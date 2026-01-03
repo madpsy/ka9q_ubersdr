@@ -1900,8 +1900,11 @@ function updateStatus(msg) {
         const freqText = formatFrequency(msg.frequency);
         const bandName = findBandForFrequency(msg.frequency);
 
-        // Update frequency display
-        document.getElementById('current-freq').textContent = freqText;
+        // Update frequency display (if element exists)
+        const currentFreqElement = document.getElementById('current-freq');
+        if (currentFreqElement) {
+            currentFreqElement.textContent = freqText;
+        }
 
         // Only update frequency input if user is not currently editing it
         const freqInput = document.getElementById('frequency');
@@ -1909,16 +1912,19 @@ function updateStatus(msg) {
             setFrequencyInputValue(msg.frequency);
         }
 
-        // Update mode display (without band name)
+        // Update mode display (without band name) (if element exists)
         if (msg.mode) {
             const modeText = msg.mode.toUpperCase();
-            document.getElementById('current-mode').textContent = modeText;
+            const currentModeElement = document.getElementById('current-mode');
+            if (currentModeElement) {
+                currentModeElement.textContent = modeText;
+            }
         }
 
         // Update bandwidth display
         updateCurrentBandwidthDisplay(window.currentBandwidthLow, window.currentBandwidthHigh);
 
-        // Update band display
+        // Update band display (if element exists)
         const bandElement = document.getElementById('current-band');
         if (bandElement) {
             bandElement.textContent = bandName || '-';
@@ -1934,8 +1940,11 @@ function updateStatus(msg) {
             });
         }
     } else if (msg.mode) {
-        // Mode update without frequency - just update mode text
-        document.getElementById('current-mode').textContent = msg.mode.toUpperCase();
+        // Mode update without frequency - just update mode text (if element exists)
+        const currentModeElement = document.getElementById('current-mode');
+        if (currentModeElement) {
+            currentModeElement.textContent = msg.mode.toUpperCase();
+        }
     }
 
     // Update page title

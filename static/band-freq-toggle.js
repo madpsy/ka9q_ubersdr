@@ -1,6 +1,9 @@
 // Frequency Readout Display
 // Shows current frequency in a digital readout format
 
+// Always show frequency readout (no toggle)
+let bandFreqMode = 'frequency';
+
 /**
  * Update the frequency readout display with current frequency
  */
@@ -144,14 +147,18 @@ function monitorFrequencyChanges() {
 
     // Update readout when frequency input changes
     freqInput.addEventListener('input', () => {
-        updateFrequencyReadout();
+        if (bandFreqMode === 'frequency') {
+            updateFrequencyReadout();
+        }
     });
 
     // Also monitor for programmatic changes to data-hz-value attribute
     const observer = new MutationObserver((mutations) => {
         mutations.forEach((mutation) => {
             if (mutation.type === 'attributes' && mutation.attributeName === 'data-hz-value') {
-                updateFrequencyReadout();
+                if (bandFreqMode === 'frequency') {
+                    updateFrequencyReadout();
+                }
             }
         });
     });

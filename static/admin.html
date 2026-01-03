@@ -6241,18 +6241,45 @@
         }
 
         // Show channel status modal
+        // Channel status modal state
+        let channelStatusModalOpen = false;
+        let channelStatusSSRC = null;
+        let channelStatusRefreshInterval = null;
+
         async function showChannelStatus(ssrc) {
             const modal = document.getElementById('channelStatusModal');
             const content = document.getElementById('channelStatusContent');
             if (!modal || !content) return;
 
+            // Store SSRC for auto-refresh
+            channelStatusSSRC = ssrc;
+            channelStatusModalOpen = true;
+
             // Show loading state
             content.innerHTML = '<div style="text-align: center; padding: 40px;"><div class="spinner"></div><p>Loading channel status...</p></div>';
             modal.style.display = 'block';
 
+            // Load initial data
+            await loadChannelStatusData();
+
+            // Start auto-refresh every 2 seconds
+            if (channelStatusRefreshInterval) {
+                clearInterval(channelStatusRefreshInterval);
+            }
+            channelStatusRefreshInterval = setInterval(async () => {
+                if (channelStatusModalOpen) {
+                    await loadChannelStatusData();
+                }
+            }, 2000);
+        }
+
+        async function loadChannelStatusData() {
+            const content = document.getElementById('channelStatusContent');
+            if (!content || !channelStatusSSRC) return;
+
             try {
                 // Fetch channel status from API
-                const response = await authenticatedFetch(`/admin/channel-status?ssrc=${encodeURIComponent(ssrc)}`);
+                const response = await authenticatedFetch(`/admin/channel-status?ssrc=${encodeURIComponent(channelStatusSSRC)}`);
                 if (!response) {
                     content.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">Authentication failed</div>';
                     return;
@@ -6366,6 +6393,14 @@
             const modal = document.getElementById('channelStatusModal');
             if (modal) {
                 modal.style.display = 'none';
+            }
+            
+            // Stop auto-refresh
+            channelStatusModalOpen = false;
+            channelStatusSSRC = null;
+            if (channelStatusRefreshInterval) {
+                clearInterval(channelStatusRefreshInterval);
+                channelStatusRefreshInterval = null;
             }
         }
 

@@ -7533,19 +7533,17 @@ window.validateFrequencyInput = function(input) {
 document.addEventListener('DOMContentLoaded', () => {
     const freqInput = document.getElementById('frequency');
     if (freqInput) {
-        // Store initial Hz value
+        // The HTML value is always in Hz (e.g., "14175000")
         const initialHz = parseInt(freqInput.value);
         if (!isNaN(initialHz)) {
             freqInput.setAttribute('data-hz-value', initialHz);
         }
 
-        // Load saved unit preference
+        // Load saved unit preference (or use default kHz)
         const unitLoaded = loadFrequencyUnitPreference();
 
-        // If a unit preference was loaded and it's not Hz, update the display
-        if (unitLoaded && currentFrequencyUnit !== 'Hz') {
-            updateFrequencyDisplay();
-        }
+        // Update display to show in the current unit (kHz by default or saved preference)
+        updateFrequencyDisplay();
 
         // Add blur event to convert and validate
         freqInput.addEventListener('blur', () => {

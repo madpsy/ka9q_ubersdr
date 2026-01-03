@@ -1259,6 +1259,22 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 			}
 		}
 
+		// Add frontend status if available
+		if frontendStatus := sm.radiod.GetFrontendStatus(session.SSRC); frontendStatus != nil {
+			info["frontend_status"] = map[string]interface{}{
+				"lna_gain":           frontendStatus.LNAGain,
+				"mixer_gain":         frontendStatus.MixerGain,
+				"if_gain":            frontendStatus.IFGain,
+				"rf_gain":            frontendStatus.RFGain,
+				"rf_atten":           frontendStatus.RFAtten,
+				"rf_agc":             frontendStatus.RFAGC,
+				"if_power":           frontendStatus.IFPower,
+				"ad_overranges":      frontendStatus.ADOverranges,
+				"samples_since_over": frontendStatus.SamplesSinceOver,
+				"last_update":        frontendStatus.LastUpdate.Format(time.RFC3339),
+			}
+		}
+
 		session.mu.RUnlock()
 
 		sessions = append(sessions, info)

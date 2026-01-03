@@ -15,10 +15,11 @@ import (
 
 // RadiodController manages communication with ka9q-radio's radiod
 type RadiodController struct {
-	statusAddr *net.UDPAddr
-	dataAddr   *net.UDPAddr
-	conn       *net.UDPConn
-	iface      *net.Interface
+	statusAddr      *net.UDPAddr
+	dataAddr        *net.UDPAddr
+	conn            *net.UDPConn
+	iface           *net.Interface
+	frontendTracker *FrontendStatusTracker
 }
 
 // fnv1hash implements the FNV-1 hash algorithm
@@ -134,10 +135,17 @@ func NewRadiodController(statusGroup, dataGroup, ifaceName string) (*RadiodContr
 	}
 
 	rc := &RadiodController{
-		statusAddr: statusAddr,
-		dataAddr:   dataAddr,
-		conn:       conn,
-		iface:      iface,
+		statusAddr:      statusAddr,
+		dataAddr:        dataAddr,
+		conn:            conn,
+		iface:           iface,
+		frontendTracker: NewFrontendStatusTracker(),
+	}
+
+	// Start STATUS packet listener to receive frontend status
+	if err := rc.frontendTracker.StartStatusListener(statusAddr, iface); err != nil {
+		log.Printf("Warning: Failed to start STATUS listener: %v", err)
+		log.Printf("Frontend status (gain, overload counts) will not be available")
 	}
 
 	log.Printf("Radiod controller initialized (status: %s, data: %s, iface: %v)", statusGroup, dataGroup, iface)
@@ -747,6 +755,11 @@ func (rc *RadiodController) sendCommand(cmd []byte) error {
 
 // Close closes the radiod controller connection
 func (rc *RadiodController) Close() error {
+	// Stop frontend status tracker
+	if rc.frontendTracker != nil {
+		rc.frontendTracker.Stop()
+	}
+
 	if rc.conn != nil {
 		return rc.conn.Close()
 	}
@@ -761,4 +774,22 @@ func (rc *RadiodController) GetDataAddr() *net.UDPAddr {
 // GetInterface returns the network interface
 func (rc *RadiodController) GetInterface() *net.Interface {
 	return rc.iface
+}
+
+// GetFrontendStatus returns the frontend status for a given SSRC
+// Returns nil if no status is available for that SSRC
+func (rc *RadiodController) GetFrontendStatus(ssrc uint32) *FrontendStatus {
+	if rc.frontendTracker == nil {
+		return nil
+	}
+	return rc.frontendTracker.GetFrontendStatus(ssrc)
+}
+
+// GetAllFrontendStatus returns all frontend status entries
+// Returns a map of SSRC -> FrontendStatus
+func (rc *RadiodController) GetAllFrontendStatus() map[uint32]*FrontendStatus {
+	if rc.frontendTracker == nil {
+		return make(map[uint32]*FrontendStatus)
+	}
+	return rc.frontendTracker.GetAllFrontendStatus()
 }

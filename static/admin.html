@@ -816,6 +816,21 @@
                 </div>
             </div>
         </div>
+
+        <!-- Frontend Status Modal -->
+        <div id="frontendStatusModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Frontend Status</h2>
+                    <button class="modal-close" onclick="closeFrontendStatusModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="frontendStatusContent" style="font-family: monospace; font-size: 14px;">
+                        <!-- Content will be populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -2906,6 +2921,11 @@
 
                 // Create action buttons
                 let actionButtons = '';
+                // Add Status button if frontend status is available
+                if (audioSession && audioSession.frontend_status) {
+                    const frontendStatusJSON = JSON.stringify(audioSession.frontend_status).replace(/"/g, '&quot;');
+                    actionButtons += `<button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px; background-color: #4CAF50; color: white;" onclick='showFrontendStatus(${frontendStatusJSON})'>Status</button>`;
+                }
                 if (userSessionID !== 'N/A') {
                     actionButtons += `<button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="kickUser('${userSessionID}')">Kick</button>`;
                 }
@@ -6061,11 +6081,54 @@
             }
         }
 
+        // Show frontend status modal
+        function showFrontendStatus(frontendStatus) {
+            const modal = document.getElementById('frontendStatusModal');
+            const content = document.getElementById('frontendStatusContent');
+            if (!modal || !content) return;
+
+            // Format the frontend status data
+            let html = '<table style="width: 100%; border-collapse: collapse;">';
+            html += '<tr style="border-bottom: 1px solid #ddd;"><th style="padding: 8px; text-align: left; background: #f5f5f5;">Parameter</th><th style="padding: 8px; text-align: right; background: #f5f5f5;">Value</th></tr>';
+            
+            html += `<tr><td style="padding: 8px;">LNA Gain</td><td style="padding: 8px; text-align: right;"><strong>${frontendStatus.lna_gain} dB</strong></td></tr>`;
+            html += `<tr><td style="padding: 8px;">Mixer Gain</td><td style="padding: 8px; text-align: right;"><strong>${frontendStatus.mixer_gain} dB</strong></td></tr>`;
+            html += `<tr><td style="padding: 8px;">IF Gain</td><td style="padding: 8px; text-align: right;"><strong>${frontendStatus.if_gain} dB</strong></td></tr>`;
+            html += `<tr><td style="padding: 8px;">RF Gain</td><td style="padding: 8px; text-align: right;"><strong>${frontendStatus.rf_gain.toFixed(1)}</strong></td></tr>`;
+            html += `<tr><td style="padding: 8px;">RF Attenuation</td><td style="padding: 8px; text-align: right;"><strong>${frontendStatus.rf_atten.toFixed(1)}</strong></td></tr>`;
+            html += `<tr><td style="padding: 8px;">RF AGC</td><td style="padding: 8px; text-align: right;"><strong>${frontendStatus.rf_agc ? 'ON' : 'OFF'}</strong></td></tr>`;
+            html += `<tr><td style="padding: 8px;">IF Power</td><td style="padding: 8px; text-align: right;"><strong>${frontendStatus.if_power.toFixed(1)} dBFS</strong></td></tr>`;
+            
+            // Highlight overranges in red if > 0
+            const overrangeStyle = frontendStatus.ad_overranges > 0 ? 'color: red; font-weight: bold;' : '';
+            html += `<tr style="border-top: 2px solid #ddd;"><td style="padding: 8px;">A/D Overranges</td><td style="padding: 8px; text-align: right; ${overrangeStyle}"><strong>${frontendStatus.ad_overranges.toLocaleString()}</strong></td></tr>`;
+            html += `<tr><td style="padding: 8px;">Samples Since Overrange</td><td style="padding: 8px; text-align: right;"><strong>${frontendStatus.samples_since_over.toLocaleString()}</strong></td></tr>`;
+            
+            html += `<tr style="border-top: 2px solid #ddd;"><td style="padding: 8px;">Last Update</td><td style="padding: 8px; text-align: right;"><em>${new Date(frontendStatus.last_update).toLocaleString()}</em></td></tr>`;
+            html += '</table>';
+
+            content.innerHTML = html;
+            modal.style.display = 'block';
+        }
+
+        // Close frontend status modal
+        function closeFrontendStatusModal() {
+            const modal = document.getElementById('frontendStatusModal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+
         // Close modal when clicking outside of it
         window.onclick = function(event) {
-            const modal = document.getElementById('tunnelUsersModal');
-            if (event.target === modal) {
+            const tunnelModal = document.getElementById('tunnelUsersModal');
+            const frontendModal = document.getElementById('frontendStatusModal');
+            
+            if (event.target === tunnelModal) {
                 closeTunnelUsersModal();
+            }
+            if (event.target === frontendModal) {
+                closeFrontendStatusModal();
             }
         }
 

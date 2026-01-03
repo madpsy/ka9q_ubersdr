@@ -285,39 +285,9 @@ func (fst *FrontendStatusTracker) Stop() {
 
 // TLV Decoding functions - reverse of encoding functions in radiod.go
 
-// decodeInt decodes a variable-length integer (like decode_int in ka9q-radio)
-// Returns int (native int size)
-func decodeInt(data []byte) int {
-	if len(data) == 0 {
-		return 0
-	}
-
-	var result uint64
-	for _, b := range data {
-		result = (result << 8) | uint64(b)
-	}
-	return int(result)
-}
-
-// decodeInt32 decodes a 32-bit integer with leading zero suppression
-func decodeInt32(data []byte) uint32 {
-	if len(data) == 0 {
-		return 0
-	}
-
-	var result uint32
-	for _, b := range data {
-		result = (result << 8) | uint32(b)
-	}
-	return result
-}
-
 // decodeInt64 decodes a 64-bit integer with leading zero suppression
+// Matches decode_int64 in ka9q-radio/src/status.c lines 218-226
 func decodeInt64(data []byte) int64 {
-	if len(data) == 0 {
-		return 0
-	}
-
 	var result uint64
 	for _, b := range data {
 		result = (result << 8) | uint64(b)
@@ -325,62 +295,73 @@ func decodeInt64(data []byte) int64 {
 	return int64(result)
 }
 
+// decodeInt32 decodes a 32-bit integer with leading zero suppression
+// Matches decode_int32 in ka9q-radio/src/status.c lines 227-229
+func decodeInt32(data []byte) uint32 {
+	return uint32(decodeInt64(data))
+}
+
+// decodeInt decodes a variable-length integer (like decode_int in ka9q-radio)
+// Matches decode_int in ka9q-radio/src/status.c lines 241-243
+// Returns int (native int size)
+func decodeInt(data []byte) int {
+	return int(decodeInt64(data))
+}
+
 // decodeFloat decodes a float32 with leading zero suppression
+// Matches decode_float in ka9q-radio/src/status.c lines 246-256
 func decodeFloat(data []byte) float32 {
 	if len(data) == 0 {
 		return 0
 	}
 
-	// Reconstruct the 32-bit value
-	var bits uint32
-	for _, b := range data {
-		bits = (bits << 8) | uint32(b)
+	// Special case: if 8 bytes, decode as double and cast to float
+	if len(data) == 8 {
+		return float32(decodeDouble(data))
 	}
 
-	// Shift left to restore leading zeros only if data is shorter than 4 bytes
-	if len(data) < 4 {
-		shift := (4 - len(data)) * 8
-		bits <<= shift
-	}
-
-	return math.Float32frombits(bits)
-}
-
-// decodeDouble decodes a float64 with leading zero suppression
-func decodeDouble(data []byte) float64 {
-	if len(data) == 0 {
-		return 0
-	}
-
-	// Reconstruct the 64-bit value
+	// Decode as uint64 (accumulates into low-order bits)
+	// then reinterpret the low 32 bits as float32
 	var bits uint64
 	for _, b := range data {
 		bits = (bits << 8) | uint64(b)
 	}
 
-	// Shift left to restore leading zeros only if data is shorter than 8 bytes
-	if len(data) < 8 {
-		shift := (8 - len(data)) * 8
-		bits <<= shift
+	return math.Float32frombits(uint32(bits))
+}
+
+// decodeDouble decodes a float64 with leading zero suppression
+// Matches decode_double in ka9q-radio/src/status.c lines 258-268
+func decodeDouble(data []byte) float64 {
+	if len(data) == 0 {
+		return 0
+	}
+
+	// Special case: if 4 bytes, decode as float and cast to double
+	if len(data) == 4 {
+		return float64(decodeFloat(data))
+	}
+
+	// Decode as uint64 (accumulates into low-order bits)
+	// then reinterpret as float64
+	var bits uint64
+	for _, b := range data {
+		bits = (bits << 8) | uint64(b)
 	}
 
 	return math.Float64frombits(bits)
 }
 
 // decodeInt8 decodes an 8-bit integer
+// Matches decode_int8 in ka9q-radio/src/status.c lines 234-236
 func decodeInt8(data []byte) int8 {
-	if len(data) == 0 {
-		return 0
-	}
-	return int8(data[0])
+	return int8(decodeInt64(data))
 }
 
 // decodeBool decodes a boolean value
+// Matches decode_bool in ka9q-radio/src/status.c lines 237-239
 func decodeBool(data []byte) bool {
-	if len(data) == 0 {
-		return false
-	}
-	return data[0] != 0
+	return decodeInt64(data) != 0
 }
 
 // decodeString decodes a string

@@ -48,6 +48,18 @@ const (
 	// Frequency validation constants (UberSDR valid range)
 	MinFrequencyHz = 100000   // 100 kHz
 	MaxFrequencyHz = 30000000 // 30 MHz
+
+	// Buffering constants
+	// Keep a jitter buffer of ~100ms worth of samples to smooth out network variability
+	// At 192 kHz: 192000 samples/sec * 0.1 sec = 19200 samples
+	// This is ~80 HPSDR packets (238 samples each)
+	JitterBufferSamples = 19200
+	// Minimum buffer level before we start sending (pre-fill buffer)
+	// Small pre-fill like ka9q_hpsdr - just enough to prevent initial underrun
+	// 3 packets = ~714 samples = ~3.7ms at 192kHz
+	MinBufferSamples = SamplesPerPacket * 3 // ~3 packets = ~3.7ms at 192kHz
+	// Low water mark - if buffer drops below this, warn about potential issues
+	LowWaterMark = SamplesPerPacket * 2 // ~2 packets = ~2.5ms at 192kHz
 )
 
 // WebSocketMessage represents incoming WebSocket messages from ubersdr
@@ -94,6 +106,12 @@ type UberSDRBridge struct {
 	// Temporary conversion buffers (per receiver) - reused to avoid allocations
 	tempBuffers [MaxReceivers][]complex64
 
+	// Buffer state tracking
+	bufferPrimed    [MaxReceivers]bool      // Track if buffer has been pre-filled
+	bufferUnderruns [MaxReceivers]uint64    // Count of underrun events
+	bufferOverruns  [MaxReceivers]uint64    // Count of overrun events
+	lastBufferLog   [MaxReceivers]time.Time // Last time we logged buffer stats
+
 	// PCM-zstd decoder
 	pcmDecoder *PCMBinaryDecoder
 }
@@ -123,13 +141,13 @@ func NewUberSDRBridge(url string, password string, hpsdrConfig Protocol2Config) 
 
 	// Initialize receiver frequencies and unique session IDs
 	for i := 0; i < MaxReceivers; i++ {
-		bridge.receiverFreqs[i] = 14200000                                 // 14.2 MHz default
-		bridge.receiverModes[i] = "iq192"                                  // IQ mode at 192 kHz
-		bridge.userSessionIDs[i] = uuid.New().String()                     // Unique UUID per receiver
-		bridge.lastFailedFreq[i] = 0                                       // No failed connection yet
-		bridge.lastFailedMode[i] = ""                                      // No failed connection yet
-		bridge.sampleBuffers[i] = make([]complex64, 0, SamplesPerPacket*2) // Pre-allocate buffer
-		bridge.tempBuffers[i] = make([]complex64, 0, 8192)                 // Pre-allocate temp buffer (typical WebSocket message size)
+		bridge.receiverFreqs[i] = 14200000                                  // 14.2 MHz default
+		bridge.receiverModes[i] = "iq192"                                   // IQ mode at 192 kHz
+		bridge.userSessionIDs[i] = uuid.New().String()                      // Unique UUID per receiver
+		bridge.lastFailedFreq[i] = 0                                        // No failed connection yet
+		bridge.lastFailedMode[i] = ""                                       // No failed connection yet
+		bridge.sampleBuffers[i] = make([]complex64, 0, JitterBufferSamples) // Jitter buffer
+		bridge.tempBuffers[i] = make([]complex64, 0, 8192)                  // Pre-allocate temp buffer (typical WebSocket message size)
 	}
 
 	return bridge, nil
@@ -305,6 +323,7 @@ func (b *UberSDRBridge) monitorReceivers() {
 				b.bufferMus[i].Lock()
 				log.Printf("DEBUG: monitorReceivers: Receiver %d clearing sample buffer", i)
 				b.sampleBuffers[i] = b.sampleBuffers[i][:0] // Clear buffer but keep capacity
+				b.bufferPrimed[i] = false                   // Reset buffer primed flag
 				b.bufferMus[i].Unlock()
 				log.Printf("DEBUG: monitorReceivers: Receiver %d cleanup complete", i)
 			}
@@ -672,8 +691,9 @@ func (b *UberSDRBridge) decodeAudio(base64Data string) ([]byte, error) {
 }
 
 // forwardToHPSDR converts PCM data to IQ samples and forwards to HPSDR server
-// This implements proper sample buffering as described in ka9q_hpsdr.c:
-// - Accumulate samples in a buffer
+// This implements proper sample buffering with jitter buffer:
+// - Accumulate samples in a buffer (up to ~100ms worth)
+// - Pre-fill buffer before starting to send (avoid initial underruns)
 // - Only call LoadIQData() when we have exactly 238 samples ready
 // - This ensures proper packet timing (e.g., 192 kHz / 238 samples = ~806 packets/sec)
 func (b *UberSDRBridge) forwardToHPSDR(receiverNum int, pcmData []byte) error {
@@ -719,8 +739,60 @@ func (b *UberSDRBridge) forwardToHPSDR(receiverNum int, pcmData []byte) error {
 	// Add converted samples to buffer
 	b.sampleBuffers[receiverNum] = append(b.sampleBuffers[receiverNum], tempSamples...)
 
+	bufferLevel := len(b.sampleBuffers[receiverNum])
+
+	// Check if buffer is getting too large (prevent unbounded growth)
+	if bufferLevel > JitterBufferSamples {
+		// Drop oldest samples to maintain buffer size
+		excess := bufferLevel - JitterBufferSamples
+		b.bufferOverruns[receiverNum]++
+		log.Printf("Bridge: Receiver %d buffer OVERRUN #%d, dropping %d samples (buffer was %d samples, %.1f ms)",
+			receiverNum, b.bufferOverruns[receiverNum], excess, bufferLevel,
+			float64(bufferLevel)/192.0) // Assume 192 kHz
+		b.sampleBuffers[receiverNum] = b.sampleBuffers[receiverNum][excess:]
+		bufferLevel = len(b.sampleBuffers[receiverNum])
+	}
+
+	// Pre-fill buffer before starting to send (jitter buffer priming)
+	// This prevents initial underruns when connection starts
+	if !b.bufferPrimed[receiverNum] {
+		if bufferLevel >= MinBufferSamples {
+			b.bufferPrimed[receiverNum] = true
+		} else {
+			// Still filling buffer, don't send yet
+			return nil
+		}
+	}
+
+	// Detect underruns (buffer depleted while primed)
+	// Don't send if we don't have enough samples - just accumulate
+	if b.bufferPrimed[receiverNum] && bufferLevel < SamplesPerPacket {
+		b.bufferUnderruns[receiverNum]++
+		// Re-prime buffer to recover from underrun - need to refill to minimum level
+		b.bufferPrimed[receiverNum] = false
+		// Don't send anything, just accumulate
+		return nil
+	}
+
+	// If not primed and don't have minimum samples yet, just accumulate
+	if !b.bufferPrimed[receiverNum] && bufferLevel < MinBufferSamples {
+		// Still filling, don't send yet
+		return nil
+	}
+
+	// Periodic buffer statistics (every 30 seconds) - only log if there are issues
+	now := time.Now()
+	if now.Sub(b.lastBufferLog[receiverNum]) > 30*time.Second {
+		b.lastBufferLog[receiverNum] = now
+		if b.bufferUnderruns[receiverNum] > 0 || b.bufferOverruns[receiverNum] > 0 {
+			log.Printf("Bridge: Receiver %d buffer stats - level: %d samples (%.1f ms), underruns: %d, overruns: %d",
+				receiverNum, bufferLevel, float64(bufferLevel)/192.0,
+				b.bufferUnderruns[receiverNum], b.bufferOverruns[receiverNum])
+		}
+	}
+
 	// Send packets while we have enough samples
-	// This matches ka9q_hpsdr.c behavior: accumulate samples, then send when ready
+	// Send all available packets to keep buffer from overflowing
 	for len(b.sampleBuffers[receiverNum]) >= SamplesPerPacket {
 		// Extract exactly 238 samples for one packet
 		packet := make([]complex64, SamplesPerPacket)

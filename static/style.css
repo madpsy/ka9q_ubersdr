@@ -623,7 +623,22 @@ body {
     color: #6c757d;
     font-weight: bold;
     font-size: 0.9em;
-    pointer-events: none;
+    pointer-events: auto;
+    cursor: pointer;
+    user-select: none;
+    padding: 2px 6px;
+    border-radius: 3px;
+    transition: all 0.2s ease;
+}
+
+.frequency-unit:hover {
+    background: #667eea;
+    color: white;
+    transform: scale(1.05);
+}
+
+.frequency-unit:active {
+    transform: scale(0.95);
 }
 
 .control-group input[type="number"],

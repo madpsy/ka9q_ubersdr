@@ -7285,3 +7285,170 @@ function updateFrequencyScrollMode() {
 window.toggleFrequencyScrollDropdown = toggleFrequencyScrollDropdown;
 window.updateFrequencyScrollMode = updateFrequencyScrollMode;
 
+// Frequency unit toggle functionality
+let currentFrequencyUnit = 'Hz'; // Can be 'Hz', 'kHz', or 'MHz'
+
+// Toggle frequency unit (Hz -> kHz -> MHz -> Hz)
+function toggleFrequencyUnit() {
+    const unitLabel = document.getElementById('frequency-unit');
+    const freqInput = document.getElementById('frequency');
+
+    if (!unitLabel || !freqInput) return;
+
+    // Get current value in Hz (internal representation)
+    const currentHzValue = parseFloat(freqInput.getAttribute('data-hz-value') || freqInput.value);
+    if (isNaN(currentHzValue)) return;
+
+    // Cycle through units: Hz -> kHz -> MHz -> Hz
+    if (currentFrequencyUnit === 'Hz') {
+        currentFrequencyUnit = 'kHz';
+    } else if (currentFrequencyUnit === 'kHz') {
+        currentFrequencyUnit = 'MHz';
+    } else {
+        currentFrequencyUnit = 'Hz';
+    }
+
+    // Update the label
+    unitLabel.textContent = currentFrequencyUnit;
+
+    // Convert and display the value in the new unit
+    updateFrequencyDisplay();
+
+    log(`Frequency unit changed to ${currentFrequencyUnit}`);
+}
+
+// Update frequency display based on current unit
+function updateFrequencyDisplay() {
+    const freqInput = document.getElementById('frequency');
+    if (!freqInput) return;
+
+    // Get the internal Hz value
+    const hzValue = parseFloat(freqInput.getAttribute('data-hz-value') || freqInput.value);
+    if (isNaN(hzValue)) return;
+
+    // Store the Hz value as a data attribute
+    freqInput.setAttribute('data-hz-value', hzValue);
+
+    // Convert to display unit
+    let displayValue;
+    if (currentFrequencyUnit === 'kHz') {
+        displayValue = (hzValue / 1000).toFixed(1);
+    } else if (currentFrequencyUnit === 'MHz') {
+        displayValue = (hzValue / 1000000).toFixed(6);
+    } else {
+        displayValue = Math.round(hzValue).toString();
+    }
+
+    // Update the input field
+    freqInput.value = displayValue;
+}
+
+// Convert displayed value to Hz when input changes
+function convertDisplayedFrequencyToHz() {
+    const freqInput = document.getElementById('frequency');
+    if (!freqInput) return;
+
+    const displayValue = parseFloat(freqInput.value);
+    if (isNaN(displayValue)) return;
+
+    // Convert to Hz based on current unit
+    let hzValue;
+    if (currentFrequencyUnit === 'kHz') {
+        hzValue = displayValue * 1000;
+    } else if (currentFrequencyUnit === 'MHz') {
+        hzValue = displayValue * 1000000;
+    } else {
+        hzValue = displayValue;
+    }
+
+    // Store the Hz value
+    freqInput.setAttribute('data-hz-value', Math.round(hzValue));
+}
+
+// Override the existing handleFrequencyChange to work with units
+const originalHandleFrequencyChange = handleFrequencyChange;
+window.handleFrequencyChange = function() {
+    // Convert displayed value to Hz first
+    convertDisplayedFrequencyToHz();
+
+    const freqInput = document.getElementById('frequency');
+    if (!freqInput) return;
+
+    // Get the Hz value
+    const hzValue = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
+
+    // Temporarily set the input to Hz for validation
+    const originalValue = freqInput.value;
+    freqInput.value = hzValue;
+
+    // Call the original function
+    originalHandleFrequencyChange();
+
+    // Restore the display value in the current unit
+    updateFrequencyDisplay();
+};
+
+// Override validateFrequencyInput to handle decimal points for kHz/MHz
+const originalValidateFrequencyInput = validateFrequencyInput;
+window.validateFrequencyInput = function(input) {
+    if (currentFrequencyUnit === 'Hz') {
+        // Hz mode: only allow digits (original behavior)
+        originalValidateFrequencyInput(input);
+    } else {
+        // kHz/MHz mode: allow digits and one decimal point
+        const cursorPos = input.selectionStart;
+        const oldValue = input.value;
+
+        // Allow digits, one decimal point, and handle multiple decimals
+        let value = oldValue.replace(/[^\d.]/g, '');
+
+        // Ensure only one decimal point
+        const parts = value.split('.');
+        if (parts.length > 2) {
+            value = parts[0] + '.' + parts.slice(1).join('');
+        }
+
+        // Limit decimal places based on unit
+        if (parts.length === 2) {
+            if (currentFrequencyUnit === 'kHz') {
+                // kHz: limit to 1 decimal place
+                parts[1] = parts[1].substring(0, 1);
+            } else if (currentFrequencyUnit === 'MHz') {
+                // MHz: limit to 6 decimal places
+                parts[1] = parts[1].substring(0, 6);
+            }
+            value = parts.join('.');
+        }
+
+        // Only update if value changed
+        if (value !== oldValue) {
+            input.value = value;
+
+            // Restore cursor position
+            const newCursorPos = Math.max(0, Math.min(value.length, cursorPos));
+            input.setSelectionRange(newCursorPos, newCursorPos);
+        }
+    }
+};
+
+// Initialize frequency display on page load
+document.addEventListener('DOMContentLoaded', () => {
+    const freqInput = document.getElementById('frequency');
+    if (freqInput) {
+        // Store initial Hz value
+        const initialHz = parseInt(freqInput.value);
+        if (!isNaN(initialHz)) {
+            freqInput.setAttribute('data-hz-value', initialHz);
+        }
+
+        // Add blur event to convert and validate
+        freqInput.addEventListener('blur', () => {
+            convertDisplayedFrequencyToHz();
+            updateFrequencyDisplay();
+        });
+    }
+});
+
+// Expose toggle function globally
+window.toggleFrequencyUnit = toggleFrequencyUnit;
+

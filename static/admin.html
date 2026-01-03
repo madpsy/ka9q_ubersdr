@@ -684,6 +684,15 @@
 
                 <!-- Monitor Tab -->
                 <div id="monitorTab" class="tab-content">
+                    <!-- SDR Frontend Status Section (always at top) -->
+                    <div id="frontendStatusSection" class="config-section" style="display: none;">
+                        <h3>📡 SDR Frontend Status</h3>
+                        <div id="frontendStatusDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                            <div class="spinner" style="margin: 20px auto;"></div>
+                            <p style="text-align: center; color: #666;">Loading frontend status...</p>
+                        </div>
+                    </div>
+                    
                     <div id="monitorHealth" class="loading">
                         <div class="spinner"></div>
                         <p>Loading health status...</p>
@@ -4736,8 +4745,88 @@
         }
 
         // Monitor health management
+        async function loadFrontendStatus() {
+            try {
+                const response = await authenticatedFetch('/admin/frontend-status');
+                if (!response) return; // Auth failed, already handled
+
+                const frontendStatusSection = document.getElementById('frontendStatusSection');
+                const frontendStatusDisplay = document.getElementById('frontendStatusDisplay');
+
+                if (!response.ok) {
+                    // Frontend status not available (wideband channel not found)
+                    frontendStatusSection.style.display = 'none';
+                    return;
+                }
+
+                const data = await response.json();
+
+                // Helper to format value or show N/A
+                const formatValue = (val, decimals = 1, suffix = '') => {
+                    if (val === null || val === undefined) return '<em style="color: #999;">N/A</em>';
+                    if (typeof val === 'number') return `<strong>${val.toFixed(decimals)}${suffix}</strong>`;
+                    return `<strong>${val}${suffix}</strong>`;
+                };
+
+                // Determine IF Power status color
+                const ifPower = data.if_power;
+                let ifPowerColor = '#666';
+                let ifPowerStatus = '';
+                if (ifPower !== null && ifPower !== undefined) {
+                    if (ifPower >= -10) {
+                        ifPowerColor = '#dc3545'; // Red - too hot
+                        ifPowerStatus = ' ⚠️ Too High';
+                    } else if (ifPower >= -30) {
+                        ifPowerColor = '#28a745'; // Green - good
+                        ifPowerStatus = ' ✓ Good';
+                    } else {
+                        ifPowerColor = '#ffc107'; // Yellow - weak
+                        ifPowerStatus = ' ⚠️ Weak';
+                    }
+                }
+
+                // Determine overrange status
+                const overranges = data.ad_overranges || 0;
+                const overrangeColor = overranges > 0 ? '#dc3545' : '#28a745';
+                const overrangeStatus = overranges > 0 ? ' ⚠️ Clipping!' : ' ✓ No Clipping';
+
+                frontendStatusDisplay.innerHTML = `
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                        <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">RF Gain</div>
+                            <div style="font-size: 24px; font-weight: bold; color: #667eea;">${formatValue(data.rf_gain, 1, '')}</div>
+                        </div>
+                        <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">IF Power</div>
+                            <div style="font-size: 24px; font-weight: bold; color: ${ifPowerColor};">${formatValue(data.if_power, 1, ' dBFS')}${ifPowerStatus}</div>
+                        </div>
+                        <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">A/D Overranges</div>
+                            <div style="font-size: 24px; font-weight: bold; color: ${overrangeColor};">${overranges.toLocaleString()}${overrangeStatus}</div>
+                        </div>
+                        <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Samples Since Overrange</div>
+                            <div style="font-size: 18px; font-weight: bold; color: #667eea;">${(data.samples_since_over || 0).toLocaleString()}</div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 10px; text-align: right; font-size: 11px; color: #999;">
+                        Last Update: ${data.last_update ? new Date(data.last_update).toLocaleString() : 'N/A'}
+                    </div>
+                `;
+
+                frontendStatusSection.style.display = 'block';
+            } catch (error) {
+                console.error('Error loading frontend status:', error);
+                // Hide section on error
+                document.getElementById('frontendStatusSection').style.display = 'none';
+            }
+        }
+
         async function loadMonitorHealth() {
             try {
+                // Load frontend status first (at top of Monitor tab)
+                await loadFrontendStatus();
+
                 // Fetch system load, tunnel status, instance reporter, noise floor, space weather, decoder, and CW Skimmer health
                 const fetchPromises = [
                     authenticatedFetch('/admin/system-load'),

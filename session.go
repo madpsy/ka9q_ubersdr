@@ -1200,6 +1200,15 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
+	// Find the wideband session ID first (pattern: "noisefloor-wideband-XXXXXXXX")
+	widebandSessionID := ""
+	for id := range sm.sessions {
+		if len(id) >= 19 && id[:19] == "noisefloor-wideband" {
+			widebandSessionID = id
+			break
+		}
+	}
+
 	sessions := make([]map[string]interface{}, 0, len(sm.sessions))
 	for _, session := range sm.sessions {
 		session.mu.RLock()
@@ -1260,27 +1269,31 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 			}
 		}
 
-		// Add frontend status if available
-		if frontendStatus := sm.radiod.GetFrontendStatus(session.SSRC); frontendStatus != nil {
-			// Helper function to sanitize float values for JSON (replace Inf/NaN with nil)
-			sanitizeFloat := func(f float32) interface{} {
-				if math.IsInf(float64(f), 0) || math.IsNaN(float64(f)) {
-					return nil
+		// Only include frontend_status for the wideband spectrum channel
+		// All other sessions will get frontend status from a separate API endpoint
+		// This avoids duplicating the same frontend data across all sessions
+		if session.ID == widebandSessionID {
+			if frontendStatus := sm.radiod.GetFrontendStatus(session.SSRC); frontendStatus != nil {
+				// Helper function to sanitize float values for JSON (replace Inf/NaN with nil)
+				sanitizeFloat := func(f float32) interface{} {
+					if math.IsInf(float64(f), 0) || math.IsNaN(float64(f)) {
+						return nil
+					}
+					return f
 				}
-				return f
-			}
 
-			info["frontend_status"] = map[string]interface{}{
-				"lna_gain":           frontendStatus.LNAGain,
-				"mixer_gain":         frontendStatus.MixerGain,
-				"if_gain":            frontendStatus.IFGain,
-				"rf_gain":            sanitizeFloat(frontendStatus.RFGain),
-				"rf_atten":           sanitizeFloat(frontendStatus.RFAtten),
-				"rf_agc":             frontendStatus.RFAGC,
-				"if_power":           sanitizeFloat(frontendStatus.IFPower),
-				"ad_overranges":      frontendStatus.ADOverranges,
-				"samples_since_over": frontendStatus.SamplesSinceOver,
-				"last_update":        frontendStatus.LastUpdate.Format(time.RFC3339),
+				info["frontend_status"] = map[string]interface{}{
+					"lna_gain":           frontendStatus.LNAGain,
+					"mixer_gain":         frontendStatus.MixerGain,
+					"if_gain":            frontendStatus.IFGain,
+					"rf_gain":            sanitizeFloat(frontendStatus.RFGain),
+					"rf_atten":           sanitizeFloat(frontendStatus.RFAtten),
+					"rf_agc":             frontendStatus.RFAGC,
+					"if_power":           sanitizeFloat(frontendStatus.IFPower),
+					"ad_overranges":      frontendStatus.ADOverranges,
+					"samples_since_over": frontendStatus.SamplesSinceOver,
+					"last_update":        frontendStatus.LastUpdate.Format(time.RFC3339),
+				}
 			}
 		}
 

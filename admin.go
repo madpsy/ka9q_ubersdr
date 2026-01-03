@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -1734,6 +1735,67 @@ func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding sessions: %v", err)
+	}
+}
+
+// HandleFrontendStatus returns the SDR frontend status from the wideband spectrum channel
+func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Find the wideband spectrum session (pattern: "noisefloor-wideband-XXXXXXXX")
+	ah.sessions.mu.RLock()
+	var widebandSSRC uint32
+	found := false
+	for id, session := range ah.sessions.sessions {
+		if len(id) >= 19 && id[:19] == "noisefloor-wideband" {
+			widebandSSRC = session.SSRC
+			found = true
+			break
+		}
+	}
+	ah.sessions.mu.RUnlock()
+
+	if !found {
+		http.Error(w, "Wideband spectrum channel not found", http.StatusNotFound)
+		return
+	}
+
+	// Get frontend status for the wideband channel
+	frontendStatus := ah.sessions.radiod.GetFrontendStatus(widebandSSRC)
+	if frontendStatus == nil {
+		http.Error(w, "Frontend status not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Helper function to sanitize float values for JSON (replace Inf/NaN with nil)
+	sanitizeFloat := func(f float32) interface{} {
+		if math.IsInf(float64(f), 0) || math.IsNaN(float64(f)) {
+			return nil
+		}
+		return f
+	}
+
+	response := map[string]interface{}{
+		"lna_gain":           frontendStatus.LNAGain,
+		"mixer_gain":         frontendStatus.MixerGain,
+		"if_gain":            frontendStatus.IFGain,
+		"rf_gain":            sanitizeFloat(frontendStatus.RFGain),
+		"rf_atten":           sanitizeFloat(frontendStatus.RFAtten),
+		"rf_agc":             frontendStatus.RFAGC,
+		"if_power":           sanitizeFloat(frontendStatus.IFPower),
+		"ad_overranges":      frontendStatus.ADOverranges,
+		"samples_since_over": frontendStatus.SamplesSinceOver,
+		"last_update":        frontendStatus.LastUpdate.Format(time.RFC3339),
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding frontend status: %v", err)
 	}
 }
 

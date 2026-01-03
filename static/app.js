@@ -2838,7 +2838,9 @@ function loadSettingsFromURL() {
         if (!isNaN(freq) && freq >= 100000 && freq <= 30000000) {
             const freqInput = document.getElementById('frequency');
             if (freqInput && document.activeElement !== freqInput) {
-                setFrequencyInputValue(freq);
+                // Store as Hz value directly (don't use setFrequencyInputValue yet as unit may not be loaded)
+                freqInput.value = freq;
+                freqInput.setAttribute('data-hz-value', freq);
             }
             updateBandButtons(freq);
         }

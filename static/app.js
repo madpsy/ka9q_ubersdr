@@ -1374,7 +1374,9 @@ function toggleConnection() {
 
 // Connect to WebSocket
 async function connect() {
-    const frequency = document.getElementById('frequency').value;
+    const freqInput = document.getElementById('frequency');
+    // Get frequency from data-hz-value attribute
+    const frequency = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
     const mode = currentMode;
 
     await wsManager.connect({

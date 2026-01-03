@@ -7404,7 +7404,7 @@ function updateFrequencyDisplay() {
     // Convert to display unit
     let displayValue;
     if (currentFrequencyUnit === 'kHz') {
-        displayValue = (hzValue / 1000).toFixed(1);
+        displayValue = (hzValue / 1000).toFixed(2); // 2 decimals to show 10 Hz changes
     } else if (currentFrequencyUnit === 'MHz') {
         displayValue = (hzValue / 1000000).toFixed(6);
     } else {

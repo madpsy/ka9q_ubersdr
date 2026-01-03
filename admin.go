@@ -1784,7 +1784,24 @@ func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Requ
 	var timeSinceOverrange string
 	if frontendStatus.InputSamprate > 0 && frontendStatus.SamplesSinceOver > 0 {
 		seconds := float64(frontendStatus.SamplesSinceOver) / float64(frontendStatus.InputSamprate)
-		timeSinceOverrange = formatDuration(time.Duration(seconds * float64(time.Second)))
+		duration := time.Duration(seconds * float64(time.Second))
+
+		// Format as "Xd Yh Zm" or "Xh Ym Zs" or "Xm Ys" or "Xs"
+		totalSeconds := int64(duration.Seconds())
+		days := totalSeconds / 86400
+		hours := (totalSeconds % 86400) / 3600
+		minutes := (totalSeconds % 3600) / 60
+		secs := totalSeconds % 60
+
+		if days > 0 {
+			timeSinceOverrange = fmt.Sprintf("%dd %dh %dm", days, hours, minutes)
+		} else if hours > 0 {
+			timeSinceOverrange = fmt.Sprintf("%dh %dm %ds", hours, minutes, secs)
+		} else if minutes > 0 {
+			timeSinceOverrange = fmt.Sprintf("%dm %ds", minutes, secs)
+		} else {
+			timeSinceOverrange = fmt.Sprintf("%ds", secs)
+		}
 	} else {
 		timeSinceOverrange = "N/A"
 	}

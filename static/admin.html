@@ -4785,24 +4785,22 @@
                 const overranges = data.ad_overranges || 0;
                 const overrangeColor = overranges > 0 ? '#dc3545' : '#28a745';
 
-                // Format sample rate for display
-                const sampleRateMHz = data.input_samprate ? (data.input_samprate / 1e6).toFixed(2) + ' MHz' : 'N/A';
-                const agcStatus = data.rf_agc ? 'ON' : 'OFF';
-                const agcColor = data.rf_agc ? '#28a745' : '#666';
+                // Format sample rate for display (MSPS = Mega Samples Per Second)
+                const sampleRateMSPS = data.input_samprate ? (data.input_samprate / 1e6).toFixed(2) + ' MSPS' : 'N/A';
 
                 frontendStatusDisplay.innerHTML = `
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
                         <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Sample Rate</div>
-                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${sampleRateMHz}</div>
+                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${sampleRateMSPS}</div>
                         </div>
                         <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 12px; color: #666; margin-bottom: 5px;">RF Gain</div>
                             <div style="font-size: 20px; font-weight: bold; color: #667eea;">${formatValue(data.rf_gain, 1, '')}</div>
                         </div>
                         <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">RF AGC</div>
-                            <div style="font-size: 20px; font-weight: bold; color: ${agcColor};">${agcStatus}</div>
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">RF Attenuation</div>
+                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${formatValue(data.rf_atten, 1, '')}</div>
                         </div>
                         <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 12px; color: #666; margin-bottom: 5px;">IF Power</div>

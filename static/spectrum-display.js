@@ -3290,9 +3290,49 @@ class SpectrumDisplay {
         const minDbValue = document.getElementById('spectrum-min-db-value');
         const maxDbValue = document.getElementById('spectrum-max-db-value');
 
+        // Load saved manual range settings from localStorage
+        const savedManualRangeEnabled = localStorage.getItem('spectrumManualRangeEnabled');
+        const savedMinDb = localStorage.getItem('spectrumManualMinDb');
+        const savedMaxDb = localStorage.getItem('spectrumManualMaxDb');
+
+        if (savedManualRangeEnabled !== null) {
+            const isEnabled = savedManualRangeEnabled === 'true';
+            this.config.manualRangeEnabled = isEnabled;
+            if (manualRangeCheckbox) {
+                manualRangeCheckbox.checked = isEnabled;
+            }
+            if (manualRangeControls) {
+                manualRangeControls.style.display = isEnabled ? 'flex' : 'none';
+            }
+        }
+
+        if (savedMinDb !== null) {
+            const minDb = parseFloat(savedMinDb);
+            this.config.manualMinDb = minDb;
+            if (minDbSlider) {
+                minDbSlider.value = minDb;
+            }
+            if (minDbValue) {
+                minDbValue.textContent = minDb.toFixed(0);
+            }
+        }
+
+        if (savedMaxDb !== null) {
+            const maxDb = parseFloat(savedMaxDb);
+            this.config.manualMaxDb = maxDb;
+            if (maxDbSlider) {
+                maxDbSlider.value = maxDb;
+            }
+            if (maxDbValue) {
+                maxDbValue.textContent = maxDb.toFixed(0);
+            }
+        }
+
         if (manualRangeCheckbox) {
             manualRangeCheckbox.addEventListener('change', (e) => {
                 this.config.manualRangeEnabled = e.target.checked;
+                localStorage.setItem('spectrumManualRangeEnabled', e.target.checked.toString());
+
                 if (manualRangeControls) {
                     manualRangeControls.style.display = e.target.checked ? 'flex' : 'none';
                 }
@@ -3313,6 +3353,12 @@ class SpectrumDisplay {
                 const value = parseFloat(e.target.value);
                 this.config.manualMinDb = value;
                 minDbValue.textContent = value.toFixed(0);
+                localStorage.setItem('spectrumManualMinDb', value.toString());
+
+                // Force redraw if we have spectrum data
+                if (this.spectrumData && this.spectrumData.length > 0) {
+                    this.draw();
+                }
             });
         }
 
@@ -3321,6 +3367,12 @@ class SpectrumDisplay {
                 const value = parseFloat(e.target.value);
                 this.config.manualMaxDb = value;
                 maxDbValue.textContent = value.toFixed(0);
+                localStorage.setItem('spectrumManualMaxDb', value.toString());
+
+                // Force redraw if we have spectrum data
+                if (this.spectrumData && this.spectrumData.length > 0) {
+                    this.draw();
+                }
             });
         }
 

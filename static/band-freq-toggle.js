@@ -4,6 +4,10 @@
 // Always show frequency readout (no toggle)
 let bandFreqMode = 'frequency';
 
+// Throttling for frequency changes (matches spectrum zoom throttle)
+let lastFreqChangeTime = 0;
+const FREQ_CHANGE_THROTTLE_MS = 25; // 40 updates/sec max (matches rate limit)
+
 /**
  * Update the frequency readout display with current frequency
  */
@@ -55,6 +59,12 @@ function setupFrequencyDigitInteraction() {
         // Mouse wheel scroll - increment/decrement at this digit's step
         digit.addEventListener('wheel', (e) => {
             e.preventDefault(); // Prevent page scroll
+
+            // Throttle wheel events
+            const now = Date.now();
+            if (now - lastFreqChangeTime < FREQ_CHANGE_THROTTLE_MS) return;
+            lastFreqChangeTime = now;
+
             const step = parseInt(digit.getAttribute('data-step'));
             const increment = e.deltaY < 0; // Scroll up = increment, scroll down = decrement
 

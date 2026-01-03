@@ -6948,11 +6948,25 @@ function updateBandSelector() {
         return;
     }
 
-    const currentFreq = parseInt(freqInput.value);
-    if (isNaN(currentFreq)) {
-        console.log('updateBandSelector: invalid frequency');
-        selector.value = '';
-        return;
+    // Get frequency from data-hz-value attribute
+    let currentFreq = parseInt(freqInput.getAttribute('data-hz-value'));
+    if (isNaN(currentFreq) || !currentFreq) {
+        // Fallback: parse the display value intelligently based on magnitude
+        const displayValue = parseFloat(freqInput.value);
+        if (isNaN(displayValue)) {
+            console.log('updateBandSelector: invalid frequency');
+            selector.value = '';
+            return;
+        }
+        // If value is small (< 100), assume it's in MHz and convert
+        if (displayValue < 100) {
+            currentFreq = Math.round(displayValue * 1000000);
+        } else if (displayValue < 100000) {
+            // Assume kHz
+            currentFreq = Math.round(displayValue * 1000);
+        } else {
+            currentFreq = Math.round(displayValue);
+        }
     }
 
     console.log('updateBandSelector: checking frequency', currentFreq);

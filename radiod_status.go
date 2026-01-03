@@ -234,12 +234,6 @@ func (fst *FrontendStatusTracker) parseStatusPacket(data []byte) {
 		fst.mu.Lock()
 		fst.frontendStatus[status.SSRC] = status
 		fst.mu.Unlock()
-
-		if DebugMode {
-			log.Printf("Updated frontend status for SSRC 0x%08x: LNA=%d dB, Mixer=%d dB, IF=%d dB, RF=%.1f, Atten=%.1f, IFPower=%.1f dBFS, Overranges=%d",
-				status.SSRC, status.LNAGain, status.MixerGain, status.IFGain,
-				status.RFGain, status.RFAtten, status.IFPower, status.ADOverranges)
-		}
 	}
 }
 

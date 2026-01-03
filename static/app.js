@@ -7324,7 +7324,7 @@ window.toggleFrequencyScrollDropdown = toggleFrequencyScrollDropdown;
 window.updateFrequencyScrollMode = updateFrequencyScrollMode;
 
 // Frequency unit toggle functionality
-let currentFrequencyUnit = 'Hz'; // Can be 'Hz', 'kHz', or 'MHz'
+let currentFrequencyUnit = 'kHz'; // Can be 'Hz', 'kHz', or 'MHz' - default to kHz
 
 // Load frequency unit preference from localStorage
 function loadFrequencyUnitPreference() {

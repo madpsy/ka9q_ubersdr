@@ -2836,8 +2836,16 @@ class SpectrumDisplay {
 
     // Get color as RGB object for waterfall
     getColorRGB(normalized) {
-        const index = Math.floor(normalized * (this.colorGradient.length - 1));
+        // Clamp normalized value to valid range [0, 1] to prevent undefined array access
+        const clampedNormalized = Math.max(0, Math.min(1, normalized));
+        const index = Math.floor(clampedNormalized * (this.colorGradient.length - 1));
         const colorStr = this.colorGradient[index];
+
+        // Safety check: if colorStr is undefined, return black
+        if (!colorStr) {
+            console.warn(`getColorRGB: undefined color at index ${index} (normalized=${normalized})`);
+            return { r: 0, g: 0, b: 0 };
+        }
 
         // Parse rgb(r, g, b) string
         const match = colorStr.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);

@@ -6436,6 +6436,37 @@ function spectrumMaxZoom() {
     updateURL(); // Save zoom to URL
 }
 
+function spectrumCenterFrequency() {
+    if (!spectrumDisplay) return;
+
+    const now = Date.now();
+    if (now - lastZoomTime < ZOOM_THROTTLE_MS) return;
+    lastZoomTime = now;
+
+    // Get current frequency from input
+    const freqInput = document.getElementById('frequency');
+    const frequency = parseInt(freqInput.value);
+
+    if (isNaN(frequency)) {
+        log('Invalid frequency for centering', 'error');
+        return;
+    }
+
+    // Send zoom request to center at current frequency, keeping current bin bandwidth
+    if (spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
+        const currentBinBandwidth = spectrumDisplay.binBandwidth || 400.0;
+        spectrumDisplay.ws.send(JSON.stringify({
+            type: 'zoom',
+            frequency: frequency,
+            binBandwidth: currentBinBandwidth
+        }));
+        log(`Centered spectrum at ${formatFrequency(frequency)}`);
+    }
+
+    // Zoom display will be updated when config arrives from server
+    updateURL(); // Save zoom to URL
+}
+
 function updateSpectrumZoomDisplay() {
     if (!spectrumDisplay) return;
 
@@ -6455,6 +6486,7 @@ window.spectrumResetZoom = spectrumResetZoom;
 window.spectrumZoomOut = spectrumZoomOut;
 window.spectrumZoomIn = spectrumZoomIn;
 window.spectrumMaxZoom = spectrumMaxZoom;
+window.spectrumCenterFrequency = spectrumCenterFrequency;
 window.updateSpectrumColorScheme = updateSpectrumColorScheme;
 window.updateSpectrumRange = updateSpectrumRange;
 window.updateSpectrumGrid = updateSpectrumGrid;

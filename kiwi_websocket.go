@@ -802,8 +802,12 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			// Convert spectrum data (float32 dBm) to KiwiSDR waterfall format
 			// KiwiSDR expects 8-bit values: 0-255 representing -200 to 0 dBm
 			// Formula: byte_value = (dBm + 200) * 255 / 200
+			// NOTE: Reverse the spectrum data - UberSDR sends low-to-high freq, KiwiSDR expects high-to-low
 			wfData := make([]byte, len(spectrumData))
 			for i, dbValue := range spectrumData {
+				// Reverse the index to flip the spectrum
+				reverseIdx := len(spectrumData) - 1 - i
+
 				// Clamp to -200..0 dBm range
 				clampedDb := dbValue
 				if clampedDb < -200 {
@@ -820,7 +824,7 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 				if byteVal > 255 {
 					byteVal = 255
 				}
-				wfData[i] = byte(byteVal)
+				wfData[reverseIdx] = byte(byteVal)
 			}
 
 			// Check if compression is enabled

@@ -445,6 +445,15 @@ class SpectrumDisplay {
         this.currentBandwidthLow = 50;
         this.currentBandwidthHigh = 3000;
 
+        // Bandwidth drag state
+        this.bandwidthDragState = {
+            isDragging: false,
+            draggedEdge: null, // 'low' or 'high'
+            startY: 0,
+            startBandwidthValue: 0,
+            hitTolerance: 10 // pixels
+        };
+
         // Track last spectrum view state for conditional marker redraw (performance optimization)
         this.lastMarkerCenterFreq = null;
         this.lastMarkerTotalBandwidth = null;
@@ -537,6 +546,9 @@ class SpectrumDisplay {
             initSMeterNeedle();
         }
 
+        // Setup bandwidth drag handlers on overlay canvas
+        this.setupBandwidthDragHandlers();
+
         // Check localStorage preference for line graph visibility (default to false/unchecked)
         const savedState = localStorage.getItem('spectrumLineGraphEnabled');
         const lineGraphEnabled = savedState === 'true'; // Only true if explicitly saved as 'true'
@@ -592,6 +604,227 @@ class SpectrumDisplay {
             this.cachedFilterLatency = window.getTotalFilterLatency();
             console.log(`Spectrum sync: Initial filter latency ${this.cachedFilterLatency.toFixed(1)}ms`);
         }
+    }
+
+    // Setup bandwidth drag handlers on overlay canvas
+    setupBandwidthDragHandlers() {
+        // Add mousedown handler to detect clicks on bandwidth bracket
+        this.overlayCanvas.addEventListener('mousedown', (e) => {
+            // Only handle in bookmark area (top 35px)
+            const rect = this.overlayCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            if (y > 35 || !this.currentTunedFreq || !this.totalBandwidth) return;
+
+            // Calculate bandwidth edge positions
+            const effectiveCenterFreq = this.isDragging ?
+                this.centerFreq + this.predictedFreqOffset :
+                this.centerFreq;
+            const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
+            const endFreq = effectiveCenterFreq + this.totalBandwidth / 2;
+
+            // Check if tuned frequency is visible
+            if (this.currentTunedFreq < startFreq || this.currentTunedFreq > endFreq) return;
+
+            // Calculate bandwidth edge x positions
+            const lowFreq = this.currentTunedFreq + this.currentBandwidthLow;
+            const highFreq = this.currentTunedFreq + this.currentBandwidthHigh;
+            let xLow = ((lowFreq - startFreq) / (endFreq - startFreq)) * this.width;
+            let xHigh = ((highFreq - startFreq) / (endFreq - startFreq)) * this.width;
+
+            // For LSB mode, swap positions
+            if (this.currentBandwidthLow < 0 && this.currentBandwidthHigh < 0) {
+                [xLow, xHigh] = [xHigh, xLow];
+            }
+
+            // Check if click is near bandwidth bracket (y=30, within hitTolerance)
+            const bracketY = 30;
+            if (Math.abs(y - bracketY) > this.bandwidthDragState.hitTolerance) return;
+
+            // Check if click is near low or high edge
+            const nearLow = Math.abs(x - xLow) <= this.bandwidthDragState.hitTolerance;
+            const nearHigh = Math.abs(x - xHigh) <= this.bandwidthDragState.hitTolerance;
+
+            if (nearLow || nearHigh) {
+                // Start dragging
+                this.bandwidthDragState.isDragging = true;
+                this.bandwidthDragState.draggedEdge = nearLow ? 'low' : 'high';
+                this.bandwidthDragState.startY = y;
+                this.bandwidthDragState.startBandwidthValue = nearLow ?
+                    this.currentBandwidthLow : this.currentBandwidthHigh;
+
+                // Change cursor
+                this.overlayCanvas.style.cursor = 'ns-resize';
+
+                // Prevent default to avoid text selection
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        });
+
+        // Add mousemove handler for dragging
+        this.overlayCanvas.addEventListener('mousemove', (e) => {
+            if (!this.bandwidthDragState.isDragging) {
+                // Update cursor when hovering over bandwidth bracket
+                const rect = this.overlayCanvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                if (y <= 35 && this.currentTunedFreq && this.totalBandwidth) {
+                    const effectiveCenterFreq = this.isDragging ?
+                        this.centerFreq + this.predictedFreqOffset :
+                        this.centerFreq;
+                    const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
+                    const endFreq = effectiveCenterFreq + this.totalBandwidth / 2;
+
+                    if (this.currentTunedFreq >= startFreq && this.currentTunedFreq <= endFreq) {
+                        const lowFreq = this.currentTunedFreq + this.currentBandwidthLow;
+                        const highFreq = this.currentTunedFreq + this.currentBandwidthHigh;
+                        let xLow = ((lowFreq - startFreq) / (endFreq - startFreq)) * this.width;
+                        let xHigh = ((highFreq - startFreq) / (endFreq - startFreq)) * this.width;
+
+                        if (this.currentBandwidthLow < 0 && this.currentBandwidthHigh < 0) {
+                            [xLow, xHigh] = [xHigh, xLow];
+                        }
+
+                        const bracketY = 30;
+                        const nearBracket = Math.abs(y - bracketY) <= this.bandwidthDragState.hitTolerance;
+                        const nearLow = Math.abs(x - xLow) <= this.bandwidthDragState.hitTolerance;
+                        const nearHigh = Math.abs(x - xHigh) <= this.bandwidthDragState.hitTolerance;
+
+                        if (nearBracket && (nearLow || nearHigh)) {
+                            this.overlayCanvas.style.cursor = 'ns-resize';
+                            return;
+                        }
+                    }
+                }
+                this.overlayCanvas.style.cursor = 'default';
+                return;
+            }
+
+            // Handle dragging
+            const rect = this.overlayCanvas.getBoundingClientRect();
+            const y = e.clientY - rect.top;
+            const deltaY = y - this.bandwidthDragState.startY;
+
+            // Get mode-specific bandwidth limits from app.js
+            const currentMode = window.currentMode ? window.currentMode.toLowerCase() : 'usb';
+            let minLimit, maxLimit;
+
+            // Define limits based on mode (matching setMode() in app.js)
+            switch (currentMode) {
+                case 'usb':
+                    minLimit = 0;
+                    maxLimit = 4000;
+                    break;
+                case 'lsb':
+                    minLimit = -4000;
+                    maxLimit = 0;
+                    break;
+                case 'cw':
+                case 'cw-r':
+                    minLimit = -500;
+                    maxLimit = 500;
+                    break;
+                case 'am':
+                case 'sam':
+                    minLimit = -5000;
+                    maxLimit = 5000;
+                    break;
+                case 'fm':
+                case 'wfm':
+                    minLimit = -8000;
+                    maxLimit = 8000;
+                    break;
+                default:
+                    minLimit = 0;
+                    maxLimit = 4000;
+            }
+
+            // Convert vertical pixel movement to frequency change
+            // Dragging up = increase frequency (more positive or less negative)
+            // Dragging down = decrease frequency (less positive or more negative)
+            const pixelsToHz = 20; // 20 Hz per pixel movement
+            const freqDelta = -deltaY * pixelsToHz; // Negative because up is positive
+
+            // Calculate new bandwidth value
+            let newValue = this.bandwidthDragState.startBandwidthValue + freqDelta;
+
+            // Clamp to mode-specific limits
+            newValue = Math.max(minLimit, Math.min(maxLimit, newValue));
+
+            // Round to nearest 10 Hz for cleaner values
+            newValue = Math.round(newValue / 10) * 10;
+
+            // Update the appropriate bandwidth edge
+            if (this.bandwidthDragState.draggedEdge === 'low') {
+                // Ensure low doesn't exceed high
+                if (currentMode === 'lsb') {
+                    // LSB: low is more negative than high
+                    newValue = Math.min(newValue, this.currentBandwidthHigh - 50);
+                } else {
+                    // Other modes: low is less than high
+                    newValue = Math.min(newValue, this.currentBandwidthHigh - 50);
+                }
+
+                this.currentBandwidthLow = newValue;
+                window.currentBandwidthLow = newValue;
+            } else {
+                // Ensure high doesn't go below low
+                if (currentMode === 'lsb') {
+                    // LSB: high is less negative than low
+                    newValue = Math.max(newValue, this.currentBandwidthLow + 50);
+                } else {
+                    // Other modes: high is greater than low
+                    newValue = Math.max(newValue, this.currentBandwidthLow + 50);
+                }
+
+                this.currentBandwidthHigh = newValue;
+                window.currentBandwidthHigh = newValue;
+            }
+
+            // Update display immediately
+            this.drawTunedFrequencyCursor();
+
+            // Call updateBandwidthDisplay() for throttled server update
+            if (window.updateBandwidthDisplay) {
+                window.updateBandwidthDisplay();
+            }
+
+            e.preventDefault();
+        });
+
+        // Add mouseup handler to stop dragging
+        this.overlayCanvas.addEventListener('mouseup', (e) => {
+            if (this.bandwidthDragState.isDragging) {
+                this.bandwidthDragState.isDragging = false;
+                this.bandwidthDragState.draggedEdge = null;
+                this.overlayCanvas.style.cursor = 'default';
+
+                // Trigger final bandwidth update
+                if (window.updateBandwidth) {
+                    window.updateBandwidth();
+                }
+
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        });
+
+        // Add mouseleave handler to cancel dragging
+        this.overlayCanvas.addEventListener('mouseleave', () => {
+            if (this.bandwidthDragState.isDragging) {
+                this.bandwidthDragState.isDragging = false;
+                this.bandwidthDragState.draggedEdge = null;
+                this.overlayCanvas.style.cursor = 'default';
+
+                // Trigger final bandwidth update
+                if (window.updateBandwidth) {
+                    window.updateBandwidth();
+                }
+            }
+        });
     }
 
     // Resize canvas to match container

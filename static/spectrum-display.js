@@ -455,7 +455,7 @@ class SpectrumDisplay {
         this.bandwidthDragState = {
             isDragging: false,
             draggedEdge: null, // 'low' or 'high'
-            startY: 0,
+            startX: 0,
             startBandwidthValue: 0,
             hitTolerance: 10, // pixels
             wasDragging: false // flag to prevent click events after drag
@@ -657,12 +657,12 @@ class SpectrumDisplay {
                 // Start dragging
                 this.bandwidthDragState.isDragging = true;
                 this.bandwidthDragState.draggedEdge = nearLow ? 'low' : 'high';
-                this.bandwidthDragState.startY = y;
+                this.bandwidthDragState.startX = x;
                 this.bandwidthDragState.startBandwidthValue = nearLow ?
                     this.currentBandwidthLow : this.currentBandwidthHigh;
 
                 // Change cursor
-                this.overlayCanvas.style.cursor = 'ns-resize';
+                this.overlayCanvas.style.cursor = 'ew-resize';
 
                 // Prevent default to avoid text selection
                 e.preventDefault();
@@ -699,9 +699,9 @@ class SpectrumDisplay {
                         const nearBracket = Math.abs(y - bracketY) <= this.bandwidthDragState.hitTolerance;
                         const nearLow = Math.abs(x - xLow) <= this.bandwidthDragState.hitTolerance;
                         const nearHigh = Math.abs(x - xHigh) <= this.bandwidthDragState.hitTolerance;
-
+    
                         if (nearBracket && (nearLow || nearHigh)) {
-                            this.overlayCanvas.style.cursor = 'ns-resize';
+                            this.overlayCanvas.style.cursor = 'ew-resize';
                             return;
                         }
                     }
@@ -712,8 +712,24 @@ class SpectrumDisplay {
 
             // Handle dragging
             const rect = this.overlayCanvas.getBoundingClientRect();
-            const y = e.clientY - rect.top;
-            const deltaY = y - this.bandwidthDragState.startY;
+            const x = e.clientX - rect.left;
+            const deltaX = x - this.bandwidthDragState.startX;
+
+            // Calculate frequency per pixel based on current spectrum view
+            const effectiveCenterFreq = this.isDragging ?
+                this.centerFreq + this.predictedFreqOffset :
+                this.centerFreq;
+            const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
+            const endFreq = effectiveCenterFreq + this.totalBandwidth / 2;
+            const hzPerPixel = this.totalBandwidth / this.width;
+
+            // Convert horizontal pixel movement to frequency change
+            // Dragging right = increase frequency (more positive or less negative)
+            // Dragging left = decrease frequency (less positive or more negative)
+            const freqDelta = deltaX * hzPerPixel;
+
+            // Calculate new bandwidth value
+            let newValue = this.bandwidthDragState.startBandwidthValue + freqDelta;
 
             // Get mode-specific bandwidth limits from app.js
             const currentMode = window.currentMode ? window.currentMode.toLowerCase() : 'usb';
@@ -730,7 +746,8 @@ class SpectrumDisplay {
                     maxLimit = 0;
                     break;
                 case 'cw':
-                case 'cw-r':
+                case 'cwu':
+                case 'cwl':
                     minLimit = -500;
                     maxLimit = 500;
                     break;
@@ -740,7 +757,7 @@ class SpectrumDisplay {
                     maxLimit = 5000;
                     break;
                 case 'fm':
-                case 'wfm':
+                case 'nfm':
                     minLimit = -8000;
                     maxLimit = 8000;
                     break;
@@ -748,15 +765,6 @@ class SpectrumDisplay {
                     minLimit = 0;
                     maxLimit = 4000;
             }
-
-            // Convert vertical pixel movement to frequency change
-            // Dragging up = increase frequency (more positive or less negative)
-            // Dragging down = decrease frequency (less positive or more negative)
-            const pixelsToHz = 20; // 20 Hz per pixel movement
-            const freqDelta = -deltaY * pixelsToHz; // Negative because up is positive
-
-            // Calculate new bandwidth value
-            let newValue = this.bandwidthDragState.startBandwidthValue + freqDelta;
 
             // Clamp to mode-specific limits
             newValue = Math.max(minLimit, Math.min(maxLimit, newValue));

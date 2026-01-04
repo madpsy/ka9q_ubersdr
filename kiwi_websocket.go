@@ -628,8 +628,8 @@ func (kc *kiwiConn) sendUserList() {
 		if !isSpectrum {
 			// Audio session - use its frequency
 			if freq, ok := sessionInfo["frequency"].(uint64); ok {
-				// UberSDR stores frequencies in Hz, convert to kHz for KiwiSDR protocol
-				user.Frequency = int(freq / 1000)
+				// UberSDR stores frequencies in Hz, KiwiSDR protocol also expects Hz
+				user.Frequency = int(freq)
 			}
 			if mode, ok := sessionInfo["mode"].(string); ok {
 				user.Mode = mode
@@ -637,8 +637,8 @@ func (kc *kiwiConn) sendUserList() {
 		} else if user.Frequency == 0 {
 			// Spectrum session and no frequency set yet
 			if freq, ok := sessionInfo["frequency"].(uint64); ok {
-				// UberSDR stores frequencies in Hz, convert to kHz for KiwiSDR protocol
-				user.Frequency = int(freq / 1000)
+				// UberSDR stores frequencies in Hz, KiwiSDR protocol also expects Hz
+				user.Frequency = int(freq)
 			}
 			user.Mode = "spectrum"
 		}

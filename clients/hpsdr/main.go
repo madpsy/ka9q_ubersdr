@@ -42,7 +42,7 @@ const (
 	// Default HPSDR configuration
 	DefaultInterface    = ""
 	DefaultIPAddress    = "0.0.0.0"
-	DefaultNumReceivers = 8
+	DefaultNumReceivers = 10
 	DefaultDeviceType   = DeviceHermesLite
 
 	// Frequency validation constants (UberSDR valid range)
@@ -933,7 +933,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  -ip string\n")
 		fmt.Fprintf(os.Stderr, "        IP address for HPSDR server (default \"0.0.0.0\")\n")
 		fmt.Fprintf(os.Stderr, "  -receivers int\n")
-		fmt.Fprintf(os.Stderr, "        Number of receivers 1-8 (default 8)\n")
+		fmt.Fprintf(os.Stderr, "        Number of receivers 1-10 (default 10)\n")
 		fmt.Fprintf(os.Stderr, "  -device int\n")
 		fmt.Fprintf(os.Stderr, "        Device type: 1=Hermes, 6=HermesLite (default 6)\n\n")
 		fmt.Fprintf(os.Stderr, "Examples:\n")

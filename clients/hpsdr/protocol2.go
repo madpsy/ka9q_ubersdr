@@ -27,7 +27,7 @@ const (
 	DeviceHermesLite = 0x06
 
 	// Protocol constants
-	MaxReceivers       = 8
+	MaxReceivers       = 10 // Support up to 10 receivers (Hermes-Lite2 extension)
 	SamplesPerPacket   = 238
 	IQDataSize         = 1428 // 238 samples * 6 bytes
 	BitsPerSample      = 24
@@ -38,11 +38,12 @@ const (
 	PortHighPrio    = 1027
 	PortDDCSpecific = 1025
 	PortMic         = 1026
-	PortDDC0        = 1035 // DDC ports are 1035-1042 (1035 + receiver_num)
+	PortDDC0        = 1035 // DDC ports are 1035-1044 (1035 + receiver_num)
 
 	// Firmware version
-	FirmwareVersion = 38
-	ProtocolVersion = 18
+	// Use Hermes-Lite2 cicrx version: FW=72 (0x48), Protocol=8
+	FirmwareVersion = 72
+	ProtocolVersion = 8
 )
 
 // Protocol2Config holds configuration for HPSDR Protocol 2 emulation
@@ -372,7 +373,6 @@ func (s *Protocol2Server) discoveryThread() {
 
 		// General packet: 60 bytes starting with 00 00 00 00 00
 		if n == 60 && buffer[4] == 0x00 {
-			log.Printf("Protocol2: General packet received from %s", addr)
 			s.clientAddr = addr
 			s.handleGeneralPacket(buffer[:n])
 			continue
@@ -381,6 +381,7 @@ func (s *Protocol2Server) discoveryThread() {
 }
 
 // handleDiscovery sends discovery response
+// Standard HPSDR Protocol 2 format with Hermes-Lite2 extensions
 func (s *Protocol2Server) handleDiscovery(addr *net.UDPAddr) {
 	response := make([]byte, 60)
 
@@ -397,22 +398,33 @@ func (s *Protocol2Server) handleDiscovery(addr *net.UDPAddr) {
 	// Bytes 5-10: MAC address
 	copy(response[5:11], s.config.MACAddress)
 
-	// Byte 11: Device type
+	// Byte 11: Device type (0x06 = HermesLite)
 	response[11] = s.config.DeviceType
 
-	// Bytes 12-13: Firmware version
+	// Byte 12: Firmware version (VERSION_MAJOR)
 	response[12] = FirmwareVersion
+
+	// Byte 13: Protocol version (VERSION_MINOR)
 	response[13] = ProtocolVersion
+
+	// Bytes 14-19: Reserved/zeros
 
 	// Byte 20: Number of receivers
 	response[20] = byte(s.config.NumReceivers)
 
-	// Bytes 21-22: Protocol info
-	response[21] = 1
+	// Byte 21: Board ID with bandscope bits
+	// Format: {BANDSCOPE_BITS[1:0], BOARD[5:0]}
+	// BANDSCOPE_BITS = 0x01, BOARD = 5 -> 0x45
+	response[21] = 0x45
+
+	// Byte 22: Protocol info
 	response[22] = 3
 
+	// Bytes 23-59: zeros
+
 	s.discoverySock.WriteToUDP(response, addr)
-	log.Printf("Protocol2: Discovery response sent to %s", addr)
+	log.Printf("Protocol2: Discovery response sent to %s (FW=%d.%d, Board=0x%02x, Receivers=%d)",
+		addr, FirmwareVersion, ProtocolVersion, response[21], s.config.NumReceivers)
 }
 
 // handleGeneralPacket processes general packet (starts radio)
@@ -518,8 +530,10 @@ func (s *Protocol2Server) highPriorityThread() {
 		s.adcRandom = (buffer[6] & 0x01) != 0
 		s.stepAtt0 = int(buffer[1443])
 
-		// Parse DDC frequencies (bytes 9-40, 8 receivers × 4 bytes)
-		for i := 0; i < s.config.NumReceivers; i++ {
+		// Parse DDC frequencies
+		// Standard HPSDR: bytes 9-40 (8 receivers × 4 bytes, receivers 0-7)
+		// Hermes-Lite2 extension: bytes 41-48 (2 receivers × 4 bytes, receivers 8-9)
+		for i := 0; i < s.config.NumReceivers && i < 8; i++ {
 			offset := 9 + (i * 4)
 			freqVal := binary.BigEndian.Uint32(buffer[offset : offset+4])
 
@@ -531,6 +545,25 @@ func (s *Protocol2Server) highPriorityThread() {
 				s.receivers[i].frequency = freq
 				s.receivers[i].mu.Unlock()
 				// log.Printf("Protocol2: DDC%d frequency = %d Hz", i, freq)
+			}
+		}
+
+		// Hermes-Lite2 extension: Parse receivers 8-9 from bytes 41-48
+		// This maintains backwards compatibility - standard 8-receiver clients won't send this data
+		if s.config.NumReceivers > 8 && len(buffer) >= 49 {
+			for i := 8; i < s.config.NumReceivers && i < 10; i++ {
+				offset := 41 + ((i - 8) * 4)
+				freqVal := binary.BigEndian.Uint32(buffer[offset : offset+4])
+
+				// Convert to Hz using fractional conversion if needed
+				freq := s.convertFrequency(freqVal)
+
+				if s.receivers[i].frequency != freq {
+					s.receivers[i].mu.Lock()
+					s.receivers[i].frequency = freq
+					s.receivers[i].mu.Unlock()
+					// log.Printf("Protocol2: DDC%d frequency = %d Hz (HL2 extension)", i, freq)
+				}
 			}
 		}
 	}

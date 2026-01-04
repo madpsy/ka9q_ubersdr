@@ -379,7 +379,10 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		}
 	}
 
-	log.Printf("KiwiSDR SET command: %v", params)
+	// Only log commands with parameters or non-keepalive/GET_USERS commands
+	if len(params) > 0 || (!strings.Contains(command, "keepalive") && !strings.Contains(command, "GET_USERS")) {
+		log.Printf("KiwiSDR SET command: %s (params: %v)", command, params)
+	}
 
 	// Handle auth command
 	if _, hasAuth := params["auth"]; hasAuth {
@@ -535,15 +538,19 @@ func (kc *kiwiConn) sendUserList() {
 	// Get all active sessions from the session manager
 	allSessions := kc.sessions.GetAllSessionsInfo()
 
+	log.Printf("KiwiSDR GET_USERS: Found %d total sessions", len(allSessions))
+
 	// Build user list in KiwiSDR format
 	// Group sessions by user_session_id to combine audio and spectrum sessions
 	userMap := make(map[string]*KiwiUserInfo)
 	userIndex := 0
+	skippedInternal := 0
 
 	for _, sessionInfo := range allSessions {
 		// Skip internal sessions (no client IP)
 		clientIP, _ := sessionInfo["client_ip"].(string)
 		if clientIP == "" {
+			skippedInternal++
 			continue
 		}
 
@@ -552,6 +559,9 @@ func (kc *kiwiConn) sendUserList() {
 			// No UUID, create a unique entry for this session
 			userSessionID = fmt.Sprintf("anonymous-%s", sessionInfo["id"])
 		}
+
+		log.Printf("KiwiSDR GET_USERS: Processing session - UUID=%s, IP=%s, IsSpectrum=%v",
+			userSessionID, clientIP, sessionInfo["is_spectrum"])
 
 		// Check if we already have this user
 		if _, exists := userMap[userSessionID]; !exists {
@@ -628,12 +638,16 @@ func (kc *kiwiConn) sendUserList() {
 		users = append(users, *user)
 	}
 
+	log.Printf("KiwiSDR GET_USERS: Returning %d users (skipped %d internal sessions)", len(users), skippedInternal)
+
 	// Marshal to JSON
 	jsonData, err := json.Marshal(users)
 	if err != nil {
 		log.Printf("Error marshaling user list: %v", err)
 		return
 	}
+
+	log.Printf("KiwiSDR GET_USERS: JSON length=%d bytes, data=%s", len(jsonData), string(jsonData))
 
 	// Send as MSG user_cb=<json>
 	kc.sendMsg("user_cb", string(jsonData))

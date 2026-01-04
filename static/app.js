@@ -6923,6 +6923,15 @@ function selectBandFromDropdown(value) {
 
         // Zoom spectrum to show entire band (same as band buttons)
         if (spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
+            // Set flag to prevent edge detection from interfering after zoom
+            spectrumDisplay.skipEdgeDetection = true;
+            // Clear the flag after a short delay (after zoom completes)
+            setTimeout(() => {
+                if (spectrumDisplay) {
+                    spectrumDisplay.skipEdgeDetection = false;
+                }
+            }, 2000);
+
             // Use a minimum bandwidth to prevent excessive zoom on narrow bands
             const minBandWidth = 100000; // 100 kHz minimum (same as band buttons)
             const effectiveBandWidth = Math.max(bandWidth, minBandWidth);

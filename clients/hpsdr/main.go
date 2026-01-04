@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"gopkg.in/yaml.v3"
 )
 
 // ConnectionCheckRequest for /connection endpoint
@@ -62,6 +63,22 @@ const (
 	LowWaterMark = SamplesPerPacket * 2 // ~2 packets = ~2.5ms at 192kHz
 )
 
+// FrequencyRange defines a frequency range mapped to a specific UberSDR instance
+type FrequencyRange struct {
+	Name     string `yaml:"name"`
+	MinFreq  int64  `yaml:"min_freq"`
+	MaxFreq  int64  `yaml:"max_freq"`
+	URL      string `yaml:"url"`
+	Password string `yaml:"password"`
+}
+
+// RoutingConfig holds the frequency routing configuration
+type RoutingConfig struct {
+	DefaultURL      string           `yaml:"default_url"`
+	DefaultPassword string           `yaml:"default_password"`
+	FrequencyRanges []FrequencyRange `yaml:"frequency_ranges"`
+}
+
 // WebSocketMessage represents incoming WebSocket messages from ubersdr
 type WebSocketMessage struct {
 	Type       string `json:"type"`
@@ -79,6 +96,7 @@ type UberSDRBridge struct {
 	// ubersdr connection
 	url            string
 	password       string
+	routingConfig  *RoutingConfig                // Optional frequency routing config
 	wsConns        [MaxReceivers]*websocket.Conn // One connection per receiver
 	wsConnMus      [MaxReceivers]sync.Mutex      // Protects WebSocket writes per receiver
 	userSessionIDs [MaxReceivers]string          // Unique session ID per receiver
@@ -117,7 +135,7 @@ type UberSDRBridge struct {
 }
 
 // NewUberSDRBridge creates a new bridge instance
-func NewUberSDRBridge(url string, password string, hpsdrConfig Protocol2Config) (*UberSDRBridge, error) {
+func NewUberSDRBridge(url string, password string, hpsdrConfig Protocol2Config, routingConfig *RoutingConfig) (*UberSDRBridge, error) {
 	// Create HPSDR server
 	hpsdrServer, err := NewProtocol2Server(hpsdrConfig)
 	if err != nil {
@@ -130,13 +148,14 @@ func NewUberSDRBridge(url string, password string, hpsdrConfig Protocol2Config) 
 	}
 
 	bridge := &UberSDRBridge{
-		url:         url,
-		password:    password,
-		hpsdrServer: hpsdrServer,
-		running:     true,
-		sampleRate:  192000, // Default
-		channels:    2,      // IQ mode
-		pcmDecoder:  pcmDecoder,
+		url:           url,
+		password:      password,
+		routingConfig: routingConfig,
+		hpsdrServer:   hpsdrServer,
+		running:       true,
+		sampleRate:    192000, // Default
+		channels:      2,      // IQ mode
+		pcmDecoder:    pcmDecoder,
 	}
 
 	// Initialize receiver frequencies and unique session IDs
@@ -398,10 +417,32 @@ func isValidFrequency(frequency int64) bool {
 	return frequency >= MinFrequencyHz && frequency <= MaxFrequencyHz
 }
 
+// getURLForFrequency returns the appropriate URL and password for a given frequency
+// based on the routing configuration, or the default if no range matches
+func (b *UberSDRBridge) getURLForFrequency(frequency int64) (string, string) {
+	// If no routing config, use default
+	if b.routingConfig == nil {
+		return b.url, b.password
+	}
+
+	// Check each frequency range
+	for _, fr := range b.routingConfig.FrequencyRanges {
+		if frequency >= fr.MinFreq && frequency <= fr.MaxFreq {
+			log.Printf("Bridge: Frequency %d Hz matched range '%s' (%d-%d Hz), using %s",
+				frequency, fr.Name, fr.MinFreq, fr.MaxFreq, fr.URL)
+			return fr.URL, fr.Password
+		}
+	}
+
+	// No match, use default
+	log.Printf("Bridge: Frequency %d Hz using default URL %s", frequency, b.routingConfig.DefaultURL)
+	return b.routingConfig.DefaultURL, b.routingConfig.DefaultPassword
+}
+
 // checkConnection checks if connection is allowed via /connection endpoint
-func (b *UberSDRBridge) checkConnection(receiverNum int) (bool, error) {
-	// Parse the base URL
-	parsedURL, err := url.Parse(b.url)
+func (b *UberSDRBridge) checkConnection(receiverNum int, targetURL string, targetPassword string) (bool, error) {
+	// Parse the target URL
+	parsedURL, err := url.Parse(targetURL)
 	if err != nil {
 		return false, err
 	}
@@ -417,7 +458,7 @@ func (b *UberSDRBridge) checkConnection(receiverNum int) (bool, error) {
 	// Prepare request body with per-receiver session ID
 	reqBody := ConnectionCheckRequest{
 		UserSessionID: b.userSessionIDs[receiverNum],
-		Password:      b.password,
+		Password:      targetPassword,
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -480,6 +521,9 @@ func (b *UberSDRBridge) connectToUberSDR(receiverNum int) {
 	lastFailedFreq := b.lastFailedFreq[receiverNum]
 	lastFailedMode := b.lastFailedMode[receiverNum]
 
+	// Get URL and password for this frequency (may differ from default)
+	targetURL, targetPassword := b.getURLForFrequency(frequency)
+
 	log.Printf("DEBUG: connectToUberSDR: Receiver %d current freq=%d mode=%s, lastFailed freq=%d mode=%s",
 		receiverNum, frequency, mode, lastFailedFreq, lastFailedMode)
 
@@ -497,7 +541,7 @@ func (b *UberSDRBridge) connectToUberSDR(receiverNum int) {
 	b.mu.Unlock()
 
 	// Check if connection is allowed with per-receiver session ID
-	allowed, err := b.checkConnection(receiverNum)
+	allowed, err := b.checkConnection(receiverNum, targetURL, targetPassword)
 	if err != nil {
 		log.Printf("Bridge: Receiver %d connection check error: %v", receiverNum, err)
 	}
@@ -510,8 +554,8 @@ func (b *UberSDRBridge) connectToUberSDR(receiverNum int) {
 		return
 	}
 
-	// Parse the base URL and convert to WebSocket URL
-	parsedURL, err := url.Parse(b.url)
+	// Parse the target URL and convert to WebSocket URL
+	parsedURL, err := url.Parse(targetURL)
 	if err != nil {
 		log.Printf("Bridge: Invalid URL: %v", err)
 		return
@@ -537,8 +581,8 @@ func (b *UberSDRBridge) connectToUberSDR(receiverNum int) {
 	query.Set("user_session_id", b.userSessionIDs[receiverNum])
 	// Don't set format - let server use default (pcm-zstd binary)
 
-	if b.password != "" {
-		query.Set("password", b.password)
+	if targetPassword != "" {
+		query.Set("password", targetPassword)
 	}
 
 	wsURL.RawQuery = query.Encode()
@@ -908,11 +952,12 @@ func main() {
 	// Command-line flags
 	urlFlag := flag.String("url", "http://localhost:8080", "UberSDR server URL (http://, https://, ws://, or wss://)")
 	password := flag.String("password", "", "UberSDR server password (optional)")
+	configFile := flag.String("config", "", "Frequency routing configuration file (optional, YAML format)")
 
 	// HPSDR configuration
 	hpsdrInterface := flag.String("interface", DefaultInterface, "Network interface to bind to (optional)")
 	hpsdrIP := flag.String("ip", DefaultIPAddress, "IP address for HPSDR server")
-	numReceivers := flag.Int("receivers", DefaultNumReceivers, "Number of receivers (1-8)")
+	numReceivers := flag.Int("receivers", DefaultNumReceivers, "Number of receivers (1-10)")
 	deviceType := flag.Int("device", int(DefaultDeviceType), "Device type (1=Hermes, 6=HermesLite)")
 
 	flag.Usage = func() {
@@ -926,7 +971,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "        Accepts http://, https://, ws://, or wss://\n")
 		fmt.Fprintf(os.Stderr, "        http/https will be converted to ws/wss automatically\n")
 		fmt.Fprintf(os.Stderr, "  -password string\n")
-		fmt.Fprintf(os.Stderr, "        UberSDR server password (optional)\n\n")
+		fmt.Fprintf(os.Stderr, "        UberSDR server password (optional)\n")
+		fmt.Fprintf(os.Stderr, "  -config string\n")
+		fmt.Fprintf(os.Stderr, "        Frequency routing configuration file (optional, YAML format)\n")
+		fmt.Fprintf(os.Stderr, "        See routing.yaml.example for format\n\n")
 		fmt.Fprintf(os.Stderr, "HPSDR Emulation Options:\n")
 		fmt.Fprintf(os.Stderr, "  -interface string\n")
 		fmt.Fprintf(os.Stderr, "        Network interface to bind to (optional)\n")
@@ -946,6 +994,26 @@ func main() {
 	}
 
 	flag.Parse()
+
+	// Load routing configuration if specified
+	var routingConfig *RoutingConfig
+	if *configFile != "" {
+		data, err := os.ReadFile(*configFile)
+		if err != nil {
+			log.Fatalf("Failed to read config file %s: %v", *configFile, err)
+		}
+
+		routingConfig = &RoutingConfig{}
+		if err := yaml.Unmarshal(data, routingConfig); err != nil {
+			log.Fatalf("Failed to parse config file %s: %v", *configFile, err)
+		}
+
+		log.Printf("Loaded routing config with %d frequency ranges", len(routingConfig.FrequencyRanges))
+		for i, fr := range routingConfig.FrequencyRanges {
+			log.Printf("  Range %d: %s (%.3f-%.3f MHz) -> %s",
+				i+1, fr.Name, float64(fr.MinFreq)/1e6, float64(fr.MaxFreq)/1e6, fr.URL)
+		}
+	}
 
 	// Validate parameters
 	if *numReceivers < 1 || *numReceivers > MaxReceivers {
@@ -975,7 +1043,7 @@ func main() {
 	}
 
 	// Create bridge
-	bridge, err := NewUberSDRBridge(*urlFlag, *password, hpsdrConfig)
+	bridge, err := NewUberSDRBridge(*urlFlag, *password, hpsdrConfig, routingConfig)
 	if err != nil {
 		log.Fatalf("Failed to create bridge: %v", err)
 	}

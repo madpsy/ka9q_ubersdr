@@ -1,0 +1,94 @@
+# HPSDR Bridge Frequency Routing Configuration
+# This file allows routing different frequency ranges to different UberSDR instances
+# Useful for multi-SDR setups with different antennas or geographic locations
+
+# Default UberSDR instance (used when frequency doesn't match any range)
+default_url: "http://localhost:8080"
+default_password: ""
+
+# Frequency ranges mapped to specific UberSDR instances
+# Frequencies are in Hz
+# Ranges are checked in order - first match wins
+frequency_ranges:
+  # 160m band (1.8-2.0 MHz)
+  - name: "160m"
+    min_freq: 1800000
+    max_freq: 2000000
+    url: "http://sdr-160m.example.com:8080"
+    password: ""
+
+  # 80m band (3.5-4.0 MHz)
+  - name: "80m"
+    min_freq: 3500000
+    max_freq: 4000000
+    url: "http://sdr-80m.example.com:8080"
+    password: ""
+
+  # 60m band (5.3-5.4 MHz)
+  - name: "60m"
+    min_freq: 5300000
+    max_freq: 5400000
+    url: "http://sdr-60m.example.com:8080"
+    password: ""
+
+  # 40m band (7.0-7.3 MHz)
+  - name: "40m"
+    min_freq: 7000000
+    max_freq: 7300000
+    url: "http://sdr-40m.example.com:8080"
+    password: ""
+
+  # 30m band (10.1-10.15 MHz)
+  - name: "30m"
+    min_freq: 10100000
+    max_freq: 10150000
+    url: "http://sdr-30m.example.com:8080"
+    password: ""
+
+  # 20m band (14.0-14.35 MHz)
+  - name: "20m"
+    min_freq: 14000000
+    max_freq: 14350000
+    url: "http://sdr-20m.example.com:8080"
+    password: ""
+
+  # 17m band (18.068-18.168 MHz)
+  - name: "17m"
+    min_freq: 18068000
+    max_freq: 18168000
+    url: "http://sdr-17m.example.com:8080"
+    password: ""
+
+  # 15m band (21.0-21.45 MHz)
+  - name: "15m"
+    min_freq: 21000000
+    max_freq: 21450000
+    url: "http://sdr-15m.example.com:8080"
+    password: ""
+
+  # 12m band (24.89-24.99 MHz)
+  - name: "12m"
+    min_freq: 24890000
+    max_freq: 24990000
+    url: "http://sdr-12m.example.com:8080"
+    password: ""
+
+  # 10m band (28.0-29.7 MHz)
+  - name: "10m"
+    min_freq: 28000000
+    max_freq: 29700000
+    url: "http://sdr-10m.example.com:8080"
+    password: ""
+
+# Example multi-region setup:
+# - name: "EU-HF"
+#   min_freq: 1800000
+#   max_freq: 30000000
+#   url: "http://eu-sdr.example.com:8080"
+#   password: "eu_password"
+#
+# - name: "US-HF"
+#   min_freq: 1800000
+#   max_freq: 30000000
+#   url: "http://us-sdr.example.com:8080"
+#   password: "us_password"

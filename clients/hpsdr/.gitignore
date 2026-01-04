@@ -2,6 +2,9 @@
 ubersdr-hpsdr-bridge
 ubersdr-hpsdr-bridge.exe
 
+# Config
+routing.yaml
+
 # Go build artifacts
 *.o
 *.a

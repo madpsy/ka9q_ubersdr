@@ -1,0 +1,39 @@
+# Simple HPSDR Bridge Frequency Routing Configuration
+# Two-instance setup: Low bands (below 14 MHz) and High bands (14 MHz and above)
+
+# Default UberSDR instance (used when frequency doesn't match any range)
+default_url: "http://localhost:8080"
+default_password: ""
+
+# Frequency ranges mapped to specific UberSDR instances
+# Split at 20m band (14 MHz)
+frequency_ranges:
+  # Low bands: 160m, 80m, 60m, 40m, 30m (below 14 MHz)
+  # Typically uses loop antennas or low-band optimized antennas
+  - name: "Low Bands (160m-30m)"
+    min_freq: 100000      # 100 kHz
+    max_freq: 13999999    # Just below 14 MHz
+    url: "http://sdr-lowbands.example.com:8080"
+    password: ""
+
+  # High bands: 20m, 17m, 15m, 12m, 10m (14 MHz and above)
+  # Typically uses dipoles, beams, or high-band optimized antennas
+  - name: "High Bands (20m-10m)"
+    min_freq: 14000000    # 14 MHz (20m band start)
+    max_freq: 30000000    # 30 MHz
+    url: "http://sdr-highbands.example.com:8080"
+    password: ""
+
+# Example with passwords:
+# frequency_ranges:
+#   - name: "Low Bands"
+#     min_freq: 100000
+#     max_freq: 13999999
+#     url: "https://lowband-sdr.example.com:8080"
+#     password: "lowband_secret"
+#
+#   - name: "High Bands"
+#     min_freq: 14000000
+#     max_freq: 30000000
+#     url: "https://highband-sdr.example.com:8080"
+#     password: "highband_secret"

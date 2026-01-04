@@ -333,6 +333,12 @@ class SpectrumDisplay {
 
         // Add click handler for bookmarks, DX spots, and CW spots on overlay canvas
         this.overlayCanvas.addEventListener('click', (e) => {
+            // Skip if we just finished a bandwidth drag
+            if (this.bandwidthDragState && this.bandwidthDragState.wasDragging) {
+                this.bandwidthDragState.wasDragging = false;
+                return;
+            }
+
             const rect = this.overlayCanvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
@@ -451,7 +457,8 @@ class SpectrumDisplay {
             draggedEdge: null, // 'low' or 'high'
             startY: 0,
             startBandwidthValue: 0,
-            hitTolerance: 10 // pixels
+            hitTolerance: 10, // pixels
+            wasDragging: false // flag to prevent click events after drag
         };
 
         // Track last spectrum view state for conditional marker redraw (performance optimization)
@@ -770,6 +777,12 @@ class SpectrumDisplay {
 
                 this.currentBandwidthLow = newValue;
                 window.currentBandwidthLow = newValue;
+
+                // Update slider and display value in DOM
+                const sliderElement = document.getElementById('bandwidth-low');
+                const valueElement = document.getElementById('bandwidth-low-value');
+                if (sliderElement) sliderElement.value = newValue;
+                if (valueElement) valueElement.textContent = newValue;
             } else {
                 // Ensure high doesn't go below low
                 if (currentMode === 'lsb') {
@@ -782,12 +795,18 @@ class SpectrumDisplay {
 
                 this.currentBandwidthHigh = newValue;
                 window.currentBandwidthHigh = newValue;
+
+                // Update slider and display value in DOM
+                const sliderElement = document.getElementById('bandwidth-high');
+                const valueElement = document.getElementById('bandwidth-high-value');
+                if (sliderElement) sliderElement.value = newValue;
+                if (valueElement) valueElement.textContent = newValue;
             }
 
             // Update display immediately
             this.drawTunedFrequencyCursor();
 
-            // Call updateBandwidthDisplay() for throttled server update
+            // Trigger tune command with throttling (updateBandwidthDisplay handles this)
             if (window.updateBandwidthDisplay) {
                 window.updateBandwidthDisplay();
             }
@@ -800,6 +819,7 @@ class SpectrumDisplay {
             if (this.bandwidthDragState.isDragging) {
                 this.bandwidthDragState.isDragging = false;
                 this.bandwidthDragState.draggedEdge = null;
+                this.bandwidthDragState.wasDragging = true; // Set flag to prevent click event
                 this.overlayCanvas.style.cursor = 'default';
 
                 // Trigger final bandwidth update
@@ -817,6 +837,7 @@ class SpectrumDisplay {
             if (this.bandwidthDragState.isDragging) {
                 this.bandwidthDragState.isDragging = false;
                 this.bandwidthDragState.draggedEdge = null;
+                this.bandwidthDragState.wasDragging = true; // Set flag to prevent click event
                 this.overlayCanvas.style.cursor = 'default';
 
                 // Trigger final bandwidth update

@@ -3200,7 +3200,7 @@ function updateBandwidthDisplay() {
         // Update spectrum display bandwidth indicator
         if (spectrumDisplay) {
             const freqInput = document.getElementById('frequency');
-            const currentFreq = freqInput ? parseInt(freqInput.value) : 0;
+            const currentFreq = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
             spectrumDisplay.updateConfig({
                 tunedFreq: currentFreq,
                 bandwidthLow: bandwidthLow,

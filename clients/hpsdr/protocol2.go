@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"log"
@@ -19,7 +20,6 @@ var debugSeqNum = os.Getenv("HPSDR_DEBUG_SEQ") != ""
 
 // HPSDR Protocol 2 Implementation
 // Based on: https://github.com/TAPR/OpenHPSDR-Firmware/blob/master/Protocol%202/Documentation/openHPSDR%20Ethernet%20Protocol%20v4.3.pdf
-// Reference implementation: ka9q_hpsdr by N1GP
 
 const (
 	// Device types
@@ -153,56 +153,81 @@ func NewProtocol2Server(config Protocol2Config) (*Protocol2Server, error) {
 func (s *Protocol2Server) Start() error {
 	var err error
 
+	// Create ListenConfig that sets SO_REUSEADDR and SO_REUSEPORT before bind
+	// This allows multiple instances to share ports
+	createListenConfig := func(bindToInterface bool) *net.ListenConfig {
+		return &net.ListenConfig{
+			Control: func(network, address string, c syscall.RawConn) error {
+				var sockErr error
+				err := c.Control(func(fd uintptr) {
+					// Set SO_REUSEADDR
+					if err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
+						sockErr = fmt.Errorf("failed to set SO_REUSEADDR: %w", err)
+						return
+					}
+					// Set SO_REUSEPORT - critical for multiple instances
+					if err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, unix.SO_REUSEPORT, 1); err != nil {
+						sockErr = fmt.Errorf("failed to set SO_REUSEPORT: %w", err)
+						return
+					}
+					// Optionally bind to specific interface
+					if bindToInterface && s.config.Interface != "" {
+						if err := syscall.SetsockoptString(int(fd), syscall.SOL_SOCKET, unix.SO_BINDTODEVICE, s.config.Interface); err != nil {
+							sockErr = fmt.Errorf("failed to bind to interface %s: %w", s.config.Interface, err)
+							return
+						}
+					}
+				})
+				if err != nil {
+					return err
+				}
+				return sockErr
+			},
+		}
+	}
+
 	// Setup discovery socket (port 1024)
-	s.discoverySock, err = net.ListenUDP("udp4", &net.UDPAddr{
-		IP:   net.ParseIP(s.config.IPAddress),
-		Port: PortDiscovery,
-	})
+	// If interface is specified, bind discovery socket to that interface
+	// This restricts discovery responses to only that interface's network
+	lc := createListenConfig(s.config.Interface != "")
+	lp, err := lc.ListenPacket(context.Background(), "udp4", "0.0.0.0:1024")
 	if err != nil {
 		return fmt.Errorf("failed to create discovery socket: %w", err)
 	}
-	s.setSocketOptions(s.discoverySock)
+	s.discoverySock = lp.(*net.UDPConn)
 
 	// Setup high priority socket (port 1027)
-	s.highPrioSock, err = net.ListenUDP("udp4", &net.UDPAddr{
-		IP:   net.ParseIP(s.config.IPAddress),
-		Port: PortHighPrio,
-	})
+	lc = createListenConfig(true)
+	lp, err = lc.ListenPacket(context.Background(), "udp4", fmt.Sprintf("%s:%d", s.config.IPAddress, PortHighPrio))
 	if err != nil {
 		return fmt.Errorf("failed to create high priority socket: %w", err)
 	}
-	s.setSocketOptions(s.highPrioSock)
+	s.highPrioSock = lp.(*net.UDPConn)
 
 	// Setup DDC specific socket (port 1025)
-	s.ddcSpecSock, err = net.ListenUDP("udp4", &net.UDPAddr{
-		IP:   net.ParseIP(s.config.IPAddress),
-		Port: PortDDCSpecific,
-	})
+	lc = createListenConfig(true)
+	lp, err = lc.ListenPacket(context.Background(), "udp4", fmt.Sprintf("%s:%d", s.config.IPAddress, PortDDCSpecific))
 	if err != nil {
 		return fmt.Errorf("failed to create DDC specific socket: %w", err)
 	}
-	s.setSocketOptions(s.ddcSpecSock)
+	s.ddcSpecSock = lp.(*net.UDPConn)
 
 	// Setup microphone socket (port 1026)
-	s.micSock, err = net.ListenUDP("udp4", &net.UDPAddr{
-		IP:   net.ParseIP(s.config.IPAddress),
-		Port: PortMic,
-	})
+	lc = createListenConfig(true)
+	lp, err = lc.ListenPacket(context.Background(), "udp4", fmt.Sprintf("%s:%d", s.config.IPAddress, PortMic))
 	if err != nil {
 		return fmt.Errorf("failed to create microphone socket: %w", err)
 	}
-	s.setSocketOptions(s.micSock)
+	s.micSock = lp.(*net.UDPConn)
 
 	// Setup receiver sockets (ports 1035-1042)
 	for i := 0; i < s.config.NumReceivers; i++ {
-		s.rxSocks[i], err = net.ListenUDP("udp4", &net.UDPAddr{
-			IP:   net.ParseIP(s.config.IPAddress),
-			Port: PortDDC0 + i,
-		})
+		lc = createListenConfig(true)
+		lp, err = lc.ListenPacket(context.Background(), "udp4", fmt.Sprintf("%s:%d", s.config.IPAddress, PortDDC0+i))
 		if err != nil {
 			return fmt.Errorf("failed to create receiver %d socket: %w", i, err)
 		}
-		s.setSocketOptions(s.rxSocks[i])
+		s.rxSocks[i] = lp.(*net.UDPConn)
 	}
 
 	// Start threads
@@ -257,17 +282,18 @@ func (s *Protocol2Server) Stop() {
 }
 
 // setSocketOptions sets SO_REUSEADDR and SO_REUSEPORT on a UDP socket
-func (s *Protocol2Server) setSocketOptions(conn *net.UDPConn) {
+// If bindToInterface is true, also sets SO_BINDTODEVICE
+func (s *Protocol2Server) setSocketOptions(conn *net.UDPConn, bindToInterface bool) error {
 	if conn == nil {
-		return
+		return nil
 	}
 
 	rawConn, err := conn.SyscallConn()
 	if err != nil {
-		log.Printf("Protocol2: Failed to get raw connection: %v", err)
-		return
+		return fmt.Errorf("failed to get raw connection: %w", err)
 	}
 
+	var bindErr error
 	rawConn.Control(func(fd uintptr) {
 		// Set SO_REUSEADDR
 		if err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
@@ -280,12 +306,15 @@ func (s *Protocol2Server) setSocketOptions(conn *net.UDPConn) {
 		}
 
 		// Optionally bind to specific interface (if configured)
-		if s.config.Interface != "" {
+		// Discovery socket should NOT be bound to interface to allow broadcast reception
+		if bindToInterface && s.config.Interface != "" {
 			if err := syscall.SetsockoptString(int(fd), syscall.SOL_SOCKET, unix.SO_BINDTODEVICE, s.config.Interface); err != nil {
-				log.Printf("Protocol2: Failed to bind to interface %s: %v", s.config.Interface, err)
+				bindErr = fmt.Errorf("failed to bind to interface %s: %w", s.config.Interface, err)
 			}
 		}
 	})
+
+	return bindErr
 }
 
 // convertFrequency converts a 32-bit frequency value to Hz
@@ -343,6 +372,7 @@ func (s *Protocol2Server) discoveryThread() {
 
 		// General packet: 60 bytes starting with 00 00 00 00 00
 		if n == 60 && buffer[4] == 0x00 {
+			log.Printf("Protocol2: General packet received from %s", addr)
 			s.clientAddr = addr
 			s.handleGeneralPacket(buffer[:n])
 			continue
@@ -395,7 +425,7 @@ func (s *Protocol2Server) handleGeneralPacket(buffer []byte) {
 
 	if !s.running {
 		s.running = true
-		log.Println("Protocol2: Radio started")
+		log.Printf("Protocol2: Radio started by client %s", s.clientAddr)
 
 		// Start receiver threads
 		for i := 0; i < s.config.NumReceivers; i++ {
@@ -467,7 +497,11 @@ func (s *Protocol2Server) highPriorityThread() {
 		s.mu.Lock()
 		if running != s.running {
 			s.running = running
-			log.Printf("Protocol2: Running = %v", running)
+			if running {
+				log.Printf("Protocol2: Running = true (client connected)")
+			} else {
+				log.Printf("Protocol2: Running = false (client disconnected)")
+			}
 			if !running {
 				// Reset all receivers
 				for i := 0; i < s.config.NumReceivers; i++ {
@@ -899,4 +933,11 @@ func (s *Protocol2Server) GetReceiverLastActivity(receiverNum int) (time.Time, e
 	defer rcv.mu.Unlock()
 
 	return rcv.lastActivity, nil
+}
+
+// GetClientAddr returns the current HPSDR client address
+func (s *Protocol2Server) GetClientAddr() *net.UDPAddr {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.clientAddr
 }

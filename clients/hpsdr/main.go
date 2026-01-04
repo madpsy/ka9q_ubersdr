@@ -230,12 +230,12 @@ func (b *UberSDRBridge) monitorReceivers() {
 		if wasProtocol2Running && !protocol2Running {
 			log.Println("DEBUG: monitorReceivers: Protocol2 server stopped, cleaning up all receivers")
 			// Protocol2 server stopped, clean up all receivers
+			// Clean up ALL receivers unconditionally - the cleanupReceiver() function
+			// safely handles cases where there's no active connection
 			for i := 0; i < b.hpsdrServer.config.NumReceivers; i++ {
-				if connectedReceivers[i] {
-					log.Printf("DEBUG: monitorReceivers: Cleaning up receiver %d due to server shutdown", i)
-					b.cleanupReceiver(i)
-					connectedReceivers[i] = false
-				}
+				log.Printf("DEBUG: monitorReceivers: Cleaning up receiver %d due to server shutdown", i)
+				b.cleanupReceiver(i)
+				connectedReceivers[i] = false
 			}
 		}
 
@@ -245,6 +245,13 @@ func (b *UberSDRBridge) monitorReceivers() {
 		// If Protocol2 is not running, skip receiver checks
 		if !protocol2Running {
 			continue
+		}
+
+		// Get client IP for logging
+		clientIP := b.hpsdrServer.GetClientAddr()
+		clientIPStr := "unknown"
+		if clientIP != nil {
+			clientIPStr = clientIP.String()
 		}
 
 		// Check all receivers
@@ -257,8 +264,8 @@ func (b *UberSDRBridge) monitorReceivers() {
 			if enabled && frequency > 0 && sampleRate > 0 {
 				// Validate frequency is within UberSDR range
 				if !isValidFrequency(frequency) {
-					log.Printf("Bridge: Receiver %d invalid frequency %d Hz (%.3f kHz) - must be between %d Hz (%.1f kHz) and %d Hz (%.1f MHz), skipping",
-						i, frequency, float64(frequency)/1000.0,
+					log.Printf("Bridge: [%s] Receiver %d invalid frequency %d Hz (%.3f kHz) - must be between %d Hz (%.1f kHz) and %d Hz (%.1f MHz), skipping",
+						clientIPStr, i, frequency, float64(frequency)/1000.0,
 						MinFrequencyHz, float64(MinFrequencyHz)/1000.0,
 						MaxFrequencyHz, float64(MaxFrequencyHz)/1000000.0)
 					continue
@@ -270,14 +277,14 @@ func (b *UberSDRBridge) monitorReceivers() {
 				// Receiver is active
 				if !connectedReceivers[i] {
 					log.Printf("DEBUG: monitorReceivers: Receiver %d state change - newly enabled", i)
-					log.Printf("Bridge: Receiver %d enabled: %d Hz, %d kHz", i, frequency, sampleRate)
+					log.Printf("Bridge: [%s] Receiver %d enabled: %d Hz, %d kHz", clientIPStr, i, frequency, sampleRate)
 					connectedReceivers[i] = true
 
 					// Check if frequency or mode changed from last failed attempt
 					// If so, clear the failed state to allow reconnection
 					b.mu.Lock()
 					if b.lastFailedFreq[i] != 0 && (b.lastFailedFreq[i] != frequency || b.lastFailedMode[i] != mode) {
-						log.Printf("Bridge: Receiver %d frequency/mode changed from last failed attempt, clearing failed state", i)
+						log.Printf("Bridge: [%s] Receiver %d frequency/mode changed from last failed attempt, clearing failed state", clientIPStr, i)
 						b.lastFailedFreq[i] = 0
 						b.lastFailedMode[i] = ""
 					}
@@ -303,12 +310,12 @@ func (b *UberSDRBridge) monitorReceivers() {
 
 					if frequencyChanged || modeChanged {
 						if frequencyChanged {
-							log.Printf("Bridge: Receiver %d frequency changed: %d Hz", i, frequency)
+							log.Printf("Bridge: [%s] Receiver %d frequency changed: %d Hz", clientIPStr, i, frequency)
 							b.receiverFreqs[i] = frequency
 						}
 						if modeChanged {
-							log.Printf("Bridge: Receiver %d sample rate changed: %d kHz (mode %s -> %s)",
-								i, sampleRate, b.receiverModes[i], mode)
+							log.Printf("Bridge: [%s] Receiver %d sample rate changed: %d kHz (mode %s -> %s)",
+								clientIPStr, i, sampleRate, b.receiverModes[i], mode)
 							b.receiverModes[i] = mode
 						}
 
@@ -319,7 +326,7 @@ func (b *UberSDRBridge) monitorReceivers() {
 			} else if connectedReceivers[i] {
 				// Receiver was disabled - clean up connection state
 				log.Printf("DEBUG: monitorReceivers: Receiver %d state change - disabled, cleaning up", i)
-				log.Printf("Bridge: Receiver %d disabled, cleaning up connection", i)
+				log.Printf("Bridge: [%s] Receiver %d disabled, cleaning up connection", clientIPStr, i)
 				connectedReceivers[i] = false
 				b.cleanupReceiver(i)
 			}
@@ -347,14 +354,20 @@ func (b *UberSDRBridge) cleanupReceiver(receiverNum int) {
 	b.mu.Unlock()
 	log.Printf("DEBUG: cleanupReceiver: Receiver %d released main lock", receiverNum)
 
-	// Clear sample buffer (do this AFTER releasing b.mu to avoid deadlock)
-	// The receiveAudio goroutine may be holding bufferMus while waiting on something
-	log.Printf("DEBUG: cleanupReceiver: Receiver %d attempting to acquire buffer lock", receiverNum)
-	b.bufferMus[receiverNum].Lock()
-	log.Printf("DEBUG: cleanupReceiver: Receiver %d clearing sample buffer", receiverNum)
-	b.sampleBuffers[receiverNum] = b.sampleBuffers[receiverNum][:0] // Clear buffer but keep capacity
-	b.bufferPrimed[receiverNum] = false                             // Reset buffer primed flag
-	b.bufferMus[receiverNum].Unlock()
+	// Don't try to acquire buffer lock here - this can cause deadlock
+	// The receiveAudio goroutine will exit when it sees the connection is closed,
+	// and it will naturally stop using the buffer. We'll clear the buffer state
+	// in a non-blocking way using TryLock.
+	log.Printf("DEBUG: cleanupReceiver: Receiver %d attempting to clear buffer (non-blocking)", receiverNum)
+	if b.bufferMus[receiverNum].TryLock() {
+		log.Printf("DEBUG: cleanupReceiver: Receiver %d clearing sample buffer", receiverNum)
+		b.sampleBuffers[receiverNum] = b.sampleBuffers[receiverNum][:0] // Clear buffer but keep capacity
+		b.bufferPrimed[receiverNum] = false                             // Reset buffer primed flag
+		b.bufferMus[receiverNum].Unlock()
+		log.Printf("DEBUG: cleanupReceiver: Receiver %d buffer cleared", receiverNum)
+	} else {
+		log.Printf("DEBUG: cleanupReceiver: Receiver %d buffer lock held by receiveAudio, will be cleared when goroutine exits", receiverNum)
+	}
 	log.Printf("DEBUG: cleanupReceiver: Receiver %d cleanup complete", receiverNum)
 }
 

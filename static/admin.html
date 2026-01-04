@@ -684,7 +684,10 @@
 
                 <!-- Monitor Tab -->
                 <div id="monitorTab" class="tab-content">
-                    <!-- SDR Frontend Status Section (always at top) -->
+                    <!-- System Health Warnings Section (always at top, before frontend status) -->
+                    <div id="systemHealthWarnings" style="display: none;"></div>
+
+                    <!-- SDR Frontend Status Section -->
                     <div id="frontendStatusSection" class="config-section" style="display: none;">
                         <h3>📡 SDR Frontend Status</h3>
                         <div id="frontendStatusDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
@@ -5084,12 +5087,8 @@
             container.innerHTML = '';
             container.classList.remove('loading');
 
-            // Display system load as the first section (only in non-detailed view)
-            if (!isDetailed && data.system_load) {
-                renderSystemLoadHealth(container, data.system_load);
-            }
-
-            // Add summary warning banner at the top if any system has issues
+            // Render warning banner in dedicated section at the top (only in non-detailed view)
+            const warningsContainer = document.getElementById('systemHealthWarnings');
             if (!isDetailed) {
                 const hasTunnelIssues = data.tunnel && (data.tunnel.error || !data.tunnel.tunnel_up);
                 const hasInstanceReporterIssues = data.instanceReporter && data.instanceReporter.enabled && !data.instanceReporter.healthy;
@@ -5097,7 +5096,7 @@
                 const hasSpaceWeatherIssues = data.spaceWeather && !data.spaceWeather.healthy;
                 const hasDecoderIssues = data.decoder && !data.decoder.healthy;
                 const hasCWSkimmerIssues = data.cwSkimmer && data.cwSkimmer.enabled && !data.cwSkimmer.healthy;
-                
+
                 if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasDecoderIssues || hasCWSkimmerIssues) {
                     const warningBanner = document.createElement('div');
                     warningBanner.style.padding = '20px';
@@ -5106,14 +5105,14 @@
                     warningBanner.style.borderRadius = '8px';
                     warningBanner.style.marginBottom = '20px';
                     warningBanner.style.boxShadow = '0 2px 8px rgba(255, 193, 7, 0.3)';
-                    
+
                     const warningTitle = document.createElement('h3');
                     warningTitle.style.margin = '0 0 15px 0';
                     warningTitle.style.color = '#856404';
                     warningTitle.style.fontSize = '20px';
                     warningTitle.innerHTML = '⚠️ System Health Warnings';
                     warningBanner.appendChild(warningTitle);
-                    
+
                     const issuesList = document.createElement('ul');
                     issuesList.style.margin = '0';
                     issuesList.style.paddingLeft = '20px';
@@ -5136,34 +5135,49 @@
                         li.innerHTML = '<strong>Instance Reporter:</strong> ' + (data.instanceReporter.issues && data.instanceReporter.issues.length > 0 ? data.instanceReporter.issues.join(', ') : 'System unhealthy');
                         issuesList.appendChild(li);
                     }
-                    
+
                     if (hasNoiseFloorIssues) {
                         const li = document.createElement('li');
                         li.innerHTML = '<strong>Noise Floor Monitor:</strong> ' + (data.noiseFloor.issues && data.noiseFloor.issues.length > 0 ? data.noiseFloor.issues.join(', ') : 'System unhealthy');
                         issuesList.appendChild(li);
                     }
-                    
+
                     if (hasSpaceWeatherIssues) {
                         const li = document.createElement('li');
                         li.innerHTML = '<strong>Space Weather Monitor:</strong> ' + (data.spaceWeather.issues && data.spaceWeather.issues.length > 0 ? data.spaceWeather.issues.join(', ') : 'System unhealthy');
                         issuesList.appendChild(li);
                     }
-                    
+
                     if (hasDecoderIssues) {
                         const li = document.createElement('li');
                         li.innerHTML = '<strong>Decoder Monitor:</strong> ' + (data.decoder.issues && data.decoder.issues.length > 0 ? data.decoder.issues.join(', ') : 'System unhealthy');
                         issuesList.appendChild(li);
                     }
-                    
+
                     if (hasCWSkimmerIssues) {
                         const li = document.createElement('li');
                         li.innerHTML = '<strong>CW Skimmer:</strong> ' + (data.cwSkimmer.issues && data.cwSkimmer.issues.length > 0 ? data.cwSkimmer.issues.join(', ') : 'System unhealthy');
                         issuesList.appendChild(li);
                     }
-                    
+
                     warningBanner.appendChild(issuesList);
-                    container.appendChild(warningBanner);
+                    warningsContainer.innerHTML = '';
+                    warningsContainer.appendChild(warningBanner);
+                    warningsContainer.style.display = 'block';
+                } else {
+                    // No issues, hide the warnings section
+                    warningsContainer.innerHTML = '';
+                    warningsContainer.style.display = 'none';
                 }
+            } else {
+                // In detailed view, hide warnings section
+                warningsContainer.innerHTML = '';
+                warningsContainer.style.display = 'none';
+            }
+
+            // Display system load as the first section in monitorHealth (only in non-detailed view)
+            if (!isDetailed && data.system_load) {
+                renderSystemLoadHealth(container, data.system_load);
             }
 
             if (isDetailed) {

@@ -552,6 +552,34 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 	return nil
 }
 
+// UpdateSpectrumSessionByUserID finds and updates the spectrum session for a given userSessionID
+// This is used by KiwiSDR protocol to sync waterfall with audio frequency
+// Returns true if a spectrum session was found and updated, false otherwise
+func (sm *SessionManager) UpdateSpectrumSessionByUserID(userSessionID string, frequency uint64, binBandwidth float64) bool {
+	if userSessionID == "" {
+		return false
+	}
+
+	sm.mu.RLock()
+	// Find the spectrum session for this userSessionID
+	var spectrumSessionID string
+	for _, session := range sm.sessions {
+		if session.UserSessionID == userSessionID && session.IsSpectrum {
+			spectrumSessionID = session.ID
+			break
+		}
+	}
+	sm.mu.RUnlock()
+
+	if spectrumSessionID == "" {
+		return false
+	}
+
+	// Update the spectrum session
+	err := sm.UpdateSpectrumSession(spectrumSessionID, frequency, binBandwidth, 0)
+	return err == nil
+}
+
 // UpdateSession updates an existing session's frequency, mode, and/or bandwidth
 // This reuses the existing channel instead of destroying and recreating it
 // Parameters with value 0 (for numbers) or "" (for strings) mean "don't change"

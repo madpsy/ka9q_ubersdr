@@ -239,6 +239,10 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiWebSocket(w http.ResponseWriter, r *
 	}()
 
 	// Create Kiwi connection handler
+	// Use timestamp + client IP as the userSessionID so SND and W/F connections from the same client are linked
+	// This ensures audio and waterfall sessions share the same UUID and appear as one user
+	userSessionID := fmt.Sprintf("kiwi-%s-%s", timestamp, clientIP)
+
 	kc := &kiwiConn{
 		conn:               conn,
 		connType:           connType,
@@ -249,6 +253,7 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiWebSocket(w http.ResponseWriter, r *
 		config:             kwsh.config,
 		rateLimiterManager: kwsh.rateLimiterManager,
 		radiod:             kwsh.radiod,
+		userSessionID:      userSessionID, // Set before handle() is called
 		sequence:           0,
 		compression:        true,
 		wfCompression:      true,
@@ -287,8 +292,8 @@ type kiwiConn struct {
 
 // handle processes the KiwiSDR connection
 func (kc *kiwiConn) handle() {
-	// Generate user session ID
-	kc.userSessionID = generateUUID()
+	// userSessionID is already set in HandleKiwiWebSocket using timestamp+IP
+	// This ensures SND and W/F connections from the same client share the same UUID
 
 	// Register User-Agent for this session (required by UberSDR)
 	kc.sessions.SetUserAgent(kc.userSessionID, "KiwiSDR Client")
@@ -443,6 +448,8 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 	}
 
 	// Handle zoom command (waterfall)
+	// This command is sent on the SND (audio) connection but needs to update the W/F (spectrum) session
+	// Both connections share the same userSessionID, so we use that to find the spectrum session
 	if zoomStr, hasZoom := params["zoom"]; hasZoom {
 		zoom, _ := strconv.Atoi(zoomStr)
 		var cfKHz float64
@@ -455,12 +462,17 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		fullSpanKHz := 30000.0
 		spanKHz := fullSpanKHz / math.Pow(2, float64(zoom))
 		binBandwidth := (spanKHz * 1000) / 1024 // Hz
+		freq := uint64(cfKHz * 1000)
 
-		if kc.session != nil && kc.session.IsSpectrum {
-			freq := uint64(cfKHz * 1000)
-			err := kc.sessions.UpdateSpectrumSession(kc.session.ID, freq, binBandwidth, 0)
-			if err != nil {
-				log.Printf("Failed to update KiwiSDR spectrum session: %v", err)
+		// Find and update the spectrum session for this userSessionID
+		// The zoom/cf command comes on the SND connection but applies to the W/F spectrum session
+		if kc.userSessionID != "" {
+			updated := kc.sessions.UpdateSpectrumSessionByUserID(kc.userSessionID, freq, binBandwidth)
+			if updated {
+				log.Printf("KiwiSDR: Updated spectrum session for user %s to freq=%d Hz, zoom=%d, span=%.1f kHz, binBW=%.1f Hz",
+					kc.userSessionID, freq, zoom, spanKHz, binBandwidth)
+			} else {
+				log.Printf("KiwiSDR: No spectrum session found for user %s (zoom command ignored)", kc.userSessionID)
 			}
 		}
 		return

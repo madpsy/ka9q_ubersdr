@@ -201,9 +201,9 @@ server:
   # Usage with kiwirecorder.py:
   #   python3 kiwirecorder.py -s your-host -p 8073 -f 14074 -m usb --tlimit 60
   #
-  enable_kiwisdr: false
+  enable_kiwisdr: true
   kiwisdr_listen: ":8073"
-  kiwisdr_smeter_offset: 30.0
+  kiwisdr_smeter_offset: 20.0
 
   # HTTP request log file (Apache combined log format)
   logfile: "web.log"

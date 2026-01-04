@@ -389,24 +389,7 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		}
 	}
 
-	// Only log important commands (auth, mod, zoom, compression, ident_user)
-	// Skip logging for: keepalive, GET_USERS, maxdb/mindb, agc, squelch, nb, nr, wf_comp, wf_speed, STATS_UPD
-	shouldLog := false
-	if _, hasAuth := params["auth"]; hasAuth {
-		shouldLog = true
-	} else if _, hasMod := params["mod"]; hasMod {
-		shouldLog = true
-	} else if _, hasZoom := params["zoom"]; hasZoom {
-		shouldLog = true
-	} else if _, hasComp := params["compression"]; hasComp {
-		shouldLog = true
-	} else if _, hasIdent := params["ident_user"]; hasIdent {
-		shouldLog = true
-	}
-
-	if shouldLog {
-		log.Printf("KiwiSDR SET command: %s (params: %v)", command, params)
-	}
+	// Don't log routine commands - only log errors and important events elsewhere
 
 	// Handle auth command
 	if _, hasAuth := params["auth"]; hasAuth {
@@ -414,7 +397,6 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			kc.mu.Lock()
 			kc.password = password
 			kc.mu.Unlock()
-			log.Printf("KiwiSDR password received (length: %d)", len(password))
 		}
 		return
 	}
@@ -447,7 +429,6 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			}
 			kc.session = session
 			kc.audioReceiver.GetChannelAudio(session)
-			log.Printf("KiwiSDR session created: %s", session.ID)
 		} else {
 			// Update existing session
 			if freq > 0 || mode != "" || (lowCut != 0 && highCut != 0) {
@@ -512,7 +493,6 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			kc.mu.Lock()
 			kc.audioInitSent = true
 			kc.mu.Unlock()
-			log.Printf("KiwiSDR: Sent audio_init message in response to AR command (in=%s)", inRate)
 			return
 		}
 	}
@@ -541,7 +521,6 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		if kc.userSessionID != "" {
 			kc.sessions.SetUserAgent(kc.userSessionID, identUser)
 		}
-		log.Printf("KiwiSDR: User identity set to '%s' for session %s", identUser, kc.userSessionID)
 		return
 	}
 

@@ -1623,6 +1623,16 @@ function tuneToChannel(frequency, mode, bandwidthLow, bandwidthHigh) {
     // Update URL
     updateURL();
 
+    // Disable edge detection temporarily when tuning to channel
+    if (window.spectrumDisplay) {
+        window.spectrumDisplay.skipEdgeDetection = true;
+        setTimeout(() => {
+            if (window.spectrumDisplay) {
+                window.spectrumDisplay.skipEdgeDetection = false;
+            }
+        }, 2000);
+    }
+
     // Tune to the new settings
     if (wsManager.isConnected()) {
         autoTune();

@@ -1202,7 +1202,7 @@ class RadioGUI:
 
         # Step size selector
         ttk.Label(freq_frame, text="Step:").grid(row=0, column=5, sticky=tk.W, padx=(10, 5))
-        self.step_size_var = tk.StringVar(value="1 kHz")
+        self.step_size_var = tk.StringVar(value="500 Hz")
         step_combo = ttk.Combobox(freq_frame, textvariable=self.step_size_var,
                                   values=["10 Hz", "100 Hz", "500 Hz", "1 kHz", "10 kHz"],
                                   state='readonly', width=8)
@@ -1718,7 +1718,7 @@ class RadioGUI:
                 self.users_btn = None
 
             # Scroll mode selector removed from here - now in waterfall window title section
-            self.scroll_mode_var = tk.StringVar(value="pan")
+            self.scroll_mode_var = tk.StringVar(value="zoom")
 
             controls_frame.columnconfigure(0, weight=1)
 

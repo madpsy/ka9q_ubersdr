@@ -780,7 +780,7 @@ def create_waterfall_window(parent_gui):
     # Scroll mode selector (between signal meter and title) - stacked vertically
     # Create frame for radio buttons to stack them vertically
     scroll_frame = tk.Frame(info_frame, bg='#000000')
-    scroll_frame.place(x=150, y=25, anchor=tk.W)
+    scroll_frame.place(x=120, y=25, anchor=tk.W)
 
     from tkinter import ttk
     # Create custom style for radio buttons with black background
@@ -801,23 +801,117 @@ def create_waterfall_window(parent_gui):
                                style='Black.TRadiobutton')
     pan_radio.pack(side=tk.TOP, anchor=tk.W)
 
-    # Title label (centered)
-    title_label = tk.Label(info_frame, text="RF Spectrum & Waterfall",
-                          bg='#000000', fg='white',
-                          font=('sans-serif', 12, 'bold'))
-    title_label.place(relx=0.5, y=15, anchor=tk.CENTER)
+    # Segmented frequency display (centered) - replaces title and bandwidth labels
+    freq_display_frame = tk.Frame(info_frame, bg='#000000')
+    freq_display_frame.place(relx=0.5, y=10, anchor=tk.N)
     
-    # Bandwidth info (centered below title)
-    bw_label = tk.Label(info_frame, text="",
-                       bg='#000000', fg='yellow',
-                       font=('monospace', 9))
-    bw_label.place(relx=0.5, y=35, anchor=tk.CENTER)
+    # Create 8 digit labels with separators (format: XX.XXX.XXX MHz)
+    freq_digit_labels = []
+    freq_digit_steps = [10000000, 1000000, 100000, 10000, 1000, 100, 10, 1]  # Step sizes in Hz
+    
+    # Create both rows together to ensure perfect alignment
+    # Row 1: Digits
+    digit_row = tk.Frame(freq_display_frame, bg='#000000')
+    digit_row.pack(side=tk.TOP)
+
+    for i in range(8):
+        # Create digit label in row 1
+        digit_label = tk.Label(digit_row, text="0", bg='#222222', fg='#00ff00',
+                              font=('monospace', 16, 'bold'),
+                              width=2, relief=tk.RAISED, bd=1,
+                              cursor='sb_v_double_arrow')
+        digit_label.pack(side=tk.LEFT, padx=1)
+        freq_digit_labels.append(digit_label)
+
+        # Store step size as attribute
+        digit_label.step_size = freq_digit_steps[i]
+        digit_label.digit_index = i
+
+        # Add decimal point separators AFTER digits at positions 1 and 4 (after 2nd and 5th digit)
+        if i == 1 or i == 4:
+            # Separator in digit row
+            sep_digit = tk.Label(digit_row, text=".", bg='#000000', fg='white',
+                                font=('monospace', 16, 'bold'))
+            sep_digit.pack(side=tk.LEFT)
+
+    # Add MHz label to digit row only
+    mhz_label = tk.Label(digit_row, text=" MHz", bg='#000000', fg='white',
+                        font=('monospace', 12, 'bold'))
+    mhz_label.pack(side=tk.LEFT, padx=5)
+    
+    # Function to update frequency display
+    def update_freq_display():
+        """Update all digit labels from current frequency."""
+        try:
+            freq_hz = parent_gui.get_frequency_hz()
+            # Format as 8 digits: XXYYYZZZZ where XX=MHz, YYY=kHz, ZZZ=Hz
+            # Example: 7074000 Hz = 07.074.000 MHz
+            freq_str = f"{freq_hz:08d}"  # Format as 8-digit Hz value with leading zeros
+            
+            # Update each digit label
+            for i, digit_label in enumerate(freq_digit_labels):
+                if i < len(freq_str):
+                    digit_label.config(text=freq_str[i])
+        except (ValueError, AttributeError):
+            pass
+    
+    # Function to change frequency by step
+    def change_frequency_by_step(step_hz, increment):
+        """Change frequency by specified step size."""
+        try:
+            current_freq = parent_gui.get_frequency_hz()
+            if increment:
+                new_freq = current_freq + step_hz
+            else:
+                new_freq = current_freq - step_hz
+            
+            # Clamp to valid range (100 kHz to 30 MHz)
+            new_freq = max(100000, min(30000000, new_freq))
+            
+            # Update frequency
+            parent_gui.on_spectrum_frequency_click(float(new_freq))
+            update_freq_display()
+        except (ValueError, AttributeError) as e:
+            print(f"Error changing frequency: {e}")
+    
+    # Bind mouse events to each digit
+    for digit_label in freq_digit_labels:
+        # Mouse wheel scroll (Linux)
+        digit_label.bind('<Button-4>', lambda e, lbl=digit_label: change_frequency_by_step(lbl.step_size, True))
+        digit_label.bind('<Button-5>', lambda e, lbl=digit_label: change_frequency_by_step(lbl.step_size, False))
+        
+        # Mouse wheel scroll (Windows/Mac)
+        digit_label.bind('<MouseWheel>', lambda e, lbl=digit_label: change_frequency_by_step(
+            lbl.step_size, e.delta > 0))
+        
+        # Click to increment/decrement (upper half = increment, lower half = decrement)
+        def on_digit_click(event, lbl=digit_label):
+            # Get click position relative to label
+            label_height = lbl.winfo_height()
+            click_y = event.y
+            increment = click_y < label_height / 2
+            change_frequency_by_step(lbl.step_size, increment)
+        
+        digit_label.bind('<Button-1>', lambda e, lbl=digit_label: on_digit_click(e, lbl))
+        
+        # Hover effect
+        def on_enter(e, lbl=digit_label):
+            lbl.config(bg='#333333')
+        
+        def on_leave(e, lbl=digit_label):
+            lbl.config(bg='#222222')
+        
+        digit_label.bind('<Enter>', lambda e, lbl=digit_label: on_enter(e, lbl))
+        digit_label.bind('<Leave>', lambda e, lbl=digit_label: on_leave(e, lbl))
+    
+    # Initial update
+    update_freq_display()
     
     # Click Tune checkbox (between title and peak freq, top)
     click_tune_var = tk.BooleanVar(value=True)
 
-    # Center Tune checkbox (below Click Tune) - disabled by default
-    center_tune_var = tk.BooleanVar(value=False)
+    # Center Tune checkbox (below Click Tune) - enabled by default
+    center_tune_var = tk.BooleanVar(value=True)
 
     # Create custom style for checkbox with black background
     style.configure('Black.TCheckbutton', background='#000000', foreground='white')
@@ -1003,13 +1097,8 @@ def create_waterfall_window(parent_gui):
                 except (ValueError, AttributeError):
                     signal_meter_label.config(text=f"{signal_meter_mode[0].upper()}: -- dB", fg='#666666')
             
-            # Update RF spectrum bandwidth info (total bandwidth being displayed)
-            if spectrum.total_bandwidth > 0:
-                bw_khz = spectrum.total_bandwidth / 1000
-                bw_text = f"RF Spectrum BW: {bw_khz:.1f} kHz"
-                bw_label.config(text=bw_text)
-            else:
-                bw_label.config(text="")
+            # Update frequency display
+            update_freq_display()
             
             # Find peak in spectrum data
             if spectrum.spectrum_data is not None and len(spectrum.spectrum_data) > 0:

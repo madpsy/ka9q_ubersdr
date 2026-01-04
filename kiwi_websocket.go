@@ -26,6 +26,7 @@ type KiwiWebSocketHandler struct {
 	rateLimiterManager *RateLimiterManager
 	connRateLimiter    *IPConnectionRateLimiter
 	prometheusMetrics  *PrometheusMetrics
+	radiod             *RadiodController
 }
 
 // NewKiwiWebSocketHandler creates a new KiwiSDR WebSocket handler
@@ -38,6 +39,7 @@ func NewKiwiWebSocketHandler(sessions *SessionManager, audioReceiver *AudioRecei
 		rateLimiterManager: rateLimiterManager,
 		connRateLimiter:    connRateLimiter,
 		prometheusMetrics:  prometheusMetrics,
+		radiod:             sessions.radiod, // Get radiod from sessions
 	}
 }
 
@@ -246,6 +248,7 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiWebSocket(w http.ResponseWriter, r *
 		audioReceiver:      kwsh.audioReceiver,
 		config:             kwsh.config,
 		rateLimiterManager: kwsh.rateLimiterManager,
+		radiod:             kwsh.radiod,
 		sequence:           0,
 		compression:        true,
 		wfCompression:      true,
@@ -268,6 +271,7 @@ type kiwiConn struct {
 	audioReceiver      *AudioReceiver
 	config             *Config
 	rateLimiterManager *RateLimiterManager
+	radiod             *RadiodController
 	session            *Session
 	userSessionID      string
 	identUser          string // User identity from SET ident_user command
@@ -733,8 +737,29 @@ func (kc *kiwiConn) streamAudio(done <-chan struct{}) {
 			packet := make([]byte, 7+len(encodedData))
 			packet[0] = flags
 			binary.LittleEndian.PutUint32(packet[1:5], kc.sequence)
-			// S-meter: dummy value -50 dBm → ((-50 + 127) * 10) = 770
-			binary.BigEndian.PutUint16(packet[5:7], 770)
+
+			// S-meter: Get actual baseband power from radiod channel status
+			// KiwiSDR S-meter encoding: smeter_value = (dBm + 127) * 10
+			// We have dBFS from radiod, convert to approximate dBm (assume 0 dBFS = -10 dBm)
+			smeterValue := uint16(770) // Default fallback value (-50 dBm)
+			if kc.session != nil && kc.radiod != nil {
+				// Get channel status from radiod
+				if channelStatus := kc.radiod.GetChannelStatus(kc.session.SSRC); channelStatus != nil {
+					// Convert dBFS to approximate dBm: dBm ≈ dBFS - 10
+					// This is a rough approximation; actual conversion depends on system calibration
+					dbm := channelStatus.BasebandPower - 10
+					// Clamp to reasonable range (-127 to 0 dBm)
+					if dbm < -127 {
+						dbm = -127
+					}
+					if dbm > 0 {
+						dbm = 0
+					}
+					// Encode: (dBm + 127) * 10
+					smeterValue = uint16((dbm + 127) * 10)
+				}
+			}
+			binary.BigEndian.PutUint16(packet[5:7], smeterValue)
 			copy(packet[7:], encodedData)
 
 			// Debug: Log first packet structure

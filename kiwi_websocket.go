@@ -457,6 +457,9 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			cfKHz, _ = strconv.ParseFloat(cfStr, 64)
 		}
 
+		log.Printf("KiwiSDR: Received zoom command - zoom=%d, cf=%.3f kHz, userSessionID=%s, connType=%s",
+			zoom, cfKHz, kc.userSessionID, kc.connType)
+
 		// Calculate bin_bandwidth from zoom level
 		// Full span = 30 MHz, zoom divides by 2^zoom, 1024 bins
 		fullSpanKHz := 30000.0
@@ -464,15 +467,17 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		binBandwidth := (spanKHz * 1000) / 1024 // Hz
 		freq := uint64(cfKHz * 1000)
 
+		log.Printf("KiwiSDR: Calculated spectrum params - freq=%d Hz (%.3f kHz), span=%.1f kHz, binBW=%.1f Hz",
+			freq, freq/1000.0, spanKHz, binBandwidth)
+
 		// Find and update the spectrum session for this userSessionID
 		// The zoom/cf command comes on the SND connection but applies to the W/F spectrum session
 		if kc.userSessionID != "" {
 			updated := kc.sessions.UpdateSpectrumSessionByUserID(kc.userSessionID, freq, binBandwidth)
 			if updated {
-				log.Printf("KiwiSDR: Updated spectrum session for user %s to freq=%d Hz, zoom=%d, span=%.1f kHz, binBW=%.1f Hz",
-					kc.userSessionID, freq, zoom, spanKHz, binBandwidth)
+				log.Printf("KiwiSDR: ✓ Successfully updated spectrum session for user %s", kc.userSessionID)
 			} else {
-				log.Printf("KiwiSDR: No spectrum session found for user %s (zoom command ignored)", kc.userSessionID)
+				log.Printf("KiwiSDR: ✗ No spectrum session found for user %s (zoom command ignored)", kc.userSessionID)
 			}
 		}
 		return

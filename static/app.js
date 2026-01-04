@@ -2776,23 +2776,28 @@ function setBand(bandName) {
             }
         }, 2000);
 
-        // Reset initial bandwidth before band zoom to ensure consistent behavior
-        // This prevents the zoom level from being calculated relative to a previous band
-        spectrumDisplay.initialBinBandwidth = null;
-
-        // Calculate bin bandwidth to show the full band width
-        // totalBandwidth = binBandwidth * binCount
-        // Assuming binCount is typically 2048, calculate binBandwidth
-        const binCount = spectrumDisplay.binCount || 2048;
-        const binBandwidth = bandWidth / binCount;
-
+        // Reset spectrum to default bin count first to ensure consistent zoom behavior
+        // This prevents bin count state from previous zooms affecting the current band zoom
         spectrumDisplay.ws.send(JSON.stringify({
-            type: 'zoom',
-            frequency: centerFreq,
-            binBandwidth: binBandwidth
+            type: 'reset'
         }));
 
-        log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)} ${mode.toUpperCase()} (zoomed to ${formatFrequency(centerFreq - bandWidth/2)} - ${formatFrequency(centerFreq + bandWidth/2)})`);
+        // Then zoom to band after a brief delay to let reset complete
+        setTimeout(() => {
+            if (spectrumDisplay && spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
+                // Use default bin count (2048) for consistent zoom calculations
+                const binCount = 2048;
+                const binBandwidth = bandWidth / binCount;
+
+                spectrumDisplay.ws.send(JSON.stringify({
+                    type: 'zoom',
+                    frequency: centerFreq,
+                    binBandwidth: binBandwidth
+                }));
+
+                log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)} ${mode.toUpperCase()} (zoomed to ${formatFrequency(centerFreq - bandWidth/2)} - ${formatFrequency(centerFreq + bandWidth/2)})`);
+            }
+        }, 100); // 100ms delay to allow reset to complete
     } else {
         log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)} ${mode.toUpperCase()}`);
     }

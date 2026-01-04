@@ -190,11 +190,20 @@ server:
   # kiwisdr_listen: Listen address for KiwiSDR server (default: ":8073")
   #   Format: ":port" (e.g., ":8073") or "address:port" (e.g., "0.0.0.0:8073")
   #
+  # kiwisdr_smeter_offset: Calibration offset for S-meter readings (dBFS to dBm conversion)
+  #   This value is added to the baseband power (in dBFS) to convert to approximate dBm
+  #   Adjust based on your system's calibration to get accurate S-meter readings
+  #   Typical values: 25-35 (default: 30)
+  #   Higher values = higher S-meter readings (more sensitive)
+  #   Lower values = lower S-meter readings (less sensitive)
+  #   Example: If -43 dBFS signals should show as S9 (-73 dBm), offset = -73 - (-43) = -30, so use 30
+  #
   # Usage with kiwirecorder.py:
   #   python3 kiwirecorder.py -s your-host -p 8073 -f 14074 -m usb --tlimit 60
   #
   enable_kiwisdr: false
   kiwisdr_listen: ":8073"
+  kiwisdr_smeter_offset: 30.0
 
   # HTTP request log file (Apache combined log format)
   logfile: "web.log"

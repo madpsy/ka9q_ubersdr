@@ -740,16 +740,14 @@ func (kc *kiwiConn) streamAudio(done <-chan struct{}) {
 
 			// S-meter: Get actual baseband power from radiod channel status
 			// KiwiSDR S-meter encoding: smeter_value = (dBm + 127) * 10
-			// We have dBFS from radiod, convert to approximate dBm
+			// We have dBFS from radiod, convert to approximate dBm using configured offset
 			smeterValue := uint16(770) // Default fallback value (-50 dBm)
 			if kc.session != nil && kc.radiod != nil {
 				// Get channel status from radiod
 				if channelStatus := kc.radiod.GetChannelStatus(kc.session.SSRC); channelStatus != nil {
-					// Convert dBFS to approximate dBm
-					// Typical strong signal: -20 dBFS → S9 (-73 dBm for HF)
-					// Calibration: dBm ≈ dBFS + 53 (maps -20 dBFS to -73 dBm for S9)
-					// Adjust this offset based on your system's actual calibration
-					dbm := channelStatus.BasebandPower + 53
+					// Convert dBFS to approximate dBm using configured calibration offset
+					// The offset is configured in config.yaml as kiwisdr_smeter_offset
+					dbm := channelStatus.BasebandPower + kc.config.Server.KiwiSDRSmeterOffset
 					// Clamp to reasonable range (-127 to 0 dBm)
 					if dbm < -127 {
 						dbm = -127

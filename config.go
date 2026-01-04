@@ -81,23 +81,24 @@ type RadiodConfig struct {
 
 // ServerConfig contains web server settings
 type ServerConfig struct {
-	Listen            string          `yaml:"listen"`
-	MaxSessions       int             `yaml:"max_sessions"`
-	MaxSessionsIP     int             `yaml:"max_sessions_ip"` // Maximum sessions per IP address (0 = unlimited)
-	SessionTimeout    int             `yaml:"session_timeout"`
-	MaxSessionTime    int             `yaml:"max_session_time"`    // Maximum time a session can exist in seconds (0 = unlimited)
-	MaxIdleTime       int             `yaml:"max_idle_time"`       // Maximum time a user can be idle in seconds (0 = unlimited)
-	CmdRateLimit      int             `yaml:"cmd_rate_limit"`      // Commands per second per UUID per channel (0 = unlimited)
-	ConnRateLimit     int             `yaml:"conn_rate_limit"`     // WebSocket connections per second per IP (0 = unlimited)
-	SessionsPerMinute int             `yaml:"sessions_per_minute"` // /connection endpoint requests per minute per IP (0 = unlimited)
-	TimeoutBypassIPs  []string        `yaml:"timeout_bypass_ips"`  // List of IPs/CIDRs that bypass idle and max session time limits
-	BypassPassword    string          `yaml:"bypass_password"`     // Password that grants bypass privileges (empty = disabled)
-	PublicIQModes     map[string]bool `yaml:"public_iq_modes"`     // IQ modes accessible without bypass authentication
-	EnableCORS        bool            `yaml:"enable_cors"`
-	EnableKiwiSDR     bool            `yaml:"enable_kiwisdr"` // Enable KiwiSDR protocol compatibility server (default: false)
-	KiwiSDRListen     string          `yaml:"kiwisdr_listen"` // KiwiSDR server listen address (e.g., ":8073", default: ":8073")
-	LogFile           string          `yaml:"logfile"`        // HTTP request log file path
-	timeoutBypassNets []*net.IPNet    // Parsed CIDR networks (internal use)
+	Listen              string          `yaml:"listen"`
+	MaxSessions         int             `yaml:"max_sessions"`
+	MaxSessionsIP       int             `yaml:"max_sessions_ip"` // Maximum sessions per IP address (0 = unlimited)
+	SessionTimeout      int             `yaml:"session_timeout"`
+	MaxSessionTime      int             `yaml:"max_session_time"`    // Maximum time a session can exist in seconds (0 = unlimited)
+	MaxIdleTime         int             `yaml:"max_idle_time"`       // Maximum time a user can be idle in seconds (0 = unlimited)
+	CmdRateLimit        int             `yaml:"cmd_rate_limit"`      // Commands per second per UUID per channel (0 = unlimited)
+	ConnRateLimit       int             `yaml:"conn_rate_limit"`     // WebSocket connections per second per IP (0 = unlimited)
+	SessionsPerMinute   int             `yaml:"sessions_per_minute"` // /connection endpoint requests per minute per IP (0 = unlimited)
+	TimeoutBypassIPs    []string        `yaml:"timeout_bypass_ips"`  // List of IPs/CIDRs that bypass idle and max session time limits
+	BypassPassword      string          `yaml:"bypass_password"`     // Password that grants bypass privileges (empty = disabled)
+	PublicIQModes       map[string]bool `yaml:"public_iq_modes"`     // IQ modes accessible without bypass authentication
+	EnableCORS          bool            `yaml:"enable_cors"`
+	EnableKiwiSDR       bool            `yaml:"enable_kiwisdr"`        // Enable KiwiSDR protocol compatibility server (default: false)
+	KiwiSDRListen       string          `yaml:"kiwisdr_listen"`        // KiwiSDR server listen address (e.g., ":8073", default: ":8073")
+	KiwiSDRSmeterOffset float32         `yaml:"kiwisdr_smeter_offset"` // S-meter calibration offset (dBFS to dBm, default: 30.0)
+	LogFile             string          `yaml:"logfile"`               // HTTP request log file path
+	timeoutBypassNets   []*net.IPNet    // Parsed CIDR networks (internal use)
 }
 
 // AudioConfig contains audio processing settings
@@ -320,6 +321,9 @@ func LoadConfig(filename string) (*Config, error) {
 	// KiwiSDR compatibility defaults
 	if config.Server.EnableKiwiSDR && config.Server.KiwiSDRListen == "" {
 		config.Server.KiwiSDRListen = ":8073" // Default port
+	}
+	if config.Server.EnableKiwiSDR && config.Server.KiwiSDRSmeterOffset == 0 {
+		config.Server.KiwiSDRSmeterOffset = 30.0 // Default S-meter calibration offset
 	}
 	if config.Audio.BufferSize == 0 {
 		config.Audio.BufferSize = 4096

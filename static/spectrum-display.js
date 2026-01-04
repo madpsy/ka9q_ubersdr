@@ -455,6 +455,9 @@ class SpectrumDisplay {
         // Flag to prevent auto-pan when frequency is changed by clicking waterfall
         this.skipNextPan = false;
 
+        // Flag to prevent edge detection when user manually changes frequency
+        this.skipEdgeDetection = false;
+
         // Auto-ranging
         this.actualMinDb = this.config.minDb;
         this.actualMaxDb = this.config.maxDb;

@@ -2776,6 +2776,10 @@ function setBand(bandName) {
             }
         }, 2000);
 
+        // Reset initial bandwidth before band zoom to ensure consistent behavior
+        // This prevents the zoom level from being calculated relative to a previous band
+        spectrumDisplay.initialBinBandwidth = null;
+
         // Calculate bin bandwidth to show the full band width
         // totalBandwidth = binBandwidth * binCount
         // Assuming binCount is typically 2048, calculate binBandwidth

@@ -4808,12 +4808,15 @@
 
                 // Format sample rate for display (MSPS = Mega Samples Per Second)
                 const sampleRateMSPS = data.input_samprate ? (data.input_samprate / 1e6).toFixed(2) + ' MSPS' : 'N/A';
+                // Calculate Nyquist frequency (max usable frequency = sample rate / 2)
+                const nyquistFreqMHz = data.input_samprate ? (data.input_samprate / 2 / 1e6).toFixed(1) : 'N/A';
 
                 frontendStatusDisplay.innerHTML = `
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
                         <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Sample Rate</div>
                             <div style="font-size: 20px; font-weight: bold; color: #667eea;">${sampleRateMSPS}</div>
+                            <div style="font-size: 11px; color: #999; margin-top: 3px;">(max ${nyquistFreqMHz} MHz)</div>
                         </div>
                         <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 12px; color: #666; margin-bottom: 5px;">RF Gain</div>
@@ -4835,6 +4838,7 @@
                         <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Stable For</div>
                             <div style="font-size: 20px; font-weight: bold; color: #667eea;">${data.time_since_overrange || 'N/A'}</div>
+                            <div style="font-size: 11px; color: #999; margin-top: 3px;">(since last overrange)</div>
                         </div>
                     </div>
                     <div style="margin-top: 10px; text-align: right; font-size: 11px; color: #999;">

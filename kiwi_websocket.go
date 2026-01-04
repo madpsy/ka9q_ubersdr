@@ -507,6 +507,29 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 	// Ignore other commands (agc, ident_user, etc.)
 }
 
+// KiwiUserInfo represents a user in KiwiSDR format for JSON marshaling
+type KiwiUserInfo struct {
+	Index           int     `json:"i"`
+	Name            string  `json:"n"`
+	Location        string  `json:"g"`
+	Frequency       int     `json:"f"`
+	Mode            string  `json:"m"`
+	Zoom            int     `json:"z"`
+	Waterfall       int     `json:"wf"`
+	FreqChange      int     `json:"fc"`
+	Time            string  `json:"t"`
+	InactivityTimer int     `json:"rt"`
+	RecordNum       int     `json:"rn"`
+	AckTime         string  `json:"rs"`
+	Extension       string  `json:"e"`
+	Antenna         string  `json:"a"`
+	Compression     float64 `json:"c"`
+	FreqOffset      float64 `json:"fo"`
+	ColorAnt        int     `json:"ca"`
+	NoiseCancel     int     `json:"nc"`
+	NoiseSubtract   int     `json:"ns"`
+}
+
 // sendUserList sends the list of active users in KiwiSDR format
 func (kc *kiwiConn) sendUserList() {
 	// Get all active sessions from the session manager
@@ -514,7 +537,7 @@ func (kc *kiwiConn) sendUserList() {
 
 	// Build user list in KiwiSDR format
 	// Group sessions by user_session_id to combine audio and spectrum sessions
-	userMap := make(map[string]map[string]interface{})
+	userMap := make(map[string]*KiwiUserInfo)
 	userIndex := 0
 
 	for _, sessionInfo := range allSessions {
@@ -533,78 +556,76 @@ func (kc *kiwiConn) sendUserList() {
 		// Check if we already have this user
 		if _, exists := userMap[userSessionID]; !exists {
 			// New user, create entry
-			userMap[userSessionID] = make(map[string]interface{})
-			userMap[userSessionID]["i"] = userIndex
+			user := &KiwiUserInfo{
+				Index:           userIndex,
+				Name:            "Unknown",
+				Location:        "Unknown",
+				Frequency:       0,
+				Mode:            "",
+				Zoom:            0,
+				Waterfall:       0,
+				FreqChange:      0,
+				Time:            "",
+				InactivityTimer: 0,
+				RecordNum:       0,
+				AckTime:         "",
+				Extension:       "Unknown",
+				Antenna:         "Unknown",
+				Compression:     0.0,
+				FreqOffset:      0.0,
+				ColorAnt:        0,
+				NoiseCancel:     0,
+				NoiseSubtract:   0,
+			}
 			userIndex++
 
 			// Get user agent if available
-			userAgent, _ := sessionInfo["user_agent"].(string)
-			if userAgent == "" {
-				userAgent = "Unknown"
+			if userAgent, ok := sessionInfo["user_agent"].(string); ok && userAgent != "" {
+				user.Name = userAgent
 			}
-			userMap[userSessionID]["n"] = userAgent
-
-			// Location - use "Unknown" as we don't track this
-			userMap[userSessionID]["g"] = "Unknown"
 
 			// Get creation time
-			createdAt, _ := sessionInfo["created_at"].(string)
-			if createdAt != "" {
+			if createdAt, ok := sessionInfo["created_at"].(string); ok && createdAt != "" {
 				if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 					// Calculate time connected in seconds
 					timeConnected := int(time.Since(t).Seconds())
-					userMap[userSessionID]["t"] = fmt.Sprintf("%ds", timeConnected)
+					user.Time = fmt.Sprintf("%ds", timeConnected)
 				}
 			}
 
 			// Extension - use mode or "Unknown"
-			mode, _ := sessionInfo["mode"].(string)
-			if mode == "" {
-				mode = "Unknown"
+			if mode, ok := sessionInfo["mode"].(string); ok && mode != "" {
+				user.Extension = mode
 			}
-			userMap[userSessionID]["e"] = mode
 
-			// Antenna - use "Unknown"
-			userMap[userSessionID]["a"] = "Unknown"
-
-			// Initialize other fields
-			userMap[userSessionID]["z"] = 0    // Zoom level
-			userMap[userSessionID]["wf"] = 0   // Waterfall
-			userMap[userSessionID]["fc"] = 0   // Frequency change count
-			userMap[userSessionID]["rt"] = 0   // Inactivity timer
-			userMap[userSessionID]["rn"] = 0   // Record number
-			userMap[userSessionID]["rs"] = ""  // Acknowledgment time
-			userMap[userSessionID]["c"] = 0.0  // Compression
-			userMap[userSessionID]["fo"] = 0.0 // Frequency offset
-			userMap[userSessionID]["ca"] = 0   // Color antenna
-			userMap[userSessionID]["nc"] = 0   // Noise cancel
-			userMap[userSessionID]["ns"] = 0   // Noise subtract
+			userMap[userSessionID] = user
 		}
 
 		// Update frequency and mode from this session
 		// Prefer audio sessions over spectrum sessions for frequency display
+		user := userMap[userSessionID]
 		isSpectrum, _ := sessionInfo["is_spectrum"].(bool)
 		if !isSpectrum {
 			// Audio session - use its frequency
 			if freq, ok := sessionInfo["frequency"].(uint64); ok {
-				userMap[userSessionID]["f"] = int(freq / 1000) // Convert to kHz
+				user.Frequency = int(freq / 1000) // Convert Hz to kHz
 			}
 			if mode, ok := sessionInfo["mode"].(string); ok {
-				userMap[userSessionID]["m"] = mode
+				user.Mode = mode
 			}
-		} else if _, hasFreq := userMap[userSessionID]["f"]; !hasFreq {
+		} else if user.Frequency == 0 {
 			// Spectrum session and no frequency set yet
 			if freq, ok := sessionInfo["frequency"].(uint64); ok {
-				userMap[userSessionID]["f"] = int(freq / 1000) // Convert to kHz
+				user.Frequency = int(freq / 1000) // Convert Hz to kHz
 			}
-			userMap[userSessionID]["m"] = "spectrum"
+			user.Mode = "spectrum"
 		}
 	}
 
 	// Convert map to array
-	users := make([]map[string]interface{}, 0, len(userMap))
+	users := make([]KiwiUserInfo, 0, len(userMap))
 	for _, user := range userMap {
-		users = append(users, user)
+		users = append(users, *user)
 	}
 
 	// Marshal to JSON

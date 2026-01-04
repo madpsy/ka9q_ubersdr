@@ -389,8 +389,22 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		}
 	}
 
-	// Only log commands with parameters or non-keepalive/GET_USERS commands
-	if len(params) > 0 || (!strings.Contains(command, "keepalive") && !strings.Contains(command, "GET_USERS")) {
+	// Only log important commands (auth, mod, zoom, compression, ident_user)
+	// Skip logging for: keepalive, GET_USERS, maxdb/mindb, agc, squelch, nb, nr, wf_comp, wf_speed, STATS_UPD
+	shouldLog := false
+	if _, hasAuth := params["auth"]; hasAuth {
+		shouldLog = true
+	} else if _, hasMod := params["mod"]; hasMod {
+		shouldLog = true
+	} else if _, hasZoom := params["zoom"]; hasZoom {
+		shouldLog = true
+	} else if _, hasComp := params["compression"]; hasComp {
+		shouldLog = true
+	} else if _, hasIdent := params["ident_user"]; hasIdent {
+		shouldLog = true
+	}
+
+	if shouldLog {
 		log.Printf("KiwiSDR SET command: %s (params: %v)", command, params)
 	}
 
@@ -457,9 +471,6 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			cfKHz, _ = strconv.ParseFloat(cfStr, 64)
 		}
 
-		log.Printf("KiwiSDR: Received zoom command - zoom=%d, cf=%.3f kHz, userSessionID=%s, connType=%s",
-			zoom, cfKHz, kc.userSessionID, kc.connType)
-
 		// Calculate bin_bandwidth from zoom level
 		// Full span = 30 MHz, zoom divides by 2^zoom, 1024 bins
 		fullSpanKHz := 30000.0
@@ -467,18 +478,10 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		binBandwidth := (spanKHz * 1000) / 1024 // Hz
 		freq := uint64(cfKHz * 1000)
 
-		log.Printf("KiwiSDR: Calculated spectrum params - freq=%d Hz (%.3f kHz), span=%.1f kHz, binBW=%.1f Hz",
-			freq, freq/1000.0, spanKHz, binBandwidth)
-
 		// Find and update the spectrum session for this userSessionID
 		// The zoom/cf command comes on the SND connection but applies to the W/F spectrum session
 		if kc.userSessionID != "" {
-			updated := kc.sessions.UpdateSpectrumSessionByUserID(kc.userSessionID, freq, binBandwidth)
-			if updated {
-				log.Printf("KiwiSDR: ✓ Successfully updated spectrum session for user %s", kc.userSessionID)
-			} else {
-				log.Printf("KiwiSDR: ✗ No spectrum session found for user %s (zoom command ignored)", kc.userSessionID)
-			}
+			kc.sessions.UpdateSpectrumSessionByUserID(kc.userSessionID, freq, binBandwidth)
 		}
 		return
 	}
@@ -721,18 +724,10 @@ func (kc *kiwiConn) streamAudio(done <-chan struct{}) {
 			}
 
 			packetCount++
-			if packetCount%1000 == 0 {
-				log.Printf("KiwiSDR: Streamed %d audio packets", packetCount)
-			}
 
 			// PCMData is already []byte (big-endian int16)
 			// This is what KiwiSDR expects for uncompressed audio
 			pcmData := audioPacket.PCMData
-
-			// Debug: Log first packet details
-			if packetCount == 1 {
-				log.Printf("KiwiSDR: First audio packet - size=%d bytes, first 10 bytes: %v", len(pcmData), pcmData[:min(10, len(pcmData))])
-			}
 
 			var encodedData []byte
 			var flags byte
@@ -778,12 +773,6 @@ func (kc *kiwiConn) streamAudio(done <-chan struct{}) {
 			}
 			binary.BigEndian.PutUint16(packet[5:7], smeterValue)
 			copy(packet[7:], encodedData)
-
-			// Debug: Log first packet structure
-			if packetCount == 1 {
-				log.Printf("KiwiSDR: First SND packet - total=%d bytes, flags=0x%02x, seq=%d, smeter=%d, audio=%d bytes",
-					len(packet)+3, flags, kc.sequence, 770, len(encodedData))
-			}
 
 			// Send with "SND" tag
 			fullPacket := append([]byte("SND"), packet...)
@@ -837,9 +826,6 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			}
 
 			packetCount++
-			if packetCount%100 == 0 {
-				log.Printf("KiwiSDR: Streamed %d waterfall packets", packetCount)
-			}
 
 			// Unwrap FFT data for KiwiSDR
 			// Radiod sends wrapped FFT: [DC...+Nyquist, -Nyquist...-DC]

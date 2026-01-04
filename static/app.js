@@ -2774,7 +2774,7 @@ function setBand(bandName) {
             if (spectrumDisplay) {
                 spectrumDisplay.skipEdgeDetection = false;
             }
-        }, 1000);
+        }, 2000);
 
         // Calculate bin bandwidth to show the full band width
         // totalBandwidth = binBandwidth * binCount
@@ -7487,7 +7487,7 @@ window.handleFrequencyChange = function() {
             if (window.spectrumDisplay) {
                 window.spectrumDisplay.skipEdgeDetection = false;
             }
-        }, 2000); // 2 seconds should be enough for spectrum to update
+        }, 2000);
     }
 
     // Call the original function (it will read freqInput.value as Hz)

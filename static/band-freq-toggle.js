@@ -122,7 +122,7 @@ function changeFrequencyByStep(step, increment) {
             if (window.spectrumDisplay) {
                 window.spectrumDisplay.skipEdgeDetection = false;
             }
-        }, 500);
+        }, 2000);
     }
 
     // Use the global setFrequencyInputValue function to properly update the input

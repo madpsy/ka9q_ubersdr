@@ -371,7 +371,7 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
                 if (spectrumDisplay) {
                     spectrumDisplay.skipEdgeDetection = false;
                 }
-            }, 1000);
+            }, 2000);
 
             spectrumDisplay.ws.send(JSON.stringify({
                 type: 'pan',

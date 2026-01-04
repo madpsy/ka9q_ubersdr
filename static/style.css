@@ -2489,8 +2489,8 @@ input[type="range"]::-moz-range-thumb {
 }
 
 #signal-meter-value {
-    min-width: 120px;
-    text-align: center;
+    min-width: 95px;
+    text-align: left;
     transition: color 0.3s ease-out;
     font-family: 'Courier New', monospace;
     display: inline-block;

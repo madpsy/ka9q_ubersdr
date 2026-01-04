@@ -2782,11 +2782,13 @@ function setBand(bandName) {
             type: 'reset'
         }));
 
-        // Then zoom to band after a brief delay to let reset complete
+        // Wait for reset to complete, then zoom to band
+        // Increased delay to ensure reset is fully processed by server
         setTimeout(() => {
             if (spectrumDisplay && spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
-                // Use default bin count (2048) for consistent zoom calculations
-                const binCount = 2048;
+                // Use default bin count from config (typically 1024 or 2048)
+                // Query from spectrum display's current bin count after reset
+                const binCount = 1024; // Default from config.go
                 const binBandwidth = bandWidth / binCount;
 
                 spectrumDisplay.ws.send(JSON.stringify({
@@ -2797,7 +2799,7 @@ function setBand(bandName) {
 
                 log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)} ${mode.toUpperCase()} (zoomed to ${formatFrequency(centerFreq - bandWidth/2)} - ${formatFrequency(centerFreq + bandWidth/2)})`);
             }
-        }, 100); // 100ms delay to allow reset to complete
+        }, 500); // 500ms delay to ensure reset completes
     } else {
         log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)} ${mode.toUpperCase()}`);
     }

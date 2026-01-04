@@ -841,11 +841,23 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 				log.Printf("KiwiSDR: Streamed %d waterfall packets", packetCount)
 			}
 
-			// Convert spectrum data (float32 dBm) to KiwiSDR waterfall format
+			// Unwrap FFT data for KiwiSDR
+			// Radiod sends wrapped FFT: [DC...+Nyquist, -Nyquist...-DC]
+			// KiwiSDR expects unwrapped: [-Nyquist...DC...+Nyquist]
+			N := len(spectrumData)
+			halfBins := N / 2
+			unwrapped := make([]float32, N)
+
+			// Copy second half (negative frequencies) to start
+			copy(unwrapped[0:halfBins], spectrumData[halfBins:N])
+			// Copy first half (positive frequencies) to end
+			copy(unwrapped[halfBins:N], spectrumData[0:halfBins])
+
+			// Convert unwrapped spectrum data (float32 dBm) to KiwiSDR waterfall format
 			// KiwiSDR expects 8-bit values: 0-255 representing -200 to 0 dBm
 			// Formula: byte_value = (dBm + 200) * 255 / 200
-			wfData := make([]byte, len(spectrumData))
-			for i, dbValue := range spectrumData {
+			wfData := make([]byte, N)
+			for i, dbValue := range unwrapped {
 				// Clamp to -200..0 dBm range
 				clampedDb := dbValue
 				if clampedDb < -200 {

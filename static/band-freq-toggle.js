@@ -100,8 +100,23 @@ function setupFrequencyDigitInteraction() {
  * @param {boolean} increment - True to increment, false to decrement
  */
 function changeFrequencyByStep(step, increment) {
+    // Disable edge detection FIRST, before any frequency changes
+    if (window.spectrumDisplay) {
+        window.spectrumDisplay.skipEdgeDetection = true;
+    }
+
     const freqInput = document.getElementById('frequency');
-    if (!freqInput) return;
+    if (!freqInput) {
+        // Re-enable edge detection if we exit early
+        if (window.spectrumDisplay) {
+            setTimeout(() => {
+                if (window.spectrumDisplay) {
+                    window.spectrumDisplay.skipEdgeDetection = false;
+                }
+            }, 2000);
+        }
+        return;
+    }
 
     // Get current frequency from data-hz-value attribute
     let currentFreq = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) || 0;
@@ -114,16 +129,6 @@ function changeFrequencyByStep(step, increment) {
 
     // Clamp frequency to reasonable bounds (0.1 MHz to 30 MHz for HF)
     currentFreq = Math.max(100000, Math.min(30000000, currentFreq));
-
-    // Disable edge detection temporarily when user manually changes frequency
-    if (window.spectrumDisplay) {
-        window.spectrumDisplay.skipEdgeDetection = true;
-        setTimeout(() => {
-            if (window.spectrumDisplay) {
-                window.spectrumDisplay.skipEdgeDetection = false;
-            }
-        }, 2000);
-    }
 
     // Use the global setFrequencyInputValue function to properly update the input
     if (typeof window.setFrequencyInputValue === 'function') {
@@ -156,6 +161,13 @@ function changeFrequencyByStep(step, increment) {
     if (typeof window.autoTune === 'function') {
         window.autoTune();
     }
+
+    // Re-enable edge detection after a delay to allow spectrum to update
+    setTimeout(() => {
+        if (window.spectrumDisplay) {
+            window.spectrumDisplay.skipEdgeDetection = false;
+        }
+    }, 2000);
 }
 
 /**

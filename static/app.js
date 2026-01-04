@@ -6921,11 +6921,14 @@ function selectBandFromDropdown(value) {
             autoTune();
         }
 
-        // Zoom spectrum to show band with focused view (0.6x band width)
+        // Zoom spectrum to show entire band (same as band buttons)
         if (spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
-            const focusedBandwidth = bandWidth * 0.6;
-            const binCount = spectrumDisplay.binCount || 2048;
-            const binBandwidth = focusedBandwidth / binCount;
+            // Use a minimum bandwidth to prevent excessive zoom on narrow bands
+            const minBandWidth = 100000; // 100 kHz minimum (same as band buttons)
+            const effectiveBandWidth = Math.max(bandWidth, minBandWidth);
+            // Use default bin count (1024) instead of current state to ensure consistent zoom
+            const binCount = 1024; // Default from config.go
+            const binBandwidth = effectiveBandWidth / binCount;
 
             spectrumDisplay.ws.send(JSON.stringify({
                 type: 'zoom',
@@ -6933,7 +6936,7 @@ function selectBandFromDropdown(value) {
                 binBandwidth: binBandwidth
             }));
 
-            log(`Tuned to ${bandData.label}: ${formatFrequency(centerFreq)} ${mode.toUpperCase()} (zoomed to ${formatFrequency(centerFreq - focusedBandwidth/2)} - ${formatFrequency(centerFreq + focusedBandwidth/2)})`);
+            log(`Tuned to ${bandData.label}: ${formatFrequency(centerFreq)} ${mode.toUpperCase()} (zoomed to ${formatFrequency(centerFreq - effectiveBandWidth/2)} - ${formatFrequency(centerFreq + effectiveBandWidth/2)})`);
         } else {
             log(`Tuned to ${bandData.label}: ${formatFrequency(centerFreq)} ${mode.toUpperCase()}`);
         }

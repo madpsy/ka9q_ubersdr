@@ -2776,30 +2776,21 @@ function setBand(bandName) {
             }
         }, 2000);
 
-        // Reset spectrum to default bin count first to ensure consistent zoom behavior
-        // This prevents bin count state from previous zooms affecting the current band zoom
+        // Calculate bin bandwidth to show the full band width
+        // Use a minimum bandwidth to prevent excessive zoom on narrow bands like 30m
+        const minBandWidth = 100000; // 100 kHz minimum
+        const effectiveBandWidth = Math.max(bandWidth, minBandWidth);
+        // Use default bin count (1024) instead of current state to ensure consistent zoom
+        const binCount = 1024; // Default from config.go
+        const binBandwidth = effectiveBandWidth / binCount;
+
         spectrumDisplay.ws.send(JSON.stringify({
-            type: 'reset'
+            type: 'zoom',
+            frequency: centerFreq,
+            binBandwidth: binBandwidth
         }));
 
-        // Wait for reset to complete, then zoom to band
-        // Increased delay to ensure reset is fully processed by server
-        setTimeout(() => {
-            if (spectrumDisplay && spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
-                // Use default bin count from config (typically 1024 or 2048)
-                // Query from spectrum display's current bin count after reset
-                const binCount = 1024; // Default from config.go
-                const binBandwidth = bandWidth / binCount;
-
-                spectrumDisplay.ws.send(JSON.stringify({
-                    type: 'zoom',
-                    frequency: centerFreq,
-                    binBandwidth: binBandwidth
-                }));
-
-                log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)} ${mode.toUpperCase()} (zoomed to ${formatFrequency(centerFreq - bandWidth/2)} - ${formatFrequency(centerFreq + bandWidth/2)})`);
-            }
-        }, 500); // 500ms delay to ensure reset completes
+        log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)} ${mode.toUpperCase()} (zoomed to ${formatFrequency(centerFreq - effectiveBandWidth/2)} - ${formatFrequency(centerFreq + effectiveBandWidth/2)})`);
     } else {
         log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)} ${mode.toUpperCase()}`);
     }

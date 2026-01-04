@@ -1197,12 +1197,19 @@ class SpectrumDisplay {
                 }
 
                 // Store initial bin bandwidth on first config (for zoom level calculation)
-                if (!this.initialBinBandwidth) {
+                // Don't update if it was explicitly set to null (e.g., by band button clicks)
+                if (this.initialBinBandwidth === undefined) {
                     this.initialBinBandwidth = this.binBandwidth;
                 }
 
                 // Update zoom level: how much we've zoomed from initial
-                this.zoomLevel = this.initialBinBandwidth / this.binBandwidth;
+                // Use current binBandwidth as reference if initialBinBandwidth was reset
+                if (this.initialBinBandwidth === null) {
+                    this.initialBinBandwidth = this.binBandwidth;
+                    this.zoomLevel = 1.0;
+                } else {
+                    this.zoomLevel = this.initialBinBandwidth / this.binBandwidth;
+                }
 
                 // Only log config changes if they're significant (not from periodic sync)
                 // Log if this is the first config OR if values actually changed

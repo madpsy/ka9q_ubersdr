@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
@@ -497,7 +498,124 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		return
 	}
 
+	// Handle GET_USERS command
+	if strings.Contains(command, "GET_USERS") {
+		kc.sendUserList()
+		return
+	}
+
 	// Ignore other commands (agc, ident_user, etc.)
+}
+
+// sendUserList sends the list of active users in KiwiSDR format
+func (kc *kiwiConn) sendUserList() {
+	// Get all active sessions from the session manager
+	allSessions := kc.sessions.GetAllSessionsInfo()
+
+	// Build user list in KiwiSDR format
+	// Group sessions by user_session_id to combine audio and spectrum sessions
+	userMap := make(map[string]map[string]interface{})
+	userIndex := 0
+
+	for _, sessionInfo := range allSessions {
+		// Skip internal sessions (no client IP)
+		clientIP, _ := sessionInfo["client_ip"].(string)
+		if clientIP == "" {
+			continue
+		}
+
+		userSessionID, _ := sessionInfo["user_session_id"].(string)
+		if userSessionID == "" {
+			// No UUID, create a unique entry for this session
+			userSessionID = fmt.Sprintf("anonymous-%s", sessionInfo["id"])
+		}
+
+		// Check if we already have this user
+		if _, exists := userMap[userSessionID]; !exists {
+			// New user, create entry
+			userMap[userSessionID] = make(map[string]interface{})
+			userMap[userSessionID]["i"] = userIndex
+			userIndex++
+
+			// Get user agent if available
+			userAgent, _ := sessionInfo["user_agent"].(string)
+			if userAgent == "" {
+				userAgent = "Unknown"
+			}
+			userMap[userSessionID]["n"] = userAgent
+
+			// Location - use "Unknown" as we don't track this
+			userMap[userSessionID]["g"] = "Unknown"
+
+			// Get creation time
+			createdAt, _ := sessionInfo["created_at"].(string)
+			if createdAt != "" {
+				if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+					// Calculate time connected in seconds
+					timeConnected := int(time.Since(t).Seconds())
+					userMap[userSessionID]["t"] = fmt.Sprintf("%ds", timeConnected)
+				}
+			}
+
+			// Extension - use mode or "Unknown"
+			mode, _ := sessionInfo["mode"].(string)
+			if mode == "" {
+				mode = "Unknown"
+			}
+			userMap[userSessionID]["e"] = mode
+
+			// Antenna - use "Unknown"
+			userMap[userSessionID]["a"] = "Unknown"
+
+			// Initialize other fields
+			userMap[userSessionID]["z"] = 0    // Zoom level
+			userMap[userSessionID]["wf"] = 0   // Waterfall
+			userMap[userSessionID]["fc"] = 0   // Frequency change count
+			userMap[userSessionID]["rt"] = 0   // Inactivity timer
+			userMap[userSessionID]["rn"] = 0   // Record number
+			userMap[userSessionID]["rs"] = ""  // Acknowledgment time
+			userMap[userSessionID]["c"] = 0.0  // Compression
+			userMap[userSessionID]["fo"] = 0.0 // Frequency offset
+			userMap[userSessionID]["ca"] = 0   // Color antenna
+			userMap[userSessionID]["nc"] = 0   // Noise cancel
+			userMap[userSessionID]["ns"] = 0   // Noise subtract
+		}
+
+		// Update frequency and mode from this session
+		// Prefer audio sessions over spectrum sessions for frequency display
+		isSpectrum, _ := sessionInfo["is_spectrum"].(bool)
+		if !isSpectrum {
+			// Audio session - use its frequency
+			if freq, ok := sessionInfo["frequency"].(uint64); ok {
+				userMap[userSessionID]["f"] = int(freq / 1000) // Convert to kHz
+			}
+			if mode, ok := sessionInfo["mode"].(string); ok {
+				userMap[userSessionID]["m"] = mode
+			}
+		} else if _, hasFreq := userMap[userSessionID]["f"]; !hasFreq {
+			// Spectrum session and no frequency set yet
+			if freq, ok := sessionInfo["frequency"].(uint64); ok {
+				userMap[userSessionID]["f"] = int(freq / 1000) // Convert to kHz
+			}
+			userMap[userSessionID]["m"] = "spectrum"
+		}
+	}
+
+	// Convert map to array
+	users := make([]map[string]interface{}, 0, len(userMap))
+	for _, user := range userMap {
+		users = append(users, user)
+	}
+
+	// Marshal to JSON
+	jsonData, err := json.Marshal(users)
+	if err != nil {
+		log.Printf("Error marshaling user list: %v", err)
+		return
+	}
+
+	// Send as MSG user_cb=<json>
+	kc.sendMsg("user_cb", string(jsonData))
 }
 
 // streamAudio streams audio in KiwiSDR SND format

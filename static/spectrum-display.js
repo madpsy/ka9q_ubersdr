@@ -3237,6 +3237,14 @@ class SpectrumDisplay {
         this.canvas.addEventListener('mouseup', (e) => {
             if (!this.spectrumData) return;
 
+            // Skip if bandwidth drag is active or just finished
+            if (this.bandwidthDragState && (this.bandwidthDragState.isDragging || this.bandwidthDragState.wasDragging)) {
+                if (this.bandwidthDragState.wasDragging) {
+                    this.bandwidthDragState.wasDragging = false;
+                }
+                return;
+            }
+
             // Ignore right-clicks (button 2) - they're handled by contextmenu event
             if (e.button === 2) {
                 this.isDragging = false;

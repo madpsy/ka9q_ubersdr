@@ -270,6 +270,7 @@ type kiwiConn struct {
 	rateLimiterManager *RateLimiterManager
 	session            *Session
 	userSessionID      string
+	identUser          string // User identity from SET ident_user command
 	sequence           uint32
 	compression        bool
 	wfCompression      bool // Waterfall compression (separate from audio)
@@ -507,7 +508,20 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		return
 	}
 
-	// Ignore other commands (agc, ident_user, etc.)
+	// Handle ident_user command
+	if identUser, hasIdent := params["ident_user"]; hasIdent {
+		kc.mu.Lock()
+		kc.identUser = identUser
+		kc.mu.Unlock()
+		// Also update the User-Agent for this session to use the ident_user
+		if kc.userSessionID != "" {
+			kc.sessions.SetUserAgent(kc.userSessionID, identUser)
+		}
+		log.Printf("KiwiSDR: User identity set to '%s' for session %s", identUser, kc.userSessionID)
+		return
+	}
+
+	// Ignore other commands (agc, etc.)
 }
 
 // KiwiUserInfo represents a user in KiwiSDR format for JSON marshaling

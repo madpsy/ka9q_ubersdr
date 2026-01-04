@@ -150,7 +150,8 @@ class SignalMeter {
             displayValue = snr;
             // Pad single-digit values with a space to prevent layout shift
             const snrText = snr.toFixed(1);
-            const paddedSnrText = snrText.length < 4 ? ' ' + snrText : snrText;
+            // Check if the value is single digit (before decimal point)
+            const paddedSnrText = (Math.abs(snr) < 10) ? ' ' + snrText : snrText;
             displayText = `${paddedSnrText} dB (SNR)`;
         } else {
             displayText = `${avgPeakDb.toFixed(1)} dBFS`;

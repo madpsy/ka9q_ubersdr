@@ -74,9 +74,10 @@ type FrequencyRange struct {
 
 // RoutingConfig holds the frequency routing configuration
 type RoutingConfig struct {
-	DefaultURL      string           `yaml:"default_url"`
-	DefaultPassword string           `yaml:"default_password"`
-	FrequencyRanges []FrequencyRange `yaml:"frequency_ranges"`
+	DefaultURL      string              `yaml:"default_url"`
+	DefaultPassword string              `yaml:"default_password"`
+	FrequencyRanges []FrequencyRange    `yaml:"frequency_ranges"`
+	SmartRouting    *SmartRoutingConfig `yaml:"smart_routing,omitempty"` // Optional smart routing
 }
 
 // WebSocketMessage represents incoming WebSocket messages from ubersdr
@@ -113,6 +114,8 @@ type UberSDRBridge struct {
 	// Receiver mapping (HPSDR receiver -> ubersdr frequency/mode)
 	receiverFreqs  [MaxReceivers]int64
 	receiverModes  [MaxReceivers]string
+	receiverURLs   [MaxReceivers]string // Track which URL each receiver is connected to
+	lastFailedURL  [MaxReceivers]string // Track last failed connection URL
 	lastFailedFreq [MaxReceivers]int64  // Track last failed connection frequency
 	lastFailedMode [MaxReceivers]string // Track last failed connection mode
 
@@ -304,6 +307,7 @@ func (b *UberSDRBridge) monitorReceivers() {
 					b.mu.Lock()
 					if b.lastFailedFreq[i] != 0 && (b.lastFailedFreq[i] != frequency || b.lastFailedMode[i] != mode) {
 						log.Printf("Bridge: [%s] Receiver %d frequency/mode changed from last failed attempt, clearing failed state", clientIPStr, i)
+						b.lastFailedURL[i] = ""
 						b.lastFailedFreq[i] = 0
 						b.lastFailedMode[i] = ""
 					}
@@ -328,6 +332,32 @@ func (b *UberSDRBridge) monitorReceivers() {
 					modeChanged := mode != b.receiverModes[i]
 
 					if frequencyChanged || modeChanged {
+						// Check if frequency change requires switching to a different UberSDR instance
+						if frequencyChanged && b.routingConfig != nil {
+							oldURL, _ := b.getURLForFrequency(b.receiverFreqs[i], false, "") // Don't reserve, just query
+							newURL, _ := b.getURLForFrequency(frequency, false, "")          // Don't reserve, just query
+
+							if oldURL != newURL {
+								// Frequency moved to different instance - reconnect
+								log.Printf("Bridge: [%s] Receiver %d frequency changed to different instance (%d Hz -> %d Hz)",
+									clientIPStr, i, b.receiverFreqs[i], frequency)
+								log.Printf("Bridge: [%s] Receiver %d switching from %s to %s",
+									clientIPStr, i, oldURL, newURL)
+
+								// Update tracking
+								b.receiverFreqs[i] = frequency
+								b.receiverModes[i] = mode
+
+								// Close old connection and reconnect to new instance
+								b.cleanupReceiver(i)
+								connectedReceivers[i] = false
+
+								// Reconnection will happen on next monitor loop iteration
+								continue
+							}
+						}
+
+						// Same instance - just tune
 						if frequencyChanged {
 							log.Printf("Bridge: [%s] Receiver %d frequency changed: %d Hz", clientIPStr, i, frequency)
 							b.receiverFreqs[i] = frequency
@@ -355,6 +385,16 @@ func (b *UberSDRBridge) monitorReceivers() {
 
 // cleanupReceiver closes WebSocket connection and clears state for a receiver
 func (b *UberSDRBridge) cleanupReceiver(receiverNum int) {
+	// Get the URL that this receiver was connected to
+	b.mu.Lock()
+	instanceURL := b.receiverURLs[receiverNum]
+	b.mu.Unlock()
+
+	// Release instance usage for smart routing
+	if instanceURL != "" && b.routingConfig != nil && b.routingConfig.SmartRouting != nil && b.routingConfig.SmartRouting.Enabled {
+		b.routingConfig.SmartRouting.ReleaseInstance(instanceURL)
+	}
+
 	// Close WebSocket connection
 	b.mu.Lock()
 	log.Printf("DEBUG: cleanupReceiver: Receiver %d acquired lock for cleanup", receiverNum)
@@ -365,11 +405,13 @@ func (b *UberSDRBridge) cleanupReceiver(receiverNum int) {
 		log.Printf("DEBUG: cleanupReceiver: Receiver %d WebSocket connection closed", receiverNum)
 	}
 
-	// Clear lastFailedFreq/Mode when receiver is disabled
+	// Clear lastFailedURL/Freq/Mode and URL when receiver is disabled
 	// This allows reconnection when the receiver is re-enabled
 	log.Printf("DEBUG: cleanupReceiver: Receiver %d clearing failed state tracking", receiverNum)
+	b.lastFailedURL[receiverNum] = ""
 	b.lastFailedFreq[receiverNum] = 0
 	b.lastFailedMode[receiverNum] = ""
+	b.receiverURLs[receiverNum] = "" // Clear the tracked URL
 	b.mu.Unlock()
 	log.Printf("DEBUG: cleanupReceiver: Receiver %d released main lock", receiverNum)
 
@@ -419,13 +461,34 @@ func isValidFrequency(frequency int64) bool {
 
 // getURLForFrequency returns the appropriate URL and password for a given frequency
 // based on the routing configuration, or the default if no range matches
-func (b *UberSDRBridge) getURLForFrequency(frequency int64) (string, string) {
+// If reserve is true, reserves the instance for smart routing (call when connecting)
+// If reserve is false, just queries without reserving (call when checking if URL changed)
+// excludeURL can be used to exclude a specific URL from selection (e.g., one that just failed)
+func (b *UberSDRBridge) getURLForFrequency(frequency int64, reserve bool, excludeURL string) (string, string) {
 	// If no routing config, use default
 	if b.routingConfig == nil {
 		return b.url, b.password
 	}
 
-	// Check each frequency range
+	// Try smart routing first if enabled
+	if b.routingConfig.SmartRouting != nil && b.routingConfig.SmartRouting.Enabled {
+		// Determine mode based on current receiver settings
+		mode := "iq192" // Default mode
+		for i := 0; i < MaxReceivers; i++ {
+			if b.receiverFreqs[i] == frequency {
+				mode = b.receiverModes[i]
+				break
+			}
+		}
+
+		url, password, err := b.routingConfig.SmartRouting.GetURLForFrequency(frequency, mode, reserve, excludeURL)
+		if err == nil && url != "" {
+			return url, password
+		}
+		log.Printf("Bridge: Smart routing failed for %d Hz, falling back to static routing", frequency)
+	}
+
+	// Check each frequency range (static routing)
 	for _, fr := range b.routingConfig.FrequencyRanges {
 		if frequency >= fr.MinFreq && frequency <= fr.MaxFreq {
 			log.Printf("Bridge: Frequency %d Hz matched range '%s' (%d-%d Hz), using %s",
@@ -518,27 +581,37 @@ func (b *UberSDRBridge) connectToUberSDR(receiverNum int) {
 
 	frequency := b.receiverFreqs[receiverNum]
 	mode := b.receiverModes[receiverNum]
+	lastFailedURL := b.lastFailedURL[receiverNum]
 	lastFailedFreq := b.lastFailedFreq[receiverNum]
 	lastFailedMode := b.lastFailedMode[receiverNum]
+	b.mu.Unlock()
 
 	// Get URL and password for this frequency (may differ from default)
-	targetURL, targetPassword := b.getURLForFrequency(frequency)
-
-	log.Printf("DEBUG: connectToUberSDR: Receiver %d current freq=%d mode=%s, lastFailed freq=%d mode=%s",
-		receiverNum, frequency, mode, lastFailedFreq, lastFailedMode)
-
-	// Prevent reconnection loops - only block if we're trying to reconnect to the SAME
-	// frequency/mode that just failed. If the receiver was disabled and re-enabled
-	// (even to the same frequency), allow reconnection.
+	// Reserve the instance atomically to prevent race conditions
+	// Exclude the last failed URL so smart routing selects the next best instance
+	excludeURL := ""
 	if lastFailedFreq == frequency && lastFailedMode == mode {
-		b.mu.Unlock()
-		log.Printf("DEBUG: connectToUberSDR: Receiver %d BLOCKED - same freq/mode as last failure", receiverNum)
-		log.Printf("Bridge: Receiver %d skipping reconnection to %d Hz/%s (previous attempt failed)",
-			receiverNum, frequency, mode)
+		excludeURL = lastFailedURL // Exclude the instance that just failed for this freq/mode
+	}
+	targetURL, targetPassword := b.getURLForFrequency(frequency, true, excludeURL) // Reserve instance
+
+	log.Printf("DEBUG: connectToUberSDR: Receiver %d current freq=%d mode=%s URL=%s, lastFailed URL=%s freq=%d mode=%s",
+		receiverNum, frequency, mode, targetURL, lastFailedURL, lastFailedFreq, lastFailedMode)
+
+	// Prevent reconnection loops - block if we're trying to reconnect to the SAME
+	// URL/frequency/mode that just failed. This allows smart routing to select a different
+	// instance for the same frequency if the previous one failed.
+	if lastFailedURL == targetURL && lastFailedFreq == frequency && lastFailedMode == mode {
+		// Release the instance we just reserved since we're not going to use it
+		if b.routingConfig != nil && b.routingConfig.SmartRouting != nil && b.routingConfig.SmartRouting.Enabled {
+			b.routingConfig.SmartRouting.ReleaseInstance(targetURL)
+		}
+		log.Printf("DEBUG: connectToUberSDR: Receiver %d BLOCKED - same URL/freq/mode as last failure", receiverNum)
+		log.Printf("Bridge: Receiver %d skipping reconnection to %s (%d Hz/%s) - previous attempt to this instance failed",
+			receiverNum, targetURL, frequency, mode)
 		return
 	}
-	log.Printf("DEBUG: connectToUberSDR: Receiver %d reconnection allowed (freq/mode different or no prior failure)", receiverNum)
-	b.mu.Unlock()
+	log.Printf("DEBUG: connectToUberSDR: Receiver %d reconnection allowed (URL/freq/mode different or no prior failure)", receiverNum)
 
 	// Check if connection is allowed with per-receiver session ID
 	allowed, err := b.checkConnection(receiverNum, targetURL, targetPassword)
@@ -546,8 +619,9 @@ func (b *UberSDRBridge) connectToUberSDR(receiverNum int) {
 		log.Printf("Bridge: Receiver %d connection check error: %v", receiverNum, err)
 	}
 	if !allowed {
-		// Mark this frequency/mode as failed
+		// Mark this URL/frequency/mode as failed
 		b.mu.Lock()
+		b.lastFailedURL[receiverNum] = targetURL
 		b.lastFailedFreq[receiverNum] = frequency
 		b.lastFailedMode[receiverNum] = mode
 		b.mu.Unlock()
@@ -596,8 +670,13 @@ func (b *UberSDRBridge) connectToUberSDR(receiverNum int) {
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL.String(), headers)
 	if err != nil {
 		log.Printf("Bridge: Receiver %d connection error: %v", receiverNum, err)
-		// Mark this frequency/mode as failed to prevent immediate retry
+		// Release the reserved instance since connection failed
+		if b.routingConfig != nil && b.routingConfig.SmartRouting != nil && b.routingConfig.SmartRouting.Enabled {
+			b.routingConfig.SmartRouting.ReleaseInstance(targetURL)
+		}
+		// Mark this URL/frequency/mode as failed to prevent immediate retry to same instance
 		b.mu.Lock()
+		b.lastFailedURL[receiverNum] = targetURL
 		b.lastFailedFreq[receiverNum] = frequency
 		b.lastFailedMode[receiverNum] = mode
 		b.mu.Unlock()
@@ -606,10 +685,14 @@ func (b *UberSDRBridge) connectToUberSDR(receiverNum int) {
 
 	b.mu.Lock()
 	b.wsConns[receiverNum] = conn
+	b.receiverURLs[receiverNum] = targetURL // Track which URL this receiver is connected to
 	// Clear failed connection tracking on successful connection
+	b.lastFailedURL[receiverNum] = ""
 	b.lastFailedFreq[receiverNum] = 0
 	b.lastFailedMode[receiverNum] = ""
 	b.mu.Unlock()
+
+	// Note: Instance was already reserved in getURLForFrequency() to prevent race conditions
 
 	log.Printf("Bridge: Receiver %d connected to ubersdr (%d Hz, %s)", receiverNum, frequency, mode)
 
@@ -1008,7 +1091,56 @@ func main() {
 			log.Fatalf("Failed to parse config file %s: %v", *configFile, err)
 		}
 
+		// Command-line flags override config file defaults
+		if *urlFlag != "http://localhost:8080" {
+			log.Printf("Command-line -url flag overriding config default_url")
+			routingConfig.DefaultURL = *urlFlag
+		}
+		if *password != "" {
+			log.Printf("Command-line -password flag overriding config default_password")
+			routingConfig.DefaultPassword = *password
+		}
+
+		// Initialize smart routing if enabled
+		if routingConfig.SmartRouting != nil && routingConfig.SmartRouting.Enabled {
+			// Initialize cache
+			if routingConfig.SmartRouting.cache == nil {
+				routingConfig.SmartRouting.cache = &InstanceCache{
+					instances:   make([]CollectorInstance, 0),
+					lastUpdated: time.Time{},
+				}
+			}
+
+			// Initialize instance usage tracking
+			if routingConfig.SmartRouting.instanceUsage == nil {
+				routingConfig.SmartRouting.instanceUsage = make(map[string]int)
+			}
+
+			// Set defaults if not specified
+			if routingConfig.SmartRouting.CollectorAPIURL == "" {
+				routingConfig.SmartRouting.CollectorAPIURL = "https://instances.ubersdr.org"
+			}
+			if routingConfig.SmartRouting.Behavior.CheckIntervalSeconds == 0 {
+				routingConfig.SmartRouting.Behavior.CheckIntervalSeconds = 300 // 5 minutes default
+			}
+			if routingConfig.SmartRouting.MaxConnectionsPerInstance == 0 {
+				routingConfig.SmartRouting.MaxConnectionsPerInstance = 1 // Default to 1 connection per instance
+			}
+
+			log.Printf("Smart routing enabled:")
+			log.Printf("  Collector API: %s", routingConfig.SmartRouting.CollectorAPIURL)
+			log.Printf("  Location: %.4f, %.4f (max distance: %.0f km)",
+				routingConfig.SmartRouting.Location.Latitude,
+				routingConfig.SmartRouting.Location.Longitude,
+				routingConfig.SmartRouting.Location.MaxDistanceKm)
+			log.Printf("  Required bandwidth: %s", routingConfig.SmartRouting.RequiredBandwidth)
+			log.Printf("  Max connections per instance: %d", routingConfig.SmartRouting.MaxConnectionsPerInstance)
+			log.Printf("  Check interval: %d seconds", routingConfig.SmartRouting.Behavior.CheckIntervalSeconds)
+			log.Printf("  Priority mode: %s", routingConfig.SmartRouting.Behavior.PriorityMode)
+		}
+
 		log.Printf("Loaded routing config with %d frequency ranges", len(routingConfig.FrequencyRanges))
+		log.Printf("  Default URL: %s", routingConfig.DefaultURL)
 		for i, fr := range routingConfig.FrequencyRanges {
 			log.Printf("  Range %d: %s (%.3f-%.3f MHz) -> %s",
 				i+1, fr.Name, float64(fr.MinFreq)/1e6, float64(fr.MaxFreq)/1e6, fr.URL)

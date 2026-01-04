@@ -1,0 +1,135 @@
+# Smart Routing Configuration Example for UberSDR HPSDR Bridge
+#
+# This configuration enables intelligent instance selection based on:
+# - Real-time band conditions and signal quality
+# - Geographic location and distance
+# - Bandwidth requirements
+# - Per-frequency signal strength (optional)
+#
+# The bridge will automatically query the UberSDR Instance Collector API
+# to find the best instance for each frequency you tune to.
+
+# Default instance (fallback if smart routing fails or finds no suitable instances)
+default_url: "https://my-default-sdr.example.com"
+default_password: ""
+
+# Smart Routing Configuration
+smart_routing:
+  # Enable smart routing
+  enabled: true
+  
+  # Instance Collector API URL
+  collector_api_url: "https://instances.ubersdr.org"
+  
+  # Your geographic location (used to find nearby instances)
+  location:
+    latitude: 51.5074      # London, UK example
+    longitude: -0.1278
+    max_distance_km: 2000  # Only consider instances within 2000 km
+  
+  # Required bandwidth mode (must match one of: iq48, iq96, iq192, iq384)
+  required_bandwidth: "iq48"
+  
+  # Maximum number of receivers that can connect to the same instance
+  # Most public instances only allow 1 connection, so this defaults to 1
+  # If you know an instance supports multiple connections, you can increase this
+  max_connections_per_instance: 1
+  
+  # Additional filters
+  filters:
+    cors_enabled: false     # Set to true to only consider instances with CORS enabled
+    unlimited_only: false   # Set to true to only use instances with unlimited session time
+    min_slots: 1            # Minimum number of available client slots
+  
+  # Behavior settings
+  behavior:
+    # How often to refresh the instance list (seconds)
+    # The bridge queries the API once per interval and caches the results
+    # All receivers and frequency changes use the cached data until the next refresh
+    check_interval_seconds: 300  # 5 minutes (12 API calls per hour)
+    
+    # Minimum SNR required to consider an instance (dB)
+    # Instances with SNR below this threshold will be rejected
+    # If no instances meet this requirement, the default instance will be used
+    # Set to 0 to disable (accept any SNR)
+    min_snr_db: 10.0  # Require at least 10 dB SNR
+    
+    # Minimum SNR improvement required to switch instances (dB)
+    # This prevents excessive switching for small improvements
+    switch_threshold_db: 5.0
+    
+    # Priority mode for selecting instances when multiple are available
+    # Options:
+    #   "snr" (default) - Prioritize best signal quality (SNR)
+    #                     Use distance as tiebreaker if prefer_closer is true
+    #   "distance"      - Prioritize closest instances
+    #                     Use SNR as tiebreaker
+    #   "balanced"      - Balanced approach: prefer significantly better SNR (>5 dB),
+    #                     otherwise prefer closer instances
+    priority_mode: "snr"
+    
+    # Prefer closer instances when signal quality is similar (only used with "snr" mode)
+    prefer_closer: true
+
+# Optional: Static frequency ranges (used as fallback if smart routing is disabled)
+# These are evaluated AFTER smart routing, so smart routing takes precedence
+frequency_ranges:
+  # Example: Route 160m band to a specific instance
+  # - name: "160m"
+  #   min_freq: 1800000
+  #   max_freq: 2000000
+  #   url: "https://160m-specialist.example.com"
+  #   password: ""
+  
+  # Example: Route 20m band to a different instance
+  # - name: "20m"
+  #   min_freq: 14000000
+  #   max_freq: 14350000
+  #   url: "https://20m-specialist.example.com"
+  #   password: ""
+
+# Built-in Ham Bands (automatically recognized, no configuration needed):
+# - 160m: 1.8 - 2.0 MHz
+# - 80m:  3.5 - 4.0 MHz
+# - 60m:  5.3305 - 5.4065 MHz
+# - 40m:  7.0 - 7.3 MHz
+# - 30m:  10.1 - 10.15 MHz
+# - 20m:  14.0 - 14.35 MHz
+# - 17m:  18.068 - 18.168 MHz
+# - 15m:  21.0 - 21.45 MHz
+# - 12m:  24.89 - 24.99 MHz
+# - 10m:  28.0 - 29.7 MHz
+
+# Usage Examples:
+#
+# 1. Basic usage with smart routing:
+#    ./hpsdr-bridge -config routing-smart.yaml
+#
+# 2. Override default URL from command line:
+#    ./hpsdr-bridge -config routing-smart.yaml -url https://backup.example.com
+#
+# 3. Test with specific number of receivers:
+#    ./hpsdr-bridge -config routing-smart.yaml -receivers 4
+#
+# How it works:
+# 1. When you tune to a frequency, the bridge determines which ham band it's in
+# 2. Every check_interval_seconds, it queries /api/instances once for ALL instances
+# 3. The results are cached and shared across ALL receivers
+# 4. For each band, it selects the BEST instance from the cache based on:
+#    - Signal quality (SNR) for that specific band
+#    - Distance from your location (based on priority_mode)
+#    - Availability (free slots)
+# 5. It automatically connects to the selected instance
+# 6. If no suitable instance is found, it falls back to the default
+#
+# Benefits:
+# - Always connected to the instance with the best signal for each band
+# - Automatic failover if an instance goes offline
+# - Geographic optimization (configurable via priority_mode)
+# - Minimal API calls (1 call per check_interval for all receivers)
+# - Minimal configuration needed (ham bands are built-in)
+#
+# API Usage:
+# - With check_interval_seconds: 300 (5 minutes)
+# - API calls per hour: 12 (regardless of number of receivers or frequency changes)
+# - All receivers share the same cached instance list

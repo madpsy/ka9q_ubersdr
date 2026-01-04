@@ -148,7 +148,10 @@ class SignalMeter {
             const noiseFloor = this.getNoiseFloor();
             const snr = avgPeakDb - noiseFloor;
             displayValue = snr;
-            displayText = `${snr.toFixed(1)} dB (SNR)`;
+            // Pad single-digit values with a space to prevent layout shift
+            const snrText = snr.toFixed(1);
+            const paddedSnrText = snrText.length < 4 ? ' ' + snrText : snrText;
+            displayText = `${paddedSnrText} dB (SNR)`;
         } else {
             displayText = `${avgPeakDb.toFixed(1)} dBFS`;
         }

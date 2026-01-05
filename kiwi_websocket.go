@@ -870,14 +870,41 @@ func (kc *kiwiConn) buildDXConfig() string {
 	log.Printf("DEBUG: buildDXConfig called with %d bands, %d bookmarks", len(kc.config.Bands), len(kc.config.Bookmarks))
 
 	// Create dx_type array (16 entries for bookmark types)
-	// Even though we're not sending bookmarks here, we still need to define types
-	// for compatibility with the Kiwi client structure
+	// Map bookmark groups to types and generate colors
+	groupToType := make(map[string]int)
+	typeColors := make([]string, 16)
+	typeNames := make([]string, 16)
+	nextType := 0
+
+	// First pass: collect unique bookmark groups and assign types
+	for _, bookmark := range kc.config.Bookmarks {
+		group := bookmark.Group
+		if group == "" {
+			group = "General"
+		}
+
+		if _, exists := groupToType[group]; !exists && nextType < 16 {
+			groupToType[group] = nextType
+			typeNames[nextType] = group
+			typeColors[nextType] = generatePastelColor(group)
+			log.Printf("DEBUG: Bookmark type: group=%s, type=%d, color=%s", group, nextType, typeColors[nextType])
+			nextType++
+		}
+	}
+
+	// Fill remaining types with defaults
+	for i := nextType; i < 16; i++ {
+		typeNames[i] = fmt.Sprintf("type-%d", i)
+		typeColors[i] = "white"
+	}
+
+	// Build dx_type array
 	dxTypes := make([]map[string]interface{}, 16)
 	for i := 0; i < 16; i++ {
 		dxTypes[i] = map[string]interface{}{
 			"key":   i,
-			"name":  fmt.Sprintf("type-%d", i),
-			"color": "white",
+			"name":  typeNames[i],
+			"color": typeColors[i],
 		}
 	}
 
@@ -1207,13 +1234,24 @@ func (kc *kiwiConn) handleMarkerCommand(params map[string]string) {
 	// Build response array with header
 	response := make([]interface{}, len(matchingBookmarks)+1)
 
+	// Count bookmarks by type for the header
+	typeCounts := make([]int, 16)
+	for _, bm := range matchingBookmarks {
+		if fl, ok := bm["fl"].(int); ok {
+			typeIdx := (fl >> 16) & 0xFFFF
+			if typeIdx < 16 {
+				typeCounts[typeIdx]++
+			}
+		}
+	}
+
 	// Header entry (index 0)
 	response[0] = map[string]interface{}{
-		"pe": 0,               // Parse errors
-		"fe": 0,               // Format errors
-		"tc": make([]int, 16), // Type counts (all zeros for now)
-		"s":  0,               // Server time (seconds)
-		"m":  0,               // Server time (milliseconds)
+		"pe": 0,          // Parse errors
+		"fe": 0,          // Format errors
+		"tc": typeCounts, // Type counts
+		"s":  0,          // Server time (seconds)
+		"m":  0,          // Server time (milliseconds)
 	}
 
 	// Add bookmark entries

@@ -294,6 +294,8 @@ type kiwiConn struct {
 	wfAdpcmEncoder     *IMAAdpcmEncoder // ADPCM encoder for waterfall compression
 	audioInitSent      bool             // Track if audio_init message has been sent
 	authReceived       bool             // Track if SET auth command has been received
+	zoom               int              // Current zoom level (0-14)
+	xBin               uint32           // Current x_bin (start position in bins)
 	mu                 sync.RWMutex
 }
 
@@ -339,6 +341,11 @@ func (kc *kiwiConn) sendMsg(name, value string) {
 	// KiwiSDR protocol: MSG tag (3 bytes) + space + message
 	packet := append([]byte("MSG "), []byte(msg)...)
 
+	// Log large messages for debugging
+	if len(packet) > 500 {
+		log.Printf("Sending large MSG: %s (total %d bytes, msg %d bytes)", name, len(packet), len(msg))
+	}
+
 	kc.conn.writeMu.Lock()
 	if err := kc.conn.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
 		log.Printf("Error setting write deadline: %v", err)
@@ -348,6 +355,8 @@ func (kc *kiwiConn) sendMsg(name, value string) {
 
 	if err != nil {
 		log.Printf("Error sending MSG to Kiwi client: %v", err)
+	} else if len(packet) > 500 {
+		log.Printf("Successfully sent large MSG: %s", name)
 	}
 }
 
@@ -466,10 +475,25 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 	}
 
 	// Handle zoom command (waterfall)
-	// This command is sent on the SND (audio) connection but needs to update the W/F (spectrum) session
-	// Both connections share the same userSessionID, so we use that to find the spectrum session
+	// Client sends: "SET zoom=X start=Y" or "SET zoom=X cf=Y"
+	// This command can come on either SND or W/F connection
 	if zoomStr, hasZoom := params["zoom"]; hasZoom {
 		zoom, _ := strconv.Atoi(zoomStr)
+
+		// Store zoom level
+		kc.mu.Lock()
+		kc.zoom = zoom
+		kc.mu.Unlock()
+
+		// Handle start parameter (x_bin position)
+		if startStr, ok := params["start"]; ok {
+			xBin, _ := strconv.ParseUint(startStr, 10, 32)
+			kc.mu.Lock()
+			kc.xBin = uint32(xBin)
+			kc.mu.Unlock()
+		}
+
+		// Handle cf parameter (center frequency in kHz)
 		var cfKHz float64
 		if cfStr, ok := params["cf"]; ok {
 			cfKHz, _ = strconv.ParseFloat(cfStr, 64)
@@ -620,8 +644,9 @@ func (kc *kiwiConn) sendInitMessages() {
 		kc.sendMsg("wf_chans_real", fmt.Sprintf("%d", maxSessions))
 		kc.sendMsg("wf_cal", "-3")
 
-		// Extension list (URL encoded JSON array)
-		extListJSON := "%5b%22ALE_2G%22%2c%22colormap%22%2c%22CW_decoder%22%2c%22CW_skimmer%22%2c%22devl%22%2c%22digi_modes%22%2c%22DRM%22%2c%22FAX%22%2c%22FFT%22%2c%22FSK%22%2c%22FT8%22%2c%22HFDL%22%2c%22IBP_scan%22%2c%22iframe%22%2c%22IQ_display%22%2c%22Loran_C%22%2c%22NAVTEX%22%2c%22prefs%22%2c%22sig_gen%22%2c%22S_meter%22%2c%22SSTV%22%2c%22TDoA%22%2c%22timecode%22%2c%22wspr%22%5d"
+		// Extension list (empty - no extensions available)
+		// URL encoded JSON array: []
+		extListJSON := "%5B%5D"
 		kc.sendMsg("kiwi_up", "1")
 		kc.sendMsg("rx_chan", "1")
 		kc.sendMsg("extint_list_json", extListJSON)
@@ -966,12 +991,16 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 				wfData[i] = byte(byteVal)
 			}
 
-			// Check if compression is enabled
+			// Check if compression is enabled and get current zoom/xBin
 			kc.mu.RLock()
 			useCompression := kc.wfCompression
+			currentZoom := kc.zoom
+			currentXBin := kc.xBin
 			kc.mu.RUnlock()
 
 			var encodedData []byte
+			var flags uint32
+
 			if useCompression {
 				// Reset encoder for each waterfall line (as per KiwiSDR protocol)
 				kc.wfAdpcmEncoder = NewIMAAdpcmEncoder()
@@ -983,15 +1012,18 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 					binary.BigEndian.PutUint16(pcmData[i*2:], uint16(val))
 				}
 				encodedData = kc.wfAdpcmEncoder.Encode(pcmData)
+				flags = 1 // Compression flag (bit 0)
 			} else {
 				encodedData = wfData
+				flags = 0
 			}
 
 			// Build W/F packet: [x_bin:4][flags_zoom:4][seq:4][data]
+			// flags_zoom = (flags << 16) | (zoom & 0xffff)
 			packet := make([]byte, 12+len(encodedData))
-			binary.LittleEndian.PutUint32(packet[0:4], 0)           // x_bin (unused)
-			binary.LittleEndian.PutUint32(packet[4:8], 0)           // flags_zoom (unused)
-			binary.LittleEndian.PutUint32(packet[8:12], wfSequence) // sequence
+			binary.LittleEndian.PutUint32(packet[0:4], currentXBin)                            // x_bin (current bin position)
+			binary.LittleEndian.PutUint32(packet[4:8], (flags<<16)|uint32(currentZoom&0xffff)) // flags_zoom
+			binary.LittleEndian.PutUint32(packet[8:12], wfSequence)                            // sequence
 			copy(packet[12:], encodedData)
 
 			// Send with "W/F" tag + skip byte

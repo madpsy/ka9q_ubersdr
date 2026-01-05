@@ -570,6 +570,17 @@ func (kc *kiwiConn) sendInitMessages() {
 	cfgJSONEncoded := url.QueryEscape(cfgJSON)
 	kc.sendMsg("load_cfg", cfgJSONEncoded)
 
+	// Send DX configuration (minimal structure to avoid null errors)
+	// Client expects dx_type array with 16 entries
+	dxcfgJSON := `{"dx_type":[{"key":0,"name":"type-0","color":"white"},{"key":1,"name":"type-1","color":"white"},{"key":2,"name":"type-2","color":"white"},{"key":3,"name":"type-3","color":"white"},{"key":4,"name":"type-4","color":"white"},{"key":5,"name":"type-5","color":"white"},{"key":6,"name":"type-6","color":"white"},{"key":7,"name":"type-7","color":"white"},{"key":8,"name":"type-8","color":"white"},{"key":9,"name":"type-9","color":"white"},{"key":10,"name":"type-10","color":"white"},{"key":11,"name":"type-11","color":"white"},{"key":12,"name":"type-12","color":"white"},{"key":13,"name":"type-13","color":"white"},{"key":14,"name":"type-14","color":"white"},{"key":15,"name":"type-15","color":"white"}],"band_svc":[],"bands":[]}`
+	dxcfgJSONEncoded := url.QueryEscape(dxcfgJSON)
+	kc.sendMsg("load_dxcfg", dxcfgJSONEncoded)
+
+	// Send DX community configuration (minimal structure to avoid null errors)
+	dxcommJSON := `{"dx_type":[{"key":0,"name":"type-0","color":"white"},{"key":1,"name":"type-1","color":"white"},{"key":2,"name":"type-2","color":"white"},{"key":3,"name":"type-3","color":"white"},{"key":4,"name":"type-4","color":"white"},{"key":5,"name":"type-5","color":"white"},{"key":6,"name":"type-6","color":"white"},{"key":7,"name":"type-7","color":"white"},{"key":8,"name":"type-8","color":"white"},{"key":9,"name":"type-9","color":"white"},{"key":10,"name":"type-10","color":"white"},{"key":11,"name":"type-11","color":"white"},{"key":12,"name":"type-12","color":"white"},{"key":13,"name":"type-13","color":"white"},{"key":14,"name":"type-14","color":"white"},{"key":15,"name":"type-15","color":"white"}],"band_svc":[],"bands":[]}`
+	dxcommJSONEncoded := url.QueryEscape(dxcommJSON)
+	kc.sendMsg("load_dxcomm_cfg", dxcommJSONEncoded)
+
 	// Center frequency and bandwidth
 	kc.sendMsg("center_freq", "15000000")
 	kc.sendMsg("bandwidth", "30000000")

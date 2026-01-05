@@ -505,14 +505,14 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		// Instead of clamping bin bandwidth and sending wrong frequency range,
 		// request fewer bins at wider bandwidth, then interpolate in streaming code
 		const minBinBandwidth = 100.0 // Hz - radiod's practical minimum
-		const minBinCount = 256       // Minimum bins for reasonable quality
+		const minBinCount = 64        // Minimum bins for reasonable quality (lowered from 256)
 		binCount := 1024              // Default bin count for KiwiSDR
 		binBandwidth := requestedBinBandwidth
 
 		if requestedBinBandwidth < minBinBandwidth {
 			// We need to cover spanKHz at minBinBandwidth resolution
 			// Calculate bins needed: bins = span / bin_bandwidth
-			// But we want the SAME span, just with wider bins
+			// This ensures we cover the SAME span the client expects
 			requestedBinCount := int((spanKHz * 1000) / minBinBandwidth)
 			if requestedBinCount < minBinCount {
 				requestedBinCount = minBinCount

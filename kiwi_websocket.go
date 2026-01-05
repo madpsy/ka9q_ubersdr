@@ -355,13 +355,16 @@ func (kc *kiwiConn) handleMessages(done chan struct{}) {
 	defer close(done)
 
 	for {
-		_, message, err := kc.conn.conn.ReadMessage()
+		msgType, message, err := kc.conn.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Printf("KiwiSDR WebSocket error: %v", err)
 			}
 			break
 		}
+
+		// Log all incoming messages
+		log.Printf("KiwiSDR %s received message (type=%d, len=%d): %q", kc.connType, msgType, len(message), string(message))
 
 		// Parse message (should be text "SET ..." commands)
 		msgStr := string(message)
@@ -433,15 +436,17 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 
 		// Create or update session
 		if kc.session == nil {
-			// Create initial session
-			session, err := kc.sessions.CreateSessionWithBandwidthAndPassword(
-				freq, mode, 3000, kc.sourceIP, kc.clientIP, kc.userSessionID, kc.password)
-			if err != nil {
-				log.Printf("Failed to create KiwiSDR session: %v", err)
-				return
+			// Create initial session (only for SND connections)
+			if kc.connType == "SND" {
+				session, err := kc.sessions.CreateSessionWithBandwidthAndPassword(
+					freq, mode, 3000, kc.sourceIP, kc.clientIP, kc.userSessionID, kc.password)
+				if err != nil {
+					log.Printf("Failed to create KiwiSDR session: %v", err)
+					return
+				}
+				kc.session = session
+				kc.audioReceiver.GetChannelAudio(session)
 			}
-			kc.session = session
-			kc.audioReceiver.GetChannelAudio(session)
 		} else {
 			// Update existing session
 			if freq > 0 || mode != "" || (lowCut != 0 && highCut != 0) {

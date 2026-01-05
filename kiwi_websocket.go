@@ -384,7 +384,10 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		}
 	}
 
-	// Don't log routine commands - only log errors and important events elsewhere
+	// Log auth commands for debugging
+	if _, hasAuth := params["auth"]; hasAuth {
+		log.Printf("KiwiSDR: Received SET auth command: %s (params: %v)", command, params)
+	}
 
 	// Handle auth command
 	if _, hasAuth := params["auth"]; hasAuth {

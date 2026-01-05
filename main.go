@@ -1054,12 +1054,11 @@ func main() {
 		})
 
 		// Handle WebSocket connections and static files
-		// WebSocket paths are numeric timestamps followed by /SND or /W/F
+		// WebSocket paths can be:
+		// - /<timestamp>/SND or /<timestamp>/W/F (native KiwiSDR)
+		// - /kiwi/<timestamp>/SND or /kiwi/<timestamp>/W/F (with prefix)
 		// Static files are everything else
 		kiwiMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			// Check if this looks like a WebSocket connection path
-			// KiwiSDR WebSocket paths: /<timestamp>/SND or /<timestamp>/W/F
-			// where timestamp is a large number (e.g., 4611686267285906000)
 			path := r.URL.Path
 
 			// Log all requests for debugging
@@ -1067,12 +1066,28 @@ func main() {
 				log.Printf("KiwiSDR request: %s %s", r.Method, path)
 			}
 
+			// Check if this is a WebSocket connection
+			isWebSocket := false
+
 			if path != "/" && len(path) > 1 {
-				// Split path into parts
 				parts := strings.Split(strings.Trim(path, "/"), "/")
-				// If first part is numeric and looks like a timestamp, treat as WebSocket
-				if len(parts) >= 2 && len(parts[0]) > 10 {
-					// Check if first part is all digits (timestamp)
+
+				// Check for /kiwi/<timestamp>/SND or /kiwi/<timestamp>/W/F format
+				if len(parts) >= 3 && parts[0] == "kiwi" && len(parts[1]) > 10 {
+					// Check if second part is all digits (timestamp)
+					isTimestamp := true
+					for _, c := range parts[1] {
+						if c < '0' || c > '9' {
+							isTimestamp = false
+							break
+						}
+					}
+					if isTimestamp {
+						isWebSocket = true
+					}
+				} else if len(parts) >= 2 && len(parts[0]) > 10 {
+					// Check for /<timestamp>/SND or /<timestamp>/W/F format
+					// First part should be all digits (timestamp)
 					isTimestamp := true
 					for _, c := range parts[0] {
 						if c < '0' || c > '9' {
@@ -1081,15 +1096,20 @@ func main() {
 						}
 					}
 					if isTimestamp {
-						// This is a WebSocket connection
-						if DebugMode {
-							log.Printf("KiwiSDR WebSocket connection detected: %s", path)
-						}
-						kiwiHandler.HandleKiwiWebSocket(w, r)
-						return
+						isWebSocket = true
 					}
 				}
 			}
+
+			if isWebSocket {
+				// This is a WebSocket connection
+				if DebugMode {
+					log.Printf("KiwiSDR WebSocket connection detected: %s", path)
+				}
+				kiwiHandler.HandleKiwiWebSocket(w, r)
+				return
+			}
+
 			// Otherwise, serve static files
 			if DebugMode {
 				log.Printf("KiwiSDR serving static file: %s", path)

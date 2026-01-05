@@ -600,22 +600,27 @@ func (kc *kiwiConn) sendInitMessages() {
 		kc.mu.Unlock()
 	} else {
 		// Waterfall connection - send waterfall-specific messages
+		// Send wf_fft_size FIRST before wf_setup (client needs this to create canvas)
+		kc.sendMsg("wf_fft_size", "1024")
+		kc.sendMsg("wf_fps", "23")
+		kc.sendMsg("wf_fps_max", "23")
+		kc.sendMsg("zoom_max", "14")
+		kc.sendMsg("wf_chans", fmt.Sprintf("%d", maxSessions))
+		kc.sendMsg("wf_chans_real", fmt.Sprintf("%d", maxSessions))
+		kc.sendMsg("wf_cal", "-3")
+
 		// Extension list (URL encoded JSON array)
 		extListJSON := "%5b%22ALE_2G%22%2c%22colormap%22%2c%22CW_decoder%22%2c%22CW_skimmer%22%2c%22devl%22%2c%22digi_modes%22%2c%22DRM%22%2c%22FAX%22%2c%22FFT%22%2c%22FSK%22%2c%22FT8%22%2c%22HFDL%22%2c%22IBP_scan%22%2c%22iframe%22%2c%22IQ_display%22%2c%22Loran_C%22%2c%22NAVTEX%22%2c%22prefs%22%2c%22sig_gen%22%2c%22S_meter%22%2c%22SSTV%22%2c%22TDoA%22%2c%22timecode%22%2c%22wspr%22%5d"
 		kc.sendMsg("kiwi_up", "1")
 		kc.sendMsg("rx_chan", "1")
 		kc.sendMsg("extint_list_json", extListJSON)
 
-		// Waterfall configuration
-		wfMsg := fmt.Sprintf("wf_fft_size=1024 wf_fps=23 wf_fps_max=23 zoom_max=14 rx_chans=%d wf_chans=%d wf_chans_real=%d wf_cal=-3 wf_setup", maxSessions, maxSessions, maxSessions)
-		kc.sendMsg("", wfMsg)
+		// Send wf_setup to trigger wf_init() on client
+		kc.sendMsg("wf_setup", "")
 
 		// Initial zoom and start position
 		kc.sendMsg("zoom", "0")
 		kc.sendMsg("start", "0")
-
-		// Waterfall FPS
-		kc.sendMsg("wf_fps", "23")
 
 		// Create spectrum session immediately for W/F connection
 		if kc.session == nil {

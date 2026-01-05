@@ -1015,10 +1015,13 @@ func (kc *kiwiConn) buildDXConfig() string {
 		}
 		svcKey := groupToSvc[group]
 
+		// Encode band name using %20 for spaces (not +)
+		encodedLabel := kiwiEncodeString(band.Label)
+
 		kiwiBand := map[string]interface{}{
 			"min":  minKHz,
 			"max":  maxKHz,
-			"name": band.Label,
+			"name": encodedLabel, // Encoded with %20
 			"svc":  svcKey,
 			"itu":  0,  // 0 = any region (show in all ITU regions)
 			"sel":  "", // Selector string (empty for now)

@@ -1153,6 +1153,14 @@ func (kc *kiwiConn) handleMarkerCommand(params map[string]string) {
 		}
 	}
 
+	// Mode name to index mapping (from Kiwi's mode list)
+	modeToIndex := map[string]int{
+		"am": 0, "amn": 1, "usb": 2, "lsb": 3, "cw": 4, "cwn": 5,
+		"nbfm": 6, "iq": 7, "drm": 8, "usn": 9, "lsn": 10,
+		"sam": 11, "sau": 12, "sal": 13, "sas": 14, "qam": 15,
+		"cwu": 4, // Map cwu to cw
+	}
+
 	// Filter bookmarks within the requested frequency range
 	var matchingBookmarks []map[string]interface{}
 	for _, bookmark := range kc.config.Bookmarks {
@@ -1166,21 +1174,28 @@ func (kc *kiwiConn) handleMarkerCommand(params map[string]string) {
 			}
 			bookmarkType := groupToType[group]
 
+			// Encode mode in flags (bits 0-7)
+			modeIndex := 0 // Default to AM
+			if bookmark.Mode != "" {
+				if idx, ok := modeToIndex[strings.ToLower(bookmark.Mode)]; ok {
+					modeIndex = idx
+				}
+			}
+
+			// Build flags: type in bits 16-31, mode in bits 0-7
+			flags := (bookmarkType << 16) | modeIndex
+
 			// Build bookmark entry in Kiwi format
 			entry := map[string]interface{}{
 				"f":  freqKHz,                // Frequency in kHz
 				"i":  bookmark.Name,          // Ident (name)
-				"fl": bookmarkType << 16,     // Flags: type in upper 16 bits
+				"fl": flags,                  // Flags: type (16-31) + mode (0-7)
 				"g":  len(matchingBookmarks), // GID (index)
 			}
 
 			// Add optional fields
 			if bookmark.Comment != "" {
 				entry["n"] = bookmark.Comment // Notes
-			}
-			if bookmark.Mode != "" {
-				// Mode encoding (simplified - Kiwi uses mode indices)
-				entry["m"] = bookmark.Mode
 			}
 
 			matchingBookmarks = append(matchingBookmarks, entry)

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -297,6 +298,14 @@ type kiwiConn struct {
 	zoom               int              // Current zoom level (0-14)
 	xBin               uint32           // Current x_bin (start position in bins)
 	mu                 sync.RWMutex
+}
+
+// kiwiEncodeString encodes a string for use in Kiwi MSG protocol JSON values
+// Uses %20 for spaces (not +) to match real KiwiSDR behavior
+func kiwiEncodeString(s string) string {
+	// url.QueryEscape uses + for spaces, but Kiwi expects %20
+	encoded := url.QueryEscape(s)
+	return strings.ReplaceAll(encoded, "+", "%20")
 }
 
 // handle processes the KiwiSDR connection
@@ -707,7 +716,11 @@ func (kc *kiwiConn) sendInitMessages() {
 
 	// Send configuration to both SND and W/F connections
 	// The client needs this on both connections
-	cfgJSON := `{"passbands":{"am":{"lo":-4900,"hi":4900},"amn":{"lo":-2500,"hi":2500},"amw":{"lo":-6000,"hi":6000},"sam":{"lo":-4900,"hi":4900},"sal":{"lo":-4900,"hi":0},"sau":{"lo":0,"hi":4900},"sas":{"lo":-4900,"hi":4900},"qam":{"lo":-4900,"hi":4900},"drm":{"lo":-5000,"hi":5000},"lsb":{"lo":-2400,"hi":-300},"lsn":{"lo":-2100,"hi":-300},"usb":{"lo":300,"hi":2400},"usn":{"lo":300,"hi":2100},"cw":{"lo":-400,"hi":400},"cwn":{"lo":-250,"hi":250},"nbfm":{"lo":-6000,"hi":6000},"nnfm":{"lo":-5000,"hi":5000},"iq":{"lo":-10000,"hi":10000}},"index_html_params":{"PAGE_TITLE":"KiwiSDR","RX_PHOTO_HEIGHT":350,"RX_PHOTO_TITLE_HEIGHT":70,"RX_PHOTO_TITLE":"","RX_PHOTO_DESC":"","RX_TITLE":"` + kc.config.Admin.Name + `","RX_LOC":"` + kc.config.Admin.Location + `","RX_QRA":"","RX_ASL":` + fmt.Sprintf("%d", kc.config.Admin.ASL) + `,"RX_GMAP":""},"owner_info":"","init":{"freq":7020,"mode":"cw","zoom":0,"max_dB":-10,"min_dB":-110},"waterfall_cal":-3,"waterfall_min_dB":-110,"waterfall_max_dB":-10,"snr_meas_interval_hrs":0}`
+	// Encode receiver name and location for JSON (use %20 for spaces, not +)
+	encodedName := kiwiEncodeString(kc.config.Admin.Name)
+	encodedLocation := kiwiEncodeString(kc.config.Admin.Location)
+
+	cfgJSON := `{"passbands":{"am":{"lo":-4900,"hi":4900},"amn":{"lo":-2500,"hi":2500},"amw":{"lo":-6000,"hi":6000},"sam":{"lo":-4900,"hi":4900},"sal":{"lo":-4900,"hi":0},"sau":{"lo":0,"hi":4900},"sas":{"lo":-4900,"hi":4900},"qam":{"lo":-4900,"hi":4900},"drm":{"lo":-5000,"hi":5000},"lsb":{"lo":-2400,"hi":-300},"lsn":{"lo":-2100,"hi":-300},"usb":{"lo":300,"hi":2400},"usn":{"lo":300,"hi":2100},"cw":{"lo":-400,"hi":400},"cwn":{"lo":-250,"hi":250},"nbfm":{"lo":-6000,"hi":6000},"nnfm":{"lo":-5000,"hi":5000},"iq":{"lo":-10000,"hi":10000}},"index_html_params":{"PAGE_TITLE":"KiwiSDR","RX_PHOTO_HEIGHT":350,"RX_PHOTO_TITLE_HEIGHT":70,"RX_PHOTO_TITLE":"","RX_PHOTO_DESC":"","RX_TITLE":"` + encodedName + `","RX_LOC":"` + encodedLocation + `","RX_QRA":"","RX_ASL":` + fmt.Sprintf("%d", kc.config.Admin.ASL) + `,"RX_GMAP":""},"owner_info":"","init":{"freq":7020,"mode":"cw","zoom":0,"max_dB":-10,"min_dB":-110},"waterfall_cal":-3,"waterfall_min_dB":-110,"waterfall_max_dB":-10,"snr_meas_interval_hrs":0}`
 	cfgJSONEncoded := url.QueryEscape(cfgJSON)
 	kc.sendMsg("load_cfg", cfgJSONEncoded)
 
@@ -1032,7 +1045,7 @@ func (kc *kiwiConn) sendUserList() {
 	// Build user list in KiwiSDR format
 	// Group sessions by user_session_id to combine audio and spectrum sessions
 	userMap := make(map[string]*KiwiUserInfo)
-	userIndex := 0
+	nextNonKiwiIndex := kc.config.Server.MaxSessions // Non-Kiwi users start after max Kiwi slots
 
 	for _, sessionInfo := range allSessions {
 		// Skip internal sessions (no client IP)
@@ -1049,6 +1062,23 @@ func (kc *kiwiConn) sendUserList() {
 
 		// Check if we already have this user
 		if _, exists := userMap[userSessionID]; !exists {
+			// Determine index based on whether this is a Kiwi user
+			var userIndex int
+			isKiwiUser := strings.HasPrefix(userSessionID, "kiwi-")
+
+			if isKiwiUser {
+				// Kiwi users: try to extract their RX channel number from session
+				// The userSessionID format is "kiwi-<timestamp>-<ip>"
+				// We need to find which RX slot they're using
+				// For now, assign based on order of first seen
+				// TODO: Track actual RX channel assignments
+				userIndex = len(userMap) // Temporary: use map size as index
+			} else {
+				// Non-Kiwi users: assign indices after max Kiwi slots
+				userIndex = nextNonKiwiIndex
+				nextNonKiwiIndex++
+			}
+
 			// New user, create entry
 			user := &KiwiUserInfo{
 				Index:           userIndex,
@@ -1075,9 +1105,8 @@ func (kc *kiwiConn) sendUserList() {
 
 			// Get user agent if available
 			if userAgent, ok := sessionInfo["user_agent"].(string); ok && userAgent != "" {
-				// URL-encode the string value (not the whole JSON, just this string)
-				// Real KiwiSDR does this: "London, UK" becomes "London%2c%20UK"
-				user.Name = url.QueryEscape(userAgent)
+				// Encode using %20 for spaces (not +)
+				user.Name = kiwiEncodeString(userAgent)
 			}
 
 			// Get creation time
@@ -1120,11 +1149,17 @@ func (kc *kiwiConn) sendUserList() {
 		}
 	}
 
-	// Convert map to array
+	// Convert map to array and sort by index for consistent ordering
 	users := make([]KiwiUserInfo, 0, len(userMap))
 	for _, user := range userMap {
 		users = append(users, *user)
 	}
+
+	// Sort by index to ensure consistent ordering
+	// This prevents the user list from jumping around on each update
+	sort.Slice(users, func(i, j int) bool {
+		return users[i].Index < users[j].Index
+	})
 
 	// Marshal to JSON (compact, no indentation)
 	jsonData, err := json.Marshal(users)
@@ -1222,21 +1257,20 @@ func (kc *kiwiConn) handleMarkerCommand(params map[string]string) {
 			flags := (bookmarkType << 16) | modeIndex
 
 			// Build bookmark entry in Kiwi format
-			// URL-encode string values (not the whole JSON, just the strings)
-			// Real KiwiSDR does this: "FT8 20m" becomes "FT8%2020m"
-			encodedName := url.QueryEscape(bookmark.Name)
-			encodedComment := url.QueryEscape(bookmark.Comment)
+			// Encode string values using %20 for spaces (not +)
+			encodedName := kiwiEncodeString(bookmark.Name)
+			encodedComment := kiwiEncodeString(bookmark.Comment)
 
 			entry := map[string]interface{}{
 				"f":  freqKHz,                // Frequency in kHz
-				"i":  encodedName,            // Ident (URL-encoded)
+				"i":  encodedName,            // Ident (encoded with %20)
 				"fl": flags,                  // Flags: type (16-31) + mode (0-7)
 				"g":  len(matchingBookmarks), // GID (index)
 			}
 
 			// Add optional fields
 			if encodedComment != "" {
-				entry["n"] = encodedComment // Notes (URL-encoded)
+				entry["n"] = encodedComment // Notes (encoded with %20)
 			}
 
 			matchingBookmarks = append(matchingBookmarks, entry)

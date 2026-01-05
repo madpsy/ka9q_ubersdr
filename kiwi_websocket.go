@@ -996,24 +996,30 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			}
 
 			// Convert unwrapped spectrum data (float32 dBFS) to KiwiSDR waterfall format
-			// Use the same encoding as main UberSDR waterfall (user_spectrum_websocket.go:704)
-			// Encoding: byte = dBFS + 256
-			// This maps: -256 dBFS -> 0, 0 dBFS -> 255, -1 dBFS -> 255
-			// KiwiSDR client decodes as: dBm = -(255 - byte) + wf.cal
-			// With wf.cal = -3: dBm = -(255 - byte) - 3
-			// The values work out correctly for display purposes
+			// Use the same encoding as main UberSDR: byte = dBFS + 256
+			// BUT: Radiod's dBFS values are too high (around -93 to -21 dBFS)
+			// Real KiwiSDR shows values that decode to around -160 dBFS
+			// Apply calibration offset to match real KiwiSDR display
+			// Measured difference: UberSDR min=163 vs Real min=0 → 163-0 = 163 points
+			// In dBFS: 163 - 256 = -93, vs Real: 0 - 256 = -256, difference = 163 dBFS
+			// But more realistically, Real mean=96 → -160 dBFS, Uber mean=170 → -86 dBFS
+			// Difference: -160 - (-86) = -74 dB, so subtract 74 from UberSDR values
+			wfCalibration := float32(-74.0) // Calibration offset in dB
+
 			wfData := make([]byte, N)
 			for i, dbfsValue := range unwrapped {
+				// Apply calibration offset
+				calibratedDbfs := dbfsValue + wfCalibration
+
 				// Clamp to -256..0 dBFS range
-				clampedDbfs := dbfsValue
-				if clampedDbfs < -256 {
-					clampedDbfs = -256
+				if calibratedDbfs < -256 {
+					calibratedDbfs = -256
 				}
-				if clampedDbfs > 0 {
-					clampedDbfs = 0
+				if calibratedDbfs > 0 {
+					calibratedDbfs = 0
 				}
-				// Encode: byte = dBFS + 256 (same as main UberSDR)
-				byteVal := int(clampedDbfs + 256)
+				// Encode: byte = dBFS + 256
+				byteVal := int(calibratedDbfs + 256)
 				if byteVal < 0 {
 					byteVal = 0
 				}

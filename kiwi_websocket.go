@@ -481,6 +481,17 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		binBandwidth := (spanKHz * 1000) / 1024 // Hz
 		freq := uint64(cfKHz * 1000)
 
+		// If this is a W/F connection and no session exists yet, create one
+		if kc.connType == "W/F" && kc.session == nil {
+			session, err := kc.sessions.CreateSpectrumSessionWithUserIDAndPassword(
+				kc.sourceIP, kc.clientIP, kc.userSessionID, kc.password)
+			if err != nil {
+				log.Printf("Failed to create KiwiSDR spectrum session: %v", err)
+				return
+			}
+			kc.session = session
+		}
+
 		// Find and update the spectrum session for this userSessionID
 		// The zoom/cf command comes on the SND connection but applies to the W/F spectrum session
 		if kc.userSessionID != "" {
@@ -551,18 +562,28 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 
 // sendInitMessages sends the initialization message sequence for KiwiSDR
 func (kc *kiwiConn) sendInitMessages() {
+	// Common messages for both SND and W/F connections
+	maxSessions := kc.config.Server.MaxSessions
+	kc.sendMsg("rx_chans", fmt.Sprintf("%d", maxSessions))
+	kc.sendMsg("chan_no_pwd", "0")
+	kc.sendMsg("chan_no_pwd_true", "0")
+	kc.sendMsg("max_camp", fmt.Sprintf("%d", maxSessions))
+	kc.sendMsg("badp", "0")
+
+	// Version and hardware info
+	versionMsg := fmt.Sprintf("version_maj=1 version_min=826 debian_ver=11 model=2 platform=0 hw=1 ext_clk=0 freq_offset=0.000 abyy=B25 dx_db_name=dx")
+	kc.sendMsg("", versionMsg)
+
+	// Center frequency and bandwidth
+	kc.sendMsg("center_freq", "15000000")
+	kc.sendMsg("bandwidth", "30000000")
+	kc.sendMsg("adc_clk_nom", "66666600")
+
 	if kc.connType == "SND" {
-		// Audio connection - send full initialization sequence
-		// Use actual sample rate from config (default 12000 Hz)
+		// Audio connection - send audio-specific messages
 		sampleRate := kc.config.Audio.DefaultSampleRate
 		kc.sendMsg("sample_rate", fmt.Sprintf("%d", sampleRate))
 		kc.sendMsg("client_public_ip", kc.clientIP)
-
-		// Channel configuration
-		maxSessions := kc.config.Server.MaxSessions
-		kc.sendMsg("rx_chans", fmt.Sprintf("%d", maxSessions))
-		kc.sendMsg("chan_no_pwd", "0")
-		kc.sendMsg("chan_no_pwd_true", "0")
 
 		// Check if client is local (same as server or in bypass list)
 		isLocal := "0"
@@ -571,20 +592,8 @@ func (kc *kiwiConn) sendInitMessages() {
 		}
 		kc.sendMsg("is_local", isLocal+",0,0")
 
-		kc.sendMsg("max_camp", fmt.Sprintf("%d", maxSessions))
-		kc.sendMsg("badp", "0")
-
-		// Version and hardware info
-		versionMsg := fmt.Sprintf("version_maj=1 version_min=826 debian_ver=11 model=2 platform=0 hw=1 ext_clk=0 freq_offset=0.000 abyy=B25 dx_db_name=dx")
-		kc.sendMsg("", versionMsg)
-
 		// Configuration loaded
 		kc.sendMsg("cfg_loaded", "")
-
-		// Center frequency and bandwidth
-		kc.sendMsg("center_freq", "15000000")
-		kc.sendMsg("bandwidth", "30000000")
-		kc.sendMsg("adc_clk_nom", "66666600")
 
 		// Audio initialization
 		kc.sendMsg("audio_init", fmt.Sprintf("0 audio_rate=%d", sampleRate))
@@ -594,8 +603,23 @@ func (kc *kiwiConn) sendInitMessages() {
 		kc.audioInitSent = true
 		kc.mu.Unlock()
 	} else {
-		// Waterfall connection
-		kc.sendMsg("wf_setup", "")
+		// Waterfall connection - send waterfall-specific messages
+		// Extension list (URL encoded JSON array)
+		extListJSON := "%5b%22ALE_2G%22%2c%22colormap%22%2c%22CW_decoder%22%2c%22CW_skimmer%22%2c%22devl%22%2c%22digi_modes%22%2c%22DRM%22%2c%22FAX%22%2c%22FFT%22%2c%22FSK%22%2c%22FT8%22%2c%22HFDL%22%2c%22IBP_scan%22%2c%22iframe%22%2c%22IQ_display%22%2c%22Loran_C%22%2c%22NAVTEX%22%2c%22prefs%22%2c%22sig_gen%22%2c%22S_meter%22%2c%22SSTV%22%2c%22TDoA%22%2c%22timecode%22%2c%22wspr%22%5d"
+		kc.sendMsg("kiwi_up", "1")
+		kc.sendMsg("rx_chan", "1")
+		kc.sendMsg("extint_list_json", extListJSON)
+
+		// Waterfall configuration
+		wfMsg := fmt.Sprintf("wf_fft_size=1024 wf_fps=23 wf_fps_max=23 zoom_max=14 rx_chans=%d wf_chans=%d wf_chans_real=%d wf_cal=-3 wf_setup", maxSessions, maxSessions, maxSessions)
+		kc.sendMsg("", wfMsg)
+
+		// Initial zoom and start position
+		kc.sendMsg("zoom", "0")
+		kc.sendMsg("start", "0")
+
+		// Waterfall FPS
+		kc.sendMsg("wf_fps", "23")
 	}
 }
 
@@ -849,21 +873,16 @@ func (kc *kiwiConn) streamAudio(done <-chan struct{}) {
 func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 	log.Printf("Starting KiwiSDR waterfall stream")
 
-	// Create spectrum session if not created
-	if kc.session == nil {
-		session, err := kc.sessions.CreateSpectrumSessionWithUserIDAndPassword(
-			kc.sourceIP, kc.clientIP, kc.userSessionID, kc.password)
-		if err != nil {
-			log.Printf("Failed to create KiwiSDR spectrum session: %v", err)
-			return
-		}
-		kc.session = session
-	}
-
 	packetCount := 0
 	wfSequence := uint32(0)
 
 	for {
+		// Wait for session to be created by zoom command
+		if kc.session == nil {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
 		select {
 		case <-done:
 			return

@@ -1005,7 +1005,11 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			//
 			// We have dBFS values from radiod. Apply calibration to convert to dBm,
 			// then encode using KiwiSDR wire format.
-			wfCalibration := float32(-13.0) // Calibration offset in dB to convert dBFS to dBm
+			// Real KiwiSDR shows mean byte values of 162-163 (dBm = -(255-162) = -93 dBm)
+			// UberSDR was showing 93-99 (dBm = -(255-96) = -159 dBm)
+			// Difference: 65 points = 65 dB too low
+			// Adjusted calibration to match real KiwiSDR levels
+			wfCalibration := float32(25.0) // Calibration offset in dB to convert dBFS to dBm
 
 			wfData := make([]byte, N)
 			for i, dbfsValue := range unwrapped {

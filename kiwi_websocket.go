@@ -501,16 +501,25 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		spanKHz := fullSpanKHz / math.Pow(2, float64(zoom))
 		binBandwidth := (spanKHz * 1000) / 1024 // Hz per bin at this zoom level
 
-		// CRITICAL: Clamp bin bandwidth to radiod's safe minimum (100 Hz)
-		// This prevents radiod from entering FFT mode where filter constraints cause failures
-		// Zoom 10+ would request <100 Hz bins, which causes radiod to fail with:
-		// "Invalid filter output length" error when bin_bw < 100 Hz
-		const minBinBandwidth = 100.0 // Hz - safe minimum that avoids filter architecture issues
+		// CRITICAL: Handle radiod's minimum bin bandwidth constraint
+		// Radiod has a minimum ~100 Hz bin bandwidth due to filter architecture
+		// When zoom requests narrower bins, we must reduce bin_count to maintain correct span
+		const minBinBandwidth = 100.0 // Hz - radiod's safe minimum
+		binCount := 1024              // Default: always 1024 bins for KiwiSDR
+
 		if binBandwidth < minBinBandwidth {
-			log.Printf("DEBUG ZOOM: Requested bin_bw %.2f Hz too narrow for radiod, clamping to %.2f Hz (zoom %d)",
-				binBandwidth, minBinBandwidth, zoom)
+			// Calculate how many bins we need at 100 Hz to cover the requested span
+			// Requested span = spanKHz * 1000 Hz
+			// With 100 Hz bins: binCount = span / 100
+			requestedBinCount := int((spanKHz * 1000) / minBinBandwidth)
+			if requestedBinCount < 256 {
+				requestedBinCount = 256 // Minimum bin count for radiod
+			}
+			binCount = requestedBinCount
 			binBandwidth = minBinBandwidth
-			// Note: Client still thinks it's at zoom level %d, but gets best resolution radiod can provide
+
+			log.Printf("DEBUG ZOOM: Zoom %d requests %.2f Hz bins (too narrow), using %d bins at %.2f Hz (span %.3f kHz)",
+				zoom, (spanKHz*1000)/1024, binCount, binBandwidth, float64(binCount)*binBandwidth/1000)
 		}
 
 		var freq uint64
@@ -577,12 +586,12 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		// Find and update the spectrum session for this userSessionID
 		// The zoom command can come on either SND or W/F connection
 		if kc.userSessionID != "" {
-			log.Printf("DEBUG ZOOM: Calling UpdateSpectrumSessionByUserID with userSessionID=%s, freq=%d, binBW=%.2f",
-				kc.userSessionID, freq, binBandwidth)
-			updated := kc.sessions.UpdateSpectrumSessionByUserID(kc.userSessionID, freq, binBandwidth)
+			log.Printf("DEBUG ZOOM: Calling UpdateSpectrumSessionByUserID with userSessionID=%s, freq=%d, binBW=%.2f, binCount=%d",
+				kc.userSessionID, freq, binBandwidth, binCount)
+			updated := kc.sessions.UpdateSpectrumSessionByUserIDWithBinCount(kc.userSessionID, freq, binBandwidth, binCount)
 			if !updated {
-				log.Printf("ERROR ZOOM: Failed to update spectrum session for zoom command (userSessionID=%s, freq=%d, binBW=%.2f)",
-					kc.userSessionID, freq, binBandwidth)
+				log.Printf("ERROR ZOOM: Failed to update spectrum session for zoom command (userSessionID=%s, freq=%d, binBW=%.2f, binCount=%d)",
+					kc.userSessionID, freq, binBandwidth, binCount)
 			} else {
 				log.Printf("DEBUG ZOOM: Successfully updated spectrum session")
 			}

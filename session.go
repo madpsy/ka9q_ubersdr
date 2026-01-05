@@ -556,13 +556,21 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 // This is used by KiwiSDR protocol to sync waterfall with audio frequency
 // Returns true if a spectrum session was found and updated, false otherwise
 func (sm *SessionManager) UpdateSpectrumSessionByUserID(userSessionID string, frequency uint64, binBandwidth float64) bool {
+	return sm.UpdateSpectrumSessionByUserIDWithBinCount(userSessionID, frequency, binBandwidth, 0)
+}
+
+// UpdateSpectrumSessionByUserIDWithBinCount finds and updates the spectrum session for a given userSessionID
+// with optional bin count adjustment (0 = don't change)
+// This is used by KiwiSDR protocol to sync waterfall with audio frequency
+// Returns true if a spectrum session was found and updated, false otherwise
+func (sm *SessionManager) UpdateSpectrumSessionByUserIDWithBinCount(userSessionID string, frequency uint64, binBandwidth float64, binCount int) bool {
 	if userSessionID == "" {
 		log.Printf("DEBUG SESSION: UpdateSpectrumSessionByUserID called with empty userSessionID")
 		return false
 	}
 
-	log.Printf("DEBUG SESSION: UpdateSpectrumSessionByUserID called: userSessionID=%s, freq=%d, binBW=%.2f",
-		userSessionID, frequency, binBandwidth)
+	log.Printf("DEBUG SESSION: UpdateSpectrumSessionByUserID called: userSessionID=%s, freq=%d, binBW=%.2f, binCount=%d",
+		userSessionID, frequency, binBandwidth, binCount)
 
 	sm.mu.RLock()
 	// Find the spectrum session for this userSessionID
@@ -586,11 +594,11 @@ func (sm *SessionManager) UpdateSpectrumSessionByUserID(userSessionID string, fr
 		return false
 	}
 
-	log.Printf("DEBUG SESSION: Found spectrum session %s, updating to freq=%d, binBW=%.2f",
-		spectrumSessionID, frequency, binBandwidth)
+	log.Printf("DEBUG SESSION: Found spectrum session %s, updating to freq=%d, binBW=%.2f, binCount=%d",
+		spectrumSessionID, frequency, binBandwidth, binCount)
 
 	// Update the spectrum session
-	err := sm.UpdateSpectrumSession(spectrumSessionID, frequency, binBandwidth, 0)
+	err := sm.UpdateSpectrumSession(spectrumSessionID, frequency, binBandwidth, binCount)
 	if err != nil {
 		log.Printf("DEBUG SESSION: UpdateSpectrumSession failed: %v", err)
 		return false

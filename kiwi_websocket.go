@@ -1218,11 +1218,12 @@ func (kc *kiwiConn) sendUserList() {
 				user.Name = kiwiEncodeString(userAgent)
 			}
 
-			// Get geolocation from the connection (stored in kiwiConn)
-			// We need to find the kiwiConn for this userSessionID
-			// For now, we'll store it in the handler's connection map
-			// This is populated when SET geoloc is received
-			user.Location = kc.handler.getGeolocation(userSessionID)
+			// Get geolocation from the handler's map (populated when SET geoloc is received)
+			// Encode it the same way as Name to ensure proper JSON encoding
+			geoloc := kc.handler.getGeolocation(userSessionID)
+			if geoloc != "" {
+				user.Location = kiwiEncodeString(geoloc)
+			}
 
 			// Get creation time
 			if createdAt, ok := sessionInfo["created_at"].(string); ok && createdAt != "" {

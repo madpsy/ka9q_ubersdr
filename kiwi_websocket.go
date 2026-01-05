@@ -378,8 +378,8 @@ func (kc *kiwiConn) sendMsg(name, value string) {
 		msg = name
 	}
 
-	// KiwiSDR protocol: MSG tag (3 bytes) + skip byte + message
-	packet := append([]byte("MSG\x00"), []byte(msg)...)
+	// KiwiSDR protocol: MSG tag (3 bytes) + space + message
+	packet := append([]byte("MSG "), []byte(msg)...)
 
 	kc.conn.writeMu.Lock()
 	if err := kc.conn.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {

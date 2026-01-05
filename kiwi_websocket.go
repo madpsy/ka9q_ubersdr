@@ -501,27 +501,23 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		spanKHz := fullSpanKHz / math.Pow(2, float64(zoom))
 		requestedBinBandwidth := (spanKHz * 1000) / 1024 // Hz per bin at this zoom level
 
-		// CRITICAL: Use dynamic bin count for narrow bandwidths (like UberSDR does)
-		// Instead of clamping bin bandwidth and sending wrong frequency range,
-		// request fewer bins at wider bandwidth, then interpolate in streaming code
-		const minBinBandwidth = 100.0 // Hz - radiod's practical minimum
-		const minBinCount = 64        // Minimum bins for reasonable quality (lowered from 256)
-		binCount := 1024              // Default bin count for KiwiSDR
+		// Radiod constraint: total span (bins × bandwidth) has practical limits
+		// UberSDR uses fewer bins at narrow bandwidths to keep total span reasonable
+		// For KiwiSDR, we need to interpolate back to 1024 bins for the client
+		binCount := 1024
 		binBandwidth := requestedBinBandwidth
 
-		if requestedBinBandwidth < minBinBandwidth {
-			// We need to cover spanKHz at minBinBandwidth resolution
-			// Calculate bins needed: bins = span / bin_bandwidth
-			// This ensures we cover the SAME span the client expects
-			requestedBinCount := int((spanKHz * 1000) / minBinBandwidth)
-			if requestedBinCount < minBinCount {
-				requestedBinCount = minBinCount
-			}
-			binCount = requestedBinCount
-			binBandwidth = minBinBandwidth
-
-			log.Printf("DEBUG ZOOM: Zoom %d requests %.2f Hz/bin (span %.3f kHz), using %d bins at %.2f Hz (span %.3f kHz)",
-				zoom, requestedBinBandwidth, spanKHz, binCount, binBandwidth, float64(binCount)*binBandwidth/1000)
+		// If requested span is very narrow, use fewer bins to stay within radiod's capabilities
+		// UberSDR shows this works - it uses variable bin counts (256-2048)
+		const maxBinsForNarrowBW = 512 // Reduce bins when bandwidth is very narrow
+		if requestedBinBandwidth < 10.0 && binCount > maxBinsForNarrowBW {
+			// For very narrow bandwidths (<10 Hz/bin), reduce bin count
+			// This keeps total span reasonable while maintaining resolution
+			binCount = maxBinsForNarrowBW
+			// Recalculate bandwidth to cover the same span with fewer bins
+			binBandwidth = (spanKHz * 1000) / float64(binCount)
+			log.Printf("DEBUG ZOOM: Zoom %d: requested %.2f Hz/bin, using %d bins at %.2f Hz/bin (span %.3f kHz)",
+				zoom, requestedBinBandwidth, binCount, binBandwidth, spanKHz)
 		}
 
 		var freq uint64
@@ -1084,9 +1080,7 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 				log.Printf("Unwrapped: first 10 values: %v", unwrapped[:10])
 			}
 
-			// CRITICAL: Handle dynamic bin count for deep zoom
-			// When radiod sends fewer bins (e.g., 293 bins), interpolate up to 1024 bins for KiwiSDR client
-			// Get current zoom level, xBin, and compression flag for later use
+			// Get current zoom, xBin, and compression flag for packet building
 			kc.mu.RLock()
 			currentZoom := kc.zoom
 			currentXBin := kc.xBin
@@ -1094,11 +1088,9 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			kc.mu.RUnlock()
 
 			// KiwiSDR protocol always expects exactly 1024 bins
+			// If radiod sent fewer bins (due to narrow bandwidth optimization), interpolate up
 			const targetBins = 1024
-
-			// If radiod sent fewer bins, interpolate up to 1024
 			if N < targetBins {
-				// Interpolate using linear interpolation
 				interpolated := make([]float32, targetBins)
 				for i := 0; i < targetBins; i++ {
 					// Map output bin i to input position in unwrapped
@@ -1106,7 +1098,7 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 					srcIdx := int(srcPos)
 					frac := float32(srcPos - float64(srcIdx))
 
-					// Linear interpolation between srcIdx and srcIdx+1
+					// Linear interpolation
 					if srcIdx+1 < N {
 						interpolated[i] = unwrapped[srcIdx]*(1-frac) + unwrapped[srcIdx+1]*frac
 					} else {
@@ -1115,8 +1107,7 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 				}
 
 				if packetCount == 1 {
-					log.Printf("INTERPOLATE: zoom=%d, radiod sent %d bins, interpolated to %d bins for KiwiSDR",
-						currentZoom, N, targetBins)
+					log.Printf("INTERPOLATE: Radiod sent %d bins, interpolated to %d for KiwiSDR", N, targetBins)
 				}
 
 				unwrapped = interpolated

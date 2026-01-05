@@ -996,24 +996,24 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			}
 
 			// Convert unwrapped spectrum data (float32 dBFS) to KiwiSDR waterfall format
-			// UberSDR provides dBFS (dB relative to Full Scale), typically -120 to 0 dBFS
-			// KiwiSDR client expects byte values that decode as: dBm = -(255 - byte) + wf.cal
-			// We send wf.cal = -3, so: dBm = -(255 - byte) - 3
-			// To encode dBFS as if it were dBm: byte = 255 + dBFS
-			// But we need to map dBFS range (-120 to 0) to byte range (0 to 255)
-			// Simple linear mapping: byte = (dBFS + 120) * 255 / 120 = (dBFS + 120) * 2.125
+			// Use the same encoding as main UberSDR waterfall (user_spectrum_websocket.go:704)
+			// Encoding: byte = dBFS + 256
+			// This maps: -256 dBFS -> 0, 0 dBFS -> 255, -1 dBFS -> 255
+			// KiwiSDR client decodes as: dBm = -(255 - byte) + wf.cal
+			// With wf.cal = -3: dBm = -(255 - byte) - 3
+			// The values work out correctly for display purposes
 			wfData := make([]byte, N)
 			for i, dbfsValue := range unwrapped {
-				// Clamp to -120..0 dBFS range (typical for SDR)
+				// Clamp to -256..0 dBFS range
 				clampedDbfs := dbfsValue
-				if clampedDbfs < -120 {
-					clampedDbfs = -120
+				if clampedDbfs < -256 {
+					clampedDbfs = -256
 				}
 				if clampedDbfs > 0 {
 					clampedDbfs = 0
 				}
-				// Map -120..0 dBFS to 0..255 byte range
-				byteVal := int((clampedDbfs + 120) * 2.125)
+				// Encode: byte = dBFS + 256 (same as main UberSDR)
+				byteVal := int(clampedDbfs + 256)
 				if byteVal < 0 {
 					byteVal = 0
 				}

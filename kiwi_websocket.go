@@ -769,9 +769,43 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 	}
 
 	// Handle geojson command (full JSON response from geolocation service)
-	// We receive this but don't currently store it - just log for debugging
-	if _, hasGeojson := params["geojson"]; hasGeojson {
-		// Just acknowledge receipt, we use the simpler geoloc field
+	// Parse the JSON to extract city and country for a more complete location string
+	if geojson, hasGeojson := params["geojson"]; hasGeojson {
+		// Decode the URL-encoded JSON
+		decoded, err := url.QueryUnescape(geojson)
+		if err == nil {
+			// Parse the JSON to extract city and country
+			var geoData map[string]interface{}
+			if err := json.Unmarshal([]byte(decoded), &geoData); err == nil {
+				// Build location string: "City, Country" or just "Country"
+				var locationParts []string
+
+				// Try to get city
+				if city, ok := geoData["city"].(string); ok && city != "" {
+					locationParts = append(locationParts, city)
+				}
+
+				// Try to get country name
+				if countryName, ok := geoData["country_name"].(string); ok && countryName != "" {
+					locationParts = append(locationParts, countryName)
+				} else if country, ok := geoData["country"].(string); ok && country != "" {
+					locationParts = append(locationParts, country)
+				}
+
+				if len(locationParts) > 0 {
+					location := strings.Join(locationParts, ", ")
+					sanitized := sanitizeGeolocation(location)
+					if sanitized != "" {
+						kc.mu.Lock()
+						kc.geoloc = sanitized
+						kc.mu.Unlock()
+						// Store in handler's map for retrieval in user list
+						kc.handler.setGeolocation(kc.userSessionID, sanitized)
+						log.Printf("KiwiSDR: User %s geolocation from JSON: %s", kc.userSessionID, sanitized)
+					}
+				}
+			}
+		}
 		return
 	}
 

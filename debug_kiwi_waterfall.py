@@ -9,7 +9,7 @@ import struct
 import sys
 from datetime import datetime
 
-async def connect_and_debug(url, name):
+async def connect_and_debug(url, name, password=""):
     """Connect to a KiwiSDR server and analyze waterfall packets"""
     print(f"\n{'='*60}")
     print(f"Connecting to {name}: {url}")
@@ -22,9 +22,17 @@ async def connect_and_debug(url, name):
         async with websockets.connect(ws_url, max_size=10*1024*1024) as websocket:
             print(f"✓ Connected to {name}")
             
-            # Send auth
-            await websocket.send("SET auth t=kiwi p=#")
-            print("✓ Sent auth")
+            # Send auth (with password if provided)
+            auth_cmd = f"SET auth t=kiwi p={password if password else '#'}"
+            await websocket.send(auth_cmd)
+            print(f"✓ Sent auth (password={'yes' if password else 'no'})")
+            
+            # Wait a bit for auth to process
+            await asyncio.sleep(0.5)
+            
+            # Disable compression to see raw values
+            await websocket.send("SET wf_comp=0")
+            print("✓ Disabled compression")
             
             # Wait for init messages
             msg_count = 0

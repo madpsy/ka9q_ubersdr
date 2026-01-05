@@ -658,6 +658,12 @@ func (kc *kiwiConn) sendInitMessages() {
 		kc.sendMsg("zoom", "0")
 		kc.sendMsg("start", "0")
 
+		// Initialize zoom and xBin to defaults
+		kc.mu.Lock()
+		kc.zoom = 0
+		kc.xBin = 0
+		kc.mu.Unlock()
+
 		// Create spectrum session immediately for W/F connection
 		if kc.session == nil {
 			session, err := kc.sessions.CreateSpectrumSessionWithUserIDAndPassword(
@@ -668,6 +674,17 @@ func (kc *kiwiConn) sendInitMessages() {
 			}
 			kc.session = session
 			log.Printf("Created spectrum session for W/F connection: %s", kc.session.ID)
+
+			// Configure initial spectrum parameters (zoom 0 = full 30 MHz span)
+			// Full span = 30 MHz, zoom 0 = 30000 kHz / 1024 bins = 29.296875 kHz/bin
+			initialBinBandwidth := 30000000.0 / 1024.0 // Hz per bin at zoom 0
+			initialFreq := uint64(15000000)            // Center frequency: 15 MHz
+			updated := kc.sessions.UpdateSpectrumSessionByUserID(kc.userSessionID, initialFreq, initialBinBandwidth)
+			if !updated {
+				log.Printf("Warning: Failed to configure initial spectrum session")
+			} else {
+				log.Printf("Configured spectrum session: freq=%d Hz, binBW=%.2f Hz", initialFreq, initialBinBandwidth)
+			}
 		}
 	}
 }
@@ -978,23 +995,20 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			}
 
 			// Convert unwrapped spectrum data (float32 dBm) to KiwiSDR waterfall format
-			// KiwiSDR client decodes as: dBm = -(255 - db_value) + wf.cal
-			// So encoding is: db_value = 255 + dBm - wf.cal
-			// We use wf.cal = -3 (sent in init), so: db_value = 255 + dBm + 3
+			// KiwiSDR expects 8-bit values: 0-255 representing -200 to 0 dBm
+			// Formula: byte_value = (dBm + 200) * 255 / 200
 			wfData := make([]byte, N)
-			wfCal := float32(-3.0) // Must match wf_cal sent in init messages
 			for i, dbValue := range unwrapped {
-				// Clamp to reasonable dBm range (-255 to 0 dBm)
+				// Clamp to -200..0 dBm range
 				clampedDb := dbValue
-				if clampedDb < -255 {
-					clampedDb = -255
+				if clampedDb < -200 {
+					clampedDb = -200
 				}
 				if clampedDb > 0 {
 					clampedDb = 0
 				}
-				// Encode: byte_value = 255 + dBm - wf.cal
-				// With wf.cal = -3: byte_value = 255 + dBm + 3
-				byteVal := int(255 + clampedDb - wfCal)
+				// Convert to 0..255 range: (dBm + 200) * 1.275
+				byteVal := int((clampedDb + 200) * 1.275)
 				if byteVal < 0 {
 					byteVal = 0
 				}

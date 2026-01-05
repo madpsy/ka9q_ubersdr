@@ -697,9 +697,8 @@ func (kc *kiwiConn) sendInitMessages() {
 	cfgJSONEncoded := url.QueryEscape(cfgJSON)
 	kc.sendMsg("load_cfg", cfgJSONEncoded)
 
-	// Send DX configuration (minimal structure to avoid null errors)
-	// Client expects dx_type array with 16 entries
-	dxcfgJSON := `{"dx_type":[{"key":0,"name":"type-0","color":"white"},{"key":1,"name":"type-1","color":"white"},{"key":2,"name":"type-2","color":"white"},{"key":3,"name":"type-3","color":"white"},{"key":4,"name":"type-4","color":"white"},{"key":5,"name":"type-5","color":"white"},{"key":6,"name":"type-6","color":"white"},{"key":7,"name":"type-7","color":"white"},{"key":8,"name":"type-8","color":"white"},{"key":9,"name":"type-9","color":"white"},{"key":10,"name":"type-10","color":"white"},{"key":11,"name":"type-11","color":"white"},{"key":12,"name":"type-12","color":"white"},{"key":13,"name":"type-13","color":"white"},{"key":14,"name":"type-14","color":"white"},{"key":15,"name":"type-15","color":"white"}],"band_svc":[],"bands":[]}`
+	// Send DX configuration with UberSDR bookmarks
+	dxcfgJSON := kc.buildDXConfig()
 	dxcfgJSONEncoded := url.QueryEscape(dxcfgJSON)
 	kc.sendMsg("load_dxcfg", dxcfgJSONEncoded)
 
@@ -790,6 +789,221 @@ func (kc *kiwiConn) sendInitMessages() {
 			}
 		}
 	}
+}
+
+// generatePastelColor generates a pastel color based on a hash of the input string
+func generatePastelColor(s string) string {
+	// Simple hash function
+	hash := uint32(0)
+	for _, c := range s {
+		hash = hash*31 + uint32(c)
+	}
+
+	// Generate pastel colors (high saturation, high lightness)
+	// Use hash to generate hue (0-360), keep saturation and lightness high for pastel
+	hue := hash % 360
+
+	// Convert HSL to RGB for pastel colors
+	// Pastel: high lightness (75-85%), moderate saturation (60-80%)
+	saturation := 0.65 + float64((hash>>8)%20)/100.0 // 65-85%
+	lightness := 0.75 + float64((hash>>16)%10)/100.0 // 75-85%
+
+	r, g, b := hslToRGB(float64(hue), saturation, lightness)
+
+	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
+}
+
+// hslToRGB converts HSL color values to RGB
+func hslToRGB(h, s, l float64) (uint8, uint8, uint8) {
+	h = h / 360.0 // Normalize hue to 0-1
+
+	var r, g, b float64
+
+	if s == 0 {
+		r, g, b = l, l, l // Achromatic
+	} else {
+		hue2rgb := func(p, q, t float64) float64 {
+			if t < 0 {
+				t += 1
+			}
+			if t > 1 {
+				t -= 1
+			}
+			if t < 1.0/6.0 {
+				return p + (q-p)*6*t
+			}
+			if t < 1.0/2.0 {
+				return q
+			}
+			if t < 2.0/3.0 {
+				return p + (q-p)*(2.0/3.0-t)*6
+			}
+			return p
+		}
+
+		var q float64
+		if l < 0.5 {
+			q = l * (1 + s)
+		} else {
+			q = l + s - l*s
+		}
+		p := 2*l - q
+
+		r = hue2rgb(p, q, h+1.0/3.0)
+		g = hue2rgb(p, q, h)
+		b = hue2rgb(p, q, h-1.0/3.0)
+	}
+
+	return uint8(r * 255), uint8(g * 255), uint8(b * 255)
+}
+
+// buildDXConfig builds the DX configuration JSON with UberSDR bookmarks and bands
+func (kc *kiwiConn) buildDXConfig() string {
+	// Create dx_type array (16 entries for bookmark types)
+	// Map groups to types and generate colors
+	groupToType := make(map[string]int)
+	typeColors := make([]string, 16)
+	typeNames := make([]string, 16)
+	nextType := 0
+
+	// First pass: collect unique groups and assign types
+	for _, bookmark := range kc.config.Bookmarks {
+		group := bookmark.Group
+		if group == "" {
+			group = "General"
+		}
+
+		if _, exists := groupToType[group]; !exists && nextType < 16 {
+			groupToType[group] = nextType
+			typeNames[nextType] = group
+			typeColors[nextType] = generatePastelColor(group)
+			nextType++
+		}
+	}
+
+	// Fill remaining types with defaults
+	for i := nextType; i < 16; i++ {
+		typeNames[i] = fmt.Sprintf("type-%d", i)
+		typeColors[i] = "white"
+	}
+
+	// Build dx_type array
+	dxTypes := make([]map[string]interface{}, 16)
+	for i := 0; i < 16; i++ {
+		dxTypes[i] = map[string]interface{}{
+			"key":   i,
+			"name":  typeNames[i],
+			"color": typeColors[i],
+		}
+	}
+
+	// Build band_svc array (band service types)
+	// Map UberSDR band groups to service keys
+	groupToSvc := make(map[string]string)
+	bandSvc := make([]map[string]interface{}, 0)
+	svcIndex := 0
+
+	for _, band := range kc.config.Bands {
+		group := band.Group
+		if group == "" {
+			group = "Amateur"
+		}
+
+		// Check if we already have this service
+		if _, exists := groupToSvc[group]; !exists {
+			// Create new service key (use letters A-Z, then numbers)
+			var svcKey string
+			if svcIndex < 26 {
+				svcKey = string(rune('A' + svcIndex))
+			} else {
+				svcKey = fmt.Sprintf("%d", svcIndex-26)
+			}
+			groupToSvc[group] = svcKey
+
+			bandSvc = append(bandSvc, map[string]interface{}{
+				"key":   svcKey,
+				"name":  group,
+				"color": generatePastelColor(group),
+			})
+			svcIndex++
+		}
+	}
+
+	// Convert UberSDR bands to Kiwi bands format
+	// Kiwi bands are for the band bar display (frequency ranges)
+	kiwiBands := make([]map[string]interface{}, 0, len(kc.config.Bands))
+	for _, band := range kc.config.Bands {
+		// Kiwi expects frequencies in kHz
+		minKHz := float64(band.Start) / 1000.0
+		maxKHz := float64(band.End) / 1000.0
+
+		// Get service key for this band's group
+		group := band.Group
+		if group == "" {
+			group = "Amateur"
+		}
+		svcKey := groupToSvc[group]
+
+		kiwiBand := map[string]interface{}{
+			"min":  minKHz,
+			"max":  maxKHz,
+			"name": band.Label,
+			"svc":  svcKey,
+			"itu":  0,  // 0 = any region (show in all ITU regions)
+			"sel":  "", // Selector string (empty for now)
+			"chan": 0,  // Channel (0 = default)
+		}
+
+		kiwiBands = append(kiwiBands, kiwiBand)
+	}
+
+	// Convert UberSDR bookmarks to Kiwi DX labels (stored in same "bands" array after band bars)
+	// Note: In Kiwi, both band bars and DX labels are in the same "bands" array
+	// Band bars have min != max, DX labels have freq field
+	for _, bookmark := range kc.config.Bookmarks {
+		// Kiwi expects frequency in kHz
+		freqKHz := float64(bookmark.Frequency) / 1000.0
+
+		// Determine type from group
+		group := bookmark.Group
+		if group == "" {
+			group = "General"
+		}
+		bookmarkType := groupToType[group]
+
+		dxLabel := map[string]interface{}{
+			"name": bookmark.Name,
+			"freq": freqKHz,
+			"mode": bookmark.Mode,
+			"type": bookmarkType,
+		}
+
+		// Add optional fields
+		if bookmark.Comment != "" {
+			dxLabel["notes"] = bookmark.Comment
+		}
+		if bookmark.Extension != "" {
+			dxLabel["ext"] = bookmark.Extension
+		}
+
+		kiwiBands = append(kiwiBands, dxLabel)
+	}
+
+	// Build complete dxcfg structure
+	dxcfg := map[string]interface{}{
+		"dx_type":  dxTypes,
+		"band_svc": bandSvc,
+		"bands":    kiwiBands,
+	}
+
+	// Marshal to JSON
+	dxcfgJSON, err := json.Marshal(dxcfg)
+	if err != nil {
+		log.Printf("Error marshaling dxcfg: %v", err)
+		return `{"dx_type":[{"key":0,"name":"type-0","color":"white"},{"key":1,"name":"type-1","color":"white"},{"key":2,"name":"type-2","color":"white"},{"key":3,"name":"type-3","color":"white"},{"key":4,"name":"type-4","color":"white"},{"key":5,"name":"type-5","color":"white"},{"key":6,"name":"type-6","color":"white"},{"key":7,"name":"type-7","color":"white"},{"key":8,"name":"type-8","color":"white"},{"key":9,"name":"type-9","color":"white"},{"key":10,"name":"type-10","color":"white"},{"key":11,"name":"type-11","color":"white"},{"key":12,"name":"type-12","color":"white"},{"key":13,"name":"type-13","color":"white"},{"key":14,"name":"type-14","color":"white"},{"key":15,"name":"type-15","color":"white"}],"band_svc":[],"bands":[]}`
+	}
+
+	return string(dxcfgJSON)
 }
 
 // KiwiUserInfo represents a user in KiwiSDR format for JSON marshaling

@@ -996,30 +996,24 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			}
 
 			// Convert unwrapped spectrum data (float32 dBFS) to KiwiSDR waterfall format
-			// Radiod sends dBFS (relative to full scale), need to convert to dBm
-			// Comparison with real KiwiSDR:
-			//   Real KiwiSDR: Min=0, Max=243-248, Mean=96
-			//   UberSDR -63dB: Min=55, Max=147, Mean=65 (too dark)
-			// Adjust offset to match real KiwiSDR mean of 96
-			// Difference: 96 - 65 = 31, so reduce offset by 31/1.275 = ~24 dB
-			wfCalibrationOffset := float32(-39.0) // Convert dBFS to dBm (empirically tuned)
-
-			// KiwiSDR expects 8-bit values: 0-255 representing -200 to 0 dBm
-			// Formula: byte_value = (dBm + 200) * 255 / 200 = (dBm + 200) * 1.275
+			// UberSDR provides dBFS (dB relative to Full Scale), typically -120 to 0 dBFS
+			// KiwiSDR client expects byte values that decode as: dBm = -(255 - byte) + wf.cal
+			// We send wf.cal = -3, so: dBm = -(255 - byte) - 3
+			// To encode dBFS as if it were dBm: byte = 255 + dBFS
+			// But we need to map dBFS range (-120 to 0) to byte range (0 to 255)
+			// Simple linear mapping: byte = (dBFS + 120) * 255 / 120 = (dBFS + 120) * 2.125
 			wfData := make([]byte, N)
-			for i, dbValue := range unwrapped {
-				// Convert dBFS to dBm
-				dBm := dbValue + wfCalibrationOffset
-
-				// Clamp to -200..0 dBm range
-				if dBm < -200 {
-					dBm = -200
+			for i, dbfsValue := range unwrapped {
+				// Clamp to -120..0 dBFS range (typical for SDR)
+				clampedDbfs := dbfsValue
+				if clampedDbfs < -120 {
+					clampedDbfs = -120
 				}
-				if dBm > 0 {
-					dBm = 0
+				if clampedDbfs > 0 {
+					clampedDbfs = 0
 				}
-				// Convert to 0..255 range: (dBm + 200) * 1.275
-				byteVal := int((dBm + 200) * 1.275)
+				// Map -120..0 dBFS to 0..255 byte range
+				byteVal := int((clampedDbfs + 120) * 2.125)
 				if byteVal < 0 {
 					byteVal = 0
 				}

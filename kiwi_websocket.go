@@ -499,7 +499,7 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		// Full span = 30 MHz, zoom divides by 2^zoom, 1024 bins displayed
 		fullSpanKHz := 30000.0
 		spanKHz := fullSpanKHz / math.Pow(2, float64(zoom))
-		binBandwidth := (spanKHz * 1000) / 1024 // Hz per bin at this zoom level
+		requestedBinBandwidth := (spanKHz * 1000) / 1024 // Hz per bin at this zoom level
 
 		// CRITICAL: Use dynamic bin count for narrow bandwidths (like UberSDR does)
 		// Instead of clamping bin bandwidth and sending wrong frequency range,
@@ -507,11 +507,12 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		const minBinBandwidth = 100.0 // Hz - radiod's practical minimum
 		const minBinCount = 256       // Minimum bins for reasonable quality
 		binCount := 1024              // Default bin count for KiwiSDR
+		binBandwidth := requestedBinBandwidth
 
-		if binBandwidth < minBinBandwidth {
-			// Calculate how many bins we need at minBinBandwidth to cover the requested span
-			// Requested span = spanKHz * 1000 Hz
-			// bins_needed = span / minBinBandwidth
+		if requestedBinBandwidth < minBinBandwidth {
+			// We need to cover spanKHz at minBinBandwidth resolution
+			// Calculate bins needed: bins = span / bin_bandwidth
+			// But we want the SAME span, just with wider bins
 			requestedBinCount := int((spanKHz * 1000) / minBinBandwidth)
 			if requestedBinCount < minBinCount {
 				requestedBinCount = minBinCount
@@ -519,8 +520,8 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			binCount = requestedBinCount
 			binBandwidth = minBinBandwidth
 
-			log.Printf("DEBUG ZOOM: Zoom %d requests %.2f Hz/bin, using %d bins at %.2f Hz (span %.3f kHz)",
-				zoom, (spanKHz*1000)/1024, binCount, binBandwidth, float64(binCount)*binBandwidth/1000)
+			log.Printf("DEBUG ZOOM: Zoom %d requests %.2f Hz/bin (span %.3f kHz), using %d bins at %.2f Hz (span %.3f kHz)",
+				zoom, requestedBinBandwidth, spanKHz, binCount, binBandwidth, float64(binCount)*binBandwidth/1000)
 		}
 
 		var freq uint64

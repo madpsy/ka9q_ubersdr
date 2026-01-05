@@ -1028,6 +1028,31 @@ func main() {
 		// Register specific endpoints first (they take precedence over the file server)
 		kiwiMux.HandleFunc("/status", kiwiHandler.HandleKiwiStatus) // KiwiSDR status endpoint
 
+		// KiwiSDR WebSocket endpoint with /ws/ prefix
+		kiwiMux.HandleFunc("/ws/", kiwiHandler.HandleKiwiWebSocket)
+
+		// KiwiSDR version endpoint
+		kiwiMux.HandleFunc("/VER", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+
+			// Generate timestamp in nanoseconds (Unix epoch time * 1e9)
+			ts := time.Now().UnixNano()
+
+			// Return version info in KiwiSDR format
+			// maj: major version, min: minor version, ts: timestamp in nanoseconds, sp: spare field
+			response := map[string]interface{}{
+				"maj": 1,
+				"min": 826,
+				"ts":  ts,
+				"sp":  0,
+			}
+
+			if err := json.NewEncoder(w).Encode(response); err != nil {
+				log.Printf("Error encoding /VER response: %v", err)
+			}
+		})
+
 		// Handle WebSocket connections and static files
 		// WebSocket paths are numeric timestamps followed by /SND or /W/F
 		// Static files are everything else

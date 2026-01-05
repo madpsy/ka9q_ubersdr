@@ -28,7 +28,8 @@ This file is part of OpenWebRX.
 		
 		<!-- web.cpp:reload_index_params() creates content of GEN_LIST_CSS and GEN_LIST_JS -->
 
-		%[GEN_LIST_CSS]
+		<link rel="stylesheet" type="text/css" href="kiwisdr.min.css" />
+
 
 		<script type="text/javascript">
 			/* must be before inclusion of any .js files below */
@@ -36,10 +37,11 @@ This file is part of OpenWebRX.
 		</script>
 		
 		<script src="config/config.js"></script>
-		%[GEN_LIST_JS]
+		<script src="kiwisdr.min.js"></script>
+
 
 		<!-- load HTML/javascript from admin config (e.g. for Google analytics code or user CSS customization) -->
-		%[HTML_HEAD]
+		
 
 		<!-- dynamically loaded javascript and CSS are added here via document.head.appendChild() -->
 	</head>
@@ -53,7 +55,7 @@ This file is part of OpenWebRX.
             <div id="id-kiwi-msg">
             </div>
             <div id="id-kiwi-user-login" style="display:none">
-                %[USER_LOGIN]
+                
             </div>
         </div>
 

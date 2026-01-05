@@ -485,29 +485,55 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		kc.zoom = zoom
 		kc.mu.Unlock()
 
-		// Handle start parameter (x_bin position)
-		if startStr, ok := params["start"]; ok {
-			xBin, _ := strconv.ParseUint(startStr, 10, 32)
-			kc.mu.Lock()
-			kc.xBin = uint32(xBin)
-			kc.mu.Unlock()
-		}
-
-		// Handle cf parameter (center frequency in kHz)
-		var cfKHz float64
-		if cfStr, ok := params["cf"]; ok {
-			cfKHz, _ = strconv.ParseFloat(cfStr, 64)
-		}
-
 		// Calculate bin_bandwidth from zoom level
 		// Full span = 30 MHz, zoom divides by 2^zoom, 1024 bins
 		fullSpanKHz := 30000.0
 		spanKHz := fullSpanKHz / math.Pow(2, float64(zoom))
-		binBandwidth := (spanKHz * 1000) / 1024 // Hz
-		freq := uint64(cfKHz * 1000)
+		binBandwidth := (spanKHz * 1000) / 1024 // Hz per bin at this zoom level
+
+		var freq uint64
+		var xBin uint32
+
+		// Handle cf parameter (center frequency in kHz) - takes precedence
+		if cfStr, ok := params["cf"]; ok {
+			cfKHz, _ := strconv.ParseFloat(cfStr, 64)
+			freq = uint64(cfKHz * 1000)
+			// Calculate xBin from center frequency
+			// xBin represents the leftmost bin of the visible window
+			// At zoom level, we see 1024 bins out of (1024 * 2^zoom) total bins
+			// Center frequency maps to the middle of our 1024-bin window
+			totalBins := 1024 * math.Pow(2, float64(zoom))
+			binWidth := fullSpanKHz / totalBins // kHz per bin in the full spectrum
+			// Frequency 0 is at the left edge, 30 MHz at the right
+			centerBinInFullSpectrum := cfKHz / binWidth
+			// Our window shows bins [xBin, xBin+1024), so center is at xBin+512
+			xBin = uint32(centerBinInFullSpectrum - 512)
+		} else if startStr, ok := params["start"]; ok {
+			// Handle start parameter (x_bin position) - bin number in the zoomed spectrum
+			xBin64, _ := strconv.ParseUint(startStr, 10, 32)
+			xBin = uint32(xBin64)
+			// Calculate center frequency from xBin
+			// xBin is the leftmost bin of our 1024-bin window
+			// Total bins at this zoom level: 1024 * 2^zoom
+			totalBins := 1024 * math.Pow(2, float64(zoom))
+			binWidth := fullSpanKHz / totalBins // kHz per bin in the full spectrum
+			// Center of our window is at bin (xBin + 512)
+			centerBinInFullSpectrum := float64(xBin) + 512
+			cfKHz := centerBinInFullSpectrum * binWidth
+			freq = uint64(cfKHz * 1000)
+		} else {
+			// No cf or start provided, use current center (15 MHz)
+			freq = 15000000
+			xBin = 0
+		}
+
+		// Store xBin
+		kc.mu.Lock()
+		kc.xBin = xBin
+		kc.mu.Unlock()
 
 		// Find and update the spectrum session for this userSessionID
-		// The zoom/cf command comes on the SND connection but applies to the W/F spectrum session
+		// The zoom command can come on either SND or W/F connection
 		if kc.userSessionID != "" {
 			kc.sessions.UpdateSpectrumSessionByUserID(kc.userSessionID, freq, binBandwidth)
 		}

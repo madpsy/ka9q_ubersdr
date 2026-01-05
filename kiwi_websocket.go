@@ -1075,8 +1075,9 @@ func (kc *kiwiConn) sendUserList() {
 
 			// Get user agent if available
 			if userAgent, ok := sessionInfo["user_agent"].(string); ok && userAgent != "" {
-				// Remove newlines and other control characters that would break JSON
-				user.Name = strings.ReplaceAll(strings.ReplaceAll(userAgent, "\n", " "), "\r", " ")
+				// URL-encode the string value (not the whole JSON, just this string)
+				// Real KiwiSDR does this: "London, UK" becomes "London%2c%20UK"
+				user.Name = url.QueryEscape(userAgent)
 			}
 
 			// Get creation time
@@ -1139,9 +1140,9 @@ func (kc *kiwiConn) sendUserList() {
 	jsonStr = strings.ReplaceAll(jsonStr, "\n", "")
 	jsonStr = strings.ReplaceAll(jsonStr, "\r", "")
 
-	// Log the JSON for debugging
-	log.Printf("Sending user_cb JSON (%d bytes): %s", len(jsonStr), jsonStr)
-
+	// user_cb is NOT URL-decoded by the Kiwi client, so send raw JSON
+	// Spaces in string values have been replaced with underscores above
+	log.Printf("Sending user_cb JSON (%d bytes)", len(jsonStr))
 	kc.sendMsg("user_cb", jsonStr)
 }
 
@@ -1221,16 +1222,21 @@ func (kc *kiwiConn) handleMarkerCommand(params map[string]string) {
 			flags := (bookmarkType << 16) | modeIndex
 
 			// Build bookmark entry in Kiwi format
+			// URL-encode string values (not the whole JSON, just the strings)
+			// Real KiwiSDR does this: "FT8 20m" becomes "FT8%2020m"
+			encodedName := url.QueryEscape(bookmark.Name)
+			encodedComment := url.QueryEscape(bookmark.Comment)
+
 			entry := map[string]interface{}{
 				"f":  freqKHz,                // Frequency in kHz
-				"i":  bookmark.Name,          // Ident (name)
+				"i":  encodedName,            // Ident (URL-encoded)
 				"fl": flags,                  // Flags: type (16-31) + mode (0-7)
 				"g":  len(matchingBookmarks), // GID (index)
 			}
 
 			// Add optional fields
-			if bookmark.Comment != "" {
-				entry["n"] = bookmark.Comment // Notes
+			if encodedComment != "" {
+				entry["n"] = encodedComment // Notes (URL-encoded)
 			}
 
 			matchingBookmarks = append(matchingBookmarks, entry)
@@ -1278,11 +1284,12 @@ func (kc *kiwiConn) handleMarkerCommand(params map[string]string) {
 	if len(matchingBookmarks) > 0 {
 		log.Printf("KiwiSDR: Sample bookmark: %+v", matchingBookmarks[0])
 	}
-	log.Printf("KiwiSDR: Sending mkr JSON (%d bytes): %s", len(jsonData), string(jsonData))
+	// mkr is NOT URL-decoded by the Kiwi client, so send raw JSON
+	// Spaces in string values have been replaced with underscores above
+	jsonStr := string(jsonData)
 
-	// Send as mkr message
-	kc.sendMsg("mkr", string(jsonData))
-	log.Printf("KiwiSDR: Sent %d bookmarks to client", len(matchingBookmarks))
+	log.Printf("KiwiSDR: Sending mkr (%d bytes, %d bookmarks)", len(jsonStr), len(matchingBookmarks))
+	kc.sendMsg("mkr", jsonStr)
 }
 
 // streamAudio streams audio in KiwiSDR SND format

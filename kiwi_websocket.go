@@ -178,16 +178,21 @@ func latLonToGridSquare(lat, lon float64) string {
 // Path format: /<timestamp>/<type> where type is "SND" or "W/F"
 // When running on dedicated port, accepts paths like: /1234567890/SND
 func (kwsh *KiwiWebSocketHandler) HandleKiwiWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Parse path: /<timestamp>/<type> or /kiwi/<timestamp>/<type>
+	// Parse path: /<timestamp>/<type> or /kiwi/<timestamp>/<type> or /ws/kiwi/<timestamp>/<type>
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 
-	// Support both formats:
-	// - /<timestamp>/SND (when on dedicated port)
-	// - /kiwi/<timestamp>/SND (when on main port with /kiwi/ prefix)
+	// Support multiple formats:
+	// - /<timestamp>/SND (native KiwiSDR format on dedicated port)
+	// - /kiwi/<timestamp>/SND (with /kiwi/ prefix)
+	// - /ws/kiwi/<timestamp>/SND (with /ws/kiwi/ prefix)
 	var timestamp, connType string
 
 	if len(parts) >= 2 {
-		if parts[0] == "kiwi" && len(parts) >= 3 {
+		if parts[0] == "ws" && parts[1] == "kiwi" && len(parts) >= 4 {
+			// /ws/kiwi/<timestamp>/<type> format
+			timestamp = parts[2]
+			connType = strings.Join(parts[3:], "/")
+		} else if parts[0] == "kiwi" && len(parts) >= 3 {
 			// /kiwi/<timestamp>/<type> format
 			timestamp = parts[1]
 			connType = strings.Join(parts[2:], "/")

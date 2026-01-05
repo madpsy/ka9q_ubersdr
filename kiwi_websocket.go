@@ -275,12 +275,12 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiWebSocket(w http.ResponseWriter, r *
 	}()
 
 	// Create Kiwi connection handler
-	// Use ONLY client IP as the userSessionID (not timestamp)
+	// Use timestamp + client IP as the userSessionID
 	// This ensures:
-	// 1. SND and W/F connections from same client are linked
-	// 2. Multiple tabs/refreshes from same IP appear as same user
-	// 3. User persists across reconnections
-	userSessionID := fmt.Sprintf("kiwi-%s", clientIP)
+	// 1. SND and W/F connections from same page load are linked (same timestamp)
+	// 2. Multiple tabs/users from same IP are tracked separately (different timestamps)
+	// 3. Each browser session gets its own user entry
+	userSessionID := fmt.Sprintf("kiwi-%s-%s", timestamp, clientIP)
 
 	kc := &kiwiConn{
 		conn:               conn,

@@ -749,10 +749,11 @@ func (kc *kiwiConn) sendInitMessages() {
 	kc.sendMsg("", versionMsg)
 
 	// Send configuration to both SND and W/F connections
-	// Calculate grid square from GPS coordinates
+	// Calculate grid square and format GPS coordinates
 	gridSquare := latLonToGridSquare(kc.config.Admin.GPS.Lat, kc.config.Admin.GPS.Lon)
+	gpsCoords := fmt.Sprintf("(%.6f, %.6f)", kc.config.Admin.GPS.Lat, kc.config.Admin.GPS.Lon)
 
-	cfgJSON := `{"passbands":{"am":{"lo":-4900,"hi":4900},"amn":{"lo":-2500,"hi":2500},"amw":{"lo":-6000,"hi":6000},"sam":{"lo":-4900,"hi":4900},"sal":{"lo":-4900,"hi":0},"sau":{"lo":0,"hi":4900},"sas":{"lo":-4900,"hi":4900},"qam":{"lo":-4900,"hi":4900},"drm":{"lo":-5000,"hi":5000},"lsb":{"lo":-2400,"hi":-300},"lsn":{"lo":-2100,"hi":-300},"usb":{"lo":300,"hi":2400},"usn":{"lo":300,"hi":2100},"cw":{"lo":-400,"hi":400},"cwn":{"lo":-250,"hi":250},"nbfm":{"lo":-6000,"hi":6000},"nnfm":{"lo":-5000,"hi":5000},"iq":{"lo":-10000,"hi":10000}},"index_html_params":{"PAGE_TITLE":"KiwiSDR","RX_PHOTO_HEIGHT":350,"RX_PHOTO_TITLE_HEIGHT":70,"RX_PHOTO_TITLE":"","RX_PHOTO_DESC":"","RX_TITLE":"` + kc.config.Admin.Name + `","RX_LOC":"` + kc.config.Admin.Location + `","RX_QRA":"` + gridSquare + `","RX_ASL":` + fmt.Sprintf("%d", kc.config.Admin.ASL) + `,"RX_GMAP":""},"owner_info":"","init":{"freq":7020,"mode":"cw","zoom":0,"max_dB":-10,"min_dB":-110},"waterfall_cal":-3,"waterfall_min_dB":-110,"waterfall_max_dB":-10,"snr_meas_interval_hrs":0}`
+	cfgJSON := `{"passbands":{"am":{"lo":-4900,"hi":4900},"amn":{"lo":-2500,"hi":2500},"amw":{"lo":-6000,"hi":6000},"sam":{"lo":-4900,"hi":4900},"sal":{"lo":-4900,"hi":0},"sau":{"lo":0,"hi":4900},"sas":{"lo":-4900,"hi":4900},"qam":{"lo":-4900,"hi":4900},"drm":{"lo":-5000,"hi":5000},"lsb":{"lo":-2400,"hi":-300},"lsn":{"lo":-2100,"hi":-300},"usb":{"lo":300,"hi":2400},"usn":{"lo":300,"hi":2100},"cw":{"lo":-400,"hi":400},"cwn":{"lo":-250,"hi":250},"nbfm":{"lo":-6000,"hi":6000},"nnfm":{"lo":-5000,"hi":5000},"iq":{"lo":-10000,"hi":10000}},"rx_grid":"` + gridSquare + `","rx_gps":"` + gpsCoords + `","index_html_params":{"PAGE_TITLE":"KiwiSDR","RX_PHOTO_HEIGHT":350,"RX_PHOTO_TITLE_HEIGHT":70,"RX_PHOTO_TITLE":"","RX_PHOTO_DESC":"","RX_TITLE":"` + kc.config.Admin.Name + `","RX_LOC":"` + kc.config.Admin.Location + `","RX_QRA":"` + gridSquare + `","RX_ASL":` + fmt.Sprintf("%d", kc.config.Admin.ASL) + `,"RX_GMAP":""},"owner_info":"","init":{"freq":7020,"mode":"cw","zoom":0,"max_dB":-10,"min_dB":-110},"waterfall_cal":-3,"waterfall_min_dB":-110,"waterfall_max_dB":-10,"snr_meas_interval_hrs":0}`
 	cfgJSONEncoded := url.QueryEscape(cfgJSON)
 	cfgJSONEncoded = strings.ReplaceAll(cfgJSONEncoded, "+", "%20")
 	kc.sendMsg("load_cfg", cfgJSONEncoded)
@@ -1086,7 +1087,13 @@ func (kc *kiwiConn) sendUserList() {
 	// Group sessions by user_session_id to combine audio and spectrum sessions
 	userMap := make(map[string]*KiwiUserInfo)
 
+	// First pass: Process audio sessions to create user entries
 	for _, sessionInfo := range allSessions {
+		isSpectrum, _ := sessionInfo["is_spectrum"].(bool)
+		if isSpectrum {
+			continue // Skip spectrum sessions in first pass
+		}
+
 		// Skip internal sessions (no client IP)
 		clientIP, _ := sessionInfo["client_ip"].(string)
 		if clientIP == "" {
@@ -1154,25 +1161,15 @@ func (kc *kiwiConn) sendUserList() {
 			userMap[userSessionID] = user
 		}
 
-		// Update frequency and mode from this session
-		// ALWAYS prefer audio sessions over spectrum sessions
+		// Update frequency and mode from this session (audio only in first pass)
 		user := userMap[userSessionID]
-		isSpectrum, _ := sessionInfo["is_spectrum"].(bool)
-		if !isSpectrum {
-			// Audio session - ALWAYS use its frequency and mode
-			if freq, ok := sessionInfo["frequency"].(uint64); ok {
-				user.Frequency = int(freq)
-			}
-			if mode, ok := sessionInfo["mode"].(string); ok {
-				user.Mode = mode
-			}
-		} else if user.Frequency == 0 {
-			// Spectrum session and no audio session yet - use spectrum frequency
-			// but DON'T set mode to "spectrum" - leave it empty or use default
-			if freq, ok := sessionInfo["frequency"].(uint64); ok {
-				user.Frequency = int(freq)
-			}
-			// Don't set mode to "spectrum" - it will show the audio mode when audio connects
+
+		// Set frequency and mode from audio session
+		if freq, ok := sessionInfo["frequency"].(uint64); ok {
+			user.Frequency = int(freq)
+		}
+		if mode, ok := sessionInfo["mode"].(string); ok {
+			user.Mode = mode
 		}
 	}
 

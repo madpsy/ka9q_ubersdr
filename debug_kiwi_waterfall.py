@@ -34,6 +34,9 @@ async def connect_and_debug(url, name, password=""):
             await websocket.send("SET wf_comp=0")
             print("✓ Disabled compression")
             
+            # Wait for compression setting to take effect
+            await asyncio.sleep(1.0)
+            
             # Wait for init messages
             msg_count = 0
             wf_setup_received = False

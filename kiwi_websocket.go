@@ -406,6 +406,12 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		log.Printf("KiwiSDR: Received SET auth command: %s (params: %v)", command, params)
 	}
 
+	// Handle MARKER command (DX label requests)
+	if _, hasMarker := params["MARKER"]; hasMarker {
+		kc.handleMarkerCommand(params)
+		return
+	}
+
 	// Handle auth command
 	if _, hasAuth := params["auth"]; hasAuth {
 		// Extract password (# means no password, empty string also means no password)
@@ -857,43 +863,19 @@ func hslToRGB(h, s, l float64) (uint8, uint8, uint8) {
 	return uint8(r * 255), uint8(g * 255), uint8(b * 255)
 }
 
-// buildDXConfig builds the DX configuration JSON with UberSDR bookmarks and bands
+// buildDXConfig builds the DX configuration JSON with UberSDR bands
+// Note: DX labels (bookmarks) are NOT sent here - they require a separate server-side database
+// and are loaded via SET MARKER commands. This function only handles band bars and their services.
 func (kc *kiwiConn) buildDXConfig() string {
 	// Create dx_type array (16 entries for bookmark types)
-	// Map groups to types and generate colors
-	groupToType := make(map[string]int)
-	typeColors := make([]string, 16)
-	typeNames := make([]string, 16)
-	nextType := 0
-
-	// First pass: collect unique groups and assign types
-	for _, bookmark := range kc.config.Bookmarks {
-		group := bookmark.Group
-		if group == "" {
-			group = "General"
-		}
-
-		if _, exists := groupToType[group]; !exists && nextType < 16 {
-			groupToType[group] = nextType
-			typeNames[nextType] = group
-			typeColors[nextType] = generatePastelColor(group)
-			nextType++
-		}
-	}
-
-	// Fill remaining types with defaults
-	for i := nextType; i < 16; i++ {
-		typeNames[i] = fmt.Sprintf("type-%d", i)
-		typeColors[i] = "white"
-	}
-
-	// Build dx_type array
+	// Even though we're not sending bookmarks here, we still need to define types
+	// for compatibility with the Kiwi client structure
 	dxTypes := make([]map[string]interface{}, 16)
 	for i := 0; i < 16; i++ {
 		dxTypes[i] = map[string]interface{}{
 			"key":   i,
-			"name":  typeNames[i],
-			"color": typeColors[i],
+			"name":  fmt.Sprintf("type-%d", i),
+			"color": "white",
 		}
 	}
 
@@ -930,7 +912,8 @@ func (kc *kiwiConn) buildDXConfig() string {
 	}
 
 	// Convert UberSDR bands to Kiwi bands format
-	// Kiwi bands are for the band bar display (frequency ranges)
+	// Kiwi bands are ONLY for the band bar display (frequency ranges)
+	// DX labels (bookmarks) are handled separately via SET MARKER protocol
 	kiwiBands := make([]map[string]interface{}, 0, len(kc.config.Bands))
 	for _, band := range kc.config.Bands {
 		// Kiwi expects frequencies in kHz
@@ -957,39 +940,9 @@ func (kc *kiwiConn) buildDXConfig() string {
 		kiwiBands = append(kiwiBands, kiwiBand)
 	}
 
-	// Convert UberSDR bookmarks to Kiwi DX labels (stored in same "bands" array after band bars)
-	// Note: In Kiwi, both band bars and DX labels are in the same "bands" array
-	// Band bars have min != max, DX labels have freq field
-	for _, bookmark := range kc.config.Bookmarks {
-		// Kiwi expects frequency in kHz
-		freqKHz := float64(bookmark.Frequency) / 1000.0
-
-		// Determine type from group
-		group := bookmark.Group
-		if group == "" {
-			group = "General"
-		}
-		bookmarkType := groupToType[group]
-
-		dxLabel := map[string]interface{}{
-			"name": bookmark.Name,
-			"freq": freqKHz,
-			"mode": bookmark.Mode,
-			"type": bookmarkType,
-		}
-
-		// Add optional fields
-		if bookmark.Comment != "" {
-			dxLabel["notes"] = bookmark.Comment
-		}
-		if bookmark.Extension != "" {
-			dxLabel["ext"] = bookmark.Extension
-		}
-
-		kiwiBands = append(kiwiBands, dxLabel)
-	}
-
 	// Build complete dxcfg structure
+	// Note: This does NOT include DX labels (bookmarks) - those require implementing
+	// the SET MARKER protocol on the server side with a proper database backend
 	dxcfg := map[string]interface{}{
 		"dx_type":  dxTypes,
 		"band_svc": bandSvc,
@@ -1148,6 +1101,114 @@ func (kc *kiwiConn) sendUserList() {
 	log.Printf("Sending user_cb JSON (%d bytes): %s", len(jsonStr), jsonStr)
 
 	kc.sendMsg("user_cb", jsonStr)
+}
+
+// handleMarkerCommand processes MARKER commands and sends DX labels (bookmarks)
+func (kc *kiwiConn) handleMarkerCommand(params map[string]string) {
+	// Parse parameters
+	minStr, hasMin := params["min"]
+	maxStr, hasMax := params["max"]
+
+	if !hasMin || !hasMax {
+		log.Printf("KiwiSDR: MARKER command missing min/max parameters")
+		return
+	}
+
+	// Parse frequency range (in kHz)
+	minKHz, err := strconv.ParseFloat(minStr, 64)
+	if err != nil {
+		log.Printf("KiwiSDR: Invalid min frequency: %v", err)
+		return
+	}
+	maxKHz, err := strconv.ParseFloat(maxStr, 64)
+	if err != nil {
+		log.Printf("KiwiSDR: Invalid max frequency: %v", err)
+		return
+	}
+
+	// Convert to Hz for comparison with UberSDR bookmarks
+	minHz := uint64(minKHz * 1000)
+	maxHz := uint64(maxKHz * 1000)
+
+	log.Printf("KiwiSDR: MARKER request for %.3f - %.3f kHz", minKHz, maxKHz)
+
+	// Build bookmark type mapping (group -> type index)
+	groupToType := make(map[string]int)
+	nextType := 0
+	for _, bookmark := range kc.config.Bookmarks {
+		group := bookmark.Group
+		if group == "" {
+			group = "General"
+		}
+		if _, exists := groupToType[group]; !exists && nextType < 16 {
+			groupToType[group] = nextType
+			nextType++
+		}
+	}
+
+	// Filter bookmarks within the requested frequency range
+	var matchingBookmarks []map[string]interface{}
+	for _, bookmark := range kc.config.Bookmarks {
+		if bookmark.Frequency >= minHz && bookmark.Frequency <= maxHz {
+			freqKHz := float64(bookmark.Frequency) / 1000.0
+
+			// Determine type from group
+			group := bookmark.Group
+			if group == "" {
+				group = "General"
+			}
+			bookmarkType := groupToType[group]
+
+			// Build bookmark entry in Kiwi format
+			entry := map[string]interface{}{
+				"f":  freqKHz,                // Frequency in kHz
+				"i":  bookmark.Name,          // Ident (name)
+				"fl": bookmarkType << 16,     // Flags: type in upper 16 bits
+				"g":  len(matchingBookmarks), // GID (index)
+			}
+
+			// Add optional fields
+			if bookmark.Comment != "" {
+				entry["n"] = bookmark.Comment // Notes
+			}
+			if bookmark.Mode != "" {
+				// Mode encoding (simplified - Kiwi uses mode indices)
+				entry["m"] = bookmark.Mode
+			}
+
+			matchingBookmarks = append(matchingBookmarks, entry)
+		}
+	}
+
+	log.Printf("KiwiSDR: Found %d bookmarks in range", len(matchingBookmarks))
+
+	// Build response array with header
+	response := make([]interface{}, len(matchingBookmarks)+1)
+
+	// Header entry (index 0)
+	response[0] = map[string]interface{}{
+		"pe": 0,               // Parse errors
+		"fe": 0,               // Format errors
+		"tc": make([]int, 16), // Type counts (all zeros for now)
+		"s":  0,               // Server time (seconds)
+		"m":  0,               // Server time (milliseconds)
+	}
+
+	// Add bookmark entries
+	for i, bookmark := range matchingBookmarks {
+		response[i+1] = bookmark
+	}
+
+	// Marshal to JSON
+	jsonData, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("KiwiSDR: Error marshaling marker response: %v", err)
+		return
+	}
+
+	// Send as mkr message
+	kc.sendMsg("mkr", string(jsonData))
+	log.Printf("KiwiSDR: Sent %d bookmarks to client", len(matchingBookmarks))
 }
 
 // streamAudio streams audio in KiwiSDR SND format

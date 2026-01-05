@@ -502,13 +502,13 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		requestedBinBandwidth := (spanKHz * 1000) / 1024 // Hz per bin at this zoom level
 
 		// Radiod has minimum bin bandwidth constraints that depend on bin count
-		// From UberSDR testing: 256 bins at 25 Hz/bin works fine
+		// From UberSDR testing: 256 bins at 50 Hz/bin works (not 25 Hz!)
 		// The constraint is related to FFT size and filter design
 		binCount := 1024
 		binBandwidth := requestedBinBandwidth
 		const minBinBW1024 = 60.0 // Minimum Hz/bin for 1024 bins
-		const minBinBW512 = 40.0  // Minimum Hz/bin for 512 bins
-		const minBinBW256 = 25.0  // Minimum Hz/bin for 256 bins (from UberSDR)
+		const minBinBW512 = 50.0  // Minimum Hz/bin for 512 bins
+		const minBinBW256 = 50.0  // Minimum Hz/bin for 256 bins (from UberSDR actual usage)
 
 		if requestedBinBandwidth < minBinBW1024 {
 			// Try 512 bins
@@ -1103,30 +1103,81 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			kc.mu.RUnlock()
 
 			// KiwiSDR protocol always expects exactly 1024 bins
-			// If radiod sent fewer bins (due to narrow bandwidth optimization), interpolate up
+			// If radiod sent fewer bins (due to narrow bandwidth optimization), we need to:
+			// 1. Calculate the requested span from zoom level
+			// 2. Extract/crop the portion of radiod's data that matches the requested span
+			// 3. Interpolate that cropped portion to 1024 bins
 			const targetBins = 1024
-			if N < targetBins {
+
+			// Calculate requested span from zoom level
+			fullSpanKHz := 30000.0
+			requestedSpanKHz := fullSpanKHz / math.Pow(2, float64(currentZoom))
+
+			// Calculate actual span from radiod (bins × bin_bandwidth)
+			var actualSpanKHz float64
+			if kc.session != nil && kc.session.BinBandwidth > 0 {
+				actualSpanKHz = float64(N) * kc.session.BinBandwidth / 1000.0
+			} else {
+				actualSpanKHz = requestedSpanKHz // Fallback if session not available
+			}
+
+			if packetCount == 1 {
+				log.Printf("SPAN: Requested %.3f kHz, radiod sent %.3f kHz (%d bins @ %.2f Hz/bin)",
+					requestedSpanKHz, actualSpanKHz, N, kc.session.BinBandwidth)
+			}
+
+			// If radiod sent a wider span than requested, crop to the requested span
+			var croppedData []float32
+			if actualSpanKHz > requestedSpanKHz*1.01 { // 1% tolerance
+				// Calculate how many bins to extract from center
+				cropRatio := requestedSpanKHz / actualSpanKHz
+				croppedBins := int(float64(N) * cropRatio)
+				if croppedBins < 1 {
+					croppedBins = 1
+				}
+
+				// Extract center portion
+				startBin := (N - croppedBins) / 2
+				endBin := startBin + croppedBins
+
+				if packetCount == 1 {
+					log.Printf("CROP: Extracting bins %d-%d (center %d bins) from %d total bins",
+						startBin, endBin, croppedBins, N)
+				}
+
+				croppedData = unwrapped[startBin:endBin]
+			} else {
+				// Spans match (within tolerance), use all data
+				croppedData = unwrapped
+			}
+
+			// Now interpolate cropped data to 1024 bins
+			croppedN := len(croppedData)
+			if croppedN < targetBins {
 				interpolated := make([]float32, targetBins)
 				for i := 0; i < targetBins; i++ {
-					// Map output bin i to input position in unwrapped
-					srcPos := float64(i) * float64(N-1) / float64(targetBins-1)
+					// Map output bin i to input position in croppedData
+					srcPos := float64(i) * float64(croppedN-1) / float64(targetBins-1)
 					srcIdx := int(srcPos)
 					frac := float32(srcPos - float64(srcIdx))
 
 					// Linear interpolation
-					if srcIdx+1 < N {
-						interpolated[i] = unwrapped[srcIdx]*(1-frac) + unwrapped[srcIdx+1]*frac
+					if srcIdx+1 < croppedN {
+						interpolated[i] = croppedData[srcIdx]*(1-frac) + croppedData[srcIdx+1]*frac
 					} else {
-						interpolated[i] = unwrapped[srcIdx]
+						interpolated[i] = croppedData[srcIdx]
 					}
 				}
 
 				if packetCount == 1 {
-					log.Printf("INTERPOLATE: Radiod sent %d bins, interpolated to %d for KiwiSDR", N, targetBins)
+					log.Printf("INTERPOLATE: Cropped %d bins → interpolated to %d bins for KiwiSDR", croppedN, targetBins)
 				}
 
 				unwrapped = interpolated
 				N = targetBins
+			} else {
+				unwrapped = croppedData
+				N = croppedN
 			}
 
 			// Convert unwrapped spectrum data (float32 dBFS) to KiwiSDR waterfall format

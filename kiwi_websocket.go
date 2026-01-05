@@ -539,17 +539,23 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			// Handle start parameter (x_bin position at max zoom resolution)
 			xBin64, _ := strconv.ParseUint(startStr, 10, 32)
 			xBin = uint32(xBin64)
-			// Calculate center frequency from xBin
-			// At zoom level Z, the displayed window spans (maxBins / 2^Z) max-resolution bins
-			// xBin is the starting position in max-resolution bin space
-			binsInWindow := maxBins >> uint(zoom) // Total max-res bins visible in this zoom window
-			// Center bin is at xBin + (binsInWindow / 2)
-			centerBin := float64(xBin) + float64(binsInWindow)/2
-			// bin_to_freq: freq = (bin / max_bins) * bandwidth
-			cfKHz := (centerBin / float64(maxBins)) * fullSpanKHz
-			freq = uint64(cfKHz * 1000)
-			log.Printf("DEBUG ZOOM: Using start parameter: xBin=%d, binsInWindow=%d, centerBin=%.0f, cfKHz=%.3f, freq=%d Hz",
-				xBin, binsInWindow, centerBin, cfKHz, freq)
+
+			// CRITICAL FIX: The client displays 1024 bins on screen at ANY zoom level
+			// xBin is the starting position in max-resolution bin space (16777216 bins across 30 MHz)
+			// We need to calculate the center of the DISPLAYED 1024 bins, not the window size at this zoom
+
+			// The displayed window always shows 1024 bins on screen
+			// Center of display is at xBin + 512 bins (in max-resolution space)
+			displayedBins := 1024.0
+			centerBin := float64(xBin) + displayedBins/2.0
+
+			// bin_to_freq: freq = (bin / max_bins) * total_bandwidth
+			// This matches the client's bin_to_freq() function
+			totalBandwidthHz := fullSpanKHz * 1000.0
+			freq = uint64((centerBin / float64(maxBins)) * totalBandwidthHz)
+
+			log.Printf("DEBUG ZOOM: Using start parameter: xBin=%d, displayedBins=%.0f, centerBin=%.0f, freq=%d Hz (%.3f kHz)",
+				xBin, displayedBins, centerBin, freq, float64(freq)/1000.0)
 		} else {
 			// No cf or start provided, use current center (15 MHz)
 			freq = 15000000

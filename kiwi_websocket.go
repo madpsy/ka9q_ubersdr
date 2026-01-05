@@ -29,9 +29,10 @@ type KiwiWebSocketHandler struct {
 	connRateLimiter    *IPConnectionRateLimiter
 	prometheusMetrics  *PrometheusMetrics
 	radiod             *RadiodController
-	kiwiRXSlots        map[string]int // Map userSessionID to RX channel number
-	nextRXSlot         int            // Next available RX slot
-	mu                 sync.RWMutex   // Protects kiwiRXSlots and nextRXSlot
+	kiwiRXSlots        map[string]int    // Map userSessionID to RX channel number
+	kiwiGeolocations   map[string]string // Map userSessionID to geolocation string
+	nextRXSlot         int               // Next available RX slot
+	mu                 sync.RWMutex      // Protects kiwiRXSlots, kiwiGeolocations, and nextRXSlot
 }
 
 // NewKiwiWebSocketHandler creates a new KiwiSDR WebSocket handler
@@ -46,6 +47,7 @@ func NewKiwiWebSocketHandler(sessions *SessionManager, audioReceiver *AudioRecei
 		prometheusMetrics:  prometheusMetrics,
 		radiod:             sessions.radiod, // Get radiod from sessions
 		kiwiRXSlots:        make(map[string]int),
+		kiwiGeolocations:   make(map[string]string),
 		nextRXSlot:         0,
 	}
 }
@@ -72,6 +74,23 @@ func (kwsh *KiwiWebSocketHandler) getOrAssignRXSlot(userSessionID string) int {
 
 	log.Printf("DEBUG: Assigned RX slot %d to user %s (nextRXSlot now %d)", slot, userSessionID, kwsh.nextRXSlot)
 	return slot
+}
+
+// setGeolocation stores the geolocation for a Kiwi user
+func (kwsh *KiwiWebSocketHandler) setGeolocation(userSessionID, geoloc string) {
+	kwsh.mu.Lock()
+	defer kwsh.mu.Unlock()
+	kwsh.kiwiGeolocations[userSessionID] = geoloc
+}
+
+// getGeolocation retrieves the geolocation for a Kiwi user
+func (kwsh *KiwiWebSocketHandler) getGeolocation(userSessionID string) string {
+	kwsh.mu.RLock()
+	defer kwsh.mu.RUnlock()
+	if geoloc, exists := kwsh.kiwiGeolocations[userSessionID]; exists {
+		return geoloc
+	}
+	return ""
 }
 
 // HandleKiwiStatus handles KiwiSDR /status HTTP endpoint
@@ -321,6 +340,7 @@ type kiwiConn struct {
 	session            *Session
 	userSessionID      string
 	identUser          string // User identity from SET ident_user command
+	geoloc             string // User geolocation from SET geoloc command
 	sequence           uint32
 	compression        bool
 	wfCompression      bool // Waterfall compression (separate from audio)
@@ -731,7 +751,60 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		return
 	}
 
+	// Handle geoloc command (user location from IP geolocation service)
+	if geoloc, hasGeoloc := params["geoloc"]; hasGeoloc {
+		// Sanitize geolocation string:
+		// - Limit length to 100 characters
+		// - Allow only letters, spaces, commas, and hyphens
+		sanitized := sanitizeGeolocation(geoloc)
+		if sanitized != "" {
+			kc.mu.Lock()
+			kc.geoloc = sanitized
+			kc.mu.Unlock()
+			// Store in handler's map for retrieval in user list
+			kc.handler.setGeolocation(kc.userSessionID, sanitized)
+			log.Printf("KiwiSDR: User %s geolocation: %s", kc.userSessionID, sanitized)
+		}
+		return
+	}
+
+	// Handle geojson command (full JSON response from geolocation service)
+	// We receive this but don't currently store it - just log for debugging
+	if _, hasGeojson := params["geojson"]; hasGeojson {
+		// Just acknowledge receipt, we use the simpler geoloc field
+		return
+	}
+
 	// Ignore other commands (agc, etc.)
+}
+
+// sanitizeGeolocation sanitizes a geolocation string to prevent abuse
+// Limits length and allows only safe characters (letters, spaces, commas, hyphens)
+func sanitizeGeolocation(geoloc string) string {
+	// Decode URL encoding first
+	decoded, err := url.QueryUnescape(geoloc)
+	if err != nil {
+		// If decode fails, use original
+		decoded = geoloc
+	}
+
+	// Limit length to 100 characters
+	if len(decoded) > 100 {
+		decoded = decoded[:100]
+	}
+
+	// Filter to allow only: letters (any language), spaces, commas, hyphens, parentheses
+	var result strings.Builder
+	for _, r := range decoded {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || // Allow numbers for things like "USA"
+			r == ' ' || r == ',' || r == '-' || r == '(' || r == ')' ||
+			(r >= 0x80 && r <= 0x10FFFF) { // Allow Unicode letters (for international locations)
+			result.WriteRune(r)
+		}
+	}
+
+	return strings.TrimSpace(result.String())
 }
 
 // sendInitMessages sends the initialization message sequence for KiwiSDR
@@ -790,6 +863,7 @@ func (kc *kiwiConn) sendInitMessages() {
 		if kc.config.Server.IsIPTimeoutBypassed(kc.clientIP, kc.password) {
 			isLocal = "1"
 		}
+		// Format: "rx_chan,is_local,tlimit_exempt"
 		kc.sendMsg("is_local", fmt.Sprintf("%d,%s,0", rxSlot, isLocal))
 
 		// Configuration loaded
@@ -1119,7 +1193,7 @@ func (kc *kiwiConn) sendUserList() {
 			user := &KiwiUserInfo{
 				Index:           rxSlot, // Use assigned RX slot number
 				Name:            "Unknown",
-				Location:        "Unknown",
+				Location:        "",
 				Frequency:       0,
 				Mode:            "",
 				Zoom:            0,
@@ -1143,6 +1217,12 @@ func (kc *kiwiConn) sendUserList() {
 				// Encode using %20 for spaces (not +)
 				user.Name = kiwiEncodeString(userAgent)
 			}
+
+			// Get geolocation from the connection (stored in kiwiConn)
+			// We need to find the kiwiConn for this userSessionID
+			// For now, we'll store it in the handler's connection map
+			// This is populated when SET geoloc is received
+			user.Location = kc.handler.getGeolocation(userSessionID)
 
 			// Get creation time
 			if createdAt, ok := sessionInfo["created_at"].(string); ok && createdAt != "" {

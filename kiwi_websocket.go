@@ -749,7 +749,10 @@ func (kc *kiwiConn) sendInitMessages() {
 	kc.sendMsg("", versionMsg)
 
 	// Send configuration to both SND and W/F connections
-	cfgJSON := `{"passbands":{"am":{"lo":-4900,"hi":4900},"amn":{"lo":-2500,"hi":2500},"amw":{"lo":-6000,"hi":6000},"sam":{"lo":-4900,"hi":4900},"sal":{"lo":-4900,"hi":0},"sau":{"lo":0,"hi":4900},"sas":{"lo":-4900,"hi":4900},"qam":{"lo":-4900,"hi":4900},"drm":{"lo":-5000,"hi":5000},"lsb":{"lo":-2400,"hi":-300},"lsn":{"lo":-2100,"hi":-300},"usb":{"lo":300,"hi":2400},"usn":{"lo":300,"hi":2100},"cw":{"lo":-400,"hi":400},"cwn":{"lo":-250,"hi":250},"nbfm":{"lo":-6000,"hi":6000},"nnfm":{"lo":-5000,"hi":5000},"iq":{"lo":-10000,"hi":10000}},"index_html_params":{"PAGE_TITLE":"KiwiSDR","RX_PHOTO_HEIGHT":350,"RX_PHOTO_TITLE_HEIGHT":70,"RX_PHOTO_TITLE":"","RX_PHOTO_DESC":"","RX_TITLE":"` + kc.config.Admin.Name + `","RX_LOC":"` + kc.config.Admin.Location + `","RX_QRA":"","RX_ASL":` + fmt.Sprintf("%d", kc.config.Admin.ASL) + `,"RX_GMAP":""},"owner_info":"","init":{"freq":7020,"mode":"cw","zoom":0,"max_dB":-10,"min_dB":-110},"waterfall_cal":-3,"waterfall_min_dB":-110,"waterfall_max_dB":-10,"snr_meas_interval_hrs":0}`
+	// Calculate grid square from GPS coordinates
+	gridSquare := latLonToGridSquare(kc.config.Admin.GPS.Lat, kc.config.Admin.GPS.Lon)
+
+	cfgJSON := `{"passbands":{"am":{"lo":-4900,"hi":4900},"amn":{"lo":-2500,"hi":2500},"amw":{"lo":-6000,"hi":6000},"sam":{"lo":-4900,"hi":4900},"sal":{"lo":-4900,"hi":0},"sau":{"lo":0,"hi":4900},"sas":{"lo":-4900,"hi":4900},"qam":{"lo":-4900,"hi":4900},"drm":{"lo":-5000,"hi":5000},"lsb":{"lo":-2400,"hi":-300},"lsn":{"lo":-2100,"hi":-300},"usb":{"lo":300,"hi":2400},"usn":{"lo":300,"hi":2100},"cw":{"lo":-400,"hi":400},"cwn":{"lo":-250,"hi":250},"nbfm":{"lo":-6000,"hi":6000},"nnfm":{"lo":-5000,"hi":5000},"iq":{"lo":-10000,"hi":10000}},"index_html_params":{"PAGE_TITLE":"KiwiSDR","RX_PHOTO_HEIGHT":350,"RX_PHOTO_TITLE_HEIGHT":70,"RX_PHOTO_TITLE":"","RX_PHOTO_DESC":"","RX_TITLE":"` + kc.config.Admin.Name + `","RX_LOC":"` + kc.config.Admin.Location + `","RX_QRA":"` + gridSquare + `","RX_ASL":` + fmt.Sprintf("%d", kc.config.Admin.ASL) + `,"RX_GMAP":""},"owner_info":"","init":{"freq":7020,"mode":"cw","zoom":0,"max_dB":-10,"min_dB":-110},"waterfall_cal":-3,"waterfall_min_dB":-110,"waterfall_max_dB":-10,"snr_meas_interval_hrs":0}`
 	cfgJSONEncoded := url.QueryEscape(cfgJSON)
 	cfgJSONEncoded = strings.ReplaceAll(cfgJSONEncoded, "+", "%20")
 	kc.sendMsg("load_cfg", cfgJSONEncoded)
@@ -777,12 +780,16 @@ func (kc *kiwiConn) sendInitMessages() {
 		kc.sendMsg("sample_rate", fmt.Sprintf("%d", sampleRate))
 		kc.sendMsg("client_public_ip", kc.clientIP)
 
+		// Send RX channel number (which slot this user is assigned to)
+		rxSlot := kc.handler.getOrAssignRXSlot(kc.userSessionID)
+		kc.sendMsg("rx_chan", fmt.Sprintf("%d", rxSlot))
+
 		// Check if client is local (same as server or in bypass list)
 		isLocal := "0"
 		if kc.config.Server.IsIPTimeoutBypassed(kc.clientIP, kc.password) {
 			isLocal = "1"
 		}
-		kc.sendMsg("is_local", isLocal+",0,0")
+		kc.sendMsg("is_local", fmt.Sprintf("%d,%s,0", rxSlot, isLocal))
 
 		// Configuration loaded
 		kc.sendMsg("cfg_loaded", "")

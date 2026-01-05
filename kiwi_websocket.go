@@ -530,8 +530,9 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			// Calculate xBin from center frequency (at max zoom resolution)
 			// freq_to_bin: bin = (freq / bandwidth) * max_bins
 			centerBin := (cfKHz / fullSpanKHz) * float64(maxBins)
-			// We display 1024 bins, so xBin is 512 bins before center
-			binsAtCurrentZoom := 1024 << uint(zoom)
+			// Calculate bins at current zoom: bins_at_zoom(zoom) = wf_fft_size << (zoom_levels_max - zoom)
+			binsAtCurrentZoom := 1024 << uint(maxZoom-zoom)
+			// xBin is the start position, so it's center minus half the window
 			xBin = uint32(centerBin - float64(binsAtCurrentZoom)/2)
 			log.Printf("DEBUG ZOOM: Using cf parameter: cfKHz=%.3f, centerBin=%.0f, binsAtZoom=%d, xBin=%d",
 				cfKHz, centerBin, binsAtCurrentZoom, xBin)

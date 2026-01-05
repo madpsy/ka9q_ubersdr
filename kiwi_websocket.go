@@ -481,17 +481,6 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		binBandwidth := (spanKHz * 1000) / 1024 // Hz
 		freq := uint64(cfKHz * 1000)
 
-		// If this is a W/F connection and no session exists yet, create one
-		if kc.connType == "W/F" && kc.session == nil {
-			session, err := kc.sessions.CreateSpectrumSessionWithUserIDAndPassword(
-				kc.sourceIP, kc.clientIP, kc.userSessionID, kc.password)
-			if err != nil {
-				log.Printf("Failed to create KiwiSDR spectrum session: %v", err)
-				return
-			}
-			kc.session = session
-		}
-
 		// Find and update the spectrum session for this userSessionID
 		// The zoom/cf command comes on the SND connection but applies to the W/F spectrum session
 		if kc.userSessionID != "" {
@@ -592,6 +581,11 @@ func (kc *kiwiConn) sendInitMessages() {
 		}
 		kc.sendMsg("is_local", isLocal+",0,0")
 
+		// Send minimal configuration with passbands
+		// The client needs cfg.passbands to be defined to avoid errors
+		cfgJSON := `{"passbands":{"am":{"lo":-4900,"hi":4900},"amn":{"lo":-2500,"hi":2500},"amw":{"lo":-6000,"hi":6000},"sam":{"lo":-4900,"hi":4900},"sal":{"lo":-4900,"hi":0},"sau":{"lo":0,"hi":4900},"sas":{"lo":-4900,"hi":4900},"qam":{"lo":-4900,"hi":4900},"drm":{"lo":-5000,"hi":5000},"lsb":{"lo":-2400,"hi":-300},"lsn":{"lo":-2100,"hi":-300},"usb":{"lo":300,"hi":2400},"usn":{"lo":300,"hi":2100},"cw":{"lo":-400,"hi":400},"cwn":{"lo":-250,"hi":250},"nbfm":{"lo":-6000,"hi":6000},"nnfm":{"lo":-5000,"hi":5000},"iq":{"lo":-10000,"hi":10000}}}`
+		kc.sendMsg("load_cfg", cfgJSON)
+
 		// Configuration loaded
 		kc.sendMsg("cfg_loaded", "")
 
@@ -620,6 +614,18 @@ func (kc *kiwiConn) sendInitMessages() {
 
 		// Waterfall FPS
 		kc.sendMsg("wf_fps", "23")
+
+		// Create spectrum session immediately for W/F connection
+		if kc.session == nil {
+			session, err := kc.sessions.CreateSpectrumSessionWithUserIDAndPassword(
+				kc.sourceIP, kc.clientIP, kc.userSessionID, kc.password)
+			if err != nil {
+				log.Printf("Failed to create KiwiSDR spectrum session: %v", err)
+				return
+			}
+			kc.session = session
+			log.Printf("Created spectrum session for W/F connection: %s", kc.session.ID)
+		}
 	}
 }
 

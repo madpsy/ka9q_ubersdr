@@ -29,6 +29,9 @@ type KiwiWebSocketHandler struct {
 	connRateLimiter    *IPConnectionRateLimiter
 	prometheusMetrics  *PrometheusMetrics
 	radiod             *RadiodController
+	kiwiRXSlots        map[string]int // Map userSessionID to RX channel number
+	nextRXSlot         int            // Next available RX slot
+	mu                 sync.RWMutex   // Protects kiwiRXSlots and nextRXSlot
 }
 
 // NewKiwiWebSocketHandler creates a new KiwiSDR WebSocket handler
@@ -42,7 +45,32 @@ func NewKiwiWebSocketHandler(sessions *SessionManager, audioReceiver *AudioRecei
 		connRateLimiter:    connRateLimiter,
 		prometheusMetrics:  prometheusMetrics,
 		radiod:             sessions.radiod, // Get radiod from sessions
+		kiwiRXSlots:        make(map[string]int),
+		nextRXSlot:         0,
 	}
+}
+
+// getOrAssignRXSlot gets or assigns an RX slot number for a Kiwi user
+func (kwsh *KiwiWebSocketHandler) getOrAssignRXSlot(userSessionID string) int {
+	kwsh.mu.Lock()
+	defer kwsh.mu.Unlock()
+
+	// Check if user already has a slot
+	if slot, exists := kwsh.kiwiRXSlots[userSessionID]; exists {
+		return slot
+	}
+
+	// Assign new slot
+	slot := kwsh.nextRXSlot
+	kwsh.kiwiRXSlots[userSessionID] = slot
+	kwsh.nextRXSlot++
+
+	// Wrap around if we exceed max sessions
+	if kwsh.nextRXSlot >= kwsh.config.Server.MaxSessions {
+		kwsh.nextRXSlot = 0
+	}
+
+	return slot
 }
 
 // HandleKiwiStatus handles KiwiSDR /status HTTP endpoint
@@ -263,6 +291,7 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiWebSocket(w http.ResponseWriter, r *
 		config:             kwsh.config,
 		rateLimiterManager: kwsh.rateLimiterManager,
 		radiod:             kwsh.radiod,
+		handler:            kwsh,          // Reference to handler for RX slot management
 		userSessionID:      userSessionID, // Set before handle() is called
 		sequence:           0,
 		compression:        true,
@@ -287,6 +316,7 @@ type kiwiConn struct {
 	config             *Config
 	rateLimiterManager *RateLimiterManager
 	radiod             *RadiodController
+	handler            *KiwiWebSocketHandler // Reference to handler for RX slot management
 	session            *Session
 	userSessionID      string
 	identUser          string // User identity from SET ident_user command
@@ -1049,7 +1079,6 @@ func (kc *kiwiConn) sendUserList() {
 	// Only show Kiwi protocol users (not native UberSDR users, decoders, etc.)
 	// Group sessions by user_session_id to combine audio and spectrum sessions
 	userMap := make(map[string]*KiwiUserInfo)
-	kiwiUserIndex := 0
 
 	for _, sessionInfo := range allSessions {
 		// Skip internal sessions (no client IP)
@@ -1070,9 +1099,12 @@ func (kc *kiwiConn) sendUserList() {
 
 		// Check if we already have this user
 		if _, exists := userMap[userSessionID]; !exists {
+			// Get or assign RX slot for this Kiwi user
+			rxSlot := kc.handler.getOrAssignRXSlot(userSessionID)
+
 			// New Kiwi user, create entry
 			user := &KiwiUserInfo{
-				Index:           kiwiUserIndex,
+				Index:           rxSlot, // Use assigned RX slot number
 				Name:            "Unknown",
 				Location:        "Unknown",
 				Frequency:       0,
@@ -1092,7 +1124,6 @@ func (kc *kiwiConn) sendUserList() {
 				NoiseCancel:     0,
 				NoiseSubtract:   0,
 			}
-			kiwiUserIndex++
 
 			// Get user agent if available
 			if userAgent, ok := sessionInfo["user_agent"].(string); ok && userAgent != "" {

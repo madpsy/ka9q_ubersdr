@@ -968,20 +968,23 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			copy(unwrapped[halfBins:N], spectrumData[0:halfBins])
 
 			// Convert unwrapped spectrum data (float32 dBm) to KiwiSDR waterfall format
-			// KiwiSDR expects 8-bit values: 0-255 representing -200 to 0 dBm
-			// Formula: byte_value = (dBm + 200) * 255 / 200
+			// KiwiSDR client decodes as: dBm = -(255 - db_value) + wf.cal
+			// So encoding is: db_value = 255 + dBm - wf.cal
+			// We use wf.cal = -3 (sent in init), so: db_value = 255 + dBm + 3
 			wfData := make([]byte, N)
+			wfCal := float32(-3.0) // Must match wf_cal sent in init messages
 			for i, dbValue := range unwrapped {
-				// Clamp to -200..0 dBm range
+				// Clamp to reasonable dBm range (-255 to 0 dBm)
 				clampedDb := dbValue
-				if clampedDb < -200 {
-					clampedDb = -200
+				if clampedDb < -255 {
+					clampedDb = -255
 				}
 				if clampedDb > 0 {
 					clampedDb = 0
 				}
-				// Convert to 0..255 range: (dBm + 200) * 1.275
-				byteVal := int((clampedDb + 200) * 1.275)
+				// Encode: byte_value = 255 + dBm - wf.cal
+				// With wf.cal = -3: byte_value = 255 + dBm + 3
+				byteVal := int(255 + clampedDb - wfCal)
 				if byteVal < 0 {
 					byteVal = 0
 				}

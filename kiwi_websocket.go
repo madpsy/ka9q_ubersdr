@@ -1213,6 +1213,12 @@ func (kc *kiwiConn) handleMarkerCommand(params map[string]string) {
 		return
 	}
 
+	// Log first bookmark for debugging
+	if len(matchingBookmarks) > 0 {
+		log.Printf("KiwiSDR: Sample bookmark: %+v", matchingBookmarks[0])
+	}
+	log.Printf("KiwiSDR: Sending mkr JSON (%d bytes): %s", len(jsonData), string(jsonData))
+
 	// Send as mkr message
 	kc.sendMsg("mkr", string(jsonData))
 	log.Printf("KiwiSDR: Sent %d bookmarks to client", len(matchingBookmarks))

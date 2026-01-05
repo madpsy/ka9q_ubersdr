@@ -867,6 +867,8 @@ func hslToRGB(h, s, l float64) (uint8, uint8, uint8) {
 // Note: DX labels (bookmarks) are NOT sent here - they require a separate server-side database
 // and are loaded via SET MARKER commands. This function only handles band bars and their services.
 func (kc *kiwiConn) buildDXConfig() string {
+	log.Printf("DEBUG: buildDXConfig called with %d bands, %d bookmarks", len(kc.config.Bands), len(kc.config.Bookmarks))
+
 	// Create dx_type array (16 entries for bookmark types)
 	// Even though we're not sending bookmarks here, we still need to define types
 	// for compatibility with the Kiwi client structure
@@ -902,14 +904,19 @@ func (kc *kiwiConn) buildDXConfig() string {
 			}
 			groupToSvc[group] = svcKey
 
+			color := generatePastelColor(group)
+			log.Printf("DEBUG: Band service: group=%s, key=%s, color=%s", group, svcKey, color)
+
 			bandSvc = append(bandSvc, map[string]interface{}{
 				"key":   svcKey,
 				"name":  group,
-				"color": generatePastelColor(group),
+				"color": color,
 			})
 			svcIndex++
 		}
 	}
+
+	log.Printf("DEBUG: Created %d band services", len(bandSvc))
 
 	// Convert UberSDR bands to Kiwi bands format
 	// Kiwi bands are ONLY for the band bar display (frequency ranges)

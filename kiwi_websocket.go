@@ -246,9 +246,12 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiWebSocket(w http.ResponseWriter, r *
 	}()
 
 	// Create Kiwi connection handler
-	// Use timestamp + client IP as the userSessionID so SND and W/F connections from the same client are linked
-	// This ensures audio and waterfall sessions share the same UUID and appear as one user
-	userSessionID := fmt.Sprintf("kiwi-%s-%s", timestamp, clientIP)
+	// Use ONLY client IP as the userSessionID (not timestamp)
+	// This ensures:
+	// 1. SND and W/F connections from same client are linked
+	// 2. Multiple tabs/refreshes from same IP appear as same user
+	// 3. User persists across reconnections
+	userSessionID := fmt.Sprintf("kiwi-%s", clientIP)
 
 	kc := &kiwiConn{
 		conn:               conn,
@@ -1043,9 +1046,10 @@ func (kc *kiwiConn) sendUserList() {
 	allSessions := kc.sessions.GetAllSessionsInfo()
 
 	// Build user list in KiwiSDR format
+	// Only show Kiwi protocol users (not native UberSDR users, decoders, etc.)
 	// Group sessions by user_session_id to combine audio and spectrum sessions
 	userMap := make(map[string]*KiwiUserInfo)
-	nextNonKiwiIndex := kc.config.Server.MaxSessions // Non-Kiwi users start after max Kiwi slots
+	kiwiUserIndex := 0
 
 	for _, sessionInfo := range allSessions {
 		// Skip internal sessions (no client IP)
@@ -1056,32 +1060,19 @@ func (kc *kiwiConn) sendUserList() {
 
 		userSessionID, _ := sessionInfo["user_session_id"].(string)
 		if userSessionID == "" {
-			// No UUID, create a unique entry for this session
-			userSessionID = fmt.Sprintf("anonymous-%s", sessionInfo["id"])
+			continue // Skip sessions without UUID
+		}
+
+		// Only include Kiwi protocol users
+		if !strings.HasPrefix(userSessionID, "kiwi-") {
+			continue // Skip non-Kiwi users (native UberSDR clients, decoders, etc.)
 		}
 
 		// Check if we already have this user
 		if _, exists := userMap[userSessionID]; !exists {
-			// Determine index based on whether this is a Kiwi user
-			var userIndex int
-			isKiwiUser := strings.HasPrefix(userSessionID, "kiwi-")
-
-			if isKiwiUser {
-				// Kiwi users: try to extract their RX channel number from session
-				// The userSessionID format is "kiwi-<timestamp>-<ip>"
-				// We need to find which RX slot they're using
-				// For now, assign based on order of first seen
-				// TODO: Track actual RX channel assignments
-				userIndex = len(userMap) // Temporary: use map size as index
-			} else {
-				// Non-Kiwi users: assign indices after max Kiwi slots
-				userIndex = nextNonKiwiIndex
-				nextNonKiwiIndex++
-			}
-
-			// New user, create entry
+			// New Kiwi user, create entry
 			user := &KiwiUserInfo{
-				Index:           userIndex,
+				Index:           kiwiUserIndex,
 				Name:            "Unknown",
 				Location:        "Unknown",
 				Frequency:       0,
@@ -1101,7 +1092,7 @@ func (kc *kiwiConn) sendUserList() {
 				NoiseCancel:     0,
 				NoiseSubtract:   0,
 			}
-			userIndex++
+			kiwiUserIndex++
 
 			// Get user agent if available
 			if userAgent, ok := sessionInfo["user_agent"].(string); ok && userAgent != "" {
@@ -1266,6 +1257,12 @@ func (kc *kiwiConn) handleMarkerCommand(params map[string]string) {
 				"i":  encodedName,            // Ident (encoded with %20)
 				"fl": flags,                  // Flags: type (16-31) + mode (0-7)
 				"g":  len(matchingBookmarks), // GID (index)
+				"lo": 0,                      // Passband low (0 = use mode default)
+				"hi": 0,                      // Passband high (0 = use mode default)
+				"o":  0,                      // Offset (0 = no offset)
+				"s":  0,                      // Signal bandwidth (0 = unknown)
+				"b":  0,                      // Begin time (0 = 00:00, always active)
+				"e":  2400,                   // End time (2400 = 24:00, always active)
 			}
 
 			// Add optional fields

@@ -1013,8 +1013,44 @@ func main() {
 	if config.Server.EnableKiwiSDR && config.Server.KiwiSDRListen != "" {
 		// Create separate HTTP server for KiwiSDR protocol
 		kiwiMux := http.NewServeMux()
+
+		// Serve static files from kiwi directory
+		kiwiFS := http.FileServer(http.Dir("kiwi"))
+
+		// Register specific endpoints first (they take precedence over the file server)
 		kiwiMux.HandleFunc("/status", kiwiHandler.HandleKiwiStatus) // KiwiSDR status endpoint
-		kiwiMux.HandleFunc("/", kiwiHandler.HandleKiwiWebSocket)    // Accept any path for WebSocket
+
+		// Handle WebSocket connections and static files
+		// WebSocket paths are numeric timestamps followed by /SND or /W/F
+		// Static files are everything else
+		kiwiMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			// Check if this looks like a WebSocket connection path
+			// KiwiSDR WebSocket paths: /<timestamp>/SND or /<timestamp>/W/F
+			// where timestamp is a large number (e.g., 4611686267285906000)
+			path := r.URL.Path
+			if path != "/" && len(path) > 1 {
+				// Split path into parts
+				parts := strings.Split(strings.Trim(path, "/"), "/")
+				// If first part is numeric and looks like a timestamp, treat as WebSocket
+				if len(parts) >= 2 && len(parts[0]) > 10 {
+					// Check if first part is all digits (timestamp)
+					isTimestamp := true
+					for _, c := range parts[0] {
+						if c < '0' || c > '9' {
+							isTimestamp = false
+							break
+						}
+					}
+					if isTimestamp {
+						// This is a WebSocket connection
+						kiwiHandler.HandleKiwiWebSocket(w, r)
+						return
+					}
+				}
+			}
+			// Otherwise, serve static files
+			kiwiFS.ServeHTTP(w, r)
+		})
 
 		kiwiServer = &http.Server{
 			Addr:    config.Server.KiwiSDRListen,

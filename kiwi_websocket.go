@@ -501,17 +501,26 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		spanKHz := fullSpanKHz / math.Pow(2, float64(zoom))
 		binBandwidth := (spanKHz * 1000) / 1024 // Hz per bin at this zoom level
 
-		// CRITICAL: Clamp bin bandwidth to radiod's safe minimum (100 Hz)
-		// This prevents radiod from entering FFT mode where filter constraints cause failures
-		// At deep zoom (10+), this means radiod sends a WIDER span than client expects
-		// The waterfall streaming code will need to decimate/crop the data to match
-		const minBinBandwidth = 100.0 // Hz - safe minimum that avoids filter architecture issues
+		// CRITICAL: Use dynamic bin count for narrow bandwidths (like UberSDR does)
+		// Instead of clamping bin bandwidth and sending wrong frequency range,
+		// request fewer bins at wider bandwidth, then interpolate in streaming code
+		const minBinBandwidth = 100.0 // Hz - radiod's practical minimum
+		const minBinCount = 256       // Minimum bins for reasonable quality
+		binCount := 1024              // Default bin count for KiwiSDR
+
 		if binBandwidth < minBinBandwidth {
-			log.Printf("DEBUG ZOOM: Requested bin_bw %.2f Hz too narrow for radiod, clamping to %.2f Hz (zoom %d)",
-				binBandwidth, minBinBandwidth, zoom)
+			// Calculate how many bins we need at minBinBandwidth to cover the requested span
+			// Requested span = spanKHz * 1000 Hz
+			// bins_needed = span / minBinBandwidth
+			requestedBinCount := int((spanKHz * 1000) / minBinBandwidth)
+			if requestedBinCount < minBinCount {
+				requestedBinCount = minBinCount
+			}
+			binCount = requestedBinCount
 			binBandwidth = minBinBandwidth
-			// Note: radiod will send 1024 bins at 100 Hz (102.4 kHz span)
-			// but client expects narrower span - waterfall code must handle this
+
+			log.Printf("DEBUG ZOOM: Zoom %d requests %.2f Hz/bin, using %d bins at %.2f Hz (span %.3f kHz)",
+				zoom, (spanKHz*1000)/1024, binCount, binBandwidth, float64(binCount)*binBandwidth/1000)
 		}
 
 		var freq uint64
@@ -578,12 +587,12 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		// Find and update the spectrum session for this userSessionID
 		// The zoom command can come on either SND or W/F connection
 		if kc.userSessionID != "" {
-			log.Printf("DEBUG ZOOM: Calling UpdateSpectrumSessionByUserID with userSessionID=%s, freq=%d, binBW=%.2f",
-				kc.userSessionID, freq, binBandwidth)
-			updated := kc.sessions.UpdateSpectrumSessionByUserID(kc.userSessionID, freq, binBandwidth)
+			log.Printf("DEBUG ZOOM: Calling UpdateSpectrumSessionByUserIDWithBinCount with userSessionID=%s, freq=%d, binBW=%.2f, binCount=%d",
+				kc.userSessionID, freq, binBandwidth, binCount)
+			updated := kc.sessions.UpdateSpectrumSessionByUserIDWithBinCount(kc.userSessionID, freq, binBandwidth, binCount)
 			if !updated {
-				log.Printf("ERROR ZOOM: Failed to update spectrum session for zoom command (userSessionID=%s, freq=%d, binBW=%.2f)",
-					kc.userSessionID, freq, binBandwidth)
+				log.Printf("ERROR ZOOM: Failed to update spectrum session for zoom command (userSessionID=%s, freq=%d, binBW=%.2f, binCount=%d)",
+					kc.userSessionID, freq, binBandwidth, binCount)
 			} else {
 				log.Printf("DEBUG ZOOM: Successfully updated spectrum session")
 			}
@@ -1074,6 +1083,45 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 				log.Printf("Unwrapped: first 10 values: %v", unwrapped[:10])
 			}
 
+			// CRITICAL: Handle dynamic bin count for deep zoom
+			// When radiod sends fewer bins (e.g., 293 bins), interpolate up to 1024 bins for KiwiSDR client
+			// Get current zoom level, xBin, and compression flag for later use
+			kc.mu.RLock()
+			currentZoom := kc.zoom
+			currentXBin := kc.xBin
+			useCompression := kc.wfCompression
+			kc.mu.RUnlock()
+
+			// KiwiSDR protocol always expects exactly 1024 bins
+			const targetBins = 1024
+
+			// If radiod sent fewer bins, interpolate up to 1024
+			if N < targetBins {
+				// Interpolate using linear interpolation
+				interpolated := make([]float32, targetBins)
+				for i := 0; i < targetBins; i++ {
+					// Map output bin i to input position in unwrapped
+					srcPos := float64(i) * float64(N-1) / float64(targetBins-1)
+					srcIdx := int(srcPos)
+					frac := float32(srcPos - float64(srcIdx))
+
+					// Linear interpolation between srcIdx and srcIdx+1
+					if srcIdx+1 < N {
+						interpolated[i] = unwrapped[srcIdx]*(1-frac) + unwrapped[srcIdx+1]*frac
+					} else {
+						interpolated[i] = unwrapped[srcIdx]
+					}
+				}
+
+				if packetCount == 1 {
+					log.Printf("INTERPOLATE: zoom=%d, radiod sent %d bins, interpolated to %d bins for KiwiSDR",
+						currentZoom, N, targetBins)
+				}
+
+				unwrapped = interpolated
+				N = targetBins
+			}
+
 			// Convert unwrapped spectrum data (float32 dBFS) to KiwiSDR waterfall format
 			// KiwiSDR wire protocol (from openwebrx.js dB_wire_to_dBm):
 			//   Wire format: byte_value = 255 + dBm (where dBm is 0 to -200)
@@ -1119,13 +1167,7 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 				log.Printf("Encoded wfData: first 10 values: %v", wfData[:10])
 			}
 
-			// Check if compression is enabled and get current zoom/xBin
-			kc.mu.RLock()
-			useCompression := kc.wfCompression
-			currentZoom := kc.zoom
-			currentXBin := kc.xBin
-			kc.mu.RUnlock()
-
+			// Prepare encoded data (compression flag already read above)
 			var encodedData []byte
 			var flags uint32
 

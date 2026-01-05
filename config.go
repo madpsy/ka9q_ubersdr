@@ -40,6 +40,7 @@ type AdminConfig struct {
 	GPS                  GPSConfig `yaml:"gps"`
 	ASL                  int       `yaml:"asl"` // Altitude above sea level in meters
 	Location             string    `yaml:"location"`
+	Antenna              string    `yaml:"antenna"`                // Antenna description
 	VersionCheckEnabled  bool      `yaml:"version_check_enabled"`  // Enable automatic version checking from GitHub
 	VersionCheckInterval int       `yaml:"version_check_interval"` // Version check interval in minutes (default: 60)
 	MaxLoginAttempts     int       `yaml:"max_login_attempts"`     // Maximum failed login attempts before temporary ban (default: 5)
@@ -371,6 +372,9 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Admin.Location == "" {
 		config.Admin.Location = "Dalgety Bay, Scotland, UK"
+	}
+	if config.Admin.Antenna == "" {
+		config.Admin.Antenna = "Multi-band HF antenna"
 	}
 	// Set version checker defaults if not specified
 	// VersionCheckEnabled defaults to true (enabled by default)

@@ -23,6 +23,8 @@ admin:
   asl: 30
   # Location description
   location: "London, England, UK"
+  # Antenna description (displayed in KiwiSDR client and status page)
+  antenna: "Multi-band HF antenna"
   
   # Automatic version checking from GitHub
   # When enabled, checks for new versions periodically and writes to /var/run/updater/latest

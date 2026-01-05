@@ -1575,6 +1575,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 			},
 			"asl":      config.Admin.ASL,
 			"location": config.Admin.Location,
+			"antenna":  config.Admin.Antenna,
 		},
 		"max_clients":          config.Server.MaxSessions,
 		"available_clients":    availableClients,

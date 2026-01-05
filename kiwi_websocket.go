@@ -262,7 +262,7 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiWebSocket(w http.ResponseWriter, r *
 		userSessionID:      userSessionID, // Set before handle() is called
 		sequence:           0,
 		compression:        true,
-		wfCompression:      true,
+		wfCompression:      false, // Disable waterfall compression by default (real KiwiSDR doesn't use it)
 		password:           "",
 		adpcmEncoder:       NewIMAAdpcmEncoder(),
 		wfAdpcmEncoder:     NewIMAAdpcmEncoder(),
@@ -1006,10 +1006,9 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			// We have dBFS values from radiod. Apply calibration to convert to dBm,
 			// then encode using KiwiSDR wire format.
 			// Real KiwiSDR shows mean byte values of 162-163 (dBm = -(255-162) = -93 dBm)
-			// UberSDR was showing 93-99 (dBm = -(255-96) = -159 dBm)
-			// Difference: 67 points = 67 dB too low
-			// Adjusted calibration to match real KiwiSDR levels
-			wfCalibration := float32(92.0) // Calibration offset in dB to convert dBFS to dBm
+			// The previous issue was ADPCM compression being enabled for waterfall data
+			// Now with compression disabled, use moderate calibration offset
+			wfCalibration := float32(-13.0) // Calibration offset in dB to convert dBFS to dBm
 
 			wfData := make([]byte, N)
 			for i, dbfsValue := range unwrapped {

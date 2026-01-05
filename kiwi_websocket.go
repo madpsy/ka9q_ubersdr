@@ -501,6 +501,18 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		spanKHz := fullSpanKHz / math.Pow(2, float64(zoom))
 		binBandwidth := (spanKHz * 1000) / 1024 // Hz per bin at this zoom level
 
+		// CRITICAL: Clamp bin bandwidth to radiod's safe minimum (100 Hz)
+		// This prevents radiod from entering FFT mode where filter constraints cause failures
+		// Zoom 10+ would request <100 Hz bins, which causes radiod to fail with:
+		// "Invalid filter output length" error when bin_bw < 100 Hz
+		const minBinBandwidth = 100.0 // Hz - safe minimum that avoids filter architecture issues
+		if binBandwidth < minBinBandwidth {
+			log.Printf("DEBUG ZOOM: Requested bin_bw %.2f Hz too narrow for radiod, clamping to %.2f Hz (zoom %d)",
+				binBandwidth, minBinBandwidth, zoom)
+			binBandwidth = minBinBandwidth
+			// Note: Client still thinks it's at zoom level %d, but gets best resolution radiod can provide
+		}
+
 		var freq uint64
 		var xBin uint32
 

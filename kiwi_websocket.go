@@ -388,11 +388,14 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 
 	// Handle auth command
 	if _, hasAuth := params["auth"]; hasAuth {
-		// Extract password (# means no password)
-		if password, ok := params["p"]; ok && password != "" && password != "#" {
-			kc.mu.Lock()
-			kc.password = password
-			kc.mu.Unlock()
+		// Extract password (# means no password, empty string also means no password)
+		if password, ok := params["p"]; ok {
+			// Only store non-empty passwords that aren't the placeholder "#"
+			if password != "" && password != "#" {
+				kc.mu.Lock()
+				kc.password = password
+				kc.mu.Unlock()
+			}
 		}
 
 		// Mark auth as received

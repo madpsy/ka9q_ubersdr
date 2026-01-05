@@ -118,8 +118,8 @@ func startStatsLogger() {
 }
 
 var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
+	ReadBufferSize:  8192,  // Increased from 1024 for large messages
+	WriteBufferSize: 65536, // Increased from 1024 for large messages (64KB for load_dxcfg)
 	// Disable Gorilla's compression - we'll do it manually
 	EnableCompression: false,
 	CheckOrigin: func(r *http.Request) bool {

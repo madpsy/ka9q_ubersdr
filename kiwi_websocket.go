@@ -347,9 +347,17 @@ func (kc *kiwiConn) sendMsg(name, value string) {
 	}
 
 	kc.conn.writeMu.Lock()
-	if err := kc.conn.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+	// Increase write deadline for large messages
+	deadline := 10 * time.Second
+	if len(packet) > 10000 {
+		deadline = 30 * time.Second
+	}
+	if err := kc.conn.conn.SetWriteDeadline(time.Now().Add(deadline)); err != nil {
 		log.Printf("Error setting write deadline: %v", err)
 	}
+
+	// CRITICAL: Disable compression for large messages to prevent fragmentation
+	// The Kiwi client expects MSG messages to arrive as single complete frames
 	err := kc.conn.conn.WriteMessage(websocket.BinaryMessage, packet)
 	kc.conn.writeMu.Unlock()
 

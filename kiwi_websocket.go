@@ -292,6 +292,7 @@ type kiwiConn struct {
 	adpcmEncoder       *IMAAdpcmEncoder // ADPCM encoder for audio compression
 	wfAdpcmEncoder     *IMAAdpcmEncoder // ADPCM encoder for waterfall compression
 	audioInitSent      bool             // Track if audio_init message has been sent
+	authReceived       bool             // Track if SET auth command has been received
 	mu                 sync.RWMutex
 }
 
@@ -303,52 +304,8 @@ func (kc *kiwiConn) handle() {
 	// Register User-Agent for this session (required by UberSDR)
 	kc.sessions.SetUserAgent(kc.userSessionID, "KiwiSDR Client")
 
-	if kc.connType == "SND" {
-		// Audio connection - send full initialization sequence
-		// Use actual sample rate from config (default 12000 Hz)
-		sampleRate := kc.config.Audio.DefaultSampleRate
-		kc.sendMsg("sample_rate", fmt.Sprintf("%d", sampleRate))
-		kc.sendMsg("client_public_ip", kc.clientIP)
-
-		// Channel configuration
-		maxSessions := kc.config.Server.MaxSessions
-		kc.sendMsg("rx_chans", fmt.Sprintf("%d", maxSessions))
-		kc.sendMsg("chan_no_pwd", "0")
-		kc.sendMsg("chan_no_pwd_true", "0")
-
-		// Check if client is local (same as server or in bypass list)
-		isLocal := "0"
-		if kc.config.Server.IsIPTimeoutBypassed(kc.clientIP) {
-			isLocal = "1"
-		}
-		kc.sendMsg("is_local", isLocal+",0,0")
-
-		kc.sendMsg("max_camp", fmt.Sprintf("%d", maxSessions))
-		kc.sendMsg("badp", "0")
-
-		// Version and hardware info
-		versionMsg := fmt.Sprintf("version_maj=1 version_min=826 debian_ver=11 model=2 platform=0 hw=1 ext_clk=0 freq_offset=0.000 abyy=B25 dx_db_name=dx")
-		kc.sendMsg("", versionMsg)
-
-		// Configuration loaded
-		kc.sendMsg("cfg_loaded", "")
-
-		// Center frequency and bandwidth
-		kc.sendMsg("center_freq", "15000000")
-		kc.sendMsg("bandwidth", "30000000")
-		kc.sendMsg("adc_clk_nom", "66666600")
-
-		// Audio initialization
-		kc.sendMsg("audio_init", "0 audio_rate=12000")
-
-		// Mark audio_init as sent so we can start streaming
-		kc.mu.Lock()
-		kc.audioInitSent = true
-		kc.mu.Unlock()
-	} else {
-		// Waterfall connection
-		kc.sendMsg("wf_setup", "")
-	}
+	// Don't send initialization messages yet - wait for SET auth command
+	// The client must send "SET auth t=kiwi p=#" (or with a password) first
 
 	// Start message handler and streamer
 	done := make(chan struct{})
@@ -431,10 +388,22 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 
 	// Handle auth command
 	if _, hasAuth := params["auth"]; hasAuth {
+		// Extract password (# means no password)
 		if password, ok := params["p"]; ok && password != "" && password != "#" {
 			kc.mu.Lock()
 			kc.password = password
 			kc.mu.Unlock()
+		}
+
+		// Mark auth as received
+		kc.mu.Lock()
+		alreadyAuthed := kc.authReceived
+		kc.authReceived = true
+		kc.mu.Unlock()
+
+		// Send initialization messages after first auth (only once)
+		if !alreadyAuthed {
+			kc.sendInitMessages()
 		}
 		return
 	}
@@ -563,6 +532,56 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 	}
 
 	// Ignore other commands (agc, etc.)
+}
+
+// sendInitMessages sends the initialization message sequence for KiwiSDR
+func (kc *kiwiConn) sendInitMessages() {
+	if kc.connType == "SND" {
+		// Audio connection - send full initialization sequence
+		// Use actual sample rate from config (default 12000 Hz)
+		sampleRate := kc.config.Audio.DefaultSampleRate
+		kc.sendMsg("sample_rate", fmt.Sprintf("%d", sampleRate))
+		kc.sendMsg("client_public_ip", kc.clientIP)
+
+		// Channel configuration
+		maxSessions := kc.config.Server.MaxSessions
+		kc.sendMsg("rx_chans", fmt.Sprintf("%d", maxSessions))
+		kc.sendMsg("chan_no_pwd", "0")
+		kc.sendMsg("chan_no_pwd_true", "0")
+
+		// Check if client is local (same as server or in bypass list)
+		isLocal := "0"
+		if kc.config.Server.IsIPTimeoutBypassed(kc.clientIP, kc.password) {
+			isLocal = "1"
+		}
+		kc.sendMsg("is_local", isLocal+",0,0")
+
+		kc.sendMsg("max_camp", fmt.Sprintf("%d", maxSessions))
+		kc.sendMsg("badp", "0")
+
+		// Version and hardware info
+		versionMsg := fmt.Sprintf("version_maj=1 version_min=826 debian_ver=11 model=2 platform=0 hw=1 ext_clk=0 freq_offset=0.000 abyy=B25 dx_db_name=dx")
+		kc.sendMsg("", versionMsg)
+
+		// Configuration loaded
+		kc.sendMsg("cfg_loaded", "")
+
+		// Center frequency and bandwidth
+		kc.sendMsg("center_freq", "15000000")
+		kc.sendMsg("bandwidth", "30000000")
+		kc.sendMsg("adc_clk_nom", "66666600")
+
+		// Audio initialization
+		kc.sendMsg("audio_init", fmt.Sprintf("0 audio_rate=%d", sampleRate))
+
+		// Mark audio_init as sent so we can start streaming
+		kc.mu.Lock()
+		kc.audioInitSent = true
+		kc.mu.Unlock()
+	} else {
+		// Waterfall connection
+		kc.sendMsg("wf_setup", "")
+	}
 }
 
 // KiwiUserInfo represents a user in KiwiSDR format for JSON marshaling

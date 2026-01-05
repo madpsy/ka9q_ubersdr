@@ -955,6 +955,11 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 
 			packetCount++
 
+			// Debug: Log first packet to verify we're receiving data
+			if packetCount == 1 {
+				log.Printf("First waterfall packet: len=%d, first 10 values: %v", len(spectrumData), spectrumData[:10])
+			}
+
 			// Unwrap FFT data for KiwiSDR
 			// Radiod sends wrapped FFT: [DC...+Nyquist, -Nyquist...-DC]
 			// KiwiSDR expects unwrapped: [-Nyquist...DC...+Nyquist]
@@ -966,6 +971,11 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			copy(unwrapped[0:halfBins], spectrumData[halfBins:N])
 			// Copy first half (positive frequencies) to end
 			copy(unwrapped[halfBins:N], spectrumData[0:halfBins])
+
+			// Debug: Log unwrapped data
+			if packetCount == 1 {
+				log.Printf("Unwrapped: first 10 values: %v", unwrapped[:10])
+			}
 
 			// Convert unwrapped spectrum data (float32 dBm) to KiwiSDR waterfall format
 			// KiwiSDR client decodes as: dBm = -(255 - db_value) + wf.cal
@@ -992,6 +1002,11 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 					byteVal = 255
 				}
 				wfData[i] = byte(byteVal)
+			}
+
+			// Debug: Log encoded data
+			if packetCount == 1 {
+				log.Printf("Encoded wfData: first 10 values: %v", wfData[:10])
 			}
 
 			// Check if compression is enabled and get current zoom/xBin
@@ -1028,6 +1043,13 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			binary.LittleEndian.PutUint32(packet[4:8], (flags<<16)|uint32(currentZoom&0xffff)) // flags_zoom
 			binary.LittleEndian.PutUint32(packet[8:12], wfSequence)                            // sequence
 			copy(packet[12:], encodedData)
+
+			// Debug: Log packet structure for first packet
+			if packetCount == 1 {
+				log.Printf("W/F packet #%d: xBin=%d, zoom=%d, flags=%d, seq=%d, dataLen=%d, compressed=%v",
+					packetCount, currentXBin, currentZoom, flags, wfSequence, len(encodedData), useCompression)
+				log.Printf("First 10 bytes of encoded data: %v", encodedData[:10])
+			}
 
 			// Send with "W/F" tag + skip byte
 			fullPacket := append([]byte("W/F\x00"), packet...)

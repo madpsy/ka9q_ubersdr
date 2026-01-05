@@ -5144,15 +5144,27 @@ function waterfall_add(data_raw, audioFFT)
    var x_bin_server, x_zoom_server;
 	
 	if (audioFFT == 0) {
-      var u32View = new Uint32Array(data_raw, 4, 3);
-      x_bin_server = u32View[0];    // bin & zoom from server at time data was queued
-      var u32 = u32View[1];
-      if (kiwi_gc_wf) u32View = null;	// gc
-      x_zoom_server = u32 & 0xffff;
-      var flags = (u32 >> 16) & 0xffff;
-      
-      data_arr_u8 = new Uint8Array(data_raw, 16);	// unsigned dBm values, converted to signed later on
-      var bytes = data_arr_u8.length;
+	     var u32View = new Uint32Array(data_raw, 4, 3);
+	     x_bin_server = u32View[0];    // bin & zoom from server at time data was queued
+	     var u32 = u32View[1];
+	     if (kiwi_gc_wf) u32View = null;	// gc
+	     x_zoom_server = u32 & 0xffff;
+	     var flags = (u32 >> 16) & 0xffff;
+	     
+	     // DEBUG: Log first packet
+	     if (typeof(wf_debug_count) === 'undefined') wf_debug_count = 0;
+	     if (wf_debug_count < 3) {
+	        console.log('WF packet #'+ wf_debug_count +': x_bin='+ x_bin_server +', zoom='+ x_zoom_server +', flags='+ flags +', data_raw.byteLength='+ data_raw.byteLength);
+	        wf_debug_count++;
+	     }
+	     
+	     data_arr_u8 = new Uint8Array(data_raw, 16);	// unsigned dBm values, converted to signed later on
+	     var bytes = data_arr_u8.length;
+	     
+	     // DEBUG: Log data values
+	     if (wf_debug_count <= 3) {
+	        console.log('WF data: bytes='+ bytes +', first 10 values='+ Array.from(data_arr_u8.slice(0,10)));
+	     }
    
       // when caught up, update the max/min db so lagging w/f data doesn't use wrong (newer) zoom correction
       if (need_maxmindb_update && zoom_level == x_zoom_server) {

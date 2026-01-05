@@ -303,15 +303,48 @@ func (kc *kiwiConn) handle() {
 	// Register User-Agent for this session (required by UberSDR)
 	kc.sessions.SetUserAgent(kc.userSessionID, "KiwiSDR Client")
 
-	// Send initial MSG responses
-	kc.sendMsg("version_maj", "1")
-	kc.sendMsg("version_min", "550")
-	kc.sendMsg("bandwidth", "30000000")
-
 	if kc.connType == "SND" {
-		// Audio connection
-		kc.sendMsg("sample_rate", "12000")
-		// Note: audio_init message is sent in response to "SET AR OK" command
+		// Audio connection - send full initialization sequence
+		// Use actual sample rate from config (default 12000 Hz)
+		sampleRate := kc.config.Audio.DefaultSampleRate
+		kc.sendMsg("sample_rate", fmt.Sprintf("%d", sampleRate))
+		kc.sendMsg("client_public_ip", kc.clientIP)
+
+		// Channel configuration
+		maxSessions := kc.config.Server.MaxSessions
+		kc.sendMsg("rx_chans", fmt.Sprintf("%d", maxSessions))
+		kc.sendMsg("chan_no_pwd", "0")
+		kc.sendMsg("chan_no_pwd_true", "0")
+
+		// Check if client is local (same as server or in bypass list)
+		isLocal := "0"
+		if kc.config.Server.IsIPTimeoutBypassed(kc.clientIP) {
+			isLocal = "1"
+		}
+		kc.sendMsg("is_local", isLocal+",0,0")
+
+		kc.sendMsg("max_camp", fmt.Sprintf("%d", maxSessions))
+		kc.sendMsg("badp", "0")
+
+		// Version and hardware info
+		versionMsg := fmt.Sprintf("version_maj=1 version_min=826 debian_ver=11 model=2 platform=0 hw=1 ext_clk=0 freq_offset=0.000 abyy=B25 dx_db_name=dx")
+		kc.sendMsg("", versionMsg)
+
+		// Configuration loaded
+		kc.sendMsg("cfg_loaded", "")
+
+		// Center frequency and bandwidth
+		kc.sendMsg("center_freq", "15000000")
+		kc.sendMsg("bandwidth", "30000000")
+		kc.sendMsg("adc_clk_nom", "66666600")
+
+		// Audio initialization
+		kc.sendMsg("audio_init", "0 audio_rate=12000")
+
+		// Mark audio_init as sent so we can start streaming
+		kc.mu.Lock()
+		kc.audioInitSent = true
+		kc.mu.Unlock()
 	} else {
 		// Waterfall connection
 		kc.sendMsg("wf_setup", "")

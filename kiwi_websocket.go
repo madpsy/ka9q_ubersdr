@@ -770,7 +770,7 @@ func (kc *kiwiConn) sendUserList() {
 		users = append(users, *user)
 	}
 
-	// Marshal to JSON
+	// Marshal to JSON (compact, no indentation)
 	jsonData, err := json.Marshal(users)
 	if err != nil {
 		log.Printf("Error marshaling user list: %v", err)
@@ -778,7 +778,16 @@ func (kc *kiwiConn) sendUserList() {
 	}
 
 	// Send as MSG user_cb=<json>
-	kc.sendMsg("user_cb", string(jsonData))
+	// The JSON must be sent as a single message without line breaks
+	jsonStr := string(jsonData)
+	// Remove any newlines that might have been added
+	jsonStr = strings.ReplaceAll(jsonStr, "\n", "")
+	jsonStr = strings.ReplaceAll(jsonStr, "\r", "")
+
+	// Log the JSON for debugging
+	log.Printf("Sending user_cb JSON (%d bytes): %s", len(jsonStr), jsonStr)
+
+	kc.sendMsg("user_cb", jsonStr)
 }
 
 // streamAudio streams audio in KiwiSDR SND format

@@ -501,23 +501,39 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		spanKHz := fullSpanKHz / math.Pow(2, float64(zoom))
 		requestedBinBandwidth := (spanKHz * 1000) / 1024 // Hz per bin at this zoom level
 
-		// Radiod constraint: total span (bins × bandwidth) has practical limits
-		// UberSDR uses fewer bins at narrow bandwidths to keep total span reasonable
-		// For KiwiSDR, we need to interpolate back to 1024 bins for the client
+		// Radiod has minimum bin bandwidth constraints that depend on bin count
+		// From error: "Invalid filter output length" when bin_bw is too narrow
+		// The minimum appears to be around 30 Hz for 512 bins, 60 Hz for 1024 bins
+		// Strategy: Reduce bin count for narrow bandwidths, then interpolate for client
 		binCount := 1024
 		binBandwidth := requestedBinBandwidth
+		const minBinBW1024 = 60.0 // Minimum Hz/bin for 1024 bins
+		const minBinBW512 = 30.0  // Minimum Hz/bin for 512 bins
+		const minBinBW256 = 15.0  // Minimum Hz/bin for 256 bins
 
-		// If requested span is very narrow, use fewer bins to stay within radiod's capabilities
-		// UberSDR shows this works - it uses variable bin counts (256-2048)
-		const maxBinsForNarrowBW = 512 // Reduce bins when bandwidth is very narrow
-		if requestedBinBandwidth < 10.0 && binCount > maxBinsForNarrowBW {
-			// For very narrow bandwidths (<10 Hz/bin), reduce bin count
-			// This keeps total span reasonable while maintaining resolution
-			binCount = maxBinsForNarrowBW
-			// Recalculate bandwidth to cover the same span with fewer bins
+		if requestedBinBandwidth < minBinBW1024 {
+			// Try 512 bins
+			binCount = 512
 			binBandwidth = (spanKHz * 1000) / float64(binCount)
-			log.Printf("DEBUG ZOOM: Zoom %d: requested %.2f Hz/bin, using %d bins at %.2f Hz/bin (span %.3f kHz)",
-				zoom, requestedBinBandwidth, binCount, binBandwidth, spanKHz)
+
+			if binBandwidth < minBinBW512 {
+				// Try 256 bins
+				binCount = 256
+				binBandwidth = (spanKHz * 1000) / float64(binCount)
+
+				if binBandwidth < minBinBW256 {
+					// Clamp to minimum
+					binBandwidth = minBinBW256
+					log.Printf("DEBUG ZOOM: Zoom %d: requested %.2f Hz/bin, clamped to %d bins at %.2f Hz/bin (span %.3f kHz, requested %.3f kHz)",
+						zoom, requestedBinBandwidth, binCount, binBandwidth, float64(binCount)*binBandwidth/1000, spanKHz)
+				} else {
+					log.Printf("DEBUG ZOOM: Zoom %d: requested %.2f Hz/bin, using %d bins at %.2f Hz/bin (span %.3f kHz)",
+						zoom, requestedBinBandwidth, binCount, binBandwidth, spanKHz)
+				}
+			} else {
+				log.Printf("DEBUG ZOOM: Zoom %d: requested %.2f Hz/bin, using %d bins at %.2f Hz/bin (span %.3f kHz)",
+					zoom, requestedBinBandwidth, binCount, binBandwidth, spanKHz)
+			}
 		}
 
 		var freq uint64

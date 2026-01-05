@@ -478,6 +478,13 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 	// Client sends: "SET zoom=X start=Y" or "SET zoom=X cf=Y"
 	// This command can come on either SND or W/F connection
 	if zoomStr, hasZoom := params["zoom"]; hasZoom {
+		// Ignore zoom parameter in MARKER commands - these are just display parameters
+		// and should not trigger spectrum frequency updates
+		if _, isMarker := params["MARKER"]; isMarker {
+			log.Printf("DEBUG ZOOM: Ignoring zoom in MARKER command")
+			return
+		}
+
 		zoom, _ := strconv.Atoi(zoomStr)
 
 		log.Printf("DEBUG ZOOM: Received zoom command on %s connection: zoom=%d, params=%v, userSessionID=%s",

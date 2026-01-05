@@ -502,14 +502,13 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		requestedBinBandwidth := (spanKHz * 1000) / 1024 // Hz per bin at this zoom level
 
 		// Radiod has minimum bin bandwidth constraints that depend on bin count
-		// From error: "Invalid filter output length" when bin_bw is too narrow
-		// The minimum appears to be around 30 Hz for 512 bins, 60 Hz for 1024 bins
-		// Strategy: Reduce bin count for narrow bandwidths, then interpolate for client
+		// From UberSDR testing: 256 bins at 25 Hz/bin works fine
+		// The constraint is related to FFT size and filter design
 		binCount := 1024
 		binBandwidth := requestedBinBandwidth
 		const minBinBW1024 = 60.0 // Minimum Hz/bin for 1024 bins
-		const minBinBW512 = 30.0  // Minimum Hz/bin for 512 bins
-		const minBinBW256 = 15.0  // Minimum Hz/bin for 256 bins
+		const minBinBW512 = 40.0  // Minimum Hz/bin for 512 bins
+		const minBinBW256 = 25.0  // Minimum Hz/bin for 256 bins (from UberSDR)
 
 		if requestedBinBandwidth < minBinBW1024 {
 			// Try 512 bins

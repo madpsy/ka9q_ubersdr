@@ -1014,8 +1014,16 @@ func main() {
 		// Create separate HTTP server for KiwiSDR protocol
 		kiwiMux := http.NewServeMux()
 
+		// Check if kiwi directory exists and log it
+		kiwiDir := "kiwi"
+		if _, err := os.Stat(kiwiDir); os.IsNotExist(err) {
+			log.Printf("Warning: kiwi directory not found at %s", kiwiDir)
+		} else {
+			log.Printf("KiwiSDR static files will be served from: %s", kiwiDir)
+		}
+
 		// Serve static files from kiwi directory
-		kiwiFS := http.FileServer(http.Dir("kiwi"))
+		kiwiFS := http.FileServer(http.Dir(kiwiDir))
 
 		// Register specific endpoints first (they take precedence over the file server)
 		kiwiMux.HandleFunc("/status", kiwiHandler.HandleKiwiStatus) // KiwiSDR status endpoint
@@ -1028,6 +1036,12 @@ func main() {
 			// KiwiSDR WebSocket paths: /<timestamp>/SND or /<timestamp>/W/F
 			// where timestamp is a large number (e.g., 4611686267285906000)
 			path := r.URL.Path
+
+			// Log all requests for debugging
+			if DebugMode {
+				log.Printf("KiwiSDR request: %s %s", r.Method, path)
+			}
+
 			if path != "/" && len(path) > 1 {
 				// Split path into parts
 				parts := strings.Split(strings.Trim(path, "/"), "/")
@@ -1043,12 +1057,18 @@ func main() {
 					}
 					if isTimestamp {
 						// This is a WebSocket connection
+						if DebugMode {
+							log.Printf("KiwiSDR WebSocket connection detected: %s", path)
+						}
 						kiwiHandler.HandleKiwiWebSocket(w, r)
 						return
 					}
 				}
 			}
 			// Otherwise, serve static files
+			if DebugMode {
+				log.Printf("KiwiSDR serving static file: %s", path)
+			}
 			kiwiFS.ServeHTTP(w, r)
 		})
 

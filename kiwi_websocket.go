@@ -480,6 +480,9 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 	if zoomStr, hasZoom := params["zoom"]; hasZoom {
 		zoom, _ := strconv.Atoi(zoomStr)
 
+		log.Printf("DEBUG ZOOM: Received zoom command on %s connection: zoom=%d, params=%v, userSessionID=%s",
+			kc.connType, zoom, params, kc.userSessionID)
+
 		// Store zoom level
 		kc.mu.Lock()
 		kc.zoom = zoom
@@ -511,6 +514,8 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			// We display 1024 bins, so xBin is 512 bins before center
 			binsAtCurrentZoom := 1024 << uint(zoom)
 			xBin = uint32(centerBin - float64(binsAtCurrentZoom)/2)
+			log.Printf("DEBUG ZOOM: Using cf parameter: cfKHz=%.3f, centerBin=%.0f, binsAtZoom=%d, xBin=%d",
+				cfKHz, centerBin, binsAtCurrentZoom, xBin)
 		} else if startStr, ok := params["start"]; ok {
 			// Handle start parameter (x_bin position at max zoom resolution)
 			xBin64, _ := strconv.ParseUint(startStr, 10, 32)
@@ -523,10 +528,13 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			// bin_to_freq: freq = (bin / max_bins) * bandwidth
 			cfKHz := (centerBin / float64(maxBins)) * fullSpanKHz
 			freq = uint64(cfKHz * 1000)
+			log.Printf("DEBUG ZOOM: Using start parameter: xBin=%d, binsAtZoom=%d, centerBin=%.0f, cfKHz=%.3f, freq=%d Hz",
+				xBin, binsAtCurrentZoom, centerBin, cfKHz, freq)
 		} else {
 			// No cf or start provided, use current center (15 MHz)
 			freq = 15000000
 			xBin = 0
+			log.Printf("DEBUG ZOOM: No cf or start parameter, using default: freq=15 MHz, xBin=0")
 		}
 
 		// Store xBin
@@ -534,10 +542,24 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		kc.xBin = xBin
 		kc.mu.Unlock()
 
+		// Debug logging
+		log.Printf("DEBUG ZOOM: Calculated values: zoom=%d, xBin=%d, freq=%d Hz (%.3f kHz), binBW=%.2f Hz, spanKHz=%.3f",
+			zoom, xBin, freq, float64(freq)/1000.0, binBandwidth, spanKHz)
+
 		// Find and update the spectrum session for this userSessionID
 		// The zoom command can come on either SND or W/F connection
 		if kc.userSessionID != "" {
-			kc.sessions.UpdateSpectrumSessionByUserID(kc.userSessionID, freq, binBandwidth)
+			log.Printf("DEBUG ZOOM: Calling UpdateSpectrumSessionByUserID with userSessionID=%s, freq=%d, binBW=%.2f",
+				kc.userSessionID, freq, binBandwidth)
+			updated := kc.sessions.UpdateSpectrumSessionByUserID(kc.userSessionID, freq, binBandwidth)
+			if !updated {
+				log.Printf("ERROR ZOOM: Failed to update spectrum session for zoom command (userSessionID=%s, freq=%d, binBW=%.2f)",
+					kc.userSessionID, freq, binBandwidth)
+			} else {
+				log.Printf("DEBUG ZOOM: Successfully updated spectrum session")
+			}
+		} else {
+			log.Printf("ERROR ZOOM: userSessionID is empty, cannot update spectrum session")
 		}
 		return
 	}
@@ -1105,11 +1127,15 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			binary.LittleEndian.PutUint32(packet[8:12], wfSequence)                            // sequence
 			copy(packet[12:], encodedData)
 
-			// Debug: Log packet structure for first packet
-			if packetCount == 1 {
+			// Debug: Log packet structure for first few packets
+			if packetCount <= 3 {
 				log.Printf("W/F packet #%d: xBin=%d, zoom=%d, flags=%d, seq=%d, dataLen=%d, compressed=%v",
 					packetCount, currentXBin, currentZoom, flags, wfSequence, len(encodedData), useCompression)
 				log.Printf("First 10 bytes of encoded data: %v", encodedData[:10])
+				// Calculate what frequency range this represents
+				if kc.session != nil {
+					log.Printf("Session freq=%d Hz, binBW=%.2f Hz", kc.session.Frequency, kc.session.BinBandwidth)
+				}
 			}
 
 			// Send with "W/F" tag + skip byte

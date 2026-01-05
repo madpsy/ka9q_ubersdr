@@ -581,9 +581,9 @@ func (kc *kiwiConn) sendInitMessages() {
 		}
 		kc.sendMsg("is_local", isLocal+",0,0")
 
-		// Send minimal configuration with passbands
-		// The client needs cfg.passbands to be defined to avoid errors
-		cfgJSON := `{"passbands":{"am":{"lo":-4900,"hi":4900},"amn":{"lo":-2500,"hi":2500},"amw":{"lo":-6000,"hi":6000},"sam":{"lo":-4900,"hi":4900},"sal":{"lo":-4900,"hi":0},"sau":{"lo":0,"hi":4900},"sas":{"lo":-4900,"hi":4900},"qam":{"lo":-4900,"hi":4900},"drm":{"lo":-5000,"hi":5000},"lsb":{"lo":-2400,"hi":-300},"lsn":{"lo":-2100,"hi":-300},"usb":{"lo":300,"hi":2400},"usn":{"lo":300,"hi":2100},"cw":{"lo":-400,"hi":400},"cwn":{"lo":-250,"hi":250},"nbfm":{"lo":-6000,"hi":6000},"nnfm":{"lo":-5000,"hi":5000},"iq":{"lo":-10000,"hi":10000}}}`
+		// Send minimal configuration with passbands and index_html_params
+		// The client needs these to be defined to avoid errors
+		cfgJSON := `{"passbands":{"am":{"lo":-4900,"hi":4900},"amn":{"lo":-2500,"hi":2500},"amw":{"lo":-6000,"hi":6000},"sam":{"lo":-4900,"hi":4900},"sal":{"lo":-4900,"hi":0},"sau":{"lo":0,"hi":4900},"sas":{"lo":-4900,"hi":4900},"qam":{"lo":-4900,"hi":4900},"drm":{"lo":-5000,"hi":5000},"lsb":{"lo":-2400,"hi":-300},"lsn":{"lo":-2100,"hi":-300},"usb":{"lo":300,"hi":2400},"usn":{"lo":300,"hi":2100},"cw":{"lo":-400,"hi":400},"cwn":{"lo":-250,"hi":250},"nbfm":{"lo":-6000,"hi":6000},"nnfm":{"lo":-5000,"hi":5000},"iq":{"lo":-10000,"hi":10000}},"index_html_params":{"RX_PHOTO_HEIGHT":350,"RX_PHOTO_TITLE_HEIGHT":70},"init":{"freq":7020,"mode":"cw","zoom":0,"max_dB":-10,"min_dB":-110}}`
 		kc.sendMsg("load_cfg", cfgJSON)
 
 		// Configuration loaded

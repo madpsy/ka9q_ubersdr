@@ -377,6 +377,7 @@ func (kc *kiwiConn) handleMessages(done chan struct{}) {
 // handleSetCommand processes a SET command from the Kiwi client
 func (kc *kiwiConn) handleSetCommand(command string) {
 	// Parse space-separated key=value pairs
+	// Also handle standalone keys (like "auth" in "SET auth t=kiwi p=#")
 	params := make(map[string]string)
 	parts := strings.Fields(command)
 	for _, part := range parts {
@@ -384,6 +385,9 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			key := part[:idx]
 			value := part[idx+1:]
 			params[key] = value
+		} else {
+			// Standalone key without value (e.g., "auth")
+			params[part] = ""
 		}
 	}
 

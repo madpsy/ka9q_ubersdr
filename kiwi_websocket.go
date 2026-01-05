@@ -486,7 +486,7 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		kc.mu.Unlock()
 
 		// Calculate bin_bandwidth from zoom level
-		// Full span = 30 MHz, zoom divides by 2^zoom, 1024 bins
+		// Full span = 30 MHz, zoom divides by 2^zoom, 1024 bins displayed
 		fullSpanKHz := 30000.0
 		spanKHz := fullSpanKHz / math.Pow(2, float64(zoom))
 		binBandwidth := (spanKHz * 1000) / 1024 // Hz per bin at this zoom level
@@ -494,32 +494,34 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		var freq uint64
 		var xBin uint32
 
+		// Important: x_bin is always relative to MAX zoom level (zoom 14)
+		// max_bins = 1024 << 14 = 16777216 bins across 30 MHz
+		// bin_to_freq: freq = (bin / max_bins) * bandwidth
+		// freq_to_bin: bin = (freq / bandwidth) * max_bins
+		const maxZoom = 14
+		maxBins := 1024 << maxZoom // 16777216
+
 		// Handle cf parameter (center frequency in kHz) - takes precedence
 		if cfStr, ok := params["cf"]; ok {
 			cfKHz, _ := strconv.ParseFloat(cfStr, 64)
 			freq = uint64(cfKHz * 1000)
-			// Calculate xBin from center frequency
-			// xBin represents the leftmost bin of the visible window
-			// At zoom level, we see 1024 bins out of (1024 * 2^zoom) total bins
-			// Center frequency maps to the middle of our 1024-bin window
-			totalBins := 1024 * math.Pow(2, float64(zoom))
-			binWidth := fullSpanKHz / totalBins // kHz per bin in the full spectrum
-			// Frequency 0 is at the left edge, 30 MHz at the right
-			centerBinInFullSpectrum := cfKHz / binWidth
-			// Our window shows bins [xBin, xBin+1024), so center is at xBin+512
-			xBin = uint32(centerBinInFullSpectrum - 512)
+			// Calculate xBin from center frequency (at max zoom resolution)
+			// freq_to_bin: bin = (freq / bandwidth) * max_bins
+			centerBin := (cfKHz / fullSpanKHz) * float64(maxBins)
+			// We display 1024 bins, so xBin is 512 bins before center
+			binsAtCurrentZoom := 1024 << uint(zoom)
+			xBin = uint32(centerBin - float64(binsAtCurrentZoom)/2)
 		} else if startStr, ok := params["start"]; ok {
-			// Handle start parameter (x_bin position) - bin number in the zoomed spectrum
+			// Handle start parameter (x_bin position at max zoom resolution)
 			xBin64, _ := strconv.ParseUint(startStr, 10, 32)
 			xBin = uint32(xBin64)
 			// Calculate center frequency from xBin
-			// xBin is the leftmost bin of our 1024-bin window
-			// Total bins at this zoom level: 1024 * 2^zoom
-			totalBins := 1024 * math.Pow(2, float64(zoom))
-			binWidth := fullSpanKHz / totalBins // kHz per bin in the full spectrum
-			// Center of our window is at bin (xBin + 512)
-			centerBinInFullSpectrum := float64(xBin) + 512
-			cfKHz := centerBinInFullSpectrum * binWidth
+			// xBin is at max zoom resolution, we display bins_at_current_zoom
+			binsAtCurrentZoom := 1024 << uint(zoom)
+			// Center bin is at xBin + (bins_at_current_zoom / 2)
+			centerBin := float64(xBin) + float64(binsAtCurrentZoom)/2
+			// bin_to_freq: freq = (bin / max_bins) * bandwidth
+			cfKHz := (centerBin / float64(maxBins)) * fullSpanKHz
 			freq = uint64(cfKHz * 1000)
 		} else {
 			// No cf or start provided, use current center (15 MHz)

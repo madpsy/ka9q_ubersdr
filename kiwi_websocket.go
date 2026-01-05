@@ -997,11 +997,12 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 
 			// Convert unwrapped spectrum data (float32 dBFS) to KiwiSDR waterfall format
 			// Radiod sends dBFS (relative to full scale), need to convert to dBm
-			// Real KiwiSDR shows: Min=0, Max=243-248, Mean=96
-			// UberSDR before fix: Min=136, Max=228, Mean=145
-			// Need to shift down by ~50 and expand range to include 0
-			// Calibration offset determined by comparing with real KiwiSDR
-			wfCalibrationOffset := float32(-63.0) // Convert dBFS to dBm
+			// Comparison with real KiwiSDR:
+			//   Real KiwiSDR: Min=0, Max=243-248, Mean=96
+			//   UberSDR -63dB: Min=55, Max=147, Mean=65 (too dark)
+			// Adjust offset to match real KiwiSDR mean of 96
+			// Difference: 96 - 65 = 31, so reduce offset by 31/1.275 = ~24 dB
+			wfCalibrationOffset := float32(-39.0) // Convert dBFS to dBm (empirically tuned)
 
 			// KiwiSDR expects 8-bit values: 0-255 representing -200 to 0 dBm
 			// Formula: byte_value = (dBm + 200) * 255 / 200 = (dBm + 200) * 1.275

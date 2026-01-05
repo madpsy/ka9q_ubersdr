@@ -1238,7 +1238,7 @@ func (kc *kiwiConn) sendUserList() {
 				RecordNum:       0,
 				AckTime:         "",
 				Extension:       "Unknown",
-				Antenna:         "Unknown",
+				Antenna:         "", // Leave empty - client will not display if empty
 				Compression:     0.0,
 				FreqOffset:      0.0,
 				ColorAnt:        0,

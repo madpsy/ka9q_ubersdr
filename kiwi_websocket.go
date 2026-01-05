@@ -501,49 +501,16 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		spanKHz := fullSpanKHz / math.Pow(2, float64(zoom))
 		requestedBinBandwidth := (spanKHz * 1000) / 1024 // Hz per bin at this zoom level
 
-		// Radiod has minimum bin bandwidth constraints that depend on bin count
-		// From UberSDR testing: 256 bins at 50 Hz/bin works (not 25 Hz!)
-		// The constraint is related to FFT size and filter design
-		binCount := 1024
-		binBandwidth := requestedBinBandwidth
-		const minBinBW1024 = 60.0 // Minimum Hz/bin for 1024 bins
-		const minBinBW512 = 50.0  // Minimum Hz/bin for 512 bins
-		const minBinBW256 = 50.0  // Minimum Hz/bin for 256 bins (from UberSDR actual usage)
-
-		if requestedBinBandwidth < minBinBW1024 {
-			// Try 512 bins
-			binCount = 512
-			binBandwidth = (spanKHz * 1000) / float64(binCount)
-
-			if binBandwidth < minBinBW512 {
-				// Try 256 bins
-				binCount = 256
-				binBandwidth = (spanKHz * 1000) / float64(binCount)
-
-				if binBandwidth < minBinBW256 {
-					// Clamp to minimum
-					binBandwidth = minBinBW256
-					log.Printf("DEBUG ZOOM: Zoom %d: requested %.2f Hz/bin, clamped to %d bins at %.2f Hz/bin (span %.3f kHz, requested %.3f kHz)",
-						zoom, requestedBinBandwidth, binCount, binBandwidth, float64(binCount)*binBandwidth/1000, spanKHz)
-				} else {
-					log.Printf("DEBUG ZOOM: Zoom %d: requested %.2f Hz/bin, using %d bins at %.2f Hz/bin (span %.3f kHz)",
-						zoom, requestedBinBandwidth, binCount, binBandwidth, spanKHz)
-				}
-			} else {
-				log.Printf("DEBUG ZOOM: Zoom %d: requested %.2f Hz/bin, using %d bins at %.2f Hz/bin (span %.3f kHz)",
-					zoom, requestedBinBandwidth, binCount, binBandwidth, spanKHz)
-			}
-		}
-
-		var freq uint64
-		var xBin uint32
-
 		// Important: x_bin is always relative to MAX zoom level (zoom 14)
 		// max_bins = 1024 << 14 = 16777216 bins across 30 MHz
 		// bin_to_freq: freq = (bin / max_bins) * bandwidth
 		// freq_to_bin: bin = (freq / bandwidth) * max_bins
 		const maxZoom = 14
 		maxBins := 1024 << maxZoom // 16777216
+
+		// Parse x_bin and calculate center frequency FIRST (before bin count determination)
+		var freq uint64
+		var xBin uint32
 
 		// Handle cf parameter (center frequency in kHz) - takes precedence
 		if cfStr, ok := params["cf"]; ok {
@@ -585,6 +552,42 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			freq = 15000000
 			xBin = 0
 			log.Printf("DEBUG ZOOM: No cf or start parameter, using default: freq=15 MHz, xBin=0")
+		}
+
+		// NOW determine bin count and bandwidth based on radiod constraints
+		// The center frequency is already calculated correctly above
+		// Radiod has minimum bin bandwidth constraints that depend on bin count
+		// From UberSDR testing: 256 bins at 50 Hz/bin works (not 25 Hz!)
+		// The constraint is related to FFT size and filter design
+		binCount := 1024
+		binBandwidth := requestedBinBandwidth
+		const minBinBW1024 = 60.0 // Minimum Hz/bin for 1024 bins
+		const minBinBW512 = 50.0  // Minimum Hz/bin for 512 bins
+		const minBinBW256 = 50.0  // Minimum Hz/bin for 256 bins (from UberSDR actual usage)
+
+		if requestedBinBandwidth < minBinBW1024 {
+			// Try 512 bins
+			binCount = 512
+			binBandwidth = (spanKHz * 1000) / float64(binCount)
+
+			if binBandwidth < minBinBW512 {
+				// Try 256 bins
+				binCount = 256
+				binBandwidth = (spanKHz * 1000) / float64(binCount)
+
+				if binBandwidth < minBinBW256 {
+					// Clamp to minimum
+					binBandwidth = minBinBW256
+					log.Printf("DEBUG ZOOM: Zoom %d: requested %.2f Hz/bin, clamped to %d bins at %.2f Hz/bin (span %.3f kHz, requested %.3f kHz)",
+						zoom, requestedBinBandwidth, binCount, binBandwidth, float64(binCount)*binBandwidth/1000, spanKHz)
+				} else {
+					log.Printf("DEBUG ZOOM: Zoom %d: requested %.2f Hz/bin, using %d bins at %.2f Hz/bin (span %.3f kHz)",
+						zoom, requestedBinBandwidth, binCount, binBandwidth, spanKHz)
+				}
+			} else {
+				log.Printf("DEBUG ZOOM: Zoom %d: requested %.2f Hz/bin, using %d bins at %.2f Hz/bin (span %.3f kHz)",
+					zoom, requestedBinBandwidth, binCount, binBandwidth, spanKHz)
+			}
 		}
 
 		// Store xBin
@@ -1103,81 +1106,38 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			kc.mu.RUnlock()
 
 			// KiwiSDR protocol always expects exactly 1024 bins
-			// If radiod sent fewer bins (due to narrow bandwidth optimization), we need to:
-			// 1. Calculate the requested span from zoom level
-			// 2. Extract/crop the portion of radiod's data that matches the requested span
-			// 3. Interpolate that cropped portion to 1024 bins
+			// If radiod sent fewer bins (due to narrow bandwidth optimization), interpolate up
+			//
+			// IMPORTANT: We cannot crop the data because the client calculates frequencies based on
+			// x_bin and zoom level, assuming the 1024 bins represent the full span at that zoom.
+			// Cropping would break frequency alignment.
+			//
+			// Instead, we accept that at deep zoom levels (12+), radiod's minimum bin bandwidth
+			// constraint means we send a wider span than requested. The client will display this
+			// wider span, but frequencies will be correctly aligned.
 			const targetBins = 1024
-
-			// Calculate requested span from zoom level
-			fullSpanKHz := 30000.0
-			requestedSpanKHz := fullSpanKHz / math.Pow(2, float64(currentZoom))
-
-			// Calculate actual span from radiod (bins × bin_bandwidth)
-			var actualSpanKHz float64
-			if kc.session != nil && kc.session.BinBandwidth > 0 {
-				actualSpanKHz = float64(N) * kc.session.BinBandwidth / 1000.0
-			} else {
-				actualSpanKHz = requestedSpanKHz // Fallback if session not available
-			}
-
-			if packetCount == 1 {
-				log.Printf("SPAN: Requested %.3f kHz, radiod sent %.3f kHz (%d bins @ %.2f Hz/bin)",
-					requestedSpanKHz, actualSpanKHz, N, kc.session.BinBandwidth)
-			}
-
-			// If radiod sent a wider span than requested, crop to the requested span
-			var croppedData []float32
-			if actualSpanKHz > requestedSpanKHz*1.01 { // 1% tolerance
-				// Calculate how many bins to extract from center
-				cropRatio := requestedSpanKHz / actualSpanKHz
-				croppedBins := int(float64(N) * cropRatio)
-				if croppedBins < 1 {
-					croppedBins = 1
-				}
-
-				// Extract center portion
-				startBin := (N - croppedBins) / 2
-				endBin := startBin + croppedBins
-
-				if packetCount == 1 {
-					log.Printf("CROP: Extracting bins %d-%d (center %d bins) from %d total bins",
-						startBin, endBin, croppedBins, N)
-				}
-
-				croppedData = unwrapped[startBin:endBin]
-			} else {
-				// Spans match (within tolerance), use all data
-				croppedData = unwrapped
-			}
-
-			// Now interpolate cropped data to 1024 bins
-			croppedN := len(croppedData)
-			if croppedN < targetBins {
+			if N < targetBins {
 				interpolated := make([]float32, targetBins)
 				for i := 0; i < targetBins; i++ {
-					// Map output bin i to input position in croppedData
-					srcPos := float64(i) * float64(croppedN-1) / float64(targetBins-1)
+					// Map output bin i to input position in unwrapped
+					srcPos := float64(i) * float64(N-1) / float64(targetBins-1)
 					srcIdx := int(srcPos)
 					frac := float32(srcPos - float64(srcIdx))
 
 					// Linear interpolation
-					if srcIdx+1 < croppedN {
-						interpolated[i] = croppedData[srcIdx]*(1-frac) + croppedData[srcIdx+1]*frac
+					if srcIdx+1 < N {
+						interpolated[i] = unwrapped[srcIdx]*(1-frac) + unwrapped[srcIdx+1]*frac
 					} else {
-						interpolated[i] = croppedData[srcIdx]
+						interpolated[i] = unwrapped[srcIdx]
 					}
 				}
 
 				if packetCount == 1 {
-					log.Printf("INTERPOLATE: Cropped %d bins → interpolated to %d bins for KiwiSDR", croppedN, targetBins)
+					log.Printf("INTERPOLATE: Radiod sent %d bins, interpolated to %d for KiwiSDR", N, targetBins)
 				}
 
 				unwrapped = interpolated
 				N = targetBins
-			} else {
-				unwrapped = croppedData
-				N = croppedN
 			}
 
 			// Convert unwrapped spectrum data (float32 dBFS) to KiwiSDR waterfall format

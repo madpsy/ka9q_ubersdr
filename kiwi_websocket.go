@@ -763,7 +763,8 @@ func (kc *kiwiConn) sendUserList() {
 
 			// Get user agent if available
 			if userAgent, ok := sessionInfo["user_agent"].(string); ok && userAgent != "" {
-				user.Name = userAgent
+				// Remove newlines and other control characters that would break JSON
+				user.Name = strings.ReplaceAll(strings.ReplaceAll(userAgent, "\n", " "), "\r", " ")
 			}
 
 			// Get creation time
@@ -995,20 +996,22 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			}
 
 			// Convert unwrapped spectrum data (float32 dBm) to KiwiSDR waterfall format
-			// KiwiSDR expects 8-bit values: 0-255 representing -200 to 0 dBm
-			// Formula: byte_value = (dBm + 200) * 255 / 200
+			// Client decodes as: dBm = -(255 - db_value) + wf.cal
+			// Solving for db_value: db_value = 255 - (dBm - wf.cal)
+			// With wf.cal = -3: db_value = 255 - dBm + 3 = 258 - dBm
 			wfData := make([]byte, N)
+			wfCal := float32(-3.0) // Must match wf_cal sent in init messages (line 645)
 			for i, dbValue := range unwrapped {
-				// Clamp to -200..0 dBm range
+				// Clamp to reasonable dBm range
 				clampedDb := dbValue
-				if clampedDb < -200 {
-					clampedDb = -200
+				if clampedDb < -255 {
+					clampedDb = -255
 				}
 				if clampedDb > 0 {
 					clampedDb = 0
 				}
-				// Convert to 0..255 range: (dBm + 200) * 1.275
-				byteVal := int((clampedDb + 200) * 1.275)
+				// Encode: db_value = 255 - (dBm - wf.cal) = 255 - dBm + wf.cal
+				byteVal := int(255 - clampedDb + wfCal)
 				if byteVal < 0 {
 					byteVal = 0
 				}

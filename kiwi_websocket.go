@@ -1037,11 +1037,13 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			if useCompression {
 				// Reset encoder for each waterfall line (as per KiwiSDR protocol)
 				kc.wfAdpcmEncoder = NewIMAAdpcmEncoder()
-				// Convert bytes to int16 for ADPCM encoding
+				// ADPCM expects int16 PCM data (big-endian)
+				// Convert unsigned bytes (0-255) to signed int16 centered at 0
 				pcmData := make([]byte, len(wfData)*2)
 				for i, b := range wfData {
-					// Convert unsigned byte to signed int16 (centered at 0)
-					val := int16(b) - 128
+					// Convert unsigned byte to signed int16: (b - 128) * 256
+					// This gives proper 16-bit range for ADPCM
+					val := int16(int(b)-128) * 256
 					binary.BigEndian.PutUint16(pcmData[i*2:], uint16(val))
 				}
 				encodedData = kc.wfAdpcmEncoder.Encode(pcmData)

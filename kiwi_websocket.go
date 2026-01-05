@@ -60,8 +60,8 @@ func (kwsh *KiwiWebSocketHandler) getOrAssignRXSlot(userSessionID string) int {
 		return slot
 	}
 
-	// Assign new slot
-	slot := kwsh.nextRXSlot
+	// Assign new slot (start from 1, not 0, to match Kiwi RX numbering)
+	slot := kwsh.nextRXSlot + 1
 	kwsh.kiwiRXSlots[userSessionID] = slot
 	kwsh.nextRXSlot++
 
@@ -70,6 +70,7 @@ func (kwsh *KiwiWebSocketHandler) getOrAssignRXSlot(userSessionID string) int {
 		kwsh.nextRXSlot = 0
 	}
 
+	log.Printf("DEBUG: Assigned RX slot %d to user %s", slot, userSessionID)
 	return slot
 }
 
@@ -1015,13 +1016,10 @@ func (kc *kiwiConn) buildDXConfig() string {
 		}
 		svcKey := groupToSvc[group]
 
-		// Encode band name using %20 for spaces (not +)
-		encodedLabel := kiwiEncodeString(band.Label)
-
 		kiwiBand := map[string]interface{}{
 			"min":  minKHz,
 			"max":  maxKHz,
-			"name": encodedLabel, // Encoded with %20
+			"name": band.Label, // NOT encoded - whole JSON will be URL-encoded
 			"svc":  svcKey,
 			"itu":  0,  // 0 = any region (show in all ITU regions)
 			"sel":  "", // Selector string (empty for now)

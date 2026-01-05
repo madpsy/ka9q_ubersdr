@@ -60,8 +60,8 @@ func (kwsh *KiwiWebSocketHandler) getOrAssignRXSlot(userSessionID string) int {
 		return slot
 	}
 
-	// Assign new slot (start from 1, not 0, to match Kiwi RX numbering)
-	slot := kwsh.nextRXSlot + 1
+	// Assign new slot (RX slots are 0-based: RX0, RX1, RX2, etc.)
+	slot := kwsh.nextRXSlot
 	kwsh.kiwiRXSlots[userSessionID] = slot
 	kwsh.nextRXSlot++
 
@@ -70,7 +70,7 @@ func (kwsh *KiwiWebSocketHandler) getOrAssignRXSlot(userSessionID string) int {
 		kwsh.nextRXSlot = 0
 	}
 
-	log.Printf("DEBUG: Assigned RX slot %d to user %s", slot, userSessionID)
+	log.Printf("DEBUG: Assigned RX slot %d to user %s (nextRXSlot now %d)", slot, userSessionID, kwsh.nextRXSlot)
 	return slot
 }
 
@@ -749,23 +749,21 @@ func (kc *kiwiConn) sendInitMessages() {
 	kc.sendMsg("", versionMsg)
 
 	// Send configuration to both SND and W/F connections
-	// The client needs this on both connections
-	// Encode receiver name and location for JSON (use %20 for spaces, not +)
-	encodedName := kiwiEncodeString(kc.config.Admin.Name)
-	encodedLocation := kiwiEncodeString(kc.config.Admin.Location)
-
-	cfgJSON := `{"passbands":{"am":{"lo":-4900,"hi":4900},"amn":{"lo":-2500,"hi":2500},"amw":{"lo":-6000,"hi":6000},"sam":{"lo":-4900,"hi":4900},"sal":{"lo":-4900,"hi":0},"sau":{"lo":0,"hi":4900},"sas":{"lo":-4900,"hi":4900},"qam":{"lo":-4900,"hi":4900},"drm":{"lo":-5000,"hi":5000},"lsb":{"lo":-2400,"hi":-300},"lsn":{"lo":-2100,"hi":-300},"usb":{"lo":300,"hi":2400},"usn":{"lo":300,"hi":2100},"cw":{"lo":-400,"hi":400},"cwn":{"lo":-250,"hi":250},"nbfm":{"lo":-6000,"hi":6000},"nnfm":{"lo":-5000,"hi":5000},"iq":{"lo":-10000,"hi":10000}},"index_html_params":{"PAGE_TITLE":"KiwiSDR","RX_PHOTO_HEIGHT":350,"RX_PHOTO_TITLE_HEIGHT":70,"RX_PHOTO_TITLE":"","RX_PHOTO_DESC":"","RX_TITLE":"` + encodedName + `","RX_LOC":"` + encodedLocation + `","RX_QRA":"","RX_ASL":` + fmt.Sprintf("%d", kc.config.Admin.ASL) + `,"RX_GMAP":""},"owner_info":"","init":{"freq":7020,"mode":"cw","zoom":0,"max_dB":-10,"min_dB":-110},"waterfall_cal":-3,"waterfall_min_dB":-110,"waterfall_max_dB":-10,"snr_meas_interval_hrs":0}`
+	cfgJSON := `{"passbands":{"am":{"lo":-4900,"hi":4900},"amn":{"lo":-2500,"hi":2500},"amw":{"lo":-6000,"hi":6000},"sam":{"lo":-4900,"hi":4900},"sal":{"lo":-4900,"hi":0},"sau":{"lo":0,"hi":4900},"sas":{"lo":-4900,"hi":4900},"qam":{"lo":-4900,"hi":4900},"drm":{"lo":-5000,"hi":5000},"lsb":{"lo":-2400,"hi":-300},"lsn":{"lo":-2100,"hi":-300},"usb":{"lo":300,"hi":2400},"usn":{"lo":300,"hi":2100},"cw":{"lo":-400,"hi":400},"cwn":{"lo":-250,"hi":250},"nbfm":{"lo":-6000,"hi":6000},"nnfm":{"lo":-5000,"hi":5000},"iq":{"lo":-10000,"hi":10000}},"index_html_params":{"PAGE_TITLE":"KiwiSDR","RX_PHOTO_HEIGHT":350,"RX_PHOTO_TITLE_HEIGHT":70,"RX_PHOTO_TITLE":"","RX_PHOTO_DESC":"","RX_TITLE":"` + kc.config.Admin.Name + `","RX_LOC":"` + kc.config.Admin.Location + `","RX_QRA":"","RX_ASL":` + fmt.Sprintf("%d", kc.config.Admin.ASL) + `,"RX_GMAP":""},"owner_info":"","init":{"freq":7020,"mode":"cw","zoom":0,"max_dB":-10,"min_dB":-110},"waterfall_cal":-3,"waterfall_min_dB":-110,"waterfall_max_dB":-10,"snr_meas_interval_hrs":0}`
 	cfgJSONEncoded := url.QueryEscape(cfgJSON)
+	cfgJSONEncoded = strings.ReplaceAll(cfgJSONEncoded, "+", "%20")
 	kc.sendMsg("load_cfg", cfgJSONEncoded)
 
 	// Send DX configuration with UberSDR bookmarks
 	dxcfgJSON := kc.buildDXConfig()
 	dxcfgJSONEncoded := url.QueryEscape(dxcfgJSON)
+	dxcfgJSONEncoded = strings.ReplaceAll(dxcfgJSONEncoded, "+", "%20")
 	kc.sendMsg("load_dxcfg", dxcfgJSONEncoded)
 
 	// Send DX community configuration (minimal structure to avoid null errors)
 	dxcommJSON := `{"dx_type":[{"key":0,"name":"type-0","color":"white"},{"key":1,"name":"type-1","color":"white"},{"key":2,"name":"type-2","color":"white"},{"key":3,"name":"type-3","color":"white"},{"key":4,"name":"type-4","color":"white"},{"key":5,"name":"type-5","color":"white"},{"key":6,"name":"type-6","color":"white"},{"key":7,"name":"type-7","color":"white"},{"key":8,"name":"type-8","color":"white"},{"key":9,"name":"type-9","color":"white"},{"key":10,"name":"type-10","color":"white"},{"key":11,"name":"type-11","color":"white"},{"key":12,"name":"type-12","color":"white"},{"key":13,"name":"type-13","color":"white"},{"key":14,"name":"type-14","color":"white"},{"key":15,"name":"type-15","color":"white"}],"band_svc":[],"bands":[]}`
 	dxcommJSONEncoded := url.QueryEscape(dxcommJSON)
+	dxcommJSONEncoded = strings.ReplaceAll(dxcommJSONEncoded, "+", "%20")
 	kc.sendMsg("load_dxcomm_cfg", dxcommJSONEncoded)
 
 	// Center frequency and bandwidth
@@ -1150,25 +1148,24 @@ func (kc *kiwiConn) sendUserList() {
 		}
 
 		// Update frequency and mode from this session
-		// Prefer audio sessions over spectrum sessions for frequency display
+		// ALWAYS prefer audio sessions over spectrum sessions
 		user := userMap[userSessionID]
 		isSpectrum, _ := sessionInfo["is_spectrum"].(bool)
 		if !isSpectrum {
-			// Audio session - use its frequency
+			// Audio session - ALWAYS use its frequency and mode
 			if freq, ok := sessionInfo["frequency"].(uint64); ok {
-				// UberSDR stores frequencies in Hz, KiwiSDR protocol also expects Hz
 				user.Frequency = int(freq)
 			}
 			if mode, ok := sessionInfo["mode"].(string); ok {
 				user.Mode = mode
 			}
 		} else if user.Frequency == 0 {
-			// Spectrum session and no frequency set yet
+			// Spectrum session and no audio session yet - use spectrum frequency
+			// but DON'T set mode to "spectrum" - leave it empty or use default
 			if freq, ok := sessionInfo["frequency"].(uint64); ok {
-				// UberSDR stores frequencies in Hz, KiwiSDR protocol also expects Hz
 				user.Frequency = int(freq)
 			}
-			user.Mode = "spectrum"
+			// Don't set mode to "spectrum" - it will show the audio mode when audio connects
 		}
 	}
 

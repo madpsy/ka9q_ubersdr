@@ -192,7 +192,7 @@ class ChatUI {
             }
             
             .chat-header:hover {
-                background: rgba(70, 70, 70, 0.7);
+                background: rgba(70, 70, 70, 0.6);
             }
             
             .chat-unread {
@@ -212,7 +212,7 @@ class ChatUI {
                 width: 310px;
                 height: 500px;
                 background: rgba(40, 40, 40, 0.7);
-                border: 1px solid rgba(100, 100, 100, 0.5);
+                border: 1px solid rgba(100, 100, 100, 0.6);
                 border-right: none;
                 border-radius: 8px 0 0 8px;
                 order: 1;
@@ -232,7 +232,7 @@ class ChatUI {
                 flex: 1;
                 overflow-y: auto;
                 padding: 8px;
-                background: rgba(30, 30, 30, 0.7);
+                background: rgba(30, 30, 30, 0.6);
                 color: #ddd;
                 font-size: 12px;
             }

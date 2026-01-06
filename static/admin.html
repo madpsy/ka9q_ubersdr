@@ -3059,6 +3059,66 @@
 
             summary.innerHTML = summaryHTML;
             container.appendChild(summary);
+
+            // Add Network Summary section
+            const networkSummary = document.createElement('div');
+            networkSummary.style.marginTop = '20px';
+            networkSummary.style.padding = '15px';
+            networkSummary.style.background = '#f8f9fa';
+            networkSummary.style.borderRadius = '5px';
+
+            // Calculate throughput totals by type
+            let regularAudioKbps = 0;
+            let regularWaterfallKbps = 0;
+            let ipBypassedAudioKbps = 0;
+            let ipBypassedWaterfallKbps = 0;
+            let passwordBypassedAudioKbps = 0;
+            let passwordBypassedWaterfallKbps = 0;
+
+            for (const [key, sessions] of Object.entries(sessionsByUser)) {
+                // Get auth method from first available session
+                const authMethod = sessions.audio[0]?.auth_method || sessions.spectrum[0]?.auth_method || '';
+
+                // Sum audio throughput
+                if (sessions.audio.length > 0) {
+                    const audioKbps = sessions.audio[0].audio_kbps || 0;
+                    if (authMethod === 'password') {
+                        passwordBypassedAudioKbps += audioKbps;
+                    } else if (authMethod === 'ip_bypass') {
+                        ipBypassedAudioKbps += audioKbps;
+                    } else {
+                        regularAudioKbps += audioKbps;
+                    }
+                }
+
+                // Sum waterfall throughput
+                if (sessions.spectrum.length > 0) {
+                    const waterfallKbps = sessions.spectrum[0].waterfall_kbps || 0;
+                    if (authMethod === 'password') {
+                        passwordBypassedWaterfallKbps += waterfallKbps;
+                    } else if (authMethod === 'ip_bypass') {
+                        ipBypassedWaterfallKbps += waterfallKbps;
+                    } else {
+                        regularWaterfallKbps += waterfallKbps;
+                    }
+                }
+            }
+
+            // Calculate totals
+            const totalAudioKbps = regularAudioKbps + ipBypassedAudioKbps + passwordBypassedAudioKbps;
+            const totalWaterfallKbps = regularWaterfallKbps + ipBypassedWaterfallKbps + passwordBypassedWaterfallKbps;
+            const totalKbps = totalAudioKbps + totalWaterfallKbps;
+
+            let networkHTML = `<strong>Network Summary:</strong><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• Regular users: <strong>${regularAudioKbps} kbps</strong> audio, <strong>${regularWaterfallKbps} kbps</strong> waterfall</span><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• IP bypassed users: <strong>${ipBypassedAudioKbps} kbps</strong> audio, <strong>${ipBypassedWaterfallKbps} kbps</strong> waterfall</span><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• Password bypassed users: <strong>${passwordBypassedAudioKbps} kbps</strong> audio, <strong>${passwordBypassedWaterfallKbps} kbps</strong> waterfall</span><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• <strong>Total audio:</strong> <strong style="color: #667eea;">${totalAudioKbps} kbps</strong></span><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• <strong>Total waterfall:</strong> <strong style="color: #667eea;">${totalWaterfallKbps} kbps</strong></span><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• <strong>Total throughput:</strong> <strong style="color: #28a745; font-size: 16px;">${totalKbps} kbps</strong></span>`;
+
+            networkSummary.innerHTML = networkHTML;
+            container.appendChild(networkSummary);
         }
 
         // Session Activity Chart

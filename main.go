@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"sort"
@@ -182,9 +183,45 @@ func gzipHandler(fn http.HandlerFunc) http.HandlerFunc {
 // corsMiddleware adds CORS headers to all responses if enabled in config
 func corsMiddleware(config *Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if config.Server.EnableCORS {
-			// Set CORS headers before any other processing
-			w.Header().Set("Access-Control-Allow-Origin", "*")
+		// Get the Origin header (used by browsers for CORS)
+		origin := r.Header.Get("Origin")
+
+		// If no Origin header, fall back to Referer
+		if origin == "" {
+			referer := r.Header.Get("Referer")
+			if referer != "" {
+				// Parse the referer to extract just the origin (scheme + host)
+				if refererURL, err := url.Parse(referer); err == nil {
+					origin = refererURL.Scheme + "://" + refererURL.Host
+				}
+			}
+		}
+
+		// Check if we should add CORS headers
+		shouldAddCORS := config.Server.EnableCORS
+
+		// Always add CORS headers if request originates from the directory service
+		if !shouldAddCORS && origin != "" && config.InstanceReporting.Hostname != "" {
+			// Parse the origin to extract just the hostname
+			if originURL, err := url.Parse(origin); err == nil {
+				// Compare hostname against the directory service hostname
+				if originURL.Hostname() == config.InstanceReporting.Hostname {
+					shouldAddCORS = true
+				}
+			}
+		}
+
+		if shouldAddCORS {
+			// Set CORS headers - use the request's origin if available
+			if origin != "" {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Vary", "Origin")                           // Important: tell caches that response varies by Origin
+				w.Header().Set("Access-Control-Allow-Credentials", "true") // Allow credentials when origin is specific
+			} else {
+				// No origin/referer provided, allow all (fallback for non-browser clients)
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			}
+
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			w.Header().Set("Access-Control-Max-Age", "86400") // Cache preflight for 24 hours
@@ -1588,6 +1625,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"public_iq_modes":      publicIQModes,
 		"spectrum_poll_period": config.Spectrum.PollPeriodMs,
 		"public_uuid":          publicUUID,
+		"cors_enabled":         config.Server.EnableCORS,
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

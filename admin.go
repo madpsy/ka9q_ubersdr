@@ -4208,10 +4208,11 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 	// Track sessions across snapshots
 	// Map: user_session_id -> last seen info
 	type sessionInfo struct {
-		entry     SessionActivityEntry
-		lastSeen  time.Time
-		firstSeen time.Time
-		allTypes  map[string]bool // Track all session types seen
+		entry           SessionActivityEntry
+		lastSeen        time.Time
+		firstSeen       time.Time
+		allTypes        map[string]bool // Track all session types seen
+		startEventIndex int             // Index of start event in events slice (for updating types)
 	}
 	activeSessions := make(map[string]*sessionInfo)
 	events := []SessionEvent{}
@@ -4227,8 +4228,21 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 				// Session already active, update last seen and merge session types
 				existing.lastSeen = log.Timestamp
 				// Merge session types from this snapshot
+				typesChanged := false
 				for _, t := range session.SessionTypes {
-					existing.allTypes[t] = true
+					if !existing.allTypes[t] {
+						existing.allTypes[t] = true
+						typesChanged = true
+					}
+				}
+				// If types changed, update the start event with cumulative types
+				if typesChanged && existing.startEventIndex >= 0 && existing.startEventIndex < len(events) {
+					allTypesSlice := make([]string, 0, len(existing.allTypes))
+					for t := range existing.allTypes {
+						allTypesSlice = append(allTypesSlice, t)
+					}
+					sort.Strings(allTypesSlice)
+					events[existing.startEventIndex].SessionTypes = allTypesSlice
 				}
 				// Keep the most complete session info (prefer entries with more types)
 				if len(session.SessionTypes) > len(existing.entry.SessionTypes) {
@@ -4253,13 +4267,6 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					startTime = session.FirstSeen
 				}
 
-				activeSessions[session.UserSessionID] = &sessionInfo{
-					entry:     session,
-					firstSeen: startTime,
-					lastSeen:  log.Timestamp,
-					allTypes:  allTypes,
-				}
-
 				// Convert allTypes to slice for start event
 				startTypesSlice := make([]string, 0, len(allTypes))
 				for t := range allTypes {
@@ -4267,6 +4274,8 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 				}
 				sort.Strings(startTypesSlice)
 
+				// Create start event and track its index
+				startEventIndex := len(events)
 				events = append(events, SessionEvent{
 					Timestamp:     startTime, // Use actual session start time
 					EventType:     "session_start",
@@ -4277,6 +4286,14 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					SessionTypes:  startTypesSlice, // Use all types from snapshot
 					UserAgent:     session.UserAgent,
 				})
+
+				activeSessions[session.UserSessionID] = &sessionInfo{
+					entry:           session,
+					firstSeen:       startTime,
+					lastSeen:        log.Timestamp,
+					allTypes:        allTypes,
+					startEventIndex: startEventIndex,
+				}
 			}
 		}
 

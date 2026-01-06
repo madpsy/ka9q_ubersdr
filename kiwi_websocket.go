@@ -2014,41 +2014,28 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 				N = targetBins
 			}
 
-			// Debug: Calculate and log all frequency alignment values whenever zoom/xBin changes
-			// Check if zoom or xBin has changed since last log
-			kc.mu.Lock()
-			logThis := packetCount == 1 || currentZoom != kc.lastLoggedZoom || currentXBin != kc.lastLoggedXBin
-			if logThis {
-				kc.lastLoggedZoom = currentZoom
-				kc.lastLoggedXBin = currentXBin
-			}
-			kc.mu.Unlock()
+			// Calculate what span the client expects based on zoom level
+			// Client expects: span = 30 MHz / 2^zoom
+			fullSpanKHz := 30000.0
+			expectedSpanHz := (fullSpanKHz * 1000.0) / math.Pow(2, float64(currentZoom))
 
-			if logThis {
-				const maxZoom = 14
-				maxBins := float64(1024 << maxZoom) // 16777216
-				fullBandwidthHz := 30000000.0
+			// Calculate actual span radiod sent
+			actualSpanHz := kc.session.BinBandwidth * float64(N)
 
-				// What the client expects based on x_bin we're sending
-				clientExpectedLeftEdge := (float64(currentXBin) / maxBins) * fullBandwidthHz
-				clientExpectedCenter := ((float64(currentXBin) + float64(N)/2.0) / maxBins) * fullBandwidthHz
-				clientExpectedRightEdge := ((float64(currentXBin) + float64(N)) / maxBins) * fullBandwidthHz
+			// If radiod sent a wider span than client expects, crop to match
+			if actualSpanHz > expectedSpanHz*1.01 { // 1% tolerance
+				// Calculate how many bins to keep
+				binsToKeep := int((expectedSpanHz / actualSpanHz) * float64(N))
+				if binsToKeep > 0 && binsToKeep < N {
+					// Crop center portion
+					startBin := (N - binsToKeep) / 2
+					endBin := startBin + binsToKeep
+					unwrapped = unwrapped[startBin:endBin]
+					N = len(unwrapped)
 
-				// What radiod actually sent (from session)
-				radiodActualCenter := float64(kc.session.Frequency)
-				radiodActualBinBW := kc.session.BinBandwidth
-				radiodActualLeftEdge := radiodActualCenter - (float64(N) * radiodActualBinBW / 2.0)
-				radiodActualRightEdge := radiodActualCenter + (float64(N) * radiodActualBinBW / 2.0)
-
-				// Calculate the frequency error
-				centerError := radiodActualCenter - clientExpectedCenter
-				leftEdgeError := radiodActualLeftEdge - clientExpectedLeftEdge
-
-				log.Printf("FREQ_ALIGN: xBin=%d zoom=%d N=%d | Client expects: L=%.0f C=%.0f R=%.0f | Radiod sent: L=%.0f C=%.0f R=%.0f (binBW=%.2f) | Error: center=%.0f Hz, leftEdge=%.0f Hz",
-					currentXBin, currentZoom, N,
-					clientExpectedLeftEdge, clientExpectedCenter, clientExpectedRightEdge,
-					radiodActualLeftEdge, radiodActualCenter, radiodActualRightEdge, radiodActualBinBW,
-					centerError, leftEdgeError)
+					log.Printf("CROP: Radiod sent %.0f Hz span, client expects %.0f Hz, cropped from %d to %d bins",
+						actualSpanHz, expectedSpanHz, len(spectrumData), N)
+				}
 			}
 
 			// Convert unwrapped spectrum data (float32 dBFS) to KiwiSDR waterfall format

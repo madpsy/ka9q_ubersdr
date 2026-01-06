@@ -4211,6 +4211,7 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 		entry     SessionActivityEntry
 		lastSeen  time.Time
 		firstSeen time.Time
+		allTypes  map[string]bool // Track all session types seen
 	}
 	activeSessions := make(map[string]*sessionInfo)
 	events := []SessionEvent{}
@@ -4223,15 +4224,25 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 			currentSessionIDs[session.UserSessionID] = true
 
 			if existing, exists := activeSessions[session.UserSessionID]; exists {
-				// Session already active, update last seen
+				// Session already active, update last seen and merge session types
 				existing.lastSeen = log.Timestamp
 				existing.entry = session // Update with latest info
+				// Merge session types
+				for _, t := range session.SessionTypes {
+					existing.allTypes[t] = true
+				}
 			} else {
 				// New session detected - create start event
+				allTypes := make(map[string]bool)
+				for _, t := range session.SessionTypes {
+					allTypes[t] = true
+				}
+
 				activeSessions[session.UserSessionID] = &sessionInfo{
 					entry:     session,
 					firstSeen: log.Timestamp,
 					lastSeen:  log.Timestamp,
+					allTypes:  allTypes,
 				}
 
 				events = append(events, SessionEvent{
@@ -4250,16 +4261,25 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 		// Check for sessions that disappeared (ended)
 		for sessionID, info := range activeSessions {
 			if !currentSessionIDs[sessionID] {
-				// Session ended - create end event
+				// Session ended - calculate duration from first seen to last seen
+				// Use info.lastSeen (last time we saw it) not log.Timestamp (when we noticed it was gone)
 				duration := info.lastSeen.Sub(info.firstSeen).Seconds()
+
+				// Convert allTypes map to slice
+				allTypesSlice := make([]string, 0, len(info.allTypes))
+				for t := range info.allTypes {
+					allTypesSlice = append(allTypesSlice, t)
+				}
+				sort.Strings(allTypesSlice) // Sort for consistent ordering
+
 				events = append(events, SessionEvent{
-					Timestamp:     log.Timestamp,
+					Timestamp:     info.lastSeen, // Use last seen time, not detection time
 					EventType:     "session_end",
 					UserSessionID: info.entry.UserSessionID,
 					ClientIP:      info.entry.ClientIP,
 					SourceIP:      info.entry.SourceIP,
 					AuthMethod:    info.entry.AuthMethod,
-					SessionTypes:  info.entry.SessionTypes,
+					SessionTypes:  allTypesSlice, // Use accumulated types
 					UserAgent:     info.entry.UserAgent,
 					Duration:      &duration,
 				})
@@ -4270,9 +4290,9 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 		}
 	}
 
-	// Sort events by timestamp
+	// Sort events by timestamp (most recent first)
 	sort.Slice(events, func(i, j int) bool {
-		return events[i].Timestamp.Before(events[j].Timestamp)
+		return events[i].Timestamp.After(events[j].Timestamp)
 	})
 
 	return events

@@ -1522,19 +1522,48 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 		}
 
 		// Add throughput metrics (both average and instantaneous)
+		// Calculate while we already have the session lock to avoid deadlock
 		// Average throughput (since session start) - rounded to whole numbers
-		audioBPS := session.GetAudioBytesPerSecond()
-		waterfallBPS := session.GetWaterfallBytesPerSecond()
-		totalBPS := session.GetTotalBytesPerSecond()
+		elapsed := time.Since(session.CreatedAt).Seconds()
+		var audioKbpsAvg, waterfallKbpsAvg, totalKbpsAvg int
+		if elapsed > 0 {
+			audioKbpsAvg = int(float64(session.AudioBytesSent) / elapsed * 8 / 1000)
+			waterfallKbpsAvg = int(float64(session.WaterfallBytesSent) / elapsed * 8 / 1000)
+			totalKbpsAvg = int(float64(session.AudioBytesSent+session.WaterfallBytesSent) / elapsed * 8 / 1000)
+		}
 
-		info["audio_kbps_avg"] = int(audioBPS * 8 / 1000) // Convert bytes/sec to kbps (whole number)
-		info["waterfall_kbps_avg"] = int(waterfallBPS * 8 / 1000)
-		info["total_kbps_avg"] = int(totalBPS * 8 / 1000)
+		info["audio_kbps_avg"] = audioKbpsAvg
+		info["waterfall_kbps_avg"] = waterfallKbpsAvg
+		info["total_kbps_avg"] = totalKbpsAvg
 
 		// Instantaneous throughput (1-second sliding window) - rounded to whole numbers
-		info["audio_kbps"] = int(session.GetInstantaneousAudioKbps())
-		info["waterfall_kbps"] = int(session.GetInstantaneousWaterfallKbps())
-		info["total_kbps"] = int(session.GetInstantaneousTotalKbps())
+		var audioKbps, waterfallKbps int
+
+		// Calculate audio instantaneous throughput
+		if len(session.audioSamples) >= 2 {
+			oldest := session.audioSamples[0]
+			newest := session.audioSamples[len(session.audioSamples)-1]
+			duration := newest.Timestamp.Sub(oldest.Timestamp).Seconds()
+			if duration > 0 {
+				bytesDiff := newest.Bytes - oldest.Bytes
+				audioKbps = int(float64(bytesDiff) / duration * 8 / 1000)
+			}
+		}
+
+		// Calculate waterfall instantaneous throughput
+		if len(session.waterfallSamples) >= 2 {
+			oldest := session.waterfallSamples[0]
+			newest := session.waterfallSamples[len(session.waterfallSamples)-1]
+			duration := newest.Timestamp.Sub(oldest.Timestamp).Seconds()
+			if duration > 0 {
+				bytesDiff := newest.Bytes - oldest.Bytes
+				waterfallKbps = int(float64(bytesDiff) / duration * 8 / 1000)
+			}
+		}
+
+		info["audio_kbps"] = audioKbps
+		info["waterfall_kbps"] = waterfallKbps
+		info["total_kbps"] = audioKbps + waterfallKbps
 
 		// Only include frontend_status for the wideband spectrum channel
 		// All other sessions will get frontend status from a separate API endpoint

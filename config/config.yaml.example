@@ -242,7 +242,7 @@ server:
   #   - Historical analysis of user patterns
   #
   # Enable session activity logging (default: false)
-  session_activity_log_enabled: true
+  session_activity_log_enabled: false
 
   # Directory for session activity log files (default: session_activity)
   # Files are organized as: session_activity_log_dir/YYYY/MM/DD/sessions.jsonl

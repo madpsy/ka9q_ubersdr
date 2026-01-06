@@ -7625,6 +7625,7 @@ window.toggleFrequencyUnit = toggleFrequencyUnit;
 function updateSignalQualityDisplay() {
     const basebandElement = document.getElementById('signal-baseband-power');
     const noiseElement = document.getElementById('signal-noise-density');
+    const snrElement = document.getElementById('signal-snr');
 
     if (basebandElement) {
         if (currentBasebandPower > -900) {
@@ -7639,6 +7640,19 @@ function updateSignalQualityDisplay() {
             noiseElement.textContent = currentNoiseDensity.toFixed(1) + ' dBFS';
         } else {
             noiseElement.textContent = 'N/A';
+        }
+    }
+
+    if (snrElement) {
+        // Calculate SNR as the difference between baseband power and noise density
+        // SNR = Signal - Noise (both in dBFS, so subtraction gives the ratio in dB)
+        if (currentBasebandPower > -900 && currentNoiseDensity > -900) {
+            const snr = currentBasebandPower - currentNoiseDensity;
+            // Clamp at 0 dB minimum (signal should not be below noise floor)
+            const clampedSnr = Math.max(0, snr);
+            snrElement.textContent = clampedSnr.toFixed(1) + ' dB';
+        } else {
+            snrElement.textContent = 'N/A';
         }
     }
 }

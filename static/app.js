@@ -7705,8 +7705,8 @@ function drawSNRChart() {
         snrChartCtx.lineTo(width, y);
         snrChartCtx.stroke();
 
-        // Draw dB label on left
-        const label = db.toFixed(0) + ' dB';
+        // Draw dB label on left (just the number)
+        const label = db.toFixed(0);
         const labelWidth = snrChartCtx.measureText(label).width + 6;
 
         snrChartCtx.fillStyle = 'rgba(44, 62, 80, 0.8)';

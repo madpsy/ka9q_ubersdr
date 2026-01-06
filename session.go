@@ -320,9 +320,15 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 
 	// Track if this is a new UUID (for activity logging)
 	isNewUUID := false
+	hadAudioBefore := false
 	if userSessionID != "" {
 		if _, exists := sm.userSessionUUIDs[userSessionID]; !exists {
 			isNewUUID = true
+		} else {
+			// Existing UUID - check if they already had an audio session
+			if _, exists := sm.uuidAudioSessions[userSessionID]; exists {
+				hadAudioBefore = true
+			}
 		}
 		sm.userSessionUUIDs[userSessionID]++
 		// Track audio session for this UUID
@@ -346,8 +352,8 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 	log.Printf("Session created: %s (channel: %s, SSRC: 0x%08x, freq: %d Hz, mode: %s, bandwidth: %d Hz, user: %s)",
 		sessionID, channelName, ssrc, frequency, mode, bandwidth, userSessionID)
 
-	// Log session activity only if this is a NEW UUID (not just a new session for existing UUID)
-	if sm.activityLogger != nil && isNewUUID {
+	// Log session activity if this is a NEW UUID OR if adding audio to existing spectrum-only session
+	if sm.activityLogger != nil && (isNewUUID || !hadAudioBefore) {
 		if err := sm.activityLogger.LogSessionCreated(); err != nil {
 			log.Printf("Warning: failed to log session creation: %v", err)
 		}
@@ -524,9 +530,15 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 
 	// Track if this is a new UUID (for activity logging)
 	isNewUUID := false
+	hadSpectrumBefore := false
 	if userSessionID != "" {
 		if _, exists := sm.userSessionUUIDs[userSessionID]; !exists {
 			isNewUUID = true
+		} else {
+			// Existing UUID - check if they already had a spectrum session
+			if _, exists := sm.uuidSpectrumSessions[userSessionID]; exists {
+				hadSpectrumBefore = true
+			}
 		}
 		sm.userSessionUUIDs[userSessionID]++
 		// Track spectrum session for this UUID
@@ -544,8 +556,8 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 	log.Printf("Spectrum session created: %s (SSRC: 0x%08x, freq: %d Hz, bins: %d, bw: %.1f Hz, user: %s)",
 		sessionID, ssrc, frequency, binCount, binBandwidth, userSessionID)
 
-	// Log session activity only if this is a NEW UUID (not just a new session for existing UUID)
-	if sm.activityLogger != nil && isNewUUID {
+	// Log session activity if this is a NEW UUID OR if adding spectrum to existing audio-only session
+	if sm.activityLogger != nil && (isNewUUID || !hadSpectrumBefore) {
 		if err := sm.activityLogger.LogSessionCreated(); err != nil {
 			log.Printf("Warning: failed to log spectrum session creation: %v", err)
 		}

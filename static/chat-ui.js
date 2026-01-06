@@ -164,7 +164,7 @@ class ChatUI {
             }
             
             .chat-panel.collapsed {
-                width: 200px;
+                width: 150px;
             }
             
             .chat-panel.expanded {

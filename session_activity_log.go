@@ -121,10 +121,8 @@ func (sal *SessionActivityLogger) LogSessionDestroyed() error {
 
 // logActivity logs the current state of all active sessions
 func (sal *SessionActivityLogger) logActivity(eventType string) error {
-	sal.mu.Lock()
-	defer sal.mu.Unlock()
-
-	// Get all active sessions from session manager
+	// Get all active sessions from session manager FIRST (without holding our lock)
+	// This prevents deadlock since session manager may call us while holding its lock
 	activeSessions := sal.getActiveSessionEntries()
 
 	// Create log entry
@@ -133,6 +131,10 @@ func (sal *SessionActivityLogger) logActivity(eventType string) error {
 		EventType:      eventType,
 		ActiveSessions: activeSessions,
 	}
+
+	// Now acquire our lock for file operations
+	sal.mu.Lock()
+	defer sal.mu.Unlock()
 
 	// Get or create file for today
 	file, err := sal.getOrCreateFile()

@@ -917,21 +917,37 @@ func (kc *kiwiConn) sendStatsCallback() {
 	// cf: CPU frequency in MHz
 	stats["cf"] = 0
 
-	// ===== NETWORK STATS (placeholder - to be implemented with traffic tracking) =====
-	// ac: Audio bytes transferred (total)
-	stats["ac"] = 0
+	// ===== NETWORK STATS (fully implemented with per-session tracking) =====
+	// Get network statistics from the session
+	audioBytesPerSec := 0
+	waterfallBytesPerSec := 0
+	totalBytesPerSec := 0
+	httpBytesPerSec := 0 // We don't track HTTP separately, so set to 0
 
-	// wc: Waterfall bytes transferred (total)
-	stats["wc"] = 0
+	if kc.session != nil {
+		audioBytesPerSec = int(kc.session.GetAudioBytesPerSecond())
+		waterfallBytesPerSec = int(kc.session.GetWaterfallBytesPerSecond())
+		totalBytesPerSec = int(kc.session.GetTotalBytesPerSecond())
+	}
 
-	// fc: FFT bytes transferred (total)
-	stats["fc"] = 0
+	// Calculate waterfall FPS from poll period
+	// poll_period_ms is the update interval, so FPS = 1000 / poll_period_ms
+	waterfallFPS := 1000.0 / float64(kc.config.Spectrum.PollPeriodMs)
 
-	// ah: Audio bytes transferred per hour
-	stats["ah"] = 0
+	// ac: Audio bytes per second (audio_kbps in frontend)
+	stats["ac"] = audioBytesPerSec
 
-	// as: Audio bytes transferred per second
-	stats["as"] = 0
+	// wc: Waterfall bytes per second (waterfall_kbps in frontend)
+	stats["wc"] = waterfallBytesPerSec
+
+	// fc: Waterfall FPS (waterfall_fps in frontend) - NOT total bytes!
+	stats["fc"] = int(waterfallFPS)
+
+	// ah: HTTP bytes per second (http_kbps in frontend) - NOT audio bytes per hour!
+	stats["ah"] = httpBytesPerSec
+
+	// as: Sum of all bytes per second (sum_kbps in frontend)
+	stats["as"] = totalBytesPerSec
 
 	// ===== GPS STATS (placeholder - to be implemented with GPS integration) =====
 	// ga: GPS acquisition state (0 = no GPS, 1 = acquiring, 2 = acquired)
@@ -1777,6 +1793,9 @@ func (kc *kiwiConn) streamAudio(done <-chan struct{}) {
 				return
 			}
 
+			// Track audio bytes sent
+			kc.session.AddAudioBytes(uint64(len(fullPacket)))
+
 			kc.sequence++
 		}
 	}
@@ -1975,6 +1994,9 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 				log.Printf("Error sending W/F packet: %v", writeErr)
 				return
 			}
+
+			// Track waterfall bytes sent
+			kc.session.AddWaterfallBytes(uint64(len(fullPacket)))
 
 			wfSequence++
 		}

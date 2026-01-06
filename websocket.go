@@ -1026,6 +1026,9 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					return
 				}
 
+				// Track audio bytes sent in session
+				session.AddAudioBytes(uint64(len(packet)))
+
 				// Track bytes for statistics
 				if conn.aggregator != nil {
 					conn.aggregator.addBytes(int64(len(packet)))
@@ -1080,6 +1083,9 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					log.Printf("Failed to send binary PCM: %v", err)
 					return
 				}
+
+				// Track audio bytes sent in session
+				session.AddAudioBytes(uint64(len(packet)))
 
 				// Track bytes for statistics
 				if conn.aggregator != nil {

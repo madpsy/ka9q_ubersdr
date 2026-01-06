@@ -45,6 +45,10 @@ type Session struct {
 	BinCount     int
 	BinBandwidth float64
 	SpectrumChan chan []float32 // Channel for spectrum data
+
+	// Network statistics (protected by mu)
+	AudioBytesSent     uint64 // Total audio bytes sent
+	WaterfallBytesSent uint64 // Total waterfall/spectrum bytes sent
 }
 
 // SessionManager manages all active sessions
@@ -1261,6 +1265,61 @@ func (sm *SessionManager) GetUserAgent(userSessionID string) string {
 	defer sm.mu.RUnlock()
 
 	return sm.userAgents[userSessionID]
+}
+
+// AddAudioBytes atomically adds to the audio byte counter
+func (s *Session) AddAudioBytes(bytes uint64) {
+	s.mu.Lock()
+	s.AudioBytesSent += bytes
+	s.mu.Unlock()
+}
+
+// AddWaterfallBytes atomically adds to the waterfall byte counter
+func (s *Session) AddWaterfallBytes(bytes uint64) {
+	s.mu.Lock()
+	s.WaterfallBytesSent += bytes
+	s.mu.Unlock()
+}
+
+// GetAudioBytesPerSecond returns the current audio transfer rate in bytes/second
+func (s *Session) GetAudioBytesPerSecond() float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	elapsed := time.Since(s.CreatedAt).Seconds()
+	if elapsed == 0 {
+		return 0
+	}
+	return float64(s.AudioBytesSent) / elapsed
+}
+
+// GetAudioBytesPerHour returns the average audio transfer rate in bytes/hour
+func (s *Session) GetAudioBytesPerHour() float64 {
+	return s.GetAudioBytesPerSecond() * 3600
+}
+
+// GetWaterfallBytesPerSecond returns the current waterfall transfer rate in bytes/second
+func (s *Session) GetWaterfallBytesPerSecond() float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	elapsed := time.Since(s.CreatedAt).Seconds()
+	if elapsed == 0 {
+		return 0
+	}
+	return float64(s.WaterfallBytesSent) / elapsed
+}
+
+// GetTotalBytesPerSecond returns the total transfer rate (audio + waterfall) in bytes/second
+func (s *Session) GetTotalBytesPerSecond() float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	elapsed := time.Since(s.CreatedAt).Seconds()
+	if elapsed == 0 {
+		return 0
+	}
+	return float64(s.AudioBytesSent+s.WaterfallBytesSent) / elapsed
 }
 
 // GetSessionInfo returns information about a session

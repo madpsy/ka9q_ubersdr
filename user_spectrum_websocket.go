@@ -655,6 +655,9 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinarySpectrum(conn *wsConn, sessi
 		return err
 	}
 
+	// Track waterfall bytes sent in session
+	session.AddWaterfallBytes(uint64(len(packet)))
+
 	// Track bytes for statistics
 	if conn.aggregator != nil {
 		conn.aggregator.addBytes(int64(len(packet)))
@@ -827,6 +830,9 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinary8Spectrum(conn *wsConn, sess
 	if err != nil {
 		return err
 	}
+
+	// Track waterfall bytes sent in session
+	session.AddWaterfallBytes(uint64(len(packet)))
 
 	// Track bytes for statistics
 	if conn.aggregator != nil {

@@ -3338,6 +3338,11 @@
                             mode: 'index',
                             intersect: false,
                             callbacks: {
+                                label: function(context) {
+                                    // Extract label without the (value) part
+                                    const label = context.dataset.label.replace(/\s*\(\d+\)$/, '');
+                                    return label + ': ' + context.parsed.y;
+                                },
                                 footer: function(tooltipItems) {
                                     let total = 0;
                                     tooltipItems.forEach(item => {

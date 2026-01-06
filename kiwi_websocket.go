@@ -120,9 +120,13 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiStatus(w http.ResponseWriter, r *htt
 	// Hardware info
 	status.WriteString(fmt.Sprintf("sdr_hw=UberSDR %s\n", Version))
 
-	// Admin email
-	if kwsh.config.Admin.Email != "" {
-		status.WriteString(fmt.Sprintf("op_email=%s\n", kwsh.config.Admin.Email))
+	// Admin email (use kiwisdr_public_email if set, otherwise fall back to admin email)
+	publicEmail := kwsh.config.Server.KiwiSDRPublicEmail
+	if publicEmail == "" {
+		publicEmail = kwsh.config.Admin.Email
+	}
+	if publicEmail != "" {
+		status.WriteString(fmt.Sprintf("op_email=%s\n", publicEmail))
 	}
 
 	// Frequency range (0-30 MHz in Hz)

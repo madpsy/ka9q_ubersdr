@@ -97,6 +97,7 @@ type ServerConfig struct {
 	EnableCORS          bool            `yaml:"enable_cors"`
 	EnableKiwiSDR       bool            `yaml:"enable_kiwisdr"`        // Enable KiwiSDR protocol compatibility server (default: false)
 	KiwiSDRListen       string          `yaml:"kiwisdr_listen"`        // KiwiSDR server listen address (e.g., ":8073", default: ":8073")
+	KiwiSDRPublicEmail  string          `yaml:"kiwisdr_public_email"`  // Public email for KiwiSDR status endpoint (default: "admin@example.com")
 	KiwiSDRSmeterOffset float32         `yaml:"kiwisdr_smeter_offset"` // S-meter calibration offset (dBFS to dBm, default: 30.0)
 	LogFile             string          `yaml:"logfile"`               // HTTP request log file path
 	timeoutBypassNets   []*net.IPNet    // Parsed CIDR networks (internal use)
@@ -322,6 +323,9 @@ func LoadConfig(filename string) (*Config, error) {
 	// KiwiSDR compatibility defaults
 	if config.Server.EnableKiwiSDR && config.Server.KiwiSDRListen == "" {
 		config.Server.KiwiSDRListen = ":8073" // Default port
+	}
+	if config.Server.EnableKiwiSDR && config.Server.KiwiSDRPublicEmail == "" {
+		config.Server.KiwiSDRPublicEmail = "admin@example.com" // Default public email
 	}
 	if config.Server.EnableKiwiSDR && config.Server.KiwiSDRSmeterOffset == 0 {
 		config.Server.KiwiSDRSmeterOffset = 30.0 // Default S-meter calibration offset

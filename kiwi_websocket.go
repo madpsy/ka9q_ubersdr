@@ -29,6 +29,7 @@ type KiwiWebSocketHandler struct {
 	connRateLimiter    *IPConnectionRateLimiter
 	prometheusMetrics  *PrometheusMetrics
 	radiod             *RadiodController
+	noiseFloorMonitor  *NoiseFloorMonitor
 	kiwiRXSlots        map[string]int    // Map userSessionID to RX channel number
 	kiwiGeolocations   map[string]string // Map userSessionID to geolocation string
 	nextRXSlot         int               // Next available RX slot
@@ -36,7 +37,7 @@ type KiwiWebSocketHandler struct {
 }
 
 // NewKiwiWebSocketHandler creates a new KiwiSDR WebSocket handler
-func NewKiwiWebSocketHandler(sessions *SessionManager, audioReceiver *AudioReceiver, config *Config, ipBanManager *IPBanManager, rateLimiterManager *RateLimiterManager, connRateLimiter *IPConnectionRateLimiter, prometheusMetrics *PrometheusMetrics) *KiwiWebSocketHandler {
+func NewKiwiWebSocketHandler(sessions *SessionManager, audioReceiver *AudioReceiver, config *Config, ipBanManager *IPBanManager, rateLimiterManager *RateLimiterManager, connRateLimiter *IPConnectionRateLimiter, prometheusMetrics *PrometheusMetrics, noiseFloorMonitor *NoiseFloorMonitor) *KiwiWebSocketHandler {
 	return &KiwiWebSocketHandler{
 		sessions:           sessions,
 		audioReceiver:      audioReceiver,
@@ -46,6 +47,7 @@ func NewKiwiWebSocketHandler(sessions *SessionManager, audioReceiver *AudioRecei
 		connRateLimiter:    connRateLimiter,
 		prometheusMetrics:  prometheusMetrics,
 		radiod:             sessions.radiod, // Get radiod from sessions
+		noiseFloorMonitor:  noiseFloorMonitor,
 		kiwiRXSlots:        make(map[string]int),
 		kiwiGeolocations:   make(map[string]string),
 		nextRXSlot:         0,
@@ -815,7 +817,198 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		return
 	}
 
+	// Handle STATS_UPD command (statistics update request)
+	if _, hasStatsUpd := params["STATS_UPD"]; hasStatsUpd {
+		kc.sendStatsCallback()
+		return
+	}
+
 	// Ignore other commands (agc, etc.)
+}
+
+// calculateDynamicRangeFromFFT calculates P5, P95, and dynamic range from FFT data
+func calculateDynamicRangeFromFFT(data []float32) (p5, p95, dynamicRange float32) {
+	if len(data) == 0 {
+		return 0, 0, 0
+	}
+
+	// Sort data for percentile calculations
+	sorted := make([]float32, len(data))
+	copy(sorted, data)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i] < sorted[j]
+	})
+
+	n := len(sorted)
+	p5 = sorted[n*5/100]   // 5th percentile (noise floor)
+	p95 = sorted[n*95/100] // 95th percentile (signal peak)
+	dynamicRange = p95 - p5
+
+	return p5, p95, dynamicRange
+}
+
+// sendStatsCallback sends the stats_cb message with system statistics
+func (kc *kiwiConn) sendStatsCallback() {
+	// Build stats JSON object with all expected fields
+	stats := make(map[string]interface{})
+
+	// ===== TIME FIELDS (fully implemented) =====
+	now := time.Now()
+	utc := now.UTC()
+
+	// tu: UTC time string (format: "HH:MM:SS")
+	stats["tu"] = utc.Format("15:04:05")
+
+	// tl: Local time string (format: "HH:MM:SS")
+	stats["tl"] = now.Format("15:04:05")
+
+	// ti: Timezone ID (e.g., "GMT", "EST", "PST")
+	// Get timezone abbreviation from the zone name
+	zoneName, _ := now.Zone()
+	stats["ti"] = zoneName
+
+	// tn: Timezone name (e.g., "Europe/London", "America/New_York")
+	// Use IANA timezone name if available, otherwise use offset
+	location := now.Location()
+	if location != nil && location.String() != "" && location.String() != "Local" {
+		stats["tn"] = location.String()
+	} else {
+		// Fallback to offset format
+		_, offset := now.Zone()
+		hours := offset / 3600
+		minutes := (offset % 3600) / 60
+		stats["tn"] = fmt.Sprintf("UTC%+03d:%02d", hours, minutes)
+	}
+
+	// ===== SAMPLE RATE FIELDS (fully implemented) =====
+	// sr: Sample rate (Hz) - audio sample rate
+	sampleRate := kc.config.Audio.DefaultSampleRate
+	stats["sr"] = sampleRate
+
+	// wsr: Waterfall sample rate (Hz) - spectrum update rate
+	// KiwiSDR uses 1024 bins at ~23 fps, so effective sample rate is bins * fps
+	stats["wsr"] = 1024 * 23
+
+	// nsr: Network sample rate (Hz) - same as audio sample rate for now
+	stats["nsr"] = sampleRate
+
+	// ===== UPTIME FIELD (fully implemented) =====
+	// ct: Current time / uptime in seconds since server start
+	uptime := int(time.Since(StartTime).Seconds())
+	stats["ct"] = uptime
+
+	// ===== CPU STATS (placeholder - to be implemented with system monitoring) =====
+	// ce: CPU enabled (0 = disabled, 1 = enabled)
+	stats["ce"] = 0 // Disabled for now - will enable when we add CPU monitoring
+
+	// cu: CPU user time percentage (0-100)
+	stats["cu"] = 0
+
+	// cs: CPU system time percentage (0-100)
+	stats["cs"] = 0
+
+	// ci: CPU idle time percentage (0-100)
+	stats["ci"] = 100 // Show 100% idle since we're not monitoring yet
+
+	// cc: CPU count (number of CPU cores)
+	// TODO: Get actual CPU count from runtime.NumCPU()
+	stats["cc"] = 0
+
+	// cf: CPU frequency in MHz
+	stats["cf"] = 0
+
+	// ===== NETWORK STATS (placeholder - to be implemented with traffic tracking) =====
+	// ac: Audio bytes transferred (total)
+	stats["ac"] = 0
+
+	// wc: Waterfall bytes transferred (total)
+	stats["wc"] = 0
+
+	// fc: FFT bytes transferred (total)
+	stats["fc"] = 0
+
+	// ah: Audio bytes transferred per hour
+	stats["ah"] = 0
+
+	// as: Audio bytes transferred per second
+	stats["as"] = 0
+
+	// ===== GPS STATS (placeholder - to be implemented with GPS integration) =====
+	// ga: GPS acquisition state (0 = no GPS, 1 = acquiring, 2 = acquired)
+	// Check if GPS coordinates are configured
+	if kc.config.Admin.GPS.Lat != 0 || kc.config.Admin.GPS.Lon != 0 {
+		stats["ga"] = 2 // Show as acquired if coordinates are configured
+	} else {
+		stats["ga"] = 0 // No GPS
+	}
+
+	// gt: GPS tracking state (0 = not tracking, 1 = tracking)
+	stats["gt"] = 0
+
+	// gg: GPS good satellites count
+	stats["gg"] = 0
+
+	// gf: GPS fixes count
+	stats["gf"] = 0
+
+	// gc: GPS corrections count
+	stats["gc"] = 0
+
+	// go: GPS offset in ns (nanoseconds)
+	stats["go"] = 0
+
+	// gr: GPS reference clock frequency in Hz
+	stats["gr"] = 0
+
+	// gl: GPS lock status (0 = unlocked, 1 = locked)
+	stats["gl"] = 0
+
+	// ===== SNR STATS (fully implemented using wideband spectrum) =====
+	// sa: SNR for 0-30 MHz in dB (or -1 if not available)
+	// sh: SNR for 1.8-30 MHz HF bands in dB (or -1 if not available)
+	// tr: Time remaining until next measurement in seconds (10 = 10-second averaging window)
+	sa := -1
+	sh := -1
+	tr := 10 // Next measurement in 10 seconds (wideband FFT uses 10-second averaging)
+
+	// Get SNR measurements from wideband spectrum if noise floor monitor is available
+	if kc.handler != nil && kc.handler.noiseFloorMonitor != nil {
+		widebandFFT := kc.handler.noiseFloorMonitor.GetWideBandFFT()
+		if widebandFFT != nil && len(widebandFFT.Data) > 0 {
+			// Calculate 0-30 MHz SNR (dynamic range = P95 - P5)
+			_, _, fullDynamicRange := calculateDynamicRangeFromFFT(widebandFFT.Data)
+			sa = int(fullDynamicRange)
+
+			// Calculate 1.8-30 MHz HF SNR
+			// Wideband FFT covers 0-30 MHz with bin width of 7324.21875 Hz
+			// 1.8 MHz starts at bin: 1800000 / 7324.21875 ≈ 246
+			startBin := int(1800000.0 / widebandFFT.BinWidth)
+			if startBin < len(widebandFFT.Data) {
+				hfBins := widebandFFT.Data[startBin:]
+				_, _, hfDynamicRange := calculateDynamicRangeFromFFT(hfBins)
+				sh = int(hfDynamicRange)
+			}
+
+			log.Printf("SNR stats: sa (0-30 MHz) = %d dB, sh (1.8-30 MHz) = %d dB", sa, sh)
+		}
+	}
+
+	stats["sa"] = sa
+	stats["sh"] = sh
+	stats["tr"] = tr
+
+	// Marshal to JSON
+	jsonData, err := json.Marshal(stats)
+	if err != nil {
+		log.Printf("Error marshaling stats_cb: %v", err)
+		return
+	}
+
+	// Send as MSG stats_cb=<json>
+	// The JSON is sent raw (not URL-encoded) as per KiwiSDR protocol
+	jsonStr := string(jsonData)
+	log.Printf("Sending stats_cb: %s", jsonStr)
+	kc.sendMsg("stats_cb", jsonStr)
 }
 
 // sanitizeGeolocation sanitizes a geolocation string to prevent abuse

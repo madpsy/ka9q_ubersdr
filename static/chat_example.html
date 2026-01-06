@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DX Cluster Chat Example</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        #chat-container {
+            border: 1px solid #ccc;
+            height: 400px;
+            overflow-y: auto;
+            padding: 10px;
+            margin-bottom: 10px;
+            background-color: #f9f9f9;
+        }
+        .chat-message {
+            margin: 5px 0;
+            padding: 5px;
+        }
+        .chat-message .username {
+            font-weight: bold;
+            color: #0066cc;
+        }
+        .chat-message .timestamp {
+            font-size: 0.8em;
+            color: #666;
+        }
+        .system-message {
+            color: #666;
+            font-style: italic;
+        }
+        #username-setup {
+            margin-bottom: 20px;
+        }
+        #chat-input-area {
+            display: none;
+        }
+        #message-input {
+            width: 70%;
+            padding: 8px;
+        }
+        #send-button {
+            padding: 8px 20px;
+        }
+        #active-users {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        .error {
+            color: red;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>DX Cluster Live Chat</h1>
+    
+    <div id="username-setup">
+        <label for="username-input">Enter your username (alphanumeric, max 15 chars):</label><br>
+        <input type="text" id="username-input" maxlength="15" pattern="[A-Za-z0-9]+" placeholder="YourCallsign">
+        <button id="set-username-button">Join Chat</button>
+        <div id="username-error" class="error"></div>
+    </div>
+
+    <div id="chat-input-area">
+        <div id="chat-container"></div>
+        <input type="text" id="message-input" placeholder="Type your message (max 250 chars)..." maxlength="250">
+        <button id="send-button">Send</button>
+        <button id="leave-button" style="background-color: #dc3545; margin-left: 10px;">Leave Chat</button>
+        
+        <div id="active-users">
+            <strong>Active Users:</strong> <span id="user-count">0</span>
+            <div id="user-list"></div>
+        </div>
+    </div>
+
+    <div id="connection-status">Status: <span id="status-text">Disconnected</span></div>
+
+    <script>
+        // WebSocket connection
+        let ws = null;
+        let userSessionId = generateUUID();
+        let currentUsername = null;
+        let mutedUsers = new Set(); // Client-side mute list
+
+        // Generate a UUID for the session
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        // Register session with server (required before WebSocket connection)
+        async function registerSession() {
+            try {
+                const response = await fetch('/connection', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        user_session_id: userSessionId
+                    })
+                });
+                
+                if (!response.ok) {
+                    console.error('Failed to register session:', response.statusText);
+                    return false;
+                }
+                return true;
+            } catch (error) {
+                console.error('Error registering session:', error);
+                return false;
+            }
+        }
+
+        // Connect to WebSocket
+        async function connectWebSocket() {
+            // First register the session
+            const registered = await registerSession();
+            if (!registered) {
+                document.getElementById('status-text').textContent = 'Failed to register session';
+                document.getElementById('status-text').style.color = 'red';
+                // Retry after 5 seconds
+                setTimeout(connectWebSocket, 5000);
+                return;
+            }
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/dxcluster?user_session_id=${userSessionId}`;
+            
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function() {
+                document.getElementById('status-text').textContent = 'Connected';
+                document.getElementById('status-text').style.color = 'green';
+            };
+
+            ws.onmessage = function(event) {
+                const msg = JSON.parse(event.data);
+                handleMessage(msg);
+            };
+
+            ws.onclose = function() {
+                document.getElementById('status-text').textContent = 'Disconnected';
+                document.getElementById('status-text').style.color = 'red';
+                // Attempt to reconnect after 5 seconds
+                setTimeout(connectWebSocket, 5000);
+            };
+
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        // Handle incoming messages
+        function handleMessage(msg) {
+            switch(msg.type) {
+                case 'chat_message':
+                    displayChatMessage(msg.data);
+                    break;
+                case 'chat_user_joined':
+                    displaySystemMessage(`${msg.data.username} joined the chat`);
+                    requestActiveUsers();
+                    break;
+                case 'chat_user_left':
+                    displaySystemMessage(`${msg.data.username} left the chat`);
+                    requestActiveUsers();
+                    break;
+                case 'chat_active_users':
+                    updateActiveUsers(msg.data);
+                    break;
+                case 'chat_error':
+                    displayError(msg.error);
+                    break;
+                case 'pong':
+                    // Keepalive response
+                    break;
+                default:
+                    // Handle other message types (dx_spot, digital_spot, cw_spot, etc.)
+                    console.log('Received:', msg.type);
+            }
+        }
+
+        // Display a chat message
+        function displayChatMessage(data) {
+            // Check if user is muted
+            if (mutedUsers.has(data.username)) {
+                return; // Don't display messages from muted users
+            }
+            
+            const container = document.getElementById('chat-container');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'chat-message';
+            
+            const timestamp = new Date(data.timestamp).toLocaleTimeString();
+            messageDiv.innerHTML = `
+                <span class="username" onclick="toggleMute('${escapeHtml(data.username)}')" style="cursor:pointer;" title="Click to mute/unmute">${escapeHtml(data.username)}:</span>
+                <span class="message">${escapeHtml(data.message)}</span>
+                <span class="timestamp">(${timestamp})</span>
+            `;
+            
+            container.appendChild(messageDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // Toggle mute for a user
+        function toggleMute(username) {
+            if (mutedUsers.has(username)) {
+                mutedUsers.delete(username);
+                displaySystemMessage(`Unmuted ${username}`);
+            } else {
+                mutedUsers.add(username);
+                displaySystemMessage(`Muted ${username} (click their name again to unmute)`);
+            }
+            // Save to localStorage
+            localStorage.setItem('mutedUsers', JSON.stringify([...mutedUsers]));
+        }
+
+        // Load muted users from localStorage
+        function loadMutedUsers() {
+            const saved = localStorage.getItem('mutedUsers');
+            if (saved) {
+                mutedUsers = new Set(JSON.parse(saved));
+            }
+        }
+
+        // Display a system message
+        function displaySystemMessage(text) {
+            const container = document.getElementById('chat-container');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'chat-message system-message';
+            messageDiv.textContent = text;
+            container.appendChild(messageDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // Display an error
+        function displayError(errorText) {
+            const errorDiv = document.getElementById('username-error');
+            errorDiv.textContent = errorText;
+            setTimeout(() => {
+                errorDiv.textContent = '';
+            }, 5000);
+        }
+
+        // Update active users list
+        function updateActiveUsers(data) {
+            document.getElementById('user-count').textContent = data.count;
+            const userList = document.getElementById('user-list');
+            userList.innerHTML = data.users.map(u => escapeHtml(u.username)).join(', ');
+        }
+
+        // Request active users list
+        function requestActiveUsers() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'chat_request_users'
+                }));
+            }
+        }
+
+        // Set username
+        function setUsername() {
+            const username = document.getElementById('username-input').value.trim();
+            
+            // Validate username (alphanumeric only, max 15 chars)
+            if (!/^[A-Za-z0-9]{1,15}$/.test(username)) {
+                displayError('Username must be alphanumeric and 1-15 characters');
+                return;
+            }
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'chat_set_username',
+                    username: username
+                }));
+                
+                currentUsername = username;
+                document.getElementById('username-setup').style.display = 'none';
+                document.getElementById('chat-input-area').style.display = 'block';
+                displaySystemMessage(`You joined as ${username}`);
+                requestActiveUsers();
+            } else {
+                displayError('Not connected to server');
+            }
+        }
+
+        // Send a chat message
+        function sendMessage() {
+            const input = document.getElementById('message-input');
+            const message = input.value.trim();
+            
+            if (message && ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'chat_message',
+                    message: message
+                }));
+                input.value = '';
+            }
+        }
+
+        // Leave chat cleanly (without closing WebSocket - it's shared with DX spots!)
+        function leaveChat() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                // Send leave message to server (keeps WebSocket open for DX spots)
+                ws.send(JSON.stringify({
+                    type: 'chat_leave'
+                }));
+            }
+            
+            // Reset UI
+            document.getElementById('username-setup').style.display = 'block';
+            document.getElementById('chat-input-area').style.display = 'none';
+            document.getElementById('username-input').value = '';
+            currentUsername = null;
+            
+            displaySystemMessage('You have left the chat (DX spots still active)');
+        }
+
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Event listeners
+        document.getElementById('set-username-button').addEventListener('click', setUsername);
+        document.getElementById('username-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') setUsername();
+        });
+        document.getElementById('send-button').addEventListener('click', sendMessage);
+        document.getElementById('leave-button').addEventListener('click', leaveChat);
+        document.getElementById('message-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        // Load muted users on page load
+        loadMutedUsers();
+        
+        // Connect on page load
+        connectWebSocket();
+
+        // Send periodic ping to keep connection alive
+        setInterval(function() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ping' }));
+            }
+        }, 30000);
+    </script>
+</body>
+</html>

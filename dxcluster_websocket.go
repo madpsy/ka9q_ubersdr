@@ -57,10 +57,17 @@ type DXClusterWebSocketHandler struct {
 
 	// Receiver location for distance/bearing calculation
 	receiverLocator string
+
+	// Chat manager for live chat functionality
+	chatManager *ChatManager
+
+	// Map websocket connections to session IDs for chat
+	connToSessionID   map[*websocket.Conn]string
+	connToSessionIDMu sync.RWMutex
 }
 
 // NewDXClusterWebSocketHandler creates a new DX cluster WebSocket handler
-func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionManager, ipBanManager *IPBanManager, prometheusMetrics *PrometheusMetrics, receiverLocator string) *DXClusterWebSocketHandler {
+func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionManager, ipBanManager *IPBanManager, prometheusMetrics *PrometheusMetrics, receiverLocator string, chatConfig ChatConfig) *DXClusterWebSocketHandler {
 	handler := &DXClusterWebSocketHandler{
 		clients:           make(map[*websocket.Conn]*sync.Mutex),
 		dxCluster:         dxCluster,
@@ -74,6 +81,7 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 		cwSpotBuffer:      make([]map[string]interface{}, 0, 100),
 		maxCWSpots:        100,
 		receiverLocator:   receiverLocator,
+		connToSessionID:   make(map[*websocket.Conn]string),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:    1024,
 			WriteBufferSize:   1024,
@@ -82,6 +90,12 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 				return true // Allow all origins for now
 			},
 		},
+	}
+
+	// Initialize chat manager if enabled (50 message buffer, configured max users)
+	if chatConfig.Enabled {
+		handler.chatManager = NewChatManager(handler, 50, chatConfig.MaxUsers)
+		log.Printf("Chat: Initialized with max %d users", chatConfig.MaxUsers)
 	}
 
 	// Register spot handler to broadcast to all clients
@@ -175,6 +189,11 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 	clientCount := len(h.clients)
 	h.clientsMu.Unlock()
 
+	// Map connection to session ID for chat
+	h.connToSessionIDMu.Lock()
+	h.connToSessionID[conn] = userSessionID
+	h.connToSessionIDMu.Unlock()
+
 	log.Printf("DX Cluster WebSocket: Client connected, user_session_id: %s, source IP: %s, client IP: %s (total: %d)", userSessionID, sourceIP, clientIP, clientCount)
 
 	// Record connection in Prometheus
@@ -197,15 +216,30 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 
 		// Send buffered CW spots to new client
 		h.sendBufferedCWSpots(conn)
+
+		// Send buffered chat messages to new client
+		if h.chatManager != nil {
+			h.chatManager.SendBufferedMessages(conn)
+		}
 	}()
 
-	// Handle client messages (mainly for ping/pong)
-	go h.handleClient(conn)
+	// Handle client messages (mainly for ping/pong and chat)
+	go h.handleClient(conn, userSessionID)
 }
 
 // handleClient handles messages from a WebSocket client
-func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn) {
+func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessionID string) {
 	defer func() {
+		// Remove user from chat system
+		if h.chatManager != nil {
+			h.chatManager.RemoveUser(userSessionID)
+		}
+
+		// Remove connection to session ID mapping
+		h.connToSessionIDMu.Lock()
+		delete(h.connToSessionID, conn)
+		h.connToSessionIDMu.Unlock()
+
 		// Unregister client
 		h.clientsMu.Lock()
 		delete(h.clients, conn)
@@ -254,7 +288,7 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn) {
 		}
 	}()
 
-	// Read messages (mainly for keepalive)
+	// Read messages (for keepalive and chat)
 	for {
 		messageType, message, err := conn.ReadMessage()
 		if err != nil {
@@ -264,14 +298,33 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn) {
 			break
 		}
 
-		// Handle ping messages
+		// Handle text messages
 		if messageType == websocket.TextMessage {
 			var msg map[string]interface{}
 			if err := json.Unmarshal(message, &msg); err == nil {
-				if msgType, ok := msg["type"].(string); ok && msgType == "ping" {
+				msgType, ok := msg["type"].(string)
+				if !ok {
+					continue
+				}
+
+				switch msgType {
+				case "ping":
+					// Handle ping/pong
 					h.sendMessage(conn, map[string]interface{}{
 						"type": "pong",
 					})
+
+				case "chat_set_username", "chat_message", "chat_request_users":
+					// Handle chat messages
+					if h.chatManager != nil {
+						if err := h.chatManager.HandleChatMessage(userSessionID, msg); err != nil {
+							// Send error back to client
+							h.sendMessage(conn, map[string]interface{}{
+								"type":  "chat_error",
+								"error": err.Error(),
+							})
+						}
+					}
 				}
 			}
 		}

@@ -21,6 +21,7 @@ type Config struct {
 	MQTT              MQTTConfig              `yaml:"mqtt"`
 	Logging           LoggingConfig           `yaml:"logging"`
 	DXCluster         DXClusterConfig         `yaml:"dxcluster"`
+	Chat              ChatConfig              `yaml:"chat"`
 	SpaceWeather      SpaceWeatherConfig      `yaml:"spaceweather"`
 	InstanceReporting InstanceReportingConfig `yaml:"instance_reporting"`
 	Bookmarks         []Bookmark              `yaml:"bookmarks"`
@@ -160,6 +161,12 @@ type DXClusterConfig struct {
 	Callsign       string `yaml:"callsign"`
 	ReconnectDelay int    `yaml:"reconnect_delay"` // Seconds between reconnection attempts
 	KeepAliveDelay int    `yaml:"keepalive_delay"` // Seconds between keep-alive messages
+}
+
+// ChatConfig contains live chat settings
+type ChatConfig struct {
+	Enabled  bool `yaml:"enabled"`   // Enable/disable live chat functionality
+	MaxUsers int  `yaml:"max_users"` // Maximum concurrent chat users (0 = unlimited)
 }
 
 // SpaceWeatherConfig contains space weather monitoring settings
@@ -458,6 +465,13 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.DXCluster.KeepAliveDelay == 0 {
 		config.DXCluster.KeepAliveDelay = 300 // 5 minutes default
+	}
+
+	// Set chat defaults if not specified
+	// Chat is enabled by default (YAML bool defaults to false, so we check and set to true)
+	// MaxUsers of 0 means unlimited, so we set a default of 25
+	if config.Chat.MaxUsers == 0 {
+		config.Chat.MaxUsers = 25 // Default 25 concurrent chat users
 	}
 
 	// Set space weather defaults if not specified

@@ -734,7 +734,7 @@ func main() {
 	if config.Decoder.Enabled {
 		receiverLocator = config.Decoder.ReceiverLocator
 	}
-	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics, receiverLocator)
+	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics, receiverLocator, config.Chat)
 
 	// Register CW Skimmer spot handler to broadcast via websocket and MQTT
 	if cwSkimmer != nil {

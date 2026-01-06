@@ -375,6 +375,24 @@ dxcluster:
   # Keep-alive delay in seconds (time between keep-alive messages to prevent timeout)
   keepalive_delay: 300
 
+# Live Chat settings
+# Provides real-time chat functionality over the DX cluster websocket
+# Users can communicate with each other while monitoring DX spots
+chat:
+  # Enable or disable live chat functionality
+  # When enabled, users can set a username and send chat messages
+  # Chat uses the same websocket connection as DX spots (no additional connections)
+  # Default: false
+  enabled: false
+  
+  # Maximum number of concurrent chat users
+  # Limits how many users can have active chat sessions simultaneously
+  # This is separate from the general max_sessions limit
+  # Set to 0 for unlimited chat users
+  # Default: 25
+  # Recommended: 25-50 for small to medium instances
+  max_users: 25
+
 # Space Weather settings
 spaceweather:
   # Enable space weather monitoring from NOAA SWPC

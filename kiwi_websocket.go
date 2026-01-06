@@ -856,11 +856,11 @@ func (kc *kiwiConn) sendStatsCallback() {
 	now := time.Now()
 	utc := now.UTC()
 
-	// tu: UTC time string (format: "HH:MM:SS")
-	stats["tu"] = utc.Format("15:04:05")
+	// tu: UTC time string (format: "HH:MM" - no seconds, matching real KiwiSDR)
+	stats["tu"] = utc.Format("15:04")
 
-	// tl: Local time string (format: "HH:MM:SS")
-	stats["tl"] = now.Format("15:04:05")
+	// tl: Local time string (format: "HH:MM" - no seconds, matching real KiwiSDR)
+	stats["tl"] = now.Format("15:04")
 
 	// ti: Timezone ID (e.g., "GMT", "EST", "PST")
 	// Get timezone abbreviation from the zone name

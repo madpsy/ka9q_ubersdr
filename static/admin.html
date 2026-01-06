@@ -894,7 +894,7 @@
                             </div>
                             <div style="display: flex; gap: 10px;">
                                 <button class="btn" onclick="loadSessionEvents()" style="padding: 8px 16px; white-space: nowrap;">Load Events</button>
-                                <button class="btn btn-secondary" onclick="loadSessionEvents()" style="padding: 8px 16px; white-space: nowrap;">🔄 Refresh</button>
+                                <button class="btn btn-secondary" onclick="refreshSessionEvents()" style="padding: 8px 16px; white-space: nowrap;">🔄 Refresh</button>
                                 <button class="btn btn-secondary" onclick="downloadSessionEvents()" style="padding: 8px 16px; white-space: nowrap;">📥 Download</button>
                             </div>
                         </div>
@@ -6938,6 +6938,27 @@
             if (modal) {
                 modal.style.display = 'none';
             }
+        }
+
+        function refreshSessionEvents() {
+            // Update both start and end times to maintain a rolling 24-hour window
+            const endTime = new Date();
+            const startTime = new Date(endTime.getTime() - 24 * 60 * 60 * 1000);
+
+            const formatForInput = (date) => {
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                const hours = String(date.getHours()).padStart(2, '0');
+                const minutes = String(date.getMinutes()).padStart(2, '0');
+                return `${year}-${month}-${day}T${hours}:${minutes}`;
+            };
+
+            document.getElementById('eventsStartTime').value = formatForInput(startTime);
+            document.getElementById('eventsEndTime').value = formatForInput(endTime);
+
+            // Reload events with updated time range
+            loadSessionEvents();
         }
 
         async function loadSessionEvents() {

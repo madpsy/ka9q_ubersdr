@@ -3047,8 +3047,14 @@
 
         // Session Activity Chart
         let sessionActivityChart = null;
+        let sessionActivityChartLoaded = false;
 
         async function loadSessionActivityChart() {
+            // Only load once to prevent flickering on session refresh
+            if (sessionActivityChartLoaded) {
+                return;
+            }
+
             try {
                 // Calculate time range (last 24 hours)
                 const endTime = new Date();
@@ -3058,9 +3064,9 @@
                 const response = await authenticatedFetch(
                     `/admin/session-activity/metrics?start=${startTime.toISOString()}&end=${endTime.toISOString()}`
                 );
-                
+
                 if (!response) return; // Auth failed
-                
+
                 if (!response.ok) {
                     // If session activity logging is not enabled, hide the chart
                     const chartContainer = document.getElementById('sessionActivityChart')?.parentElement;
@@ -3072,6 +3078,7 @@
 
                 const data = await response.json();
                 renderSessionActivityChart(data.metrics);
+                sessionActivityChartLoaded = true;
             } catch (error) {
                 console.error('Error loading session activity chart:', error);
                 // Hide chart on error
@@ -3086,19 +3093,30 @@
             const canvas = document.getElementById('sessionActivityChart');
             if (!canvas) return;
 
-            // Destroy existing chart if it exists
+            // Only create chart once
             if (sessionActivityChart) {
-                sessionActivityChart.destroy();
+                return; // Chart already exists, don't recreate
             }
 
             // Prepare data for Chart.js
             const timeline = metrics.timeline || [];
-            
+
             // Extract data points for each auth method
             const labels = timeline.map(entry => new Date(entry.timestamp));
             const regularData = timeline.map(entry => entry.auth_breakdown?.regular || 0);
             const passwordData = timeline.map(entry => entry.auth_breakdown?.password || 0);
             const bypassedData = timeline.map(entry => entry.auth_breakdown?.bypassed || 0);
+
+            // Get max_sessions limit from config
+            const maxSessions = currentConfig?.server?.max_sessions || 20;
+
+            // Get most recent values (last data point)
+            const latestRegular = regularData.length > 0 ? regularData[regularData.length - 1] : 0;
+            const latestPassword = passwordData.length > 0 ? passwordData[passwordData.length - 1] : 0;
+            const latestBypassed = bypassedData.length > 0 ? bypassedData[bypassedData.length - 1] : 0;
+
+            // Create limit line data (constant value across all time points)
+            const limitData = labels.map(() => maxSessions);
 
             // Create stacked area chart
             const ctx = canvas.getContext('2d');
@@ -3108,31 +3126,47 @@
                     labels: labels,
                     datasets: [
                         {
-                            label: 'Regular Users',
+                            label: `Regular Users (${latestRegular})`,
                             data: regularData,
-                            backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.5)', // Blue
                             borderColor: 'rgba(54, 162, 235, 1)',
                             borderWidth: 2,
                             fill: true,
-                            tension: 0.4
+                            tension: 0.4,
+                            order: 2
                         },
                         {
-                            label: 'Password Bypassed',
+                            label: `Password Bypassed (${latestPassword})`,
                             data: passwordData,
-                            backgroundColor: 'rgba(255, 206, 86, 0.5)',
-                            borderColor: 'rgba(255, 206, 86, 1)',
+                            backgroundColor: 'rgba(255, 159, 64, 0.5)', // Orange
+                            borderColor: 'rgba(255, 159, 64, 1)',
                             borderWidth: 2,
                             fill: true,
-                            tension: 0.4
+                            tension: 0.4,
+                            order: 2
                         },
                         {
-                            label: 'IP Bypassed',
+                            label: `IP Bypassed (${latestBypassed})`,
                             data: bypassedData,
-                            backgroundColor: 'rgba(75, 192, 192, 0.5)',
-                            borderColor: 'rgba(75, 192, 192, 1)',
+                            backgroundColor: 'rgba(75, 192, 75, 0.5)', // Green
+                            borderColor: 'rgba(75, 192, 75, 1)',
                             borderWidth: 2,
                             fill: true,
-                            tension: 0.4
+                            tension: 0.4,
+                            order: 2
+                        },
+                        {
+                            label: `Regular User Limit (${maxSessions})`,
+                            data: limitData,
+                            backgroundColor: 'transparent',
+                            borderColor: 'rgba(220, 53, 69, 0.8)', // Red
+                            borderWidth: 2,
+                            borderDash: [10, 5],
+                            fill: false,
+                            pointRadius: 0,
+                            pointHoverRadius: 0,
+                            tension: 0,
+                            order: 1 // Draw on top
                         }
                     ]
                 },
@@ -3170,6 +3204,7 @@
                             }
                         }
                     },
+                    animation: false, // Disable animation to prevent flickering
                     plugins: {
                         legend: {
                             display: true,

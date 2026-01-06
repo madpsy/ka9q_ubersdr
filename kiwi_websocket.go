@@ -932,17 +932,16 @@ func (kc *kiwiConn) sendStatsCallback() {
 	// ce: CPU enabled (0 = disabled, 1 = enabled)
 	stats["ce"] = 0 // Disabled for now - will enable when we add CPU monitoring
 
-	// cu: CPU user time percentage (0-100)
-	stats["cu"] = 0
+	// cu: CPU user time percentage (0-100) - MUST be array even when disabled
+	stats["cu"] = []int{0}
 
-	// cs: CPU system time percentage (0-100)
-	stats["cs"] = 0
+	// cs: CPU system time percentage (0-100) - MUST be array even when disabled
+	stats["cs"] = []int{0}
 
-	// ci: CPU idle time percentage (0-100)
-	stats["ci"] = 100 // Show 100% idle since we're not monitoring yet
+	// ci: CPU idle time percentage (0-100) - MUST be array even when disabled
+	stats["ci"] = []int{100} // Show 100% idle since we're not monitoring yet
 
-	// cc: CPU count (number of CPU cores)
-	// TODO: Get actual CPU count from runtime.NumCPU()
+	// cc: CPU temperature in Celsius (0 = not available)
 	stats["cc"] = 0
 
 	// cf: CPU frequency in MHz

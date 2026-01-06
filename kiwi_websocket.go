@@ -897,6 +897,11 @@ func (kc *kiwiConn) sendStatsCallback() {
 	uptime := int(time.Since(StartTime).Seconds())
 	stats["ct"] = uptime
 
+	// r: RX channels (max sessions)
+	// g: GPS channels (always 0 for UberSDR)
+	stats["r"] = kc.config.Server.MaxSessions
+	stats["g"] = 0
+
 	// Parse version string (e.g., "0.1.20" -> v1=0, v2=1)
 	// v1: Version major
 	// v2: Version minor
@@ -945,19 +950,30 @@ func (kc *kiwiConn) sendStatsCallback() {
 	// Find all sessions for this user (both audio and spectrum)
 	if kc.userSessionID != "" {
 		allSessions := kc.sessions.GetAllSessionsInfo()
+		sessionsFound := 0
 		for _, sessionInfo := range allSessions {
 			userSessionID, _ := sessionInfo["user_session_id"].(string)
 			if userSessionID == kc.userSessionID {
+				sessionsFound++
 				// Get the actual session to access byte counters
 				sessionID, _ := sessionInfo["id"].(string)
+				isSpectrum, _ := sessionInfo["is_spectrum"].(bool)
 				if session, ok := kc.sessions.GetSession(sessionID); ok {
+					audioBPS := session.GetAudioBytesPerSecond()
+					waterfallBPS := session.GetWaterfallBytesPerSecond()
+
 					// Add audio bytes (convert bytes/sec to kilobytes/sec)
-					audioKBytesPerSec += session.GetAudioBytesPerSecond() / 1024.0
+					audioKBytesPerSec += audioBPS / 1024.0
 					// Add waterfall bytes (convert bytes/sec to kilobytes/sec)
-					waterfallKBytesPerSec += session.GetWaterfallBytesPerSecond() / 1024.0
+					waterfallKBytesPerSec += waterfallBPS / 1024.0
+
+					log.Printf("STATS: Session %s (spectrum=%v): audio=%.2f kB/s, waterfall=%.2f kB/s",
+						sessionID[:8], isSpectrum, audioBPS/1024.0, waterfallBPS/1024.0)
 				}
 			}
 		}
+		log.Printf("STATS: Found %d sessions for user %s, total: audio=%.2f kB/s, waterfall=%.2f kB/s",
+			sessionsFound, kc.userSessionID, audioKBytesPerSec, waterfallKBytesPerSec)
 	}
 
 	// Calculate waterfall FPS from poll period

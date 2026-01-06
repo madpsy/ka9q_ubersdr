@@ -2752,8 +2752,18 @@
             currentSessionFilter = filterType;
             
             const container = document.getElementById('sessionsList');
+            
+            // Preserve the chart container if it exists
+            const chartContainer = document.getElementById('sessionActivityChartContainer');
+            const chartHTML = chartContainer ? chartContainer.outerHTML : '';
+            
             container.innerHTML = '';
             container.classList.remove('loading');
+            
+            // Restore chart container if it existed
+            if (chartHTML) {
+                container.insertAdjacentHTML('beforeend', chartHTML);
+            }
 
             if (currentSessions.length === 0) {
                 container.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No active sessions</p>';

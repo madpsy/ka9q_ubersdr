@@ -487,7 +487,14 @@
                 <div id="sessionsTab" class="tab-content active">
                     <!-- Session Activity Chart (outside sessionsList so it persists) -->
                     <div id="sessionActivityChartContainer" style="margin-bottom: 20px; padding: 20px; background: white; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: none;">
-                        <h3 style="margin-bottom: 15px; color: #333;">Session Activity (Last 24 Hours)</h3>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                            <h3 id="sessionActivityChartTitle" style="margin: 0; color: #333;">Session Activity (Last 24 Hours)</h3>
+                            <div style="display: flex; gap: 5px;">
+                                <button onclick="changeSessionActivityTimeRange('day')" id="btnDay" class="btn" style="padding: 6px 12px; font-size: 13px; background: #007bff; color: white;">1 Day</button>
+                                <button onclick="changeSessionActivityTimeRange('week')" id="btnWeek" class="btn" style="padding: 6px 12px; font-size: 13px;">1 Week</button>
+                                <button onclick="changeSessionActivityTimeRange('month')" id="btnMonth" class="btn" style="padding: 6px 12px; font-size: 13px;">1 Month</button>
+                            </div>
+                        </div>
                         <canvas id="sessionActivityChart" style="max-height: 300px;"></canvas>
                     </div>
                     <div id="sessionsList" class="loading">
@@ -3045,12 +3052,34 @@
         let sessionActivityChart = null;
         let sessionActivityChartLoaded = false;
         let lastChartUpdate = 0;
+        let currentTimeRange = 'day'; // day, week, month
 
-        async function loadSessionActivityChart() {
+        async function loadSessionActivityChart(timeRange = currentTimeRange) {
             try {
-                // Calculate time range (last 24 hours)
+                // Calculate time range based on selection
                 const endTime = new Date();
-                const startTime = new Date(endTime.getTime() - 24 * 60 * 60 * 1000);
+                let startTime;
+                let title;
+                let timeUnit;
+
+                switch (timeRange) {
+                    case 'week':
+                        startTime = new Date(endTime.getTime() - 7 * 24 * 60 * 60 * 1000);
+                        title = 'Session Activity (Last 7 Days)';
+                        timeUnit = 'day';
+                        break;
+                    case 'month':
+                        startTime = new Date(endTime.getTime() - 30 * 24 * 60 * 60 * 1000);
+                        title = 'Session Activity (Last 30 Days)';
+                        timeUnit = 'day';
+                        break;
+                    case 'day':
+                    default:
+                        startTime = new Date(endTime.getTime() - 24 * 60 * 60 * 1000);
+                        title = 'Session Activity (Last 24 Hours)';
+                        timeUnit = 'hour';
+                        break;
+                }
 
                 // Fetch metrics from API
                 const response = await authenticatedFetch(
@@ -3066,19 +3095,23 @@
 
                 const data = await response.json();
 
-                // Show the chart container
+                // Show the chart container and update title
                 const chartContainer = document.getElementById('sessionActivityChartContainer');
+                const chartTitle = document.getElementById('sessionActivityChartTitle');
                 if (chartContainer) {
                     chartContainer.style.display = 'block';
+                }
+                if (chartTitle) {
+                    chartTitle.textContent = title;
                 }
 
                 if (!sessionActivityChartLoaded) {
                     // First load - create the chart
-                    renderSessionActivityChart(data.metrics);
+                    renderSessionActivityChart(data.metrics, timeUnit);
                     sessionActivityChartLoaded = true;
                 } else {
                     // Update existing chart data
-                    updateSessionActivityChart(data.metrics);
+                    updateSessionActivityChart(data.metrics, timeUnit);
                 }
 
                 lastChartUpdate = Date.now();
@@ -3093,10 +3126,25 @@
             if (!sessionActivityChartLoaded || (Date.now() - lastChartUpdate) < 30000) {
                 return;
             }
-            await loadSessionActivityChart();
+            await loadSessionActivityChart(currentTimeRange);
         }
 
-        function renderSessionActivityChart(metrics) {
+        function changeSessionActivityTimeRange(range) {
+            currentTimeRange = range;
+            
+            // Update button styles
+            document.getElementById('btnDay').style.background = range === 'day' ? '#007bff' : '#6c757d';
+            document.getElementById('btnDay').style.color = 'white';
+            document.getElementById('btnWeek').style.background = range === 'week' ? '#007bff' : '#6c757d';
+            document.getElementById('btnWeek').style.color = 'white';
+            document.getElementById('btnMonth').style.background = range === 'month' ? '#007bff' : '#6c757d';
+            document.getElementById('btnMonth').style.color = 'white';
+            
+            // Reload chart with new time range
+            loadSessionActivityChart(range);
+        }
+
+        function renderSessionActivityChart(metrics, timeUnit = 'hour') {
             const canvas = document.getElementById('sessionActivityChart');
             if (!canvas) return;
 
@@ -3169,9 +3217,10 @@
                         x: {
                             type: 'time',
                             time: {
-                                unit: 'hour',
+                                unit: timeUnit,
                                 displayFormats: {
-                                    hour: 'HH:mm'
+                                    hour: 'HH:mm',
+                                    day: 'MMM dd'
                                 },
                                 tooltipFormat: 'MMM dd, HH:mm'
                             },
@@ -3215,14 +3264,14 @@
             });
         }
 
-        function updateSessionActivityChart(metrics) {
+        function updateSessionActivityChart(metrics, timeUnit = 'hour') {
             if (!sessionActivityChart) return;
 
             const timeline = metrics.timeline || [];
 
             // Update chart data
             sessionActivityChart.data.labels = timeline.map(entry => new Date(entry.timestamp));
-            
+
             const regularData = timeline.map(entry => entry.auth_breakdown?.regular || 0);
             const passwordData = timeline.map(entry => entry.auth_breakdown?.password || 0);
             const bypassedData = timeline.map(entry => entry.auth_breakdown?.bypassed || 0);
@@ -3235,12 +3284,15 @@
             // Update datasets
             sessionActivityChart.data.datasets[0].data = regularData;
             sessionActivityChart.data.datasets[0].label = `Regular Users (${latestRegular})`;
-            
+
             sessionActivityChart.data.datasets[1].data = passwordData;
             sessionActivityChart.data.datasets[1].label = `Password Bypassed (${latestPassword})`;
-            
+
             sessionActivityChart.data.datasets[2].data = bypassedData;
             sessionActivityChart.data.datasets[2].label = `IP Bypassed (${latestBypassed})`;
+
+            // Update x-axis time unit
+            sessionActivityChart.options.scales.x.time.unit = timeUnit;
 
             // Update chart without animation
             sessionActivityChart.update('none');

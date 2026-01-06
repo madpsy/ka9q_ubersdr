@@ -80,6 +80,9 @@ type PrometheusMetrics struct {
 	// System metrics
 	activeSessions         prometheus.Gauge // Total active sessions (audio + spectrum)
 	activeUsers            prometheus.Gauge // Total unique users (by UUID)
+	activeUsersRegular     prometheus.Gauge // Unique regular users (no bypass)
+	activeUsersPassword    prometheus.Gauge // Unique password-bypassed users
+	activeUsersBypassed    prometheus.Gauge // Unique IP-bypassed users
 	activeAudioSessions    prometheus.Gauge // Active audio sessions only
 	activeSpectrumSessions prometheus.Gauge // Active spectrum sessions only
 
@@ -566,6 +569,24 @@ func (pm *PrometheusMetrics) InitializeSystemMetrics() {
 			Help: "Total number of unique active users (by user_session_id UUID)",
 		},
 	)
+	pm.activeUsersRegular = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "ubersdr_active_users_regular",
+			Help: "Number of unique regular users (no bypass authentication)",
+		},
+	)
+	pm.activeUsersPassword = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "ubersdr_active_users_password_bypassed",
+			Help: "Number of unique password-bypassed users",
+		},
+	)
+	pm.activeUsersBypassed = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "ubersdr_active_users_ip_bypassed",
+			Help: "Number of unique IP-bypassed users",
+		},
+	)
 	pm.activeAudioSessions = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "ubersdr_active_audio_sessions_total",
@@ -877,15 +898,39 @@ func (pm *PrometheusMetrics) UpdateSessionMetrics(sessions *SessionManager) {
 	totalSessions := sessions.GetSessionCount()
 	uniqueUsers := sessions.GetUniqueUserCount()
 
-	// Count audio vs spectrum sessions
+	// Count audio vs spectrum sessions and track unique users by auth method
 	sessions.mu.RLock()
 	audioCount := 0
 	spectrumCount := 0
+	regularUsers := make(map[string]bool)
+	passwordUsers := make(map[string]bool)
+	bypassedUsers := make(map[string]bool)
+
 	for _, session := range sessions.sessions {
+		// Count session types
 		if session.IsSpectrum {
 			spectrumCount++
 		} else {
 			audioCount++
+		}
+
+		// Track unique users by auth method (skip internal sessions)
+		if session.UserSessionID != "" && session.ClientIP != "" {
+			// Determine auth method
+			if session.BypassPassword != "" {
+				// Has password, check if it's valid
+				if sessions.config.Server.IsIPTimeoutBypassed(session.ClientIP, session.BypassPassword) {
+					passwordUsers[session.UserSessionID] = true
+				} else {
+					regularUsers[session.UserSessionID] = true
+				}
+			} else if sessions.config.Server.IsIPTimeoutBypassed(session.ClientIP) {
+				// No password, but IP is bypassed
+				bypassedUsers[session.UserSessionID] = true
+			} else {
+				// Regular user
+				regularUsers[session.UserSessionID] = true
+			}
 		}
 	}
 	sessions.mu.RUnlock()
@@ -893,6 +938,9 @@ func (pm *PrometheusMetrics) UpdateSessionMetrics(sessions *SessionManager) {
 	// Update metrics
 	pm.activeSessions.Set(float64(totalSessions))
 	pm.activeUsers.Set(float64(uniqueUsers))
+	pm.activeUsersRegular.Set(float64(len(regularUsers)))
+	pm.activeUsersPassword.Set(float64(len(passwordUsers)))
+	pm.activeUsersBypassed.Set(float64(len(bypassedUsers)))
 	pm.activeAudioSessions.Set(float64(audioCount))
 	pm.activeSpectrumSessions.Set(float64(spectrumCount))
 

@@ -314,7 +314,7 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessi
 						"type": "pong",
 					})
 
-				case "chat_set_username", "chat_message", "chat_request_users":
+				case "chat_set_username", "chat_message", "chat_request_users", "chat_leave":
 					// Handle chat messages
 					if h.chatManager != nil {
 						if err := h.chatManager.HandleChatMessage(userSessionID, msg); err != nil {
@@ -324,6 +324,12 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessi
 								"error": err.Error(),
 							})
 						}
+					} else {
+						// Chat is disabled on server
+						h.sendMessage(conn, map[string]interface{}{
+							"type":  "chat_error",
+							"error": "chat is disabled on this server",
+						})
 					}
 				}
 			}

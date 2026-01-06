@@ -170,7 +170,15 @@
                     displayChatMessage(msg.data);
                     break;
                 case 'chat_user_joined':
-                    displaySystemMessage(`${msg.data.username} joined the chat`);
+                    // Check if this is us joining
+                    if (msg.data.username === currentUsername) {
+                        // This is our join confirmation from server
+                        document.getElementById('username-setup').style.display = 'none';
+                        document.getElementById('chat-input-area').style.display = 'block';
+                        displaySystemMessage(`You joined as ${msg.data.username}`);
+                    } else {
+                        displaySystemMessage(`${msg.data.username} joined the chat`);
+                    }
                     requestActiveUsers();
                     break;
                 case 'chat_user_left':
@@ -182,6 +190,10 @@
                     break;
                 case 'chat_error':
                     displayError(msg.error);
+                    // Reset UI on error
+                    document.getElementById('username-setup').style.display = 'block';
+                    document.getElementById('chat-input-area').style.display = 'none';
+                    currentUsername = null;
                     break;
                 case 'pong':
                     // Keepalive response
@@ -281,16 +293,17 @@
             }
 
             if (ws && ws.readyState === WebSocket.OPEN) {
+                // Store username temporarily (will be confirmed by server)
+                currentUsername = username;
+                
+                // Send username to server
                 ws.send(JSON.stringify({
                     type: 'chat_set_username',
                     username: username
                 }));
                 
-                currentUsername = username;
-                document.getElementById('username-setup').style.display = 'none';
-                document.getElementById('chat-input-area').style.display = 'block';
-                displaySystemMessage(`You joined as ${username}`);
-                requestActiveUsers();
+                // Wait for server confirmation (chat_user_joined message)
+                // UI will be updated when we receive the confirmation
             } else {
                 displayError('Not connected to server');
             }

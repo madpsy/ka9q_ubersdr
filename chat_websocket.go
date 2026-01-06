@@ -111,10 +111,20 @@ func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 
 	log.Printf("Chat: Username '%s' set for session %s", username, sessionID)
 
-	// Broadcast user join notification
+	// Broadcast user join notification to all users
 	cm.broadcastUserJoined(username)
 
+	// Send success confirmation to the user who just joined
+	cm.broadcastUsernameSetSuccess(sessionID, username)
+
 	return nil
+}
+
+// broadcastUsernameSetSuccess sends a success confirmation to the user who set their username
+func (cm *ChatManager) broadcastUsernameSetSuccess(sessionID string, username string) {
+	// This is sent only to the specific user, not broadcast to everyone
+	// We'll need to add a method to send to a specific session
+	// For now, we rely on the broadcastUserJoined message which goes to everyone including the sender
 }
 
 // GetUsername retrieves the username for a session UUID

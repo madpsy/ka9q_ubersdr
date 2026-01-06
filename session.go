@@ -304,8 +304,12 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 	sm.sessions[sessionID] = session
 	sm.ssrcToSession[ssrc] = session
 
-	// Track user_session_id count
+	// Track if this is a new UUID (for activity logging)
+	isNewUUID := false
 	if userSessionID != "" {
+		if _, exists := sm.userSessionUUIDs[userSessionID]; !exists {
+			isNewUUID = true
+		}
 		sm.userSessionUUIDs[userSessionID]++
 		// Track audio session for this UUID
 		sm.uuidAudioSessions[userSessionID] = sessionID
@@ -328,8 +332,8 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 	log.Printf("Session created: %s (channel: %s, SSRC: 0x%08x, freq: %d Hz, mode: %s, bandwidth: %d Hz, user: %s)",
 		sessionID, channelName, ssrc, frequency, mode, bandwidth, userSessionID)
 
-	// Log session activity if logger is enabled
-	if sm.activityLogger != nil {
+	// Log session activity only if this is a NEW UUID (not just a new session for existing UUID)
+	if sm.activityLogger != nil && isNewUUID {
 		if err := sm.activityLogger.LogSessionCreated(); err != nil {
 			log.Printf("Warning: failed to log session creation: %v", err)
 		}
@@ -504,8 +508,12 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 	sm.sessions[sessionID] = session
 	sm.ssrcToSession[ssrc] = session
 
-	// Track user_session_id count
+	// Track if this is a new UUID (for activity logging)
+	isNewUUID := false
 	if userSessionID != "" {
+		if _, exists := sm.userSessionUUIDs[userSessionID]; !exists {
+			isNewUUID = true
+		}
 		sm.userSessionUUIDs[userSessionID]++
 		// Track spectrum session for this UUID
 		sm.uuidSpectrumSessions[userSessionID] = sessionID
@@ -522,8 +530,8 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 	log.Printf("Spectrum session created: %s (SSRC: 0x%08x, freq: %d Hz, bins: %d, bw: %.1f Hz, user: %s)",
 		sessionID, ssrc, frequency, binCount, binBandwidth, userSessionID)
 
-	// Log session activity if logger is enabled
-	if sm.activityLogger != nil {
+	// Log session activity only if this is a NEW UUID (not just a new session for existing UUID)
+	if sm.activityLogger != nil && isNewUUID {
 		if err := sm.activityLogger.LogSessionCreated(); err != nil {
 			log.Printf("Warning: failed to log spectrum session creation: %v", err)
 		}
@@ -814,10 +822,13 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 	delete(sm.sessions, sessionID)
 	delete(sm.ssrcToSession, session.SSRC)
 
-	// Decrement user_session_id count and remove if zero
+	// Track if this UUID is being completely removed (for activity logging)
+	uuidCompletelyGone := false
 	if session.UserSessionID != "" {
 		if count, exists := sm.userSessionUUIDs[session.UserSessionID]; exists {
 			if count <= 1 {
+				// This is the last session for this UUID
+				uuidCompletelyGone = true
 				delete(sm.userSessionUUIDs, session.UserSessionID)
 			} else {
 				sm.userSessionUUIDs[session.UserSessionID]--
@@ -901,8 +912,8 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 
 	log.Printf("Session destroyed: %s (channel: %s, SSRC: 0x%08x)", sessionID, session.ChannelName, session.SSRC)
 
-	// Log session activity if logger is enabled
-	if sm.activityLogger != nil {
+	// Log session activity only if the UUID is completely gone (all sessions for this UUID destroyed)
+	if sm.activityLogger != nil && uuidCompletelyGone {
 		if err := sm.activityLogger.LogSessionDestroyed(); err != nil {
 			log.Printf("Warning: failed to log session destruction: %v", err)
 		}

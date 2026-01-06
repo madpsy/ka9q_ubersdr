@@ -39,6 +39,7 @@ type SessionActivityLogger struct {
 	currentFile *os.File
 	currentDate string
 	stopChan    chan struct{}
+	logChan     chan string // Channel for async logging
 	wg          sync.WaitGroup
 }
 
@@ -62,7 +63,12 @@ func NewSessionActivityLogger(enabled bool, dataDir string, logIntervalSecs int,
 		logInterval: time.Duration(logIntervalSecs) * time.Second,
 		sessionMgr:  sessionMgr,
 		stopChan:    make(chan struct{}),
+		logChan:     make(chan string, 100), // Buffered channel for async logging
 	}
+
+	// Start async logging goroutine
+	logger.wg.Add(1)
+	go logger.asyncLogLoop()
 
 	// Start periodic snapshot goroutine
 	logger.wg.Add(1)
@@ -71,6 +77,32 @@ func NewSessionActivityLogger(enabled bool, dataDir string, logIntervalSecs int,
 	log.Printf("Session activity logger started: dir=%s, interval=%v", dataDir, logger.logInterval)
 
 	return logger
+}
+
+// asyncLogLoop processes log events asynchronously to avoid deadlocks
+func (sal *SessionActivityLogger) asyncLogLoop() {
+	defer sal.wg.Done()
+
+	for {
+		select {
+		case eventType := <-sal.logChan:
+			if err := sal.logActivitySync(eventType); err != nil {
+				log.Printf("Error logging session activity: %v", err)
+			}
+		case <-sal.stopChan:
+			// Drain remaining events before stopping
+			for {
+				select {
+				case eventType := <-sal.logChan:
+					if err := sal.logActivitySync(eventType); err != nil {
+						log.Printf("Error logging session activity during shutdown: %v", err)
+					}
+				default:
+					return
+				}
+			}
+		}
+	}
 }
 
 // periodicSnapshotLoop periodically logs snapshots of active sessions
@@ -98,7 +130,13 @@ func (sal *SessionActivityLogger) LogSnapshot() error {
 		return nil
 	}
 
-	return sal.logActivity("snapshot")
+	// Send to async channel (non-blocking)
+	select {
+	case sal.logChan <- "snapshot":
+	default:
+		log.Printf("Warning: session activity log channel full, dropping snapshot event")
+	}
+	return nil
 }
 
 // LogSessionCreated logs when a session is created
@@ -107,7 +145,13 @@ func (sal *SessionActivityLogger) LogSessionCreated() error {
 		return nil
 	}
 
-	return sal.logActivity("session_created")
+	// Send to async channel (non-blocking)
+	select {
+	case sal.logChan <- "session_created":
+	default:
+		log.Printf("Warning: session activity log channel full, dropping session_created event")
+	}
+	return nil
 }
 
 // LogSessionDestroyed logs when a session is destroyed
@@ -116,11 +160,17 @@ func (sal *SessionActivityLogger) LogSessionDestroyed() error {
 		return nil
 	}
 
-	return sal.logActivity("session_destroyed")
+	// Send to async channel (non-blocking)
+	select {
+	case sal.logChan <- "session_destroyed":
+	default:
+		log.Printf("Warning: session activity log channel full, dropping session_destroyed event")
+	}
+	return nil
 }
 
-// logActivity logs the current state of all active sessions
-func (sal *SessionActivityLogger) logActivity(eventType string) error {
+// logActivitySync logs the current state of all active sessions (synchronous, called from async loop)
+func (sal *SessionActivityLogger) logActivitySync(eventType string) error {
 	// Get all active sessions from session manager FIRST (without holding our lock)
 	// This prevents deadlock since session manager may call us while holding its lock
 	activeSessions := sal.getActiveSessionEntries()

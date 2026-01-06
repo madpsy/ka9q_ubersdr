@@ -359,6 +359,8 @@ type kiwiConn struct {
 	authReceived       bool             // Track if SET auth command has been received
 	zoom               int              // Current zoom level (0-14)
 	xBin               uint32           // Current x_bin (start position in bins)
+	lastLoggedZoom     int              // Last logged zoom for debug
+	lastLoggedXBin     uint32           // Last logged xBin for debug
 	mu                 sync.RWMutex
 }
 
@@ -2013,14 +2015,16 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			}
 
 			// Debug: Calculate and log all frequency alignment values whenever zoom/xBin changes
-			// Track previous values to detect changes
+			// Check if zoom or xBin has changed since last log
 			kc.mu.Lock()
-			prevZoom := kc.zoom
-			prevXBin := kc.xBin
+			logThis := packetCount == 1 || currentZoom != kc.lastLoggedZoom || currentXBin != kc.lastLoggedXBin
+			if logThis {
+				kc.lastLoggedZoom = currentZoom
+				kc.lastLoggedXBin = currentXBin
+			}
 			kc.mu.Unlock()
 
-			// Log on first packet or when zoom/xBin changes
-			if packetCount == 1 || currentZoom != prevZoom || currentXBin != prevXBin {
+			if logThis {
 				const maxZoom = 14
 				maxBins := float64(1024 << maxZoom) // 16777216
 				fullBandwidthHz := 30000000.0

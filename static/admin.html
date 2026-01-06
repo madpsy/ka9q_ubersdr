@@ -3110,8 +3110,8 @@
             sessionHTML += `<span style="margin-left: 20px;">• Regular users: <strong>${nonBypassedCount}</strong> of <strong>${maxSessions}</strong> maximum</span><br>`;
             sessionHTML += `<span style="margin-left: 20px;">• Bypassed users: <strong>${bypassedCount}</strong> <em style="color: #666;">(not counted towards limit)</em></span><br>`;
             sessionHTML += `<span style="margin-left: 20px;">• Internal sessions: <strong>${internalSessions.length}</strong> <em style="color: #666;">(${internalAudio} audio, ${internalSpectrum} spectrum - system use only)</em></span><br>`;
-            sessionHTML += `<span style="margin-left: 20px;">• User connections: ${userAudio} audio, ${userSpectrum} spectrum</span><br>`;
-            sessionHTML += `<span style="margin-left: 20px;">• <strong>Total user sessions: ${userSessions.length}</strong></span>`;
+            sessionHTML += `<span style="margin-left: 20px;">• User sessions: ${userAudio} audio, ${userSpectrum} spectrum</span><br>`;
+            sessionHTML += `<span style="margin-left: 20px;">• <strong>Total user sessions: ${Object.keys(sessionsByUser).length}</strong></span>`;
 
             sessionSummary.innerHTML = sessionHTML;
             summariesContainer.appendChild(sessionSummary);

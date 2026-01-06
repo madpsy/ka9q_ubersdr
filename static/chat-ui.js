@@ -153,7 +153,7 @@ class ChatUI {
         style.textContent = `
             .chat-panel {
                 position: fixed;
-                top: 75%;
+                top: 85%;
                 right: 0;
                 transform: translateY(-50%);
                 z-index: 900;

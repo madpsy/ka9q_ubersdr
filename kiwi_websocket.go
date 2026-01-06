@@ -817,6 +817,12 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		return
 	}
 
+	// Handle GET_CONFIG command (configuration request)
+	if _, hasGetConfig := params["GET_CONFIG"]; hasGetConfig {
+		kc.sendConfigCallback()
+		return
+	}
+
 	// Handle STATS_UPD command (statistics update request)
 	if _, hasStatsUpd := params["STATS_UPD"]; hasStatsUpd {
 		kc.sendStatsCallback()
@@ -1074,6 +1080,75 @@ func (kc *kiwiConn) sendStatsCallback() {
 	jsonStr := string(jsonData)
 	log.Printf("Sending stats_cb: %s", jsonStr)
 	kc.sendMsg("stats_cb", jsonStr)
+}
+
+// sendConfigCallback sends the config_cb message with configuration information
+// This is sent in response to "SET GET_CONFIG" command
+func (kc *kiwiConn) sendConfigCallback() {
+	// Build config JSON object
+	// Frontend expects: config_cb(r, g, s, pu, pe, pv, pi, n, m, v1, v2, d1, d2)
+	config := make(map[string]interface{})
+
+	// r: RX channels (max sessions) - PUBLIC
+	config["r"] = kc.config.Server.MaxSessions
+
+	// g: GPS channels - PUBLIC (always 0 for UberSDR)
+	config["g"] = 0
+
+	// Parse version string (e.g., "0.1.20" -> v1=0, v2=1)
+	versionParts := strings.Split(Version, ".")
+	versionMaj := 0
+	versionMin := 0
+	if len(versionParts) >= 2 {
+		fmt.Sscanf(versionParts[0], "%d", &versionMaj)
+		fmt.Sscanf(versionParts[1], "%d", &versionMin)
+	}
+
+	// v1, v2: Version major/minor - PUBLIC
+	config["v1"] = versionMaj
+	config["v2"] = versionMin
+
+	// d1, d2: Debian version - PUBLIC (set to 0 for UberSDR)
+	config["d1"] = 0
+	config["d2"] = 0
+
+	// PRIVATE FIELDS - Set to safe dummy values
+	// These are only displayed in admin interface (id-net-config element)
+	// User interface doesn't have this element, so these won't be shown
+	// But we still need to send them for the message format to be correct
+
+	// s: Serial number - PRIVATE (set to 0)
+	config["s"] = 0
+
+	// pu: Public IP address - PRIVATE (set to empty string)
+	config["pu"] = ""
+
+	// pe: Public port - PRIVATE (set to 0)
+	config["pe"] = 0
+
+	// pv: Private IP address - PRIVATE (set to empty string)
+	config["pv"] = ""
+
+	// pi: Private port - PRIVATE (set to 0)
+	config["pi"] = 0
+
+	// n: Netmask - PRIVATE (set to 0)
+	config["n"] = 0
+
+	// m: MAC address - PRIVATE (set to empty string)
+	config["m"] = ""
+
+	// Marshal to JSON
+	jsonData, err := json.Marshal(config)
+	if err != nil {
+		log.Printf("Error marshaling config_cb: %v", err)
+		return
+	}
+
+	// Send as MSG config_cb=<json>
+	jsonStr := string(jsonData)
+	log.Printf("Sending config_cb: %s", jsonStr)
+	kc.sendMsg("config_cb", jsonStr)
 }
 
 // sanitizeGeolocation sanitizes a geolocation string to prevent abuse

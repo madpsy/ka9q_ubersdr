@@ -1640,6 +1640,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"noise_floor":          config.NoiseFloor.Enabled,
 		"digital_decodes":      config.Decoder.Enabled,
 		"cw_skimmer":           cwskimmerConfig.Enabled,
+		"chat_enabled":         config.Chat.Enabled,
 		"public_iq_modes":      publicIQModes,
 		"spectrum_poll_period": config.Spectrum.PollPeriodMs,
 		"public_uuid":          publicUUID,

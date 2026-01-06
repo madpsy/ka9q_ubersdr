@@ -392,6 +392,18 @@ chat:
   # Default: 25
   # Recommended: 25-50 for small to medium instances
   max_users: 25
+  
+  # Rate limit: maximum messages per second per user
+  # Prevents users from flooding the chat with rapid messages
+  # Default: 2 (one message per second)
+  # Recommended: 1-2 for normal chat
+  rate_limit_per_second: 2
+  
+  # Rate limit: maximum messages per minute per user
+  # Prevents sustained spam over longer periods
+  # Default: 30 (30 messages per minute)
+  # Recommended: 20-30 for normal chat
+  rate_limit_per_minute: 30
 
 # Space Weather settings
 spaceweather:

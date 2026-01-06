@@ -92,10 +92,11 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 		},
 	}
 
-	// Initialize chat manager if enabled (50 message buffer, configured max users)
+	// Initialize chat manager if enabled (50 message buffer, configured limits)
 	if chatConfig.Enabled {
-		handler.chatManager = NewChatManager(handler, 50, chatConfig.MaxUsers)
-		log.Printf("Chat: Initialized with max %d users", chatConfig.MaxUsers)
+		handler.chatManager = NewChatManager(handler, 50, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute)
+		log.Printf("Chat: Initialized with max %d users, rate limits: %d msg/sec, %d msg/min",
+			chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute)
 	}
 
 	// Register spot handler to broadcast to all clients

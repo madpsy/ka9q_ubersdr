@@ -22,8 +22,12 @@ type ChatUser struct {
 	SessionID         string
 	Username          string
 	LastSeen          time.Time
-	LastMessageTime   time.Time   // For 1 message per second rate limit
-	MessageTimestamps []time.Time // For 25 messages per minute rate limit
+	LastMessageTime   time.Time   // For rate limiting
+	MessageTimestamps []time.Time // For rate limiting
+	Frequency         uint64      // User's current frequency in Hz (optional)
+	Mode              string      // User's current mode (optional)
+	BWHigh            int         // High bandwidth cutoff in Hz (-10000 to 10000, optional)
+	BWLow             int         // Low bandwidth cutoff in Hz (-10000 to 10000, optional)
 }
 
 // ChatManager manages chat functionality for the DX cluster websocket
@@ -45,18 +49,22 @@ type ChatManager struct {
 	activeUsersMu sync.RWMutex
 
 	// Configuration
-	maxUsers int // Maximum concurrent users (0 = unlimited)
+	maxUsers           int // Maximum concurrent users (0 = unlimited)
+	rateLimitPerSecond int // Maximum messages per second per user
+	rateLimitPerMinute int // Maximum messages per minute per user
 }
 
 // NewChatManager creates a new chat manager
-func NewChatManager(wsHandler *DXClusterWebSocketHandler, maxMessages int, maxUsers int) *ChatManager {
+func NewChatManager(wsHandler *DXClusterWebSocketHandler, maxMessages int, maxUsers int, rateLimitPerSecond int, rateLimitPerMinute int) *ChatManager {
 	cm := &ChatManager{
-		sessionUsernames: make(map[string]string),
-		messageBuffer:    make([]ChatMessage, 0, maxMessages),
-		maxMessages:      maxMessages,
-		wsHandler:        wsHandler,
-		activeUsers:      make(map[string]*ChatUser),
-		maxUsers:         maxUsers,
+		sessionUsernames:   make(map[string]string),
+		messageBuffer:      make([]ChatMessage, 0, maxMessages),
+		maxMessages:        maxMessages,
+		wsHandler:          wsHandler,
+		activeUsers:        make(map[string]*ChatUser),
+		maxUsers:           maxUsers,
+		rateLimitPerSecond: rateLimitPerSecond,
+		rateLimitPerMinute: rateLimitPerMinute,
 	}
 
 	// Start cleanup goroutine for inactive users
@@ -146,6 +154,53 @@ func (cm *ChatManager) GetUsername(sessionID string) (string, bool) {
 	return username, exists
 }
 
+// SetFrequencyAndMode sets or updates the frequency, mode, and bandwidth for a user
+func (cm *ChatManager) SetFrequencyAndMode(sessionID string, frequency uint64, mode string, bwHigh int, bwLow int) error {
+	// Validate frequency (0 Hz to 30 MHz)
+	if frequency > 30000000 {
+		return ErrInvalidFrequency
+	}
+
+	// Validate mode
+	validModes := map[string]bool{
+		"usb": true, "lsb": true, "am": true, "fm": true,
+		"cwu": true, "cwl": true, "sam": true, "nfm": true,
+	}
+	if !validModes[mode] {
+		return ErrInvalidMode
+	}
+
+	// Validate bandwidth cutoffs (-10000 to 10000 Hz)
+	if bwHigh < -10000 || bwHigh > 10000 {
+		return ErrInvalidBandwidth
+	}
+	if bwLow < -10000 || bwLow > 10000 {
+		return ErrInvalidBandwidth
+	}
+
+	// Update user's frequency, mode, and bandwidth
+	cm.activeUsersMu.Lock()
+	user, exists := cm.activeUsers[sessionID]
+	if !exists {
+		cm.activeUsersMu.Unlock()
+		return ErrUsernameNotSet
+	}
+
+	user.Frequency = frequency
+	user.Mode = mode
+	user.BWHigh = bwHigh
+	user.BWLow = bwLow
+	cm.activeUsersMu.Unlock()
+
+	log.Printf("Chat: User '%s' set frequency %d Hz, mode %s, bw_high %d, bw_low %d",
+		user.Username, frequency, mode, bwHigh, bwLow)
+
+	// Broadcast updated user info to all clients
+	cm.BroadcastActiveUsers()
+
+	return nil
+}
+
 // RemoveUser removes a user from the chat system
 func (cm *ChatManager) RemoveUser(sessionID string) {
 	cm.sessionUsernamesMu.Lock()
@@ -182,27 +237,32 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 
 	now := time.Now()
 
-	// Rate limit: 1 message per second
-	if !user.LastMessageTime.IsZero() && now.Sub(user.LastMessageTime) < time.Second {
-		cm.activeUsersMu.Unlock()
-		return ErrRateLimitExceeded
-	}
-
-	// Rate limit: 25 messages per minute
-	// Remove timestamps older than 1 minute
-	cutoff := now.Add(-1 * time.Minute)
-	validTimestamps := make([]time.Time, 0, 25)
-	for _, ts := range user.MessageTimestamps {
-		if ts.After(cutoff) {
-			validTimestamps = append(validTimestamps, ts)
+	// Rate limit: messages per second (configurable)
+	if cm.rateLimitPerSecond > 0 {
+		minInterval := time.Second / time.Duration(cm.rateLimitPerSecond)
+		if !user.LastMessageTime.IsZero() && now.Sub(user.LastMessageTime) < minInterval {
+			cm.activeUsersMu.Unlock()
+			return ErrRateLimitExceeded
 		}
 	}
-	user.MessageTimestamps = validTimestamps
 
-	// Check if user has sent 25 messages in the last minute
-	if len(user.MessageTimestamps) >= 25 {
-		cm.activeUsersMu.Unlock()
-		return ErrRateLimitExceeded
+	// Rate limit: messages per minute (configurable)
+	if cm.rateLimitPerMinute > 0 {
+		// Remove timestamps older than 1 minute
+		cutoff := now.Add(-1 * time.Minute)
+		validTimestamps := make([]time.Time, 0, cm.rateLimitPerMinute)
+		for _, ts := range user.MessageTimestamps {
+			if ts.After(cutoff) {
+				validTimestamps = append(validTimestamps, ts)
+			}
+		}
+		user.MessageTimestamps = validTimestamps
+
+		// Check if user has sent max messages in the last minute
+		if len(user.MessageTimestamps) >= cm.rateLimitPerMinute {
+			cm.activeUsersMu.Unlock()
+			return ErrRateLimitExceeded
+		}
 	}
 
 	// Update rate limit tracking
@@ -357,9 +417,24 @@ func (cm *ChatManager) BroadcastActiveUsers() {
 
 	userList := make([]map[string]interface{}, 0, len(users))
 	for _, user := range users {
-		userList = append(userList, map[string]interface{}{
+		userData := map[string]interface{}{
 			"username": user.Username,
-		})
+		}
+		// Include frequency and mode if set
+		if user.Frequency > 0 {
+			userData["frequency"] = user.Frequency
+		}
+		if user.Mode != "" {
+			userData["mode"] = user.Mode
+		}
+		// Include bandwidth if set (non-zero values)
+		if user.BWHigh != 0 {
+			userData["bw_high"] = user.BWHigh
+		}
+		if user.BWLow != 0 {
+			userData["bw_low"] = user.BWLow
+		}
+		userList = append(userList, userData)
 	}
 
 	message := map[string]interface{}{
@@ -435,6 +510,26 @@ func (cm *ChatManager) HandleChatMessage(sessionID string, msg map[string]interf
 		}
 		return cm.SendMessage(sessionID, messageText)
 
+	case "chat_set_frequency_mode":
+		// User is setting/updating their frequency, mode, and bandwidth
+		frequency, freqOk := msg["frequency"].(float64) // JSON numbers are float64
+		mode, modeOk := msg["mode"].(string)
+		if !freqOk || !modeOk {
+			return ErrInvalidMessageType
+		}
+
+		// Bandwidth parameters are optional, default to 0
+		bwHigh := 0
+		bwLow := 0
+		if bwh, ok := msg["bw_high"].(float64); ok {
+			bwHigh = int(bwh)
+		}
+		if bwl, ok := msg["bw_low"].(float64); ok {
+			bwLow = int(bwl)
+		}
+
+		return cm.SetFrequencyAndMode(sessionID, uint64(frequency), mode, bwHigh, bwLow)
+
 	case "chat_request_users":
 		// User is requesting the list of active users
 		cm.BroadcastActiveUsers()
@@ -505,6 +600,9 @@ var (
 	ErrRateLimitExceeded    = &ChatError{"rate limit exceeded - please wait before sending another message"}
 	ErrMaxUsersReached      = &ChatError{"maximum number of chat users reached - please try again later"}
 	ErrUsernameAlreadyTaken = &ChatError{"username already taken - please choose a different username"}
+	ErrInvalidFrequency     = &ChatError{"invalid frequency - must be between 0 and 30000000 Hz"}
+	ErrInvalidMode          = &ChatError{"invalid mode - must be one of: usb, lsb, am, fm, cwu, cwl, sam, nfm"}
+	ErrInvalidBandwidth     = &ChatError{"invalid bandwidth - bw_high and bw_low must be between -10000 and 10000 Hz"}
 )
 
 // ChatError represents a chat-related error

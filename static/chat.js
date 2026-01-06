@@ -1,0 +1,461 @@
+/**
+ * UberSDR Chat System
+ * JavaScript client library for the live chat functionality
+ * 
+ * Usage:
+ *   const chat = new UberSDRChat(websocket);
+ *   chat.on('message', (data) => console.log(data));
+ *   chat.setUsername('W1ABC');
+ *   chat.sendMessage('Hello!');
+ */
+
+class UberSDRChat {
+    constructor(websocket) {
+        this.ws = websocket;
+        this.username = null;
+        this.frequency = null;
+        this.mode = null;
+        this.bwHigh = null;
+        this.bwLow = null;
+        this.mutedUsers = new Set();
+        this.eventHandlers = {};
+        
+        // Load muted users from localStorage
+        this.loadMutedUsers();
+        
+        // Set up message handler
+        this.setupMessageHandler();
+    }
+
+    /**
+     * Set up WebSocket message handler to process chat messages
+     */
+    setupMessageHandler() {
+        // Store original onmessage handler if it exists
+        const originalHandler = this.ws.onmessage;
+        
+        this.ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            
+            // Handle chat messages
+            if (msg.type && msg.type.startsWith('chat_')) {
+                this.handleChatMessage(msg);
+            }
+            
+            // Call original handler for non-chat messages
+            if (originalHandler && typeof originalHandler === 'function') {
+                originalHandler(event);
+            }
+        };
+    }
+
+    /**
+     * Handle incoming chat messages
+     */
+    handleChatMessage(msg) {
+        switch(msg.type) {
+            case 'chat_message':
+                // Check if user is muted
+                if (!this.mutedUsers.has(msg.data.username)) {
+                    this.emit('message', msg.data);
+                }
+                break;
+                
+            case 'chat_user_joined':
+                // Check if this is us joining
+                if (msg.data.username === this.username) {
+                    this.emit('join_confirmed', msg.data);
+                } else {
+                    this.emit('user_joined', msg.data);
+                }
+                break;
+                
+            case 'chat_user_left':
+                this.emit('user_left', msg.data);
+                break;
+                
+            case 'chat_active_users':
+                this.emit('active_users', msg.data);
+                break;
+                
+            case 'chat_error':
+                this.emit('error', msg.error);
+                break;
+        }
+    }
+
+    /**
+     * Register an event handler
+     * Events: message, user_joined, user_left, active_users, error, join_confirmed
+     */
+    on(event, handler) {
+        if (!this.eventHandlers[event]) {
+            this.eventHandlers[event] = [];
+        }
+        this.eventHandlers[event].push(handler);
+    }
+
+    /**
+     * Emit an event to all registered handlers
+     */
+    emit(event, data) {
+        if (this.eventHandlers[event]) {
+            this.eventHandlers[event].forEach(handler => handler(data));
+        }
+    }
+
+    /**
+     * Validate username format
+     * @param {string} username - Username to validate
+     * @returns {object} {valid: boolean, error: string}
+     */
+    validateUsername(username) {
+        if (!username || typeof username !== 'string') {
+            return { valid: false, error: 'Username is required' };
+        }
+        if (username.length < 1 || username.length > 15) {
+            return { valid: false, error: 'Username must be 1-15 characters' };
+        }
+        if (!/^[A-Za-z0-9]+$/.test(username)) {
+            return { valid: false, error: 'Username must contain only letters and numbers' };
+        }
+        return { valid: true };
+    }
+
+    /**
+     * Set username (required before sending messages)
+     * @param {string} username - Alphanumeric, 1-15 characters
+     */
+    setUsername(username) {
+        // Validate username
+        const validation = this.validateUsername(username);
+        if (!validation.valid) {
+            this.emit('error', validation.error);
+            return false;
+        }
+
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.username = username; // Store temporarily, will be confirmed by server
+            this.ws.send(JSON.stringify({
+                type: 'chat_set_username',
+                username: username
+            }));
+            return true;
+        } else {
+            this.emit('error', 'WebSocket not connected');
+            return false;
+        }
+    }
+
+    /**
+     * Validate message format
+     * @param {string} message - Message to validate
+     * @returns {object} {valid: boolean, error: string}
+     */
+    validateMessage(message) {
+        if (!message || typeof message !== 'string') {
+            return { valid: false, error: 'Message is required' };
+        }
+        if (message.length < 1) {
+            return { valid: false, error: 'Message cannot be empty' };
+        }
+        if (message.length > 250) {
+            return { valid: false, error: 'Message must be 250 characters or less' };
+        }
+        // Check for printable characters only (space through tilde in ASCII)
+        if (!/^[\x20-\x7E\n]*$/.test(message)) {
+            return { valid: false, error: 'Message contains invalid characters' };
+        }
+        return { valid: true };
+    }
+
+    /**
+     * Send a chat message
+     * @param {string} message - Message text, max 250 characters
+     */
+    sendMessage(message) {
+        if (!this.username) {
+            this.emit('error', 'Username not set');
+            return false;
+        }
+
+        // Validate message
+        const validation = this.validateMessage(message);
+        if (!validation.valid) {
+            this.emit('error', validation.error);
+            return false;
+        }
+
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({
+                type: 'chat_message',
+                message: message
+            }));
+            return true;
+        } else {
+            this.emit('error', 'WebSocket not connected');
+            return false;
+        }
+    }
+
+    /**
+     * Validate frequency
+     * @param {number} frequency - Frequency in Hz
+     * @returns {object} {valid: boolean, error: string}
+     */
+    validateFrequency(frequency) {
+        if (typeof frequency !== 'number' || isNaN(frequency)) {
+            return { valid: false, error: 'Frequency must be a number' };
+        }
+        if (!Number.isInteger(frequency)) {
+            return { valid: false, error: 'Frequency must be a whole number (integer)' };
+        }
+        if (frequency < 0) {
+            return { valid: false, error: 'Frequency cannot be negative' };
+        }
+        if (frequency > 30000000) {
+            return { valid: false, error: 'Frequency must be 30 MHz (30000000 Hz) or less' };
+        }
+        return { valid: true };
+    }
+
+    /**
+     * Validate mode
+     * @param {string} mode - Mode string
+     * @returns {object} {valid: boolean, error: string}
+     */
+    validateMode(mode) {
+        if (!mode || typeof mode !== 'string') {
+            return { valid: false, error: 'Mode is required' };
+        }
+        const validModes = ['usb', 'lsb', 'am', 'fm', 'cwu', 'cwl', 'sam', 'nfm'];
+        if (!validModes.includes(mode.toLowerCase())) {
+            return { valid: false, error: 'Mode must be one of: ' + validModes.join(', ') };
+        }
+        return { valid: true };
+    }
+
+    /**
+     * Validate bandwidth value
+     * @param {number} bw - Bandwidth value in Hz
+     * @param {string} name - Name for error message (bw_high or bw_low)
+     * @returns {object} {valid: boolean, error: string}
+     */
+    validateBandwidth(bw, name) {
+        if (typeof bw !== 'number' || isNaN(bw)) {
+            return { valid: false, error: `${name} must be a number` };
+        }
+        if (!Number.isInteger(bw)) {
+            return { valid: false, error: `${name} must be a whole number (integer)` };
+        }
+        if (bw < -10000 || bw > 10000) {
+            return { valid: false, error: `${name} must be between -10000 and 10000 Hz` };
+        }
+        return { valid: true };
+    }
+
+    /**
+     * Set frequency and mode (optional)
+     * @param {number} frequency - Frequency in Hz (0 to 30000000)
+     * @param {string} mode - Mode: usb, lsb, am, fm, cwu, cwl, sam, nfm
+     * @param {number} bwHigh - High bandwidth cutoff in Hz (-10000 to 10000), optional
+     * @param {number} bwLow - Low bandwidth cutoff in Hz (-10000 to 10000), optional
+     */
+    setFrequencyAndMode(frequency, mode, bwHigh = 0, bwLow = 0) {
+        // Validate frequency
+        const freqValidation = this.validateFrequency(frequency);
+        if (!freqValidation.valid) {
+            this.emit('error', freqValidation.error);
+            return false;
+        }
+
+        // Validate mode
+        const modeValidation = this.validateMode(mode);
+        if (!modeValidation.valid) {
+            this.emit('error', modeValidation.error);
+            return false;
+        }
+
+        // Validate bandwidth high
+        const bwHighValidation = this.validateBandwidth(bwHigh, 'bw_high');
+        if (!bwHighValidation.valid) {
+            this.emit('error', bwHighValidation.error);
+            return false;
+        }
+
+        // Validate bandwidth low
+        const bwLowValidation = this.validateBandwidth(bwLow, 'bw_low');
+        if (!bwLowValidation.valid) {
+            this.emit('error', bwLowValidation.error);
+            return false;
+        }
+
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.frequency = frequency;
+            this.mode = mode.toLowerCase();
+            this.bwHigh = bwHigh;
+            this.bwLow = bwLow;
+            
+            this.ws.send(JSON.stringify({
+                type: 'chat_set_frequency_mode',
+                frequency: frequency,
+                mode: mode.toLowerCase(),
+                bw_high: bwHigh,
+                bw_low: bwLow
+            }));
+            return true;
+        } else {
+            this.emit('error', 'WebSocket not connected');
+            return false;
+        }
+    }
+
+    /**
+     * Request the list of active users
+     */
+    requestActiveUsers() {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({
+                type: 'chat_request_users'
+            }));
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Leave chat cleanly (keeps WebSocket open for DX spots)
+     */
+    leave() {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({
+                type: 'chat_leave'
+            }));
+            this.username = null;
+            this.frequency = null;
+            this.mode = null;
+            this.bwHigh = null;
+            this.bwLow = null;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Mute a user (client-side filtering)
+     * @param {string} username - Username to mute
+     */
+    muteUser(username) {
+        this.mutedUsers.add(username);
+        this.saveMutedUsers();
+        this.emit('user_muted', username);
+    }
+
+    /**
+     * Unmute a user
+     * @param {string} username - Username to unmute
+     */
+    unmuteUser(username) {
+        this.mutedUsers.delete(username);
+        this.saveMutedUsers();
+        this.emit('user_unmuted', username);
+    }
+
+    /**
+     * Toggle mute status for a user
+     * @param {string} username - Username to toggle
+     */
+    toggleMute(username) {
+        if (this.mutedUsers.has(username)) {
+            this.unmuteUser(username);
+            return false; // Now unmuted
+        } else {
+            this.muteUser(username);
+            return true; // Now muted
+        }
+    }
+
+    /**
+     * Check if a user is muted
+     * @param {string} username - Username to check
+     */
+    isMuted(username) {
+        return this.mutedUsers.has(username);
+    }
+
+    /**
+     * Get list of muted users
+     */
+    getMutedUsers() {
+        return Array.from(this.mutedUsers);
+    }
+
+    /**
+     * Save muted users to localStorage
+     */
+    saveMutedUsers() {
+        try {
+            localStorage.setItem('ubersdr_muted_users', JSON.stringify([...this.mutedUsers]));
+        } catch (e) {
+            console.error('Failed to save muted users:', e);
+        }
+    }
+
+    /**
+     * Load muted users from localStorage
+     */
+    loadMutedUsers() {
+        try {
+            const saved = localStorage.getItem('ubersdr_muted_users');
+            if (saved) {
+                this.mutedUsers = new Set(JSON.parse(saved));
+            }
+        } catch (e) {
+            console.error('Failed to load muted users:', e);
+            this.mutedUsers = new Set();
+        }
+    }
+
+    /**
+     * Get current username
+     */
+    getUsername() {
+        return this.username;
+    }
+
+    /**
+     * Get current frequency
+     */
+    getFrequency() {
+        return this.frequency;
+    }
+
+    /**
+     * Get current mode
+     */
+    getMode() {
+        return this.mode;
+    }
+
+    /**
+     * Get current bandwidth settings
+     */
+    getBandwidth() {
+        return {
+            high: this.bwHigh,
+            low: this.bwLow
+        };
+    }
+
+    /**
+     * Check if user has joined chat (username is set and confirmed)
+     */
+    isJoined() {
+        return this.username !== null;
+    }
+}
+
+// Export for use in other scripts
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = UberSDRChat;
+}

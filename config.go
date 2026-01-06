@@ -165,8 +165,10 @@ type DXClusterConfig struct {
 
 // ChatConfig contains live chat settings
 type ChatConfig struct {
-	Enabled  bool `yaml:"enabled"`   // Enable/disable live chat functionality
-	MaxUsers int  `yaml:"max_users"` // Maximum concurrent chat users (0 = unlimited)
+	Enabled            bool `yaml:"enabled"`               // Enable/disable live chat functionality
+	MaxUsers           int  `yaml:"max_users"`             // Maximum concurrent chat users (0 = unlimited)
+	RateLimitPerSecond int  `yaml:"rate_limit_per_second"` // Maximum messages per second per user (default: 1)
+	RateLimitPerMinute int  `yaml:"rate_limit_per_minute"` // Maximum messages per minute per user (default: 25)
 }
 
 // SpaceWeatherConfig contains space weather monitoring settings
@@ -472,6 +474,12 @@ func LoadConfig(filename string) (*Config, error) {
 	// MaxUsers of 0 means unlimited, so we set a default of 25
 	if config.Chat.MaxUsers == 0 {
 		config.Chat.MaxUsers = 25 // Default 25 concurrent chat users
+	}
+	if config.Chat.RateLimitPerSecond == 0 {
+		config.Chat.RateLimitPerSecond = 1 // Default 1 message per second
+	}
+	if config.Chat.RateLimitPerMinute == 0 {
+		config.Chat.RateLimitPerMinute = 25 // Default 25 messages per minute
 	}
 
 	// Set space weather defaults if not specified

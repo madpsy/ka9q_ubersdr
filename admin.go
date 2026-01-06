@@ -4226,10 +4226,13 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 			if existing, exists := activeSessions[session.UserSessionID]; exists {
 				// Session already active, update last seen and merge session types
 				existing.lastSeen = log.Timestamp
-				existing.entry = session // Update with latest info
-				// Merge session types
+				// Merge session types from this snapshot
 				for _, t := range session.SessionTypes {
 					existing.allTypes[t] = true
+				}
+				// Keep the most complete session info (prefer entries with more types)
+				if len(session.SessionTypes) > len(existing.entry.SessionTypes) {
+					existing.entry = session
 				}
 			} else {
 				// New session detected - create start event
@@ -4238,21 +4241,29 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					allTypes[t] = true
 				}
 
+				// Use FirstSeen from the session entry if available (actual session creation time)
+				// Otherwise fall back to current snapshot timestamp
+				startTime := log.Timestamp
+				if !session.FirstSeen.IsZero() {
+					startTime = session.FirstSeen
+				}
+
 				activeSessions[session.UserSessionID] = &sessionInfo{
 					entry:     session,
-					firstSeen: log.Timestamp,
+					firstSeen: startTime,
 					lastSeen:  log.Timestamp,
 					allTypes:  allTypes,
 				}
 
+				// Use session types from the snapshot (already aggregated by session logger)
 				events = append(events, SessionEvent{
-					Timestamp:     log.Timestamp,
+					Timestamp:     startTime, // Use actual session start time
 					EventType:     "session_start",
 					UserSessionID: session.UserSessionID,
 					ClientIP:      session.ClientIP,
 					SourceIP:      session.SourceIP,
 					AuthMethod:    session.AuthMethod,
-					SessionTypes:  session.SessionTypes,
+					SessionTypes:  session.SessionTypes, // Already aggregated in snapshot
 					UserAgent:     session.UserAgent,
 				})
 			}

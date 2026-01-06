@@ -894,6 +894,7 @@
                             </div>
                             <div style="display: flex; gap: 10px;">
                                 <button class="btn" onclick="loadSessionEvents()" style="padding: 8px 16px; white-space: nowrap;">Load Events</button>
+                                <button class="btn btn-secondary" onclick="loadSessionEvents()" style="padding: 8px 16px; white-space: nowrap;">🔄 Refresh</button>
                                 <button class="btn btn-secondary" onclick="downloadSessionEvents()" style="padding: 8px 16px; white-space: nowrap;">📥 Download</button>
                             </div>
                         </div>
@@ -949,12 +950,9 @@
                                     <input type="text" id="filterUserAgent" placeholder="e.g., Chrome, Firefox" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
                                 </div>
                             </div>
-                            <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: space-between;">
-                                <button class="btn btn-secondary" onclick="loadSessionEvents()" style="padding: 6px 12px; font-size: 13px;">🔄 Refresh</button>
-                                <div style="display: flex; gap: 10px;">
-                                    <button class="btn btn-secondary" onclick="clearAllEventFilters()" style="padding: 6px 12px; font-size: 13px;">Clear Filters</button>
-                                    <button class="btn" onclick="applyEventFilters()" style="padding: 6px 12px; font-size: 13px;">Apply Filters</button>
-                                </div>
+                            <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: flex-end;">
+                                <button class="btn btn-secondary" onclick="clearAllEventFilters()" style="padding: 6px 12px; font-size: 13px;">Clear Filters</button>
+                                <button class="btn" onclick="applyEventFilters()" style="padding: 6px 12px; font-size: 13px;">Apply Filters</button>
                             </div>
                         </details>
                     </div>

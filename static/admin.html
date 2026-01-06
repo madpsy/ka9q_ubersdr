@@ -3012,13 +3012,6 @@
                 tbody.appendChild(row);
             }
 
-            // Add summary with max_sessions from config
-            const summary = document.createElement('div');
-            summary.style.marginTop = '20px';
-            summary.style.padding = '15px';
-            summary.style.background = '#f8f9fa';
-            summary.style.borderRadius = '5px';
-
             // Count bypassed vs non-bypassed users
             let bypassedCount = 0;
             let nonBypassedCount = 0;
@@ -3035,37 +3028,6 @@
             const userSpectrum = userSessions.filter(s => s.is_spectrum).length;
             const internalAudio = internalSessions.filter(s => !s.is_spectrum).length;
             const internalSpectrum = internalSessions.filter(s => s.is_spectrum).length;
-
-            // Build summary HTML with system load if available
-            let summaryHTML = `<strong>Summary:</strong><br>`;
-
-            // Add system load line if available
-            if (systemLoad && systemLoad.load_1min && systemLoad.load_5min && systemLoad.load_15min) {
-                let loadLine = `<span style="margin-left: 20px;">• System Load: <strong>${systemLoad.load_1min}</strong>, <strong>${systemLoad.load_5min}</strong>, <strong>${systemLoad.load_15min}</strong> <em style="color: #666;">(1, 5, 15 min averages)</em>`;
-
-                // Add CPU core count if available
-                if (systemLoad.cpu_cores && systemLoad.cpu_cores > 0) {
-                    loadLine += ` on <strong>${systemLoad.cpu_cores}</strong> core${systemLoad.cpu_cores !== 1 ? 's' : ''}`;
-                }
-
-                loadLine += `</span><br>`;
-                summaryHTML += loadLine;
-            }
-
-            summaryHTML += `<span style="margin-left: 20px;">• Regular users: <strong>${nonBypassedCount}</strong> of <strong>${maxSessions}</strong> maximum</span><br>`;
-            summaryHTML += `<span style="margin-left: 20px;">• Bypassed users: <strong>${bypassedCount}</strong> <em style="color: #666;">(not counted towards limit)</em></span><br>`;
-            summaryHTML += `<span style="margin-left: 20px;">• Internal sessions: <strong>${internalSessions.length}</strong> <em style="color: #666;">(${internalAudio} audio, ${internalSpectrum} spectrum - system use only)</em></span><br>`;
-            summaryHTML += `<span style="margin-left: 20px;">• User connections: ${userAudio} audio, ${userSpectrum} spectrum</span>`;
-
-            summary.innerHTML = summaryHTML;
-            container.appendChild(summary);
-
-            // Add Network Summary section
-            const networkSummary = document.createElement('div');
-            networkSummary.style.marginTop = '20px';
-            networkSummary.style.padding = '15px';
-            networkSummary.style.background = '#f8f9fa';
-            networkSummary.style.borderRadius = '5px';
 
             // Calculate throughput totals by type
             let regularAudioKbps = 0;
@@ -3117,6 +3079,48 @@
                 return `${kbps} kbps`;
             };
 
+            // Create container for both summaries in columns
+            const summariesContainer = document.createElement('div');
+            summariesContainer.style.marginTop = '20px';
+            summariesContainer.style.display = 'grid';
+            summariesContainer.style.gridTemplateColumns = '1fr 1fr';
+            summariesContainer.style.gap = '20px';
+
+            // Session Summary (left column)
+            const sessionSummary = document.createElement('div');
+            sessionSummary.style.padding = '15px';
+            sessionSummary.style.background = '#f8f9fa';
+            sessionSummary.style.borderRadius = '5px';
+
+            let sessionHTML = `<strong>Session Summary:</strong><br>`;
+
+            // Add system load line if available
+            if (systemLoad && systemLoad.load_1min && systemLoad.load_5min && systemLoad.load_15min) {
+                let loadLine = `<span style="margin-left: 20px;">• System Load: <strong>${systemLoad.load_1min}</strong>, <strong>${systemLoad.load_5min}</strong>, <strong>${systemLoad.load_15min}</strong> <em style="color: #666;">(1, 5, 15 min averages)</em>`;
+
+                // Add CPU core count if available
+                if (systemLoad.cpu_cores && systemLoad.cpu_cores > 0) {
+                    loadLine += ` on <strong>${systemLoad.cpu_cores}</strong> core${systemLoad.cpu_cores !== 1 ? 's' : ''}`;
+                }
+
+                loadLine += `</span><br>`;
+                sessionHTML += loadLine;
+            }
+
+            sessionHTML += `<span style="margin-left: 20px;">• Regular users: <strong>${nonBypassedCount}</strong> of <strong>${maxSessions}</strong> maximum</span><br>`;
+            sessionHTML += `<span style="margin-left: 20px;">• Bypassed users: <strong>${bypassedCount}</strong> <em style="color: #666;">(not counted towards limit)</em></span><br>`;
+            sessionHTML += `<span style="margin-left: 20px;">• Internal sessions: <strong>${internalSessions.length}</strong> <em style="color: #666;">(${internalAudio} audio, ${internalSpectrum} spectrum - system use only)</em></span><br>`;
+            sessionHTML += `<span style="margin-left: 20px;">• User connections: ${userAudio} audio, ${userSpectrum} spectrum</span>`;
+
+            sessionSummary.innerHTML = sessionHTML;
+            summariesContainer.appendChild(sessionSummary);
+
+            // Network Summary (right column)
+            const networkSummary = document.createElement('div');
+            networkSummary.style.padding = '15px';
+            networkSummary.style.background = '#f8f9fa';
+            networkSummary.style.borderRadius = '5px';
+
             let networkHTML = `<strong>Network Summary:</strong><br>`;
             networkHTML += `<span style="margin-left: 20px;">• Regular users: <strong>${formatThroughput(regularAudioKbps)}</strong> audio, <strong>${formatThroughput(regularWaterfallKbps)}</strong> waterfall</span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• IP bypassed users: <strong>${formatThroughput(ipBypassedAudioKbps)}</strong> audio, <strong>${formatThroughput(ipBypassedWaterfallKbps)}</strong> waterfall</span><br>`;
@@ -3126,7 +3130,9 @@
             networkHTML += `<span style="margin-left: 20px;">• <strong>Total throughput:</strong> <strong style="color: #28a745; font-size: 16px;">${formatThroughput(totalKbps)}</strong></span>`;
 
             networkSummary.innerHTML = networkHTML;
-            container.appendChild(networkSummary);
+            summariesContainer.appendChild(networkSummary);
+
+            container.appendChild(summariesContainer);
         }
 
         // Session Activity Chart

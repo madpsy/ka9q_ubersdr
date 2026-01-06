@@ -47,6 +47,11 @@ class DXClusterClient {
                     clearTimeout(this.reconnectTimer);
                     this.reconnectTimer = null;
                 }
+                
+                // Initialize chat UI if not already initialized
+                if (typeof initializeChatUI === 'function' && !window.chatUI) {
+                    initializeChatUI(this.ws);
+                }
             };
 
             this.ws.onmessage = (event) => {

@@ -2979,22 +2979,25 @@
                 tbody.appendChild(row);
             }
 
-            // Add session activity chart
-            const chartContainer = document.createElement('div');
-            chartContainer.style.marginTop = '20px';
-            chartContainer.style.marginBottom = '20px';
-            chartContainer.style.padding = '20px';
-            chartContainer.style.background = 'white';
-            chartContainer.style.borderRadius = '5px';
-            chartContainer.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
-            chartContainer.innerHTML = `
-                <h3 style="margin-bottom: 15px; color: #333;">Session Activity (Last 24 Hours)</h3>
-                <canvas id="sessionActivityChart" style="max-height: 300px;"></canvas>
-            `;
-            container.appendChild(chartContainer);
+            // Add session activity chart (only if not already present)
+            if (!document.getElementById('sessionActivityChartContainer')) {
+                const chartContainer = document.createElement('div');
+                chartContainer.id = 'sessionActivityChartContainer';
+                chartContainer.style.marginTop = '20px';
+                chartContainer.style.marginBottom = '20px';
+                chartContainer.style.padding = '20px';
+                chartContainer.style.background = 'white';
+                chartContainer.style.borderRadius = '5px';
+                chartContainer.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+                chartContainer.innerHTML = `
+                    <h3 style="margin-bottom: 15px; color: #333;">Session Activity (Last 24 Hours)</h3>
+                    <canvas id="sessionActivityChart" style="max-height: 300px;"></canvas>
+                `;
+                container.appendChild(chartContainer);
 
-            // Load and render session activity chart
-            loadSessionActivityChart();
+                // Load and render session activity chart
+                loadSessionActivityChart();
+            }
 
             // Add summary with max_sessions from config
             const summary = document.createElement('div');
@@ -3166,6 +3169,7 @@
                             pointRadius: 0,
                             pointHoverRadius: 0,
                             tension: 0,
+                            yAxisID: 'yLimit', // Use separate axis to prevent stacking
                             order: 1 // Draw on top
                         }
                     ]
@@ -3202,6 +3206,12 @@
                                 display: true,
                                 text: 'Active Users'
                             }
+                        },
+                        yLimit: {
+                            type: 'linear',
+                            display: false,
+                            beginAtZero: true,
+                            position: 'right'
                         }
                     },
                     animation: false, // Disable animation to prevent flickering

@@ -918,36 +918,51 @@ func (kc *kiwiConn) sendStatsCallback() {
 	stats["cf"] = 0
 
 	// ===== NETWORK STATS (fully implemented with per-session tracking) =====
-	// Get network statistics from the session
-	audioBytesPerSec := 0
-	waterfallBytesPerSec := 0
-	totalBytesPerSec := 0
-	httpBytesPerSec := 0 // We don't track HTTP separately, so set to 0
+	// Get network statistics from all sessions for this user
+	// KiwiSDR has separate SND and W/F connections, so we need to aggregate across both
+	audioKBytesPerSec := 0.0
+	waterfallKBytesPerSec := 0.0
+	httpKBytesPerSec := 0.0 // We don't track HTTP separately, so set to 0
 
-	if kc.session != nil {
-		audioBytesPerSec = int(kc.session.GetAudioBytesPerSecond())
-		waterfallBytesPerSec = int(kc.session.GetWaterfallBytesPerSecond())
-		totalBytesPerSec = int(kc.session.GetTotalBytesPerSecond())
+	// Find all sessions for this user (both audio and spectrum)
+	if kc.userSessionID != "" {
+		allSessions := kc.sessions.GetAllSessionsInfo()
+		for _, sessionInfo := range allSessions {
+			userSessionID, _ := sessionInfo["user_session_id"].(string)
+			if userSessionID == kc.userSessionID {
+				// Get the actual session to access byte counters
+				sessionID, _ := sessionInfo["id"].(string)
+				if session, ok := kc.sessions.GetSession(sessionID); ok {
+					// Add audio bytes (convert bytes/sec to kilobytes/sec)
+					audioKBytesPerSec += session.GetAudioBytesPerSecond() / 1024.0
+					// Add waterfall bytes (convert bytes/sec to kilobytes/sec)
+					waterfallKBytesPerSec += session.GetWaterfallBytesPerSecond() / 1024.0
+				}
+			}
+		}
 	}
 
 	// Calculate waterfall FPS from poll period
 	// poll_period_ms is the update interval, so FPS = 1000 / poll_period_ms
 	waterfallFPS := 1000.0 / float64(kc.config.Spectrum.PollPeriodMs)
 
-	// ac: Audio bytes per second (audio_kbps in frontend)
-	stats["ac"] = audioBytesPerSec
+	// Calculate total
+	totalKBytesPerSec := audioKBytesPerSec + waterfallKBytesPerSec + httpKBytesPerSec
 
-	// wc: Waterfall bytes per second (waterfall_kbps in frontend)
-	stats["wc"] = waterfallBytesPerSec
+	// ac: Audio kilobytes per second (audio_kbps in frontend)
+	stats["ac"] = int(audioKBytesPerSec)
+
+	// wc: Waterfall kilobytes per second (waterfall_kbps in frontend)
+	stats["wc"] = int(waterfallKBytesPerSec)
 
 	// fc: Waterfall FPS (waterfall_fps in frontend) - NOT total bytes!
 	stats["fc"] = int(waterfallFPS)
 
-	// ah: HTTP bytes per second (http_kbps in frontend) - NOT audio bytes per hour!
-	stats["ah"] = httpBytesPerSec
+	// ah: HTTP kilobytes per second (http_kbps in frontend)
+	stats["ah"] = int(httpKBytesPerSec)
 
-	// as: Sum of all bytes per second (sum_kbps in frontend)
-	stats["as"] = totalBytesPerSec
+	// as: Sum of all kilobytes per second (sum_kbps in frontend)
+	stats["as"] = int(totalKBytesPerSec)
 
 	// ===== GPS STATS (placeholder - to be implemented with GPS integration) =====
 	// ga: GPS acquisition state (0 = no GPS, 1 = acquiring, 2 = acquired)

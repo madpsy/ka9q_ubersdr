@@ -3099,16 +3099,10 @@
             const passwordData = timeline.map(entry => entry.auth_breakdown?.password || 0);
             const bypassedData = timeline.map(entry => entry.auth_breakdown?.bypassed || 0);
 
-            // Get max_sessions limit from config
-            const maxSessions = currentConfig?.server?.max_sessions || 20;
-
             // Get most recent values (last data point)
             const latestRegular = regularData.length > 0 ? regularData[regularData.length - 1] : 0;
             const latestPassword = passwordData.length > 0 ? passwordData[passwordData.length - 1] : 0;
             const latestBypassed = bypassedData.length > 0 ? bypassedData[bypassedData.length - 1] : 0;
-
-            // Create limit line data (constant value across all time points)
-            const limitData = labels.map(() => maxSessions);
 
             // Create stacked area chart
             const ctx = canvas.getContext('2d');
@@ -3146,20 +3140,6 @@
                             fill: true,
                             tension: 0.4,
                             order: 2
-                        },
-                        {
-                            label: `Regular User Limit (${maxSessions})`,
-                            data: limitData,
-                            backgroundColor: 'transparent',
-                            borderColor: 'rgba(220, 53, 69, 0.8)', // Red
-                            borderWidth: 2,
-                            borderDash: [10, 5],
-                            fill: false,
-                            pointRadius: 0,
-                            pointHoverRadius: 0,
-                            tension: 0,
-                            yAxisID: 'yLimit', // Use separate axis to prevent stacking
-                            order: 1 // Draw on top
                         }
                     ]
                 },
@@ -3195,12 +3175,6 @@
                                 display: true,
                                 text: 'Active Users'
                             }
-                        },
-                        yLimit: {
-                            type: 'linear',
-                            display: false,
-                            beginAtZero: true,
-                            position: 'right'
                         }
                     },
                     animation: false, // Disable animation to prevent flickering

@@ -1320,6 +1320,7 @@ func (s *Session) AddWaterfallBytes(bytes uint64) {
 }
 
 // GetAudioBytesPerSecond returns the current audio transfer rate in bytes/second
+// including 33% overhead for protocol headers (WebSocket + TCP/IP)
 func (s *Session) GetAudioBytesPerSecond() float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1328,15 +1329,17 @@ func (s *Session) GetAudioBytesPerSecond() float64 {
 	if elapsed == 0 {
 		return 0
 	}
-	return float64(s.AudioBytesSent) / elapsed
+	return float64(s.AudioBytesSent) / elapsed * 1.33
 }
 
 // GetAudioBytesPerHour returns the average audio transfer rate in bytes/hour
+// including 33% overhead for protocol headers (WebSocket + TCP/IP)
 func (s *Session) GetAudioBytesPerHour() float64 {
 	return s.GetAudioBytesPerSecond() * 3600
 }
 
 // GetWaterfallBytesPerSecond returns the current waterfall transfer rate in bytes/second
+// including 33% overhead for protocol headers (WebSocket + TCP/IP)
 func (s *Session) GetWaterfallBytesPerSecond() float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1345,10 +1348,11 @@ func (s *Session) GetWaterfallBytesPerSecond() float64 {
 	if elapsed == 0 {
 		return 0
 	}
-	return float64(s.WaterfallBytesSent) / elapsed
+	return float64(s.WaterfallBytesSent) / elapsed * 1.33
 }
 
 // GetTotalBytesPerSecond returns the total transfer rate (audio + waterfall) in bytes/second
+// including 33% overhead for protocol headers (WebSocket + TCP/IP)
 func (s *Session) GetTotalBytesPerSecond() float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1357,11 +1361,12 @@ func (s *Session) GetTotalBytesPerSecond() float64 {
 	if elapsed == 0 {
 		return 0
 	}
-	return float64(s.AudioBytesSent+s.WaterfallBytesSent) / elapsed
+	return float64(s.AudioBytesSent+s.WaterfallBytesSent) / elapsed * 1.33
 }
 
 // GetInstantaneousAudioKbps returns the instantaneous audio transfer rate in kbps
-// using a 1-second sliding window
+// using a 1-second sliding window, including 33% overhead for protocol headers
+// (WebSocket framing, TCP/IP headers, etc.)
 func (s *Session) GetInstantaneousAudioKbps() float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1384,11 +1389,14 @@ func (s *Session) GetInstantaneousAudioKbps() float64 {
 	bytesDiff := newest.Bytes - oldest.Bytes
 
 	// Convert to kbps (bytes/sec * 8 bits/byte / 1000)
-	return float64(bytesDiff) / duration * 8 / 1000
+	// Add 33% for protocol overhead (WebSocket + TCP/IP headers)
+	payloadKbps := float64(bytesDiff) / duration * 8 / 1000
+	return payloadKbps * 1.33
 }
 
 // GetInstantaneousWaterfallKbps returns the instantaneous waterfall transfer rate in kbps
-// using a 1-second sliding window
+// using a 1-second sliding window, including 33% overhead for protocol headers
+// (WebSocket framing, TCP/IP headers, etc.)
 func (s *Session) GetInstantaneousWaterfallKbps() float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1411,7 +1419,9 @@ func (s *Session) GetInstantaneousWaterfallKbps() float64 {
 	bytesDiff := newest.Bytes - oldest.Bytes
 
 	// Convert to kbps (bytes/sec * 8 bits/byte / 1000)
-	return float64(bytesDiff) / duration * 8 / 1000
+	// Add 33% for protocol overhead (WebSocket + TCP/IP headers)
+	payloadKbps := float64(bytesDiff) / duration * 8 / 1000
+	return payloadKbps * 1.33
 }
 
 // GetInstantaneousTotalKbps returns the total instantaneous transfer rate in kbps
@@ -1524,12 +1534,13 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 		// Add throughput metrics (both average and instantaneous)
 		// Calculate while we already have the session lock to avoid deadlock
 		// Average throughput (since session start) - rounded to whole numbers
+		// Includes 33% overhead for protocol headers (WebSocket + TCP/IP)
 		elapsed := time.Since(session.CreatedAt).Seconds()
 		var audioKbpsAvg, waterfallKbpsAvg, totalKbpsAvg int
 		if elapsed > 0 {
-			audioKbpsAvg = int(float64(session.AudioBytesSent) / elapsed * 8 / 1000)
-			waterfallKbpsAvg = int(float64(session.WaterfallBytesSent) / elapsed * 8 / 1000)
-			totalKbpsAvg = int(float64(session.AudioBytesSent+session.WaterfallBytesSent) / elapsed * 8 / 1000)
+			audioKbpsAvg = int(float64(session.AudioBytesSent) / elapsed * 8 / 1000 * 1.33)
+			waterfallKbpsAvg = int(float64(session.WaterfallBytesSent) / elapsed * 8 / 1000 * 1.33)
+			totalKbpsAvg = int(float64(session.AudioBytesSent+session.WaterfallBytesSent) / elapsed * 8 / 1000 * 1.33)
 		}
 
 		info["audio_kbps_avg"] = audioKbpsAvg
@@ -1537,6 +1548,7 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 		info["total_kbps_avg"] = totalKbpsAvg
 
 		// Instantaneous throughput (1-second sliding window) - rounded to whole numbers
+		// Includes 33% overhead for protocol headers (WebSocket + TCP/IP)
 		var audioKbps, waterfallKbps int
 
 		// Calculate audio instantaneous throughput
@@ -1546,7 +1558,7 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 			duration := newest.Timestamp.Sub(oldest.Timestamp).Seconds()
 			if duration > 0 {
 				bytesDiff := newest.Bytes - oldest.Bytes
-				audioKbps = int(float64(bytesDiff) / duration * 8 / 1000)
+				audioKbps = int(float64(bytesDiff) / duration * 8 / 1000 * 1.33)
 			}
 		}
 
@@ -1557,7 +1569,7 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 			duration := newest.Timestamp.Sub(oldest.Timestamp).Seconds()
 			if duration > 0 {
 				bytesDiff := newest.Bytes - oldest.Bytes
-				waterfallKbps = int(float64(bytesDiff) / duration * 8 / 1000)
+				waterfallKbps = int(float64(bytesDiff) / duration * 8 / 1000 * 1.33)
 			}
 		}
 

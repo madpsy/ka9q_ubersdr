@@ -2012,8 +2012,15 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 				N = targetBins
 			}
 
-			// Debug: Calculate and log all frequency alignment values on one line
-			if packetCount <= 5 {
+			// Debug: Calculate and log all frequency alignment values whenever zoom/xBin changes
+			// Track previous values to detect changes
+			kc.mu.Lock()
+			prevZoom := kc.zoom
+			prevXBin := kc.xBin
+			kc.mu.Unlock()
+
+			// Log on first packet or when zoom/xBin changes
+			if packetCount == 1 || currentZoom != prevZoom || currentXBin != prevXBin {
 				const maxZoom = 14
 				maxBins := float64(1024 << maxZoom) // 16777216
 				fullBandwidthHz := 30000000.0
@@ -2033,8 +2040,8 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 				centerError := radiodActualCenter - clientExpectedCenter
 				leftEdgeError := radiodActualLeftEdge - clientExpectedLeftEdge
 
-				log.Printf("FREQ_ALIGN #%d: xBin=%d zoom=%d N=%d | Client expects: L=%.0f C=%.0f R=%.0f | Radiod sent: L=%.0f C=%.0f R=%.0f (binBW=%.2f) | Error: center=%.0f Hz, leftEdge=%.0f Hz",
-					packetCount, currentXBin, currentZoom, N,
+				log.Printf("FREQ_ALIGN: xBin=%d zoom=%d N=%d | Client expects: L=%.0f C=%.0f R=%.0f | Radiod sent: L=%.0f C=%.0f R=%.0f (binBW=%.2f) | Error: center=%.0f Hz, leftEdge=%.0f Hz",
+					currentXBin, currentZoom, N,
 					clientExpectedLeftEdge, clientExpectedCenter, clientExpectedRightEdge,
 					radiodActualLeftEdge, radiodActualCenter, radiodActualRightEdge, radiodActualBinBW,
 					centerError, leftEdgeError)

@@ -2006,18 +2006,38 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 
 			// If actual span is wider than expected, crop the center portion to match
 			if actualSpanHz > expectedSpanHz*1.01 { // 1% tolerance to avoid unnecessary cropping
-				// Calculate how many bins represent the expected span
-				binsToKeep := int((expectedSpanHz / actualSpanHz) * float64(N))
-				if binsToKeep < N && binsToKeep > 0 {
-					// Crop center portion
-					startBin := (N - binsToKeep) / 2
-					endBin := startBin + binsToKeep
-					unwrapped = unwrapped[startBin:endBin]
+				// Calculate how many bins represent the expected span (keep as float for fractional cropping)
+				binsToKeepFloat := (expectedSpanHz / actualSpanHz) * float64(N)
+
+				if binsToKeepFloat < float64(N) && binsToKeepFloat > 0 {
+					// Calculate fractional start position (center the crop)
+					startBinFloat := (float64(N) - binsToKeepFloat) / 2.0
+
+					// Create cropped array with fractional bin sampling
+					// We'll sample at fractional positions to achieve sub-Hz accuracy
+					binsToKeepInt := int(binsToKeepFloat) + 1 // +1 to ensure we have enough samples
+					cropped := make([]float32, binsToKeepInt)
+
+					for i := 0; i < binsToKeepInt; i++ {
+						// Calculate fractional position in source array
+						srcPos := startBinFloat + float64(i)
+						srcIdx := int(srcPos)
+						frac := float32(srcPos - float64(srcIdx))
+
+						// Linear interpolation at fractional position
+						if srcIdx >= 0 && srcIdx < N-1 {
+							cropped[i] = unwrapped[srcIdx]*(1-frac) + unwrapped[srcIdx+1]*frac
+						} else if srcIdx >= 0 && srcIdx < N {
+							cropped[i] = unwrapped[srcIdx]
+						}
+					}
+
+					unwrapped = cropped
 					N = len(unwrapped)
 
 					if packetCount == 1 {
-						log.Printf("CROP: Radiod sent %.2f kHz span, client expects %.2f kHz, cropped to %d bins",
-							actualSpanHz/1000.0, expectedSpanHz/1000.0, N)
+						log.Printf("CROP: Radiod sent %.2f kHz span, client expects %.2f kHz, fractional crop to %d bins (%.2f bins exact)",
+							actualSpanHz/1000.0, expectedSpanHz/1000.0, N, binsToKeepFloat)
 					}
 				}
 			}

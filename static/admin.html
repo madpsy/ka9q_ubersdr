@@ -3109,13 +3109,21 @@
             const totalWaterfallKbps = regularWaterfallKbps + ipBypassedWaterfallKbps + passwordBypassedWaterfallKbps;
             const totalKbps = totalAudioKbps + totalWaterfallKbps;
 
+            // Helper function to format throughput (use Mbps if >= 1000 kbps)
+            const formatThroughput = (kbps) => {
+                if (kbps >= 1000) {
+                    return `${(kbps / 1000).toFixed(2)} Mbps`;
+                }
+                return `${kbps} kbps`;
+            };
+
             let networkHTML = `<strong>Network Summary:</strong><br>`;
-            networkHTML += `<span style="margin-left: 20px;">• Regular users: <strong>${regularAudioKbps} kbps</strong> audio, <strong>${regularWaterfallKbps} kbps</strong> waterfall</span><br>`;
-            networkHTML += `<span style="margin-left: 20px;">• IP bypassed users: <strong>${ipBypassedAudioKbps} kbps</strong> audio, <strong>${ipBypassedWaterfallKbps} kbps</strong> waterfall</span><br>`;
-            networkHTML += `<span style="margin-left: 20px;">• Password bypassed users: <strong>${passwordBypassedAudioKbps} kbps</strong> audio, <strong>${passwordBypassedWaterfallKbps} kbps</strong> waterfall</span><br>`;
-            networkHTML += `<span style="margin-left: 20px;">• <strong>Total audio:</strong> <strong style="color: #667eea;">${totalAudioKbps} kbps</strong></span><br>`;
-            networkHTML += `<span style="margin-left: 20px;">• <strong>Total waterfall:</strong> <strong style="color: #667eea;">${totalWaterfallKbps} kbps</strong></span><br>`;
-            networkHTML += `<span style="margin-left: 20px;">• <strong>Total throughput:</strong> <strong style="color: #28a745; font-size: 16px;">${totalKbps} kbps</strong></span>`;
+            networkHTML += `<span style="margin-left: 20px;">• Regular users: <strong>${formatThroughput(regularAudioKbps)}</strong> audio, <strong>${formatThroughput(regularWaterfallKbps)}</strong> waterfall</span><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• IP bypassed users: <strong>${formatThroughput(ipBypassedAudioKbps)}</strong> audio, <strong>${formatThroughput(ipBypassedWaterfallKbps)}</strong> waterfall</span><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• Password bypassed users: <strong>${formatThroughput(passwordBypassedAudioKbps)}</strong> audio, <strong>${formatThroughput(passwordBypassedWaterfallKbps)}</strong> waterfall</span><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• <strong>Total audio:</strong> <strong style="color: #667eea;">${formatThroughput(totalAudioKbps)}</strong></span><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• <strong>Total waterfall:</strong> <strong style="color: #667eea;">${formatThroughput(totalWaterfallKbps)}</strong></span><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• <strong>Total throughput:</strong> <strong style="color: #28a745; font-size: 16px;">${formatThroughput(totalKbps)}</strong></span>`;
 
             networkSummary.innerHTML = networkHTML;
             container.appendChild(networkSummary);

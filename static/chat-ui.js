@@ -81,11 +81,11 @@ class ChatUI {
         
         const chatHTML = `
             <div id="chat-panel" class="chat-panel ${this.isExpanded ? 'expanded' : 'collapsed'}">
-                <!-- Chat header bar (always visible, thin like audio buffer) -->
+                <!-- Chat header tab (always visible, vertical) -->
                 <div id="chat-header" class="chat-header" onclick="chatUI.togglePanel()">
-                    <span>💬 Open Chat</span>
+                    <span class="chat-header-text">💬 Chat</span>
                     <span id="chat-unread" class="chat-unread" style="display:none;"></span>
-                    <span id="chat-toggle-icon" class="chat-toggle-icon">${this.isExpanded ? '▼' : '▲'}</span>
+                    <span id="chat-toggle-icon" class="chat-toggle-icon">${this.isExpanded ? '◀' : '▶'}</span>
                 </div>
                 
                 <!-- Chat content (collapsible) -->

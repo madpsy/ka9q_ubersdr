@@ -1978,71 +1978,22 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 				log.Printf("Unwrapped: first 10 values: %v", unwrapped[:10])
 			}
 
-			// Get current zoom, xBin, and compression flag for packet building
+			// Get current zoom and compression flag for packet building
 			kc.mu.RLock()
 			currentZoom := kc.zoom
-			currentXBin := kc.xBin
 			useCompression := kc.wfCompression
 			kc.mu.RUnlock()
 
-			// KiwiSDR protocol always expects exactly 1024 bins representing a specific span
-			// The client calculates frequencies based on x_bin and zoom level, assuming the
-			// 1024 bins represent: span = 30 MHz / 2^zoom
+			// KiwiSDR protocol always expects exactly 1024 bins
+			// The client calculates frequencies from x_bin as: freq = (x_bin / max_bins) * 30MHz
+			// where max_bins = 1024 << 14 = 16777216
 			//
-			// However, radiod has minimum bin bandwidth constraints (50-60 Hz/bin depending on
-			// bin count). At high zoom levels, this forces us to request a wider span than the
-			// client expects. We must crop the wider span to match the expected span before
-			// interpolating to 1024 bins, otherwise signals will appear shifted.
-			//
-			// Example: At zoom 12, client expects 7.32 kHz span, but radiod minimum constraints
-			// force 12.8 kHz span. We must crop the center 7.32 kHz before sending to client.
+			// CRITICAL: x_bin must represent the LEFT EDGE frequency of the 1024 bins we send.
+			// We calculated center frequency from the client's x_bin, told radiod to send data
+			// centered at that frequency, so now we must recalculate x_bin to match the actual
+			// left edge of the data radiod sent.
 
-			// Calculate expected span (what client thinks it's getting)
-			fullSpanKHz := 30000.0
-			expectedSpanHz := (fullSpanKHz * 1000.0) / math.Pow(2, float64(currentZoom))
-
-			// Calculate actual span (what radiod sent)
-			actualSpanHz := kc.session.BinBandwidth * float64(N)
-
-			// If actual span is wider than expected, crop the center portion to match
-			if actualSpanHz > expectedSpanHz*1.01 { // 1% tolerance to avoid unnecessary cropping
-				// Calculate how many bins represent the expected span (keep as float for fractional cropping)
-				binsToKeepFloat := (expectedSpanHz / actualSpanHz) * float64(N)
-
-				if binsToKeepFloat < float64(N) && binsToKeepFloat > 0 {
-					// Calculate fractional start position (center the crop)
-					startBinFloat := (float64(N) - binsToKeepFloat) / 2.0
-
-					// Create cropped array with fractional bin sampling
-					// We'll sample at fractional positions to achieve sub-Hz accuracy
-					binsToKeepInt := int(binsToKeepFloat) + 1 // +1 to ensure we have enough samples
-					cropped := make([]float32, binsToKeepInt)
-
-					for i := 0; i < binsToKeepInt; i++ {
-						// Calculate fractional position in source array
-						srcPos := startBinFloat + float64(i)
-						srcIdx := int(srcPos)
-						frac := float32(srcPos - float64(srcIdx))
-
-						// Linear interpolation at fractional position
-						if srcIdx >= 0 && srcIdx < N-1 {
-							cropped[i] = unwrapped[srcIdx]*(1-frac) + unwrapped[srcIdx+1]*frac
-						} else if srcIdx >= 0 && srcIdx < N {
-							cropped[i] = unwrapped[srcIdx]
-						}
-					}
-
-					unwrapped = cropped
-					N = len(unwrapped)
-
-					if packetCount == 1 {
-						log.Printf("CROP: Radiod sent %.2f kHz span, client expects %.2f kHz, fractional crop to %d bins (%.2f bins exact)",
-							actualSpanHz/1000.0, expectedSpanHz/1000.0, N, binsToKeepFloat)
-					}
-				}
-			}
-
-			// Now interpolate to exactly 1024 bins if needed
+			// Interpolate to exactly 1024 bins if needed
 			const targetBins = 1024
 			if N < targetBins {
 				interpolated := make([]float32, targetBins)
@@ -2066,6 +2017,32 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 
 				unwrapped = interpolated
 				N = targetBins
+			}
+
+			// Recalculate x_bin to match the actual frequency range of the data we're sending
+			// The client expects x_bin to represent the LEFT EDGE frequency of the 1024 bins
+			// Client code: bin_to_freq(bin) = Math.round((bin / max_bins) * bandwidth)
+			// We need: x_bin such that bin_to_freq(x_bin) = actual_left_edge_freq
+			const maxZoom = 14
+			maxBins := uint32(1024 << maxZoom) // 16777216
+
+			// Get the center frequency and bin bandwidth from the session
+			// These represent what radiod actually sent
+			centerFreqHz := float64(kc.session.Frequency)
+			binBandwidthHz := kc.session.BinBandwidth
+
+			// Calculate the actual left edge frequency of the data
+			// Data is centered at centerFreqHz and spans N bins (now 1024 after interpolation)
+			actualLeftEdgeFreq := centerFreqHz - (float64(N) * binBandwidthHz / 2.0)
+
+			// Calculate x_bin that represents this left edge frequency
+			// x_bin = (freq / bandwidth) * max_bins
+			fullBandwidthHz := 30000000.0
+			actualXBin := uint32(math.Round((actualLeftEdgeFreq / fullBandwidthHz) * float64(maxBins)))
+
+			if packetCount <= 3 {
+				log.Printf("XBIN RECALC: centerFreq=%.0f Hz, binBW=%.2f Hz, N=%d, leftEdge=%.0f Hz, actualXBin=%d",
+					centerFreqHz, binBandwidthHz, N, actualLeftEdgeFreq, actualXBin)
 			}
 
 			// Convert unwrapped spectrum data (float32 dBFS) to KiwiSDR waterfall format
@@ -2138,16 +2115,17 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 
 			// Build W/F packet: [x_bin:4][flags_zoom:4][seq:4][data]
 			// flags_zoom = (flags << 16) | (zoom & 0xffff)
+			// Use actualXBin (recalculated to match actual data) instead of client's original x_bin
 			packet := make([]byte, 12+len(encodedData))
-			binary.LittleEndian.PutUint32(packet[0:4], currentXBin)                            // x_bin (current bin position)
+			binary.LittleEndian.PutUint32(packet[0:4], actualXBin)                             // x_bin (recalculated to match actual data)
 			binary.LittleEndian.PutUint32(packet[4:8], (flags<<16)|uint32(currentZoom&0xffff)) // flags_zoom
 			binary.LittleEndian.PutUint32(packet[8:12], wfSequence)                            // sequence
 			copy(packet[12:], encodedData)
 
 			// Debug: Log packet structure for first few packets
 			if packetCount <= 3 {
-				log.Printf("W/F packet #%d: xBin=%d, zoom=%d, flags=%d, seq=%d, dataLen=%d, compressed=%v",
-					packetCount, currentXBin, currentZoom, flags, wfSequence, len(encodedData), useCompression)
+				log.Printf("W/F packet #%d: xBin=%d (recalculated), zoom=%d, flags=%d, seq=%d, dataLen=%d, compressed=%v",
+					packetCount, actualXBin, currentZoom, flags, wfSequence, len(encodedData), useCompression)
 				log.Printf("First 10 bytes of encoded data: %v", encodedData[:10])
 				// Calculate what frequency range this represents
 				if kc.session != nil {

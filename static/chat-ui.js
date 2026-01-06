@@ -80,7 +80,7 @@ class ChatUI {
         this.isExpanded = savedState === 'true';
         
         const chatHTML = `
-            <div id="chat-panel" class="chat-panel">
+            <div id="chat-panel" class="chat-panel ${this.isExpanded ? 'expanded' : 'collapsed'}">
                 <!-- Chat header bar (always visible, thin like audio buffer) -->
                 <div id="chat-header" class="chat-header" onclick="chatUI.togglePanel()">
                     <span>💬 Open Chat</span>
@@ -423,14 +423,19 @@ class ChatUI {
      */
     togglePanel() {
         this.isExpanded = !this.isExpanded;
+        const panel = document.getElementById('chat-panel');
         const content = document.getElementById('chat-content');
         const icon = document.getElementById('chat-toggle-icon');
         
         if (this.isExpanded) {
+            panel.classList.remove('collapsed');
+            panel.classList.add('expanded');
             content.style.display = 'block';
             icon.textContent = '▼';
             this.clearUnread();
         } else {
+            panel.classList.remove('expanded');
+            panel.classList.add('collapsed');
             content.style.display = 'none';
             icon.textContent = '▲';
         }

@@ -1127,7 +1127,7 @@ func main() {
 				parts := strings.Split(strings.Trim(path, "/"), "/")
 
 				// Check for /kiwi/<timestamp>/SND or /kiwi/<timestamp>/W/F format
-				if len(parts) >= 3 && parts[0] == "kiwi" && len(parts[1]) > 10 {
+				if len(parts) >= 3 && parts[0] == "kiwi" && len(parts[1]) >= 10 {
 					// Check if second part is all digits (timestamp)
 					isTimestamp := true
 					for _, c := range parts[1] {
@@ -1139,7 +1139,7 @@ func main() {
 					if isTimestamp {
 						isWebSocket = true
 					}
-				} else if len(parts) >= 2 && len(parts[0]) > 10 {
+				} else if len(parts) >= 2 && len(parts[0]) >= 10 {
 					// Check for /<timestamp>/SND or /<timestamp>/W/F format
 					// First part should be all digits (timestamp)
 					isTimestamp := true

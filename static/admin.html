@@ -485,6 +485,11 @@
 
                 <!-- Sessions Tab -->
                 <div id="sessionsTab" class="tab-content active">
+                    <!-- Session Activity Chart (outside sessionsList so it persists) -->
+                    <div id="sessionActivityChartContainer" style="margin-bottom: 20px; padding: 20px; background: white; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: none;">
+                        <h3 style="margin-bottom: 15px; color: #333;">Session Activity (Last 24 Hours)</h3>
+                        <canvas id="sessionActivityChart" style="max-height: 300px;"></canvas>
+                    </div>
                     <div id="sessionsList" class="loading">
                         <div class="spinner"></div>
                         <p>Loading sessions...</p>
@@ -2686,12 +2691,17 @@
 
         async function loadSessions() {
             try {
+                // Load session activity chart on first call only
+                if (!sessionActivityChartLoaded) {
+                    loadSessionActivityChart();
+                }
+
                 // Fetch both sessions and system load in parallel
                 const [sessionsResponse, loadResponse] = await Promise.all([
                     authenticatedFetch('/admin/sessions'),
                     authenticatedFetch('/admin/system-load')
                 ]);
-                
+
                 if (!sessionsResponse || !loadResponse) {
                     // Auth failed, stop auto-refresh
                     stopSessionsAutoRefresh();
@@ -2704,13 +2714,13 @@
 
                 const data = await sessionsResponse.json();
                 currentSessions = data.sessions || [];
-                
+
                 // Get system load data
                 let systemLoad = null;
                 if (loadResponse.ok) {
                     systemLoad = await loadResponse.json();
                 }
-                
+
                 renderSessions(currentSessionFilter, systemLoad);
 
                 // Only show alert on manual refresh, not on auto-refresh
@@ -2752,18 +2762,8 @@
             currentSessionFilter = filterType;
             
             const container = document.getElementById('sessionsList');
-            
-            // Preserve the chart container if it exists
-            const chartContainer = document.getElementById('sessionActivityChartContainer');
-            const chartHTML = chartContainer ? chartContainer.outerHTML : '';
-            
             container.innerHTML = '';
             container.classList.remove('loading');
-            
-            // Restore chart container if it existed
-            if (chartHTML) {
-                container.insertAdjacentHTML('beforeend', chartHTML);
-            }
 
             if (currentSessions.length === 0) {
                 container.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No active sessions</p>';
@@ -2989,26 +2989,6 @@
                 tbody.appendChild(row);
             }
 
-            // Add session activity chart (only if not already present)
-            if (!document.getElementById('sessionActivityChartContainer')) {
-                const chartContainer = document.createElement('div');
-                chartContainer.id = 'sessionActivityChartContainer';
-                chartContainer.style.marginTop = '20px';
-                chartContainer.style.marginBottom = '20px';
-                chartContainer.style.padding = '20px';
-                chartContainer.style.background = 'white';
-                chartContainer.style.borderRadius = '5px';
-                chartContainer.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
-                chartContainer.innerHTML = `
-                    <h3 style="margin-bottom: 15px; color: #333;">Session Activity (Last 24 Hours)</h3>
-                    <canvas id="sessionActivityChart" style="max-height: 300px;"></canvas>
-                `;
-                container.appendChild(chartContainer);
-
-                // Load and render session activity chart
-                loadSessionActivityChart();
-            }
-
             // Add summary with max_sessions from config
             const summary = document.createElement('div');
             summary.style.marginTop = '20px';
@@ -3081,24 +3061,23 @@
                 if (!response) return; // Auth failed
 
                 if (!response.ok) {
-                    // If session activity logging is not enabled, hide the chart
-                    const chartContainer = document.getElementById('sessionActivityChart')?.parentElement;
-                    if (chartContainer) {
-                        chartContainer.style.display = 'none';
-                    }
+                    // If session activity logging is not enabled, keep chart hidden
                     return;
                 }
 
                 const data = await response.json();
+                
+                // Show the chart container
+                const chartContainer = document.getElementById('sessionActivityChartContainer');
+                if (chartContainer) {
+                    chartContainer.style.display = 'block';
+                }
+                
                 renderSessionActivityChart(data.metrics);
                 sessionActivityChartLoaded = true;
             } catch (error) {
                 console.error('Error loading session activity chart:', error);
-                // Hide chart on error
-                const chartContainer = document.getElementById('sessionActivityChart')?.parentElement;
-                if (chartContainer) {
-                    chartContainer.style.display = 'none';
-                }
+                // Keep chart hidden on error
             }
         }
 

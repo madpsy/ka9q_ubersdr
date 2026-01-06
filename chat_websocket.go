@@ -80,6 +80,17 @@ func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 	// Sanitize username (alphanumeric only, max 15 chars)
 	username = sanitizeUsername(username)
 
+	// Check if username is already taken by another user
+	cm.sessionUsernamesMu.RLock()
+	for otherSessionID, existingUsername := range cm.sessionUsernames {
+		if existingUsername == username && otherSessionID != sessionID {
+			cm.sessionUsernamesMu.RUnlock()
+			log.Printf("Chat: Username '%s' already taken, rejecting for session %s", username, sessionID)
+			return ErrUsernameAlreadyTaken
+		}
+	}
+	cm.sessionUsernamesMu.RUnlock()
+
 	// Check if user limit is reached (if maxUsers > 0)
 	if cm.maxUsers > 0 {
 		cm.activeUsersMu.RLock()
@@ -486,13 +497,14 @@ func trimString(s string, maxLen int) string {
 
 // Error types
 var (
-	ErrInvalidUsername    = &ChatError{"invalid username"}
-	ErrInvalidMessage     = &ChatError{"invalid message"}
-	ErrUsernameNotSet     = &ChatError{"username not set"}
-	ErrInvalidMessageType = &ChatError{"invalid message type"}
-	ErrUnknownMessageType = &ChatError{"unknown message type"}
-	ErrRateLimitExceeded  = &ChatError{"rate limit exceeded - please wait before sending another message"}
-	ErrMaxUsersReached    = &ChatError{"maximum number of chat users reached - please try again later"}
+	ErrInvalidUsername      = &ChatError{"invalid username"}
+	ErrInvalidMessage       = &ChatError{"invalid message"}
+	ErrUsernameNotSet       = &ChatError{"username not set"}
+	ErrInvalidMessageType   = &ChatError{"invalid message type"}
+	ErrUnknownMessageType   = &ChatError{"unknown message type"}
+	ErrRateLimitExceeded    = &ChatError{"rate limit exceeded - please wait before sending another message"}
+	ErrMaxUsersReached      = &ChatError{"maximum number of chat users reached - please try again later"}
+	ErrUsernameAlreadyTaken = &ChatError{"username already taken - please choose a different username"}
 )
 
 // ChatError represents a chat-related error

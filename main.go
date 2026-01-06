@@ -390,6 +390,12 @@ func main() {
 	// Initialize session manager
 	sessions := NewSessionManager(config, radiod)
 
+	// Make session activity log directory relative to config directory if it's a relative path
+	if config.Server.SessionActivityLogEnabled && !strings.HasPrefix(config.Server.SessionActivityLogDir, "/") {
+		// If relative path, make it relative to config directory
+		config.Server.SessionActivityLogDir = *configDir + "/" + config.Server.SessionActivityLogDir
+	}
+
 	// Initialize session activity logger
 	sessionActivityLogger := NewSessionActivityLogger(
 		config.Server.SessionActivityLogEnabled,

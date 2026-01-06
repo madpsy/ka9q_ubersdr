@@ -892,10 +892,28 @@ func (kc *kiwiConn) sendStatsCallback() {
 	// nsr: Network sample rate (Hz) - same as audio sample rate for now
 	stats["nsr"] = sampleRate
 
-	// ===== UPTIME FIELD (fully implemented) =====
+	// ===== UPTIME AND VERSION FIELDS (fully implemented) =====
 	// ct: Current time / uptime in seconds since server start
 	uptime := int(time.Since(StartTime).Seconds())
 	stats["ct"] = uptime
+
+	// Parse version string (e.g., "0.1.20" -> v1=0, v2=1)
+	// v1: Version major
+	// v2: Version minor
+	versionParts := strings.Split(Version, ".")
+	versionMaj := 0
+	versionMin := 0
+	if len(versionParts) >= 2 {
+		fmt.Sscanf(versionParts[0], "%d", &versionMaj)
+		fmt.Sscanf(versionParts[1], "%d", &versionMin)
+	}
+	stats["v1"] = versionMaj
+	stats["v2"] = versionMin
+
+	// d1: Debian major version (placeholder - we're not on Debian)
+	// d2: Debian minor version (placeholder)
+	stats["d1"] = 0
+	stats["d2"] = 0
 
 	// ===== CPU STATS (placeholder - to be implemented with system monitoring) =====
 	// ce: CPU enabled (0 = disabled, 1 = enabled)

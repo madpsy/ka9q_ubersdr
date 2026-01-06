@@ -156,11 +156,19 @@ class ChatUI {
                 position: fixed;
                 bottom: 40px;
                 right: 20px;
-                width: 350px;
                 background: transparent;
                 z-index: 900;
                 font-family: Arial, sans-serif;
                 font-size: 13px;
+                transition: width 0.2s ease;
+            }
+            
+            .chat-panel.collapsed {
+                width: 200px;
+            }
+            
+            .chat-panel.expanded {
+                width: 350px;
             }
             
             .chat-header {

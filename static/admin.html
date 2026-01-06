@@ -2990,13 +2990,13 @@
                     let audioThroughput = '—';
                     if (sessions.audio.length > 0) {
                         const audioKbps = sessions.audio[0].audio_kbps || 0;
-                        audioThroughput = `<span style="color: #667eea; font-weight: bold;">${audioKbps} kbps</span>`;
+                        audioThroughput = `${audioKbps} kbps`;
                     }
 
                     let spectrumThroughput = '—';
                     if (sessions.spectrum.length > 0) {
                         const waterfallKbps = sessions.spectrum[0].waterfall_kbps || 0;
-                        spectrumThroughput = `<span style="color: #667eea; font-weight: bold;">${waterfallKbps} kbps</span>`;
+                        spectrumThroughput = `${waterfallKbps} kbps`;
                     }
 
                     row.innerHTML = `

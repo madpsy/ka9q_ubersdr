@@ -11,6 +11,12 @@ import (
 	"github.com/google/uuid"
 )
 
+// BytesSample represents a sample of bytes sent at a specific time
+type BytesSample struct {
+	Timestamp time.Time
+	Bytes     uint64
+}
+
 // Session represents a user session with an associated radiod channel
 type Session struct {
 	ID            string
@@ -49,6 +55,10 @@ type Session struct {
 	// Network statistics (protected by mu)
 	AudioBytesSent     uint64 // Total audio bytes sent
 	WaterfallBytesSent uint64 // Total waterfall/spectrum bytes sent
+
+	// Sliding window for instantaneous throughput (1 second window)
+	audioSamples     []BytesSample // Samples for audio bytes
+	waterfallSamples []BytesSample // Samples for waterfall bytes
 }
 
 // SessionManager manages all active sessions
@@ -1267,17 +1277,45 @@ func (sm *SessionManager) GetUserAgent(userSessionID string) string {
 	return sm.userAgents[userSessionID]
 }
 
-// AddAudioBytes atomically adds to the audio byte counter
+// AddAudioBytes atomically adds to the audio byte counter and updates sliding window
 func (s *Session) AddAudioBytes(bytes uint64) {
 	s.mu.Lock()
 	s.AudioBytesSent += bytes
+
+	// Add sample to sliding window
+	now := time.Now()
+	s.audioSamples = append(s.audioSamples, BytesSample{
+		Timestamp: now,
+		Bytes:     s.AudioBytesSent,
+	})
+
+	// Remove samples older than 1 second
+	cutoff := now.Add(-1 * time.Second)
+	for len(s.audioSamples) > 0 && s.audioSamples[0].Timestamp.Before(cutoff) {
+		s.audioSamples = s.audioSamples[1:]
+	}
+
 	s.mu.Unlock()
 }
 
-// AddWaterfallBytes atomically adds to the waterfall byte counter
+// AddWaterfallBytes atomically adds to the waterfall byte counter and updates sliding window
 func (s *Session) AddWaterfallBytes(bytes uint64) {
 	s.mu.Lock()
 	s.WaterfallBytesSent += bytes
+
+	// Add sample to sliding window
+	now := time.Now()
+	s.waterfallSamples = append(s.waterfallSamples, BytesSample{
+		Timestamp: now,
+		Bytes:     s.WaterfallBytesSent,
+	})
+
+	// Remove samples older than 1 second
+	cutoff := now.Add(-1 * time.Second)
+	for len(s.waterfallSamples) > 0 && s.waterfallSamples[0].Timestamp.Before(cutoff) {
+		s.waterfallSamples = s.waterfallSamples[1:]
+	}
+
 	s.mu.Unlock()
 }
 
@@ -1320,6 +1358,66 @@ func (s *Session) GetTotalBytesPerSecond() float64 {
 		return 0
 	}
 	return float64(s.AudioBytesSent+s.WaterfallBytesSent) / elapsed
+}
+
+// GetInstantaneousAudioKbps returns the instantaneous audio transfer rate in kbps
+// using a 1-second sliding window
+func (s *Session) GetInstantaneousAudioKbps() float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if len(s.audioSamples) < 2 {
+		return 0
+	}
+
+	// Get oldest and newest samples in the window
+	oldest := s.audioSamples[0]
+	newest := s.audioSamples[len(s.audioSamples)-1]
+
+	// Calculate time difference
+	duration := newest.Timestamp.Sub(oldest.Timestamp).Seconds()
+	if duration == 0 {
+		return 0
+	}
+
+	// Calculate bytes transferred in this window
+	bytesDiff := newest.Bytes - oldest.Bytes
+
+	// Convert to kbps (bytes/sec * 8 bits/byte / 1000)
+	return float64(bytesDiff) / duration * 8 / 1000
+}
+
+// GetInstantaneousWaterfallKbps returns the instantaneous waterfall transfer rate in kbps
+// using a 1-second sliding window
+func (s *Session) GetInstantaneousWaterfallKbps() float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if len(s.waterfallSamples) < 2 {
+		return 0
+	}
+
+	// Get oldest and newest samples in the window
+	oldest := s.waterfallSamples[0]
+	newest := s.waterfallSamples[len(s.waterfallSamples)-1]
+
+	// Calculate time difference
+	duration := newest.Timestamp.Sub(oldest.Timestamp).Seconds()
+	if duration == 0 {
+		return 0
+	}
+
+	// Calculate bytes transferred in this window
+	bytesDiff := newest.Bytes - oldest.Bytes
+
+	// Convert to kbps (bytes/sec * 8 bits/byte / 1000)
+	return float64(bytesDiff) / duration * 8 / 1000
+}
+
+// GetInstantaneousTotalKbps returns the total instantaneous transfer rate in kbps
+// using a 1-second sliding window
+func (s *Session) GetInstantaneousTotalKbps() float64 {
+	return s.GetInstantaneousAudioKbps() + s.GetInstantaneousWaterfallKbps()
 }
 
 // GetSessionInfo returns information about a session
@@ -1422,6 +1520,21 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 				info["user_agent"] = userAgent
 			}
 		}
+
+		// Add throughput metrics (both average and instantaneous)
+		// Average throughput (since session start) - rounded to whole numbers
+		audioBPS := session.GetAudioBytesPerSecond()
+		waterfallBPS := session.GetWaterfallBytesPerSecond()
+		totalBPS := session.GetTotalBytesPerSecond()
+
+		info["audio_kbps_avg"] = int(audioBPS * 8 / 1000) // Convert bytes/sec to kbps (whole number)
+		info["waterfall_kbps_avg"] = int(waterfallBPS * 8 / 1000)
+		info["total_kbps_avg"] = int(totalBPS * 8 / 1000)
+
+		// Instantaneous throughput (1-second sliding window) - rounded to whole numbers
+		info["audio_kbps"] = int(session.GetInstantaneousAudioKbps())
+		info["waterfall_kbps"] = int(session.GetInstantaneousWaterfallKbps())
+		info["total_kbps"] = int(session.GetInstantaneousTotalKbps())
 
 		// Only include frontend_status for the wideband spectrum channel
 		// All other sessions will get frontend status from a separate API endpoint

@@ -709,7 +709,7 @@
                             <p style="text-align: center; color: #666;">Loading frontend status...</p>
                         </div>
                     </div>
-                    
+
                     <div id="monitorHealth" class="loading">
                         <div class="spinner"></div>
                         <p>Loading health status...</p>
@@ -906,14 +906,14 @@
             const overlay = document.getElementById('restartOverlay');
             const countdownEl = document.getElementById('countdownNumber');
             overlay.style.display = 'flex';
-            
+
             let countdown = 15;
             countdownEl.textContent = countdown;
-            
+
             const interval = setInterval(() => {
                 countdown--;
                 countdownEl.textContent = countdown;
-                
+
                 if (countdown <= 0) {
                     clearInterval(interval);
                     // Redirect to login page
@@ -926,7 +926,7 @@
         async function authenticatedFetch(url, options = {}) {
             try {
                 const response = await fetch(url, options);
-                
+
                 // Check for authentication errors
                 if (response.status === 401) {
                     // Session expired or invalid, redirect to login
@@ -935,7 +935,7 @@
                     showAlert('Session expired. Please login again.', 'error');
                     return null;
                 }
-                
+
                 return response;
             } catch (error) {
                 // Network or other errors
@@ -1001,7 +1001,7 @@
                 // Fetch current version from /api/description
                 const descResponse = await fetch('/api/description');
                 let currentVersion = 'Unknown';
-                
+
                 if (descResponse.ok) {
                     const descData = await descResponse.json();
                     currentVersion = descData.version || 'Unknown';
@@ -1072,11 +1072,11 @@
                             return;
                         }
                     }
-                    
+
                     // Check for return URL parameter
                     const urlParams = new URLSearchParams(window.location.search);
                     const returnUrl = urlParams.get('return');
-                    
+
                     if (returnUrl) {
                         // Validate return URL is same-origin (security check)
                         try {
@@ -1090,7 +1090,7 @@
                             console.error('Invalid return URL:', e);
                         }
                     }
-                    
+
                     // Session cookie is set automatically by the browser
                     document.getElementById('loginBox').style.display = 'none';
                     document.getElementById('configEditor').classList.add('active');
@@ -1153,7 +1153,7 @@
             if (tab !== 'sessions') {
                 stopSessionsAutoRefresh();
             }
-            
+
             // Stop monitor auto-refresh when leaving monitor tab
             if (tab !== 'monitor') {
                 stopMonitorAutoRefresh();
@@ -1278,29 +1278,29 @@
                 if (typeof values === 'object' && values !== null) {
                     const sectionDiv = document.createElement('div');
                     sectionDiv.className = 'config-section';
-                    
+
                     // Create collapsible header
                     const header = document.createElement('div');
                     header.className = 'config-section-header';
-                    
+
                     const title = document.createElement('h3');
                     title.textContent = section.charAt(0).toUpperCase() + section.slice(1);
-                    
+
                     const toggle = document.createElement('span');
                     toggle.className = 'config-section-toggle collapsed';
                     toggle.textContent = '▼';
-                    
+
                     header.appendChild(title);
                     header.appendChild(toggle);
                     sectionDiv.appendChild(header);
-                    
+
                     // Create collapsible content
                     const content = document.createElement('div');
                     content.className = 'config-section-content';
-                    
+
                     renderFields(content, values, section);
                     sectionDiv.appendChild(content);
-                    
+
                     // Add click handler to toggle
                     header.addEventListener('click', () => {
                         const isExpanded = content.classList.contains('expanded');
@@ -1312,7 +1312,7 @@
                             toggle.classList.remove('collapsed');
                         }
                     });
-                    
+
                     container.appendChild(sectionDiv);
                 }
             }
@@ -1321,27 +1321,27 @@
         function renderFields(container, obj, path) {
             for (const [key, value] of Object.entries(obj)) {
                 const fullPath = path + '.' + key;
-                
+
                 if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
                     const subSection = document.createElement('div');
                     subSection.style.marginLeft = '20px';
                     subSection.style.marginTop = '10px';
-                    
+
                     const subTitle = document.createElement('h4');
                     subTitle.textContent = key;
                     subTitle.style.color = '#555';
                     subTitle.style.marginBottom = '10px';
                     subSection.appendChild(subTitle);
-                    
+
                     renderFields(subSection, value, fullPath);
                     container.appendChild(subSection);
                 } else if (Array.isArray(value)) {
                     // Check if array contains objects
                     const hasObjects = value.length > 0 && typeof value[0] === 'object' && value[0] !== null;
-                    
+
                     const field = document.createElement('div');
                     field.className = 'config-field';
-                    
+
                     const label = document.createElement('label');
                     label.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                     field.appendChild(label);
@@ -1350,7 +1350,7 @@
                         // Render array of objects with expandable sections for each item
                         const arrayContainer = document.createElement('div');
                         arrayContainer.style.marginTop = '10px';
-                        
+
                         value.forEach((item, index) => {
                             const itemSection = document.createElement('details');
                             itemSection.style.marginBottom = '15px';
@@ -1359,7 +1359,7 @@
                             itemSection.style.border = '1px solid #dee2e6';
                             itemSection.style.borderRadius = '5px';
                             itemSection.open = index === 0; // Open first item by default
-                            
+
                             const summary = document.createElement('summary');
                             summary.style.cursor = 'pointer';
                             summary.style.fontWeight = 'bold';
@@ -1368,12 +1368,12 @@
                             // Use 'name' property if available, otherwise use index
                             summary.textContent = item.name || `Item ${index + 1}`;
                             itemSection.appendChild(summary);
-                            
+
                             // Render each property of the object
                             for (const [propKey, propValue] of Object.entries(item)) {
                                 const propField = document.createElement('div');
                                 propField.style.marginBottom = '10px';
-                                
+
                                 const propLabel = document.createElement('label');
                                 propLabel.textContent = propKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                                 propLabel.style.display = 'block';
@@ -1381,7 +1381,7 @@
                                 propLabel.style.color = '#555';
                                 propLabel.style.fontSize = '13px';
                                 propField.appendChild(propLabel);
-                                
+
                                 const propInput = document.createElement('input');
                                 propInput.type = typeof propValue === 'number' ? 'number' : 'text';
                                 propInput.value = propValue;
@@ -1400,7 +1400,7 @@
                                     const arrayPath = e.target.dataset.path;
                                     const itemIndex = parseInt(e.target.dataset.index);
                                     const property = e.target.dataset.property;
-                                    
+
                                     // Get the current array
                                     const keys = arrayPath.split('.');
                                     let obj = currentConfig;
@@ -1409,7 +1409,7 @@
                                     }
                                     const arrayKey = keys[keys.length - 1];
                                     const array = obj[arrayKey];
-                                    
+
                                     // Update the specific property
                                     const oldValue = array[itemIndex][property];
                                     if (typeof oldValue === 'number') {
@@ -1419,15 +1419,15 @@
                                     }
                                 });
                                 propField.appendChild(propInput);
-                                
+
                                 itemSection.appendChild(propField);
                             }
-                            
+
                             arrayContainer.appendChild(itemSection);
                         });
-                        
+
                         field.appendChild(arrayContainer);
-                        
+
                         const small = document.createElement('small');
                         small.textContent = 'Click on each item to expand and edit. Changes require server restart.';
                         small.style.display = 'block';
@@ -1464,12 +1464,12 @@
                         small.style.color = '#666';
                         field.appendChild(small);
                     }
-                    
+
                     container.appendChild(field);
                 } else {
                     const field = document.createElement('div');
                     field.className = 'config-field';
-                    
+
                     const label = document.createElement('label');
                     label.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                     field.appendChild(label);
@@ -1489,11 +1489,11 @@
                         input.type = 'text';
                         input.value = value;
                     }
-                    
+
                     input.dataset.path = fullPath;
                     input.addEventListener('change', (e) => updateConfigValue(e.target.dataset.path, e.target.value));
                     field.appendChild(input);
-                    
+
                     container.appendChild(field);
                 }
             }
@@ -1502,14 +1502,14 @@
         function updateConfigValue(path, value) {
             const keys = path.split('.');
             let obj = currentConfig;
-            
+
             for (let i = 0; i < keys.length - 1; i++) {
                 obj = obj[keys[i]];
             }
-            
+
             const lastKey = keys[keys.length - 1];
             const oldValue = obj[lastKey];
-            
+
             // Convert value to appropriate type
             if (typeof oldValue === 'boolean') {
                 obj[lastKey] = value === 'true';
@@ -1547,7 +1547,7 @@
                     const errorText = await response.text();
                     throw new Error(errorText || 'Failed to save config');
                 }
-                
+
                 const result = await response.json();
                 showAlert(result.message || 'Configuration saved successfully', 'success');
 
@@ -1606,7 +1606,7 @@
 
             try {
                 const text = await file.text();
-                
+
                 // Try to parse as JSON first, then YAML
                 let importedConfig;
                 if (file.name.endsWith('.json')) {
@@ -1636,10 +1636,10 @@
         function convertConfigToYAML(config) {
             // Simple YAML converter - converts JS object to YAML format
             let yaml = '';
-            
+
             function convertValue(value, indent = 0) {
                 const spaces = '  '.repeat(indent);
-                
+
                 if (value === null || value === undefined) {
                     return 'null';
                 } else if (typeof value === 'boolean') {
@@ -1669,11 +1669,11 @@
                 }
                 return value.toString();
             }
-            
+
             function convertObject(obj, indent = 0) {
                 const spaces = '  '.repeat(indent);
                 let result = '';
-                
+
                 for (const [key, value] of Object.entries(obj)) {
                     result += spaces + key + ':';
                     const converted = convertValue(value, indent + 1);
@@ -1683,22 +1683,22 @@
                         result += ' ' + converted + '\n';
                     }
                 }
-                
+
                 return result;
             }
-            
+
             return convertObject(config);
         }
 
         function showAlert(message, type) {
             const alertBox = document.getElementById('alertBox');
             alertBox.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
-            
+
             // Only scroll alert into view for errors, not for success or info messages
             if (type === 'error') {
                 alertBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
-            
+
             setTimeout(() => {
                 alertBox.innerHTML = '';
             }, 5000);
@@ -1858,7 +1858,7 @@
 
                 // Escape name for use in onclick attribute
                 const escapedName = bookmark.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                
+
                 row.innerHTML = `
                     <td style="padding: 12px;">${bookmark.name}</td>
                     <td style="padding: 12px;">${bookmark.frequency.toLocaleString()}</td>
@@ -1929,10 +1929,10 @@
             const originalName = document.getElementById('editBookmarkIndex').value;
             const originalFreq = document.getElementById('editBookmarkFreq').value;
             const isEditing = originalName !== '' && originalFreq !== '';
-            
+
             let isValid = true;
             const saveBtn = document.getElementById('saveBookmarkBtn');
-            
+
             // Validate name
             const nameError = document.getElementById('bookmarkNameError');
             if (!name) {
@@ -1942,7 +1942,7 @@
             } else {
                 nameError.style.display = 'none';
             }
-            
+
             // Validate frequency
             const freqError = document.getElementById('bookmarkFreqError');
             const frequency = parseInt(freqValue);
@@ -1959,7 +1959,7 @@
                     }
                     return bookmark.name === name && bookmark.frequency === frequency;
                 });
-                
+
                 if (isDuplicate) {
                     freqError.textContent = `A bookmark '${name}' at ${frequency.toLocaleString()} Hz already exists`;
                     freqError.style.display = 'block';
@@ -1968,12 +1968,12 @@
                     freqError.style.display = 'none';
                 }
             }
-            
+
             // Enable/disable save button based on validation
             if (saveBtn) {
                 saveBtn.disabled = !isValid;
             }
-            
+
             return isValid;
         }
 
@@ -2006,7 +2006,7 @@
 
             try {
                 const isEditing = originalName !== '' && originalFreq !== '';
-                
+
                 if (isEditing) {
                     // Update existing bookmark using original name+frequency
                     const response = await fetch(`/admin/bookmarks?name=${encodeURIComponent(originalName)}&frequency=${originalFreq}`, {
@@ -2021,7 +2021,7 @@
                         const errorText = await response.text();
                         throw new Error(errorText || 'Failed to update bookmark');
                     }
-                    
+
                     const result = await response.json();
                     showAlert(result.message, 'success');
                 } else {
@@ -2038,11 +2038,11 @@
                         const errorText = await response.text();
                         throw new Error(errorText || 'Failed to add bookmark');
                     }
-                    
+
                     const result = await response.json();
                     showAlert(result.message, 'success');
                 }
-                
+
                 cancelBookmarkForm();
                 await loadBookmarks();
             } catch (error) {
@@ -2214,7 +2214,7 @@
                 const response = await authenticatedFetch('/admin/bands');
                 if (!response) return; // Auth failed, already handled
                 if (!response.ok) throw new Error('Failed to load bands');
-                
+
                 const data = await response.json();
                 currentBands = data.bands || [];
                 renderBands();
@@ -2307,7 +2307,7 @@
             document.getElementById('newBandGroup').value = band.group || '';
             document.getElementById('newBandMode').value = band.mode || '';
             validateBandForm(); // Initial validation
-            
+
             // Scroll the form into view
             document.getElementById('addBandForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
@@ -2327,10 +2327,10 @@
             const endValue = document.getElementById('newBandEnd').value.trim();
             const originalLabel = document.getElementById('editBandIndex').value;
             const isEditing = originalLabel !== '';
-            
+
             let isValid = true;
             const saveBtn = document.getElementById('saveBandBtn');
-            
+
             // Validate label
             const labelError = document.getElementById('bandLabelError');
             if (!label) {
@@ -2345,7 +2345,7 @@
                     }
                     return band.label === label;
                 });
-                
+
                 if (isDuplicate) {
                     labelError.textContent = `Label '${label}' already exists. Please choose a different label.`;
                     labelError.style.display = 'block';
@@ -2354,7 +2354,7 @@
                     labelError.style.display = 'none';
                 }
             }
-            
+
             // Validate start frequency
             const startError = document.getElementById('bandStartError');
             const start = parseInt(startValue);
@@ -2365,7 +2365,7 @@
             } else {
                 startError.style.display = 'none';
             }
-            
+
             // Validate end frequency
             const endError = document.getElementById('bandEndError');
             const end = parseInt(endValue);
@@ -2380,12 +2380,12 @@
             } else {
                 endError.style.display = 'none';
             }
-            
+
             // Enable/disable save button based on validation
             if (saveBtn) {
                 saveBtn.disabled = !isValid;
             }
-            
+
             return isValid;
         }
 
@@ -2446,7 +2446,7 @@
                         const errorText = await response.text();
                         throw new Error(errorText || 'Failed to update band');
                     }
-                    
+
                     const result = await response.json();
                     showAlert(result.message, 'success');
                 } else {
@@ -2463,11 +2463,11 @@
                         const errorText = await response.text();
                         throw new Error(errorText || 'Failed to add band');
                     }
-                    
+
                     const result = await response.json();
                     showAlert(result.message, 'success');
                 }
-                
+
                 cancelBandForm();
                 await loadBands();
             } catch (error) {
@@ -2692,7 +2692,7 @@
         let currentSessions = [];
         let sessionsRefreshInterval = null;
         let currentSessionFilter = 'all'; // Track current filter selection
-        
+
         // Monitor health management
         let monitorRefreshInterval = null;
 
@@ -2753,7 +2753,7 @@
             if (sessionsRefreshInterval) {
                 clearInterval(sessionsRefreshInterval);
             }
-            
+
             // Start auto-refresh every 5 seconds
             sessionsRefreshInterval = setInterval(() => {
                 loadSessions();
@@ -2770,7 +2770,7 @@
         function renderSessions(filterType = currentSessionFilter, systemLoad = null) {
             // Update the current filter state
             currentSessionFilter = filterType;
-            
+
             const container = document.getElementById('sessionsList');
             container.innerHTML = '';
             container.classList.remove('loading');
@@ -2854,14 +2854,14 @@
             // Helper function to convert IP address to sortable value
             function ipToSortValue(ip) {
                 if (!ip || ip === 'N/A') return [0, 0, 0, 0, 0, 0, 0, 0]; // Sort N/A to the end
-                
+
                 // IPv4 address
                 if (ip.includes('.') && !ip.includes(':')) {
                     const parts = ip.split('.').map(p => parseInt(p) || 0);
                     // Pad to 8 elements for consistent comparison with IPv6
                     return [...parts, 0, 0, 0, 0];
                 }
-                
+
                 // IPv6 address
                 if (ip.includes(':')) {
                     // Expand :: notation and convert to numeric array
@@ -2876,7 +2876,7 @@
                     }
                     return parts.slice(0, 8).map(p => parseInt(p || '0', 16));
                 }
-                
+
                 return [0, 0, 0, 0, 0, 0, 0, 0];
             }
 
@@ -2885,14 +2885,14 @@
                 const audioA = a[1].audio[0];
                 const spectrumA = a[1].spectrum[0];
                 const ipA = audioA?.client_ip || spectrumA?.client_ip || 'N/A';
-                
+
                 const audioB = b[1].audio[0];
                 const spectrumB = b[1].spectrum[0];
                 const ipB = audioB?.client_ip || spectrumB?.client_ip || 'N/A';
-                
+
                 const sortA = ipToSortValue(ipA);
                 const sortB = ipToSortValue(ipB);
-                
+
                 // Compare each segment
                 for (let i = 0; i < 8; i++) {
                     if (sortA[i] !== sortB[i]) {
@@ -2906,10 +2906,10 @@
                 // Apply filter
                 if (filterType === 'regular' && sessions.isBypassed) continue;
                 if (filterType === 'bypassed' && !sessions.isBypassed) continue;
-                
+
                 const row = document.createElement('tr');
                 row.style.borderBottom = '1px solid #dee2e6';
-                
+
                 // Highlight bypassed users with a subtle background color
                 if (sessions.isBypassed) {
                     row.style.background = '#e8f5e9'; // Light green background for bypassed
@@ -2984,18 +2984,31 @@
                 }
                 if (clientIP !== 'N/A') {
                     actionButtons += `<button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="banUser('${clientIP}')">Ban IP</button>`;
-                }
+                    }
 
-                row.innerHTML = `
-                    <td style="padding: 12px; font-family: monospace; font-size: 12px; max-width: 140px; word-wrap: break-word;">${ipDisplay}</td>
-                    <td style="padding: 12px; font-size: 11px; word-break: break-all; max-width: 200px;" title="${userAgent}">${userAgent === 'N/A' ? '<em style="color: #999;">N/A</em>' : userAgent}</td>
-                    <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${firstSeenDisplay}</td>
-                    <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${lastSeenDisplay}</td>
-                    <td style="padding: 12px; text-align: center;">${sessions.audio.length > 0 ? '✓' : '—'}</td>
-                    <td style="padding: 12px; text-align: center;">${sessions.spectrum.length > 0 ? '✓' : '—'}</td>
-                    <td style="padding: 12px; font-size: 12px;">${details}</td>
-                    <td style="padding: 12px; text-align: center; white-space: nowrap;">${actionButtons}</td>
-                `;
+                    // Calculate throughput for audio and spectrum sessions
+                    let audioThroughput = '—';
+                    if (sessions.audio.length > 0) {
+                        const audioKbps = sessions.audio[0].audio_kbps || 0;
+                        audioThroughput = `<span style="color: #667eea; font-weight: bold;">${audioKbps} kbps</span>`;
+                    }
+
+                    let spectrumThroughput = '—';
+                    if (sessions.spectrum.length > 0) {
+                        const waterfallKbps = sessions.spectrum[0].waterfall_kbps || 0;
+                        spectrumThroughput = `<span style="color: #667eea; font-weight: bold;">${waterfallKbps} kbps</span>`;
+                    }
+
+                    row.innerHTML = `
+                        <td style="padding: 12px; font-family: monospace; font-size: 12px; max-width: 140px; word-wrap: break-word;">${ipDisplay}</td>
+                        <td style="padding: 12px; font-size: 11px; word-break: break-all; max-width: 200px;" title="${userAgent}">${userAgent === 'N/A' ? '<em style="color: #999;">N/A</em>' : userAgent}</td>
+                        <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${firstSeenDisplay}</td>
+                        <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${lastSeenDisplay}</td>
+                        <td style="padding: 12px; text-align: center;">${audioThroughput}</td>
+                        <td style="padding: 12px; text-align: center;">${spectrumThroughput}</td>
+                        <td style="padding: 12px; font-size: 12px;">${details}</td>
+                        <td style="padding: 12px; text-align: center; white-space: nowrap;">${actionButtons}</td>
+                    `;
                 tbody.appendChild(row);
             }
 
@@ -3005,7 +3018,7 @@
             summary.style.padding = '15px';
             summary.style.background = '#f8f9fa';
             summary.style.borderRadius = '5px';
-            
+
             // Count bypassed vs non-bypassed users
             let bypassedCount = 0;
             let nonBypassedCount = 0;
@@ -3016,34 +3029,34 @@
                     nonBypassedCount++;
                 }
             }
-            
+
             const maxSessions = currentConfig?.server?.max_sessions || '?';
             const userAudio = userSessions.filter(s => !s.is_spectrum).length;
             const userSpectrum = userSessions.filter(s => s.is_spectrum).length;
             const internalAudio = internalSessions.filter(s => !s.is_spectrum).length;
             const internalSpectrum = internalSessions.filter(s => s.is_spectrum).length;
-            
+
             // Build summary HTML with system load if available
             let summaryHTML = `<strong>Summary:</strong><br>`;
-            
+
             // Add system load line if available
             if (systemLoad && systemLoad.load_1min && systemLoad.load_5min && systemLoad.load_15min) {
                 let loadLine = `<span style="margin-left: 20px;">• System Load: <strong>${systemLoad.load_1min}</strong>, <strong>${systemLoad.load_5min}</strong>, <strong>${systemLoad.load_15min}</strong> <em style="color: #666;">(1, 5, 15 min averages)</em>`;
-                
+
                 // Add CPU core count if available
                 if (systemLoad.cpu_cores && systemLoad.cpu_cores > 0) {
                     loadLine += ` on <strong>${systemLoad.cpu_cores}</strong> core${systemLoad.cpu_cores !== 1 ? 's' : ''}`;
                 }
-                
+
                 loadLine += `</span><br>`;
                 summaryHTML += loadLine;
             }
-            
+
             summaryHTML += `<span style="margin-left: 20px;">• Regular users: <strong>${nonBypassedCount}</strong> of <strong>${maxSessions}</strong> maximum</span><br>`;
             summaryHTML += `<span style="margin-left: 20px;">• Bypassed users: <strong>${bypassedCount}</strong> <em style="color: #666;">(not counted towards limit)</em></span><br>`;
             summaryHTML += `<span style="margin-left: 20px;">• Internal sessions: <strong>${internalSessions.length}</strong> <em style="color: #666;">(${internalAudio} audio, ${internalSpectrum} spectrum - system use only)</em></span><br>`;
             summaryHTML += `<span style="margin-left: 20px;">• User connections: ${userAudio} audio, ${userSpectrum} spectrum</span>`;
-            
+
             summary.innerHTML = summaryHTML;
             container.appendChild(summary);
         }
@@ -3131,7 +3144,7 @@
 
         function changeSessionActivityTimeRange(range) {
             currentTimeRange = range;
-            
+
             // Update button styles
             document.getElementById('btnDay').style.background = range === 'day' ? '#007bff' : '#6c757d';
             document.getElementById('btnDay').style.color = 'white';
@@ -3139,7 +3152,7 @@
             document.getElementById('btnWeek').style.color = 'white';
             document.getElementById('btnMonth').style.background = range === 'month' ? '#007bff' : '#6c757d';
             document.getElementById('btnMonth').style.color = 'white';
-            
+
             // Reload chart with new time range
             loadSessionActivityChart(range);
         }
@@ -3532,14 +3545,14 @@
 
                 const data = await response.json();
                 availableExtensions = data.extensions || [];
-                
+
                 // Load current extensions config to get default_extension
                 const configResponse = await fetch('/admin/extensions-manage');
                 if (configResponse.ok) {
                     const configData = await configResponse.json();
                     defaultExtension = configData.default_extension || '';
                 }
-                
+
                 renderExtensions();
                 showAlert(`Loaded ${availableExtensions.length} available extension(s)`, 'success');
             } catch (error) {
@@ -3647,12 +3660,12 @@
 
         function toggleExtension(index) {
             availableExtensions[index].enabled = !availableExtensions[index].enabled;
-            
+
             // If disabling an extension that is currently the default, clear the default
             if (!availableExtensions[index].enabled && defaultExtension === availableExtensions[index].slug) {
                 defaultExtension = '';
             }
-            
+
             renderExtensions();
         }
 
@@ -3930,12 +3943,12 @@
             depthControlsSection.style.background = '#e9ecef';
             depthControlsSection.style.borderRadius = '5px';
             depthControlsSection.innerHTML = '<h4 style="margin-bottom: 15px; color: #333;">Set Decode Depth by Mode</h4>';
-            
+
             const depthControlsGrid = document.createElement('div');
             depthControlsGrid.style.display = 'grid';
             depthControlsGrid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(250px, 1fr))';
             depthControlsGrid.style.gap = '15px';
-            
+
             // FT8 depth control
             const ft8Control = document.createElement('div');
             ft8Control.style.display = 'flex';
@@ -3951,7 +3964,7 @@
                 <button class="btn" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" onclick="setBulkDepth('FT8')">Apply</button>
             `;
             depthControlsGrid.appendChild(ft8Control);
-            
+
             // FT4 depth control
             const ft4Control = document.createElement('div');
             ft4Control.style.display = 'flex';
@@ -3967,7 +3980,7 @@
                 <button class="btn" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" onclick="setBulkDepth('FT4')">Apply</button>
             `;
             depthControlsGrid.appendChild(ft4Control);
-            
+
             // WSPR cycles control
             const wsprControl = document.createElement('div');
             wsprControl.style.display = 'flex';
@@ -3984,16 +3997,16 @@
                 <button class="btn" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" onclick="setBulkDepth('WSPR')">Apply</button>
             `;
             depthControlsGrid.appendChild(wsprControl);
-            
+
             depthControlsSection.appendChild(depthControlsGrid);
-            
+
             const depthNote = document.createElement('small');
             depthNote.style.display = 'block';
             depthNote.style.marginTop = '10px';
             depthNote.style.color = '#666';
             depthNote.innerHTML = 'Sets decode depth/cycles for all bands of the selected mode. <strong>Note:</strong> WSPR uses cycles (not depth 1-3). Click "Save Configuration" to apply changes.';
             depthControlsSection.appendChild(depthNote);
-            
+
             bandsSection.appendChild(depthControlsSection);
 
             // Add band buttons container
@@ -4001,37 +4014,37 @@
             bandButtonsContainer.style.display = 'flex';
             bandButtonsContainer.style.gap = '10px';
             bandButtonsContainer.style.flexWrap = 'wrap';
-            
+
             const addBandBtn = document.createElement('button');
             addBandBtn.className = 'btn';
             addBandBtn.textContent = 'Add Decoder Band';
             addBandBtn.onclick = showAddDecoderBandForm;
             bandButtonsContainer.appendChild(addBandBtn);
-            
+
             const disableAllBtn = document.createElement('button');
             disableAllBtn.className = 'btn btn-secondary';
             disableAllBtn.textContent = 'Disable All';
             disableAllBtn.onclick = disableAllDecoderBands;
             bandButtonsContainer.appendChild(disableAllBtn);
-            
+
             const enableFT8Btn = document.createElement('button');
             enableFT8Btn.className = 'btn btn-secondary';
             enableFT8Btn.textContent = 'Enable All FT8';
             enableFT8Btn.onclick = () => enableDecoderBandsByMode('FT8');
             bandButtonsContainer.appendChild(enableFT8Btn);
-            
+
             const enableFT4Btn = document.createElement('button');
             enableFT4Btn.className = 'btn btn-secondary';
             enableFT4Btn.textContent = 'Enable All FT4';
             enableFT4Btn.onclick = () => enableDecoderBandsByMode('FT4');
             bandButtonsContainer.appendChild(enableFT4Btn);
-            
+
             const enableWSPRBtn = document.createElement('button');
             enableWSPRBtn.className = 'btn btn-secondary';
             enableWSPRBtn.textContent = 'Enable All WSPR';
             enableWSPRBtn.onclick = () => enableDecoderBandsByMode('WSPR');
             bandButtonsContainer.appendChild(enableWSPRBtn);
-            
+
             bandsSection.appendChild(bandButtonsContainer);
 
             container.appendChild(bandsSection);
@@ -4812,11 +4825,11 @@
         function renderRadiodConfig() {
             const container = document.getElementById('radiodConfig');
             const editor = document.getElementById('radiodConfigEditor');
-            
+
             container.style.display = 'none';
             editor.style.display = 'block';
             editor.value = currentRadiodConfig;
-            
+
             // Reset editing state when loading
             radiodEditingEnabled = false;
             editor.readOnly = true;
@@ -4946,27 +4959,27 @@
                     infoDiv.style.background = '#fff';
                     infoDiv.style.padding = '15px';
                     infoDiv.style.borderRadius = '5px';
-                    
+
                     // Parse and format uptime
                     const uptime = stats['ubersdr_uptime'] || 'N/A';
                     const uptimeDiv = document.createElement('div');
                     uptimeDiv.style.marginBottom = '10px';
                     uptimeDiv.innerHTML = `<strong>Uptime:</strong> ${uptime}`;
                     infoDiv.appendChild(uptimeDiv);
-                    
+
                     // Display memory usage (already formatted by backend)
                     const memory = stats['ubersdr_memory'] || 'N/A';
                     const memoryDiv = document.createElement('div');
                     memoryDiv.style.marginBottom = '10px';
                     memoryDiv.innerHTML = `<strong>Memory Usage:</strong> ${memory}`;
                     infoDiv.appendChild(memoryDiv);
-                    
+
                     // Display goroutine count
                     const goroutines = stats['ubersdr_goroutines'] || 'N/A';
                     const goroutinesDiv = document.createElement('div');
                     goroutinesDiv.innerHTML = `<strong>Goroutines:</strong> ${goroutines}`;
                     infoDiv.appendChild(goroutinesDiv);
-                    
+
                     sectionDiv.appendChild(infoDiv);
                 } else {
                     const pre = document.createElement('pre');
@@ -5151,7 +5164,7 @@
                 }
 
                 const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, decoderResponse, cwSkimmerResponse] = await Promise.all(fetchPromises);
-                
+
                 if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !decoderResponse || !cwSkimmerResponse) {
                     // Auth failed, stop auto-refresh
                     stopMonitorAutoRefresh();
@@ -5169,7 +5182,7 @@
                 const tunnelStatus = tunnelStatusPromise ? await tunnelStatusPromise : null;
 
                 renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth }, false);
-                
+
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!monitorRefreshInterval) {
                     const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false);
@@ -5189,19 +5202,19 @@
                 }
             }
         }
-        
+
         function startMonitorAutoRefresh() {
             // Clear any existing interval
             if (monitorRefreshInterval) {
                 clearInterval(monitorRefreshInterval);
             }
-            
+
             // Start auto-refresh every 10 seconds
             monitorRefreshInterval = setInterval(() => {
                 loadMonitorHealth();
             }, 10000);
         }
-        
+
         function stopMonitorAutoRefresh() {
             if (monitorRefreshInterval) {
                 clearInterval(monitorRefreshInterval);
@@ -5227,7 +5240,7 @@
                 }
 
                 const [instanceReporterResponse, nfResponse, swResponse, decoderResponse, cwSkimmerResponse] = await Promise.all(fetchPromises);
-                
+
                 if (!instanceReporterResponse || !nfResponse || !swResponse || !decoderResponse || !cwSkimmerResponse) return; // Auth failed, already handled
 
                 const instanceReporterDiag = (instanceReporterResponse.ok || instanceReporterResponse.status === 503) ? await instanceReporterResponse.json() : null;
@@ -5249,13 +5262,13 @@
         function renderSystemLoadHealth(container, systemLoad) {
             const statusSection = document.createElement('div');
             statusSection.className = 'config-section';
-            
+
             // Determine status color and icon based on backend status field
             const status = systemLoad.status || 'ok';
             let statusColor = '#28a745'; // Green for ok
             let statusIcon = '✓';
             let statusText = 'OK';
-            
+
             if (status === 'critical') {
                 statusColor = '#dc3545'; // Red
                 statusIcon = '✗';
@@ -5265,7 +5278,7 @@
                 statusIcon = '⚠';
                 statusText = 'WARNING';
             }
-            
+
             statusSection.innerHTML = `<h3 style="color: ${statusColor};">💻 System Load</h3>`;
 
             const statusDiv = document.createElement('div');
@@ -5932,7 +5945,7 @@
                                 const now = new Date();
                                 const diffMs = now - date;
                                 const diffSecs = Math.floor(diffMs / 1000);
-                                
+
                                 if (diffSecs < 0) return 'just now'; // Handle future times due to clock skew
                                 if (diffSecs < 2) return 'just now'; // Show "just now" for 0-1 seconds
                                 if (diffSecs < 60) return `${diffSecs}s ago`;
@@ -6079,7 +6092,7 @@
             statusDiv.style.border = `1px solid ${data.healthy ? '#c3e6cb' : '#f5c6cb'}`;
             statusDiv.style.borderRadius = '5px';
             statusDiv.style.marginBottom = '20px';
-            
+
             const connectedText = data.connected ? 'Yes' : 'No';
             const connectedColor = data.connected ? '#28a745' : '#dc3545';
 
@@ -6103,7 +6116,7 @@
                     timeSinceActivity = `${days}d ${hours}h`;
                 }
             }
-            
+
             // Calculate time_since_spot if not provided (backwards compatibility)
             let timeSinceSpot = 'N/A';
             if (data.time_since_spot) {
@@ -6609,7 +6622,7 @@
 
                 // Build categorized display
                 let html = '<div style="max-height: 60vh; overflow-y: auto;">';
-                
+
                 // Identity & Basic Info
                 html += '<h3 style="margin-top: 0; color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">📡 Identity & Basic Info</h3>';
                 html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">';
@@ -6683,7 +6696,7 @@
                 html += '</div>';
 
                 content.innerHTML = html;
-                
+
                 // Restore scroll position after content update
                 const newScrollContainer = content.querySelector('div[style*="overflow-y"]');
                 if (newScrollContainer && scrollTop > 0) {
@@ -6700,7 +6713,7 @@
             if (modal) {
                 modal.style.display = 'none';
             }
-            
+
             // Stop auto-refresh
             channelStatusModalOpen = false;
             channelStatusSSRC = null;
@@ -6715,7 +6728,7 @@
             const tunnelModal = document.getElementById('tunnelUsersModal');
             const frontendModal = document.getElementById('frontendStatusModal');
             const channelModal = document.getElementById('channelStatusModal');
-            
+
             if (event.target === tunnelModal) {
                 closeTunnelUsersModal();
             }

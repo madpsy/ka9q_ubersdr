@@ -6979,8 +6979,14 @@
                 }
 
                 // Convert to ISO 8601 format
-                const startTime = new Date(startInput).toISOString();
-                const endTime = new Date(endInput).toISOString();
+                // datetime-local only has minute precision, so we need to set seconds/ms explicitly
+                const startDate = new Date(startInput);
+                startDate.setSeconds(0, 0); // Start at beginning of minute (00:00.000)
+                const startTime = startDate.toISOString();
+
+                const endDate = new Date(endInput);
+                endDate.setSeconds(59, 999); // End at end of minute (59:59.999)
+                const endTime = endDate.toISOString();
 
                 // Fetch events from API
                 const response = await authenticatedFetch(
@@ -7264,8 +7270,14 @@
                 }
 
                 // Convert to ISO 8601 format
-                const startTime = new Date(startInput).toISOString();
-                const endTime = new Date(endInput).toISOString();
+                // datetime-local only has minute precision, so we need to set seconds/ms explicitly
+                const startDateTime = new Date(startInput);
+                startDateTime.setSeconds(0, 0); // Start at beginning of minute
+                const startTime = startDateTime.toISOString();
+
+                const endDateTime = new Date(endInput);
+                endDateTime.setSeconds(59, 999); // End at end of minute
+                const endTime = endDateTime.toISOString();
 
                 // Fetch events from API
                 const response = await authenticatedFetch(

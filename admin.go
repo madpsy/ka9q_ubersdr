@@ -4241,10 +4241,15 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					allTypes[t] = true
 				}
 
-				// Use FirstSeen from the session entry if available (actual session creation time)
-				// Otherwise fall back to current snapshot timestamp
+				// Determine actual session start time using all available timestamps
+				// Priority: 1) FirstSeen (from userSessionFirst map - when user first connected)
+				//           2) CreatedAt (when this specific channel was created)
+				//           3) log.Timestamp (current snapshot time - fallback)
 				startTime := log.Timestamp
-				if !session.FirstSeen.IsZero() {
+				if !session.CreatedAt.IsZero() {
+					startTime = session.CreatedAt
+				}
+				if !session.FirstSeen.IsZero() && session.FirstSeen.Before(startTime) {
 					startTime = session.FirstSeen
 				}
 
@@ -4255,7 +4260,13 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					allTypes:  allTypes,
 				}
 
-				// Use session types from the snapshot (already aggregated by session logger)
+				// Convert allTypes to slice for start event
+				startTypesSlice := make([]string, 0, len(allTypes))
+				for t := range allTypes {
+					startTypesSlice = append(startTypesSlice, t)
+				}
+				sort.Strings(startTypesSlice)
+
 				events = append(events, SessionEvent{
 					Timestamp:     startTime, // Use actual session start time
 					EventType:     "session_start",
@@ -4263,7 +4274,7 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					ClientIP:      session.ClientIP,
 					SourceIP:      session.SourceIP,
 					AuthMethod:    session.AuthMethod,
-					SessionTypes:  session.SessionTypes, // Already aggregated in snapshot
+					SessionTypes:  startTypesSlice, // Use all types from snapshot
 					UserAgent:     session.UserAgent,
 				})
 			}

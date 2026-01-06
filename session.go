@@ -64,9 +64,10 @@ type SessionManager struct {
 	radiod               *RadiodController
 	maxSessions          int
 	timeout              time.Duration
-	maxSessionTime       time.Duration      // Maximum time a session can exist (0 = unlimited)
-	kickedUUIDTTL        time.Duration      // How long to remember kicked UUIDs (default 1 hour)
-	prometheusMetrics    *PrometheusMetrics // Prometheus metrics for tracking
+	maxSessionTime       time.Duration          // Maximum time a session can exist (0 = unlimited)
+	kickedUUIDTTL        time.Duration          // How long to remember kicked UUIDs (default 1 hour)
+	prometheusMetrics    *PrometheusMetrics     // Prometheus metrics for tracking
+	activityLogger       *SessionActivityLogger // Session activity logger for disk logging
 }
 
 // NewSessionManager creates a new session manager
@@ -105,6 +106,11 @@ func NewSessionManager(config *Config, radiod *RadiodController) *SessionManager
 // SetPrometheusMetrics sets the Prometheus metrics instance for this session manager
 func (sm *SessionManager) SetPrometheusMetrics(pm *PrometheusMetrics) {
 	sm.prometheusMetrics = pm
+}
+
+// SetActivityLogger sets the session activity logger for this session manager
+func (sm *SessionManager) SetActivityLogger(logger *SessionActivityLogger) {
+	sm.activityLogger = logger
 }
 
 // translateModeForRadiod translates UI mode names to radiod preset names
@@ -322,6 +328,13 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 	log.Printf("Session created: %s (channel: %s, SSRC: 0x%08x, freq: %d Hz, mode: %s, bandwidth: %d Hz, user: %s)",
 		sessionID, channelName, ssrc, frequency, mode, bandwidth, userSessionID)
 
+	// Log session activity if logger is enabled
+	if sm.activityLogger != nil {
+		if err := sm.activityLogger.LogSessionCreated(); err != nil {
+			log.Printf("Warning: failed to log session creation: %v", err)
+		}
+	}
+
 	return session, nil
 }
 
@@ -508,6 +521,13 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 
 	log.Printf("Spectrum session created: %s (SSRC: 0x%08x, freq: %d Hz, bins: %d, bw: %.1f Hz, user: %s)",
 		sessionID, ssrc, frequency, binCount, binBandwidth, userSessionID)
+
+	// Log session activity if logger is enabled
+	if sm.activityLogger != nil {
+		if err := sm.activityLogger.LogSessionCreated(); err != nil {
+			log.Printf("Warning: failed to log spectrum session creation: %v", err)
+		}
+	}
 
 	return session, nil
 }
@@ -880,6 +900,14 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 	}
 
 	log.Printf("Session destroyed: %s (channel: %s, SSRC: 0x%08x)", sessionID, session.ChannelName, session.SSRC)
+
+	// Log session activity if logger is enabled
+	if sm.activityLogger != nil {
+		if err := sm.activityLogger.LogSessionDestroyed(); err != nil {
+			log.Printf("Warning: failed to log session destruction: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -1376,6 +1404,11 @@ func (sm *SessionManager) Shutdown() {
 		if err := sm.DestroySession(id); err != nil {
 			log.Printf("Error destroying session %s during shutdown: %v", id, err)
 		}
+	}
+
+	// Stop activity logger if enabled
+	if sm.activityLogger != nil {
+		sm.activityLogger.Stop()
 	}
 
 	log.Println("All sessions destroyed")

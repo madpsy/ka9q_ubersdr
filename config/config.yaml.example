@@ -216,6 +216,44 @@ server:
   # HTTP request log file (Apache combined log format)
   logfile: "web.log"
 
+  # Session Activity Logging
+  # Logs all session activity to disk for historical analysis and charting
+  # Creates JSONL (JSON Lines) files with snapshots of active sessions
+  # Each line contains timestamp, event type, and list of all active unique users
+  #
+  # Tracks unique users by UUID (not individual websocket connections)
+  # One user can have both audio and spectrum sessions simultaneously
+  # Logs include: UUID, IP addresses, auth method, session types, timestamps, user agent
+  #
+  # File structure: session_activity_log_dir/YYYY/MM/DD/sessions.jsonl
+  # Example line:
+  # {"timestamp":"2026-01-06T08:00:00Z","event_type":"snapshot","active_sessions":[...]}
+  #
+  # Event types:
+  #   - "snapshot": Periodic snapshot of all active sessions (every N seconds)
+  #   - "session_created": Logged when any session (audio/spectrum) is created
+  #   - "session_destroyed": Logged when any session is destroyed
+  #
+  # Use cases:
+  #   - Create charts of user activity over time
+  #   - Analyze peak usage periods
+  #   - Track authentication methods (regular vs bypassed users)
+  #   - Monitor session types (audio vs spectrum usage)
+  #   - Historical analysis of user patterns
+  #
+  # Enable session activity logging (default: false)
+  session_activity_log_enabled: false
+
+  # Directory for session activity log files (default: session_activity)
+  # Files are organized as: session_activity_log_dir/YYYY/MM/DD/sessions.jsonl
+  session_activity_log_dir: "session_activity"
+
+  # Interval for periodic snapshots in seconds (default: 300 = 5 minutes)
+  # How often to log a snapshot of all active sessions
+  # Lower values = more frequent snapshots but larger log files
+  # Recommended: 300 (5 minutes) for good time resolution
+  session_activity_log_interval_sec: 300
+
 # Audio settings
 audio:
   # Audio buffer size in samples

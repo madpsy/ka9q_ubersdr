@@ -3878,3 +3878,264 @@ func (ah *AdminHandler) HandleWizardComplete(w http.ResponseWriter, r *http.Requ
 		log.Printf("Error encoding wizard complete response: %v", err)
 	}
 }
+
+// HandleSessionActivityLogs returns session activity logs for a given time range
+// Query parameters:
+//   - start: Start time in RFC3339 format (default: 24 hours ago)
+//   - end: End time in RFC3339 format (default: now)
+//   - auth_methods: Comma-separated list of auth methods to include (regular,password,bypassed) (default: all)
+func (ah *AdminHandler) HandleSessionActivityLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if session activity logging is enabled
+	if !ah.config.Server.SessionActivityLogEnabled {
+		http.Error(w, "Session activity logging is not enabled", http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error":   "not_enabled",
+			"message": "Session activity logging is not enabled in configuration",
+		})
+		return
+	}
+
+	// Parse time range parameters
+	endTime := time.Now().UTC()
+	startTime := endTime.Add(-24 * time.Hour) // Default: last 24 hours
+
+	if startStr := r.URL.Query().Get("start"); startStr != "" {
+		if t, err := time.Parse(time.RFC3339, startStr); err == nil {
+			startTime = t.UTC()
+		} else {
+			http.Error(w, fmt.Sprintf("Invalid start time format: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	if endStr := r.URL.Query().Get("end"); endStr != "" {
+		if t, err := time.Parse(time.RFC3339, endStr); err == nil {
+			endTime = t.UTC()
+		} else {
+			http.Error(w, fmt.Sprintf("Invalid end time format: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Validate time range
+	if startTime.After(endTime) {
+		http.Error(w, "Start time must be before end time", http.StatusBadRequest)
+		return
+	}
+
+	// Parse auth methods filter
+	var authMethods []string
+	if authMethodsStr := r.URL.Query().Get("auth_methods"); authMethodsStr != "" {
+		authMethods = strings.Split(authMethodsStr, ",")
+		// Validate auth methods
+		validMethods := map[string]bool{"regular": true, "password": true, "bypassed": true}
+		for _, method := range authMethods {
+			method = strings.TrimSpace(method)
+			if !validMethods[method] {
+				http.Error(w, fmt.Sprintf("Invalid auth method: %s (valid: regular,password,bypassed)", method), http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
+	// Read logs from disk
+	logs, err := ReadActivityLogs(ah.config.Server.SessionActivityLogDir, startTime, endTime)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read activity logs: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Filter by auth methods if specified
+	if len(authMethods) > 0 {
+		logs = FilterSessionsByAuthMethod(logs, authMethods)
+	}
+
+	// Return logs
+	response := map[string]interface{}{
+		"start_time": startTime.Format(time.RFC3339),
+		"end_time":   endTime.Format(time.RFC3339),
+		"count":      len(logs),
+		"logs":       logs,
+	}
+
+	if len(authMethods) > 0 {
+		response["auth_methods_filter"] = authMethods
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding session activity logs: %v", err)
+	}
+}
+
+// HandleSessionActivityMetrics returns aggregated metrics from session activity logs
+// Query parameters:
+//   - start: Start time in RFC3339 format (default: 24 hours ago)
+//   - end: End time in RFC3339 format (default: now)
+//   - auth_methods: Comma-separated list of auth methods to include (regular,password,bypassed) (default: all)
+func (ah *AdminHandler) HandleSessionActivityMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if session activity logging is enabled
+	if !ah.config.Server.SessionActivityLogEnabled {
+		http.Error(w, "Session activity logging is not enabled", http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error":   "not_enabled",
+			"message": "Session activity logging is not enabled in configuration",
+		})
+		return
+	}
+
+	// Parse time range parameters (same as HandleSessionActivityLogs)
+	endTime := time.Now().UTC()
+	startTime := endTime.Add(-24 * time.Hour)
+
+	if startStr := r.URL.Query().Get("start"); startStr != "" {
+		if t, err := time.Parse(time.RFC3339, startStr); err == nil {
+			startTime = t.UTC()
+		} else {
+			http.Error(w, fmt.Sprintf("Invalid start time format: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	if endStr := r.URL.Query().Get("end"); endStr != "" {
+		if t, err := time.Parse(time.RFC3339, endStr); err == nil {
+			endTime = t.UTC()
+		} else {
+			http.Error(w, fmt.Sprintf("Invalid end time format: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	if startTime.After(endTime) {
+		http.Error(w, "Start time must be before end time", http.StatusBadRequest)
+		return
+	}
+
+	// Parse auth methods filter
+	var authMethods []string
+	if authMethodsStr := r.URL.Query().Get("auth_methods"); authMethodsStr != "" {
+		authMethods = strings.Split(authMethodsStr, ",")
+	}
+
+	// Read logs from disk
+	logs, err := ReadActivityLogs(ah.config.Server.SessionActivityLogDir, startTime, endTime)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read activity logs: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Filter by auth methods if specified
+	if len(authMethods) > 0 {
+		logs = FilterSessionsByAuthMethod(logs, authMethods)
+	}
+
+	// Calculate metrics
+	metrics := calculateSessionMetrics(logs)
+
+	// Add metadata
+	response := map[string]interface{}{
+		"start_time": startTime.Format(time.RFC3339),
+		"end_time":   endTime.Format(time.RFC3339),
+		"metrics":    metrics,
+	}
+
+	if len(authMethods) > 0 {
+		response["auth_methods_filter"] = authMethods
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding session activity metrics: %v", err)
+	}
+}
+
+// calculateSessionMetrics calculates aggregated metrics from session activity logs
+func calculateSessionMetrics(logs []SessionActivityLog) map[string]interface{} {
+	if len(logs) == 0 {
+		return map[string]interface{}{
+			"total_snapshots":     0,
+			"unique_users":        0,
+			"peak_concurrent":     0,
+			"total_sessions":      0,
+			"auth_method_counts":  map[string]int{},
+			"session_type_counts": map[string]int{},
+			"timeline":            []map[string]interface{}{},
+		}
+	}
+
+	// Track unique users across all logs
+	uniqueUsers := make(map[string]bool)
+	peakConcurrent := 0
+	totalSessions := 0
+	authMethodCounts := make(map[string]int)
+	sessionTypeCounts := make(map[string]int)
+
+	// Timeline data for charting
+	timeline := make([]map[string]interface{}, 0, len(logs))
+
+	for _, log := range logs {
+		// Count active sessions in this snapshot
+		activeCount := len(log.ActiveSessions)
+		if activeCount > peakConcurrent {
+			peakConcurrent = activeCount
+		}
+
+		// Track unique users and session types
+		authBreakdown := make(map[string]int)
+		typeBreakdown := make(map[string]int)
+
+		for _, session := range log.ActiveSessions {
+			uniqueUsers[session.UserSessionID] = true
+			totalSessions++
+
+			// Count auth methods
+			authMethod := "regular"
+			if session.AuthMethod == "password" {
+				authMethod = "password"
+			} else if session.AuthMethod == "ip_bypass" {
+				authMethod = "bypassed"
+			}
+			authMethodCounts[authMethod]++
+			authBreakdown[authMethod]++
+
+			// Count session types
+			for _, sessionType := range session.SessionTypes {
+				sessionTypeCounts[sessionType]++
+				typeBreakdown[sessionType]++
+			}
+		}
+
+		// Add timeline entry
+		timeline = append(timeline, map[string]interface{}{
+			"timestamp":       log.Timestamp.Format(time.RFC3339),
+			"event_type":      log.EventType,
+			"active_sessions": activeCount,
+			"auth_breakdown":  authBreakdown,
+			"type_breakdown":  typeBreakdown,
+		})
+	}
+
+	return map[string]interface{}{
+		"total_snapshots":     len(logs),
+		"unique_users":        len(uniqueUsers),
+		"peak_concurrent":     peakConcurrent,
+		"total_sessions":      totalSessions,
+		"auth_method_counts":  authMethodCounts,
+		"session_type_counts": sessionTypeCounts,
+		"timeline":            timeline,
+	}
+}

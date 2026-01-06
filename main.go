@@ -390,6 +390,15 @@ func main() {
 	// Initialize session manager
 	sessions := NewSessionManager(config, radiod)
 
+	// Initialize session activity logger
+	sessionActivityLogger := NewSessionActivityLogger(
+		config.Server.SessionActivityLogEnabled,
+		config.Server.SessionActivityLogDir,
+		config.Server.SessionActivityLogIntervalSec,
+		sessions,
+	)
+	sessions.SetActivityLogger(sessionActivityLogger)
+
 	// Start version checker to fetch latest version from GitHub
 	// Must be called after sessions is initialized so it can check for active users
 	StartVersionChecker(config.Admin.VersionCheckEnabled, config.Admin.VersionCheckInterval, sessions)
@@ -999,6 +1008,8 @@ func main() {
 	http.HandleFunc("/admin/instance-reporter-health", adminHandler.AuthMiddleware(adminHandler.HandleInstanceReporterHealth))
 	http.HandleFunc("/admin/instance-reporter-trigger", adminHandler.AuthMiddleware(adminHandler.HandleInstanceReporterTrigger))
 	http.HandleFunc("/admin/tunnel-server-health", adminHandler.AuthMiddleware(adminHandler.HandleTunnelServerHealth))
+	http.HandleFunc("/admin/session-activity/logs", adminHandler.AuthMiddleware(adminHandler.HandleSessionActivityLogs))
+	http.HandleFunc("/admin/session-activity/metrics", adminHandler.AuthMiddleware(adminHandler.HandleSessionActivityMetrics))
 
 	// Open log file for HTTP request logging
 	// If LogFile is a relative path and we have a config directory, prepend it

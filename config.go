@@ -82,25 +82,28 @@ type RadiodConfig struct {
 
 // ServerConfig contains web server settings
 type ServerConfig struct {
-	Listen              string          `yaml:"listen"`
-	MaxSessions         int             `yaml:"max_sessions"`
-	MaxSessionsIP       int             `yaml:"max_sessions_ip"` // Maximum sessions per IP address (0 = unlimited)
-	SessionTimeout      int             `yaml:"session_timeout"`
-	MaxSessionTime      int             `yaml:"max_session_time"`    // Maximum time a session can exist in seconds (0 = unlimited)
-	MaxIdleTime         int             `yaml:"max_idle_time"`       // Maximum time a user can be idle in seconds (0 = unlimited)
-	CmdRateLimit        int             `yaml:"cmd_rate_limit"`      // Commands per second per UUID per channel (0 = unlimited)
-	ConnRateLimit       int             `yaml:"conn_rate_limit"`     // WebSocket connections per second per IP (0 = unlimited)
-	SessionsPerMinute   int             `yaml:"sessions_per_minute"` // /connection endpoint requests per minute per IP (0 = unlimited)
-	TimeoutBypassIPs    []string        `yaml:"timeout_bypass_ips"`  // List of IPs/CIDRs that bypass idle and max session time limits
-	BypassPassword      string          `yaml:"bypass_password"`     // Password that grants bypass privileges (empty = disabled)
-	PublicIQModes       map[string]bool `yaml:"public_iq_modes"`     // IQ modes accessible without bypass authentication
-	EnableCORS          bool            `yaml:"enable_cors"`
-	EnableKiwiSDR       bool            `yaml:"enable_kiwisdr"`        // Enable KiwiSDR protocol compatibility server (default: false)
-	KiwiSDRListen       string          `yaml:"kiwisdr_listen"`        // KiwiSDR server listen address (e.g., ":8073", default: ":8073")
-	KiwiSDRPublicEmail  string          `yaml:"kiwisdr_public_email"`  // Public email for KiwiSDR status endpoint (default: "admin@example.com")
-	KiwiSDRSmeterOffset float32         `yaml:"kiwisdr_smeter_offset"` // S-meter calibration offset (dBFS to dBm, default: 30.0)
-	LogFile             string          `yaml:"logfile"`               // HTTP request log file path
-	timeoutBypassNets   []*net.IPNet    // Parsed CIDR networks (internal use)
+	Listen                        string          `yaml:"listen"`
+	MaxSessions                   int             `yaml:"max_sessions"`
+	MaxSessionsIP                 int             `yaml:"max_sessions_ip"` // Maximum sessions per IP address (0 = unlimited)
+	SessionTimeout                int             `yaml:"session_timeout"`
+	MaxSessionTime                int             `yaml:"max_session_time"`    // Maximum time a session can exist in seconds (0 = unlimited)
+	MaxIdleTime                   int             `yaml:"max_idle_time"`       // Maximum time a user can be idle in seconds (0 = unlimited)
+	CmdRateLimit                  int             `yaml:"cmd_rate_limit"`      // Commands per second per UUID per channel (0 = unlimited)
+	ConnRateLimit                 int             `yaml:"conn_rate_limit"`     // WebSocket connections per second per IP (0 = unlimited)
+	SessionsPerMinute             int             `yaml:"sessions_per_minute"` // /connection endpoint requests per minute per IP (0 = unlimited)
+	TimeoutBypassIPs              []string        `yaml:"timeout_bypass_ips"`  // List of IPs/CIDRs that bypass idle and max session time limits
+	BypassPassword                string          `yaml:"bypass_password"`     // Password that grants bypass privileges (empty = disabled)
+	PublicIQModes                 map[string]bool `yaml:"public_iq_modes"`     // IQ modes accessible without bypass authentication
+	EnableCORS                    bool            `yaml:"enable_cors"`
+	EnableKiwiSDR                 bool            `yaml:"enable_kiwisdr"`                    // Enable KiwiSDR protocol compatibility server (default: false)
+	KiwiSDRListen                 string          `yaml:"kiwisdr_listen"`                    // KiwiSDR server listen address (e.g., ":8073", default: ":8073")
+	KiwiSDRPublicEmail            string          `yaml:"kiwisdr_public_email"`              // Public email for KiwiSDR status endpoint (default: "admin@example.com")
+	KiwiSDRSmeterOffset           float32         `yaml:"kiwisdr_smeter_offset"`             // S-meter calibration offset (dBFS to dBm, default: 30.0)
+	LogFile                       string          `yaml:"logfile"`                           // HTTP request log file path
+	SessionActivityLogEnabled     bool            `yaml:"session_activity_log_enabled"`      // Enable session activity logging to disk
+	SessionActivityLogDir         string          `yaml:"session_activity_log_dir"`          // Directory for session activity logs (default: data/session_activity)
+	SessionActivityLogIntervalSec int             `yaml:"session_activity_log_interval_sec"` // Interval for periodic snapshots in seconds (default: 300)
+	timeoutBypassNets             []*net.IPNet    // Parsed CIDR networks (internal use)
 }
 
 // AudioConfig contains audio processing settings
@@ -319,6 +322,13 @@ func LoadConfig(filename string) (*Config, error) {
 	// If you want it in the config directory, set it explicitly in config.yaml
 	if config.Server.LogFile == "" {
 		config.Server.LogFile = "web.log"
+	}
+	// Set session activity log defaults
+	if config.Server.SessionActivityLogDir == "" {
+		config.Server.SessionActivityLogDir = "session_activity"
+	}
+	if config.Server.SessionActivityLogIntervalSec == 0 {
+		config.Server.SessionActivityLogIntervalSec = 300 // Default 5 minutes
 	}
 	// KiwiSDR compatibility defaults
 	if config.Server.EnableKiwiSDR && config.Server.KiwiSDRListen == "" {

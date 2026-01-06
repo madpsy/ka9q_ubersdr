@@ -432,6 +432,8 @@
         }
 
     </style>
+    <script src="chart.umd.min.js"></script>
+    <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -2977,6 +2979,23 @@
                 tbody.appendChild(row);
             }
 
+            // Add session activity chart
+            const chartContainer = document.createElement('div');
+            chartContainer.style.marginTop = '20px';
+            chartContainer.style.marginBottom = '20px';
+            chartContainer.style.padding = '20px';
+            chartContainer.style.background = 'white';
+            chartContainer.style.borderRadius = '5px';
+            chartContainer.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+            chartContainer.innerHTML = `
+                <h3 style="margin-bottom: 15px; color: #333;">Session Activity (Last 24 Hours)</h3>
+                <canvas id="sessionActivityChart" style="max-height: 300px;"></canvas>
+            `;
+            container.appendChild(chartContainer);
+
+            // Load and render session activity chart
+            loadSessionActivityChart();
+
             // Add summary with max_sessions from config
             const summary = document.createElement('div');
             summary.style.marginTop = '20px';
@@ -3024,6 +3043,154 @@
             
             summary.innerHTML = summaryHTML;
             container.appendChild(summary);
+        }
+
+        // Session Activity Chart
+        let sessionActivityChart = null;
+
+        async function loadSessionActivityChart() {
+            try {
+                // Calculate time range (last 24 hours)
+                const endTime = new Date();
+                const startTime = new Date(endTime.getTime() - 24 * 60 * 60 * 1000);
+
+                // Fetch metrics from API
+                const response = await authenticatedFetch(
+                    `/admin/session-activity/metrics?start=${startTime.toISOString()}&end=${endTime.toISOString()}`
+                );
+                
+                if (!response) return; // Auth failed
+                
+                if (!response.ok) {
+                    // If session activity logging is not enabled, hide the chart
+                    const chartContainer = document.getElementById('sessionActivityChart')?.parentElement;
+                    if (chartContainer) {
+                        chartContainer.style.display = 'none';
+                    }
+                    return;
+                }
+
+                const data = await response.json();
+                renderSessionActivityChart(data.metrics);
+            } catch (error) {
+                console.error('Error loading session activity chart:', error);
+                // Hide chart on error
+                const chartContainer = document.getElementById('sessionActivityChart')?.parentElement;
+                if (chartContainer) {
+                    chartContainer.style.display = 'none';
+                }
+            }
+        }
+
+        function renderSessionActivityChart(metrics) {
+            const canvas = document.getElementById('sessionActivityChart');
+            if (!canvas) return;
+
+            // Destroy existing chart if it exists
+            if (sessionActivityChart) {
+                sessionActivityChart.destroy();
+            }
+
+            // Prepare data for Chart.js
+            const timeline = metrics.timeline || [];
+            
+            // Extract data points for each auth method
+            const labels = timeline.map(entry => new Date(entry.timestamp));
+            const regularData = timeline.map(entry => entry.auth_breakdown?.regular || 0);
+            const passwordData = timeline.map(entry => entry.auth_breakdown?.password || 0);
+            const bypassedData = timeline.map(entry => entry.auth_breakdown?.bypassed || 0);
+
+            // Create stacked area chart
+            const ctx = canvas.getContext('2d');
+            sessionActivityChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Regular Users',
+                            data: regularData,
+                            backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Password Bypassed',
+                            data: passwordData,
+                            backgroundColor: 'rgba(255, 206, 86, 0.5)',
+                            borderColor: 'rgba(255, 206, 86, 1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'IP Bypassed',
+                            data: bypassedData,
+                            backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'hour',
+                                displayFormats: {
+                                    hour: 'HH:mm'
+                                },
+                                tooltipFormat: 'MMM dd, HH:mm'
+                            },
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            }
+                        },
+                        y: {
+                            stacked: true,
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1
+                            },
+                            title: {
+                                display: true,
+                                text: 'Active Users'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                footer: function(tooltipItems) {
+                                    let total = 0;
+                                    tooltipItems.forEach(item => {
+                                        total += item.parsed.y;
+                                    });
+                                    return 'Total: ' + total;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
         }
 
         // Banned IPs management

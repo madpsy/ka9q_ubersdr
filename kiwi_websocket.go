@@ -2015,52 +2015,6 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 				N = targetBins
 			}
 
-			// CRITICAL FIX: Recalculate x_bin to match the actual data radiod sent
-			// The debug logs show radiod sends a much wider span than the client expects
-			// (e.g., 51.2 kHz at zoom 12 vs 1.83 kHz expected)
-			// We cannot crop because that loses data. Instead, we must send the correct x_bin
-			// that represents the actual left edge frequency of the data.
-
-			const maxZoom = 14
-			maxBins := uint32(1024 << maxZoom) // 16777216
-			fullBandwidthHz := 30000000.0
-
-			// Radiod sent data centered at session.Frequency with session.BinBandwidth per bin
-			radiodCenterHz := float64(kc.session.Frequency)
-			radiodBinBW := kc.session.BinBandwidth
-
-			// After interpolation, we have N bins (1024) representing radiod's span
-			// Calculate the actual left edge frequency
-			actualLeftEdgeHz := radiodCenterHz - (float64(N) * radiodBinBW / 2.0)
-
-			// Calculate x_bin that represents this left edge
-			// x_bin = (freq / bandwidth) * max_bins
-			correctedXBin := uint32(math.Round((actualLeftEdgeHz / fullBandwidthHz) * float64(maxBins)))
-
-			// Debug: Log the correction
-			kc.mu.Lock()
-			logThis := packetCount == 1 || currentZoom != kc.lastLoggedZoom || currentXBin != kc.lastLoggedXBin
-			if logThis {
-				kc.lastLoggedZoom = currentZoom
-				kc.lastLoggedXBin = correctedXBin // Log the corrected value
-
-				// What the client would expect with original x_bin
-				clientExpectedLeftEdge := (float64(currentXBin) / float64(maxBins)) * fullBandwidthHz
-				clientExpectedCenter := ((float64(currentXBin) + float64(N)/2.0) / float64(maxBins)) * fullBandwidthHz
-
-				// What we're actually sending with corrected x_bin
-				correctedLeftEdge := (float64(correctedXBin) / float64(maxBins)) * fullBandwidthHz
-				correctedCenter := ((float64(correctedXBin) + float64(N)/2.0) / float64(maxBins)) * fullBandwidthHz
-
-				log.Printf("XBIN_FIX: zoom=%d | Original xBin=%d (L=%.0f C=%.0f) | Corrected xBin=%d (L=%.0f C=%.0f) | Radiod center=%.0f binBW=%.2f",
-					currentZoom, currentXBin, clientExpectedLeftEdge, clientExpectedCenter,
-					correctedXBin, correctedLeftEdge, correctedCenter, radiodCenterHz, radiodBinBW)
-			}
-			kc.mu.Unlock()
-
-			// Use corrected x_bin for the packet
-			currentXBin = correctedXBin
-
 			// Convert unwrapped spectrum data (float32 dBFS) to KiwiSDR waterfall format
 			// KiwiSDR wire protocol (from openwebrx.js dB_wire_to_dBm):
 			//   Wire format: byte_value = 255 + dBm (where dBm is 0 to -200)

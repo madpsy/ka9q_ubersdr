@@ -4283,9 +4283,11 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 		// Check for sessions that disappeared (ended)
 		for sessionID, info := range activeSessions {
 			if !currentSessionIDs[sessionID] {
-				// Session ended - calculate duration from first seen to last seen
-				// Use info.lastSeen (last time we saw it) not log.Timestamp (when we noticed it was gone)
-				duration := info.lastSeen.Sub(info.firstSeen).Seconds()
+				// Session ended - calculate duration from creation to destruction
+				// Use log.Timestamp (session_destroyed event time) as the actual end time
+				// This is when the session was actually destroyed, not when we last saw it
+				endTime := log.Timestamp
+				duration := endTime.Sub(info.firstSeen).Seconds()
 
 				// Convert allTypes map to slice
 				allTypesSlice := make([]string, 0, len(info.allTypes))
@@ -4295,7 +4297,7 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 				sort.Strings(allTypesSlice) // Sort for consistent ordering
 
 				events = append(events, SessionEvent{
-					Timestamp:     info.lastSeen, // Use last seen time, not detection time
+					Timestamp:     endTime, // Use destruction event timestamp
 					EventType:     "session_end",
 					UserSessionID: info.entry.UserSessionID,
 					ClientIP:      info.entry.ClientIP,

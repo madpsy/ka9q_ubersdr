@@ -961,20 +961,20 @@ func (kc *kiwiConn) sendStatsCallback() {
 			userSessionID, _ := sessionInfo["user_session_id"].(string)
 			if userSessionID == kc.userSessionID {
 				sessionsFound++
-				// Get the actual session to access byte counters
+				// Get the actual session to access instantaneous throughput
 				sessionID, _ := sessionInfo["id"].(string)
 				isSpectrum, _ := sessionInfo["is_spectrum"].(bool)
 				if session, ok := kc.sessions.GetSession(sessionID); ok {
-					audioBPS := session.GetAudioBytesPerSecond()
-					waterfallBPS := session.GetWaterfallBytesPerSecond()
+					// Use instantaneous throughput (1-second sliding window) instead of average
+					audioKbps := session.GetInstantaneousAudioKbps()
+					waterfallKbps := session.GetInstantaneousWaterfallKbps()
 
-					// Add audio bytes (convert bytes/sec to kilobytes/sec)
-					audioKBytesPerSec += audioBPS / 1024.0
-					// Add waterfall bytes (convert bytes/sec to kilobytes/sec)
-					waterfallKBytesPerSec += waterfallBPS / 1024.0
+					// Add to totals (convert kbps to kilobytes/sec: kbps / 8)
+					audioKBytesPerSec += audioKbps / 8.0
+					waterfallKBytesPerSec += waterfallKbps / 8.0
 
 					log.Printf("STATS: Session %s (spectrum=%v): audio=%.2f kB/s, waterfall=%.2f kB/s",
-						sessionID[:8], isSpectrum, audioBPS/1024.0, waterfallBPS/1024.0)
+						sessionID[:8], isSpectrum, audioKbps/8.0, waterfallKbps/8.0)
 				}
 			}
 		}

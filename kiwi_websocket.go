@@ -1985,16 +1985,44 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			useCompression := kc.wfCompression
 			kc.mu.RUnlock()
 
-			// KiwiSDR protocol always expects exactly 1024 bins
-			// If radiod sent fewer bins (due to narrow bandwidth optimization), interpolate up
+			// KiwiSDR protocol always expects exactly 1024 bins representing a specific span
+			// The client calculates frequencies based on x_bin and zoom level, assuming the
+			// 1024 bins represent: span = 30 MHz / 2^zoom
 			//
-			// IMPORTANT: We cannot crop the data because the client calculates frequencies based on
-			// x_bin and zoom level, assuming the 1024 bins represent the full span at that zoom.
-			// Cropping would break frequency alignment.
+			// However, radiod has minimum bin bandwidth constraints (50-60 Hz/bin depending on
+			// bin count). At high zoom levels, this forces us to request a wider span than the
+			// client expects. We must crop the wider span to match the expected span before
+			// interpolating to 1024 bins, otherwise signals will appear shifted.
 			//
-			// Instead, we accept that at deep zoom levels (12+), radiod's minimum bin bandwidth
-			// constraint means we send a wider span than requested. The client will display this
-			// wider span, but frequencies will be correctly aligned.
+			// Example: At zoom 12, client expects 7.32 kHz span, but radiod minimum constraints
+			// force 12.8 kHz span. We must crop the center 7.32 kHz before sending to client.
+
+			// Calculate expected span (what client thinks it's getting)
+			fullSpanKHz := 30000.0
+			expectedSpanHz := (fullSpanKHz * 1000.0) / math.Pow(2, float64(currentZoom))
+
+			// Calculate actual span (what radiod sent)
+			actualSpanHz := kc.session.BinBandwidth * float64(N)
+
+			// If actual span is wider than expected, crop the center portion to match
+			if actualSpanHz > expectedSpanHz*1.01 { // 1% tolerance to avoid unnecessary cropping
+				// Calculate how many bins represent the expected span
+				binsToKeep := int((expectedSpanHz / actualSpanHz) * float64(N))
+				if binsToKeep < N && binsToKeep > 0 {
+					// Crop center portion
+					startBin := (N - binsToKeep) / 2
+					endBin := startBin + binsToKeep
+					unwrapped = unwrapped[startBin:endBin]
+					N = len(unwrapped)
+
+					if packetCount == 1 {
+						log.Printf("CROP: Radiod sent %.2f kHz span, client expects %.2f kHz, cropped to %d bins",
+							actualSpanHz/1000.0, expectedSpanHz/1000.0, N)
+					}
+				}
+			}
+
+			// Now interpolate to exactly 1024 bins if needed
 			const targetBins = 1024
 			if N < targetBins {
 				interpolated := make([]float32, targetBins)

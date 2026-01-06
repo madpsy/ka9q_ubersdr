@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"regexp"
@@ -336,6 +337,15 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	query := r.URL.Query()
 	password := query.Get("password")
 
+	// Get protocol version from query string (optional, default v1)
+	version := 1
+	if v := query.Get("version"); v != "" {
+		var parsedVer int
+		if _, err := fmt.Sscanf(v, "%d", &parsedVer); err == nil && parsedVer >= 1 && parsedVer <= 2 {
+			version = parsedVer
+		}
+	}
+
 	// Get format from query string (optional): "pcm-zstd" (default) or "opus"
 	format := query.Get("format")
 	if format == "" {
@@ -611,7 +621,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 
 	// Start audio streaming goroutine
 	done := make(chan struct{})
-	go wsh.streamAudio(conn, sessionHolder, done, format)
+	go wsh.streamAudio(conn, sessionHolder, done, format, version)
 
 	// Handle incoming messages (this will manage session lifecycle)
 	wsh.handleMessages(conn, sessionHolder, done)
@@ -875,7 +885,7 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 }
 
 // streamAudio streams audio data to the client
-func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHolder, done <-chan struct{}, format string) {
+func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHolder, done <-chan struct{}, format string, version int) {
 	session := sessionHolder.getSession()
 
 	// Track original format requested (for re-enabling after IQ mode)
@@ -906,10 +916,15 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 	}
 
 	if format == "pcm-zstd" {
-		// Create PCM binary encoder with zstd compression
-		pcmBinaryEncoder = NewPCMBinaryEncoder(true)
+		// Create PCM binary encoder with zstd compression and appropriate version
+		if version >= 2 {
+			pcmBinaryEncoder = NewPCMBinaryEncoderWithVersion(true, PCMBinaryVersion2)
+			log.Printf("PCM binary encoder initialized with zstd compression (version 2)")
+		} else {
+			pcmBinaryEncoder = NewPCMBinaryEncoder(true)
+			log.Printf("PCM binary encoder initialized with zstd compression (version 1)")
+		}
 		defer pcmBinaryEncoder.Close()
-		log.Printf("PCM binary encoder initialized with zstd compression")
 	}
 
 	for {
@@ -952,23 +967,53 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			switch currentFormat {
 			case "opus":
 				// Binary Opus format: send raw Opus frames as binary WebSocket messages
-				// Format: [timestamp:8][sampleRate:4][channels:1][opusData...]
+				// Version 1: [timestamp:8][sampleRate:4][channels:1][opusData...]
+				// Version 2: [timestamp:8][sampleRate:4][channels:1][basebandPower:4][noiseDensity:4][opusData...]
+
+				// Get channel status for signal quality metrics (version 2 only)
+				var basebandPower, noiseDensity float32 = -999.0, -999.0 // Default: no data
+				if version >= 2 && wsh.sessions != nil && wsh.sessions.radiod != nil {
+					if channelStatus := wsh.sessions.radiod.GetChannelStatus(session.SSRC); channelStatus != nil {
+						basebandPower = channelStatus.BasebandPower
+						noiseDensity = channelStatus.NoiseDensity
+					}
+				}
+
 				opusData, err := opusEncoder.EncodeBinary(audioPacket.PCMData)
 				if err != nil {
 					log.Printf("Opus encoding error: %v", err)
 					continue
 				}
 
-				// Build binary packet with header
-				packet := make([]byte, 13+len(opusData))
-				// Timestamp (8 bytes, little-endian uint64)
-				binary.LittleEndian.PutUint64(packet[0:8], uint64(audioPacket.RTPTimestamp))
-				// Sample rate (4 bytes, little-endian uint32)
-				binary.LittleEndian.PutUint32(packet[8:12], uint32(session.SampleRate))
-				// Channels (1 byte)
-				packet[12] = byte(session.Channels)
-				// Opus data
-				copy(packet[13:], opusData)
+				// Build binary packet with version-specific header
+				var packet []byte
+				if version >= 2 {
+					// Version 2: include signal quality metrics
+					packet = make([]byte, 21+len(opusData))
+					// Timestamp (8 bytes, little-endian uint64)
+					binary.LittleEndian.PutUint64(packet[0:8], uint64(audioPacket.RTPTimestamp))
+					// Sample rate (4 bytes, little-endian uint32)
+					binary.LittleEndian.PutUint32(packet[8:12], uint32(session.SampleRate))
+					// Channels (1 byte)
+					packet[12] = byte(session.Channels)
+					// Baseband power (4 bytes, float32)
+					binary.LittleEndian.PutUint32(packet[13:17], math.Float32bits(basebandPower))
+					// Noise density (4 bytes, float32)
+					binary.LittleEndian.PutUint32(packet[17:21], math.Float32bits(noiseDensity))
+					// Opus data
+					copy(packet[21:], opusData)
+				} else {
+					// Version 1: original format
+					packet = make([]byte, 13+len(opusData))
+					// Timestamp (8 bytes, little-endian uint64)
+					binary.LittleEndian.PutUint64(packet[0:8], uint64(audioPacket.RTPTimestamp))
+					// Sample rate (4 bytes, little-endian uint32)
+					binary.LittleEndian.PutUint32(packet[8:12], uint32(session.SampleRate))
+					// Channels (1 byte)
+					packet[12] = byte(session.Channels)
+					// Opus data
+					copy(packet[13:], opusData)
+				}
 
 				// Send as binary WebSocket message
 				conn.writeMu.Lock()
@@ -1000,14 +1045,25 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					return
 				}
 
+				// Get channel status for signal quality metrics (version 2 only)
+				var basebandPower, noiseDensity float32 = -999.0, -999.0 // Default: no data
+				if version >= 2 && wsh.sessions != nil && wsh.sessions.radiod != nil {
+					if channelStatus := wsh.sessions.radiod.GetChannelStatus(session.SSRC); channelStatus != nil {
+						basebandPower = channelStatus.BasebandPower
+						noiseDensity = channelStatus.NoiseDensity
+					}
+				}
+
 				// Encode PCM packet with hybrid header strategy
-				// First packet or metadata change: full header (29 bytes)
-				// Subsequent packets: minimal header (13 bytes)
-				packet, err := pcmBinaryEncoder.EncodePCMPacket(
+				// Version 1: First packet or metadata change: full header (29 bytes), subsequent: minimal (13 bytes)
+				// Version 2: First packet or metadata change: full header (37 bytes), subsequent: minimal (13 bytes)
+				packet, err := pcmBinaryEncoder.EncodePCMPacketWithSignalQuality(
 					audioPacket.PCMData,
 					audioPacket.RTPTimestamp,
 					session.SampleRate,
 					session.Channels,
+					basebandPower,
+					noiseDensity,
 				)
 				if err != nil {
 					log.Printf("PCM binary encoding error: %v", err)

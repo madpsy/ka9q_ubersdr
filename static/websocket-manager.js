@@ -127,6 +127,9 @@ export class WebSocketManager {
         // Always request Opus format (will gracefully fallback to PCM if server doesn't support it)
         wsUrl += '&format=opus';
 
+        // Request version 2 of the audio protocol (includes signal quality metrics)
+        wsUrl += '&version=2';
+
         this.log(`Connecting to ${wsUrl}...`);
 
         try {

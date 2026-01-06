@@ -878,6 +878,17 @@
                     The buffer indicator colors adjust dynamically based on your selection.
                 </p>
                 <div style="border-top: 1px solid #444; padding-top: 15px; margin-top: 15px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 10px; background: rgba(0, 0, 0, 0.2); border-radius: 4px;">
+                        <div style="flex: 1; text-align: center;">
+                            <div style="font-size: 0.85em; color: #888; margin-bottom: 4px;">Baseband Power</div>
+                            <div id="signal-baseband-power" style="font-family: monospace; font-size: 1.1em; font-weight: bold; color: #28a745;">N/A</div>
+                        </div>
+                        <div style="width: 1px; height: 40px; background: #444;"></div>
+                        <div style="flex: 1; text-align: center;">
+                            <div style="font-size: 0.85em; color: #888; margin-bottom: 4px;">Noise Density</div>
+                            <div id="signal-noise-density" style="font-family: monospace; font-size: 1.1em; font-weight: bold; color: #17a2b8;">N/A</div>
+                        </div>
+                    </div>
                     <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #ecf0f1;">
                         <input type="checkbox" id="spectrum-sync-enable" onchange="toggleSpectrumSync()" style="cursor: pointer;">
                         <span style="font-weight: bold;">Attempt Spectrum Sync</span>

@@ -201,6 +201,11 @@ let lastBufferDisplayUpdate = 0;
 let nextPlayTime = 0;
 let audioStartTime = 0;
 
+// Signal quality metrics from audio packets (version 2 protocol)
+let currentBasebandPower = -999.0; // dBFS
+let currentNoiseDensity = -999.0; // dBFS
+let lastSignalQualityUpdate = 0;
+
 // Audio buffer configuration (user-configurable)
 let maxBufferMs = 200; // Default 200ms, can be changed by user
 const MIN_BUFFER_MS = 40; // Minimum 40ms buffer for Chrome stability
@@ -1658,11 +1663,9 @@ async function handleBinaryMessage(data) {
             arrayBuffer = data;
         }
 
-        // Parse binary packet header (matching Python client format)
-        // 8 bytes: timestamp (uint64, little-endian)
-        // 4 bytes: sample rate (uint32, little-endian)
-        // 1 byte: channels (uint8)
-        // remaining: Opus encoded data
+        // Parse binary packet header
+        // Version 1 (13 bytes): timestamp(8) + sample_rate(4) + channels(1)
+        // Version 2 (21 bytes): timestamp(8) + sample_rate(4) + channels(1) + baseband_power(4) + noise_density(4)
         const view = new DataView(arrayBuffer);
 
         if (arrayBuffer.byteLength < 13) {
@@ -1673,7 +1676,31 @@ async function handleBinaryMessage(data) {
         const timestamp = view.getBigUint64(0, true); // little-endian
         const sampleRate = view.getUint32(8, true); // little-endian
         const channels = view.getUint8(12);
-        const opusData = new Uint8Array(arrayBuffer, 13);
+
+        // Check if this is version 2 packet (has signal quality fields)
+        let basebandPower = -999.0;
+        let noiseDensity = -999.0;
+        let opusDataOffset = 13;
+
+        if (arrayBuffer.byteLength >= 21) {
+            // Version 2 packet - extract signal quality metrics
+            basebandPower = view.getFloat32(13, true); // little-endian float32
+            noiseDensity = view.getFloat32(17, true); // little-endian float32
+            opusDataOffset = 21;
+
+            // Update global signal quality values (throttled to avoid excessive updates)
+            const now = performance.now();
+            if (now - lastSignalQualityUpdate >= 500) {
+                currentBasebandPower = basebandPower;
+                currentNoiseDensity = noiseDensity;
+                lastSignalQualityUpdate = now;
+
+                // Update display if modal is open
+                updateSignalQualityDisplay();
+            }
+        }
+
+        const opusData = new Uint8Array(arrayBuffer, opusDataOffset);
 
         // Initialize or reinitialize decoder if sample rate or channels changed
         if (!opusDecoderInitialized ||
@@ -7183,6 +7210,9 @@ function openBufferConfigModal() {
             spectrumSyncCheckbox.checked = window.spectrumSyncEnabled !== false;
         }
 
+        // Update signal quality display
+        updateSignalQualityDisplay();
+
         modal.style.display = 'flex';
     }
 }
@@ -7590,4 +7620,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Expose toggle function globally
 window.toggleFrequencyUnit = toggleFrequencyUnit;
+
+// Update signal quality display in buffer config modal
+function updateSignalQualityDisplay() {
+    const basebandElement = document.getElementById('signal-baseband-power');
+    const noiseElement = document.getElementById('signal-noise-density');
+
+    if (basebandElement) {
+        if (currentBasebandPower > -900) {
+            basebandElement.textContent = currentBasebandPower.toFixed(1) + ' dBFS';
+        } else {
+            basebandElement.textContent = 'N/A';
+        }
+    }
+
+    if (noiseElement) {
+        if (currentNoiseDensity > -900) {
+            noiseElement.textContent = currentNoiseDensity.toFixed(1) + ' dBFS';
+        } else {
+            noiseElement.textContent = 'N/A';
+        }
+    }
+}
+
+// Expose signal quality update function globally
+window.updateSignalQualityDisplay = updateSignalQualityDisplay;
 

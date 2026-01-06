@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"math"
 	"sync"
 	"time"
 
@@ -25,8 +26,9 @@ import (
 //    - Sent for subsequent packets when metadata hasn't changed
 //    - Contains only timestamp and essential info
 //
-// FULL HEADER FORMAT (29 bytes):
-// ------------------------------
+// FULL HEADER FORMAT:
+// -------------------
+// Version 1 (29 bytes):
 // Offset | Size | Type    | Description
 // -------|------|---------|--------------------------------------------------
 // 0      | 2    | uint16  | Magic bytes: 0x5043 ("PC" for PCM)
@@ -38,6 +40,21 @@ import (
 // 24     | 1    | uint8   | Number of channels (1=mono, 2=stereo)
 // 25     | 4    | uint32  | Reserved for future use (compression level, etc.)
 // 29     | N    | []byte  | PCM audio data (big-endian int16 samples)
+//
+// Version 2 (37 bytes):
+// Offset | Size | Type    | Description
+// -------|------|---------|--------------------------------------------------
+// 0      | 2    | uint16  | Magic bytes: 0x5043 ("PC" for PCM)
+// 2      | 1    | uint8   | Version: 2 (includes signal quality)
+// 3      | 1    | uint8   | Format type: 0=PCM, 1=Opus, 2=PCM-zstd
+// 4      | 8    | uint64  | RTP timestamp (sample count for drift-free sync)
+// 12     | 8    | uint64  | Wall clock time in milliseconds (NTP-synced)
+// 20     | 4    | uint32  | Sample rate in Hz (e.g., 12000, 48000)
+// 24     | 1    | uint8   | Number of channels (1=mono, 2=stereo)
+// 25     | 4    | float32 | Baseband power in dBFS
+// 29     | 4    | float32 | Noise density (N0) in dBFS
+// 33     | 4    | uint32  | Reserved for future use
+// 37     | N    | []byte  | PCM audio data (big-endian int16 samples)
 //
 // MINIMAL HEADER FORMAT (13 bytes):
 // ---------------------------------
@@ -67,8 +84,9 @@ const (
 	PCMBinaryMagicFull    uint16 = 0x5043 // "PC" - Full header packet
 	PCMBinaryMagicMinimal uint16 = 0x504D // "PM" - Minimal header packet
 
-	// Version for future compatibility
-	PCMBinaryVersion uint8 = 1
+	// Versions for future compatibility
+	PCMBinaryVersion1 uint8 = 1 // Original format
+	PCMBinaryVersion2 uint8 = 2 // With signal quality fields
 
 	// Format types
 	PCMFormatUncompressed uint8 = 0 // Raw PCM (no compression)
@@ -76,7 +94,8 @@ const (
 	PCMFormatZstd         uint8 = 2 // PCM with zstd compression
 
 	// Header sizes
-	PCMFullHeaderSize    = 29 // Full metadata header
+	PCMFullHeaderSizeV1  = 29 // Full metadata header (version 1)
+	PCMFullHeaderSizeV2  = 37 // Full metadata header (version 2, with signal quality)
 	PCMMinimalHeaderSize = 13 // Minimal header (timestamp only)
 )
 
@@ -91,6 +110,9 @@ type PCMBinaryEncoder struct {
 	lastSampleRate int
 	lastChannels   int
 	packetCount    uint64
+
+	// Protocol version
+	version uint8
 }
 
 // zstdEncoderPool provides reusable zstd encoders for efficiency
@@ -103,13 +125,19 @@ var zstdEncoderPool = sync.Pool{
 	},
 }
 
-// NewPCMBinaryEncoder creates a new PCM binary encoder
+// NewPCMBinaryEncoder creates a new PCM binary encoder (version 1)
 func NewPCMBinaryEncoder(useCompression bool) *PCMBinaryEncoder {
+	return NewPCMBinaryEncoderWithVersion(useCompression, PCMBinaryVersion1)
+}
+
+// NewPCMBinaryEncoderWithVersion creates a new PCM binary encoder with specified version
+func NewPCMBinaryEncoderWithVersion(useCompression bool, version uint8) *PCMBinaryEncoder {
 	encoder := &PCMBinaryEncoder{
 		useCompression: useCompression,
 		lastSampleRate: -1, // Force full header on first packet
 		lastChannels:   -1,
 		packetCount:    0,
+		version:        version,
 	}
 
 	if useCompression {
@@ -132,6 +160,23 @@ func NewPCMBinaryEncoder(useCompression bool) *PCMBinaryEncoder {
 //   - Encoded packet ready for WebSocket transmission
 //   - Error if encoding fails
 func (e *PCMBinaryEncoder) EncodePCMPacket(pcmData []byte, rtpTimestamp uint32, sampleRate int, channels int) ([]byte, error) {
+	return e.EncodePCMPacketWithSignalQuality(pcmData, rtpTimestamp, sampleRate, channels, -999.0, -999.0)
+}
+
+// EncodePCMPacketWithSignalQuality encodes a PCM audio packet with optional signal quality metrics
+//
+// Parameters:
+//   - pcmData: Raw PCM audio data (big-endian int16 samples from radiod)
+//   - rtpTimestamp: RTP timestamp for drift-free audio alignment
+//   - sampleRate: Audio sample rate in Hz
+//   - channels: Number of audio channels (1=mono, 2=stereo)
+//   - basebandPower: Baseband signal power in dBFS (use -999.0 for no data)
+//   - noiseDensity: Noise density (N0) in dBFS (use -999.0 for no data)
+//
+// Returns:
+//   - Encoded packet ready for WebSocket transmission
+//   - Error if encoding fails
+func (e *PCMBinaryEncoder) EncodePCMPacketWithSignalQuality(pcmData []byte, rtpTimestamp uint32, sampleRate int, channels int, basebandPower, noiseDensity float32) ([]byte, error) {
 	e.encoderMu.Lock()
 	defer e.encoderMu.Unlock()
 
@@ -147,8 +192,8 @@ func (e *PCMBinaryEncoder) EncodePCMPacket(pcmData []byte, rtpTimestamp uint32, 
 	var packet []byte
 
 	if needFullHeader {
-		// FULL HEADER PACKET (29 bytes + data)
-		packet = e.buildFullHeaderPacket(pcmData, rtpTimestamp, sampleRate, channels)
+		// FULL HEADER PACKET (29 or 37 bytes + data, depending on version)
+		packet = e.buildFullHeaderPacket(pcmData, rtpTimestamp, sampleRate, channels, basebandPower, noiseDensity)
 
 		// Update tracking
 		e.lastSampleRate = sampleRate
@@ -169,10 +214,16 @@ func (e *PCMBinaryEncoder) EncodePCMPacket(pcmData []byte, rtpTimestamp uint32, 
 	return packet, nil
 }
 
-// buildFullHeaderPacket creates a packet with full metadata header (29 bytes)
-func (e *PCMBinaryEncoder) buildFullHeaderPacket(pcmData []byte, rtpTimestamp uint32, sampleRate int, channels int) []byte {
-	// Allocate buffer: 29 byte header + PCM data
-	packet := make([]byte, PCMFullHeaderSize+len(pcmData))
+// buildFullHeaderPacket creates a packet with full metadata header (29 or 37 bytes depending on version)
+func (e *PCMBinaryEncoder) buildFullHeaderPacket(pcmData []byte, rtpTimestamp uint32, sampleRate int, channels int, basebandPower, noiseDensity float32) []byte {
+	// Determine header size based on version
+	headerSize := PCMFullHeaderSizeV1
+	if e.version >= PCMBinaryVersion2 {
+		headerSize = PCMFullHeaderSizeV2
+	}
+
+	// Allocate buffer: header + PCM data
+	packet := make([]byte, headerSize+len(pcmData))
 	offset := 0
 
 	// Magic bytes (2 bytes): 0x5043 = "PC" for PCM
@@ -180,7 +231,7 @@ func (e *PCMBinaryEncoder) buildFullHeaderPacket(pcmData []byte, rtpTimestamp ui
 	offset += 2
 
 	// Version (1 byte): Protocol version for future compatibility
-	packet[offset] = PCMBinaryVersion
+	packet[offset] = e.version
 	offset += 1
 
 	// Format type (1 byte): 0=PCM, 1=Opus, 2=PCM-zstd
@@ -209,9 +260,24 @@ func (e *PCMBinaryEncoder) buildFullHeaderPacket(pcmData []byte, rtpTimestamp ui
 	packet[offset] = byte(channels)
 	offset += 1
 
-	// Reserved (4 bytes): For future use (compression level, bit depth, etc.)
-	binary.LittleEndian.PutUint32(packet[offset:], 0)
-	offset += 4
+	// Version-specific fields
+	if e.version >= PCMBinaryVersion2 {
+		// Baseband power (4 bytes): Signal power in dBFS
+		binary.LittleEndian.PutUint32(packet[offset:], math.Float32bits(basebandPower))
+		offset += 4
+
+		// Noise density (4 bytes): N0 in dBFS
+		binary.LittleEndian.PutUint32(packet[offset:], math.Float32bits(noiseDensity))
+		offset += 4
+
+		// Reserved (4 bytes): For future use
+		binary.LittleEndian.PutUint32(packet[offset:], 0)
+		offset += 4
+	} else {
+		// Version 1: Reserved (4 bytes)
+		binary.LittleEndian.PutUint32(packet[offset:], 0)
+		offset += 4
+	}
 
 	// PCM data: Copy raw audio samples (big-endian int16 from radiod)
 	copy(packet[offset:], pcmData)
@@ -230,7 +296,7 @@ func (e *PCMBinaryEncoder) buildMinimalHeaderPacket(pcmData []byte, rtpTimestamp
 	offset += 2
 
 	// Version (1 byte)
-	packet[offset] = PCMBinaryVersion
+	packet[offset] = e.version
 	offset += 1
 
 	// RTP timestamp (8 bytes): Only essential timing info in minimal header

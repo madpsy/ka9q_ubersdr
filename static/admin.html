@@ -872,6 +872,43 @@
                 </div>
             </div>
         </div>
+
+        <!-- Session Events Modal -->
+        <div id="sessionEventsModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Session Events</h2>
+                    <button class="modal-close" onclick="closeSessionEventsModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <!-- Time Range Controls -->
+                    <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 15px; align-items: end;">
+                            <div>
+                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555;">Start Time</label>
+                                <input type="datetime-local" id="eventsStartTime" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
+                            </div>
+                            <div>
+                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555;">End Time</label>
+                                <input type="datetime-local" id="eventsEndTime" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
+                            </div>
+                            <div style="display: flex; gap: 10px;">
+                                <button class="btn" onclick="loadSessionEvents()" style="padding: 8px 16px; white-space: nowrap;">Load Events</button>
+                                <button class="btn btn-secondary" onclick="downloadSessionEvents()" style="padding: 8px 16px; white-space: nowrap;">📥 Download</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Events Display -->
+                    <div id="sessionEventsContent" style="min-height: 300px;">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            <p>Loading events...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -2780,7 +2817,7 @@
                 return;
             }
 
-            // Add filter dropdown
+            // Add filter dropdown with Events button on the right
             const filterDiv = document.createElement('div');
             filterDiv.style.marginBottom = '15px';
             filterDiv.style.padding = '10px';
@@ -2789,13 +2826,17 @@
             filterDiv.style.display = 'flex';
             filterDiv.style.alignItems = 'center';
             filterDiv.style.gap = '10px';
+            filterDiv.style.justifyContent = 'space-between';
             filterDiv.innerHTML = `
-                <label style="font-weight: 500; color: #555;">Filter:</label>
-                <select id="sessionFilter" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
-                    <option value="all" ${filterType === 'all' ? 'selected' : ''}>Show All Users</option>
-                    <option value="regular" ${filterType === 'regular' ? 'selected' : ''}>Show Regular Users Only</option>
-                    <option value="bypassed" ${filterType === 'bypassed' ? 'selected' : ''}>Show Bypassed Users Only</option>
-                </select>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <label style="font-weight: 500; color: #555;">Filter:</label>
+                    <select id="sessionFilter" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
+                        <option value="all" ${filterType === 'all' ? 'selected' : ''}>Show All Users</option>
+                        <option value="regular" ${filterType === 'regular' ? 'selected' : ''}>Show Regular Users Only</option>
+                        <option value="bypassed" ${filterType === 'bypassed' ? 'selected' : ''}>Show Bypassed Users Only</option>
+                    </select>
+                </div>
+                <button class="btn" onclick="showSessionEventsModal()" style="padding: 8px 16px; font-size: 14px;">📊 Events</button>
             `;
             container.appendChild(filterDiv);
 
@@ -6806,11 +6847,273 @@
             }
         }
 
+        // Session Events Modal Functions
+        function showSessionEventsModal() {
+            const modal = document.getElementById('sessionEventsModal');
+            if (!modal) return;
+
+            // Set default time range to last 24 hours
+            const endTime = new Date();
+            const startTime = new Date(endTime.getTime() - 24 * 60 * 60 * 1000);
+
+            // Format for datetime-local input (YYYY-MM-DDTHH:mm)
+            const formatForInput = (date) => {
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                const hours = String(date.getHours()).padStart(2, '0');
+                const minutes = String(date.getMinutes()).padStart(2, '0');
+                return `${year}-${month}-${day}T${hours}:${minutes}`;
+            };
+
+            document.getElementById('eventsStartTime').value = formatForInput(startTime);
+            document.getElementById('eventsEndTime').value = formatForInput(endTime);
+
+            modal.style.display = 'block';
+
+            // Load initial events
+            loadSessionEvents();
+        }
+
+        function closeSessionEventsModal() {
+            const modal = document.getElementById('sessionEventsModal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        async function loadSessionEvents() {
+            const content = document.getElementById('sessionEventsContent');
+            if (!content) return;
+
+            // Show loading state
+            content.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading events...</p></div>';
+
+            try {
+                // Get time range from inputs
+                const startInput = document.getElementById('eventsStartTime').value;
+                const endInput = document.getElementById('eventsEndTime').value;
+
+                if (!startInput || !endInput) {
+                    content.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">Please select both start and end times</div>';
+                    return;
+                }
+
+                // Convert to ISO 8601 format
+                const startTime = new Date(startInput).toISOString();
+                const endTime = new Date(endInput).toISOString();
+
+                // Fetch events from API
+                const response = await authenticatedFetch(
+                    `/admin/session-activity/events?start=${encodeURIComponent(startTime)}&end=${encodeURIComponent(endTime)}`
+                );
+
+                if (!response) {
+                    content.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">Authentication failed</div>';
+                    return;
+                }
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    content.innerHTML = `<div style="text-align: center; padding: 40px; color: #dc3545;">Error: ${errorText}</div>`;
+                    return;
+                }
+
+                const data = await response.json();
+                renderSessionEvents(data);
+            } catch (error) {
+                content.innerHTML = `<div style="text-align: center; padding: 40px; color: #dc3545;">Error loading events: ${error.message}</div>`;
+            }
+        }
+
+        function renderSessionEvents(data) {
+            const content = document.getElementById('sessionEventsContent');
+            if (!content) return;
+
+            const events = data.events || [];
+
+            if (events.length === 0) {
+                content.innerHTML = '<div style="text-align: center; padding: 40px; color: #666;">No events found in the selected time range</div>';
+                return;
+            }
+
+            // Create summary
+            const startCount = events.filter(e => e.event_type === 'session_start').length;
+            const endCount = events.filter(e => e.event_type === 'session_end').length;
+
+            let html = `
+                <div style="margin-bottom: 15px; padding: 15px; background: #e3f2fd; border-radius: 5px;">
+                    <strong>Summary:</strong> ${events.length} total events (${startCount} starts, ${endCount} ends)
+                </div>
+            `;
+
+            // Create events table
+            html += `
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                            <th style="padding: 10px; text-align: left;">Timestamp</th>
+                            <th style="padding: 10px; text-align: center;">Event</th>
+                            <th style="padding: 10px; text-align: left;">IP Address</th>
+                            <th style="padding: 10px; text-align: left;">User Agent</th>
+                            <th style="padding: 10px; text-align: center;">Auth</th>
+                            <th style="padding: 10px; text-align: center;">Types</th>
+                            <th style="padding: 10px; text-align: right;">Duration</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            events.forEach(event => {
+                const timestamp = new Date(event.timestamp).toLocaleString();
+                const eventIcon = event.event_type === 'session_start' ? '🟢' : '🔴';
+                const eventText = event.event_type === 'session_start' ? 'Start' : 'End';
+                const eventColor = event.event_type === 'session_start' ? '#28a745' : '#dc3545';
+
+                // Auth method badge
+                let authBadge = '<span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px;">Regular</span>';
+                if (event.auth_method === 'password') {
+                    authBadge = '<span style="background: #2196f3; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px;">Password</span>';
+                } else if (event.auth_method === 'ip_bypass') {
+                    authBadge = '<span style="background: #4caf50; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px;">IP Bypass</span>';
+                }
+
+                // Session types
+                const types = event.session_types ? event.session_types.join(', ') : 'N/A';
+
+                // Duration (only for end events)
+                let durationDisplay = '—';
+                if (event.event_type === 'session_end' && event.duration_seconds !== null && event.duration_seconds !== undefined) {
+                    const duration = event.duration_seconds;
+                    if (duration < 60) {
+                        durationDisplay = `${Math.floor(duration)}s`;
+                    } else if (duration < 3600) {
+                        const mins = Math.floor(duration / 60);
+                        const secs = Math.floor(duration % 60);
+                        durationDisplay = `${mins}m ${secs}s`;
+                    } else if (duration < 86400) {
+                        const hours = Math.floor(duration / 3600);
+                        const mins = Math.floor((duration % 3600) / 60);
+                        durationDisplay = `${hours}h ${mins}m`;
+                    } else {
+                        const days = Math.floor(duration / 86400);
+                        const hours = Math.floor((duration % 86400) / 3600);
+                        durationDisplay = `${days}d ${hours}h`;
+                    }
+                }
+
+                // Truncate user agent for display
+                const userAgent = event.user_agent || 'N/A';
+                const userAgentShort = userAgent.length > 50 ? userAgent.substring(0, 47) + '...' : userAgent;
+
+                html += `
+                    <tr style="border-bottom: 1px solid #dee2e6;">
+                        <td style="padding: 10px; font-size: 12px; white-space: nowrap;">${timestamp}</td>
+                        <td style="padding: 10px; text-align: center;">
+                            <span style="color: ${eventColor}; font-weight: bold;">${eventIcon} ${eventText}</span>
+                        </td>
+                        <td style="padding: 10px; font-family: monospace; font-size: 12px;">${event.client_ip || 'N/A'}</td>
+                        <td style="padding: 10px; font-size: 11px; max-width: 250px; overflow: hidden; text-overflow: ellipsis;" title="${userAgent}">${userAgentShort}</td>
+                        <td style="padding: 10px; text-align: center;">${authBadge}</td>
+                        <td style="padding: 10px; text-align: center; font-size: 12px;">${types}</td>
+                        <td style="padding: 10px; text-align: right; font-family: monospace; font-size: 12px;">${durationDisplay}</td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                    </tbody>
+                </table>
+            `;
+
+            content.innerHTML = html;
+        }
+
+        async function downloadSessionEvents() {
+            try {
+                // Get time range from inputs
+                const startInput = document.getElementById('eventsStartTime').value;
+                const endInput = document.getElementById('eventsEndTime').value;
+
+                if (!startInput || !endInput) {
+                    showAlert('Please select both start and end times', 'error');
+                    return;
+                }
+
+                // Convert to ISO 8601 format
+                const startTime = new Date(startInput).toISOString();
+                const endTime = new Date(endInput).toISOString();
+
+                // Fetch events from API
+                const response = await authenticatedFetch(
+                    `/admin/session-activity/events?start=${encodeURIComponent(startTime)}&end=${encodeURIComponent(endTime)}`
+                );
+
+                if (!response) {
+                    showAlert('Authentication failed', 'error');
+                    return;
+                }
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    showAlert(`Error: ${errorText}`, 'error');
+                    return;
+                }
+
+                const data = await response.json();
+
+                // Create CSV content
+                let csv = 'Timestamp,Event Type,User Session ID,Client IP,Source IP,Auth Method,Session Types,Duration (seconds)\n';
+
+                (data.events || []).forEach(event => {
+                    const timestamp = event.timestamp;
+                    const eventType = event.event_type;
+                    const userSessionID = event.user_session_id || '';
+                    const clientIP = event.client_ip || '';
+                    const sourceIP = event.source_ip || '';
+                    const authMethod = event.auth_method || '';
+                    const sessionTypes = (event.session_types || []).join(';');
+                    const duration = event.duration_seconds !== null && event.duration_seconds !== undefined ? event.duration_seconds : '';
+
+                    // Escape fields that might contain commas
+                    const escapeCsv = (field) => {
+                        if (typeof field === 'string' && (field.includes(',') || field.includes('"') || field.includes('\n'))) {
+                            return `"${field.replace(/"/g, '""')}"`;
+                        }
+                        return field;
+                    };
+
+                    csv += `${timestamp},${eventType},${escapeCsv(userSessionID)},${clientIP},${sourceIP},${authMethod},${escapeCsv(sessionTypes)},${duration}\n`;
+                });
+
+                // Create download
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+
+                // Generate filename with date range
+                const startDate = new Date(startInput).toISOString().split('T')[0];
+                const endDate = new Date(endInput).toISOString().split('T')[0];
+                a.download = `session_events_${startDate}_to_${endDate}.csv`;
+
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                showAlert('Events downloaded successfully', 'success');
+            } catch (error) {
+                showAlert('Error downloading events: ' + error.message, 'error');
+            }
+        }
+
         // Close modal when clicking outside of it
         window.onclick = function(event) {
             const tunnelModal = document.getElementById('tunnelUsersModal');
             const frontendModal = document.getElementById('frontendStatusModal');
             const channelModal = document.getElementById('channelStatusModal');
+            const eventsModal = document.getElementById('sessionEventsModal');
 
             if (event.target === tunnelModal) {
                 closeTunnelUsersModal();
@@ -6820,6 +7123,9 @@
             }
             if (event.target === channelModal) {
                 closeChannelStatusModal();
+            }
+            if (event.target === eventsModal) {
+                closeSessionEventsModal();
             }
         }
 

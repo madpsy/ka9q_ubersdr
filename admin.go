@@ -4063,6 +4063,273 @@ func (ah *AdminHandler) HandleSessionActivityMetrics(w http.ResponseWriter, r *h
 	}
 }
 
+// SessionEvent represents a single session start or end event
+type SessionEvent struct {
+	Timestamp     time.Time `json:"timestamp"`
+	EventType     string    `json:"event_type"` // "session_start" or "session_end"
+	UserSessionID string    `json:"user_session_id"`
+	ClientIP      string    `json:"client_ip"`
+	SourceIP      string    `json:"source_ip"`
+	AuthMethod    string    `json:"auth_method"`
+	SessionTypes  []string  `json:"session_types"`
+	UserAgent     string    `json:"user_agent,omitempty"`
+	Duration      *float64  `json:"duration_seconds,omitempty"` // Only for session_end events
+}
+
+// HandleSessionActivityEvents returns individual session start/end events derived from activity logs
+// Query parameters:
+//   - start: Start time in RFC3339 format (default: 24 hours ago)
+//   - end: End time in RFC3339 format (default: now)
+//   - auth_methods: Comma-separated list of auth methods to include (regular,password,bypassed) (default: all)
+//   - event_types: Comma-separated list of event types to include (session_start,session_end) (default: all)
+func (ah *AdminHandler) HandleSessionActivityEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if session activity logging is enabled
+	if !ah.config.Server.SessionActivityLogEnabled {
+		http.Error(w, "Session activity logging is not enabled", http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error":   "not_enabled",
+			"message": "Session activity logging is not enabled in configuration",
+		})
+		return
+	}
+
+	// Parse time range parameters
+	endTime := time.Now().UTC()
+	startTime := endTime.Add(-24 * time.Hour) // Default: last 24 hours
+
+	if startStr := r.URL.Query().Get("start"); startStr != "" {
+		if t, err := time.Parse(time.RFC3339, startStr); err == nil {
+			startTime = t.UTC()
+		} else {
+			http.Error(w, fmt.Sprintf("Invalid start time format: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	if endStr := r.URL.Query().Get("end"); endStr != "" {
+		if t, err := time.Parse(time.RFC3339, endStr); err == nil {
+			endTime = t.UTC()
+		} else {
+			http.Error(w, fmt.Sprintf("Invalid end time format: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Validate time range
+	if startTime.After(endTime) {
+		http.Error(w, "Start time must be before end time", http.StatusBadRequest)
+		return
+	}
+
+	// Parse auth methods filter
+	var authMethods []string
+	if authMethodsStr := r.URL.Query().Get("auth_methods"); authMethodsStr != "" {
+		authMethods = strings.Split(authMethodsStr, ",")
+		// Validate auth methods
+		validMethods := map[string]bool{"regular": true, "password": true, "bypassed": true}
+		for _, method := range authMethods {
+			method = strings.TrimSpace(method)
+			if !validMethods[method] {
+				http.Error(w, fmt.Sprintf("Invalid auth method: %s (valid: regular,password,bypassed)", method), http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
+	// Parse event types filter
+	var eventTypes []string
+	if eventTypesStr := r.URL.Query().Get("event_types"); eventTypesStr != "" {
+		eventTypes = strings.Split(eventTypesStr, ",")
+		// Validate event types
+		validTypes := map[string]bool{"session_start": true, "session_end": true}
+		for _, eventType := range eventTypes {
+			eventType = strings.TrimSpace(eventType)
+			if !validTypes[eventType] {
+				http.Error(w, fmt.Sprintf("Invalid event type: %s (valid: session_start,session_end)", eventType), http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
+	// Read logs from disk
+	logs, err := ReadActivityLogs(ah.config.Server.SessionActivityLogDir, startTime, endTime)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read activity logs: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Convert snapshots to events
+	events := convertLogsToEvents(logs)
+
+	// Filter by auth methods if specified
+	if len(authMethods) > 0 {
+		events = filterEventsByAuthMethod(events, authMethods)
+	}
+
+	// Filter by event types if specified
+	if len(eventTypes) > 0 {
+		events = filterEventsByType(events, eventTypes)
+	}
+
+	// Return events
+	response := map[string]interface{}{
+		"start_time": startTime.Format(time.RFC3339),
+		"end_time":   endTime.Format(time.RFC3339),
+		"count":      len(events),
+		"events":     events,
+	}
+
+	if len(authMethods) > 0 {
+		response["auth_methods_filter"] = authMethods
+	}
+	if len(eventTypes) > 0 {
+		response["event_types_filter"] = eventTypes
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding session activity events: %v", err)
+	}
+}
+
+// convertLogsToEvents converts activity log snapshots into individual session start/end events
+func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
+	if len(logs) == 0 {
+		return []SessionEvent{}
+	}
+
+	// Track sessions across snapshots
+	// Map: user_session_id -> last seen info
+	type sessionInfo struct {
+		entry     SessionActivityEntry
+		lastSeen  time.Time
+		firstSeen time.Time
+	}
+	activeSessions := make(map[string]*sessionInfo)
+	events := []SessionEvent{}
+
+	for _, log := range logs {
+		currentSessionIDs := make(map[string]bool)
+
+		// Process all sessions in this snapshot
+		for _, session := range log.ActiveSessions {
+			currentSessionIDs[session.UserSessionID] = true
+
+			if existing, exists := activeSessions[session.UserSessionID]; exists {
+				// Session already active, update last seen
+				existing.lastSeen = log.Timestamp
+				existing.entry = session // Update with latest info
+			} else {
+				// New session detected - create start event
+				activeSessions[session.UserSessionID] = &sessionInfo{
+					entry:     session,
+					firstSeen: log.Timestamp,
+					lastSeen:  log.Timestamp,
+				}
+
+				events = append(events, SessionEvent{
+					Timestamp:     log.Timestamp,
+					EventType:     "session_start",
+					UserSessionID: session.UserSessionID,
+					ClientIP:      session.ClientIP,
+					SourceIP:      session.SourceIP,
+					AuthMethod:    session.AuthMethod,
+					SessionTypes:  session.SessionTypes,
+					UserAgent:     session.UserAgent,
+				})
+			}
+		}
+
+		// Check for sessions that disappeared (ended)
+		for sessionID, info := range activeSessions {
+			if !currentSessionIDs[sessionID] {
+				// Session ended - create end event
+				duration := info.lastSeen.Sub(info.firstSeen).Seconds()
+				events = append(events, SessionEvent{
+					Timestamp:     log.Timestamp,
+					EventType:     "session_end",
+					UserSessionID: info.entry.UserSessionID,
+					ClientIP:      info.entry.ClientIP,
+					SourceIP:      info.entry.SourceIP,
+					AuthMethod:    info.entry.AuthMethod,
+					SessionTypes:  info.entry.SessionTypes,
+					UserAgent:     info.entry.UserAgent,
+					Duration:      &duration,
+				})
+
+				// Remove from active sessions
+				delete(activeSessions, sessionID)
+			}
+		}
+	}
+
+	// Sort events by timestamp
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].Timestamp.Before(events[j].Timestamp)
+	})
+
+	return events
+}
+
+// filterEventsByAuthMethod filters events by authentication method
+func filterEventsByAuthMethod(events []SessionEvent, authMethods []string) []SessionEvent {
+	if len(authMethods) == 0 {
+		return events
+	}
+
+	// Create a map for quick lookup
+	methodMap := make(map[string]bool)
+	for _, method := range authMethods {
+		methodMap[strings.TrimSpace(method)] = true
+	}
+
+	filtered := make([]SessionEvent, 0, len(events))
+	for _, event := range events {
+		// Map auth_method to filter names
+		filterName := "regular"
+		if event.AuthMethod == "password" {
+			filterName = "password"
+		} else if event.AuthMethod == "ip_bypass" {
+			filterName = "bypassed"
+		}
+
+		if methodMap[filterName] {
+			filtered = append(filtered, event)
+		}
+	}
+
+	return filtered
+}
+
+// filterEventsByType filters events by event type
+func filterEventsByType(events []SessionEvent, eventTypes []string) []SessionEvent {
+	if len(eventTypes) == 0 {
+		return events
+	}
+
+	// Create a map for quick lookup
+	typeMap := make(map[string]bool)
+	for _, eventType := range eventTypes {
+		typeMap[strings.TrimSpace(eventType)] = true
+	}
+
+	filtered := make([]SessionEvent, 0, len(events))
+	for _, event := range events {
+		if typeMap[event.EventType] {
+			filtered = append(filtered, event)
+		}
+	}
+
+	return filtered
+}
+
 // calculateSessionMetrics calculates aggregated metrics from session activity logs
 func calculateSessionMetrics(logs []SessionActivityLog) map[string]interface{} {
 	if len(logs) == 0 {

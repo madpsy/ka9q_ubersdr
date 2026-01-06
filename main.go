@@ -1016,6 +1016,7 @@ func main() {
 	http.HandleFunc("/admin/tunnel-server-health", adminHandler.AuthMiddleware(adminHandler.HandleTunnelServerHealth))
 	http.HandleFunc("/admin/session-activity/logs", adminHandler.AuthMiddleware(adminHandler.HandleSessionActivityLogs))
 	http.HandleFunc("/admin/session-activity/metrics", adminHandler.AuthMiddleware(adminHandler.HandleSessionActivityMetrics))
+	http.HandleFunc("/admin/session-activity/events", adminHandler.AuthMiddleware(adminHandler.HandleSessionActivityEvents))
 
 	// Open log file for HTTP request logging
 	// If LogFile is a relative path and we have a config directory, prepend it

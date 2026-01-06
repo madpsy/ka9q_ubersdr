@@ -1031,6 +1031,43 @@ func (b *UberSDRBridge) sendKeepalive() {
 	}
 }
 
+// getInterfaceIP returns the first IPv4 address of the specified network interface
+func getInterfaceIP(interfaceName string) (string, error) {
+	iface, err := net.InterfaceByName(interfaceName)
+	if err != nil {
+		return "", fmt.Errorf("interface %s not found: %w", interfaceName, err)
+	}
+
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return "", fmt.Errorf("failed to get addresses for interface %s: %w", interfaceName, err)
+	}
+
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String(), nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no IPv4 address found for interface %s", interfaceName)
+}
+
+// getInterfaceMAC returns the MAC address of the specified network interface
+func getInterfaceMAC(interfaceName string) (net.HardwareAddr, error) {
+	iface, err := net.InterfaceByName(interfaceName)
+	if err != nil {
+		return nil, fmt.Errorf("interface %s not found: %w", interfaceName, err)
+	}
+
+	if len(iface.HardwareAddr) == 0 {
+		return nil, fmt.Errorf("interface %s has no MAC address", interfaceName)
+	}
+
+	return iface.HardwareAddr, nil
+}
+
 func main() {
 	// Command-line flags
 	urlFlag := flag.String("url", "http://localhost:8080", "UberSDR server URL (http://, https://, ws://, or wss://)")
@@ -1161,8 +1198,42 @@ func main() {
 		log.Fatalf("Invalid URL scheme: %s (must be http://, https://, ws://, or wss://)", parsedURL.Scheme)
 	}
 
-	// Generate MAC address (use a locally administered address)
-	macAddr := net.HardwareAddr{0x02, 0x00, 0x00, 0x00, 0x00, 0x01}
+	// Auto-discover IP address from interface if interface is specified but IP is not
+	if *hpsdrInterface != "" && (*hpsdrIP == "" || *hpsdrIP == "0.0.0.0" || *hpsdrIP == DefaultIPAddress) {
+		discoveredIP, err := getInterfaceIP(*hpsdrInterface)
+		if err != nil {
+			log.Fatalf("Failed to discover IP for interface %s: %v", *hpsdrInterface, err)
+		}
+		log.Printf("Auto-discovered IP %s for interface %s", discoveredIP, *hpsdrInterface)
+		*hpsdrIP = discoveredIP
+	}
+
+	// Log the interface and IP configuration
+	if *hpsdrInterface != "" {
+		log.Printf("Binding to interface: %s, IP: %s", *hpsdrInterface, *hpsdrIP)
+	} else if *hpsdrIP != "" && *hpsdrIP != "0.0.0.0" {
+		log.Printf("Binding to IP: %s (no specific interface)", *hpsdrIP)
+	} else {
+		log.Printf("Binding to all interfaces (0.0.0.0)")
+	}
+
+	// Get MAC address from interface if specified, otherwise generate one
+	var macAddr net.HardwareAddr
+	if *hpsdrInterface != "" {
+		var err error
+		macAddr, err = getInterfaceMAC(*hpsdrInterface)
+		if err != nil {
+			log.Printf("Warning: Failed to get MAC address for interface %s: %v", *hpsdrInterface, err)
+			log.Printf("Using generated MAC address instead")
+			macAddr = net.HardwareAddr{0x02, 0x00, 0x00, 0x00, 0x00, 0x01}
+		} else {
+			log.Printf("Using MAC address %s from interface %s", macAddr.String(), *hpsdrInterface)
+		}
+	} else {
+		// Generate MAC address (use a locally administered address)
+		macAddr = net.HardwareAddr{0x02, 0x00, 0x00, 0x00, 0x00, 0x01}
+		log.Printf("Using generated MAC address: %s", macAddr.String())
+	}
 
 	// Create HPSDR configuration
 	hpsdrConfig := Protocol2Config{

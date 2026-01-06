@@ -206,6 +206,12 @@ let currentBasebandPower = -999.0; // dBFS
 let currentNoiseDensity = -999.0; // dBFS
 let lastSignalQualityUpdate = 0;
 
+// SNR history for chart (10 seconds at 500ms updates = 20 data points)
+let snrHistory = [];
+const SNR_HISTORY_MAX_AGE = 10000; // 10 seconds in milliseconds
+let snrChartCanvas = null;
+let snrChartCtx = null;
+
 // Audio buffer configuration (user-configurable)
 let maxBufferMs = 200; // Default 200ms, can be changed by user
 const MIN_BUFFER_MS = 40; // Minimum 40ms buffer for Chrome stability
@@ -1694,6 +1700,16 @@ async function handleBinaryMessage(data) {
                 currentBasebandPower = basebandPower;
                 currentNoiseDensity = noiseDensity;
                 lastSignalQualityUpdate = now;
+
+                // Calculate SNR and add to history
+                if (basebandPower > -900 && noiseDensity > -900) {
+                    const snr = Math.max(0, basebandPower - noiseDensity);
+                    const timestamp = Date.now();
+                    snrHistory.push({ value: snr, timestamp: timestamp });
+
+                    // Remove old entries (older than 10 seconds)
+                    snrHistory = snrHistory.filter(entry => timestamp - entry.timestamp <= SNR_HISTORY_MAX_AGE);
+                }
 
                 // Update display if modal is open
                 updateSignalQualityDisplay();
@@ -7621,6 +7637,143 @@ document.addEventListener('DOMContentLoaded', () => {
 // Expose toggle function globally
 window.toggleFrequencyUnit = toggleFrequencyUnit;
 
+// Draw SNR chart
+function drawSNRChart() {
+    if (!snrChartCanvas || !snrChartCtx) {
+        snrChartCanvas = document.getElementById('snr-chart-canvas');
+        if (!snrChartCanvas) return;
+        snrChartCtx = snrChartCanvas.getContext('2d');
+    }
+
+    const width = snrChartCanvas.width;
+    const height = snrChartCanvas.height;
+
+    // Clear canvas
+    snrChartCtx.fillStyle = '#2c3e50';
+    snrChartCtx.fillRect(0, 0, width, height);
+
+    if (snrHistory.length === 0) {
+        // No data yet - show message
+        snrChartCtx.fillStyle = '#888';
+        snrChartCtx.font = '12px monospace';
+        snrChartCtx.textAlign = 'center';
+        snrChartCtx.textBaseline = 'middle';
+        snrChartCtx.fillText('Waiting for data...', width / 2, height / 2);
+        return;
+    }
+
+    // Find min and max SNR for scaling
+    let minSNR = Math.min(...snrHistory.map(e => e.value));
+    let maxSNR = Math.max(...snrHistory.map(e => e.value));
+
+    // Add some padding to the range
+    const range = maxSNR - minSNR;
+    const padding = Math.max(5, range * 0.1); // At least 5 dB padding
+    minSNR = Math.max(0, minSNR - padding);
+    maxSNR = maxSNR + padding;
+
+    // Ensure minimum range of 10 dB for readability
+    if (maxSNR - minSNR < 10) {
+        const center = (maxSNR + minSNR) / 2;
+        minSNR = Math.max(0, center - 5);
+        maxSNR = center + 5;
+    }
+
+    const snrRange = maxSNR - minSNR;
+
+    // Draw horizontal grid lines and dB labels (left side only)
+    snrChartCtx.font = 'bold 10px monospace';
+    snrChartCtx.textAlign = 'left';
+    snrChartCtx.textBaseline = 'middle';
+
+    // Calculate appropriate step for grid lines (aim for 4-6 lines)
+    let dbStep = 5;
+    if (snrRange > 50) dbStep = 10;
+    else if (snrRange > 25) dbStep = 5;
+    else if (snrRange > 10) dbStep = 2;
+    else dbStep = 1;
+
+    const firstDb = Math.ceil(minSNR / dbStep) * dbStep;
+    for (let db = firstDb; db <= maxSNR; db += dbStep) {
+        const y = height - ((db - minSNR) / snrRange) * height;
+
+        // Draw grid line
+        snrChartCtx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        snrChartCtx.lineWidth = 1;
+        snrChartCtx.beginPath();
+        snrChartCtx.moveTo(0, y);
+        snrChartCtx.lineTo(width, y);
+        snrChartCtx.stroke();
+
+        // Draw dB label on left
+        const label = db.toFixed(0) + ' dB';
+        const labelWidth = snrChartCtx.measureText(label).width + 6;
+
+        snrChartCtx.fillStyle = 'rgba(44, 62, 80, 0.8)';
+        snrChartCtx.fillRect(2, y - 8, labelWidth, 16);
+
+        snrChartCtx.strokeStyle = '#000000';
+        snrChartCtx.lineWidth = 2;
+        snrChartCtx.strokeText(label, 5, y);
+
+        snrChartCtx.fillStyle = '#ffffff';
+        snrChartCtx.fillText(label, 5, y);
+    }
+
+    // Draw SNR line graph
+    if (snrHistory.length > 1) {
+        snrChartCtx.strokeStyle = '#ffc107'; // Yellow/amber color
+        snrChartCtx.lineWidth = 2;
+        snrChartCtx.beginPath();
+
+        const now = Date.now();
+        const timeRange = SNR_HISTORY_MAX_AGE;
+
+        snrHistory.forEach((entry, index) => {
+            // Calculate x position based on time (right side is most recent)
+            const age = now - entry.timestamp;
+            const x = width - (age / timeRange) * width;
+
+            // Calculate y position based on SNR value
+            const y = height - ((entry.value - minSNR) / snrRange) * height;
+
+            if (index === 0) {
+                snrChartCtx.moveTo(x, y);
+            } else {
+                snrChartCtx.lineTo(x, y);
+            }
+        });
+
+        snrChartCtx.stroke();
+
+        // Draw filled area under the line
+        snrChartCtx.fillStyle = 'rgba(255, 193, 7, 0.2)'; // Semi-transparent yellow
+        snrChartCtx.beginPath();
+
+        // Start from bottom left
+        const firstAge = now - snrHistory[0].timestamp;
+        const firstX = width - (firstAge / timeRange) * width;
+        const firstY = height - ((snrHistory[0].value - minSNR) / snrRange) * height;
+        snrChartCtx.moveTo(firstX, height);
+        snrChartCtx.lineTo(firstX, firstY);
+
+        // Draw line through all points
+        snrHistory.forEach((entry) => {
+            const age = now - entry.timestamp;
+            const x = width - (age / timeRange) * width;
+            const y = height - ((entry.value - minSNR) / snrRange) * height;
+            snrChartCtx.lineTo(x, y);
+        });
+
+        // Close path at bottom right
+        const lastAge = now - snrHistory[snrHistory.length - 1].timestamp;
+        const lastX = width - (lastAge / timeRange) * width;
+        snrChartCtx.lineTo(lastX, height);
+        snrChartCtx.closePath();
+        snrChartCtx.fill();
+    }
+}
+
 // Update signal quality display in buffer config modal
 function updateSignalQualityDisplay() {
     const basebandElement = document.getElementById('signal-baseband-power');
@@ -7655,6 +7808,9 @@ function updateSignalQualityDisplay() {
             snrElement.textContent = 'N/A';
         }
     }
+
+    // Draw SNR chart
+    drawSNRChart();
 }
 
 // Expose signal quality update function globally

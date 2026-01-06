@@ -188,14 +188,22 @@ func (s *Protocol2Server) Start() error {
 	}
 
 	// Setup discovery socket (port 1024)
-	// If interface is specified, bind discovery socket to that interface
-	// This restricts discovery responses to only that interface's network
+	// Always bind to 0.0.0.0:1024 to receive broadcast packets
+	// SO_BINDTODEVICE (if interface specified) restricts to specific interface
+	// SO_REUSEPORT allows multiple instances to coexist
 	lc := createListenConfig(s.config.Interface != "")
 	lp, err := lc.ListenPacket(context.Background(), "udp4", "0.0.0.0:1024")
 	if err != nil {
 		return fmt.Errorf("failed to create discovery socket: %w", err)
 	}
 	s.discoverySock = lp.(*net.UDPConn)
+	log.Printf("Protocol2: Discovery socket bound to 0.0.0.0:1024 (interface: %s)",
+		func() string {
+			if s.config.Interface != "" {
+				return s.config.Interface
+			}
+			return "all"
+		}())
 
 	// Setup high priority socket (port 1027)
 	lc = createListenConfig(true)

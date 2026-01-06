@@ -883,7 +883,7 @@
                 <div class="modal-body">
                     <!-- Time Range Controls -->
                     <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 15px; align-items: end;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 15px; align-items: end; margin-bottom: 15px;">
                             <div>
                                 <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555;">Start Time</label>
                                 <input type="datetime-local" id="eventsStartTime" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
@@ -897,6 +897,63 @@
                                 <button class="btn btn-secondary" onclick="downloadSessionEvents()" style="padding: 8px 16px; white-space: nowrap;">📥 Download</button>
                             </div>
                         </div>
+
+                        <!-- Filters Section -->
+                        <details style="margin-top: 15px;">
+                            <summary style="cursor: pointer; font-weight: 500; color: #555; padding: 8px; background: #e9ecef; border-radius: 5px; user-select: none;">
+                                🔍 Advanced Filters
+                            </summary>
+                            <div style="margin-top: 15px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                                <div>
+                                    <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555; font-size: 13px;">Event Type</label>
+                                    <select id="filterEventType" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
+                                        <option value="">All Events</option>
+                                        <option value="session_start">Session Start Only</option>
+                                        <option value="session_end">Session End Only</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555; font-size: 13px;">Auth Method</label>
+                                    <select id="filterAuthMethod" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
+                                        <option value="">All Methods</option>
+                                        <option value="regular">Regular Only</option>
+                                        <option value="password">Password Only</option>
+                                        <option value="bypassed">IP Bypass Only</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555; font-size: 13px;">Session Type</label>
+                                    <select id="filterSessionType" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
+                                        <option value="">All Types</option>
+                                        <option value="audio">Audio Only</option>
+                                        <option value="spectrum">Spectrum Only</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555; font-size: 13px;">Duration Filter</label>
+                                    <div style="display: flex; gap: 5px;">
+                                        <select id="filterDurationOp" style="flex: 0 0 auto; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
+                                            <option value="">Any</option>
+                                            <option value="lt">Less than</option>
+                                            <option value="gt">More than</option>
+                                        </select>
+                                        <input type="number" id="filterDurationValue" placeholder="seconds" min="0" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555; font-size: 13px;">IP Address</label>
+                                    <input type="text" id="filterIPAddress" placeholder="e.g., 192.168.1" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
+                                </div>
+                                <div>
+                                    <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555; font-size: 13px;">User Agent</label>
+                                    <input type="text" id="filterUserAgent" placeholder="e.g., Chrome, Firefox" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
+                                </div>
+                            </div>
+                            <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: flex-end;">
+                                <button class="btn btn-secondary" onclick="clearAllEventFilters()" style="padding: 6px 12px; font-size: 13px;">Clear Filters</button>
+                                <button class="btn" onclick="applyEventFilters()" style="padding: 6px 12px; font-size: 13px;">Apply Filters</button>
+                            </div>
+                        </details>
                     </div>
 
                     <!-- Events Display -->
@@ -6920,10 +6977,109 @@
                 }
 
                 const data = await response.json();
+
+                // Apply client-side filters
+                data.events = applyClientSideFilters(data.events || []);
+
                 renderSessionEvents(data);
             } catch (error) {
                 content.innerHTML = `<div style="text-align: center; padding: 40px; color: #dc3545;">Error loading events: ${error.message}</div>`;
             }
+        }
+
+        // Global variable to track filtered session ID
+        let filteredSessionID = null;
+
+        function applyEventFilters() {
+            loadSessionEvents();
+        }
+
+        function clearAllEventFilters() {
+            // Clear all filter inputs
+            document.getElementById('filterEventType').value = '';
+            document.getElementById('filterAuthMethod').value = '';
+            document.getElementById('filterSessionType').value = '';
+            document.getElementById('filterDurationOp').value = '';
+            document.getElementById('filterDurationValue').value = '';
+            document.getElementById('filterIPAddress').value = '';
+            document.getElementById('filterUserAgent').value = '';
+            filteredSessionID = null;
+
+            // Reload events
+            loadSessionEvents();
+        }
+
+        function applyClientSideFilters(events) {
+            let filtered = events;
+
+            // Filter by event type
+            const eventType = document.getElementById('filterEventType').value;
+            if (eventType) {
+                filtered = filtered.filter(e => e.event_type === eventType);
+            }
+
+            // Filter by auth method
+            const authMethod = document.getElementById('filterAuthMethod').value;
+            if (authMethod) {
+                const authMap = {
+                    'regular': '',
+                    'password': 'password',
+                    'bypassed': 'ip_bypass'
+                };
+                const targetAuth = authMap[authMethod];
+                filtered = filtered.filter(e => e.auth_method === targetAuth);
+            }
+
+            // Filter by session type
+            const sessionType = document.getElementById('filterSessionType').value;
+            if (sessionType) {
+                filtered = filtered.filter(e => {
+                    return e.session_types && e.session_types.includes(sessionType);
+                });
+            }
+
+            // Filter by duration
+            const durationOp = document.getElementById('filterDurationOp').value;
+            const durationValue = parseFloat(document.getElementById('filterDurationValue').value);
+            if (durationOp && !isNaN(durationValue)) {
+                filtered = filtered.filter(e => {
+                    // Only apply to session_end events
+                    if (e.event_type !== 'session_end' || e.duration_seconds === null || e.duration_seconds === undefined) {
+                        return durationOp === 'gt'; // For 'greater than', exclude start events; for 'less than', include them
+                    }
+                    if (durationOp === 'lt') {
+                        return e.duration_seconds < durationValue;
+                    } else if (durationOp === 'gt') {
+                        return e.duration_seconds > durationValue;
+                    }
+                    return true;
+                });
+            }
+
+            // Filter by IP address (partial match)
+            const ipFilter = document.getElementById('filterIPAddress').value.trim().toLowerCase();
+            if (ipFilter) {
+                filtered = filtered.filter(e => {
+                    const ip = (e.client_ip || '').toLowerCase();
+                    return ip.includes(ipFilter);
+                });
+            }
+
+            // Filter by user agent (partial match, case-insensitive)
+            const uaFilter = document.getElementById('filterUserAgent').value.trim().toLowerCase();
+            if (uaFilter) {
+                filtered = filtered.filter(e => {
+                    const ua = (e.user_agent || '').toLowerCase();
+                    return ua.includes(uaFilter);
+                });
+            }
+
+            // Filter by session ID if set
+            if (filteredSessionID) {
+                filtered = filtered.filter(e => e.user_session_id === filteredSessionID);
+            }
+
+            return filtered;
         }
 
         function renderSessionEvents(data) {
@@ -6941,11 +7097,26 @@
             const startCount = events.filter(e => e.event_type === 'session_start').length;
             const endCount = events.filter(e => e.event_type === 'session_end').length;
 
+            // Count unique sessions
+            const uniqueSessions = new Set(events.map(e => e.user_session_id)).size;
+
             let html = `
-                <div style="margin-bottom: 15px; padding: 15px; background: #e3f2fd; border-radius: 5px;">
-                    <strong>Summary:</strong> ${events.length} total events (${startCount} starts, ${endCount} ends)
-                </div>
+                <div style="margin-bottom: 15px; padding: 15px; background: #e3f2fd; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong>Summary:</strong> ${events.length} total events (${startCount} starts, ${endCount} ends) from ${uniqueSessions} unique session(s)
+                    </div>
             `;
+
+            // Add clear filter button if a session is filtered
+            if (filteredSessionID) {
+                html += `
+                    <button class="btn btn-secondary" onclick="clearSessionFilter()" style="padding: 6px 12px; font-size: 12px;">
+                        ✕ Clear Filter
+                    </button>
+                `;
+            }
+
+            html += `</div>`;
 
             // Create events table
             html += `
@@ -6954,6 +7125,7 @@
                         <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
                             <th style="padding: 10px; text-align: left;">Timestamp</th>
                             <th style="padding: 10px; text-align: center;">Event</th>
+                            <th style="padding: 10px; text-align: center;">Session</th>
                             <th style="padding: 10px; text-align: left;">IP Address</th>
                             <th style="padding: 10px; text-align: left;">User Agent</th>
                             <th style="padding: 10px; text-align: center;">Auth</th>
@@ -7006,11 +7178,24 @@
                 const userAgent = event.user_agent || 'N/A';
                 const userAgentShort = userAgent.length > 50 ? userAgent.substring(0, 47) + '...' : userAgent;
 
+                // Create clickable session indicator (colored dot)
+                const sessionID = event.user_session_id || '';
+                const isFiltered = filteredSessionID === sessionID;
+                const sessionColor = isFiltered ? '#667eea' : '#999';
+                const sessionTitle = isFiltered ? 'Filtered - click to clear' : 'Click to filter this session';
+
                 html += `
-                    <tr style="border-bottom: 1px solid #dee2e6;">
+                    <tr style="border-bottom: 1px solid #dee2e6; ${isFiltered ? 'background: #f0f4ff;' : ''}">
                         <td style="padding: 10px; font-size: 12px; white-space: nowrap;">${timestamp}</td>
                         <td style="padding: 10px; text-align: center;">
                             <span style="color: ${eventColor}; font-weight: bold;">${eventIcon} ${eventText}</span>
+                        </td>
+                        <td style="padding: 10px; text-align: center;">
+                            <button onclick="filterBySession('${sessionID}')"
+                                    style="background: ${sessionColor}; color: white; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; font-size: 12px; font-weight: bold;"
+                                    title="${sessionTitle}">
+                                ${isFiltered ? '✓' : '●'}
+                            </button>
                         </td>
                         <td style="padding: 10px; font-family: monospace; font-size: 12px;">${event.client_ip || 'N/A'}</td>
                         <td style="padding: 10px; font-size: 11px; max-width: 250px; overflow: hidden; text-overflow: ellipsis;" title="${userAgent}">${userAgentShort}</td>
@@ -7027,6 +7212,22 @@
             `;
 
             content.innerHTML = html;
+        }
+
+        function filterBySession(sessionID) {
+            if (filteredSessionID === sessionID) {
+                // Already filtered, clear the filter
+                clearSessionFilter();
+            } else {
+                // Set new filter
+                filteredSessionID = sessionID;
+                loadSessionEvents();
+            }
+        }
+
+        function clearSessionFilter() {
+            filteredSessionID = null;
+            loadSessionEvents();
         }
 
         async function downloadSessionEvents() {

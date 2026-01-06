@@ -81,15 +81,8 @@ class ChatUI {
         
         const chatHTML = `
             <div id="chat-panel" class="chat-panel ${this.isExpanded ? 'expanded' : 'collapsed'}">
-                <!-- Chat header tab (always visible, vertical) -->
-                <div id="chat-header" class="chat-header" onclick="chatUI.togglePanel()">
-                    <span class="chat-header-text">💬 Chat</span>
-                    <span id="chat-unread" class="chat-unread" style="display:none;"></span>
-                    <span id="chat-toggle-icon" class="chat-toggle-icon">${this.isExpanded ? '◀' : '▶'}</span>
-                </div>
-                
-                <!-- Chat content (collapsible) -->
-                <div id="chat-content" class="chat-content" style="display:none;">
+                <!-- Chat content (slides out from right) -->
+                <div id="chat-content" class="chat-content" style="display:${this.isExpanded ? 'flex' : 'none'};">
                     <!-- Username setup (shown first) -->
                     <div id="chat-username-setup" class="chat-username-setup">
                         <input type="text" id="chat-username-input" 
@@ -124,6 +117,12 @@ class ChatUI {
                         <div id="chat-users-list" class="chat-users-list" style="display:none;"></div>
                     </div>
                 </div>
+                
+                <!-- Chat tab (always visible, on right edge) -->
+                <div id="chat-header" class="chat-header" onclick="chatUI.togglePanel()">
+                    <span>💬</span>
+                    <span id="chat-unread" class="chat-unread" style="display:none;"></span>
+                </div>
             </div>
         `;
 
@@ -154,17 +153,19 @@ class ChatUI {
         style.textContent = `
             .chat-panel {
                 position: fixed;
-                bottom: 30px;
-                right: 0px;
-                background: transparent;
+                top: 50%;
+                right: 0;
+                transform: translateY(-50%);
                 z-index: 900;
                 font-family: Arial, sans-serif;
                 font-size: 13px;
-                transition: width 0.2s ease;
+                display: flex;
+                flex-direction: row;
+                transition: all 0.3s ease;
             }
             
             .chat-panel.collapsed {
-                width: 150px;
+                width: 40px;
             }
             
             .chat-panel.expanded {
@@ -172,18 +173,22 @@ class ChatUI {
             }
             
             .chat-header {
-                height: 20px;
-                padding: 2px 8px;
+                width: 40px;
+                height: 100px;
+                padding: 8px 0;
                 background: rgba(50, 50, 50, 0.9);
                 color: #fff;
                 cursor: pointer;
                 user-select: none;
                 display: flex;
-                justify-content: space-between;
+                flex-direction: column;
+                justify-content: center;
                 align-items: center;
-                font-size: 12px;
+                font-size: 20px;
                 border: 1px solid rgba(100, 100, 100, 0.5);
-                border-radius: 3px 3px 0 0;
+                border-right: none;
+                border-radius: 8px 0 0 8px;
+                order: 2;
             }
             
             .chat-header:hover {
@@ -204,12 +209,13 @@ class ChatUI {
             }
             
             .chat-content {
-                max-height: 400px;
-                overflow: hidden;
+                width: 310px;
+                height: 500px;
                 background: rgba(40, 40, 40, 0.95);
                 border: 1px solid rgba(100, 100, 100, 0.5);
-                border-top: none;
-                border-radius: 0 0 3px 3px;
+                border-right: none;
+                border-radius: 8px 0 0 8px;
+                order: 1;
             }
             
             .chat-username-setup {
@@ -433,19 +439,16 @@ class ChatUI {
         this.isExpanded = !this.isExpanded;
         const panel = document.getElementById('chat-panel');
         const content = document.getElementById('chat-content');
-        const icon = document.getElementById('chat-toggle-icon');
         
         if (this.isExpanded) {
             panel.classList.remove('collapsed');
             panel.classList.add('expanded');
-            content.style.display = 'block';
-            icon.textContent = '▼';
+            content.style.display = 'flex';
             this.clearUnread();
         } else {
             panel.classList.remove('expanded');
             panel.classList.add('collapsed');
             content.style.display = 'none';
-            icon.textContent = '▲';
         }
         
         // Save state to localStorage

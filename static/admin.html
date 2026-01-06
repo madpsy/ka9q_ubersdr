@@ -7125,8 +7125,19 @@
             const startCount = events.filter(e => e.event_type === 'session_start').length;
             const endCount = events.filter(e => e.event_type === 'session_end').length;
 
-            // Count unique sessions
+            // Count unique sessions and track which have both start and end
             const uniqueSessions = new Set(events.map(e => e.user_session_id)).size;
+            const sessionEventTypes = {}; // Track which event types each session has
+            events.forEach(e => {
+                if (!sessionEventTypes[e.user_session_id]) {
+                    sessionEventTypes[e.user_session_id] = { start: false, end: false };
+                }
+                if (e.event_type === 'session_start') {
+                    sessionEventTypes[e.user_session_id].start = true;
+                } else if (e.event_type === 'session_end') {
+                    sessionEventTypes[e.user_session_id].end = true;
+                }
+            });
 
             let html = `
                 <div style="margin-bottom: 15px; padding: 15px; background: #e3f2fd; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
@@ -7209,8 +7220,36 @@
                 // Create clickable session indicator (colored dot)
                 const sessionID = event.user_session_id || '';
                 const isFiltered = filteredSessionID === sessionID;
-                const sessionColor = isFiltered ? '#667eea' : '#999';
-                const sessionTitle = isFiltered ? 'Filtered - click to clear' : 'Click to filter this session';
+
+                // Determine session state (start only, end only, or both)
+                const sessionState = sessionEventTypes[sessionID] || { start: false, end: false };
+                const hasBoth = sessionState.start && sessionState.end;
+                const hasStartOnly = sessionState.start && !sessionState.end;
+                const hasEndOnly = !sessionState.start && sessionState.end;
+
+                // Choose color and symbol based on state
+                let sessionColor, sessionSymbol, sessionTitle;
+                if (isFiltered) {
+                    sessionColor = '#667eea'; // Blue when filtered
+                    sessionSymbol = '✓';
+                    sessionTitle = 'Filtered - click to clear';
+                } else if (hasBoth) {
+                    sessionColor = '#28a745'; // Green for complete session (start + end)
+                    sessionSymbol = '●';
+                    sessionTitle = 'Complete session (start + end) - click to filter';
+                } else if (hasStartOnly) {
+                    sessionColor = '#ffc107'; // Yellow for ongoing session (start only)
+                    sessionSymbol = '◐';
+                    sessionTitle = 'Ongoing session (start only) - click to filter';
+                } else if (hasEndOnly) {
+                    sessionColor = '#dc3545'; // Red for orphaned end (no start in range)
+                    sessionSymbol = '◑';
+                    sessionTitle = 'Session end only (started before time range) - click to filter';
+                } else {
+                    sessionColor = '#999'; // Gray fallback
+                    sessionSymbol = '●';
+                    sessionTitle = 'Click to filter this session';
+                }
 
                 html += `
                     <tr style="border-bottom: 1px solid #dee2e6; ${isFiltered ? 'background: #f0f4ff;' : ''}">
@@ -7222,7 +7261,7 @@
                             <button onclick="filterBySession('${sessionID}')"
                                     style="background: ${sessionColor}; color: white; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; font-size: 12px; font-weight: bold;"
                                     title="${sessionTitle}">
-                                ${isFiltered ? '✓' : '●'}
+                                ${sessionSymbol}
                             </button>
                         </td>
                         <td style="padding: 10px; font-family: monospace; font-size: 12px;">${event.client_ip || 'N/A'}</td>

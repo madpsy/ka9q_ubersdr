@@ -2694,6 +2694,9 @@
                 // Load session activity chart on first call only
                 if (!sessionActivityChartLoaded) {
                     loadSessionActivityChart();
+                } else {
+                    // Refresh chart data on subsequent calls (throttled to 30 seconds)
+                    refreshSessionActivityChart();
                 }
 
                 // Fetch both sessions and system load in parallel
@@ -3041,13 +3044,9 @@
         // Session Activity Chart
         let sessionActivityChart = null;
         let sessionActivityChartLoaded = false;
+        let lastChartUpdate = 0;
 
         async function loadSessionActivityChart() {
-            // Only load once to prevent flickering on session refresh
-            if (sessionActivityChartLoaded) {
-                return;
-            }
-
             try {
                 // Calculate time range (last 24 hours)
                 const endTime = new Date();
@@ -3066,19 +3065,35 @@
                 }
 
                 const data = await response.json();
-                
+
                 // Show the chart container
                 const chartContainer = document.getElementById('sessionActivityChartContainer');
                 if (chartContainer) {
                     chartContainer.style.display = 'block';
                 }
-                
-                renderSessionActivityChart(data.metrics);
-                sessionActivityChartLoaded = true;
+
+                if (!sessionActivityChartLoaded) {
+                    // First load - create the chart
+                    renderSessionActivityChart(data.metrics);
+                    sessionActivityChartLoaded = true;
+                } else {
+                    // Update existing chart data
+                    updateSessionActivityChart(data.metrics);
+                }
+
+                lastChartUpdate = Date.now();
             } catch (error) {
                 console.error('Error loading session activity chart:', error);
                 // Keep chart hidden on error
             }
+        }
+
+        async function refreshSessionActivityChart() {
+            // Only refresh if chart is loaded and it's been at least 30 seconds since last update
+            if (!sessionActivityChartLoaded || (Date.now() - lastChartUpdate) < 30000) {
+                return;
+            }
+            await loadSessionActivityChart();
         }
 
         function renderSessionActivityChart(metrics) {
@@ -3199,6 +3214,37 @@
                     }
                 }
             });
+        }
+
+        function updateSessionActivityChart(metrics) {
+            if (!sessionActivityChart) return;
+
+            const timeline = metrics.timeline || [];
+
+            // Update chart data
+            sessionActivityChart.data.labels = timeline.map(entry => new Date(entry.timestamp));
+            
+            const regularData = timeline.map(entry => entry.auth_breakdown?.regular || 0);
+            const passwordData = timeline.map(entry => entry.auth_breakdown?.password || 0);
+            const bypassedData = timeline.map(entry => entry.auth_breakdown?.bypassed || 0);
+
+            // Get most recent values for labels
+            const latestRegular = regularData.length > 0 ? regularData[regularData.length - 1] : 0;
+            const latestPassword = passwordData.length > 0 ? passwordData[passwordData.length - 1] : 0;
+            const latestBypassed = bypassedData.length > 0 ? bypassedData[bypassedData.length - 1] : 0;
+
+            // Update datasets
+            sessionActivityChart.data.datasets[0].data = regularData;
+            sessionActivityChart.data.datasets[0].label = `Regular Users (${latestRegular})`;
+            
+            sessionActivityChart.data.datasets[1].data = passwordData;
+            sessionActivityChart.data.datasets[1].label = `Password Bypassed (${latestPassword})`;
+            
+            sessionActivityChart.data.datasets[2].data = bypassedData;
+            sessionActivityChart.data.datasets[2].label = `IP Bypassed (${latestBypassed})`;
+
+            // Update chart without animation
+            sessionActivityChart.update('none');
         }
 
         // Banned IPs management

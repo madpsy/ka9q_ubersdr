@@ -320,7 +320,7 @@ class ChatUI {
             }
 
             .chat-panel.expanded {
-                width: 690px;
+                width: 540px;
             }
             
             .chat-header {
@@ -360,7 +360,7 @@ class ChatUI {
             }
             
             .chat-content {
-                width: 650px;
+                width: 500px;
                 height: 500px;
                 background: rgba(40, 40, 40, 0.7);
                 border: 1px solid rgba(100, 100, 100, 0.6);

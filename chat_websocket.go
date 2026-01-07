@@ -250,6 +250,9 @@ func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]int
 		user.TX = tx
 	}
 
+	// Update user's last seen time (status updates count as activity)
+	user.LastSeen = now
+
 	cm.activeUsersMu.Unlock()
 
 	log.Printf("Chat: User '%s' updated status: frequency=%d Hz, mode=%s, bw_high=%d, bw_low=%d, zoom_bw=%.1f, cat=%t, tx=%t",
@@ -386,7 +389,7 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 	cm.addMessageToBuffer(chatMsg)
 
 	// Update user's last seen time
-	cm.updateUserActivity(sessionID)
+	cm.UpdateUserActivity(sessionID)
 
 	// Broadcast to all connected clients
 	cm.broadcastChatMessage(chatMsg)
@@ -597,8 +600,8 @@ func (cm *ChatManager) BroadcastActiveUsers() {
 	cm.wsHandler.broadcast(message)
 }
 
-// updateUserActivity updates the last seen time for a user
-func (cm *ChatManager) updateUserActivity(sessionID string) {
+// UpdateUserActivity updates the last seen time for a user (public for websocket handler)
+func (cm *ChatManager) UpdateUserActivity(sessionID string) {
 	cm.activeUsersMu.Lock()
 	defer cm.activeUsersMu.Unlock()
 

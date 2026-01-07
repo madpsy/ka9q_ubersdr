@@ -17,6 +17,7 @@ class ChatUI {
         this.usersRequestPending = false; // Track if we're waiting for users list response
         this.usersRequestTimer = null; // Timer for retry
         this.isAutoRejoining = false; // Track if we're in the middle of auto-rejoin
+        this.pendingMessage = null; // Store message that failed to send during auto-rejoin
         this.hasMentions = false; // Track if there are unread mentions
         this.isReceivingHistory = true; // Track if we're receiving initial message history
         this.tabCompletionIndex = -1; // Track current tab completion index
@@ -97,7 +98,7 @@ class ChatUI {
      */
     toggleSoundMute() {
         this.soundsMuted = !this.soundsMuted;
-        
+
         // Update button appearance
         const muteBtn = document.getElementById('chat-mute-btn');
         if (muteBtn) {
@@ -189,7 +190,7 @@ class ChatUI {
             if (this.chat && this.chat.isJoined()) {
                 // Always update our own user in the local list
                 this.updateOwnUserData({ frequency: data.frequency });
-                
+
                 // Always send to server - the server-side comparison will prevent loops
                 this.chat.updateFrequency(data.frequency);
             }
@@ -200,7 +201,7 @@ class ChatUI {
             if (this.chat && this.chat.isJoined()) {
                 // Always update our own user in the local list
                 this.updateOwnUserData({ mode: data.mode });
-                
+
                 // Always send to server - the server-side comparison will prevent loops
                 this.chat.updateMode(data.mode);
             }
@@ -211,7 +212,7 @@ class ChatUI {
             if (this.chat && this.chat.isJoined()) {
                 // Always update our own user in the local list
                 this.updateOwnUserData({ bw_low: data.low, bw_high: data.high });
-                
+
                 // Always send to server - the server-side comparison will prevent loops
                 this.chat.updateBandwidth(data.high, data.low);
             }
@@ -222,7 +223,7 @@ class ChatUI {
             if (this.chat && this.chat.isJoined()) {
                 // Always update our own user in the local list
                 this.updateOwnUserData({ zoom_bw: data.binBandwidth });
-                
+
                 // Always send to server - the server-side comparison will prevent loops
                 this.chat.debouncedSendFrequencyMode();
             }
@@ -357,7 +358,7 @@ class ChatUI {
         // Load saved state from localStorage
         const savedState = localStorage.getItem('ubersdr_chat_expanded');
         this.isExpanded = savedState === 'true';
-        
+
         const chatHTML = `
             <div id="chat-panel" class="chat-panel ${this.isExpanded ? 'expanded' : 'collapsed'}">
                 <!-- Chat content (slides out from right) -->
@@ -425,7 +426,7 @@ class ChatUI {
 
         // Inject CSS
         this.injectCSS();
-        
+
         // Inject HTML before audio buffer display
         const audioBuffer = document.getElementById('audio-buffer-display');
         if (audioBuffer && audioBuffer.parentNode) {
@@ -434,7 +435,7 @@ class ChatUI {
             // Fallback: append to body
             document.body.insertAdjacentHTML('beforeend', chatHTML);
         }
-        
+
         // Restore saved state
         const content = document.getElementById('chat-content');
         if (this.isExpanded) {
@@ -499,11 +500,11 @@ class ChatUI {
                 position: relative;
                 overflow: visible;
             }
-            
+
             .chat-header:hover {
                 background: rgba(70, 70, 70, 0.6);
             }
-            
+
             .chat-mention {
                 position: absolute;
                 top: 5px;
@@ -567,11 +568,11 @@ class ChatUI {
                 50% { transform: scale(1.3); background: #4a9eff; }
                 100% { transform: scale(1); }
             }
-            
+
             .chat-toggle-icon {
                 font-size: 12px;
             }
-            
+
             .chat-content {
                 width: 500px;
                 height: 500px;
@@ -610,7 +611,7 @@ class ChatUI {
                 color: #ddd;
                 font-size: 12px;
             }
-            
+
             .chat-message {
                 margin: 4px 0;
                 padding: 3px;
@@ -623,7 +624,7 @@ class ChatUI {
                 padding-left: 6px;
                 margin-left: -3px;
             }
-            
+
             .chat-message-username {
                 font-weight: bold;
                 color: #4a9eff;
@@ -633,22 +634,22 @@ class ChatUI {
             .chat-message-username.own-message {
                 color: #ff9f40;
             }
-            
+
             .chat-message-username:hover {
                 text-decoration: underline;
             }
-            
+
             .chat-message-system {
                 color: #999;
                 font-style: italic;
                 font-size: 11px;
             }
-            
+
             .chat-message-error {
                 color: #ff6b6b;
                 font-weight: bold;
             }
-            
+
             .chat-input-area {
                 padding: 8px;
                 background: #2a2a2a;
@@ -656,7 +657,7 @@ class ChatUI {
                 gap: 4px;
                 flex-shrink: 0;
             }
-            
+
             .chat-input {
                 width: 100%;
                 padding: 6px 8px;
@@ -743,7 +744,7 @@ class ChatUI {
                 background: #4a9eff;
                 color: #fff;
             }
-            
+
             .chat-btn {
                 padding: 6px 12px;
                 border: none;
@@ -752,16 +753,16 @@ class ChatUI {
                 font-size: 12px;
                 font-weight: bold;
             }
-            
+
             .chat-btn-primary {
                 background: #4a9eff;
                 color: #fff;
             }
-            
+
             .chat-btn-primary:hover {
                 background: #3a8eef;
             }
-            
+
             .chat-btn.chat-btn-danger {
                 background: #ff9800 !important;
                 color: #fff !important;
@@ -770,14 +771,14 @@ class ChatUI {
             .chat-btn.chat-btn-danger:hover {
                 background: #e68900 !important;
             }
-            
+
             .chat-error {
                 color: #ff6b6b;
                 font-size: 11px;
                 margin-top: 6px;
                 min-height: 16px;
             }
-            
+
             .chat-users-sidebar {
                 width: 150px;
                 display: flex;
@@ -831,7 +832,7 @@ class ChatUI {
             .chat-btn-danger {
                 flex: 1;
             }
-            
+
             .chat-user-item {
                 padding: 6px 4px;
                 margin-bottom: 6px;
@@ -844,12 +845,12 @@ class ChatUI {
             .chat-user-item:last-child {
                 border-bottom: none;
             }
-            
+
             .chat-user-muted {
                 opacity: 0.5;
                 text-decoration: line-through;
             }
-            
+
             .chat-sync-btn {
                 padding: 2px 4px !important;
                 font-size: 9px !important;
@@ -892,7 +893,7 @@ class ChatUI {
             if (value !== cleaned) {
                 e.target.value = cleaned;
             }
-            
+
             // Show/hide validation indicator and update button state
             if (cleaned.length === 0) {
                 // Empty - hide indicator
@@ -904,7 +905,7 @@ class ChatUI {
                 // Has content - show indicator
                 validationIndicator.style.display = 'block';
                 const isLengthValid = cleaned.length >= 1 && cleaned.length <= 15;
-                
+
                 // Check if username is already taken (case-insensitive)
                 const isTaken = this.chat.activeUsers.some(u =>
                     u.username.toLowerCase() === cleaned.toLowerCase()
@@ -1080,6 +1081,24 @@ class ChatUI {
             } else {
                 // Auto-rejoin succeeded - just log it
                 console.log('[ChatUI] Auto-rejoin successful as:', data.username);
+
+                // Send any pending message that failed before rejoin
+                if (this.pendingMessage) {
+                    console.log('[ChatUI] Sending pending message after auto-rejoin:', this.pendingMessage);
+                    const messageToSend = this.pendingMessage;
+                    this.pendingMessage = null; // Clear before sending to avoid loops
+
+                    // Send after a short delay to ensure join is fully processed
+                    setTimeout(() => {
+                        if (this.chat.sendMessage(messageToSend)) {
+                            // Message sent successfully - clear the input field
+                            const messageInput = document.getElementById('chat-message-input');
+                            if (messageInput) {
+                                messageInput.value = '';
+                            }
+                        }
+                    }, 100);
+                }
             }
 
             // Send initial frequency/mode/bandwidth on join (immediate, no debounce)
@@ -1187,6 +1206,14 @@ class ChatUI {
             // This handles WebSocket reconnections and server restarts gracefully
             if (error === 'username not set' && this.savedUsername && this.chat) {
                 console.log('[ChatUI] Server lost our session, automatically re-joining as:', this.savedUsername);
+
+                // Store any pending message from the input field
+                const messageInput = document.getElementById('chat-message-input');
+                if (messageInput && messageInput.value.trim()) {
+                    this.pendingMessage = messageInput.value.trim();
+                    console.log('[ChatUI] Stored pending message for retry after rejoin:', this.pendingMessage);
+                }
+
                 this.isAutoRejoining = true;
                 this.chat.setUsername(this.savedUsername);
                 // Request users after a short delay to allow join to complete
@@ -1313,7 +1340,7 @@ class ChatUI {
     sendMessage() {
         const input = document.getElementById('chat-message-input');
         const message = input.value.trim();
-        
+
         if (this.chat.sendMessage(message)) {
             input.value = '';
             input.focus();
@@ -1499,10 +1526,10 @@ class ChatUI {
 
         // Process message: escape HTML, then linkify URLs, then highlight mentions
         let messageHtml = this.escapeHtml(message);
-        
+
         // Convert URLs to clickable links
         messageHtml = this.linkifyUrls(messageHtml);
-        
+
         // Highlight @mentions in the message text
         if (this.chat && this.chat.username) {
             // Replace @username with highlighted version (case-insensitive)
@@ -1546,7 +1573,7 @@ class ChatUI {
      */
     showEmojiPicker() {
         const picker = document.getElementById('chat-emoji-picker');
-        
+
         // Common emojis
         const emojis = [
             '😊', '😂', '🤣', '😍', '😎', '🤔', '👍', '👎',
@@ -1658,7 +1685,7 @@ class ChatUI {
         console.log('[ChatUI] Received active users update:', data);
 
         document.getElementById('chat-user-count').textContent = data.count;
-        
+
         // Update the badge on the chat toggle button
         const badge = document.getElementById('chat-user-count-badge');
         if (badge) {
@@ -1670,9 +1697,9 @@ class ChatUI {
                 badge.style.display = 'none';
             }
         }
-        
+
         const usersList = document.getElementById('chat-users-list');
-        
+
         if (data.count === 0) {
             // Show different message based on whether user has joined
             if (this.chat && this.chat.isJoined()) {
@@ -1682,7 +1709,7 @@ class ChatUI {
             }
             return;
         }
-        
+
         // Get our own username to exclude from sync
         const ourUsername = this.chat.username;
 
@@ -1775,7 +1802,7 @@ class ChatUI {
                 ${syncBtn}
             </div>`;
         }).join('');
-        
+
         usersList.innerHTML = userItems;
     }
 
@@ -1812,14 +1839,14 @@ class ChatUI {
 
         const ourUsername = this.chat.username;
         const userIndex = this.chat.activeUsers.findIndex(u => u.username === ourUsername);
-        
+
         if (userIndex >= 0) {
             // Merge the updates with existing user data
             this.chat.activeUsers[userIndex] = {
                 ...this.chat.activeUsers[userIndex],
                 ...updates
             };
-            
+
             // Refresh the display
             this.updateActiveUsers({
                 users: this.chat.activeUsers,
@@ -1871,7 +1898,7 @@ class ChatUI {
         if (mentionIndicator) {
             mentionIndicator.style.display = 'none';
         }
-        
+
         // Save current time as last seen message time
         this.saveLastSeenMessageTime(Date.now());
     }
@@ -1902,7 +1929,7 @@ class ChatUI {
             // Sync with this user
             this.syncedUsername = username;
             this.addSystemMessage(`Now syncing with ${username}`);
-            
+
             // Immediately sync to their current settings if available
             const users = this.chat.activeUsers || [];
             const user = users.find(u => u.username === username);
@@ -1917,7 +1944,7 @@ class ChatUI {
             count: this.chat.activeUsers.length
         });
     }
-    
+
     /**
      * Sync our radio to a user's settings
      */
@@ -2070,7 +2097,7 @@ class ChatUI {
             bw_high: bwHigh,
             zoom_bw: zoomBW
         });
-        
+
         // Send the synced settings to the server so other users can see our changes
         // Only send if our values actually changed (prevents sync loops)
         if (this.chat && this.chat.isJoined()) {
@@ -2081,7 +2108,7 @@ class ChatUI {
                 oldBwLow !== bwLow ||
                 oldZoomBW !== zoomBW
             );
-            
+
             if (changed) {
                 console.log('[ChatUI] Settings changed, sending synced settings to server');
                 this.chat.setFrequencyAndMode(userData.frequency, userData.mode, bwHigh, bwLow, zoomBW);

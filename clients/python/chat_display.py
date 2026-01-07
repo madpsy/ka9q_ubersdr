@@ -32,18 +32,21 @@ class ChatDisplay:
         self.radio_gui = radio_gui
         self.on_close_callback = on_close
         self.username = None
+        self.saved_username = None  # For auto-rejoin
+        self.is_auto_rejoining = False  # Track if we're auto-rejoining
+        self.pending_message = None  # Store message that failed during auto-rejoin
         self.muted_users = set()
         self.active_users = []
         self.synced_username = None
         self.is_syncing = False
         self.listbox_to_user = {}  # Map listbox index to user data
         self.emoji_popup = None  # Emoji picker popup window
-        
+
         # @ mention autocomplete
         self.mention_matches = []  # List of matching usernames
         self.mention_index = 0  # Current selection index
         self.mention_listbox = None  # Suggestion listbox widget
-        
+
         # Debouncing for radio status updates (100ms like JavaScript frontend)
         self.debounce_timer = None
         self.debounce_delay_ms = 100
@@ -71,7 +74,7 @@ class ChatDisplay:
         """Get appropriate emoji font for the current platform"""
         import platform
         system = platform.system()
-        
+
         if system == 'Windows':
             return ('Segoe UI Emoji', 16)
         elif system == 'Darwin':  # macOS
@@ -80,12 +83,12 @@ class ChatDisplay:
             # Try common Linux emoji fonts
             import tkinter.font as tkfont
             available_fonts = tkfont.families()
-            
+
             # Preferred fonts in order
             for font in ['Noto Color Emoji', 'Symbola', 'DejaVu Sans']:
                 if font in available_fonts:
                     return (font, 16)
-            
+
             # Fallback to default
             return ('TkDefaultFont', 16)
 
@@ -499,6 +502,7 @@ class ChatDisplay:
                 'username': username
             })
             self.username = username
+            self.saved_username = username  # Save for auto-rejoin
 
             # Switch UI to message input
             self.username_frame.grid_remove()
@@ -574,7 +578,7 @@ class ChatDisplay:
             mode = self.radio_gui.mode_var.get().lower()
             bw_low = int(self.radio_gui.bw_low_var.get())
             bw_high = int(self.radio_gui.bw_high_var.get())
-            
+
             # Get zoom bandwidth from spectrum display
             zoom_bw = 0
             if self.radio_gui.spectrum and hasattr(self.radio_gui.spectrum, 'bin_bandwidth'):
@@ -648,7 +652,31 @@ class ChatDisplay:
             username = data.get('username', 'Unknown')
             if username == self.username:
                 # Confirmation of our join
-                pass
+                if self.is_auto_rejoining:
+                    # Auto-rejoin succeeded
+                    print(f"[Chat] Auto-rejoin successful as: {username}")
+                    self.is_auto_rejoining = False
+
+                    # Send any pending message that failed before rejoin
+                    if self.pending_message:
+                        print(f"[Chat] Sending pending message after auto-rejoin: {self.pending_message}")
+                        message_to_send = self.pending_message
+                        self.pending_message = None  # Clear before sending to avoid loops
+
+                        # Send after a short delay to ensure join is fully processed
+                        def send_pending():
+                            try:
+                                self.ws_manager.send_message({
+                                    'type': 'chat_message',
+                                    'message': message_to_send
+                                })
+                                # Clear the input field
+                                self.message_var.set('')
+                            except Exception as e:
+                                print(f"[Chat] Failed to send pending message: {e}")
+                                self.add_error_message(f"Failed to send message: {e}")
+
+                        self.window.after(100, send_pending)
             else:
                 self.add_system_message(f"{username} joined")
                 self.request_active_users()
@@ -673,6 +701,37 @@ class ChatDisplay:
 
         elif msg_type == 'chat_error':
             error = msg.get('error', 'Unknown error')
+
+            # If server says username not set but we have a saved username, auto-rejoin
+            if error == 'username not set' and self.saved_username:
+                print(f"[Chat] Server lost our session, automatically re-joining as: {self.saved_username}")
+
+                # Store any pending message from the input field
+                current_message = self.message_var.get().strip()
+                if current_message:
+                    self.pending_message = current_message
+                    print(f"[Chat] Stored pending message for retry after rejoin: {self.pending_message}")
+
+                self.is_auto_rejoining = True
+
+                # Send rejoin request
+                try:
+                    self.ws_manager.send_message({
+                        'type': 'chat_set_username',
+                        'username': self.saved_username
+                    })
+                    self.username = self.saved_username
+
+                    # Request users after a short delay
+                    self.window.after(200, self.request_active_users)
+                except Exception as e:
+                    print(f"[Chat] Auto-rejoin failed: {e}")
+                    self.is_auto_rejoining = False
+                    self.saved_username = None
+                    self.add_error_message(f"Auto-rejoin failed: {e}")
+
+                return  # Don't show error to user, we're handling it automatically
+
             self.add_error_message(error)
 
     def add_chat_message(self, username: str, message: str, timestamp: str, is_mention: bool = False):
@@ -976,9 +1035,9 @@ class ChatDisplay:
             # Debounce the send (100ms delay like JavaScript frontend)
             if self.debounce_timer:
                 self.window.after_cancel(self.debounce_timer)
-            
+
             self.debounce_timer = self.window.after(self.debounce_delay_ms, self._send_radio_status_debounced)
-    
+
     def _send_radio_status_debounced(self):
         """Internal method called after debounce delay"""
         self.debounce_timer = None
@@ -992,7 +1051,7 @@ class ChatDisplay:
             self.emoji_popup = None
         else:
             self.show_emoji_picker()
-    
+
     def show_emoji_picker(self):
         """Show emoji picker popup with common emojis (same as web UI)"""
         # Same emojis as web UI
@@ -1002,22 +1061,22 @@ class ChatDisplay:
             '👋', '🙏', '💪', '🤝', '👏', '🎵', '📻', '📡',
             '🌟', '💡', '⚡', '🌈', '☀️', '🌙', '⚙️', '🔧'
         ]
-        
+
         # Create popup window
         self.emoji_popup = tk.Toplevel(self.window)
         self.emoji_popup.title("Select Emoji")
         self.emoji_popup.transient(self.window)
         self.emoji_popup.resizable(False, False)
-        
+
         # Position near emoji button
         x = self.emoji_btn.winfo_rootx()
         y = self.emoji_btn.winfo_rooty() - 200  # Above the button
         self.emoji_popup.geometry(f"+{x}+{y}")
-        
+
         # Create grid of emoji buttons (8 columns)
         frame = ttk.Frame(self.emoji_popup, padding="5")
         frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
+
         for i, emoji in enumerate(emojis):
             row = i // 8
             col = i % 8
@@ -1035,27 +1094,27 @@ class ChatDisplay:
                 cursor='hand2'
             )
             btn.grid(row=row, column=col, padx=2, pady=2)
-        
+
         # Close on focus out
         self.emoji_popup.bind('<FocusOut>', lambda e: self.close_emoji_picker())
-        
+
         # Close on Escape
         self.emoji_popup.bind('<Escape>', lambda e: self.close_emoji_picker())
-    
+
     def insert_emoji(self, emoji: str):
         """Insert emoji at cursor position in message entry"""
         # Get current cursor position
         cursor_pos = self.message_entry.index(tk.INSERT)
-        
+
         # Insert emoji at cursor
         self.message_entry.insert(cursor_pos, emoji)
-        
+
         # Focus back to message entry
         self.message_entry.focus()
-        
+
         # Close picker
         self.close_emoji_picker()
-    
+
     def close_emoji_picker(self):
         """Close emoji picker popup"""
         if self.emoji_popup and self.emoji_popup.winfo_exists():
@@ -1067,16 +1126,16 @@ class ChatDisplay:
         # Ignore special keys
         if event.keysym in ['Up', 'Down', 'Left', 'Right', 'Tab', 'Escape', 'Return']:
             return
-        
+
         self.update_mention_suggestions()
-    
+
     def on_message_tab(self, event):
         """Handle Tab key for @ mention completion"""
         if self.mention_matches:
             self.complete_mention()
             return 'break'  # Prevent default Tab behavior
         return None
-    
+
     def on_message_up(self, event):
         """Handle Up arrow to navigate mention suggestions"""
         if self.mention_matches and self.mention_listbox:
@@ -1086,7 +1145,7 @@ class ChatDisplay:
             self.mention_listbox.see(self.mention_index)
             return 'break'  # Prevent cursor movement
         return None
-    
+
     def on_message_down(self, event):
         """Handle Down arrow to navigate mention suggestions"""
         if self.mention_matches and self.mention_listbox:
@@ -1096,49 +1155,49 @@ class ChatDisplay:
             self.mention_listbox.see(self.mention_index)
             return 'break'  # Prevent cursor movement
         return None
-    
+
     def on_message_escape(self, event):
         """Handle Escape key to hide mention suggestions"""
         if self.mention_matches:
             self.hide_mention_suggestions()
             return 'break'
         return None
-    
+
     def update_mention_suggestions(self):
         """Update @ mention suggestions based on current input"""
         text = self.message_var.get()
         cursor_pos = self.message_entry.index(tk.INSERT)
-        
+
         # Find @ mention before cursor
         text_before_cursor = text[:cursor_pos]
-        
+
         # Match @ followed by word characters
         import re
         match = re.search(r'@(\w*)$', text_before_cursor)
-        
+
         if not match:
             self.hide_mention_suggestions()
             return
-        
+
         partial_username = match.group(1).lower()
-        
+
         # Find matching usernames from active users
         self.mention_matches = [
             user['username'] for user in self.active_users
             if user['username'].lower().startswith(partial_username) and user['username'] != self.username
         ]
         self.mention_matches.sort()
-        
+
         if not self.mention_matches:
             self.hide_mention_suggestions()
             return
-        
+
         # Reset index if needed
         if self.mention_index >= len(self.mention_matches):
             self.mention_index = 0
-        
+
         self.show_mention_suggestions()
-    
+
     def show_mention_suggestions(self):
         """Show @ mention suggestions listbox"""
         if not self.mention_listbox:
@@ -1155,30 +1214,30 @@ class ChatDisplay:
                 borderwidth=1
             )
             self.mention_listbox.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(2, 0))
-            
+
             # Bind click to complete mention
             self.mention_listbox.bind('<Button-1>', lambda e: self.on_mention_click())
-        
+
         # Update listbox content
         self.mention_listbox.delete(0, tk.END)
         for username in self.mention_matches:
             self.mention_listbox.insert(tk.END, username)
-        
+
         # Select current index
         if self.mention_matches:
             self.mention_listbox.selection_set(self.mention_index)
             self.mention_listbox.see(self.mention_index)
-        
+
         # Update height
         self.mention_listbox.config(height=min(5, len(self.mention_matches)))
-    
+
     def hide_mention_suggestions(self):
         """Hide @ mention suggestions listbox"""
         if self.mention_listbox:
             self.mention_listbox.grid_remove()
         self.mention_matches = []
         self.mention_index = 0
-    
+
     def on_mention_click(self):
         """Handle click on mention suggestion"""
         if self.mention_listbox:
@@ -1186,40 +1245,40 @@ class ChatDisplay:
             if selection:
                 self.mention_index = selection[0]
                 self.complete_mention()
-    
+
     def complete_mention(self):
         """Complete the @ mention with selected username"""
         if not self.mention_matches or self.mention_index >= len(self.mention_matches):
             return
-        
+
         text = self.message_var.get()
         cursor_pos = self.message_entry.index(tk.INSERT)
-        
+
         # Find @ mention before cursor
         text_before_cursor = text[:cursor_pos]
         import re
         match = re.search(r'@(\w*)$', text_before_cursor)
-        
+
         if not match:
             return
-        
+
         at_position = match.start()
         completed_username = self.mention_matches[self.mention_index]
         text_after_cursor = text[cursor_pos:]
-        
+
         # Build new text with completed username
         new_text = text[:at_position] + '@' + completed_username + ' ' + text_after_cursor
-        
+
         # Update entry
         self.message_var.set(new_text)
-        
+
         # Set cursor after completed username and space
         new_cursor_pos = at_position + len(completed_username) + 2  # +2 for @ and space
         self.message_entry.icursor(new_cursor_pos)
-        
+
         # Hide suggestions
         self.hide_mention_suggestions()
-        
+
         # Focus back to entry
         self.message_entry.focus()
 

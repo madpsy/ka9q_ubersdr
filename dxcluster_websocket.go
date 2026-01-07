@@ -260,6 +260,12 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessi
 	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	conn.SetPongHandler(func(string) error {
 		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
+		// Update chat activity if user is in chat (pong counts as activity)
+		if h.chatManager != nil {
+			h.chatManager.UpdateUserActivity(userSessionID)
+		}
+
 		return nil
 	})
 
@@ -318,6 +324,9 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessi
 				case "chat_set_username", "chat_message", "chat_set_frequency_mode", "chat_request_users", "chat_leave":
 					// Handle chat messages
 					if h.chatManager != nil {
+						// Update activity for ANY chat-related message (keeps user alive)
+						h.chatManager.UpdateUserActivity(userSessionID)
+
 						if err := h.chatManager.HandleChatMessage(userSessionID, conn, msg); err != nil {
 							// Send error back to client
 							h.sendMessage(conn, map[string]interface{}{

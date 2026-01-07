@@ -851,6 +851,14 @@ class ChatUI {
             content.style.display = 'flex';
             this.clearUnread();
 
+            // Scroll to bottom of messages after a short delay to ensure content is rendered
+            setTimeout(() => {
+                const messagesContainer = document.getElementById('chat-messages');
+                if (messagesContainer) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            }, 50);
+
             // Request active users when opening the panel (even if not logged in)
             // This allows users to see who's online before joining
             this.requestActiveUsersWithRetry();

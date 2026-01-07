@@ -50,10 +50,8 @@ class ChatUI {
                 // Always update our own user in the local list
                 this.updateOwnUserData({ frequency: data.frequency });
                 
-                // Only send to server if not syncing (to avoid loops)
-                if (!this.isSyncing) {
-                    this.chat.updateFrequency(data.frequency);
-                }
+                // Always send to server - the server-side comparison will prevent loops
+                this.chat.updateFrequency(data.frequency);
             }
         };
 
@@ -63,10 +61,8 @@ class ChatUI {
                 // Always update our own user in the local list
                 this.updateOwnUserData({ mode: data.mode });
                 
-                // Only send to server if not syncing (to avoid loops)
-                if (!this.isSyncing) {
-                    this.chat.updateMode(data.mode);
-                }
+                // Always send to server - the server-side comparison will prevent loops
+                this.chat.updateMode(data.mode);
             }
         };
 
@@ -76,10 +72,8 @@ class ChatUI {
                 // Always update our own user in the local list
                 this.updateOwnUserData({ bw_low: data.low, bw_high: data.high });
                 
-                // Only send to server if not syncing (to avoid loops)
-                if (!this.isSyncing) {
-                    this.chat.updateBandwidth(data.high, data.low);
-                }
+                // Always send to server - the server-side comparison will prevent loops
+                this.chat.updateBandwidth(data.high, data.low);
             }
         };
 
@@ -89,11 +83,8 @@ class ChatUI {
                 // Always update our own user in the local list
                 this.updateOwnUserData({ zoom_bw: data.binBandwidth });
                 
-                // Only send to server if not syncing (to avoid loops)
-                if (!this.isSyncing) {
-                    // Update zoom_bw by sending full frequency/mode update
-                    this.chat.debouncedSendFrequencyMode();
-                }
+                // Always send to server - the server-side comparison will prevent loops
+                this.chat.debouncedSendFrequencyMode();
             }
         };
 
@@ -1165,40 +1156,39 @@ class ChatUI {
             autoTune();
         }
 
-        // Clear syncing flag after a longer delay to allow all updates to complete
-        // This prevents bandwidth_changed events from overwriting our synced values
+        // Update our own user data in the local list after sync completes
+        this.updateOwnUserData({
+            frequency: userData.frequency,
+            mode: userData.mode,
+            bw_low: bwLow,
+            bw_high: bwHigh,
+            zoom_bw: zoomBW
+        });
+        
+        // Send the synced settings to the server so other users can see our changes
+        // Only send if our values actually changed (prevents sync loops)
+        if (this.chat && this.chat.isJoined()) {
+            const changed = (
+                oldFrequency !== userData.frequency ||
+                oldMode !== userData.mode ||
+                oldBwHigh !== bwHigh ||
+                oldBwLow !== bwLow ||
+                oldZoomBW !== zoomBW
+            );
+            
+            if (changed) {
+                console.log('[ChatUI] Settings changed, sending synced settings to server');
+                this.chat.setFrequencyAndMode(userData.frequency, userData.mode, bwHigh, bwLow, zoomBW);
+            } else {
+                console.log('[ChatUI] Settings unchanged, skipping server update');
+            }
+        }
+
+        // Clear syncing flag after a short delay to allow radio updates to settle
         setTimeout(() => {
             this.isSyncing = false;
-            console.log('[ChatUI] Sync complete, re-enabling chat updates');
-            
-            // Update our own user data in the local list after sync completes
-            this.updateOwnUserData({
-                frequency: userData.frequency,
-                mode: userData.mode,
-                bw_low: bwLow,
-                bw_high: bwHigh,
-                zoom_bw: zoomBW
-            });
-            
-            // Send the synced settings to the server so other users can see our changes
-            // Only send if our values actually changed (prevents sync loops)
-            if (this.chat && this.chat.isJoined()) {
-                const changed = (
-                    oldFrequency !== userData.frequency ||
-                    oldMode !== userData.mode ||
-                    oldBwHigh !== bwHigh ||
-                    oldBwLow !== bwLow ||
-                    oldZoomBW !== zoomBW
-                );
-                
-                if (changed) {
-                    console.log('[ChatUI] Settings changed, sending synced settings to server');
-                    this.chat.setFrequencyAndMode(userData.frequency, userData.mode, bwHigh, bwLow, zoomBW);
-                } else {
-                    console.log('[ChatUI] Settings unchanged, skipping server update');
-                }
-            }
-        }, 2000);
+            console.log('[ChatUI] Sync complete, re-enabling sync triggers');
+        }, 500);
 
         // Removed "Synced to..." message per user request
     }

@@ -533,9 +533,9 @@ class ChatUI {
             .chat-sync-btn {
                 padding: 2px 4px;
                 font-size: 9px;
-                border: 1px solid #555;
-                background: #333;
-                color: #aaa;
+                border: 1px solid #4a9eff;
+                background: transparent;
+                color: #4a9eff;
                 border-radius: 3px;
                 cursor: pointer;
                 user-select: none;
@@ -544,8 +544,7 @@ class ChatUI {
             }
 
             .chat-sync-btn:hover {
-                background: #444;
-                border-color: #666;
+                background: rgba(74, 158, 255, 0.1);
             }
 
             .chat-sync-btn.active {

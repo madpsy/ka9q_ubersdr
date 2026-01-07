@@ -19,6 +19,8 @@ class ChatUI {
         this.isAutoRejoining = false; // Track if we're in the middle of auto-rejoin
         this.hasMentions = false; // Track if there are unread mentions
         this.isReceivingHistory = true; // Track if we're receiving initial message history
+        this.tabCompletionIndex = -1; // Track current tab completion index
+        this.tabCompletionMatches = []; // Store matching usernames for tab completion
 
         // Load saved username from localStorage
         this.loadSavedUsername();
@@ -249,10 +251,13 @@ class ChatUI {
 
                             <!-- Message input (shown when logged in) -->
                             <div id="chat-message-input-area" class="chat-input-area" style="display:none;">
-                                <input type="text" id="chat-message-input"
-                                       placeholder="Type message..."
-                                       maxlength="250"
-                                       class="chat-input">
+                                <div style="position: relative; flex: 1;">
+                                    <input type="text" id="chat-message-input"
+                                           placeholder="Type message..."
+                                           maxlength="250"
+                                           class="chat-input">
+                                    <div id="chat-mention-suggestions" class="chat-mention-suggestions" style="display:none;"></div>
+                                </div>
                                 <button id="chat-send-btn" class="chat-btn chat-btn-primary">Send</button>
                             </div>
                         </div>
@@ -356,7 +361,8 @@ class ChatUI {
             .chat-mention {
                 position: absolute;
                 top: 5px;
-                right: 5px;
+                left: 50%;
+                transform: translateX(-50%);
                 font-size: 16px;
                 animation: pulse 1s ease-in-out infinite;
             }
@@ -473,10 +479,37 @@ class ChatUI {
                 border-radius: 4px;
                 font-size: 12px;
             }
-            
+
             .chat-input:focus {
                 outline: none;
                 border-color: #4a9eff;
+            }
+
+            .chat-mention-suggestions {
+                position: absolute;
+                bottom: 100%;
+                left: 0;
+                right: 0;
+                background: #2a2a2a;
+                border: 1px solid #4a9eff;
+                border-radius: 4px 4px 0 0;
+                max-height: 150px;
+                overflow-y: auto;
+                z-index: 1000;
+                margin-bottom: 2px;
+            }
+
+            .chat-mention-suggestion-item {
+                padding: 6px 8px;
+                cursor: pointer;
+                color: #ddd;
+                font-size: 12px;
+            }
+
+            .chat-mention-suggestion-item:hover,
+            .chat-mention-suggestion-item.selected {
+                background: #4a9eff;
+                color: #fff;
             }
             
             .chat-btn {
@@ -672,6 +705,11 @@ class ChatUI {
             this.sendMessage();
         });
 
+        // Message input - show mention suggestions as they type
+        document.getElementById('chat-message-input').addEventListener('input', (e) => {
+            this.updateMentionSuggestions();
+        });
+
         // Leave button
         document.getElementById('chat-leave-btn').addEventListener('click', () => {
             this.leaveChat();
@@ -685,15 +723,43 @@ class ChatUI {
             }
         });
 
-        // Enter key in message input
+        // Enter key and tab completion in message input
         document.getElementById('chat-message-input').addEventListener('keydown', (e) => {
+            const suggestionsDiv = document.getElementById('chat-mention-suggestions');
+            const hasSuggestions = suggestionsDiv.style.display !== 'none';
+
             if (e.key === 'Enter') {
                 e.preventDefault();
-                this.sendMessage();
+                // If suggestions are showing, complete with selected suggestion
+                if (hasSuggestions && this.tabCompletionIndex >= 0) {
+                    this.completeMention();
+                } else {
+                    this.sendMessage();
+                }
+                // Reset tab completion
+                this.tabCompletionIndex = -1;
+                this.tabCompletionMatches = [];
+                this.hideMentionSuggestions();
                 // Refocus after a short delay to ensure message is sent first
                 setTimeout(() => {
                     document.getElementById('chat-message-input').focus();
                 }, 10);
+            } else if (e.key === 'Tab') {
+                e.preventDefault();
+                if (hasSuggestions && this.tabCompletionMatches.length > 0) {
+                    this.completeMention();
+                }
+            } else if (e.key === 'ArrowDown' && hasSuggestions) {
+                e.preventDefault();
+                this.tabCompletionIndex = Math.min(this.tabCompletionIndex + 1, this.tabCompletionMatches.length - 1);
+                this.updateMentionSuggestions();
+            } else if (e.key === 'ArrowUp' && hasSuggestions) {
+                e.preventDefault();
+                this.tabCompletionIndex = Math.max(this.tabCompletionIndex - 1, 0);
+                this.updateMentionSuggestions();
+            } else if (e.key === 'Escape' && hasSuggestions) {
+                e.preventDefault();
+                this.hideMentionSuggestions();
             }
         });
     }
@@ -944,6 +1010,114 @@ class ChatUI {
             input.value = '';
             input.focus();
         }
+    }
+
+    /**
+     * Update mention suggestions dropdown as user types
+     */
+    updateMentionSuggestions() {
+        const input = document.getElementById('chat-message-input');
+        const text = input.value;
+        const cursorPos = input.selectionStart;
+
+        // Find the word before the cursor that starts with @
+        const textBeforeCursor = text.substring(0, cursorPos);
+        const match = textBeforeCursor.match(/@(\w*)$/);
+
+        if (!match) {
+            this.hideMentionSuggestions();
+            return;
+        }
+
+        const partialUsername = match[1].toLowerCase();
+
+        // Find matching usernames
+        this.tabCompletionMatches = this.chat.activeUsers
+            .map(u => u.username)
+            .filter(username => username.toLowerCase().startsWith(partialUsername))
+            .sort();
+
+        if (this.tabCompletionMatches.length === 0) {
+            this.hideMentionSuggestions();
+            return;
+        }
+
+        // Reset index if matches changed
+        if (this.tabCompletionIndex >= this.tabCompletionMatches.length) {
+            this.tabCompletionIndex = 0;
+        } else if (this.tabCompletionIndex < 0) {
+            this.tabCompletionIndex = 0;
+        }
+
+        // Show suggestions
+        this.showMentionSuggestions();
+    }
+
+    /**
+     * Show mention suggestions dropdown
+     */
+    showMentionSuggestions() {
+        const suggestionsDiv = document.getElementById('chat-mention-suggestions');
+        suggestionsDiv.innerHTML = '';
+
+        this.tabCompletionMatches.forEach((username, index) => {
+            const item = document.createElement('div');
+            item.className = 'chat-mention-suggestion-item';
+            if (index === this.tabCompletionIndex) {
+                item.classList.add('selected');
+            }
+            item.textContent = '@' + username;
+            item.onclick = () => {
+                this.tabCompletionIndex = index;
+                this.completeMention();
+            };
+            suggestionsDiv.appendChild(item);
+        });
+
+        suggestionsDiv.style.display = 'block';
+    }
+
+    /**
+     * Hide mention suggestions dropdown
+     */
+    hideMentionSuggestions() {
+        const suggestionsDiv = document.getElementById('chat-mention-suggestions');
+        suggestionsDiv.style.display = 'none';
+        this.tabCompletionIndex = -1;
+        this.tabCompletionMatches = [];
+    }
+
+    /**
+     * Complete the mention with the selected username
+     */
+    completeMention() {
+        if (this.tabCompletionMatches.length === 0 || this.tabCompletionIndex < 0) {
+            return;
+        }
+
+        const input = document.getElementById('chat-message-input');
+        const text = input.value;
+        const cursorPos = input.selectionStart;
+
+        // Find the @ mention before cursor
+        const textBeforeCursor = text.substring(0, cursorPos);
+        const match = textBeforeCursor.match(/@(\w*)$/);
+
+        if (!match) {
+            return;
+        }
+
+        const atPosition = match.index;
+        const completedUsername = this.tabCompletionMatches[this.tabCompletionIndex];
+        const textAfterCursor = text.substring(cursorPos);
+        const newText = text.substring(0, atPosition) + '@' + completedUsername + ' ' + textAfterCursor;
+
+        input.value = newText;
+        // Set cursor position after the completed username and space
+        const newCursorPos = atPosition + completedUsername.length + 2; // +2 for @ and space
+        input.setSelectionRange(newCursorPos, newCursorPos);
+
+        this.hideMentionSuggestions();
     }
 
     /**

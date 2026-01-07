@@ -753,18 +753,22 @@ class ChatUI {
         this.isExpanded = !this.isExpanded;
         const panel = document.getElementById('chat-panel');
         const content = document.getElementById('chat-content');
-        
+
         if (this.isExpanded) {
             panel.classList.remove('collapsed');
             panel.classList.add('expanded');
             content.style.display = 'flex';
             this.clearUnread();
+
+            // Request active users when opening the panel (even if not logged in)
+            // This allows users to see who's online before joining
+            this.chat.requestActiveUsers();
         } else {
             panel.classList.remove('expanded');
             panel.classList.add('collapsed');
             content.style.display = 'none';
         }
-        
+
         // Save state to localStorage
         localStorage.setItem('ubersdr_chat_expanded', this.isExpanded.toString());
     }

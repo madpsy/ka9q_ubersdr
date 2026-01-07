@@ -232,7 +232,7 @@ class ChatUI {
                             <div id="chat-username-input-area" class="chat-input-area">
                                 <div style="position: relative; flex: 1;">
                                     <input type="text" id="chat-username-input"
-                                           placeholder="Enter username to join chat..."
+                                           placeholder="Enter username..."
                                            maxlength="15"
                                            pattern="[A-Za-z0-9]+"
                                            class="chat-input"

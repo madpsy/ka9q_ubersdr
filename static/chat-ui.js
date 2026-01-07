@@ -473,7 +473,7 @@ class ChatUI {
             }
             
             .chat-input {
-                flex: 1;
+                width: 100%;
                 padding: 6px 8px;
                 background: #1a1a1a;
                 border: 1px solid #555;

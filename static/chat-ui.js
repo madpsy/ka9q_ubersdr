@@ -1715,12 +1715,13 @@ class ChatUI {
             let radioInfo = '';
             if (u.frequency) {
                 const freqMHz = (u.frequency / 1000000).toFixed(3);
+                const modeText = u.mode ? ` (${u.mode.toUpperCase()})` : '';
                 if (isOurUser) {
                     // Our own frequency - not clickable, bold
-                    radioInfo += `<span style="color:#888; font-size:10px; display:block; margin-bottom:2px; font-weight:bold;">${freqMHz} MHz</span>`;
+                    radioInfo += `<span style="color:#888; font-size:10px; display:block; margin-bottom:2px; font-weight:bold;">${freqMHz} MHz${modeText}</span>`;
                 } else {
                     // Other user's frequency - clickable to tune
-                    radioInfo += `<span style="color:#888; cursor:pointer; text-decoration:underline; font-size:10px; display:block; margin-bottom:2px;" onclick="event.stopPropagation(); chatUI.tuneToUser('${this.escapeHtml(u.username)}')" title="Click to tune to ${freqMHz} MHz">${freqMHz} MHz</span>`;
+                    radioInfo += `<span style="color:#888; cursor:pointer; text-decoration:underline; font-size:10px; display:block; margin-bottom:2px;" onclick="event.stopPropagation(); chatUI.tuneToUser('${this.escapeHtml(u.username)}')" title="Click to tune to ${freqMHz} MHz">${freqMHz} MHz${modeText}</span>`;
                 }
             }
 

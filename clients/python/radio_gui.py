@@ -117,6 +117,14 @@ except ImportError:
     USERS_AVAILABLE = False
     print("Warning: Users display not available (missing dependencies)")
 
+# Import chat display
+try:
+    from chat_display import create_chat_window
+    CHAT_AVAILABLE = True
+except ImportError:
+    CHAT_AVAILABLE = False
+    print("Warning: Chat display not available (missing dependencies)")
+
 # Import shared WebSocket manager
 try:
     from dxcluster_websocket import DXClusterWebSocket
@@ -372,6 +380,10 @@ class RadioGUI:
         # Users display (separate window)
         self.users_window = None
         self.users_display = None
+
+        # Chat display (separate window)
+        self.chat_window = None
+        self.chat_display = None
 
         # Create UI
         self.create_widgets()
@@ -1639,6 +1651,7 @@ class RadioGUI:
             self.spectrum.set_frequency_step_callback(self.on_spectrum_frequency_step)
             self.spectrum.set_mode_callback(self.on_spectrum_mode_change)
             self.spectrum.set_bandwidth_callback(self.on_spectrum_bandwidth_change)
+            self.spectrum.set_zoom_callback(self.on_spectrum_zoom_change)
 
             # Initialize spectrum with current bandwidth values
             try:
@@ -1716,6 +1729,14 @@ class RadioGUI:
                 self.users_btn.pack(side=tk.LEFT, padx=(0, 5))
             else:
                 self.users_btn = None
+
+            # Chat button (conditionally shown based on server capability)
+            if CHAT_AVAILABLE:
+                self.chat_btn = ttk.Button(button_frame, text="Chat", width=6,
+                                          command=self.open_chat_window)
+                # Don't pack yet - will be shown after connection if server supports it
+            else:
+                self.chat_btn = None
 
             # Scroll mode selector removed from here - now in waterfall window title section
             self.scroll_mode_var = tk.StringVar(value="zoom")
@@ -1922,6 +1943,9 @@ class RadioGUI:
                 self.log_status("NR2 relearning noise profile (bandwidth changed)")
 
             self.send_tune_message()
+
+            # Notify chat of bandwidth change
+            self.notify_chat_radio_changed()
         self.bandwidth_update_job = None
 
     def set_bandwidth(self, low: int, high: int):
@@ -3058,6 +3082,9 @@ class RadioGUI:
             # self.log_status(f"Tuning to {freq_hz/1e6:.6f} MHz...")  # Removed: too verbose during rapid frequency changes
             self.send_tune_message()
 
+            # Notify chat of frequency change
+            self.notify_chat_radio_changed()
+
             # Sync to radio control if enabled
             if self.radio_control_sync_enabled:
                 self.sync_frequency_to_radio_control()
@@ -4113,6 +4140,9 @@ class RadioGUI:
         self.log_status(f"Switching to {mode.upper()} mode...")
         self.send_tune_message()
 
+        # Notify chat of mode change
+        self.notify_chat_radio_changed()
+
         # Sync mode to rigctl if enabled and direction is SDR→Rig
         if self.rigctl_sync_enabled and self.rigctl_sync_direction_var.get() == "SDR→Rig":
             self.sync_mode_to_rigctl()
@@ -4810,6 +4840,7 @@ class RadioGUI:
                     self.spectrum.set_frequency_callback(self.on_spectrum_frequency_click)
                     self.spectrum.set_frequency_step_callback(self.on_spectrum_frequency_step)
                     self.spectrum.set_bandwidth_callback(self.on_spectrum_bandwidth_change)
+                    self.spectrum.set_zoom_callback(self.on_spectrum_zoom_change)
                     # Set initial step size
                     self.spectrum.set_step_size(self.get_step_size_hz())
 
@@ -4939,6 +4970,14 @@ class RadioGUI:
         # Apply bandwidth change if connected
         if self.connected:
             self.send_tune_message()
+
+    def on_spectrum_zoom_change(self):
+        """Handle zoom change from spectrum display (zoom in/out/reset).
+
+        Notifies chat users of the zoom change so they can see the updated view.
+        """
+        # Notify chat of zoom change
+        self.notify_chat_radio_changed()
 
     def on_scroll_mode_changed(self):
         """Handle scroll mode change (zoom vs pan)."""
@@ -5510,6 +5549,47 @@ class RadioGUI:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open users window: {e}")
             self.log_status(f"ERROR: Failed to open users window - {e}")
+
+    def open_chat_window(self):
+        """Open a separate chat window."""
+        # Don't open multiple windows
+        if self.chat_window and self.chat_window.winfo_exists():
+            self.chat_window.lift()  # Bring to front
+            return
+
+        if not self.connected:
+            messagebox.showinfo("Not Connected", "Please connect to the server first.")
+            return
+
+        try:
+            # Ensure shared WebSocket is connected
+            ws_manager = self._ensure_dxcluster_ws()
+
+            # Create chat window with shared WebSocket and radio_gui reference
+            self.chat_display = create_chat_window(
+                self.root,
+                ws_manager,
+                self,  # Pass radio_gui reference
+                on_close=self._on_chat_closed
+            )
+            self.chat_window = self.chat_display.window
+
+            self.log_status("Chat window opened")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open chat: {e}")
+            self.log_status(f"ERROR: Failed to open chat - {e}")
+
+    def _on_chat_closed(self):
+        """Handle chat window close."""
+        self.chat_window = None
+        self.chat_display = None
+        self.log_status("Chat window closed")
+
+    def notify_chat_radio_changed(self):
+        """Notify chat window that radio settings have changed"""
+        if self.chat_display:
+            self.chat_display.on_radio_changed()
 
     def open_midi_window(self):
         """Open MIDI controller configuration window."""
@@ -6092,6 +6172,13 @@ class RadioGUI:
             self.users_display = None
             self.log_status("Users window closed")
 
+        # Close chat window
+        if self.chat_window and self.chat_window.winfo_exists():
+            self.chat_window.destroy()
+            self.chat_window = None
+            self.chat_display = None
+            self.log_status("Chat window closed")
+
         # Close EQ window
         if self.eq_window and self.eq_window.winfo_exists():
             self.eq_window.destroy()
@@ -6414,6 +6501,16 @@ class RadioGUI:
                                         self.noise_floor_btn.pack(side=tk.LEFT, padx=(0, 5))
                                 elif self.noise_floor_btn:
                                     self.noise_floor_btn.pack_forget()
+
+                                # Pack chat button if enabled
+                                if self.chat_btn and desc.get('chat_enabled', False):
+                                    if scroll_label:
+                                        self.chat_btn.pack(side=tk.LEFT, padx=(0, 5), before=scroll_label)
+                                    else:
+                                        self.chat_btn.pack(side=tk.LEFT, padx=(0, 5))
+                                    self.log_status("Chat enabled on this server")
+                                elif self.chat_btn:
+                                    self.chat_btn.pack_forget()
 
                             # Print loading message before opening GUI windows
                             print("Loading GUI (may take a moment)...", file=sys.stderr)
@@ -6780,6 +6877,10 @@ class RadioGUI:
         # Close users window if open
         if self.users_window and self.users_window.winfo_exists():
             self.users_window.destroy()
+
+        # Close chat window if open
+        if self.chat_window and self.chat_window.winfo_exists():
+            self.chat_window.destroy()
 
         # Close EQ window if open
         if self.eq_window and self.eq_window.winfo_exists():

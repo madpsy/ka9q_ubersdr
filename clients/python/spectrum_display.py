@@ -117,6 +117,7 @@ class SpectrumDisplay:
         self.frequency_step_callback: Optional[Callable[[int], None]] = None  # Callback for stepping frequency
         self.mode_callback: Optional[Callable[[str], None]] = None  # Callback for mode changes
         self.bandwidth_callback: Optional[Callable[[int, int], None]] = None  # Callback for bandwidth changes
+        self.zoom_callback: Optional[Callable[[], None]] = None  # Callback for zoom changes
         
         # Drawing parameters - increased top margin for bookmark section
         self.bookmark_section_height = 20  # Height for bookmark markers
@@ -1381,6 +1382,14 @@ class SpectrumDisplay:
         """
         self.bandwidth_callback = callback
 
+    def set_zoom_callback(self, callback: Callable[[], None]):
+        """Set callback for zoom changes.
+
+        Args:
+            callback: Function to call when zoom level changes
+        """
+        self.zoom_callback = callback
+
     def set_step_size(self, step_hz: int):
         """Set frequency step size for click-to-tune snapping.
         
@@ -1436,6 +1445,10 @@ class SpectrumDisplay:
                 self._send_zoom_command(zoom_center, new_total_bandwidth),
                 self.event_loop
             )
+        
+        # Notify callback that zoom changed
+        if self.zoom_callback:
+            self.zoom_callback()
     
     def zoom_out(self):
         """Zoom out by 2x (double the bandwidth)."""
@@ -1477,6 +1490,10 @@ class SpectrumDisplay:
                 self._send_zoom_command(zoom_center, new_total_bandwidth),
                 self.event_loop
             )
+        
+        # Notify callback that zoom changed
+        if self.zoom_callback:
+            self.zoom_callback()
     
     def reset_zoom(self):
         """Reset zoom to initial bandwidth (200 KHz default)."""
@@ -1502,6 +1519,10 @@ class SpectrumDisplay:
                 self._send_zoom_command(zoom_center, desired_bandwidth),
                 self.event_loop
             )
+        
+        # Notify callback that zoom changed
+        if self.zoom_callback:
+            self.zoom_callback()
     
     def get_bandwidth_signal(self, bandwidth_low: int, bandwidth_high: int) -> tuple:
         """Calculate signal metrics within the specified bandwidth.

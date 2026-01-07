@@ -40,12 +40,15 @@ class UberSDRChat {
      * Set up WebSocket message handler to process chat messages
      */
     setupMessageHandler() {
-        // Store original onmessage handler if it exists
+        // Store reference to the original handler that we'll wrap
+        // This needs to be captured once at initialization
         const ws = this.getWebSocket();
-        const originalHandler = ws ? ws.onmessage : null;
+        if (ws) {
+            this.originalHandler = ws.onmessage;
+        }
 
-        // Set up a wrapper that always gets the current websocket
-        const messageHandler = (event) => {
+        // Create a message handler that will be reused
+        this.messageHandler = (event) => {
             const msg = JSON.parse(event.data);
 
             // Handle chat messages
@@ -54,14 +57,36 @@ class UberSDRChat {
             }
 
             // Call original handler for non-chat messages
-            if (originalHandler && typeof originalHandler === 'function') {
-                originalHandler(event);
+            // Always get the current handler in case websocket was recreated
+            if (this.originalHandler && typeof this.originalHandler === 'function') {
+                this.originalHandler(event);
             }
         };
 
+        // Install the handler on the current websocket
         if (ws) {
-            ws.onmessage = messageHandler;
+            ws.onmessage = this.messageHandler;
         }
+
+        // Set up a periodic check to reinstall handler if websocket reconnects
+        this.setupReconnectHandler();
+    }
+
+    /**
+     * Monitor for websocket reconnections and reinstall message handler
+     */
+    setupReconnectHandler() {
+        // Check every second if we need to reinstall the handler
+        setInterval(() => {
+            const ws = this.getWebSocket();
+            if (ws && ws.onmessage !== this.messageHandler) {
+                console.log('[Chat] Websocket reconnected, reinstalling message handler');
+                // Save the new original handler (from DX cluster)
+                this.originalHandler = ws.onmessage;
+                // Install our wrapper
+                ws.onmessage = this.messageHandler;
+            }
+        }, 1000);
     }
 
     /**

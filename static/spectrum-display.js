@@ -3972,6 +3972,11 @@ class SpectrumDisplay {
             frequency: Math.round(newCenterFreq),
             binBandwidth: newBinBandwidth
         }));
+
+        // Notify radioAPI immediately
+        if (window.radioAPI) {
+            window.radioAPI.notifyZoomChange(newBinBandwidth);
+        }
     }
 
     // Zoom out - same bins over wider bandwidth (increase bin bandwidth)
@@ -4018,6 +4023,11 @@ class SpectrumDisplay {
             frequency: Math.round(newCenterFreq),
             binBandwidth: newBinBandwidth
         }));
+
+        // Notify radioAPI immediately
+        if (window.radioAPI) {
+            window.radioAPI.notifyZoomChange(newBinBandwidth);
+        }
     }
 
     // Reset zoom to full view (0-30 MHz)

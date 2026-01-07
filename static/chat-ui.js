@@ -766,6 +766,15 @@ class ChatUI {
         this.chat.on('error', (error) => {
             // Show errors in the UI so users know what went wrong
             console.warn('[ChatUI] Chat error:', error);
+
+            // If server says username not set but we think we have one, re-join automatically
+            // This handles WebSocket reconnections and server restarts gracefully
+            if (error === 'username not set' && this.savedUsername && this.chat) {
+                console.log('[ChatUI] Server lost our session, automatically re-joining as:', this.savedUsername);
+                this.chat.setUsername(this.savedUsername);
+                return; // Don't show error to user, we're handling it automatically
+            }
+
             this.showError(error);
         });
     }

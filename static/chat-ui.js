@@ -710,5 +710,14 @@ let chatUI = null;
 function initializeChatUI(websocket) {
     if (!chatUI) {
         chatUI = new ChatUI(websocket);
+        // Expose globally for debugging and access
+        window.chatUI = chatUI;
+
+        // Set up radio tracking after a short delay to ensure all functions exist
+        setTimeout(() => {
+            if (chatUI) {
+                chatUI.setupRadioTracking();
+            }
+        }, 500);
     }
 }

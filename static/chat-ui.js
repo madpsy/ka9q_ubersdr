@@ -839,6 +839,9 @@ class ChatUI {
             if (modeSelect) {
                 modeSelect.value = userData.mode;
                 window.currentMode = userData.mode;
+                // Trigger change event to ensure mode is properly applied
+                const event = new Event('change', { bubbles: true });
+                modeSelect.dispatchEvent(event);
             }
         }
         

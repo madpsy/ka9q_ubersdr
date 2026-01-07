@@ -1362,6 +1362,11 @@ class ChatUI {
      * Leave chat
      */
     leaveChat() {
+        // Show confirmation dialog
+        if (!confirm('Are you sure you want to leave the chat?')) {
+            return; // User cancelled
+        }
+
         this.chat.leave();
 
         // Clear saved username from localStorage

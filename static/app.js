@@ -6489,6 +6489,7 @@ function updateSpectrumAutoAdjust() {
 
 // Spectrum zoom control functions
 function spectrumZoomIn() {
+    console.log('[app.js] spectrumZoomIn() called, spectrumDisplay exists:', !!spectrumDisplay, 'radioAPI exists:', !!window.radioAPI);
     if (!spectrumDisplay) return;
 
     const now = Date.now();

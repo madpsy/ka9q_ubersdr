@@ -2894,6 +2894,11 @@ function adjustFrequency(deltaHz) {
     // Update URL with new frequency
     updateURL();
 
+    // Notify extensions of frequency change
+    if (window.radioAPI) {
+        window.radioAPI.notifyFrequencyChange(roundedFreq);
+    }
+
     autoTune();
 }
 

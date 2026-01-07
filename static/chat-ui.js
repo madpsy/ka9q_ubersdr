@@ -10,6 +10,7 @@ class ChatUI {
         this.isExpanded = false;
         this.unreadCount = 0;
         this.savedUsername = null;
+        this.syncedUsername = null; // Track which user we're synced with
         
         // Load saved username from localStorage
         this.loadSavedUsername();
@@ -427,11 +428,37 @@ class ChatUI {
             
             .chat-user-item {
                 padding: 2px 0;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
             }
             
             .chat-user-muted {
                 opacity: 0.5;
                 text-decoration: line-through;
+            }
+            
+            .chat-sync-btn {
+                padding: 2px 6px;
+                font-size: 10px;
+                border: 1px solid #555;
+                background: #333;
+                color: #aaa;
+                border-radius: 3px;
+                cursor: pointer;
+                margin-left: 8px;
+                user-select: none;
+            }
+            
+            .chat-sync-btn:hover {
+                background: #444;
+                border-color: #666;
+            }
+            
+            .chat-sync-btn.active {
+                background: #4a9eff;
+                color: #fff;
+                border-color: #4a9eff;
             }
         `;
         document.head.appendChild(style);
@@ -529,6 +556,10 @@ class ChatUI {
 
         this.chat.on('user_update', (data) => {
             this.updateSingleUser(data);
+            // If this is the user we're synced with, update our radio
+            if (this.syncedUsername === data.username) {
+                this.syncToUser(data);
+            }
         });
 
         this.chat.on('error', (error) => {
@@ -668,6 +699,9 @@ class ChatUI {
             return;
         }
         
+        // Get our own username to exclude from sync
+        const ourUsername = this.chat.username;
+        
         const userItems = data.users.map(u => {
             console.log('[ChatUI] User:', u.username, 'freq:', u.frequency, 'mode:', u.mode);
             let info = this.escapeHtml(u.username);
@@ -686,7 +720,16 @@ class ChatUI {
             const muted = this.chat.isMuted(u.username);
             const muteClass = muted ? ' chat-user-muted' : '';
             
-            return `<div class="chat-user-item${muteClass}" onclick="chatUI.toggleMute('${this.escapeHtml(u.username)}')" style="cursor:pointer;">${info}</div>`;
+            // Add sync button (only if not our own user)
+            const isOurUser = u.username === ourUsername;
+            const isSynced = this.syncedUsername === u.username;
+            const syncBtnClass = isSynced ? 'chat-sync-btn active' : 'chat-sync-btn';
+            const syncBtn = isOurUser ? '' : `<button class="${syncBtnClass}" onclick="event.stopPropagation(); chatUI.toggleSync('${this.escapeHtml(u.username)}');">${isSynced ? '✓ Sync' : 'Sync'}</button>`;
+            
+            return `<div class="chat-user-item${muteClass}">
+                <span onclick="chatUI.toggleMute('${this.escapeHtml(u.username)}')" style="cursor:pointer; flex: 1;">${info}</span>
+                ${syncBtn}
+            </div>`;
         }).join('');
         
         usersList.innerHTML = userItems;
@@ -727,6 +770,105 @@ class ChatUI {
     clearUnread() {
         this.unreadCount = 0;
         document.getElementById('chat-unread').style.display = 'none';
+    }
+
+    /**
+     * Toggle sync with a user
+     */
+    toggleSync(username) {
+        if (this.syncedUsername === username) {
+            // Unsync
+            this.syncedUsername = null;
+            this.addSystemMessage(`Stopped syncing with ${username}`);
+        } else {
+            // Sync with this user
+            this.syncedUsername = username;
+            this.addSystemMessage(`Now syncing with ${username}`);
+            
+            // Immediately sync to their current settings if available
+            const users = this.chat.activeUsers || [];
+            const user = users.find(u => u.username === username);
+            if (user) {
+                this.syncToUser(user);
+            }
+        }
+        
+        // Refresh the user list to update button states
+        this.chat.requestActiveUsers();
+    }
+    
+    /**
+     * Sync our radio to a user's settings
+     */
+    syncToUser(userData) {
+        console.log('[ChatUI] Syncing to user:', userData.username, 'freq:', userData.frequency, 'mode:', userData.mode);
+        
+        // Only sync if we have frequency data
+        if (!userData.frequency) {
+            console.log('[ChatUI] No frequency data to sync');
+            return;
+        }
+        
+        // Get current values to avoid unnecessary updates
+        const freqInput = document.getElementById('frequency');
+        const currentFreq = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
+        const currentMode = window.currentMode || 'usb';
+        const currentBwLow = window.currentBandwidthLow || 0;
+        const currentBwHigh = window.currentBandwidthHigh || 0;
+        
+        // Check if anything actually changed
+        const freqChanged = userData.frequency !== currentFreq;
+        const modeChanged = userData.mode && userData.mode !== currentMode;
+        const bwChanged = (userData.bw_low !== undefined && userData.bw_low !== currentBwLow) ||
+                         (userData.bw_high !== undefined && userData.bw_high !== currentBwHigh);
+        
+        if (!freqChanged && !modeChanged && !bwChanged) {
+            console.log('[ChatUI] No changes needed for sync');
+            return;
+        }
+        
+        // Update frequency input
+        if (freqInput && freqChanged) {
+            freqInput.value = (userData.frequency / 1000000).toFixed(6);
+            freqInput.setAttribute('data-hz-value', userData.frequency);
+        }
+        
+        // Update mode dropdown if mode changed
+        if (userData.mode && modeChanged) {
+            const modeSelect = document.getElementById('mode');
+            if (modeSelect) {
+                modeSelect.value = userData.mode;
+                window.currentMode = userData.mode;
+            }
+        }
+        
+        // Update bandwidth if provided
+        if (userData.bw_low !== undefined) {
+            window.currentBandwidthLow = userData.bw_low;
+            const bwLowInput = document.getElementById('bandwidth-low');
+            if (bwLowInput) {
+                bwLowInput.value = userData.bw_low;
+            }
+        }
+        
+        if (userData.bw_high !== undefined) {
+            window.currentBandwidthHigh = userData.bw_high;
+            const bwHighInput = document.getElementById('bandwidth-high');
+            if (bwHighInput) {
+                bwHighInput.value = userData.bw_high;
+            }
+        }
+        
+        // Trigger tune to apply changes
+        if (typeof autoTune === 'function') {
+            console.log('[ChatUI] Auto-tuning to synced settings');
+            autoTune();
+        } else if (typeof tune === 'function') {
+            console.log('[ChatUI] Tuning to synced settings');
+            tune();
+        }
+        
+        this.addSystemMessage(`Synced to ${userData.username}: ${(userData.frequency / 1000000).toFixed(3)} MHz ${userData.mode ? userData.mode.toUpperCase() : ''}`);
     }
 
     /**

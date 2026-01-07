@@ -21,10 +21,11 @@ class UberSDRChat {
         this.eventHandlers = {};
         this.debounceTimer = null;
         this.debounceDelay = 250; // 250ms debounce delay
-        
+        this.activeUsers = []; // Store active users for sync functionality
+
         // Load muted users from localStorage
         this.loadMutedUsers();
-        
+
         // Set up message handler
         this.setupMessageHandler();
     }
@@ -80,6 +81,8 @@ class UberSDRChat {
                 
             case 'chat_active_users':
                 console.log('[Chat] Emitting active_users event with data:', msg.data);
+                // Store active users for sync functionality
+                this.activeUsers = msg.data.users || [];
                 this.emit('active_users', msg.data);
                 break;
                 

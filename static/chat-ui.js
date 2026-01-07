@@ -898,12 +898,28 @@ class ChatUI {
             }
         }
 
-        // Update bandwidth values in global state BEFORE mode change
+        // Update bandwidth values in global state AND sliders BEFORE mode change
         if (userData.bw_low !== undefined) {
             window.currentBandwidthLow = userData.bw_low;
+            const bwLowSlider = document.getElementById('bandwidth-low');
+            if (bwLowSlider) {
+                bwLowSlider.value = userData.bw_low;
+            }
+            const bwLowValue = document.getElementById('bandwidth-low-value');
+            if (bwLowValue) {
+                bwLowValue.textContent = userData.bw_low;
+            }
         }
         if (userData.bw_high !== undefined) {
             window.currentBandwidthHigh = userData.bw_high;
+            const bwHighSlider = document.getElementById('bandwidth-high');
+            if (bwHighSlider) {
+                bwHighSlider.value = userData.bw_high;
+            }
+            const bwHighValue = document.getElementById('bandwidth-high-value');
+            if (bwHighValue) {
+                bwHighValue.textContent = userData.bw_high;
+            }
         }
 
         // Update mode using setMode function if mode changed
@@ -911,7 +927,7 @@ class ChatUI {
         if (userData.mode && modeChanged) {
             if (typeof setMode === 'function') {
                 console.log('[ChatUI] Setting mode to:', userData.mode, 'with preserveBandwidth=true');
-                // setMode will update the sliders and call autoTune() for us
+                // setMode will update slider ranges and call autoTune() for us
                 setMode(userData.mode, true);
             } else {
                 window.currentMode = userData.mode;
@@ -920,7 +936,11 @@ class ChatUI {
                 }
             }
         } else {
-            // Mode didn't change, but frequency or bandwidth did - just tune
+            // Mode didn't change, but frequency or bandwidth did
+            // Update bandwidth display and tune
+            if (window.updateCurrentBandwidthDisplay) {
+                window.updateCurrentBandwidthDisplay(window.currentBandwidthLow, window.currentBandwidthHigh);
+            }
             if (typeof autoTune === 'function') {
                 console.log('[ChatUI] Auto-tuning to synced settings (mode unchanged)');
                 autoTune();

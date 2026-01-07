@@ -693,46 +693,13 @@ class ChatUI {
     }
 
     /**
-     * Update a single user's information (more efficient than full list)
+     * Update a single user's information
+     * For simplicity, just request the full user list
      */
     updateSingleUser(userData) {
-        console.log('[ChatUI] Updating single user:', userData);
-
-        // Find the user in the current list and update their info
-        const usersList = document.getElementById('chat-users-list');
-        if (!usersList) return;
-
-        // Get all user items
-        const userItems = usersList.querySelectorAll('.chat-user-item');
-
-        userItems.forEach(item => {
-            // Extract username from the item (it's the first text node)
-            const usernameSpan = item.querySelector('.chat-message-username') || item.firstChild;
-            if (!usernameSpan) return;
-
-            const itemUsername = usernameSpan.textContent || item.textContent.split(' ')[0];
-
-            if (itemUsername === userData.username) {
-                // Update this user's display
-                let info = this.escapeHtml(userData.username);
-
-                if (userData.frequency) {
-                    const freqMHz = (userData.frequency / 1000000).toFixed(3);
-                    info += ` <span style="color:#888;">${freqMHz} MHz</span>`;
-
-                    if (userData.mode) {
-                        info += ` <span style="color:#888;">${userData.mode.toUpperCase()}</span>`;
-                    }
-                }
-
-                const muted = this.chat.isMuted(userData.username);
-                const muteClass = muted ? ' chat-user-muted' : '';
-                item.className = `chat-user-item${muteClass}`;
-                item.innerHTML = info;
-                item.style.cursor = 'pointer';
-                item.onclick = () => this.toggleMute(userData.username);
-            }
-        });
+        console.log('[ChatUI] User update received for:', userData.username, 'requesting full user list');
+        // Request full user list to ensure consistency
+        this.chat.requestActiveUsers();
     }
 
     /**

@@ -530,13 +530,17 @@ class ChatUI {
 
             .chat-collapse-arrow {
                 position: absolute;
-                bottom: 30px;
-                left: 0;
-                right: 0;
-                text-align: center;
-                font-size: 18px;
-                color: #4a9eff;
+                top: 50px;
+                left: 50%;
+                transform: translateX(-50%);
+                font-size: 20px;
+                color: #fff;
+                background: #4a9eff;
+                padding: 2px 6px;
+                border-radius: 3px;
                 font-weight: bold;
+                z-index: 10;
+                pointer-events: none;
             }
 
             .chat-user-count-badge {

@@ -546,7 +546,8 @@ class ChatUI {
      */
     setupChatEvents() {
         this.chat.on('message', (data) => {
-            this.addChatMessage(data.username, data.message, data.timestamp);
+            // Pass full user data for frequency click handling
+            this.addChatMessage(data.username, data.message, data.timestamp, data);
             if (!this.isExpanded) {
                 this.incrementUnread();
             }
@@ -700,20 +701,54 @@ class ChatUI {
     /**
      * Add a chat message to the display
      */
-    addChatMessage(username, message, timestamp) {
+    addChatMessage(username, message, timestamp, userData) {
         const container = document.getElementById('chat-messages');
         const div = document.createElement('div');
         div.className = 'chat-message';
-        
+
         const time = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+
+        // Format frequency if provided (convert Hz to MHz)
+        let freqDisplay = '';
+        if (userData && userData.frequency && userData.frequency > 0) {
+            const freqMHz = (userData.frequency / 1000000).toFixed(3);
+            // Make frequency clickable to tune to that user's settings
+            const userDataJson = this.escapeHtml(JSON.stringify({
+                username: userData.username,
+                frequency: userData.frequency,
+                mode: userData.mode,
+                bw_low: userData.bw_low,
+                bw_high: userData.bw_high,
+                zoom_bw: userData.zoom_bw
+            }));
+            freqDisplay = `<span style="color:#888; font-size:10px; margin-left:4px; cursor:pointer; text-decoration:underline;" onclick="chatUI.tuneToUserFromMessage('${userDataJson}')" title="Click to tune to ${freqMHz} MHz">${freqMHz}</span>`;
+        }
+
         div.innerHTML = `
-            <span style="color:#666; font-size:10px; margin-right:4px;">${time}</span>
+            <span style="color:#666; font-size:10px; margin-right:4px;">${time}</span>${freqDisplay}
             <span class="chat-message-username" onclick="chatUI.toggleMute('${this.escapeHtml(username)}')">${this.escapeHtml(username)}:</span>
             <span>${this.escapeHtml(message)}</span>
         `;
-        
+
         container.appendChild(div);
         container.scrollTop = container.scrollHeight;
+    }
+
+    /**
+     * Tune to a user's settings from a chat message frequency click
+     */
+    tuneToUserFromMessage(userDataJson) {
+        try {
+            const userData = JSON.parse(userDataJson);
+            console.log('[ChatUI] Tuning to user settings from message:', userData);
+
+            // Use the existing syncToUser logic
+            if (userData.frequency && userData.mode) {
+                this.syncToUser(userData);
+            }
+        } catch (e) {
+            console.error('[ChatUI] Failed to parse user data:', e);
+        }
     }
 
     /**

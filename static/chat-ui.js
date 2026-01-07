@@ -891,7 +891,12 @@ class ChatUI {
         const usersList = document.getElementById('chat-users-list');
         
         if (data.count === 0) {
-            usersList.innerHTML = '<div style="color:#666;">No other users</div>';
+            // Show different message based on whether user has joined
+            if (this.chat && this.chat.isJoined()) {
+                usersList.innerHTML = '<div style="color:#666;">No other users</div>';
+            } else {
+                usersList.innerHTML = '<div style="color:#666;">Join chat to see active users</div>';
+            }
             return;
         }
         

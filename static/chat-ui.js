@@ -222,25 +222,24 @@ class ChatUI {
             <div id="chat-panel" class="chat-panel ${this.isExpanded ? 'expanded' : 'collapsed'}">
                 <!-- Chat content (slides out from right) -->
                 <div id="chat-content" class="chat-content" style="display:${this.isExpanded ? 'flex' : 'none'};">
-                    <!-- Username setup (shown first) -->
-                    <div id="chat-username-setup" class="chat-username-setup">
-                        <input type="text" id="chat-username-input"
-                               placeholder="Enter username..."
-                               maxlength="15"
-                               pattern="[A-Za-z0-9]+"
-                               class="chat-input">
-                        <button id="chat-join-btn" class="chat-btn chat-btn-primary">Join</button>
-                        <div id="chat-error" class="chat-error"></div>
-                    </div>
-
-                    <!-- Chat interface (shown after joining) -->
-                    <div id="chat-interface" class="chat-interface" style="display:none;">
+                    <!-- Single unified chat interface -->
+                    <div id="chat-interface" class="chat-interface">
                         <div class="chat-main-area">
                             <!-- Messages area -->
                             <div id="chat-messages" class="chat-messages"></div>
 
-                            <!-- Message input -->
-                            <div class="chat-input-area">
+                            <!-- Username input (shown when not logged in) -->
+                            <div id="chat-username-input-area" class="chat-input-area">
+                                <input type="text" id="chat-username-input"
+                                       placeholder="Enter username to join chat..."
+                                       maxlength="15"
+                                       pattern="[A-Za-z0-9]+"
+                                       class="chat-input">
+                                <button id="chat-join-btn" class="chat-btn chat-btn-primary">Join</button>
+                            </div>
+
+                            <!-- Message input (shown when logged in) -->
+                            <div id="chat-message-input-area" class="chat-input-area" style="display:none;">
                                 <input type="text" id="chat-message-input"
                                        placeholder="Type message..."
                                        maxlength="250"
@@ -256,7 +255,7 @@ class ChatUI {
                             </div>
                             <div id="chat-users-list" class="chat-users-list"></div>
                             <div class="chat-users-footer">
-                                <button id="chat-leave-btn" class="chat-btn chat-btn-danger chat-leave-btn-full">Leave</button>
+                                <button id="chat-leave-btn" class="chat-btn chat-btn-danger chat-leave-btn-full" style="display:none;">Leave</button>
                             </div>
                         </div>
                     </div>
@@ -353,7 +352,7 @@ class ChatUI {
             }
             
             .chat-content {
-                width: 500px;
+                width: 100%;
                 height: 500px;
                 background: rgba(40, 40, 40, 0.7);
                 border: 1px solid rgba(100, 100, 100, 0.6);
@@ -364,6 +363,8 @@ class ChatUI {
 
             .chat-username-setup {
                 padding: 12px;
+                width: 100%;
+                box-sizing: border-box;
             }
 
             .chat-interface {
@@ -611,9 +612,12 @@ class ChatUI {
         this.chat.on('join_confirmed', (data) => {
             // Save username for auto-login next time
             this.saveUsername(data.username);
-            
-            document.getElementById('chat-username-setup').style.display = 'none';
-            document.getElementById('chat-interface').style.display = 'flex';
+
+            // Switch from username input to message input
+            document.getElementById('chat-username-input-area').style.display = 'none';
+            document.getElementById('chat-message-input-area').style.display = 'flex';
+            document.getElementById('chat-leave-btn').style.display = 'block';
+
             this.addSystemMessage(`You joined as ${data.username}`);
 
             // Send initial frequency/mode/bandwidth on join (immediate, no debounce)
@@ -733,10 +737,16 @@ class ChatUI {
      */
     leaveChat() {
         this.chat.leave();
-        document.getElementById('chat-username-setup').style.display = 'block';
-        document.getElementById('chat-interface').style.display = 'none';
+
+        // Switch from message input back to username input
+        document.getElementById('chat-message-input-area').style.display = 'none';
+        document.getElementById('chat-username-input-area').style.display = 'flex';
+        document.getElementById('chat-leave-btn').style.display = 'none';
+
+        // Clear username input and messages
         document.getElementById('chat-username-input').value = '';
         document.getElementById('chat-messages').innerHTML = '';
+
         this.addSystemMessage('You left the chat');
     }
 
@@ -750,17 +760,8 @@ class ChatUI {
 
         const time = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
 
-        // Look up user's current frequency from activeUsers list
-        let freqDisplay = '';
-        const user = this.chat.activeUsers.find(u => u.username === username);
-        if (user && user.frequency && user.frequency > 0) {
-            const freqMHz = (user.frequency / 1000000).toFixed(3);
-            // Make frequency clickable to tune to that user's settings
-            freqDisplay = `<span style="color:#888; font-size:10px; margin-left:4px; cursor:pointer; text-decoration:underline;" onclick="chatUI.tuneToUser('${this.escapeHtml(username)}')" title="Click to tune to ${freqMHz} MHz">${freqMHz}</span>`;
-        }
-
         div.innerHTML = `
-            <span style="color:#666; font-size:10px; margin-right:4px;">${time}</span>${freqDisplay}
+            <span style="color:#666; font-size:10px; margin-right:4px;">${time}</span>
             <span class="chat-message-username" onclick="chatUI.toggleMute('${this.escapeHtml(username)}')">${this.escapeHtml(username)}:</span>
             <span>${this.escapeHtml(message)}</span>
         `;
@@ -799,25 +800,9 @@ class ChatUI {
      * Show an error message
      */
     showError(error) {
-        // Clear any existing error timeout
-        if (this.errorTimeout) {
-            clearTimeout(this.errorTimeout);
-            this.errorTimeout = null;
-        }
-
-        // Show in error div (username setup screen)
-        const errorDiv = document.getElementById('chat-error');
-        if (errorDiv) {
-            errorDiv.textContent = error;
-            this.errorTimeout = setTimeout(() => {
-                errorDiv.textContent = '';
-                this.errorTimeout = null;
-            }, 5000);
-        }
-        
-        // Also add to messages (chat interface screen)
+        // Just show errors in the messages area
         const container = document.getElementById('chat-messages');
-        if (container && container.parentElement && container.parentElement.style.display !== 'none') {
+        if (container) {
             const div = document.createElement('div');
             div.className = 'chat-message chat-message-error';
             div.textContent = 'Error: ' + error;

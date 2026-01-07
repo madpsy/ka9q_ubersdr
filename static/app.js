@@ -6630,6 +6630,12 @@ window.spectrumResetZoom = spectrumResetZoom;
 window.spectrumZoomOut = spectrumZoomOut;
 window.spectrumZoomIn = spectrumZoomIn;
 window.spectrumMaxZoom = spectrumMaxZoom;
+console.log('[app.js] Spectrum zoom functions exposed globally:', {
+    spectrumZoomIn: typeof window.spectrumZoomIn,
+    spectrumZoomOut: typeof window.spectrumZoomOut,
+    spectrumResetZoom: typeof window.spectrumResetZoom,
+    spectrumMaxZoom: typeof window.spectrumMaxZoom
+});
 window.spectrumCenterFrequency = spectrumCenterFrequency;
 window.updateSpectrumColorScheme = updateSpectrumColorScheme;
 window.updateSpectrumRange = updateSpectrumRange;

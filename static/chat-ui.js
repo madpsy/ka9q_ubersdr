@@ -352,13 +352,14 @@ class ChatUI {
             }
             
             .chat-content {
-                width: 100%;
+                width: 500px;
                 height: 500px;
                 background: rgba(40, 40, 40, 0.7);
                 border: 1px solid rgba(100, 100, 100, 0.6);
                 border-right: none;
                 border-radius: 8px 0 0 8px;
                 order: 1;
+                flex-shrink: 0;
             }
 
             .chat-username-setup {

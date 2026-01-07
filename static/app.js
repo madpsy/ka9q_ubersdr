@@ -2826,6 +2826,11 @@ function setBand(bandName) {
     // Update URL with new frequency and mode
     updateURL();
 
+    // Notify extensions of frequency change
+    if (window.radioAPI) {
+        window.radioAPI.notifyFrequencyChange(centerFreq);
+    }
+
     // Auto-connect if not connected
     if (!wsManager.isConnected()) {
         connect();

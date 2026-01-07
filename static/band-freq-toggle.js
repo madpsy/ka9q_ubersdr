@@ -159,6 +159,11 @@ function changeFrequencyByStep(step, increment) {
         window.updateURL();
     }
 
+    // Notify extensions of frequency change
+    if (window.radioAPI) {
+        window.radioAPI.notifyFrequencyChange(currentFreq);
+    }
+
     // Apply the frequency change
     if (typeof window.autoTune === 'function') {
         window.autoTune();

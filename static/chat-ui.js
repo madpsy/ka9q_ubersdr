@@ -1696,19 +1696,28 @@ class ChatUI {
         });
 
         const userItems = sortedUsers.map(u => {
-            console.log('[ChatUI] User:', u.username, 'freq:', u.frequency, 'mode:', u.mode);
+            console.log('[ChatUI] User:', u.username, 'freq:', u.frequency, 'mode:', u.mode, 'cat:', u.cat, 'tx:', u.tx);
 
             // Check if this is our own user
             const isOurUser = u.username === ourUsername;
+
+            // Build status icons (CAT control and TX status)
+            let statusIcons = '';
+            if (u.cat) {
+                statusIcons += ' 🔧'; // CAT control active
+            }
+            if (u.tx) {
+                statusIcons += ' 📡'; // Transmitting
+            }
 
             // Username - bold if it's us, clickable to mute/unmute if it's not us
             let usernameSpan;
             if (isOurUser) {
                 // Our own username - bold, not clickable
-                usernameSpan = `<span style="font-weight:bold; display:block; margin-bottom:2px;">${this.escapeHtml(u.username)}</span>`;
+                usernameSpan = `<span style="font-weight:bold; display:block; margin-bottom:2px;">${this.escapeHtml(u.username)}${statusIcons}</span>`;
             } else {
                 // Other user - clickable to mute/unmute
-                usernameSpan = `<span onclick="chatUI.toggleMute('${this.escapeHtml(u.username)}')" style="cursor:pointer; display:block; margin-bottom:2px;">${this.escapeHtml(u.username)}</span>`;
+                usernameSpan = `<span onclick="chatUI.toggleMute('${this.escapeHtml(u.username)}')" style="cursor:pointer; display:block; margin-bottom:2px;">${this.escapeHtml(u.username)}${statusIcons}</span>`;
             }
 
             // Add frequency - clickable to tune for others, just display for us
@@ -1744,6 +1753,12 @@ class ChatUI {
             }
             if (u.zoom_bw !== undefined && u.zoom_bw > 0) {
                 tooltip += `\nZoom BW: ${u.zoom_bw.toFixed(1)} Hz`;
+            }
+            if (u.cat) {
+                tooltip += `\nCAT Control: Active`;
+            }
+            if (u.tx) {
+                tooltip += `\nStatus: Transmitting`;
             }
 
             // Add sync button (only if not our own user)

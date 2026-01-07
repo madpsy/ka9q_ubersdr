@@ -133,8 +133,12 @@ class ChatDisplay:
 
         # Bind click events for clickable usernames
         self.messages_text.tag_bind('username_clickable', '<Button-1>', self.on_username_click)
-        self.messages_text.tag_bind('username_clickable', '<Enter>', lambda e: self.messages_text.config(cursor='hand2'))
-        self.messages_text.tag_bind('username_clickable', '<Leave>', lambda e: self.messages_text.config(cursor=''))
+        self.messages_text.tag_bind('username_clickable', '<Enter>', self.on_username_enter)
+        self.messages_text.tag_bind('username_clickable', '<Leave>', self.on_username_leave)
+
+        # Tooltip for chat usernames
+        self.chat_username_tooltip = None
+        self.chat_tooltip_after_id = None
 
         # Username input area (shown when not logged in)
         self.username_frame = ttk.Frame(left_frame)
@@ -210,6 +214,13 @@ class ChatDisplay:
         self.users_listbox.bind('<Double-Button-1>', self.on_user_double_click)
         # Bind right-click to show context menu
         self.users_listbox.bind('<Button-3>', self.on_user_right_click)
+        # Bind mouse motion to show tooltip
+        self.users_listbox.bind('<Motion>', self.on_user_hover)
+        self.users_listbox.bind('<Leave>', self.hide_user_tooltip)
+
+        # Create tooltip label (initially hidden)
+        self.user_tooltip = None
+        self.tooltip_after_id = None
 
         # Buttons frame
         buttons_frame = ttk.Frame(right_frame)
@@ -346,6 +357,119 @@ class ChatDisplay:
                 self.tune_to_user(username)
                 break
 
+    def on_username_enter(self, event):
+        """Handle mouse entering a username in chat"""
+        # Change cursor
+        self.messages_text.config(cursor='hand2')
+
+        # Cancel any pending tooltip
+        if self.chat_tooltip_after_id:
+            self.window.after_cancel(self.chat_tooltip_after_id)
+            self.chat_tooltip_after_id = None
+
+        # Get the username at cursor position
+        index = self.messages_text.index(f"@{event.x},{event.y}")
+        tag_ranges = self.messages_text.tag_ranges('username_clickable')
+
+        # Find which username is under cursor
+        for i in range(0, len(tag_ranges), 2):
+            start, end = tag_ranges[i], tag_ranges[i+1]
+            if self.messages_text.compare(start, '<=', index) and self.messages_text.compare(index, '<', end):
+                # Get the username text
+                username_text = self.messages_text.get(start, end)
+                username = username_text.rstrip(':').strip()
+
+                # Schedule tooltip after 500ms
+                self.chat_tooltip_after_id = self.window.after(
+                    500,
+                    lambda: self.show_chat_username_tooltip(event, username)
+                )
+                break
+
+    def on_username_leave(self, event):
+        """Handle mouse leaving a username in chat"""
+        # Reset cursor
+        self.messages_text.config(cursor='')
+
+        # Hide tooltip
+        self.hide_chat_username_tooltip()
+
+    def show_chat_username_tooltip(self, event, username):
+        """Show tooltip for username in chat"""
+        self.chat_tooltip_after_id = None
+
+        # Find user in active users
+        user = next((u for u in self.active_users if u.get('username') == username), None)
+
+        if not user:
+            return
+
+        freq = user.get('frequency')
+        mode = user.get('mode', '').upper()
+
+        if freq and mode:
+            freq_mhz = freq / 1e6
+            tooltip_text = f"Click to tune to {freq_mhz:.3f} MHz ({mode})"
+        else:
+            tooltip_text = f"Click to tune to {username}"
+
+        # Create tooltip
+        if self.chat_username_tooltip:
+            self.chat_username_tooltip.destroy()
+
+        self.chat_username_tooltip = tk.Toplevel(self.window)
+        self.chat_username_tooltip.wm_overrideredirect(True)
+        self.chat_username_tooltip.wm_geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
+
+        label = tk.Label(
+            self.chat_username_tooltip,
+            text=tooltip_text,
+            background='#2a2a2a',
+            foreground='#ddd',
+            relief=tk.SOLID,
+            borderwidth=1,
+            font=('TkDefaultFont', 9),
+            padx=8,
+            pady=6
+        )
+        label.pack()
+
+    def hide_chat_username_tooltip(self):
+        """Hide chat username tooltip"""
+        # Cancel any pending tooltip
+        if self.chat_tooltip_after_id:
+            self.window.after_cancel(self.chat_tooltip_after_id)
+            self.chat_tooltip_after_id = None
+
+        # Destroy existing tooltip
+        if self.chat_username_tooltip:
+            self.chat_username_tooltip.destroy()
+            self.chat_username_tooltip = None
+
+    def _on_chat_username_enter(self, event, username):
+        """Handle mouse entering a username in chat (called from tag binding)"""
+        # Change cursor
+        self.messages_text.config(cursor='hand2')
+
+        # Cancel any pending tooltip
+        if self.chat_tooltip_after_id:
+            self.window.after_cancel(self.chat_tooltip_after_id)
+            self.chat_tooltip_after_id = None
+
+        # Schedule tooltip after 500ms
+        self.chat_tooltip_after_id = self.window.after(
+            500,
+            lambda: self.show_chat_username_tooltip(event, username)
+        )
+
+    def _on_chat_username_leave(self, event):
+        """Handle mouse leaving a username in chat (called from tag binding)"""
+        # Reset cursor
+        self.messages_text.config(cursor='')
+
+        # Hide tooltip
+        self.hide_chat_username_tooltip()
+
     def join_chat(self):
         """Join the chat with the entered username"""
         username = self.username_var.get().strip()
@@ -361,6 +485,11 @@ class ChatDisplay:
 
         if not re.match(r'^[A-Za-z0-9]+$', username):
             messagebox.showerror("Error", "Username must contain only letters and numbers")
+            return
+
+        # Check if username is already taken (case-insensitive)
+        if any(u.get('username', '').lower() == username.lower() for u in self.active_users):
+            messagebox.showerror("Error", f"Username '{username}' is already taken. Please choose a different username.")
             return
 
         # Send join message via WebSocket
@@ -435,7 +564,7 @@ class ChatDisplay:
             self.add_error_message(f"Failed to send message: {e}")
 
     def send_radio_status(self):
-        """Send current frequency/mode/bandwidth to chat"""
+        """Send current frequency/mode/bandwidth/CAT/TX status to chat"""
         if not self.username or not self.radio_gui:
             return
 
@@ -451,6 +580,29 @@ class ChatDisplay:
             if self.radio_gui.spectrum and hasattr(self.radio_gui.spectrum, 'bin_bandwidth'):
                 zoom_bw = self.radio_gui.spectrum.bin_bandwidth
 
+            # Get CAT control status (true if any radio control is connected)
+            cat_enabled = False
+            if hasattr(self.radio_gui, 'radio_control_connected'):
+                cat_enabled = self.radio_gui.radio_control_connected
+            if hasattr(self.radio_gui, 'radio_control') and self.radio_gui.radio_control:
+                cat_enabled = True
+
+            # Debug logging
+            print(f"DEBUG send_radio_status: cat_enabled={cat_enabled}, has_radio_control={hasattr(self.radio_gui, 'radio_control')}, radio_control={self.radio_gui.radio_control if hasattr(self.radio_gui, 'radio_control') else None}")
+
+            # Get TX status from radio control (PTT state)
+            tx_status = False
+            if cat_enabled and hasattr(self.radio_gui, 'radio_control') and self.radio_gui.radio_control:
+                # Check if radio control has PTT status
+                if hasattr(self.radio_gui.radio_control, 'get_ptt'):
+                    try:
+                        tx_status = self.radio_gui.radio_control.get_ptt()
+                    except:
+                        pass
+                # For rigctl, check cached PTT value
+                elif hasattr(self.radio_gui.radio_control, '_cached_ptt'):
+                    tx_status = self.radio_gui.radio_control._cached_ptt
+
             # Send to server
             self.ws_manager.send_message({
                 'type': 'chat_set_frequency_mode',
@@ -458,7 +610,9 @@ class ChatDisplay:
                 'mode': mode,
                 'bw_high': bw_high,
                 'bw_low': bw_low,
-                'zoom_bw': zoom_bw
+                'zoom_bw': zoom_bw,
+                'cat': cat_enabled,
+                'tx': tx_status
             })
 
         except Exception as e:
@@ -541,11 +695,17 @@ class ChatDisplay:
         if is_own:
             self.messages_text.insert(tk.END, f"{username}: ", 'own_username')
         else:
-            # Make username clickable to tune
-            start_index = self.messages_text.index(tk.END)
-            self.messages_text.insert(tk.END, f"{username}: ", 'username_clickable')
-            # Store username in tag for click handler
-            end_index = self.messages_text.index(tk.END)
+            # Make username clickable to tune - use unique tag for this specific username instance
+            unique_tag = f'username_clickable_{id(username)}_{time_str}'
+            self.messages_text.insert(tk.END, f"{username}: ", ('username_clickable', unique_tag))
+
+            # Bind events to this specific tag instance
+            self.messages_text.tag_bind(unique_tag, '<Button-1>',
+                lambda e, u=username: self.tune_to_user(u))
+            self.messages_text.tag_bind(unique_tag, '<Enter>',
+                lambda e, u=username: self._on_chat_username_enter(e, u))
+            self.messages_text.tag_bind(unique_tag, '<Leave>',
+                lambda e: self._on_chat_username_leave(e))
 
         # Add message (highlight mentions)
         if is_mention and self.username:
@@ -607,12 +767,24 @@ class ChatDisplay:
             username = user.get('username', 'Unknown')
             freq = user.get('frequency')
             mode = user.get('mode', '').upper()
+            cat = user.get('cat', False)
+            tx = user.get('tx', False)
 
             # Store mapping from listbox index to user data
             self.listbox_to_user[listbox_index] = user
 
             # Format display
             display = username
+
+            # Add CAT control indicator (after username, before frequency)
+            if cat:
+                display += " 🔧"
+
+            # Add TX status indicator (after CAT, before frequency)
+            if tx:
+                display += " 📡"
+
+            # Add frequency and mode
             if freq:
                 freq_mhz = freq / 1e6
                 display += f" - {freq_mhz:.3f} MHz"
@@ -743,7 +915,11 @@ class ChatDisplay:
         finally:
             # Clear syncing flag after a SHORT delay (200ms instead of 500ms)
             # This prevents loops from incoming sync updates, but allows user changes to be sent
-            self.window.after(200, lambda: setattr(self, 'is_syncing', False))
+            def clear_sync_and_notify():
+                self.is_syncing = False
+                # Send our updated position to chat after sync completes
+                self.send_radio_status()
+            self.window.after(200, clear_sync_and_notify)
 
     def tune_to_user(self, username: str):
         """Tune to a user's frequency"""
@@ -1047,8 +1223,103 @@ class ChatDisplay:
         # Focus back to entry
         self.message_entry.focus()
 
+    def on_user_hover(self, event):
+        """Show tooltip when hovering over a user in the list"""
+        # Cancel any pending tooltip
+        if self.tooltip_after_id:
+            self.window.after_cancel(self.tooltip_after_id)
+            self.tooltip_after_id = None
+
+        # Get the index of the item under the mouse
+        index = self.users_listbox.nearest(event.y)
+        if index < 0:
+            self.hide_user_tooltip()
+            return
+
+        # Get user data
+        user = self.listbox_to_user.get(index)
+        if not user:
+            self.hide_user_tooltip()
+            return
+
+        # Schedule tooltip to appear after 500ms
+        self.tooltip_after_id = self.window.after(500, lambda: self.show_user_tooltip(event, user))
+
+    def show_user_tooltip(self, event, user):
+        """Display tooltip with user information"""
+        self.tooltip_after_id = None
+
+        # Build tooltip text
+        username = user.get('username', 'Unknown')
+        freq = user.get('frequency')
+        mode = user.get('mode', '').upper()
+        cat = user.get('cat', False)
+        tx = user.get('tx', False)
+
+        tooltip_lines = [username]
+
+        if freq:
+            freq_mhz = freq / 1e6
+            tooltip_lines.append(f"Frequency: {freq_mhz:.6f} MHz")
+
+        if mode:
+            tooltip_lines.append(f"Mode: {mode}")
+
+        # Add icon explanations
+        if cat:
+            tooltip_lines.append("🔧 CAT Control: Enabled")
+
+        if tx:
+            tooltip_lines.append("📡 TX Status: Transmitting")
+
+        if username == self.synced_username:
+            tooltip_lines.append("🔗 Synced")
+
+        if username == self.username:
+            tooltip_lines.append("★ You")
+
+        tooltip_text = '\n'.join(tooltip_lines)
+
+        # Create or update tooltip
+        if self.user_tooltip:
+            self.user_tooltip.destroy()
+
+        self.user_tooltip = tk.Toplevel(self.window)
+        self.user_tooltip.wm_overrideredirect(True)
+        self.user_tooltip.wm_geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
+
+        label = tk.Label(
+            self.user_tooltip,
+            text=tooltip_text,
+            background='#2a2a2a',
+            foreground='#ddd',
+            relief=tk.SOLID,
+            borderwidth=1,
+            font=('TkDefaultFont', 9),
+            justify=tk.LEFT,
+            padx=8,
+            pady=6
+        )
+        label.pack()
+
+    def hide_user_tooltip(self, event=None):
+        """Hide the user tooltip"""
+        # Cancel any pending tooltip
+        if self.tooltip_after_id:
+            self.window.after_cancel(self.tooltip_after_id)
+            self.tooltip_after_id = None
+
+        # Destroy existing tooltip
+        if self.user_tooltip:
+            self.user_tooltip.destroy()
+            self.user_tooltip = None
+
     def close(self):
         """Close the chat window"""
+        # Hide tooltips if showing
+        self.hide_user_tooltip()
+        self.hide_chat_username_tooltip()
+
         # Unregister callback
         self.ws_manager.unregister_callback('chat')
 

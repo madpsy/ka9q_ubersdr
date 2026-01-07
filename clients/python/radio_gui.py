@@ -3732,6 +3732,9 @@ class RadioGUI:
             self.radio_control_connected = True
             self.radio_connect_btn.config(text="Disconnect")
 
+            # Notify chat of CAT status change (icon will appear)
+            self.notify_chat_radio_changed()
+
             # Start periodic updates AFTER setting connected state
             if self.radio_control_type == 'tci':
                 # Start periodic S-meter updates (250ms interval)
@@ -3826,6 +3829,9 @@ class RadioGUI:
         self.radio_control_connected = False
         self.radio_control_sync_enabled = False
         self.radio_control_type = 'none'
+
+        # Notify chat of CAT status change (icon will be removed)
+        self.notify_chat_radio_changed()
 
         # Update legacy aliases
         self.rigctl = None

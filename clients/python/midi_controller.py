@@ -619,8 +619,10 @@ class MIDIController:
             # Frequency controls
             if function_name == "Frequency: Step Up":
                 gui.step_frequency_up()
+                gui.notify_chat_radio_changed()
             elif function_name == "Frequency: Step Down":
                 gui.step_frequency_down()
+                gui.notify_chat_radio_changed()
             elif function_name.startswith("Frequency: Encoder"):
                 # Encoder with specific step size
                 step_map = {
@@ -649,6 +651,8 @@ class MIDIController:
                     gui.set_frequency_hz(new_hz)
                     if gui.connected:
                         gui.apply_frequency()
+                    # Notify chat of frequency change from MIDI
+                    gui.notify_chat_radio_changed()
                 except ValueError:
                     pass
 
@@ -702,6 +706,8 @@ class MIDIController:
                 }
                 if function_name in band_freqs:
                     gui.set_frequency_and_mode(band_freqs[function_name])
+                    # Notify chat of band change from MIDI
+                    gui.notify_chat_radio_changed()
 
             # Volume control
             elif function_name == "Volume: Set":
@@ -709,6 +715,8 @@ class MIDIController:
                 volume = int((value / 127) * 100)
                 gui.volume_var.set(volume)
                 gui.update_volume(volume)
+                # Notify chat of volume change from MIDI
+                gui.notify_chat_radio_changed()
 
             # Bandwidth controls
             elif function_name == "Bandwidth: Low":
@@ -751,6 +759,8 @@ class MIDIController:
                     filter_low = int(slider_min + (value / 127) * (slider_max - slider_min))
                     gui.audio_filter_low_var.set(filter_low)
                     gui.update_audio_filter_display()
+                    # Notify chat of audio filter change from MIDI
+                    gui.notify_chat_radio_changed()
                 except (ValueError, AttributeError):
                     pass
 
@@ -765,6 +775,8 @@ class MIDIController:
                     filter_high = int(slider_min + (value / 127) * (slider_max - slider_min))
                     gui.audio_filter_high_var.set(filter_high)
                     gui.update_audio_filter_display()
+                    # Notify chat of audio filter change from MIDI
+                    gui.notify_chat_radio_changed()
                 except (ValueError, AttributeError):
                     pass
 
@@ -779,6 +791,8 @@ class MIDIController:
                 if function_name in step_map:
                     gui.step_size_var.set(step_map[function_name])
                     gui.on_step_size_changed()
+                    # Notify chat of step size change from MIDI
+                    gui.notify_chat_radio_changed()
 
             # Spectrum zoom controls (only work if spectrum/waterfall window is open)
             elif function_name == "Spectrum: Zoom In" and value > 0:
@@ -846,9 +860,13 @@ class MIDIController:
                 if function_name == "NR2: Toggle":
                     gui.nr2_enabled_var.set(not gui.nr2_enabled_var.get())
                     gui.toggle_nr2()
+                    # Notify chat of NR2 toggle from MIDI
+                    gui.notify_chat_radio_changed()
                 elif function_name == "Audio Filter: Toggle":
                     gui.audio_filter_enabled_var.set(not gui.audio_filter_enabled_var.get())
                     gui.toggle_audio_filter()
+                    # Notify chat of audio filter toggle from MIDI
+                    gui.notify_chat_radio_changed()
                 elif function_name == "Mute: Toggle":
                     # Toggle both channels
                     current_muted = not (gui.channel_left_var.get() or gui.channel_right_var.get())
@@ -856,6 +874,8 @@ class MIDIController:
                     gui.channel_left_var.set(not new_muted)
                     gui.channel_right_var.set(not new_muted)
                     gui.update_channels()
+                    # Notify chat of mute toggle from MIDI
+                    gui.notify_chat_radio_changed()
 
         except Exception as e:
             print(f"Error executing MIDI function {function_name}: {e}")

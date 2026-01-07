@@ -802,75 +802,85 @@ class ChatUI {
      */
     syncToUser(userData) {
         console.log('[ChatUI] Syncing to user:', userData.username, 'freq:', userData.frequency, 'mode:', userData.mode);
-        
+
         // Only sync if we have frequency data
         if (!userData.frequency) {
             console.log('[ChatUI] No frequency data to sync');
             return;
         }
-        
+
         // Get current values to avoid unnecessary updates
         const freqInput = document.getElementById('frequency');
         const currentFreq = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
         const currentMode = window.currentMode || 'usb';
         const currentBwLow = window.currentBandwidthLow || 0;
         const currentBwHigh = window.currentBandwidthHigh || 0;
-        
+
         // Check if anything actually changed
         const freqChanged = userData.frequency !== currentFreq;
         const modeChanged = userData.mode && userData.mode !== currentMode;
         const bwChanged = (userData.bw_low !== undefined && userData.bw_low !== currentBwLow) ||
                          (userData.bw_high !== undefined && userData.bw_high !== currentBwHigh);
-        
+
         if (!freqChanged && !modeChanged && !bwChanged) {
             console.log('[ChatUI] No changes needed for sync');
             return;
         }
-        
+
         // Update frequency input
         if (freqInput && freqChanged) {
-            freqInput.value = (userData.frequency / 1000000).toFixed(6);
-            freqInput.setAttribute('data-hz-value', userData.frequency);
-        }
-        
-        // Update mode dropdown if mode changed
-        if (userData.mode && modeChanged) {
-            const modeSelect = document.getElementById('mode');
-            if (modeSelect) {
-                modeSelect.value = userData.mode;
-                window.currentMode = userData.mode;
-                // Trigger change event to ensure mode is properly applied
-                const event = new Event('change', { bubbles: true });
-                modeSelect.dispatchEvent(event);
+            if (window.setFrequencyInputValue) {
+                window.setFrequencyInputValue(userData.frequency);
+            } else {
+                freqInput.value = (userData.frequency / 1000000).toFixed(6);
+                freqInput.setAttribute('data-hz-value', userData.frequency);
             }
         }
-        
-        // Update bandwidth if provided
+
+        // Update bandwidth BEFORE mode change (setMode may reset bandwidth)
         if (userData.bw_low !== undefined) {
             window.currentBandwidthLow = userData.bw_low;
             const bwLowInput = document.getElementById('bandwidth-low');
             if (bwLowInput) {
                 bwLowInput.value = userData.bw_low;
+                const bwLowValue = document.getElementById('bandwidth-low-value');
+                if (bwLowValue) {
+                    bwLowValue.textContent = userData.bw_low;
+                }
             }
         }
-        
+
         if (userData.bw_high !== undefined) {
             window.currentBandwidthHigh = userData.bw_high;
             const bwHighInput = document.getElementById('bandwidth-high');
             if (bwHighInput) {
                 bwHighInput.value = userData.bw_high;
+                const bwHighValue = document.getElementById('bandwidth-high-value');
+                if (bwHighValue) {
+                    bwHighValue.textContent = userData.bw_high;
+                }
             }
         }
-        
-        // Trigger tune to apply changes
-        if (typeof autoTune === 'function') {
-            console.log('[ChatUI] Auto-tuning to synced settings');
-            autoTune();
-        } else if (typeof tune === 'function') {
-            console.log('[ChatUI] Tuning to synced settings');
-            tune();
+
+        // Update mode using setMode function if mode changed (preserves bandwidth)
+        if (userData.mode && modeChanged) {
+            if (typeof setMode === 'function') {
+                console.log('[ChatUI] Setting mode to:', userData.mode, 'with preserveBandwidth=true');
+                setMode(userData.mode, true); // preserveBandwidth=true to keep our synced bandwidth
+            } else {
+                window.currentMode = userData.mode;
+            }
+        } else if (!modeChanged) {
+            // Mode didn't change, just tune
+            if (typeof autoTune === 'function') {
+                console.log('[ChatUI] Auto-tuning to synced settings (mode unchanged)');
+                autoTune();
+            } else if (typeof tune === 'function') {
+                console.log('[ChatUI] Tuning to synced settings (mode unchanged)');
+                tune();
+            }
         }
-        
+
         this.addSystemMessage(`Synced to ${userData.username}: ${(userData.frequency / 1000000).toFixed(3)} MHz ${userData.mode ? userData.mode.toUpperCase() : ''}`);
     }
 

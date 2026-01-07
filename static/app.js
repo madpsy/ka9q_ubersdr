@@ -6346,10 +6346,12 @@ function updateSpectrumCursor() {
         // Get frequency from data-hz-value attribute
         const freq = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
         if (!isNaN(freq)) {
+            // CRITICAL: Use window globals, not local variables
+            // Local variables may be stale if mode/bandwidth changed via chat sync
             spectrumDisplay.updateConfig({
                 tunedFreq: freq,
-                bandwidthLow: currentBandwidthLow,
-                bandwidthHigh: currentBandwidthHigh
+                bandwidthLow: window.currentBandwidthLow,
+                bandwidthHigh: window.currentBandwidthHigh
             });
         }
     }

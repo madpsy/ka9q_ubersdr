@@ -195,10 +195,39 @@ func (cm *ChatManager) SetFrequencyAndMode(sessionID string, frequency uint64, m
 	log.Printf("Chat: User '%s' set frequency %d Hz, mode %s, bw_high %d, bw_low %d",
 		user.Username, frequency, mode, bwHigh, bwLow)
 
-	// Broadcast updated user info to all clients
-	cm.BroadcastActiveUsers()
+	// Broadcast only this user's updated info (more efficient than full user list)
+	cm.broadcastUserUpdate(user)
 
 	return nil
+}
+
+// broadcastUserUpdate broadcasts a single user's updated information
+func (cm *ChatManager) broadcastUserUpdate(user *ChatUser) {
+	userData := map[string]interface{}{
+		"username": user.Username,
+	}
+
+	// Include frequency and mode if set
+	if user.Frequency > 0 {
+		userData["frequency"] = user.Frequency
+	}
+	if user.Mode != "" {
+		userData["mode"] = user.Mode
+	}
+	// Include bandwidth if set (non-zero values)
+	if user.BWHigh != 0 {
+		userData["bw_high"] = user.BWHigh
+	}
+	if user.BWLow != 0 {
+		userData["bw_low"] = user.BWLow
+	}
+
+	message := map[string]interface{}{
+		"type": "chat_user_update",
+		"data": userData,
+	}
+
+	cm.wsHandler.broadcast(message)
 }
 
 // RemoveUser removes a user from the chat system

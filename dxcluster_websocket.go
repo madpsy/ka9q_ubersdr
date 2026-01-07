@@ -315,7 +315,7 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessi
 						"type": "pong",
 					})
 
-				case "chat_set_username", "chat_message", "chat_request_users", "chat_leave":
+				case "chat_set_username", "chat_message", "chat_set_frequency_mode", "chat_request_users", "chat_leave":
 					// Handle chat messages
 					if h.chatManager != nil {
 						if err := h.chatManager.HandleChatMessage(userSessionID, msg); err != nil {

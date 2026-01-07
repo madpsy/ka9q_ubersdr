@@ -490,10 +490,27 @@ class ChatUI {
             document.getElementById('chat-username-setup').style.display = 'none';
             document.getElementById('chat-interface').style.display = 'flex';
             this.addSystemMessage(`You joined as ${data.username}`);
-            this.chat.requestActiveUsers();
 
-            // Send initial frequency/mode/bandwidth on join
-            this.updateRadioSettings();
+            // Send initial frequency/mode/bandwidth on join (immediate, no debounce)
+            const freqInput = document.getElementById('frequency');
+            const frequency = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
+            const mode = window.currentMode || 'usb';
+            const bwLow = window.currentBandwidthLow || 0;
+            const bwHigh = window.currentBandwidthHigh || 0;
+
+            if (frequency && mode) {
+                console.log('[ChatUI] Sending initial radio settings on join - freq:', frequency, 'mode:', mode);
+                this.chat.setFrequencyAndMode(frequency, mode, bwHigh, bwLow);
+
+                // Wait a moment for server to process, then request active users
+                // This ensures our frequency/mode is included in the response
+                setTimeout(() => {
+                    this.chat.requestActiveUsers();
+                }, 100);
+            } else {
+                // No frequency/mode to send, request users immediately
+                this.chat.requestActiveUsers();
+            }
         });
 
         this.chat.on('user_joined', (data) => {

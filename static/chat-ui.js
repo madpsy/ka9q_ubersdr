@@ -1145,6 +1145,12 @@ class ChatUI {
             // Show errors in the UI so users know what went wrong
             console.warn('[ChatUI] Chat error:', error);
 
+            // Suppress rate limit errors - just log them
+            if (error.includes('rate limit exceeded')) {
+                console.log('[ChatUI] Rate limit hit, suppressing error message');
+                return;
+            }
+
             // If we're auto-rejoining and get an error, it means rejoin failed
             if (this.isAutoRejoining) {
                 console.log('[ChatUI] Auto-rejoin failed with error:', error);

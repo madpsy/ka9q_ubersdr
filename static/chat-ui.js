@@ -684,6 +684,7 @@ class ChatUI {
         
         if (this.chat.sendMessage(message)) {
             input.value = '';
+            input.focus();
         }
     }
 

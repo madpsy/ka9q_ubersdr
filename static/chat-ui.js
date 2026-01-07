@@ -409,6 +409,10 @@ class ChatUI {
                 color: #4a9eff;
                 cursor: pointer;
             }
+
+            .chat-message-username.own-message {
+                color: #ff9f40;
+            }
             
             .chat-message-username:hover {
                 text-decoration: underline;
@@ -845,9 +849,13 @@ class ChatUI {
 
         const time = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
 
+        // Check if this message is from us
+        const isOwnMessage = this.chat && this.chat.username === username;
+        const usernameClass = isOwnMessage ? 'chat-message-username own-message' : 'chat-message-username';
+
         div.innerHTML = `
             <span style="color:#666; font-size:10px; margin-right:4px;">${time}</span>
-            <span class="chat-message-username" onclick="chatUI.toggleMute('${this.escapeHtml(username)}')">${this.escapeHtml(username)}:</span>
+            <span class="${usernameClass}" onclick="chatUI.toggleMute('${this.escapeHtml(username)}')">${this.escapeHtml(username)}:</span>
             <span>${this.escapeHtml(message)}</span>
         `;
 
@@ -930,14 +938,24 @@ class ChatUI {
         const userItems = sortedUsers.map(u => {
             console.log('[ChatUI] User:', u.username, 'freq:', u.frequency, 'mode:', u.mode);
 
-            // Username (clickable to mute/unmute)
-            let usernameSpan = `<span onclick="chatUI.toggleMute('${this.escapeHtml(u.username)}')" style="cursor:pointer; display:block; margin-bottom:2px;">${this.escapeHtml(u.username)}</span>`;
+            // Check if this is our own user
+            const isOurUser = u.username === ourUsername;
 
-            // Add frequency (clickable to tune)
+            // Username (clickable to mute/unmute) - bold if it's us
+            const usernameStyle = isOurUser ? 'font-weight:bold; cursor:pointer; display:block; margin-bottom:2px;' : 'cursor:pointer; display:block; margin-bottom:2px;';
+            let usernameSpan = `<span onclick="chatUI.toggleMute('${this.escapeHtml(u.username)}')" style="${usernameStyle}">${this.escapeHtml(u.username)}</span>`;
+
+            // Add frequency - clickable to tune for others, just display for us
             let radioInfo = '';
             if (u.frequency) {
                 const freqMHz = (u.frequency / 1000000).toFixed(3);
-                radioInfo += `<span style="color:#888; cursor:pointer; text-decoration:underline; font-size:10px; display:block; margin-bottom:2px;" onclick="event.stopPropagation(); chatUI.tuneToUser('${this.escapeHtml(u.username)}')" title="Click to tune to ${freqMHz} MHz">${freqMHz} MHz</span>`;
+                if (isOurUser) {
+                    // Our own frequency - not clickable, bold
+                    radioInfo += `<span style="color:#888; font-size:10px; display:block; margin-bottom:2px; font-weight:bold;">${freqMHz} MHz</span>`;
+                } else {
+                    // Other user's frequency - clickable to tune
+                    radioInfo += `<span style="color:#888; cursor:pointer; text-decoration:underline; font-size:10px; display:block; margin-bottom:2px;" onclick="event.stopPropagation(); chatUI.tuneToUser('${this.escapeHtml(u.username)}')" title="Click to tune to ${freqMHz} MHz">${freqMHz} MHz</span>`;
+                }
             }
 
             const muted = this.chat.isMuted(u.username);
@@ -962,7 +980,6 @@ class ChatUI {
             }
 
             // Add sync button (only if not our own user)
-            const isOurUser = u.username === ourUsername;
             const isSynced = this.syncedUsername === u.username;
             const syncBtnClass = isSynced ? 'chat-sync-btn active' : 'chat-sync-btn';
             const syncBtnText = isSynced ? '✓' : '🔗';

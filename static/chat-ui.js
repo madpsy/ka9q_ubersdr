@@ -956,10 +956,23 @@ class ChatUI {
         // Step 4: Apply zoom_bw if provided and valid (do this BEFORE autoTune)
         if (zoomBW > 0 && window.spectrumDisplay && window.spectrumDisplay.ws && window.spectrumDisplay.ws.readyState === WebSocket.OPEN) {
             console.log('[ChatUI] Applying synced zoom_bw:', zoomBW, 'Hz/bin at frequency:', userData.frequency);
+
+            // Calculate new total bandwidth and apply boundary constraints (0-30 MHz)
+            const binCount = window.spectrumDisplay.binCount || 2048;
+            const newTotalBW = zoomBW * binCount;
+            const halfBandwidth = newTotalBW / 2;
+
+            // Constrain center frequency to keep view within 0-30 MHz
+            const minCenterFreq = 0 + halfBandwidth;
+            const maxCenterFreq = 30e6 - halfBandwidth;
+            const clampedCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, userData.frequency));
+
+            console.log('[ChatUI] Zoom constraints - totalBW:', (newTotalBW/1e6).toFixed(3), 'MHz, clamped freq:', (clampedCenterFreq/1e6).toFixed(3), 'MHz');
+
             // Send zoom command to spectrum display using the correct message format
             window.spectrumDisplay.ws.send(JSON.stringify({
                 type: 'zoom',
-                frequency: Math.round(userData.frequency),
+                frequency: Math.round(clampedCenterFreq),
                 binBandwidth: zoomBW
             }));
         }

@@ -982,6 +982,12 @@ class ChatUI {
         window.currentBandwidthLow = bwLow;
         window.currentBandwidthHigh = bwHigh;
 
+        // Update spectrum display instance to prevent flickering filter lines
+        if (window.spectrumDisplay) {
+            window.spectrumDisplay.currentBandwidthLow = bwLow;
+            window.spectrumDisplay.currentBandwidthHigh = bwHigh;
+        }
+
         // Update sliders
         const bwLowSlider = document.getElementById('bandwidth-low');
         const bwHighSlider = document.getElementById('bandwidth-high');

@@ -383,7 +383,7 @@ chat:
   # When enabled, users can set a username and send chat messages
   # Chat uses the same websocket connection as DX spots (no additional connections)
   # Default: false
-  enabled: false
+  enabled: true
   
   # Maximum number of concurrent chat users
   # Limits how many users can have active chat sessions simultaneously

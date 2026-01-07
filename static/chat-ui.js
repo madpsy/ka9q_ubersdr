@@ -542,12 +542,20 @@ class ChatUI {
 
         this.chat.on('user_joined', (data) => {
             this.addSystemMessage(`${data.username} joined`);
-            this.chat.requestActiveUsers();
+            // User list will be updated via chat_user_update broadcast
         });
 
         this.chat.on('user_left', (data) => {
             this.addSystemMessage(`${data.username} left`);
-            this.chat.requestActiveUsers();
+            // Remove user from local list
+            const userIndex = this.chat.activeUsers.findIndex(u => u.username === data.username);
+            if (userIndex >= 0) {
+                this.chat.activeUsers.splice(userIndex, 1);
+                this.updateActiveUsers({
+                    users: this.chat.activeUsers,
+                    count: this.chat.activeUsers.length
+                });
+            }
         });
 
         this.chat.on('active_users', (data) => {
@@ -770,7 +778,11 @@ class ChatUI {
     toggleMute(username) {
         const wasMuted = this.chat.toggleMute(username);
         this.addSystemMessage(wasMuted ? `Muted ${username}` : `Unmuted ${username}`);
-        this.chat.requestActiveUsers(); // Refresh display
+        // Refresh display locally without server request
+        this.updateActiveUsers({
+            users: this.chat.activeUsers,
+            count: this.chat.activeUsers.length
+        });
     }
 
     /**
@@ -811,9 +823,12 @@ class ChatUI {
                 this.syncToUser(user);
             }
         }
-        
-        // Refresh the user list to update button states
-        this.chat.requestActiveUsers();
+
+        // Refresh the user list to update button states locally
+        this.updateActiveUsers({
+            users: this.chat.activeUsers,
+            count: this.chat.activeUsers.length
+        });
     }
     
     /**

@@ -19,6 +19,8 @@ class UberSDRChat {
         this.bwLow = null;
         this.mutedUsers = new Set();
         this.eventHandlers = {};
+        this.debounceTimer = null;
+        this.debounceDelay = 250; // 250ms debounce delay
         
         // Load muted users from localStorage
         this.loadMutedUsers();
@@ -302,6 +304,117 @@ class UberSDRChat {
                 mode: mode.toLowerCase(),
                 bw_high: bwHigh,
                 bw_low: bwLow
+            }));
+            return true;
+        } else {
+            this.emit('error', 'WebSocket not connected');
+            return false;
+        }
+    }
+
+    /**
+     * Update frequency with debouncing
+     * @param {number} frequency - Frequency in Hz (0 to 30000000)
+     */
+    updateFrequency(frequency) {
+        // Validate frequency
+        const freqValidation = this.validateFrequency(frequency);
+        if (!freqValidation.valid) {
+            this.emit('error', freqValidation.error);
+            return false;
+        }
+
+        // Store the new frequency
+        this.frequency = frequency;
+
+        // Debounce the send
+        this.debouncedSendFrequencyMode();
+        return true;
+    }
+
+    /**
+     * Update mode with debouncing
+     * @param {string} mode - Mode: usb, lsb, am, fm, cwu, cwl, sam, nfm
+     */
+    updateMode(mode) {
+        // Validate mode
+        const modeValidation = this.validateMode(mode);
+        if (!modeValidation.valid) {
+            this.emit('error', modeValidation.error);
+            return false;
+        }
+
+        // Store the new mode
+        this.mode = mode.toLowerCase();
+
+        // Debounce the send
+        this.debouncedSendFrequencyMode();
+        return true;
+    }
+
+    /**
+     * Update bandwidth with debouncing
+     * @param {number} bwHigh - High bandwidth cutoff in Hz (-10000 to 10000)
+     * @param {number} bwLow - Low bandwidth cutoff in Hz (-10000 to 10000)
+     */
+    updateBandwidth(bwHigh, bwLow) {
+        // Validate bandwidth high
+        const bwHighValidation = this.validateBandwidth(bwHigh, 'bw_high');
+        if (!bwHighValidation.valid) {
+            this.emit('error', bwHighValidation.error);
+            return false;
+        }
+
+        // Validate bandwidth low
+        const bwLowValidation = this.validateBandwidth(bwLow, 'bw_low');
+        if (!bwLowValidation.valid) {
+            this.emit('error', bwLowValidation.error);
+            return false;
+        }
+
+        // Store the new bandwidth
+        this.bwHigh = bwHigh;
+        this.bwLow = bwLow;
+
+        // Debounce the send
+        this.debouncedSendFrequencyMode();
+        return true;
+    }
+
+    /**
+     * Debounced send of frequency/mode/bandwidth
+     * Waits 250ms after the last change before sending
+     */
+    debouncedSendFrequencyMode() {
+        // Clear any existing timer
+        if (this.debounceTimer) {
+            clearTimeout(this.debounceTimer);
+        }
+
+        // Set a new timer
+        this.debounceTimer = setTimeout(() => {
+            this.sendFrequencyMode();
+            this.debounceTimer = null;
+        }, this.debounceDelay);
+    }
+
+    /**
+     * Send current frequency/mode/bandwidth to server
+     * Internal method called by debounced updates
+     */
+    sendFrequencyMode() {
+        if (!this.username) {
+            // Don't send if not joined chat
+            return false;
+        }
+
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({
+                type: 'chat_set_frequency_mode',
+                frequency: this.frequency,
+                mode: this.mode,
+                bw_high: this.bwHigh,
+                bw_low: this.bwLow
             }));
             return true;
         } else {

@@ -17,12 +17,87 @@ class ChatUI {
         this.createChatPanel();
         this.setupEventHandlers();
         this.setupChatEvents();
+        this.setupRadioTracking();
         
         // Auto-login if we have a saved username
         if (this.savedUsername) {
             setTimeout(() => {
                 this.autoLogin();
             }, 1000); // Wait 1 second for WebSocket to be fully ready
+        }
+    }
+
+    /**
+     * Set up tracking of radio frequency/mode/bandwidth changes
+     * Automatically sends updates to chat when user changes these values
+     */
+    setupRadioTracking() {
+        // Track frequency changes
+        const originalHandleFrequencyChange = window.handleFrequencyChange;
+        if (originalHandleFrequencyChange) {
+            window.handleFrequencyChange = () => {
+                originalHandleFrequencyChange();
+                this.updateRadioSettings();
+            };
+        }
+
+        // Track mode changes
+        const originalSetMode = window.setMode;
+        if (originalSetMode) {
+            window.setMode = (...args) => {
+                originalSetMode(...args);
+                this.updateRadioSettings();
+            };
+        }
+
+        // Track bandwidth changes (already debounced in app.js)
+        const originalUpdateBandwidth = window.updateBandwidth;
+        if (originalUpdateBandwidth) {
+            window.updateBandwidth = () => {
+                originalUpdateBandwidth();
+                this.updateRadioSettings();
+            };
+        }
+
+        // Also track bandwidth display updates (for slider changes)
+        const originalUpdateBandwidthDisplay = window.updateBandwidthDisplay;
+        if (originalUpdateBandwidthDisplay) {
+            window.updateBandwidthDisplay = () => {
+                originalUpdateBandwidthDisplay();
+                this.updateRadioSettings();
+            };
+        }
+    }
+
+    /**
+     * Update radio settings in chat (debounced)
+     * Called whenever frequency, mode, or bandwidth changes
+     */
+    updateRadioSettings() {
+        if (!this.chat || !this.chat.isJoined()) {
+            return; // Not joined to chat, skip update
+        }
+
+        // Get current values from app.js globals
+        const freqInput = document.getElementById('frequency');
+        const frequency = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
+        const mode = window.currentMode || 'usb';
+        const bwLow = window.currentBandwidthLow || 0;
+        const bwHigh = window.currentBandwidthHigh || 0;
+
+        // Update frequency
+        if (frequency && !isNaN(frequency)) {
+            this.chat.updateFrequency(frequency);
+        }
+
+        // Update mode
+        if (mode) {
+            this.chat.updateMode(mode);
+        }
+
+        // Update bandwidth
+        if (bwLow !== undefined && bwHigh !== undefined) {
+            this.chat.updateBandwidth(bwHigh, bwLow);
         }
     }
 
@@ -153,7 +228,7 @@ class ChatUI {
         style.textContent = `
             .chat-panel {
                 position: fixed;
-                top: 85%;
+                top: 50%;
                 right: 0;
                 transform: translateY(-50%);
                 z-index: 900;
@@ -411,6 +486,9 @@ class ChatUI {
             document.getElementById('chat-interface').style.display = 'flex';
             this.addSystemMessage(`You joined as ${data.username}`);
             this.chat.requestActiveUsers();
+
+            // Send initial frequency/mode/bandwidth on join
+            this.updateRadioSettings();
         });
 
         this.chat.on('user_joined', (data) => {
@@ -505,9 +583,9 @@ class ChatUI {
         
         const time = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
         div.innerHTML = `
+            <span style="color:#666; font-size:10px; margin-right:4px;">${time}</span>
             <span class="chat-message-username" onclick="chatUI.toggleMute('${this.escapeHtml(username)}')">${this.escapeHtml(username)}:</span>
             <span>${this.escapeHtml(message)}</span>
-            <span style="color:#666; font-size:10px; margin-left:4px;">${time}</span>
         `;
         
         container.appendChild(div);
@@ -565,10 +643,15 @@ class ChatUI {
         const userItems = data.users.map(u => {
             let info = this.escapeHtml(u.username);
             
-            // Add frequency/mode if set
-            if (u.frequency && u.mode) {
+            // Add frequency (always show if set, even without mode)
+            if (u.frequency) {
                 const freqMHz = (u.frequency / 1000000).toFixed(3);
-                info += ` <span style="color:#888;">(${freqMHz} MHz ${u.mode.toUpperCase()})</span>`;
+                info += ` <span style="color:#888;">${freqMHz} MHz</span>`;
+
+                // Add mode if also set
+                if (u.mode) {
+                    info += ` <span style="color:#888;">${u.mode.toUpperCase()}</span>`;
+                }
             }
             
             const muted = this.chat.isMuted(u.username);

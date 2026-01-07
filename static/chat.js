@@ -403,21 +403,29 @@ class UberSDRChat {
      * Internal method called by debounced updates
      */
     sendFrequencyMode() {
+        console.log('[Chat] sendFrequencyMode called, username:', this.username);
+
         if (!this.username) {
+            console.log('[Chat] No username set, skipping send');
             // Don't send if not joined chat
             return false;
         }
 
+        console.log('[Chat] WebSocket state:', this.ws ? this.ws.readyState : 'no ws', 'OPEN=', WebSocket.OPEN);
+
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({
+            const payload = {
                 type: 'chat_set_frequency_mode',
                 frequency: this.frequency,
                 mode: this.mode,
                 bw_high: this.bwHigh,
                 bw_low: this.bwLow
-            }));
+            };
+            console.log('[Chat] Sending frequency/mode update:', payload);
+            this.ws.send(JSON.stringify(payload));
             return true;
         } else {
+            console.error('[Chat] WebSocket not connected - ws:', this.ws, 'readyState:', this.ws ? this.ws.readyState : 'N/A');
             this.emit('error', 'WebSocket not connected');
             return false;
         }

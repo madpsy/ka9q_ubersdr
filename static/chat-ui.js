@@ -718,13 +718,21 @@ function initializeChatUI(websocket) {
         // Expose globally for debugging and access
         window.chatUI = chatUI;
 
-        // Set up radio tracking after a longer delay to ensure app.js has finished all its overrides
-        // app.js overrides window.handleFrequencyChange around line 7539, so we need to wait
-        setTimeout(() => {
-            if (chatUI) {
-                console.log('[ChatUI] Delayed setup of radio tracking...');
-                chatUI.setupRadioTracking();
-            }
-        }, 2000); // 2 second delay to ensure app.js is fully loaded
+        // Set up radio tracking immediately - radioAPI should exist by now
+        console.log('[ChatUI] Initializing radio tracking, radioAPI exists:', !!window.radioAPI);
+        if (window.radioAPI) {
+            chatUI.setupRadioTracking();
+        } else {
+            // Fallback: wait for radioAPI to be available
+            console.warn('[ChatUI] radioAPI not available yet, waiting...');
+            setTimeout(() => {
+                if (chatUI && window.radioAPI) {
+                    console.log('[ChatUI] Delayed setup of radio tracking...');
+                    chatUI.setupRadioTracking();
+                } else {
+                    console.error('[ChatUI] radioAPI still not available after delay');
+                }
+            }, 1000);
+        }
     }
 }

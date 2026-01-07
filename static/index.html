@@ -1027,32 +1027,46 @@
     <script src="oscilloscope.js"></script>
     <script src="recorder.js"></script>
     <script src="idle-detector.js"></script>
+    <!-- Fetch description once and store globally for chat and other features -->
+    <script>
+        // Fetch /api/description once and cache it globally
+        window.descriptionPromise = (async function() {
+            try {
+                const response = await fetch('/api/description');
+                if (response.ok) {
+                    const data = await response.json();
+                    window.apiDescription = data;
+                    return data;
+                }
+            } catch (error) {
+                console.error('[Description] Error fetching /api/description:', error);
+            }
+            return null;
+        })();
+    </script>
     <script src="dxcluster-client.js"></script>
     <!-- Chat scripts loaded conditionally based on chat_enabled -->
     <script>
         // Load chat scripts only if chat is enabled
         (async function() {
             try {
-                const response = await fetch('/api/description');
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.chat_enabled === true) {
-                        console.log('[Chat] Chat is enabled, loading chat scripts');
-                        // Load chat scripts dynamically
-                        const scripts = ['chat.js', 'chat-ui.js', 'chat-radio-tracker.js'];
-                        for (const src of scripts) {
-                            const script = document.createElement('script');
-                            script.src = src;
-                            document.body.appendChild(script);
-                            await new Promise((resolve, reject) => {
-                                script.onload = resolve;
-                                script.onerror = reject;
-                            });
-                        }
-                        console.log('[Chat] Chat scripts loaded successfully');
-                    } else {
-                        console.log('[Chat] Chat is disabled, skipping chat scripts');
+                const data = await window.descriptionPromise;
+                if (data && data.chat_enabled === true) {
+                    console.log('[Chat] Chat is enabled, loading chat scripts');
+                    // Load chat scripts dynamically
+                    const scripts = ['chat.js', 'chat-ui.js', 'chat-radio-tracker.js'];
+                    for (const src of scripts) {
+                        const script = document.createElement('script');
+                        script.src = src;
+                        document.body.appendChild(script);
+                        await new Promise((resolve, reject) => {
+                            script.onload = resolve;
+                            script.onerror = reject;
+                        });
                     }
+                    console.log('[Chat] Chat scripts loaded successfully');
+                } else {
+                    console.log('[Chat] Chat is disabled, skipping chat scripts');
                 }
             } catch (error) {
                 console.error('[Chat] Error loading chat scripts:', error);

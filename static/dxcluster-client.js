@@ -84,17 +84,17 @@ class DXClusterClient {
 
     async initializeChatIfEnabled() {
         try {
-            const response = await fetch('/api/description');
-            if (response.ok) {
-                const data = await response.json();
-                if (data.chat_enabled === true) {
-                    console.log('[DX Cluster] Chat is enabled, initializing chat UI');
-                    initializeChatUI(this.ws);
-                } else {
-                    console.log('[DX Cluster] Chat is disabled, skipping chat UI initialization');
-                }
+            // Use cached description from window.descriptionPromise if available
+            let data = window.apiDescription;
+            if (!data && window.descriptionPromise) {
+                data = await window.descriptionPromise;
+            }
+
+            if (data && data.chat_enabled === true) {
+                console.log('[DX Cluster] Chat is enabled, initializing chat UI');
+                initializeChatUI(this.ws);
             } else {
-                console.warn('[DX Cluster] Failed to fetch description, skipping chat initialization');
+                console.log('[DX Cluster] Chat is disabled, skipping chat UI initialization');
             }
         } catch (error) {
             console.error('[DX Cluster] Error checking chat_enabled status:', error);

@@ -3271,7 +3271,8 @@ function updateBandwidthDisplay() {
         }
 
         // Update spectrum display bandwidth indicator
-        if (spectrumDisplay) {
+        // Skip if chat is syncing to prevent flickering
+        if (spectrumDisplay && (!window.chatUI || !window.chatUI.isSyncing)) {
             const freqInput = document.getElementById('frequency');
             const currentFreq = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
             spectrumDisplay.updateConfig({
@@ -3345,7 +3346,8 @@ function updateBandwidth() {
     }
 
     // Update spectrum display bandwidth indicator
-    if (spectrumDisplay) {
+    // Skip if chat is syncing to prevent flickering
+    if (spectrumDisplay && (!window.chatUI || !window.chatUI.isSyncing)) {
         spectrumDisplay.updateConfig({
             bandwidthLow: bandwidthLow,
             bandwidthHigh: bandwidthHigh

@@ -169,7 +169,8 @@ export function adjustBandwidth(direction) {
     }
     
     // Update spectrum display bandwidth indicator
-    if (window.spectrumDisplay) {
+    // Skip if chat is syncing to prevent flickering
+    if (window.spectrumDisplay && (!window.chatUI || !window.chatUI.isSyncing)) {
         const freqInput = document.getElementById('frequency');
         const currentFreq = freqInput ? parseInt(freqInput.value) : 0;
         window.spectrumDisplay.updateConfig({

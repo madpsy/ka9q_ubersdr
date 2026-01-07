@@ -41,7 +41,7 @@ type InstanceReport struct {
 	UUID             string                 `json:"uuid"`
 	Callsign         string                 `json:"callsign"`
 	Name             string                 `json:"name"`
-	Email            string                 `json:"email"`             // Admin email address (private, for Let's Encrypt)
+	Email            string                 `json:"email"` // Admin email address (private, for Let's Encrypt)
 	Location         string                 `json:"location"`
 	Latitude         float64                `json:"latitude"`
 	Longitude        float64                `json:"longitude"`
@@ -63,6 +63,8 @@ type InstanceReport struct {
 	PublicIQModes    []string               `json:"public_iq_modes"`   // List of IQ modes accessible without authentication
 	CPUModel         string                 `json:"cpu_model"`         // CPU model name
 	Load             map[string]interface{} `json:"load,omitempty"`    // System load averages, CPU cores, and status
+	CORSEnabled      bool                   `json:"cors_enabled"`      // Whether CORS is enabled
+	ChatEnabled      bool                   `json:"chat_enabled"`      // Whether chat is enabled
 	Test             bool                   `json:"test,omitempty"`    // If true, this is a test report - collector will verify /api/description instead of full callback
 }
 
@@ -438,6 +440,8 @@ func (ir *InstanceReporter) sendReport() error {
 		PublicIQModes:    publicIQModes,
 		CPUModel:         cpuModel,
 		Load:             systemLoad,
+		CORSEnabled:      ir.config.Server.EnableCORS,
+		ChatEnabled:      ir.config.Chat.Enabled,
 	}
 
 	jsonData, err := json.Marshal(report)
@@ -761,6 +765,8 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		PublicIQModes:    publicIQModes,
 		CPUModel:         cpuModel,
 		Load:             systemLoad,
+		CORSEnabled:      ir.config.Server.EnableCORS,
+		ChatEnabled:      ir.config.Chat.Enabled,
 		Test:             isTest,
 	}
 
@@ -850,7 +856,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 				collectorMessage = message
 			}
 		}
-		
+
 		// Build error message with collector's response if available
 		var lastErr error
 		if collectorMessage != "" {
@@ -858,7 +864,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		} else {
 			lastErr = fmt.Errorf("server returned status %d for %s", resp.StatusCode, url)
 		}
-		
+
 		ir.mu.Lock()
 		ir.lastResponseCode = resp.StatusCode
 		ir.lastResponseStatus = ""

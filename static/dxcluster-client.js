@@ -84,15 +84,30 @@ class DXClusterClient {
 
     async initializeChatIfEnabled() {
         try {
-            // Use cached description from window.descriptionPromise if available
+            // Always wait for the description promise to ensure we have the data
             let data = window.apiDescription;
-            if (!data && window.descriptionPromise) {
-                data = await window.descriptionPromise;
+            if (!data) {
+                console.log('[DX Cluster] Waiting for description data...');
+                if (window.descriptionPromise) {
+                    data = await window.descriptionPromise;
+                } else {
+                    console.warn('[DX Cluster] No description promise available');
+                    return;
+                }
             }
 
             if (data && data.chat_enabled === true) {
                 console.log('[DX Cluster] Chat is enabled, initializing chat UI');
-                initializeChatUI(this.ws);
+                // Check if initializeChatUI function exists (scripts may not be loaded yet)
+                if (typeof initializeChatUI === 'function' && !window.chatUI) {
+                    initializeChatUI(this.ws);
+                } else if (!window.chatUI) {
+                    // Queue the initialization for when scripts are loaded
+                    console.log('[DX Cluster] Chat UI function not available yet, queuing initialization');
+                    if (window.chatInitQueue) {
+                        window.chatInitQueue.push(this.ws);
+                    }
+                }
             } else {
                 console.log('[DX Cluster] Chat is disabled, skipping chat UI initialization');
             }

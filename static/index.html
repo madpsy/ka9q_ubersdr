@@ -1047,6 +1047,9 @@
     <script src="dxcluster-client.js"></script>
     <!-- Chat scripts loaded conditionally based on chat_enabled -->
     <script>
+        // Queue for pending chat initialization (in case WebSocket connects before scripts load)
+        window.chatInitQueue = [];
+
         // Load chat scripts only if chat is enabled
         (async function() {
             try {
@@ -1065,6 +1068,17 @@
                         });
                     }
                     console.log('[Chat] Chat scripts loaded successfully');
+
+                    // Process any queued chat initializations
+                    if (window.chatInitQueue.length > 0) {
+                        console.log('[Chat] Processing', window.chatInitQueue.length, 'queued initialization(s)');
+                        window.chatInitQueue.forEach(ws => {
+                            if (typeof initializeChatUI === 'function' && !window.chatUI) {
+                                initializeChatUI(ws);
+                            }
+                        });
+                        window.chatInitQueue = [];
+                    }
                 } else {
                     console.log('[Chat] Chat is disabled, skipping chat scripts');
                 }

@@ -46,38 +46,54 @@ class ChatUI {
         // Define event handlers and store references
         this.radioEventHandlers.frequency_changed = (data) => {
             console.log('[ChatUI] Frequency changed event:', data.frequency, 'isSyncing:', this.isSyncing);
-            if (this.chat && this.chat.isJoined() && !this.isSyncing) {
-                this.chat.updateFrequency(data.frequency);
-                // Update our own user in the local list
+            if (this.chat && this.chat.isJoined()) {
+                // Always update our own user in the local list
                 this.updateOwnUserData({ frequency: data.frequency });
+                
+                // Only send to server if not syncing (to avoid loops)
+                if (!this.isSyncing) {
+                    this.chat.updateFrequency(data.frequency);
+                }
             }
         };
 
         this.radioEventHandlers.mode_changed = (data) => {
             console.log('[ChatUI] Mode changed event:', data.mode, 'isSyncing:', this.isSyncing);
-            if (this.chat && this.chat.isJoined() && !this.isSyncing) {
-                this.chat.updateMode(data.mode);
-                // Update our own user in the local list
+            if (this.chat && this.chat.isJoined()) {
+                // Always update our own user in the local list
                 this.updateOwnUserData({ mode: data.mode });
+                
+                // Only send to server if not syncing (to avoid loops)
+                if (!this.isSyncing) {
+                    this.chat.updateMode(data.mode);
+                }
             }
         };
 
         this.radioEventHandlers.bandwidth_changed = (data) => {
             console.log('[ChatUI] Bandwidth changed event - low:', data.low, 'high:', data.high, 'isSyncing:', this.isSyncing);
-            if (this.chat && this.chat.isJoined() && !this.isSyncing) {
-                this.chat.updateBandwidth(data.high, data.low);
-                // Update our own user in the local list
+            if (this.chat && this.chat.isJoined()) {
+                // Always update our own user in the local list
                 this.updateOwnUserData({ bw_low: data.low, bw_high: data.high });
+                
+                // Only send to server if not syncing (to avoid loops)
+                if (!this.isSyncing) {
+                    this.chat.updateBandwidth(data.high, data.low);
+                }
             }
         };
 
         this.radioEventHandlers.zoom_changed = (data) => {
             console.log('[ChatUI] Zoom changed event - binBandwidth:', data.binBandwidth, 'isSyncing:', this.isSyncing);
-            if (this.chat && this.chat.isJoined() && !this.isSyncing) {
-                // Update zoom_bw by sending full frequency/mode update
-                this.chat.debouncedSendFrequencyMode();
-                // Update our own user in the local list
+            if (this.chat && this.chat.isJoined()) {
+                // Always update our own user in the local list
                 this.updateOwnUserData({ zoom_bw: data.binBandwidth });
+                
+                // Only send to server if not syncing (to avoid loops)
+                if (!this.isSyncing) {
+                    // Update zoom_bw by sending full frequency/mode update
+                    this.chat.debouncedSendFrequencyMode();
+                }
             }
         };
 

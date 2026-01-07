@@ -49,7 +49,8 @@ class DXClusterClient {
                 }
                 
                 // Initialize chat UI if not already initialized and chat is enabled
-                if (typeof initializeChatUI === 'function' && !window.chatUI) {
+                // Always call this - it will handle queuing if scripts aren't loaded yet
+                if (!window.chatUI) {
                     this.initializeChatIfEnabled();
                 }
             };

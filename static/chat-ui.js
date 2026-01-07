@@ -315,9 +315,10 @@ class ChatUI {
                 font-size: 13px;
                 display: flex;
                 flex-direction: row;
+                align-items: flex-end;
                 transition: all 0.3s ease;
             }
-            
+
             .chat-panel.collapsed {
                 width: 40px;
             }
@@ -325,7 +326,7 @@ class ChatUI {
             .chat-panel.expanded {
                 width: 540px;
             }
-            
+
             .chat-header {
                 width: 40px;
                 height: 100px;
@@ -343,6 +344,7 @@ class ChatUI {
                 border-right: none;
                 border-radius: 8px 0 0 8px;
                 order: 2;
+                flex-shrink: 0;
             }
             
             .chat-header:hover {

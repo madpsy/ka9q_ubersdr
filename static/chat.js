@@ -401,6 +401,7 @@ class UberSDRChat {
     /**
      * Send current frequency/mode/bandwidth to server
      * Internal method called by debounced updates
+     * Always reads fresh values from app.js globals to ensure accuracy
      */
     sendFrequencyMode() {
         console.log('[Chat] sendFrequencyMode called, username:', this.username);
@@ -414,12 +415,19 @@ class UberSDRChat {
         console.log('[Chat] WebSocket state:', this.ws ? this.ws.readyState : 'no ws', 'OPEN=', WebSocket.OPEN);
 
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            // Always read fresh values from app.js globals to ensure we send current state
+            const freqInput = document.getElementById('frequency');
+            const currentFreq = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : this.frequency;
+            const currentMode = window.currentMode || this.mode;
+            const currentBwLow = window.currentBandwidthLow !== undefined ? window.currentBandwidthLow : this.bwLow;
+            const currentBwHigh = window.currentBandwidthHigh !== undefined ? window.currentBandwidthHigh : this.bwHigh;
+
             const payload = {
                 type: 'chat_set_frequency_mode',
-                frequency: this.frequency,
-                mode: this.mode,
-                bw_high: this.bwHigh,
-                bw_low: this.bwLow
+                frequency: currentFreq,
+                mode: currentMode,
+                bw_high: currentBwHigh,
+                bw_low: currentBwLow
             };
             console.log('[Chat] Sending frequency/mode update:', payload);
             this.ws.send(JSON.stringify(payload));

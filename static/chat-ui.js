@@ -533,9 +533,9 @@ class ChatUI {
                 bottom: 8px;
                 left: 50%;
                 transform: translateX(-50%);
-                font-size: 16px;
-                color: #aaa;
-                font-weight: normal;
+                font-size: 20px;
+                color: #fff;
+                font-weight: bold;
                 z-index: 10;
                 pointer-events: none;
             }

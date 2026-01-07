@@ -542,7 +542,16 @@ class ChatUI {
 
         this.chat.on('user_joined', (data) => {
             this.addSystemMessage(`${data.username} joined`);
-            // User list will be updated via chat_user_update broadcast
+            // Add new user to local list (they may not have radio data yet)
+            if (!this.chat.activeUsers.find(u => u.username === data.username)) {
+                this.chat.activeUsers.push({
+                    username: data.username
+                });
+                this.updateActiveUsers({
+                    users: this.chat.activeUsers,
+                    count: this.chat.activeUsers.length
+                });
+            }
         });
 
         this.chat.on('user_left', (data) => {

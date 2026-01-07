@@ -788,13 +788,25 @@ class ChatUI {
     leaveChat() {
         this.chat.leave();
 
+        // Clear saved username from localStorage
+        this.clearSavedUsername();
+
         // Switch from message input back to username input
         document.getElementById('chat-message-input-area').style.display = 'none';
         document.getElementById('chat-username-input-area').style.display = 'flex';
         document.getElementById('chat-leave-btn').style.display = 'none';
 
-        // Clear username input and messages
-        document.getElementById('chat-username-input').value = '';
+        // Clear username input, validation indicator, and messages
+        const usernameInput = document.getElementById('chat-username-input');
+        const validationIndicator = document.getElementById('chat-username-validation');
+        const joinBtn = document.getElementById('chat-join-btn');
+
+        usernameInput.value = '';
+        validationIndicator.style.display = 'none';
+        joinBtn.disabled = true;
+        joinBtn.style.opacity = '0.5';
+        joinBtn.style.cursor = 'not-allowed';
+
         document.getElementById('chat-messages').innerHTML = '';
 
         this.addSystemMessage('You left the chat');

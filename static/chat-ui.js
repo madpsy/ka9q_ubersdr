@@ -539,6 +539,10 @@ class ChatUI {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 this.sendMessage();
+                // Refocus after a short delay to ensure message is sent first
+                setTimeout(() => {
+                    document.getElementById('chat-message-input').focus();
+                }, 10);
             }
         });
     }

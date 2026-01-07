@@ -395,7 +395,7 @@ chat:
   
   # Rate limit: maximum messages per second per user
   # Prevents users from flooding the chat with rapid messages
-  # Default: 2 (one message per second)
+  # Default: 2 (two messages per second)
   # Recommended: 1-2 for normal chat
   rate_limit_per_second: 2
   
@@ -404,6 +404,13 @@ chat:
   # Default: 30 (30 messages per minute)
   # Recommended: 20-30 for normal chat
   rate_limit_per_minute: 30
+  
+  # Rate limit: maximum user updates per second per user
+  # Limits how often users can update their frequency/mode information
+  # Prevents spam of chat_user_update events to all connected clients
+  # Default: 4 (four updates per second)
+  # Recommended: 4-10 for normal usage
+  update_rate_limit_per_second: 4
 
 # Space Weather settings
 spaceweather:

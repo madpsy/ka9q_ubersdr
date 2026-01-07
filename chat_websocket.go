@@ -22,8 +22,9 @@ type ChatUser struct {
 	SessionID         string
 	Username          string
 	LastSeen          time.Time
-	LastMessageTime   time.Time   // For rate limiting
-	MessageTimestamps []time.Time // For rate limiting
+	LastMessageTime   time.Time   // For rate limiting chat messages
+	MessageTimestamps []time.Time // For rate limiting chat messages
+	LastUpdateTime    time.Time   // For rate limiting user updates (frequency/mode)
 	Frequency         uint64      // User's current frequency in Hz (optional)
 	Mode              string      // User's current mode (optional)
 	BWHigh            int         // High bandwidth cutoff in Hz (-10000 to 10000, optional)
@@ -49,22 +50,24 @@ type ChatManager struct {
 	activeUsersMu sync.RWMutex
 
 	// Configuration
-	maxUsers           int // Maximum concurrent users (0 = unlimited)
-	rateLimitPerSecond int // Maximum messages per second per user
-	rateLimitPerMinute int // Maximum messages per minute per user
+	maxUsers                 int // Maximum concurrent users (0 = unlimited)
+	rateLimitPerSecond       int // Maximum messages per second per user
+	rateLimitPerMinute       int // Maximum messages per minute per user
+	updateRateLimitPerSecond int // Maximum user updates per second per user
 }
 
 // NewChatManager creates a new chat manager
-func NewChatManager(wsHandler *DXClusterWebSocketHandler, maxMessages int, maxUsers int, rateLimitPerSecond int, rateLimitPerMinute int) *ChatManager {
+func NewChatManager(wsHandler *DXClusterWebSocketHandler, maxMessages int, maxUsers int, rateLimitPerSecond int, rateLimitPerMinute int, updateRateLimitPerSecond int) *ChatManager {
 	cm := &ChatManager{
-		sessionUsernames:   make(map[string]string),
-		messageBuffer:      make([]ChatMessage, 0, maxMessages),
-		maxMessages:        maxMessages,
-		wsHandler:          wsHandler,
-		activeUsers:        make(map[string]*ChatUser),
-		maxUsers:           maxUsers,
-		rateLimitPerSecond: rateLimitPerSecond,
-		rateLimitPerMinute: rateLimitPerMinute,
+		sessionUsernames:         make(map[string]string),
+		messageBuffer:            make([]ChatMessage, 0, maxMessages),
+		maxMessages:              maxMessages,
+		wsHandler:                wsHandler,
+		activeUsers:              make(map[string]*ChatUser),
+		maxUsers:                 maxUsers,
+		rateLimitPerSecond:       rateLimitPerSecond,
+		rateLimitPerMinute:       rateLimitPerMinute,
+		updateRateLimitPerSecond: updateRateLimitPerSecond,
 	}
 
 	// Start cleanup goroutine for inactive users
@@ -125,6 +128,7 @@ func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 		LastSeen:          time.Now(),
 		LastMessageTime:   time.Time{}, // Zero time
 		MessageTimestamps: make([]time.Time, 0, 25),
+		LastUpdateTime:    time.Time{}, // Zero time
 	}
 	cm.activeUsersMu.Unlock()
 
@@ -178,7 +182,7 @@ func (cm *ChatManager) SetFrequencyAndMode(sessionID string, frequency uint64, m
 		return ErrInvalidBandwidth
 	}
 
-	// Update user's frequency, mode, and bandwidth
+	// Check rate limit for user updates
 	cm.activeUsersMu.Lock()
 	user, exists := cm.activeUsers[sessionID]
 	if !exists {
@@ -186,6 +190,21 @@ func (cm *ChatManager) SetFrequencyAndMode(sessionID string, frequency uint64, m
 		return ErrUsernameNotSet
 	}
 
+	now := time.Now()
+
+	// Rate limit: user updates per second (configurable)
+	if cm.updateRateLimitPerSecond > 0 {
+		minInterval := time.Second / time.Duration(cm.updateRateLimitPerSecond)
+		if !user.LastUpdateTime.IsZero() && now.Sub(user.LastUpdateTime) < minInterval {
+			cm.activeUsersMu.Unlock()
+			return ErrUpdateRateLimitExceeded
+		}
+	}
+
+	// Update rate limit tracking
+	user.LastUpdateTime = now
+
+	// Update user's frequency, mode, and bandwidth
 	user.Frequency = frequency
 	user.Mode = mode
 	user.BWHigh = bwHigh
@@ -621,17 +640,18 @@ func trimString(s string, maxLen int) string {
 
 // Error types
 var (
-	ErrInvalidUsername      = &ChatError{"invalid username"}
-	ErrInvalidMessage       = &ChatError{"invalid message"}
-	ErrUsernameNotSet       = &ChatError{"username not set"}
-	ErrInvalidMessageType   = &ChatError{"invalid message type"}
-	ErrUnknownMessageType   = &ChatError{"unknown message type"}
-	ErrRateLimitExceeded    = &ChatError{"rate limit exceeded - please wait before sending another message"}
-	ErrMaxUsersReached      = &ChatError{"maximum number of chat users reached - please try again later"}
-	ErrUsernameAlreadyTaken = &ChatError{"username already taken - please choose a different username"}
-	ErrInvalidFrequency     = &ChatError{"invalid frequency - must be between 0 and 30000000 Hz"}
-	ErrInvalidMode          = &ChatError{"invalid mode - must be one of: usb, lsb, am, fm, cwu, cwl, sam, nfm"}
-	ErrInvalidBandwidth     = &ChatError{"invalid bandwidth - bw_high and bw_low must be between -10000 and 10000 Hz"}
+	ErrInvalidUsername         = &ChatError{"invalid username"}
+	ErrInvalidMessage          = &ChatError{"invalid message"}
+	ErrUsernameNotSet          = &ChatError{"username not set"}
+	ErrInvalidMessageType      = &ChatError{"invalid message type"}
+	ErrUnknownMessageType      = &ChatError{"unknown message type"}
+	ErrRateLimitExceeded       = &ChatError{"rate limit exceeded - please wait before sending another message"}
+	ErrUpdateRateLimitExceeded = &ChatError{"update rate limit exceeded - please wait before updating frequency/mode"}
+	ErrMaxUsersReached         = &ChatError{"maximum number of chat users reached - please try again later"}
+	ErrUsernameAlreadyTaken    = &ChatError{"username already taken - please choose a different username"}
+	ErrInvalidFrequency        = &ChatError{"invalid frequency - must be between 0 and 30000000 Hz"}
+	ErrInvalidMode             = &ChatError{"invalid mode - must be one of: usb, lsb, am, fm, cwu, cwl, sam, nfm"}
+	ErrInvalidBandwidth        = &ChatError{"invalid bandwidth - bw_high and bw_low must be between -10000 and 10000 Hz"}
 )
 
 // ChatError represents a chat-related error

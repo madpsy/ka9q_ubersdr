@@ -256,18 +256,18 @@ func (cm *ChatManager) broadcastUserUpdate(user *ChatUser) {
 		"username": user.Username,
 	}
 
-	// Include frequency and mode if set
+	// Always include frequency if set (even if 0)
 	if user.Frequency > 0 {
 		userData["frequency"] = user.Frequency
 	}
+	// Always include mode if set
 	if user.Mode != "" {
 		userData["mode"] = user.Mode
 	}
-	// Include bandwidth if set (non-zero values)
-	if user.BWHigh != 0 {
+	// Always include bandwidth values (even if 0, for sync functionality)
+	// Only exclude if both frequency and mode are not set (user hasn't sent any radio data yet)
+	if user.Frequency > 0 || user.Mode != "" {
 		userData["bw_high"] = user.BWHigh
-	}
-	if user.BWLow != 0 {
 		userData["bw_low"] = user.BWLow
 	}
 	// Include CAT and TX status
@@ -501,18 +501,18 @@ func (cm *ChatManager) BroadcastActiveUsers() {
 		userData := map[string]interface{}{
 			"username": user.Username,
 		}
-		// Include frequency and mode if set
+		// Include frequency if set
 		if user.Frequency > 0 {
 			userData["frequency"] = user.Frequency
 		}
+		// Include mode if set
 		if user.Mode != "" {
 			userData["mode"] = user.Mode
 		}
-		// Include bandwidth if set (non-zero values)
-		if user.BWHigh != 0 {
+		// Always include bandwidth values (even if 0, for sync functionality)
+		// Only exclude if both frequency and mode are not set (user hasn't sent any radio data yet)
+		if user.Frequency > 0 || user.Mode != "" {
 			userData["bw_high"] = user.BWHigh
-		}
-		if user.BWLow != 0 {
 			userData["bw_low"] = user.BWLow
 		}
 		// Include CAT and TX status

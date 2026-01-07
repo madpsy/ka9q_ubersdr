@@ -557,8 +557,15 @@ class ChatUI {
         this.chat.on('user_update', (data) => {
             this.updateSingleUser(data);
             // If this is the user we're synced with, update our radio
+            // Get the full user data from activeUsers to ensure we have all fields
             if (this.syncedUsername === data.username) {
-                this.syncToUser(data);
+                const fullUserData = this.chat.activeUsers.find(u => u.username === data.username);
+                if (fullUserData) {
+                    this.syncToUser(fullUserData);
+                } else {
+                    // Fallback to partial data if full data not available
+                    this.syncToUser(data);
+                }
             }
         });
 

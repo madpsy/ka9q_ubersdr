@@ -6498,6 +6498,13 @@ function spectrumZoomIn() {
     spectrumDisplay.zoomIn();
     // Zoom display will be updated when config arrives from server
     updateURL(); // Save zoom to URL
+
+    // Notify radioAPI immediately (don't wait for config update)
+    if (window.radioAPI && spectrumDisplay.binBandwidth) {
+        // Estimate new binBandwidth (will be corrected when config arrives)
+        const estimatedBinBandwidth = spectrumDisplay.binBandwidth / 2;
+        window.radioAPI.notifyZoomChange(estimatedBinBandwidth);
+    }
 }
 
 function spectrumZoomOut() {
@@ -6510,6 +6517,13 @@ function spectrumZoomOut() {
     spectrumDisplay.zoomOut();
     // Zoom display will be updated when config arrives from server
     updateURL(); // Save zoom to URL
+
+    // Notify radioAPI immediately (don't wait for config update)
+    if (window.radioAPI && spectrumDisplay.binBandwidth) {
+        // Estimate new binBandwidth (will be corrected when config arrives)
+        const estimatedBinBandwidth = spectrumDisplay.binBandwidth * 2;
+        window.radioAPI.notifyZoomChange(estimatedBinBandwidth);
+    }
 }
 
 function spectrumResetZoom() {
@@ -6522,6 +6536,12 @@ function spectrumResetZoom() {
     spectrumDisplay.resetZoom();
     // Zoom display will be updated when config arrives from server
     updateURL(); // Save zoom to URL (will remove zoom params when at 1x)
+
+    // Notify radioAPI immediately with default binBandwidth
+    if (window.radioAPI) {
+        // Default binBandwidth when fully zoomed out (will be corrected when config arrives)
+        window.radioAPI.notifyZoomChange(14648.4375); // 30MHz / 2048 bins
+    }
 }
 
 function spectrumMaxZoom() {
@@ -6552,6 +6572,11 @@ function spectrumMaxZoom() {
 
     // Zoom display will be updated when config arrives from server
     updateURL(); // Save zoom to URL
+
+    // Notify radioAPI immediately with max zoom binBandwidth
+    if (window.radioAPI) {
+        window.radioAPI.notifyZoomChange(1.0);
+    }
 }
 
 function spectrumCenterFrequency() {

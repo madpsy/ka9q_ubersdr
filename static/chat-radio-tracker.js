@@ -17,6 +17,7 @@ class ChatRadioTracker extends DecoderExtension {
         this.lastMode = null;
         this.lastBwLow = null;
         this.lastBwHigh = null;
+        this.lastZoomBW = null;
         this.pollInterval = null;
     }
 
@@ -59,6 +60,7 @@ class ChatRadioTracker extends DecoderExtension {
         const currentMode = window.currentMode || 'usb';
         const currentBwLow = window.currentBandwidthLow || 0;
         const currentBwHigh = window.currentBandwidthHigh || 0;
+        const currentZoomBW = (window.spectrumDisplay && window.spectrumDisplay.binBandwidth) ? window.spectrumDisplay.binBandwidth : 0;
 
         // Check for frequency change
         if (currentFreq !== this.lastFrequency && currentFreq > 0) {
@@ -81,29 +83,25 @@ class ChatRadioTracker extends DecoderExtension {
             this.lastBwHigh = currentBwHigh;
             window.chatUI.chat.updateBandwidth(currentBwHigh, currentBwLow);
         }
+
+        // Check for zoom change
+        if (currentZoomBW !== this.lastZoomBW && currentZoomBW > 0) {
+            console.log('[ChatRadioTracker] Zoom changed:', this.lastZoomBW, '→', currentZoomBW);
+            this.lastZoomBW = currentZoomBW;
+            // Trigger a full update which includes zoom_bw
+            window.chatUI.chat.debouncedSendFrequencyMode();
+        }
     }
 }
 
-// Register the extension (but don't auto-enable - radioAPI event system is preferred)
-// This polling-based tracker is kept as a fallback that can be manually enabled if needed
+// Register the extension but DO NOT auto-enable
+// RadioAPI event system should handle all change detection
+// This is kept only as a manual fallback for debugging
 if (window.decoderManager) {
     const tracker = new ChatRadioTracker();
     window.decoderManager.register(tracker);
-    console.log('[ChatRadioTracker] Registered (not auto-enabled - using radioAPI events instead)');
-    
-    // Only auto-enable if radioAPI is not available (fallback mode)
-    setTimeout(() => {
-        if (!window.radioAPI) {
-            console.warn('[ChatRadioTracker] radioAPI not available, enabling polling fallback');
-            if (window.audioContext) {
-                window.decoderManager.initialize('chat-tracker', window.audioContext, window.analyser, 0);
-                window.decoderManager.enable('chat-tracker');
-                console.log('✅ Chat Radio Tracker auto-enabled (fallback mode)');
-            }
-        } else {
-            console.log('[ChatRadioTracker] radioAPI available, staying disabled (event-based tracking active)');
-        }
-    }, 1500);
+    console.log('[ChatRadioTracker] Registered (disabled - use radioAPI events instead)');
+    console.log('[ChatRadioTracker] To manually enable for debugging: window.decoderManager.enable("chat-tracker")');
 } else {
     console.error('❌ decoderManager not available - Chat Radio Tracker cannot be registered');
 }

@@ -11,7 +11,8 @@ class ChatUI {
         this.unreadCount = 0;
         this.savedUsername = null;
         this.syncedUsername = null; // Track which user we're synced with
-        
+        this.isSyncing = false; // Flag to prevent update loops when syncing
+
         // Load saved username from localStorage
         this.loadSavedUsername();
         
@@ -42,24 +43,24 @@ class ChatUI {
 
         // Subscribe to frequency changes
         window.radioAPI.on('frequency_changed', (data) => {
-            console.log('[ChatUI] Frequency changed event:', data.frequency);
-            if (this.chat && this.chat.isJoined()) {
+            console.log('[ChatUI] Frequency changed event:', data.frequency, 'isSyncing:', this.isSyncing);
+            if (this.chat && this.chat.isJoined() && !this.isSyncing) {
                 this.chat.updateFrequency(data.frequency);
             }
         });
 
         // Subscribe to mode changes
         window.radioAPI.on('mode_changed', (data) => {
-            console.log('[ChatUI] Mode changed event:', data.mode);
-            if (this.chat && this.chat.isJoined()) {
+            console.log('[ChatUI] Mode changed event:', data.mode, 'isSyncing:', this.isSyncing);
+            if (this.chat && this.chat.isJoined() && !this.isSyncing) {
                 this.chat.updateMode(data.mode);
             }
         });
 
         // Subscribe to bandwidth changes
         window.radioAPI.on('bandwidth_changed', (data) => {
-            console.log('[ChatUI] Bandwidth changed event - low:', data.low, 'high:', data.high);
-            if (this.chat && this.chat.isJoined()) {
+            console.log('[ChatUI] Bandwidth changed event - low:', data.low, 'high:', data.high, 'isSyncing:', this.isSyncing);
+            if (this.chat && this.chat.isJoined() && !this.isSyncing) {
                 this.chat.updateBandwidth(data.high, data.low);
             }
         });
@@ -870,6 +871,19 @@ class ChatUI {
         const bwLow = userData.bw_low !== undefined ? userData.bw_low : 0;
         const bwHigh = userData.bw_high !== undefined ? userData.bw_high : 0;
 
+        // Set syncing flag to prevent sending updates back (avoid loops)
+        this.isSyncing = true;
+
+        // Disable edge detection temporarily when syncing (same as tuneToChannel)
+        if (window.spectrumDisplay) {
+            window.spectrumDisplay.skipEdgeDetection = true;
+            setTimeout(() => {
+                if (window.spectrumDisplay) {
+                    window.spectrumDisplay.skipEdgeDetection = false;
+                }
+            }, 2000);
+        }
+
         // Step 1: Update frequency
         const freqInput = document.getElementById('frequency');
         if (freqInput && window.setFrequencyInputValue) {
@@ -930,6 +944,12 @@ class ChatUI {
             console.log('[ChatUI] Auto-tuning with synced bandwidth');
             autoTune();
         }
+
+        // Clear syncing flag after a delay to allow all updates to complete
+        setTimeout(() => {
+            this.isSyncing = false;
+            console.log('[ChatUI] Sync complete, re-enabling chat updates');
+        }, 1000);
 
         this.addSystemMessage(`Synced to ${userData.username}: ${(userData.frequency / 1000000).toFixed(3)} MHz ${userData.mode.toUpperCase()}`);
     }

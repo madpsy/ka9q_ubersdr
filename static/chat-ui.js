@@ -681,7 +681,7 @@ class ChatUI {
                 width: 150px;
                 display: flex;
                 flex-direction: column;
-                background: rgba(35, 35, 35, 0.8);
+                background: transparent;
                 border-left: 1px solid rgba(100, 100, 100, 0.4);
             }
 

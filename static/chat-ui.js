@@ -525,10 +525,11 @@ class ChatUI {
             const mode = window.currentMode || 'usb';
             const bwLow = window.currentBandwidthLow || 0;
             const bwHigh = window.currentBandwidthHigh || 0;
+            const zoomBW = (window.spectrumDisplay && window.spectrumDisplay.binBandwidth) ? window.spectrumDisplay.binBandwidth : 0;
 
             if (frequency && mode) {
-                console.log('[ChatUI] Sending initial radio settings on join - freq:', frequency, 'mode:', mode);
-                this.chat.setFrequencyAndMode(frequency, mode, bwHigh, bwLow);
+                console.log('[ChatUI] Sending initial radio settings on join - freq:', frequency, 'mode:', mode, 'zoom_bw:', zoomBW);
+                this.chat.setFrequencyAndMode(frequency, mode, bwHigh, bwLow, zoomBW);
 
                 // Wait a moment for server to process, then request active users
                 // This ensures our frequency/mode is included in the response
@@ -759,6 +760,9 @@ class ChatUI {
             if (u.bw_high !== undefined) {
                 tooltip += `\nBW High: ${u.bw_high} Hz`;
             }
+            if (u.zoom_bw !== undefined && u.zoom_bw > 0) {
+                tooltip += `\nZoom BW: ${u.zoom_bw.toFixed(1)} Hz`;
+            }
 
             // Add sync button (only if not our own user)
             const isOurUser = u.username === ourUsername;
@@ -860,7 +864,7 @@ class ChatUI {
      * Sync our radio to a user's settings
      */
     syncToUser(userData) {
-        console.log('[ChatUI] Syncing to user:', userData.username, 'freq:', userData.frequency, 'mode:', userData.mode, 'bw_low:', userData.bw_low, 'bw_high:', userData.bw_high);
+        console.log('[ChatUI] Syncing to user:', userData.username, 'freq:', userData.frequency, 'mode:', userData.mode, 'bw_low:', userData.bw_low, 'bw_high:', userData.bw_high, 'zoom_bw:', userData.zoom_bw);
 
         // Only sync if we have frequency and mode data
         if (!userData.frequency || !userData.mode) {
@@ -870,6 +874,7 @@ class ChatUI {
 
         const bwLow = userData.bw_low !== undefined ? userData.bw_low : 0;
         const bwHigh = userData.bw_high !== undefined ? userData.bw_high : 0;
+        const zoomBW = userData.zoom_bw !== undefined ? userData.zoom_bw : 0;
 
         // Set syncing flag to prevent sending updates back (avoid loops)
         this.isSyncing = true;
@@ -943,6 +948,17 @@ class ChatUI {
         if (typeof autoTune === 'function') {
             console.log('[ChatUI] Auto-tuning with synced bandwidth');
             autoTune();
+        }
+
+        // Step 5: Apply zoom_bw if provided and valid
+        if (zoomBW > 0 && window.spectrumDisplay && window.spectrumDisplay.ws) {
+            console.log('[ChatUI] Applying synced zoom_bw:', zoomBW);
+            // Send zoom command to spectrum display
+            window.spectrumDisplay.ws.send(JSON.stringify({
+                type: 'set_zoom',
+                center_freq: userData.frequency,
+                bin_bandwidth: zoomBW
+            }));
         }
 
         // Clear syncing flag after a delay to allow all updates to complete

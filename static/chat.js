@@ -17,6 +17,7 @@ class UberSDRChat {
         this.mode = null;
         this.bwHigh = null;
         this.bwLow = null;
+        this.zoomBW = null;
         this.mutedUsers = new Set();
         this.eventHandlers = {};
         this.debounceTimer = null;
@@ -273,8 +274,9 @@ class UberSDRChat {
      * @param {string} mode - Mode: usb, lsb, am, fm, cwu, cwl, sam, nfm
      * @param {number} bwHigh - High bandwidth cutoff in Hz (-10000 to 10000), optional
      * @param {number} bwLow - Low bandwidth cutoff in Hz (-10000 to 10000), optional
+     * @param {number} zoomBW - Spectrum zoom bandwidth in Hz, optional
      */
-    setFrequencyAndMode(frequency, mode, bwHigh = 0, bwLow = 0) {
+    setFrequencyAndMode(frequency, mode, bwHigh = 0, bwLow = 0, zoomBW = 0) {
         // Validate frequency
         const freqValidation = this.validateFrequency(frequency);
         if (!freqValidation.valid) {
@@ -308,14 +310,22 @@ class UberSDRChat {
             this.mode = mode.toLowerCase();
             this.bwHigh = bwHigh;
             this.bwLow = bwLow;
-            
-            this.ws.send(JSON.stringify({
+            this.zoomBW = zoomBW;
+
+            const payload = {
                 type: 'chat_set_frequency_mode',
                 frequency: frequency,
                 mode: mode.toLowerCase(),
                 bw_high: bwHigh,
                 bw_low: bwLow
-            }));
+            };
+
+            // Only include zoom_bw if it's set (greater than 0)
+            if (zoomBW > 0) {
+                payload.zoom_bw = zoomBW;
+            }
+
+            this.ws.send(JSON.stringify(payload));
             return true;
         } else {
             this.emit('error', 'WebSocket not connected');
@@ -432,6 +442,7 @@ class UberSDRChat {
             const currentMode = window.currentMode || this.mode;
             const currentBwLow = window.currentBandwidthLow !== undefined ? window.currentBandwidthLow : this.bwLow;
             const currentBwHigh = window.currentBandwidthHigh !== undefined ? window.currentBandwidthHigh : this.bwHigh;
+            const currentZoomBW = (window.spectrumDisplay && window.spectrumDisplay.binBandwidth) ? window.spectrumDisplay.binBandwidth : this.zoomBW;
 
             const payload = {
                 type: 'chat_set_frequency_mode',
@@ -440,6 +451,12 @@ class UberSDRChat {
                 bw_high: currentBwHigh,
                 bw_low: currentBwLow
             };
+
+            // Only include zoom_bw if it's set (greater than 0)
+            if (currentZoomBW > 0) {
+                payload.zoom_bw = currentZoomBW;
+            }
+
             console.log('[Chat] Sending frequency/mode update:', payload);
             this.ws.send(JSON.stringify(payload));
             return true;
@@ -476,6 +493,7 @@ class UberSDRChat {
             this.mode = null;
             this.bwHigh = null;
             this.bwLow = null;
+            this.zoomBW = null;
             return true;
         }
         return false;
@@ -585,6 +603,13 @@ class UberSDRChat {
             high: this.bwHigh,
             low: this.bwLow
         };
+    }
+
+    /**
+     * Get current zoom bandwidth
+     */
+    getZoomBW() {
+        return this.zoomBW;
     }
 
     /**

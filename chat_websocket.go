@@ -29,6 +29,7 @@ type ChatUser struct {
 	Mode              string      // User's current mode (optional)
 	BWHigh            int         // High bandwidth cutoff in Hz (-10000 to 10000, optional)
 	BWLow             int         // Low bandwidth cutoff in Hz (-10000 to 10000, optional)
+	ZoomBW            float64     // Spectrum zoom bandwidth in Hz (optional)
 	CAT               bool        // CAT control enabled (optional)
 	TX                bool        // Transmitting status (optional)
 }
@@ -229,6 +230,16 @@ func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]int
 		user.BWLow = int(bwLow)
 	}
 
+	// Update zoom_bw if provided
+	if zoomBW, ok := updates["zoom_bw"].(float64); ok {
+		// Validate zoom_bw (must be positive, reasonable range)
+		if zoomBW < 0 || zoomBW > 100000000 {
+			cm.activeUsersMu.Unlock()
+			return ErrInvalidBandwidth
+		}
+		user.ZoomBW = zoomBW
+	}
+
 	// Update CAT if provided
 	if cat, ok := updates["cat"].(bool); ok {
 		user.CAT = cat
@@ -241,8 +252,8 @@ func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]int
 
 	cm.activeUsersMu.Unlock()
 
-	log.Printf("Chat: User '%s' updated status: frequency=%d Hz, mode=%s, bw_high=%d, bw_low=%d, cat=%t, tx=%t",
-		user.Username, user.Frequency, user.Mode, user.BWHigh, user.BWLow, user.CAT, user.TX)
+	log.Printf("Chat: User '%s' updated status: frequency=%d Hz, mode=%s, bw_high=%d, bw_low=%d, zoom_bw=%.1f, cat=%t, tx=%t",
+		user.Username, user.Frequency, user.Mode, user.BWHigh, user.BWLow, user.ZoomBW, user.CAT, user.TX)
 
 	// Broadcast only this user's updated info (more efficient than full user list)
 	cm.broadcastUserUpdate(user)
@@ -269,6 +280,10 @@ func (cm *ChatManager) broadcastUserUpdate(user *ChatUser) {
 	if user.Frequency > 0 || user.Mode != "" {
 		userData["bw_high"] = user.BWHigh
 		userData["bw_low"] = user.BWLow
+	}
+	// Include zoom_bw if set
+	if user.ZoomBW > 0 {
+		userData["zoom_bw"] = user.ZoomBW
 	}
 	// Include CAT and TX status
 	userData["cat"] = user.CAT
@@ -515,6 +530,10 @@ func (cm *ChatManager) SendActiveUsers(conn *websocket.Conn) {
 			userData["bw_high"] = user.BWHigh
 			userData["bw_low"] = user.BWLow
 		}
+		// Include zoom_bw if set
+		if user.ZoomBW > 0 {
+			userData["zoom_bw"] = user.ZoomBW
+		}
 		// Include CAT and TX status
 		userData["cat"] = user.CAT
 		userData["tx"] = user.TX
@@ -556,6 +575,10 @@ func (cm *ChatManager) BroadcastActiveUsers() {
 		if user.Frequency > 0 || user.Mode != "" {
 			userData["bw_high"] = user.BWHigh
 			userData["bw_low"] = user.BWLow
+		}
+		// Include zoom_bw if set
+		if user.ZoomBW > 0 {
+			userData["zoom_bw"] = user.ZoomBW
 		}
 		// Include CAT and TX status
 		userData["cat"] = user.CAT

@@ -867,17 +867,69 @@ class ChatUI {
             return;
         }
 
-        // Use the same logic as tuneToChannel() from app.js which works correctly
-        // This ensures consistent behavior with the active channels "Go" button
-        if (typeof tuneToChannel === 'function') {
-            const bwLow = userData.bw_low !== undefined ? userData.bw_low : 0;
-            const bwHigh = userData.bw_high !== undefined ? userData.bw_high : 0;
-            console.log('[ChatUI] Calling tuneToChannel with:', userData.frequency, userData.mode, bwLow, bwHigh);
-            tuneToChannel(userData.frequency, userData.mode, bwLow, bwHigh);
-            this.addSystemMessage(`Synced to ${userData.username}: ${(userData.frequency / 1000000).toFixed(3)} MHz ${userData.mode.toUpperCase()}`);
-        } else {
-            console.error('[ChatUI] tuneToChannel function not available');
+        const bwLow = userData.bw_low !== undefined ? userData.bw_low : 0;
+        const bwHigh = userData.bw_high !== undefined ? userData.bw_high : 0;
+
+        // Step 1: Update frequency
+        const freqInput = document.getElementById('frequency');
+        if (freqInput && window.setFrequencyInputValue) {
+            window.setFrequencyInputValue(userData.frequency);
         }
+        if (window.updateBandButtons) {
+            window.updateBandButtons(userData.frequency);
+        }
+        if (window.updateBandSelector) {
+            window.updateBandSelector();
+        }
+
+        // Step 2: Set mode first (this updates slider ranges)
+        if (typeof setMode === 'function') {
+            console.log('[ChatUI] Setting mode to:', userData.mode, '(this updates slider ranges)');
+            // Call setMode WITHOUT preserveBandwidth to update slider ranges
+            // We'll set the bandwidth values after
+            setMode(userData.mode, false);
+        }
+
+        // Step 3: Now set the bandwidth values (after slider ranges are correct)
+        window.currentBandwidthLow = bwLow;
+        window.currentBandwidthHigh = bwHigh;
+
+        const bwLowSlider = document.getElementById('bandwidth-low');
+        const bwHighSlider = document.getElementById('bandwidth-high');
+
+        if (bwLowSlider) {
+            bwLowSlider.value = bwLow;
+            const bwLowValue = document.getElementById('bandwidth-low-value');
+            if (bwLowValue) {
+                bwLowValue.textContent = bwLow;
+            }
+        }
+
+        if (bwHighSlider) {
+            bwHighSlider.value = bwHigh;
+            const bwHighValue = document.getElementById('bandwidth-high-value');
+            if (bwHighValue) {
+                bwHighValue.textContent = bwHigh;
+            }
+        }
+
+        // Update bandwidth display
+        if (window.updateCurrentBandwidthDisplay) {
+            window.updateCurrentBandwidthDisplay(bwLow, bwHigh);
+        }
+
+        // Update URL
+        if (window.updateURL) {
+            window.updateURL();
+        }
+
+        // Step 4: Tune to apply all changes (setMode already called autoTune, but call again to ensure bandwidth is applied)
+        if (typeof autoTune === 'function') {
+            console.log('[ChatUI] Auto-tuning to apply synced settings');
+            autoTune();
+        }
+
+        this.addSystemMessage(`Synced to ${userData.username}: ${(userData.frequency / 1000000).toFixed(3)} MHz ${userData.mode.toUpperCase()}`);
     }
 
     /**

@@ -3934,6 +3934,7 @@ class SpectrumDisplay {
     // Zoom in - same bins over narrower bandwidth (decrease bin bandwidth)
     // Backend now handles dynamic bin count adjustment for deep zoom levels
     zoomIn() {
+        console.log('[SpectrumDisplay] zoomIn() called');
         if (!this.connected || !this.ws) return;
 
         // Halve the bin bandwidth = half the total bandwidth = 2x zoom
@@ -3981,6 +3982,7 @@ class SpectrumDisplay {
 
     // Zoom out - same bins over wider bandwidth (increase bin bandwidth)
     zoomOut() {
+        console.log('[SpectrumDisplay] zoomOut() called');
         if (!this.connected || !this.ws) return;
 
         // Don't zoom out past initial bandwidth

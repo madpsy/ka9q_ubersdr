@@ -527,15 +527,17 @@ class ChatUI {
         });
 
         // Enter key in username input
-        document.getElementById('chat-username-input').addEventListener('keypress', (e) => {
+        document.getElementById('chat-username-input').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
+                e.preventDefault();
                 document.getElementById('chat-join-btn').click();
             }
         });
 
         // Enter key in message input
-        document.getElementById('chat-message-input').addEventListener('keypress', (e) => {
+        document.getElementById('chat-message-input').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
+                e.preventDefault();
                 this.sendMessage();
             }
         });

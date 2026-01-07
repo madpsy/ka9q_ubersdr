@@ -994,10 +994,13 @@ class ChatUI {
         window.currentBandwidthLow = bwLow;
         window.currentBandwidthHigh = bwHigh;
 
-        // Update spectrum display instance to prevent flickering filter lines
+        // Update spectrum display via updateConfig to ensure proper redraw
+        // This is the ONLY way to reliably update the bandwidth lines
         if (window.spectrumDisplay) {
-            window.spectrumDisplay.currentBandwidthLow = bwLow;
-            window.spectrumDisplay.currentBandwidthHigh = bwHigh;
+            window.spectrumDisplay.updateConfig({
+                bandwidthLow: bwLow,
+                bandwidthHigh: bwHigh
+            });
         }
 
         // Re-update sliders and display values to ensure they match

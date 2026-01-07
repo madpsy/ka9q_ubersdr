@@ -84,29 +84,26 @@ class ChatRadioTracker extends DecoderExtension {
     }
 }
 
-// Register and auto-enable the extension when decoderManager is available
+// Register the extension (but don't auto-enable - radioAPI event system is preferred)
+// This polling-based tracker is kept as a fallback that can be manually enabled if needed
 if (window.decoderManager) {
     const tracker = new ChatRadioTracker();
     window.decoderManager.register(tracker);
+    console.log('[ChatRadioTracker] Registered (not auto-enabled - using radioAPI events instead)');
     
-    // Auto-enable after a short delay to ensure chat UI is initialized
+    // Only auto-enable if radioAPI is not available (fallback mode)
     setTimeout(() => {
-        if (window.audioContext) {
-            window.decoderManager.initialize('chat-tracker', window.audioContext, window.analyser, 0);
-            window.decoderManager.enable('chat-tracker');
-            console.log('✅ Chat Radio Tracker auto-enabled');
+        if (!window.radioAPI) {
+            console.warn('[ChatRadioTracker] radioAPI not available, enabling polling fallback');
+            if (window.audioContext) {
+                window.decoderManager.initialize('chat-tracker', window.audioContext, window.analyser, 0);
+                window.decoderManager.enable('chat-tracker');
+                console.log('✅ Chat Radio Tracker auto-enabled (fallback mode)');
+            }
         } else {
-            // Wait for audio context to be created
-            const checkAudio = setInterval(() => {
-                if (window.audioContext) {
-                    clearInterval(checkAudio);
-                    window.decoderManager.initialize('chat-tracker', window.audioContext, window.analyser, 0);
-                    window.decoderManager.enable('chat-tracker');
-                    console.log('✅ Chat Radio Tracker auto-enabled (delayed)');
-                }
-            }, 500);
+            console.log('[ChatRadioTracker] radioAPI available, staying disabled (event-based tracking active)');
         }
-    }, 1000);
+    }, 1500);
 } else {
     console.error('❌ decoderManager not available - Chat Radio Tracker cannot be registered');
 }

@@ -83,6 +83,11 @@ class UberSDRChat {
                 this.emit('active_users', msg.data);
                 break;
                 
+            case 'chat_user_update':
+                console.log('[Chat] Received user update:', msg.data);
+                this.emit('user_update', msg.data);
+                break;
+                
             case 'chat_error':
                 this.emit('error', msg.error);
                 break;

@@ -17,6 +17,8 @@ class ChatUI {
         this.usersRequestPending = false; // Track if we're waiting for users list response
         this.usersRequestTimer = null; // Timer for retry
         this.isAutoRejoining = false; // Track if we're in the middle of auto-rejoin
+        this.hasMentions = false; // Track if there are unread mentions
+        this.isReceivingHistory = true; // Track if we're receiving initial message history
 
         // Load saved username from localStorage
         this.loadSavedUsername();
@@ -271,6 +273,7 @@ class ChatUI {
                 <!-- Chat tab (always visible, on right edge) -->
                 <div id="chat-header" class="chat-header" onclick="chatUI.togglePanel()">
                     <span>💬</span>
+                    <span id="chat-mention" class="chat-mention" style="display:none;">❗</span>
                     <span id="chat-unread" class="chat-unread" style="display:none;"></span>
                 </div>
             </div>
@@ -350,6 +353,19 @@ class ChatUI {
                 background: rgba(70, 70, 70, 0.6);
             }
             
+            .chat-mention {
+                position: absolute;
+                top: 5px;
+                right: 5px;
+                font-size: 16px;
+                animation: pulse 1s ease-in-out infinite;
+            }
+
+            @keyframes pulse {
+                0%, 100% { opacity: 1; transform: scale(1); }
+                50% { opacity: 0.7; transform: scale(1.1); }
+            }
+
             .chat-unread {
                 background: #dc3545;
                 color: #fff;
@@ -406,6 +422,13 @@ class ChatUI {
                 margin: 4px 0;
                 padding: 3px;
                 word-wrap: break-word;
+            }
+
+            .chat-message-mention {
+                background: rgba(255, 193, 7, 0.2);
+                border-left: 3px solid #ffc107;
+                padding-left: 6px;
+                margin-left: -3px;
             }
             
             .chat-message-username {
@@ -680,9 +703,15 @@ class ChatUI {
      */
     setupChatEvents() {
         this.chat.on('message', (data) => {
-            this.addChatMessage(data.username, data.message, data.timestamp);
+            // Check if this message mentions us (only for new messages, not history)
+            const isMention = !this.isReceivingHistory &&
+                              this.chat.username &&
+                              data.message.toLowerCase().includes('@' + this.chat.username.toLowerCase());
+
+            this.addChatMessage(data.username, data.message, data.timestamp, isMention);
+
             if (!this.isExpanded) {
-                this.incrementUnread();
+                this.incrementUnread(isMention);
             }
         });
 
@@ -692,6 +721,13 @@ class ChatUI {
 
             // Clear auto-rejoining flag on successful join
             this.isAutoRejoining = false;
+
+            // After a short delay, mark that we're done receiving history
+            // This allows the initial 50 messages to load without triggering mention notifications
+            setTimeout(() => {
+                this.isReceivingHistory = false;
+                console.log('[ChatUI] Now tracking new messages for mentions');
+            }, 1000);
 
             // Save username for auto-login next time
             this.saveUsername(data.username);
@@ -953,10 +989,10 @@ class ChatUI {
     /**
      * Add a chat message to the display
      */
-    addChatMessage(username, message, timestamp) {
+    addChatMessage(username, message, timestamp, isMention = false) {
         const container = document.getElementById('chat-messages');
         const div = document.createElement('div');
-        div.className = 'chat-message';
+        div.className = isMention ? 'chat-message chat-message-mention' : 'chat-message';
 
         const time = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
 
@@ -973,10 +1009,18 @@ class ChatUI {
             usernameHtml = `<span class="${usernameClass}" onclick="chatUI.tuneToUser('${this.escapeHtml(username)}')" onmouseover="chatUI.updateUsernameTooltip(this, '${this.escapeHtml(username)}')">${this.escapeHtml(username)}:</span>`;
         }
 
+        // Highlight @mentions in the message text
+        let messageHtml = this.escapeHtml(message);
+        if (this.chat && this.chat.username) {
+            // Replace @username with highlighted version (case-insensitive)
+            const mentionRegex = new RegExp(`(@${this.chat.username})`, 'gi');
+            messageHtml = messageHtml.replace(mentionRegex, '<span style="background:#ffc107; color:#000; padding:1px 3px; border-radius:3px; font-weight:bold;">$1</span>');
+        }
+
         div.innerHTML = `
             <span style="color:#666; font-size:10px; margin-right:4px;">${time}</span>
             ${usernameHtml}
-            <span>${this.escapeHtml(message)}</span>
+            <span>${messageHtml}</span>
         `;
 
         container.appendChild(div);
@@ -1188,11 +1232,20 @@ class ChatUI {
     /**
      * Increment unread message count
      */
-    incrementUnread() {
+    incrementUnread(isMention = false) {
         this.unreadCount++;
         const badge = document.getElementById('chat-unread');
         badge.textContent = this.unreadCount;
         badge.style.display = 'inline-block';
+
+        // Show mention indicator if this is a mention
+        if (isMention) {
+            this.hasMentions = true;
+            const mentionIndicator = document.getElementById('chat-mention');
+            if (mentionIndicator) {
+                mentionIndicator.style.display = 'block';
+            }
+        }
     }
 
     /**
@@ -1200,7 +1253,12 @@ class ChatUI {
      */
     clearUnread() {
         this.unreadCount = 0;
+        this.hasMentions = false;
         document.getElementById('chat-unread').style.display = 'none';
+        const mentionIndicator = document.getElementById('chat-mention');
+        if (mentionIndicator) {
+            mentionIndicator.style.display = 'none';
+        }
     }
 
     /**

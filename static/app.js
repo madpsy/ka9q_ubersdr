@@ -2741,6 +2741,11 @@ function handleFrequencyChange() {
     // Update URL with new frequency
     updateURL();
 
+    // Notify extensions of frequency change
+    if (window.radioAPI) {
+        window.radioAPI.notifyFrequencyChange(frequency);
+    }
+
     // Auto-connect if not connected
     if (!wsManager.isConnected()) {
         connect();

@@ -512,7 +512,7 @@ class ChatUI {
             .chat-users-list {
                 flex: 1;
                 padding: 8px;
-                background: #222;
+                background: rgba(30, 30, 30, 0.6);
                 color: #aaa;
                 font-size: 11px;
                 overflow-y: auto;
@@ -861,11 +861,26 @@ class ChatUI {
             content.style.display = 'flex';
             this.clearUnread();
 
-            // Scroll to bottom of messages after a short delay to ensure content is rendered
+            // Scroll to bottom of messages and focus input after a short delay
             setTimeout(() => {
                 const messagesContainer = document.getElementById('chat-messages');
                 if (messagesContainer) {
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+
+                // Focus on the appropriate input field
+                if (this.chat && this.chat.isJoined()) {
+                    // User is logged in - focus message input
+                    const messageInput = document.getElementById('chat-message-input');
+                    if (messageInput) {
+                        messageInput.focus();
+                    }
+                } else {
+                    // User not logged in - focus username input
+                    const usernameInput = document.getElementById('chat-username-input');
+                    if (usernameInput) {
+                        usernameInput.focus();
+                    }
                 }
             }, 50);
 

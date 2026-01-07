@@ -795,16 +795,19 @@ class ChatUI {
         
         const userItems = data.users.map(u => {
             console.log('[ChatUI] User:', u.username, 'freq:', u.frequency, 'mode:', u.mode);
-            let info = this.escapeHtml(u.username);
 
-            // Add frequency (always show if set, even without mode)
+            // Username (clickable to mute/unmute)
+            let usernameSpan = `<span onclick="chatUI.toggleMute('${this.escapeHtml(u.username)}')" style="cursor:pointer;">${this.escapeHtml(u.username)}</span>`;
+
+            // Add frequency and mode (clickable to tune)
+            let radioInfo = '';
             if (u.frequency) {
                 const freqMHz = (u.frequency / 1000000).toFixed(3);
-                info += ` <span style="color:#888;">${freqMHz} MHz</span>`;
+                radioInfo += ` <span style="color:#888; cursor:pointer; text-decoration:underline;" onclick="event.stopPropagation(); chatUI.tuneToUser('${this.escapeHtml(u.username)}')" title="Click to tune to ${freqMHz} MHz">${freqMHz} MHz</span>`;
 
                 // Add mode if also set
                 if (u.mode) {
-                    info += ` <span style="color:#888;">${u.mode.toUpperCase()}</span>`;
+                    radioInfo += ` <span style="color:#888; cursor:pointer; text-decoration:underline;" onclick="event.stopPropagation(); chatUI.tuneToUser('${this.escapeHtml(u.username)}')" title="Click to tune to ${u.mode.toUpperCase()}">${u.mode.toUpperCase()}</span>`;
                 }
             }
 
@@ -836,7 +839,7 @@ class ChatUI {
             const syncBtn = isOurUser ? '' : `<button class="${syncBtnClass}" onclick="event.stopPropagation(); chatUI.toggleSync('${this.escapeHtml(u.username)}');">${isSynced ? '✓ Sync' : 'Sync'}</button>`;
 
             return `<div class="chat-user-item${muteClass}" title="${this.escapeHtml(tooltip)}">
-                <span onclick="chatUI.toggleMute('${this.escapeHtml(u.username)}')" style="cursor:pointer; flex: 1;">${info}</span>
+                <span style="flex: 1;">${usernameSpan}${radioInfo}</span>
                 ${syncBtn}
             </div>`;
         }).join('');

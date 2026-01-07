@@ -365,6 +365,7 @@ class ChatUI {
                     <span>💬</span>
                     <span id="chat-mention" class="chat-mention" style="display:none;">❗</span>
                     <span id="chat-unread" class="chat-unread" style="display:none;"></span>
+                    <span id="chat-user-count-badge" class="chat-user-count-badge" style="display:none;">0</span>
                 </div>
             </div>
         `;
@@ -466,6 +467,23 @@ class ChatUI {
                 border-radius: 10px;
                 font-size: 11px;
                 font-weight: bold;
+            }
+
+            .chat-user-count-badge {
+                position: absolute;
+                bottom: 5px;
+                left: 0;
+                right: 0;
+                text-align: center;
+                background: #fff;
+                color: #000;
+                border-radius: 50%;
+                width: 20px;
+                height: 20px;
+                line-height: 20px;
+                font-size: 10px;
+                font-weight: bold;
+                margin: 0 auto;
             }
             
             .chat-toggle-icon {
@@ -1077,6 +1095,12 @@ class ChatUI {
             content.style.display = 'flex';
             this.clearUnread();
 
+            // Hide user count badge when expanded
+            const badge = document.getElementById('chat-user-count-badge');
+            if (badge) {
+                badge.style.display = 'none';
+            }
+
             // Scroll to bottom of messages and focus input after a short delay
             setTimeout(() => {
                 const messagesContainer = document.getElementById('chat-messages');
@@ -1107,6 +1131,13 @@ class ChatUI {
             panel.classList.remove('expanded');
             panel.classList.add('collapsed');
             content.style.display = 'none';
+
+            // Show user count badge when collapsed (if there are users)
+            const userCount = parseInt(document.getElementById('chat-user-count').textContent || '0');
+            const badge = document.getElementById('chat-user-count-badge');
+            if (badge && userCount > 0) {
+                badge.style.display = 'block';
+            }
         }
 
         // Save state to localStorage
@@ -1364,6 +1395,19 @@ class ChatUI {
         console.log('[ChatUI] Received active users update:', data);
 
         document.getElementById('chat-user-count').textContent = data.count;
+        
+        // Update the badge on the chat toggle button
+        const badge = document.getElementById('chat-user-count-badge');
+        if (badge) {
+            badge.textContent = data.count;
+            // Show badge only when collapsed and there are users
+            if (!this.isExpanded && data.count > 0) {
+                badge.style.display = 'block';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+        
         const usersList = document.getElementById('chat-users-list');
         
         if (data.count === 0) {

@@ -1062,11 +1062,12 @@ class ChatUI {
             autoTune();
         }
 
-        // Clear syncing flag after a delay to allow all updates to complete
+        // Clear syncing flag after a longer delay to allow all updates to complete
+        // This prevents bandwidth_changed events from overwriting our synced values
         setTimeout(() => {
             this.isSyncing = false;
             console.log('[ChatUI] Sync complete, re-enabling chat updates');
-        }, 1000);
+        }, 2000);
 
         this.addSystemMessage(`Synced to ${userData.username}: ${(userData.frequency / 1000000).toFixed(3)} MHz ${userData.mode.toUpperCase()}`);
     }

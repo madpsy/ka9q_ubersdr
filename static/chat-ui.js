@@ -890,7 +890,8 @@ class ChatUI {
             const isOurUser = u.username === ourUsername;
             const isSynced = this.syncedUsername === u.username;
             const syncBtnClass = isSynced ? 'chat-sync-btn active' : 'chat-sync-btn';
-            const syncBtn = isOurUser ? '' : `<button class="${syncBtnClass}" onclick="event.stopPropagation(); chatUI.toggleSync('${this.escapeHtml(u.username)}');" title="${isSynced ? 'Stop syncing' : 'Sync to this user'}">🔗</button>`;
+            const syncBtnText = isSynced ? '✓' : '🔗';
+            const syncBtn = isOurUser ? '' : `<button class="${syncBtnClass}" onclick="event.stopPropagation(); chatUI.toggleSync('${this.escapeHtml(u.username)}');" title="${isSynced ? 'Stop syncing' : 'Sync to this user'}">${syncBtnText}</button>`;
 
             return `<div class="chat-user-item${muteClass}" title="${this.escapeHtml(tooltip)}">
                 <div style="flex: 1; min-width: 0;">

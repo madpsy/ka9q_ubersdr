@@ -1162,6 +1162,21 @@ class ChatUI {
         setTimeout(() => {
             this.isSyncing = false;
             console.log('[ChatUI] Sync complete, re-enabling chat updates');
+            
+            // Update our own user data in the local list after sync completes
+            this.updateOwnUserData({
+                frequency: userData.frequency,
+                mode: userData.mode,
+                bw_low: bwLow,
+                bw_high: bwHigh,
+                zoom_bw: zoomBW
+            });
+            
+            // Send the synced settings to the server so other users can see our changes
+            if (this.chat && this.chat.isJoined()) {
+                console.log('[ChatUI] Sending synced settings to server');
+                this.chat.setFrequencyAndMode(userData.frequency, userData.mode, bwHigh, bwLow, zoomBW);
+            }
         }, 2000);
 
         // Removed "Synced to..." message per user request

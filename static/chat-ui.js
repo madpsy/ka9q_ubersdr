@@ -288,7 +288,11 @@ class ChatUI {
         // Restore saved state
         const content = document.getElementById('chat-content');
         if (this.isExpanded) {
-            content.style.display = 'block';
+            content.style.display = 'flex';
+            // Request users if panel is already expanded on load
+            setTimeout(() => {
+                this.chat.requestActiveUsers();
+            }, 1000);
         }
     }
 

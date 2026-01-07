@@ -3920,9 +3920,11 @@ class SpectrumDisplay {
         }
         // Update bandwidth edges if provided
         if (newConfig.bandwidthLow !== undefined) {
+            console.log(`[SpectrumDisplay] updateConfig: bandwidthLow ${this.currentBandwidthLow} -> ${newConfig.bandwidthLow}`, new Error().stack.split('\n')[2]);
             this.currentBandwidthLow = newConfig.bandwidthLow;
         }
         if (newConfig.bandwidthHigh !== undefined) {
+            console.log(`[SpectrumDisplay] updateConfig: bandwidthHigh ${this.currentBandwidthHigh} -> ${newConfig.bandwidthHigh}`, new Error().stack.split('\n')[2]);
             this.currentBandwidthHigh = newConfig.bandwidthHigh;
         }
         // Redraw to show cursor and bandwidth indicator

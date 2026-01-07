@@ -740,17 +740,32 @@ class ChatUI {
                     info += ` <span style="color:#888;">${u.mode.toUpperCase()}</span>`;
                 }
             }
-            
+
             const muted = this.chat.isMuted(u.username);
             const muteClass = muted ? ' chat-user-muted' : '';
-            
+
+            // Build tooltip with all radio settings
+            let tooltip = u.username;
+            if (u.frequency) {
+                tooltip += `\nFrequency: ${(u.frequency / 1000000).toFixed(6)} MHz`;
+            }
+            if (u.mode) {
+                tooltip += `\nMode: ${u.mode.toUpperCase()}`;
+            }
+            if (u.bw_low !== undefined) {
+                tooltip += `\nBW Low: ${u.bw_low} Hz`;
+            }
+            if (u.bw_high !== undefined) {
+                tooltip += `\nBW High: ${u.bw_high} Hz`;
+            }
+
             // Add sync button (only if not our own user)
             const isOurUser = u.username === ourUsername;
             const isSynced = this.syncedUsername === u.username;
             const syncBtnClass = isSynced ? 'chat-sync-btn active' : 'chat-sync-btn';
             const syncBtn = isOurUser ? '' : `<button class="${syncBtnClass}" onclick="event.stopPropagation(); chatUI.toggleSync('${this.escapeHtml(u.username)}');">${isSynced ? '✓ Sync' : 'Sync'}</button>`;
-            
-            return `<div class="chat-user-item${muteClass}">
+
+            return `<div class="chat-user-item${muteClass}" title="${this.escapeHtml(tooltip)}">
                 <span onclick="chatUI.toggleMute('${this.escapeHtml(u.username)}')" style="cursor:pointer; flex: 1;">${info}</span>
                 ${syncBtn}
             </div>`;

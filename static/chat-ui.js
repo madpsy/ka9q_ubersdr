@@ -858,14 +858,8 @@ class ChatUI {
         if (isOwnMessage) {
             usernameHtml = `<span class="${usernameClass}" style="cursor:default;">${this.escapeHtml(username)}:</span>`;
         } else {
-            // Look up user's frequency and mode for tooltip
-            const user = this.chat.activeUsers.find(u => u.username === username);
-            let tooltip = 'Click to tune to user';
-            if (user && user.frequency && user.mode) {
-                const freqMHz = (user.frequency / 1000000).toFixed(3);
-                tooltip = `Click to tune to ${freqMHz} MHz (${user.mode.toUpperCase()})`;
-            }
-            usernameHtml = `<span class="${usernameClass}" onclick="chatUI.tuneToUser('${this.escapeHtml(username)}')" title="${tooltip}">${this.escapeHtml(username)}:</span>`;
+            // Dynamic tooltip that updates on hover to show current frequency/mode
+            usernameHtml = `<span class="${usernameClass}" onclick="chatUI.tuneToUser('${this.escapeHtml(username)}')" onmouseover="chatUI.updateUsernameTooltip(this, '${this.escapeHtml(username)}')">${this.escapeHtml(username)}:</span>`;
         }
 
         div.innerHTML = `
@@ -1096,6 +1090,20 @@ class ChatUI {
     clearUnread() {
         this.unreadCount = 0;
         document.getElementById('chat-unread').style.display = 'none';
+    }
+
+    /**
+     * Update tooltip for a username span to show current frequency/mode
+     * Called on mouseover to provide dynamic tooltip
+     */
+    updateUsernameTooltip(element, username) {
+        const user = this.chat.activeUsers.find(u => u.username === username);
+        if (user && user.frequency && user.mode) {
+            const freqMHz = (user.frequency / 1000000).toFixed(3);
+            element.title = `Click to tune to ${freqMHz} MHz (${user.mode.toUpperCase()})`;
+        } else {
+            element.title = 'Click to tune to user';
+        }
     }
 
     /**

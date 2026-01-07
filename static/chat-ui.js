@@ -123,6 +123,21 @@ class ChatUI {
     }
 
     /**
+     * Trigger pulse animation on user count badge
+     */
+    pulseUserCountBadge() {
+        const badge = document.getElementById('chat-user-count-badge');
+        if (badge && badge.style.display !== 'none') {
+            // Add pulse class
+            badge.classList.add('pulse');
+            // Remove it after animation completes
+            setTimeout(() => {
+                badge.classList.remove('pulse');
+            }, 600);
+        }
+    }
+
+    /**
      * Set up tracking of radio frequency/mode/bandwidth changes
      * Uses the existing radioAPI event system
      */
@@ -484,6 +499,17 @@ class ChatUI {
                 font-size: 10px;
                 font-weight: bold;
                 margin: 0 auto;
+                transition: all 0.3s ease;
+            }
+
+            .chat-user-count-badge.pulse {
+                animation: badge-pulse 0.6s ease-out;
+            }
+
+            @keyframes badge-pulse {
+                0% { transform: scale(1); }
+                50% { transform: scale(1.3); background: #4a9eff; }
+                100% { transform: scale(1); }
             }
             
             .chat-toggle-icon {
@@ -977,6 +1003,8 @@ class ChatUI {
                     users: this.chat.activeUsers,
                     count: this.chat.activeUsers.length
                 });
+                // Pulse the user count badge when someone joins
+                this.pulseUserCountBadge();
             }
         });
 

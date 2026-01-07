@@ -861,96 +861,23 @@ class ChatUI {
     syncToUser(userData) {
         console.log('[ChatUI] Syncing to user:', userData.username, 'freq:', userData.frequency, 'mode:', userData.mode, 'bw_low:', userData.bw_low, 'bw_high:', userData.bw_high);
 
-        // Only sync if we have frequency data
-        if (!userData.frequency) {
-            console.log('[ChatUI] No frequency data to sync');
+        // Only sync if we have frequency and mode data
+        if (!userData.frequency || !userData.mode) {
+            console.log('[ChatUI] Incomplete data for sync - need frequency and mode');
             return;
         }
 
-        // Get current values to avoid unnecessary updates
-        const freqInput = document.getElementById('frequency');
-        const currentFreq = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
-        const currentMode = window.currentMode || 'usb';
-        const currentBwLow = window.currentBandwidthLow || 0;
-        const currentBwHigh = window.currentBandwidthHigh || 0;
-
-        // Check if anything actually changed
-        const freqChanged = userData.frequency !== currentFreq;
-        const modeChanged = userData.mode && userData.mode !== currentMode;
-        const bwChanged = (userData.bw_low !== undefined && userData.bw_low !== currentBwLow) ||
-                         (userData.bw_high !== undefined && userData.bw_high !== currentBwHigh);
-
-        if (!freqChanged && !modeChanged && !bwChanged) {
-            console.log('[ChatUI] No changes needed for sync');
-            return;
-        }
-
-        // Update frequency input first
-        if (freqInput && freqChanged) {
-            if (window.setFrequencyInputValue) {
-                window.setFrequencyInputValue(userData.frequency);
-            } else {
-                freqInput.value = (userData.frequency / 1000000).toFixed(6);
-                freqInput.setAttribute('data-hz-value', userData.frequency);
-            }
-            if (window.updateBandButtons) {
-                window.updateBandButtons(userData.frequency);
-            }
-        }
-
-        // Update bandwidth values in global state AND sliders BEFORE mode change
-        if (userData.bw_low !== undefined) {
-            window.currentBandwidthLow = userData.bw_low;
-            const bwLowSlider = document.getElementById('bandwidth-low');
-            if (bwLowSlider) {
-                bwLowSlider.value = userData.bw_low;
-            }
-            const bwLowValue = document.getElementById('bandwidth-low-value');
-            if (bwLowValue) {
-                bwLowValue.textContent = userData.bw_low;
-            }
-        }
-        if (userData.bw_high !== undefined) {
-            window.currentBandwidthHigh = userData.bw_high;
-            const bwHighSlider = document.getElementById('bandwidth-high');
-            if (bwHighSlider) {
-                bwHighSlider.value = userData.bw_high;
-            }
-            const bwHighValue = document.getElementById('bandwidth-high-value');
-            if (bwHighValue) {
-                bwHighValue.textContent = userData.bw_high;
-            }
-        }
-
-        // Update mode using setMode function if mode changed
-        // setMode with preserveBandwidth=true will keep the bandwidth we just set
-        if (userData.mode && modeChanged) {
-            if (typeof setMode === 'function') {
-                console.log('[ChatUI] Setting mode to:', userData.mode, 'with preserveBandwidth=true');
-                // setMode will update slider ranges and call autoTune() for us
-                setMode(userData.mode, true);
-            } else {
-                window.currentMode = userData.mode;
-                if (typeof autoTune === 'function') {
-                    autoTune();
-                }
-            }
+        // Use the same logic as tuneToChannel() from app.js which works correctly
+        // This ensures consistent behavior with the active channels "Go" button
+        if (typeof tuneToChannel === 'function') {
+            const bwLow = userData.bw_low !== undefined ? userData.bw_low : 0;
+            const bwHigh = userData.bw_high !== undefined ? userData.bw_high : 0;
+            console.log('[ChatUI] Calling tuneToChannel with:', userData.frequency, userData.mode, bwLow, bwHigh);
+            tuneToChannel(userData.frequency, userData.mode, bwLow, bwHigh);
+            this.addSystemMessage(`Synced to ${userData.username}: ${(userData.frequency / 1000000).toFixed(3)} MHz ${userData.mode.toUpperCase()}`);
         } else {
-            // Mode didn't change, but frequency or bandwidth did
-            // Update bandwidth display and tune
-            if (window.updateCurrentBandwidthDisplay) {
-                window.updateCurrentBandwidthDisplay(window.currentBandwidthLow, window.currentBandwidthHigh);
-            }
-            if (typeof autoTune === 'function') {
-                console.log('[ChatUI] Auto-tuning to synced settings (mode unchanged)');
-                autoTune();
-            } else if (typeof tune === 'function') {
-                console.log('[ChatUI] Tuning to synced settings (mode unchanged)');
-                tune();
-            }
+            console.error('[ChatUI] tuneToChannel function not available');
         }
-
-        this.addSystemMessage(`Synced to ${userData.username}: ${(userData.frequency / 1000000).toFixed(3)} MHz ${userData.mode ? userData.mode.toUpperCase() : ''}`);
     }
 
     /**

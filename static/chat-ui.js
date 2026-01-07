@@ -683,8 +683,9 @@ class ChatUI {
         this.chat.on('user_update', (data) => {
             this.updateSingleUser(data);
             // If this is the user we're synced with, update our radio
-            // Get the full user data from activeUsers to ensure we have all fields
-            if (this.syncedUsername === data.username) {
+            // But only if we're not currently in the middle of syncing (to prevent loops)
+            if (this.syncedUsername === data.username && !this.isSyncing) {
+                // Get the full user data from activeUsers to ensure we have all fields
                 const fullUserData = this.chat.activeUsers.find(u => u.username === data.username);
                 if (fullUserData) {
                     this.syncToUser(fullUserData);
@@ -1173,9 +1174,22 @@ class ChatUI {
             });
             
             // Send the synced settings to the server so other users can see our changes
+            // Only send if our values actually changed (prevents sync loops)
             if (this.chat && this.chat.isJoined()) {
-                console.log('[ChatUI] Sending synced settings to server');
-                this.chat.setFrequencyAndMode(userData.frequency, userData.mode, bwHigh, bwLow, zoomBW);
+                const changed = (
+                    this.chat.frequency !== userData.frequency ||
+                    this.chat.mode !== userData.mode ||
+                    this.chat.bwHigh !== bwHigh ||
+                    this.chat.bwLow !== bwLow ||
+                    this.chat.zoomBW !== zoomBW
+                );
+                
+                if (changed) {
+                    console.log('[ChatUI] Settings changed, sending synced settings to server');
+                    this.chat.setFrequencyAndMode(userData.frequency, userData.mode, bwHigh, bwLow, zoomBW);
+                } else {
+                    console.log('[ChatUI] Settings unchanged, skipping server update');
+                }
             }
         }, 2000);
 

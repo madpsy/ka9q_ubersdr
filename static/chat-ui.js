@@ -12,15 +12,16 @@ class ChatUI {
         this.savedUsername = null;
         this.syncedUsername = null; // Track which user we're synced with
         this.isSyncing = false; // Flag to prevent update loops when syncing
+        this.radioEventHandlers = {}; // Store references to our radio event handlers
 
         // Load saved username from localStorage
         this.loadSavedUsername();
-        
+
         this.createChatPanel();
         this.setupEventHandlers();
         this.setupChatEvents();
         // Don't call setupRadioTracking here - it will be called after delay in initializeChatUI
-        
+
         // Auto-login if we have a saved username
         if (this.savedUsername) {
             setTimeout(() => {
@@ -41,38 +42,69 @@ class ChatUI {
             return;
         }
 
-        // Subscribe to frequency changes
-        window.radioAPI.on('frequency_changed', (data) => {
+        // Define event handlers and store references
+        this.radioEventHandlers.frequency_changed = (data) => {
             console.log('[ChatUI] Frequency changed event:', data.frequency, 'isSyncing:', this.isSyncing);
             if (this.chat && this.chat.isJoined() && !this.isSyncing) {
                 this.chat.updateFrequency(data.frequency);
             }
-        });
+        };
 
-        // Subscribe to mode changes
-        window.radioAPI.on('mode_changed', (data) => {
+        this.radioEventHandlers.mode_changed = (data) => {
             console.log('[ChatUI] Mode changed event:', data.mode, 'isSyncing:', this.isSyncing);
             if (this.chat && this.chat.isJoined() && !this.isSyncing) {
                 this.chat.updateMode(data.mode);
             }
-        });
+        };
 
-        // Subscribe to bandwidth changes
-        window.radioAPI.on('bandwidth_changed', (data) => {
+        this.radioEventHandlers.bandwidth_changed = (data) => {
             console.log('[ChatUI] Bandwidth changed event - low:', data.low, 'high:', data.high, 'isSyncing:', this.isSyncing);
             if (this.chat && this.chat.isJoined() && !this.isSyncing) {
                 this.chat.updateBandwidth(data.high, data.low);
             }
-        });
+        };
 
-        // Subscribe to zoom changes
-        window.radioAPI.on('zoom_changed', (data) => {
+        this.radioEventHandlers.zoom_changed = (data) => {
             console.log('[ChatUI] Zoom changed event - binBandwidth:', data.binBandwidth, 'isSyncing:', this.isSyncing);
             if (this.chat && this.chat.isJoined() && !this.isSyncing) {
                 // Update zoom_bw by sending full frequency/mode update
                 this.chat.debouncedSendFrequencyMode();
             }
-        });
+        };
+
+        // Subscribe to events
+        window.radioAPI.on('frequency_changed', this.radioEventHandlers.frequency_changed);
+        window.radioAPI.on('mode_changed', this.radioEventHandlers.mode_changed);
+        window.radioAPI.on('bandwidth_changed', this.radioEventHandlers.bandwidth_changed);
+        window.radioAPI.on('zoom_changed', this.radioEventHandlers.zoom_changed);
+
+        // Periodically verify event listeners are still registered (every 5 seconds)
+        // This fixes the issue where listeners mysteriously disappear
+        this.radioTrackingInterval = setInterval(() => {
+            if (!window.radioAPI) return;
+
+            // Check if our handlers are still in the callbacks map
+            const events = ['frequency_changed', 'mode_changed', 'bandwidth_changed', 'zoom_changed'];
+            let needsReregistration = false;
+
+            for (const event of events) {
+                const callbacks = window.radioAPI.callbacks.get(event);
+                if (!callbacks || !callbacks.includes(this.radioEventHandlers[event])) {
+                    console.warn(`[ChatUI] Event listener for '${event}' was lost, re-registering...`);
+                    needsReregistration = true;
+                    break;
+                }
+            }
+
+            if (needsReregistration) {
+                // Re-register all handlers
+                console.log('[ChatUI] Re-registering radio event listeners');
+                window.radioAPI.on('frequency_changed', this.radioEventHandlers.frequency_changed);
+                window.radioAPI.on('mode_changed', this.radioEventHandlers.mode_changed);
+                window.radioAPI.on('bandwidth_changed', this.radioEventHandlers.bandwidth_changed);
+                window.radioAPI.on('zoom_changed', this.radioEventHandlers.zoom_changed);
+            }
+        }, 5000);
 
         console.log('[ChatUI] Radio tracking setup complete via radioAPI events');
     }

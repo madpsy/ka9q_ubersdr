@@ -37,15 +37,15 @@ class UberSDRChat {
     setupMessageHandler() {
         // Store original onmessage handler if it exists
         const originalHandler = this.ws.onmessage;
-        
+
         this.ws.onmessage = (event) => {
             const msg = JSON.parse(event.data);
-            
+
             // Handle chat messages
             if (msg.type && msg.type.startsWith('chat_')) {
                 this.handleChatMessage(msg);
             }
-            
+
             // Call original handler for non-chat messages
             if (originalHandler && typeof originalHandler === 'function') {
                 originalHandler(event);

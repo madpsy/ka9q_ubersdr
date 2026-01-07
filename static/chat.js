@@ -252,9 +252,18 @@ class UberSDRChat {
         if (message.length > 250) {
             return { valid: false, error: 'Message must be 250 characters or less' };
         }
-        // Check for printable characters only (space through tilde in ASCII)
-        if (!/^[\x20-\x7E\n]*$/.test(message)) {
-            return { valid: false, error: 'Message contains invalid characters' };
+        // Allow printable ASCII, newlines, and Unicode characters (including emojis)
+        // Only reject control characters (except newline and space)
+        for (let i = 0; i < message.length; i++) {
+            const code = message.charCodeAt(i);
+            // Reject control characters except newline (10) and space (32)
+            if (code < 32 && code !== 10) {
+                return { valid: false, error: 'Message contains invalid control characters' };
+            }
+            // Reject DEL character (127)
+            if (code === 127) {
+                return { valid: false, error: 'Message contains invalid control characters' };
+            }
         }
         return { valid: true };
     }

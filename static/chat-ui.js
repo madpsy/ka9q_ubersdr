@@ -687,18 +687,27 @@ class ChatUI {
         });
 
         this.chat.on('join_confirmed', (data) => {
+            // Check if this was an auto-rejoin (UI already shows message input)
+            const wasAutoRejoin = this.isAutoRejoining;
+
             // Clear auto-rejoining flag on successful join
             this.isAutoRejoining = false;
 
             // Save username for auto-login next time
             this.saveUsername(data.username);
 
-            // Switch from username input to message input
-            document.getElementById('chat-username-input-area').style.display = 'none';
-            document.getElementById('chat-message-input-area').style.display = 'flex';
-            document.getElementById('chat-leave-btn').style.display = 'block';
+            // Only switch UI if this wasn't an auto-rejoin
+            if (!wasAutoRejoin) {
+                // Switch from username input to message input
+                document.getElementById('chat-username-input-area').style.display = 'none';
+                document.getElementById('chat-message-input-area').style.display = 'flex';
+                document.getElementById('chat-leave-btn').style.display = 'block';
 
-            this.addSystemMessage(`You joined as ${data.username}`);
+                this.addSystemMessage(`You joined as ${data.username}`);
+            } else {
+                // Auto-rejoin succeeded - just log it
+                console.log('[ChatUI] Auto-rejoin successful as:', data.username);
+            }
 
             // Send initial frequency/mode/bandwidth on join (immediate, no debounce)
             const freqInput = document.getElementById('frequency');

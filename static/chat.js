@@ -284,6 +284,7 @@ class UberSDRChat {
             }));
             return true;
         } else {
+            // Only emit error for user-initiated actions like sending messages
             this.emit('error', 'WebSocket not connected');
             return false;
         }
@@ -406,7 +407,8 @@ class UberSDRChat {
             ws.send(JSON.stringify(payload));
             return true;
         } else {
-            this.emit('error', 'WebSocket not connected');
+            // Don't emit error - this is called automatically and will retry
+            console.log('[Chat] WebSocket not ready for setFrequencyAndMode, will retry');
             return false;
         }
     }

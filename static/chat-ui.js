@@ -593,22 +593,37 @@ class ChatUI {
             } else {
                 // Has content - show indicator
                 validationIndicator.style.display = 'block';
-                const isValid = cleaned.length >= 1 && cleaned.length <= 15;
+                const isLengthValid = cleaned.length >= 1 && cleaned.length <= 15;
                 
-                if (isValid) {
-                    // Valid - green checkmark
-                    validationIndicator.textContent = '✓';
-                    validationIndicator.style.color = '#4ade80';
-                    joinBtn.disabled = false;
-                    joinBtn.style.opacity = '1';
-                    joinBtn.style.cursor = 'pointer';
-                } else {
-                    // Invalid - red cross
+                // Check if username is already taken (case-insensitive)
+                const isTaken = this.chat.activeUsers.some(u =>
+                    u.username.toLowerCase() === cleaned.toLowerCase()
+                );
+
+                if (!isLengthValid) {
+                    // Invalid length - red cross
                     validationIndicator.textContent = '✗';
                     validationIndicator.style.color = '#f87171';
+                    validationIndicator.title = 'Username must be 1-15 characters';
                     joinBtn.disabled = true;
                     joinBtn.style.opacity = '0.5';
                     joinBtn.style.cursor = 'not-allowed';
+                } else if (isTaken) {
+                    // Username taken - red cross
+                    validationIndicator.textContent = '✗';
+                    validationIndicator.style.color = '#f87171';
+                    validationIndicator.title = 'Username already in use';
+                    joinBtn.disabled = true;
+                    joinBtn.style.opacity = '0.5';
+                    joinBtn.style.cursor = 'not-allowed';
+                } else {
+                    // Valid and available - green checkmark
+                    validationIndicator.textContent = '✓';
+                    validationIndicator.style.color = '#4ade80';
+                    validationIndicator.title = 'Username available';
+                    joinBtn.disabled = false;
+                    joinBtn.style.opacity = '1';
+                    joinBtn.style.cursor = 'pointer';
                 }
             }
         });

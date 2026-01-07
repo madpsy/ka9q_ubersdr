@@ -29,6 +29,8 @@ type ChatUser struct {
 	Mode              string      // User's current mode (optional)
 	BWHigh            int         // High bandwidth cutoff in Hz (-10000 to 10000, optional)
 	BWLow             int         // Low bandwidth cutoff in Hz (-10000 to 10000, optional)
+	CAT               bool        // CAT control enabled (optional)
+	TX                bool        // Transmitting status (optional)
 }
 
 // ChatManager manages chat functionality for the DX cluster websocket
@@ -158,30 +160,9 @@ func (cm *ChatManager) GetUsername(sessionID string) (string, bool) {
 	return username, exists
 }
 
-// SetFrequencyAndMode sets or updates the frequency, mode, and bandwidth for a user
-func (cm *ChatManager) SetFrequencyAndMode(sessionID string, frequency uint64, mode string, bwHigh int, bwLow int) error {
-	// Validate frequency (0 Hz to 30 MHz)
-	if frequency > 30000000 {
-		return ErrInvalidFrequency
-	}
-
-	// Validate mode
-	validModes := map[string]bool{
-		"usb": true, "lsb": true, "am": true, "fm": true,
-		"cwu": true, "cwl": true, "sam": true, "nfm": true,
-	}
-	if !validModes[mode] {
-		return ErrInvalidMode
-	}
-
-	// Validate bandwidth cutoffs (-10000 to 10000 Hz)
-	if bwHigh < -10000 || bwHigh > 10000 {
-		return ErrInvalidBandwidth
-	}
-	if bwLow < -10000 || bwLow > 10000 {
-		return ErrInvalidBandwidth
-	}
-
+// UpdateUserStatus updates user status fields (frequency, mode, bandwidth, CAT, TX)
+// All parameters are optional - only provided fields will be updated
+func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]interface{}) error {
 	// Check rate limit for user updates
 	cm.activeUsersMu.Lock()
 	user, exists := cm.activeUsers[sessionID]
@@ -204,15 +185,64 @@ func (cm *ChatManager) SetFrequencyAndMode(sessionID string, frequency uint64, m
 	// Update rate limit tracking
 	user.LastUpdateTime = now
 
-	// Update user's frequency, mode, and bandwidth
-	user.Frequency = frequency
-	user.Mode = mode
-	user.BWHigh = bwHigh
-	user.BWLow = bwLow
+	// Update frequency if provided
+	if frequency, ok := updates["frequency"].(float64); ok {
+		// Validate frequency (0 Hz to 30 MHz)
+		if frequency > 30000000 {
+			cm.activeUsersMu.Unlock()
+			return ErrInvalidFrequency
+		}
+		user.Frequency = uint64(frequency)
+	}
+
+	// Update mode if provided
+	if mode, ok := updates["mode"].(string); ok {
+		// Validate mode
+		validModes := map[string]bool{
+			"usb": true, "lsb": true, "am": true, "fm": true,
+			"cwu": true, "cwl": true, "sam": true, "nfm": true,
+		}
+		if !validModes[mode] {
+			cm.activeUsersMu.Unlock()
+			return ErrInvalidMode
+		}
+		user.Mode = mode
+	}
+
+	// Update bandwidth high if provided
+	if bwHigh, ok := updates["bw_high"].(float64); ok {
+		// Validate bandwidth cutoffs (-10000 to 10000 Hz)
+		if bwHigh < -10000 || bwHigh > 10000 {
+			cm.activeUsersMu.Unlock()
+			return ErrInvalidBandwidth
+		}
+		user.BWHigh = int(bwHigh)
+	}
+
+	// Update bandwidth low if provided
+	if bwLow, ok := updates["bw_low"].(float64); ok {
+		// Validate bandwidth cutoffs (-10000 to 10000 Hz)
+		if bwLow < -10000 || bwLow > 10000 {
+			cm.activeUsersMu.Unlock()
+			return ErrInvalidBandwidth
+		}
+		user.BWLow = int(bwLow)
+	}
+
+	// Update CAT if provided
+	if cat, ok := updates["cat"].(bool); ok {
+		user.CAT = cat
+	}
+
+	// Update TX if provided
+	if tx, ok := updates["tx"].(bool); ok {
+		user.TX = tx
+	}
+
 	cm.activeUsersMu.Unlock()
 
-	log.Printf("Chat: User '%s' set frequency %d Hz, mode %s, bw_high %d, bw_low %d",
-		user.Username, frequency, mode, bwHigh, bwLow)
+	log.Printf("Chat: User '%s' updated status: frequency=%d Hz, mode=%s, bw_high=%d, bw_low=%d, cat=%t, tx=%t",
+		user.Username, user.Frequency, user.Mode, user.BWHigh, user.BWLow, user.CAT, user.TX)
 
 	// Broadcast only this user's updated info (more efficient than full user list)
 	cm.broadcastUserUpdate(user)
@@ -240,6 +270,9 @@ func (cm *ChatManager) broadcastUserUpdate(user *ChatUser) {
 	if user.BWLow != 0 {
 		userData["bw_low"] = user.BWLow
 	}
+	// Include CAT and TX status
+	userData["cat"] = user.CAT
+	userData["tx"] = user.TX
 
 	message := map[string]interface{}{
 		"type": "chat_user_update",
@@ -482,6 +515,9 @@ func (cm *ChatManager) BroadcastActiveUsers() {
 		if user.BWLow != 0 {
 			userData["bw_low"] = user.BWLow
 		}
+		// Include CAT and TX status
+		userData["cat"] = user.CAT
+		userData["tx"] = user.TX
 		userList = append(userList, userData)
 	}
 
@@ -559,24 +595,9 @@ func (cm *ChatManager) HandleChatMessage(sessionID string, msg map[string]interf
 		return cm.SendMessage(sessionID, messageText)
 
 	case "chat_set_frequency_mode":
-		// User is setting/updating their frequency, mode, and bandwidth
-		frequency, freqOk := msg["frequency"].(float64) // JSON numbers are float64
-		mode, modeOk := msg["mode"].(string)
-		if !freqOk || !modeOk {
-			return ErrInvalidMessageType
-		}
-
-		// Bandwidth parameters are optional, default to 0
-		bwHigh := 0
-		bwLow := 0
-		if bwh, ok := msg["bw_high"].(float64); ok {
-			bwHigh = int(bwh)
-		}
-		if bwl, ok := msg["bw_low"].(float64); ok {
-			bwLow = int(bwl)
-		}
-
-		return cm.SetFrequencyAndMode(sessionID, uint64(frequency), mode, bwHigh, bwLow)
+		// User is setting/updating their frequency, mode, bandwidth, CAT, and TX status
+		// All fields are optional - only provided fields will be updated
+		return cm.UpdateUserStatus(sessionID, msg)
 
 	case "chat_request_users":
 		// User is requesting the list of active users

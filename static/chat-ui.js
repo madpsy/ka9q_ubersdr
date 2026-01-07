@@ -48,6 +48,8 @@ class ChatUI {
             console.log('[ChatUI] Frequency changed event:', data.frequency, 'isSyncing:', this.isSyncing);
             if (this.chat && this.chat.isJoined() && !this.isSyncing) {
                 this.chat.updateFrequency(data.frequency);
+                // Update our own user in the local list
+                this.updateOwnUserData({ frequency: data.frequency });
             }
         };
 
@@ -55,6 +57,8 @@ class ChatUI {
             console.log('[ChatUI] Mode changed event:', data.mode, 'isSyncing:', this.isSyncing);
             if (this.chat && this.chat.isJoined() && !this.isSyncing) {
                 this.chat.updateMode(data.mode);
+                // Update our own user in the local list
+                this.updateOwnUserData({ mode: data.mode });
             }
         };
 
@@ -62,6 +66,8 @@ class ChatUI {
             console.log('[ChatUI] Bandwidth changed event - low:', data.low, 'high:', data.high, 'isSyncing:', this.isSyncing);
             if (this.chat && this.chat.isJoined() && !this.isSyncing) {
                 this.chat.updateBandwidth(data.high, data.low);
+                // Update our own user in the local list
+                this.updateOwnUserData({ bw_low: data.low, bw_high: data.high });
             }
         };
 
@@ -70,6 +76,8 @@ class ChatUI {
             if (this.chat && this.chat.isJoined() && !this.isSyncing) {
                 // Update zoom_bw by sending full frequency/mode update
                 this.chat.debouncedSendFrequencyMode();
+                // Update our own user in the local list
+                this.updateOwnUserData({ zoom_bw: data.binBandwidth });
             }
         };
 
@@ -874,7 +882,7 @@ class ChatUI {
             const isOurUser = u.username === ourUsername;
             const isSynced = this.syncedUsername === u.username;
             const syncBtnClass = isSynced ? 'chat-sync-btn active' : 'chat-sync-btn';
-            const syncBtn = isOurUser ? '' : `<button class="${syncBtnClass}" onclick="event.stopPropagation(); chatUI.toggleSync('${this.escapeHtml(u.username)}');">${isSynced ? '✓' : 'Sync'}</button>`;
+            const syncBtn = isOurUser ? '' : `<button class="${syncBtnClass}" onclick="event.stopPropagation(); chatUI.toggleSync('${this.escapeHtml(u.username)}');" title="${isSynced ? 'Stop syncing' : 'Sync to this user'}">🔗</button>`;
 
             return `<div class="chat-user-item${muteClass}" title="${this.escapeHtml(tooltip)}">
                 <div style="flex: 1; min-width: 0;">
@@ -908,6 +916,33 @@ class ChatUI {
             users: this.chat.activeUsers,
             count: this.chat.activeUsers.length
         });
+    }
+
+    /**
+     * Update our own user's data in the local activeUsers list
+     * Called when we change our radio settings locally
+     */
+    updateOwnUserData(updates) {
+        if (!this.chat || !this.chat.username) {
+            return;
+        }
+
+        const ourUsername = this.chat.username;
+        const userIndex = this.chat.activeUsers.findIndex(u => u.username === ourUsername);
+        
+        if (userIndex >= 0) {
+            // Merge the updates with existing user data
+            this.chat.activeUsers[userIndex] = {
+                ...this.chat.activeUsers[userIndex],
+                ...updates
+            };
+            
+            // Refresh the display
+            this.updateActiveUsers({
+                users: this.chat.activeUsers,
+                count: this.chat.activeUsers.length
+            });
+        }
     }
 
     /**

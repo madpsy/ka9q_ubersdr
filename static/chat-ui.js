@@ -17,7 +17,7 @@ class ChatUI {
         this.createChatPanel();
         this.setupEventHandlers();
         this.setupChatEvents();
-        this.setupRadioTracking();
+        // Don't call setupRadioTracking here - it will be called after delay in initializeChatUI
         
         // Auto-login if we have a saved username
         if (this.savedUsername) {
@@ -733,11 +733,13 @@ function initializeChatUI(websocket) {
         // Expose globally for debugging and access
         window.chatUI = chatUI;
 
-        // Set up radio tracking after a short delay to ensure all functions exist
+        // Set up radio tracking after a longer delay to ensure app.js has finished all its overrides
+        // app.js overrides window.handleFrequencyChange around line 7539, so we need to wait
         setTimeout(() => {
             if (chatUI) {
+                console.log('[ChatUI] Delayed setup of radio tracking...');
                 chatUI.setupRadioTracking();
             }
-        }, 500);
+        }, 2000); // 2 second delay to ensure app.js is fully loaded
     }
 }

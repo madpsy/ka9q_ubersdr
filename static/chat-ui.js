@@ -853,9 +853,14 @@ class ChatUI {
         const isOwnMessage = this.chat && this.chat.username === username;
         const usernameClass = isOwnMessage ? 'chat-message-username own-message' : 'chat-message-username';
 
+        // Clicking username tunes to their frequency (except for our own)
+        const usernameHtml = isOwnMessage
+            ? `<span class="${usernameClass}" style="cursor:default;">${this.escapeHtml(username)}:</span>`
+            : `<span class="${usernameClass}" onclick="chatUI.tuneToUser('${this.escapeHtml(username)}')" title="Click to tune to ${this.escapeHtml(username)}'s frequency">${this.escapeHtml(username)}:</span>`;
+
         div.innerHTML = `
             <span style="color:#666; font-size:10px; margin-right:4px;">${time}</span>
-            <span class="${usernameClass}" onclick="chatUI.toggleMute('${this.escapeHtml(username)}')">${this.escapeHtml(username)}:</span>
+            ${usernameHtml}
             <span>${this.escapeHtml(message)}</span>
         `;
 
@@ -941,9 +946,15 @@ class ChatUI {
             // Check if this is our own user
             const isOurUser = u.username === ourUsername;
 
-            // Username (clickable to mute/unmute) - bold if it's us
-            const usernameStyle = isOurUser ? 'font-weight:bold; cursor:pointer; display:block; margin-bottom:2px;' : 'cursor:pointer; display:block; margin-bottom:2px;';
-            let usernameSpan = `<span onclick="chatUI.toggleMute('${this.escapeHtml(u.username)}')" style="${usernameStyle}">${this.escapeHtml(u.username)}</span>`;
+            // Username - bold if it's us, clickable to mute/unmute if it's not us
+            let usernameSpan;
+            if (isOurUser) {
+                // Our own username - bold, not clickable
+                usernameSpan = `<span style="font-weight:bold; display:block; margin-bottom:2px;">${this.escapeHtml(u.username)}</span>`;
+            } else {
+                // Other user - clickable to mute/unmute
+                usernameSpan = `<span onclick="chatUI.toggleMute('${this.escapeHtml(u.username)}')" style="cursor:pointer; display:block; margin-bottom:2px;">${this.escapeHtml(u.username)}</span>`;
+            }
 
             // Add frequency - clickable to tune for others, just display for us
             let radioInfo = '';

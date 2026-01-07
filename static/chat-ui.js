@@ -21,9 +21,12 @@ class ChatUI {
         this.isReceivingHistory = true; // Track if we're receiving initial message history
         this.tabCompletionIndex = -1; // Track current tab completion index
         this.tabCompletionMatches = []; // Store matching usernames for tab completion
+        this.audioContext = null; // Web Audio API context for notification sounds
+        this.soundsMuted = false; // Track if notification sounds are muted
 
-        // Load saved username from localStorage
+        // Load saved username and preferences from localStorage
         this.loadSavedUsername();
+        this.loadSoundMutePreference();
 
         this.createChatPanel();
         this.setupEventHandlers();
@@ -35,6 +38,87 @@ class ChatUI {
             setTimeout(() => {
                 this.autoLogin();
             }, 1000); // Wait 1 second for WebSocket to be fully ready
+        }
+    }
+
+    /**
+     * Play a notification sound for @ mentions
+     */
+    playMentionSound() {
+        // Don't play if muted
+        if (this.soundsMuted) {
+            return;
+        }
+
+        try {
+            // Create audio context on first use (must be after user interaction)
+            if (!this.audioContext) {
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            const ctx = this.audioContext;
+            const now = ctx.currentTime;
+
+            // Create oscillator for the "ding" sound
+            const oscillator = ctx.createOscillator();
+            const gainNode = ctx.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(ctx.destination);
+
+            // Configure the sound - a pleasant "ding" at 800Hz
+            oscillator.frequency.setValueAtTime(800, now);
+            oscillator.type = 'sine';
+
+            // Envelope: quick attack, short sustain, quick decay
+            gainNode.gain.setValueAtTime(0, now);
+            gainNode.gain.linearRampToValueAtTime(0.3, now + 0.01); // Attack
+            gainNode.gain.linearRampToValueAtTime(0.2, now + 0.05); // Sustain
+            gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.3); // Decay
+
+            // Play the sound
+            oscillator.start(now);
+            oscillator.stop(now + 0.3);
+        } catch (e) {
+            console.warn('[ChatUI] Failed to play mention sound:', e);
+        }
+    }
+
+    /**
+     * Toggle sound mute state
+     */
+    toggleSoundMute() {
+        this.soundsMuted = !this.soundsMuted;
+        
+        // Update button appearance
+        const muteBtn = document.getElementById('chat-mute-btn');
+        if (muteBtn) {
+            muteBtn.textContent = this.soundsMuted ? '🔇' : '🔊';
+            muteBtn.title = this.soundsMuted ? 'Unmute notification sounds' : 'Mute notification sounds';
+        }
+
+        // Save preference to localStorage
+        try {
+            localStorage.setItem('ubersdr_chat_sounds_muted', this.soundsMuted.toString());
+        } catch (e) {
+            console.error('Failed to save mute preference:', e);
+        }
+
+        // Show feedback message
+        this.addSystemMessage(this.soundsMuted ? 'Notification sounds muted' : 'Notification sounds enabled');
+    }
+
+    /**
+     * Load sound mute preference from localStorage
+     */
+    loadSoundMutePreference() {
+        try {
+            const saved = localStorage.getItem('ubersdr_chat_sounds_muted');
+            if (saved !== null) {
+                this.soundsMuted = saved === 'true';
+            }
+        } catch (e) {
+            console.error('Failed to load mute preference:', e);
         }
     }
 
@@ -269,7 +353,8 @@ class ChatUI {
                             </div>
                             <div id="chat-users-list" class="chat-users-list"></div>
                             <div class="chat-users-footer">
-                                <button id="chat-leave-btn" class="chat-btn chat-btn-danger chat-leave-btn-full" style="display:none;">Leave</button>
+                                <button id="chat-mute-btn" class="chat-btn chat-btn-mute" onclick="chatUI.toggleSoundMute()" title="Mute notification sounds" style="display:none;">🔊</button>
+                                <button id="chat-leave-btn" class="chat-btn chat-btn-danger" style="display:none;">Leave</button>
                             </div>
                         </div>
                     </div>
@@ -533,12 +618,12 @@ class ChatUI {
             }
             
             .chat-btn-danger {
-                background: #dc3545;
+                background: #ff9800;
                 color: #fff;
             }
-            
+
             .chat-btn-danger:hover {
-                background: #c82333;
+                background: #e68900;
             }
             
             .chat-error {
@@ -582,10 +667,24 @@ class ChatUI {
                 background: #2a2a2a;
                 border-top: 1px solid #444;
                 flex-shrink: 0;
+                display: flex;
+                gap: 4px;
             }
 
-            .chat-leave-btn-full {
-                width: 100%;
+            .chat-btn-mute {
+                background: #555;
+                color: #fff;
+                padding: 6px 8px;
+                font-size: 14px;
+                flex: 0 0 auto;
+            }
+
+            .chat-btn-mute:hover {
+                background: #666;
+            }
+
+            .chat-btn-danger {
+                flex: 1;
             }
             
             .chat-user-item {
@@ -781,6 +880,11 @@ class ChatUI {
             if (!this.isExpanded) {
                 this.incrementUnread(isMention);
             }
+
+            // Play sound if we were mentioned
+            if (isMention) {
+                this.playMentionSound();
+            }
         });
 
         this.chat.on('join_confirmed', (data) => {
@@ -806,6 +910,14 @@ class ChatUI {
                 document.getElementById('chat-username-input-area').style.display = 'none';
                 document.getElementById('chat-message-input-area').style.display = 'flex';
                 document.getElementById('chat-leave-btn').style.display = 'block';
+                document.getElementById('chat-mute-btn').style.display = 'block';
+
+                // Update mute button to reflect current state
+                const muteBtn = document.getElementById('chat-mute-btn');
+                if (muteBtn) {
+                    muteBtn.textContent = this.soundsMuted ? '🔇' : '🔊';
+                    muteBtn.title = this.soundsMuted ? 'Unmute notification sounds' : 'Mute notification sounds';
+                }
 
                 this.addSystemMessage(`You joined as ${data.username}`);
             } else {
@@ -1130,6 +1242,7 @@ class ChatUI {
         document.getElementById('chat-message-input-area').style.display = 'none';
         document.getElementById('chat-username-input-area').style.display = 'flex';
         document.getElementById('chat-leave-btn').style.display = 'none';
+        document.getElementById('chat-mute-btn').style.display = 'none';
 
         // Clear username input and validation indicator
         const usernameInput = document.getElementById('chat-username-input');

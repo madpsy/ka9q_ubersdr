@@ -1,0 +1,9 @@
+{
+  "name": "chat-tracker",
+  "displayName": "Chat Radio Tracker",
+  "version": "1.0.0",
+  "description": "Background extension that tracks radio changes for the chat system",
+  "author": "UberSDR",
+  "hidden": true,
+  "autoLoad": false
+}

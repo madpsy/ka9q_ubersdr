@@ -439,6 +439,11 @@ class ChatUI {
         const content = document.getElementById('chat-content');
         if (this.isExpanded) {
             content.style.display = 'flex';
+            // Show collapse arrow if expanded on load
+            const arrow = document.getElementById('chat-collapse-arrow');
+            if (arrow) {
+                arrow.style.display = 'block';
+            }
             // Request users if panel is already expanded on load
             setTimeout(() => {
                 this.requestActiveUsersWithRetry();

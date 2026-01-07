@@ -706,9 +706,9 @@ func sanitizeUsername(username string) string {
 func sanitizeMessage(message string) string {
 	cleaned := ""
 	for _, r := range message {
-		// Allow printable ASCII characters and common punctuation
+		// Allow printable ASCII characters, common punctuation, and Unicode characters (including emojis)
 		// Exclude control characters (except space and newline)
-		if r == '\n' || r == ' ' || (r >= 33 && r <= 126) {
+		if r == '\n' || r == ' ' || (r >= 33 && r <= 126) || r > 127 {
 			// Keep the character as-is - JSON encoding will handle quotes properly
 			cleaned += string(r)
 		}

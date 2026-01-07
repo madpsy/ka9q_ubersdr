@@ -230,12 +230,16 @@ class ChatUI {
 
                             <!-- Username input (shown when not logged in) -->
                             <div id="chat-username-input-area" class="chat-input-area">
-                                <input type="text" id="chat-username-input"
-                                       placeholder="Enter username to join chat..."
-                                       maxlength="15"
-                                       pattern="[A-Za-z0-9]+"
-                                       class="chat-input">
-                                <button id="chat-join-btn" class="chat-btn chat-btn-primary">Join</button>
+                                <div style="position: relative; flex: 1;">
+                                    <input type="text" id="chat-username-input"
+                                           placeholder="Enter username to join chat..."
+                                           maxlength="15"
+                                           pattern="[A-Za-z0-9]+"
+                                           class="chat-input"
+                                           style="padding-right: 30px;">
+                                    <span id="chat-username-validation" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 14px; display: none;"></span>
+                                </div>
+                                <button id="chat-join-btn" class="chat-btn chat-btn-primary" disabled style="opacity: 0.5; cursor: not-allowed;">Join</button>
                             </div>
 
                             <!-- Message input (shown when logged in) -->
@@ -562,10 +566,55 @@ class ChatUI {
      * Set up DOM event handlers
      */
     setupEventHandlers() {
+        // Username input validation
+        const usernameInput = document.getElementById('chat-username-input');
+        const validationIndicator = document.getElementById('chat-username-validation');
+        const joinBtn = document.getElementById('chat-join-btn');
+
+        usernameInput.addEventListener('input', (e) => {
+            const value = e.target.value;
+            // Remove any non-alphanumeric characters as user types
+            const cleaned = value.replace(/[^A-Za-z0-9]/g, '');
+            if (value !== cleaned) {
+                e.target.value = cleaned;
+            }
+            
+            // Show/hide validation indicator and update button state
+            if (cleaned.length === 0) {
+                // Empty - hide indicator
+                validationIndicator.style.display = 'none';
+                joinBtn.disabled = true;
+                joinBtn.style.opacity = '0.5';
+                joinBtn.style.cursor = 'not-allowed';
+            } else {
+                // Has content - show indicator
+                validationIndicator.style.display = 'block';
+                const isValid = cleaned.length >= 1 && cleaned.length <= 15;
+                
+                if (isValid) {
+                    // Valid - green checkmark
+                    validationIndicator.textContent = '✓';
+                    validationIndicator.style.color = '#4ade80';
+                    joinBtn.disabled = false;
+                    joinBtn.style.opacity = '1';
+                    joinBtn.style.cursor = 'pointer';
+                } else {
+                    // Invalid - red cross
+                    validationIndicator.textContent = '✗';
+                    validationIndicator.style.color = '#f87171';
+                    joinBtn.disabled = true;
+                    joinBtn.style.opacity = '0.5';
+                    joinBtn.style.cursor = 'not-allowed';
+                }
+            }
+        });
+
         // Join button
-        document.getElementById('chat-join-btn').addEventListener('click', () => {
-            const username = document.getElementById('chat-username-input').value.trim();
-            this.chat.setUsername(username);
+        joinBtn.addEventListener('click', () => {
+            const username = usernameInput.value.trim();
+            if (username.length >= 1 && username.length <= 15 && /^[A-Za-z0-9]+$/.test(username)) {
+                this.chat.setUsername(username);
+            }
         });
 
         // Send button

@@ -1037,6 +1037,13 @@ class ChatUI {
         const bwHigh = userData.bw_high !== undefined ? userData.bw_high : 0;
         const zoomBW = userData.zoom_bw !== undefined ? userData.zoom_bw : 0;
 
+        // Store current values BEFORE syncing to compare later
+        const oldFrequency = this.chat.frequency;
+        const oldMode = this.chat.mode;
+        const oldBwHigh = this.chat.bwHigh;
+        const oldBwLow = this.chat.bwLow;
+        const oldZoomBW = this.chat.zoomBW;
+
         // Set syncing flag to prevent sending updates back (avoid loops)
         this.isSyncing = true;
 
@@ -1177,11 +1184,11 @@ class ChatUI {
             // Only send if our values actually changed (prevents sync loops)
             if (this.chat && this.chat.isJoined()) {
                 const changed = (
-                    this.chat.frequency !== userData.frequency ||
-                    this.chat.mode !== userData.mode ||
-                    this.chat.bwHigh !== bwHigh ||
-                    this.chat.bwLow !== bwLow ||
-                    this.chat.zoomBW !== zoomBW
+                    oldFrequency !== userData.frequency ||
+                    oldMode !== userData.mode ||
+                    oldBwHigh !== bwHigh ||
+                    oldBwLow !== bwLow ||
+                    oldZoomBW !== zoomBW
                 );
                 
                 if (changed) {

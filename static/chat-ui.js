@@ -745,8 +745,9 @@ class ChatUI {
         });
 
         this.chat.on('error', (error) => {
-            // Just log errors to console, don't show in UI
+            // Show errors in the UI so users know what went wrong
             console.warn('[ChatUI] Chat error:', error);
+            this.showError(error);
         });
     }
 

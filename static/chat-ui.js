@@ -497,6 +497,7 @@ class ChatUI {
                 order: 2;
                 flex-shrink: 0;
                 position: relative;
+                overflow: visible;
             }
             
             .chat-header:hover {
@@ -1242,8 +1243,12 @@ class ChatUI {
 
             // Show collapse arrow when expanded
             const arrow = document.getElementById('chat-collapse-arrow');
+            console.log('[ChatUI] Showing collapse arrow, element:', arrow, 'display:', arrow ? arrow.style.display : 'null');
             if (arrow) {
                 arrow.style.display = 'block';
+                console.log('[ChatUI] Arrow display set to block, computed style:', window.getComputedStyle(arrow).display);
+            } else {
+                console.error('[ChatUI] Arrow element not found!');
             }
 
             // Hide user count badge when expanded

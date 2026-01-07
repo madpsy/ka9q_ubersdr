@@ -13,6 +13,7 @@ class ChatUI {
         this.syncedUsername = null; // Track which user we're synced with
         this.isSyncing = false; // Flag to prevent update loops when syncing
         this.radioEventHandlers = {}; // Store references to our radio event handlers
+        this.errorTimeout = null; // Track error display timeout
 
         // Load saved username from localStorage
         this.loadSavedUsername();
@@ -208,39 +209,44 @@ class ChatUI {
                 <div id="chat-content" class="chat-content" style="display:${this.isExpanded ? 'flex' : 'none'};">
                     <!-- Username setup (shown first) -->
                     <div id="chat-username-setup" class="chat-username-setup">
-                        <input type="text" id="chat-username-input" 
-                               placeholder="Enter username..." 
-                               maxlength="15" 
+                        <input type="text" id="chat-username-input"
+                               placeholder="Enter username..."
+                               maxlength="15"
                                pattern="[A-Za-z0-9]+"
                                class="chat-input">
                         <button id="chat-join-btn" class="chat-btn chat-btn-primary">Join</button>
                         <div id="chat-error" class="chat-error"></div>
                     </div>
-                    
+
                     <!-- Chat interface (shown after joining) -->
                     <div id="chat-interface" class="chat-interface" style="display:none;">
-                        <!-- Messages area -->
-                        <div id="chat-messages" class="chat-messages"></div>
-                        
-                        <!-- Message input -->
-                        <div class="chat-input-area">
-                            <input type="text" id="chat-message-input" 
-                                   placeholder="Type message..." 
-                                   maxlength="250"
-                                   class="chat-input">
-                            <button id="chat-send-btn" class="chat-btn chat-btn-primary">Send</button>
-                            <button id="chat-leave-btn" class="chat-btn chat-btn-danger">Leave</button>
+                        <div class="chat-main-area">
+                            <!-- Messages area -->
+                            <div id="chat-messages" class="chat-messages"></div>
+
+                            <!-- Message input -->
+                            <div class="chat-input-area">
+                                <input type="text" id="chat-message-input"
+                                       placeholder="Type message..."
+                                       maxlength="250"
+                                       class="chat-input">
+                                <button id="chat-send-btn" class="chat-btn chat-btn-primary">Send</button>
+                            </div>
                         </div>
-                        
-                        <!-- Active users (collapsible) -->
-                        <div class="chat-users-header" onclick="chatUI.toggleUsers()">
-                            <span>👥 Users (<span id="chat-user-count">0</span>)</span>
-                            <span id="chat-users-toggle">▼</span>
+
+                        <!-- Active users sidebar -->
+                        <div class="chat-users-sidebar">
+                            <div class="chat-users-header">
+                                <span>👥 Users (<span id="chat-user-count">0</span>)</span>
+                            </div>
+                            <div id="chat-users-list" class="chat-users-list"></div>
+                            <div class="chat-users-footer">
+                                <button id="chat-leave-btn" class="chat-btn chat-btn-danger chat-leave-btn-full">Leave</button>
+                            </div>
                         </div>
-                        <div id="chat-users-list" class="chat-users-list" style="display:none;"></div>
                     </div>
                 </div>
-                
+
                 <!-- Chat tab (always visible, on right edge) -->
                 <div id="chat-header" class="chat-header" onclick="chatUI.togglePanel()">
                     <span>💬</span>
@@ -290,9 +296,9 @@ class ChatUI {
             .chat-panel.collapsed {
                 width: 40px;
             }
-            
+
             .chat-panel.expanded {
-                width: 350px;
+                width: 540px;
             }
             
             .chat-header {
@@ -332,7 +338,7 @@ class ChatUI {
             }
             
             .chat-content {
-                width: 310px;
+                width: 500px;
                 height: 500px;
                 background: rgba(40, 40, 40, 0.7);
                 border: 1px solid rgba(100, 100, 100, 0.6);
@@ -340,17 +346,24 @@ class ChatUI {
                 border-radius: 8px 0 0 8px;
                 order: 1;
             }
-            
+
             .chat-username-setup {
                 padding: 12px;
             }
-            
+
             .chat-interface {
                 display: flex;
-                flex-direction: column;
-                height: 400px;
+                flex-direction: row;
+                height: 100%;
             }
-            
+
+            .chat-main-area {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                min-width: 0;
+            }
+
             .chat-messages {
                 flex: 1;
                 overflow-y: auto;
@@ -392,6 +405,7 @@ class ChatUI {
                 background: #2a2a2a;
                 display: flex;
                 gap: 4px;
+                flex-shrink: 0;
             }
             
             .chat-input {
@@ -443,36 +457,57 @@ class ChatUI {
                 min-height: 16px;
             }
             
+            .chat-users-sidebar {
+                width: 150px;
+                display: flex;
+                flex-direction: column;
+                background: rgba(35, 35, 35, 0.8);
+                border-left: 1px solid rgba(100, 100, 100, 0.4);
+            }
+
             .chat-users-header {
-                padding: 6px 12px;
+                padding: 6px 8px;
                 background: #2a2a2a;
                 color: #aaa;
-                cursor: pointer;
                 user-select: none;
-                border-top: 1px solid #444;
-                display: flex;
-                justify-content: space-between;
+                border-bottom: 1px solid #444;
                 font-size: 11px;
+                text-align: center;
+                flex-shrink: 0;
             }
-            
-            .chat-users-header:hover {
-                background: #333;
-            }
-            
+
             .chat-users-list {
-                padding: 8px 12px;
+                flex: 1;
+                padding: 8px;
                 background: #222;
                 color: #aaa;
                 font-size: 11px;
-                max-height: 100px;
                 overflow-y: auto;
+                min-height: 0;
+            }
+
+            .chat-users-footer {
+                padding: 8px;
+                background: #2a2a2a;
+                border-top: 1px solid #444;
+                flex-shrink: 0;
+            }
+
+            .chat-leave-btn-full {
+                width: 100%;
             }
             
             .chat-user-item {
-                padding: 2px 0;
+                padding: 6px 4px;
+                margin-bottom: 6px;
                 display: flex;
                 justify-content: space-between;
-                align-items: center;
+                align-items: flex-start;
+                border-bottom: 1px solid #333;
+            }
+
+            .chat-user-item:last-child {
+                border-bottom: none;
             }
             
             .chat-user-muted {
@@ -481,22 +516,23 @@ class ChatUI {
             }
             
             .chat-sync-btn {
-                padding: 2px 6px;
-                font-size: 10px;
+                padding: 2px 4px;
+                font-size: 9px;
                 border: 1px solid #555;
                 background: #333;
                 color: #aaa;
                 border-radius: 3px;
                 cursor: pointer;
-                margin-left: 8px;
                 user-select: none;
+                white-space: nowrap;
+                flex-shrink: 0;
             }
-            
+
             .chat-sync-btn:hover {
                 background: #444;
                 border-color: #666;
             }
-            
+
             .chat-sync-btn.active {
                 background: #4a9eff;
                 color: #fff;
@@ -664,22 +700,6 @@ class ChatUI {
     }
 
     /**
-     * Toggle users list
-     */
-    toggleUsers() {
-        const usersList = document.getElementById('chat-users-list');
-        const toggle = document.getElementById('chat-users-toggle');
-        
-        if (usersList.style.display === 'none') {
-            usersList.style.display = 'block';
-            toggle.textContent = '▲';
-        } else {
-            usersList.style.display = 'none';
-            toggle.textContent = '▼';
-        }
-    }
-
-    /**
      * Send a message
      */
     sendMessage() {
@@ -763,18 +783,25 @@ class ChatUI {
      * Show an error message
      */
     showError(error) {
-        // Show in error div
+        // Clear any existing error timeout
+        if (this.errorTimeout) {
+            clearTimeout(this.errorTimeout);
+            this.errorTimeout = null;
+        }
+
+        // Show in error div (username setup screen)
         const errorDiv = document.getElementById('chat-error');
         if (errorDiv) {
             errorDiv.textContent = error;
-            setTimeout(() => {
+            this.errorTimeout = setTimeout(() => {
                 errorDiv.textContent = '';
+                this.errorTimeout = null;
             }, 5000);
         }
         
-        // Also add to messages
+        // Also add to messages (chat interface screen)
         const container = document.getElementById('chat-messages');
-        if (container) {
+        if (container && container.parentElement && container.parentElement.style.display !== 'none') {
             const div = document.createElement('div');
             div.className = 'chat-message chat-message-error';
             div.textContent = 'Error: ' + error;
@@ -799,23 +826,27 @@ class ChatUI {
         
         // Get our own username to exclude from sync
         const ourUsername = this.chat.username;
-        
-        const userItems = data.users.map(u => {
+
+        // Sort users: synced user first, then alphabetically
+        const sortedUsers = [...data.users].sort((a, b) => {
+            // Synced user always first
+            if (a.username === this.syncedUsername) return -1;
+            if (b.username === this.syncedUsername) return 1;
+            // Then alphabetically
+            return a.username.localeCompare(b.username);
+        });
+
+        const userItems = sortedUsers.map(u => {
             console.log('[ChatUI] User:', u.username, 'freq:', u.frequency, 'mode:', u.mode);
 
             // Username (clickable to mute/unmute)
-            let usernameSpan = `<span onclick="chatUI.toggleMute('${this.escapeHtml(u.username)}')" style="cursor:pointer;">${this.escapeHtml(u.username)}</span>`;
+            let usernameSpan = `<span onclick="chatUI.toggleMute('${this.escapeHtml(u.username)}')" style="cursor:pointer; display:block; margin-bottom:2px;">${this.escapeHtml(u.username)}</span>`;
 
-            // Add frequency and mode (clickable to tune)
+            // Add frequency (clickable to tune)
             let radioInfo = '';
             if (u.frequency) {
                 const freqMHz = (u.frequency / 1000000).toFixed(3);
-                radioInfo += ` <span style="color:#888; cursor:pointer; text-decoration:underline;" onclick="event.stopPropagation(); chatUI.tuneToUser('${this.escapeHtml(u.username)}')" title="Click to tune to ${freqMHz} MHz">${freqMHz} MHz</span>`;
-
-                // Add mode if also set
-                if (u.mode) {
-                    radioInfo += ` <span style="color:#888; cursor:pointer; text-decoration:underline;" onclick="event.stopPropagation(); chatUI.tuneToUser('${this.escapeHtml(u.username)}')" title="Click to tune to ${u.mode.toUpperCase()}">${u.mode.toUpperCase()}</span>`;
-                }
+                radioInfo += `<span style="color:#888; cursor:pointer; text-decoration:underline; font-size:10px; display:block; margin-bottom:2px;" onclick="event.stopPropagation(); chatUI.tuneToUser('${this.escapeHtml(u.username)}')" title="Click to tune to ${freqMHz} MHz">${freqMHz} MHz</span>`;
             }
 
             const muted = this.chat.isMuted(u.username);
@@ -843,10 +874,13 @@ class ChatUI {
             const isOurUser = u.username === ourUsername;
             const isSynced = this.syncedUsername === u.username;
             const syncBtnClass = isSynced ? 'chat-sync-btn active' : 'chat-sync-btn';
-            const syncBtn = isOurUser ? '' : `<button class="${syncBtnClass}" onclick="event.stopPropagation(); chatUI.toggleSync('${this.escapeHtml(u.username)}');">${isSynced ? '✓ Sync' : 'Sync'}</button>`;
+            const syncBtn = isOurUser ? '' : `<button class="${syncBtnClass}" onclick="event.stopPropagation(); chatUI.toggleSync('${this.escapeHtml(u.username)}');">${isSynced ? '✓' : 'Sync'}</button>`;
 
             return `<div class="chat-user-item${muteClass}" title="${this.escapeHtml(tooltip)}">
-                <span style="flex: 1;">${usernameSpan}${radioInfo}</span>
+                <div style="flex: 1; min-width: 0;">
+                    ${usernameSpan}
+                    ${radioInfo}
+                </div>
                 ${syncBtn}
             </div>`;
         }).join('');

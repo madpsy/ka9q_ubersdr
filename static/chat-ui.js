@@ -1072,7 +1072,7 @@ class ChatUI {
             console.log('[ChatUI] Sync complete, re-enabling chat updates');
         }, 2000);
 
-        this.addSystemMessage(`Synced to ${userData.username}: ${(userData.frequency / 1000000).toFixed(3)} MHz ${userData.mode.toUpperCase()}`);
+        // Removed "Synced to..." message per user request
     }
 
     /**

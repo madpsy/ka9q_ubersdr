@@ -964,6 +964,14 @@ class ChatUI {
                 }
 
                 this.addSystemMessage(`You joined as ${data.username}`);
+
+                // Focus the message input after a short delay to ensure UI is updated
+                setTimeout(() => {
+                    const messageInput = document.getElementById('chat-message-input');
+                    if (messageInput) {
+                        messageInput.focus();
+                    }
+                }, 100);
             } else {
                 // Auto-rejoin succeeded - just log it
                 console.log('[ChatUI] Auto-rejoin successful as:', data.username);

@@ -352,6 +352,7 @@ class ChatUI {
                 border-radius: 8px 0 0 8px;
                 order: 2;
                 flex-shrink: 0;
+                position: relative;
             }
             
             .chat-header:hover {
@@ -361,8 +362,9 @@ class ChatUI {
             .chat-mention {
                 position: absolute;
                 top: 5px;
-                left: 50%;
-                transform: translateX(-50%);
+                left: 0;
+                right: 0;
+                text-align: center;
                 font-size: 16px;
                 animation: pulse 1s ease-in-out infinite;
             }

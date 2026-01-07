@@ -969,15 +969,15 @@ class ChatUI {
             window.updateBandSelector();
         }
 
-        // Step 2: Update mode (this sets slider ranges to defaults for that mode)
+        // Step 2: Update mode (preserve bandwidth - we'll set it manually)
         window.currentMode = userData.mode;
         if (typeof setMode === 'function') {
-            console.log('[ChatUI] Calling setMode to update slider ranges');
-            // This will set slider ranges and default bandwidth, then call autoTune()
-            setMode(userData.mode, false);
+            console.log('[ChatUI] Calling setMode with preserveBandwidth=true');
+            // Pass true to preserve bandwidth (don't call autoTune yet)
+            setMode(userData.mode, true);
         }
 
-        // Step 3: Override the bandwidth values that setMode just set
+        // Step 3: Set the correct bandwidth values
         // Update global state
         window.currentBandwidthLow = bwLow;
         window.currentBandwidthHigh = bwHigh;

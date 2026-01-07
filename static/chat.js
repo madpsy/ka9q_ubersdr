@@ -28,12 +28,44 @@ class UberSDRChat {
         this.debounceTimer = null;
         this.debounceDelay = 100; // 100ms debounce delay
         this.activeUsers = []; // Store active users for sync functionality
+        this.pendingOperations = []; // Queue for operations waiting for WebSocket
 
         // Load muted users from localStorage
         this.loadMutedUsers();
 
         // Set up message handler
         this.setupMessageHandler();
+    }
+
+    /**
+     * Wait for WebSocket to be ready, with retry logic
+     * @param {number} maxWaitMs - Maximum time to wait in milliseconds
+     * @param {number} checkIntervalMs - How often to check in milliseconds
+     * @returns {Promise<WebSocket|null>} - Returns WebSocket when ready, or null on timeout
+     */
+    waitForWebSocket(maxWaitMs = 2000, checkIntervalMs = 100) {
+        return new Promise((resolve) => {
+            const startTime = Date.now();
+
+            const checkWebSocket = () => {
+                const ws = this.getWebSocket();
+
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    resolve(ws);
+                    return;
+                }
+
+                if (Date.now() - startTime >= maxWaitMs) {
+                    console.warn('[Chat] WebSocket not ready after', maxWaitMs, 'ms');
+                    resolve(null);
+                    return;
+                }
+
+                setTimeout(checkWebSocket, checkIntervalMs);
+            };
+
+            checkWebSocket();
+        });
     }
 
     /**
@@ -176,7 +208,7 @@ class UberSDRChat {
      * Set username (required before sending messages)
      * @param {string} username - Alphanumeric, 1-15 characters
      */
-    setUsername(username) {
+    async setUsername(username) {
         // Validate username
         const validation = this.validateUsername(username);
         if (!validation.valid) {
@@ -184,7 +216,14 @@ class UberSDRChat {
             return false;
         }
 
-        const ws = this.getWebSocket();
+        // Try to get WebSocket immediately
+        let ws = this.getWebSocket();
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            // Wait for WebSocket to be ready (up to 2 seconds)
+            console.log('[Chat] WebSocket not ready, waiting...');
+            ws = await this.waitForWebSocket(2000);
+        }
+
         if (ws && ws.readyState === WebSocket.OPEN) {
             this.username = username; // Store temporarily, will be confirmed by server
             ws.send(JSON.stringify({
@@ -501,8 +540,9 @@ class UberSDRChat {
             ws.send(JSON.stringify(payload));
             return true;
         } else {
-            console.error('[Chat] WebSocket not connected - ws:', ws, 'readyState:', ws ? ws.readyState : 'N/A');
-            this.emit('error', 'WebSocket not connected');
+            // Don't emit error for frequency/mode updates - they're debounced and will retry
+            // This prevents spamming "WebSocket not connected" errors during reconnection
+            console.log('[Chat] WebSocket not ready for frequency/mode update, will retry on next change');
             return false;
         }
     }

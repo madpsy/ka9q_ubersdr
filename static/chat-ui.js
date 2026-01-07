@@ -14,6 +14,9 @@ class ChatUI {
         this.isSyncing = false; // Flag to prevent update loops when syncing
         this.radioEventHandlers = {}; // Store references to our radio event handlers
         this.errorTimeout = null; // Track error display timeout
+        this.usersRequestPending = false; // Track if we're waiting for users list response
+        this.usersRequestTimer = null; // Timer for retry
+        this.isAutoRejoining = false; // Track if we're in the middle of auto-rejoin
 
         // Load saved username from localStorage
         this.loadSavedUsername();
@@ -291,7 +294,7 @@ class ChatUI {
             content.style.display = 'flex';
             // Request users if panel is already expanded on load
             setTimeout(() => {
-                this.chat.requestActiveUsers();
+                this.requestActiveUsersWithRetry();
             }, 1000);
         }
     }
@@ -683,6 +686,9 @@ class ChatUI {
         });
 
         this.chat.on('join_confirmed', (data) => {
+            // Clear auto-rejoining flag on successful join
+            this.isAutoRejoining = false;
+
             // Save username for auto-login next time
             this.saveUsername(data.username);
 
@@ -708,11 +714,11 @@ class ChatUI {
                 // Wait a moment for server to process, then request active users
                 // This ensures our frequency/mode is included in the response
                 setTimeout(() => {
-                    this.chat.requestActiveUsers();
+                    this.requestActiveUsersWithRetry();
                 }, 100);
             } else {
                 // No frequency/mode to send, request users immediately
-                this.chat.requestActiveUsers();
+                this.requestActiveUsersWithRetry();
             }
         });
 
@@ -744,6 +750,12 @@ class ChatUI {
         });
 
         this.chat.on('active_users', (data) => {
+            // Clear pending request flag and timer since we got a response
+            this.usersRequestPending = false;
+            if (this.usersRequestTimer) {
+                clearTimeout(this.usersRequestTimer);
+                this.usersRequestTimer = null;
+            }
             this.updateActiveUsers(data);
         });
 
@@ -767,16 +779,62 @@ class ChatUI {
             // Show errors in the UI so users know what went wrong
             console.warn('[ChatUI] Chat error:', error);
 
+            // If we're auto-rejoining and get an error, it means rejoin failed
+            if (this.isAutoRejoining) {
+                console.log('[ChatUI] Auto-rejoin failed with error:', error);
+                this.isAutoRejoining = false;
+                // Clear saved username since it's not working
+                this.clearSavedUsername();
+                // Reset UI to username input view
+                this.resetToUsernameInput();
+                // Show the error to user
+                this.showError('Auto-rejoin failed: ' + error);
+                return;
+            }
+
             // If server says username not set but we think we have one, re-join automatically
             // This handles WebSocket reconnections and server restarts gracefully
             if (error === 'username not set' && this.savedUsername && this.chat) {
                 console.log('[ChatUI] Server lost our session, automatically re-joining as:', this.savedUsername);
+                this.isAutoRejoining = true;
                 this.chat.setUsername(this.savedUsername);
+                // Request users after a short delay to allow join to complete
+                setTimeout(() => {
+                    this.requestActiveUsersWithRetry();
+                }, 200);
                 return; // Don't show error to user, we're handling it automatically
             }
 
             this.showError(error);
         });
+    }
+
+    /**
+     * Request active users with retry logic
+     * If we don't get a response within 1 second, retry once
+     */
+    requestActiveUsersWithRetry() {
+        // Don't send if already pending
+        if (this.usersRequestPending) {
+            console.log('[ChatUI] Users request already pending, skipping');
+            return;
+        }
+
+        console.log('[ChatUI] Requesting active users');
+        this.usersRequestPending = true;
+
+        // Send the request
+        this.chat.requestActiveUsers();
+
+        // Set up retry timer (1 second)
+        this.usersRequestTimer = setTimeout(() => {
+            if (this.usersRequestPending) {
+                console.log('[ChatUI] No response to users request, retrying once...');
+                this.usersRequestPending = false;
+                this.chat.requestActiveUsers();
+                // Don't set up another retry - only retry once
+            }
+        }, 1000);
     }
 
     /**
@@ -795,7 +853,7 @@ class ChatUI {
 
             // Request active users when opening the panel (even if not logged in)
             // This allows users to see who's online before joining
-            this.chat.requestActiveUsers();
+            this.requestActiveUsersWithRetry();
         } else {
             panel.classList.remove('expanded');
             panel.classList.add('collapsed');
@@ -820,14 +878,9 @@ class ChatUI {
     }
 
     /**
-     * Leave chat
+     * Reset UI to username input view (used when auto-rejoin fails)
      */
-    leaveChat() {
-        this.chat.leave();
-
-        // Clear saved username from localStorage
-        this.clearSavedUsername();
-
+    resetToUsernameInput() {
         // Switch from message input back to username input
         document.getElementById('chat-message-input-area').style.display = 'none';
         document.getElementById('chat-username-input-area').style.display = 'flex';
@@ -843,6 +896,22 @@ class ChatUI {
         joinBtn.disabled = true;
         joinBtn.style.opacity = '0.5';
         joinBtn.style.cursor = 'not-allowed';
+
+        // Clear username from chat object
+        this.chat.username = null;
+    }
+
+    /**
+     * Leave chat
+     */
+    leaveChat() {
+        this.chat.leave();
+
+        // Clear saved username from localStorage
+        this.clearSavedUsername();
+
+        // Reset UI to username input view
+        this.resetToUsernameInput();
 
         // Don't clear messages - keep chat history visible
         this.addSystemMessage('You left the chat');

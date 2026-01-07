@@ -397,6 +397,10 @@ class RadioAPI {
     notifyBandwidthChange(low, high) {
         this.emit('bandwidth_changed', { low: low, high: high });
     }
+
+    notifyZoomChange(binBandwidth) {
+        this.emit('zoom_changed', { binBandwidth: binBandwidth });
+    }
     
     // === UTILITY METHODS ===
     

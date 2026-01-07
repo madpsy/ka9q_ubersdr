@@ -65,6 +65,15 @@ class ChatUI {
             }
         });
 
+        // Subscribe to zoom changes
+        window.radioAPI.on('zoom_changed', (data) => {
+            console.log('[ChatUI] Zoom changed event - binBandwidth:', data.binBandwidth, 'isSyncing:', this.isSyncing);
+            if (this.chat && this.chat.isJoined() && !this.isSyncing) {
+                // Update zoom_bw by sending full frequency/mode update
+                this.chat.debouncedSendFrequencyMode();
+            }
+        });
+
         console.log('[ChatUI] Radio tracking setup complete via radioAPI events');
     }
 
@@ -944,21 +953,21 @@ class ChatUI {
             window.updateURL();
         }
 
-        // Step 4: Tune again with the correct bandwidth values
+        // Step 4: Apply zoom_bw if provided and valid (do this BEFORE autoTune)
+        if (zoomBW > 0 && window.spectrumDisplay && window.spectrumDisplay.ws && window.spectrumDisplay.ws.readyState === WebSocket.OPEN) {
+            console.log('[ChatUI] Applying synced zoom_bw:', zoomBW, 'Hz/bin at frequency:', userData.frequency);
+            // Send zoom command to spectrum display using the correct message format
+            window.spectrumDisplay.ws.send(JSON.stringify({
+                type: 'zoom',
+                frequency: Math.round(userData.frequency),
+                binBandwidth: zoomBW
+            }));
+        }
+
+        // Step 5: Tune with the correct bandwidth values
         if (typeof autoTune === 'function') {
             console.log('[ChatUI] Auto-tuning with synced bandwidth');
             autoTune();
-        }
-
-        // Step 5: Apply zoom_bw if provided and valid
-        if (zoomBW > 0 && window.spectrumDisplay && window.spectrumDisplay.ws) {
-            console.log('[ChatUI] Applying synced zoom_bw:', zoomBW);
-            // Send zoom command to spectrum display
-            window.spectrumDisplay.ws.send(JSON.stringify({
-                type: 'set_zoom',
-                center_freq: userData.frequency,
-                bin_bandwidth: zoomBW
-            }));
         }
 
         // Clear syncing flag after a delay to allow all updates to complete

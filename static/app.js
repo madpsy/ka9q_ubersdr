@@ -6190,6 +6190,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.lastLoggedSpectrumConfig.binBandwidth !== config.binBandwidth ||
                     window.lastLoggedSpectrumConfig.binCount !== config.binCount) {
                     log(`Spectrum: ${config.binCount} bins @ ${config.binBandwidth} Hz, ${formatFrequency(config.centerFreq)}`);
+
+                    // Notify zoom change if binBandwidth changed
+                    if (window.radioAPI && window.lastLoggedSpectrumConfig &&
+                        window.lastLoggedSpectrumConfig.binBandwidth !== config.binBandwidth) {
+                        window.radioAPI.notifyZoomChange(config.binBandwidth);
+                    }
+
                     window.lastLoggedSpectrumConfig = {
                         centerFreq: config.centerFreq,
                         binBandwidth: config.binBandwidth,

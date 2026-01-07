@@ -23,10 +23,12 @@ class ChatUI {
         this.tabCompletionMatches = []; // Store matching usernames for tab completion
         this.audioContext = null; // Web Audio API context for notification sounds
         this.soundsMuted = false; // Track if notification sounds are muted
+        this.lastSeenMessageTime = 0; // Track last message timestamp we've seen
 
         // Load saved username and preferences from localStorage
         this.loadSavedUsername();
         this.loadSoundMutePreference();
+        this.loadLastSeenMessageTime();
 
         this.createChatPanel();
         this.setupEventHandlers();
@@ -134,6 +136,32 @@ class ChatUI {
             setTimeout(() => {
                 badge.classList.remove('pulse');
             }, 600);
+        }
+    }
+
+    /**
+     * Load last seen message timestamp from localStorage
+     */
+    loadLastSeenMessageTime() {
+        try {
+            const saved = localStorage.getItem('ubersdr_chat_last_seen_message');
+            if (saved !== null) {
+                this.lastSeenMessageTime = parseInt(saved, 10) || 0;
+            }
+        } catch (e) {
+            console.error('Failed to load last seen message time:', e);
+        }
+    }
+
+    /**
+     * Save last seen message timestamp to localStorage
+     */
+    saveLastSeenMessageTime(timestamp) {
+        try {
+            this.lastSeenMessageTime = timestamp;
+            localStorage.setItem('ubersdr_chat_last_seen_message', timestamp.toString());
+        } catch (e) {
+            console.error('Failed to save last seen message time:', e);
         }
     }
 
@@ -921,12 +949,16 @@ class ChatUI {
 
             this.addChatMessage(data.username, data.message, data.timestamp, isMention);
 
-            if (!this.isExpanded) {
+            // Only count as unread if:
+            // 1. Panel is collapsed
+            // 2. Message is newer than last seen time
+            const messageTime = new Date(data.timestamp).getTime();
+            if (!this.isExpanded && messageTime > this.lastSeenMessageTime) {
                 this.incrementUnread(isMention);
             }
 
-            // Play sound if we were mentioned
-            if (isMention) {
+            // Play sound if we were mentioned (and it's a new message)
+            if (isMention && messageTime > this.lastSeenMessageTime) {
                 this.playMentionSound();
             }
         });
@@ -1628,6 +1660,9 @@ class ChatUI {
         if (mentionIndicator) {
             mentionIndicator.style.display = 'none';
         }
+        
+        // Save current time as last seen message time
+        this.saveLastSeenMessageTime(Date.now());
     }
 
     /**

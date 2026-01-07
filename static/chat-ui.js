@@ -860,12 +860,12 @@ class ChatUI {
         } else {
             // Look up user's frequency and mode for tooltip
             const user = this.chat.activeUsers.find(u => u.username === username);
-            let tooltip = 'Click to tune to user';
+            let tooltip = '';
             if (user && user.frequency && user.mode) {
                 const freqMHz = (user.frequency / 1000000).toFixed(3);
-                tooltip = `Click to tune to ${freqMHz} MHz (${user.mode.toUpperCase()})`;
+                tooltip = ` title="Click to tune to ${freqMHz} MHz (${user.mode.toUpperCase()})"`;
             }
-            usernameHtml = `<span class="${usernameClass}" onclick="chatUI.tuneToUser('${this.escapeHtml(username)}')" title="${tooltip}">${this.escapeHtml(username)}:</span>`;
+            usernameHtml = `<span class="${usernameClass}" onclick="chatUI.tuneToUser('${this.escapeHtml(username)}')"${tooltip}>${this.escapeHtml(username)}:</span>`;
         }
 
         div.innerHTML = `

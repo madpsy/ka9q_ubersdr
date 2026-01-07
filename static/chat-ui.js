@@ -35,6 +35,12 @@ class ChatUI {
         this.setupChatEvents();
         // Don't call setupRadioTracking here - it will be called after delay in initializeChatUI
 
+        // Request user count on page load (even if collapsed and not logged in)
+        // This ensures the badge shows the correct count
+        setTimeout(() => {
+            this.requestActiveUsersWithRetry();
+        }, 1500);
+
         // Auto-login if we have a saved username
         if (this.savedUsername) {
             setTimeout(() => {

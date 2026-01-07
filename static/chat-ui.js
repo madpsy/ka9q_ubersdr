@@ -969,16 +969,8 @@ class ChatUI {
             window.updateBandSelector();
         }
 
-        // Step 2: Update mode (preserve bandwidth - we'll set it manually)
-        window.currentMode = userData.mode;
-        if (typeof setMode === 'function') {
-            console.log('[ChatUI] Calling setMode with preserveBandwidth=true');
-            // Pass true to preserve bandwidth (don't call autoTune yet)
-            setMode(userData.mode, true);
-        }
-
-        // Step 3: Set the correct bandwidth values
-        // Update global state
+        // Step 2: Set the correct bandwidth values FIRST (before setMode)
+        // This ensures they're in place when setMode reads them
         window.currentBandwidthLow = bwLow;
         window.currentBandwidthHigh = bwHigh;
 
@@ -1011,6 +1003,14 @@ class ChatUI {
         // Update bandwidth display
         if (window.updateCurrentBandwidthDisplay) {
             window.updateCurrentBandwidthDisplay(bwLow, bwHigh);
+        }
+
+        // Step 3: Update mode (preserve bandwidth - we already set it above)
+        window.currentMode = userData.mode;
+        if (typeof setMode === 'function') {
+            console.log('[ChatUI] Calling setMode with preserveBandwidth=true');
+            // Pass true to preserve bandwidth (don't reset to defaults)
+            setMode(userData.mode, true);
         }
 
         // Update URL

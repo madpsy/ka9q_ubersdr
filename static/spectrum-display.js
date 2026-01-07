@@ -3764,6 +3764,11 @@ class SpectrumDisplay {
                 if (typeof window.updateURL === 'function') {
                     window.updateURL();
                 }
+
+                // Notify extensions of frequency change
+                if (window.radioAPI) {
+                    window.radioAPI.notifyFrequencyChange(newFreq);
+                }
                 
                 // Trigger tune
                 if (typeof window.autoTune === 'function') {

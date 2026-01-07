@@ -1402,8 +1402,13 @@ class ChatUI {
             usernameHtml = `<span class="${usernameClass}" onclick="chatUI.tuneToUser('${this.escapeHtml(username)}')" onmouseover="chatUI.updateUsernameTooltip(this, '${this.escapeHtml(username)}')">${this.escapeHtml(username)}:</span>`;
         }
 
-        // Highlight @mentions in the message text
+        // Process message: escape HTML, then linkify URLs, then highlight mentions
         let messageHtml = this.escapeHtml(message);
+        
+        // Convert URLs to clickable links
+        messageHtml = this.linkifyUrls(messageHtml);
+        
+        // Highlight @mentions in the message text
         if (this.chat && this.chat.username) {
             // Replace @username with highlighted version (case-insensitive)
             const mentionRegex = new RegExp(`(@${this.chat.username})`, 'gi');
@@ -1418,6 +1423,15 @@ class ChatUI {
 
         container.appendChild(div);
         container.scrollTop = container.scrollHeight;
+    }
+
+    /**
+     * Convert URLs in text to clickable links
+     */
+    linkifyUrls(text) {
+        // Match URLs starting with http:// or https://
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        return text.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#4a9eff; text-decoration:underline;">$1</a>');
     }
 
     /**

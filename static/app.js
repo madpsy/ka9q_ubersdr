@@ -7638,6 +7638,11 @@ window.handleFrequencyChange = function() {
 
     // Restore the display value in the current unit
     updateFrequencyDisplay();
+
+    // Notify extensions of frequency change (in case original didn't)
+    if (window.radioAPI && hzValue) {
+        window.radioAPI.notifyFrequencyChange(hzValue);
+    }
 };
 
 // Override validateFrequencyInput to handle decimal points for kHz/MHz

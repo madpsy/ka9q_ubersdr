@@ -415,6 +415,7 @@ class ChatUI {
                 <!-- Chat tab (always visible, on right edge) -->
                 <div id="chat-header" class="chat-header" onclick="chatUI.togglePanel()">
                     <span>💬</span>
+                    <span id="chat-collapse-arrow" class="chat-collapse-arrow" style="display:none;">→</span>
                     <span id="chat-mention" class="chat-mention" style="display:none;">❗</span>
                     <span id="chat-unread" class="chat-unread" style="display:none;"></span>
                     <span id="chat-user-count-badge" class="chat-user-count-badge" style="display:none;">0</span>
@@ -519,6 +520,16 @@ class ChatUI {
                 border-radius: 10px;
                 font-size: 11px;
                 font-weight: bold;
+            }
+
+            .chat-collapse-arrow {
+                position: absolute;
+                bottom: 35px;
+                left: 0;
+                right: 0;
+                text-align: center;
+                font-size: 16px;
+                color: #aaa;
             }
 
             .chat-user-count-badge {
@@ -1223,6 +1234,12 @@ class ChatUI {
             content.style.display = 'flex';
             this.clearUnread();
 
+            // Show collapse arrow when expanded
+            const arrow = document.getElementById('chat-collapse-arrow');
+            if (arrow) {
+                arrow.style.display = 'block';
+            }
+
             // Hide user count badge when expanded
             const badge = document.getElementById('chat-user-count-badge');
             if (badge) {
@@ -1259,6 +1276,12 @@ class ChatUI {
             panel.classList.remove('expanded');
             panel.classList.add('collapsed');
             content.style.display = 'none';
+
+            // Hide collapse arrow when collapsed
+            const arrow = document.getElementById('chat-collapse-arrow');
+            if (arrow) {
+                arrow.style.display = 'none';
+            }
 
             // Show user count badge when collapsed (if there are users)
             const userCount = parseInt(document.getElementById('chat-user-count').textContent || '0');

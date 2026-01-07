@@ -232,7 +232,7 @@ class ChatUI {
                             <div id="chat-username-input-area" class="chat-input-area">
                                 <div style="position: relative; flex: 1;">
                                     <input type="text" id="chat-username-input"
-                                           placeholder="Enter username..."
+                                           placeholder="Choose a username..."
                                            maxlength="15"
                                            pattern="[A-Za-z0-9]+"
                                            class="chat-input"
@@ -804,7 +804,7 @@ class ChatUI {
         document.getElementById('chat-username-input-area').style.display = 'flex';
         document.getElementById('chat-leave-btn').style.display = 'none';
 
-        // Clear username input, validation indicator, and messages
+        // Clear username input and validation indicator
         const usernameInput = document.getElementById('chat-username-input');
         const validationIndicator = document.getElementById('chat-username-validation');
         const joinBtn = document.getElementById('chat-join-btn');
@@ -815,8 +815,7 @@ class ChatUI {
         joinBtn.style.opacity = '0.5';
         joinBtn.style.cursor = 'not-allowed';
 
-        document.getElementById('chat-messages').innerHTML = '';
-
+        // Don't clear messages - keep chat history visible
         this.addSystemMessage('You left the chat');
     }
 

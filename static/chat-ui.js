@@ -29,56 +29,41 @@ class ChatUI {
 
     /**
      * Set up tracking of radio frequency/mode/bandwidth changes
-     * Automatically sends updates to chat when user changes these values
+     * Uses the existing radioAPI event system
      */
     setupRadioTracking() {
-        console.log('[ChatUI] Setting up radio tracking...');
+        console.log('[ChatUI] Setting up radio tracking via radioAPI...');
 
-        // Track frequency changes
-        const originalHandleFrequencyChange = window.handleFrequencyChange;
-        console.log('[ChatUI] handleFrequencyChange exists:', !!originalHandleFrequencyChange);
-        if (originalHandleFrequencyChange) {
-            window.handleFrequencyChange = () => {
-                console.log('[ChatUI] Frequency changed, calling original and updating chat');
-                originalHandleFrequencyChange();
-                this.updateRadioSettings();
-            };
+        if (!window.radioAPI) {
+            console.error('[ChatUI] radioAPI not available, cannot track radio changes');
+            return;
         }
 
-        // Track mode changes
-        const originalSetMode = window.setMode;
-        console.log('[ChatUI] setMode exists:', !!originalSetMode);
-        if (originalSetMode) {
-            window.setMode = (...args) => {
-                console.log('[ChatUI] Mode changed, calling original and updating chat');
-                originalSetMode(...args);
-                this.updateRadioSettings();
-            };
-        }
+        // Subscribe to frequency changes
+        window.radioAPI.on('frequency_changed', (data) => {
+            console.log('[ChatUI] Frequency changed event:', data.frequency);
+            if (this.chat && this.chat.isJoined()) {
+                this.chat.updateFrequency(data.frequency);
+            }
+        });
 
-        // Track bandwidth changes (already debounced in app.js)
-        const originalUpdateBandwidth = window.updateBandwidth;
-        console.log('[ChatUI] updateBandwidth exists:', !!originalUpdateBandwidth);
-        if (originalUpdateBandwidth) {
-            window.updateBandwidth = () => {
-                console.log('[ChatUI] Bandwidth changed, calling original and updating chat');
-                originalUpdateBandwidth();
-                this.updateRadioSettings();
-            };
-        }
+        // Subscribe to mode changes
+        window.radioAPI.on('mode_changed', (data) => {
+            console.log('[ChatUI] Mode changed event:', data.mode);
+            if (this.chat && this.chat.isJoined()) {
+                this.chat.updateMode(data.mode);
+            }
+        });
 
-        // Also track bandwidth display updates (for slider changes)
-        const originalUpdateBandwidthDisplay = window.updateBandwidthDisplay;
-        console.log('[ChatUI] updateBandwidthDisplay exists:', !!originalUpdateBandwidthDisplay);
-        if (originalUpdateBandwidthDisplay) {
-            window.updateBandwidthDisplay = () => {
-                console.log('[ChatUI] Bandwidth display changed, calling original and updating chat');
-                originalUpdateBandwidthDisplay();
-                this.updateRadioSettings();
-            };
-        }
+        // Subscribe to bandwidth changes
+        window.radioAPI.on('bandwidth_changed', (data) => {
+            console.log('[ChatUI] Bandwidth changed event - low:', data.low, 'high:', data.high);
+            if (this.chat && this.chat.isJoined()) {
+                this.chat.updateBandwidth(data.high, data.low);
+            }
+        });
 
-        console.log('[ChatUI] Radio tracking setup complete');
+        console.log('[ChatUI] Radio tracking setup complete via radioAPI events');
     }
 
     /**

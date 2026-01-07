@@ -2760,6 +2760,11 @@ function setFrequency(freq) {
     // Update URL with new frequency
     updateURL();
 
+    // Notify extensions of frequency change
+    if (window.radioAPI) {
+        window.radioAPI.notifyFrequencyChange(clampedFreq);
+    }
+
     // Auto-connect if not connected
     if (!wsManager.isConnected()) {
         connect();
@@ -3162,6 +3167,11 @@ function setMode(mode, preserveBandwidth = false) {
 
     // Update URL with new mode
     updateURL();
+
+    // Notify extensions of mode change
+    if (window.radioAPI) {
+        window.radioAPI.notifyModeChange(mode);
+    }
 
     // Update bandpass slider ranges for new mode (important for LSB)
     if (bandpassEnabled) {

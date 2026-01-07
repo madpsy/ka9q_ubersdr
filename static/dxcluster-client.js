@@ -48,9 +48,9 @@ class DXClusterClient {
                     this.reconnectTimer = null;
                 }
                 
-                // Initialize chat UI if not already initialized
+                // Initialize chat UI if not already initialized and chat is enabled
                 if (typeof initializeChatUI === 'function' && !window.chatUI) {
-                    initializeChatUI(this.ws);
+                    this.initializeChatIfEnabled();
                 }
             };
 
@@ -79,6 +79,25 @@ class DXClusterClient {
         } catch (error) {
             console.error('[DX Cluster] Failed to create WebSocket:', error);
             this.scheduleReconnect();
+        }
+    }
+
+    async initializeChatIfEnabled() {
+        try {
+            const response = await fetch('/api/description');
+            if (response.ok) {
+                const data = await response.json();
+                if (data.chat_enabled === true) {
+                    console.log('[DX Cluster] Chat is enabled, initializing chat UI');
+                    initializeChatUI(this.ws);
+                } else {
+                    console.log('[DX Cluster] Chat is disabled, skipping chat UI initialization');
+                }
+            } else {
+                console.warn('[DX Cluster] Failed to fetch description, skipping chat initialization');
+            }
+        } catch (error) {
+            console.error('[DX Cluster] Error checking chat_enabled status:', error);
         }
     }
 

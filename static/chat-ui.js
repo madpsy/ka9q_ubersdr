@@ -383,10 +383,10 @@ class ChatUI {
             }
 
             .chat-main-area {
-                flex: 1;
+                width: 350px;
                 display: flex;
                 flex-direction: column;
-                min-width: 0;
+                flex-shrink: 0;
             }
 
             .chat-messages {

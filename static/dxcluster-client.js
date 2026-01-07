@@ -101,12 +101,14 @@ class DXClusterClient {
                 console.log('[DX Cluster] Chat is enabled, initializing chat UI');
                 // Check if initializeChatUI function exists (scripts may not be loaded yet)
                 if (typeof initializeChatUI === 'function' && !window.chatUI) {
-                    initializeChatUI(this.ws);
+                    // Pass a getter function that always returns the current websocket
+                    initializeChatUI(() => this.ws);
                 } else if (!window.chatUI) {
                     // Queue the initialization for when scripts are loaded
                     console.log('[DX Cluster] Chat UI function not available yet, queuing initialization');
                     if (window.chatInitQueue) {
-                        window.chatInitQueue.push(this.ws);
+                        // Queue the getter function instead of the websocket object
+                        window.chatInitQueue.push(() => this.ws);
                     }
                 }
             } else {

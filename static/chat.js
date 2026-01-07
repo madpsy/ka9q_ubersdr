@@ -11,7 +11,12 @@
 
 class UberSDRChat {
     constructor(websocket) {
-        this.ws = websocket;
+        // Support both direct websocket reference and getter function
+        if (typeof websocket === 'function') {
+            this.getWebSocket = websocket;
+        } else {
+            this.getWebSocket = () => websocket;
+        }
         this.username = null;
         this.frequency = null;
         this.mode = null;
@@ -36,9 +41,11 @@ class UberSDRChat {
      */
     setupMessageHandler() {
         // Store original onmessage handler if it exists
-        const originalHandler = this.ws.onmessage;
+        const ws = this.getWebSocket();
+        const originalHandler = ws ? ws.onmessage : null;
 
-        this.ws.onmessage = (event) => {
+        // Set up a wrapper that always gets the current websocket
+        const messageHandler = (event) => {
             const msg = JSON.parse(event.data);
 
             // Handle chat messages
@@ -51,6 +58,10 @@ class UberSDRChat {
                 originalHandler(event);
             }
         };
+
+        if (ws) {
+            ws.onmessage = messageHandler;
+        }
     }
 
     /**
@@ -148,9 +159,10 @@ class UberSDRChat {
             return false;
         }
 
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        const ws = this.getWebSocket();
+        if (ws && ws.readyState === WebSocket.OPEN) {
             this.username = username; // Store temporarily, will be confirmed by server
-            this.ws.send(JSON.stringify({
+            ws.send(JSON.stringify({
                 type: 'chat_set_username',
                 username: username
             }));
@@ -200,8 +212,9 @@ class UberSDRChat {
             return false;
         }
 
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({
+        const ws = this.getWebSocket();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
                 type: 'chat_message',
                 message: message
             }));
@@ -305,7 +318,8 @@ class UberSDRChat {
             return false;
         }
 
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        const ws = this.getWebSocket();
+        if (ws && ws.readyState === WebSocket.OPEN) {
             this.frequency = frequency;
             this.mode = mode.toLowerCase();
             this.bwHigh = bwHigh;
@@ -325,7 +339,7 @@ class UberSDRChat {
                 payload.zoom_bw = zoomBW;
             }
 
-            this.ws.send(JSON.stringify(payload));
+            ws.send(JSON.stringify(payload));
             return true;
         } else {
             this.emit('error', 'WebSocket not connected');
@@ -433,9 +447,10 @@ class UberSDRChat {
             return false;
         }
 
-        console.log('[Chat] WebSocket state:', this.ws ? this.ws.readyState : 'no ws', 'OPEN=', WebSocket.OPEN);
+        const ws = this.getWebSocket();
+        console.log('[Chat] WebSocket state:', ws ? ws.readyState : 'no ws', 'OPEN=', WebSocket.OPEN);
 
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
             // Always read fresh values from app.js globals to ensure we send current state
             const freqInput = document.getElementById('frequency');
             const currentFreq = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : this.frequency;
@@ -458,10 +473,10 @@ class UberSDRChat {
             }
 
             console.log('[Chat] Sending frequency/mode update:', payload);
-            this.ws.send(JSON.stringify(payload));
+            ws.send(JSON.stringify(payload));
             return true;
         } else {
-            console.error('[Chat] WebSocket not connected - ws:', this.ws, 'readyState:', this.ws ? this.ws.readyState : 'N/A');
+            console.error('[Chat] WebSocket not connected - ws:', ws, 'readyState:', ws ? ws.readyState : 'N/A');
             this.emit('error', 'WebSocket not connected');
             return false;
         }
@@ -471,8 +486,9 @@ class UberSDRChat {
      * Request the list of active users
      */
     requestActiveUsers() {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({
+        const ws = this.getWebSocket();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
                 type: 'chat_request_users'
             }));
             return true;
@@ -484,8 +500,9 @@ class UberSDRChat {
      * Leave chat cleanly (keeps WebSocket open for DX spots)
      */
     leave() {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({
+        const ws = this.getWebSocket();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
                 type: 'chat_leave'
             }));
             this.username = null;

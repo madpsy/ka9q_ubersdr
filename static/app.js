@@ -1985,12 +1985,17 @@ function updateStatus(msg) {
 
         updateBandButtons(msg.frequency);
         // Update spectrum display cursor - use window globals for latest values
+        // Skip bandwidth update if chat is syncing to prevent flickering
         if (spectrumDisplay) {
-            spectrumDisplay.updateConfig({
-                tunedFreq: msg.frequency,
-                bandwidthLow: window.currentBandwidthLow,
-                bandwidthHigh: window.currentBandwidthHigh
-            });
+            const updateData = {
+                tunedFreq: msg.frequency
+            };
+            // Only update bandwidth if not syncing (prevents old server values from overwriting sync)
+            if (!window.chatUI || !window.chatUI.isSyncing) {
+                updateData.bandwidthLow = window.currentBandwidthLow;
+                updateData.bandwidthHigh = window.currentBandwidthHigh;
+            }
+            spectrumDisplay.updateConfig(updateData);
         }
     } else if (msg.mode) {
         // Mode update without frequency - just update mode text (if element exists)

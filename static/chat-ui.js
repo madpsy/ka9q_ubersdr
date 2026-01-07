@@ -637,6 +637,8 @@ class ChatUI {
      * Update active users list
      */
     updateActiveUsers(data) {
+        console.log('[ChatUI] Received active users update:', data);
+
         document.getElementById('chat-user-count').textContent = data.count;
         const usersList = document.getElementById('chat-users-list');
         
@@ -646,8 +648,9 @@ class ChatUI {
         }
         
         const userItems = data.users.map(u => {
+            console.log('[ChatUI] User:', u.username, 'freq:', u.frequency, 'mode:', u.mode);
             let info = this.escapeHtml(u.username);
-            
+
             // Add frequency (always show if set, even without mode)
             if (u.frequency) {
                 const freqMHz = (u.frequency / 1000000).toFixed(3);

@@ -55,6 +55,8 @@ class UberSDRChat {
      * Handle incoming chat messages
      */
     handleChatMessage(msg) {
+        console.log('[Chat] Received message type:', msg.type, 'data:', msg.data);
+        
         switch(msg.type) {
             case 'chat_message':
                 // Check if user is muted
@@ -77,6 +79,7 @@ class UberSDRChat {
                 break;
                 
             case 'chat_active_users':
+                console.log('[Chat] Emitting active_users event with data:', msg.data);
                 this.emit('active_users', msg.data);
                 break;
                 

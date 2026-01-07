@@ -635,13 +635,13 @@ class ChatUI {
                 background: #3a8eef;
             }
             
-            .chat-btn-danger {
-                background: #ff9800;
-                color: #fff;
+            .chat-btn.chat-btn-danger {
+                background: #ff9800 !important;
+                color: #fff !important;
             }
 
-            .chat-btn-danger:hover {
-                background: #e68900;
+            .chat-btn.chat-btn-danger:hover {
+                background: #e68900 !important;
             }
             
             .chat-error {

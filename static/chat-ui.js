@@ -801,7 +801,7 @@ class ChatUI {
      * Sync our radio to a user's settings
      */
     syncToUser(userData) {
-        console.log('[ChatUI] Syncing to user:', userData.username, 'freq:', userData.frequency, 'mode:', userData.mode);
+        console.log('[ChatUI] Syncing to user:', userData.username, 'freq:', userData.frequency, 'mode:', userData.mode, 'bw_low:', userData.bw_low, 'bw_high:', userData.bw_high);
 
         // Only sync if we have frequency data
         if (!userData.frequency) {
@@ -827,7 +827,7 @@ class ChatUI {
             return;
         }
 
-        // Update frequency input
+        // Update frequency input first
         if (freqInput && freqChanged) {
             if (window.setFrequencyInputValue) {
                 window.setFrequencyInputValue(userData.frequency);
@@ -835,43 +835,34 @@ class ChatUI {
                 freqInput.value = (userData.frequency / 1000000).toFixed(6);
                 freqInput.setAttribute('data-hz-value', userData.frequency);
             }
+            if (window.updateBandButtons) {
+                window.updateBandButtons(userData.frequency);
+            }
         }
 
-        // Update bandwidth BEFORE mode change (setMode may reset bandwidth)
+        // Update bandwidth values in global state BEFORE mode change
         if (userData.bw_low !== undefined) {
             window.currentBandwidthLow = userData.bw_low;
-            const bwLowInput = document.getElementById('bandwidth-low');
-            if (bwLowInput) {
-                bwLowInput.value = userData.bw_low;
-                const bwLowValue = document.getElementById('bandwidth-low-value');
-                if (bwLowValue) {
-                    bwLowValue.textContent = userData.bw_low;
-                }
-            }
         }
-
         if (userData.bw_high !== undefined) {
             window.currentBandwidthHigh = userData.bw_high;
-            const bwHighInput = document.getElementById('bandwidth-high');
-            if (bwHighInput) {
-                bwHighInput.value = userData.bw_high;
-                const bwHighValue = document.getElementById('bandwidth-high-value');
-                if (bwHighValue) {
-                    bwHighValue.textContent = userData.bw_high;
-                }
-            }
         }
 
-        // Update mode using setMode function if mode changed (preserves bandwidth)
+        // Update mode using setMode function if mode changed
+        // setMode with preserveBandwidth=true will keep the bandwidth we just set
         if (userData.mode && modeChanged) {
             if (typeof setMode === 'function') {
                 console.log('[ChatUI] Setting mode to:', userData.mode, 'with preserveBandwidth=true');
-                setMode(userData.mode, true); // preserveBandwidth=true to keep our synced bandwidth
+                // setMode will update the sliders and call autoTune() for us
+                setMode(userData.mode, true);
             } else {
                 window.currentMode = userData.mode;
+                if (typeof autoTune === 'function') {
+                    autoTune();
+                }
             }
-        } else if (!modeChanged) {
-            // Mode didn't change, just tune
+        } else {
+            // Mode didn't change, but frequency or bandwidth did - just tune
             if (typeof autoTune === 'function') {
                 console.log('[ChatUI] Auto-tuning to synced settings (mode unchanged)');
                 autoTune();

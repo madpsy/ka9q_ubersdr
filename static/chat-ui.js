@@ -530,15 +530,12 @@ class ChatUI {
 
             .chat-collapse-arrow {
                 position: absolute;
-                top: 50px;
+                bottom: 8px;
                 left: 50%;
                 transform: translateX(-50%);
-                font-size: 20px;
-                color: #fff;
-                background: #4a9eff;
-                padding: 2px 6px;
-                border-radius: 3px;
-                font-weight: bold;
+                font-size: 16px;
+                color: #aaa;
+                font-weight: normal;
                 z-index: 10;
                 pointer-events: none;
             }

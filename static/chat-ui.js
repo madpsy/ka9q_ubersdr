@@ -32,10 +32,14 @@ class ChatUI {
      * Automatically sends updates to chat when user changes these values
      */
     setupRadioTracking() {
+        console.log('[ChatUI] Setting up radio tracking...');
+
         // Track frequency changes
         const originalHandleFrequencyChange = window.handleFrequencyChange;
+        console.log('[ChatUI] handleFrequencyChange exists:', !!originalHandleFrequencyChange);
         if (originalHandleFrequencyChange) {
             window.handleFrequencyChange = () => {
+                console.log('[ChatUI] Frequency changed, calling original and updating chat');
                 originalHandleFrequencyChange();
                 this.updateRadioSettings();
             };
@@ -43,8 +47,10 @@ class ChatUI {
 
         // Track mode changes
         const originalSetMode = window.setMode;
+        console.log('[ChatUI] setMode exists:', !!originalSetMode);
         if (originalSetMode) {
             window.setMode = (...args) => {
+                console.log('[ChatUI] Mode changed, calling original and updating chat');
                 originalSetMode(...args);
                 this.updateRadioSettings();
             };
@@ -52,8 +58,10 @@ class ChatUI {
 
         // Track bandwidth changes (already debounced in app.js)
         const originalUpdateBandwidth = window.updateBandwidth;
+        console.log('[ChatUI] updateBandwidth exists:', !!originalUpdateBandwidth);
         if (originalUpdateBandwidth) {
             window.updateBandwidth = () => {
+                console.log('[ChatUI] Bandwidth changed, calling original and updating chat');
                 originalUpdateBandwidth();
                 this.updateRadioSettings();
             };
@@ -61,12 +69,16 @@ class ChatUI {
 
         // Also track bandwidth display updates (for slider changes)
         const originalUpdateBandwidthDisplay = window.updateBandwidthDisplay;
+        console.log('[ChatUI] updateBandwidthDisplay exists:', !!originalUpdateBandwidthDisplay);
         if (originalUpdateBandwidthDisplay) {
             window.updateBandwidthDisplay = () => {
+                console.log('[ChatUI] Bandwidth display changed, calling original and updating chat');
                 originalUpdateBandwidthDisplay();
                 this.updateRadioSettings();
             };
         }
+
+        console.log('[ChatUI] Radio tracking setup complete');
     }
 
     /**
@@ -74,7 +86,10 @@ class ChatUI {
      * Called whenever frequency, mode, or bandwidth changes
      */
     updateRadioSettings() {
+        console.log('[ChatUI] updateRadioSettings called, isJoined:', this.chat ? this.chat.isJoined() : 'no chat');
+
         if (!this.chat || !this.chat.isJoined()) {
+            console.log('[ChatUI] Not joined to chat, skipping update');
             return; // Not joined to chat, skip update
         }
 
@@ -85,18 +100,23 @@ class ChatUI {
         const bwLow = window.currentBandwidthLow || 0;
         const bwHigh = window.currentBandwidthHigh || 0;
 
+        console.log('[ChatUI] Current values - freq:', frequency, 'mode:', mode, 'bwLow:', bwLow, 'bwHigh:', bwHigh);
+
         // Update frequency
         if (frequency && !isNaN(frequency)) {
+            console.log('[ChatUI] Updating frequency:', frequency);
             this.chat.updateFrequency(frequency);
         }
 
         // Update mode
         if (mode) {
+            console.log('[ChatUI] Updating mode:', mode);
             this.chat.updateMode(mode);
         }
 
         // Update bandwidth
         if (bwLow !== undefined && bwHigh !== undefined) {
+            console.log('[ChatUI] Updating bandwidth - high:', bwHigh, 'low:', bwLow);
             this.chat.updateBandwidth(bwHigh, bwLow);
         }
     }

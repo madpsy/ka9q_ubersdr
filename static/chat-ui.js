@@ -307,9 +307,8 @@ class ChatUI {
         style.textContent = `
             .chat-panel {
                 position: fixed;
-                top: 50%;
+                bottom: 50px;
                 right: 0;
-                transform: translateY(-50%);
                 z-index: 900;
                 font-family: Arial, sans-serif;
                 font-size: 13px;

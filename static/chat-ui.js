@@ -882,27 +882,53 @@ class ChatUI {
             window.updateBandSelector();
         }
 
-        // Step 2: Set bandwidth in global state FIRST (before setMode)
+        // Step 2: Update mode (this sets slider ranges to defaults for that mode)
+        window.currentMode = userData.mode;
+        if (typeof setMode === 'function') {
+            console.log('[ChatUI] Calling setMode to update slider ranges');
+            // This will set slider ranges and default bandwidth, then call autoTune()
+            setMode(userData.mode, false);
+        }
+
+        // Step 3: Override the bandwidth values that setMode just set
+        // Update global state
         window.currentBandwidthLow = bwLow;
         window.currentBandwidthHigh = bwHigh;
 
-        // Step 3: Call setMode with preserveBandwidth=true
-        // This will update slider ranges AND preserve our bandwidth values
-        if (typeof setMode === 'function') {
-            console.log('[ChatUI] Setting mode to:', userData.mode, 'with preserveBandwidth=true');
-            setMode(userData.mode, true);
-        }
-
-        // The bandwidth sliders should now be updated by setMode with our values
-        // But let's verify they're set correctly
-        console.log('[ChatUI] After setMode - verifying slider values...');
+        // Update sliders
         const bwLowSlider = document.getElementById('bandwidth-low');
         const bwHighSlider = document.getElementById('bandwidth-high');
+
         if (bwLowSlider) {
-            console.log('[ChatUI] BW Low slider - value:', bwLowSlider.value, 'expected:', bwLow, 'min:', bwLowSlider.min, 'max:', bwLowSlider.max);
+            bwLowSlider.value = bwLow;
+            const bwLowValue = document.getElementById('bandwidth-low-value');
+            if (bwLowValue) {
+                bwLowValue.textContent = bwLow;
+            }
         }
+
         if (bwHighSlider) {
-            console.log('[ChatUI] BW High slider - value:', bwHighSlider.value, 'expected:', bwHigh, 'min:', bwHighSlider.min, 'max:', bwHighSlider.max);
+            bwHighSlider.value = bwHigh;
+            const bwHighValue = document.getElementById('bandwidth-high-value');
+            if (bwHighValue) {
+                bwHighValue.textContent = bwHigh;
+            }
+        }
+
+        // Update bandwidth display
+        if (window.updateCurrentBandwidthDisplay) {
+            window.updateCurrentBandwidthDisplay(bwLow, bwHigh);
+        }
+
+        // Update URL
+        if (window.updateURL) {
+            window.updateURL();
+        }
+
+        // Step 4: Tune again with the correct bandwidth values
+        if (typeof autoTune === 'function') {
+            console.log('[ChatUI] Auto-tuning with synced bandwidth');
+            autoTune();
         }
 
         this.addSystemMessage(`Synced to ${userData.username}: ${(userData.frequency / 1000000).toFixed(3)} MHz ${userData.mode.toUpperCase()}`);

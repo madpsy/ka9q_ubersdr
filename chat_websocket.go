@@ -492,7 +492,49 @@ func (cm *ChatManager) GetActiveUsers() []ChatUser {
 	return users
 }
 
+// SendActiveUsers sends the list of active users to a specific client
+func (cm *ChatManager) SendActiveUsers(conn *websocket.Conn) {
+	users := cm.GetActiveUsers()
+
+	userList := make([]map[string]interface{}, 0, len(users))
+	for _, user := range users {
+		userData := map[string]interface{}{
+			"username": user.Username,
+		}
+		// Include frequency if set
+		if user.Frequency > 0 {
+			userData["frequency"] = user.Frequency
+		}
+		// Include mode if set
+		if user.Mode != "" {
+			userData["mode"] = user.Mode
+		}
+		// Always include bandwidth values (even if 0, for sync functionality)
+		// Only exclude if both frequency and mode are not set (user hasn't sent any radio data yet)
+		if user.Frequency > 0 || user.Mode != "" {
+			userData["bw_high"] = user.BWHigh
+			userData["bw_low"] = user.BWLow
+		}
+		// Include CAT and TX status
+		userData["cat"] = user.CAT
+		userData["tx"] = user.TX
+		userList = append(userList, userData)
+	}
+
+	message := map[string]interface{}{
+		"type": "chat_active_users",
+		"data": map[string]interface{}{
+			"users": userList,
+			"count": len(users),
+		},
+	}
+
+	// Send only to the requesting client
+	cm.wsHandler.sendMessage(conn, message)
+}
+
 // BroadcastActiveUsers sends the list of active users to all clients
+// Kept for compatibility with user join/leave events
 func (cm *ChatManager) BroadcastActiveUsers() {
 	users := cm.GetActiveUsers()
 
@@ -571,7 +613,7 @@ func (cm *ChatManager) cleanupInactiveUsers() {
 }
 
 // HandleChatMessage processes incoming chat messages from websocket clients
-func (cm *ChatManager) HandleChatMessage(sessionID string, msg map[string]interface{}) error {
+func (cm *ChatManager) HandleChatMessage(sessionID string, conn *websocket.Conn, msg map[string]interface{}) error {
 	msgType, ok := msg["type"].(string)
 	if !ok {
 		return ErrInvalidMessageType
@@ -601,7 +643,8 @@ func (cm *ChatManager) HandleChatMessage(sessionID string, msg map[string]interf
 
 	case "chat_request_users":
 		// User is requesting the list of active users
-		cm.BroadcastActiveUsers()
+		// Send only to the requesting user, not broadcast
+		cm.SendActiveUsers(conn)
 		return nil
 
 	case "chat_leave":

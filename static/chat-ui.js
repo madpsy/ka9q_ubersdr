@@ -744,12 +744,24 @@ class ChatUI {
 
     /**
      * Update a single user's information
-     * For simplicity, just request the full user list
+     * Update the stored activeUsers array with the new data
      */
     updateSingleUser(userData) {
-        console.log('[ChatUI] User update received for:', userData.username, 'requesting full user list');
-        // Request full user list to ensure consistency
-        this.chat.requestActiveUsers();
+        console.log('[ChatUI] User update received for:', userData.username);
+        // Update the user in the activeUsers array
+        const userIndex = this.chat.activeUsers.findIndex(u => u.username === userData.username);
+        if (userIndex >= 0) {
+            // Merge the update with existing user data
+            this.chat.activeUsers[userIndex] = {
+                ...this.chat.activeUsers[userIndex],
+                ...userData
+            };
+        }
+        // Refresh the display without requesting from server
+        this.updateActiveUsers({
+            users: this.chat.activeUsers,
+            count: this.chat.activeUsers.length
+        });
     }
 
     /**

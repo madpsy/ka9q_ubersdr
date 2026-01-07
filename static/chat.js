@@ -26,7 +26,7 @@ class UberSDRChat {
         this.mutedUsers = new Set();
         this.eventHandlers = {};
         this.debounceTimer = null;
-        this.debounceDelay = 250; // 250ms debounce delay
+        this.debounceDelay = 100; // 100ms debounce delay
         this.activeUsers = []; // Store active users for sync functionality
 
         // Load muted users from localStorage

@@ -27,10 +27,10 @@ class ChatRadioTracker extends DecoderExtension {
     onEnable() {
         console.log('[ChatRadioTracker] Enabled - polling for radio changes');
 
-        // Poll every 250ms to detect changes
+        // Poll every 100ms to detect changes
         this.pollInterval = setInterval(() => {
             this.checkForChanges();
-        }, 250);
+        }, 100);
 
         // Initial check
         this.checkForChanges();

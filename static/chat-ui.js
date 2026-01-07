@@ -969,8 +969,28 @@ class ChatUI {
             window.updateBandSelector();
         }
 
-        // Step 2: Set the correct bandwidth values FIRST (before setMode)
-        // This ensures they're in place when setMode reads them
+        // Step 2: Pre-set sliders to target values BEFORE calling setMode
+        // This ensures setMode reads the correct values when preserveBandwidth=true
+        const bwLowSlider = document.getElementById('bandwidth-low');
+        const bwHighSlider = document.getElementById('bandwidth-high');
+
+        if (bwLowSlider) {
+            bwLowSlider.value = bwLow;
+        }
+        if (bwHighSlider) {
+            bwHighSlider.value = bwHigh;
+        }
+
+        // Step 3: Update mode (preserve bandwidth - will read from sliders we just set)
+        window.currentMode = userData.mode;
+        if (typeof setMode === 'function') {
+            console.log('[ChatUI] Calling setMode with preserveBandwidth=true');
+            // Pass true to preserve bandwidth (sets up slider ranges and reads current slider values)
+            setMode(userData.mode, true);
+        }
+
+        // Step 4: Force update all bandwidth values again to ensure they stuck
+        // (setMode may have adjusted them based on mode limits)
         window.currentBandwidthLow = bwLow;
         window.currentBandwidthHigh = bwHigh;
 
@@ -980,10 +1000,7 @@ class ChatUI {
             window.spectrumDisplay.currentBandwidthHigh = bwHigh;
         }
 
-        // Update sliders
-        const bwLowSlider = document.getElementById('bandwidth-low');
-        const bwHighSlider = document.getElementById('bandwidth-high');
-
+        // Re-update sliders and display values to ensure they match
         if (bwLowSlider) {
             bwLowSlider.value = bwLow;
             const bwLowValue = document.getElementById('bandwidth-low-value');
@@ -1005,17 +1022,14 @@ class ChatUI {
             window.updateCurrentBandwidthDisplay(bwLow, bwHigh);
         }
 
-        // Step 3: Update mode (preserve bandwidth - we already set it above)
-        window.currentMode = userData.mode;
-        if (typeof setMode === 'function') {
-            console.log('[ChatUI] Calling setMode with preserveBandwidth=true');
-            // Pass true to preserve bandwidth (don't reset to defaults)
-            setMode(userData.mode, true);
-        }
-
         // Update URL
         if (window.updateURL) {
             window.updateURL();
+        }
+
+        // Notify radioAPI of bandwidth change (after all updates are complete)
+        if (window.radioAPI) {
+            window.radioAPI.notifyBandwidthChange(bwLow, bwHigh);
         }
 
         // Step 4: Apply zoom_bw if provided and valid (do this BEFORE autoTune)

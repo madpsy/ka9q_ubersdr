@@ -531,26 +531,26 @@ class ChatUI {
             }
             
             .chat-sync-btn {
-                padding: 2px 4px;
-                font-size: 9px;
-                border: 1px solid #4a9eff;
-                background: transparent;
-                color: #4a9eff;
-                border-radius: 3px;
-                cursor: pointer;
-                user-select: none;
-                white-space: nowrap;
-                flex-shrink: 0;
+                padding: 2px 4px !important;
+                font-size: 9px !important;
+                border: 1px solid #4a9eff !important;
+                background: transparent !important;
+                color: #4a9eff !important;
+                border-radius: 3px !important;
+                cursor: pointer !important;
+                user-select: none !important;
+                white-space: nowrap !important;
+                flex-shrink: 0 !important;
             }
 
             .chat-sync-btn:hover {
-                background: rgba(74, 158, 255, 0.1);
+                background: rgba(74, 158, 255, 0.1) !important;
             }
 
             .chat-sync-btn.active {
-                background: #4a9eff;
-                color: #fff;
-                border-color: #4a9eff;
+                background: #4a9eff !important;
+                color: #fff !important;
+                border-color: #4a9eff !important;
             }
         `;
         document.head.appendChild(style);

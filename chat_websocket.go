@@ -164,7 +164,6 @@ func (cm *ChatManager) GetUsername(sessionID string) (string, bool) {
 // UpdateUserStatus updates user status fields (frequency, mode, bandwidth, CAT, TX)
 // All parameters are optional - only provided fields will be updated
 func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]interface{}) error {
-	// Check rate limit for user updates
 	cm.activeUsersMu.Lock()
 	user, exists := cm.activeUsers[sessionID]
 	if !exists {
@@ -174,19 +173,7 @@ func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]int
 
 	now := time.Now()
 
-	// Rate limit: user updates per second (configurable)
-	if cm.updateRateLimitPerSecond > 0 {
-		minInterval := time.Second / time.Duration(cm.updateRateLimitPerSecond)
-		if !user.LastUpdateTime.IsZero() && now.Sub(user.LastUpdateTime) < minInterval {
-			cm.activeUsersMu.Unlock()
-			return ErrUpdateRateLimitExceeded
-		}
-	}
-
-	// Update rate limit tracking
-	user.LastUpdateTime = now
-
-	// Track if any value actually changed
+	// Track if any value actually changed (check BEFORE rate limiting)
 	valueChanged := false
 
 	// Update frequency if provided AND different
@@ -277,22 +264,37 @@ func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]int
 		}
 	}
 
+	// If nothing changed, return early without rate limiting or broadcasting
+	// This prevents duplicate updates from counting against rate limits
+	if !valueChanged {
+		cm.activeUsersMu.Unlock()
+		log.Printf("Chat: User '%s' update ignored (no changes): frequency=%d Hz, mode=%s, bw_high=%d, bw_low=%d, zoom_bw=%.1f, cat=%t, tx=%t",
+			user.Username, user.Frequency, user.Mode, user.BWHigh, user.BWLow, user.ZoomBW, user.CAT, user.TX)
+		return nil
+	}
+
+	// Only apply rate limiting if values actually changed
+	if cm.updateRateLimitPerSecond > 0 {
+		minInterval := time.Second / time.Duration(cm.updateRateLimitPerSecond)
+		if !user.LastUpdateTime.IsZero() && now.Sub(user.LastUpdateTime) < minInterval {
+			cm.activeUsersMu.Unlock()
+			return ErrUpdateRateLimitExceeded
+		}
+	}
+
+	// Update rate limit tracking (only for real changes)
+	user.LastUpdateTime = now
+
 	// Update user's last seen time (status updates count as activity)
 	user.LastSeen = now
 
 	cm.activeUsersMu.Unlock()
 
-	// Only broadcast if something actually changed
-	if valueChanged {
-		log.Printf("Chat: User '%s' updated status (changed): frequency=%d Hz, mode=%s, bw_high=%d, bw_low=%d, zoom_bw=%.1f, cat=%t, tx=%t",
-			user.Username, user.Frequency, user.Mode, user.BWHigh, user.BWLow, user.ZoomBW, user.CAT, user.TX)
+	log.Printf("Chat: User '%s' updated status (changed): frequency=%d Hz, mode=%s, bw_high=%d, bw_low=%d, zoom_bw=%.1f, cat=%t, tx=%t",
+		user.Username, user.Frequency, user.Mode, user.BWHigh, user.BWLow, user.ZoomBW, user.CAT, user.TX)
 
-		// Broadcast only this user's updated info (more efficient than full user list)
-		cm.broadcastUserUpdate(user)
-	} else {
-		log.Printf("Chat: User '%s' update ignored (no changes): frequency=%d Hz, mode=%s, bw_high=%d, bw_low=%d, zoom_bw=%.1f, cat=%t, tx=%t",
-			user.Username, user.Frequency, user.Mode, user.BWHigh, user.BWLow, user.ZoomBW, user.CAT, user.TX)
-	}
+	// Broadcast only this user's updated info (more efficient than full user list)
+	cm.broadcastUserUpdate(user)
 
 	return nil
 }

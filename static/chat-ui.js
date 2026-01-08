@@ -13,6 +13,15 @@ class ChatUI {
         this.syncedUsername = null; // Track which user we're synced with
         this.radioEventHandlers = {}; // Store references to our radio event handlers
         this.errorTimeout = null; // Track error display timeout
+        
+        // Track last sent values to prevent duplicate sends
+        this.lastSentFreq = null;
+        this.lastSentMode = null;
+        this.lastSentBwLow = null;
+        this.lastSentBwHigh = null;
+        this.lastSentZoomBW = null;
+        this.lastSentCAT = null;
+        this.lastSentTX = null;
         this.usersRequestPending = false; // Track if we're waiting for users list response
         this.usersRequestTimer = null; // Timer for retry
         this.isAutoRejoining = false; // Track if we're in the middle of auto-rejoin

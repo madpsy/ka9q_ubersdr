@@ -41,6 +41,15 @@ class ChatDisplay:
         self.synced_username = None
         self.listbox_to_user = {}  # Map listbox index to user data
         self.emoji_popup = None  # Emoji picker popup window
+        
+        # Track last sent values to prevent duplicate sends
+        self.last_sent_freq = None
+        self.last_sent_mode = None
+        self.last_sent_bw_low = None
+        self.last_sent_bw_high = None
+        self.last_sent_zoom_bw = None
+        self.last_sent_cat = None
+        self.last_sent_tx = None
 
         # @ mention autocomplete
         self.mention_matches = []  # List of matching usernames
@@ -606,6 +615,26 @@ class ChatDisplay:
                 # For rigctl, check cached PTT value
                 elif hasattr(self.radio_gui.radio_control, '_cached_ptt'):
                     tx_status = self.radio_gui.radio_control._cached_ptt
+
+            # Check if anything actually changed before sending
+            if (freq_hz == self.last_sent_freq and
+                mode == self.last_sent_mode and
+                bw_low == self.last_sent_bw_low and
+                bw_high == self.last_sent_bw_high and
+                zoom_bw == self.last_sent_zoom_bw and
+                cat_enabled == self.last_sent_cat and
+                tx_status == self.last_sent_tx):
+                print(f"[Chat] Skipping duplicate send (no changes)")
+                return
+
+            # Update last sent values
+            self.last_sent_freq = freq_hz
+            self.last_sent_mode = mode
+            self.last_sent_bw_low = bw_low
+            self.last_sent_bw_high = bw_high
+            self.last_sent_zoom_bw = zoom_bw
+            self.last_sent_cat = cat_enabled
+            self.last_sent_tx = tx_status
 
             # Log what we're sending
             print(f"[Chat] Sending radio status: freq={freq_hz} Hz, mode={mode}, bw_low={bw_low}, bw_high={bw_high}, zoom_bw={zoom_bw:.1f}, cat={cat_enabled}, tx={tx_status}")

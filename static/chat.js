@@ -30,6 +30,13 @@ class UberSDRChat {
         this.activeUsers = []; // Store active users for sync functionality
         this.pendingOperations = []; // Queue for operations waiting for WebSocket
 
+        // Track last sent values to prevent duplicate sends
+        this.lastSentFreq = null;
+        this.lastSentMode = null;
+        this.lastSentBwHigh = null;
+        this.lastSentBwLow = null;
+        this.lastSentZoomBW = null;
+
         // Load muted users from localStorage
         this.loadMutedUsers();
 
@@ -534,6 +541,16 @@ class UberSDRChat {
             const currentBwHigh = window.currentBandwidthHigh !== undefined ? window.currentBandwidthHigh : this.bwHigh;
             const currentZoomBW = (window.spectrumDisplay && window.spectrumDisplay.binBandwidth) ? window.spectrumDisplay.binBandwidth : this.zoomBW;
 
+            // Check if values have actually changed from last send (client-side deduplication)
+            if (currentFreq === this.lastSentFreq &&
+                currentMode === this.lastSentMode &&
+                currentBwHigh === this.lastSentBwHigh &&
+                currentBwLow === this.lastSentBwLow &&
+                currentZoomBW === this.lastSentZoomBW) {
+                console.log('[Chat] Skipping duplicate send (no changes from last send)');
+                return false;
+            }
+
             const payload = {
                 type: 'chat_set_frequency_mode',
                 frequency: currentFreq,
@@ -549,6 +566,14 @@ class UberSDRChat {
 
             console.log('[Chat] Sending frequency/mode update:', payload);
             ws.send(JSON.stringify(payload));
+
+            // Update last sent values
+            this.lastSentFreq = currentFreq;
+            this.lastSentMode = currentMode;
+            this.lastSentBwHigh = currentBwHigh;
+            this.lastSentBwLow = currentBwLow;
+            this.lastSentZoomBW = currentZoomBW;
+
             return true;
         } else {
             // Don't emit error for frequency/mode updates - they're debounced and will retry

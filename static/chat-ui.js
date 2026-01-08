@@ -2168,14 +2168,10 @@ class ChatUI {
             zoom_bw: zoomBW
         });
 
-        // Send the synced settings to the server so other users can see our changes
-        // Server-side deduplication will prevent loops automatically
-        if (this.chat && this.chat.isJoined()) {
-            console.log('[ChatUI] Sending synced settings to server');
-            this.chat.setFrequencyAndMode(userData.frequency, userData.mode, bwHigh, bwLow, zoomBW);
-        }
-
-        console.log('[ChatUI] Sync complete');
+        // Don't send updates directly - let the radio event handlers do it
+        // The GUI changes above will trigger radioAPI events which are debounced
+        // This prevents multiple rapid updates when syncing
+        console.log('[ChatUI] Sync complete - waiting for debounced radio events');
         // Removed "Synced to..." message per user request
     }
 

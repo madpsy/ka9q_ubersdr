@@ -594,9 +594,6 @@ class ChatDisplay:
             if hasattr(self.radio_gui, 'radio_control') and self.radio_gui.radio_control:
                 cat_enabled = True
 
-            # Debug logging
-            print(f"DEBUG send_radio_status: cat_enabled={cat_enabled}, has_radio_control={hasattr(self.radio_gui, 'radio_control')}, radio_control={self.radio_gui.radio_control if hasattr(self.radio_gui, 'radio_control') else None}")
-
             # Get TX status from radio control (PTT state)
             tx_status = False
             if cat_enabled and hasattr(self.radio_gui, 'radio_control') and self.radio_gui.radio_control:
@@ -609,6 +606,9 @@ class ChatDisplay:
                 # For rigctl, check cached PTT value
                 elif hasattr(self.radio_gui.radio_control, '_cached_ptt'):
                     tx_status = self.radio_gui.radio_control._cached_ptt
+
+            # Log what we're sending
+            print(f"[Chat] Sending radio status: freq={freq_hz} Hz, mode={mode}, bw_low={bw_low}, bw_high={bw_high}, zoom_bw={zoom_bw:.1f}, cat={cat_enabled}, tx={tx_status}")
 
             # Send to server
             self.ws_manager.send_message({
@@ -623,7 +623,7 @@ class ChatDisplay:
             })
 
         except Exception as e:
-            print(f"Failed to send radio status: {e}")
+            print(f"[Chat] Failed to send radio status: {e}")
 
     def request_active_users(self):
         """Request the list of active users"""
@@ -963,6 +963,8 @@ class ChatDisplay:
         bw_high = user.get('bw_high', 2700)
         zoom_bw = user.get('zoom_bw', 0)
 
+        print(f"[Chat] Syncing to {user.get('username')}: freq={freq} Hz, mode={mode}, bw_low={bw_low}, bw_high={bw_high}, zoom_bw={zoom_bw:.1f}")
+
         # Update radio GUI
         self.radio_gui.set_frequency_hz(freq)
 
@@ -1009,9 +1011,9 @@ class ChatDisplay:
         if self.radio_gui.connected:
             self.radio_gui.apply_frequency(skip_auto_mode=True)
 
-        # Send our updated position to chat after sync completes
-        # Server will deduplicate if values haven't changed
-        self.send_radio_status()
+        # Don't call send_radio_status() directly - let the debounced on_radio_changed() handle it
+        # This prevents multiple rapid updates when syncing
+        # The GUI changes above will trigger on_radio_changed() which is debounced
 
     def tune_to_user(self, username: str):
         """Tune to a user's frequency"""

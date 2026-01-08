@@ -68,6 +68,7 @@ type InstanceReport struct {
 	ChatEnabled      bool                   `json:"chat_enabled"`      // Whether chat is enabled
 	ChatUsers        int                    `json:"chat_users"`        // Number of active chat users
 	Test             bool                   `json:"test,omitempty"`    // If true, this is a test report - collector will verify /api/description instead of full callback
+	StartupReport    bool                   `json:"startup_report"`    // If true, this is a startup report sent regardless of instance_reporting.enabled
 }
 
 // NewInstanceReporter creates a new instance reporter
@@ -233,91 +234,14 @@ func (ir *InstanceReporter) reportLoop() {
 	}
 }
 
-// getCPUInfo retrieves CPU model and core count information
+// getCPUInfo retrieves CPU model and core count information (wrapper for helper function)
 func (ir *InstanceReporter) getCPUInfo() (string, int) {
-	info, err := cpu.Info()
-	if err != nil {
-		log.Printf("Failed to get CPU info: %v", err)
-		return "Unknown", 0
-	}
-
-	if len(info) > 0 {
-		// Get model name from first CPU
-		model := info[0].ModelName
-
-		// Get total number of cores (sum across all CPUs)
-		totalCores := 0
-		for _, cpuInfo := range info {
-			totalCores += int(cpuInfo.Cores)
-		}
-
-		return model, totalCores
-	}
-
-	return "Unknown", 0
+	return getCPUInfo()
 }
 
-// getSystemLoad retrieves system load averages and calculates status
+// getSystemLoad retrieves system load averages and calculates status (wrapper for helper function)
 func (ir *InstanceReporter) getSystemLoad() map[string]interface{} {
-	loadData := map[string]interface{}{
-		"load_1min":  "",
-		"load_5min":  "",
-		"load_15min": "",
-		"cpu_cores":  0,
-		"status":     "unknown",
-	}
-
-	// Read /proc/loadavg
-	data, err := os.ReadFile("/proc/loadavg")
-	if err != nil {
-		log.Printf("Failed to read /proc/loadavg: %v", err)
-		return loadData
-	}
-
-	// Parse the load averages
-	// Format: "0.52 0.58 0.59 1/1234 12345"
-	fields := strings.Split(strings.TrimSpace(string(data)), " ")
-	if len(fields) < 3 {
-		log.Printf("Invalid /proc/loadavg format")
-		return loadData
-	}
-
-	loadData["load_1min"] = fields[0]
-	loadData["load_5min"] = fields[1]
-	loadData["load_15min"] = fields[2]
-
-	// Get CPU core count
-	cpuCores := 0
-	info, err := cpu.Info()
-	if err == nil && len(info) > 0 {
-		for _, cpuInfo := range info {
-			cpuCores += int(cpuInfo.Cores)
-		}
-	}
-	loadData["cpu_cores"] = cpuCores
-
-	// Parse load values for status calculation
-	load1, err1 := strconv.ParseFloat(fields[0], 64)
-	load5, err2 := strconv.ParseFloat(fields[1], 64)
-	load15, err3 := strconv.ParseFloat(fields[2], 64)
-
-	if err1 == nil && err2 == nil && err3 == nil {
-		// Calculate average load across all three periods
-		avgLoad := (load1 + load5 + load15) / 3.0
-
-		// Determine status based on average load vs CPU cores
-		status := "ok"
-		if cpuCores > 0 {
-			if avgLoad >= float64(cpuCores)*2.0 {
-				status = "critical"
-			} else if avgLoad >= float64(cpuCores) {
-				status = "warning"
-			}
-		}
-		loadData["status"] = status
-	}
-
-	return loadData
+	return getSystemLoad()
 }
 
 // getPublicIP fetches the public IP address from the collector's /api/myip endpoint
@@ -931,4 +855,351 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 
 	log.Printf("Successfully tested instance report to %s (status: %d)", url, resp.StatusCode)
 	return nil
+}
+
+// ensureUUIDForStartup generates and persists a UUID if one doesn't exist (for startup report)
+// This is a standalone function that doesn't require an InstanceReporter instance
+func ensureUUIDForStartup(config *Config, configPath string) error {
+	// If UUID already exists, nothing to do
+	if config.InstanceReporting.InstanceUUID != "" {
+		return nil
+	}
+
+	// Generate new UUID
+	newUUID := uuid.New().String()
+
+	// Read current config file
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	// Parse as generic map to preserve structure and comments
+	var configMap map[string]interface{}
+	if err := yaml.Unmarshal(data, &configMap); err != nil {
+		return fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	// Update instance_reporting section
+	if instanceReporting, ok := configMap["instance_reporting"].(map[string]interface{}); ok {
+		// Double-check that instance_uuid doesn't already exist in the file
+		if existingUUID, exists := instanceReporting["instance_uuid"]; exists && existingUUID != nil && existingUUID != "" {
+			// UUID exists in file, use it and update in-memory config
+			if uuidStr, ok := existingUUID.(string); ok && uuidStr != "" {
+				config.InstanceReporting.InstanceUUID = uuidStr
+				log.Printf("Using existing instance UUID from config file: %s", uuidStr)
+				return nil
+			}
+		}
+		// Set the new UUID
+		instanceReporting["instance_uuid"] = newUUID
+	} else {
+		// Create section if it doesn't exist
+		configMap["instance_reporting"] = map[string]interface{}{
+			"enabled":             config.InstanceReporting.Enabled,
+			"hostname":            config.InstanceReporting.Hostname,
+			"port":                config.InstanceReporting.Port,
+			"report_interval_sec": config.InstanceReporting.ReportIntervalSec,
+			"instance_uuid":       newUUID,
+		}
+	}
+
+	// Marshal back to YAML
+	updatedData, err := yaml.Marshal(configMap)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	// Write back to file
+	// Create backup first
+	backupPath := configPath + ".bak"
+	if err := os.WriteFile(backupPath, data, 0644); err != nil {
+		log.Printf("Warning: failed to create config backup: %v", err)
+	}
+
+	if err := os.WriteFile(configPath, updatedData, 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	// Update in-memory config
+	config.InstanceReporting.InstanceUUID = newUUID
+	log.Printf("Generated new instance UUID: %s", newUUID)
+	return nil
+}
+
+// SendStartupReport sends a startup report regardless of whether instance reporting is enabled
+// This runs in a non-blocking goroutine with retries and only sends if collector endpoint is configured
+func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, configPath string) {
+	// Run in a goroutine to not block startup
+	go func() {
+		// Check if we have the minimum required configuration (collector hostname and port)
+		if config.InstanceReporting.Hostname == "" {
+			log.Println("Startup report skipped: instance_reporting.hostname not configured")
+			return
+		}
+
+		if config.InstanceReporting.Port == 0 {
+			log.Println("Startup report skipped: instance_reporting.port not configured")
+			return
+		}
+
+		// Ensure UUID exists (generate and save if needed)
+		if err := ensureUUIDForStartup(config, configPath); err != nil {
+			log.Printf("Startup report skipped: failed to ensure UUID: %v", err)
+			return
+		}
+
+		log.Println("Sending startup report...")
+
+		// Build the report with all available fields
+		cwSkimmerEnabled := false
+		if cwskimmerConfig != nil {
+			cwSkimmerEnabled = cwskimmerConfig.Enabled
+		}
+
+		// Calculate available client slots
+		currentNonBypassedUsers := sessions.GetNonBypassedUserCount()
+		availableClients := config.Server.MaxSessions - currentNonBypassedUsers
+		if availableClients < 0 {
+			availableClients = 0
+		}
+
+		// Build list of public IQ modes
+		publicIQModes := []string{}
+		for mode, isPublic := range config.Server.PublicIQModes {
+			if isPublic {
+				publicIQModes = append(publicIQModes, mode)
+			}
+		}
+
+		// Construct public_url from instance connection info
+		publicURL := config.InstanceReporting.ConstructPublicURL()
+
+		// Get CPU information
+		cpuModel, _ := getCPUInfo()
+
+		// Get system load information
+		systemLoad := getSystemLoad()
+
+		// Build the report
+		report := InstanceReport{
+			UUID:             config.InstanceReporting.InstanceUUID,
+			Callsign:         config.Admin.Callsign,
+			Name:             config.Admin.Name,
+			Email:            config.Admin.Email,
+			Location:         config.Admin.Location,
+			Latitude:         config.Admin.GPS.Lat,
+			Longitude:        config.Admin.GPS.Lon,
+			Altitude:         config.Admin.ASL,
+			PublicURL:        publicURL,
+			Version:          Version,
+			Timestamp:        time.Now().Unix(),
+			Host:             config.InstanceReporting.Instance.Host,
+			Port:             config.InstanceReporting.Instance.Port,
+			TLS:              config.InstanceReporting.Instance.TLS,
+			UseMyIP:          config.InstanceReporting.UseMyIP,
+			CreateDomain:     config.InstanceReporting.CreateDomain,
+			CWSkimmer:        cwSkimmerEnabled,
+			DigitalDecodes:   config.Decoder.Enabled,
+			NoiseFloor:       config.NoiseFloor.Enabled,
+			MaxClients:       config.Server.MaxSessions,
+			AvailableClients: availableClients,
+			MaxSessionTime:   config.Server.MaxSessionTime,
+			PublicIQModes:    publicIQModes,
+			CPUModel:         cpuModel,
+			Load:             systemLoad,
+			CORSEnabled:      config.Server.EnableCORS,
+			ChatEnabled:      config.Chat.Enabled,
+			ChatUsers:        0, // Chat users not available at startup
+			StartupReport:    true,
+		}
+
+		jsonData, err := json.Marshal(report)
+		if err != nil {
+			log.Printf("Startup report failed: failed to marshal report: %v", err)
+			return
+		}
+
+		// Build URL
+		protocol := "https"
+		defaultPort := 443
+		if !config.InstanceReporting.UseHTTPS {
+			protocol = "http"
+			defaultPort = 80
+		}
+
+		var url string
+		if config.InstanceReporting.Port == defaultPort {
+			url = fmt.Sprintf("%s://%s/api/instance/%s",
+				protocol,
+				config.InstanceReporting.Hostname,
+				config.InstanceReporting.InstanceUUID)
+		} else {
+			url = fmt.Sprintf("%s://%s:%d/api/instance/%s",
+				protocol,
+				config.InstanceReporting.Hostname,
+				config.InstanceReporting.Port,
+				config.InstanceReporting.InstanceUUID)
+		}
+
+		// Create HTTP client with 10-second timeout
+		httpClient := &http.Client{
+			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					MinVersion: tls.VersionTLS12,
+				},
+			},
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+
+		// Retry up to 3 times with 10 second delays
+		maxRetries := 3
+		retryDelay := 10 * time.Second
+
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+			if err != nil {
+				log.Printf("Startup report failed: failed to create request: %v", err)
+				return
+			}
+
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("User-Agent", fmt.Sprintf("UberSDR/%s", Version))
+
+			resp, err := httpClient.Do(req)
+			if err != nil {
+				log.Printf("Startup report attempt %d/%d failed: %v", attempt, maxRetries, err)
+				if attempt < maxRetries {
+					time.Sleep(retryDelay)
+					continue
+				}
+				return
+			}
+
+			// Read and close response body
+			func() {
+				defer func() {
+					if err := resp.Body.Close(); err != nil {
+						log.Printf("Startup report: error closing response body: %v", err)
+					}
+				}()
+
+				// Check for redirect responses
+				if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+					location := resp.Header.Get("Location")
+					log.Printf("Startup report attempt %d/%d: server returned redirect %d to %s", attempt, maxRetries, resp.StatusCode, location)
+					if attempt < maxRetries {
+						time.Sleep(retryDelay)
+						return
+					}
+					return
+				}
+
+				if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+					log.Printf("Startup report attempt %d/%d: server returned status %d", attempt, maxRetries, resp.StatusCode)
+					if attempt < maxRetries {
+						time.Sleep(retryDelay)
+						return
+					}
+					return
+				}
+
+				// Success
+				log.Printf("Startup report sent successfully (status: %d, attempt: %d)", resp.StatusCode, attempt)
+			}()
+
+			// If we got here, the request completed (success or final failure)
+			return
+		}
+	}()
+}
+
+// getCPUInfo is a helper function to get CPU information (extracted for reuse)
+func getCPUInfo() (string, int) {
+	info, err := cpu.Info()
+	if err != nil {
+		log.Printf("Failed to get CPU info: %v", err)
+		return "Unknown", 0
+	}
+
+	if len(info) > 0 {
+		// Get model name from first CPU
+		model := info[0].ModelName
+
+		// Get total number of cores (sum across all CPUs)
+		totalCores := 0
+		for _, cpuInfo := range info {
+			totalCores += int(cpuInfo.Cores)
+		}
+
+		return model, totalCores
+	}
+
+	return "Unknown", 0
+}
+
+// getSystemLoad is a helper function to get system load (extracted for reuse)
+func getSystemLoad() map[string]interface{} {
+	loadData := map[string]interface{}{
+		"load_1min":  "",
+		"load_5min":  "",
+		"load_15min": "",
+		"cpu_cores":  0,
+		"status":     "unknown",
+	}
+
+	// Read /proc/loadavg
+	data, err := os.ReadFile("/proc/loadavg")
+	if err != nil {
+		log.Printf("Failed to read /proc/loadavg: %v", err)
+		return loadData
+	}
+
+	// Parse the load averages
+	// Format: "0.52 0.58 0.59 1/1234 12345"
+	fields := strings.Split(strings.TrimSpace(string(data)), " ")
+	if len(fields) < 3 {
+		log.Printf("Invalid /proc/loadavg format")
+		return loadData
+	}
+
+	loadData["load_1min"] = fields[0]
+	loadData["load_5min"] = fields[1]
+	loadData["load_15min"] = fields[2]
+
+	// Get CPU core count
+	cpuCores := 0
+	info, err := cpu.Info()
+	if err == nil && len(info) > 0 {
+		for _, cpuInfo := range info {
+			cpuCores += int(cpuInfo.Cores)
+		}
+	}
+	loadData["cpu_cores"] = cpuCores
+
+	// Parse load values for status calculation
+	load1, err1 := strconv.ParseFloat(fields[0], 64)
+	load5, err2 := strconv.ParseFloat(fields[1], 64)
+	load15, err3 := strconv.ParseFloat(fields[2], 64)
+
+	if err1 == nil && err2 == nil && err3 == nil {
+		// Calculate average load across all three periods
+		avgLoad := (load1 + load5 + load15) / 3.0
+
+		// Determine status based on average load vs CPU cores
+		status := "ok"
+		if cpuCores > 0 {
+			if avgLoad >= float64(cpuCores)*2.0 {
+				status = "critical"
+			} else if avgLoad >= float64(cpuCores) {
+				status = "warning"
+			}
+		}
+		loadData["status"] = status
+	}
+
+	return loadData
 }

@@ -825,6 +825,10 @@ func main() {
 	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions, ipBanManager, rateLimiterManager, connRateLimiter, prometheusMetrics)                         // New per-user spectrum
 	kiwiHandler := NewKiwiWebSocketHandler(sessions, audioReceiver, config, ipBanManager, rateLimiterManager, connRateLimiter, prometheusMetrics, noiseFloorMonitor) // KiwiSDR compatibility
 
+	// Send startup report (non-blocking, runs regardless of instance_reporting.enabled)
+	// This must be called after sessions is initialized but before HTTP server starts
+	SendStartupReport(config, cwskimmerConfig, sessions, configPath)
+
 	// Initialize instance reporter (before admin handler so it can be passed in)
 	var instanceReporter *InstanceReporter
 	if config.InstanceReporting.Enabled {

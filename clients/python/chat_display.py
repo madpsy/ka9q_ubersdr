@@ -39,7 +39,6 @@ class ChatDisplay:
         self.muted_users = set()
         self.active_users = []
         self.synced_username = None
-        self.is_syncing = False
         self.listbox_to_user = {}  # Map listbox index to user data
         self.emoji_popup = None  # Emoji picker popup window
 
@@ -921,7 +920,8 @@ class ChatDisplay:
         })
 
         # If this is the user we're synced with, update our radio
-        if self.synced_username == username and not self.is_syncing:
+        # Server-side deduplication prevents loops, no need for is_syncing flag
+        if self.synced_username == username:
             user = self.active_users[i] if i < len(self.active_users) else None
             if user:
                 self.sync_to_user(user)
@@ -956,71 +956,62 @@ class ChatDisplay:
         if not user.get('frequency') or not user.get('mode'):
             return
 
-        # Set syncing flag to prevent update loops
-        # This flag is only set during the actual sync operation
-        self.is_syncing = True
+        # Server-side deduplication prevents loops, no need for is_syncing flag
+        freq = user.get('frequency')
+        mode = user.get('mode', 'usb').upper()
+        bw_low = user.get('bw_low', 50)
+        bw_high = user.get('bw_high', 2700)
+        zoom_bw = user.get('zoom_bw', 0)
 
-        try:
-            freq = user.get('frequency')
-            mode = user.get('mode', 'usb').upper()
-            bw_low = user.get('bw_low', 50)
-            bw_high = user.get('bw_high', 2700)
-            zoom_bw = user.get('zoom_bw', 0)
+        # Update radio GUI
+        self.radio_gui.set_frequency_hz(freq)
 
-            # Update radio GUI
-            self.radio_gui.set_frequency_hz(freq)
+        # Set mode if not locked
+        if not self.radio_gui.mode_lock_var.get():
+            self.radio_gui.mode_var.set(mode)
+            self.radio_gui.on_mode_changed()
 
-            # Set mode if not locked
-            if not self.radio_gui.mode_lock_var.get():
-                self.radio_gui.mode_var.set(mode)
-                self.radio_gui.on_mode_changed()
+        # Set bandwidth
+        self.radio_gui.bw_low_var.set(bw_low)
+        self.radio_gui.bw_high_var.set(bw_high)
+        self.radio_gui.bw_low_label.config(text=f"{bw_low} Hz")
+        self.radio_gui.bw_high_label.config(text=f"{bw_high} Hz")
 
-            # Set bandwidth
-            self.radio_gui.bw_low_var.set(bw_low)
-            self.radio_gui.bw_high_var.set(bw_high)
-            self.radio_gui.bw_low_label.config(text=f"{bw_low} Hz")
-            self.radio_gui.bw_high_label.config(text=f"{bw_high} Hz")
+        # Update client bandwidth values
+        if self.radio_gui.client:
+            self.radio_gui.client.bandwidth_low = bw_low
+            self.radio_gui.client.bandwidth_high = bw_high
 
-            # Update client bandwidth values
-            if self.radio_gui.client:
-                self.radio_gui.client.bandwidth_low = bw_low
-                self.radio_gui.client.bandwidth_high = bw_high
+        # Update spectrum displays
+        if self.radio_gui.spectrum:
+            self.radio_gui.spectrum.update_bandwidth(bw_low, bw_high, mode.lower())
+        if self.radio_gui.waterfall_display:
+            self.radio_gui.waterfall_display.update_bandwidth(bw_low, bw_high, mode.lower())
+        if self.radio_gui.audio_spectrum_display:
+            self.radio_gui.audio_spectrum_display.update_bandwidth(bw_low, bw_high, mode.lower())
 
-            # Update spectrum displays
-            if self.radio_gui.spectrum:
-                self.radio_gui.spectrum.update_bandwidth(bw_low, bw_high, mode.lower())
-            if self.radio_gui.waterfall_display:
-                self.radio_gui.waterfall_display.update_bandwidth(bw_low, bw_high, mode.lower())
-            if self.radio_gui.audio_spectrum_display:
-                self.radio_gui.audio_spectrum_display.update_bandwidth(bw_low, bw_high, mode.lower())
+        # Apply zoom bandwidth if provided and spectrum is connected
+        if zoom_bw > 0 and self.radio_gui.spectrum:
+            spectrum = self.radio_gui.spectrum
+            if spectrum.connected and spectrum.bin_count > 0:
+                # Calculate total bandwidth from bin bandwidth
+                new_total_bandwidth = zoom_bw * spectrum.bin_count
+                # Send zoom command via the spectrum's event loop
+                import asyncio
+                if spectrum.event_loop and spectrum.event_loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        spectrum._send_zoom_command(freq, new_total_bandwidth),
+                        spectrum.event_loop
+                    )
+                    print(f"Applied synced zoom: {new_total_bandwidth/1000:.1f} KHz ({zoom_bw:.2f} Hz/bin)")
 
-            # Apply zoom bandwidth if provided and spectrum is connected
-            if zoom_bw > 0 and self.radio_gui.spectrum:
-                spectrum = self.radio_gui.spectrum
-                if spectrum.connected and spectrum.bin_count > 0:
-                    # Calculate total bandwidth from bin bandwidth
-                    new_total_bandwidth = zoom_bw * spectrum.bin_count
-                    # Send zoom command via the spectrum's event loop
-                    import asyncio
-                    if spectrum.event_loop and spectrum.event_loop.is_running():
-                        asyncio.run_coroutine_threadsafe(
-                            spectrum._send_zoom_command(freq, new_total_bandwidth),
-                            spectrum.event_loop
-                        )
-                        print(f"Applied synced zoom: {new_total_bandwidth/1000:.1f} KHz ({zoom_bw:.2f} Hz/bin)")
+        # Apply changes if connected (skip auto mode to preserve synced mode)
+        if self.radio_gui.connected:
+            self.radio_gui.apply_frequency(skip_auto_mode=True)
 
-            # Apply changes if connected (skip auto mode to preserve synced mode)
-            if self.radio_gui.connected:
-                self.radio_gui.apply_frequency(skip_auto_mode=True)
-
-        finally:
-            # Clear syncing flag after a SHORT delay (200ms instead of 500ms)
-            # This prevents loops from incoming sync updates, but allows user changes to be sent
-            def clear_sync_and_notify():
-                self.is_syncing = False
-                # Send our updated position to chat after sync completes
-                self.send_radio_status()
-            self.window.after(200, clear_sync_and_notify)
+        # Send our updated position to chat after sync completes
+        # Server will deduplicate if values haven't changed
+        self.send_radio_status()
 
     def tune_to_user(self, username: str):
         """Tune to a user's frequency"""
@@ -1073,7 +1064,7 @@ class ChatDisplay:
 
     def on_radio_changed(self):
         """Called when radio settings change in the main GUI - debounced"""
-        if self.username and not self.is_syncing:
+        if self.username:
             # Debounce the send (100ms delay like JavaScript frontend)
             if self.debounce_timer:
                 self.window.after_cancel(self.debounce_timer)
@@ -1083,7 +1074,8 @@ class ChatDisplay:
     def _send_radio_status_debounced(self):
         """Internal method called after debounce delay"""
         self.debounce_timer = None
-        if self.username and not self.is_syncing:
+        if self.username:
+            # Server-side deduplication prevents loops
             self.send_radio_status()
 
     def toggle_emoji_picker(self):

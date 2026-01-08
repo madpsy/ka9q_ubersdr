@@ -11,7 +11,6 @@ class ChatUI {
         this.unreadCount = 0;
         this.savedUsername = null;
         this.syncedUsername = null; // Track which user we're synced with
-        this.isSyncing = false; // Flag to prevent update loops when syncing
         this.radioEventHandlers = {}; // Store references to our radio event handlers
         this.errorTimeout = null; // Track error display timeout
         this.usersRequestPending = false; // Track if we're waiting for users list response
@@ -186,45 +185,45 @@ class ChatUI {
 
         // Define event handlers and store references
         this.radioEventHandlers.frequency_changed = (data) => {
-            console.log('[ChatUI] Frequency changed event:', data.frequency, 'isSyncing:', this.isSyncing);
+            console.log('[ChatUI] Frequency changed event:', data.frequency);
             if (this.chat && this.chat.isJoined()) {
                 // Always update our own user in the local list
                 this.updateOwnUserData({ frequency: data.frequency });
 
-                // Always send to server - the server-side comparison will prevent loops
+                // Send to server - server-side deduplication prevents loops
                 this.chat.updateFrequency(data.frequency);
             }
         };
 
         this.radioEventHandlers.mode_changed = (data) => {
-            console.log('[ChatUI] Mode changed event:', data.mode, 'isSyncing:', this.isSyncing);
+            console.log('[ChatUI] Mode changed event:', data.mode);
             if (this.chat && this.chat.isJoined()) {
                 // Always update our own user in the local list
                 this.updateOwnUserData({ mode: data.mode });
 
-                // Always send to server - the server-side comparison will prevent loops
+                // Send to server - server-side deduplication prevents loops
                 this.chat.updateMode(data.mode);
             }
         };
 
         this.radioEventHandlers.bandwidth_changed = (data) => {
-            console.log('[ChatUI] Bandwidth changed event - low:', data.low, 'high:', data.high, 'isSyncing:', this.isSyncing);
+            console.log('[ChatUI] Bandwidth changed event - low:', data.low, 'high:', data.high);
             if (this.chat && this.chat.isJoined()) {
                 // Always update our own user in the local list
                 this.updateOwnUserData({ bw_low: data.low, bw_high: data.high });
 
-                // Always send to server - the server-side comparison will prevent loops
+                // Send to server - server-side deduplication prevents loops
                 this.chat.updateBandwidth(data.high, data.low);
             }
         };
 
         this.radioEventHandlers.zoom_changed = (data) => {
-            console.log('[ChatUI] Zoom changed event - binBandwidth:', data.binBandwidth, 'isSyncing:', this.isSyncing);
+            console.log('[ChatUI] Zoom changed event - binBandwidth:', data.binBandwidth);
             if (this.chat && this.chat.isJoined()) {
                 // Always update our own user in the local list
                 this.updateOwnUserData({ zoom_bw: data.binBandwidth });
 
-                // Always send to server - the server-side comparison will prevent loops
+                // Send to server - server-side deduplication prevents loops
                 this.chat.debouncedSendFrequencyMode();
             }
         };
@@ -1247,8 +1246,8 @@ class ChatUI {
         this.chat.on('user_update', (data) => {
             this.updateSingleUser(data);
             // If this is the user we're synced with, update our radio
-            // But only if we're not currently in the middle of syncing (to prevent loops)
-            if (this.syncedUsername === data.username && !this.isSyncing) {
+            // Server-side deduplication prevents loops, no need for isSyncing flag
+            if (this.syncedUsername === data.username) {
                 // Get the full user data from activeUsers to ensure we have all fields
                 const fullUserData = this.chat.activeUsers.find(u => u.username === data.username);
                 if (fullUserData) {
@@ -2042,16 +2041,6 @@ class ChatUI {
         const bwHigh = userData.bw_high !== undefined ? userData.bw_high : 0;
         const zoomBW = userData.zoom_bw !== undefined ? userData.zoom_bw : 0;
 
-        // Store current values BEFORE syncing to compare later
-        const oldFrequency = this.chat.frequency;
-        const oldMode = this.chat.mode;
-        const oldBwHigh = this.chat.bwHigh;
-        const oldBwLow = this.chat.bwLow;
-        const oldZoomBW = this.chat.zoomBW;
-
-        // Set syncing flag to prevent sending updates back (avoid loops)
-        this.isSyncing = true;
-
         // Disable edge detection temporarily when syncing (same as tuneToChannel)
         if (window.spectrumDisplay) {
             window.spectrumDisplay.skipEdgeDetection = true;
@@ -2180,30 +2169,13 @@ class ChatUI {
         });
 
         // Send the synced settings to the server so other users can see our changes
-        // Only send if our values actually changed (prevents sync loops)
+        // Server-side deduplication will prevent loops automatically
         if (this.chat && this.chat.isJoined()) {
-            const changed = (
-                oldFrequency !== userData.frequency ||
-                oldMode !== userData.mode ||
-                oldBwHigh !== bwHigh ||
-                oldBwLow !== bwLow ||
-                oldZoomBW !== zoomBW
-            );
-
-            if (changed) {
-                console.log('[ChatUI] Settings changed, sending synced settings to server');
-                this.chat.setFrequencyAndMode(userData.frequency, userData.mode, bwHigh, bwLow, zoomBW);
-            } else {
-                console.log('[ChatUI] Settings unchanged, skipping server update');
-            }
+            console.log('[ChatUI] Sending synced settings to server');
+            this.chat.setFrequencyAndMode(userData.frequency, userData.mode, bwHigh, bwLow, zoomBW);
         }
 
-        // Clear syncing flag after a short delay to allow radio updates to settle
-        setTimeout(() => {
-            this.isSyncing = false;
-            console.log('[ChatUI] Sync complete, re-enabling sync triggers');
-        }, 500);
-
+        console.log('[ChatUI] Sync complete');
         // Removed "Synced to..." message per user request
     }
 

@@ -186,17 +186,24 @@ func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]int
 	// Update rate limit tracking
 	user.LastUpdateTime = now
 
-	// Update frequency if provided
+	// Track if any value actually changed
+	valueChanged := false
+
+	// Update frequency if provided AND different
 	if frequency, ok := updates["frequency"].(float64); ok {
 		// Validate frequency (0 Hz to 30 MHz)
 		if frequency > 30000000 {
 			cm.activeUsersMu.Unlock()
 			return ErrInvalidFrequency
 		}
-		user.Frequency = uint64(frequency)
+		newFreq := uint64(frequency)
+		if newFreq != user.Frequency {
+			user.Frequency = newFreq
+			valueChanged = true
+		}
 	}
 
-	// Update mode if provided
+	// Update mode if provided AND different
 	if mode, ok := updates["mode"].(string); ok {
 		// Validate mode
 		validModes := map[string]bool{
@@ -207,47 +214,67 @@ func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]int
 			cm.activeUsersMu.Unlock()
 			return ErrInvalidMode
 		}
-		user.Mode = mode
+		if mode != user.Mode {
+			user.Mode = mode
+			valueChanged = true
+		}
 	}
 
-	// Update bandwidth high if provided
+	// Update bandwidth high if provided AND different
 	if bwHigh, ok := updates["bw_high"].(float64); ok {
 		// Validate bandwidth cutoffs (-10000 to 10000 Hz)
 		if bwHigh < -10000 || bwHigh > 10000 {
 			cm.activeUsersMu.Unlock()
 			return ErrInvalidBandwidth
 		}
-		user.BWHigh = int(bwHigh)
+		newBWHigh := int(bwHigh)
+		if newBWHigh != user.BWHigh {
+			user.BWHigh = newBWHigh
+			valueChanged = true
+		}
 	}
 
-	// Update bandwidth low if provided
+	// Update bandwidth low if provided AND different
 	if bwLow, ok := updates["bw_low"].(float64); ok {
 		// Validate bandwidth cutoffs (-10000 to 10000 Hz)
 		if bwLow < -10000 || bwLow > 10000 {
 			cm.activeUsersMu.Unlock()
 			return ErrInvalidBandwidth
 		}
-		user.BWLow = int(bwLow)
+		newBWLow := int(bwLow)
+		if newBWLow != user.BWLow {
+			user.BWLow = newBWLow
+			valueChanged = true
+		}
 	}
 
-	// Update zoom_bw if provided
+	// Update zoom_bw if provided AND different
 	if zoomBW, ok := updates["zoom_bw"].(float64); ok {
 		// Validate zoom_bw (must be positive, reasonable range)
 		if zoomBW < 0 || zoomBW > 100000000 {
 			cm.activeUsersMu.Unlock()
 			return ErrInvalidBandwidth
 		}
-		user.ZoomBW = zoomBW
+		if zoomBW != user.ZoomBW {
+			user.ZoomBW = zoomBW
+			valueChanged = true
+		}
 	}
 
-	// Update CAT if provided
+	// Update CAT if provided AND different
 	if cat, ok := updates["cat"].(bool); ok {
-		user.CAT = cat
+		if cat != user.CAT {
+			user.CAT = cat
+			valueChanged = true
+		}
 	}
 
-	// Update TX if provided
+	// Update TX if provided AND different
 	if tx, ok := updates["tx"].(bool); ok {
-		user.TX = tx
+		if tx != user.TX {
+			user.TX = tx
+			valueChanged = true
+		}
 	}
 
 	// Update user's last seen time (status updates count as activity)
@@ -255,11 +282,17 @@ func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]int
 
 	cm.activeUsersMu.Unlock()
 
-	log.Printf("Chat: User '%s' updated status: frequency=%d Hz, mode=%s, bw_high=%d, bw_low=%d, zoom_bw=%.1f, cat=%t, tx=%t",
-		user.Username, user.Frequency, user.Mode, user.BWHigh, user.BWLow, user.ZoomBW, user.CAT, user.TX)
+	// Only broadcast if something actually changed
+	if valueChanged {
+		log.Printf("Chat: User '%s' updated status (changed): frequency=%d Hz, mode=%s, bw_high=%d, bw_low=%d, zoom_bw=%.1f, cat=%t, tx=%t",
+			user.Username, user.Frequency, user.Mode, user.BWHigh, user.BWLow, user.ZoomBW, user.CAT, user.TX)
 
-	// Broadcast only this user's updated info (more efficient than full user list)
-	cm.broadcastUserUpdate(user)
+		// Broadcast only this user's updated info (more efficient than full user list)
+		cm.broadcastUserUpdate(user)
+	} else {
+		log.Printf("Chat: User '%s' update ignored (no changes): frequency=%d Hz, mode=%s, bw_high=%d, bw_low=%d, zoom_bw=%.1f, cat=%t, tx=%t",
+			user.Username, user.Frequency, user.Mode, user.BWHigh, user.BWLow, user.ZoomBW, user.CAT, user.TX)
+	}
 
 	return nil
 }

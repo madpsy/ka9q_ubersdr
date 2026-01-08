@@ -4467,3 +4467,64 @@ func calculateSessionMetrics(logs []SessionActivityLog) map[string]interface{} {
 		"timeline":            timeline,
 	}
 }
+
+// HandleForceUpdate forces an update by writing the version trigger file
+// This endpoint accepts a POST request with an optional JSON body containing a version string
+// If no version is provided, it uses the latest version from GitHub (if available) or current version
+func (ah *AdminHandler) HandleForceUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Parse optional request body
+	var req struct {
+		Version string `json:"version"`
+	}
+
+	if r.Body != nil && r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Determine which version to write
+	versionToWrite := req.Version
+	if versionToWrite == "" {
+		// Try to use the latest version from GitHub if available
+		latestVersion := GetLatestVersion()
+		if latestVersion != "" {
+			versionToWrite = latestVersion
+		} else {
+			// Fall back to current version
+			versionToWrite = Version
+		}
+	}
+
+	// Write the version file to trigger update
+	if err := WriteVersionFile(versionToWrite); err != nil {
+		log.Printf("Admin forced update failed: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "error",
+			"message": fmt.Sprintf("Failed to write version file: %v", err),
+		}); err != nil {
+			log.Printf("Error encoding response: %v", err)
+		}
+		return
+	}
+
+	log.Printf("Admin forced update: version file written with version %s", versionToWrite)
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": fmt.Sprintf("Update triggered successfully. Version file written with version %s. The cron job will detect this and trigger the update within 1 minute.", versionToWrite),
+		"version": versionToWrite,
+	}); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
+}

@@ -91,8 +91,9 @@ func fetchVersionFromGitHub() (string, error) {
 	return "", fmt.Errorf("version constant not found in file")
 }
 
-// writeVersionFile writes the version string to /var/run/updater/latest
-func writeVersionFile(version string) error {
+// WriteVersionFile writes the version string to /var/run/updater/latest
+// This function is exported so it can be called by the admin API to force updates
+func WriteVersionFile(version string) error {
 	// Create directory if it doesn't exist
 	if err := os.MkdirAll(versionFileDir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", versionFileDir, err)
@@ -131,7 +132,7 @@ func checkVersion() {
 			log.Printf("Version file NOT written: %d regular user(s) connected (bypassed/internal users excluded). Will retry on next check to avoid disrupting active users.", regularUserCount)
 		} else {
 			// Safe to write version file - no regular users connected
-			if err := writeVersionFile(version); err != nil {
+			if err := WriteVersionFile(version); err != nil {
 				log.Printf("Warning: Failed to write version file: %v", err)
 			} else {
 				log.Printf("Version file updated: %s (no regular users connected - safe to update)", versionFilePath)

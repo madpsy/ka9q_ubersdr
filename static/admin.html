@@ -799,6 +799,9 @@
                     🎉 New version available!
                 </a>
             </div>
+            <button id="forceUpdateBtn" class="btn btn-danger" onclick="showForceUpdateModal()" style="margin-left: auto; padding: 8px 16px; font-size: 13px; font-weight: bold;">
+                🔄 Force Update
+            </button>
         </div>
 
         <!-- Restart Countdown Overlay -->
@@ -962,6 +965,40 @@
                         <div class="loading">
                             <div class="spinner"></div>
                             <p>Loading events...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Force Update Modal -->
+        <div id="forceUpdateModal" class="modal">
+            <div class="modal-content" style="max-width: 500px;">
+                <div class="modal-header">
+                    <h2>⚠️ Force Update</h2>
+                    <button class="modal-close" onclick="closeForceUpdateModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="padding: 20px;">
+                        <p style="font-size: 16px; margin-bottom: 20px; color: #721c24;">
+                            <strong>WARNING:</strong> This will trigger an immediate system update!
+                        </p>
+                        <p style="margin-bottom: 15px;">
+                            The system will:
+                        </p>
+                        <ul style="margin-left: 20px; margin-bottom: 20px; line-height: 1.8;">
+                            <li>Pull the latest Docker images</li>
+                            <li>Restart all services</li>
+                            <li>Disconnect all active users</li>
+                        </ul>
+                        <p style="margin-bottom: 20px; color: #856404; background: #fff3cd; padding: 10px; border-radius: 5px;">
+                            <strong>Note:</strong> The update process may take several minutes. You will need to log back in after the update completes.
+                        </p>
+                        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                            <button class="btn btn-secondary" onclick="closeForceUpdateModal()">Cancel</button>
+                            <button class="btn btn-danger" onclick="confirmForceUpdate()" style="font-weight: bold;">
+                                🔄 Force Update Now
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -7688,6 +7725,71 @@
                 window.open(url, '_blank');
             } catch (error) {
                 showAlert('Error opening instance view: ' + error.message, 'error');
+            }
+        }
+
+        // Force Update Modal Functions
+        function showForceUpdateModal() {
+            const modal = document.getElementById('forceUpdateModal');
+            modal.style.display = 'block';
+        }
+
+        function closeForceUpdateModal() {
+            const modal = document.getElementById('forceUpdateModal');
+            modal.style.display = 'none';
+        }
+
+        async function confirmForceUpdate() {
+            try {
+                // Close modal
+                closeForceUpdateModal();
+
+                // Show loading alert
+                showAlert('Triggering system update...', 'info');
+
+                // Call the force update endpoint
+                const response = await authenticatedFetch('/admin/force-update', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+
+                if (!response) {
+                    showAlert('Authentication failed', 'error');
+                    return;
+                }
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to trigger update');
+                }
+
+                const result = await response.json();
+
+                // Show success message
+                showAlert(result.message || 'Update triggered successfully! The system will update shortly.', 'success');
+
+                // Show a countdown or notification
+                setTimeout(() => {
+                    showAlert('System update in progress. You will be logged out shortly...', 'info');
+                }, 3000);
+
+                // After 10 seconds, show restart countdown
+                setTimeout(() => {
+                    showRestartCountdown();
+                }, 10000);
+
+            } catch (error) {
+                showAlert('Error triggering update: ' + error.message, 'error');
+            }
+        }
+
+        // Close modal when clicking outside of it
+        window.onclick = function(event) {
+            const forceUpdateModal = document.getElementById('forceUpdateModal');
+            if (event.target === forceUpdateModal) {
+                closeForceUpdateModal();
             }
         }
     </script>

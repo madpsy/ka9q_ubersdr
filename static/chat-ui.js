@@ -1268,6 +1268,23 @@ class ChatUI {
             }
         });
 
+        this.chat.on('idle_updates', (data) => {
+            // Bulk update of idle times for all idle users
+            if (data.users && Array.isArray(data.users)) {
+                data.users.forEach(idleUser => {
+                    const user = this.chat.activeUsers.find(u => u.username === idleUser.username);
+                    if (user) {
+                        user.idle_minutes = idleUser.idle_minutes;
+                    }
+                });
+                // Refresh the display with updated idle times
+                this.updateActiveUsers({
+                    users: this.chat.activeUsers,
+                    count: this.chat.activeUsers.length
+                });
+            }
+        });
+
         this.chat.on('error', (error) => {
             // Show errors in the UI so users know what went wrong
             console.warn('[ChatUI] Chat error:', error);
@@ -1812,18 +1829,22 @@ class ChatUI {
         });
 
         const userItems = sortedUsers.map(u => {
-            console.log('[ChatUI] User:', u.username, 'freq:', u.frequency, 'mode:', u.mode, 'cat:', u.cat, 'tx:', u.tx);
+            console.log('[ChatUI] User:', u.username, 'freq:', u.frequency, 'mode:', u.mode, 'cat:', u.cat, 'tx:', u.tx, 'idle_minutes:', u.idle_minutes);
 
             // Check if this is our own user
             const isOurUser = u.username === ourUsername;
 
-            // Build status icons (CAT control and TX status)
+            // Build status icons (CAT control, TX status, and idle status)
             let statusIcons = '';
             if (u.cat) {
                 statusIcons += ' 🔧'; // CAT control active
             }
             if (u.tx) {
                 statusIcons += ' 📡'; // Transmitting
+            }
+            // Add idle icon if user has been idle for 5+ minutes
+            if (u.idle_minutes && u.idle_minutes >= 5) {
+                statusIcons += ' 💤'; // Idle
             }
 
             // Username - bold if it's us, clickable to mute/unmute if it's not us
@@ -1855,6 +1876,9 @@ class ChatUI {
 
             // Build tooltip with all radio settings
             let tooltip = u.username;
+            if (u.idle_minutes && u.idle_minutes >= 5) {
+                tooltip += `\nIdle: ${u.idle_minutes} minutes`;
+            }
             if (u.frequency) {
                 tooltip += `\nFrequency: ${(u.frequency / 1000000).toFixed(6)} MHz`;
             }

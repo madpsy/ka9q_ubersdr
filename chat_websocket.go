@@ -22,6 +22,7 @@ type ChatUser struct {
 	SessionID         string
 	Username          string
 	LastSeen          time.Time
+	LastActivityTime  time.Time   // For tracking idle time (user-initiated actions only)
 	LastMessageTime   time.Time   // For rate limiting chat messages
 	MessageTimestamps []time.Time // For rate limiting chat messages
 	LastUpdateTime    time.Time   // For rate limiting user updates (frequency/mode)
@@ -32,6 +33,7 @@ type ChatUser struct {
 	ZoomBW            float64     // Spectrum zoom bandwidth in Hz (optional)
 	CAT               bool        // CAT control enabled (optional)
 	TX                bool        // Transmitting status (optional)
+	IsIdle            bool        // Whether user is currently marked as idle
 }
 
 // ChatManager manages chat functionality for the DX cluster websocket
@@ -75,6 +77,9 @@ func NewChatManager(wsHandler *DXClusterWebSocketHandler, maxMessages int, maxUs
 
 	// Start cleanup goroutine for inactive users
 	go cm.cleanupInactiveUsers()
+
+	// Start idle tracking goroutine
+	go cm.trackIdleStatus()
 
 	return cm
 }
@@ -124,14 +129,17 @@ func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 	cm.sessionUsernamesMu.Unlock()
 
 	// Update active users
+	now := time.Now()
 	cm.activeUsersMu.Lock()
 	cm.activeUsers[sessionID] = &ChatUser{
 		SessionID:         sessionID,
 		Username:          username,
-		LastSeen:          time.Now(),
+		LastSeen:          now,
+		LastActivityTime:  now,         // User just joined - this is an activity
 		LastMessageTime:   time.Time{}, // Zero time
 		MessageTimestamps: make([]time.Time, 0, 25),
 		LastUpdateTime:    time.Time{}, // Zero time
+		IsIdle:            false,
 	}
 	cm.activeUsersMu.Unlock()
 
@@ -288,7 +296,18 @@ func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]int
 	// Update user's last seen time (status updates count as activity)
 	user.LastSeen = now
 
+	// Update activity time and clear idle status (status updates are user-initiated)
+	user.LastActivityTime = now
+	wasIdle := user.IsIdle
+	user.IsIdle = false
+
 	cm.activeUsersMu.Unlock()
+
+	// If user was idle and is now active, broadcast the change
+	if wasIdle {
+		log.Printf("Chat: User '%s' is no longer idle", user.Username)
+		cm.broadcastUserUpdate(user)
+	}
 
 	log.Printf("Chat: User '%s' updated status (changed): frequency=%d Hz, mode=%s, bw_high=%d, bw_low=%d, zoom_bw=%.1f, cat=%t, tx=%t",
 		user.Username, user.Frequency, user.Mode, user.BWHigh, user.BWLow, user.ZoomBW, user.CAT, user.TX)
@@ -303,6 +322,12 @@ func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]int
 func (cm *ChatManager) broadcastUserUpdate(user *ChatUser) {
 	userData := map[string]interface{}{
 		"username": user.Username,
+	}
+
+	// Calculate and include idle time
+	idleMinutes := int(time.Now().Sub(user.LastActivityTime).Minutes())
+	if idleMinutes > 0 {
+		userData["idle_minutes"] = idleMinutes
 	}
 
 	// Always include frequency if set (even if 0)
@@ -402,7 +427,19 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 	// Update rate limit tracking
 	user.LastMessageTime = now
 	user.MessageTimestamps = append(user.MessageTimestamps, now)
+
+	// Update activity time and clear idle status (messages are user-initiated)
+	user.LastActivityTime = now
+	wasIdle := user.IsIdle
+	user.IsIdle = false
+
 	cm.activeUsersMu.Unlock()
+
+	// If user was idle and is now active, broadcast the change
+	if wasIdle {
+		log.Printf("Chat: User '%s' is no longer idle (sent message)", username)
+		cm.broadcastUserUpdate(user)
+	}
 
 	// Validate message (max 250 characters)
 	if len(messageText) == 0 || len(messageText) > 250 {
@@ -554,6 +591,11 @@ func (cm *ChatManager) SendActiveUsers(conn *websocket.Conn) {
 		userData := map[string]interface{}{
 			"username": user.Username,
 		}
+		// Calculate and include idle time
+		idleMinutes := int(time.Now().Sub(user.LastActivityTime).Minutes())
+		if idleMinutes > 0 {
+			userData["idle_minutes"] = idleMinutes
+		}
 		// Include frequency if set
 		if user.Frequency > 0 {
 			userData["frequency"] = user.Frequency
@@ -599,6 +641,11 @@ func (cm *ChatManager) BroadcastActiveUsers() {
 	for _, user := range users {
 		userData := map[string]interface{}{
 			"username": user.Username,
+		}
+		// Calculate and include idle time
+		idleMinutes := int(time.Now().Sub(user.LastActivityTime).Minutes())
+		if idleMinutes > 0 {
+			userData["idle_minutes"] = idleMinutes
 		}
 		// Include frequency if set
 		if user.Frequency > 0 {
@@ -671,6 +718,56 @@ func (cm *ChatManager) cleanupInactiveUsers() {
 		}
 		cm.activeUsersMu.Unlock()
 	}
+}
+
+// trackIdleStatus periodically checks users for idle status and broadcasts updates
+func (cm *ChatManager) trackIdleStatus() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		cm.activeUsersMu.Lock()
+		now := time.Now()
+
+		// Collect all idle users for bulk update
+		idleUpdates := make([]map[string]interface{}, 0)
+
+		for _, user := range cm.activeUsers {
+			idleMinutes := int(now.Sub(user.LastActivityTime).Minutes())
+
+			// Check if user just became idle (crossed 5 minute threshold)
+			if idleMinutes >= 5 && !user.IsIdle {
+				user.IsIdle = true
+				log.Printf("Chat: User '%s' is now idle (%d minutes)", user.Username, idleMinutes)
+			}
+
+			// Add all idle users to the bulk update
+			if idleMinutes >= 5 {
+				idleUpdates = append(idleUpdates, map[string]interface{}{
+					"username":     user.Username,
+					"idle_minutes": idleMinutes,
+				})
+			}
+		}
+		cm.activeUsersMu.Unlock()
+
+		// Send bulk update if there are any idle users
+		if len(idleUpdates) > 0 {
+			cm.broadcastIdleUpdates(idleUpdates)
+		}
+	}
+}
+
+// broadcastIdleUpdates sends a bulk update of all idle users' idle times
+func (cm *ChatManager) broadcastIdleUpdates(idleUpdates []map[string]interface{}) {
+	message := map[string]interface{}{
+		"type": "chat_idle_updates",
+		"data": map[string]interface{}{
+			"users": idleUpdates,
+		},
+	}
+
+	cm.wsHandler.broadcast(message)
 }
 
 // HandleChatMessage processes incoming chat messages from websocket clients

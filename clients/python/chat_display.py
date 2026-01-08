@@ -731,6 +731,10 @@ class ChatDisplay:
             data = msg.get('data', {})
             self.update_single_user(data)
 
+        elif msg_type == 'chat_idle_updates':
+            data = msg.get('data', {})
+            self.update_idle_users(data)
+
         elif msg_type == 'chat_error':
             error = msg.get('error', 'Unknown error')
 
@@ -898,12 +902,17 @@ class ChatDisplay:
             mode = user.get('mode', '').upper()
             cat = user.get('cat', False)
             tx = user.get('tx', False)
+            idle_minutes = user.get('idle_minutes', 0)
 
             # Store mapping from listbox index to user data
             self.listbox_to_user[listbox_index] = user
 
             # Format display
             display = username
+
+            # Add idle indicator (after username, before other status icons)
+            if idle_minutes and idle_minutes >= 5:
+                display += " 💤"
 
             # Add CAT control indicator (after username, before frequency)
             if cat:
@@ -954,6 +963,28 @@ class ChatDisplay:
             user = self.active_users[i] if i < len(self.active_users) else None
             if user:
                 self.sync_to_user(user)
+
+    def update_idle_users(self, data: dict):
+        """Update idle times for multiple users (bulk update)"""
+        users = data.get('users', [])
+
+        # Update idle_minutes for each user in the list
+        for idle_user in users:
+            username = idle_user.get('username')
+            idle_minutes = idle_user.get('idle_minutes')
+
+            if username and idle_minutes is not None:
+                # Find and update the user in active_users
+                for user in self.active_users:
+                    if user.get('username') == username:
+                        user['idle_minutes'] = idle_minutes
+                        break
+
+        # Refresh display with updated idle times
+        self.update_active_users({
+            'users': self.active_users,
+            'count': len(self.active_users)
+        })
 
     def toggle_sync(self, username: str):
         """Toggle sync with a user"""
@@ -1379,8 +1410,13 @@ class ChatDisplay:
         mode = user.get('mode', '').upper()
         cat = user.get('cat', False)
         tx = user.get('tx', False)
+        idle_minutes = user.get('idle_minutes', 0)
 
         tooltip_lines = [username]
+
+        # Show idle time if user is idle
+        if idle_minutes and idle_minutes >= 5:
+            tooltip_lines.append(f"💤 Idle: {idle_minutes} minutes")
 
         if freq:
             freq_mhz = freq / 1e6

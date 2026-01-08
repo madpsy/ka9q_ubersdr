@@ -1,4 +1,4 @@
- sue kn user tt// Frequency Readout Display
+// Frequency Readout Display
 // Shows current frequency in a digital readout format
 
 // Always show frequency readout (no toggle)

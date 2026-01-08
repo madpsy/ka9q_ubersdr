@@ -786,20 +786,22 @@
 
         <!-- Version Footer -->
         <div id="versionFooter" class="version-footer" style="display: none;">
-            <div class="version-info">
-                <span>Current:</span>
-                <span id="currentVersion" class="version-badge version-current">Loading...</span>
+            <div style="display: flex; align-items: center; gap: 20px;">
+                <div class="version-info">
+                    <span>Current:</span>
+                    <span id="currentVersion" class="version-badge version-current">Loading...</span>
+                </div>
+                <div class="version-info">
+                    <span>Latest:</span>
+                    <span id="latestVersion" class="version-badge version-latest">Checking...</span>
+                </div>
+                <div id="updateNotice" style="display: none;">
+                    <a href="https://ubersdr.org" target="_blank" class="version-link">
+                        🎉 New version available!
+                    </a>
+                </div>
             </div>
-            <div class="version-info">
-                <span>Latest:</span>
-                <span id="latestVersion" class="version-badge version-latest">Checking...</span>
-            </div>
-            <div id="updateNotice" style="display: none;">
-                <a href="https://ubersdr.org" target="_blank" class="version-link">
-                    🎉 New version available!
-                </a>
-            </div>
-            <button id="forceUpdateBtn" class="btn btn-danger" onclick="showForceUpdateModal()" style="margin-left: auto; padding: 8px 16px; font-size: 13px; font-weight: bold;">
+            <button id="forceUpdateBtn" class="btn btn-danger" onclick="showForceUpdateModal()" style="padding: 8px 16px; font-size: 13px; font-weight: bold;">
                 🔄 Force Update
             </button>
         </div>

@@ -2177,20 +2177,11 @@ class ChatUI {
             zoom_bw: zoomBW
         });
 
-        // Update chat's lastSent tracking to prevent echo
-        // This tells the deduplication logic we already know about these values
-        this.chat.updateLastSentValues({
-            frequency: userData.frequency,
-            mode: userData.mode,
-            bwHigh: bwHigh,
-            bwLow: bwLow,
-            zoomBW: zoomBW
-        });
-
         // Don't send updates directly - let the radio event handlers do it
         // The GUI changes above will trigger radioAPI events which are debounced
-        // This prevents multiple rapid updates when syncing
-        console.log('[ChatUI] Sync complete - waiting for debounced radio events');
+        // The first send will go through (to notify other users we changed)
+        // Subsequent duplicate sends will be blocked by sendFrequencyMode() deduplication
+        console.log('[ChatUI] Sync complete - waiting for debounced radio events to notify others');
         // Removed "Synced to..." message per user request
     }
 

@@ -888,8 +888,8 @@ class ChatUI {
 
         usernameInput.addEventListener('input', (e) => {
             const value = e.target.value;
-            // Remove any non-alphanumeric characters as user types
-            const cleaned = value.replace(/[^A-Za-z0-9]/g, '');
+            // Allow alphanumeric, hyphens, underscores, forward slashes
+            const cleaned = value.replace(/[^A-Za-z0-9\-_\/]/g, '');
             if (value !== cleaned) {
                 e.target.value = cleaned;
             }
@@ -906,6 +906,10 @@ class ChatUI {
                 validationIndicator.style.display = 'block';
                 const isLengthValid = cleaned.length >= 1 && cleaned.length <= 15;
 
+                // Check if starts or ends with special characters
+                const startsWithSpecial = /^[-_\/]/.test(cleaned);
+                const endsWithSpecial = /[-_\/]$/.test(cleaned);
+
                 // Check if username is already taken (case-insensitive)
                 const isTaken = this.chat.activeUsers.some(u =>
                     u.username.toLowerCase() === cleaned.toLowerCase()
@@ -916,6 +920,14 @@ class ChatUI {
                     validationIndicator.textContent = '✗';
                     validationIndicator.style.color = '#f87171';
                     validationIndicator.title = 'Username must be 1-15 characters';
+                    joinBtn.disabled = true;
+                    joinBtn.style.opacity = '0.5';
+                    joinBtn.style.cursor = 'not-allowed';
+                } else if (startsWithSpecial || endsWithSpecial) {
+                    // Starts or ends with special character - red cross
+                    validationIndicator.textContent = '✗';
+                    validationIndicator.style.color = '#f87171';
+                    validationIndicator.title = 'Username cannot start or end with - _ /';
                     joinBtn.disabled = true;
                     joinBtn.style.opacity = '0.5';
                     joinBtn.style.cursor = 'not-allowed';
@@ -942,7 +954,9 @@ class ChatUI {
         // Join button
         joinBtn.addEventListener('click', () => {
             const username = usernameInput.value.trim();
-            if (username.length >= 1 && username.length <= 15 && /^[A-Za-z0-9]+$/.test(username)) {
+            // Allow alphanumeric plus hyphens, underscores, forward slashes (not at start/end)
+            if (username.length >= 1 && username.length <= 15 &&
+                /^[A-Za-z0-9][A-Za-z0-9\-_\/]*[A-Za-z0-9]$|^[A-Za-z0-9]$/.test(username)) {
                 this.chat.setUsername(username);
             }
         });

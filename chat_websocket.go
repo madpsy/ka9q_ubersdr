@@ -683,26 +683,61 @@ func (cm *ChatManager) HandleChatMessage(sessionID string, conn *websocket.Conn,
 	}
 }
 
-// isAlphanumeric checks if a string contains only alphanumeric characters
+// isAlphanumeric checks if a string contains only alphanumeric characters and allowed special chars
+// Allows: letters, numbers, hyphens, underscores, forward slashes
+// But not at the start or end
 func isAlphanumeric(s string) bool {
-	for _, r := range s {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
-			return false
+	if len(s) == 0 {
+		return false
+	}
+
+	for i, r := range s {
+		isAlpha := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+		isDigit := (r >= '0' && r <= '9')
+		isSpecial := (r == '-' || r == '_' || r == '/')
+
+		// First and last character must be alphanumeric
+		if i == 0 || i == len(s)-1 {
+			if !(isAlpha || isDigit) {
+				return false
+			}
+		} else {
+			// Middle characters can be alphanumeric or special
+			if !(isAlpha || isDigit || isSpecial) {
+				return false
+			}
 		}
 	}
 	return true
 }
 
-// sanitizeUsername removes non-alphanumeric characters and limits length
+// sanitizeUsername removes invalid characters and limits length
+// Keeps: alphanumeric, hyphens, underscores, forward slashes (but not at start/end)
 func sanitizeUsername(username string) string {
-	// Keep only alphanumeric characters
+	// Keep only valid characters
 	cleaned := ""
 	for _, r := range username {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+		isAlpha := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+		isDigit := (r >= '0' && r <= '9')
+		isSpecial := (r == '-' || r == '_' || r == '/')
+
+		if isAlpha || isDigit || isSpecial {
 			cleaned += string(r)
 		}
 	}
-	return trimString(cleaned, 15)
+
+	// Trim to max length
+	cleaned = trimString(cleaned, 15)
+
+	// Remove special characters from start and end
+	for len(cleaned) > 0 && (cleaned[0] == '-' || cleaned[0] == '_' || cleaned[0] == '/') {
+		cleaned = cleaned[1:]
+	}
+	for len(cleaned) > 0 && (cleaned[len(cleaned)-1] == '-' || cleaned[len(cleaned)-1] == '_' || cleaned[len(cleaned)-1] == '/') {
+		cleaned = cleaned[:len(cleaned)-1]
+	}
+
+	return cleaned
 }
 
 // sanitizeMessage removes control characters and ensures safe encoding

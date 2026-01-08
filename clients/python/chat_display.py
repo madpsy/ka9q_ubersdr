@@ -12,6 +12,7 @@ import time
 from datetime import datetime
 from typing import Optional, Callable, Dict, List
 import re
+import webbrowser
 
 
 class ChatDisplay:
@@ -113,7 +114,7 @@ class ChatDisplay:
 
         self.messages_text = scrolledtext.ScrolledText(
             left_frame,
-            wrap=tk.WORD,
+            wrap=tk.CHAR,
             width=50,
             height=25,
             state='disabled',
@@ -133,6 +134,7 @@ class ChatDisplay:
         self.messages_text.tag_config('system', foreground='#999', font=('TkDefaultFont', 9, 'italic'))
         self.messages_text.tag_config('error', foreground='#ff6b6b', font=('TkDefaultFont', 9, 'bold'))
         self.messages_text.tag_config('mention', background='#ffc107', foreground='#000')
+        self.messages_text.tag_config('link', foreground='#4a9eff', underline=1)
 
         # Bind click events for clickable usernames
         self.messages_text.tag_bind('username_clickable', '<Button-1>', self.on_username_click)
@@ -486,8 +488,10 @@ class ChatDisplay:
             messagebox.showerror("Error", "Username must be 1-15 characters")
             return
 
-        if not re.match(r'^[A-Za-z0-9]+$', username):
-            messagebox.showerror("Error", "Username must contain only letters and numbers")
+        # Allow alphanumeric plus hyphens, underscores, forward slashes (not at start/end)
+        # Pattern: alphanumeric at start and end, any allowed chars in middle, OR single alphanumeric
+        if not re.match(r'^[A-Za-z0-9]([A-Za-z0-9\-_/]*[A-Za-z0-9])?$', username):
+            messagebox.showerror("Error", "Username must contain only letters, numbers, hyphens, underscores, and forward slashes.\nSpecial characters cannot be at the start or end.")
             return
 
         # Check if username is already taken (case-insensitive)
@@ -745,6 +749,9 @@ class ChatDisplay:
         except:
             time_str = ''
 
+        # Build the entire line first, then insert it
+        # This prevents wrapping issues where long messages start on a new line
+
         # Add timestamp
         if time_str:
             self.messages_text.insert(tk.END, f"[{time_str}] ", 'timestamp')
@@ -766,22 +773,57 @@ class ChatDisplay:
             self.messages_text.tag_bind(unique_tag, '<Leave>',
                 lambda e: self._on_chat_username_leave(e))
 
-        # Add message (highlight mentions)
+        # Add message on the same line (highlight mentions and linkify URLs)
         if is_mention and self.username:
-            # Split message and highlight mentions
+            # Split message and highlight mentions, then linkify URLs
             parts = re.split(f'(@{re.escape(self.username)})', message, flags=re.IGNORECASE)
             for part in parts:
                 if part.lower() == f'@{self.username.lower()}':
                     self.messages_text.insert(tk.END, part, 'mention')
                 else:
-                    self.messages_text.insert(tk.END, part)
+                    # Linkify URLs in this part
+                    self._insert_text_with_links(part)
         else:
-            self.messages_text.insert(tk.END, message)
+            # Linkify URLs in the entire message
+            self._insert_text_with_links(message)
 
+        # Add newline at the end of the complete message
         self.messages_text.insert(tk.END, '\n')
 
         self.messages_text.config(state='disabled')
         self.messages_text.see(tk.END)
+
+    def _insert_text_with_links(self, text: str):
+        """Insert text with URLs converted to clickable links"""
+        # Match URLs starting with http:// or https://
+        url_pattern = r'(https?://[^\s]+)'
+        parts = re.split(url_pattern, text)
+
+        for part in parts:
+            if re.match(url_pattern, part):
+                # This is a URL - make it clickable
+                # Create a unique tag for this link
+                link_tag = f'link_{id(part)}_{time.time()}'
+                self.messages_text.insert(tk.END, part, ('link', link_tag))
+
+                # Bind click event to open URL
+                self.messages_text.tag_bind(link_tag, '<Button-1>',
+                    lambda e, url=part: self._open_url(url))
+                # Change cursor on hover
+                self.messages_text.tag_bind(link_tag, '<Enter>',
+                    lambda e: self.messages_text.config(cursor='hand2'))
+                self.messages_text.tag_bind(link_tag, '<Leave>',
+                    lambda e: self.messages_text.config(cursor=''))
+            else:
+                # Regular text
+                self.messages_text.insert(tk.END, part)
+
+    def _open_url(self, url: str):
+        """Open URL in default web browser"""
+        try:
+            webbrowser.open(url)
+        except Exception as e:
+            print(f"Failed to open URL {url}: {e}")
 
     def add_system_message(self, message: str):
         """Add a system message to the display"""

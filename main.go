@@ -831,6 +831,12 @@ func main() {
 		instanceReporter = NewInstanceReporter(config, cwskimmerConfig, sessions, configPath)
 	}
 
+	// Set the DX cluster websocket handler in instance reporter for chat user count
+	// This must be done after both are initialized
+	if instanceReporter != nil && dxClusterWsHandler != nil {
+		instanceReporter.SetDXClusterWebSocketHandler(dxClusterWsHandler)
+	}
+
 	// Initialize admin handler (pass all components for proper shutdown during restart)
 	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter)
 
@@ -859,7 +865,7 @@ func main() {
 		handleExtensions(w, r, config)
 	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
-		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter)
+		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler)
 	})
 	http.HandleFunc("/api/instance", func(w http.ResponseWriter, r *http.Request) {
 		handleInstanceStatus(w, r, config)
@@ -1580,7 +1586,7 @@ func handleExtensions(w http.ResponseWriter, r *http.Request, config *Config) {
 }
 
 // handleDescription serves the description HTML from config plus all status information
-func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter) {
+func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -1618,6 +1624,12 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		}
 	}
 
+	// Get chat user count (thread-safe, returns 0 if chat disabled)
+	chatUserCount := 0
+	if dxClusterWsHandler != nil {
+		chatUserCount = dxClusterWsHandler.GetChatUserCount()
+	}
+
 	// Build the response with description plus status information (without sdrs)
 	response := map[string]interface{}{
 		"description": config.Admin.Description,
@@ -1642,6 +1654,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"digital_decodes":      config.Decoder.Enabled,
 		"cw_skimmer":           cwskimmerConfig.Enabled,
 		"chat_enabled":         config.Chat.Enabled,
+		"chat_users":           chatUserCount,
 		"public_iq_modes":      publicIQModes,
 		"spectrum_poll_period": config.Spectrum.PollPeriodMs,
 		"public_uuid":          publicUUID,

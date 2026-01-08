@@ -585,6 +585,13 @@ func (cm *ChatManager) GetActiveUsers() []ChatUser {
 	return users
 }
 
+// GetActiveUserCount returns the number of currently active users (thread-safe)
+func (cm *ChatManager) GetActiveUserCount() int {
+	cm.activeUsersMu.RLock()
+	defer cm.activeUsersMu.RUnlock()
+	return len(cm.activeUsers)
+}
+
 // SendActiveUsers sends the list of active users to a specific client
 func (cm *ChatManager) SendActiveUsers(conn *websocket.Conn) {
 	users := cm.GetActiveUsers()

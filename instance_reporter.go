@@ -23,6 +23,7 @@ type InstanceReporter struct {
 	config              *Config
 	cwskimmerConfig     *CWSkimmerConfig
 	sessions            *SessionManager
+	dxClusterWsHandler  *DXClusterWebSocketHandler // For getting chat user count
 	configPath          string
 	httpClient          *http.Client
 	stopChan            chan struct{}
@@ -65,6 +66,7 @@ type InstanceReport struct {
 	Load             map[string]interface{} `json:"load,omitempty"`    // System load averages, CPU cores, and status
 	CORSEnabled      bool                   `json:"cors_enabled"`      // Whether CORS is enabled
 	ChatEnabled      bool                   `json:"chat_enabled"`      // Whether chat is enabled
+	ChatUsers        int                    `json:"chat_users"`        // Number of active chat users
 	Test             bool                   `json:"test,omitempty"`    // If true, this is a test report - collector will verify /api/description instead of full callback
 }
 
@@ -90,6 +92,26 @@ func NewInstanceReporter(config *Config, cwskimmerConfig *CWSkimmerConfig, sessi
 		},
 		stopChan: make(chan struct{}),
 	}
+}
+
+// SetDXClusterWebSocketHandler sets the DX cluster websocket handler for chat user count
+// This must be called after the handler is initialized (after NewInstanceReporter)
+func (ir *InstanceReporter) SetDXClusterWebSocketHandler(handler *DXClusterWebSocketHandler) {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
+	ir.dxClusterWsHandler = handler
+}
+
+// getChatUserCount returns the current number of active chat users (thread-safe)
+func (ir *InstanceReporter) getChatUserCount() int {
+	ir.mu.RLock()
+	handler := ir.dxClusterWsHandler
+	ir.mu.RUnlock()
+
+	if handler == nil {
+		return 0
+	}
+	return handler.GetChatUserCount()
 }
 
 // Start begins the instance reporting service
@@ -414,6 +436,9 @@ func (ir *InstanceReporter) sendReport() error {
 	// Get system load information (includes CPU cores)
 	systemLoad := ir.getSystemLoad()
 
+	// Get chat user count (thread-safe)
+	chatUserCount := ir.getChatUserCount()
+
 	report := InstanceReport{
 		UUID:             ir.config.InstanceReporting.InstanceUUID,
 		Callsign:         ir.config.Admin.Callsign,
@@ -442,6 +467,7 @@ func (ir *InstanceReporter) sendReport() error {
 		Load:             systemLoad,
 		CORSEnabled:      ir.config.Server.EnableCORS,
 		ChatEnabled:      ir.config.Chat.Enabled,
+		ChatUsers:        chatUserCount,
 	}
 
 	jsonData, err := json.Marshal(report)
@@ -739,6 +765,9 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 	// Get system load information (includes CPU cores)
 	systemLoad := ir.getSystemLoad()
 
+	// Get chat user count (thread-safe)
+	chatUserCount := ir.getChatUserCount()
+
 	report := InstanceReport{
 		UUID:             instanceUUID,
 		Callsign:         adminCallsign,
@@ -767,6 +796,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		Load:             systemLoad,
 		CORSEnabled:      ir.config.Server.EnableCORS,
 		ChatEnabled:      ir.config.Chat.Enabled,
+		ChatUsers:        chatUserCount,
 		Test:             isTest,
 	}
 

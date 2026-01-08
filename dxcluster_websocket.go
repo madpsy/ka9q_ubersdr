@@ -867,3 +867,12 @@ func (h *DXClusterWebSocketHandler) sendBufferedSpots(conn *websocket.Conn) {
 		}
 	}
 }
+
+// GetChatUserCount returns the number of active chat users (thread-safe)
+// Returns 0 if chat is not enabled
+func (h *DXClusterWebSocketHandler) GetChatUserCount() int {
+	if h.chatManager == nil {
+		return 0
+	}
+	return h.chatManager.GetActiveUserCount()
+}

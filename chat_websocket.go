@@ -324,7 +324,10 @@ func (cm *ChatManager) broadcastUserUpdate(user *ChatUser) {
 		"username": user.Username,
 	}
 
-	// Calculate and include idle time
+	// Always include idle status (boolean)
+	userData["is_idle"] = user.IsIdle
+
+	// Calculate and include idle time (informational)
 	idleMinutes := int(time.Now().Sub(user.LastActivityTime).Minutes())
 	if idleMinutes > 0 {
 		userData["idle_minutes"] = idleMinutes
@@ -591,7 +594,9 @@ func (cm *ChatManager) SendActiveUsers(conn *websocket.Conn) {
 		userData := map[string]interface{}{
 			"username": user.Username,
 		}
-		// Calculate and include idle time
+		// Always include idle status (boolean)
+		userData["is_idle"] = user.IsIdle
+		// Calculate and include idle time (informational)
 		idleMinutes := int(time.Now().Sub(user.LastActivityTime).Minutes())
 		if idleMinutes > 0 {
 			userData["idle_minutes"] = idleMinutes
@@ -642,7 +647,9 @@ func (cm *ChatManager) BroadcastActiveUsers() {
 		userData := map[string]interface{}{
 			"username": user.Username,
 		}
-		// Calculate and include idle time
+		// Always include idle status (boolean)
+		userData["is_idle"] = user.IsIdle
+		// Calculate and include idle time (informational)
 		idleMinutes := int(time.Now().Sub(user.LastActivityTime).Minutes())
 		if idleMinutes > 0 {
 			userData["idle_minutes"] = idleMinutes

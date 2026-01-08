@@ -1842,8 +1842,8 @@ class ChatUI {
             if (u.tx) {
                 statusIcons += ' 📡'; // Transmitting
             }
-            // Add idle icon if user has been idle for 5+ minutes
-            if (u.idle_minutes && u.idle_minutes >= 5) {
+            // Add idle icon if user is idle (server determines threshold)
+            if (u.is_idle) {
                 statusIcons += ' 💤'; // Idle
             }
 
@@ -1876,7 +1876,7 @@ class ChatUI {
 
             // Build tooltip with all radio settings
             let tooltip = u.username;
-            if (u.idle_minutes && u.idle_minutes >= 5) {
+            if (u.is_idle && u.idle_minutes) {
                 tooltip += `\nIdle: ${u.idle_minutes} minutes`;
             }
             if (u.frequency) {

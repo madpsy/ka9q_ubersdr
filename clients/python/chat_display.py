@@ -902,6 +902,7 @@ class ChatDisplay:
             mode = user.get('mode', '').upper()
             cat = user.get('cat', False)
             tx = user.get('tx', False)
+            is_idle = user.get('is_idle', False)
             idle_minutes = user.get('idle_minutes', 0)
 
             # Store mapping from listbox index to user data
@@ -911,7 +912,8 @@ class ChatDisplay:
             display = username
 
             # Add idle indicator (after username, before other status icons)
-            if idle_minutes and idle_minutes >= 5:
+            # Server determines idle threshold
+            if is_idle:
                 display += " 💤"
 
             # Add CAT control indicator (after username, before frequency)
@@ -1410,12 +1412,13 @@ class ChatDisplay:
         mode = user.get('mode', '').upper()
         cat = user.get('cat', False)
         tx = user.get('tx', False)
+        is_idle = user.get('is_idle', False)
         idle_minutes = user.get('idle_minutes', 0)
 
         tooltip_lines = [username]
 
-        # Show idle time if user is idle
-        if idle_minutes and idle_minutes >= 5:
+        # Show idle time if user is idle (server determines threshold)
+        if is_idle and idle_minutes:
             tooltip_lines.append(f"💤 Idle: {idle_minutes} minutes")
 
         if freq:

@@ -1606,6 +1606,11 @@ class ChatUI {
 
         // Don't clear messages - keep chat history visible
         this.addSystemMessage('You left the chat');
+
+        // Collapse the chat panel
+        if (this.isExpanded) {
+            this.togglePanel();
+        }
     }
 
     /**

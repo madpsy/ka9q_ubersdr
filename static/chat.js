@@ -210,8 +210,10 @@ class UberSDRChat {
         if (username.length < 1 || username.length > 15) {
             return { valid: false, error: 'Username must be 1-15 characters' };
         }
-        if (!/^[A-Za-z0-9]+$/.test(username)) {
-            return { valid: false, error: 'Username must contain only letters and numbers' };
+        // Allow alphanumeric, hyphens, underscores, forward slashes
+        // Must start and end with alphanumeric (special chars only in middle)
+        if (!/^[A-Za-z0-9]([A-Za-z0-9\-_\/]*[A-Za-z0-9])?$/.test(username)) {
+            return { valid: false, error: 'Username must contain letters, numbers, - _ / and cannot start or end with - _ /' };
         }
         return { valid: true };
     }

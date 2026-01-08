@@ -1029,8 +1029,9 @@ class ChatUI {
         joinBtn.addEventListener('click', () => {
             const username = usernameInput.value.trim();
             // Allow alphanumeric plus hyphens, underscores, forward slashes (not at start/end)
+            // Pattern: single alphanumeric char OR alphanumeric at start and end with anything in middle
             if (username.length >= 1 && username.length <= 15 &&
-                /^[A-Za-z0-9][A-Za-z0-9\-_\/]*[A-Za-z0-9]$|^[A-Za-z0-9]$/.test(username)) {
+                /^[A-Za-z0-9]([A-Za-z0-9\-_\/]*[A-Za-z0-9])?$/.test(username)) {
                 this.chat.setUsername(username);
             }
         });

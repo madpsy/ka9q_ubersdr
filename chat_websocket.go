@@ -738,6 +738,8 @@ func (cm *ChatManager) trackIdleStatus() {
 
 		// Collect all idle users for bulk update
 		idleUpdates := make([]map[string]interface{}, 0)
+		// Track users who just became idle for individual broadcasts
+		newlyIdleUsers := make([]*ChatUser, 0)
 
 		for _, user := range cm.activeUsers {
 			idleMinutes := int(now.Sub(user.LastActivityTime).Minutes())
@@ -746,6 +748,8 @@ func (cm *ChatManager) trackIdleStatus() {
 			if idleMinutes >= 5 && !user.IsIdle {
 				user.IsIdle = true
 				log.Printf("Chat: User '%s' is now idle (%d minutes)", user.Username, idleMinutes)
+				// Track for individual broadcast
+				newlyIdleUsers = append(newlyIdleUsers, user)
 			}
 
 			// Add all idle users to the bulk update
@@ -758,6 +762,11 @@ func (cm *ChatManager) trackIdleStatus() {
 			}
 		}
 		cm.activeUsersMu.Unlock()
+
+		// Send individual broadcasts for newly idle users
+		for _, user := range newlyIdleUsers {
+			cm.broadcastUserUpdate(user)
+		}
 
 		// Send bulk update if there are any idle users
 		if len(idleUpdates) > 0 {

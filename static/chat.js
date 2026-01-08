@@ -516,6 +516,29 @@ class UberSDRChat {
     }
 
     /**
+     * Update last sent tracking values
+     * Call this when receiving updates from other users to prevent echo
+     * @param {object} values - Object with frequency, mode, bwHigh, bwLow, zoomBW
+     */
+    updateLastSentValues(values) {
+        if (values.frequency !== undefined) {
+            this.lastSentFreq = values.frequency;
+        }
+        if (values.mode !== undefined) {
+            this.lastSentMode = values.mode.toLowerCase();
+        }
+        if (values.bwHigh !== undefined) {
+            this.lastSentBwHigh = values.bwHigh;
+        }
+        if (values.bwLow !== undefined) {
+            this.lastSentBwLow = values.bwLow;
+        }
+        if (values.zoomBW !== undefined) {
+            this.lastSentZoomBW = values.zoomBW;
+        }
+    }
+
+    /**
      * Send current frequency/mode/bandwidth to server
      * Internal method called by debounced updates
      * Always reads fresh values from app.js globals to ensure accuracy

@@ -1274,6 +1274,7 @@ class ChatUI {
                 data.users.forEach(idleUser => {
                     const user = this.chat.activeUsers.find(u => u.username === idleUser.username);
                     if (user) {
+                        user.is_idle = idleUser.is_idle;
                         user.idle_minutes = idleUser.idle_minutes;
                     }
                 });

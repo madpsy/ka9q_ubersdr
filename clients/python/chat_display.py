@@ -970,16 +970,20 @@ class ChatDisplay:
         """Update idle times for multiple users (bulk update)"""
         users = data.get('users', [])
 
-        # Update idle_minutes for each user in the list
+        # Update is_idle and idle_minutes for each user in the list
         for idle_user in users:
             username = idle_user.get('username')
+            is_idle = idle_user.get('is_idle')
             idle_minutes = idle_user.get('idle_minutes')
 
-            if username and idle_minutes is not None:
+            if username:
                 # Find and update the user in active_users
                 for user in self.active_users:
                     if user.get('username') == username:
-                        user['idle_minutes'] = idle_minutes
+                        if is_idle is not None:
+                            user['is_idle'] = is_idle
+                        if idle_minutes is not None:
+                            user['idle_minutes'] = idle_minutes
                         break
 
         # Refresh display with updated idle times

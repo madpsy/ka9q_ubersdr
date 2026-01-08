@@ -752,6 +752,7 @@ func (cm *ChatManager) trackIdleStatus() {
 			if idleMinutes >= 5 {
 				idleUpdates = append(idleUpdates, map[string]interface{}{
 					"username":     user.Username,
+					"is_idle":      true, // Always true for users in this list
 					"idle_minutes": idleMinutes,
 				})
 			}

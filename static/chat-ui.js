@@ -2038,7 +2038,7 @@ class ChatUI {
      * Sync our radio to a user's settings
      */
     syncToUser(userData) {
-        console.log('[ChatUI] Syncing to user:', userData.username, 'freq:', userData.frequency, 'mode:', userData.mode, 'bw_low:', userData.bw_low, 'bw_high:', userData.bw_high, 'zoom_bw:', userData.zoom_bw);
+        console.log(`[ChatUI] Syncing to ${userData.username}: freq=${userData.frequency} Hz, mode=${userData.mode ? userData.mode.toUpperCase() : 'N/A'}, bw_low=${userData.bw_low}, bw_high=${userData.bw_high}, zoom_bw=${userData.zoom_bw}`);
 
         // Only sync if we have frequency and mode data
         if (!userData.frequency || !userData.mode) {

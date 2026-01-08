@@ -476,7 +476,8 @@ class ChatUI {
             }
 
             .chat-panel.expanded {
-                width: 540px;
+                width: min(540px, 100vw);
+                max-width: 100vw;
             }
 
             .chat-header {
@@ -574,7 +575,8 @@ class ChatUI {
             }
 
             .chat-content {
-                width: 500px;
+                width: min(500px, calc(100vw - 40px));
+                max-width: 100%;
                 height: 500px;
                 background: rgba(40, 40, 40, 0.7);
                 border: 1px solid rgba(100, 100, 100, 0.6);
@@ -872,6 +874,71 @@ class ChatUI {
                 background: #4a9eff !important;
                 color: #fff !important;
                 border-color: #4a9eff !important;
+            }
+
+            /* Mobile responsive styles */
+            @media (max-width: 768px) {
+                .chat-panel.expanded {
+                    width: 100vw;
+                    right: 0;
+                }
+
+                .chat-content {
+                    width: calc(100vw - 40px);
+                    height: 400px;
+                }
+
+                .chat-main-area {
+                    width: 60%;
+                    min-width: 200px;
+                }
+
+                .chat-users-sidebar {
+                    width: 40%;
+                    min-width: 120px;
+                }
+
+                .chat-input {
+                    font-size: 16px; /* Prevents zoom on iOS */
+                }
+
+                .chat-messages {
+                    font-size: 11px;
+                }
+
+                .chat-user-item {
+                    padding: 4px 2px;
+                    margin-bottom: 4px;
+                }
+            }
+
+            /* Very small screens */
+            @media (max-width: 480px) {
+                .chat-content {
+                    height: 350px;
+                }
+
+                .chat-main-area {
+                    width: 65%;
+                }
+
+                .chat-users-sidebar {
+                    width: 35%;
+                }
+
+                .chat-messages {
+                    font-size: 10px;
+                    padding: 6px;
+                }
+
+                .chat-input-area {
+                    padding: 6px;
+                }
+
+                .chat-btn {
+                    padding: 5px 8px;
+                    font-size: 11px;
+                }
             }
         `;
         document.head.appendChild(style);

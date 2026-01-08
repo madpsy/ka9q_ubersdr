@@ -383,7 +383,6 @@ class ChatUI {
                                     <input type="text" id="chat-username-input"
                                            placeholder="Choose a username..."
                                            maxlength="15"
-                                           pattern="[A-Za-z0-9]+"
                                            class="chat-input"
                                            style="padding-right: 30px;">
                                     <span id="chat-username-validation" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 14px; display: none;"></span>

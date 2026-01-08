@@ -921,7 +921,7 @@ func trimString(s string, maxLen int) string {
 
 // Error types
 var (
-	ErrInvalidUsername         = &ChatError{"invalid username"}
+	ErrInvalidUsername         = &ChatError{"invalid username - must be 1-15 characters (letters, numbers, - _ /) and cannot start or end with - _ /"}
 	ErrInvalidMessage          = &ChatError{"invalid message"}
 	ErrUsernameNotSet          = &ChatError{"username not set"}
 	ErrInvalidMessageType      = &ChatError{"invalid message type"}

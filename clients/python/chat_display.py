@@ -13,12 +13,14 @@ from datetime import datetime
 from typing import Optional, Callable, Dict, List
 import re
 import webbrowser
+import os
+import platform
 
 
 class ChatDisplay:
     """Chat display window for UberSDR"""
 
-    def __init__(self, parent, websocket_manager, radio_gui, on_close: Optional[Callable] = None):
+    def __init__(self, parent, websocket_manager, radio_gui, on_close: Optional[Callable] = None, instance_uuid: Optional[str] = None):
         """
         Initialize chat display
 
@@ -27,11 +29,13 @@ class ChatDisplay:
             websocket_manager: DXClusterWebSocket manager instance
             radio_gui: Reference to RadioGUI instance for frequency/mode updates
             on_close: Callback when window is closed
+            instance_uuid: UUID of the instance we're connected to (for saving username)
         """
         self.parent = parent
         self.ws_manager = websocket_manager
         self.radio_gui = radio_gui
         self.on_close_callback = on_close
+        self.instance_uuid = instance_uuid
         self.username = None
         self.saved_username = None  # For auto-rejoin
         self.is_auto_rejoining = False  # Track if we're auto-rejoining
@@ -41,6 +45,14 @@ class ChatDisplay:
         self.synced_username = None
         self.listbox_to_user = {}  # Map listbox index to user data
         self.emoji_popup = None  # Emoji picker popup window
+        
+        # Config file path for storing chat usernames per instance
+        if platform.system() == 'Windows':
+            config_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'ubersdr')
+            os.makedirs(config_dir, exist_ok=True)
+            self.config_file = os.path.join(config_dir, 'chat_usernames.json')
+        else:
+            self.config_file = os.path.expanduser("~/.ubersdr_chat_usernames.json")
         
         # Track last sent values to prevent duplicate sends
         self.last_sent_freq = None
@@ -77,6 +89,9 @@ class ChatDisplay:
         # Request active users after a short delay to ensure WebSocket is ready
         # This allows users to see who's online even before joining
         self.window.after(500, self.request_active_users)
+
+        # Load saved username for this instance
+        self.load_saved_username()
 
 # Add this helper function at the class level (after __init__)
     def _get_emoji_font(self):
@@ -516,6 +531,9 @@ class ChatDisplay:
             self.username = username
             self.saved_username = username  # Save for auto-rejoin
 
+            # Save username for this instance UUID
+            self.save_username_for_instance(username)
+
             # Switch UI to message input
             self.username_frame.grid_remove()
             self.message_frame.grid()
@@ -544,6 +562,9 @@ class ChatDisplay:
             self.ws_manager.send_message({
                 'type': 'chat_leave'
             })
+
+            # Remove saved username for this instance
+            self.remove_username_for_instance()
 
             self.username = None
             self.synced_username = None
@@ -1481,6 +1502,85 @@ class ChatDisplay:
             self.user_tooltip.destroy()
             self.user_tooltip = None
 
+    def load_saved_username(self):
+        """Load saved username for this instance UUID"""
+        if not self.instance_uuid:
+            return None
+
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r') as f:
+                    data = json.load(f)
+                    return data.get(self.instance_uuid)
+        except Exception as e:
+            print(f"Error loading saved chat username: {e}")
+        return None
+
+    def save_username_for_instance(self, username: str):
+        """Save username for this instance UUID"""
+        if not self.instance_uuid:
+            return
+
+        try:
+            # Load existing data
+            data = {}
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r') as f:
+                    data = json.load(f)
+
+            # Update with new username
+            data[self.instance_uuid] = username
+
+            # Save back to file
+            with open(self.config_file, 'w') as f:
+                json.dump(data, f, indent=2)
+
+            print(f"Saved chat username '{username}' for instance {self.instance_uuid}")
+        except Exception as e:
+            print(f"Error saving chat username: {e}")
+
+    def remove_username_for_instance(self):
+        """Remove saved username for this instance UUID"""
+        if not self.instance_uuid:
+            return
+
+        try:
+            # Load existing data
+            if not os.path.exists(self.config_file):
+                return
+
+            with open(self.config_file, 'r') as f:
+                data = json.load(f)
+
+            # Remove this instance's username if it exists
+            if self.instance_uuid in data:
+                del data[self.instance_uuid]
+                print(f"Removed saved chat username for instance {self.instance_uuid}")
+
+                # Save back to file
+                with open(self.config_file, 'w') as f:
+                    json.dump(data, f, indent=2)
+        except Exception as e:
+            print(f"Error removing chat username: {e}")
+
+    def get_saved_username_for_instance(self, instance_uuid: str) -> Optional[str]:
+        """Get saved username for a specific instance UUID (static method for external use)"""
+        try:
+            # Determine config file path
+            if platform.system() == 'Windows':
+                config_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'ubersdr')
+                config_file = os.path.join(config_dir, 'chat_usernames.json')
+            else:
+                config_file = os.path.expanduser("~/.ubersdr_chat_usernames.json")
+
+            if os.path.exists(config_file):
+                with open(config_file, 'r') as f:
+                    data = json.load(f)
+                    return data.get(instance_uuid)
+        except Exception as e:
+            print(f"Error loading saved chat username: {e}")
+        return None
+
     def close(self):
         """Close the chat window"""
         # Hide tooltips if showing
@@ -1507,7 +1607,34 @@ class ChatDisplay:
         self.window.destroy()
 
 
-def create_chat_window(parent, websocket_manager, radio_gui, on_close: Optional[Callable] = None):
+def get_saved_username_for_instance(instance_uuid: str) -> Optional[str]:
+    """
+    Get saved username for a specific instance UUID (module-level function for external use)
+
+    Args:
+        instance_uuid: UUID of the instance
+
+    Returns:
+        Saved username for this instance, or None if not found
+    """
+    try:
+        # Determine config file path
+        if platform.system() == 'Windows':
+            config_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'ubersdr')
+            config_file = os.path.join(config_dir, 'chat_usernames.json')
+        else:
+            config_file = os.path.expanduser("~/.ubersdr_chat_usernames.json")
+
+        if os.path.exists(config_file):
+            with open(config_file, 'r') as f:
+                data = json.load(f)
+                return data.get(instance_uuid)
+    except Exception as e:
+        print(f"Error loading saved chat username: {e}")
+    return None
+
+
+def create_chat_window(parent, websocket_manager, radio_gui, on_close: Optional[Callable] = None, instance_uuid: Optional[str] = None):
     """
     Create a chat window
 
@@ -1516,8 +1643,9 @@ def create_chat_window(parent, websocket_manager, radio_gui, on_close: Optional[
         websocket_manager: DXClusterWebSocket manager instance
         radio_gui: Reference to RadioGUI instance
         on_close: Callback when window is closed
+        instance_uuid: UUID of the instance we're connected to (for saving username)
 
     Returns:
         ChatDisplay instance
     """
-    return ChatDisplay(parent, websocket_manager, radio_gui, on_close)
+    return ChatDisplay(parent, websocket_manager, radio_gui, on_close, instance_uuid)

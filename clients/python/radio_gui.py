@@ -119,7 +119,7 @@ except ImportError:
 
 # Import chat display
 try:
-    from chat_display import create_chat_window
+    from chat_display import create_chat_window, get_saved_username_for_instance
     CHAT_AVAILABLE = True
 except ImportError:
     CHAT_AVAILABLE = False
@@ -5568,19 +5568,37 @@ class RadioGUI:
             return
 
         try:
+            # Get instance UUID from server description
+            instance_uuid = None
+            if self.client and hasattr(self.client, 'server_description'):
+                instance_uuid = self.client.server_description.get('public_uuid', '')
+
             # Ensure shared WebSocket is connected
             ws_manager = self._ensure_dxcluster_ws()
 
-            # Create chat window with shared WebSocket and radio_gui reference
+            # Create chat window with shared WebSocket, radio_gui reference, and instance UUID
             self.chat_display = create_chat_window(
                 self.root,
                 ws_manager,
                 self,  # Pass radio_gui reference
-                on_close=self._on_chat_closed
+                on_close=self._on_chat_closed,
+                instance_uuid=instance_uuid
             )
             self.chat_window = self.chat_display.window
 
-            self.log_status("Chat window opened")
+            # Check for saved username and auto-join if found
+            if instance_uuid:
+                saved_username = get_saved_username_for_instance(instance_uuid)
+                if saved_username:
+                    # Auto-populate username field
+                    self.chat_display.username_var.set(saved_username)
+                    # Automatically join chat with saved username
+                    self.root.after(100, lambda: self.chat_display.join_chat())
+                    self.log_status(f"Chat window opened - auto-joining as '{saved_username}'")
+                else:
+                    self.log_status("Chat window opened")
+            else:
+                self.log_status("Chat window opened")
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open chat: {e}")
@@ -6515,6 +6533,15 @@ class RadioGUI:
                                     else:
                                         self.chat_btn.pack(side=tk.LEFT, padx=(0, 5))
                                     self.log_status("Chat enabled on this server")
+
+                                    # Auto-open chat window if there's a saved username for this instance
+                                    instance_uuid = desc.get('public_uuid', '')
+                                    if instance_uuid and CHAT_AVAILABLE:
+                                        saved_username = get_saved_username_for_instance(instance_uuid)
+                                        if saved_username:
+                                            # Delay opening chat window to allow UI to fully initialize
+                                            self.root.after(500, self.open_chat_window)
+                                            self.log_status(f"Auto-opening chat (saved username: '{saved_username}')")
                                 elif self.chat_btn:
                                     self.chat_btn.pack_forget()
 

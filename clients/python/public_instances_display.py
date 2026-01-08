@@ -30,20 +30,31 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
     # Create new window
     window = tk.Toplevel(parent)
     window.title("Public UberSDR Instances")
-    window.geometry("1040x500")
+    window.geometry("1040x650")
 
     # Main frame with padding
     main_frame = ttk.Frame(window, padding="10")
     main_frame.pack(fill=tk.BOTH, expand=True)
 
-    # Filter frame
-    filter_frame = ttk.Frame(main_frame)
+    # Filter/Search frame at the top - with visible border for debugging
+    filter_frame = ttk.LabelFrame(main_frame, text="Search/Filter", padding="5")
     filter_frame.pack(fill=tk.X, pady=(0, 10))
 
-    ttk.Label(filter_frame, text="Filter:").pack(side=tk.LEFT, padx=(0, 5))
     filter_var = tk.StringVar()
-    filter_entry = ttk.Entry(filter_frame, textvariable=filter_var, width=40)
-    filter_entry.pack(side=tk.LEFT, padx=(0, 5))
+    filter_entry = ttk.Entry(filter_frame, textvariable=filter_var, width=50, font=('TkDefaultFont', 10))
+    filter_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 5))
+
+    # Add a clear button
+    def clear_filter():
+        filter_var.set('')
+        filter_entry.focus()
+
+    clear_btn = ttk.Button(filter_frame, text="Clear", command=clear_filter, width=8)
+    clear_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+    # Add help text
+    help_label = ttk.Label(filter_frame, text="(name, callsign, location)", foreground='gray', font=('TkDefaultFont', 9))
+    help_label.pack(side=tk.LEFT)
 
     # Status label
     status_label = ttk.Label(main_frame, text="Fetching public instances...", foreground='blue')
@@ -288,13 +299,15 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
                 # No filter, show all
                 filtered_instances.append(instance)
             else:
-                # Check if filter matches name, callsign, or UUID (id)
+                # Check if filter matches name, callsign, location, or UUID (id)
                 name = instance.get('name', '').lower()
                 callsign = instance.get('callsign', '').lower()
+                location = instance.get('location', '').lower()
                 uuid = instance.get('id', '').lower()
 
                 if (filter_text in name or
                     filter_text in callsign or
+                    filter_text in location or
                     filter_text in uuid):
                     filtered_instances.append(instance)
 

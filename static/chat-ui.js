@@ -11,6 +11,7 @@ class ChatUI {
         this.unreadCount = 0;
         this.savedUsername = null;
         this.syncedUsername = null; // Track which user we're synced with
+        this.syncZoom = false; // Track whether to sync zoom bandwidth
         this.radioEventHandlers = {}; // Store references to our radio event handlers
         this.errorTimeout = null; // Track error display timeout
         
@@ -37,6 +38,7 @@ class ChatUI {
         // Load saved username and preferences from localStorage
         this.loadSavedUsername();
         this.loadSoundMutePreference();
+        this.loadZoomSyncPreference();
         this.loadLastSeenMessageTime();
 
         this.createChatPanel();
@@ -414,6 +416,7 @@ class ChatUI {
                             <div id="chat-users-list" class="chat-users-list"></div>
                             <div class="chat-users-footer">
                                 <button id="chat-mute-btn" class="chat-btn chat-btn-mute" onclick="chatUI.toggleSoundMute()" title="Mute notification sounds" style="display:none;">🔊</button>
+                                <button id="chat-zoom-btn" class="chat-btn chat-btn-mute" onclick="chatUI.toggleZoomSync()" title="Sync zoom level" style="display:none;">🔍</button>
                                 <button id="chat-leave-btn" class="chat-btn chat-btn-danger" style="display:none;">Leave</button>
                             </div>
                         </div>
@@ -838,6 +841,11 @@ class ChatUI {
                 background: #666;
             }
 
+            .chat-btn-mute.active {
+                background: #4a9eff;
+                color: #fff;
+            }
+
             .chat-btn-danger {
                 flex: 1;
             }
@@ -1150,12 +1158,24 @@ class ChatUI {
                 document.getElementById('chat-message-input-area').style.display = 'flex';
                 document.getElementById('chat-leave-btn').style.display = 'block';
                 document.getElementById('chat-mute-btn').style.display = 'block';
+                document.getElementById('chat-zoom-btn').style.display = 'block';
 
                 // Update mute button to reflect current state
                 const muteBtn = document.getElementById('chat-mute-btn');
                 if (muteBtn) {
                     muteBtn.textContent = this.soundsMuted ? '🔇' : '🔊';
                     muteBtn.title = this.soundsMuted ? 'Unmute notification sounds' : 'Mute notification sounds';
+                }
+
+                // Update zoom button to reflect current state
+                const zoomBtn = document.getElementById('chat-zoom-btn');
+                if (zoomBtn) {
+                    if (this.syncZoom) {
+                        zoomBtn.classList.add('active');
+                    } else {
+                        zoomBtn.classList.remove('active');
+                    }
+                    zoomBtn.title = this.syncZoom ? 'Disable zoom sync' : 'Enable zoom sync';
                 }
 
                 this.addSystemMessage(`You joined as ${data.username}`);
@@ -1571,6 +1591,7 @@ class ChatUI {
         document.getElementById('chat-username-input-area').style.display = 'flex';
         document.getElementById('chat-leave-btn').style.display = 'none';
         document.getElementById('chat-mute-btn').style.display = 'none';
+        document.getElementById('chat-zoom-btn').style.display = 'none';
 
         // Clear username input and validation indicator
         const usernameInput = document.getElementById('chat-username-input');
@@ -2168,8 +2189,8 @@ class ChatUI {
             window.radioAPI.notifyBandwidthChange(bwLow, bwHigh);
         }
 
-        // Step 4: Apply zoom_bw if provided and valid (do this BEFORE autoTune)
-        if (zoomBW > 0 && window.spectrumDisplay && window.spectrumDisplay.ws && window.spectrumDisplay.ws.readyState === WebSocket.OPEN) {
+        // Step 4: Apply zoom_bw if provided, valid, AND zoom sync is enabled (do this BEFORE autoTune)
+        if (this.syncZoom && zoomBW > 0 && window.spectrumDisplay && window.spectrumDisplay.ws && window.spectrumDisplay.ws.readyState === WebSocket.OPEN) {
             console.log('[ChatUI] Applying synced zoom_bw:', zoomBW, 'Hz/bin at frequency:', userData.frequency);
 
             // Calculate new total bandwidth and apply boundary constraints (0-30 MHz)
@@ -2213,6 +2234,57 @@ class ChatUI {
         // Subsequent duplicate sends will be blocked by sendFrequencyMode() deduplication
         console.log('[ChatUI] Sync complete - waiting for debounced radio events to notify others');
         // Removed "Synced to..." message per user request
+    }
+
+    /**
+     * Load zoom sync preference from localStorage
+     */
+    loadZoomSyncPreference() {
+        try {
+            const saved = localStorage.getItem('ubersdr_chat_zoom_sync');
+            if (saved !== null) {
+                this.syncZoom = saved === 'true';
+            }
+        } catch (e) {
+            console.error('Failed to load zoom sync preference:', e);
+        }
+    }
+
+    /**
+     * Toggle zoom sync state
+     */
+    toggleZoomSync() {
+        this.syncZoom = !this.syncZoom;
+
+        // Update button appearance
+        const zoomBtn = document.getElementById('chat-zoom-btn');
+        if (zoomBtn) {
+            if (this.syncZoom) {
+                zoomBtn.classList.add('active');
+            } else {
+                zoomBtn.classList.remove('active');
+            }
+            zoomBtn.title = this.syncZoom ? 'Disable zoom sync' : 'Enable zoom sync';
+        }
+
+        // Save preference to localStorage
+        try {
+            localStorage.setItem('ubersdr_chat_zoom_sync', this.syncZoom.toString());
+        } catch (e) {
+            console.error('Failed to save zoom sync preference:', e);
+        }
+
+        // Show feedback message
+        this.addSystemMessage(this.syncZoom ? 'Zoom sync enabled' : 'Zoom sync disabled');
+
+        // If zoom was just enabled and we're currently synced with someone, apply their zoom immediately
+        if (this.syncZoom && this.syncedUsername) {
+            const user = this.chat.activeUsers.find(u => u.username === this.syncedUsername);
+            if (user && user.zoom_bw > 0) {
+                console.log('[ChatUI] Zoom enabled - applying synced user zoom immediately');
+                this.syncToUser(user);
+            }
+        }
     }
 
     /**

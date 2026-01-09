@@ -99,11 +99,18 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 		},
 	}
 
-	// Initialize chat manager if enabled (50 message buffer, configured limits)
+	// Initialize chat manager if enabled (configured message buffer and limits)
 	if chatConfig.Enabled {
-		handler.chatManager = NewChatManager(handler, 50, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond)
-		log.Printf("Chat: Initialized with max %d users, rate limits: %d msg/sec, %d msg/min, %d updates/sec",
-			chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond)
+		// Initialize chat logger
+		chatLogger, err := NewChatLogger(chatConfig.DataDir, chatConfig.LogToCSV)
+		if err != nil {
+			log.Printf("Chat: Failed to initialize logger: %v", err)
+			chatLogger = nil // Continue without logging
+		}
+
+		handler.chatManager = NewChatManager(handler, chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatLogger)
+		log.Printf("Chat: Initialized with %d buffered messages, max %d users, rate limits: %d msg/sec, %d msg/min, %d updates/sec, logging: %v",
+			chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatConfig.LogToCSV)
 	}
 
 	// Register spot handler to broadcast to all clients
@@ -201,6 +208,11 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 	h.connToSessionIDMu.Lock()
 	h.connToSessionID[conn] = userSessionID
 	h.connToSessionIDMu.Unlock()
+
+	// Store IP address for chat logging
+	if h.chatManager != nil {
+		h.chatManager.SetSessionIP(userSessionID, clientIP)
+	}
 
 	log.Printf("DX Cluster WebSocket: Client connected, user_session_id: %s, source IP: %s, client IP: %s (total: %d)", userSessionID, sourceIP, clientIP, clientCount)
 

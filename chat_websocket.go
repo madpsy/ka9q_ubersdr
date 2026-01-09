@@ -42,6 +42,10 @@ type ChatManager struct {
 	sessionUsernames   map[string]string
 	sessionUsernamesMu sync.RWMutex
 
+	// Map session UUID to IP address
+	sessionIPs   map[string]string
+	sessionIPsMu sync.RWMutex
+
 	// Chat message buffer for new connections
 	messageBuffer   []ChatMessage
 	messageBufferMu sync.RWMutex
@@ -59,12 +63,16 @@ type ChatManager struct {
 	rateLimitPerSecond       int // Maximum messages per second per user
 	rateLimitPerMinute       int // Maximum messages per minute per user
 	updateRateLimitPerSecond int // Maximum user updates per second per user
+
+	// Chat logger for persistent storage
+	chatLogger *ChatLogger
 }
 
 // NewChatManager creates a new chat manager
-func NewChatManager(wsHandler *DXClusterWebSocketHandler, maxMessages int, maxUsers int, rateLimitPerSecond int, rateLimitPerMinute int, updateRateLimitPerSecond int) *ChatManager {
+func NewChatManager(wsHandler *DXClusterWebSocketHandler, maxMessages int, maxUsers int, rateLimitPerSecond int, rateLimitPerMinute int, updateRateLimitPerSecond int, chatLogger *ChatLogger) *ChatManager {
 	cm := &ChatManager{
 		sessionUsernames:         make(map[string]string),
+		sessionIPs:               make(map[string]string),
 		messageBuffer:            make([]ChatMessage, 0, maxMessages),
 		maxMessages:              maxMessages,
 		wsHandler:                wsHandler,
@@ -73,6 +81,7 @@ func NewChatManager(wsHandler *DXClusterWebSocketHandler, maxMessages int, maxUs
 		rateLimitPerSecond:       rateLimitPerSecond,
 		rateLimitPerMinute:       rateLimitPerMinute,
 		updateRateLimitPerSecond: updateRateLimitPerSecond,
+		chatLogger:               chatLogger,
 	}
 
 	// Start cleanup goroutine for inactive users
@@ -82,6 +91,21 @@ func NewChatManager(wsHandler *DXClusterWebSocketHandler, maxMessages int, maxUs
 	go cm.trackIdleStatus()
 
 	return cm
+}
+
+// SetSessionIP associates an IP address with a session UUID
+func (cm *ChatManager) SetSessionIP(sessionID string, ipAddress string) {
+	cm.sessionIPsMu.Lock()
+	cm.sessionIPs[sessionID] = ipAddress
+	cm.sessionIPsMu.Unlock()
+}
+
+// GetSessionIP retrieves the IP address for a session UUID
+func (cm *ChatManager) GetSessionIP(sessionID string) string {
+	cm.sessionIPsMu.RLock()
+	ip := cm.sessionIPs[sessionID]
+	cm.sessionIPsMu.RUnlock()
+	return ip
 }
 
 // SetUsername associates a username with a session UUID
@@ -370,6 +394,10 @@ func (cm *ChatManager) RemoveUser(sessionID string) {
 	delete(cm.sessionUsernames, sessionID)
 	cm.sessionUsernamesMu.Unlock()
 
+	cm.sessionIPsMu.Lock()
+	delete(cm.sessionIPs, sessionID)
+	cm.sessionIPsMu.Unlock()
+
 	cm.activeUsersMu.Lock()
 	delete(cm.activeUsers, sessionID)
 	cm.activeUsersMu.Unlock()
@@ -465,6 +493,17 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 
 	// Update user's last seen time
 	cm.UpdateUserActivity(sessionID)
+
+	// Log to persistent storage
+	if cm.chatLogger != nil {
+		sourceIP := cm.GetSessionIP(sessionID)
+		if sourceIP == "" {
+			sourceIP = "unknown"
+		}
+		if err := cm.chatLogger.LogMessage(now, sourceIP, username, messageText); err != nil {
+			log.Printf("Chat: Failed to log message: %v", err)
+		}
+	}
 
 	// Broadcast to all connected clients
 	cm.broadcastChatMessage(chatMsg)

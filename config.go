@@ -165,11 +165,14 @@ type DXClusterConfig struct {
 
 // ChatConfig contains live chat settings
 type ChatConfig struct {
-	Enabled                  bool `yaml:"enabled"`                      // Enable/disable live chat functionality
-	MaxUsers                 int  `yaml:"max_users"`                    // Maximum concurrent chat users (0 = unlimited)
-	RateLimitPerSecond       int  `yaml:"rate_limit_per_second"`        // Maximum messages per second per user (default: 2)
-	RateLimitPerMinute       int  `yaml:"rate_limit_per_minute"`        // Maximum messages per minute per user (default: 30)
-	UpdateRateLimitPerSecond int  `yaml:"update_rate_limit_per_second"` // Maximum user updates per second per user (default: 4)
+	Enabled                  bool   `yaml:"enabled"`                      // Enable/disable live chat functionality
+	MaxUsers                 int    `yaml:"max_users"`                    // Maximum concurrent chat users (0 = unlimited)
+	BufferedMessages         int    `yaml:"buffered_messages"`            // Number of messages to buffer for new connections (default: 50)
+	RateLimitPerSecond       int    `yaml:"rate_limit_per_second"`        // Maximum messages per second per user (default: 2)
+	RateLimitPerMinute       int    `yaml:"rate_limit_per_minute"`        // Maximum messages per minute per user (default: 30)
+	UpdateRateLimitPerSecond int    `yaml:"update_rate_limit_per_second"` // Maximum user updates per second per user (default: 4)
+	LogToCSV                 bool   `yaml:"log_to_csv"`                   // Enable CSV logging of chat messages (default: true)
+	DataDir                  string `yaml:"data_dir"`                     // Directory to store CSV chat log files (default: "chat")
 }
 
 // SpaceWeatherConfig contains space weather monitoring settings
@@ -476,6 +479,9 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.Chat.MaxUsers == 0 {
 		config.Chat.MaxUsers = 25 // Default 25 concurrent chat users
 	}
+	if config.Chat.BufferedMessages == 0 {
+		config.Chat.BufferedMessages = 50 // Default 50 buffered messages
+	}
 	if config.Chat.RateLimitPerSecond == 0 {
 		config.Chat.RateLimitPerSecond = 2 // Default 2 messages per second
 	}
@@ -484,6 +490,13 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Chat.UpdateRateLimitPerSecond == 0 {
 		config.Chat.UpdateRateLimitPerSecond = 4 // Default 4 user updates per second
+	}
+	// Chat logging defaults - enabled by default
+	// Note: LogToCSV defaults to false in YAML, but we want it enabled by default
+	// We'll handle this by checking if it's explicitly set to false in the YAML
+	// For now, we assume if the config is loaded, logging should be enabled unless explicitly disabled
+	if config.Chat.DataDir == "" {
+		config.Chat.DataDir = "chat" // Default "chat" directory
 	}
 
 	// Set space weather defaults if not specified

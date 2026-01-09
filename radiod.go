@@ -579,6 +579,41 @@ func (rc *RadiodController) DisableChannel(name string, ssrc uint32) error {
 	return nil
 }
 
+// TerminateChannel explicitly terminates a channel by setting demod_type to -1
+// This immediately stops the demod thread and cleans up all resources
+// Use this instead of DisableChannel when you want to completely remove a channel
+func (rc *RadiodController) TerminateChannel(name string, ssrc uint32) error {
+	buf := make([]byte, 0, 1500)
+
+	// Start with CMD packet type
+	buf = append(buf, 1) // CMD = 1
+
+	// Add SSRC (tag 18 = 0x12)
+	buf = encodeInt32(&buf, 0x12, ssrc)
+
+	// Add DEMOD_TYPE = -1 (tag 48 = 0x30) to terminate
+	// -1 signals the demod thread to exit and clean up
+	buf = encodeInt32(&buf, 0x30, 0xFFFFFFFF) // -1 as uint32
+
+	// Add COMMAND_TAG (tag 1 = 0x01)
+	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
+
+	// Add EOL marker
+	buf = append(buf, 0)
+
+	if DebugMode {
+		log.Printf("DEBUG: Sending TerminateChannel command for SSRC 0x%08x", ssrc)
+		log.Printf("DEBUG: Command hex: % x", buf)
+	}
+
+	if err := rc.sendCommand(buf); err != nil {
+		return fmt.Errorf("failed to send terminate command: %w", err)
+	}
+
+	log.Printf("Terminated channel: %s (SSRC: 0x%08x)", name, ssrc)
+	return nil
+}
+
 // buildCommand constructs a radiod control command packet
 // Format: TLV (Type-Length-Value) encoding with leading zero suppression
 // Tag numbers from ka9q-radio/src/status.h enum status_type

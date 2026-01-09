@@ -924,9 +924,10 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 		close(session.Done)
 	}
 
-	// Disable radiod channel (set frequency to 0)
-	if err := sm.radiod.DisableChannel(session.ChannelName, session.SSRC); err != nil {
-		log.Printf("Warning: failed to disable channel %s: %v", session.ChannelName, err)
+	// Terminate radiod channel (set demod_type to -1 to properly clean up)
+	// This immediately stops the demod thread and prevents orphaned channels at freq=0
+	if err := sm.radiod.TerminateChannel(session.ChannelName, session.SSRC); err != nil {
+		log.Printf("Warning: failed to terminate channel %s: %v", session.ChannelName, err)
 	}
 
 	// Close appropriate channel based on session type

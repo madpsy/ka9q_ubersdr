@@ -1604,9 +1604,9 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 			}); ok {
 				// Check if user has an active DX cluster connection
 				if handler.HasDXConnection(session.UserSessionID) {
-					// User is connected - show throughput (0 if idle, >0 if active)
+					// User is connected - show throughput as whole number (0 if idle, >0 if active)
 					dxKbps := handler.GetInstantaneousDXKbps(session.UserSessionID)
-					info["dxcluster_kbps"] = dxKbps
+					info["dxcluster_kbps"] = int(dxKbps)
 				}
 			}
 		}

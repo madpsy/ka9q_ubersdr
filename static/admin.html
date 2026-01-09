@@ -3134,7 +3134,7 @@
                     let audioThroughput = '—';
                     if (sessions.audio.length > 0) {
                         const audioKbps = sessions.audio[0].audio_kbps || 0;
-                        audioThroughput = Math.round(audioKbps).toString();
+                        audioThroughput = audioKbps.toString();
                     }
 
                     // Calculate throughput for spectrum sessions
@@ -3142,7 +3142,7 @@
                     let spectrumThroughput = '—';
                     if (sessions.spectrum.length > 0) {
                         const waterfallKbps = sessions.spectrum[0].waterfall_kbps || 0;
-                        spectrumThroughput = Math.round(waterfallKbps).toString();
+                        spectrumThroughput = waterfallKbps.toString();
                     }
 
                     // Calculate throughput for DX cluster connections
@@ -3153,7 +3153,7 @@
                                      sessions.spectrum.find(s => s.dxcluster_kbps !== undefined);
                     if (dxSession) {
                         const dxKbps = dxSession.dxcluster_kbps || 0;
-                        dxClusterThroughput = Math.round(dxKbps).toString();
+                        dxClusterThroughput = dxKbps.toString();
                     }
 
                     row.innerHTML = `
@@ -3302,7 +3302,7 @@
             let networkHTML = `<strong>Network Summary:</strong><br>`;
             networkHTML += `<span style="margin-left: 20px;">• Regular users: <strong>${formatThroughput(regularAudioKbps)}</strong> audio, <strong>${formatThroughput(regularWaterfallKbps)}</strong> waterfall, <strong>${formatThroughput(regularDXClusterKbps)}</strong> DX</span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• IP bypassed users: <strong>${formatThroughput(ipBypassedAudioKbps)}</strong> audio, <strong>${formatThroughput(ipBypassedWaterfallKbps)}</strong> waterfall, <strong>${formatThroughput(ipBypassedDXClusterKbps)}</strong> DX</span><br>`;
-            networkHTML += `<span style="margin-left: 20px;">• Password bypassed users: <strong>${formatThroughput(passwordBypassedAudioKbps)}</strong> audio, <strong>${formatThroughput(passwordBypassedWaterfallKbps)}</strong> waterfall, <strong>${formatThroughput(passwordBypassedDXClusterKbps)}</strong> DX</span><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• Password users: <strong>${formatThroughput(passwordBypassedAudioKbps)}</strong> audio, <strong>${formatThroughput(passwordBypassedWaterfallKbps)}</strong> waterfall, <strong>${formatThroughput(passwordBypassedDXClusterKbps)}</strong> DX</span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• <strong>Total audio:</strong> <strong style="color: #667eea;">${formatThroughput(totalAudioKbps)}</strong></span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• <strong>Total waterfall:</strong> <strong style="color: #667eea;">${formatThroughput(totalWaterfallKbps)}</strong></span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• <strong>Total DX cluster:</strong> <strong style="color: #667eea;">${formatThroughput(totalDXClusterKbps)}</strong></span><br>`;

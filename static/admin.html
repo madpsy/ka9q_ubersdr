@@ -8039,10 +8039,11 @@
                 ${unknownCount > 0 ? `<span style="margin-left: 20px;">• Unknown: <strong style="color: #999;">${unknownCount}</strong></span>` : ''}
             `;
 
-            // Only create filter section on first render
-            if (isFirstRender || !document.getElementById('filterChannelType')) {
-                // Add filter section
-                const filterDiv = document.createElement('div');
+            // Create or update filter section
+            let filterDiv = document.getElementById('radiodChannelsFilters');
+            if (!filterDiv) {
+                filterDiv = document.createElement('div');
+                filterDiv.id = 'radiodChannelsFilters';
                 filterDiv.style.marginBottom = '15px';
                 filterDiv.style.padding = '15px';
                 filterDiv.style.background = '#f8f9fa';
@@ -8053,45 +8054,18 @@
                 filterDiv.innerHTML = `
                     <div>
                         <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555;">Channel Type</label>
-                        <select id="filterChannelType" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px;">
-                            <option value="">All Types</option>
-                            <option value="decoder">Decoder</option>
-                            <option value="noisefloor">Noise Floor</option>
-                            <option value="user_audio">User Audio</option>
-                            <option value="user_spectrum">User Spectrum</option>
-                            <option value="unknown">Unknown</option>
-                        </select>
+                        <select id="filterChannelType" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px;"></select>
                     </div>
                     <div>
                         <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555;">Demod Type</label>
-                        <select id="filterDemod" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px;">
-                            <option value="">All Demods</option>
-                            <option value="Linear">Linear</option>
-                            <option value="FM">FM</option>
-                            <option value="WFM">WFM</option>
-                            <option value="Spectrum">Spectrum</option>
-                        </select>
+                        <select id="filterDemod" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px;"></select>
                     </div>
                     <div>
                         <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555;">Preset</label>
-                        <select id="filterPreset" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px;">
-                            <option value="">All Presets</option>
-                        </select>
+                        <select id="filterPreset" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px;"></select>
                     </div>
                 `;
-                
-                // Insert at the beginning of container
                 container.insertBefore(filterDiv, container.firstChild);
-
-                // Populate preset filter with unique presets from data
-                const presets = [...new Set(data.channels.map(ch => ch.preset).filter(p => p))].sort();
-                const presetSelect = document.getElementById('filterPreset');
-                presets.forEach(preset => {
-                    const option = document.createElement('option');
-                    option.value = preset;
-                    option.textContent = preset;
-                    presetSelect.appendChild(option);
-                });
 
                 // Add event listeners that update global variables and re-render
                 document.getElementById('filterChannelType').addEventListener('change', (e) => {
@@ -8107,6 +8081,50 @@
                     renderRadiodChannelsTable();
                 });
             }
+
+            // Populate all dropdowns dynamically from data
+            // Channel Type dropdown
+            const channelTypes = [...new Set(data.channels.map(ch => ch.channel_type))].sort();
+            const typeSelect = document.getElementById('filterChannelType');
+            typeSelect.innerHTML = '<option value="">All Types</option>';
+            channelTypes.forEach(type => {
+                const option = document.createElement('option');
+                option.value = type;
+                const typeLabels = {
+                    'decoder': 'Decoder',
+                    'noisefloor': 'Noise Floor',
+                    'user_audio': 'User Audio',
+                    'user_spectrum': 'User Spectrum',
+                    'unknown': 'Unknown'
+                };
+                option.textContent = typeLabels[type] || type;
+                if (type === filterType) option.selected = true;
+                typeSelect.appendChild(option);
+            });
+
+            // Demod Type dropdown
+            const demodTypes = [...new Set(data.channels.map(ch => ch.demod_type))].sort();
+            const demodSelect = document.getElementById('filterDemod');
+            demodSelect.innerHTML = '<option value="">All Demods</option>';
+            demodTypes.forEach(demod => {
+                const option = document.createElement('option');
+                option.value = demod;
+                option.textContent = demod;
+                if (demod === filterDemod) option.selected = true;
+                demodSelect.appendChild(option);
+            });
+
+            // Preset dropdown
+            const presets = [...new Set(data.channels.map(ch => ch.preset).filter(p => p))].sort();
+            const presetSelect = document.getElementById('filterPreset');
+            presetSelect.innerHTML = '<option value="">All Presets</option>';
+            presets.forEach(preset => {
+                const option = document.createElement('option');
+                option.value = preset;
+                option.textContent = preset;
+                if (preset === filterPreset) option.selected = true;
+                presetSelect.appendChild(option);
+            });
 
             // Render the table
             renderRadiodChannelsTable();

@@ -7898,6 +7898,11 @@
             }
         }
 
+        // Global variable to store current channels data for filtering/sorting
+        let currentRadiodChannelsData = null;
+        let radiodChannelsSortColumn = 'frequency';
+        let radiodChannelsSortDirection = 'asc';
+
         function renderRadiodChannels(data) {
             const container = document.getElementById('radiodChannelsList');
             container.innerHTML = '';
@@ -7908,14 +7913,78 @@
                 return;
             }
 
-            // Count channels by type
+            // Store data globally for filtering/sorting
+            currentRadiodChannelsData = data;
+
+            // Get filter values
+            const filterType = document.getElementById('filterChannelType')?.value || '';
+            const filterDemod = document.getElementById('filterDemod')?.value || '';
+            const filterPreset = document.getElementById('filterPreset')?.value || '';
+
+            // Filter channels
+            let filteredChannels = data.channels;
+            if (filterType) {
+                filteredChannels = filteredChannels.filter(ch => ch.channel_type === filterType);
+            }
+            if (filterDemod) {
+                filteredChannels = filteredChannels.filter(ch => ch.demod_type === filterDemod);
+            }
+            if (filterPreset) {
+                filteredChannels = filteredChannels.filter(ch => ch.preset === filterPreset);
+            }
+
+            // Sort channels
+            filteredChannels.sort((a, b) => {
+                let aVal, bVal;
+                switch(radiodChannelsSortColumn) {
+                    case 'frequency':
+                        aVal = a.frequency;
+                        bVal = b.frequency;
+                        break;
+                    case 'preset':
+                        aVal = a.preset || '';
+                        bVal = b.preset || '';
+                        break;
+                    case 'demod':
+                        aVal = a.demod_type;
+                        bVal = b.demod_type;
+                        break;
+                    case 'power':
+                        aVal = a.baseband_power || -999;
+                        bVal = b.baseband_power || -999;
+                        break;
+                    case 'snr':
+                        aVal = a.snr || -999;
+                        bVal = b.snr || -999;
+                        break;
+                    case 'packets':
+                        aVal = a.output_data_packets || 0;
+                        bVal = b.output_data_packets || 0;
+                        break;
+                    case 'type':
+                        aVal = a.channel_name;
+                        bVal = b.channel_name;
+                        break;
+                    default:
+                        aVal = a.frequency;
+                        bVal = b.frequency;
+                }
+
+                if (radiodChannelsSortDirection === 'asc') {
+                    return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
+                } else {
+                    return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
+                }
+            });
+
+            // Count channels by type (from filtered data)
             let decoderCount = 0;
             let noiseFloorCount = 0;
             let userAudioCount = 0;
             let userSpectrumCount = 0;
             let unknownCount = 0;
 
-            data.channels.forEach(ch => {
+            filteredChannels.forEach(ch => {
                 switch(ch.channel_type) {
                     case 'decoder': decoderCount++; break;
                     case 'noisefloor': noiseFloorCount++; break;
@@ -7934,6 +8003,7 @@
             summaryDiv.innerHTML = `
                 <strong>Summary:</strong>
                 <span style="margin-left: 20px;">• Total: <strong>${data.total_channels}</strong></span>
+                ${filteredChannels.length !== data.total_channels ? `<span style="margin-left: 20px;">• Filtered: <strong>${filteredChannels.length}</strong></span>` : ''}
                 <span style="margin-left: 20px;">• Decoder: <strong style="color: #667eea;">${decoderCount}</strong></span>
                 <span style="margin-left: 20px;">• Noise Floor: <strong style="color: #9c27b0;">${noiseFloorCount}</strong></span>
                 <span style="margin-left: 20px;">• User Audio: <strong style="color: #28a745;">${userAudioCount}</strong></span>
@@ -7941,6 +8011,65 @@
                 ${unknownCount > 0 ? `<span style="margin-left: 20px;">• Unknown: <strong style="color: #999;">${unknownCount}</strong></span>` : ''}
             `;
             container.appendChild(summaryDiv);
+
+            // Add filter section
+            const filterDiv = document.createElement('div');
+            filterDiv.style.marginBottom = '15px';
+            filterDiv.style.padding = '15px';
+            filterDiv.style.background = '#f8f9fa';
+            filterDiv.style.borderRadius = '5px';
+            filterDiv.style.display = 'grid';
+            filterDiv.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
+            filterDiv.style.gap = '10px';
+            filterDiv.innerHTML = `
+                <div>
+                    <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555;">Channel Type</label>
+                    <select id="filterChannelType" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px;" onchange="renderRadiodChannels(currentRadiodChannelsData)">
+                        <option value="">All Types</option>
+                        <option value="decoder">Decoder</option>
+                        <option value="noisefloor">Noise Floor</option>
+                        <option value="user_audio">User Audio</option>
+                        <option value="user_spectrum">User Spectrum</option>
+                        <option value="unknown">Unknown</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555;">Demod Type</label>
+                    <select id="filterDemod" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px;" onchange="renderRadiodChannels(currentRadiodChannelsData)">
+                        <option value="">All Demods</option>
+                        <option value="Linear">Linear</option>
+                        <option value="FM">FM</option>
+                        <option value="WFM">WFM</option>
+                        <option value="Spectrum">Spectrum</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555;">Preset</label>
+                    <select id="filterPreset" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px;" onchange="renderRadiodChannels(currentRadiodChannelsData)">
+                        <option value="">All Presets</option>
+                    </select>
+                </div>
+            `;
+            container.appendChild(filterDiv);
+
+            // Populate preset filter with unique presets from data
+            const presets = [...new Set(data.channels.map(ch => ch.preset).filter(p => p))].sort();
+            const presetSelect = document.getElementById('filterPreset');
+            presets.forEach(preset => {
+                const option = document.createElement('option');
+                option.value = preset;
+                option.textContent = preset;
+                if (preset === filterPreset) option.selected = true;
+                presetSelect.appendChild(option);
+            });
+
+            // Helper function to create sortable header
+            const sortIcon = (column) => {
+                if (radiodChannelsSortColumn === column) {
+                    return radiodChannelsSortDirection === 'asc' ? ' ▲' : ' ▼';
+                }
+                return '';
+            };
 
             // Create table
             const table = document.createElement('table');
@@ -7950,16 +8079,16 @@
                 <thead>
                     <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
                         <th style="padding: 10px; text-align: left;">SSRC</th>
-                        <th style="padding: 10px; text-align: left;">Frequency</th>
-                        <th style="padding: 10px; text-align: left;">Preset</th>
-                        <th style="padding: 10px; text-align: left;">Demod</th>
+                        <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('frequency')" title="Click to sort">Frequency${sortIcon('frequency')}</th>
+                        <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('preset')" title="Click to sort">Preset${sortIcon('preset')}</th>
+                        <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('demod')" title="Click to sort">Demod${sortIcon('demod')}</th>
                         <th style="padding: 10px; text-align: center;">Sample Rate</th>
                         <th style="padding: 10px; text-align: center;">Filter (Hz)</th>
-                        <th style="padding: 10px; text-align: center;">Power</th>
-                        <th style="padding: 10px; text-align: center;">SNR</th>
-                        <th style="padding: 10px; text-align: center;">Packets</th>
+                        <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('power')" title="Click to sort">Power${sortIcon('power')}</th>
+                        <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('snr')" title="Click to sort">SNR${sortIcon('snr')}</th>
+                        <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('packets')" title="Click to sort">Packets${sortIcon('packets')}</th>
                         <th style="padding: 10px; text-align: left;">Last Update</th>
-                        <th style="padding: 10px; text-align: left;">Channel Type</th>
+                        <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('type')" title="Click to sort">Channel Type${sortIcon('type')}</th>
                     </tr>
                 </thead>
                 <tbody id="radiodChannelsTableBody"></tbody>
@@ -7967,7 +8096,7 @@
             container.appendChild(table);
 
             const tbody = document.getElementById('radiodChannelsTableBody');
-            data.channels.forEach(channel => {
+            filteredChannels.forEach(channel => {
                 const row = document.createElement('tr');
                 row.style.borderBottom = '1px solid #dee2e6';
 
@@ -8033,6 +8162,21 @@
                 `;
                 tbody.appendChild(row);
             });
+        }
+
+        function sortRadiodChannels(column) {
+            // Toggle direction if clicking same column, otherwise default to ascending
+            if (radiodChannelsSortColumn === column) {
+                radiodChannelsSortDirection = radiodChannelsSortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                radiodChannelsSortColumn = column;
+                radiodChannelsSortDirection = 'asc';
+            }
+
+            // Re-render with current data
+            if (currentRadiodChannelsData) {
+                renderRadiodChannels(currentRadiodChannelsData);
+            }
         }
     </script>
 </body>

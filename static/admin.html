@@ -7908,6 +7908,23 @@
                 return;
             }
 
+            // Count channels by type
+            let decoderCount = 0;
+            let noiseFloorCount = 0;
+            let userAudioCount = 0;
+            let userSpectrumCount = 0;
+            let unknownCount = 0;
+
+            data.channels.forEach(ch => {
+                switch(ch.channel_type) {
+                    case 'decoder': decoderCount++; break;
+                    case 'noisefloor': noiseFloorCount++; break;
+                    case 'user_audio': userAudioCount++; break;
+                    case 'user_spectrum': userSpectrumCount++; break;
+                    default: unknownCount++; break;
+                }
+            });
+
             // Add summary section
             const summaryDiv = document.createElement('div');
             summaryDiv.style.marginBottom = '15px';
@@ -7916,9 +7933,12 @@
             summaryDiv.style.borderRadius = '5px';
             summaryDiv.innerHTML = `
                 <strong>Summary:</strong>
-                <span style="margin-left: 20px;">• Total Channels: <strong>${data.total_channels}</strong></span>
-                <span style="margin-left: 20px;">• Decoder Channels: <strong style="color: #667eea;">${data.decoder_count}</strong></span>
-                <span style="margin-left: 20px;">• Other Channels: <strong style="color: #28a745;">${data.other_count}</strong></span>
+                <span style="margin-left: 20px;">• Total: <strong>${data.total_channels}</strong></span>
+                <span style="margin-left: 20px;">• Decoder: <strong style="color: #667eea;">${decoderCount}</strong></span>
+                <span style="margin-left: 20px;">• Noise Floor: <strong style="color: #9c27b0;">${noiseFloorCount}</strong></span>
+                <span style="margin-left: 20px;">• User Audio: <strong style="color: #28a745;">${userAudioCount}</strong></span>
+                <span style="margin-left: 20px;">• User Spectrum: <strong style="color: #ff9800;">${userSpectrumCount}</strong></span>
+                ${unknownCount > 0 ? `<span style="margin-left: 20px;">• Unknown: <strong style="color: #999;">${unknownCount}</strong></span>` : ''}
             `;
             container.appendChild(summaryDiv);
 
@@ -7932,14 +7952,14 @@
                         <th style="padding: 10px; text-align: left;">SSRC</th>
                         <th style="padding: 10px; text-align: left;">Frequency</th>
                         <th style="padding: 10px; text-align: left;">Preset</th>
-                        <th style="padding: 10px; text-align: left;">Type</th>
+                        <th style="padding: 10px; text-align: left;">Demod</th>
                         <th style="padding: 10px; text-align: center;">Sample Rate</th>
                         <th style="padding: 10px; text-align: center;">Filter (Hz)</th>
                         <th style="padding: 10px; text-align: center;">Power</th>
                         <th style="padding: 10px; text-align: center;">SNR</th>
                         <th style="padding: 10px; text-align: center;">Packets</th>
                         <th style="padding: 10px; text-align: left;">Last Update</th>
-                        <th style="padding: 10px; text-align: left;">Channel</th>
+                        <th style="padding: 10px; text-align: left;">Channel Type</th>
                     </tr>
                 </thead>
                 <tbody id="radiodChannelsTableBody"></tbody>
@@ -7951,9 +7971,35 @@
                 const row = document.createElement('tr');
                 row.style.borderBottom = '1px solid #dee2e6';
 
-                // Highlight decoder channels with a subtle background
-                if (channel.is_decoder_channel) {
-                    row.style.background = '#e3f2fd'; // Light blue for decoder channels
+                // Color-code rows by channel type
+                let rowBg = '';
+                let channelDisplay = '';
+                
+                switch(channel.channel_type) {
+                    case 'decoder':
+                        rowBg = '#e3f2fd'; // Light blue
+                        channelDisplay = `<strong style="color: #667eea;">🔊 ${channel.channel_name}</strong>`;
+                        break;
+                    case 'noisefloor':
+                        rowBg = '#f3e5f5'; // Light purple
+                        channelDisplay = `<strong style="color: #9c27b0;">📊 ${channel.channel_name}</strong>`;
+                        break;
+                    case 'user_audio':
+                        rowBg = '#e8f5e9'; // Light green
+                        channelDisplay = `<span style="color: #28a745;">👤 ${channel.channel_name}</span>`;
+                        break;
+                    case 'user_spectrum':
+                        rowBg = '#fff3e0'; // Light orange
+                        channelDisplay = `<span style="color: #ff9800;">📡 ${channel.channel_name}</span>`;
+                        break;
+                    default:
+                        rowBg = '#f5f5f5'; // Light gray
+                        channelDisplay = `<span style="color: #999;">❓ ${channel.channel_name}</span>`;
+                        break;
+                }
+                
+                if (rowBg) {
+                    row.style.background = rowBg;
                 }
 
                 // Format filter range
@@ -7963,24 +8009,14 @@
                 const formatPower = (power) => {
                     if (power === null || power === undefined || power < -200) return '<em style="color: #999;">—</em>';
                     const color = power > -20 ? '#28a745' : power > -40 ? '#ffc107' : '#dc3545';
-                    return `<span style="color: ${color}; font-weight: bold;">${power.toFixed(1)} dBFS</span>`;
+                    return `<span style="color: ${color}; font-weight: bold;">${power.toFixed(1)}</span>`;
                 };
 
                 const formatSNR = (snr) => {
                     if (snr === null || snr === undefined || snr < -200) return '<em style="color: #999;">—</em>';
                     const color = snr > 10 ? '#28a745' : snr > 0 ? '#ffc107' : '#dc3545';
-                    return `<span style="color: ${color}; font-weight: bold;">${snr.toFixed(1)} dB</span>`;
+                    return `<span style="color: ${color}; font-weight: bold;">${snr.toFixed(1)}</span>`;
                 };
-
-                // Channel name/description
-                let channelDesc = '';
-                if (channel.is_decoder_channel) {
-                    channelDesc = `<strong style="color: #667eea;">Decoder: ${channel.decoder_band_name}</strong>`;
-                } else if (channel.demod_type === 'Spectrum') {
-                    channelDesc = '<span style="color: #28a745;">Spectrum</span>';
-                } else {
-                    channelDesc = '<span style="color: #666;">User/System</span>';
-                }
 
                 row.innerHTML = `
                     <td style="padding: 10px; font-family: monospace; font-size: 11px;">${channel.ssrc}</td>
@@ -7993,7 +8029,7 @@
                     <td style="padding: 10px; text-align: center; font-size: 12px;">${formatSNR(channel.snr)}</td>
                     <td style="padding: 10px; text-align: center; font-size: 12px;">${channel.output_data_packets ? channel.output_data_packets.toLocaleString() : '0'}</td>
                     <td style="padding: 10px; font-size: 11px;">${channel.time_since_update}</td>
-                    <td style="padding: 10px; font-size: 12px;">${channelDesc}</td>
+                    <td style="padding: 10px; font-size: 12px;">${channelDisplay}</td>
                 `;
                 tbody.appendChild(row);
             });

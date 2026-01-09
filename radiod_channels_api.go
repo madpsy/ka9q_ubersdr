@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -25,8 +27,10 @@ type RadiodChannelInfo struct {
 	OutputDataPackets int64     `json:"output_data_packets"`
 	LastUpdate        time.Time `json:"last_update"`
 	TimeSinceUpdate   string    `json:"time_since_update"`
-	IsDecoderChannel  bool      `json:"is_decoder_channel"` // True if this is a UberSDR decoder channel
-	DecoderBandName   string    `json:"decoder_band_name"`  // Name of decoder band if applicable
+	ChannelType       string    `json:"channel_type"` // "decoder", "noisefloor", "user_audio", "user_spectrum", "unknown"
+	ChannelName       string    `json:"channel_name"` // Descriptive name based on type
+	SessionID         string    `json:"session_id"`   // UberSDR session ID if applicable
+	IsInternal        bool      `json:"is_internal"`  // True for decoder/noisefloor channels
 }
 
 // RadiodChannelsResponse is the API response for all radiod channels
@@ -49,18 +53,66 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 	// Get all channel status from radiod (via sessions)
 	allChannelStatus := ah.sessions.radiod.GetAllChannelStatus()
 
-	// Build decoder SSRC map for quick lookup
-	decoderSSRCs := make(map[uint32]string) // SSRC -> band name
+	// Debug: log the count
+	log.Printf("DEBUG: Radiod Channels API - GetAllChannelStatus returned %d channels", len(allChannelStatus))
+
+	// Also log session count for comparison
+	ah.sessions.mu.RLock()
+	sessionCount := len(ah.sessions.sessions)
+	ah.sessions.mu.RUnlock()
+	log.Printf("DEBUG: Radiod Channels API - SessionManager has %d sessions", sessionCount)
+
+	// If no STATUS packets received yet, build channel list from sessions instead
+	// This ensures we show something even if radiod hasn't sent STATUS packets
+	if len(allChannelStatus) == 0 {
+		log.Printf("DEBUG: No STATUS packets received from radiod, building from sessions")
+		allChannelStatus = make(map[uint32]*ChannelStatus)
+
+		// Add all sessions to the channel status map with minimal info
+		ah.sessions.mu.RLock()
+		for _, session := range ah.sessions.sessions {
+			allChannelStatus[session.SSRC] = &ChannelStatus{
+				SSRC:           session.SSRC,
+				RadioFrequency: float64(session.Frequency),
+				Preset:         session.Mode,
+				OutputSamprate: session.SampleRate,
+				LastUpdate:     session.LastActive,
+			}
+		}
+		ah.sessions.mu.RUnlock()
+
+		log.Printf("DEBUG: Built %d channels from sessions", len(allChannelStatus))
+	}
+
+	// Build maps for quick lookup of different channel types
+	decoderSSRCs := make(map[uint32]string) // SSRC -> decoder band name
+	sessionSSRCs := make(map[uint32]string) // SSRC -> session ID
+	sessionTypes := make(map[uint32]string) // SSRC -> "audio" or "spectrum"
+
+	// Map decoder channels
 	if ah.multiDecoder != nil {
 		for name, band := range ah.multiDecoder.decoderBands {
 			decoderSSRCs[band.SSRC] = name
 		}
 	}
 
+	// Map all sessions (user, noise floor, decoder, etc.)
+	ah.sessions.mu.RLock()
+	for sessionID, session := range ah.sessions.sessions {
+		sessionSSRCs[session.SSRC] = sessionID
+		if session.IsSpectrum {
+			sessionTypes[session.SSRC] = "spectrum"
+		} else {
+			sessionTypes[session.SSRC] = "audio"
+		}
+	}
+	ah.sessions.mu.RUnlock()
+
 	// Convert to display format
 	channels := make([]RadiodChannelInfo, 0, len(allChannelStatus))
 	decoderCount := 0
-	otherCount := 0
+	noiseFloorCount := 0
+	userCount := 0
 
 	for ssrc, status := range allChannelStatus {
 		// Determine demod type string
@@ -97,12 +149,54 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 			}
 		}
 
-		// Check if this is a decoder channel
-		bandName, isDecoder := decoderSSRCs[ssrc]
-		if isDecoder {
+		// Determine channel type and name by examining session ID patterns
+		var channelType, channelName, sessionID string
+		var isInternal bool
+
+		if decoderName, isDecoder := decoderSSRCs[ssrc]; isDecoder {
+			// This is a decoder channel
+			channelType = "decoder"
+			channelName = fmt.Sprintf("Decoder: %s", decoderName)
+			isInternal = true
 			decoderCount++
+			if sessID, hasSession := sessionSSRCs[ssrc]; hasSession {
+				sessionID = sessID
+			}
+		} else if sessID, hasSession := sessionSSRCs[ssrc]; hasSession {
+			// This is a session - determine type from session ID prefix
+			sessionID = sessID
+
+			if len(sessID) >= 10 && sessID[:10] == "noisefloor" {
+				// Noise floor session
+				channelType = "noisefloor"
+				isInternal = true
+				noiseFloorCount++
+
+				// Extract band name from session ID (format: "noisefloor-BANDNAME-XXXXXXXX")
+				parts := strings.Split(sessID, "-")
+				if len(parts) >= 2 {
+					channelName = fmt.Sprintf("Noise Floor: %s", parts[1])
+				} else {
+					channelName = "Noise Floor"
+				}
+			} else {
+				// User session (audio or spectrum)
+				isInternal = false
+				userCount++
+
+				if sessionTypes[ssrc] == "spectrum" {
+					channelType = "user_spectrum"
+					channelName = "User Spectrum"
+				} else {
+					channelType = "user_audio"
+					channelName = "User Audio"
+				}
+			}
 		} else {
-			otherCount++
+			// Unknown channel (not in our session map)
+			channelType = "unknown"
+			channelName = "Unknown"
+			isInternal = false
 		}
 
 		channelInfo := RadiodChannelInfo{
@@ -121,8 +215,10 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 			OutputDataPackets: status.OutputDataPackets,
 			LastUpdate:        status.LastUpdate,
 			TimeSinceUpdate:   timeSinceUpdate,
-			IsDecoderChannel:  isDecoder,
-			DecoderBandName:   bandName,
+			ChannelType:       channelType,
+			ChannelName:       channelName,
+			SessionID:         sessionID,
+			IsInternal:        isInternal,
 		}
 
 		channels = append(channels, channelInfo)
@@ -132,6 +228,9 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 	sort.Slice(channels, func(i, j int) bool {
 		return channels[i].Frequency < channels[j].Frequency
 	})
+
+	// Calculate other count (total - decoder - noisefloor)
+	otherCount := len(channels) - decoderCount - noiseFloorCount
 
 	response := RadiodChannelsResponse{
 		Channels:      channels,

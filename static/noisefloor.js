@@ -1613,7 +1613,7 @@ class NoiseFloorMonitor {
                         },
                         title: {
                             display: true,
-                            text: 'Full HF Spectrum (10s avg)',
+                            text: '10s average',
                             color: 'rgba(255, 255, 255, 0.9)',
                             font: {
                                 size: 12

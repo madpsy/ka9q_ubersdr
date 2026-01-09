@@ -1140,68 +1140,74 @@ class ChatDisplay:
         if self.radio_gui.audio_spectrum_display:
             self.radio_gui.audio_spectrum_display.update_bandwidth(bw_low, bw_high, mode.lower())
 
-        # Apply zoom bandwidth if provided, spectrum is connected, AND zoom sync is enabled
-        # Do this BEFORE apply_frequency so zoom command is sent last
-        zoom_applied = False
-        if self.sync_zoom and zoom_bw > 0 and self.radio_gui.spectrum:
-            spectrum = self.radio_gui.spectrum
-            if spectrum.connected and spectrum.bin_count > 0:
-                # Validate zoom bandwidth to prevent negative/invalid values
-
-                # Check minimum bin bandwidth (1 Hz/bin minimum)
-                if zoom_bw < 1:
-                    print(f"[Chat] Ignoring invalid synced zoom: {zoom_bw:.2f} Hz/bin (minimum is 1 Hz/bin)")
-                    return
-
-                # Don't clamp to our initial_bin_bandwidth - use the synced user's zoom_bw as-is
-                # The synced user might have a different initial bandwidth than us
-                # Calculate total bandwidth from bin bandwidth
-                new_total_bandwidth = zoom_bw * spectrum.bin_count
-
-                # Constrain zoom center to keep view within 0-30 MHz (matches web UI)
-                # Web UI uses 0-30 MHz range (chat-ui.js lines 2180-2183)
-                half_bandwidth = new_total_bandwidth / 2
-                min_center = 0 + half_bandwidth  # 0 Hz + half bandwidth
-                max_center = 30000000 - half_bandwidth  # 30 MHz - half bandwidth
-                clamped_center = max(min_center, min(max_center, freq))
-
-                # Log if we adjusted the center frequency
-                if clamped_center != freq:
-                    print(f"[Chat] Clamped synced zoom center from {freq/1e6:.6f} to {clamped_center/1e6:.6f} MHz to stay within 0-30 MHz range")
-
-                # Always set tuned_freq to the original frequency (where we're actually tuned)
-                # The marker should show the actual tuned frequency, not the clamped zoom center
-                spectrum.tuned_freq = freq
-
-                print(f"[Chat] Applying synced zoom: {new_total_bandwidth/1000:.1f} KHz ({zoom_bw:.2f} Hz/bin) at center {clamped_center/1e6:.6f} MHz")
-
-                # Send ONLY the zoom command (matches web UI behavior)
-                # Do NOT call update_center_frequency - it sends a conflicting PAN command
-                # The zoom command includes the frequency and the server will respond with a config
-                # message that updates center_freq and redraws the spectrum with correct labels
-                import asyncio
-                if spectrum.event_loop and spectrum.event_loop.is_running():
-                    asyncio.run_coroutine_threadsafe(
-                        spectrum._send_zoom_command(clamped_center, new_total_bandwidth),
-                        spectrum.event_loop
-                    )
-                    print(f"[Chat] Zoom command sent - server will update center frequency via config message")
-                    zoom_applied = True
-
-                    # Call zoom callback if it exists (same as manual zoom operations)
-                    if spectrum.zoom_callback:
-                        spectrum.zoom_callback()
-                        print(f"[Chat] Zoom callback called")
+        # Check if we'll be applying zoom (need to know this before calling apply_frequency)
+        will_apply_zoom = (self.sync_zoom and zoom_bw > 0 and self.radio_gui.spectrum and
+                          self.radio_gui.spectrum.connected and self.radio_gui.spectrum.bin_count > 0 and
+                          zoom_bw >= 1)
 
         # Apply changes if connected (skip auto mode to preserve synced mode)
-        # Always call apply_frequency to set the audio channel frequency
-        # The zoom command only affects spectrum display, not audio tuning
-        if self.radio_gui.connected:
-            self.radio_gui.apply_frequency(skip_auto_mode=True)
+        # Set audio channel frequency via tune message
+        if self.radio_gui.connected and self.radio_gui.client:
+            # Directly set client frequency and send tune message
+            # This avoids the spectrum.update_center_frequency() call in apply_frequency()
+            # which would conflict with the zoom command we're about to send
+            self.radio_gui.client.frequency = freq
+            self.radio_gui.send_tune_message()
+            print(f"[Chat] Set audio channel frequency to {freq/1e6:.6f} MHz")
 
-        # Update spectrum center if zoom was not applied
-        if not zoom_applied and self.radio_gui.spectrum:
-            self.radio_gui.spectrum.update_center_frequency(freq)
+            # Sync to radio control if enabled (for rigctl, flrig, OmniRig, TCI Client)
+            # This ensures radio controls receive frequency/mode updates during chat sync
+            if self.radio_gui.radio_control_sync_enabled and self.radio_gui.radio_sync_direction_var.get() == "SDR→Rig":
+                self.radio_gui.sync_frequency_to_radio_control()
+                self.radio_gui.sync_mode_to_radio_control()
+                print(f"[Chat] Synced to radio control: {freq/1e6:.6f} MHz, {mode}")
+
+        # Apply zoom bandwidth if provided, spectrum is connected, AND zoom sync is enabled
+        # Do this AFTER setting audio frequency so zoom command is sent last
+        zoom_applied = False
+        if will_apply_zoom:
+            spectrum = self.radio_gui.spectrum
+            
+            # Calculate total bandwidth from bin bandwidth
+            new_total_bandwidth = zoom_bw * spectrum.bin_count
+
+            # Constrain zoom center to keep view within 0-30 MHz (matches web UI)
+            # Web UI uses 0-30 MHz range (chat-ui.js lines 2180-2183)
+            half_bandwidth = new_total_bandwidth / 2
+            min_center = 0 + half_bandwidth  # 0 Hz + half bandwidth
+            max_center = 30000000 - half_bandwidth  # 30 MHz - half bandwidth
+            clamped_center = max(min_center, min(max_center, freq))
+
+            # Log if we adjusted the center frequency
+            if clamped_center != freq:
+                print(f"[Chat] Clamped synced zoom center from {freq/1e6:.6f} to {clamped_center/1e6:.6f} MHz to stay within 0-30 MHz range")
+
+            # Always set tuned_freq to the original frequency (where we're actually tuned)
+            # The marker should show the actual tuned frequency, not the clamped zoom center
+            spectrum.tuned_freq = freq
+
+            print(f"[Chat] Applying synced zoom: {new_total_bandwidth/1000:.1f} KHz ({zoom_bw:.2f} Hz/bin) at center {clamped_center/1e6:.6f} MHz")
+
+            # Send zoom command - this will override any previous PAN command
+            # The zoom command includes the frequency and the server will respond with a config
+            # message that updates center_freq and redraws the spectrum with correct labels
+            import asyncio
+            if spectrum.event_loop and spectrum.event_loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    spectrum._send_zoom_command(clamped_center, new_total_bandwidth),
+                    spectrum.event_loop
+                )
+                print(f"[Chat] Zoom command sent - will set spectrum center to {clamped_center/1e6:.6f} MHz")
+                zoom_applied = True
+
+                # Call zoom callback if it exists (same as manual zoom operations)
+                if spectrum.zoom_callback:
+                    spectrum.zoom_callback()
+                    print(f"[Chat] Zoom callback called")
+        else:
+            # Update spectrum center if zoom was not applied
+            if self.radio_gui.spectrum:
+                self.radio_gui.spectrum.update_center_frequency(freq)
 
         # Don't call send_radio_status() directly - let the debounced on_radio_changed() handle it
         # This prevents multiple rapid updates when syncing

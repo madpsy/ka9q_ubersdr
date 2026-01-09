@@ -210,11 +210,15 @@ class NoiseFloorMonitor {
         const widthSlider = document.getElementById('wideband-width');
         const frequencyValue = document.getElementById('wideband-frequency-value');
         const widthValue = document.getElementById('wideband-width-value');
+        const frequencyInput = document.getElementById('wideband-frequency-input');
+        const widthInput = document.getElementById('wideband-width-input');
+        const resetButton = document.getElementById('wideband-reset');
 
         if (frequencySlider) {
             frequencySlider.addEventListener('input', (e) => {
                 this.widebandFrequency = parseFloat(e.target.value);
                 frequencyValue.textContent = this.widebandFrequency.toFixed(3);
+                if (frequencyInput) frequencyInput.value = this.widebandFrequency.toFixed(3);
                 this.updateWidebandZoom();
             });
         }
@@ -223,6 +227,52 @@ class NoiseFloorMonitor {
             widthSlider.addEventListener('input', (e) => {
                 this.widebandWidth = parseFloat(e.target.value);
                 widthValue.textContent = this.widebandWidth.toFixed(0);
+                if (widthInput) widthInput.value = this.widebandWidth.toFixed(0);
+                this.updateWidebandZoom();
+            });
+        }
+
+        // Text input event listeners
+        if (frequencyInput) {
+            frequencyInput.addEventListener('change', (e) => {
+                let value = parseFloat(e.target.value);
+                // Clamp to valid range
+                value = Math.max(0, Math.min(30, value));
+                this.widebandFrequency = value;
+                frequencySlider.value = value;
+                frequencyValue.textContent = value.toFixed(3);
+                frequencyInput.value = value.toFixed(3);
+                this.updateWidebandZoom();
+            });
+        }
+
+        if (widthInput) {
+            widthInput.addEventListener('change', (e) => {
+                let value = parseFloat(e.target.value);
+                // Clamp to valid range
+                value = Math.max(3, Math.min(30000, value));
+                this.widebandWidth = value;
+                widthSlider.value = value;
+                widthValue.textContent = value.toFixed(0);
+                widthInput.value = value.toFixed(0);
+                this.updateWidebandZoom();
+            });
+        }
+
+        // Reset button event listener
+        if (resetButton) {
+            resetButton.addEventListener('click', () => {
+                // Reset to defaults: 15 MHz center, 30000 kHz width
+                this.widebandFrequency = 15;
+                this.widebandWidth = 30000;
+                
+                if (frequencySlider) frequencySlider.value = 15;
+                if (widthSlider) widthSlider.value = 30000;
+                if (frequencyValue) frequencyValue.textContent = '15.000';
+                if (widthValue) widthValue.textContent = '30000';
+                if (frequencyInput) frequencyInput.value = '15.000';
+                if (widthInput) widthInput.value = '30000';
+                
                 this.updateWidebandZoom();
             });
         }
@@ -1698,15 +1748,19 @@ class NoiseFloorMonitor {
                     const freqMHz = xScale.getValueForPixel(x);
                     
                     if (freqMHz !== undefined && freqMHz !== null && freqMHz >= 0 && freqMHz <= 30) {
-                        // Update the frequency slider and value
+                        // Update the frequency slider, value, and input
                         this.widebandFrequency = freqMHz;
                         const frequencySlider = document.getElementById('wideband-frequency');
                         const frequencyValue = document.getElementById('wideband-frequency-value');
+                        const frequencyInput = document.getElementById('wideband-frequency-input');
                         if (frequencySlider) {
                             frequencySlider.value = freqMHz;
                         }
                         if (frequencyValue) {
                             frequencyValue.textContent = freqMHz.toFixed(3);
+                        }
+                        if (frequencyInput) {
+                            frequencyInput.value = freqMHz.toFixed(3);
                         }
                         // Update the chart zoom
                         this.updateWidebandZoom();

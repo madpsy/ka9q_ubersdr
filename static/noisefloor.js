@@ -276,6 +276,14 @@ class NoiseFloorMonitor {
                 this.updateWidebandZoom();
             });
         }
+
+        // Save button event listener
+        const saveButton = document.getElementById('wideband-save');
+        if (saveButton) {
+            saveButton.addEventListener('click', () => {
+                this.saveWidebandChart();
+            });
+        }
     }
 
     toggleCompactView() {
@@ -1835,6 +1843,40 @@ class NoiseFloorMonitor {
 
         // Update the chart
         this.wideBandChart.update('none');
+    }
+
+    saveWidebandChart() {
+        if (!this.wideBandChart) {
+            console.warn('No wideband chart to save');
+            return;
+        }
+
+        // Get the canvas element
+        const canvas = document.getElementById('wideband-fft');
+        if (!canvas) {
+            console.warn('Canvas element not found');
+            return;
+        }
+
+        // Generate filename with current date/time and frequency info
+        const now = new Date();
+        const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
+        const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-'); // HH-MM-SS
+        const freqStr = this.widebandFrequency.toFixed(3).replace('.', '_');
+        const widthStr = this.widebandWidth.toFixed(0);
+        const filename = `spectrum_${dateStr}_${timeStr}_${freqStr}MHz_${widthStr}kHz.png`;
+
+        // Convert canvas to blob and download
+        canvas.toBlob((blob) => {
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }, 'image/png');
     }
 
     displayHistoricalData(data) {

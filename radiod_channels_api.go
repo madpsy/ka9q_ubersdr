@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -199,6 +200,14 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 			isInternal = false
 		}
 
+		// Sanitize float values to avoid JSON encoding errors (replace Inf/NaN with 0)
+		sanitizeFloat32 := func(f float32) float32 {
+			if math.IsInf(float64(f), 0) || math.IsNaN(float64(f)) {
+				return 0
+			}
+			return f
+		}
+
 		channelInfo := RadiodChannelInfo{
 			SSRC:              fmt.Sprintf("0x%08x", ssrc),
 			Frequency:         status.RadioFrequency,
@@ -207,11 +216,11 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 			DemodType:         demodType,
 			OutputSamprate:    status.OutputSamprate,
 			OutputSampratekHz: fmt.Sprintf("%.1f", float64(status.OutputSamprate)/1e3),
-			FilterLow:         status.LowEdge,
-			FilterHigh:        status.HighEdge,
-			BasebandPower:     status.BasebandPower,
-			NoiseDensity:      status.NoiseDensity,
-			SNR:               snr,
+			FilterLow:         sanitizeFloat32(status.LowEdge),
+			FilterHigh:        sanitizeFloat32(status.HighEdge),
+			BasebandPower:     sanitizeFloat32(status.BasebandPower),
+			NoiseDensity:      sanitizeFloat32(status.NoiseDensity),
+			SNR:               sanitizeFloat32(snr),
 			OutputDataPackets: status.OutputDataPackets,
 			LastUpdate:        status.LastUpdate,
 			TimeSinceUpdate:   timeSinceUpdate,

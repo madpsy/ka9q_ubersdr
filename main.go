@@ -736,6 +736,9 @@ func main() {
 	}
 	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics, receiverLocator, config.Chat)
 
+	// Connect DX cluster websocket handler to session manager for throughput tracking
+	sessions.SetDXClusterWebSocketHandler(dxClusterWsHandler)
+
 	// Register CW Skimmer spot handler to broadcast via websocket and MQTT
 	if cwSkimmer != nil {
 		cwSkimmer.OnSpot(func(spot CWSkimmerSpot) {

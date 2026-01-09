@@ -833,7 +833,7 @@
                                 <th style="padding: 12px; text-align: left;">User Agent</th>
                                 <th style="padding: 12px; text-align: center;">Audio</th>
                                 <th style="padding: 12px; text-align: center;">Spectrum</th>
-                                <th style="padding: 12px; text-align: center;">DXCluster</th>
+                                <th style="padding: 12px; text-align: center;">DX Cluster</th>
                                 <th style="padding: 12px; text-align: left;">Throughput (kbps)</th>
                                 <th style="padding: 12px; text-align: left;">First Seen</th>
                                 <th style="padding: 12px; text-align: left;">Last Active</th>
@@ -841,7 +841,7 @@
                             </tr>
                         </thead>
                         <tbody id="tunnelUsersTableBody">
-                            <tr><td colspan="10" style="text-align: center; padding: 40px; color: #666;">Loading...</td></tr>
+                            <tr><td colspan="9" style="text-align: center; padding: 40px; color: #666;">Loading...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -2984,6 +2984,7 @@
                         <th style="padding: 12px; text-align: left;">Last Seen</th>
                         <th style="padding: 12px; text-align: center;">Audio</th>
                         <th style="padding: 12px; text-align: center;">Spectrum</th>
+                        <th style="padding: 12px; text-align: center;">DX Cluster</th>
                         <th style="padding: 12px; text-align: left;">Details</th>
                         <th style="padding: 12px; text-align: center;">Actions</th>
                     </tr>
@@ -3143,6 +3144,16 @@
                         spectrumThroughput = `${waterfallKbps} kbps`;
                     }
 
+                    // Calculate throughput for DX cluster connections
+                    let dxClusterThroughput = '—';
+                    // Check both audio and spectrum sessions for DX cluster connection
+                    const dxSession = sessions.audio.find(s => s.dxcluster_kbps !== undefined && s.dxcluster_kbps > 0) ||
+                                     sessions.spectrum.find(s => s.dxcluster_kbps !== undefined && s.dxcluster_kbps > 0);
+                    if (dxSession) {
+                        const dxKbps = dxSession.dxcluster_kbps || 0;
+                        dxClusterThroughput = `${dxKbps.toFixed(1)} kbps`;
+                    }
+
                     row.innerHTML = `
                         <td style="padding: 12px; font-family: monospace; font-size: 12px; max-width: 140px; word-wrap: break-word;">${ipDisplay}</td>
                         <td style="padding: 12px; font-size: 11px; word-break: break-all; max-width: 200px;" title="${userAgent}">${userAgent === 'N/A' ? '<em style="color: #999;">N/A</em>' : userAgent}</td>
@@ -3151,6 +3162,7 @@
                         <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${lastSeenDisplay}</td>
                         <td style="padding: 12px; text-align: center;">${audioThroughput}</td>
                         <td style="padding: 12px; text-align: center;">${spectrumThroughput}</td>
+                        <td style="padding: 12px; text-align: center;">${dxClusterThroughput}</td>
                         <td style="padding: 12px; font-size: 12px;">${details}</td>
                         <td style="padding: 12px; text-align: center; white-space: nowrap;">${actionButtons}</td>
                     `;
@@ -6694,12 +6706,20 @@
                         }
                     };
 
+                    // Format DX cluster throughput if available
+                    let dxClusterDisplay = '—';
+                    if (user.dxcluster && user.dxcluster_kbps !== undefined && user.dxcluster_kbps > 0) {
+                        dxClusterDisplay = `${user.dxcluster_kbps.toFixed(1)} kbps`;
+                    } else if (user.dxcluster) {
+                        dxClusterDisplay = '✓';
+                    }
+
                     row.innerHTML = `
                         <td style="padding: 12px; font-family: monospace; font-size: 12px;">${user.client_ip || 'N/A'}</td>
                         <td style="padding: 12px; font-size: 11px; max-width: 200px; word-break: break-all;" title="${user.user_agent || 'N/A'}">${user.user_agent || 'N/A'}</td>
                         <td style="padding: 12px; text-align: center;">${user.audio ? '✓' : '—'}</td>
                         <td style="padding: 12px; text-align: center;">${user.spectrum ? '✓' : '—'}</td>
-                        <td style="padding: 12px; text-align: center;">${user.dxcluster ? '✓' : '—'}</td>
+                        <td style="padding: 12px; text-align: center;">${dxClusterDisplay}</td>
                         <td style="padding: 12px; font-family: monospace; font-size: 12px;">↑ ${(user.throughput_up_kbps || 0).toFixed(1)}<br>↓ ${(user.throughput_down_kbps || 0).toFixed(1)}</td>
                         <td style="padding: 12px; font-size: 12px;">${formatTime(user.first_seen)}</td>
                         <td style="padding: 12px; font-size: 12px;">${formatTime(user.last_active)}</td>

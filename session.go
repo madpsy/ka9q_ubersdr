@@ -82,6 +82,7 @@ type SessionManager struct {
 	kickedUUIDTTL        time.Duration          // How long to remember kicked UUIDs (default 1 hour)
 	prometheusMetrics    *PrometheusMetrics     // Prometheus metrics for tracking
 	activityLogger       *SessionActivityLogger // Session activity logger for disk logging
+	dxClusterWsHandler   interface{}            // DXClusterWebSocketHandler for throughput tracking (interface to avoid import cycle)
 }
 
 // NewSessionManager creates a new session manager
@@ -125,6 +126,11 @@ func (sm *SessionManager) SetPrometheusMetrics(pm *PrometheusMetrics) {
 // SetActivityLogger sets the session activity logger for this session manager
 func (sm *SessionManager) SetActivityLogger(logger *SessionActivityLogger) {
 	sm.activityLogger = logger
+}
+
+// SetDXClusterWebSocketHandler sets the DX cluster websocket handler for throughput tracking
+func (sm *SessionManager) SetDXClusterWebSocketHandler(handler interface{}) {
+	sm.dxClusterWsHandler = handler
 }
 
 // translateModeForRadiod translates UI mode names to radiod preset names
@@ -1588,6 +1594,19 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 		info["audio_kbps"] = audioKbps
 		info["waterfall_kbps"] = waterfallKbps
 		info["total_kbps"] = audioKbps + waterfallKbps
+
+		// Add DX cluster throughput if handler is available and user has a session ID
+		if session.UserSessionID != "" && sm.dxClusterWsHandler != nil {
+			// Type assert to get the handler (using interface to avoid import cycle)
+			if handler, ok := sm.dxClusterWsHandler.(interface {
+				GetInstantaneousDXKbps(string) float64
+			}); ok {
+				dxKbps := handler.GetInstantaneousDXKbps(session.UserSessionID)
+				if dxKbps > 0 {
+					info["dxcluster_kbps"] = dxKbps
+				}
+			}
+		}
 
 		// Only include frontend_status for the wideband spectrum channel
 		// All other sessions will get frontend status from a separate API endpoint

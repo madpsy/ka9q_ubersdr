@@ -64,6 +64,11 @@ type DXClusterWebSocketHandler struct {
 	// Map websocket connections to session IDs for chat
 	connToSessionID   map[*websocket.Conn]string
 	connToSessionIDMu sync.RWMutex
+
+	// Throughput tracking per UserSessionID
+	dxBytesSent    map[string]uint64        // UserSessionID -> total bytes sent
+	dxBytesSamples map[string][]BytesSample // UserSessionID -> sliding window samples
+	dxThroughputMu sync.RWMutex
 }
 
 // NewDXClusterWebSocketHandler creates a new DX cluster WebSocket handler
@@ -82,6 +87,8 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 		maxCWSpots:        100,
 		receiverLocator:   receiverLocator,
 		connToSessionID:   make(map[*websocket.Conn]string),
+		dxBytesSent:       make(map[string]uint64),
+		dxBytesSamples:    make(map[string][]BytesSample),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:    1024,
 			WriteBufferSize:   1024,
@@ -246,6 +253,22 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessi
 		delete(h.clients, conn)
 		clientCount := len(h.clients)
 		h.clientsMu.Unlock()
+
+		// Check if this UserSessionID has any other DX cluster connections
+		// If not, clean up throughput tracking data
+		h.connToSessionIDMu.RLock()
+		hasOtherConnections := false
+		for _, sid := range h.connToSessionID {
+			if sid == userSessionID {
+				hasOtherConnections = true
+				break
+			}
+		}
+		h.connToSessionIDMu.RUnlock()
+
+		if !hasOtherConnections {
+			h.CleanupUserSessionID(userSessionID)
+		}
 
 		// Record disconnection in Prometheus
 		if h.prometheusMetrics != nil {
@@ -692,6 +715,8 @@ func (h *DXClusterWebSocketHandler) broadcast(message map[string]interface{}) {
 		return
 	}
 
+	messageSize := uint64(len(messageJSON))
+
 	// Copy client list FIRST, then release lock before writing
 	// This prevents holding clientsMu.RLock() during slow WebSocket writes
 	h.clientsMu.RLock()
@@ -702,6 +727,16 @@ func (h *DXClusterWebSocketHandler) broadcast(message map[string]interface{}) {
 		writeMutexes = append(writeMutexes, writeMu)
 	}
 	h.clientsMu.RUnlock()
+
+	// Get UserSessionIDs for all connections
+	h.connToSessionIDMu.RLock()
+	connToUserSessionID := make(map[*websocket.Conn]string)
+	for _, conn := range clientList {
+		if userSessionID, exists := h.connToSessionID[conn]; exists {
+			connToUserSessionID[conn] = userSessionID
+		}
+	}
+	h.connToSessionIDMu.RUnlock()
 
 	// Track failed connections for immediate cleanup
 	var failedConns []*websocket.Conn
@@ -723,6 +758,11 @@ func (h *DXClusterWebSocketHandler) broadcast(message map[string]interface{}) {
 			// Log the error and mark connection for cleanup
 			log.Printf("DX Cluster WebSocket: Failed to send message to client: %v", err)
 			failedConns = append(failedConns, conn)
+		} else {
+			// Track bytes sent for this UserSessionID
+			if userSessionID, exists := connToUserSessionID[conn]; exists {
+				h.AddDXBytes(userSessionID, messageSize)
+			}
 		}
 	}
 
@@ -761,6 +801,8 @@ func (h *DXClusterWebSocketHandler) sendMessage(conn *websocket.Conn, message ma
 		return err
 	}
 
+	messageSize := uint64(len(messageJSON))
+
 	// Get the write mutex for this connection
 	h.clientsMu.RLock()
 	writeMu, exists := h.clients[conn]
@@ -770,13 +812,25 @@ func (h *DXClusterWebSocketHandler) sendMessage(conn *websocket.Conn, message ma
 		return fmt.Errorf("connection not found")
 	}
 
+	// Get UserSessionID for this connection
+	h.connToSessionIDMu.RLock()
+	userSessionID := h.connToSessionID[conn]
+	h.connToSessionIDMu.RUnlock()
+
 	// Lock before writing
 	writeMu.Lock()
 	defer writeMu.Unlock()
 
 	// Reduced timeout from 10s to 5s for faster failure detection
 	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	return conn.WriteMessage(websocket.TextMessage, messageJSON)
+	err = conn.WriteMessage(websocket.TextMessage, messageJSON)
+
+	// Track bytes sent if successful
+	if err == nil && userSessionID != "" {
+		h.AddDXBytes(userSessionID, messageSize)
+	}
+
+	return err
 }
 
 // BroadcastStatus broadcasts connection status to all clients
@@ -875,4 +929,81 @@ func (h *DXClusterWebSocketHandler) GetChatUserCount() int {
 		return 0
 	}
 	return h.chatManager.GetActiveUserCount()
+}
+
+// AddDXBytes tracks bytes sent to a DX cluster connection for a given UserSessionID
+func (h *DXClusterWebSocketHandler) AddDXBytes(userSessionID string, bytes uint64) {
+	if userSessionID == "" {
+		return
+	}
+
+	h.dxThroughputMu.Lock()
+	defer h.dxThroughputMu.Unlock()
+
+	// Add to total bytes sent
+	h.dxBytesSent[userSessionID] += bytes
+
+	// Add sample to sliding window
+	now := time.Now()
+	samples := h.dxBytesSamples[userSessionID]
+	samples = append(samples, BytesSample{
+		Timestamp: now,
+		Bytes:     h.dxBytesSent[userSessionID],
+	})
+
+	// Remove samples older than 1 second
+	cutoff := now.Add(-1 * time.Second)
+	for len(samples) > 0 && samples[0].Timestamp.Before(cutoff) {
+		samples = samples[1:]
+	}
+
+	h.dxBytesSamples[userSessionID] = samples
+}
+
+// GetInstantaneousDXKbps returns the instantaneous DX cluster transfer rate in kbps
+// for a given UserSessionID using a 1-second sliding window, including 33% overhead
+func (h *DXClusterWebSocketHandler) GetInstantaneousDXKbps(userSessionID string) float64 {
+	if userSessionID == "" {
+		return 0
+	}
+
+	h.dxThroughputMu.RLock()
+	defer h.dxThroughputMu.RUnlock()
+
+	samples := h.dxBytesSamples[userSessionID]
+	if len(samples) < 2 {
+		return 0
+	}
+
+	// Get oldest and newest samples in the window
+	oldest := samples[0]
+	newest := samples[len(samples)-1]
+
+	// Calculate time difference
+	duration := newest.Timestamp.Sub(oldest.Timestamp).Seconds()
+	if duration == 0 {
+		return 0
+	}
+
+	// Calculate bytes transferred in this window
+	bytesDiff := newest.Bytes - oldest.Bytes
+
+	// Convert to kbps (bytes/sec * 8 bits/byte / 1000)
+	// Add 33% for protocol overhead (WebSocket + TCP/IP headers)
+	payloadKbps := float64(bytesDiff) / duration * 8 / 1000
+	return payloadKbps * 1.33
+}
+
+// CleanupUserSessionID removes throughput tracking data for a UserSessionID
+// Called when all sessions for a user are closed
+func (h *DXClusterWebSocketHandler) CleanupUserSessionID(userSessionID string) {
+	if userSessionID == "" {
+		return
+	}
+
+	h.dxThroughputMu.Lock()
+	defer h.dxThroughputMu.Unlock()
+
+	delete(h.dxBytesSent, userSessionID)
+	delete(h.dxBytesSamples, userSessionID)
 }

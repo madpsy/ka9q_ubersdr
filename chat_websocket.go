@@ -228,12 +228,47 @@ func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]int
 
 	// Update mode if provided AND different
 	if mode, ok := updates["mode"].(string); ok {
-		// Validate mode
+		// Validate mode length (max 6 chars: "iq" + 4 digits, or standard 3-char modes)
+		if len(mode) == 0 || len(mode) > 6 {
+			cm.activeUsersMu.Unlock()
+			return ErrInvalidMode
+		}
+
+		// Validate characters (alphanumeric only)
+		for _, r := range mode {
+			if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+				cm.activeUsersMu.Unlock()
+				return ErrInvalidMode
+			}
+		}
+
+		// Validate mode - accept standard modes and IQ modes
 		validModes := map[string]bool{
 			"usb": true, "lsb": true, "am": true, "fm": true,
 			"cwu": true, "cwl": true, "sam": true, "nfm": true,
 		}
-		if !validModes[mode] {
+
+		// Check if it's a valid IQ mode: "iq" followed by 0-4 digits
+		// Valid: iq, iq48, iq96, iq192, iq384, iq1234
+		// Invalid: iq12345, iqabc, abc123
+		isIQMode := false
+		if len(mode) >= 2 && len(mode) <= 6 { // "iq" (2) + up to 4 digits (4) = max 6
+			if mode[0:2] == "iq" {
+				// Check that everything after "iq" is digits
+				allDigits := true
+				for i := 2; i < len(mode); i++ {
+					if mode[i] < '0' || mode[i] > '9' {
+						allDigits = false
+						break
+					}
+				}
+				if allDigits {
+					isIQMode = true
+				}
+			}
+		}
+
+		if !validModes[mode] && !isIQMode {
 			cm.activeUsersMu.Unlock()
 			return ErrInvalidMode
 		}
@@ -357,22 +392,34 @@ func (cm *ChatManager) broadcastUserUpdate(user *ChatUser) {
 		userData["idle_minutes"] = idleMinutes
 	}
 
-	// Always include frequency if set (even if 0)
-	if user.Frequency > 0 {
+	// Check if mode is an IQ mode (contains "iq")
+	isIQMode := false
+	if user.Mode != "" {
+		for i := 0; i < len(user.Mode)-1; i++ {
+			if user.Mode[i:i+2] == "iq" {
+				isIQMode = true
+				break
+			}
+		}
+	}
+
+	// Always include frequency if set (even if 0) and not in IQ mode
+	if user.Frequency > 0 && !isIQMode {
 		userData["frequency"] = user.Frequency
 	}
-	// Always include mode if set
-	if user.Mode != "" {
+	// Include mode only if it's not an IQ mode
+	if user.Mode != "" && !isIQMode {
 		userData["mode"] = user.Mode
 	}
 	// Always include bandwidth values (even if 0, for sync functionality)
 	// Only exclude if both frequency and mode are not set (user hasn't sent any radio data yet)
-	if user.Frequency > 0 || user.Mode != "" {
+	// Also exclude if in IQ mode
+	if (user.Frequency > 0 || user.Mode != "") && !isIQMode {
 		userData["bw_high"] = user.BWHigh
 		userData["bw_low"] = user.BWLow
 	}
-	// Include zoom_bw if set
-	if user.ZoomBW > 0 {
+	// Include zoom_bw if set and not in IQ mode
+	if user.ZoomBW > 0 && !isIQMode {
 		userData["zoom_bw"] = user.ZoomBW
 	}
 	// Include CAT and TX status
@@ -657,22 +704,35 @@ func (cm *ChatManager) SendActiveUsers(conn *websocket.Conn) {
 		if idleMinutes > 0 {
 			userData["idle_minutes"] = idleMinutes
 		}
-		// Include frequency if set
-		if user.Frequency > 0 {
+
+		// Check if mode is an IQ mode (contains "iq")
+		isIQMode := false
+		if user.Mode != "" {
+			for i := 0; i < len(user.Mode)-1; i++ {
+				if user.Mode[i:i+2] == "iq" {
+					isIQMode = true
+					break
+				}
+			}
+		}
+
+		// Include frequency if set and not in IQ mode
+		if user.Frequency > 0 && !isIQMode {
 			userData["frequency"] = user.Frequency
 		}
-		// Include mode if set
-		if user.Mode != "" {
+		// Include mode only if it's not an IQ mode
+		if user.Mode != "" && !isIQMode {
 			userData["mode"] = user.Mode
 		}
 		// Always include bandwidth values (even if 0, for sync functionality)
 		// Only exclude if both frequency and mode are not set (user hasn't sent any radio data yet)
-		if user.Frequency > 0 || user.Mode != "" {
+		// Also exclude if in IQ mode
+		if (user.Frequency > 0 || user.Mode != "") && !isIQMode {
 			userData["bw_high"] = user.BWHigh
 			userData["bw_low"] = user.BWLow
 		}
-		// Include zoom_bw if set
-		if user.ZoomBW > 0 {
+		// Include zoom_bw if set and not in IQ mode
+		if user.ZoomBW > 0 && !isIQMode {
 			userData["zoom_bw"] = user.ZoomBW
 		}
 		// Include CAT and TX status
@@ -710,22 +770,35 @@ func (cm *ChatManager) BroadcastActiveUsers() {
 		if idleMinutes > 0 {
 			userData["idle_minutes"] = idleMinutes
 		}
-		// Include frequency if set
-		if user.Frequency > 0 {
+
+		// Check if mode is an IQ mode (contains "iq")
+		isIQMode := false
+		if user.Mode != "" {
+			for i := 0; i < len(user.Mode)-1; i++ {
+				if user.Mode[i:i+2] == "iq" {
+					isIQMode = true
+					break
+				}
+			}
+		}
+
+		// Include frequency if set and not in IQ mode
+		if user.Frequency > 0 && !isIQMode {
 			userData["frequency"] = user.Frequency
 		}
-		// Include mode if set
-		if user.Mode != "" {
+		// Include mode only if it's not an IQ mode
+		if user.Mode != "" && !isIQMode {
 			userData["mode"] = user.Mode
 		}
 		// Always include bandwidth values (even if 0, for sync functionality)
 		// Only exclude if both frequency and mode are not set (user hasn't sent any radio data yet)
-		if user.Frequency > 0 || user.Mode != "" {
+		// Also exclude if in IQ mode
+		if (user.Frequency > 0 || user.Mode != "") && !isIQMode {
 			userData["bw_high"] = user.BWHigh
 			userData["bw_low"] = user.BWLow
 		}
-		// Include zoom_bw if set
-		if user.ZoomBW > 0 {
+		// Include zoom_bw if set and not in IQ mode
+		if user.ZoomBW > 0 && !isIQMode {
 			userData["zoom_bw"] = user.ZoomBW
 		}
 		// Include CAT and TX status
@@ -980,7 +1053,7 @@ var (
 	ErrMaxUsersReached         = &ChatError{"maximum number of chat users reached - please try again later"}
 	ErrUsernameAlreadyTaken    = &ChatError{"username already taken - please choose a different username"}
 	ErrInvalidFrequency        = &ChatError{"invalid frequency - must be between 0 and 30000000 Hz"}
-	ErrInvalidMode             = &ChatError{"invalid mode - must be one of: usb, lsb, am, fm, cwu, cwl, sam, nfm"}
+	ErrInvalidMode             = &ChatError{"invalid mode - must be one of: usb, lsb, am, fm, cwu, cwl, sam, nfm, or any IQ mode (iq, iq48, iq96, iq192, iq384)"}
 	ErrInvalidBandwidth        = &ChatError{"invalid bandwidth - bw_high and bw_low must be between -10000 and 10000 Hz"}
 )
 

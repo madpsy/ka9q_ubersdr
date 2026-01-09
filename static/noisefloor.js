@@ -1471,14 +1471,14 @@ class NoiseFloorMonitor {
                             type: 'line',
                             xMin: minFreqMHz,
                             xMax: minFreqMHz,
-                            borderColor: 'rgba(33, 150, 243, 0.8)',
+                            borderColor: 'rgba(34, 139, 34, 0.8)', // Dark green
                             borderWidth: 2,
                             borderDash: [5, 5],
                             label: {
                                 display: true,
                                 content: `${minFreqMHz.toFixed(3)} MHz`,
                                 position: 'end',
-                                backgroundColor: 'rgba(33, 150, 243, 0.9)',
+                                backgroundColor: 'rgba(34, 139, 34, 0.9)',
                                 color: '#fff',
                                 font: { size: 10, weight: 'bold' },
                                 padding: 4
@@ -1537,14 +1537,14 @@ class NoiseFloorMonitor {
                     type: 'line',
                     xMin: minFreqMHz,
                     xMax: minFreqMHz,
-                    borderColor: 'rgba(33, 150, 243, 0.8)', // Blue
+                    borderColor: 'rgba(34, 139, 34, 0.8)', // Dark green
                     borderWidth: 2,
                     borderDash: [5, 5],
                     label: {
                         display: true,
                         content: `${minFreqMHz.toFixed(3)} MHz`,
                         position: 'end',
-                        backgroundColor: 'rgba(33, 150, 243, 0.9)',
+                        backgroundColor: 'rgba(34, 139, 34, 0.9)',
                         color: '#fff',
                         font: {
                             size: 10,

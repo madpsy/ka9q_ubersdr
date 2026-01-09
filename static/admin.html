@@ -1041,7 +1041,7 @@
             const countdownEl = document.getElementById('countdownNumber');
             overlay.style.display = 'flex';
 
-            let countdown = 15;
+            let countdown = 30;
             countdownEl.textContent = countdown;
 
             const interval = setInterval(() => {
@@ -7820,9 +7820,9 @@
                 // Show success message
                 showAlert(result.message || 'Update triggered successfully! The system will update shortly.', 'success');
 
-                // Show 120-second countdown overlay immediately
+                // Show 180-second countdown overlay immediately
                 setTimeout(() => {
-                    showUpdateCountdown(120);
+                    showUpdateCountdown(180);
                 }, 1000);
 
             } catch (error) {

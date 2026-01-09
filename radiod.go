@@ -592,8 +592,12 @@ func (rc *RadiodController) TerminateChannel(name string, ssrc uint32) error {
 	buf = encodeInt32(&buf, 0x12, ssrc)
 
 	// Add DEMOD_TYPE = -1 (tag 48 = 0x30) to terminate
-	// -1 signals the demod thread to exit and clean up
-	buf = encodeInt32(&buf, 0x30, 0xFFFFFFFF) // -1 as uint32
+	// radiod expects enum demod_type, where -1 means "no demodulator" (terminate)
+	// We need to encode -1 as a signed integer, which in two's complement is 0xFF (1 byte)
+	// radiod's decode_int() will properly interpret this as -1
+	buf = append(buf, 0x30) // DEMOD_TYPE tag
+	buf = append(buf, 0x01) // Length = 1 byte
+	buf = append(buf, 0xFF) // -1 in two's complement (signed byte)
 
 	// Add COMMAND_TAG (tag 1 = 0x01)
 	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))

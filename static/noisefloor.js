@@ -1687,6 +1687,33 @@ class NoiseFloorMonitor {
                 }
             });
 
+            // Add click handler to set frequency slider to clicked frequency
+            ctx.onclick = (e) => {
+                if (this.wideBandChart) {
+                    const rect = ctx.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    
+                    // Get the x-axis scale and convert pixel to frequency value
+                    const xScale = this.wideBandChart.scales.x;
+                    const freqMHz = xScale.getValueForPixel(x);
+                    
+                    if (freqMHz !== undefined && freqMHz !== null && freqMHz >= 0 && freqMHz <= 30) {
+                        // Update the frequency slider and value
+                        this.widebandFrequency = freqMHz;
+                        const frequencySlider = document.getElementById('wideband-frequency');
+                        const frequencyValue = document.getElementById('wideband-frequency-value');
+                        if (frequencySlider) {
+                            frequencySlider.value = freqMHz;
+                        }
+                        if (frequencyValue) {
+                            frequencyValue.textContent = freqMHz.toFixed(3);
+                        }
+                        // Update the chart zoom
+                        this.updateWidebandZoom();
+                    }
+                }
+            };
+
             // Add double-click to reset zoom
             ctx.ondblclick = () => {
                 if (this.wideBandChart) {

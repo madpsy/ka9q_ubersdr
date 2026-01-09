@@ -2995,55 +2995,14 @@
 
             const tbody = document.getElementById('sessionsTableBody');
 
-            // Helper function to convert IP address to sortable value
-            function ipToSortValue(ip) {
-                if (!ip || ip === 'N/A') return [0, 0, 0, 0, 0, 0, 0, 0]; // Sort N/A to the end
-
-                // IPv4 address
-                if (ip.includes('.') && !ip.includes(':')) {
-                    const parts = ip.split('.').map(p => parseInt(p) || 0);
-                    // Pad to 8 elements for consistent comparison with IPv6
-                    return [...parts, 0, 0, 0, 0];
-                }
-
-                // IPv6 address
-                if (ip.includes(':')) {
-                    // Expand :: notation and convert to numeric array
-                    let parts = ip.split(':');
-                    const emptyIndex = parts.indexOf('');
-                    if (emptyIndex !== -1) {
-                        // Handle :: expansion
-                        const before = parts.slice(0, emptyIndex);
-                        const after = parts.slice(emptyIndex + 1).filter(p => p !== '');
-                        const zerosNeeded = 8 - before.length - after.length;
-                        parts = [...before, ...Array(zerosNeeded).fill('0'), ...after];
-                    }
-                    return parts.slice(0, 8).map(p => parseInt(p || '0', 16));
-                }
-
-                return [0, 0, 0, 0, 0, 0, 0, 0];
-            }
-
-            // Sort sessions by IP address
+            // Sort sessions by user session ID (UUID)
             const sortedEntries = Object.entries(sessionsByUser).sort((a, b) => {
-                const audioA = a[1].audio[0];
-                const spectrumA = a[1].spectrum[0];
-                const ipA = audioA?.client_ip || spectrumA?.client_ip || 'N/A';
-
-                const audioB = b[1].audio[0];
-                const spectrumB = b[1].spectrum[0];
-                const ipB = audioB?.client_ip || spectrumB?.client_ip || 'N/A';
-
-                const sortA = ipToSortValue(ipA);
-                const sortB = ipToSortValue(ipB);
-
-                // Compare each segment
-                for (let i = 0; i < 8; i++) {
-                    if (sortA[i] !== sortB[i]) {
-                        return sortA[i] - sortB[i];
-                    }
-                }
-                return 0;
+                // Use the key which is the user_session_id or fallback to client IP
+                const keyA = a[0];
+                const keyB = b[0];
+                
+                // Sort alphabetically by key (UUID or IP)
+                return keyA.localeCompare(keyB);
             });
 
             for (const [key, sessions] of sortedEntries) {

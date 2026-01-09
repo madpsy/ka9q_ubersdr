@@ -43,6 +43,7 @@ class ChatDisplay:
         self.muted_users = set()
         self.active_users = []
         self.synced_username = None
+        self.sync_zoom = False  # Whether to apply zoom changes when syncing
         self.listbox_to_user = {}  # Map listbox index to user data
         self.emoji_popup = None  # Emoji picker popup window
         
@@ -90,8 +91,9 @@ class ChatDisplay:
         # This allows users to see who's online even before joining
         self.window.after(500, self.request_active_users)
 
-        # Load saved username for this instance
+        # Load saved username and zoom preference for this instance
         self.load_saved_username()
+        self.load_saved_zoom_preference()
 
 # Add this helper function at the class level (after __init__)
     def _get_emoji_font(self):
@@ -255,13 +257,23 @@ class ChatDisplay:
         buttons_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(5, 0))
 
         # Sync button
-        self.sync_btn = ttk.Button(buttons_frame, text="Sync", command=self.toggle_sync_selected, width=8)
-        self.sync_btn.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 5))
+        self.sync_btn = ttk.Button(buttons_frame, text="Sync", command=self.toggle_sync_selected)
+        self.sync_btn.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 5))
         self.sync_btn.state(['disabled'])  # Disabled until user selected
 
+        # Zoom checkbox
+        self.sync_zoom_var = tk.BooleanVar(value=False)
+        self.zoom_checkbox = ttk.Checkbutton(
+            buttons_frame,
+            text="Zoom",
+            variable=self.sync_zoom_var,
+            command=self.on_zoom_checkbox_changed
+        )
+        self.zoom_checkbox.grid(row=1, column=0, sticky=tk.W, pady=(0, 5))
+
         # Leave button
-        self.leave_btn = ttk.Button(buttons_frame, text="Leave", command=self.leave_chat, width=8)
-        self.leave_btn.grid(row=0, column=1, sticky=(tk.W, tk.E))
+        self.leave_btn = ttk.Button(buttons_frame, text="Leave", command=self.leave_chat)
+        self.leave_btn.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=(0, 5))
         self.leave_btn.grid_remove()  # Hidden initially
 
         buttons_frame.columnconfigure(0, weight=1)
@@ -900,6 +912,15 @@ class ChatDisplay:
         self.active_users = users
         self.users_label.config(text=f"Users ({count})")
 
+        # Remember currently selected user before clearing listbox
+        selected_username = None
+        selection = self.users_listbox.curselection()
+        if selection:
+            index = selection[0]
+            user = self.listbox_to_user.get(index)
+            if user:
+                selected_username = user.get('username')
+
         # Update listbox
         self.users_listbox.delete(0, tk.END)
         self.listbox_to_user.clear()
@@ -961,6 +982,10 @@ class ChatDisplay:
                 display = f"★ {display}"
 
             self.users_listbox.insert(tk.END, display)
+
+        # Restore selection if we had one
+        if selected_username:
+            self.select_user_in_listbox(selected_username)
 
     def update_single_user(self, data: dict):
         """Update a single user's information"""
@@ -1035,8 +1060,44 @@ class ChatDisplay:
             'count': len(self.active_users)
         })
 
+        # Select the user in the listbox to enable the sync button
+        self.select_user_in_listbox(username)
+
         # Update sync button text
         self.on_user_selected()
+
+    def select_user_in_listbox(self, username: str):
+        """Select a user in the listbox by username"""
+        # Find the user's index in the listbox
+        for index, user in self.listbox_to_user.items():
+            if user.get('username') == username:
+                # Select this item
+                self.users_listbox.selection_clear(0, tk.END)
+                self.users_listbox.selection_set(index)
+                self.users_listbox.see(index)
+                return
+
+    def on_zoom_checkbox_changed(self):
+        """Handle zoom checkbox state change"""
+        self.sync_zoom = self.sync_zoom_var.get()
+        print(f"[Chat] Zoom sync {'enabled' if self.sync_zoom else 'disabled'}")
+        # Save the preference for this instance
+        self.save_zoom_preference(self.sync_zoom)
+
+        # If zoom was just enabled and we're currently synced with someone, apply their zoom immediately
+        if self.sync_zoom and self.synced_username:
+            user = next((u for u in self.active_users if u.get('username') == self.synced_username), None)
+            if user:
+                freq = user.get('frequency')
+                zoom_bw = user.get('zoom_bw', 0)
+                print(f"[Chat] Zoom enabled - synced user {self.synced_username}: freq={freq}, zoom_bw={zoom_bw}")
+                if zoom_bw > 0:
+                    print(f"[Chat] Applying {self.synced_username}'s zoom level immediately")
+                    self.sync_to_user(user)
+                else:
+                    print(f"[Chat] Synced user has no zoom data (zoom_bw={zoom_bw})")
+            else:
+                print(f"[Chat] Could not find synced user {self.synced_username} in active users")
 
     def sync_to_user(self, user: dict):
         """Sync our radio to a user's settings"""
@@ -1050,9 +1111,9 @@ class ChatDisplay:
         bw_high = user.get('bw_high', 2700)
         zoom_bw = user.get('zoom_bw', 0)
 
-        print(f"[Chat] Syncing to {user.get('username')}: freq={freq} Hz, mode={mode}, bw_low={bw_low}, bw_high={bw_high}, zoom_bw={zoom_bw:.1f}")
+        print(f"[Chat] Syncing to {user.get('username')}: freq={freq} Hz, mode={mode}, bw_low={bw_low}, bw_high={bw_high}, zoom_bw={zoom_bw:.1f}, sync_zoom={self.sync_zoom}")
 
-        # Update radio GUI
+        # Update radio GUI frequency
         self.radio_gui.set_frequency_hz(freq)
 
         # Set mode if not locked
@@ -1079,24 +1140,69 @@ class ChatDisplay:
         if self.radio_gui.audio_spectrum_display:
             self.radio_gui.audio_spectrum_display.update_bandwidth(bw_low, bw_high, mode.lower())
 
-        # Apply zoom bandwidth if provided and spectrum is connected
-        if zoom_bw > 0 and self.radio_gui.spectrum:
+        # Apply zoom bandwidth if provided, spectrum is connected, AND zoom sync is enabled
+        # Do this BEFORE apply_frequency so zoom command is sent last
+        zoom_applied = False
+        if self.sync_zoom and zoom_bw > 0 and self.radio_gui.spectrum:
             spectrum = self.radio_gui.spectrum
             if spectrum.connected and spectrum.bin_count > 0:
+                # Validate zoom bandwidth to prevent negative/invalid values
+
+                # Check minimum bin bandwidth (1 Hz/bin minimum)
+                if zoom_bw < 1:
+                    print(f"[Chat] Ignoring invalid synced zoom: {zoom_bw:.2f} Hz/bin (minimum is 1 Hz/bin)")
+                    return
+
+                # Don't clamp to our initial_bin_bandwidth - use the synced user's zoom_bw as-is
+                # The synced user might have a different initial bandwidth than us
                 # Calculate total bandwidth from bin bandwidth
                 new_total_bandwidth = zoom_bw * spectrum.bin_count
-                # Send zoom command via the spectrum's event loop
+
+                # Constrain zoom center to keep view within 0-30 MHz (matches web UI)
+                # Web UI uses 0-30 MHz range (chat-ui.js lines 2180-2183)
+                half_bandwidth = new_total_bandwidth / 2
+                min_center = 0 + half_bandwidth  # 0 Hz + half bandwidth
+                max_center = 30000000 - half_bandwidth  # 30 MHz - half bandwidth
+                clamped_center = max(min_center, min(max_center, freq))
+
+                # Log if we adjusted the center frequency
+                if clamped_center != freq:
+                    print(f"[Chat] Clamped synced zoom center from {freq/1e6:.6f} to {clamped_center/1e6:.6f} MHz to stay within 0-30 MHz range")
+
+                # Always set tuned_freq to the original frequency (where we're actually tuned)
+                # The marker should show the actual tuned frequency, not the clamped zoom center
+                spectrum.tuned_freq = freq
+
+                print(f"[Chat] Applying synced zoom: {new_total_bandwidth/1000:.1f} KHz ({zoom_bw:.2f} Hz/bin) at center {clamped_center/1e6:.6f} MHz")
+
+                # Send ONLY the zoom command (matches web UI behavior)
+                # Do NOT call update_center_frequency - it sends a conflicting PAN command
+                # The zoom command includes the frequency and the server will respond with a config
+                # message that updates center_freq and redraws the spectrum with correct labels
                 import asyncio
                 if spectrum.event_loop and spectrum.event_loop.is_running():
                     asyncio.run_coroutine_threadsafe(
-                        spectrum._send_zoom_command(freq, new_total_bandwidth),
+                        spectrum._send_zoom_command(clamped_center, new_total_bandwidth),
                         spectrum.event_loop
                     )
-                    print(f"Applied synced zoom: {new_total_bandwidth/1000:.1f} KHz ({zoom_bw:.2f} Hz/bin)")
+                    print(f"[Chat] Zoom command sent - server will update center frequency via config message")
+                    zoom_applied = True
+
+                    # Call zoom callback if it exists (same as manual zoom operations)
+                    if spectrum.zoom_callback:
+                        spectrum.zoom_callback()
+                        print(f"[Chat] Zoom callback called")
 
         # Apply changes if connected (skip auto mode to preserve synced mode)
-        if self.radio_gui.connected:
+        # Only call apply_frequency if zoom was NOT applied (to avoid conflicting PAN commands)
+        if self.radio_gui.connected and not zoom_applied:
             self.radio_gui.apply_frequency(skip_auto_mode=True)
+        elif self.radio_gui.connected:
+            print(f"[Chat] Skipping apply_frequency because zoom command was sent")
+
+        # Update spectrum center if zoom was not applied
+        if not zoom_applied and self.radio_gui.spectrum:
+            self.radio_gui.spectrum.update_center_frequency(freq)
 
         # Don't call send_radio_status() directly - let the debounced on_radio_changed() handle it
         # This prevents multiple rapid updates when syncing
@@ -1114,6 +1220,8 @@ class ChatDisplay:
         if freq and mode:
             self.sync_to_user(user)
             self.add_system_message(f"Tuned to {username}'s frequency")
+            # Select the user in the listbox
+            self.select_user_in_listbox(username)
         else:
             messagebox.showinfo("Info", f"{username} has no frequency/mode set")
 
@@ -1511,7 +1619,13 @@ class ChatDisplay:
             if os.path.exists(self.config_file):
                 with open(self.config_file, 'r') as f:
                     data = json.load(f)
-                    return data.get(self.instance_uuid)
+                    instance_data = data.get(self.instance_uuid)
+
+                    # Handle both legacy (string) and new (dict) formats
+                    if isinstance(instance_data, str):
+                        return instance_data
+                    elif isinstance(instance_data, dict):
+                        return instance_data.get('username')
         except Exception as e:
             print(f"Error loading saved chat username: {e}")
         return None
@@ -1528,8 +1642,16 @@ class ChatDisplay:
                 with open(self.config_file, 'r') as f:
                     data = json.load(f)
 
-            # Update with new username
-            data[self.instance_uuid] = username
+            # Get or create instance data
+            if self.instance_uuid not in data:
+                data[self.instance_uuid] = {}
+
+            # Handle legacy format (string username) by converting to dict
+            if isinstance(data[self.instance_uuid], str):
+                data[self.instance_uuid] = {'username': data[self.instance_uuid]}
+
+            # Update username
+            data[self.instance_uuid]['username'] = username
 
             # Save back to file
             with open(self.config_file, 'w') as f:
@@ -1540,7 +1662,7 @@ class ChatDisplay:
             print(f"Error saving chat username: {e}")
 
     def remove_username_for_instance(self):
-        """Remove saved username for this instance UUID"""
+        """Remove saved username and preferences for this instance UUID"""
         if not self.instance_uuid:
             return
 
@@ -1552,16 +1674,71 @@ class ChatDisplay:
             with open(self.config_file, 'r') as f:
                 data = json.load(f)
 
-            # Remove this instance's username if it exists
+            # Remove this instance's data if it exists
             if self.instance_uuid in data:
                 del data[self.instance_uuid]
-                print(f"Removed saved chat username for instance {self.instance_uuid}")
+                print(f"Removed saved chat data for instance {self.instance_uuid}")
 
                 # Save back to file
                 with open(self.config_file, 'w') as f:
                     json.dump(data, f, indent=2)
         except Exception as e:
-            print(f"Error removing chat username: {e}")
+            print(f"Error removing chat data: {e}")
+
+    def load_saved_zoom_preference(self):
+        """Load saved zoom sync preference for this instance UUID"""
+        if not self.instance_uuid:
+            return
+
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r') as f:
+                    data = json.load(f)
+                    instance_data = data.get(self.instance_uuid)
+
+                    # Handle both legacy (string) and new (dict) formats
+                    if isinstance(instance_data, dict):
+                        saved_zoom = instance_data.get('sync_zoom', False)
+                    else:
+                        # Legacy format or no data - default to False
+                        saved_zoom = False
+
+                    self.sync_zoom = saved_zoom
+                    self.sync_zoom_var.set(saved_zoom)
+                    print(f"Loaded saved zoom preference for instance {self.instance_uuid}: {saved_zoom}")
+        except Exception as e:
+            print(f"Error loading saved zoom preference: {e}")
+
+    def save_zoom_preference(self, zoom_enabled: bool):
+        """Save zoom sync preference for this instance UUID"""
+        if not self.instance_uuid:
+            return
+
+        try:
+            # Load existing data
+            data = {}
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r') as f:
+                    data = json.load(f)
+
+            # Get or create instance data
+            if self.instance_uuid not in data:
+                data[self.instance_uuid] = {}
+
+            # Handle legacy format (string username) by converting to dict
+            if isinstance(data[self.instance_uuid], str):
+                data[self.instance_uuid] = {'username': data[self.instance_uuid]}
+
+            # Update zoom preference
+            data[self.instance_uuid]['sync_zoom'] = zoom_enabled
+
+            # Save back to file
+            with open(self.config_file, 'w') as f:
+                json.dump(data, f, indent=2)
+
+            print(f"Saved zoom preference '{zoom_enabled}' for instance {self.instance_uuid}")
+        except Exception as e:
+            print(f"Error saving zoom preference: {e}")
 
     def get_saved_username_for_instance(self, instance_uuid: str) -> Optional[str]:
         """Get saved username for a specific instance UUID (static method for external use)"""
@@ -1576,7 +1753,13 @@ class ChatDisplay:
             if os.path.exists(config_file):
                 with open(config_file, 'r') as f:
                     data = json.load(f)
-                    return data.get(instance_uuid)
+                    instance_data = data.get(instance_uuid)
+
+                    # Handle both legacy (string) and new (dict) formats
+                    if isinstance(instance_data, str):
+                        return instance_data
+                    elif isinstance(instance_data, dict):
+                        return instance_data.get('username')
         except Exception as e:
             print(f"Error loading saved chat username: {e}")
         return None
@@ -1628,7 +1811,13 @@ def get_saved_username_for_instance(instance_uuid: str) -> Optional[str]:
         if os.path.exists(config_file):
             with open(config_file, 'r') as f:
                 data = json.load(f)
-                return data.get(instance_uuid)
+                instance_data = data.get(instance_uuid)
+
+                # Handle both legacy (string) and new (dict) formats
+                if isinstance(instance_data, str):
+                    return instance_data
+                elif isinstance(instance_data, dict):
+                    return instance_data.get('username')
     except Exception as e:
         print(f"Error loading saved chat username: {e}")
     return None

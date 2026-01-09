@@ -49,8 +49,59 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
         filter_var.set('')
         filter_entry.focus()
 
+    def on_filter_enter(event):
+        """Handle Enter key in filter entry to connect to selected instance."""
+        selection = tree.selection()
+        if selection:
+            connect_to_instance()
+        return "break"
+
+    def on_filter_up(event):
+        """Handle Up arrow key in filter entry to navigate tree."""
+        children = tree.get_children()
+        if not children:
+            return "break"
+
+        selection = tree.selection()
+        if selection:
+            current = selection[0]
+            current_index = children.index(current)
+            if current_index > 0:
+                # Move to previous item
+                prev_item = children[current_index - 1]
+                tree.selection_set(prev_item)
+                tree.focus(prev_item)
+                tree.see(prev_item)
+        return "break"
+
+    def on_filter_down(event):
+        """Handle Down arrow key in filter entry to navigate tree."""
+        children = tree.get_children()
+        if not children:
+            return "break"
+
+        selection = tree.selection()
+        if selection:
+            current = selection[0]
+            current_index = children.index(current)
+            if current_index < len(children) - 1:
+                # Move to next item
+                next_item = children[current_index + 1]
+                tree.selection_set(next_item)
+                tree.focus(next_item)
+                tree.see(next_item)
+        return "break"
+
     clear_btn = ttk.Button(filter_frame, text="Clear", command=clear_filter, width=8)
     clear_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+    # Bind Enter key to filter entry
+    filter_entry.bind('<Return>', on_filter_enter)
+    filter_entry.bind('<KP_Enter>', on_filter_enter)
+
+    # Bind arrow keys to filter entry for tree navigation
+    filter_entry.bind('<Up>', on_filter_up)
+    filter_entry.bind('<Down>', on_filter_down)
 
     # Add help text
     help_label = ttk.Label(filter_frame, text="(name, callsign, location)", foreground='gray', font=('TkDefaultFont', 9))
@@ -272,11 +323,33 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
             # Connect to it
             connect_to_instance()
 
+    def on_tree_enter_key(event):
+        """Handle Enter key press on tree to connect to selected instance."""
+        selection = tree.selection()
+        if selection:
+            connect_to_instance()
+        return "break"  # Prevent default behavior
+
+    def on_tree_focus(event):
+        """When tree gets focus, select first item if nothing is selected."""
+        if not tree.selection() and tree.get_children():
+            first_item = tree.get_children()[0]
+            tree.selection_set(first_item)
+            tree.focus(first_item)
+            tree.see(first_item)
+
     # Use single-click for links (more intuitive)
     tree.bind('<Button-1>', on_tree_click)
 
     # Use double-click to connect
     tree.bind('<Double-Button-1>', on_tree_double_click)
+
+    # Use Enter key to connect to selected instance
+    tree.bind('<Return>', on_tree_enter_key)
+    tree.bind('<KP_Enter>', on_tree_enter_key)  # Numpad Enter
+
+    # Auto-select first item when tree gets focus
+    tree.bind('<FocusIn>', on_tree_focus)
 
     # Configure tags for link-like appearance and local instance highlighting
     tree.tag_configure('link', foreground='blue')
@@ -320,6 +393,7 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
             status_label.config(text=f"Showing {len(filtered_instances)} of {len(all_instances)} instance(s)", foreground='green')
 
         # Add filtered instances to tree
+        first_item_id = None
         for instance in filtered_instances:
             name = instance.get('name', 'Unknown')
             callsign = instance.get('callsign', '')
@@ -370,6 +444,10 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
             # Insert into tree
             item_id = tree.insert('', tk.END, values=(name, callsign, location, users_text, session_text, cw_text, digi_text, noise_text, iq_text, version, url_text, map_text), tags=tags)
 
+            # Store the first item ID
+            if first_item_id is None:
+                first_item_id = item_id
+
             # Store full instance data with connection info
             # The API returns host, port, tls at the top level
             instances_data[item_id] = {
@@ -380,6 +458,12 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
                     'tls': instance.get('tls', False)
                 }
             }
+
+        # Always select the first item if there are any items
+        if first_item_id:
+            tree.selection_set(first_item_id)
+            tree.focus(first_item_id)
+            tree.see(first_item_id)
 
     # Fetch instances in background
     def fetch_instances():
@@ -431,5 +515,8 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
     # Start initial fetch in background thread
     fetch_thread = threading.Thread(target=fetch_instances, daemon=True)
     fetch_thread.start()
+
+    # Set focus to the filter entry so user can type immediately
+    filter_entry.focus_set()
 
     return window

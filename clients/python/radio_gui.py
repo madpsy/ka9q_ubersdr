@@ -3350,6 +3350,16 @@ class RadioGUI:
         """Handle radio control type change - show/hide appropriate controls."""
         control_type = self.radio_control_type_var.get()
 
+        # Update button text based on control type
+        if control_type in ('Serial', 'TCI'):
+            # Serial and TCI are servers, so use "Start" instead of "Connect"
+            if not self.radio_control_connected:
+                self.radio_connect_btn.config(text="Start")
+        else:
+            # Other types are clients, so use "Connect"
+            if not self.radio_control_connected:
+                self.radio_connect_btn.config(text="Connect")
+
         if control_type == 'rigctl':
             # Show rigctl controls (host, port)
             self.radio_host_label.pack(side=tk.LEFT, padx=(5, 5))
@@ -3730,7 +3740,11 @@ class RadioGUI:
 
             # Update state BEFORE starting periodic updates
             self.radio_control_connected = True
-            self.radio_connect_btn.config(text="Disconnect")
+            # Use "Stop" for servers (Serial, TCI), "Disconnect" for clients
+            if control_type in ('Serial', 'TCI'):
+                self.radio_connect_btn.config(text="Stop")
+            else:
+                self.radio_connect_btn.config(text="Disconnect")
 
             # Notify chat of CAT status change (icon will appear)
             self.notify_chat_radio_changed()
@@ -3843,7 +3857,12 @@ class RadioGUI:
             self.root.after_cancel(self.radio_control_poll_job)
             self.radio_control_poll_job = None
 
-        self.radio_connect_btn.config(text="Connect")
+        # Use "Start" for servers (Serial, TCI), "Connect" for clients
+        control_type = self.radio_control_type_var.get()
+        if control_type in ('Serial', 'TCI'):
+            self.radio_connect_btn.config(text="Start")
+        else:
+            self.radio_connect_btn.config(text="Connect")
         self.log_status("Disconnected from radio control")
 
     def on_radio_control_frequency_changed(self, freq_hz: int):

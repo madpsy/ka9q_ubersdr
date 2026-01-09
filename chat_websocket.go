@@ -329,12 +329,8 @@ func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]int
 
 	// If user was idle and is now active, broadcast the change
 	if wasIdle {
-		log.Printf("Chat: User '%s' is no longer idle", user.Username)
 		cm.broadcastUserUpdate(user)
 	}
-
-	log.Printf("Chat: User '%s' updated status (changed): frequency=%d Hz, mode=%s, bw_high=%d, bw_low=%d, zoom_bw=%.1f, cat=%t, tx=%t",
-		user.Username, user.Frequency, user.Mode, user.BWHigh, user.BWLow, user.ZoomBW, user.CAT, user.TX)
 
 	// Broadcast only this user's updated info (more efficient than full user list)
 	cm.broadcastUserUpdate(user)

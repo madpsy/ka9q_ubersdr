@@ -423,9 +423,6 @@ func (rc *RadiodController) UpdateSpectrumChannel(ssrc uint32, frequency uint64,
 	// Add BIN_COUNT (tag 94 = 0x5e) if it changed
 	if sendBinCount && binCount > 0 {
 		buf = encodeInt32(&buf, 0x5e, uint32(binCount))
-		if DebugMode {
-			log.Printf("DEBUG: Sending BIN_COUNT=%d", binCount)
-		}
 	}
 
 	// Add NONCOHERENT_BIN_BW (tag 93 = 0x5d) if changed

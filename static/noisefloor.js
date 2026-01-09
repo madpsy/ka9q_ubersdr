@@ -1816,14 +1816,14 @@ class NoiseFloorMonitor {
             type: 'line',
             xMin: this.widebandFrequency,
             xMax: this.widebandFrequency,
-            borderColor: 'rgba(255, 152, 0, 0.9)', // Orange
+            borderColor: 'rgba(33, 150, 243, 0.9)', // Blue
             borderWidth: 2,
             borderDash: [5, 5],
             label: {
                 display: true,
                 content: `${this.widebandFrequency.toFixed(3)} MHz`,
                 position: 'end',
-                backgroundColor: 'rgba(255, 152, 0, 0.9)',
+                backgroundColor: 'rgba(33, 150, 243, 0.9)',
                 color: '#fff',
                 font: {
                     size: 11,

@@ -392,33 +392,27 @@ func (cm *ChatManager) broadcastUserUpdate(user *ChatUser) {
 		userData["idle_minutes"] = idleMinutes
 	}
 
-	// Check if mode is an IQ mode (contains "iq")
+	// Check if mode is an IQ mode (starts with "iq")
 	isIQMode := false
-	if user.Mode != "" {
-		for i := 0; i < len(user.Mode)-1; i++ {
-			if user.Mode[i:i+2] == "iq" {
-				isIQMode = true
-				break
-			}
-		}
+	if len(user.Mode) >= 2 && user.Mode[0:2] == "iq" {
+		isIQMode = true
 	}
 
-	// Always include frequency if set (even if 0) and not in IQ mode
-	if user.Frequency > 0 && !isIQMode {
+	// Always include frequency if set (even for IQ mode users)
+	if user.Frequency > 0 {
 		userData["frequency"] = user.Frequency
 	}
 	// Include mode only if it's not an IQ mode
 	if user.Mode != "" && !isIQMode {
 		userData["mode"] = user.Mode
 	}
-	// Always include bandwidth values (even if 0, for sync functionality)
+	// Include bandwidth values only if not in IQ mode
 	// Only exclude if both frequency and mode are not set (user hasn't sent any radio data yet)
-	// Also exclude if in IQ mode
 	if (user.Frequency > 0 || user.Mode != "") && !isIQMode {
 		userData["bw_high"] = user.BWHigh
 		userData["bw_low"] = user.BWLow
 	}
-	// Include zoom_bw if set and not in IQ mode
+	// Include zoom_bw only if not in IQ mode
 	if user.ZoomBW > 0 && !isIQMode {
 		userData["zoom_bw"] = user.ZoomBW
 	}
@@ -705,33 +699,27 @@ func (cm *ChatManager) SendActiveUsers(conn *websocket.Conn) {
 			userData["idle_minutes"] = idleMinutes
 		}
 
-		// Check if mode is an IQ mode (contains "iq")
+		// Check if mode is an IQ mode (starts with "iq")
 		isIQMode := false
-		if user.Mode != "" {
-			for i := 0; i < len(user.Mode)-1; i++ {
-				if user.Mode[i:i+2] == "iq" {
-					isIQMode = true
-					break
-				}
-			}
+		if len(user.Mode) >= 2 && user.Mode[0:2] == "iq" {
+			isIQMode = true
 		}
 
-		// Include frequency if set and not in IQ mode
-		if user.Frequency > 0 && !isIQMode {
+		// Always include frequency if set (even for IQ mode users)
+		if user.Frequency > 0 {
 			userData["frequency"] = user.Frequency
 		}
 		// Include mode only if it's not an IQ mode
 		if user.Mode != "" && !isIQMode {
 			userData["mode"] = user.Mode
 		}
-		// Always include bandwidth values (even if 0, for sync functionality)
+		// Include bandwidth values only if not in IQ mode
 		// Only exclude if both frequency and mode are not set (user hasn't sent any radio data yet)
-		// Also exclude if in IQ mode
 		if (user.Frequency > 0 || user.Mode != "") && !isIQMode {
 			userData["bw_high"] = user.BWHigh
 			userData["bw_low"] = user.BWLow
 		}
-		// Include zoom_bw if set and not in IQ mode
+		// Include zoom_bw only if not in IQ mode
 		if user.ZoomBW > 0 && !isIQMode {
 			userData["zoom_bw"] = user.ZoomBW
 		}
@@ -771,33 +759,27 @@ func (cm *ChatManager) BroadcastActiveUsers() {
 			userData["idle_minutes"] = idleMinutes
 		}
 
-		// Check if mode is an IQ mode (contains "iq")
+		// Check if mode is an IQ mode (starts with "iq")
 		isIQMode := false
-		if user.Mode != "" {
-			for i := 0; i < len(user.Mode)-1; i++ {
-				if user.Mode[i:i+2] == "iq" {
-					isIQMode = true
-					break
-				}
-			}
+		if len(user.Mode) >= 2 && user.Mode[0:2] == "iq" {
+			isIQMode = true
 		}
 
-		// Include frequency if set and not in IQ mode
-		if user.Frequency > 0 && !isIQMode {
+		// Always include frequency if set (even for IQ mode users)
+		if user.Frequency > 0 {
 			userData["frequency"] = user.Frequency
 		}
 		// Include mode only if it's not an IQ mode
 		if user.Mode != "" && !isIQMode {
 			userData["mode"] = user.Mode
 		}
-		// Always include bandwidth values (even if 0, for sync functionality)
+		// Include bandwidth values only if not in IQ mode
 		// Only exclude if both frequency and mode are not set (user hasn't sent any radio data yet)
-		// Also exclude if in IQ mode
 		if (user.Frequency > 0 || user.Mode != "") && !isIQMode {
 			userData["bw_high"] = user.BWHigh
 			userData["bw_low"] = user.BWLow
 		}
-		// Include zoom_bw if set and not in IQ mode
+		// Include zoom_bw only if not in IQ mode
 		if user.ZoomBW > 0 && !isIQMode {
 			userData["zoom_bw"] = user.ZoomBW
 		}

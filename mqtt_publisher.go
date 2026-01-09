@@ -608,6 +608,42 @@ func (mp *MQTTPublisher) PublishDigitalDecode(decode DecodeInfo, bandName string
 	}()
 }
 
+// PublishChatMessage publishes a chat message to MQTT
+// Topic structure: {prefix}/chat
+// Payload contains timestamp, IP address, username, and message
+func (mp *MQTTPublisher) PublishChatMessage(timestamp time.Time, ipAddress, username, message string) {
+	if mp == nil || !mp.client.IsConnected() {
+		return
+	}
+
+	// Create chat message payload
+	chatPayload := map[string]interface{}{
+		"timestamp": timestamp.Unix(),
+		"ip":        ipAddress,
+		"username":  username,
+		"message":   message,
+	}
+
+	// Build topic: {prefix}/chat
+	topic := fmt.Sprintf("%s/chat", mp.config.TopicPrefix)
+
+	data, err := json.Marshal(chatPayload)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal chat message payload: %v", err)
+		return
+	}
+
+	// Publish asynchronously - don't wait for completion (prevents blocking)
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+
+	// Check for errors in background goroutine
+	go func() {
+		if token.Wait() && token.Error() != nil {
+			log.Printf("MQTT ERROR: Failed to publish chat message to %s: %v", topic, token.Error())
+		}
+	}()
+}
+
 // PublishCWSpot publishes a CW Skimmer spot to MQTT
 // Topic structure: {prefix}/cw_spots/{band}
 // Uses the same JSON format as websocket messages for consistency

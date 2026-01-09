@@ -66,10 +66,13 @@ type ChatManager struct {
 
 	// Chat logger for persistent storage
 	chatLogger *ChatLogger
+
+	// MQTT publisher for real-time chat events
+	mqttPublisher *MQTTPublisher
 }
 
 // NewChatManager creates a new chat manager
-func NewChatManager(wsHandler *DXClusterWebSocketHandler, maxMessages int, maxUsers int, rateLimitPerSecond int, rateLimitPerMinute int, updateRateLimitPerSecond int, chatLogger *ChatLogger) *ChatManager {
+func NewChatManager(wsHandler *DXClusterWebSocketHandler, maxMessages int, maxUsers int, rateLimitPerSecond int, rateLimitPerMinute int, updateRateLimitPerSecond int, chatLogger *ChatLogger, mqttPublisher *MQTTPublisher) *ChatManager {
 	cm := &ChatManager{
 		sessionUsernames:         make(map[string]string),
 		sessionIPs:               make(map[string]string),
@@ -82,6 +85,7 @@ func NewChatManager(wsHandler *DXClusterWebSocketHandler, maxMessages int, maxUs
 		rateLimitPerMinute:       rateLimitPerMinute,
 		updateRateLimitPerSecond: updateRateLimitPerSecond,
 		chatLogger:               chatLogger,
+		mqttPublisher:            mqttPublisher,
 	}
 
 	// Start cleanup goroutine for inactive users
@@ -490,17 +494,26 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 	// Update user's last seen time
 	cm.UpdateUserActivity(sessionID)
 
+	// Get source IP for logging and MQTT
+	sourceIP := cm.GetSessionIP(sessionID)
+	if sourceIP == "" {
+		sourceIP = "unknown"
+	}
+
 	// Log to persistent storage (non-blocking)
 	if cm.chatLogger != nil {
-		sourceIP := cm.GetSessionIP(sessionID)
-		if sourceIP == "" {
-			sourceIP = "unknown"
-		}
 		// Use goroutine to avoid blocking message delivery on disk I/O
 		go func(timestamp time.Time, ip, user, msg string) {
 			if err := cm.chatLogger.LogMessage(timestamp, ip, user, msg); err != nil {
 				log.Printf("Chat: Failed to log message: %v", err)
 			}
+		}(now, sourceIP, username, messageText)
+	}
+
+	// Publish to MQTT (non-blocking)
+	if cm.mqttPublisher != nil {
+		go func(timestamp time.Time, ip, user, msg string) {
+			cm.mqttPublisher.PublishChatMessage(timestamp, ip, user, msg)
 		}(now, sourceIP, username, messageText)
 	}
 

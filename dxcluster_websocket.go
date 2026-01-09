@@ -108,9 +108,15 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 			chatLogger = nil // Continue without logging
 		}
 
-		handler.chatManager = NewChatManager(handler, chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatLogger)
-		log.Printf("Chat: Initialized with %d buffered messages, max %d users, rate limits: %d msg/sec, %d msg/min, %d updates/sec, logging: %v",
-			chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatConfig.LogToCSV)
+		// Get MQTT publisher from PrometheusMetrics if available
+		var mqttPublisher *MQTTPublisher
+		if prometheusMetrics != nil {
+			mqttPublisher = prometheusMetrics.mqttPublisher
+		}
+
+		handler.chatManager = NewChatManager(handler, chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatLogger, mqttPublisher)
+		log.Printf("Chat: Initialized with %d buffered messages, max %d users, rate limits: %d msg/sec, %d msg/min, %d updates/sec, logging: %v, MQTT: %v",
+			chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatConfig.LogToCSV, mqttPublisher != nil)
 	}
 
 	// Register spot handler to broadcast to all clients

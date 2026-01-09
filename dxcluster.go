@@ -436,10 +436,6 @@ func (c *DXClusterClient) processLine(line string) {
 
 	// Try to parse as DX spot
 	if spot, ok := c.parseDXSpot(line); ok {
-		// Log the successfully parsed spot
-		log.Printf("DX Cluster: Spot parsed: %.1f kHz %s by %s - %s",
-			spot.Frequency/1000, spot.DXCall, spot.Spotter, spot.Comment)
-
 		// Filter spots: only process spots between 0 and 30 MHz
 		if spot.Frequency <= 0 || spot.Frequency > 30000000 {
 			log.Printf("DX Cluster: Spot filtered out (frequency %.1f kHz outside 0-30 MHz range)",

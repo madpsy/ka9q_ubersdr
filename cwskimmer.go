@@ -407,7 +407,10 @@ func (c *CWSkimmerClient) handleConnection() {
 			line = strings.TrimSpace(line)
 
 			if line != "" {
-				log.Printf("CW Skimmer: << %s", line)
+				// Log non-spot messages only (spots are too noisy)
+				if !strings.HasPrefix(line, "DX de ") {
+					log.Printf("CW Skimmer: << %s", line)
+				}
 
 				// Update last activity time and last spot time if this is a spot
 				now := time.Now()

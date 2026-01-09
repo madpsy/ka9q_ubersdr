@@ -454,11 +454,13 @@ func (kc *kiwiConn) handleMessages(done chan struct{}) {
 			break
 		}
 
-		// Log all incoming messages
-		log.Printf("KiwiSDR %s received message (type=%d, len=%d): %q", kc.connType, msgType, len(message), string(message))
-
 		// Parse message (should be text "SET ..." commands)
 		msgStr := string(message)
+
+		// Log all incoming messages (disabled for keepalive and GET_USERS to reduce noise)
+		if !strings.Contains(msgStr, "keepalive") && !strings.Contains(msgStr, "GET_USERS") {
+			log.Printf("KiwiSDR %s received message (type=%d, len=%d): %q", kc.connType, msgType, len(message), msgStr)
+		}
 		if strings.HasPrefix(msgStr, "SET ") {
 			kc.handleSetCommand(msgStr[4:])
 		}
@@ -1659,7 +1661,6 @@ func (kc *kiwiConn) sendUserList() {
 
 	// user_cb is NOT URL-decoded by the Kiwi client, so send raw JSON
 	// Spaces in string values have been replaced with underscores above
-	log.Printf("Sending user_cb JSON (%d bytes)", len(jsonStr))
 	kc.sendMsg("user_cb", jsonStr)
 }
 

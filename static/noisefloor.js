@@ -1858,14 +1858,14 @@ class NoiseFloorMonitor {
             return;
         }
 
-        // Create a temporary canvas with white background
+        // Create a temporary canvas with dark blue background
         const tempCanvas = document.createElement('canvas');
         tempCanvas.width = canvas.width;
         tempCanvas.height = canvas.height;
         const tempCtx = tempCanvas.getContext('2d');
 
-        // Fill with white background
-        tempCtx.fillStyle = '#FFFFFF';
+        // Fill with dark blue background (matching the chart container gradient)
+        tempCtx.fillStyle = '#1e3c72';
         tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
 
         // Draw the original canvas on top

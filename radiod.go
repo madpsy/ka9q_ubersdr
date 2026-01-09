@@ -583,6 +583,11 @@ func (rc *RadiodController) DisableChannel(name string, ssrc uint32) error {
 // This immediately stops the demod thread and cleans up all resources
 // Use this instead of DisableChannel when you want to completely remove a channel
 func (rc *RadiodController) TerminateChannel(name string, ssrc uint32) error {
+	// Try a multi-pronged approach to ensure termination:
+	// 1. Set frequency to 0 (triggers idle timeout)
+	// 2. Set demod_type to -1 (signals termination)
+	// 3. Force a restart by changing output sample rate (triggers demod restart)
+
 	buf := make([]byte, 0, 1500)
 
 	// Start with CMD packet type
@@ -591,28 +596,46 @@ func (rc *RadiodController) TerminateChannel(name string, ssrc uint32) error {
 	// Add SSRC (tag 18 = 0x12)
 	buf = encodeInt32(&buf, 0x12, ssrc)
 
-	// Add DEMOD_TYPE = -1 (tag 48 = 0x30) to terminate
-	// radiod expects enum demod_type, where -1 means "no demodulator" (terminate)
-	// We need to encode -1 as a signed integer, which in two's complement is 0xFF (1 byte)
-	// radiod's decode_int() will properly interpret this as -1
+	log.Printf("=== TERMINATE CHANNEL DEBUG ===")
+	log.Printf("Channel: %s, SSRC: 0x%08x (%d)", name, ssrc, ssrc)
+	log.Printf("Sending to: %s", rc.statusAddr)
+
+	// Add RADIO_FREQUENCY = 0 (tag 33 = 0x21) to trigger idle timeout
+	buf = encodeDouble(&buf, 0x21, 0.0)
+	log.Printf("Added RADIO_FREQUENCY=0")
+
+	// Add DEMOD_TYPE = -1 (tag 48 = 0x30) to signal termination
+	// Encode as signed byte: -1 = 0xFF in two's complement
 	buf = append(buf, 0x30) // DEMOD_TYPE tag
 	buf = append(buf, 0x01) // Length = 1 byte
-	buf = append(buf, 0xFF) // -1 in two's complement (signed byte)
+	buf = append(buf, 0xFF) // -1 in two's complement
+	log.Printf("Added DEMOD_TYPE=-1 (0xFF)")
+
+	// Add OUTPUT_SAMPRATE change to force restart (tag 20 = 0x14)
+	// This triggers restart_needed = true in radiod
+	buf = encodeInt32(&buf, 0x14, 1) // Set to 1 Hz (invalid, will cause restart)
+	log.Printf("Added OUTPUT_SAMPRATE=1 (to force restart)")
 
 	// Add COMMAND_TAG (tag 1 = 0x01)
-	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
+	commandTag := uint32(time.Now().Unix())
+	buf = encodeInt32(&buf, 0x01, commandTag)
+	log.Printf("Added COMMAND_TAG=%d", commandTag)
 
 	// Add EOL marker
 	buf = append(buf, 0)
 
-	if DebugMode {
-		log.Printf("DEBUG: Sending TerminateChannel command for SSRC 0x%08x", ssrc)
-		log.Printf("DEBUG: Command hex: % x", buf)
-	}
+	log.Printf("Complete command packet (%d bytes): % x", len(buf), buf)
+	log.Printf("Sending command via WriteTo to %s", rc.statusAddr)
 
-	if err := rc.sendCommand(buf); err != nil {
+	// Send command
+	n, err := rc.conn.WriteTo(buf, rc.statusAddr)
+	if err != nil {
+		log.Printf("ERROR: WriteTo failed: %v", err)
 		return fmt.Errorf("failed to send terminate command: %w", err)
 	}
+
+	log.Printf("SUCCESS: Sent %d bytes to %s", n, rc.statusAddr)
+	log.Printf("=== END TERMINATE DEBUG ===")
 
 	log.Printf("Terminated channel: %s (SSRC: 0x%08x)", name, ssrc)
 	return nil

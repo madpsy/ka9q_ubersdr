@@ -232,6 +232,9 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 	// Calculate other count (total - decoder - noisefloor)
 	otherCount := len(channels) - decoderCount - noiseFloorCount
 
+	log.Printf("DEBUG: Built %d channel info structs (decoder=%d, noisefloor=%d, user=%d, other=%d)",
+		len(channels), decoderCount, noiseFloorCount, userCount, otherCount)
+
 	response := RadiodChannelsResponse{
 		Channels:      channels,
 		TotalChannels: len(channels),
@@ -240,6 +243,14 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 		LastUpdate:    time.Now(),
 	}
 
+	log.Printf("DEBUG: Sending response with %d channels", len(response.Channels))
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("ERROR: Failed to encode radiod channels response: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("DEBUG: Response sent successfully")
 }

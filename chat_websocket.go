@@ -494,15 +494,18 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 	// Update user's last seen time
 	cm.UpdateUserActivity(sessionID)
 
-	// Log to persistent storage
+	// Log to persistent storage (non-blocking)
 	if cm.chatLogger != nil {
 		sourceIP := cm.GetSessionIP(sessionID)
 		if sourceIP == "" {
 			sourceIP = "unknown"
 		}
-		if err := cm.chatLogger.LogMessage(now, sourceIP, username, messageText); err != nil {
-			log.Printf("Chat: Failed to log message: %v", err)
-		}
+		// Use goroutine to avoid blocking message delivery on disk I/O
+		go func(timestamp time.Time, ip, user, msg string) {
+			if err := cm.chatLogger.LogMessage(timestamp, ip, user, msg); err != nil {
+				log.Printf("Chat: Failed to log message: %v", err)
+			}
+		}(now, sourceIP, username, messageText)
 	}
 
 	// Broadcast to all connected clients

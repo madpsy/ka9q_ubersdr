@@ -1858,6 +1858,19 @@ class NoiseFloorMonitor {
             return;
         }
 
+        // Create a temporary canvas with white background
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = canvas.width;
+        tempCanvas.height = canvas.height;
+        const tempCtx = tempCanvas.getContext('2d');
+
+        // Fill with white background
+        tempCtx.fillStyle = '#FFFFFF';
+        tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+        // Draw the original canvas on top
+        tempCtx.drawImage(canvas, 0, 0);
+
         // Generate filename with current date/time and frequency info
         const now = new Date();
         const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
@@ -1866,8 +1879,8 @@ class NoiseFloorMonitor {
         const widthStr = this.widebandWidth.toFixed(0);
         const filename = `spectrum_${dateStr}_${timeStr}_${freqStr}MHz_${widthStr}kHz.png`;
 
-        // Convert canvas to blob and download
-        canvas.toBlob((blob) => {
+        // Convert temp canvas to blob and download
+        tempCanvas.toBlob((blob) => {
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;

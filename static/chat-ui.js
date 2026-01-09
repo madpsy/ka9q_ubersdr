@@ -842,8 +842,26 @@ class ChatUI {
             }
 
             .chat-btn-mute.active {
-                background: #4a9eff;
+                background: #dc3545;
                 color: #fff;
+            }
+
+            #chat-zoom-btn {
+                background: #28a745;
+                color: #fff;
+            }
+
+            #chat-zoom-btn:hover {
+                background: #218838;
+            }
+
+            #chat-zoom-btn.active {
+                background: #dc3545;
+                color: #fff;
+            }
+
+            #chat-zoom-btn.active:hover {
+                background: #c82333;
             }
 
             .chat-btn-danger {

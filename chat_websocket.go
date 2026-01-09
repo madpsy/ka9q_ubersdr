@@ -511,8 +511,6 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 	// Broadcast to all connected clients
 	cm.broadcastChatMessage(chatMsg)
 
-	log.Printf("Chat: Message from '%s': %s", username, messageText)
-
 	return nil
 }
 

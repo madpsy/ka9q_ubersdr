@@ -728,6 +728,14 @@ func main() {
 		}
 	}
 
+	// Set chat data directory relative to config directory (same pattern as spaceweather/noisefloor)
+	if config.Chat.Enabled && config.Chat.LogToCSV && config.Chat.DataDir == "" {
+		config.Chat.DataDir = *configDir + "/chat"
+	} else if config.Chat.Enabled && config.Chat.LogToCSV && !strings.HasPrefix(config.Chat.DataDir, "/") {
+		// If relative path, make it relative to config directory
+		config.Chat.DataDir = *configDir + "/" + config.Chat.DataDir
+	}
+
 	// Initialize DX cluster WebSocket handler
 	// Pass receiver locator from decoder config for distance/bearing calculation
 	receiverLocator := ""

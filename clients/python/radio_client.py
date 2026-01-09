@@ -2715,16 +2715,7 @@ Examples:
 
                 elif param_type == 'mode':
                     # Update client's mode state
-                    old_mode = client.mode
                     client.mode = value.lower()
-                    
-                    # Re-enable Opus if switching from IQ mode to audio mode
-                    was_iq_mode = old_mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
-                    is_iq_mode = client.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
-                    if was_iq_mode and not is_iq_mode and OPUS_AVAILABLE and not client.use_opus:
-                        client.use_opus = True
-                        print(f"Re-enabled Opus compression after switching from {old_mode} to {client.mode}", file=sys.stderr)
-                    
                     # Send tune message to WebSocket
                     if client.ws and hasattr(client, '_event_loop') and client._event_loop:
                         # Check if this is an IQ mode - IQ modes don't accept bandwidth parameters

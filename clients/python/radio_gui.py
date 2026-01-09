@@ -4208,6 +4208,25 @@ class RadioGUI:
 
         mode_display = self.mode_var.get()
         mode = self._parse_mode_name(mode_display)
+
+        # Check if switching from IQ mode to audio mode and re-enable Opus
+        if self.client:
+            old_mode = self.client.mode
+            was_iq_mode = old_mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+            is_iq_mode = mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+
+            # Import OPUS_AVAILABLE from radio_client
+            try:
+                from radio_client import OPUS_AVAILABLE
+                if was_iq_mode and not is_iq_mode and OPUS_AVAILABLE and not self.client.use_opus:
+                    self.client.use_opus = True
+                    self.log_status("⚠ Opus will be enabled on next connection")
+                    messagebox.showinfo("Reconnection Required",
+                                      "Opus compression will be enabled on your next connection.\n\n"
+                                      "Please disconnect and reconnect to use Opus compression.")
+            except ImportError:
+                pass
+
         self.client.mode = mode
 
         # Reset NR2 learning when mode changes (noise profile will be different)

@@ -21,6 +21,10 @@ class NoiseFloorMonitor {
         this.sparklineCharts = {}; // Store sparkline chart references by band
         this.fftCharts = {}; // Store FFT chart references by band
         this.wasHistorical = false; // Track if we were viewing historical data
+        
+        // Wideband zoom controls
+        this.widebandFrequency = 15; // MHz (center frequency)
+        this.widebandWidth = 3000; // kHz (total width)
 
         // Comparison dates for historical single-band view
         this.comparisonDates = {
@@ -200,6 +204,28 @@ class NoiseFloorMonitor {
         document.getElementById('viewToggleBtn').addEventListener('click', () => {
             this.toggleCompactView();
         });
+
+        // Wideband zoom control event listeners
+        const frequencySlider = document.getElementById('wideband-frequency');
+        const widthSlider = document.getElementById('wideband-width');
+        const frequencyValue = document.getElementById('wideband-frequency-value');
+        const widthValue = document.getElementById('wideband-width-value');
+
+        if (frequencySlider) {
+            frequencySlider.addEventListener('input', (e) => {
+                this.widebandFrequency = parseFloat(e.target.value);
+                frequencyValue.textContent = this.widebandFrequency.toFixed(3);
+                this.updateWidebandZoom();
+            });
+        }
+
+        if (widthSlider) {
+            widthSlider.addEventListener('input', (e) => {
+                this.widebandWidth = parseFloat(e.target.value);
+                widthValue.textContent = this.widebandWidth.toFixed(0);
+                this.updateWidebandZoom();
+            });
+        }
     }
 
     toggleCompactView() {
@@ -1427,12 +1453,13 @@ class NoiseFloorMonitor {
                         }
                     };
 
-                    this.wideBandChart.update('none');
+                    // Apply zoom after update
+                    this.applyWidebandZoomToChart();
                     return;
                 }
-            }
+           }
 
-            // Create annotations for min, max, and P5
+           // Create annotations for min, max, and P5
             const annotations = {
                 // P5 horizontal line (noise floor)
                 p5Line: {
@@ -1666,9 +1693,67 @@ class NoiseFloorMonitor {
                     this.wideBandChart.resetZoom();
                 }
             };
+
+            // Apply initial zoom if not at default (full spectrum)
+            this.applyWidebandZoomToChart();
         } catch (error) {
             console.error('Error creating wide-band spectrum:', error);
         }
+    }
+
+    updateWidebandZoom() {
+        // Update the chart zoom when sliders change
+        if (this.wideBandChart) {
+            this.applyWidebandZoomToChart();
+        }
+    }
+
+    applyWidebandZoomToChart() {
+        if (!this.wideBandChart) return;
+
+        // Calculate the frequency range based on center frequency and width
+        const widthMHz = this.widebandWidth / 1000; // Convert kHz to MHz
+        const halfWidth = widthMHz / 2;
+        const minFreq = this.widebandFrequency - halfWidth;
+        const maxFreq = this.widebandFrequency + halfWidth;
+
+        // Ensure we stay within 0-30 MHz bounds
+        const clampedMin = Math.max(0, minFreq);
+        const clampedMax = Math.min(30, maxFreq);
+
+        // Update the x-axis range
+        this.wideBandChart.options.scales.x.min = clampedMin;
+        this.wideBandChart.options.scales.x.max = clampedMax;
+
+        // Add or update the center frequency marker (orange dashed line)
+        if (!this.wideBandChart.options.plugins.annotation.annotations) {
+            this.wideBandChart.options.plugins.annotation.annotations = {};
+        }
+
+        // Add center frequency marker
+        this.wideBandChart.options.plugins.annotation.annotations.centerFreq = {
+            type: 'line',
+            xMin: this.widebandFrequency,
+            xMax: this.widebandFrequency,
+            borderColor: 'rgba(255, 152, 0, 0.9)', // Orange
+            borderWidth: 2,
+            borderDash: [5, 5],
+            label: {
+                display: true,
+                content: `${this.widebandFrequency.toFixed(3)} MHz`,
+                position: 'start',
+                backgroundColor: 'rgba(255, 152, 0, 0.9)',
+                color: '#fff',
+                font: {
+                    size: 11,
+                    weight: 'bold'
+                },
+                padding: 4
+            }
+        };
+
+        // Update the chart
+        this.wideBandChart.update('none');
     }
 
     displayHistoricalData(data) {

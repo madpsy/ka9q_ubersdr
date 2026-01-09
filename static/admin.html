@@ -3300,9 +3300,9 @@
             networkSummary.style.borderRadius = '5px';
 
             let networkHTML = `<strong>Network Summary:</strong><br>`;
-            networkHTML += `<span style="margin-left: 20px;">• Regular users: <strong>${formatThroughput(regularAudioKbps)}</strong> audio, <strong>${formatThroughput(regularWaterfallKbps)}</strong> waterfall, <strong>${formatThroughput(regularDXClusterKbps)}</strong> DX</span><br>`;
-            networkHTML += `<span style="margin-left: 20px;">• Bypassed users: <strong>${formatThroughput(ipBypassedAudioKbps)}</strong> audio, <strong>${formatThroughput(ipBypassedWaterfallKbps)}</strong> waterfall, <strong>${formatThroughput(ipBypassedDXClusterKbps)}</strong> DX</span><br>`;
-            networkHTML += `<span style="margin-left: 20px;">• Password users: <strong>${formatThroughput(passwordBypassedAudioKbps)}</strong> audio, <strong>${formatThroughput(passwordBypassedWaterfallKbps)}</strong> waterfall, <strong>${formatThroughput(passwordBypassedDXClusterKbps)}</strong> DX</span><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• Regular users: <strong>${formatThroughput(regularAudioKbps)}</strong> audio, <strong>${formatThroughput(regularWaterfallKbps)}</strong> w/f, <strong>${formatThroughput(regularDXClusterKbps)}</strong> DX</span><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• Bypassed users: <strong>${formatThroughput(ipBypassedAudioKbps)}</strong> audio, <strong>${formatThroughput(ipBypassedWaterfallKbps)}</strong> w/f, <strong>${formatThroughput(ipBypassedDXClusterKbps)}</strong> DX</span><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• Password users: <strong>${formatThroughput(passwordBypassedAudioKbps)}</strong> audio, <strong>${formatThroughput(passwordBypassedWaterfallKbps)}</strong> w/f, <strong>${formatThroughput(passwordBypassedDXClusterKbps)}</strong> DX</span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• <strong>Total audio:</strong> <strong style="color: #667eea;">${formatThroughput(totalAudioKbps)}</strong></span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• <strong>Total waterfall:</strong> <strong style="color: #667eea;">${formatThroughput(totalWaterfallKbps)}</strong></span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• <strong>Total DX cluster:</strong> <strong style="color: #667eea;">${formatThroughput(totalDXClusterKbps)}</strong></span><br>`;

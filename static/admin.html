@@ -3105,12 +3105,10 @@
 
                 let details = '';
                 if (audioSession) {
-                    details += `<strong>Audio:</strong> ${(audioSession.frequency / 1e6).toFixed(3)} MHz, ${audioSession.mode.toUpperCase()}<br>`;
-                    details += `Session: ${audioSession.id.substring(0, 8)}...<br>`;
+                    details += `<strong>A:</strong> ${(audioSession.frequency / 1e6).toFixed(3)} MHz, ${audioSession.mode.toUpperCase()}<br>`;
                 }
                 if (spectrumSession) {
-                    details += `<strong>Spectrum:</strong> ${(spectrumSession.frequency / 1e6).toFixed(3)} MHz<br>`;
-                    details += `Session: ${spectrumSession.id.substring(0, 8)}...<br>`;
+                    details += `<strong>S:</strong> ${(spectrumSession.frequency / 1e6).toFixed(3)} MHz<br>`;
                 }
 
                 // Create action buttons

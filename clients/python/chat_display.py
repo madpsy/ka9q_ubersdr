@@ -1199,6 +1199,10 @@ class ChatDisplay:
             self.radio_gui.apply_frequency(skip_auto_mode=True)
         elif self.radio_gui.connected:
             print(f"[Chat] Skipping apply_frequency because zoom command was sent")
+            # But still sync to radio control if enabled (zoom doesn't affect radio control)
+            if self.radio_gui.radio_control_sync_enabled:
+                self.radio_gui.sync_frequency_to_radio_control()
+                self.radio_gui.sync_mode_to_radio_control()
 
         # Update spectrum center if zoom was not applied
         if not zoom_applied and self.radio_gui.spectrum:

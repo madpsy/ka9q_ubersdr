@@ -213,10 +213,18 @@ except ImportError:
 # Import TCI server
 try:
     from tci_server import TCIServer
-    TCI_AVAILABLE = True
+    TCI_SERVER_AVAILABLE = True
 except ImportError:
-    TCI_AVAILABLE = False
+    TCI_SERVER_AVAILABLE = False
     print("Warning: TCI server module not available")
+
+# Import TCI client
+try:
+    from tci_client import ThreadedTCIClient
+    TCI_CLIENT_AVAILABLE = True
+except ImportError:
+    TCI_CLIENT_AVAILABLE = False
+    print("Warning: TCI client module not available")
 
 
 class RadioGUI:
@@ -294,6 +302,7 @@ class RadioGUI:
         self.radio_control_last_mode = None  # Track last known rig mode
         self.radio_control_last_ptt = False  # Track last known PTT state
         self.radio_control_saved_channels = None  # Store channel states before muting
+        self.tci_client_spot_callback_registered = False  # Track if CW spot callback is registered
 
         # Legacy aliases for backward compatibility
         self.rigctl = None
@@ -479,7 +488,9 @@ class RadioGUI:
                 'vfo': self.radio_vfo_var.get(),
                 'omnirig_rig': self.omnirig_rig_var.get(),
                 'serial_port': self.serial_port_var.get(),
-                'tci_port': self.tci_port_var.get(),
+                'tci_server_port': self.tci_server_port_var.get(),
+                'tci_client_host': self.tci_client_host_var.get(),
+                'tci_client_port': self.tci_client_port_var.get(),
                 'sync_direction': self.radio_sync_direction_var.get(),
                 'mute_tx': self.radio_mute_tx_var.get()
             }
@@ -574,9 +585,15 @@ class RadioGUI:
         if 'serial_port' in settings:
             self.serial_port_var.set(settings['serial_port'])
 
-        # Apply TCI port (silently)
-        if 'tci_port' in settings:
-            self.tci_port_var.set(settings['tci_port'])
+        # Apply TCI Server port (silently)
+        if 'tci_server_port' in settings:
+            self.tci_server_port_var.set(settings['tci_server_port'])
+
+        # Apply TCI Client host/port (silently)
+        if 'tci_client_host' in settings:
+            self.tci_client_host_var.set(settings['tci_client_host'])
+        if 'tci_client_port' in settings:
+            self.tci_client_port_var.set(settings['tci_client_port'])
 
         # Apply sync direction (silently)
         if 'sync_direction' in settings:
@@ -1046,7 +1063,7 @@ class RadioGUI:
         radio_controls = ttk.Frame(conn_frame)
         radio_controls.grid(row=3, column=1, columnspan=6, sticky=tk.W)
 
-        # Radio control type selector (rigctl, flrig, OmniRig, Serial, or TCI)
+        # Radio control type selector (rigctl, flrig, OmniRig, Serial, TCI Server, or TCI Client)
         available_types = ['None']
         if RIGCTL_AVAILABLE:
             available_types.append('rigctl')
@@ -1056,8 +1073,10 @@ class RadioGUI:
             available_types.append('OmniRig')
         if SERIAL_CAT_AVAILABLE:
             available_types.append('Serial')
-        if TCI_AVAILABLE:
-            available_types.append('TCI')
+        if TCI_SERVER_AVAILABLE:
+            available_types.append('TCI Server')
+        if TCI_CLIENT_AVAILABLE:
+            available_types.append('TCI Client')
 
         # Set default based on platform
         default_type = 'None'
@@ -1126,17 +1145,29 @@ class RadioGUI:
         self.serial_refresh_btn = ttk.Button(radio_controls, text="↻", width=3,
                                             command=self.refresh_serial_ports)
 
-        # TCI server port (for TCI only)
-        self.tci_port_label = ttk.Label(radio_controls, text="Port:")
-        self.tci_port_var = tk.StringVar(value='40001')
-        self.tci_port_entry = ttk.Entry(radio_controls, textvariable=self.tci_port_var, width=6)
-        # Auto-save when TCI port changes
-        self.tci_port_var.trace_add('write', lambda *args: self.save_servers())
+        # TCI server port (for TCI Server only)
+        self.tci_server_port_label = ttk.Label(radio_controls, text="Port:")
+        self.tci_server_port_var = tk.StringVar(value='40001')
+        self.tci_server_port_entry = ttk.Entry(radio_controls, textvariable=self.tci_server_port_var, width=6)
+        # Auto-save when TCI server port changes
+        self.tci_server_port_var.trace_add('write', lambda *args: self.save_servers())
 
-        # TCI connected client IP label (shown when client is connected)
+        # TCI connected client IP label (shown when TCI server has a client connected)
         self.tci_client_ip_var = tk.StringVar(value='')
         self.tci_client_ip_label = ttk.Label(radio_controls, textvariable=self.tci_client_ip_var, foreground='blue')
-        # Initially hidden - will be shown when TCI type is selected
+
+        # TCI client host/port (for TCI Client only)
+        self.tci_client_host_label = ttk.Label(radio_controls, text="Host:")
+        self.tci_client_host_var = tk.StringVar(value='127.0.0.1')
+        self.tci_client_host_entry = ttk.Entry(radio_controls, textvariable=self.tci_client_host_var, width=15)
+        # Auto-save when TCI client host changes
+        self.tci_client_host_var.trace_add('write', lambda *args: self.save_servers())
+
+        self.tci_client_port_label = ttk.Label(radio_controls, text="Port:")
+        self.tci_client_port_var = tk.StringVar(value='40001')
+        self.tci_client_port_entry = ttk.Entry(radio_controls, textvariable=self.tci_client_port_var, width=6)
+        # Auto-save when TCI client port changes
+        self.tci_client_port_var.trace_add('write', lambda *args: self.save_servers())
 
         # Hide VFO, OmniRig, and Serial controls initially
         # (will be shown when appropriate type is selected)
@@ -1169,6 +1200,12 @@ class RadioGUI:
         self.radio_mute_tx_check = ttk.Checkbutton(radio_controls, text="Mute TX",
                                                      variable=self.radio_mute_tx_var)
         self.radio_mute_tx_check.pack(side=tk.LEFT)
+
+        # TCI Client Spots checkbox (for forwarding CW spots to TCI server)
+        self.tci_client_spots_var = tk.BooleanVar(value=True)
+        self.tci_client_spots_check = ttk.Checkbutton(radio_controls, text="Spots",
+                                                        variable=self.tci_client_spots_var)
+        # Initially hidden - will be shown when TCI Client is selected
 
         # Legacy aliases for backward compatibility
         self.rigctl_sync_direction_var = self.radio_sync_direction_var
@@ -3089,8 +3126,8 @@ class RadioGUI:
             if self.radio_control_sync_enabled:
                 self.sync_frequency_to_radio_control()
 
-            # Sync to TCI server if active (but don't create feedback loop)
-            if self.radio_control_type == 'tci' and self.radio_control:
+            # Sync to TCI Server if active (but don't create feedback loop)
+            if self.radio_control_type == 'tci_server' and self.radio_control:
                 # Pass skip_callback=True to prevent feedback loop
                 self.radio_control.update_frequency(freq_hz, skip_callback=True)
         except ValueError as e:
@@ -3350,9 +3387,32 @@ class RadioGUI:
         """Handle radio control type change - show/hide appropriate controls."""
         control_type = self.radio_control_type_var.get()
 
+        # First, hide ALL controls
+        self.radio_host_label.pack_forget()
+        self.radio_host_entry.pack_forget()
+        self.radio_port_label.pack_forget()
+        self.radio_port_entry.pack_forget()
+        self.radio_vfo_label.pack_forget()
+        self.radio_vfo_combo.pack_forget()
+        self.omnirig_rig_label.pack_forget()
+        self.omnirig_rig_combo.pack_forget()
+        self.serial_port_label.pack_forget()
+        self.serial_port_combo.pack_forget()
+        self.serial_refresh_btn.pack_forget()
+        self.tci_server_port_label.pack_forget()
+        self.tci_server_port_entry.pack_forget()
+        self.tci_client_ip_label.pack_forget()
+        self.tci_client_host_label.pack_forget()
+        self.tci_client_host_entry.pack_forget()
+        self.tci_client_port_label.pack_forget()
+        self.tci_client_port_entry.pack_forget()
+        self.radio_sdr_to_rig_radio.pack_forget()
+        self.radio_rig_to_sdr_radio.pack_forget()
+        self.radio_mute_tx_check.pack_forget()
+
         # Update button text based on control type
-        if control_type in ('Serial', 'TCI'):
-            # Serial and TCI are servers, so use "Start" instead of "Connect"
+        if control_type in ('Serial', 'TCI Server'):
+            # Serial and TCI Server are servers, so use "Start" instead of "Connect"
             if not self.radio_control_connected:
                 self.radio_connect_btn.config(text="Start")
         else:
@@ -3360,6 +3420,7 @@ class RadioGUI:
             if not self.radio_control_connected:
                 self.radio_connect_btn.config(text="Connect")
 
+        # Now show only the controls needed for the selected type
         if control_type == 'rigctl':
             # Show rigctl controls (host, port)
             self.radio_host_label.pack(side=tk.LEFT, padx=(5, 5))
@@ -3369,14 +3430,10 @@ class RadioGUI:
             # Update default port for rigctl
             if not self.radio_port_var.get() or self.radio_port_var.get() == '12345':
                 self.radio_port_var.set('4532')
-            # Hide VFO, OmniRig, and Serial controls
-            self.radio_vfo_label.pack_forget()
-            self.radio_vfo_combo.pack_forget()
-            self.omnirig_rig_label.pack_forget()
-            self.omnirig_rig_combo.pack_forget()
-            self.serial_port_label.pack_forget()
-            self.serial_port_combo.pack_forget()
-            self.serial_refresh_btn.pack_forget()
+            # Show sync direction and Mute TX
+            self.radio_sdr_to_rig_radio.pack(side=tk.LEFT, padx=(0, 5))
+            self.radio_rig_to_sdr_radio.pack(side=tk.LEFT, padx=(0, 10))
+            self.radio_mute_tx_check.pack(side=tk.LEFT)
         elif control_type == 'flrig':
             # Show flrig controls (host, port, VFO)
             self.radio_host_label.pack(side=tk.LEFT, padx=(5, 5))
@@ -3388,107 +3445,49 @@ class RadioGUI:
             # Update default port for flrig
             if not self.radio_port_var.get() or self.radio_port_var.get() == '4532':
                 self.radio_port_var.set('12345')
-            # Hide OmniRig and Serial controls
-            self.omnirig_rig_label.pack_forget()
-            self.omnirig_rig_combo.pack_forget()
-            self.serial_port_label.pack_forget()
-            self.serial_port_combo.pack_forget()
-            self.serial_refresh_btn.pack_forget()
-            # Show sync direction radio buttons for flrig
+            # Show sync direction and Mute TX
             self.radio_sdr_to_rig_radio.pack(side=tk.LEFT, padx=(0, 5))
             self.radio_rig_to_sdr_radio.pack(side=tk.LEFT, padx=(0, 10))
-            self.radio_mute_tx_check.pack(side=tk.LEFT)  # Show Mute TX for flrig
+            self.radio_mute_tx_check.pack(side=tk.LEFT)
         elif control_type == 'OmniRig':
-            # Hide host/port controls
-            self.radio_host_label.pack_forget()
-            self.radio_host_entry.pack_forget()
-            self.radio_port_label.pack_forget()
-            self.radio_port_entry.pack_forget()
             # Show OmniRig controls (rig number, VFO)
             self.omnirig_rig_label.pack(side=tk.LEFT, padx=(5, 5))
             self.omnirig_rig_combo.pack(side=tk.LEFT, padx=(0, 5))
             self.radio_vfo_label.pack(side=tk.LEFT, padx=(5, 5))
             self.radio_vfo_combo.pack(side=tk.LEFT, padx=(0, 5))
-            # Hide Serial controls
-            self.serial_port_label.pack_forget()
-            self.serial_port_combo.pack_forget()
-            self.serial_refresh_btn.pack_forget()
-            # Show sync direction radio buttons for OmniRig
+            # Show sync direction and Mute TX
             self.radio_sdr_to_rig_radio.pack(side=tk.LEFT, padx=(0, 5))
             self.radio_rig_to_sdr_radio.pack(side=tk.LEFT, padx=(0, 10))
-            self.radio_mute_tx_check.pack(side=tk.LEFT)  # Show Mute TX for OmniRig
+            self.radio_mute_tx_check.pack(side=tk.LEFT)
         elif control_type == 'Serial':
-            # Hide host/port controls
-            self.radio_host_label.pack_forget()
-            self.radio_host_entry.pack_forget()
-            self.radio_port_label.pack_forget()
-            self.radio_port_entry.pack_forget()
-            # Hide OmniRig controls
-            self.omnirig_rig_label.pack_forget()
-            self.omnirig_rig_combo.pack_forget()
-            # Hide VFO selector (CAT server doesn't need it)
-            self.radio_vfo_label.pack_forget()
-            self.radio_vfo_combo.pack_forget()
             # Show Serial controls (port selector only)
             self.serial_port_label.pack(side=tk.LEFT, padx=(5, 5))
             self.serial_port_combo.pack(side=tk.LEFT, padx=(0, 5))
             self.serial_refresh_btn.pack(side=tk.LEFT, padx=(0, 5))
-            # Hide TCI controls
-            self.tci_port_label.pack_forget()
-            self.tci_port_entry.pack_forget()
-            # Hide Mute TX checkbox (Serial CAT server acts as the radio itself)
-            self.radio_mute_tx_check.pack_forget()
-            # Hide sync direction radio buttons (Serial is always Rig→SDR)
-            self.radio_sdr_to_rig_radio.pack_forget()
-            self.radio_rig_to_sdr_radio.pack_forget()
-            # Set sync direction to Rig→SDR for Serial mode
+            # Set sync direction to Rig→SDR for Serial mode (no UI controls shown)
             self.radio_sync_direction_var.set("Rig→SDR")
             # Refresh serial ports list
             self.refresh_serial_ports()
-        elif control_type == 'TCI':
-            # Hide host/port controls (TCI uses fixed localhost)
-            self.radio_host_label.pack_forget()
-            self.radio_host_entry.pack_forget()
-            self.radio_port_label.pack_forget()
-            self.radio_port_entry.pack_forget()
-            # Hide OmniRig controls
-            self.omnirig_rig_label.pack_forget()
-            self.omnirig_rig_combo.pack_forget()
-            # Hide VFO selector (TCI server doesn't need it)
-            self.radio_vfo_label.pack_forget()
-            self.radio_vfo_combo.pack_forget()
-            # Hide Serial controls
-            self.serial_port_label.pack_forget()
-            self.serial_port_combo.pack_forget()
-            self.serial_refresh_btn.pack_forget()
-            # Show TCI controls (port only)
-            self.tci_port_label.pack(side=tk.LEFT, padx=(5, 5))
-            self.tci_port_entry.pack(side=tk.LEFT, padx=(0, 5))
-            # Always show the client IP label when TCI is selected (will be empty until client connects)
+        elif control_type == 'TCI Server':
+            # Show TCI Server controls (port only)
+            self.tci_server_port_label.pack(side=tk.LEFT, padx=(5, 5))
+            self.tci_server_port_entry.pack(side=tk.LEFT, padx=(0, 5))
+            # Show the client IP label (will be empty until client connects)
             self.tci_client_ip_label.pack(side=tk.LEFT, padx=(5, 5))
-            # Hide Mute TX checkbox (TCI server acts as the radio itself)
-            self.radio_mute_tx_check.pack_forget()
-            # Hide sync direction radio buttons (TCI is always Rig→SDR)
-            self.radio_sdr_to_rig_radio.pack_forget()
-            self.radio_rig_to_sdr_radio.pack_forget()
-            # Set sync direction to Rig→SDR for TCI mode
+            # Set sync direction to Rig→SDR for TCI Server mode (no UI controls shown)
             self.radio_sync_direction_var.set("Rig→SDR")
-        else:  # None
-            # Hide all controls
-            self.radio_host_label.pack_forget()
-            self.radio_host_entry.pack_forget()
-            self.radio_port_label.pack_forget()
-            self.radio_port_entry.pack_forget()
-            self.radio_vfo_label.pack_forget()
-            self.radio_vfo_combo.pack_forget()
-            self.omnirig_rig_label.pack_forget()
-            self.omnirig_rig_combo.pack_forget()
-            self.serial_port_label.pack_forget()
-            self.serial_port_combo.pack_forget()
-            self.serial_refresh_btn.pack_forget()
-            self.tci_port_label.pack_forget()
-            self.tci_port_entry.pack_forget()
-            self.tci_client_ip_label.pack_forget()
+        elif control_type == 'TCI Client':
+            # Show TCI Client controls (host and port)
+            self.tci_client_host_label.pack(side=tk.LEFT, padx=(5, 5))
+            self.tci_client_host_entry.pack(side=tk.LEFT, padx=(0, 5))
+            self.tci_client_port_label.pack(side=tk.LEFT, padx=(0, 5))
+            self.tci_client_port_entry.pack(side=tk.LEFT, padx=(0, 5))
+            # Show sync direction, Mute TX, and Spots checkbox
+            self.radio_sdr_to_rig_radio.pack(side=tk.LEFT, padx=(0, 5))
+            self.radio_rig_to_sdr_radio.pack(side=tk.LEFT, padx=(0, 10))
+            self.radio_mute_tx_check.pack(side=tk.LEFT, padx=(0, 5))
+            self.tci_client_spots_check.pack(side=tk.LEFT)
+        # else: None - all controls already hidden above
 
     def on_radio_vfo_changed(self):
         """Handle VFO selection change for flrig, OmniRig, or Serial."""
@@ -3662,13 +3661,13 @@ class RadioGUI:
                     self.radio_control = None
                     return
 
-            elif control_type == 'TCI':
+            elif control_type == 'TCI Server':
                 # Start TCI Server
                 if not self.client:
                     messagebox.showerror("Error", "Please connect to SDR first before starting TCI server")
                     return
 
-                port_str = self.tci_port_var.get().strip()
+                port_str = self.tci_server_port_var.get().strip()
                 if not port_str:
                     messagebox.showerror("Error", "Please enter a TCI server port")
                     return
@@ -3698,7 +3697,7 @@ class RadioGUI:
 
                 # Create and start TCI server with GUI callback and WebSocket manager for spot injection
                 self.radio_control = TCIServer(self.client, port=port, gui_callback=tci_gui_callback, websocket_manager=websocket_manager)
-                self.radio_control_type = 'tci'
+                self.radio_control_type = 'tci_server'
 
                 # Attach TCI server to client for audio forwarding
                 self.client.tci_server = self.radio_control
@@ -3738,10 +3737,44 @@ class RadioGUI:
                                   f"The TCI server will forward frequency/mode changes\n"
                                   f"and stream demodulated audio.")
 
+            elif control_type == 'TCI Client':
+                # Connect to TCI Client
+                host = self.tci_client_host_var.get().strip()
+                port_str = self.tci_client_port_var.get().strip()
+
+                if not host or not port_str:
+                    messagebox.showerror("Error", "Please enter TCI server host and port")
+                    return
+
+                try:
+                    port = int(port_str)
+                except ValueError:
+                    messagebox.showerror("Error", "Invalid port number")
+                    return
+
+                # Create and connect threaded TCI client
+                self.radio_control = ThreadedTCIClient(host, port)
+                self.radio_control_type = 'tci_client'
+
+                # Set up callbacks
+                self.radio_control.set_callbacks(
+                    frequency_callback=self.on_radio_control_frequency_changed,
+                    mode_callback=self.on_radio_control_mode_changed,
+                    ptt_callback=self.on_radio_control_ptt_changed,
+                    error_callback=lambda err: self.log_status(f"TCI client: {err}")
+                )
+
+                self.radio_control.connect()
+                self.log_status(f"✓ Connected to TCI server at {host}:{port}")
+
+                # Register CW spot callback if Spots checkbox is enabled
+                if self.tci_client_spots_var.get():
+                    self._register_tci_client_spot_callback()
+
             # Update state BEFORE starting periodic updates
             self.radio_control_connected = True
-            # Use "Stop" for servers (Serial, TCI), "Disconnect" for clients
-            if control_type in ('Serial', 'TCI'):
+            # Use "Stop" for servers (Serial, TCI Server), "Disconnect" for clients
+            if control_type in ('Serial', 'TCI Server'):
                 self.radio_connect_btn.config(text="Stop")
             else:
                 self.radio_connect_btn.config(text="Disconnect")
@@ -3750,7 +3783,7 @@ class RadioGUI:
             self.notify_chat_radio_changed()
 
             # Start periodic updates AFTER setting connected state
-            if self.radio_control_type == 'tci':
+            if self.radio_control_type == 'tci_server':
                 # Start periodic S-meter updates (250ms interval)
                 self.update_tci_smeter()
 
@@ -3780,17 +3813,23 @@ class RadioGUI:
                 self.serial_port_combo.config(state='disabled')
                 self.serial_refresh_btn.config(state='disabled')
 
-            # Disable TCI port entry when connected (for TCI type)
-            if control_type == 'TCI':
-                self.tci_port_entry.config(state='disabled')
+            # Disable TCI Server port entry when connected
+            if control_type == 'TCI Server':
+                self.tci_server_port_entry.config(state='disabled')
+
+            # Disable TCI Client host/port entries when connected
+            if control_type == 'TCI Client':
+                self.tci_client_host_entry.config(state='disabled')
+                self.tci_client_port_entry.config(state='disabled')
 
             # Update legacy aliases
             self.rigctl = self.radio_control
             self.rigctl_connected = self.radio_control_connected
 
-            # Serial CAT server and TCI server are passive - they don't need polling or sync
+            # Serial CAT server and TCI Server are passive - they don't need polling or sync
             # External software polls the servers, which read current state from radio_gui
-            if control_type not in ('Serial', 'TCI'):
+            # TCI Client needs polling like other clients
+            if control_type not in ('Serial', 'TCI Server'):
                 # Initialize PTT state for non-Serial modes
                 self.radio_control_last_ptt = False
                 self.radio_mute_tx_check.configure(style='MuteTX.Green.TCheckbutton')
@@ -3817,25 +3856,34 @@ class RadioGUI:
     def disconnect_radio_control(self):
         """Disconnect from radio control."""
         if self.radio_control:
-            # Serial CAT server and TCI server use stop() instead of disconnect()
+            # Serial CAT server and TCI Server use stop() instead of disconnect()
             if self.radio_control_type == 'serial_cat':
                 self.radio_control.stop()
                 # Re-enable serial port dropdown and refresh button
                 self.serial_port_combo.config(state='readonly')
                 self.serial_refresh_btn.config(state='normal')
-            elif self.radio_control_type == 'tci':
+            elif self.radio_control_type == 'tci_server':
                 self.radio_control.stop()
-                # Re-enable TCI port entry
-                self.tci_port_entry.config(state='normal')
+                # Re-enable TCI Server port entry
+                self.tci_server_port_entry.config(state='normal')
 
-                # Hide CW Spots button when TCI disconnects (unless server has CW Skimmer)
+                # Hide CW Spots button when TCI Server disconnects (unless server has CW Skimmer)
                 if self.cw_spots_btn and self.connected and self.client:
                     if hasattr(self.client, 'server_description'):
                         desc = self.client.server_description
                         # Only hide if server doesn't have CW Skimmer
                         if not desc.get('cw_skimmer', False):
                             self.cw_spots_btn.pack_forget()
-                            self.log_status("CW Spots button disabled (TCI disconnected)")
+                            self.log_status("CW Spots button disabled (TCI Server disconnected)")
+            elif self.radio_control_type == 'tci_client':
+                # Unregister CW spot callback if it was registered
+                if self.tci_client_spot_callback_registered:
+                    self._unregister_tci_client_spot_callback()
+
+                self.radio_control.disconnect()
+                # Re-enable TCI Client host/port entries
+                self.tci_client_host_entry.config(state='normal')
+                self.tci_client_port_entry.config(state='normal')
             else:
                 self.radio_control.disconnect()
             self.radio_control = None
@@ -3967,6 +4015,9 @@ class RadioGUI:
                 self.client.channel_left = left_state
                 self.client.channel_right = right_state
                 self.radio_control_saved_channels = None
+
+        # Notify chat of PTT state change (updates TX status in chat)
+        self.notify_chat_radio_changed()
 
     def on_radio_sync_direction_changed(self):
         """Handle sync direction change - restart sync if active."""
@@ -4453,6 +4504,69 @@ class RadioGUI:
             self.on_mode_changed(skip_apply=True)
             if self.connected:
                 self.apply_mode()
+
+    def _register_tci_client_spot_callback(self):
+        """Register callback to forward CW spots to TCI Client."""
+        if not self.dxcluster_ws:
+            # Ensure DXCluster WebSocket manager exists
+            try:
+                self._ensure_dxcluster_ws()
+            except Exception as e:
+                self.log_status(f"Warning: Could not create WebSocket manager for TCI spot forwarding: {e}")
+                return
+
+        # Register CW spot callback
+        self.dxcluster_ws.on_cw_spot(self._forward_cw_spot_to_tci)
+        self.tci_client_spot_callback_registered = True
+        self.log_status("✓ CW spot forwarding to TCI Client enabled")
+
+    def _unregister_tci_client_spot_callback(self):
+        """Unregister CW spot callback for TCI Client."""
+        if self.dxcluster_ws and self.tci_client_spot_callback_registered:
+            self.dxcluster_ws.remove_cw_spot_callback(self._forward_cw_spot_to_tci)
+            self.tci_client_spot_callback_registered = False
+            self.log_status("CW spot forwarding to TCI Client disabled")
+
+    def _forward_cw_spot_to_tci(self, spot_data: dict):
+        """Forward a CW spot to the TCI Client.
+
+        Args:
+            spot_data: Spot data dictionary from WebSocket
+        """
+        if not self.radio_control or self.radio_control_type != 'tci_client':
+            return
+
+        if not self.tci_client_spots_var.get():
+            return
+
+        try:
+            # Extract spot data
+            callsign = spot_data.get('dx_call', '')
+            frequency = spot_data.get('frequency', 0)
+            mode = 'cw'  # CW spots are always CW mode
+            color = ''  # No color from UberSDR spots
+            # Use comment if available, otherwise use SNR and WPM info
+            comment = spot_data.get('comment', '')
+            snr = spot_data.get('snr', 0)
+            wpm = spot_data.get('wpm', 0)
+
+            # Build text field with useful info
+            text_parts = []
+            if comment:
+                text_parts.append(comment)
+            if snr > 0:
+                text_parts.append(f"{snr}dB")
+            if wpm > 0:
+                text_parts.append(f"{wpm}WPM")
+
+            text = ' '.join(text_parts) if text_parts else 'UberSDR'
+
+            # Send to TCI server
+            if callsign and frequency:
+                self.radio_control.send_spot(callsign, mode, frequency, color, text)
+
+        except Exception as e:
+            self.log_status(f"Error forwarding CW spot to TCI: {e}")
 
     def toggle_nr2(self):
         """Toggle NR2 noise reduction on/off."""

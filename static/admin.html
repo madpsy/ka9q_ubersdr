@@ -7937,6 +7937,10 @@
             filteredChannels.sort((a, b) => {
                 let aVal, bVal;
                 switch(radiodChannelsSortColumn) {
+                    case 'ssrc':
+                        aVal = a.ssrc;
+                        bVal = b.ssrc;
+                        break;
                     case 'frequency':
                         aVal = a.frequency;
                         bVal = b.frequency;
@@ -7949,6 +7953,10 @@
                         aVal = a.demod_type;
                         bVal = b.demod_type;
                         break;
+                    case 'samplerate':
+                        aVal = a.output_samprate || 0;
+                        bVal = b.output_samprate || 0;
+                        break;
                     case 'power':
                         aVal = a.baseband_power || -999;
                         bVal = b.baseband_power || -999;
@@ -7960,6 +7968,11 @@
                     case 'packets':
                         aVal = a.output_data_packets || 0;
                         bVal = b.output_data_packets || 0;
+                        break;
+                    case 'update':
+                        // Sort by last_update timestamp
+                        aVal = a.last_update ? new Date(a.last_update).getTime() : 0;
+                        bVal = b.last_update ? new Date(b.last_update).getTime() : 0;
                         break;
                     case 'type':
                         aVal = a.channel_name;
@@ -8025,34 +8038,34 @@
                 <div>
                     <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555;">Channel Type</label>
                     <select id="filterChannelType" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px;" onchange="renderRadiodChannels(currentRadiodChannelsData)">
-                        <option value="">All Types</option>
-                        <option value="decoder">Decoder</option>
-                        <option value="noisefloor">Noise Floor</option>
-                        <option value="user_audio">User Audio</option>
-                        <option value="user_spectrum">User Spectrum</option>
-                        <option value="unknown">Unknown</option>
+                        <option value="" ${filterType === '' ? 'selected' : ''}>All Types</option>
+                        <option value="decoder" ${filterType === 'decoder' ? 'selected' : ''}>Decoder</option>
+                        <option value="noisefloor" ${filterType === 'noisefloor' ? 'selected' : ''}>Noise Floor</option>
+                        <option value="user_audio" ${filterType === 'user_audio' ? 'selected' : ''}>User Audio</option>
+                        <option value="user_spectrum" ${filterType === 'user_spectrum' ? 'selected' : ''}>User Spectrum</option>
+                        <option value="unknown" ${filterType === 'unknown' ? 'selected' : ''}>Unknown</option>
                     </select>
                 </div>
                 <div>
                     <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555;">Demod Type</label>
                     <select id="filterDemod" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px;" onchange="renderRadiodChannels(currentRadiodChannelsData)">
-                        <option value="">All Demods</option>
-                        <option value="Linear">Linear</option>
-                        <option value="FM">FM</option>
-                        <option value="WFM">WFM</option>
-                        <option value="Spectrum">Spectrum</option>
+                        <option value="" ${filterDemod === '' ? 'selected' : ''}>All Demods</option>
+                        <option value="Linear" ${filterDemod === 'Linear' ? 'selected' : ''}>Linear</option>
+                        <option value="FM" ${filterDemod === 'FM' ? 'selected' : ''}>FM</option>
+                        <option value="WFM" ${filterDemod === 'WFM' ? 'selected' : ''}>WFM</option>
+                        <option value="Spectrum" ${filterDemod === 'Spectrum' ? 'selected' : ''}>Spectrum</option>
                     </select>
                 </div>
                 <div>
                     <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #555;">Preset</label>
                     <select id="filterPreset" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px;" onchange="renderRadiodChannels(currentRadiodChannelsData)">
-                        <option value="">All Presets</option>
+                        <option value="" ${filterPreset === '' ? 'selected' : ''}>All Presets</option>
                     </select>
                 </div>
             `;
             container.appendChild(filterDiv);
 
-            // Populate preset filter with unique presets from data
+            // Populate preset filter with unique presets from data and preserve selection
             const presets = [...new Set(data.channels.map(ch => ch.preset).filter(p => p))].sort();
             const presetSelect = document.getElementById('filterPreset');
             presets.forEach(preset => {
@@ -8078,16 +8091,16 @@
             table.innerHTML = `
                 <thead>
                     <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
-                        <th style="padding: 10px; text-align: left;">SSRC</th>
+                        <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('ssrc')" title="Click to sort">SSRC${sortIcon('ssrc')}</th>
                         <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('frequency')" title="Click to sort">Frequency${sortIcon('frequency')}</th>
                         <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('preset')" title="Click to sort">Preset${sortIcon('preset')}</th>
                         <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('demod')" title="Click to sort">Demod${sortIcon('demod')}</th>
-                        <th style="padding: 10px; text-align: center;">Sample Rate</th>
+                        <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('samplerate')" title="Click to sort">Sample Rate${sortIcon('samplerate')}</th>
                         <th style="padding: 10px; text-align: center;">Filter (Hz)</th>
                         <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('power')" title="Click to sort">Power${sortIcon('power')}</th>
                         <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('snr')" title="Click to sort">SNR${sortIcon('snr')}</th>
                         <th style="padding: 10px; text-align: center; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('packets')" title="Click to sort">Packets${sortIcon('packets')}</th>
-                        <th style="padding: 10px; text-align: left;">Last Update</th>
+                        <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('update')" title="Click to sort">Last Update${sortIcon('update')}</th>
                         <th style="padding: 10px; text-align: left; cursor: pointer; user-select: none;" onclick="sortRadiodChannels('type')" title="Click to sort">Channel Type${sortIcon('type')}</th>
                     </tr>
                 </thead>

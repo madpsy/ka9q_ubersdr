@@ -2979,6 +2979,7 @@
                     <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
                         <th style="padding: 12px; text-align: left;">IP Address</th>
                         <th style="padding: 12px; text-align: left;">User Agent</th>
+                        <th style="padding: 12px; text-align: left;">Chat</th>
                         <th style="padding: 12px; text-align: left;">First Seen</th>
                         <th style="padding: 12px; text-align: left;">Last Seen</th>
                         <th style="padding: 12px; text-align: center;">Audio</th>
@@ -3063,6 +3064,7 @@
                 const sourceIP = audioSession?.source_ip || spectrumSession?.source_ip || 'N/A';
                 const userSessionID = sessions.hasUUID ? key : 'N/A';
                 const userAgent = audioSession?.user_agent || spectrumSession?.user_agent || 'N/A';
+                const chatUsername = audioSession?.chat_username || spectrumSession?.chat_username || '—';
 
                 // Get first seen timestamp and calculate duration
                 const firstSeen = audioSession?.user_session_first_seen || spectrumSession?.user_session_first_seen;
@@ -3144,6 +3146,7 @@
                     row.innerHTML = `
                         <td style="padding: 12px; font-family: monospace; font-size: 12px; max-width: 140px; word-wrap: break-word;">${ipDisplay}</td>
                         <td style="padding: 12px; font-size: 11px; word-break: break-all; max-width: 200px;" title="${userAgent}">${userAgent === 'N/A' ? '<em style="color: #999;">N/A</em>' : userAgent}</td>
+                        <td style="padding: 12px; font-size: 12px;">${chatUsername === '—' ? '<em style="color: #999;">—</em>' : '<strong style="color: #667eea;">' + chatUsername + '</strong>'}</td>
                         <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${firstSeenDisplay}</td>
                         <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${lastSeenDisplay}</td>
                         <td style="padding: 12px; text-align: center;">${audioThroughput}</td>

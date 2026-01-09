@@ -247,6 +247,7 @@ type AdminHandler struct {
 	noiseFloorMonitor   *NoiseFloorMonitor
 	multiDecoder        *MultiDecoder
 	dxCluster           *DXClusterClient
+	dxClusterWsHandler  *DXClusterWebSocketHandler
 	spaceWeatherMonitor *SpaceWeatherMonitor
 	cwSkimmerConfig     *CWSkimmerConfig
 	cwSkimmerClient     *CWSkimmerClient
@@ -313,7 +314,7 @@ func (ah *AdminHandler) restartServer() {
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter) *AdminHandler {
 	return &AdminHandler{
 		config:              config,
 		configFile:          configFile,
@@ -326,6 +327,7 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		noiseFloorMonitor:   noiseFloorMonitor,
 		multiDecoder:        multiDecoder,
 		dxCluster:           dxCluster,
+		dxClusterWsHandler:  dxClusterWsHandler,
 		spaceWeatherMonitor: spaceWeatherMonitor,
 		cwSkimmerConfig:     cwSkimmerConfig,
 		cwSkimmerClient:     cwSkimmerClient,
@@ -1726,6 +1728,17 @@ func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	sessions := ah.sessions.GetAllSessionsInfo()
+
+	// Enhance with chat usernames if DX cluster websocket handler (with chat) is available
+	if ah.dxClusterWsHandler != nil && ah.dxClusterWsHandler.chatManager != nil {
+		for i := range sessions {
+			if userSessionID, ok := sessions[i]["user_session_id"].(string); ok && userSessionID != "" {
+				if username, exists := ah.dxClusterWsHandler.chatManager.GetUsername(userSessionID); exists {
+					sessions[i]["chat_username"] = username
+				}
+			}
+		}
+	}
 
 	response := map[string]interface{}{
 		"sessions": sessions,

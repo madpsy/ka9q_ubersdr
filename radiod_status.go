@@ -256,10 +256,54 @@ type FrontendStatusTracker struct {
 
 // NewFrontendStatusTracker creates a new frontend status tracker
 func NewFrontendStatusTracker() *FrontendStatusTracker {
-	return &FrontendStatusTracker{
+	fst := &FrontendStatusTracker{
 		frontendStatus: make(map[uint32]*FrontendStatus),
 		channelStatus:  make(map[uint32]*ChannelStatus),
 		stopListener:   make(chan struct{}),
+	}
+
+	// Start cleanup goroutine to remove stale entries
+	go fst.cleanupStaleEntries()
+
+	return fst
+}
+
+// cleanupStaleEntries removes status entries that haven't been updated in 30 seconds
+// This prevents terminated channels from lingering in the cache
+func (fst *FrontendStatusTracker) cleanupStaleEntries() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-fst.stopListener:
+			return
+		case <-ticker.C:
+			now := time.Now()
+			staleThreshold := 30 * time.Second
+
+			fst.mu.Lock()
+
+			// Clean up stale frontend status entries
+			for ssrc, status := range fst.frontendStatus {
+				if now.Sub(status.LastUpdate) > staleThreshold {
+					delete(fst.frontendStatus, ssrc)
+					log.Printf("Removed stale frontend status for SSRC 0x%08x (last update: %v ago)",
+						ssrc, now.Sub(status.LastUpdate))
+				}
+			}
+
+			// Clean up stale channel status entries
+			for ssrc, status := range fst.channelStatus {
+				if now.Sub(status.LastUpdate) > staleThreshold {
+					delete(fst.channelStatus, ssrc)
+					log.Printf("Removed stale channel status for SSRC 0x%08x (last update: %v ago)",
+						ssrc, now.Sub(status.LastUpdate))
+				}
+			}
+
+			fst.mu.Unlock()
+		}
 	}
 }
 

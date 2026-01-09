@@ -549,9 +549,6 @@ class TCIServer:
 
         self.vfo_frequencies[rx][vfo] = freq
 
-        # Log frequency change
-        print(f"TCI server: Received frequency change - RX{rx} VFO{vfo} = {freq/1e6:.6f} MHz")
-
         # Update GUI if this is the active receiver and RX VFO (unless skip_callback is True)
         if rx == 0 and vfo == 0 and self.gui_callback and not skip_callback:
             # Call GUI callback to update frequency
@@ -1017,22 +1014,11 @@ class TCIServer:
         """
         if not self.iq_streaming.get(rx, False):
             # IQ streaming not enabled for this receiver
-            if not hasattr(self, '_iq_not_streaming_logged'):
-                print(f"DEBUG TCI: IQ streaming not enabled for RX{rx}", file=sys.stderr)
-                self._iq_not_streaming_logged = True
             return
 
         if not self.clients:
             # No clients connected
-            if not hasattr(self, '_no_clients_logged'):
-                print(f"DEBUG TCI: No TCI clients connected", file=sys.stderr)
-                self._no_clients_logged = True
             return
-
-        # Log first IQ data transmission
-        if not hasattr(self, '_iq_data_logged'):
-            print(f"DEBUG TCI: Sending IQ data to client (size: {len(iq_data)} bytes, rate: {sample_rate} Hz)", file=sys.stderr)
-            self._iq_data_logged = True
 
         # Schedule sending in the event loop
         if not self.loop or not self.loop.is_running():

@@ -3866,6 +3866,8 @@ class RadioGUI:
                 self.radio_control.stop()
                 # Re-enable TCI Server port entry
                 self.tci_server_port_entry.config(state='normal')
+                # Clear client IP display
+                self.tci_client_ip_var.set("")
 
                 # Hide CW Spots button when TCI Server disconnects (unless server has CW Skimmer)
                 if self.cw_spots_btn and self.connected and self.client:
@@ -3905,9 +3907,9 @@ class RadioGUI:
             self.root.after_cancel(self.radio_control_poll_job)
             self.radio_control_poll_job = None
 
-        # Use "Start" for servers (Serial, TCI), "Connect" for clients
+        # Use "Start" for servers (Serial, TCI Server), "Connect" for clients
         control_type = self.radio_control_type_var.get()
-        if control_type in ('Serial', 'TCI'):
+        if control_type in ('Serial', 'TCI Server'):
             self.radio_connect_btn.config(text="Start")
         else:
             self.radio_connect_btn.config(text="Connect")
@@ -4224,7 +4226,7 @@ class RadioGUI:
             self.sync_mode_to_rigctl()
 
         # Sync to TCI server if active (but don't create feedback loop)
-        if self.radio_control_type == 'tci' and self.radio_control:
+        if self.radio_control_type == 'tci_server' and self.radio_control:
             # Set flag to prevent callback loop
             self._tci_updating = True
             self.radio_control.update_mode(mode)
@@ -4444,7 +4446,7 @@ class RadioGUI:
     def update_tci_smeter(self):
         """Update TCI S-meter from RF spectrum data (periodic callback)."""
         try:
-            if self.radio_control_type == 'tci' and self.radio_control and self.connected:
+            if self.radio_control_type == 'tci_server' and self.radio_control and self.connected:
                 # Get current bandwidth for signal level calculation
                 low = int(self.bw_low_var.get())
                 high = int(self.bw_high_var.get())
@@ -4456,18 +4458,18 @@ class RadioGUI:
             pass
 
         # Schedule next update (250ms = 4 times per second)
-        if self.radio_control_type == 'tci' and self.radio_control:
+        if self.radio_control_type == 'tci_server' and self.radio_control:
             self.root.after(250, self.update_tci_smeter)
 
     def update_tci_client_ip(self):
         """Update TCI client IP display (periodic callback)."""
 
         # Schedule next update FIRST so loop continues even when no client is connected yet
-        if self.radio_control_type == 'tci' and self.radio_control_connected:
+        if self.radio_control_type == 'tci_server' and self.radio_control_connected:
             self.root.after(1000, self.update_tci_client_ip)
 
         try:
-            if self.radio_control_type == 'tci' and self.radio_control and self.radio_control_connected:
+            if self.radio_control_type == 'tci_server' and self.radio_control and self.radio_control_connected:
                 # Get connected client IP from TCI server
                 if hasattr(self.radio_control, 'connected_client_ip'):
                     client_ip = self.radio_control.connected_client_ip
@@ -6641,7 +6643,7 @@ class RadioGUI:
 
                                 # Pack CW spots button if enabled (either server has CW Skimmer OR TCI is active)
                                 # TCI can report spots too, so enable button when TCI is connected
-                                tci_active = (self.radio_control_type == 'tci' and self.radio_control_connected)
+                                tci_active = (self.radio_control_type == 'tci_server' and self.radio_control_connected)
                                 if self.cw_spots_btn and (desc.get('cw_skimmer', False) or tci_active):
                                     if scroll_label:
                                         self.cw_spots_btn.pack(side=tk.LEFT, padx=(0, 5), before=scroll_label)

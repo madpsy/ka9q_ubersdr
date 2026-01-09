@@ -24,7 +24,7 @@ class NoiseFloorMonitor {
         
         // Wideband zoom controls
         this.widebandFrequency = 15; // MHz (center frequency)
-        this.widebandWidth = 3000; // kHz (total width)
+        this.widebandWidth = 30000; // kHz (total width)
 
         // Comparison dates for historical single-band view
         this.comparisonDates = {
@@ -1741,7 +1741,7 @@ class NoiseFloorMonitor {
             label: {
                 display: true,
                 content: `${this.widebandFrequency.toFixed(3)} MHz`,
-                position: 'start',
+                position: 'end',
                 backgroundColor: 'rgba(255, 152, 0, 0.9)',
                 color: '#fff',
                 font: {

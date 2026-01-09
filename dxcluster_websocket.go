@@ -1007,3 +1007,20 @@ func (h *DXClusterWebSocketHandler) CleanupUserSessionID(userSessionID string) {
 	delete(h.dxBytesSent, userSessionID)
 	delete(h.dxBytesSamples, userSessionID)
 }
+
+// HasDXConnection checks if a UserSessionID has an active DX cluster connection
+func (h *DXClusterWebSocketHandler) HasDXConnection(userSessionID string) bool {
+	if userSessionID == "" {
+		return false
+	}
+
+	h.connToSessionIDMu.RLock()
+	defer h.connToSessionIDMu.RUnlock()
+
+	for _, sid := range h.connToSessionID {
+		if sid == userSessionID {
+			return true
+		}
+	}
+	return false
+}

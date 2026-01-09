@@ -3131,24 +3131,28 @@
                     actionButtons += `<button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="banUser('${clientIP}')">Ban IP</button>`;
                     }
 
-                    // Calculate throughput for audio and spectrum sessions
+                    // Calculate throughput for audio sessions
+                    // Show "0 kbps" if connected but idle, "—" if not connected
                     let audioThroughput = '—';
                     if (sessions.audio.length > 0) {
                         const audioKbps = sessions.audio[0].audio_kbps || 0;
-                        audioThroughput = `${audioKbps} kbps`;
+                        audioThroughput = `${audioKbps.toFixed(1)} kbps`;
                     }
 
+                    // Calculate throughput for spectrum sessions
+                    // Show "0 kbps" if connected but idle, "—" if not connected
                     let spectrumThroughput = '—';
                     if (sessions.spectrum.length > 0) {
                         const waterfallKbps = sessions.spectrum[0].waterfall_kbps || 0;
-                        spectrumThroughput = `${waterfallKbps} kbps`;
+                        spectrumThroughput = `${waterfallKbps.toFixed(1)} kbps`;
                     }
 
                     // Calculate throughput for DX cluster connections
+                    // Show "0.0 kbps" if connected but idle, "—" if not connected
                     let dxClusterThroughput = '—';
                     // Check both audio and spectrum sessions for DX cluster connection
-                    const dxSession = sessions.audio.find(s => s.dxcluster_kbps !== undefined && s.dxcluster_kbps > 0) ||
-                                     sessions.spectrum.find(s => s.dxcluster_kbps !== undefined && s.dxcluster_kbps > 0);
+                    const dxSession = sessions.audio.find(s => s.dxcluster_kbps !== undefined) ||
+                                     sessions.spectrum.find(s => s.dxcluster_kbps !== undefined);
                     if (dxSession) {
                         const dxKbps = dxSession.dxcluster_kbps || 0;
                         dxClusterThroughput = `${dxKbps.toFixed(1)} kbps`;

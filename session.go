@@ -1595,14 +1595,17 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 		info["waterfall_kbps"] = waterfallKbps
 		info["total_kbps"] = audioKbps + waterfallKbps
 
-		// Add DX cluster throughput if handler is available and user has a session ID
+		// Add DX cluster connection status and throughput if handler is available and user has a session ID
 		if session.UserSessionID != "" && sm.dxClusterWsHandler != nil {
 			// Type assert to get the handler (using interface to avoid import cycle)
 			if handler, ok := sm.dxClusterWsHandler.(interface {
+				HasDXConnection(string) bool
 				GetInstantaneousDXKbps(string) float64
 			}); ok {
-				dxKbps := handler.GetInstantaneousDXKbps(session.UserSessionID)
-				if dxKbps > 0 {
+				// Check if user has an active DX cluster connection
+				if handler.HasDXConnection(session.UserSessionID) {
+					// User is connected - show throughput (0 if idle, >0 if active)
+					dxKbps := handler.GetInstantaneousDXKbps(session.UserSessionID)
 					info["dxcluster_kbps"] = dxKbps
 				}
 			}

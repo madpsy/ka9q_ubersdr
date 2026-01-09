@@ -1012,6 +1012,7 @@ func main() {
 	http.HandleFunc("/admin/sessions", adminHandler.AuthMiddleware(adminHandler.HandleSessions))
 	http.HandleFunc("/admin/frontend-status", adminHandler.AuthMiddleware(adminHandler.HandleFrontendStatus))
 	http.HandleFunc("/admin/channel-status", adminHandler.AuthMiddleware(adminHandler.HandleChannelStatus))
+	http.HandleFunc("/admin/radiod-channels", adminHandler.AuthMiddleware(adminHandler.HandleRadiodChannels))
 	http.HandleFunc("/admin/system-load", adminHandler.AuthMiddleware(adminHandler.HandleSystemLoad))
 	http.HandleFunc("/admin/kick", adminHandler.AuthMiddleware(adminHandler.HandleKickUser))
 	http.HandleFunc("/admin/ban", adminHandler.AuthMiddleware(adminHandler.HandleBanUser))

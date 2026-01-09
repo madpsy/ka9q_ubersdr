@@ -474,6 +474,7 @@
                     <button class="tab" onclick="switchTab('banned')">Banned IPs</button>
                     <button class="tab" onclick="switchTab('visual')">Config</button>
                     <button class="tab" onclick="switchTab('radiod')">Radiod</button>
+                    <button class="tab" onclick="switchTab('radiod-channels')">Radiod Channels</button>
                     <button class="tab" onclick="switchTab('bookmarks')">Bookmarks</button>
                     <button class="tab" onclick="switchTab('bands')">Bands</button>
                     <button class="tab" onclick="switchTab('extensions')">Extensions</button>
@@ -546,6 +547,17 @@
                         <p>Loading radiod configuration...</p>
                     </div>
                     <textarea id="radiodConfigEditor" style="width: 100%; min-height: 500px; font-family: monospace; font-size: 13px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background: #f5f5f5; display: none;" readonly></textarea>
+                </div>
+
+                <!-- Radiod Channels Tab -->
+                <div id="radiodChannelsTab" class="tab-content">
+                    <div class="alert alert-info" style="margin-bottom: 20px;">
+                        ℹ️ <strong>Info:</strong> This shows all active channels in radiod, including decoder channels, user audio/spectrum sessions, and noise floor monitors. Auto-refreshes every 5 seconds.
+                    </div>
+                    <div id="radiodChannelsList" class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading radiod channels...</p>
+                    </div>
                 </div>
 
                 <!-- Bookmarks Tab -->
@@ -743,6 +755,9 @@
                     <button class="btn" onclick="saveRadiodConfig()">Save Configuration</button>
                     <button class="btn btn-danger" onclick="saveRadiodConfigAndRestart()">Save & Restart Radiod</button>
                     <button class="btn btn-secondary" onclick="loadRadiodConfig()">Reload</button>
+                </div>
+                <div class="button-group" id="radiodChannelsButtons" style="display: none;">
+                    <button class="btn btn-secondary" onclick="loadRadiodChannels()">Refresh</button>
                 </div>
                 <div class="button-group" id="bookmarkButtons" style="display: none;">
                     <button class="btn" onclick="showAddBookmarkForm()">Add New Bookmark</button>
@@ -1277,6 +1292,7 @@
             // Hide all button groups
             document.getElementById('configButtons').style.display = 'none';
             document.getElementById('radiodButtons').style.display = 'none';
+            document.getElementById('radiodChannelsButtons').style.display = 'none';
             document.getElementById('bookmarkButtons').style.display = 'none';
             document.getElementById('bandButtons').style.display = 'none';
             document.getElementById('extensionButtons').style.display = 'none';
@@ -1295,6 +1311,11 @@
             // Stop monitor auto-refresh when leaving monitor tab
             if (tab !== 'monitor') {
                 stopMonitorAutoRefresh();
+            }
+
+            // Stop radiod channels auto-refresh when leaving radiod-channels tab
+            if (tab !== 'radiod-channels') {
+                stopRadiodChannelsAutoRefresh();
             }
 
             if (tab === 'sessions') {
@@ -1317,39 +1338,45 @@
                 document.getElementById('radiodTab').classList.add('active');
                 document.getElementById('radiodButtons').style.display = 'flex';
                 loadRadiodConfig();
-            } else if (tab === 'bookmarks') {
+            } else if (tab === 'radiod-channels') {
                 document.querySelector('.tab:nth-child(5)').classList.add('active');
+                document.getElementById('radiodChannelsTab').classList.add('active');
+                document.getElementById('radiodChannelsButtons').style.display = 'flex';
+                loadRadiodChannels();
+                startRadiodChannelsAutoRefresh();
+            } else if (tab === 'bookmarks') {
+                document.querySelector('.tab:nth-child(6)').classList.add('active');
                 document.getElementById('bookmarksTab').classList.add('active');
                 document.getElementById('bookmarkButtons').style.display = 'flex';
                 loadBookmarks();
             } else if (tab === 'bands') {
-                document.querySelector('.tab:nth-child(6)').classList.add('active');
+                document.querySelector('.tab:nth-child(7)').classList.add('active');
                 document.getElementById('bandsTab').classList.add('active');
                 document.getElementById('bandButtons').style.display = 'flex';
                 loadBands();
             } else if (tab === 'extensions') {
-                document.querySelector('.tab:nth-child(7)').classList.add('active');
+                document.querySelector('.tab:nth-child(8)').classList.add('active');
                 document.getElementById('extensionsTab').classList.add('active');
                 document.getElementById('extensionButtons').style.display = 'flex';
                 loadAvailableExtensions();
             } else if (tab === 'decoder') {
-                document.querySelector('.tab:nth-child(8)').classList.add('active');
+                document.querySelector('.tab:nth-child(9)').classList.add('active');
                 document.getElementById('decoderTab').classList.add('active');
                 document.getElementById('decoderButtons').style.display = 'flex';
                 loadDecoderConfig();
             } else if (tab === 'cwskimmer') {
-                document.querySelector('.tab:nth-child(9)').classList.add('active');
+                document.querySelector('.tab:nth-child(10)').classList.add('active');
                 document.getElementById('cwskimmerTab').classList.add('active');
                 document.getElementById('cwskimmerButtons').style.display = 'flex';
                 loadCWSkimmerConfig();
             } else if (tab === 'monitor') {
-                document.querySelector('.tab:nth-child(10)').classList.add('active');
+                document.querySelector('.tab:nth-child(11)').classList.add('active');
                 document.getElementById('monitorTab').classList.add('active');
                 document.getElementById('monitorButtons').style.display = 'flex';
                 loadMonitorHealth();
                 startMonitorAutoRefresh();
             } else if (tab === 'system') {
-                document.querySelector('.tab:nth-child(11)').classList.add('active');
+                document.querySelector('.tab:nth-child(12)').classList.add('active');
                 document.getElementById('systemTab').classList.add('active');
                 document.getElementById('systemButtons').style.display = 'flex';
                 loadSystemStats();
@@ -7816,6 +7843,160 @@
             if (event.target === forceUpdateModal) {
                 closeForceUpdateModal();
             }
+        }
+
+        // Radiod Channels management
+        let radiodChannelsRefreshInterval = null;
+
+        async function loadRadiodChannels() {
+            try {
+                const response = await authenticatedFetch('/admin/radiod-channels');
+                if (!response) {
+                    // Auth failed, stop auto-refresh
+                    stopRadiodChannelsAutoRefresh();
+                    return;
+                }
+
+                if (!response.ok) {
+                    throw new Error('Failed to load radiod channels');
+                }
+
+                const data = await response.json();
+                renderRadiodChannels(data);
+
+                // Only show alert on manual refresh, not on auto-refresh
+                if (!radiodChannelsRefreshInterval) {
+                    showAlert(`Loaded ${data.total_channels} radiod channel(s)`, 'success');
+                }
+            } catch (error) {
+                // Only show error alert if not auto-refreshing to avoid spam
+                if (!radiodChannelsRefreshInterval) {
+                    showAlert('Error loading radiod channels: ' + error.message, 'error');
+                } else {
+                    // Log error silently during auto-refresh
+                    console.error('Error loading radiod channels during auto-refresh:', error);
+                }
+            }
+        }
+
+        function startRadiodChannelsAutoRefresh() {
+            // Clear any existing interval
+            if (radiodChannelsRefreshInterval) {
+                clearInterval(radiodChannelsRefreshInterval);
+            }
+
+            // Start auto-refresh every 5 seconds
+            radiodChannelsRefreshInterval = setInterval(() => {
+                loadRadiodChannels();
+            }, 5000);
+        }
+
+        function stopRadiodChannelsAutoRefresh() {
+            if (radiodChannelsRefreshInterval) {
+                clearInterval(radiodChannelsRefreshInterval);
+                radiodChannelsRefreshInterval = null;
+            }
+        }
+
+        function renderRadiodChannels(data) {
+            const container = document.getElementById('radiodChannelsList');
+            container.innerHTML = '';
+            container.classList.remove('loading');
+
+            if (!data.channels || data.channels.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No active radiod channels found</p>';
+                return;
+            }
+
+            // Add summary section
+            const summaryDiv = document.createElement('div');
+            summaryDiv.style.marginBottom = '15px';
+            summaryDiv.style.padding = '15px';
+            summaryDiv.style.background = '#f8f9fa';
+            summaryDiv.style.borderRadius = '5px';
+            summaryDiv.innerHTML = `
+                <strong>Summary:</strong>
+                <span style="margin-left: 20px;">• Total Channels: <strong>${data.total_channels}</strong></span>
+                <span style="margin-left: 20px;">• Decoder Channels: <strong style="color: #667eea;">${data.decoder_count}</strong></span>
+                <span style="margin-left: 20px;">• Other Channels: <strong style="color: #28a745;">${data.other_count}</strong></span>
+            `;
+            container.appendChild(summaryDiv);
+
+            // Create table
+            const table = document.createElement('table');
+            table.style.width = '100%';
+            table.style.borderCollapse = 'collapse';
+            table.innerHTML = `
+                <thead>
+                    <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                        <th style="padding: 10px; text-align: left;">SSRC</th>
+                        <th style="padding: 10px; text-align: left;">Frequency</th>
+                        <th style="padding: 10px; text-align: left;">Preset</th>
+                        <th style="padding: 10px; text-align: left;">Type</th>
+                        <th style="padding: 10px; text-align: center;">Sample Rate</th>
+                        <th style="padding: 10px; text-align: center;">Filter (Hz)</th>
+                        <th style="padding: 10px; text-align: center;">Power</th>
+                        <th style="padding: 10px; text-align: center;">SNR</th>
+                        <th style="padding: 10px; text-align: center;">Packets</th>
+                        <th style="padding: 10px; text-align: left;">Last Update</th>
+                        <th style="padding: 10px; text-align: left;">Channel</th>
+                    </tr>
+                </thead>
+                <tbody id="radiodChannelsTableBody"></tbody>
+            `;
+            container.appendChild(table);
+
+            const tbody = document.getElementById('radiodChannelsTableBody');
+            data.channels.forEach(channel => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #dee2e6';
+
+                // Highlight decoder channels with a subtle background
+                if (channel.is_decoder_channel) {
+                    row.style.background = '#e3f2fd'; // Light blue for decoder channels
+                }
+
+                // Format filter range
+                const filterRange = `${Math.round(channel.filter_low)} to ${Math.round(channel.filter_high)}`;
+
+                // Format power and SNR with color coding
+                const formatPower = (power) => {
+                    if (power === null || power === undefined || power < -200) return '<em style="color: #999;">—</em>';
+                    const color = power > -20 ? '#28a745' : power > -40 ? '#ffc107' : '#dc3545';
+                    return `<span style="color: ${color}; font-weight: bold;">${power.toFixed(1)} dBFS</span>`;
+                };
+
+                const formatSNR = (snr) => {
+                    if (snr === null || snr === undefined || snr < -200) return '<em style="color: #999;">—</em>';
+                    const color = snr > 10 ? '#28a745' : snr > 0 ? '#ffc107' : '#dc3545';
+                    return `<span style="color: ${color}; font-weight: bold;">${snr.toFixed(1)} dB</span>`;
+                };
+
+                // Channel name/description
+                let channelDesc = '';
+                if (channel.is_decoder_channel) {
+                    channelDesc = `<strong style="color: #667eea;">Decoder: ${channel.decoder_band_name}</strong>`;
+                } else if (channel.demod_type === 'Spectrum') {
+                    channelDesc = '<span style="color: #28a745;">Spectrum</span>';
+                } else {
+                    channelDesc = '<span style="color: #666;">User/System</span>';
+                }
+
+                row.innerHTML = `
+                    <td style="padding: 10px; font-family: monospace; font-size: 11px;">${channel.ssrc}</td>
+                    <td style="padding: 10px; font-family: monospace; font-size: 12px;"><strong>${channel.frequency_mhz} MHz</strong></td>
+                    <td style="padding: 10px; font-size: 12px;">${channel.preset || '<em style="color: #999;">—</em>'}</td>
+                    <td style="padding: 10px; font-size: 12px;">${channel.demod_type}</td>
+                    <td style="padding: 10px; text-align: center; font-size: 12px;">${channel.output_samprate_khz} kHz</td>
+                    <td style="padding: 10px; text-align: center; font-size: 11px;">${filterRange}</td>
+                    <td style="padding: 10px; text-align: center; font-size: 12px;">${formatPower(channel.baseband_power)}</td>
+                    <td style="padding: 10px; text-align: center; font-size: 12px;">${formatSNR(channel.snr)}</td>
+                    <td style="padding: 10px; text-align: center; font-size: 12px;">${channel.output_data_packets ? channel.output_data_packets.toLocaleString() : '0'}</td>
+                    <td style="padding: 10px; font-size: 11px;">${channel.time_since_update}</td>
+                    <td style="padding: 10px; font-size: 12px;">${channelDesc}</td>
+                `;
+                tbody.appendChild(row);
+            });
         }
     </script>
 </body>

@@ -994,7 +994,7 @@
                             <li>Disconnect all active users</li>
                         </ul>
                         <p style="margin-bottom: 20px; color: #856404; background: #fff3cd; padding: 10px; border-radius: 5px;">
-                            <strong>Note:</strong> The update process may take several minutes. You will need to log back in after the update completes.
+                            <strong>Note:</strong> The update process may take a couple of minutes. You will need to log back in after the update completes.
                         </p>
                         <div style="display: flex; gap: 10px; justify-content: flex-end;">
                             <button class="btn btn-secondary" onclick="closeForceUpdateModal()">Cancel</button>
@@ -2982,9 +2982,9 @@
                         <th style="padding: 12px; text-align: left;">Chat</th>
                         <th style="padding: 12px; text-align: left;">First Seen</th>
                         <th style="padding: 12px; text-align: left;">Last Seen</th>
-                        <th style="padding: 12px; text-align: center;">Audio (kbps)</th>
-                        <th style="padding: 12px; text-align: center;">Spectrum (kbps)</th>
-                        <th style="padding: 12px; text-align: center;">DX (kbps)</th>
+                        <th style="padding: 12px; text-align: center; width: 80px;">Audio (kbps)</th>
+                        <th style="padding: 12px; text-align: center; width: 80px;">Spectrum (kbps)</th>
+                        <th style="padding: 12px; text-align: center; width: 80px;">DX (kbps)</th>
                         <th style="padding: 12px; text-align: left;">Details</th>
                         <th style="padding: 12px; text-align: center;">Actions</th>
                     </tr>
@@ -3162,9 +3162,9 @@
                         <td style="padding: 12px; font-size: 12px;">${chatUsername === '—' ? '<em style="color: #999;">—</em>' : '<strong style="color: #667eea;">' + chatUsername + '</strong>'}</td>
                         <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${firstSeenDisplay}</td>
                         <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${lastSeenDisplay}</td>
-                        <td style="padding: 12px; text-align: center;">${audioThroughput}</td>
-                        <td style="padding: 12px; text-align: center;">${spectrumThroughput}</td>
-                        <td style="padding: 12px; text-align: center;">${dxClusterThroughput}</td>
+                        <td style="padding: 12px; font-size: 12px; text-align: center;">${audioThroughput}</td>
+                        <td style="padding: 12px; font-size: 12px; text-align: center;">${spectrumThroughput}</td>
+                        <td style="padding: 12px; font-size: 12px; text-align: center;">${dxClusterThroughput}</td>
                         <td style="padding: 12px; font-size: 12px;">${details}</td>
                         <td style="padding: 12px; text-align: center; white-space: nowrap;">${actionButtons}</td>
                     `;

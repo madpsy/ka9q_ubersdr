@@ -4007,7 +4007,7 @@
             const keepWavField = createConfigField('Keep WAV Files (Warning: Will fill /dev/shm)', 'checkbox', currentDecoderConfig.keep_wav || false, 'keep_wav');
             globalSection.appendChild(keepWavField);
 
-            const keepLogsField = createConfigField('Keep Log Files (Warning: Will fill /dev/shm)', 'checkbox', currentDecoderConfig.keep_logs || false, 'keep_logs');
+            const keepLogsField = createConfigField('Keep Decoded Files (Warning: Will fill /dev/shm)', 'checkbox', currentDecoderConfig.keep_logs || false, 'keep_logs');
             globalSection.appendChild(keepLogsField);
 
             const includeDeadTimeField = createConfigField('Include Dead Time in WAV', 'checkbox', currentDecoderConfig.include_dead_time || false, 'include_dead_time');

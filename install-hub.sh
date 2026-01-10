@@ -53,6 +53,31 @@ fi
 echo "Running UberSDR mDNS installation script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/install-ubersdr-mdns.sh | sudo bash
 
+# Install HPSDR bridge binary
+echo "Installing UberSDR HPSDR bridge..."
+if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-hpsdr-bridge -o /tmp/ubersdr-hpsdr-bridge 2>/dev/null; then
+    sudo mv /tmp/ubersdr-hpsdr-bridge /usr/local/bin/ubersdr-hpsdr-bridge
+    sudo chmod +x /usr/local/bin/ubersdr-hpsdr-bridge
+    echo "HPSDR bridge binary installed successfully."
+
+    # Install systemd service
+    if [ -f /etc/systemd/system/ubersdr-hpsdr-bridge.service ]; then
+        echo "HPSDR bridge service file already exists, skipping."
+    else
+        if curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/clients/hpsdr/ubersdr-hpsdr-bridge.service -o /tmp/ubersdr-hpsdr-bridge.service 2>/dev/null; then
+            sudo mv /tmp/ubersdr-hpsdr-bridge.service /etc/systemd/system/ubersdr-hpsdr-bridge.service
+            sudo systemctl daemon-reload
+            sudo systemctl enable ubersdr-hpsdr-bridge.service
+            sudo systemctl start ubersdr-hpsdr-bridge.service
+            echo "HPSDR bridge service installed, enabled, and started."
+        else
+            echo "Warning: Failed to download HPSDR bridge service file. Skipping service installation."
+        fi
+    fi
+else
+    echo "Warning: Failed to download HPSDR bridge binary. Skipping HPSDR bridge installation."
+fi
+
 # Create ubersdr directory in user's home
 echo "Creating ~/ubersdr directory..."
 mkdir -p ~/ubersdr

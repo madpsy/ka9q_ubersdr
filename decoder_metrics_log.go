@@ -419,16 +419,28 @@ func (ml *MetricsLogger) loadMetricsFromFile(filePath string, dm *DigitalDecodeM
 
 	decoder := json.NewDecoder(file)
 	count := 0
+	lineNum := 0
+	maxErrors := 10 // Stop after 10 consecutive errors to prevent infinite loops
 
+	consecutiveErrors := 0
 	for {
+		lineNum++
 		var snapshot MetricsSnapshot
 		if err := decoder.Decode(&snapshot); err != nil {
 			if err.Error() == "EOF" {
 				break
 			}
-			// Skip malformed lines
+			// Skip malformed lines but track consecutive errors
+			consecutiveErrors++
+			if consecutiveErrors >= maxErrors {
+				log.Printf("Warning: too many consecutive errors (%d) in %s at line %d, skipping rest of file", consecutiveErrors, filePath, lineNum)
+				break
+			}
 			continue
 		}
+
+		// Reset consecutive error counter on successful decode
+		consecutiveErrors = 0
 
 		// Only load snapshots from the last 24 hours
 		if snapshot.Timestamp.Before(startTime) {

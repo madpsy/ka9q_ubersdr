@@ -1,6 +1,5 @@
 [Unit]
 Description=UberSDR to HPSDR Protocol 2 Bridge
-Documentation=https://github.com/ka9q/ka9q_ubersdr
 After=network-online.target
 Wants=network-online.target
 

@@ -8360,12 +8360,16 @@
                 // Format power and SNR with color coding
                 const formatPower = (power) => {
                     if (power === null || power === undefined || power < -200) return '<em style="color: #999;">—</em>';
+                    // Treat 0.0 as neutral (not an error) - common for special channels during initialization
+                    if (power === 0.0) return `<span style="color: #667eea; font-weight: bold;">${power.toFixed(1)}</span>`;
                     const color = power > -20 ? '#28a745' : power > -40 ? '#ffc107' : '#dc3545';
                     return `<span style="color: ${color}; font-weight: bold;">${power.toFixed(1)}</span>`;
                 };
 
                 const formatSNR = (snr) => {
                     if (snr === null || snr === undefined || snr < -200) return '<em style="color: #999;">—</em>';
+                    // Treat 0.0 as neutral (not an error) - common for special channels during initialization
+                    if (snr === 0.0) return `<span style="color: #667eea; font-weight: bold;">${snr.toFixed(1)}</span>`;
                     const color = snr > 10 ? '#28a745' : snr > 0 ? '#ffc107' : '#dc3545';
                     return `<span style="color: ${color}; font-weight: bold;">${snr.toFixed(1)}</span>`;
                 };

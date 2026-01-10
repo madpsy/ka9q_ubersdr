@@ -92,6 +92,10 @@ func NewMQTTPublisher(config *MQTTConfig, metrics *PrometheusMetrics, noiseFloor
 	opts.SetKeepAlive(60 * time.Second)
 	opts.SetPingTimeout(10 * time.Second)
 
+	// Set connection timeout for initial connection attempts
+	opts.SetConnectTimeout(2 * time.Second)
+	opts.SetMaxReconnectInterval(2 * time.Second)
+
 	// TLS configuration if enabled
 	if config.TLS.Enabled {
 		tlsConfig, err := loadTLSConfig(config.TLS)
@@ -113,11 +117,38 @@ func NewMQTTPublisher(config *MQTTConfig, metrics *PrometheusMetrics, noiseFloor
 	})
 
 	client := mqtt.NewClient(opts)
-	if token := client.Connect(); token.Wait() && token.Error() != nil {
-		return nil, fmt.Errorf("failed to connect to MQTT broker: %w", token.Error())
+
+	// Attempt connection with timeout and retries (non-blocking for startup)
+	// Try up to 2 times with 2 second timeout each
+	connected := false
+	for attempt := 1; attempt <= 2; attempt++ {
+		log.Printf("MQTT: Connection attempt %d/2 to broker: %s", attempt, config.Broker)
+
+		token := client.Connect()
+
+		// Wait with timeout
+		if token.WaitTimeout(2 * time.Second) {
+			if token.Error() == nil {
+				connected = true
+				log.Printf("MQTT: Successfully connected to broker: %s", config.Broker)
+				break
+			} else {
+				log.Printf("MQTT: Connection attempt %d failed: %v", attempt, token.Error())
+			}
+		} else {
+			log.Printf("MQTT: Connection attempt %d timed out after 2 seconds", attempt)
+		}
+
+		// Don't sleep after last attempt
+		if attempt < 2 {
+			time.Sleep(500 * time.Millisecond)
+		}
 	}
 
-	log.Printf("MQTT: Successfully connected to broker: %s", config.Broker)
+	// If not connected after retries, log warning but continue (auto-reconnect will handle it)
+	if !connected {
+		log.Printf("MQTT: Failed to connect after 2 attempts, will retry in background (auto-reconnect enabled)")
+	}
 
 	return &MQTTPublisher{
 		client:              client,

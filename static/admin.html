@@ -8323,7 +8323,7 @@
                 const row = document.createElement('tr');
                 row.style.borderBottom = '1px solid #dee2e6';
 
-                // Check if channel is stale (last update > 30 seconds)
+                // Check if channel is stale (last update > 60 seconds)
                 const parseTimeToSeconds = (timeStr) => {
                     if (!timeStr || timeStr === '0s') return 0;
                     const match = timeStr.match(/^(\d+)([smhd])$/);
@@ -8338,7 +8338,7 @@
                         default: return 0;
                     }
                 };
-                const isStale = parseTimeToSeconds(channel.time_since_update) > 30;
+                const isStale = parseTimeToSeconds(channel.time_since_update) > 60;
 
                 // Color-code rows by channel type, but override with warning color if stale
                 let rowBg = '';

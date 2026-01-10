@@ -4898,33 +4898,6 @@ function wf_init_ready()
 
 	openwebrx_resize();
 	waterfall_setup_done = 1;
-
-	// Show UberSDR disclaimer modal on page load
-	setTimeout(function() {
-		show_ubersdr_disclaimer();
-	}, 500);
-}
-
-function show_ubersdr_disclaimer()
-{
-	var s =
-		w3_div('w3-padding',
-			w3_text('w3-medium w3-bold w3-text-aqua w3-margin-B-8', 'UberSDR KiwiSDR Emulation Notice'),
-			w3_div('w3-text-white',
-				'Apart from this message, this is an exact copy of the KiwiSDR frontend.' +
-				'<br><br>' +
-				'The Kiwi emulation in UberSDR has a known issue with frequency alignment in the waterfall which is caused by bin bucket differences between a real KiwiSDR and UberSDR. However, the audio demodulation itself is correct.'
-			),
-			w3_div('w3-margin-T-16 w3-center',
-				w3_button('w3-green w3-padding', 'OK', 'ubersdr_disclaimer_close')
-			)
-		);
-	confirmation_show_content(s, 550, 200);
-}
-
-function ubersdr_disclaimer_close()
-{
-	confirmation_panel_close();
 }
 
 function add_wf_canvas()
@@ -10942,7 +10915,13 @@ function test_audio_suspended()
       input = true;
    } else
    if (ac_play_button.state != "running" || m_old) {
-      s1 = (kiwi_isMobile()? 'Tap to':'Click to') +' start KiwiSDR';
+      s1 = (kiwi_isMobile()? 'Tap to':'Click to') +' start KiwiSDR' +
+         '<br><br>' +
+         '<div style="font-size: 14pt; color: cyan; margin-top: 20px;">' +
+         'Apart from this message, this is an exact copy of the KiwiSDR frontend.' +
+         '<br><br>' +
+         'The Kiwi emulation in UberSDR has a known issue with frequency alignment in the waterfall which is caused by bin bucket differences between a real KiwiSDR and UberSDR. However, the audio demodulation itself is correct.' +
+         '</div>';
       if (0 && (kiwi_isMobile() || m_old))
          s1 += '<br><br>' + w3_button('w3-round-xlarge w3-aqua', 'Try new<br>mobile features', 'try_mobile_cb');
          //s1 += '<br><br>' + w3_button('w3-round-xlarge w3-aqua', 'Don\'t use new<br>mobile features', 'try_mobile_cb');

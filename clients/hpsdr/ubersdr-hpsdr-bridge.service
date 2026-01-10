@@ -6,7 +6,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/ubersdr-hpsdr-bridge --url http://localhost:8073
+ExecStart=/usr/local/bin/ubersdr-hpsdr-bridge --url http://localhost:8080
 Restart=on-failure
 RestartSec=5s
 

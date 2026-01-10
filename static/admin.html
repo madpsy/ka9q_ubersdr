@@ -8087,6 +8087,14 @@
             const channelTypes = [...new Set(data.channels.map(ch => ch.channel_type))].sort();
             const typeSelect = document.getElementById('filterChannelType');
             typeSelect.innerHTML = '<option value="">All Types</option>';
+
+            // Check if current filter type still exists in data
+            const filterTypeExists = channelTypes.includes(filterType);
+            if (!filterTypeExists && filterType !== '') {
+                // Reset filter if the selected type no longer exists
+                radiodChannelsFilterType = '';
+            }
+
             channelTypes.forEach(type => {
                 const option = document.createElement('option');
                 option.value = type;
@@ -8098,7 +8106,7 @@
                     'unknown': 'Unknown'
                 };
                 option.textContent = typeLabels[type] || type;
-                if (type === filterType) option.selected = true;
+                if (type === radiodChannelsFilterType) option.selected = true;
                 typeSelect.appendChild(option);
             });
 
@@ -8106,11 +8114,19 @@
             const demodTypes = [...new Set(data.channels.map(ch => ch.demod_type))].sort();
             const demodSelect = document.getElementById('filterDemod');
             demodSelect.innerHTML = '<option value="">All Demods</option>';
+
+            // Check if current filter demod still exists in data
+            const filterDemodExists = demodTypes.includes(filterDemod);
+            if (!filterDemodExists && filterDemod !== '') {
+                // Reset filter if the selected demod no longer exists
+                radiodChannelsFilterDemod = '';
+            }
+
             demodTypes.forEach(demod => {
                 const option = document.createElement('option');
                 option.value = demod;
                 option.textContent = demod;
-                if (demod === filterDemod) option.selected = true;
+                if (demod === radiodChannelsFilterDemod) option.selected = true;
                 demodSelect.appendChild(option);
             });
 
@@ -8118,11 +8134,19 @@
             const presets = [...new Set(data.channels.map(ch => ch.preset).filter(p => p))].sort();
             const presetSelect = document.getElementById('filterPreset');
             presetSelect.innerHTML = '<option value="">All Presets</option>';
+
+            // Check if current filter preset still exists in data
+            const filterPresetExists = presets.includes(filterPreset);
+            if (!filterPresetExists && filterPreset !== '') {
+                // Reset filter if the selected preset no longer exists
+                radiodChannelsFilterPreset = '';
+            }
+
             presets.forEach(preset => {
                 const option = document.createElement('option');
                 option.value = preset;
                 option.textContent = preset;
-                if (preset === filterPreset) option.selected = true;
+                if (preset === radiodChannelsFilterPreset) option.selected = true;
                 presetSelect.appendChild(option);
             });
 

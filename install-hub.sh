@@ -68,7 +68,7 @@ if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ub
             sudo mv /tmp/ubersdr-hpsdr-bridge.service /etc/systemd/system/ubersdr-hpsdr-bridge.service
             sudo systemctl daemon-reload
             sudo systemctl enable ubersdr-hpsdr-bridge.service
-            sudo systemctl start ubersdr-hpsdr-bridge.service
+            sudo systemctl restart ubersdr-hpsdr-bridge.service
             echo "HPSDR bridge service installed, enabled, and started."
         else
             echo "Warning: Failed to download HPSDR bridge service file. Skipping service installation."

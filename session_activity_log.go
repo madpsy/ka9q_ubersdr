@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -409,12 +411,28 @@ func ReadActivityLogs(dataDir string, startTime, endTime time.Time) ([]SessionAc
 			return nil, fmt.Errorf("failed to open file %s: %w", filename, err)
 		}
 
-		// Read line by line
-		scanner := json.NewDecoder(file)
-		for scanner.More() {
+		// Read line by line using bufio.Scanner to properly handle corrupted data
+		scanner := bufio.NewScanner(file)
+		lineNum := 0
+		corruptedLines := 0
+		for scanner.Scan() {
+			lineNum++
+			line := scanner.Bytes()
+
+			// Skip empty lines
+			if len(line) == 0 {
+				continue
+			}
+
+			// Skip lines with null bytes (corrupted data)
+			if bytes.Contains(line, []byte{0}) {
+				corruptedLines++
+				continue
+			}
+
 			var entry SessionActivityLog
-			if err := scanner.Decode(&entry); err != nil {
-				log.Printf("Warning: failed to decode log entry in %s: %v", filename, err)
+			if err := json.Unmarshal(line, &entry); err != nil {
+				corruptedLines++
 				continue
 			}
 
@@ -423,6 +441,16 @@ func ReadActivityLogs(dataDir string, startTime, endTime time.Time) ([]SessionAc
 				(entry.Timestamp.Equal(endTime) || entry.Timestamp.Before(endTime)) {
 				logs = append(logs, entry)
 			}
+		}
+
+		// Log summary only if there were corrupted lines (not per-line to avoid log spam)
+		if corruptedLines > 0 {
+			log.Printf("Warning: skipped %d corrupted lines in %s", corruptedLines, filename)
+		}
+
+		if err := scanner.Err(); err != nil {
+			file.Close()
+			return nil, fmt.Errorf("error reading file %s: %w", filename, err)
 		}
 
 		file.Close()

@@ -74,33 +74,40 @@ if [ -f "$INSTALLED_MARKER" ]; then
     # Re-installation - don't set new password
     echo
     echo "Existing installation detected. Preserving current admin password."
-    
-    # Clean up any existing containers and network (allow failures)
+
+    # Pull latest images first (while old containers still run)
     echo
-    echo "Cleaning up any existing containers..."
-    cd ~/ubersdr
-    sudo docker compose -f docker-compose.yml down 2>/dev/null || true
-    
-    # Pull latest images
     echo "Pulling latest Docker images..."
-    sudo docker compose -f docker-compose.yml pull
-    
-    # Start Docker containers without setting password
-    echo "Starting UberSDR containers..."
-    sudo docker compose -f docker-compose.yml up -d
+    cd ~/ubersdr
+    if sudo docker compose -f docker-compose.yml pull; then
+        # Pull succeeded - proceed with restart
+        echo "Pull successful. Restarting containers with new images..."
+
+        # Clean up any existing containers and network (allow failures)
+        echo "Stopping existing containers..."
+        sudo docker compose -f docker-compose.yml down 2>/dev/null || true
+
+        # Start Docker containers without setting password
+        echo "Starting UberSDR containers..."
+        sudo docker compose -f docker-compose.yml up -d
+    else
+        # Pull failed - keep existing containers running
+        echo "Warning: Failed to pull new images. Keeping existing containers running."
+        echo "Your installation will continue to use the current image versions."
+    fi
 else
     # Fresh installation - generate and set password
     password=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16)
     
-    # Clean up any existing containers and network (allow failures)
+    # Pull latest images first
     echo
-    echo "Cleaning up any existing containers..."
-    cd ~/ubersdr
-    sudo docker compose -f docker-compose.yml down 2>/dev/null || true
-    
-    # Pull latest images
     echo "Pulling latest Docker images..."
+    cd ~/ubersdr
     sudo docker compose -f docker-compose.yml pull
+
+    # Clean up any existing containers and network (allow failures)
+    echo "Stopping any existing containers..."
+    sudo docker compose -f docker-compose.yml down 2>/dev/null || true
     
     # Start Docker containers with the generated password
     echo "Starting UberSDR containers..."

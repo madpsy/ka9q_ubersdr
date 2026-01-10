@@ -8323,31 +8323,74 @@
                 const row = document.createElement('tr');
                 row.style.borderBottom = '1px solid #dee2e6';
 
-                // Color-code rows by channel type
+                // Check if channel is stale (last update > 30 seconds)
+                const parseTimeToSeconds = (timeStr) => {
+                    if (!timeStr || timeStr === '0s') return 0;
+                    const match = timeStr.match(/^(\d+)([smhd])$/);
+                    if (!match) return 0;
+                    const value = parseInt(match[1]);
+                    const unit = match[2];
+                    switch(unit) {
+                        case 's': return value;
+                        case 'm': return value * 60;
+                        case 'h': return value * 3600;
+                        case 'd': return value * 86400;
+                        default: return 0;
+                    }
+                };
+                const isStale = parseTimeToSeconds(channel.time_since_update) > 30;
+
+                // Color-code rows by channel type, but override with warning color if stale
                 let rowBg = '';
                 let channelDisplay = '';
                 
-                switch(channel.channel_type) {
-                    case 'decoder':
-                        rowBg = '#e3f2fd'; // Light blue
-                        channelDisplay = `<strong style="color: #667eea;">🔊 ${channel.channel_name}</strong>`;
-                        break;
-                    case 'noisefloor':
-                        rowBg = '#e0f2f1'; // Light teal/cyan
-                        channelDisplay = `<strong style="color: #00897b;">📊 ${channel.channel_name}</strong>`;
-                        break;
-                    case 'user_audio':
-                        rowBg = '#e8f5e9'; // Light green
-                        channelDisplay = `<span style="color: #28a745;">👤 ${channel.channel_name}</span>`;
-                        break;
-                    case 'user_spectrum':
-                        rowBg = '#fff3e0'; // Light orange
-                        channelDisplay = `<span style="color: #ff9800;">📡 ${channel.channel_name}</span>`;
-                        break;
-                    default:
-                        rowBg = '#f5f5f5'; // Light gray
-                        channelDisplay = `<span style="color: #999;">❓ ${channel.channel_name}</span>`;
-                        break;
+                if (isStale) {
+                    // Stale channels get a subtle red/salmon background
+                    rowBg = '#ffebee'; // Light red/pink (not bright red)
+                } else {
+                    switch(channel.channel_type) {
+                        case 'decoder':
+                            rowBg = '#e3f2fd'; // Light blue
+                            channelDisplay = `<strong style="color: #667eea;">🔊 ${channel.channel_name}</strong>`;
+                            break;
+                        case 'noisefloor':
+                            rowBg = '#e0f2f1'; // Light teal/cyan
+                            channelDisplay = `<strong style="color: #00897b;">📊 ${channel.channel_name}</strong>`;
+                            break;
+                        case 'user_audio':
+                            rowBg = '#e8f5e9'; // Light green
+                            channelDisplay = `<span style="color: #28a745;">👤 ${channel.channel_name}</span>`;
+                            break;
+                        case 'user_spectrum':
+                            rowBg = '#fff3e0'; // Light orange
+                            channelDisplay = `<span style="color: #ff9800;">📡 ${channel.channel_name}</span>`;
+                            break;
+                        default:
+                            rowBg = '#f5f5f5'; // Light gray
+                            channelDisplay = `<span style="color: #999;">❓ ${channel.channel_name}</span>`;
+                            break;
+                    }
+                }
+                
+                // Set channel display if not already set (for stale channels)
+                if (!channelDisplay) {
+                    switch(channel.channel_type) {
+                        case 'decoder':
+                            channelDisplay = `<strong style="color: #667eea;">🔊 ${channel.channel_name}</strong>`;
+                            break;
+                        case 'noisefloor':
+                            channelDisplay = `<strong style="color: #00897b;">📊 ${channel.channel_name}</strong>`;
+                            break;
+                        case 'user_audio':
+                            channelDisplay = `<span style="color: #28a745;">👤 ${channel.channel_name}</span>`;
+                            break;
+                        case 'user_spectrum':
+                            channelDisplay = `<span style="color: #ff9800;">📡 ${channel.channel_name}</span>`;
+                            break;
+                        default:
+                            channelDisplay = `<span style="color: #999;">❓ ${channel.channel_name}</span>`;
+                            break;
+                    }
                 }
                 
                 if (rowBg) {

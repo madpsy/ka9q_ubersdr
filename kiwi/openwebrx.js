@@ -4898,6 +4898,33 @@ function wf_init_ready()
 
 	openwebrx_resize();
 	waterfall_setup_done = 1;
+
+	// Show UberSDR disclaimer modal on page load
+	setTimeout(function() {
+		show_ubersdr_disclaimer();
+	}, 500);
+}
+
+function show_ubersdr_disclaimer()
+{
+	var s =
+		w3_div('w3-padding',
+			w3_text('w3-medium w3-bold w3-text-aqua w3-margin-B-8', 'UberSDR KiwiSDR Emulation Notice'),
+			w3_div('w3-text-white',
+				'Apart from this message, this is an exact copy of the KiwiSDR frontend.' +
+				'<br><br>' +
+				'The Kiwi emulation in UberSDR has a known issue with frequency alignment in the waterfall which is caused by bin bucket differences between a real KiwiSDR and UberSDR. However, the audio demodulation itself is correct.'
+			),
+			w3_div('w3-margin-T-16 w3-center',
+				w3_button('w3-green w3-padding', 'OK', 'ubersdr_disclaimer_close')
+			)
+		);
+	confirmation_show_content(s, 550, 200);
+}
+
+function ubersdr_disclaimer_close()
+{
+	confirmation_panel_close();
 }
 
 function add_wf_canvas()

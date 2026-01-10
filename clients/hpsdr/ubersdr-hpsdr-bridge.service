@@ -1,0 +1,42 @@
+[Unit]
+Description=UberSDR to HPSDR Protocol 2 Bridge
+Documentation=https://github.com/ka9q/ka9q_ubersdr
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ubersdr-hpsdr-bridge --url http://localhost:8073
+Restart=on-failure
+RestartSec=5s
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+# Network capabilities
+# The service needs to bind to UDP ports 1024-1042 for HPSDR Protocol 2
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=512
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ubersdr-hpsdr-bridge
+
+[Install]
+WantedBy=multi-user.target

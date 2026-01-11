@@ -586,6 +586,24 @@ class MinimalRadio {
         console.log('Audio context initialized:', this.audioContext.sampleRate, 'Hz');
     }
     
+    // External analysers that should be connected to audio
+    externalAnalysers = [];
+
+    // Add an external analyser to be connected to audio
+    addAnalyser(analyser) {
+        if (!this.externalAnalysers.includes(analyser)) {
+            this.externalAnalysers.push(analyser);
+        }
+    }
+
+    // Remove an external analyser
+    removeAnalyser(analyser) {
+        const index = this.externalAnalysers.indexOf(analyser);
+        if (index > -1) {
+            this.externalAnalysers.splice(index, 1);
+        }
+    }
+
     // Play audio buffer
     playAudioBuffer(buffer) {
         const source = this.audioContext.createBufferSource();
@@ -593,6 +611,12 @@ class MinimalRadio {
         
         const gainNode = this.audioContext.createGain();
         source.connect(gainNode);
+        
+        // Connect to external analysers if any
+        for (const analyser of this.externalAnalysers) {
+            source.connect(analyser);
+        }
+        
         gainNode.connect(this.audioContext.destination);
         
         const currentTime = this.audioContext.currentTime;

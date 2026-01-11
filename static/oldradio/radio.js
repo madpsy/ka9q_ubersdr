@@ -354,6 +354,9 @@ function setupVUMeter() {
     vuAnalyser.fftSize = 2048;
     vuAnalyser.smoothingTimeConstant = 0;
 
+    // Connect analyser to MinimalRadio's audio stream
+    minimalRadio.addAnalyser(vuAnalyser);
+
     updateSignalLED();
 }
 
@@ -859,6 +862,9 @@ function setupOscilloscope() {
     oscilloscopeAnalyser = minimalRadio.audioContext.createAnalyser();
     oscilloscopeAnalyser.fftSize = 2048;
     oscilloscopeAnalyser.smoothingTimeConstant = 0.3;
+
+    // Connect analyser to MinimalRadio's audio stream
+    minimalRadio.addAnalyser(oscilloscopeAnalyser);
 
     oscilloscopeOverlay.classList.add('active');
     drawOscilloscope();

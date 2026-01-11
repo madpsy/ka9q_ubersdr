@@ -243,10 +243,15 @@ func (b *UberSDRBridge) monitorReceivers() {
 			return
 		}
 
-		<-ticker.C
-
 		// Check if Protocol2 server is running
 		protocol2Running := b.hpsdrServer.IsRunning()
+
+		// Use longer sleep interval when no client connected to reduce CPU usage
+		if !protocol2Running {
+			time.Sleep(500 * time.Millisecond)
+		} else {
+			<-ticker.C
+		}
 
 		// Detect transition from running to stopped
 		if wasProtocol2Running && !protocol2Running {
@@ -1079,6 +1084,7 @@ func main() {
 	hpsdrIP := flag.String("ip", DefaultIPAddress, "IP address for HPSDR server")
 	numReceivers := flag.Int("receivers", DefaultNumReceivers, "Number of receivers (1-10)")
 	deviceType := flag.Int("device", int(DefaultDeviceType), "Device type (1=Hermes, 6=HermesLite)")
+	enableMicrophone := flag.Bool("enable-microphone", false, "Enable microphone thread (for TX monitoring, not needed for RX-only)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "UberSDR to HPSDR Protocol 2 Bridge\n\n")
@@ -1103,7 +1109,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  -receivers int\n")
 		fmt.Fprintf(os.Stderr, "        Number of receivers 1-10 (default 10)\n")
 		fmt.Fprintf(os.Stderr, "  -device int\n")
-		fmt.Fprintf(os.Stderr, "        Device type: 1=Hermes, 6=HermesLite (default 6)\n\n")
+		fmt.Fprintf(os.Stderr, "        Device type: 1=Hermes, 6=HermesLite (default 6)\n")
+		fmt.Fprintf(os.Stderr, "  -enable-microphone\n")
+		fmt.Fprintf(os.Stderr, "        Enable microphone thread (for TX monitoring, not needed for RX-only)\n\n")
 		fmt.Fprintf(os.Stderr, "Examples:\n")
 		fmt.Fprintf(os.Stderr, "  # Connect to local UberSDR server\n")
 		fmt.Fprintf(os.Stderr, "  %s --url http://localhost:8080\n\n", os.Args[0])
@@ -1237,12 +1245,13 @@ func main() {
 
 	// Create HPSDR configuration
 	hpsdrConfig := Protocol2Config{
-		Interface:      *hpsdrInterface,
-		IPAddress:      *hpsdrIP,
-		MACAddress:     macAddr,
-		NumReceivers:   *numReceivers,
-		DeviceType:     byte(*deviceType),
-		WidebandEnable: false, // Wideband not supported yet
+		Interface:        *hpsdrInterface,
+		IPAddress:        *hpsdrIP,
+		MACAddress:       macAddr,
+		NumReceivers:     *numReceivers,
+		DeviceType:       byte(*deviceType),
+		WidebandEnable:   false, // Wideband not supported yet
+		MicrophoneEnable: *enableMicrophone,
 	}
 
 	// Create bridge

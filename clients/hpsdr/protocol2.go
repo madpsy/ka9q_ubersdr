@@ -48,12 +48,13 @@ const (
 
 // Protocol2Config holds configuration for HPSDR Protocol 2 emulation
 type Protocol2Config struct {
-	Interface      string
-	IPAddress      string
-	MACAddress     net.HardwareAddr
-	NumReceivers   int
-	DeviceType     byte
-	WidebandEnable bool
+	Interface        string
+	IPAddress        string
+	MACAddress       net.HardwareAddr
+	NumReceivers     int
+	DeviceType       byte
+	WidebandEnable   bool
+	MicrophoneEnable bool
 }
 
 // Protocol2Server implements HPSDR Protocol 2
@@ -240,11 +241,16 @@ func (s *Protocol2Server) Start() error {
 	}
 
 	// Start threads
-	s.wg.Add(4)
+	threadCount := 3
+	s.wg.Add(threadCount)
 	go s.discoveryThread()
 	go s.highPriorityThread()
 	go s.ddcSpecificThread()
-	go s.microphoneThread()
+
+	if s.config.MicrophoneEnable {
+		s.wg.Add(1)
+		go s.microphoneThread()
+	}
 
 	if s.config.WidebandEnable {
 		s.widebandSock = s.highPrioSock // Shares port 1027
@@ -366,7 +372,16 @@ func (s *Protocol2Server) discoveryThread() {
 		n, addr, err := s.discoverySock.ReadFromUDP(buffer)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				s.discoverySock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+				// Use longer timeout when no client connected to reduce CPU usage
+				s.mu.RLock()
+				hasClient := s.clientAddr != nil
+				s.mu.RUnlock()
+
+				if hasClient {
+					s.discoverySock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+				} else {
+					s.discoverySock.SetReadDeadline(time.Now().Add(1 * time.Second))
+				}
 				continue
 			}
 			log.Printf("Protocol2: Discovery read error: %v", err)
@@ -487,7 +502,16 @@ func (s *Protocol2Server) highPriorityThread() {
 		n, _, err := s.highPrioSock.ReadFromUDP(buffer)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				s.highPrioSock.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
+				// Use longer timeout when not running to reduce CPU usage
+				s.mu.RLock()
+				running := s.running
+				s.mu.RUnlock()
+
+				if running {
+					s.highPrioSock.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
+				} else {
+					s.highPrioSock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+				}
 				continue
 			}
 			continue
@@ -600,7 +624,7 @@ func (s *Protocol2Server) ddcSpecificThread() {
 		s.mu.RUnlock()
 
 		if !running {
-			time.Sleep(50 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 			seqNum = 0
 			continue
 		}
@@ -866,15 +890,12 @@ func (s *Protocol2Server) microphoneThread() {
 	buffer := make([]byte, 132)
 	var seqNum uint32
 
-	ticker := time.NewTicker(1333333 * time.Nanosecond) // 1.333ms (64 samples at 48kHz)
-	defer ticker.Stop()
-
 	for {
 		select {
 		case <-s.stopChan:
 			log.Println("Protocol2: Microphone thread stopped")
 			return
-		case <-ticker.C:
+		default:
 		}
 
 		s.mu.RLock()
@@ -885,15 +906,42 @@ func (s *Protocol2Server) microphoneThread() {
 
 		if !genReceived || !running || clientAddr == nil {
 			seqNum = 0
+			// Sleep longer when no client connected to reduce CPU usage
+			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 
-		// Build packet (all zeros = silence)
-		binary.BigEndian.PutUint32(buffer[0:4], seqNum)
-		seqNum++
+		// Client is connected - use fast ticker
+		ticker := time.NewTicker(1333333 * time.Nanosecond) // 1.333ms (64 samples at 48kHz)
 
-		// Send packet
-		s.micSock.WriteToUDP(buffer, clientAddr)
+		for {
+			select {
+			case <-s.stopChan:
+				ticker.Stop()
+				log.Println("Protocol2: Microphone thread stopped")
+				return
+			case <-ticker.C:
+			}
+
+			s.mu.RLock()
+			running := s.running
+			genReceived := s.genReceived
+			clientAddr := s.clientAddr
+			s.mu.RUnlock()
+
+			if !genReceived || !running || clientAddr == nil {
+				ticker.Stop()
+				seqNum = 0
+				break // Break inner loop to go back to idle sleep
+			}
+
+			// Build packet (all zeros = silence)
+			binary.BigEndian.PutUint32(buffer[0:4], seqNum)
+			seqNum++
+
+			// Send packet
+			s.micSock.WriteToUDP(buffer, clientAddr)
+		}
 	}
 }
 

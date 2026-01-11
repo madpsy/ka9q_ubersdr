@@ -58,6 +58,7 @@ echo "Installing UberSDR HPSDR bridge..."
 if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-hpsdr-bridge -o /tmp/ubersdr-hpsdr-bridge 2>/dev/null; then
     sudo mv /tmp/ubersdr-hpsdr-bridge /usr/local/bin/ubersdr-hpsdr-bridge
     sudo chmod +x /usr/local/bin/ubersdr-hpsdr-bridge
+    sudo systemctl restart ubersdr-hpsdr-bridge.service
     echo "HPSDR bridge binary installed successfully."
 
     # Install systemd service

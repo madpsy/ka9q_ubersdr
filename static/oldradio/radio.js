@@ -45,6 +45,7 @@ let isChangingRadio = false;
 // Signal LED
 let vuLevel = 0;
 let vuAnalyser = null;
+let lastSNRLogTime = 0;
 
 // Oscilloscope
 let oscilloscopeActive = true;
@@ -833,14 +834,21 @@ function updateSignalLED() {
     if (minimalRadio.hasSignalQuality && minimalRadio.hasSignalQuality()) {
         const signalQuality = minimalRadio.getSignalQuality();
         if (signalQuality && signalQuality.snr !== null) {
+            // Log SNR every 10 seconds
+            const now = Date.now();
+            if (now - lastSNRLogTime >= 10000) {
+                console.log(`SNR: ${signalQuality.snr.toFixed(2)} dB (basebandPower: ${signalQuality.basebandPower.toFixed(2)} dBFS, noiseDensity: ${signalQuality.noiseDensity.toFixed(2)} dBFS)`);
+                lastSNRLogTime = now;
+            }
+
             // Map SNR to 0-1 range, with 30 dB as full brightness
             // 0 dB = 0%, 30 dB = 100%
             const snrPercentage = Math.max(0, Math.min(1, signalQuality.snr / 30));
-            
+
             // Smooth the value
             vuLevel = vuLevel * 0.8 + snrPercentage * 0.2;
             updatePowerIndicator(vuLevel);
-            
+
             requestAnimationFrame(updateSignalLED);
             return;
         }

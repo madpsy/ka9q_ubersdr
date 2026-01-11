@@ -357,32 +357,24 @@ class MinimalRadio {
         }
     }
 
-    // Handle signal quality metrics
-    handleSignalQuality(message) {
-        this.signalQuality = {
-            snr: message.snr,
-            signalLevel: message.signal_level,
-            noiseLevel: message.noise_level,
-            timestamp: message.timestamp || Date.now()
-        };
-
-        // Call callback if registered
-        if (this.signalQualityCallback) {
-            this.signalQualityCallback(this.signalQuality);
-        }
-    }
-
     // Set callback for signal quality updates
     onSignalQuality(callback) {
         this.signalQualityCallback = callback;
     }
 
-    // Get latest signal quality metrics
+    // Get latest signal quality metrics (version 2 protocol)
     getSignalQuality() {
         return this.signalQuality;
     }
+
+    // Check if signal quality data is available
+    hasSignalQuality() {
+        return this.signalQuality !== null &&
+               this.signalQuality.basebandPower !== null &&
+               this.signalQuality.noiseDensity !== null;
+    }
     
-    // Handle binary Opus audio messages
+    // Handle binary Opus audio messages (version 2 protocol)
     async handleBinaryMessage(data) {
         try {
             // Convert Blob to ArrayBuffer if needed
@@ -393,22 +385,38 @@ class MinimalRadio {
                 arrayBuffer = data;
             }
 
-            // Parse binary packet header (matching Python client format)
-            // 8 bytes: timestamp (uint64, little-endian)
-            // 4 bytes: sample rate (uint32, little-endian)
-            // 1 byte: channels (uint8)
-            // remaining: Opus encoded data
+            // Parse binary Opus packet header - Version 2 format
+            // We requested version=2, so always parse as version 2
+            // Format: [timestamp:8][sampleRate:4][channels:1][basebandPower:4][noiseDensity:4][opusData...]
             const view = new DataView(arrayBuffer);
 
-            if (arrayBuffer.byteLength < 13) {
-                console.error('Binary packet too short:', arrayBuffer.byteLength, 'bytes');
+            if (arrayBuffer.byteLength < 21) {
+                console.error('Binary packet too short for version 2:', arrayBuffer.byteLength, 'bytes (expected ≥21)');
                 return;
             }
 
-            const timestamp = view.getBigUint64(0, true); // little-endian
-            const sampleRate = view.getUint32(8, true); // little-endian
-            const channels = view.getUint8(12);
-            const opusData = new Uint8Array(arrayBuffer, 13);
+            // Parse header fields
+            const timestamp = view.getBigUint64(0, true);   // 8 bytes, little-endian
+            const sampleRate = view.getUint32(8, true);     // 4 bytes, little-endian
+            const channels = view.getUint8(12);             // 1 byte
+            const basebandPower = view.getFloat32(13, true); // 4 bytes, little-endian
+            const noiseDensity = view.getFloat32(17, true);  // 4 bytes, little-endian
+
+            // Store signal quality metrics
+            this.signalQuality = {
+                basebandPower: basebandPower,
+                noiseDensity: noiseDensity,
+                snr: (basebandPower > -900 && noiseDensity > -900) ? basebandPower - noiseDensity : null,
+                timestamp: Number(timestamp)
+            };
+
+            // Call callback if registered
+            if (this.signalQualityCallback) {
+                this.signalQualityCallback(this.signalQuality);
+            }
+
+            // Opus data starts at byte 21 for version 2
+            const opusData = new Uint8Array(arrayBuffer, 21);
 
             // Initialize audio context on first binary packet if not already done
             if (!this.audioContext) {

@@ -887,6 +887,11 @@ class CWSpotsExtension extends DecoderExtension {
             this.subscribeToCWSpots();
         }
 
+        // Subscribe to CW spots on server
+        if (window.dxClusterClient) {
+            window.dxClusterClient.subscribeToCWSpots();
+        }
+
         this.updateConnectionStatus();
         this.startConnectionMonitoring();
         this.startAgeUpdates();
@@ -908,6 +913,11 @@ class CWSpotsExtension extends DecoderExtension {
         if (this.unsubscribe) {
             this.unsubscribe();
             this.unsubscribe = null;
+        }
+
+        // Unsubscribe from CW spots on server
+        if (window.dxClusterClient) {
+            window.dxClusterClient.unsubscribeFromCWSpots();
         }
 
         // Hide badges when extension is disabled

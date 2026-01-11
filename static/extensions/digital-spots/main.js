@@ -1164,6 +1164,11 @@ class DigitalSpotsExtension extends DecoderExtension {
             this.subscribeToDigitalSpots();
         }
 
+        // Subscribe to digital spots on server
+        if (window.dxClusterClient) {
+            window.dxClusterClient.subscribeToDigitalSpots();
+        }
+
         this.updateConnectionStatus();
         this.startConnectionMonitoring();
         this.startAgeUpdates();
@@ -1185,6 +1190,11 @@ class DigitalSpotsExtension extends DecoderExtension {
         if (this.unsubscribe) {
             this.unsubscribe();
             this.unsubscribe = null;
+        }
+
+        // Unsubscribe from digital spots on server
+        if (window.dxClusterClient) {
+            window.dxClusterClient.unsubscribeFromDigitalSpots();
         }
 
         // Hide badges when extension is disabled

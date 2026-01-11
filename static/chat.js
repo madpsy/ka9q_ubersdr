@@ -42,6 +42,23 @@ class UberSDRChat {
 
         // Set up message handler
         this.setupMessageHandler();
+
+        // Subscribe to chat on server when chat object is created
+        this.subscribeToChat();
+    }
+
+    /**
+     * Subscribe to chat messages on the server
+     */
+    async subscribeToChat() {
+        // Wait for WebSocket to be ready
+        const ws = await this.waitForWebSocket(5000);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            console.log('[Chat] Subscribing to chat on server');
+            ws.send(JSON.stringify({ type: 'subscribe_chat' }));
+        } else {
+            console.warn('[Chat] Could not subscribe to chat - WebSocket not ready');
+        }
     }
 
     /**
@@ -239,6 +256,13 @@ class UberSDRChat {
         }
 
         if (ws && ws.readyState === WebSocket.OPEN) {
+            // Re-subscribe to chat if user is joining after leaving
+            // This ensures they receive chat messages again
+            console.log('[Chat] Re-subscribing to chat on server before setting username');
+            ws.send(JSON.stringify({
+                type: 'subscribe_chat'
+            }));
+
             this.username = username; // Store temporarily, will be confirmed by server
             ws.send(JSON.stringify({
                 type: 'chat_set_username',
@@ -633,9 +657,17 @@ class UberSDRChat {
     leave() {
         const ws = this.getWebSocket();
         if (ws && ws.readyState === WebSocket.OPEN) {
+            // Send chat_leave message
             ws.send(JSON.stringify({
                 type: 'chat_leave'
             }));
+
+            // Unsubscribe from chat on server
+            console.log('[Chat] Unsubscribing from chat on server');
+            ws.send(JSON.stringify({
+                type: 'unsubscribe_chat'
+            }));
+
             this.username = null;
             this.frequency = null;
             this.mode = null;

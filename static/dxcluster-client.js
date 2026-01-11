@@ -293,6 +293,64 @@ class DXClusterClient {
         };
     }
 
+    // Send subscription message to server
+    subscribeToDXSpots() {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            console.log('[DX Cluster] Subscribing to DX spots');
+            this.ws.send(JSON.stringify({ type: 'subscribe_dx_spots' }));
+        }
+    }
+
+    subscribeToDigitalSpots() {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            console.log('[DX Cluster] Subscribing to digital spots');
+            this.ws.send(JSON.stringify({ type: 'subscribe_digital_spots' }));
+        }
+    }
+
+    subscribeToCWSpots() {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            console.log('[DX Cluster] Subscribing to CW spots');
+            this.ws.send(JSON.stringify({ type: 'subscribe_cw_spots' }));
+        }
+    }
+
+    subscribeToChat() {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            console.log('[DX Cluster] Subscribing to chat');
+            this.ws.send(JSON.stringify({ type: 'subscribe_chat' }));
+        }
+    }
+
+    // Send unsubscription message to server
+    unsubscribeFromDXSpots() {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            console.log('[DX Cluster] Unsubscribing from DX spots');
+            this.ws.send(JSON.stringify({ type: 'unsubscribe_dx_spots' }));
+        }
+    }
+
+    unsubscribeFromDigitalSpots() {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            console.log('[DX Cluster] Unsubscribing from digital spots');
+            this.ws.send(JSON.stringify({ type: 'unsubscribe_digital_spots' }));
+        }
+    }
+
+    unsubscribeFromCWSpots() {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            console.log('[DX Cluster] Unsubscribing from CW spots');
+            this.ws.send(JSON.stringify({ type: 'unsubscribe_cw_spots' }));
+        }
+    }
+
+    unsubscribeFromChat() {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            console.log('[DX Cluster] Unsubscribing from chat');
+            this.ws.send(JSON.stringify({ type: 'unsubscribe_chat' }));
+        }
+    }
+
     scheduleReconnect() {
         if (this.reconnectTimer) {
             return; // Already scheduled

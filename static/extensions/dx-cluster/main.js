@@ -733,6 +733,11 @@ class DXClusterExtension extends DecoderExtension {
             this.subscribeToDXSpots();
         }
 
+        // Subscribe to DX spots on server
+        if (window.dxClusterClient) {
+            window.dxClusterClient.subscribeToDXSpots();
+        }
+
         // Restart monitoring intervals
         this.updateConnectionStatus();
         this.startConnectionMonitoring();
@@ -754,6 +759,11 @@ class DXClusterExtension extends DecoderExtension {
         if (this.unsubscribe) {
             this.unsubscribe();
             this.unsubscribe = null;
+        }
+
+        // Unsubscribe from DX spots on server
+        if (window.dxClusterClient) {
+            window.dxClusterClient.unsubscribeFromDXSpots();
         }
     }
 

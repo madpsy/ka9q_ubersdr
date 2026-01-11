@@ -26,7 +26,7 @@ class MinimalRadio {
         this.currentVolume = 0.5;
         this.isPlaying = false;
         
-        // Fixed bandwidth for preview (2800 Hz)
+        // Bandwidth settings (will be adjusted based on mode)
         this.bandwidthLow = 50;
         this.bandwidthHigh = 2850;
         
@@ -104,14 +104,8 @@ class MinimalRadio {
             this.currentMode = mode;
         }
 
-        // Adjust bandwidth for LSB mode
-        if (this.currentMode === 'lsb') {
-            this.bandwidthLow = -2850;
-            this.bandwidthHigh = -50;
-        } else {
-            this.bandwidthLow = 50;
-            this.bandwidthHigh = 2850;
-        }
+        // Adjust bandwidth based on mode
+        this.setBandwidthForMode(this.currentMode);
 
         console.log(`Starting preview: ${frequency} Hz, ${this.currentMode.toUpperCase()}, BW: ${this.bandwidthLow} to ${this.bandwidthHigh} Hz`);
         
@@ -136,17 +130,50 @@ class MinimalRadio {
             this.currentMode = mode;
         }
         
-        // Adjust bandwidth for LSB mode
-        if (this.currentMode === 'lsb') {
-            this.bandwidthLow = -2850;
-            this.bandwidthHigh = -50;
-        } else {
-            this.bandwidthLow = 50;
-            this.bandwidthHigh = 2850;
-        }
+        // Adjust bandwidth based on mode
+        this.setBandwidthForMode(this.currentMode);
         
         // Send new tune command without reconnecting
         this.sendTuneCommand();
+    }
+    
+    // Set bandwidth based on mode
+    setBandwidthForMode(mode) {
+        switch (mode.toLowerCase()) {
+            case 'lsb':
+                this.bandwidthLow = -2850;
+                this.bandwidthHigh = -50;
+                break;
+            case 'usb':
+                this.bandwidthLow = 50;
+                this.bandwidthHigh = 2850;
+                break;
+            case 'am':
+                // AM uses symmetric bandwidth around carrier
+                this.bandwidthLow = -5000;
+                this.bandwidthHigh = 5000;
+                break;
+            case 'fm':
+                // FM uses wider bandwidth
+                this.bandwidthLow = -8000;
+                this.bandwidthHigh = 8000;
+                break;
+            case 'cw':
+            case 'cwu':
+                // CW uses narrow bandwidth
+                this.bandwidthLow = 50;
+                this.bandwidthHigh = 800;
+                break;
+            case 'cwl':
+                this.bandwidthLow = -800;
+                this.bandwidthHigh = -50;
+                break;
+            default:
+                // Default to USB bandwidth
+                this.bandwidthLow = 50;
+                this.bandwidthHigh = 2850;
+                break;
+        }
     }
     
     // Stop audio preview

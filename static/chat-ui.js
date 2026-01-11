@@ -1668,7 +1668,11 @@ class ChatUI {
         // Reset UI to username input view
         this.resetToUsernameInput();
 
-        // Don't clear messages - keep chat history visible
+        // Clear message history to prevent duplicates when rejoining
+        const messagesContainer = document.getElementById('chat-messages');
+        if (messagesContainer) {
+            messagesContainer.innerHTML = '';
+        }
         this.addSystemMessage('You left the chat');
 
         // Collapse the chat panel

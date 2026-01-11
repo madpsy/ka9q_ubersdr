@@ -1432,9 +1432,16 @@ class ChatUI {
 
             // Re-subscribe to chat when opening the panel if not subscribed
             // This ensures we can receive messages and request users even if we previously left
-            if (this.chat && !this.chat.isSubscribed) {
+            const needsSubscription = this.chat && !this.chat.isSubscribed;
+            if (needsSubscription) {
                 console.log('[ChatUI] Re-subscribing to chat on panel open');
-                this.chat.subscribeToChat();
+                // Wait for subscription to complete before requesting users
+                this.chat.subscribeToChat().then(() => {
+                    // Request active users after subscription completes
+                    setTimeout(() => {
+                        this.requestActiveUsersWithRetry();
+                    }, 100);
+                });
             }
 
             // Scroll to bottom of messages and focus input after a short delay
@@ -1460,9 +1467,11 @@ class ChatUI {
                 }
             }, 50);
 
-            // Request active users when opening the panel (even if not logged in)
-            // This allows users to see who's online before joining
-            this.requestActiveUsersWithRetry();
+            // Request active users when opening the panel (only if we didn't need to subscribe)
+            // If we needed to subscribe, the request happens after subscription completes
+            if (!needsSubscription) {
+                this.requestActiveUsersWithRetry();
+            }
         } else {
             panel.classList.remove('expanded');
             panel.classList.add('collapsed');

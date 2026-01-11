@@ -997,6 +997,10 @@ class DigitalSpotsMap {
 
         this.ws.onopen = () => {
             console.log('WebSocket connected');
+
+            // Subscribe to digital spots on server
+            this.ws.send(JSON.stringify({ type: 'subscribe_digital_spots' }));
+            console.log('Subscribed to digital spots');
             this.updateStatus('connected', 'Connected');
             // Reset reconnection attempts on successful connection
             this.reconnectAttempts = 0;

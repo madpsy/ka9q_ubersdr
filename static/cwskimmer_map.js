@@ -891,6 +891,10 @@ class CWSkimmerMap {
 
         this.ws.onopen = () => {
             console.log('WebSocket connected');
+
+            // Subscribe to CW spots on server
+            this.ws.send(JSON.stringify({ type: 'subscribe_cw_spots' }));
+            console.log('Subscribed to CW spots');
             this.updateStatus('connected', 'Connected');
             // Reset reconnection attempts on successful connection
             this.reconnectAttempts = 0;

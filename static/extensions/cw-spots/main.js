@@ -2005,6 +2005,11 @@ class CWSpotsExtension extends DecoderExtension {
             this.unsubscribe = null;
         }
 
+        // Unsubscribe from CW spots on server
+        if (window.dxClusterClient) {
+            window.dxClusterClient.unsubscribeFromCWSpots();
+        }
+
         // Hide badges when extension is disabled
         const container = document.getElementById('cw-spots-badges-main');
         if (container) {

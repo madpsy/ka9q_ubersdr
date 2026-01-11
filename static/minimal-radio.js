@@ -612,8 +612,10 @@ class MinimalRadio {
         source.connect(gainNode);
         
         // Connect to external analysers if any
-        for (const analyser of this.externalAnalysers) {
-            source.connect(analyser);
+        if (this.externalAnalysers && this.externalAnalysers.length > 0) {
+            for (const analyser of this.externalAnalysers) {
+                source.connect(analyser);
+            }
         }
         
         gainNode.connect(this.audioContext.destination);

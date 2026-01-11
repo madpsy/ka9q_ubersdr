@@ -334,9 +334,12 @@ async function startRadio() {
         await minimalRadio.startPreview(currentFrequency, MODE);
         console.log('Radio started successfully');
 
-        // Setup VU meter and oscilloscope after audio context is initialized
-        setupVUMeter();
-        setupOscilloscope();
+        // Wait a bit for audio context to be fully ready
+        setTimeout(() => {
+            // Setup VU meter and oscilloscope after audio context is initialized
+            setupVUMeter();
+            setupOscilloscope();
+        }, 500);
     } catch (error) {
         console.error('Failed to start radio:', error);
         alert('Failed to start radio: ' + error.message);
@@ -345,18 +348,26 @@ async function startRadio() {
 
 // Setup VU Meter
 function setupVUMeter() {
+    console.log('setupVUMeter called');
     if (!minimalRadio || !minimalRadio.audioContext) {
-        console.log('Audio context not ready for VU meter');
+        console.error('Audio context not ready for VU meter', {
+            minimalRadio: !!minimalRadio,
+            audioContext: minimalRadio ? !!minimalRadio.audioContext : false
+        });
         return;
     }
 
+    console.log('Creating VU analyser...');
     vuAnalyser = minimalRadio.audioContext.createAnalyser();
     vuAnalyser.fftSize = 2048;
     vuAnalyser.smoothingTimeConstant = 0;
 
     // Connect analyser to MinimalRadio's audio stream
+    console.log('Adding analyser to MinimalRadio, current analysers:', minimalRadio.externalAnalysers.length);
     minimalRadio.addAnalyser(vuAnalyser);
+    console.log('Analyser added, now have:', minimalRadio.externalAnalysers.length, 'analysers');
 
+    console.log('Starting updateSignalLED loop');
     updateSignalLED();
 }
 

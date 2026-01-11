@@ -76,7 +76,11 @@ class DXClusterWebSocket:
         """Run the WebSocket connection with automatic reconnection."""
         while self.running:
             try:
-                self.ws.run_forever()
+                # Enable ping/pong handling to keep connection alive
+                # ping_timeout: Maximum time to wait for pong response (10 seconds)
+                # The server sends pings every 30 seconds, and we respond with pongs
+                # This ensures the server updates our LastSeen timestamp for chat
+                self.ws.run_forever(ping_timeout=10)
             except Exception as e:
                 print(f"WebSocket error: {e}")
 

@@ -1430,6 +1430,13 @@ class ChatUI {
                 badge.style.display = 'none';
             }
 
+            // Re-subscribe to chat when opening the panel if not subscribed
+            // This ensures we can receive messages and request users even if we previously left
+            if (this.chat && !this.chat.isSubscribed) {
+                console.log('[ChatUI] Re-subscribing to chat on panel open');
+                this.chat.subscribeToChat();
+            }
+
             // Scroll to bottom of messages and focus input after a short delay
             setTimeout(() => {
                 const messagesContainer = document.getElementById('chat-messages');

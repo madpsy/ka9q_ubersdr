@@ -1334,6 +1334,13 @@ class ChatUI {
                 return;
             }
 
+            // Suppress "must subscribe to chat first" errors - these happen during re-subscription
+            // and are handled automatically by the retry logic
+            if (error.includes('must subscribe to chat first')) {
+                console.log('[ChatUI] Subscription in progress, suppressing error message');
+                return;
+            }
+
             // If we're auto-rejoining and get an error, it means rejoin failed
             if (this.isAutoRejoining) {
                 console.log('[ChatUI] Auto-rejoin failed with error:', error);

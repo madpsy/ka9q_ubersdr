@@ -1360,6 +1360,8 @@ class ChatUI {
                 }
 
                 this.isAutoRejoining = true;
+                // Set flag to indicate we're receiving history to prevent duplicate messages
+                this.isReceivingHistory = true;
                 this.chat.setUsername(this.savedUsername);
                 // Request users after a short delay to allow join to complete
                 setTimeout(() => {
@@ -1435,12 +1437,19 @@ class ChatUI {
             const needsSubscription = this.chat && !this.chat.isSubscribed;
             if (needsSubscription) {
                 console.log('[ChatUI] Re-subscribing to chat on panel open');
+                // Set flag to indicate we're receiving history to prevent duplicate messages
+                this.isReceivingHistory = true;
                 // Wait for subscription to complete before requesting users
                 this.chat.subscribeToChat().then(() => {
                     // Request active users after subscription completes
                     setTimeout(() => {
                         this.requestActiveUsersWithRetry();
                     }, 100);
+                    // After a delay, mark that we're done receiving history
+                    setTimeout(() => {
+                        this.isReceivingHistory = false;
+                        console.log('[ChatUI] Done receiving history after re-subscription');
+                    }, 1500);
                 });
             }
 

@@ -181,8 +181,7 @@ class DXClusterWebSocket:
             with self.callback_lock:
                 was_empty = len(self.cw_spot_callbacks) == 0 and len(self.digital_spot_callbacks) == 0 and len(self.chat_callbacks) == 0
                 self.chat_callbacks.append(callback)
-                has_callbacks = len(self.cw_spot_callbacks) > 0 or len(self.digital_spot_callbacks) > 0 or len(self.chat_callbacks) > 0
-                should_connect = was_empty and has_callbacks
+                should_connect = was_empty
 
             if should_connect:
                 print("DX Cluster WebSocket: First callback registered, connecting...")
@@ -197,6 +196,7 @@ class DXClusterWebSocket:
     def unregister_callback(self, callback_type: str, callback: Callable = None):
         """
         Unregister a callback for a specific message type.
+        Note: Does NOT auto-disconnect - connection stays alive for other subscriptions.
 
         Args:
             callback_type: Type of callback ('chat', 'cw_spot', 'digital_spot', 'status')
@@ -208,11 +208,6 @@ class DXClusterWebSocket:
                     self.chat_callbacks.clear()
                 elif callback in self.chat_callbacks:
                     self.chat_callbacks.remove(callback)
-                should_disconnect = len(self.cw_spot_callbacks) == 0 and len(self.digital_spot_callbacks) == 0 and len(self.chat_callbacks) == 0
-
-            if should_disconnect:
-                print("DX Cluster WebSocket: No callbacks remaining, disconnecting...")
-                self.disconnect()
         elif callback_type == 'cw_spot' and callback:
             self.remove_cw_spot_callback(callback)
         elif callback_type == 'digital_spot' and callback:
@@ -244,12 +239,12 @@ class DXClusterWebSocket:
             callback: Function to call when a CW spot is received
         """
         with self.callback_lock:
-            # Check if this is the first callback (before adding)
-            was_empty = len(self.cw_spot_callbacks) == 0 and len(self.digital_spot_callbacks) == 0
+            # Check if this is the first callback of any type (before adding)
+            was_empty = (len(self.cw_spot_callbacks) == 0 and
+                        len(self.digital_spot_callbacks) == 0 and
+                        len(self.chat_callbacks) == 0)
             self.cw_spot_callbacks.append(callback)
-            # Check if we now have callbacks (after adding)
-            has_callbacks = len(self.cw_spot_callbacks) > 0 or len(self.digital_spot_callbacks) > 0
-            should_connect = was_empty and has_callbacks
+            should_connect = was_empty
 
         # Connect outside the lock to avoid deadlock
         if should_connect:
@@ -265,12 +260,12 @@ class DXClusterWebSocket:
             callback: Function to call when a digital spot is received
         """
         with self.callback_lock:
-            # Check if this is the first callback (before adding)
-            was_empty = len(self.cw_spot_callbacks) == 0 and len(self.digital_spot_callbacks) == 0
+            # Check if this is the first callback of any type (before adding)
+            was_empty = (len(self.cw_spot_callbacks) == 0 and
+                        len(self.digital_spot_callbacks) == 0 and
+                        len(self.chat_callbacks) == 0)
             self.digital_spot_callbacks.append(callback)
-            # Check if we now have callbacks (after adding)
-            has_callbacks = len(self.cw_spot_callbacks) > 0 or len(self.digital_spot_callbacks) > 0
-            should_connect = was_empty and has_callbacks
+            should_connect = was_empty
 
         # Connect outside the lock to avoid deadlock
         if should_connect:
@@ -295,34 +290,20 @@ class DXClusterWebSocket:
     def remove_cw_spot_callback(self, callback: Callable[[Dict[str, Any]], None]):
         """
         Remove a CW spot callback.
-        Auto-disconnects the websocket if this was the last callback.
+        Note: Does NOT auto-disconnect anymore - connection stays alive for other subscriptions.
         """
         with self.callback_lock:
             if callback in self.cw_spot_callbacks:
                 self.cw_spot_callbacks.remove(callback)
-            # Check if we have any callbacks remaining (after removal)
-            should_disconnect = len(self.cw_spot_callbacks) == 0 and len(self.digital_spot_callbacks) == 0
-
-        # Disconnect outside the lock to avoid deadlock
-        if should_disconnect:
-            print("DX Cluster WebSocket: No callbacks remaining, disconnecting...")
-            self.disconnect()
 
     def remove_digital_spot_callback(self, callback: Callable[[Dict[str, Any]], None]):
         """
         Remove a digital spot callback.
-        Auto-disconnects the websocket if this was the last callback.
+        Note: Does NOT auto-disconnect anymore - connection stays alive for other subscriptions.
         """
         with self.callback_lock:
             if callback in self.digital_spot_callbacks:
                 self.digital_spot_callbacks.remove(callback)
-            # Check if we have any callbacks remaining (after removal)
-            should_disconnect = len(self.cw_spot_callbacks) == 0 and len(self.digital_spot_callbacks) == 0
-
-        # Disconnect outside the lock to avoid deadlock
-        if should_disconnect:
-            print("DX Cluster WebSocket: No callbacks remaining, disconnecting...")
-            self.disconnect()
 
     def remove_status_callback(self, callback: Callable[[bool], None]):
         """Remove a status callback."""

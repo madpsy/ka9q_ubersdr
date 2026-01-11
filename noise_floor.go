@@ -248,18 +248,20 @@ func (fb *FFTBuffer) GetAveragedFFT(duration time.Duration) *BandFFT {
 
 // BandMeasurement contains noise floor statistics for a band
 type BandMeasurement struct {
-	Timestamp    time.Time `json:"timestamp"`
-	Band         string    `json:"band"`
-	MinDB        float32   `json:"min_db"`
-	MaxDB        float32   `json:"max_db"`
-	MeanDB       float32   `json:"mean_db"`
-	MedianDB     float32   `json:"median_db"`
-	P5DB         float32   `json:"p5_db"`         // 5th percentile - noise floor estimate
-	P10DB        float32   `json:"p10_db"`        // 10th percentile
-	P95DB        float32   `json:"p95_db"`        // 95th percentile - signal peak
-	DynamicRange float32   `json:"dynamic_range"` // P95 - P5
-	OccupancyPct float32   `json:"occupancy_pct"` // % of bins above noise + 10dB
-	FT8SNR       float32   `json:"ft8_snr"`       // FT8 SNR in dB (signal power - noise floor)
+	Timestamp     time.Time `json:"timestamp"`
+	Band          string    `json:"band"`
+	MinDB         float32   `json:"min_db"`
+	MaxDB         float32   `json:"max_db"`
+	MeanDB        float32   `json:"mean_db"`
+	MedianDB      float32   `json:"median_db"`
+	P5DB          float32   `json:"p5_db"`          // 5th percentile - noise floor estimate
+	P10DB         float32   `json:"p10_db"`         // 10th percentile
+	P95DB         float32   `json:"p95_db"`         // 95th percentile - signal peak
+	DynamicRange  float32   `json:"dynamic_range"`  // P95 - P5
+	OccupancyPct  float32   `json:"occupancy_pct"`  // % of bins above noise + 10dB
+	FT8SNR        float32   `json:"ft8_snr"`        // FT8 SNR in dB (signal power - noise floor)
+	SNR_0_30MHz   float32   `json:"snr_0_30_mhz"`   // SNR for 0-30 MHz (dynamic range)
+	SNR_1_8_30MHz float32   `json:"snr_1_8_30_mhz"` // SNR for 1.8-30 MHz HF bands (dynamic range)
 }
 
 // FrequencyMarker represents a frequency marker to display on the FFT graph
@@ -715,6 +717,29 @@ func (nfm *NoiseFloorMonitor) calculateAndLogStatistics() {
 	timestamp := time.Now()
 	bandsProcessed := 0
 
+	// Calculate wideband SNR measurements (0-30 MHz and 1.8-30 MHz)
+	var snr_0_30, snr_1_8_30 float32
+	if nfm.wideBandFFTBuffer != nil {
+		widebandFFT := nfm.wideBandFFTBuffer.GetAveragedFFT(10 * time.Second)
+		if widebandFFT != nil && len(widebandFFT.Data) > 0 {
+			// Calculate 0-30 MHz SNR (dynamic range = P95 - P5)
+			_, _, fullDynamicRange := calculateDynamicRangeFromFFT(widebandFFT.Data)
+			snr_0_30 = fullDynamicRange
+
+			// Calculate 1.8-30 MHz HF SNR
+			// Wideband FFT covers 0-30 MHz with bin width of 7324.21875 Hz
+			// 1.8 MHz starts at bin: 1800000 / 7324.21875 ≈ 246
+			startBin := int(1800000.0 / widebandFFT.BinWidth)
+			if startBin < len(widebandFFT.Data) {
+				hfBins := widebandFFT.Data[startBin:]
+				_, _, hfDynamicRange := calculateDynamicRangeFromFFT(hfBins)
+				snr_1_8_30 = hfDynamicRange
+			}
+
+			log.Printf("Wideband SNR: 0-30 MHz = %.1f dB, 1.8-30 MHz = %.1f dB", snr_0_30, snr_1_8_30)
+		}
+	}
+
 	for _, band := range nfm.config.NoiseFloor.Bands {
 		// Get buffer with raw samples
 		nfm.fftMu.RLock()
@@ -735,6 +760,10 @@ func (nfm *NoiseFloorMonitor) calculateAndLogStatistics() {
 		// Calculate statistics from the max-hold FFT data
 		// This represents the strongest signals seen in each frequency bin over the last 10 seconds
 		measurement := nfm.calculateStatistics(timestamp, band.Name, maxHoldFFT.Data)
+
+		// Add wideband SNR measurements to each band measurement
+		measurement.SNR_0_30MHz = snr_0_30
+		measurement.SNR_1_8_30MHz = snr_1_8_30
 
 		// Store latest measurement
 		nfm.measurementsMu.Lock()
@@ -912,6 +941,8 @@ func (nfm *NoiseFloorMonitor) logMeasurement(m *BandMeasurement) error {
 		fmt.Sprintf("%.1f", m.DynamicRange),
 		fmt.Sprintf("%.1f", m.OccupancyPct),
 		fmt.Sprintf("%.1f", m.FT8SNR),
+		fmt.Sprintf("%.1f", m.SNR_0_30MHz),
+		fmt.Sprintf("%.1f", m.SNR_1_8_30MHz),
 	}
 
 	if err := writer.Write(record); err != nil {
@@ -971,6 +1002,7 @@ func (nfm *NoiseFloorMonitor) rotateFile(band, dateStr string) error {
 		header := []string{
 			"timestamp", "min_db", "max_db", "mean_db", "median_db",
 			"p5_db", "p10_db", "p95_db", "dynamic_range", "occupancy_pct", "ft8_snr",
+			"snr_0_30_mhz", "snr_1_8_30_mhz",
 		}
 		if err := nfm.csvWriters[band].Write(header); err != nil {
 			return fmt.Errorf("failed to write CSV header: %w", err)
@@ -1409,7 +1441,10 @@ func (nfm *NoiseFloorMonitor) readBandFile(band, date string) ([]*BandMeasuremen
 	measurements := make([]*BandMeasurement, 0, len(records))
 	for _, record := range records {
 		// Need at least 10 columns (old format without FT8 SNR)
-		// New format has 11 columns (with FT8 SNR)
+		// Format evolution:
+		// - 10 columns: original (no FT8 SNR)
+		// - 11 columns: with FT8 SNR
+		// - 13 columns: with FT8 SNR + wideband SNR measurements
 		if len(record) < 10 {
 			continue
 		}
@@ -1438,6 +1473,12 @@ func (nfm *NoiseFloorMonitor) readBandFile(band, date string) ([]*BandMeasuremen
 		// Parse FT8 SNR if available (for backward compatibility with old CSV files)
 		if len(record) >= 11 {
 			_, _ = fmt.Sscanf(record[10], "%f", &m.FT8SNR)
+		}
+
+		// Parse wideband SNR measurements if available (newest format)
+		if len(record) >= 13 {
+			_, _ = fmt.Sscanf(record[11], "%f", &m.SNR_0_30MHz)
+			_, _ = fmt.Sscanf(record[12], "%f", &m.SNR_1_8_30MHz)
 		}
 
 		measurements = append(measurements, m)
@@ -1618,6 +1659,40 @@ func (nfm *NoiseFloorMonitor) GetWideBandFFT() *BandFFT {
 		log.Printf("DEBUG: No wide-band FFT buffer found")
 	}
 	return nil
+}
+
+// GetWidebandSNR returns the current wideband SNR measurements (0-30 MHz and 1.8-30 MHz)
+// Returns -1 for both values if no data is available
+func (nfm *NoiseFloorMonitor) GetWidebandSNR() (snr_0_30, snr_1_8_30 float32) {
+	if nfm == nil {
+		return -1, -1
+	}
+
+	nfm.fftMu.RLock()
+	defer nfm.fftMu.RUnlock()
+
+	if nfm.wideBandFFTBuffer != nil {
+		widebandFFT := nfm.wideBandFFTBuffer.GetAveragedFFT(10 * time.Second)
+		if widebandFFT != nil && len(widebandFFT.Data) > 0 {
+			// Calculate 0-30 MHz SNR (dynamic range = P95 - P5)
+			_, _, fullDynamicRange := calculateDynamicRangeFromFFT(widebandFFT.Data)
+			snr_0_30 = fullDynamicRange
+
+			// Calculate 1.8-30 MHz HF SNR
+			// Wideband FFT covers 0-30 MHz with bin width of 7324.21875 Hz
+			// 1.8 MHz starts at bin: 1800000 / 7324.21875 ≈ 246
+			startBin := int(1800000.0 / widebandFFT.BinWidth)
+			if startBin < len(widebandFFT.Data) {
+				hfBins := widebandFFT.Data[startBin:]
+				_, _, hfDynamicRange := calculateDynamicRangeFromFFT(hfBins)
+				snr_1_8_30 = hfDynamicRange
+			}
+
+			return snr_0_30, snr_1_8_30
+		}
+	}
+
+	return -1, -1
 }
 
 // watchdogLoop monitors for stalled spectrum channels and attempts reconnection

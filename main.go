@@ -880,7 +880,7 @@ func main() {
 		handleExtensions(w, r, config)
 	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
-		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler)
+		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor)
 	})
 	http.HandleFunc("/api/instance", func(w http.ResponseWriter, r *http.Request) {
 		handleInstanceStatus(w, r, config)
@@ -1602,7 +1602,7 @@ func handleExtensions(w http.ResponseWriter, r *http.Request, config *Config) {
 }
 
 // handleDescription serves the description HTML from config plus all status information
-func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler) {
+func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -1646,6 +1646,12 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		chatUserCount = dxClusterWsHandler.GetChatUserCount()
 	}
 
+	// Get wideband SNR measurements if noise floor monitor is available
+	snr_0_30, snr_1_8_30 := float32(-1), float32(-1)
+	if noiseFloorMonitor != nil {
+		snr_0_30, snr_1_8_30 = noiseFloorMonitor.GetWidebandSNR()
+	}
+
 	// Build the response with description plus status information (without sdrs)
 	response := map[string]interface{}{
 		"description": config.Admin.Description,
@@ -1657,9 +1663,11 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 				"lat": config.Admin.GPS.Lat,
 				"lon": config.Admin.GPS.Lon,
 			},
-			"asl":      config.Admin.ASL,
-			"location": config.Admin.Location,
-			"antenna":  config.Admin.Antenna,
+			"asl":            config.Admin.ASL,
+			"location":       config.Admin.Location,
+			"antenna":        config.Admin.Antenna,
+			"snr_0_30_mhz":   snr_0_30,   // SNR for 0-30 MHz (dynamic range in dB)
+			"snr_1_8_30_mhz": snr_1_8_30, // SNR for 1.8-30 MHz HF bands (dynamic range in dB)
 		},
 		"max_clients":          config.Server.MaxSessions,
 		"available_clients":    availableClients,

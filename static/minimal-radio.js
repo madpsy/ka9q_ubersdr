@@ -1,5 +1,4 @@
 // Minimal Radio - Lightweight audio preview for noise floor monitoring
-// Adapted from oldradio/radio.js with only essential audio functionality
 
 class MinimalRadio {
     constructor(userSessionID = null) {
@@ -40,6 +39,9 @@ class MinimalRadio {
         // Signal quality metrics (from version=2 protocol)
         this.signalQuality = null;
         this.signalQualityCallback = null;
+
+        // External analysers that should be connected to audio
+        this.externalAnalysers = [];
 
         // Heartbeat timer
         this.heartbeatInterval = null;
@@ -586,9 +588,6 @@ class MinimalRadio {
         console.log('Audio context initialized:', this.audioContext.sampleRate, 'Hz');
     }
     
-    // External analysers that should be connected to audio
-    externalAnalysers = [];
-
     // Add an external analyser to be connected to audio
     addAnalyser(analyser) {
         if (!this.externalAnalysers.includes(analyser)) {

@@ -733,34 +733,30 @@
                 <div id="chatTab" class="tab-content">
                     <!-- Filter Section -->
                     <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 10px;">
-                            <div style="margin-bottom: 0;">
-                                <label style="display: block; margin-bottom: 5px; color: #555; font-weight: 500;">Start Date</label>
-                                <input type="date" id="chatStartDate" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 10px;">
+                            <div>
+                                <label style="display: block; margin-bottom: 3px; color: #555; font-weight: 500; font-size: 13px;">Start Date</label>
+                                <input type="date" id="chatStartDate" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
                             </div>
-                            <div style="margin-bottom: 0;">
-                                <label style="display: block; margin-bottom: 5px; color: #555; font-weight: 500;">End Date</label>
-                                <input type="date" id="chatEndDate" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                            <div>
+                                <label style="display: block; margin-bottom: 3px; color: #555; font-weight: 500; font-size: 13px;">End Date</label>
+                                <input type="date" id="chatEndDate" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
                             </div>
-                            <div style="margin-bottom: 0;">
-                                <label style="display: block; margin-bottom: 5px; color: #555; font-weight: 500;">IP Address</label>
-                                <input type="text" id="chatIPFilter" placeholder="e.g., 192.168.1" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
-                                <small style="display: block; margin-top: 5px; color: #666; font-size: 12px;">Partial match</small>
+                            <div>
+                                <label style="display: block; margin-bottom: 3px; color: #555; font-weight: 500; font-size: 13px;">IP Address</label>
+                                <input type="text" id="chatIPFilter" placeholder="e.g., 192.168.1" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
                             </div>
-                            <div style="margin-bottom: 0;">
-                                <label style="display: block; margin-bottom: 5px; color: #555; font-weight: 500;">Nickname</label>
-                                <input type="text" id="chatNicknameFilter" placeholder="e.g., John" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
-                                <small style="display: block; margin-top: 5px; color: #666; font-size: 12px;">Case-insensitive partial match</small>
+                            <div>
+                                <label style="display: block; margin-bottom: 3px; color: #555; font-weight: 500; font-size: 13px;">Nickname</label>
+                                <input type="text" id="chatNicknameFilter" placeholder="e.g., John" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
                             </div>
-                            <div style="margin-bottom: 0;">
-                                <label style="display: block; margin-bottom: 5px; color: #555; font-weight: 500;">Message Content</label>
-                                <input type="text" id="chatMessageFilter" placeholder="e.g., hello" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
-                                <small style="display: block; margin-top: 5px; color: #666; font-size: 12px;">Case-insensitive partial match</small>
+                            <div>
+                                <label style="display: block; margin-bottom: 3px; color: #555; font-weight: 500; font-size: 13px;">Message Content</label>
+                                <input type="text" id="chatMessageFilter" placeholder="e.g., hello" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
                             </div>
-                            <div style="margin-bottom: 0;">
-                                <label style="display: block; margin-bottom: 5px; color: #555; font-weight: 500;">Limit</label>
-                                <input type="number" id="chatLimitFilter" value="1000" min="1" max="10000" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
-                                <small style="display: block; margin-top: 5px; color: #666; font-size: 12px;">Max results (1-10000)</small>
+                            <div>
+                                <label style="display: block; margin-bottom: 3px; color: #555; font-weight: 500; font-size: 13px;">Limit</label>
+                                <input type="number" id="chatLimitFilter" value="1000" min="1" max="10000" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px;">
                             </div>
                         </div>
                         <div style="display: flex; gap: 10px;">

@@ -841,9 +841,9 @@ function updateSignalLED() {
                 lastSNRLogTime = now;
             }
 
-            // Map SNR to 0-1 range, with 30 dB as full brightness
-            // 0 dB = 0%, 30 dB = 100%
-            const snrPercentage = Math.max(0, Math.min(1, signalQuality.snr / 30));
+            // Map SNR to 0-1 range, with 100 dB as full brightness
+            // 0 dB = 0%, 100 dB = 100%
+            const snrPercentage = Math.max(0, Math.min(1, signalQuality.snr / 100));
 
             // Smooth the value
             vuLevel = vuLevel * 0.8 + snrPercentage * 0.2;

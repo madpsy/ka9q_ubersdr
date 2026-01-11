@@ -731,14 +731,9 @@
 
                 <!-- Chat Tab -->
                 <div id="chatTab" class="tab-content">
-                    <div class="alert alert-info" style="margin-bottom: 20px;">
-                        ℹ️ <strong>Note:</strong> Chat logs are stored as CSV files organized by date. Use the filters below to search through chat history.
-                    </div>
-
                     <!-- Filter Section -->
-                    <div style="margin-bottom: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px;">
-                        <h3 style="margin-bottom: 15px; color: #333;">Filter Chat Logs</h3>
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 15px;">
+                    <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 10px;">
                             <div class="config-field">
                                 <label>Start Date</label>
                                 <input type="date" id="chatStartDate" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
@@ -8508,6 +8503,10 @@
         }
 
         // Chat Logs Management
+        let currentChatLogs = [];
+        let chatLogsSortColumn = 'timestamp';
+        let chatLogsSortDirection = 'desc';
+
         async function loadChatLogs() {
             try {
                 // Get filter values
@@ -8537,11 +8536,53 @@
                 }
 
                 const data = await response.json();
+                currentChatLogs = data.logs || [];
                 renderChatLogs(data);
                 showAlert(`Loaded ${data.count} chat log(s)`, 'success');
             } catch (error) {
                 showAlert('Error loading chat logs: ' + error.message, 'error');
             }
+        }
+
+        function sortChatLogs(column) {
+            // Toggle direction if clicking same column, otherwise default to descending
+            if (chatLogsSortColumn === column) {
+                chatLogsSortDirection = chatLogsSortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                chatLogsSortColumn = column;
+                chatLogsSortDirection = column === 'timestamp' ? 'desc' : 'asc';
+            }
+
+            // Sort the current logs
+            currentChatLogs.sort((a, b) => {
+                let aVal, bVal;
+                switch(column) {
+                    case 'timestamp':
+                        aVal = new Date(a.timestamp).getTime();
+                        bVal = new Date(b.timestamp).getTime();
+                        break;
+                    case 'ip':
+                        aVal = a.source_ip || '';
+                        bVal = b.source_ip || '';
+                        break;
+                    case 'nickname':
+                        aVal = (a.username || '').toLowerCase();
+                        bVal = (b.username || '').toLowerCase();
+                        break;
+                    default:
+                        aVal = new Date(a.timestamp).getTime();
+                        bVal = new Date(b.timestamp).getTime();
+                }
+
+                if (chatLogsSortDirection === 'asc') {
+                    return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
+                } else {
+                    return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
+                }
+            });
+
+            // Re-render table
+            renderChatLogsTable();
         }
 
         function renderChatLogs(data) {
@@ -8571,23 +8612,41 @@
 
             // Create table
             const table = document.createElement('table');
+            table.id = 'chatLogsTable';
             table.style.width = '100%';
             table.style.borderCollapse = 'collapse';
+            container.appendChild(table);
+
+            // Render table content
+            renderChatLogsTable();
+        }
+
+        function renderChatLogsTable() {
+            const table = document.getElementById('chatLogsTable');
+            if (!table) return;
+
+            // Helper function to create sort icon
+            const sortIcon = (column) => {
+                if (chatLogsSortColumn === column) {
+                    return chatLogsSortDirection === 'asc' ? ' ▲' : ' ▼';
+                }
+                return '';
+            };
+
             table.innerHTML = `
                 <thead>
                     <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
-                        <th style="padding: 12px; text-align: left; width: 180px;">Timestamp</th>
-                        <th style="padding: 12px; text-align: left; width: 140px;">IP Address</th>
-                        <th style="padding: 12px; text-align: left; width: 150px;">Nickname</th>
+                        <th style="padding: 12px; text-align: left; width: 180px; cursor: pointer; user-select: none;" onclick="sortChatLogs('timestamp')" title="Click to sort">Timestamp${sortIcon('timestamp')}</th>
+                        <th style="padding: 12px; text-align: left; width: 140px; cursor: pointer; user-select: none;" onclick="sortChatLogs('ip')" title="Click to sort">IP Address${sortIcon('ip')}</th>
+                        <th style="padding: 12px; text-align: left; width: 150px; cursor: pointer; user-select: none;" onclick="sortChatLogs('nickname')" title="Click to sort">Nickname${sortIcon('nickname')}</th>
                         <th style="padding: 12px; text-align: left;">Message</th>
                     </tr>
                 </thead>
                 <tbody id="chatLogsTableBody"></tbody>
             `;
-            container.appendChild(table);
 
             const tbody = document.getElementById('chatLogsTableBody');
-            data.logs.forEach(log => {
+            currentChatLogs.forEach(log => {
                 const row = document.createElement('tr');
                 row.style.borderBottom = '1px solid #dee2e6';
 

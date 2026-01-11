@@ -535,27 +535,35 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 	// Update user's last seen time
 	cm.UpdateUserActivity(sessionID)
 
-	// Get source IP for logging and MQTT
+	// Get source IP for logging and MQTT - capture it NOW before spawning goroutines
+	// to avoid race condition where IP might be removed from map during cleanup
 	sourceIP := cm.GetSessionIP(sessionID)
 	if sourceIP == "" {
 		sourceIP = "unknown"
 	}
 
+	// Capture values in local variables before spawning goroutines
+	// This prevents race conditions if the session is cleaned up
+	logTimestamp := now
+	logIP := sourceIP
+	logUsername := username
+	logMessage := messageText
+
 	// Log to persistent storage (non-blocking)
 	if cm.chatLogger != nil {
 		// Use goroutine to avoid blocking message delivery on disk I/O
-		go func(timestamp time.Time, ip, user, msg string) {
-			if err := cm.chatLogger.LogMessage(timestamp, ip, user, msg); err != nil {
+		go func() {
+			if err := cm.chatLogger.LogMessage(logTimestamp, logIP, logUsername, logMessage); err != nil {
 				log.Printf("Chat: Failed to log message: %v", err)
 			}
-		}(now, sourceIP, username, messageText)
+		}()
 	}
 
 	// Publish to MQTT (non-blocking)
 	if cm.mqttPublisher != nil {
-		go func(timestamp time.Time, ip, user, msg string) {
-			cm.mqttPublisher.PublishChatMessage(timestamp, ip, user, msg)
-		}(now, sourceIP, username, messageText)
+		go func() {
+			cm.mqttPublisher.PublishChatMessage(logTimestamp, logIP, logUsername, logMessage)
+		}()
 	}
 
 	// Broadcast to all connected clients

@@ -24,6 +24,7 @@ type InstanceReporter struct {
 	cwskimmerConfig     *CWSkimmerConfig
 	sessions            *SessionManager
 	dxClusterWsHandler  *DXClusterWebSocketHandler // For getting chat user count
+	noiseFloorMonitor   *NoiseFloorMonitor         // For getting SNR measurements
 	configPath          string
 	httpClient          *http.Client
 	stopChan            chan struct{}
@@ -67,6 +68,8 @@ type InstanceReport struct {
 	CORSEnabled      bool                   `json:"cors_enabled"`      // Whether CORS is enabled
 	ChatEnabled      bool                   `json:"chat_enabled"`      // Whether chat is enabled
 	ChatUsers        int                    `json:"chat_users"`        // Number of active chat users
+	SNR_0_30MHz      int                    `json:"snr_0_30_mhz"`      // SNR for 0-30 MHz (dynamic range in dB, -1 if unavailable)
+	SNR_1_8_30MHz    int                    `json:"snr_1_8_30_mhz"`    // SNR for 1.8-30 MHz HF bands (dynamic range in dB, -1 if unavailable)
 	Test             bool                   `json:"test,omitempty"`    // If true, this is a test report - collector will verify /api/description instead of full callback
 	StartupReport    bool                   `json:"startup_report"`    // If true, this is a startup report sent regardless of instance_reporting.enabled
 }
@@ -103,6 +106,14 @@ func (ir *InstanceReporter) SetDXClusterWebSocketHandler(handler *DXClusterWebSo
 	ir.dxClusterWsHandler = handler
 }
 
+// SetNoiseFloorMonitor sets the noise floor monitor for SNR measurements
+// This must be called after the monitor is initialized (after NewInstanceReporter)
+func (ir *InstanceReporter) SetNoiseFloorMonitor(monitor *NoiseFloorMonitor) {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
+	ir.noiseFloorMonitor = monitor
+}
+
 // getChatUserCount returns the current number of active chat users (thread-safe)
 func (ir *InstanceReporter) getChatUserCount() int {
 	ir.mu.RLock()
@@ -113,6 +124,21 @@ func (ir *InstanceReporter) getChatUserCount() int {
 		return 0
 	}
 	return handler.GetChatUserCount()
+}
+
+// getSNRMeasurements returns the current wideband SNR measurements (thread-safe)
+// Returns -1 for both values if noise floor monitor is not available or no data yet
+func (ir *InstanceReporter) getSNRMeasurements() (int, int) {
+	ir.mu.RLock()
+	monitor := ir.noiseFloorMonitor
+	ir.mu.RUnlock()
+
+	if monitor == nil {
+		return -1, -1
+	}
+
+	snr_0_30, snr_1_8_30 := monitor.GetWidebandSNR()
+	return int(snr_0_30), int(snr_1_8_30)
 }
 
 // Start begins the instance reporting service
@@ -363,6 +389,9 @@ func (ir *InstanceReporter) sendReport() error {
 	// Get chat user count (thread-safe)
 	chatUserCount := ir.getChatUserCount()
 
+	// Get SNR measurements (thread-safe)
+	snr_0_30, snr_1_8_30 := ir.getSNRMeasurements()
+
 	report := InstanceReport{
 		UUID:             ir.config.InstanceReporting.InstanceUUID,
 		Callsign:         ir.config.Admin.Callsign,
@@ -392,6 +421,8 @@ func (ir *InstanceReporter) sendReport() error {
 		CORSEnabled:      ir.config.Server.EnableCORS,
 		ChatEnabled:      ir.config.Chat.Enabled,
 		ChatUsers:        chatUserCount,
+		SNR_0_30MHz:      snr_0_30,
+		SNR_1_8_30MHz:    snr_1_8_30,
 	}
 
 	jsonData, err := json.Marshal(report)
@@ -692,6 +723,9 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 	// Get chat user count (thread-safe)
 	chatUserCount := ir.getChatUserCount()
 
+	// Get SNR measurements (thread-safe)
+	snr_0_30, snr_1_8_30 := ir.getSNRMeasurements()
+
 	report := InstanceReport{
 		UUID:             instanceUUID,
 		Callsign:         adminCallsign,
@@ -721,6 +755,8 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		CORSEnabled:      ir.config.Server.EnableCORS,
 		ChatEnabled:      ir.config.Chat.Enabled,
 		ChatUsers:        chatUserCount,
+		SNR_0_30MHz:      snr_0_30,
+		SNR_1_8_30MHz:    snr_1_8_30,
 		Test:             isTest,
 	}
 
@@ -929,7 +965,7 @@ func ensureUUIDForStartup(config *Config, configPath string) error {
 
 // SendStartupReport sends a startup report regardless of whether instance reporting is enabled
 // This runs in a non-blocking goroutine with retries and only sends if collector endpoint is configured
-func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, configPath string) {
+func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, configPath string, noiseFloorMonitor *NoiseFloorMonitor) {
 	// Run in a goroutine to not block startup
 	go func() {
 		// Check if we have the minimum required configuration (collector hostname and port)
@@ -948,6 +984,10 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			log.Printf("Startup report skipped: failed to ensure UUID: %v", err)
 			return
 		}
+
+		// Wait 30 seconds before sending startup report to allow noise floor monitor to collect data
+		log.Println("Waiting 30 seconds before sending startup report (to collect SNR data)...")
+		time.Sleep(30 * time.Second)
 
 		log.Println("Sending startup report...")
 
@@ -981,6 +1021,14 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 		// Get system load information
 		systemLoad := getSystemLoad()
 
+		// Get SNR measurements if noise floor monitor is available
+		snr_0_30, snr_1_8_30 := -1, -1
+		if noiseFloorMonitor != nil {
+			snr_0_30_f, snr_1_8_30_f := noiseFloorMonitor.GetWidebandSNR()
+			snr_0_30 = int(snr_0_30_f)
+			snr_1_8_30 = int(snr_1_8_30_f)
+		}
+
 		// Build the report
 		report := InstanceReport{
 			UUID:             config.InstanceReporting.InstanceUUID,
@@ -1011,6 +1059,8 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			CORSEnabled:      config.Server.EnableCORS,
 			ChatEnabled:      config.Chat.Enabled,
 			ChatUsers:        0, // Chat users not available at startup
+			SNR_0_30MHz:      snr_0_30,
+			SNR_1_8_30MHz:    snr_1_8_30,
 			StartupReport:    true,
 		}
 

@@ -838,7 +838,7 @@ func main() {
 
 	// Send startup report (non-blocking, runs regardless of instance_reporting.enabled)
 	// This must be called after sessions is initialized but before HTTP server starts
-	SendStartupReport(config, cwskimmerConfig, sessions, configPath)
+	SendStartupReport(config, cwskimmerConfig, sessions, configPath, noiseFloorMonitor)
 
 	// Initialize instance reporter (before admin handler so it can be passed in)
 	var instanceReporter *InstanceReporter
@@ -850,6 +850,12 @@ func main() {
 	// This must be done after both are initialized
 	if instanceReporter != nil && dxClusterWsHandler != nil {
 		instanceReporter.SetDXClusterWebSocketHandler(dxClusterWsHandler)
+	}
+
+	// Set the noise floor monitor in instance reporter for SNR measurements
+	// This must be done after both are initialized
+	if instanceReporter != nil && noiseFloorMonitor != nil {
+		instanceReporter.SetNoiseFloorMonitor(noiseFloorMonitor)
 	}
 
 	// Initialize admin handler (pass all components for proper shutdown during restart)
@@ -1666,8 +1672,8 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 			"asl":            config.Admin.ASL,
 			"location":       config.Admin.Location,
 			"antenna":        config.Admin.Antenna,
-			"snr_0_30_mhz":   snr_0_30,   // SNR for 0-30 MHz (dynamic range in dB)
-			"snr_1_8_30_mhz": snr_1_8_30, // SNR for 1.8-30 MHz HF bands (dynamic range in dB)
+			"snr_0_30_mhz":   int(snr_0_30),   // SNR for 0-30 MHz (dynamic range in dB, whole number)
+			"snr_1_8_30_mhz": int(snr_1_8_30), // SNR for 1.8-30 MHz HF bands (dynamic range in dB, whole number)
 		},
 		"max_clients":          config.Server.MaxSessions,
 		"available_clients":    availableClients,

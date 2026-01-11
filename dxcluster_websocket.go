@@ -27,6 +27,14 @@ type cwSpotKey struct {
 	frequency float64
 }
 
+// Subscriptions tracks which data types a client has subscribed to
+type Subscriptions struct {
+	DXSpots      bool
+	DigitalSpots bool
+	CWSpots      bool
+	Chat         bool
+}
+
 // DXClusterWebSocketHandler manages WebSocket connections for DX cluster spots
 type DXClusterWebSocketHandler struct {
 	clients           map[*websocket.Conn]*sync.Mutex // Each connection has its own write mutex
@@ -65,6 +73,10 @@ type DXClusterWebSocketHandler struct {
 	connToSessionID   map[*websocket.Conn]string
 	connToSessionIDMu sync.RWMutex
 
+	// Per-connection subscription preferences
+	connSubscriptions   map[*websocket.Conn]*Subscriptions
+	connSubscriptionsMu sync.RWMutex
+
 	// Throughput tracking per UserSessionID
 	dxBytesSent    map[string]uint64        // UserSessionID -> total bytes sent
 	dxBytesSamples map[string][]BytesSample // UserSessionID -> sliding window samples
@@ -87,6 +99,7 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 		maxCWSpots:        100,
 		receiverLocator:   receiverLocator,
 		connToSessionID:   make(map[*websocket.Conn]string),
+		connSubscriptions: make(map[*websocket.Conn]*Subscriptions),
 		dxBytesSent:       make(map[string]uint64),
 		dxBytesSamples:    make(map[string][]BytesSample),
 		upgrader: websocket.Upgrader{
@@ -215,6 +228,16 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 	h.connToSessionID[conn] = userSessionID
 	h.connToSessionIDMu.Unlock()
 
+	// Initialize subscription state (all disabled by default - client must opt-in)
+	h.connSubscriptionsMu.Lock()
+	h.connSubscriptions[conn] = &Subscriptions{
+		DXSpots:      false,
+		DigitalSpots: false,
+		CWSpots:      false,
+		Chat:         false,
+	}
+	h.connSubscriptionsMu.Unlock()
+
 	// Store IP address for chat logging
 	if h.chatManager != nil {
 		h.chatManager.SetSessionIP(userSessionID, clientIP)
@@ -230,24 +253,8 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 	// Send connection status
 	h.sendConnectionStatus(conn)
 
-	// Send buffered spots after a delay to allow client to initialize and register callbacks
-	go func() {
-		time.Sleep(1000 * time.Millisecond)
-
-		// Send buffered DX spots to new client
-		h.sendBufferedSpots(conn)
-
-		// Send buffered digital spots to new client
-		h.sendBufferedDigitalSpots(conn)
-
-		// Send buffered CW spots to new client
-		h.sendBufferedCWSpots(conn)
-
-		// Send buffered chat messages to new client
-		if h.chatManager != nil {
-			h.chatManager.SendBufferedMessages(conn)
-		}
-	}()
+	// Note: Buffered data is no longer sent automatically
+	// Client must explicitly subscribe to each data type using subscription messages
 
 	// Handle client messages (mainly for ping/pong and chat)
 	go h.handleClient(conn, userSessionID)
@@ -265,6 +272,11 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessi
 		h.connToSessionIDMu.Lock()
 		delete(h.connToSessionID, conn)
 		h.connToSessionIDMu.Unlock()
+
+		// Remove subscription state
+		h.connSubscriptionsMu.Lock()
+		delete(h.connSubscriptions, conn)
+		h.connSubscriptionsMu.Unlock()
 
 		// Unregister client
 		h.clientsMu.Lock()
@@ -362,8 +374,167 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessi
 						"type": "pong",
 					})
 
+				case "subscribe_dx_spots":
+					// Enable DX cluster spots
+					h.connSubscriptionsMu.Lock()
+					if subs, exists := h.connSubscriptions[conn]; exists {
+						subs.DXSpots = true
+					}
+					h.connSubscriptionsMu.Unlock()
+
+					// Send buffered DX spots
+					h.sendBufferedSpots(conn)
+
+					// Send confirmation
+					h.sendMessage(conn, map[string]interface{}{
+						"type":    "subscription_status",
+						"stream":  "dx_spots",
+						"enabled": true,
+					})
+					log.Printf("DX Cluster WebSocket: Client %s subscribed to DX spots", userSessionID)
+
+				case "subscribe_digital_spots":
+					// Enable digital spots
+					h.connSubscriptionsMu.Lock()
+					if subs, exists := h.connSubscriptions[conn]; exists {
+						subs.DigitalSpots = true
+					}
+					h.connSubscriptionsMu.Unlock()
+
+					// Send buffered digital spots
+					h.sendBufferedDigitalSpots(conn)
+
+					// Send confirmation
+					h.sendMessage(conn, map[string]interface{}{
+						"type":    "subscription_status",
+						"stream":  "digital_spots",
+						"enabled": true,
+					})
+					log.Printf("DX Cluster WebSocket: Client %s subscribed to digital spots", userSessionID)
+
+				case "subscribe_cw_spots":
+					// Enable CW spots
+					h.connSubscriptionsMu.Lock()
+					if subs, exists := h.connSubscriptions[conn]; exists {
+						subs.CWSpots = true
+					}
+					h.connSubscriptionsMu.Unlock()
+
+					// Send buffered CW spots
+					h.sendBufferedCWSpots(conn)
+
+					// Send confirmation
+					h.sendMessage(conn, map[string]interface{}{
+						"type":    "subscription_status",
+						"stream":  "cw_spots",
+						"enabled": true,
+					})
+					log.Printf("DX Cluster WebSocket: Client %s subscribed to CW spots", userSessionID)
+
+				case "subscribe_chat":
+					// Enable chat
+					h.connSubscriptionsMu.Lock()
+					if subs, exists := h.connSubscriptions[conn]; exists {
+						subs.Chat = true
+					}
+					h.connSubscriptionsMu.Unlock()
+
+					// Send buffered chat messages
+					if h.chatManager != nil {
+						h.chatManager.SendBufferedMessages(conn)
+					}
+
+					// Send confirmation
+					h.sendMessage(conn, map[string]interface{}{
+						"type":    "subscription_status",
+						"stream":  "chat",
+						"enabled": true,
+					})
+					log.Printf("DX Cluster WebSocket: Client %s subscribed to chat", userSessionID)
+
+				case "unsubscribe_dx_spots":
+					// Disable DX cluster spots
+					h.connSubscriptionsMu.Lock()
+					if subs, exists := h.connSubscriptions[conn]; exists {
+						subs.DXSpots = false
+					}
+					h.connSubscriptionsMu.Unlock()
+
+					h.sendMessage(conn, map[string]interface{}{
+						"type":    "subscription_status",
+						"stream":  "dx_spots",
+						"enabled": false,
+					})
+					log.Printf("DX Cluster WebSocket: Client %s unsubscribed from DX spots", userSessionID)
+
+				case "unsubscribe_digital_spots":
+					// Disable digital spots
+					h.connSubscriptionsMu.Lock()
+					if subs, exists := h.connSubscriptions[conn]; exists {
+						subs.DigitalSpots = false
+					}
+					h.connSubscriptionsMu.Unlock()
+
+					h.sendMessage(conn, map[string]interface{}{
+						"type":    "subscription_status",
+						"stream":  "digital_spots",
+						"enabled": false,
+					})
+					log.Printf("DX Cluster WebSocket: Client %s unsubscribed from digital spots", userSessionID)
+
+				case "unsubscribe_cw_spots":
+					// Disable CW spots
+					h.connSubscriptionsMu.Lock()
+					if subs, exists := h.connSubscriptions[conn]; exists {
+						subs.CWSpots = false
+					}
+					h.connSubscriptionsMu.Unlock()
+
+					h.sendMessage(conn, map[string]interface{}{
+						"type":    "subscription_status",
+						"stream":  "cw_spots",
+						"enabled": false,
+					})
+					log.Printf("DX Cluster WebSocket: Client %s unsubscribed from CW spots", userSessionID)
+
+				case "unsubscribe_chat":
+					// Disable chat
+					h.connSubscriptionsMu.Lock()
+					if subs, exists := h.connSubscriptions[conn]; exists {
+						subs.Chat = false
+					}
+					h.connSubscriptionsMu.Unlock()
+
+					// Remove user from chat system
+					if h.chatManager != nil {
+						h.chatManager.RemoveUser(userSessionID)
+					}
+
+					h.sendMessage(conn, map[string]interface{}{
+						"type":    "subscription_status",
+						"stream":  "chat",
+						"enabled": false,
+					})
+					log.Printf("DX Cluster WebSocket: Client %s unsubscribed from chat", userSessionID)
+
 				case "chat_set_username", "chat_message", "chat_set_frequency_mode", "chat_request_users", "chat_leave":
-					// Handle chat messages
+					// Handle chat messages (only if subscribed to chat)
+					h.connSubscriptionsMu.RLock()
+					chatEnabled := false
+					if subs, exists := h.connSubscriptions[conn]; exists {
+						chatEnabled = subs.Chat
+					}
+					h.connSubscriptionsMu.RUnlock()
+
+					if !chatEnabled {
+						// Client must subscribe to chat first
+						h.sendMessage(conn, map[string]interface{}{
+							"type":  "chat_error",
+							"error": "you must subscribe to chat first (send subscribe_chat message)",
+						})
+						continue
+					}
+
 					if h.chatManager != nil {
 						// Update activity for ANY chat-related message (keeps user alive)
 						h.chatManager.UpdateUserActivity(userSessionID)
@@ -726,6 +897,7 @@ func (h *DXClusterWebSocketHandler) cleanupDigitalSpotCache() {
 }
 
 // broadcast is a helper method to send messages to all clients
+// Only sends to clients subscribed to the specific message type
 func (h *DXClusterWebSocketHandler) broadcast(message map[string]interface{}) {
 	messageJSON, err := json.Marshal(message)
 	if err != nil {
@@ -734,6 +906,9 @@ func (h *DXClusterWebSocketHandler) broadcast(message map[string]interface{}) {
 	}
 
 	messageSize := uint64(len(messageJSON))
+
+	// Determine message type for subscription filtering
+	messageType, _ := message["type"].(string)
 
 	// Copy client list FIRST, then release lock before writing
 	// This prevents holding clientsMu.RLock() during slow WebSocket writes
@@ -746,7 +921,7 @@ func (h *DXClusterWebSocketHandler) broadcast(message map[string]interface{}) {
 	}
 	h.clientsMu.RUnlock()
 
-	// Get UserSessionIDs for all connections
+	// Get UserSessionIDs and subscriptions for all connections
 	h.connToSessionIDMu.RLock()
 	connToUserSessionID := make(map[*websocket.Conn]string)
 	for _, conn := range clientList {
@@ -756,12 +931,46 @@ func (h *DXClusterWebSocketHandler) broadcast(message map[string]interface{}) {
 	}
 	h.connToSessionIDMu.RUnlock()
 
+	h.connSubscriptionsMu.RLock()
+	connSubscriptions := make(map[*websocket.Conn]*Subscriptions)
+	for _, conn := range clientList {
+		if subs, exists := h.connSubscriptions[conn]; exists {
+			connSubscriptions[conn] = subs
+		}
+	}
+	h.connSubscriptionsMu.RUnlock()
+
 	// Track failed connections for immediate cleanup
 	var failedConns []*websocket.Conn
 
 	// Now write to clients without holding clientsMu (prevents deadlock)
 	for i, conn := range clientList {
 		writeMu := writeMutexes[i]
+
+		// Check if client is subscribed to this message type
+		subs, hasSubscription := connSubscriptions[conn]
+		if !hasSubscription {
+			continue // Skip if no subscription info
+		}
+
+		shouldSend := false
+		switch messageType {
+		case "dx_spot":
+			shouldSend = subs.DXSpots
+		case "digital_spot":
+			shouldSend = subs.DigitalSpots
+		case "cw_spot":
+			shouldSend = subs.CWSpots
+		case "chat_message", "chat_user_joined", "chat_user_left", "chat_users":
+			shouldSend = subs.Chat
+		default:
+			// For other message types (status, etc.), always send
+			shouldSend = true
+		}
+
+		if !shouldSend {
+			continue // Skip this client
+		}
 
 		// Lock this connection's write mutex
 		writeMu.Lock()

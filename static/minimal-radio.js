@@ -36,10 +36,14 @@ class MinimalRadio {
         this.spectrumCallback = null;
         this.spectrumConfig = null; // Store spectrum config (centerFreq, binCount, etc.)
         this.binarySpectrumData8 = null; // State for binary8 delta decoding
-        
+
+        // Signal quality metrics (from version=2 protocol)
+        this.signalQuality = null;
+        this.signalQualityCallback = null;
+
         // Heartbeat timer
         this.heartbeatInterval = null;
-        
+
         // Connection validation cache (avoid duplicate /connection checks)
         this.connectionValidated = false;
 
@@ -267,9 +271,9 @@ class MinimalRadio {
                 this.connectionValidated = true;
             }
             
-            // Create WebSocket connection with Opus format
+            // Create WebSocket connection with Opus format and version 2 (for signal quality metrics)
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws?frequency=${this.currentFrequency}&mode=${this.currentMode}&user_session_id=${encodeURIComponent(this.userSessionID)}&format=opus`;
+            const wsUrl = `${protocol}//${window.location.host}/ws?frequency=${this.currentFrequency}&mode=${this.currentMode}&user_session_id=${encodeURIComponent(this.userSessionID)}&format=opus&version=2`;
 
             this.ws = new WebSocket(wsUrl);
 
@@ -338,6 +342,10 @@ class MinimalRadio {
             case 'status':
                 // Status updates (optional)
                 break;
+            case 'signal_quality':
+                // Signal quality metrics from version=2 protocol
+                this.handleSignalQuality(message);
+                break;
             case 'error':
                 console.error('Server error:', message.error);
                 break;
@@ -347,6 +355,31 @@ class MinimalRadio {
             default:
                 console.log('Unknown message type:', message.type);
         }
+    }
+
+    // Handle signal quality metrics
+    handleSignalQuality(message) {
+        this.signalQuality = {
+            snr: message.snr,
+            signalLevel: message.signal_level,
+            noiseLevel: message.noise_level,
+            timestamp: message.timestamp || Date.now()
+        };
+
+        // Call callback if registered
+        if (this.signalQualityCallback) {
+            this.signalQualityCallback(this.signalQuality);
+        }
+    }
+
+    // Set callback for signal quality updates
+    onSignalQuality(callback) {
+        this.signalQualityCallback = callback;
+    }
+
+    // Get latest signal quality metrics
+    getSignalQuality() {
+        return this.signalQuality;
     }
     
     // Handle binary Opus audio messages

@@ -480,6 +480,7 @@
                     <button class="tab" onclick="switchTab('extensions')">Extensions</button>
                     <button class="tab" onclick="switchTab('decoder')">Decoder</button>
                     <button class="tab" onclick="switchTab('cwskimmer')">CW Skimmer</button>
+                    <button class="tab" onclick="switchTab('chat')">Chat</button>
                     <button class="tab" onclick="switchTab('monitor')">Monitor</button>
                     <button class="tab" onclick="switchTab('system')">System</button>
                 </div>
@@ -728,6 +729,59 @@
                     </div>
                 </div>
 
+                <!-- Chat Tab -->
+                <div id="chatTab" class="tab-content">
+                    <div class="alert alert-info" style="margin-bottom: 20px;">
+                        ℹ️ <strong>Note:</strong> Chat logs are stored as CSV files organized by date. Use the filters below to search through chat history.
+                    </div>
+
+                    <!-- Filter Section -->
+                    <div style="margin-bottom: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px;">
+                        <h3 style="margin-bottom: 15px; color: #333;">Filter Chat Logs</h3>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 15px;">
+                            <div class="config-field">
+                                <label>Start Date</label>
+                                <input type="date" id="chatStartDate" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                            </div>
+                            <div class="config-field">
+                                <label>End Date</label>
+                                <input type="date" id="chatEndDate" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                            </div>
+                            <div class="config-field">
+                                <label>IP Address</label>
+                                <input type="text" id="chatIPFilter" placeholder="e.g., 192.168.1" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                                <small>Partial match</small>
+                            </div>
+                            <div class="config-field">
+                                <label>Nickname</label>
+                                <input type="text" id="chatNicknameFilter" placeholder="e.g., John" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                                <small>Case-insensitive partial match</small>
+                            </div>
+                            <div class="config-field">
+                                <label>Message Content</label>
+                                <input type="text" id="chatMessageFilter" placeholder="e.g., hello" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                                <small>Case-insensitive partial match</small>
+                            </div>
+                            <div class="config-field">
+                                <label>Limit</label>
+                                <input type="number" id="chatLimitFilter" value="1000" min="1" max="10000" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                                <small>Max results (1-10000)</small>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 10px;">
+                            <button class="btn" onclick="loadChatLogs()">Load Logs</button>
+                            <button class="btn btn-secondary" onclick="clearChatFilters()">Clear Filters</button>
+                            <button class="btn btn-secondary" onclick="exportChatLogs()">Export CSV</button>
+                        </div>
+                    </div>
+
+                    <!-- Chat Logs Display -->
+                    <div id="chatLogsList" class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading chat logs...</p>
+                    </div>
+                </div>
+
                 <!-- System Tab -->
                 <div id="systemTab" class="tab-content">
                     <div id="systemStats" class="loading">
@@ -786,6 +840,9 @@
                 <div class="button-group" id="monitorButtons" style="display: none;">
                     <button class="btn btn-secondary" onclick="loadMonitorHealth()">Refresh</button>
                     <button class="btn btn-secondary" onclick="loadMonitorHealthDetailed()">Detailed Diagnostics</button>
+                </div>
+                <div class="button-group" id="chatButtons" style="display: none;">
+                    <button class="btn btn-secondary" onclick="loadChatLogs()">Refresh</button>
                 </div>
                 <div class="button-group" id="systemButtons" style="display: none;">
                     <button class="btn btn-secondary" onclick="loadSystemStats()">Refresh</button>
@@ -1300,6 +1357,7 @@
             document.getElementById('cwskimmerButtons').style.display = 'none';
             document.getElementById('sessionButtons').style.display = 'none';
             document.getElementById('bannedButtons').style.display = 'none';
+            document.getElementById('chatButtons').style.display = 'none';
             document.getElementById('monitorButtons').style.display = 'none';
             document.getElementById('systemButtons').style.display = 'none';
 
@@ -1369,14 +1427,19 @@
                 document.getElementById('cwskimmerTab').classList.add('active');
                 document.getElementById('cwskimmerButtons').style.display = 'flex';
                 loadCWSkimmerConfig();
-            } else if (tab === 'monitor') {
+            } else if (tab === 'chat') {
                 document.querySelector('.tab:nth-child(11)').classList.add('active');
+                document.getElementById('chatTab').classList.add('active');
+                document.getElementById('chatButtons').style.display = 'flex';
+                loadChatLogs();
+            } else if (tab === 'monitor') {
+                document.querySelector('.tab:nth-child(12)').classList.add('active');
                 document.getElementById('monitorTab').classList.add('active');
                 document.getElementById('monitorButtons').style.display = 'flex';
                 loadMonitorHealth();
                 startMonitorAutoRefresh();
             } else if (tab === 'system') {
-                document.querySelector('.tab:nth-child(12)').classList.add('active');
+                document.querySelector('.tab:nth-child(13)').classList.add('active');
                 document.getElementById('systemTab').classList.add('active');
                 document.getElementById('systemButtons').style.display = 'flex';
                 loadSystemStats();
@@ -3027,7 +3090,7 @@
                 // Use the key which is the user_session_id or fallback to client IP
                 const keyA = a[0];
                 const keyB = b[0];
-                
+
                 // Sort alphabetically by key (UUID or IP)
                 return keyA.localeCompare(keyB);
             });
@@ -7908,13 +7971,13 @@
 
         function renderRadiodChannels(data) {
             const container = document.getElementById('radiodChannelsList');
-            
+
             // Store data globally for filtering/sorting
             currentRadiodChannelsData = data;
 
             // Check if this is first render or a filter/sort update
             const isFirstRender = container.classList.contains('loading');
-            
+
             if (isFirstRender) {
                 container.innerHTML = '';
                 container.classList.remove('loading');
@@ -8027,7 +8090,7 @@
                 summaryDiv.style.borderRadius = '5px';
                 container.appendChild(summaryDiv);
             }
-            
+
             summaryDiv.innerHTML = `
                 <strong>Summary:</strong>
                 <span style="margin-left: 20px;">• Total: <strong>${data.total_channels}</strong></span>
@@ -8343,7 +8406,7 @@
                 // Color-code rows by channel type, but override with warning color if stale
                 let rowBg = '';
                 let channelDisplay = '';
-                
+
                 if (isStale) {
                     // Stale channels get a subtle red/salmon background
                     rowBg = '#ffebee'; // Light red/pink (not bright red)
@@ -8371,7 +8434,7 @@
                             break;
                     }
                 }
-                
+
                 // Set channel display if not already set (for stale channels)
                 if (!channelDisplay) {
                     switch(channel.channel_type) {
@@ -8392,7 +8455,7 @@
                             break;
                     }
                 }
-                
+
                 if (rowBg) {
                     row.style.background = rowBg;
                 }
@@ -8443,6 +8506,198 @@
                 renderRadiodChannelsTable();
             }
         }
+
+        // Chat Logs Management
+        async function loadChatLogs() {
+            try {
+                // Get filter values
+                const startDate = document.getElementById('chatStartDate').value;
+                const endDate = document.getElementById('chatEndDate').value;
+                const ipFilter = document.getElementById('chatIPFilter').value.trim();
+                const nicknameFilter = document.getElementById('chatNicknameFilter').value.trim();
+                const messageFilter = document.getElementById('chatMessageFilter').value.trim();
+                const limit = document.getElementById('chatLimitFilter').value;
+
+                // Build query parameters
+                const params = new URLSearchParams();
+                if (startDate) params.append('start', startDate);
+                if (endDate) params.append('end', endDate);
+                if (ipFilter) params.append('ip', ipFilter);
+                if (nicknameFilter) params.append('nickname', nicknameFilter);
+                if (messageFilter) params.append('message', messageFilter);
+                if (limit) params.append('limit', limit);
+
+                // Fetch chat logs
+                const response = await authenticatedFetch(`/admin/chat/logs?${params.toString()}`);
+                if (!response) return; // Auth failed, already handled
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to load chat logs');
+                }
+
+                const data = await response.json();
+                renderChatLogs(data);
+                showAlert(`Loaded ${data.count} chat log(s)`, 'success');
+            } catch (error) {
+                showAlert('Error loading chat logs: ' + error.message, 'error');
+            }
+        }
+
+        function renderChatLogs(data) {
+            const container = document.getElementById('chatLogsList');
+            container.innerHTML = '';
+            container.classList.remove('loading');
+
+            if (!data.logs || data.logs.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No chat logs found for the selected filters</p>';
+                return;
+            }
+
+            // Create summary
+            const summaryDiv = document.createElement('div');
+            summaryDiv.style.marginBottom = '15px';
+            summaryDiv.style.padding = '15px';
+            summaryDiv.style.background = '#e3f2fd';
+            summaryDiv.style.borderRadius = '5px';
+
+            let summaryHTML = `<strong>Summary:</strong> ${data.count} message(s) from ${data.start_date} to ${data.end_date}`;
+            if (data.ip_filter) summaryHTML += ` • IP: <strong>${data.ip_filter}</strong>`;
+            if (data.nickname_filter) summaryHTML += ` • Nickname: <strong>${data.nickname_filter}</strong>`;
+            if (data.message_filter) summaryHTML += ` • Message: <strong>${data.message_filter}</strong>`;
+
+            summaryDiv.innerHTML = summaryHTML;
+            container.appendChild(summaryDiv);
+
+            // Create table
+            const table = document.createElement('table');
+            table.style.width = '100%';
+            table.style.borderCollapse = 'collapse';
+            table.innerHTML = `
+                <thead>
+                    <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                        <th style="padding: 12px; text-align: left; width: 180px;">Timestamp</th>
+                        <th style="padding: 12px; text-align: left; width: 140px;">IP Address</th>
+                        <th style="padding: 12px; text-align: left; width: 150px;">Nickname</th>
+                        <th style="padding: 12px; text-align: left;">Message</th>
+                    </tr>
+                </thead>
+                <tbody id="chatLogsTableBody"></tbody>
+            `;
+            container.appendChild(table);
+
+            const tbody = document.getElementById('chatLogsTableBody');
+            data.logs.forEach(log => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #dee2e6';
+
+                // Format timestamp
+                const timestamp = new Date(log.timestamp);
+                const timestampStr = timestamp.toLocaleString();
+
+                // Escape HTML to prevent XSS
+                const escapeHtml = (text) => {
+                    const div = document.createElement('div');
+                    div.textContent = text;
+                    return div.innerHTML;
+                };
+
+                row.innerHTML = `
+                    <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${timestampStr}</td>
+                    <td style="padding: 12px; font-family: monospace; font-size: 12px;">${escapeHtml(log.source_ip)}</td>
+                    <td style="padding: 12px; font-weight: bold; color: #667eea;">${escapeHtml(log.username)}</td>
+                    <td style="padding: 12px; word-break: break-word;">${escapeHtml(log.message)}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function clearChatFilters() {
+            // Set dates to today
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('chatStartDate').value = today;
+            document.getElementById('chatEndDate').value = today;
+            document.getElementById('chatIPFilter').value = '';
+            document.getElementById('chatNicknameFilter').value = '';
+            document.getElementById('chatMessageFilter').value = '';
+            document.getElementById('chatLimitFilter').value = '1000';
+
+            // Reload logs
+            loadChatLogs();
+        }
+
+        async function exportChatLogs() {
+            try {
+                // Get filter values
+                const startDate = document.getElementById('chatStartDate').value;
+                const endDate = document.getElementById('chatEndDate').value;
+                const ipFilter = document.getElementById('chatIPFilter').value.trim();
+                const nicknameFilter = document.getElementById('chatNicknameFilter').value.trim();
+                const messageFilter = document.getElementById('chatMessageFilter').value.trim();
+                const limit = document.getElementById('chatLimitFilter').value;
+
+                // Build query parameters
+                const params = new URLSearchParams();
+                if (startDate) params.append('start', startDate);
+                if (endDate) params.append('end', endDate);
+                if (ipFilter) params.append('ip', ipFilter);
+                if (nicknameFilter) params.append('nickname', nicknameFilter);
+                if (messageFilter) params.append('message', messageFilter);
+                if (limit) params.append('limit', limit);
+
+                // Fetch chat logs
+                const response = await authenticatedFetch(`/admin/chat/logs?${params.toString()}`);
+                if (!response) return; // Auth failed, already handled
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to load chat logs');
+                }
+
+                const data = await response.json();
+
+                // Create CSV content
+                let csv = 'Timestamp,IP Address,Nickname,Message\n';
+                (data.logs || []).forEach(log => {
+                    const timestamp = new Date(log.timestamp).toISOString();
+                    // Escape CSV fields
+                    const escapeCsv = (field) => {
+                        if (typeof field === 'string' && (field.includes(',') || field.includes('"') || field.includes('\n'))) {
+                            return `"${field.replace(/"/g, '""')}"`;
+                        }
+                        return field;
+                    };
+                    csv += `${timestamp},${escapeCsv(log.source_ip)},${escapeCsv(log.username)},${escapeCsv(log.message)}\n`;
+                });
+
+                // Create download
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+
+                // Generate filename with date range
+                const startStr = startDate || 'all';
+                const endStr = endDate || 'all';
+                a.download = `chat_logs_${startStr}_to_${endStr}.csv`;
+
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                showAlert('Chat logs exported successfully', 'success');
+            } catch (error) {
+                showAlert('Error exporting chat logs: ' + error.message, 'error');
+            }
+        }
+
+        // Initialize chat date filters to today when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('chatStartDate').value = today;
+            document.getElementById('chatEndDate').value = today;
+        });
     </script>
 </body>
 </html>

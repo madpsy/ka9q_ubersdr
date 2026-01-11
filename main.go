@@ -1045,6 +1045,7 @@ func main() {
 	http.HandleFunc("/admin/session-activity/logs", adminHandler.AuthMiddleware(adminHandler.HandleSessionActivityLogs))
 	http.HandleFunc("/admin/session-activity/metrics", adminHandler.AuthMiddleware(adminHandler.HandleSessionActivityMetrics))
 	http.HandleFunc("/admin/session-activity/events", adminHandler.AuthMiddleware(adminHandler.HandleSessionActivityEvents))
+	http.HandleFunc("/admin/chat/logs", adminHandler.AuthMiddleware(adminHandler.HandleChatLogs))
 	http.HandleFunc("/admin/force-update", adminHandler.AuthMiddleware(adminHandler.HandleForceUpdate))
 
 	// Open log file for HTTP request logging

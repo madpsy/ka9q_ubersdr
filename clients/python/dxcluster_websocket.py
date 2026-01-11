@@ -40,6 +40,9 @@ class DXClusterWebSocket:
         # Lock for thread-safe callback management
         self.callback_lock = threading.Lock()
 
+        # Track pending subscriptions (to send when connection opens)
+        self._pending_subscriptions = set()
+
     def connect(self):
         """Start the WebSocket connection."""
         if self.running:
@@ -88,6 +91,12 @@ class DXClusterWebSocket:
         self.connected = True
         print("DX Cluster WebSocket connected")
         self._notify_status(True)
+
+        # Send any pending subscriptions that were queued before connection
+        if hasattr(self, '_pending_subscriptions'):
+            for sub_type in self._pending_subscriptions:
+                self._send_subscription(sub_type, True)
+            self._pending_subscriptions.clear()
 
     def _on_message(self, ws, message):
         """Handle incoming WebSocket message."""
@@ -324,3 +333,68 @@ class DXClusterWebSocket:
     def is_connected(self) -> bool:
         """Check if WebSocket is connected."""
         return self.connected
+
+    def _send_subscription(self, stream_type: str, subscribe: bool):
+        """
+        Send subscription/unsubscription message to server.
+
+        Args:
+            stream_type: Type of stream ('dx_spots', 'digital_spots', 'cw_spots', 'chat')
+            subscribe: True to subscribe, False to unsubscribe
+        """
+        action = 'subscribe' if subscribe else 'unsubscribe'
+        message = {'type': f'{action}_{stream_type}'}
+        self.send_message(message)
+        print(f"DX Cluster WebSocket: {'Subscribed to' if subscribe else 'Unsubscribed from'} {stream_type}")
+
+    def subscribe_to_dx_spots(self):
+        """Subscribe to DX cluster spots."""
+        if self.connected:
+            self._send_subscription('dx_spots', True)
+        else:
+            self._pending_subscriptions.add('dx_spots')
+
+    def subscribe_to_digital_spots(self):
+        """Subscribe to digital spots (FT8/FT4/WSPR)."""
+        if self.connected:
+            self._send_subscription('digital_spots', True)
+        else:
+            self._pending_subscriptions.add('digital_spots')
+
+    def subscribe_to_cw_spots(self):
+        """Subscribe to CW spots."""
+        if self.connected:
+            self._send_subscription('cw_spots', True)
+        else:
+            self._pending_subscriptions.add('cw_spots')
+
+    def subscribe_to_chat(self):
+        """Subscribe to chat messages."""
+        if self.connected:
+            self._send_subscription('chat', True)
+        else:
+            self._pending_subscriptions.add('chat')
+
+    def unsubscribe_from_dx_spots(self):
+        """Unsubscribe from DX cluster spots."""
+        if self.connected:
+            self._send_subscription('dx_spots', False)
+        self._pending_subscriptions.discard('dx_spots')
+
+    def unsubscribe_from_digital_spots(self):
+        """Unsubscribe from digital spots."""
+        if self.connected:
+            self._send_subscription('digital_spots', False)
+        self._pending_subscriptions.discard('digital_spots')
+
+    def unsubscribe_from_cw_spots(self):
+        """Unsubscribe from CW spots."""
+        if self.connected:
+            self._send_subscription('cw_spots', False)
+        self._pending_subscriptions.discard('cw_spots')
+
+    def unsubscribe_from_chat(self):
+        """Unsubscribe from chat messages."""
+        if self.connected:
+            self._send_subscription('chat', False)
+        self._pending_subscriptions.discard('chat')

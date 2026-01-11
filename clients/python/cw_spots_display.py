@@ -78,6 +78,9 @@ class CWSpotsDisplay:
         self.websocket_manager.on_cw_spot(self._handle_spot)
         self.websocket_manager.on_status(self._handle_status)
 
+        # Subscribe to CW spots on server
+        self.websocket_manager.subscribe_to_cw_spots()
+
         # Auto-open graph window
         self.window.after(500, self.open_graph_window)
 
@@ -671,6 +674,9 @@ class CWSpotsDisplay:
             self.graph_window.window.destroy()
             self.graph_window = None
 
+        # Unsubscribe from CW spots on server
+        self.websocket_manager.unsubscribe_from_cw_spots()
+
         # Remove callbacks
         self.websocket_manager.remove_cw_spot_callback(self._handle_spot)
         self.websocket_manager.remove_status_callback(self._handle_status)
@@ -775,13 +781,13 @@ class CWSpotsDisplay:
     def open_live_map(self):
         """Open the CW Skimmer live map in the default browser."""
         import webbrowser
-        
+
         # Get public_url from radio_gui if available
         if self.radio_gui and hasattr(self.radio_gui, 'client') and self.radio_gui.client:
             if hasattr(self.radio_gui.client, 'server_description'):
                 desc = self.radio_gui.client.server_description
                 public_url = desc.get('receiver', {}).get('public_url', '')
-                
+
                 if public_url and public_url != 'https://example.com':
                     # Build the map URL
                     map_url = f"{public_url}/cwskimmer_map.html"
@@ -791,7 +797,7 @@ class CWSpotsDisplay:
                     except Exception as e:
                         print(f"Failed to open map: {e}")
                     return
-        
+
         # Fallback: show error message
         from tkinter import messagebox
         messagebox.showinfo("Map Not Available", "Public URL not available for this receiver")

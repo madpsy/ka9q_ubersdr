@@ -46,7 +46,7 @@ class ChatDisplay:
         self.sync_zoom = False  # Whether to apply zoom changes when syncing
         self.listbox_to_user = {}  # Map listbox index to user data
         self.emoji_popup = None  # Emoji picker popup window
-        
+
         # Config file path for storing chat usernames per instance
         if platform.system() == 'Windows':
             config_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'ubersdr')
@@ -54,7 +54,7 @@ class ChatDisplay:
             self.config_file = os.path.join(config_dir, 'chat_usernames.json')
         else:
             self.config_file = os.path.expanduser("~/.ubersdr_chat_usernames.json")
-        
+
         # Track last sent values to prevent duplicate sends
         self.last_sent_freq = None
         self.last_sent_mode = None
@@ -86,6 +86,9 @@ class ChatDisplay:
 
         # Register WebSocket callback for chat messages
         self.ws_manager.register_callback('chat', self.handle_chat_message)
+
+        # Subscribe to chat on server when window is opened
+        self.ws_manager.subscribe_to_chat()
 
         # Request active users after a short delay to ensure WebSocket is ready
         # This allows users to see who's online even before joining
@@ -1167,7 +1170,7 @@ class ChatDisplay:
         zoom_applied = False
         if will_apply_zoom:
             spectrum = self.radio_gui.spectrum
-            
+
             # Calculate total bandwidth from bin bandwidth
             new_total_bandwidth = zoom_bw * spectrum.bin_count
 
@@ -1774,6 +1777,9 @@ class ChatDisplay:
         # Hide tooltips if showing
         self.hide_user_tooltip()
         self.hide_chat_username_tooltip()
+
+        # Unsubscribe from chat on server
+        self.ws_manager.unsubscribe_from_chat()
 
         # Unregister callback
         self.ws_manager.unregister_callback('chat')

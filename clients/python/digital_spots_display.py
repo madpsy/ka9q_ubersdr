@@ -13,11 +13,11 @@ import queue
 
 class DigitalSpotsDisplay:
     """Display window for digital mode spots (FT8, FT4, WSPR)."""
-    
+
     def __init__(self, websocket_manager, on_close: Optional[Callable] = None, countries: Optional[List[Dict]] = None, radio_gui=None):
         """
         Initialize the digital spots display.
-        
+
         Args:
             websocket_manager: Shared DXClusterWebSocket instance
             on_close: Optional callback when window is closed
@@ -28,22 +28,22 @@ class DigitalSpotsDisplay:
         self.on_close_callback = on_close
         self.countries = countries or []
         self.radio_gui = radio_gui
-        
+
         # Create window
         self.window = tk.Toplevel()
         self.window.title("Digital Spots")
         self.window.geometry("1400x700")
-        
+
         # Data storage
         self.spots: List[Dict] = []
         self.max_spots = 5000
         self.filtered_spots: List[Dict] = []
-        
+
         # Update queue for thread-safe GUI updates
         self.update_queue = queue.Queue()
-        
+
         self.running = True
-        
+
         # Filter state
         self.mode_filter = tk.StringVar(value="all")
         self.age_filter = tk.IntVar(value=10)  # minutes
@@ -52,14 +52,14 @@ class DigitalSpotsDisplay:
         self.callsign_filter = tk.StringVar(value="")
         self.country_filter = tk.StringVar(value="all")
         self.auto_band = True  # Auto-update band filter when frequency changes
-        
+
         # Sorting state
         self.sort_column = "time"
         self.sort_reverse = True  # Most recent first by default
-        
+
         # Create UI
         self.create_widgets()
-        
+
         # Handle window close
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -72,15 +72,18 @@ class DigitalSpotsDisplay:
         # This ensures the initial status notification is properly queued and processed
         self.websocket_manager.on_digital_spot(self._handle_spot)
         self.websocket_manager.on_status(self._handle_status)
-    
+
+        # Subscribe to digital spots on server
+        self.websocket_manager.subscribe_to_digital_spots()
+
     def _handle_spot(self, spot_data: Dict):
         """Handle incoming digital spot from WebSocket."""
         self.update_queue.put(('spot', spot_data))
-    
+
     def _handle_status(self, connected: bool):
         """Handle connection status change."""
         self.update_queue.put(('status', connected))
-    
+
     def create_widgets(self):
         """Create all GUI widgets."""
         # Main container
@@ -88,28 +91,28 @@ class DigitalSpotsDisplay:
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         self.window.columnconfigure(0, weight=1)
         self.window.rowconfigure(0, weight=1)
-        
+
         # Header with status
         header_frame = ttk.Frame(main_frame)
         header_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        
-        ttk.Label(header_frame, text="Digital Spots", 
+
+        ttk.Label(header_frame, text="Digital Spots",
                  font=('TkDefaultFont', 12, 'bold')).pack(side=tk.LEFT)
-        
-        self.status_label = ttk.Label(header_frame, text="Disconnected", 
+
+        self.status_label = ttk.Label(header_frame, text="Disconnected",
                                      foreground='red')
         self.status_label.pack(side=tk.LEFT, padx=(10, 0))
-        
+
         self.count_label = ttk.Label(header_frame, text="0 spots")
         self.count_label.pack(side=tk.RIGHT)
-        
+
         self.last_update_label = ttk.Label(header_frame, text="")
         self.last_update_label.pack(side=tk.RIGHT, padx=(0, 20))
-        
+
         # Filter controls
         filter_frame = ttk.LabelFrame(main_frame, text="Filters", padding="5")
         filter_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        
+
         # Mode filter
         ttk.Label(filter_frame, text="Mode:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
         mode_combo = ttk.Combobox(filter_frame, textvariable=self.mode_filter,
@@ -117,7 +120,7 @@ class DigitalSpotsDisplay:
                                  state='readonly', width=10)
         mode_combo.grid(row=0, column=1, sticky=tk.W, padx=(0, 15))
         mode_combo.bind('<<ComboboxSelected>>', lambda e: self.apply_filters())
-        
+
         # Age filter
         ttk.Label(filter_frame, text="Age:").grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
         age_combo = ttk.Combobox(filter_frame, textvariable=self.age_filter,
@@ -126,16 +129,16 @@ class DigitalSpotsDisplay:
         age_combo.grid(row=0, column=3, sticky=tk.W, padx=(0, 5))
         age_combo.bind('<<ComboboxSelected>>', lambda e: self.apply_filters())
         ttk.Label(filter_frame, text="min").grid(row=0, column=4, sticky=tk.W, padx=(0, 15))
-        
+
         # Band filter
         ttk.Label(filter_frame, text="Band:").grid(row=0, column=5, sticky=tk.W, padx=(0, 5))
         band_combo = ttk.Combobox(filter_frame, textvariable=self.band_filter,
-                                 values=["all", "160m", "80m", "60m", "40m", "30m", 
+                                 values=["all", "160m", "80m", "60m", "40m", "30m",
                                         "20m", "17m", "15m", "12m", "10m"],
                                  state='readonly', width=8)
         band_combo.grid(row=0, column=6, sticky=tk.W, padx=(0, 15))
         band_combo.bind('<<ComboboxSelected>>', lambda e: self.apply_filters())
-        
+
         # SNR filter
         ttk.Label(filter_frame, text="Min SNR:").grid(row=0, column=7, sticky=tk.W, padx=(0, 5))
         snr_combo = ttk.Combobox(filter_frame, textvariable=self.snr_filter,
@@ -143,13 +146,13 @@ class DigitalSpotsDisplay:
                                 state='readonly', width=8)
         snr_combo.grid(row=0, column=8, sticky=tk.W, padx=(0, 15))
         snr_combo.bind('<<ComboboxSelected>>', lambda e: self.apply_filters())
-        
+
         # Callsign filter
         ttk.Label(filter_frame, text="Callsign:").grid(row=0, column=9, sticky=tk.W, padx=(0, 5))
         callsign_entry = ttk.Entry(filter_frame, textvariable=self.callsign_filter, width=12)
         callsign_entry.grid(row=0, column=10, sticky=tk.W, padx=(0, 15))
         callsign_entry.bind('<KeyRelease>', lambda e: self.window.after(300, self.apply_filters))
-        
+
         # Country filter
         ttk.Label(filter_frame, text="Country:").grid(row=0, column=11, sticky=tk.W, padx=(0, 5))
         country_values = ["all"] + [c['name'] for c in self.countries]
@@ -175,21 +178,21 @@ class DigitalSpotsDisplay:
         # Live Map button (pinned to far right)
         live_map_btn = ttk.Button(filter_frame, text="Live Map", command=self.open_live_map)
         live_map_btn.grid(row=0, column=16, sticky=tk.E, padx=(5, 0))
-        
+
         # Spots table with scrollbar
         table_frame = ttk.Frame(main_frame)
         table_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
+
         # Create Treeview for spots
-        columns = ('time', 'age', 'mode', 'freq', 'band', 'callsign', 
+        columns = ('time', 'age', 'mode', 'freq', 'band', 'callsign',
                   'country', 'grid', 'distance', 'bearing', 'snr', 'message')
         self.tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=25)
-        
+
         # Define column headings with sort commands
         for col in columns:
             self.tree.heading(col, text=self._get_column_title(col),
                             command=lambda c=col: self._sort_by_column(c))
-        
+
         # Define column widths
         self.tree.column('time', width=80)
         self.tree.column('age', width=60)
@@ -203,27 +206,27 @@ class DigitalSpotsDisplay:
         self.tree.column('bearing', width=70)
         self.tree.column('snr', width=60)
         self.tree.column('message', width=200)
-        
+
         # Add scrollbars
         vsb = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(table_frame, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        
+
         # Grid layout
         self.tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         vsb.grid(row=0, column=1, sticky=(tk.N, tk.S))
         hsb.grid(row=1, column=0, sticky=(tk.W, tk.E))
-        
+
         table_frame.columnconfigure(0, weight=1)
         table_frame.rowconfigure(0, weight=1)
 
         # Bind single-click event to set filters
         self.tree.bind("<Button-1>", self._on_row_click)
-        
+
         # Configure main frame weights
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(2, weight=1)
-    
+
     def add_spot(self, spot: Dict):
         """Add a new spot to the list."""
         self.spots.insert(0, spot)  # Add to beginning
@@ -241,7 +244,7 @@ class DigitalSpotsDisplay:
 
         # Apply filters and update display
         self.apply_filters()
-    
+
     def apply_filters(self):
         """Apply current filters to spots list."""
         now = datetime.utcnow()
@@ -252,9 +255,9 @@ class DigitalSpotsDisplay:
         min_snr = None if snr_str == "none" else int(snr_str)
         callsign = self.callsign_filter.get().upper()
         country = self.country_filter.get()
-        
+
         self.filtered_spots = []
-        
+
         for spot in self.spots:
             # Age filter
             try:
@@ -263,19 +266,19 @@ class DigitalSpotsDisplay:
                     continue
             except (KeyError, ValueError):
                 continue
-            
+
             # Mode filter
             if mode != "all" and spot.get('mode') != mode:
                 continue
-            
+
             # Band filter
             if band != "all" and spot.get('band') != band:
                 continue
-            
+
             # SNR filter
             if min_snr is not None and spot.get('snr', -999) < min_snr:
                 continue
-            
+
             # Callsign filter
             if callsign:
                 spot_callsign = spot.get('callsign', '').upper()
@@ -283,16 +286,16 @@ class DigitalSpotsDisplay:
                 spot_msg = spot.get('message', '').upper()
                 if callsign not in spot_callsign and callsign not in spot_grid and callsign not in spot_msg:
                     continue
-            
+
             # Country filter
             if country != "all" and spot.get('country', '') != country:
                 continue
-            
+
             self.filtered_spots.append(spot)
-        
+
         # Update display
         self.update_display()
-    
+
     def _get_column_title(self, column):
         """Get display title for column."""
         titles = {
@@ -314,7 +317,7 @@ class DigitalSpotsDisplay:
         if column == self.sort_column:
             title += " ▼" if self.sort_reverse else " ▲"
         return title
-    
+
     def _sort_by_column(self, column):
         """Sort spots by the specified column."""
         # Toggle sort direction if clicking same column
@@ -324,15 +327,15 @@ class DigitalSpotsDisplay:
             self.sort_column = column
             # Default sort direction based on column type
             self.sort_reverse = column in ["time", "snr", "distance"]
-        
+
         # Update column headings to show sort indicator
         for col in ('time', 'age', 'mode', 'freq', 'band', 'callsign',
                    'country', 'grid', 'distance', 'bearing', 'snr', 'message'):
             self.tree.heading(col, text=self._get_column_title(col))
-        
+
         # Re-apply filters (which will trigger display update with new sort)
         self.apply_filters()
-    
+
     def _get_sort_key(self, spot, column):
         """Get sort key for a spot based on column."""
         if column == "time":
@@ -366,18 +369,18 @@ class DigitalSpotsDisplay:
         elif column == "message":
             return spot.get('message', '').upper()
         return ''
-    
+
     def update_display(self):
         """Update the spots table display."""
         # Clear existing items
         for item in self.tree.get_children():
             self.tree.delete(item)
-        
+
         # Sort filtered spots by current sort column
         sorted_spots = sorted(self.filtered_spots[:500],
                             key=lambda s: self._get_sort_key(s, self.sort_column),
                             reverse=self.sort_reverse)
-        
+
         # Add sorted spots
         for spot in sorted_spots:
             # Format time
@@ -386,7 +389,7 @@ class DigitalSpotsDisplay:
                 time_str = spot_time.strftime('%H:%M:%S')
             except (KeyError, ValueError):
                 time_str = ""
-            
+
             # Calculate age
             try:
                 spot_time = datetime.fromisoformat(spot['timestamp'].replace('Z', '+00:00'))
@@ -399,22 +402,22 @@ class DigitalSpotsDisplay:
                     age_str = f"{age.seconds // 3600}h{(age.seconds % 3600) // 60}m"
             except (KeyError, ValueError):
                 age_str = ""
-            
+
             # Format frequency
             freq_mhz = spot.get('frequency', 0) / 1e6
-            
+
             # Format SNR
             snr = spot.get('snr', 0)
             snr_str = f"+{snr}" if snr >= 0 else str(snr)
-            
+
             # Format distance
             distance = spot.get('distance_km')
             dist_str = f"{int(distance)} km" if distance else ""
-            
+
             # Format bearing
             bearing = spot.get('bearing_deg')
             bearing_str = f"{int(bearing)}°" if bearing is not None else ""
-            
+
             values = (
                 time_str,
                 age_str,
@@ -429,7 +432,7 @@ class DigitalSpotsDisplay:
                 snr_str,
                 spot.get('message', '')
             )
-            
+
             # Add color tags based on SNR
             tags = []
             if snr >= 10:
@@ -440,15 +443,15 @@ class DigitalSpotsDisplay:
                 tags.append('low_snr')
             else:
                 tags.append('very_low_snr')
-            
+
             self.tree.insert('', 'end', values=values, tags=tags)
-        
+
         # Configure tag colors
         self.tree.tag_configure('high_snr', foreground='#28a745')  # Green
         self.tree.tag_configure('good_snr', foreground='#007bff')  # Blue
         self.tree.tag_configure('low_snr', foreground='#ffc107')   # Yellow
         self.tree.tag_configure('very_low_snr', foreground='#dc3545')  # Red
-        
+
         # Update count
         total = len(self.spots)
         filtered = len(self.filtered_spots)
@@ -456,7 +459,7 @@ class DigitalSpotsDisplay:
             self.count_label.config(text=f"{filtered} spots of {total} total")
         else:
             self.count_label.config(text=f"{filtered} spots")
-    
+
     def update_ages(self):
         """Update age column periodically without full table rebuild."""
         if self.running:
@@ -494,7 +497,7 @@ class DigitalSpotsDisplay:
 
             # Schedule next update in 1 second
             self.window.after(1000, self.update_ages)
-    
+
     def reset_filters(self):
         """Reset all filters to their default values."""
         self.mode_filter.set("all")
@@ -510,7 +513,7 @@ class DigitalSpotsDisplay:
         self.spots = []
         self.filtered_spots = []
         self.update_display()
-    
+
     def check_updates(self):
         """Check for updates from WebSocket thread."""
         try:
@@ -532,19 +535,22 @@ class DigitalSpotsDisplay:
         # Schedule next check
         if self.running:
             self.window.after(100, self.check_updates)
-    
+
     def on_closing(self):
         """Handle window close."""
         self.running = False
-        
+
+        # Unsubscribe from digital spots on server
+        self.websocket_manager.unsubscribe_from_digital_spots()
+
         # Remove callbacks from shared WebSocket manager
         self.websocket_manager.remove_digital_spot_callback(self._handle_spot)
         self.websocket_manager.remove_status_callback(self._handle_status)
-        
+
         # Call close callback if provided
         if self.on_close_callback:
             self.on_close_callback()
-        
+
         self.window.destroy()
 
     def _on_row_click(self, event):
@@ -595,13 +601,13 @@ class DigitalSpotsDisplay:
     def open_live_map(self):
         """Open the Digital Spots live map in the default browser."""
         import webbrowser
-        
+
         # Get public_url from radio_gui if available
         if self.radio_gui and hasattr(self.radio_gui, 'client') and self.radio_gui.client:
             if hasattr(self.radio_gui.client, 'server_description'):
                 desc = self.radio_gui.client.server_description
                 public_url = desc.get('receiver', {}).get('public_url', '')
-                
+
                 if public_url and public_url != 'https://example.com':
                     # Build the map URL
                     map_url = f"{public_url}/digitalspots_map.html"
@@ -611,7 +617,7 @@ class DigitalSpotsDisplay:
                     except Exception as e:
                         print(f"Failed to open map: {e}")
                     return
-        
+
         # Fallback: show error message
         from tkinter import messagebox
         messagebox.showinfo("Map Not Available", "Public URL not available for this receiver")
@@ -619,14 +625,14 @@ class DigitalSpotsDisplay:
 
 def create_digital_spots_window(websocket_manager, on_close=None, countries=None, radio_gui=None):
     """Create and return a digital spots display window.
-    
+
     Args:
         websocket_manager: Shared DXClusterWebSocket instance
         on_close: Optional callback when window is closed
         countries: Optional list of countries from /api/cty/countries
-        
+
         radio_gui: Optional reference to RadioGUI for accessing server info
-        
+
     Returns:
         DigitalSpotsDisplay instance
     """

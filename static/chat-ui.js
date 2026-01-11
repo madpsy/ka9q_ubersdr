@@ -1430,14 +1430,6 @@ class ChatUI {
                 badge.style.display = 'none';
             }
 
-            // Re-subscribe to chat when opening the panel (only if not already joined)
-            // This ensures we receive chat messages even if we previously left
-            // If user is joined, they're already subscribed so no need to resubscribe
-            if (this.chat && !this.chat.isJoined()) {
-                console.log('[ChatUI] Re-subscribing to chat on panel open (not joined yet)');
-                this.chat.subscribeToChat();
-            }
-
             // Scroll to bottom of messages and focus input after a short delay
             setTimeout(() => {
                 const messagesContainer = document.getElementById('chat-messages');

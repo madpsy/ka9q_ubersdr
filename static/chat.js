@@ -29,6 +29,7 @@ class UberSDRChat {
         this.debounceDelay = 100; // 100ms debounce delay
         this.activeUsers = []; // Store active users for sync functionality
         this.pendingOperations = []; // Queue for operations waiting for WebSocket
+        this.isSubscribed = false; // Track if we're subscribed to chat on server
 
         // Track last sent values to prevent duplicate sends
         this.lastSentFreq = null;
@@ -51,11 +52,18 @@ class UberSDRChat {
      * Subscribe to chat messages on the server
      */
     async subscribeToChat() {
+        // Don't subscribe if already subscribed
+        if (this.isSubscribed) {
+            console.log('[Chat] Already subscribed to chat, skipping');
+            return;
+        }
+
         // Wait for WebSocket to be ready
         const ws = await this.waitForWebSocket(5000);
         if (ws && ws.readyState === WebSocket.OPEN) {
             console.log('[Chat] Subscribing to chat on server');
             ws.send(JSON.stringify({ type: 'subscribe_chat' }));
+            this.isSubscribed = true;
         } else {
             console.warn('[Chat] Could not subscribe to chat - WebSocket not ready');
         }
@@ -258,10 +266,13 @@ class UberSDRChat {
         if (ws && ws.readyState === WebSocket.OPEN) {
             // Re-subscribe to chat if user is joining after leaving
             // This ensures they receive chat messages again
-            console.log('[Chat] Re-subscribing to chat on server before setting username');
-            ws.send(JSON.stringify({
-                type: 'subscribe_chat'
-            }));
+            if (!this.isSubscribed) {
+                console.log('[Chat] Re-subscribing to chat on server before setting username');
+                ws.send(JSON.stringify({
+                    type: 'subscribe_chat'
+                }));
+                this.isSubscribed = true;
+            }
 
             this.username = username; // Store temporarily, will be confirmed by server
             ws.send(JSON.stringify({
@@ -667,6 +678,7 @@ class UberSDRChat {
             ws.send(JSON.stringify({
                 type: 'unsubscribe_chat'
             }));
+            this.isSubscribed = false;
 
             this.username = null;
             this.frequency = null;

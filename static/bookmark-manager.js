@@ -148,6 +148,12 @@ async function loadBands() {
             console.log(`[bookmark-manager.js] Loaded ${amateurBands.length} amateur radio bands`);
             console.log('[bookmark-manager.js] First band:', amateurBands[0]);
             console.log('[bookmark-manager.js] window.amateurBands set:', window.amateurBands.length);
+            
+            // Populate band dropdown after bands are loaded
+            if (window.populateBandSelector) {
+                console.log('[bookmark-manager.js] Calling populateBandSelector()');
+                window.populateBandSelector();
+            }
         } else {
             console.error('[bookmark-manager.js] No bands available, status:', response.status);
         }
@@ -168,7 +174,12 @@ async function loadBookmarks() {
             console.log(`[bookmark-manager.js] Loaded ${bookmarks.length} bookmarks`);
             console.log('[bookmark-manager.js] First bookmark:', bookmarks[0]);
             console.log('[bookmark-manager.js] window.bookmarks set:', window.bookmarks.length);
-            // Bookmarks will be drawn automatically when spectrum display draws
+            
+            // Populate bookmark dropdown after bookmarks are loaded
+            if (window.populateBookmarkSelector) {
+                console.log('[bookmark-manager.js] Calling populateBookmarkSelector()');
+                window.populateBookmarkSelector();
+            }
         } else {
             console.error('[bookmark-manager.js] No bookmarks available, status:', response.status);
         }

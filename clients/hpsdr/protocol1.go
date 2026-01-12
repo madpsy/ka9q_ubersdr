@@ -670,13 +670,14 @@ func (s *Protocol1Server) LoadIQData(receiverNum int, samples []complex64) error
 
 	// Convert complex64 samples to 24-bit integer format
 	// Protocol 1 uses 24-bit samples (3 bytes each for I and Q)
-	// Scale factor: 2^23 - 1 = 8388607 (same as linhpsdr uses)
-	const scale = 8388607.0
+	// Scale factor: Use same as Protocol 2 for 192 kHz (4000.0)
+	// The full 24-bit range (8388607) is too hot and causes S9+80 readings
+	const scale = 4000.0
 
 	rcv.mu.Lock()
 	for i := 0; i < 126; i++ {
 		// Scale from float32 [-1.0, 1.0] to int32 24-bit range
-		// linhpsdr divides by 8388607 when receiving, so we multiply by it when sending
+		// Use moderate scaling to match Protocol 2 signal levels
 		iVal := int32(real(samples[i]) * scale)
 		qVal := int32(imag(samples[i]) * scale)
 

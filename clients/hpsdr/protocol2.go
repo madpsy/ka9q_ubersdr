@@ -462,13 +462,17 @@ func (s *Protocol2Server) discoveryThread() {
 
 			// Control/data packets - forward to Protocol 1 server if available
 			if s.protocol1Server != nil {
-				log.Printf("Protocol2: Forwarding Protocol 1 packet (cmd=0x%02x, %d bytes) from %s to Protocol1Server", cmd, n, addr)
+				if debugDiscovery {
+					log.Printf("Protocol2: Forwarding Protocol 1 packet (cmd=0x%02x, %d bytes) from %s to Protocol1Server", cmd, n, addr)
+				}
 				// Forward to Protocol 1 server's handler
 				s.protocol1Server.handleControlFromDiscoveryPort(buffer[:n], addr)
 				continue
 			} else {
 				// No Protocol 1 server available
-				log.Printf("Protocol2: Received Protocol 1 control/data packet (cmd=0x%02x) but no Protocol1Server available", cmd)
+				if debugDiscovery {
+					log.Printf("Protocol2: Received Protocol 1 control/data packet (cmd=0x%02x) but no Protocol1Server available", cmd)
+				}
 				continue
 			}
 		}

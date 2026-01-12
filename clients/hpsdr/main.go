@@ -302,23 +302,11 @@ func (b *UberSDRBridge) monitorReceivers() {
 
 		// Check if any HPSDR server is running
 		var hpsdrRunning bool
-		var proto1Running, proto2Running bool
-		if b.hpsdr1Server != nil {
-			proto1Running = b.hpsdr1Server.IsRunning()
-			if proto1Running {
-				hpsdrRunning = true
-			}
+		if b.hpsdr1Server != nil && b.hpsdr1Server.IsRunning() {
+			hpsdrRunning = true
 		}
-		if b.hpsdrServer != nil {
-			proto2Running = b.hpsdrServer.IsRunning()
-			if proto2Running {
-				hpsdrRunning = true
-			}
-		}
-
-		// Debug: log running status periodically
-		if proto1Running || proto2Running {
-			log.Printf("DEBUG: monitorReceivers: Proto1 running=%v, Proto2 running=%v", proto1Running, proto2Running)
+		if b.hpsdrServer != nil && b.hpsdrServer.IsRunning() {
+			hpsdrRunning = true
 		}
 
 		// Use longer sleep interval when no client connected to reduce CPU usage
@@ -350,11 +338,12 @@ func (b *UberSDRBridge) monitorReceivers() {
 			continue
 		}
 
-		// Get client IP for logging
+		// Get client IP for logging (check both servers)
 		var clientIP *net.UDPAddr
-		if b.protocolMode == 1 {
+		if b.hpsdr1Server != nil && b.hpsdr1Server.IsRunning() {
 			clientIP = b.hpsdr1Server.GetClientAddr()
-		} else {
+		}
+		if clientIP == nil && b.hpsdrServer != nil && b.hpsdrServer.IsRunning() {
 			clientIP = b.hpsdrServer.GetClientAddr()
 		}
 		clientIPStr := "unknown"
@@ -992,10 +981,6 @@ func (b *UberSDRBridge) getReceiverState(receiverNum int) (enabled bool, frequen
 	// Check Protocol 1 server first if it's running
 	if b.hpsdr1Server != nil && b.hpsdr1Server.IsRunning() {
 		enabled, frequency, sampleRate, err = b.hpsdr1Server.GetReceiverState(receiverNum)
-		if receiverNum == 0 {
-			log.Printf("DEBUG: getReceiverState: Protocol1 receiver %d: enabled=%v, freq=%d, rate=%d, err=%v",
-				receiverNum, enabled, frequency, sampleRate, err)
-		}
 		if err == nil && enabled {
 			return
 		}

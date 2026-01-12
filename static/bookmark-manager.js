@@ -194,28 +194,76 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
     // Clear bookmark positions array
     bookmarkPositions = [];
 
-    // Draw each bookmark that's within the visible range
+    // First pass: calculate positions and detect overlaps
+    const visibleBookmarks = [];
     bookmarks.forEach(bookmark => {
-        // Only draw if tuned frequency is within range (same check as cursor)
+        // Only process if tuned frequency is within range
         if (bookmark.frequency < startFreq || bookmark.frequency > endFreq) {
             return;
         }
 
-        // Calculate x position (same formula as frequency cursor at line 633)
+        // Calculate x position
         const x = ((bookmark.frequency - startFreq) / (endFreq - startFreq)) * spectrumDisplay.width;
 
-        // Draw at same height as bandwidth marker (y=20)
-        const labelY = 20;
+        // Measure label width
+        ctx.font = 'bold 10px monospace';
+        const labelWidth = ctx.measureText(bookmark.name).width + 8;
+        const labelHeight = 12;
 
-        // Draw bookmark label (similar to frequency cursor but gold)
+        visibleBookmarks.push({
+            bookmark: bookmark,
+            x: x,
+            labelWidth: labelWidth,
+            labelHeight: labelHeight,
+            yOffset: 0  // Will be calculated in collision detection
+        });
+    });
+
+    // Sort by x position for collision detection
+    visibleBookmarks.sort((a, b) => a.x - b.x);
+
+    // Collision detection and vertical stacking
+    const baseY = 20;
+    const verticalSpacing = 18; // Space between stacked bookmarks (label height + arrow + gap)
+    const horizontalOverlapThreshold = 5; // Minimum pixel gap to consider overlap
+
+    visibleBookmarks.forEach((current, index) => {
+        let yOffset = 0;
+        
+        // Check for collisions with all previous bookmarks
+        for (let i = 0; i < index; i++) {
+            const other = visibleBookmarks[i];
+            
+            // Calculate horizontal overlap
+            const currentLeft = current.x - current.labelWidth / 2;
+            const currentRight = current.x + current.labelWidth / 2;
+            const otherLeft = other.x - other.labelWidth / 2;
+            const otherRight = other.x + other.labelWidth / 2;
+            
+            // Check if labels overlap horizontally (with threshold)
+            const overlapsHorizontally = !(currentRight + horizontalOverlapThreshold < otherLeft ||
+                                          currentLeft - horizontalOverlapThreshold > otherRight);
+            
+            if (overlapsHorizontally) {
+                // If they overlap horizontally, stack this one above the other
+                yOffset = Math.max(yOffset, other.yOffset + verticalSpacing);
+            }
+        }
+        
+        current.yOffset = yOffset;
+    });
+
+    // Second pass: draw bookmarks with calculated offsets
+    visibleBookmarks.forEach(item => {
+        const { bookmark, x, labelWidth, labelHeight, yOffset } = item;
+        const labelY = baseY - yOffset; // Subtract to move upward
+
+        // Draw bookmark label
         ctx.font = 'bold 10px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
 
         // Background for label
-        const labelWidth = ctx.measureText(bookmark.name).width + 8;
-        const labelHeight = 12;
-
         ctx.fillStyle = 'rgba(255, 215, 0, 0.95)'; // Gold background
         ctx.fillRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);
 
@@ -228,12 +276,12 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
         ctx.fillStyle = '#000000'; // Black text on gold background
         ctx.fillText(bookmark.name, x, labelY + 2);
 
-        // Draw downward arrow below label (smaller than frequency cursor)
+        // Draw downward arrow below label
         const arrowY = labelY + labelHeight;
-        const arrowLength = 6;
+        const arrowLength = 6 + yOffset; // Extend arrow to reach baseline
         ctx.fillStyle = 'rgba(255, 215, 0, 0.95)';
         ctx.beginPath();
-        ctx.moveTo(x, arrowY + arrowLength); // Arrow tip
+        ctx.moveTo(x, arrowY + arrowLength); // Arrow tip (at baseline)
         ctx.lineTo(x - 4, arrowY); // Left point
         ctx.lineTo(x + 4, arrowY); // Right point
         ctx.closePath();

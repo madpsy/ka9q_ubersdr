@@ -808,7 +808,8 @@
                     <button class="btn" onclick="showAddBookmarkForm()">Add New Bookmark</button>
                     <button class="btn btn-secondary" onclick="loadBookmarks()">Reload Bookmarks</button>
                     <button class="btn btn-secondary" onclick="exportBookmarks()">Export Bookmarks</button>
-                    <button class="btn btn-secondary" onclick="importBookmarks()">Import Bookmarks</button>
+                    <button class="btn btn-secondary" onclick="importBookmarks()">Import YAML/JSON</button>
+                    <button class="btn btn-secondary" onclick="importKiwiSDRBookmarks()">Import KiwiSDR (JSON)</button>
                 </div>
                 <div class="button-group" id="bandButtons" style="display: none;">
                     <button class="btn" onclick="showAddBandForm()">Add New Band</button>
@@ -840,6 +841,7 @@
                 </div>
                 <input type="file" id="configFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleConfigImport(event)">
                 <input type="file" id="bookmarksFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBookmarksImport(event)">
+                <input type="file" id="kiwiBookmarksFileInput" accept=".json" style="display: none;" onchange="handleKiwiSDRBookmarksImport(event)">
                 <input type="file" id="bandsFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBandsImport(event)">
                 <input type="file" id="sdrsharpFileInput" accept=".xml" style="display: none;" onchange="handleSDRSharpImport(event)">
                 <input type="file" id="decoderConfigFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleDecoderConfigImport(event)">
@@ -2334,6 +2336,149 @@
 
         function importBookmarks() {
             document.getElementById('bookmarksFileInput').click();
+        }
+
+        function importKiwiSDRBookmarks() {
+            document.getElementById('kiwiBookmarksFileInput').click();
+        }
+
+        function convertKiwiSDRBookmarks(kiwiBookmarks) {
+            // KiwiSDR type code to group name mapping
+            const typeToGroup = {
+                'T1': 'Broadcast',
+                'T2': 'Digital Modes',
+                'T3': 'Shortwave Broadcast',
+                'T4': 'Utility',
+                'T5': 'Time Signals',
+                'T7': 'HFDL',
+                'T8': 'Military',
+                'T9': 'Beacons',
+                'T10': 'Weather FSK',
+                'T11': 'FAX',
+                'T12': 'Aviation',
+                'T13': 'Marine',
+                'T14': 'Numbers Stations',
+                'T15': 'Special'
+            };
+            
+            const converted = [];
+            
+            for (const entry of kiwiBookmarks) {
+                if (!Array.isArray(entry) || entry.length < 3) continue;
+                
+                const [freqKHz, mode, name, comment, options] = entry;
+                
+                // Convert frequency from kHz to Hz
+                const frequency = Math.round(freqKHz * 1000);
+                
+                // Map KiwiSDR modes to UberSDR modes
+                const modeMap = {
+                    'USB': 'usb', 'LSB': 'lsb',
+                    'CW': 'cwu', 'CWN': 'cwu',
+                    'AM': 'am', 'AMN': 'am',
+                    'FM': 'fm', 'NFM': 'nfm'
+                };
+                
+                const bookmark = {
+                    name: name || `${freqKHz} kHz`,
+                    frequency: frequency,
+                    mode: modeMap[mode] || mode.toLowerCase()
+                };
+                
+                // Extract group from type code (T1-T15)
+                if (options) {
+                    for (const key in options) {
+                        if (key.startsWith('T') && typeToGroup[key]) {
+                            bookmark.group = typeToGroup[key];
+                            break;
+                        }
+                    }
+                    
+                    // Extract extension from 'p' parameter
+                    if (options.p) {
+                        const preset = options.p.toString();
+                        // Extract extension name (e.g., "ft8,*" -> "ft8")
+                        const extMatch = preset.match(/^([^,]+)/);
+                        if (extMatch) {
+                            bookmark.extension = extMatch[1];
+                        }
+                    }
+                }
+                
+                // Add comment if present and decode URL-encoded characters
+                if (comment && comment.trim()) {
+                    try {
+                        // Decode URL-encoded characters (e.g., %5cn -> newline, %c3%b8 -> ø)
+                        const decodedComment = decodeURIComponent(comment.replace(/\+/g, ' '));
+                        bookmark.comment = decodedComment;
+                    } catch (e) {
+                        // If decoding fails, use original comment
+                        bookmark.comment = comment;
+                    }
+                }
+                
+                converted.push(bookmark);
+            }
+            
+            return converted;
+        }
+
+        async function handleKiwiSDRBookmarksImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+                
+                // Validate KiwiSDR format
+                if (!data.dx || !Array.isArray(data.dx)) {
+                    showAlert('Invalid KiwiSDR bookmark file. Expected JSON with "dx" array.', 'error');
+                    return;
+                }
+                
+                // Convert KiwiSDR bookmarks to UberSDR format
+                const importedBookmarks = convertKiwiSDRBookmarks(data.dx);
+                
+                if (importedBookmarks.length === 0) {
+                    showAlert('No valid bookmarks found in KiwiSDR file', 'error');
+                    return;
+                }
+                
+                // Ask user if they want to replace or merge
+                const action = confirm(
+                    `Found ${importedBookmarks.length} KiwiSDR bookmark(s).\n\n` +
+                    'Click OK to REPLACE all existing bookmarks.\n' +
+                    'Click Cancel to MERGE with existing bookmarks.'
+                );
+
+                if (action) {
+                    // Replace all bookmarks
+                    currentBookmarks = importedBookmarks;
+                } else {
+                    // Merge bookmarks
+                    currentBookmarks = [...currentBookmarks, ...importedBookmarks];
+                }
+
+                // Save to server
+                const response = await fetch('/admin/bookmarks', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ bookmarks: currentBookmarks })
+                });
+
+                if (!response.ok) throw new Error('Failed to save imported bookmarks');
+
+                await loadBookmarks();
+                showAlert(`Successfully imported ${importedBookmarks.length} KiwiSDR bookmark(s)`, 'success');
+            } catch (error) {
+                showAlert('Error importing KiwiSDR bookmarks: ' + error.message, 'error');
+            }
+
+            // Reset file input
+            event.target.value = '';
         }
 
         async function handleBookmarksImport(event) {

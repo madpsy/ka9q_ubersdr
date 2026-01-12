@@ -2087,7 +2087,7 @@
                     <td style="padding: 12px;">${groupDisplay}</td>
                     <td style="padding: 12px; max-width: 300px;">${commentDisplay}</td>
                     <td style="padding: 12px;">${extensionDisplay}</td>
-                    <td style="padding: 12px; text-align: center;">
+                    <td style="padding: 12px; text-align: center; white-space: nowrap;">
                         <button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="editBookmark('${escapedName}', ${bookmark.frequency})">Edit</button>
                         <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteBookmark('${escapedName}', ${bookmark.frequency})">Delete</button>
                     </td>
@@ -2634,7 +2634,7 @@
                     <td style="padding: 12px;">${bandwidthKHz} kHz</td>
                     <td style="padding: 12px;">${groupDisplay}</td>
                     <td style="padding: 12px;">${modeDisplay}</td>
-                    <td style="padding: 12px; text-align: center;">
+                    <td style="padding: 12px; text-align: center; white-space: nowrap;">
                         <button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="editBand('${escapedLabel}')">Edit</button>
                         <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteBand('${escapedLabel}')">Delete</button>
                     </td>

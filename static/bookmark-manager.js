@@ -194,7 +194,7 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
     // Clear bookmark positions array
     bookmarkPositions = [];
 
-    // First pass: calculate positions and detect overlaps
+    // First pass: calculate positions for visible bookmarks
     const visibleBookmarks = [];
     bookmarks.forEach(bookmark => {
         // Only process if tuned frequency is within range
@@ -208,55 +208,69 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
         // Measure label width
         ctx.font = 'bold 10px monospace';
         const labelWidth = ctx.measureText(bookmark.name).width + 8;
-        const labelHeight = 12;
 
         visibleBookmarks.push({
             bookmark: bookmark,
             x: x,
             labelWidth: labelWidth,
-            labelHeight: labelHeight,
-            yOffset: 0  // Will be calculated in collision detection
+            row: 0  // Will be assigned: 0 = bottom row, 1 = top row
         });
     });
 
-    // Sort by x position for collision detection
+    // Sort by x position
     visibleBookmarks.sort((a, b) => a.x - b.x);
 
-    // Collision detection and vertical stacking
-    const baseY = 20;
-    const verticalSpacing = 18; // Space between stacked bookmarks (label height + arrow + gap)
-    const horizontalOverlapThreshold = 5; // Minimum pixel gap to consider overlap
+    // Simple two-row collision detection
+    // Assign bookmarks to rows to avoid overlaps
+    const row0Bookmarks = []; // Bottom row
+    const row1Bookmarks = []; // Top row
 
-    visibleBookmarks.forEach((current, index) => {
-        let yOffset = 0;
-        
-        // Check for collisions with all previous bookmarks
-        for (let i = 0; i < index; i++) {
-            const other = visibleBookmarks[i];
-            
-            // Calculate horizontal overlap
+    visibleBookmarks.forEach(current => {
+        // Check if it overlaps with any bookmark in row 0
+        const overlapsRow0 = row0Bookmarks.some(other => {
             const currentLeft = current.x - current.labelWidth / 2;
             const currentRight = current.x + current.labelWidth / 2;
             const otherLeft = other.x - other.labelWidth / 2;
             const otherRight = other.x + other.labelWidth / 2;
-            
-            // Check if labels overlap horizontally (with threshold)
-            const overlapsHorizontally = !(currentRight + horizontalOverlapThreshold < otherLeft ||
-                                          currentLeft - horizontalOverlapThreshold > otherRight);
-            
-            if (overlapsHorizontally) {
-                // If they overlap horizontally, stack this one above the other
-                yOffset = Math.max(yOffset, other.yOffset + verticalSpacing);
+            // 3px gap threshold
+            return !(currentRight + 3 < otherLeft || currentLeft - 3 > otherRight);
+        });
+
+        if (!overlapsRow0) {
+            // No overlap in row 0, place it there
+            current.row = 0;
+            row0Bookmarks.push(current);
+        } else {
+            // Overlaps row 0, try row 1
+            const overlapsRow1 = row1Bookmarks.some(other => {
+                const currentLeft = current.x - current.labelWidth / 2;
+                const currentRight = current.x + current.labelWidth / 2;
+                const otherLeft = other.x - other.labelWidth / 2;
+                const otherRight = other.x + other.labelWidth / 2;
+                return !(currentRight + 3 < otherLeft || currentLeft - 3 > otherRight);
+            });
+
+            if (!overlapsRow1) {
+                // No overlap in row 1, place it there
+                current.row = 1;
+                row1Bookmarks.push(current);
+            } else {
+                // Overlaps both rows - place in row 0 anyway (will overlap)
+                current.row = 0;
+                row0Bookmarks.push(current);
             }
         }
-        
-        current.yOffset = yOffset;
     });
 
-    // Second pass: draw bookmarks with calculated offsets
+    // Draw bookmarks with row assignments
+    const labelHeight = 12;
+    const arrowLength = 6;
+    const rowSpacing = 13; // Tight vertical spacing between rows
+
     visibleBookmarks.forEach(item => {
-        const { bookmark, x, labelWidth, labelHeight, yOffset } = item;
-        const labelY = baseY - yOffset; // Subtract to move upward
+        const { bookmark, x, labelWidth, row } = item;
+        // Row 0 at y=20, Row 1 at y=7 (20 - 13)
+        const labelY = 20 - (row * rowSpacing);
 
         // Draw bookmark label
         ctx.font = 'bold 10px monospace';
@@ -276,14 +290,14 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
         ctx.fillStyle = '#000000'; // Black text on gold background
         ctx.fillText(bookmark.name, x, labelY + 2);
 
-        // Draw downward arrow below label
-        const arrowY = labelY + labelHeight;
-        const arrowLength = 6 + yOffset; // Extend arrow to reach baseline
+        // Draw downward arrow - extends from label to baseline
+        const arrowStartY = labelY + labelHeight;
+        const arrowTipY = 20 + labelHeight + arrowLength; // Always point to same baseline
         ctx.fillStyle = 'rgba(255, 215, 0, 0.95)';
         ctx.beginPath();
-        ctx.moveTo(x, arrowY + arrowLength); // Arrow tip (at baseline)
-        ctx.lineTo(x - 4, arrowY); // Left point
-        ctx.lineTo(x + 4, arrowY); // Right point
+        ctx.moveTo(x, arrowTipY); // Arrow tip at baseline
+        ctx.lineTo(x - 4, arrowStartY); // Left point at label bottom
+        ctx.lineTo(x + 4, arrowStartY); // Right point at label bottom
         ctx.closePath();
         ctx.fill();
 
@@ -297,7 +311,7 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
             x: x,
             y: labelY,
             width: labelWidth,
-            height: labelHeight + arrowLength,
+            height: labelHeight + (arrowTipY - arrowStartY),
             bookmark: bookmark,
             comment: bookmark.comment || null
         });

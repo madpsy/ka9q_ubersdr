@@ -15,8 +15,14 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Debug flag for sequence number logging
+// Debug flags (can be set via environment variables or SetDebugDiscovery function)
 var debugSeqNum = os.Getenv("HPSDR_DEBUG_SEQ") != ""
+var debugDiscovery = os.Getenv("HPSDR_DEBUG_DISCOVERY") != ""
+
+// SetDebugDiscovery enables or disables discovery debug logging
+func SetDebugDiscovery(enabled bool) {
+	debugDiscovery = enabled
+}
 
 // HPSDR Protocol 2 Implementation
 // Based on: https://github.com/TAPR/OpenHPSDR-Firmware/blob/master/Protocol%202/Documentation/openHPSDR%20Ethernet%20Protocol%20v4.3.pdf
@@ -63,6 +69,9 @@ type Protocol2Server struct {
 	running     bool
 	genReceived bool // General packet received flag
 	mu          sync.RWMutex
+
+	// Protocol 1 server for handling Protocol 1 data packets (optional)
+	protocol1Server *Protocol1Server
 
 	// Sockets
 	discoverySock *net.UDPConn
@@ -388,17 +397,85 @@ func (s *Protocol2Server) discoveryThread() {
 			continue
 		}
 
-		// Discovery packet: 60 bytes starting with 00 00 00 00 02
+		// Debug: Log all packets received on port 1024
+		if debugDiscovery {
+			log.Printf("Protocol2: Discovery port received %d bytes from %s", n, addr)
+			if n >= 5 {
+				log.Printf("Protocol2: First 5 bytes: %02x %02x %02x %02x %02x",
+					buffer[0], buffer[1], buffer[2], buffer[3], buffer[4])
+			}
+			if n >= 60 {
+				log.Printf("Protocol2: Full packet hex dump:")
+				for i := 0; i < n; i += 16 {
+					end := i + 16
+					if end > n {
+						end = n
+					}
+					hexStr := ""
+					asciiStr := ""
+					for j := i; j < end; j++ {
+						hexStr += fmt.Sprintf("%02x ", buffer[j])
+						if buffer[j] >= 32 && buffer[j] <= 126 {
+							asciiStr += string(buffer[j])
+						} else {
+							asciiStr += "."
+						}
+					}
+					log.Printf("Protocol2:   %04x: %-48s %s", i, hexStr, asciiStr)
+				}
+			}
+		}
+
+		// Standard HPSDR Protocol 2 discovery packet: 60 bytes starting with 00 00 00 00 02
 		if n == 60 && buffer[4] == 0x02 {
+			if debugDiscovery {
+				log.Printf("Protocol2: Identified as standard HPSDR DISCOVERY packet (byte[4]=0x02)")
+			}
 			s.handleDiscovery(addr)
 			continue
 		}
 
 		// General packet: 60 bytes starting with 00 00 00 00 00
 		if n == 60 && buffer[4] == 0x00 {
+			if debugDiscovery {
+				log.Printf("Protocol2: Identified as GENERAL packet (byte[4]=0x00)")
+			}
 			s.clientAddr = addr
 			s.handleGeneralPacket(buffer[:n])
 			continue
+		}
+
+		// Check for Protocol 1 (Metis) packets
+		// Protocol 1 uses ef fe magic bytes
+		if n >= 3 && buffer[0] == 0xef && buffer[1] == 0xfe {
+			cmd := buffer[2]
+
+			if cmd == 0x02 {
+				// Discovery packet
+				if debugDiscovery {
+					log.Printf("Protocol2: Received HPSDR Protocol 1 discovery from %s", addr)
+				}
+				// Send Protocol 1 discovery response
+				s.handleProtocol1Discovery(addr)
+				continue
+			}
+
+			// Control/data packets - forward to Protocol 1 server if available
+			if s.protocol1Server != nil {
+				log.Printf("Protocol2: Forwarding Protocol 1 packet (cmd=0x%02x, %d bytes) from %s to Protocol1Server", cmd, n, addr)
+				// Forward to Protocol 1 server's handler
+				s.protocol1Server.handleControlFromDiscoveryPort(buffer[:n], addr)
+				continue
+			} else {
+				// No Protocol 1 server available
+				log.Printf("Protocol2: Received Protocol 1 control/data packet (cmd=0x%02x) but no Protocol1Server available", cmd)
+				continue
+			}
+		}
+
+		// Unknown packet format
+		if debugDiscovery {
+			log.Printf("Protocol2: Unknown packet format: %d bytes, byte[4]=0x%02x", n, buffer[4])
 		}
 	}
 }
@@ -448,6 +525,37 @@ func (s *Protocol2Server) handleDiscovery(addr *net.UDPAddr) {
 	s.discoverySock.WriteToUDP(response, addr)
 	log.Printf("Protocol2: Discovery response sent to %s (FW=%d.%d, Board=0x%02x, Receivers=%d)",
 		addr, FirmwareVersion, ProtocolVersion, response[21], s.config.NumReceivers)
+
+	if debugDiscovery {
+		log.Printf("Protocol2: Discovery response details:")
+		log.Printf("Protocol2:   Status: 0x%02x (%s)", response[4],
+			func() string {
+				if response[4] == 0x03 {
+					return "running"
+				}
+				return "not running"
+			}())
+		log.Printf("Protocol2:   MAC: %02x:%02x:%02x:%02x:%02x:%02x",
+			response[5], response[6], response[7], response[8], response[9], response[10])
+		log.Printf("Protocol2:   Device Type: 0x%02x", response[11])
+		log.Printf("Protocol2:   Firmware: %d", response[12])
+		log.Printf("Protocol2:   Protocol: %d", response[13])
+		log.Printf("Protocol2:   Receivers: %d", response[20])
+		log.Printf("Protocol2:   Board ID: 0x%02x", response[21])
+		log.Printf("Protocol2:   Protocol Info: %d", response[22])
+		log.Printf("Protocol2: Full response hex dump:")
+		for i := 0; i < 60; i += 16 {
+			end := i + 16
+			if end > 60 {
+				end = 60
+			}
+			hexStr := ""
+			for j := i; j < end; j++ {
+				hexStr += fmt.Sprintf("%02x ", response[j])
+			}
+			log.Printf("Protocol2:   %04x: %s", i, hexStr)
+		}
+	}
 }
 
 // handleGeneralPacket processes general packet (starts radio)
@@ -478,6 +586,73 @@ func (s *Protocol2Server) handleGeneralPacket(buffer []byte) {
 		s.wbPPF = int(buffer[28])
 		log.Printf("Protocol2: Wideband config - enable=%v len=%d size=%d rate=%d ppf=%d",
 			s.wbEnable, s.wbLength, s.wbSize, s.wbRate, s.wbPPF)
+	}
+}
+
+// handleProtocol1Discovery sends Protocol 1 (Metis) discovery response
+// This allows SDR Console to see the device, even though full Protocol 1 data streaming isn't implemented
+func (s *Protocol2Server) handleProtocol1Discovery(addr *net.UDPAddr) {
+	response := make([]byte, 60)
+
+	// Bytes 0-1: Protocol 1 magic bytes
+	response[0] = 0xef
+	response[1] = 0xfe
+
+	// Byte 2: Status (0x02 = not running, 0x03 = running)
+	s.mu.RLock()
+	if s.running {
+		response[2] = 0x03
+	} else {
+		response[2] = 0x02
+	}
+	s.mu.RUnlock()
+
+	// Bytes 3-8: MAC address (6 bytes)
+	copy(response[3:9], s.config.MACAddress)
+
+	// Byte 9: Device type (use same as Protocol 2)
+	response[9] = s.config.DeviceType
+
+	// Byte 10: Code version (firmware version)
+	response[10] = FirmwareVersion
+
+	// Bytes 11-59: Reserved/zeros
+
+	s.discoverySock.WriteToUDP(response, addr)
+	if s.protocol1Server != nil {
+		log.Printf("Protocol2: Protocol 1 discovery response sent to %s (Device=0x%02x, FW=%d) - full Protocol 1 support active",
+			addr, s.config.DeviceType, FirmwareVersion)
+	} else {
+		log.Printf("Protocol2: Protocol 1 discovery response sent to %s (Device=0x%02x, FW=%d) - discovery only",
+			addr, s.config.DeviceType, FirmwareVersion)
+	}
+
+	if debugDiscovery {
+		log.Printf("Protocol2: Protocol 1 discovery response details:")
+		log.Printf("Protocol2:   Magic: ef fe")
+		log.Printf("Protocol2:   Status: 0x%02x (%s)", response[2],
+			func() string {
+				if response[2] == 0x03 {
+					return "running"
+				}
+				return "not running"
+			}())
+		log.Printf("Protocol2:   MAC: %02x:%02x:%02x:%02x:%02x:%02x",
+			response[3], response[4], response[5], response[6], response[7], response[8])
+		log.Printf("Protocol2:   Device Type: 0x%02x", response[9])
+		log.Printf("Protocol2:   Firmware: %d", response[10])
+		log.Printf("Protocol2: Full response hex dump:")
+		for i := 0; i < 60; i += 16 {
+			end := i + 16
+			if end > 60 {
+				end = 60
+			}
+			hexStr := ""
+			for j := i; j < end; j++ {
+				hexStr += fmt.Sprintf("%02x ", response[j])
+			}
+			log.Printf("Protocol2:   %04x: %s", i, hexStr)
+		}
 	}
 }
 

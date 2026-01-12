@@ -92,7 +92,7 @@ type WebSocketMessage struct {
 	Error      string `json:"error,omitempty"`
 }
 
-// UberSDRBridge bridges ubersdr WebSocket to HPSDR Protocol 2
+// UberSDRBridge bridges ubersdr WebSocket to HPSDR Protocol 1 and/or Protocol 2
 type UberSDRBridge struct {
 	// ubersdr connection
 	url            string
@@ -102,8 +102,10 @@ type UberSDRBridge struct {
 	wsConnMus      [MaxReceivers]sync.Mutex      // Protects WebSocket writes per receiver
 	userSessionIDs [MaxReceivers]string          // Unique session ID per receiver
 
-	// HPSDR server
-	hpsdrServer *Protocol2Server
+	// HPSDR servers (can run both simultaneously for auto-detection)
+	hpsdrServer  *Protocol2Server
+	hpsdr1Server *Protocol1Server
+	protocolMode int // 0 = both (auto), 1 = Protocol 1 only, 2 = Protocol 2 only
 
 	// State
 	running    bool
@@ -138,11 +140,26 @@ type UberSDRBridge struct {
 }
 
 // NewUberSDRBridge creates a new bridge instance
-func NewUberSDRBridge(url string, password string, hpsdrConfig Protocol2Config, routingConfig *RoutingConfig) (*UberSDRBridge, error) {
-	// Create HPSDR server
-	hpsdrServer, err := NewProtocol2Server(hpsdrConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HPSDR server: %w", err)
+// protocolMode: 0 = both (auto-detect), 1 = Protocol 1 only, 2 = Protocol 2 only
+func NewUberSDRBridge(url string, password string, hpsdr2Config Protocol2Config, hpsdr1Config Protocol1Config, routingConfig *RoutingConfig, protocolMode int) (*UberSDRBridge, error) {
+	var hpsdrServer *Protocol2Server
+	var hpsdr1Server *Protocol1Server
+	var err error
+
+	// Create Protocol 2 server if needed
+	if protocolMode == 0 || protocolMode == 2 {
+		hpsdrServer, err = NewProtocol2Server(hpsdr2Config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HPSDR Protocol 2 server: %w", err)
+		}
+	}
+
+	// Create Protocol 1 server if needed
+	if protocolMode == 0 || protocolMode == 1 {
+		hpsdr1Server, err = NewProtocol1Server(hpsdr1Config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HPSDR Protocol 1 server: %w", err)
+		}
 	}
 
 	pcmDecoder, err := NewPCMBinaryDecoder()
@@ -155,6 +172,8 @@ func NewUberSDRBridge(url string, password string, hpsdrConfig Protocol2Config, 
 		password:      password,
 		routingConfig: routingConfig,
 		hpsdrServer:   hpsdrServer,
+		hpsdr1Server:  hpsdr1Server,
+		protocolMode:  protocolMode,
 		running:       true,
 		sampleRate:    192000, // Default
 		channels:      2,      // IQ mode
@@ -177,12 +196,46 @@ func NewUberSDRBridge(url string, password string, hpsdrConfig Protocol2Config, 
 
 // Start begins the bridge operation
 func (b *UberSDRBridge) Start() error {
-	// Start HPSDR server
-	if err := b.hpsdrServer.Start(); err != nil {
-		return fmt.Errorf("failed to start HPSDR server: %w", err)
-	}
+	// Start HPSDR servers based on protocol mode
+	if b.protocolMode == 0 {
+		// Auto mode: Link Protocol1 to Protocol2 and start Protocol1 without socket
+		// Protocol2's discovery port will forward Protocol1 packets to Protocol1Server
+		if b.hpsdr1Server != nil && b.hpsdrServer != nil {
+			// Link Protocol1Server to Protocol2Server
+			b.hpsdrServer.protocol1Server = b.hpsdr1Server
 
-	log.Println("Bridge: HPSDR Protocol 2 server started")
+			// Start Protocol1 without creating socket (will use Protocol2's port 1024)
+			if err := b.hpsdr1Server.StartWithSocket(false); err != nil {
+				return fmt.Errorf("failed to start HPSDR Protocol 1 server: %w", err)
+			}
+			log.Println("Bridge: HPSDR Protocol 1 server started (socket-less, using Protocol2's discovery port)")
+		}
+		if b.hpsdrServer != nil {
+			if err := b.hpsdrServer.Start(); err != nil {
+				return fmt.Errorf("failed to start HPSDR Protocol 2 server: %w", err)
+			}
+			log.Println("Bridge: HPSDR Protocol 2 server started (auto-detect mode)")
+
+			// Give Protocol1 access to Protocol2's discovery socket for sending data
+			if b.hpsdr1Server != nil {
+				b.hpsdr1Server.SetSharedSocket(b.hpsdrServer.discoverySock)
+				log.Println("Bridge: Protocol 1 server configured to use Protocol 2's socket for data transmission")
+			}
+		}
+		log.Println("Bridge: Auto-detect mode - will respond to both Protocol 1 and Protocol 2 clients on port 1024")
+	} else if b.protocolMode == 1 {
+		// Protocol 1 only - create socket
+		if err := b.hpsdr1Server.StartWithSocket(true); err != nil {
+			return fmt.Errorf("failed to start HPSDR Protocol 1 server: %w", err)
+		}
+		log.Println("Bridge: HPSDR Protocol 1 server started")
+	} else {
+		// Protocol 2 only
+		if err := b.hpsdrServer.Start(); err != nil {
+			return fmt.Errorf("failed to start HPSDR Protocol 2 server: %w", err)
+		}
+		log.Println("Bridge: HPSDR Protocol 2 server started")
+	}
 
 	// Start monitoring HPSDR receivers
 	go b.monitorReceivers()
@@ -215,9 +268,13 @@ func (b *UberSDRBridge) Stop() {
 	}
 	log.Println("DEBUG: Stop: All WebSocket connections closed")
 
-	log.Println("DEBUG: Stop: Calling hpsdrServer.Stop()")
-	b.hpsdrServer.Stop()
-	log.Println("DEBUG: Stop: hpsdrServer.Stop() completed")
+	log.Println("DEBUG: Stop: Calling HPSDR server Stop()")
+	if b.protocolMode == 1 {
+		b.hpsdr1Server.Stop()
+	} else {
+		b.hpsdrServer.Stop()
+	}
+	log.Println("DEBUG: Stop: HPSDR server Stop() completed")
 	log.Println("Bridge: Stopped")
 }
 
@@ -243,23 +300,42 @@ func (b *UberSDRBridge) monitorReceivers() {
 			return
 		}
 
-		// Check if Protocol2 server is running
-		protocol2Running := b.hpsdrServer.IsRunning()
+		// Check if any HPSDR server is running
+		var hpsdrRunning bool
+		var proto1Running, proto2Running bool
+		if b.hpsdr1Server != nil {
+			proto1Running = b.hpsdr1Server.IsRunning()
+			if proto1Running {
+				hpsdrRunning = true
+			}
+		}
+		if b.hpsdrServer != nil {
+			proto2Running = b.hpsdrServer.IsRunning()
+			if proto2Running {
+				hpsdrRunning = true
+			}
+		}
+
+		// Debug: log running status periodically
+		if proto1Running || proto2Running {
+			log.Printf("DEBUG: monitorReceivers: Proto1 running=%v, Proto2 running=%v", proto1Running, proto2Running)
+		}
 
 		// Use longer sleep interval when no client connected to reduce CPU usage
-		if !protocol2Running {
+		if !hpsdrRunning {
 			time.Sleep(500 * time.Millisecond)
 		} else {
 			<-ticker.C
 		}
 
 		// Detect transition from running to stopped
-		if wasProtocol2Running && !protocol2Running {
-			log.Println("DEBUG: monitorReceivers: Protocol2 server stopped, cleaning up all receivers")
-			// Protocol2 server stopped, clean up all receivers
+		if wasProtocol2Running && !hpsdrRunning {
+			log.Println("DEBUG: monitorReceivers: HPSDR server stopped, cleaning up all receivers")
+			// HPSDR server stopped, clean up all receivers
 			// Clean up ALL receivers unconditionally - the cleanupReceiver() function
 			// safely handles cases where there's no active connection
-			for i := 0; i < b.hpsdrServer.config.NumReceivers; i++ {
+			numReceivers := b.getNumReceivers()
+			for i := 0; i < numReceivers; i++ {
 				log.Printf("DEBUG: monitorReceivers: Cleaning up receiver %d due to server shutdown", i)
 				b.cleanupReceiver(i)
 				connectedReceivers[i] = false
@@ -267,23 +343,29 @@ func (b *UberSDRBridge) monitorReceivers() {
 		}
 
 		// Update tracking flag
-		wasProtocol2Running = protocol2Running
+		wasProtocol2Running = hpsdrRunning
 
-		// If Protocol2 is not running, skip receiver checks
-		if !protocol2Running {
+		// If HPSDR is not running, skip receiver checks
+		if !hpsdrRunning {
 			continue
 		}
 
 		// Get client IP for logging
-		clientIP := b.hpsdrServer.GetClientAddr()
+		var clientIP *net.UDPAddr
+		if b.protocolMode == 1 {
+			clientIP = b.hpsdr1Server.GetClientAddr()
+		} else {
+			clientIP = b.hpsdrServer.GetClientAddr()
+		}
 		clientIPStr := "unknown"
 		if clientIP != nil {
 			clientIPStr = clientIP.String()
 		}
 
 		// Check all receivers
-		for i := 0; i < b.hpsdrServer.config.NumReceivers; i++ {
-			enabled, frequency, sampleRate, err := b.hpsdrServer.GetReceiverState(i)
+		numReceivers := b.getNumReceivers()
+		for i := 0; i < numReceivers; i++ {
+			enabled, frequency, sampleRate, err := b.getReceiverState(i)
 			if err != nil {
 				continue
 			}
@@ -543,6 +625,19 @@ func (b *UberSDRBridge) checkConnection(receiverNum int, targetURL string, targe
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "UberSDR_HPSDR/1.0")
 
+	// Add X-Real-IP header with the HPSDR client's IP address
+	var clientAddr *net.UDPAddr
+	if b.protocolMode == 1 {
+		clientAddr = b.hpsdr1Server.GetClientAddr()
+	} else {
+		clientAddr = b.hpsdrServer.GetClientAddr()
+	}
+	if clientAddr != nil {
+		clientIP := clientAddr.IP.String()
+		req.Header.Set("X-Real-IP", clientIP)
+		log.Printf("Bridge: Receiver %d setting X-Real-IP header to %s", receiverNum, clientIP)
+	}
+
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -671,6 +766,19 @@ func (b *UberSDRBridge) connectToUberSDR(receiverNum int) {
 	// Connect to WebSocket
 	headers := http.Header{}
 	headers.Set("User-Agent", "UberSDR_HPSDR/1.0")
+
+	// Add X-Real-IP header with the HPSDR client's IP address
+	var clientAddr *net.UDPAddr
+	if b.protocolMode == 1 {
+		clientAddr = b.hpsdr1Server.GetClientAddr()
+	} else {
+		clientAddr = b.hpsdrServer.GetClientAddr()
+	}
+	if clientAddr != nil {
+		clientIP := clientAddr.IP.String()
+		headers.Set("X-Real-IP", clientIP)
+		log.Printf("Bridge: Receiver %d setting X-Real-IP header to %s", receiverNum, clientIP)
+	}
 
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL.String(), headers)
 	if err != nil {
@@ -871,12 +979,41 @@ func (b *UberSDRBridge) decodeAudio(base64Data string) ([]byte, error) {
 	return pcmData, nil
 }
 
+// getNumReceivers returns the number of receivers for the current protocol
+func (b *UberSDRBridge) getNumReceivers() int {
+	if b.protocolMode == 1 {
+		return b.hpsdr1Server.config.NumReceivers
+	}
+	return b.hpsdrServer.config.NumReceivers
+}
+
+// getReceiverState returns receiver state (check both servers, prefer active one)
+func (b *UberSDRBridge) getReceiverState(receiverNum int) (enabled bool, frequency int64, sampleRate int, err error) {
+	// Check Protocol 1 server first if it's running
+	if b.hpsdr1Server != nil && b.hpsdr1Server.IsRunning() {
+		enabled, frequency, sampleRate, err = b.hpsdr1Server.GetReceiverState(receiverNum)
+		if receiverNum == 0 {
+			log.Printf("DEBUG: getReceiverState: Protocol1 receiver %d: enabled=%v, freq=%d, rate=%d, err=%v",
+				receiverNum, enabled, frequency, sampleRate, err)
+		}
+		if err == nil && enabled {
+			return
+		}
+	}
+	// Check Protocol 2 server
+	if b.hpsdrServer != nil {
+		return b.hpsdrServer.GetReceiverState(receiverNum)
+	}
+	return false, 0, 0, fmt.Errorf("no HPSDR server available")
+}
+
 // forwardToHPSDR converts PCM data to IQ samples and forwards to HPSDR server
 // This implements proper sample buffering with jitter buffer:
 // - Accumulate samples in a buffer (up to ~100ms worth)
 // - Pre-fill buffer before starting to send (avoid initial underruns)
-// - Only call LoadIQData() when we have exactly 238 samples ready
-// - This ensures proper packet timing (e.g., 192 kHz / 238 samples = ~806 packets/sec)
+// - Only call LoadIQData() when we have exactly the right number of samples ready
+// - Protocol 1: 512 samples per packet
+// - Protocol 2: 238 samples per packet
 func (b *UberSDRBridge) forwardToHPSDR(receiverNum int, pcmData []byte) error {
 	// Convert PCM int16 stereo to complex64 IQ samples
 	// PCM data format: interleaved stereo int16 (little-endian)
@@ -972,21 +1109,29 @@ func (b *UberSDRBridge) forwardToHPSDR(receiverNum int, pcmData []byte) error {
 		}
 	}
 
-	// Send packets while we have enough samples
-	// Send all available packets to keep buffer from overflowing
-	for len(b.sampleBuffers[receiverNum]) >= SamplesPerPacket {
-		// Extract exactly 238 samples for one packet
-		packet := make([]complex64, SamplesPerPacket)
-		copy(packet, b.sampleBuffers[receiverNum][:SamplesPerPacket])
+	// Determine which protocol server is active and send to it
+	// Check Protocol 1 first if it's running
+	if b.hpsdr1Server != nil && b.hpsdr1Server.IsRunning() {
+		samplesPerPacket := 126 // Protocol 1 uses 126 samples per packet (63 per frame × 2 frames)
+		for len(b.sampleBuffers[receiverNum]) >= samplesPerPacket {
+			packet := make([]complex64, samplesPerPacket)
+			copy(packet, b.sampleBuffers[receiverNum][:samplesPerPacket])
+			b.sampleBuffers[receiverNum] = b.sampleBuffers[receiverNum][samplesPerPacket:]
 
-		// Remove sent samples from buffer
-		b.sampleBuffers[receiverNum] = b.sampleBuffers[receiverNum][SamplesPerPacket:]
+			if err := b.hpsdr1Server.LoadIQData(receiverNum, packet); err != nil {
+				return err
+			}
+		}
+	} else if b.hpsdrServer != nil && b.hpsdrServer.IsRunning() {
+		samplesPerPacket := SamplesPerPacket // Protocol 2 uses 238 samples per packet
+		for len(b.sampleBuffers[receiverNum]) >= samplesPerPacket {
+			packet := make([]complex64, samplesPerPacket)
+			copy(packet, b.sampleBuffers[receiverNum][:samplesPerPacket])
+			b.sampleBuffers[receiverNum] = b.sampleBuffers[receiverNum][samplesPerPacket:]
 
-		// Send to HPSDR server
-		// The HPSDR protocol2.go LoadIQData() will handle the scaling and
-		// packing into the HPSDR format (Q first, then I, as 24-bit integers)
-		if err := b.hpsdrServer.LoadIQData(receiverNum, packet); err != nil {
-			return err
+			if err := b.hpsdrServer.LoadIQData(receiverNum, packet); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1082,9 +1227,11 @@ func main() {
 	// HPSDR configuration
 	hpsdrInterface := flag.String("interface", DefaultInterface, "Network interface to bind to (optional)")
 	hpsdrIP := flag.String("ip", DefaultIPAddress, "IP address for HPSDR server")
-	numReceivers := flag.Int("receivers", DefaultNumReceivers, "Number of receivers (1-10)")
+	numReceivers := flag.Int("receivers", DefaultNumReceivers, "Number of receivers (1-10 for Protocol 2, 1-4 for Protocol 1)")
 	deviceType := flag.Int("device", int(DefaultDeviceType), "Device type (1=Hermes, 6=HermesLite)")
+	protocol := flag.Int("protocol", 0, "HPSDR protocol version (0=auto-detect, 1=Protocol 1 only, 2=Protocol 2 only)")
 	enableMicrophone := flag.Bool("enable-microphone", false, "Enable microphone thread (for TX monitoring, not needed for RX-only)")
+	debugDiscovery := flag.Bool("debug-discovery", false, "Enable debug logging for port 1024 discovery packets")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "UberSDR to HPSDR Protocol 2 Bridge\n\n")
@@ -1112,6 +1259,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "        Device type: 1=Hermes, 6=HermesLite (default 6)\n")
 		fmt.Fprintf(os.Stderr, "  -enable-microphone\n")
 		fmt.Fprintf(os.Stderr, "        Enable microphone thread (for TX monitoring, not needed for RX-only)\n\n")
+		fmt.Fprintf(os.Stderr, "Debug Options:\n")
+		fmt.Fprintf(os.Stderr, "  -debug-discovery\n")
+		fmt.Fprintf(os.Stderr, "        Enable detailed logging of port 1024 discovery packets\n")
+		fmt.Fprintf(os.Stderr, "        Shows hex dumps of all packets received and sent\n\n")
 		fmt.Fprintf(os.Stderr, "Examples:\n")
 		fmt.Fprintf(os.Stderr, "  # Connect to local UberSDR server\n")
 		fmt.Fprintf(os.Stderr, "  %s --url http://localhost:8080\n\n", os.Args[0])
@@ -1119,9 +1270,17 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s --url https://sdr.example.com --password mypass\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # Emulate Hermes with 4 receivers\n")
 		fmt.Fprintf(os.Stderr, "  %s --url http://localhost:8080 --device 1 --receivers 4\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # Debug discovery packets (useful for troubleshooting SDR Console)\n")
+		fmt.Fprintf(os.Stderr, "  %s --url http://localhost:8080 --debug-discovery\n\n", os.Args[0])
 	}
 
 	flag.Parse()
+
+	// Enable discovery debug logging if requested
+	if *debugDiscovery {
+		SetDebugDiscovery(true)
+		log.Println("Discovery debug logging enabled")
+	}
 
 	// Load routing configuration if specified
 	var routingConfig *RoutingConfig
@@ -1243,8 +1402,8 @@ func main() {
 		log.Printf("Using generated MAC address: %s", macAddr.String())
 	}
 
-	// Create HPSDR configuration
-	hpsdrConfig := Protocol2Config{
+	// Create configurations for both protocols
+	hpsdr2Config := Protocol2Config{
 		Interface:        *hpsdrInterface,
 		IPAddress:        *hpsdrIP,
 		MACAddress:       macAddr,
@@ -1254,8 +1413,30 @@ func main() {
 		MicrophoneEnable: *enableMicrophone,
 	}
 
-	// Create bridge
-	bridge, err := NewUberSDRBridge(*urlFlag, *password, hpsdrConfig, routingConfig)
+	hpsdr1Config := Protocol1Config{
+		Interface:    *hpsdrInterface,
+		IPAddress:    *hpsdrIP,
+		MACAddress:   macAddr,
+		NumReceivers: *numReceivers,
+		DeviceType:   byte(*deviceType),
+	}
+
+	// Create bridge with protocol mode
+	// protocol: 0 = auto (both), 1 = Protocol 1 only, 2 = Protocol 2 only
+	var protocolMode int
+	if *protocol == 0 {
+		protocolMode = 0 // Auto-detect (run both)
+		log.Printf("Using auto-detect mode - will respond to both Protocol 1 and Protocol 2 clients")
+	} else {
+		protocolMode = *protocol
+		if *protocol == 1 {
+			log.Printf("Using HPSDR Protocol 1 only (Metis/Hermes) - compatible with SDR Console")
+		} else {
+			log.Printf("Using HPSDR Protocol 2 only (Hermes-Lite2) - compatible with Thetis, PowerSDR, Spark SDR")
+		}
+	}
+
+	bridge, err := NewUberSDRBridge(*urlFlag, *password, hpsdr2Config, hpsdr1Config, routingConfig, protocolMode)
 	if err != nil {
 		log.Fatalf("Failed to create bridge: %v", err)
 	}
@@ -1269,7 +1450,7 @@ func main() {
 		log.Fatalf("Failed to start bridge: %v", err)
 	}
 
-	log.Printf("Bridge running - UberSDR at %s, HPSDR on %s", *urlFlag, *hpsdrIP)
+	log.Printf("Bridge running - UberSDR at %s, HPSDR Protocol %d on %s", *urlFlag, bridge.protocolMode, *hpsdrIP)
 	log.Printf("Press Ctrl+C to stop")
 
 	// Wait for signal

@@ -6925,8 +6925,13 @@ function closeExtensionPanel() {
 
 // Populate band selector dropdown with grouped bands
 function populateBandSelector() {
+    console.log('[app.js] populateBandSelector() called');
     const selector = document.getElementById('band-selector');
+    console.log('[app.js] selector element:', selector);
+    console.log('[app.js] window.amateurBands:', window.amateurBands);
+    console.log('[app.js] window.amateurBands length:', window.amateurBands ? window.amateurBands.length : 'undefined');
     if (!selector || !window.amateurBands || window.amateurBands.length === 0) {
+        console.log('[app.js] populateBandSelector() exiting early - missing selector or bands');
         return;
     }
 
@@ -7181,8 +7186,13 @@ window.updateBandSelector = updateBandSelector;
 
 // Populate bookmark selector dropdown
 function populateBookmarkSelector() {
+    console.log('[app.js] populateBookmarkSelector() called');
     const selector = document.getElementById('bookmark-selector');
+    console.log('[app.js] selector element:', selector);
+    console.log('[app.js] window.bookmarks:', window.bookmarks);
+    console.log('[app.js] window.bookmarks length:', window.bookmarks ? window.bookmarks.length : 'undefined');
     if (!selector || !window.bookmarks || window.bookmarks.length === 0) {
+        console.log('[app.js] populateBookmarkSelector() exiting early - missing selector or bookmarks');
         return;
     }
 

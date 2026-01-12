@@ -132,9 +132,12 @@ function drawAmateurBandBackgrounds(spectrumDisplay) {
 // Load amateur radio bands from server
 async function loadBands() {
     try {
+        console.log('[bookmark-manager.js] loadBands() called');
         const response = await fetch('/api/bands');
+        console.log('[bookmark-manager.js] Bands fetch response status:', response.status);
         if (response.ok) {
             const bandsData = await response.json();
+            console.log('[bookmark-manager.js] Bands data received:', bandsData.length, 'bands');
             // Add colors to bands
             amateurBands = bandsData.map((band, index) => ({
                 ...band,
@@ -142,29 +145,35 @@ async function loadBands() {
                 color: bandColors[index % bandColors.length]
             }));
             window.amateurBands = amateurBands; // Update window reference
-            console.log(`Loaded ${amateurBands.length} amateur radio bands`);
+            console.log(`[bookmark-manager.js] Loaded ${amateurBands.length} amateur radio bands`);
+            console.log('[bookmark-manager.js] First band:', amateurBands[0]);
+            console.log('[bookmark-manager.js] window.amateurBands set:', window.amateurBands.length);
         } else {
-            console.error('No bands available');
+            console.error('[bookmark-manager.js] No bands available, status:', response.status);
         }
     } catch (err) {
-        console.error('Failed to load bands:', err);
+        console.error('[bookmark-manager.js] Failed to load bands:', err);
     }
 }
 
 // Load bookmarks from server
 async function loadBookmarks() {
     try {
+        console.log('[bookmark-manager.js] loadBookmarks() called');
         const response = await fetch('/api/bookmarks');
+        console.log('[bookmark-manager.js] Fetch response status:', response.status);
         if (response.ok) {
             bookmarks = await response.json();
             window.bookmarks = bookmarks; // Update window reference
-            console.log(`Loaded ${bookmarks.length} bookmarks`);
+            console.log(`[bookmark-manager.js] Loaded ${bookmarks.length} bookmarks`);
+            console.log('[bookmark-manager.js] First bookmark:', bookmarks[0]);
+            console.log('[bookmark-manager.js] window.bookmarks set:', window.bookmarks.length);
             // Bookmarks will be drawn automatically when spectrum display draws
         } else {
-            console.error('No bookmarks available');
+            console.error('[bookmark-manager.js] No bookmarks available, status:', response.status);
         }
     } catch (err) {
-        console.error('Failed to load bookmarks:', err);
+        console.error('[bookmark-manager.js] Failed to load bookmarks:', err);
     }
 }
 

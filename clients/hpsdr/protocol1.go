@@ -450,7 +450,6 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 				s.receivers[0].mu.Lock()
 				if freq != s.receivers[0].frequency {
 					s.receivers[0].frequency = freq
-					log.Printf("Protocol1: Receiver 0 frequency = %d Hz (%.3f MHz)", freq, float64(freq)/1e6)
 				}
 
 				// Enable receiver when frequency is set
@@ -478,6 +477,9 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 
 	// Parse second frame's control bytes (if present)
 	// Frame 2 starts at byte 520
+	// NOTE: Disabled to prevent frequency bouncing - SDR Console may send different
+	// frequencies in Frame 1 vs Frame 2, causing rapid toggling. Real hardware
+	// appears to only use Frame 1 for frequency updates.
 	if len(buffer) >= 528 && buffer[520] == 0x7F && buffer[521] == 0x7F && buffer[522] == 0x7F {
 		c0 := buffer[523]
 		c1 := buffer[524]
@@ -493,16 +495,16 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 		}
 
 		// Command 2 = RX frequency
-		if commandType == 2 {
-			freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
-
-			if freq > 0 && freq != s.receivers[0].frequency {
-				s.receivers[0].mu.Lock()
-				s.receivers[0].frequency = freq
-				s.receivers[0].mu.Unlock()
-				log.Printf("Protocol1: Receiver 0 frequency = %d Hz (%.3f MHz) [frame 2]", freq, float64(freq)/1e6)
-			}
-		}
+		// Commented out to prevent frequency bouncing between frames
+		// if commandType == 2 {
+		// 	freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
+		//
+		// 	if freq > 0 && freq != s.receivers[0].frequency {
+		// 		s.receivers[0].mu.Lock()
+		// 		s.receivers[0].frequency = freq
+		// 		s.receivers[0].mu.Unlock()
+		// 	}
+		// }
 	}
 }
 

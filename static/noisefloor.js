@@ -51,6 +51,8 @@ class NoiseFloorMonitor {
 
         // Tableau 10 color palette - designed for maximum distinction
         this.bandColors = {
+            '2200m': '#8B4789', // Deep purple
+            '630m': '#D4526E',  // Rose/burgundy 
             '160m': '#4E79A7',  // Blue
             '80m': '#F28E2B',   // Orange
             '60m': '#E15759',   // Red

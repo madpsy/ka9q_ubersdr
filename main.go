@@ -1803,9 +1803,12 @@ func getClientIP(r *http.Request) string {
 
 	clientIP := sourceIP
 
-	// Only trust X-Real-IP if request comes from tunnel server
+	// Only trust X-Real-IP if request comes from tunnel server or trusted proxy
 	// This prevents clients from spoofing their IP via X-Real-IP header
-	if globalConfig != nil && globalConfig.InstanceReporting.IsTunnelServer(sourceIP) {
+	isTunnelServer := globalConfig != nil && globalConfig.InstanceReporting.IsTunnelServer(sourceIP)
+	isTrustedProxy := globalConfig != nil && globalConfig.Server.IsTrustedProxy(sourceIP)
+
+	if isTunnelServer || isTrustedProxy {
 		if xri := r.Header.Get("X-Real-IP"); xri != "" {
 			clientIP = strings.TrimSpace(xri)
 			// Strip port if present
@@ -1813,7 +1816,11 @@ func getClientIP(r *http.Request) string {
 				clientIP = host
 			}
 			if DebugMode {
-				log.Printf("DEBUG: Trusted X-Real-IP from tunnel server: sourceIP=%s, X-Real-IP=%s, clientIP=%s", sourceIP, xri, clientIP)
+				if isTunnelServer {
+					log.Printf("DEBUG: Trusted X-Real-IP from tunnel server: sourceIP=%s, X-Real-IP=%s, clientIP=%s", sourceIP, xri, clientIP)
+				} else {
+					log.Printf("DEBUG: Trusted X-Real-IP from trusted proxy: sourceIP=%s, X-Real-IP=%s, clientIP=%s", sourceIP, xri, clientIP)
+				}
 			}
 			return clientIP
 		}

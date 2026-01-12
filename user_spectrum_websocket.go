@@ -105,23 +105,28 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	}
 	clientIP := sourceIP
 
-	// Only trust X-Real-IP if request comes from tunnel server
+	// Only trust X-Real-IP if request comes from tunnel server or trusted proxy
 	// This prevents clients from spoofing their IP via X-Real-IP header
 	xRealIP := r.Header.Get("X-Real-IP")
 	xForwardedFor := r.Header.Get("X-Forwarded-For")
 	isTunnelServer := globalConfig != nil && globalConfig.InstanceReporting.IsTunnelServer(sourceIP)
+	isTrustedProxy := globalConfig != nil && globalConfig.Server.IsTrustedProxy(sourceIP)
 
-	log.Printf("Spectrum WebSocket IP detection: sourceIP=%s, X-Real-IP=%s, X-Forwarded-For=%s, isTunnelServer=%v",
-		sourceIP, xRealIP, xForwardedFor, isTunnelServer)
+	log.Printf("Spectrum WebSocket IP detection: sourceIP=%s, X-Real-IP=%s, X-Forwarded-For=%s, isTunnelServer=%v, isTrustedProxy=%v",
+		sourceIP, xRealIP, xForwardedFor, isTunnelServer, isTrustedProxy)
 
-	if isTunnelServer {
+	if isTunnelServer || isTrustedProxy {
 		if xri := xRealIP; xri != "" {
 			clientIP = strings.TrimSpace(xri)
 			// Strip port if present
 			if host, _, err := net.SplitHostPort(clientIP); err == nil {
 				clientIP = host
 			}
-			log.Printf("Spectrum WebSocket: Trusted X-Real-IP from tunnel server: %s -> %s", sourceIP, clientIP)
+			if isTunnelServer {
+				log.Printf("Spectrum WebSocket: Trusted X-Real-IP from tunnel server: %s -> %s", sourceIP, clientIP)
+			} else {
+				log.Printf("Spectrum WebSocket: Trusted X-Real-IP from trusted proxy: %s -> %s", sourceIP, clientIP)
+			}
 		}
 	} else {
 		// Check X-Forwarded-For header for true source IP (first IP in the list)

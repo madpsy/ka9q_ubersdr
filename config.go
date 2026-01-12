@@ -93,6 +93,7 @@ type ServerConfig struct {
 	ConnRateLimit                 int             `yaml:"conn_rate_limit"`     // WebSocket connections per second per IP (0 = unlimited)
 	SessionsPerMinute             int             `yaml:"sessions_per_minute"` // /connection endpoint requests per minute per IP (0 = unlimited)
 	TimeoutBypassIPs              []string        `yaml:"timeout_bypass_ips"`  // List of IPs/CIDRs that bypass idle and max session time limits
+	TrustedProxyIPs               []string        `yaml:"trusted_proxy_ips"`   // List of IPs/CIDRs to trust X-Real-IP header from
 	BypassPassword                string          `yaml:"bypass_password"`     // Password that grants bypass privileges (empty = disabled)
 	PublicIQModes                 map[string]bool `yaml:"public_iq_modes"`     // IQ modes accessible without bypass authentication
 	EnableCORS                    bool            `yaml:"enable_cors"`
@@ -105,6 +106,7 @@ type ServerConfig struct {
 	SessionActivityLogDir         string          `yaml:"session_activity_log_dir"`          // Directory for session activity logs (default: data/session_activity)
 	SessionActivityLogIntervalSec int             `yaml:"session_activity_log_interval_sec"` // Interval for periodic snapshots in seconds (default: 300)
 	timeoutBypassNets             []*net.IPNet    // Parsed CIDR networks (internal use)
+	trustedProxyNets              []*net.IPNet    // Parsed CIDR networks for trusted proxies (internal use)
 }
 
 // AudioConfig contains audio processing settings
@@ -285,6 +287,11 @@ func LoadConfig(filename string) (*Config, error) {
 	// Parse timeout bypass IPs/CIDRs
 	if err := config.Server.parseTimeoutBypassIPs(); err != nil {
 		return nil, fmt.Errorf("failed to parse timeout_bypass_ips: %w", err)
+	}
+
+	// Parse trusted proxy IPs/CIDRs
+	if err := config.Server.parseTrustedProxyIPs(); err != nil {
+		return nil, fmt.Errorf("failed to parse trusted_proxy_ips: %w", err)
 	}
 
 	// Parse Prometheus allowed hosts IPs/CIDRs
@@ -683,6 +690,54 @@ func (sc *ServerConfig) IsIPTimeoutBypassed(ipStr string, password ...string) bo
 	}
 
 	for _, ipNet := range sc.timeoutBypassNets {
+		if ipNet.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// parseTrustedProxyIPs parses the trusted_proxy_ips list into CIDR networks
+func (sc *ServerConfig) parseTrustedProxyIPs() error {
+	sc.trustedProxyNets = make([]*net.IPNet, 0, len(sc.TrustedProxyIPs))
+
+	for _, ipStr := range sc.TrustedProxyIPs {
+		// Check if it's a CIDR notation
+		if _, ipNet, err := net.ParseCIDR(ipStr); err == nil {
+			sc.trustedProxyNets = append(sc.trustedProxyNets, ipNet)
+		} else {
+			// Try parsing as a single IP address
+			ip := net.ParseIP(ipStr)
+			if ip == nil {
+				return fmt.Errorf("invalid IP or CIDR: %s", ipStr)
+			}
+			// Convert single IP to CIDR (/32 for IPv4, /128 for IPv6)
+			var ipNet *net.IPNet
+			if ip.To4() != nil {
+				_, ipNet, _ = net.ParseCIDR(ipStr + "/32")
+			} else {
+				_, ipNet, _ = net.ParseCIDR(ipStr + "/128")
+			}
+			sc.trustedProxyNets = append(sc.trustedProxyNets, ipNet)
+		}
+	}
+
+	return nil
+}
+
+// IsTrustedProxy checks if an IP address is in the trusted proxy list
+func (sc *ServerConfig) IsTrustedProxy(ipStr string) bool {
+	if len(sc.trustedProxyNets) == 0 {
+		return false
+	}
+
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+
+	for _, ipNet := range sc.trustedProxyNets {
 		if ipNet.Contains(ip) {
 			return true
 		}

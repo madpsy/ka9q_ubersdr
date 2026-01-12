@@ -357,8 +357,11 @@ func (ah *AdminHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		clientIP = host
 	}
 
-	// Only trust X-Real-IP if request comes from tunnel server
-	if globalConfig != nil && globalConfig.InstanceReporting.IsTunnelServer(clientIP) {
+	// Only trust X-Real-IP if request comes from tunnel server or trusted proxy
+	isTunnelServer := globalConfig != nil && globalConfig.InstanceReporting.IsTunnelServer(clientIP)
+	isTrustedProxy := globalConfig != nil && globalConfig.Server.IsTrustedProxy(clientIP)
+
+	if isTunnelServer || isTrustedProxy {
 		if xri := r.Header.Get("X-Real-IP"); xri != "" {
 			clientIP = strings.TrimSpace(xri)
 			if host, _, err := net.SplitHostPort(clientIP); err == nil {

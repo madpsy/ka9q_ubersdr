@@ -130,6 +130,32 @@ server:
   #   - "::1"
   #   - "192.168.1.0/24"
   #   - "10.0.0.0/8"
+
+  # List of IP addresses or CIDR ranges to trust X-Real-IP header from
+  # When requests come from these IPs, the X-Real-IP header will be trusted
+  # to contain the real client IP address (useful for reverse proxies)
+  # This works in addition to the tunnel server trust mechanism
+  # Trusted IPs/ranges:
+  #   - Can set X-Real-IP header with the real client IP
+  #   - Useful for Caddy, nginx, Cloudflare, or other reverse proxies
+  #   - Prevents clients from spoofing their IP via X-Real-IP header
+  # Supports both IPv4 and IPv6 addresses with CIDR notation
+  # Examples:
+  #   - "127.0.0.1"           # Single IPv4 address (localhost)
+  #   - "192.168.1.0/24"      # IPv4 CIDR range (local network)
+  #   - "::1"                 # Single IPv6 address (localhost)
+  #   - "2001:db8::/32"       # IPv6 CIDR range
+  #   - "172.17.0.0/16"       # Docker bridge network
+  # By default, Docker host gateway is trusted (and tunnel server if configured)
+  # Uncomment and add your reverse proxy IPs/ranges as needed
+  trusted_proxy_ips:
+    - "172.20.0.1"            # Trust Docker host gateway (HPSDR bridge)
+  # Additional examples (uncomment to use):
+  #   - "127.0.0.1"           # Trust localhost
+  #   - "172.17.0.0/16"       # Trust Docker bridge network
+  #   - "10.0.0.0/8"          # Trust private network
+  #   - "192.168.1.100"       # Trust specific proxy server
+
   # Password-based bypass authentication (optional)
   # When set, clients can provide this password to gain the same bypass privileges
   # as IPs in the timeout_bypass_ips list. This allows remote users to access

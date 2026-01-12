@@ -707,6 +707,20 @@ noisefloor:
   #
   # If you omit these parameters, sensible defaults will be calculated automatically.
   bands:
+    - name: 2200m
+      bin_bandwidth: 5
+      bin_count: 500
+      center_frequency: 136750
+      end: 137800
+      start: 135700
+
+    - name: 630m
+      bin_bandwidth: 7
+      bin_count: 1000
+      center_frequency: 475500
+      end: 479000
+      start: 472000
+
     - name: "160m"
       start: 1800000          # 1.8 MHz
       end: 2000000            # 2.0 MHz

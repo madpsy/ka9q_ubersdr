@@ -113,7 +113,7 @@ class NoiseFloorMonitor {
 
     sortBands(bands) {
         // Sort bands by their numeric value (160m, 80m, 60m, 40m, 30m, 20m, 17m, 15m, 12m, 10m)
-        const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+        const bandOrder = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
         return bands.sort((a, b) => {
             const indexA = bandOrder.indexOf(a);
             const indexB = bandOrder.indexOf(b);

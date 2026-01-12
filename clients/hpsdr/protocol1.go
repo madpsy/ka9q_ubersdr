@@ -84,15 +84,17 @@ type Protocol1Server struct {
 
 // Protocol1ReceiverState holds state for a single receiver in Protocol 1
 type Protocol1ReceiverState struct {
-	num          int
-	enabled      bool
-	frequency    int64
-	sampleRate   int // in kHz (typically 48, 96, or 192)
-	iqBuffer     []complex64
-	packetBuf    [63 * 6 * 2]byte // 2 frames × 63 IQ samples × 6 bytes (I24 + Q24) = 756 bytes
-	mu           sync.Mutex
-	receiverMask uint32
-	lastActivity time.Time // Last time a control packet was received
+	num               int
+	enabled           bool
+	frequency         int64
+	pendingFrequency  int64     // Frequency waiting to be confirmed
+	lastFrequencyTime time.Time // Last time frequency was updated
+	sampleRate        int       // in kHz (typically 48, 96, or 192)
+	iqBuffer          []complex64
+	packetBuf         [63 * 6 * 2]byte // 2 frames × 63 IQ samples × 6 bytes (I24 + Q24) = 756 bytes
+	mu                sync.Mutex
+	receiverMask      uint32
+	lastActivity      time.Time // Last time a control packet was received
 }
 
 // NewProtocol1Server creates a new HPSDR Protocol 1 server
@@ -440,28 +442,58 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 				c0, (c0&0x01) != 0, commandType, c1, c2, c3, c4)
 		}
 
-		// Command 2 = RX frequency (see linhpsdr protocol1.c line 1215)
-		// C0 format: bit 0 = MOX, bits 1-5 = command (value 2 for RX freq)
-		if commandType == 2 {
-			// C1-C4 contain the 32-bit frequency in Hz (big-endian)
-			freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
+		// Handle different command types
+		switch commandType {
+		case 1: // TX frequency (command 0x02)
+			// TX frequency - we don't need to handle this for RX-only operation
+			if debugDiscovery {
+				freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
+				log.Printf("Protocol1: TX frequency command: %d Hz (%.3f MHz)", freq, float64(freq)/1e6)
+			}
 
-			if freq > 0 {
-				s.receivers[0].mu.Lock()
-				if freq != s.receivers[0].frequency {
-					s.receivers[0].frequency = freq
-				}
+		case 2, 3, 4, 5: // RX frequencies (commands 0x04, 0x06, 0x08, 0x0A)
+			// RX frequency commands: 0x04=RX0, 0x06=RX1, 0x08=RX2, 0x0A=RX3
+			// Command type 2 = 0x04 >> 1, type 3 = 0x06 >> 1, etc.
+			// So receiver number = commandType - 2
+			receiverNum := int(commandType) - 2
 
-				// Enable receiver when frequency is set
-				if !s.receivers[0].enabled {
-					s.receivers[0].enabled = true
-					log.Printf("Protocol1: Receiver 0 enabled")
+			if receiverNum >= 0 && receiverNum < s.config.NumReceivers {
+				// C1-C4 contain the 32-bit frequency in Hz (big-endian)
+				freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
+
+				if freq > 0 {
+					s.receivers[receiverNum].mu.Lock()
+					now := time.Now()
+
+					// Debounce: Only accept frequency if it's been stable for 100ms
+					// This filters out the 10 MHz "park" frequency that SDR Console sends
+					// between actual frequency commands
+					if freq != s.receivers[receiverNum].pendingFrequency {
+						// New frequency seen, start debounce timer
+						s.receivers[receiverNum].pendingFrequency = freq
+						s.receivers[receiverNum].lastFrequencyTime = now
+					} else if freq != s.receivers[receiverNum].frequency {
+						// Same frequency seen again, check if enough time has passed
+						if now.Sub(s.receivers[receiverNum].lastFrequencyTime) >= 100*time.Millisecond {
+							// Frequency has been stable for 100ms, accept it
+							s.receivers[receiverNum].frequency = freq
+							log.Printf("Protocol1: Receiver %d frequency = %d Hz (%.3f MHz)",
+								receiverNum, freq, float64(freq)/1e6)
+
+							// Enable receiver when frequency is set
+							if !s.receivers[receiverNum].enabled {
+								s.receivers[receiverNum].enabled = true
+								log.Printf("Protocol1: Receiver %d enabled at %d Hz (%.3f MHz)",
+									receiverNum, freq, float64(freq)/1e6)
+							}
+						}
+					}
+					s.receivers[receiverNum].mu.Unlock()
 				}
-				s.receivers[0].mu.Unlock()
 			}
 		}
 
-		// Enable receiver 0 immediately when radio starts
+		// Enable receiver 0 immediately when radio starts if not already enabled
 		// Protocol 1 expects the radio to start streaming as soon as it receives start command
 		s.receivers[0].mu.Lock()
 		if !s.receivers[0].enabled {
@@ -477,9 +509,6 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 
 	// Parse second frame's control bytes (if present)
 	// Frame 2 starts at byte 520
-	// NOTE: Disabled to prevent frequency bouncing - SDR Console may send different
-	// frequencies in Frame 1 vs Frame 2, causing rapid toggling. Real hardware
-	// appears to only use Frame 1 for frequency updates.
 	if len(buffer) >= 528 && buffer[520] == 0x7F && buffer[521] == 0x7F && buffer[522] == 0x7F {
 		c0 := buffer[523]
 		c1 := buffer[524]
@@ -494,17 +523,39 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 				c0, (c0&0x01) != 0, commandType, c1, c2, c3, c4)
 		}
 
-		// Command 2 = RX frequency
-		// Commented out to prevent frequency bouncing between frames
-		// if commandType == 2 {
-		// 	freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
-		//
-		// 	if freq > 0 && freq != s.receivers[0].frequency {
-		// 		s.receivers[0].mu.Lock()
-		// 		s.receivers[0].frequency = freq
-		// 		s.receivers[0].mu.Unlock()
-		// 	}
-		// }
+		// Process Frame 2 commands as well (SDR Console uses both frames for command cycling)
+		switch commandType {
+		case 2, 3, 4, 5: // RX frequencies (commands 0x04, 0x06, 0x08, 0x0A)
+			receiverNum := int(commandType) - 2
+
+			if receiverNum >= 0 && receiverNum < s.config.NumReceivers {
+				freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
+
+				if freq > 0 {
+					s.receivers[receiverNum].mu.Lock()
+					now := time.Now()
+
+					// Debounce: Only accept frequency if it's been stable for 100ms
+					if freq != s.receivers[receiverNum].pendingFrequency {
+						s.receivers[receiverNum].pendingFrequency = freq
+						s.receivers[receiverNum].lastFrequencyTime = now
+					} else if freq != s.receivers[receiverNum].frequency {
+						if now.Sub(s.receivers[receiverNum].lastFrequencyTime) >= 100*time.Millisecond {
+							s.receivers[receiverNum].frequency = freq
+							log.Printf("Protocol1: Receiver %d frequency = %d Hz (%.3f MHz)",
+								receiverNum, freq, float64(freq)/1e6)
+
+							if !s.receivers[receiverNum].enabled {
+								s.receivers[receiverNum].enabled = true
+								log.Printf("Protocol1: Receiver %d enabled at %d Hz (%.3f MHz)",
+									receiverNum, freq, float64(freq)/1e6)
+							}
+						}
+					}
+					s.receivers[receiverNum].mu.Unlock()
+				}
+			}
+		}
 	}
 }
 

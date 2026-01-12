@@ -61,6 +61,7 @@ type Protocol2Config struct {
 	DeviceType       byte
 	WidebandEnable   bool
 	MicrophoneEnable bool
+	ProtocolMode     int // 0=auto, 1=Protocol 1 only, 2=Protocol 2 only
 }
 
 // Protocol2Server implements HPSDR Protocol 2
@@ -448,6 +449,14 @@ func (s *Protocol2Server) discoveryThread() {
 		// Check for Protocol 1 (Metis) packets
 		// Protocol 1 uses ef fe magic bytes
 		if n >= 3 && buffer[0] == 0xef && buffer[1] == 0xfe {
+			// If protocol mode is 2 (Protocol 2 only), ignore Protocol 1 packets
+			if s.config.ProtocolMode == 2 {
+				if debugDiscovery {
+					log.Printf("Protocol2: Ignoring Protocol 1 packet from %s (Protocol 2 only mode)", addr)
+				}
+				continue
+			}
+
 			cmd := buffer[2]
 
 			if cmd == 0x02 {

@@ -377,6 +377,11 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessi
 						"type": "pong",
 					})
 
+					// Update user activity for chat users (keeps them alive)
+					if h.chatManager != nil {
+						h.chatManager.UpdateUserActivity(userSessionID)
+					}
+
 				case "subscribe_dx_spots":
 					// Enable DX cluster spots
 					h.connSubscriptionsMu.Lock()

@@ -74,6 +74,21 @@ class DXClusterWebSocket:
 
     def _run_websocket(self):
         """Run the WebSocket connection with automatic reconnection."""
+
+        # Start ping thread to send periodic JSON pings
+        def send_periodic_pings():
+            while self.running:
+                time.sleep(30)  # Every 30 seconds
+                if self.connected and self.ws:
+                    try:
+                        print("[DXCluster WebSocket] Sending JSON ping to server")
+                        self.send_message({'type': 'ping'})
+                    except Exception as e:
+                        print(f"[DXCluster WebSocket] Failed to send ping: {e}")
+
+        ping_thread = threading.Thread(target=send_periodic_pings, daemon=True)
+        ping_thread.start()
+
         while self.running:
             try:
                 # Enable ping/pong handling to keep connection alive
@@ -108,7 +123,14 @@ class DXClusterWebSocket:
             data = json.loads(message)
             msg_type = data.get('type')
 
-            if msg_type == 'cw_spot':
+            if msg_type == 'ping':
+                # Respond to JSON ping with JSON pong
+                print("[DXCluster WebSocket] Received JSON ping from server, sending pong")
+                self.send_message({'type': 'pong'})
+            elif msg_type == 'pong':
+                # Log pong responses (response to our pings)
+                print("[DXCluster WebSocket] Received JSON pong from server")
+            elif msg_type == 'cw_spot':
                 self._notify_cw_spot(data.get('data', {}))
             elif msg_type == 'digital_spot':
                 self._notify_digital_spot(data.get('data', {}))

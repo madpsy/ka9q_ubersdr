@@ -581,8 +581,8 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Convert to YAML and write to file
-	yamlData, err := yaml.Marshal(newConfig)
+	// Convert to YAML and write to file, ensuring frequencies are integers
+	yamlData, err := marshalYAMLWithIntegerFrequencies(newConfig)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
 		return
@@ -647,8 +647,8 @@ func (ah *AdminHandler) handlePatchConfig(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Convert to YAML and write to file
-	yamlData, err := yaml.Marshal(configMap)
+	// Convert to YAML and write to file, ensuring frequencies are integers
+	yamlData, err := marshalYAMLWithIntegerFrequencies(configMap)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
 		return
@@ -721,18 +721,76 @@ func (ah *AdminHandler) convertValue(oldValue, newValue interface{}) interface{}
 
 	// Handle common conversions
 	switch oldType.Kind() {
-	case reflect.Int, reflect.Int64:
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		switch v := newValue.(type) {
 		case float64:
 			return int(v)
 		case string:
-			if i, err := strconv.Atoi(v); err == nil {
-				return i
+			if i, err := strconv.ParseInt(v, 10, 64); err == nil {
+				// Convert to the specific int type
+				switch oldType.Kind() {
+				case reflect.Int:
+					return int(i)
+				case reflect.Int8:
+					return int8(i)
+				case reflect.Int16:
+					return int16(i)
+				case reflect.Int32:
+					return int32(i)
+				case reflect.Int64:
+					return int64(i)
+				}
+			}
+		}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		switch v := newValue.(type) {
+		case float64:
+			// Convert to the specific uint type
+			switch oldType.Kind() {
+			case reflect.Uint:
+				return uint(v)
+			case reflect.Uint8:
+				return uint8(v)
+			case reflect.Uint16:
+				return uint16(v)
+			case reflect.Uint32:
+				return uint32(v)
+			case reflect.Uint64:
+				return uint64(v)
+			}
+		case string:
+			if u, err := strconv.ParseUint(v, 10, 64); err == nil {
+				// Convert to the specific uint type
+				switch oldType.Kind() {
+				case reflect.Uint:
+					return uint(u)
+				case reflect.Uint8:
+					return uint8(u)
+				case reflect.Uint16:
+					return uint16(u)
+				case reflect.Uint32:
+					return uint32(u)
+				case reflect.Uint64:
+					return uint64(u)
+				}
+			}
+		}
+	case reflect.Float32:
+		switch v := newValue.(type) {
+		case float64:
+			return float32(v)
+		case int:
+			return float32(v)
+		case string:
+			if f, err := strconv.ParseFloat(v, 32); err == nil {
+				return float32(f)
 			}
 		}
 	case reflect.Float64:
 		switch v := newValue.(type) {
 		case int:
+			return float64(v)
+		case float32:
 			return float64(v)
 		case string:
 			if f, err := strconv.ParseFloat(v, 64); err == nil {

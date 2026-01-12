@@ -1356,6 +1356,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "        Number of receivers 1-10 (default 10)\n")
 		fmt.Fprintf(os.Stderr, "  -device int\n")
 		fmt.Fprintf(os.Stderr, "        Device type: 1=Hermes, 6=HermesLite (default 6)\n")
+		fmt.Fprintf(os.Stderr, "  -protocol int\n")
+		fmt.Fprintf(os.Stderr, "        HPSDR protocol version: 0=auto-detect, 1=Protocol 1 only, 2=Protocol 2 only (default 0)\n")
+		fmt.Fprintf(os.Stderr, "        0 (auto): Responds to both Protocol 1 and Protocol 2 clients\n")
+		fmt.Fprintf(os.Stderr, "        1 (Protocol 1): Metis/Hermes format only (SDR Console)\n")
+		fmt.Fprintf(os.Stderr, "        2 (Protocol 2): Hermes-Lite2 format only (Thetis, PowerSDR)\n")
 		fmt.Fprintf(os.Stderr, "  -enable-microphone\n")
 		fmt.Fprintf(os.Stderr, "        Enable microphone thread (for TX monitoring, not needed for RX-only)\n\n")
 		fmt.Fprintf(os.Stderr, "Debug Options:\n")
@@ -1510,6 +1515,7 @@ func main() {
 		DeviceType:       byte(*deviceType),
 		WidebandEnable:   false, // Wideband not supported yet
 		MicrophoneEnable: *enableMicrophone,
+		ProtocolMode:     *protocol,
 	}
 
 	hpsdr1Config := Protocol1Config{

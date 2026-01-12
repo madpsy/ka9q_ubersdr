@@ -842,7 +842,12 @@ func (b *UberSDRBridge) connectToUberSDR(receiverNum int) {
 		log.Printf("Bridge: Receiver %d setting X-Real-IP header to %s", receiverNum, clientIP)
 	}
 
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL.String(), headers)
+	// Create a dialer with larger read buffer to handle large WebSocket frames
+	dialer := websocket.Dialer{
+		ReadBufferSize:  16384, // 16KB read buffer (default is 4096)
+		WriteBufferSize: 4096,  // Keep default write buffer
+	}
+	conn, _, err := dialer.Dial(wsURL.String(), headers)
 	if err != nil {
 		log.Printf("Bridge: Receiver %d connection error: %v", receiverNum, err)
 		// Release the reserved instance since connection failed

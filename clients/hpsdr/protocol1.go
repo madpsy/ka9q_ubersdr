@@ -440,6 +440,38 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 
 		// Handle different command types
 		switch commandType {
+		case 0: // Configuration command (command 0x00)
+			// C1 contains sample rate and other config
+			// Bits 0-1: Sample rate (00=48k, 01=96k, 02=192k, 03=384k)
+			sampleRateBits := c1 & 0x03
+			var sampleRateKHz int
+			switch sampleRateBits {
+			case 0x00:
+				sampleRateKHz = 48
+			case 0x01:
+				sampleRateKHz = 96
+			case 0x02:
+				sampleRateKHz = 192
+			case 0x03:
+				sampleRateKHz = 384
+			default:
+				sampleRateKHz = 192 // Default to 192 kHz
+			}
+
+			// Ignore 48 kHz - SDR Console uses this as a default in command cycling
+			// Only accept 96, 192, or 384 kHz
+			if sampleRateKHz != 48 {
+				// Update sample rate for all receivers
+				for i := 0; i < s.config.NumReceivers; i++ {
+					s.receivers[i].mu.Lock()
+					if s.receivers[i].sampleRate != sampleRateKHz {
+						s.receivers[i].sampleRate = sampleRateKHz
+						log.Printf("Protocol1: Receiver %d sample rate = %d kHz", i, sampleRateKHz)
+					}
+					s.receivers[i].mu.Unlock()
+				}
+			}
+
 		case 1: // TX frequency (command 0x02)
 			// TX frequency - we don't need to handle this for RX-only operation
 			if debugDiscovery {
@@ -457,7 +489,9 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 				// C1-C4 contain the 32-bit frequency in Hz (big-endian)
 				freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
 
-				if freq > 0 {
+				// Ignore 10 MHz - SDR Console uses this as a "park" frequency in command cycling
+				// Only process frequencies that are NOT 10 MHz
+				if freq > 0 && freq != 10000000 {
 					s.receivers[receiverNum].mu.Lock()
 					oldFreq := s.receivers[receiverNum].frequency
 					wasEnabled := s.receivers[receiverNum].enabled
@@ -512,13 +546,44 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 
 		// Process Frame 2 commands as well (SDR Console uses both frames for command cycling)
 		switch commandType {
+		case 0: // Configuration command
+			// C1 contains sample rate and other config
+			sampleRateBits := c1 & 0x03
+			var sampleRateKHz int
+			switch sampleRateBits {
+			case 0x00:
+				sampleRateKHz = 48
+			case 0x01:
+				sampleRateKHz = 96
+			case 0x02:
+				sampleRateKHz = 192
+			case 0x03:
+				sampleRateKHz = 384
+			default:
+				sampleRateKHz = 192
+			}
+
+			// Ignore 48 kHz - SDR Console uses this as a default in command cycling
+			if sampleRateKHz != 48 {
+				// Update sample rate for all receivers
+				for i := 0; i < s.config.NumReceivers; i++ {
+					s.receivers[i].mu.Lock()
+					if s.receivers[i].sampleRate != sampleRateKHz {
+						s.receivers[i].sampleRate = sampleRateKHz
+						log.Printf("Protocol1: Receiver %d sample rate = %d kHz", i, sampleRateKHz)
+					}
+					s.receivers[i].mu.Unlock()
+				}
+			}
+
 		case 2, 3, 4, 5: // RX frequencies (commands 0x04, 0x06, 0x08, 0x0A)
 			receiverNum := int(commandType) - 2
 
 			if receiverNum >= 0 && receiverNum < s.config.NumReceivers {
 				freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
 
-				if freq > 0 {
+				// Ignore 10 MHz - SDR Console uses this as a "park" frequency in command cycling
+				if freq > 0 && freq != 10000000 {
 					s.receivers[receiverNum].mu.Lock()
 					oldFreq := s.receivers[receiverNum].frequency
 					wasEnabled := s.receivers[receiverNum].enabled

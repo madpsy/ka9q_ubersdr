@@ -84,17 +84,15 @@ type Protocol1Server struct {
 
 // Protocol1ReceiverState holds state for a single receiver in Protocol 1
 type Protocol1ReceiverState struct {
-	num               int
-	enabled           bool
-	frequency         int64
-	pendingFrequency  int64     // Frequency waiting to be confirmed
-	lastFrequencyTime time.Time // Last time frequency was updated
-	sampleRate        int       // in kHz (typically 48, 96, or 192)
-	iqBuffer          []complex64
-	packetBuf         [63 * 6 * 2]byte // 2 frames × 63 IQ samples × 6 bytes (I24 + Q24) = 756 bytes
-	mu                sync.Mutex
-	receiverMask      uint32
-	lastActivity      time.Time // Last time a control packet was received
+	num          int
+	enabled      bool
+	frequency    int64
+	sampleRate   int // in kHz (typically 48, 96, or 192)
+	iqBuffer     []complex64
+	packetBuf    [63 * 6 * 2]byte // 2 frames × 63 IQ samples × 6 bytes (I24 + Q24) = 756 bytes
+	mu           sync.Mutex
+	receiverMask uint32
+	lastActivity time.Time // Last time a control packet was received
 }
 
 // NewProtocol1Server creates a new HPSDR Protocol 1 server
@@ -370,11 +368,9 @@ func (s *Protocol1Server) handleControl(buffer []byte, addr *net.UDPAddr) {
 			s.clientAddr = addr
 			log.Printf("Protocol1: Radio started by client %s", addr)
 
-			// Start receiver threads
-			for i := 0; i < s.config.NumReceivers; i++ {
-				s.wg.Add(1)
-				go s.receiverThread(i)
-			}
+			// Start single sender thread that interleaves all receivers
+			s.wg.Add(1)
+			go s.senderThread()
 		}
 		s.mu.Unlock()
 
@@ -463,30 +459,21 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 
 				if freq > 0 {
 					s.receivers[receiverNum].mu.Lock()
-					now := time.Now()
+					oldFreq := s.receivers[receiverNum].frequency
+					wasEnabled := s.receivers[receiverNum].enabled
 
-					// Debounce: Only accept frequency if it's been stable for 100ms
-					// This filters out the 10 MHz "park" frequency that SDR Console sends
-					// between actual frequency commands
-					if freq != s.receivers[receiverNum].pendingFrequency {
-						// New frequency seen, start debounce timer
-						s.receivers[receiverNum].pendingFrequency = freq
-						s.receivers[receiverNum].lastFrequencyTime = now
-					} else if freq != s.receivers[receiverNum].frequency {
-						// Same frequency seen again, check if enough time has passed
-						if now.Sub(s.receivers[receiverNum].lastFrequencyTime) >= 100*time.Millisecond {
-							// Frequency has been stable for 100ms, accept it
-							s.receivers[receiverNum].frequency = freq
-							log.Printf("Protocol1: Receiver %d frequency = %d Hz (%.3f MHz)",
-								receiverNum, freq, float64(freq)/1e6)
+					// Update frequency immediately (no debouncing)
+					if freq != oldFreq {
+						s.receivers[receiverNum].frequency = freq
+						log.Printf("Protocol1: Receiver %d frequency = %d Hz (%.3f MHz)",
+							receiverNum, freq, float64(freq)/1e6)
+					}
 
-							// Enable receiver when frequency is set
-							if !s.receivers[receiverNum].enabled {
-								s.receivers[receiverNum].enabled = true
-								log.Printf("Protocol1: Receiver %d enabled at %d Hz (%.3f MHz)",
-									receiverNum, freq, float64(freq)/1e6)
-							}
-						}
+					// Enable receiver when frequency is set
+					if !wasEnabled {
+						s.receivers[receiverNum].enabled = true
+						log.Printf("Protocol1: Receiver %d enabled at %d Hz (%.3f MHz)",
+							receiverNum, freq, float64(freq)/1e6)
 					}
 					s.receivers[receiverNum].mu.Unlock()
 				}
@@ -533,24 +520,21 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 
 				if freq > 0 {
 					s.receivers[receiverNum].mu.Lock()
-					now := time.Now()
+					oldFreq := s.receivers[receiverNum].frequency
+					wasEnabled := s.receivers[receiverNum].enabled
 
-					// Debounce: Only accept frequency if it's been stable for 100ms
-					if freq != s.receivers[receiverNum].pendingFrequency {
-						s.receivers[receiverNum].pendingFrequency = freq
-						s.receivers[receiverNum].lastFrequencyTime = now
-					} else if freq != s.receivers[receiverNum].frequency {
-						if now.Sub(s.receivers[receiverNum].lastFrequencyTime) >= 100*time.Millisecond {
-							s.receivers[receiverNum].frequency = freq
-							log.Printf("Protocol1: Receiver %d frequency = %d Hz (%.3f MHz)",
-								receiverNum, freq, float64(freq)/1e6)
+					// Update frequency immediately (no debouncing)
+					if freq != oldFreq {
+						s.receivers[receiverNum].frequency = freq
+						log.Printf("Protocol1: Receiver %d frequency = %d Hz (%.3f MHz)",
+							receiverNum, freq, float64(freq)/1e6)
+					}
 
-							if !s.receivers[receiverNum].enabled {
-								s.receivers[receiverNum].enabled = true
-								log.Printf("Protocol1: Receiver %d enabled at %d Hz (%.3f MHz)",
-									receiverNum, freq, float64(freq)/1e6)
-							}
-						}
+					// Enable receiver when frequency is set
+					if !wasEnabled {
+						s.receivers[receiverNum].enabled = true
+						log.Printf("Protocol1: Receiver %d enabled at %d Hz (%.3f MHz)",
+							receiverNum, freq, float64(freq)/1e6)
 					}
 					s.receivers[receiverNum].mu.Unlock()
 				}
@@ -559,17 +543,15 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 	}
 }
 
-// receiverThread sends IQ data for a specific receiver (Protocol 1 format)
-func (s *Protocol1Server) receiverThread(receiverNum int) {
+// senderThread sends IQ data packets with all receivers interleaved (Protocol 1 format)
+func (s *Protocol1Server) senderThread() {
 	defer s.wg.Done()
-	log.Printf("Protocol1: Receiver %d thread started", receiverNum)
-
-	rcv := s.receivers[receiverNum]
+	log.Printf("Protocol1: Sender thread started")
 
 	for {
 		select {
 		case <-s.stopChan:
-			log.Printf("Protocol1: Receiver %d thread stopped", receiverNum)
+			log.Printf("Protocol1: Sender thread stopped")
 			return
 		default:
 		}
@@ -577,30 +559,61 @@ func (s *Protocol1Server) receiverThread(receiverNum int) {
 		s.mu.RLock()
 		running := s.running
 		clientAddr := s.clientAddr
+		numReceivers := s.config.NumReceivers
 		s.mu.RUnlock()
 
-		rcv.mu.Lock()
-		enabled := rcv.enabled
-		rcv.mu.Unlock()
-
-		if !running || !enabled || clientAddr == nil {
+		if !running || clientAddr == nil {
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
 
-		// Wait for IQ data to be ready
-		s.sendMu.Lock()
-		for (s.sendFlags & rcv.receiverMask) == 0 {
-			select {
-			case <-s.stopChan:
-				s.sendMu.Unlock()
-				return
-			default:
+		// Count enabled receivers
+		enabledCount := 0
+		var enabledReceivers []*Protocol1ReceiverState
+		for i := 0; i < numReceivers; i++ {
+			s.receivers[i].mu.Lock()
+			if s.receivers[i].enabled {
+				enabledCount++
+				enabledReceivers = append(enabledReceivers, s.receivers[i])
 			}
-			s.sendCond.Wait()
+			s.receivers[i].mu.Unlock()
 		}
-		s.sendFlags &= ^rcv.receiverMask
+
+		if enabledCount == 0 {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+
+		// Wait for ALL enabled receivers to have data ready
+		s.sendMu.Lock()
+		allReady := false
+		for !allReady {
+			allReady = true
+			for _, rcv := range enabledReceivers {
+				if (s.sendFlags & rcv.receiverMask) == 0 {
+					allReady = false
+					break
+				}
+			}
+			if !allReady {
+				select {
+				case <-s.stopChan:
+					s.sendMu.Unlock()
+					return
+				default:
+				}
+				s.sendCond.Wait()
+			}
+		}
+		// Clear all enabled receiver flags
+		for _, rcv := range enabledReceivers {
+			s.sendFlags &= ^rcv.receiverMask
+		}
 		s.sendMu.Unlock()
+
+		// Calculate number of IQ samples per frame based on number of receivers
+		// Formula from linhpsdr: iq_samples = (512-8) / ((num_receivers * 6) + 2)
+		samplesPerFrame := (512 - 8) / ((enabledCount * 6) + 2)
 
 		// Build Protocol 1 data packet (1032 bytes)
 		// Structure: 8-byte Metis header + 2 frames of 512 bytes each
@@ -628,19 +641,23 @@ func (s *Protocol1Server) receiverThread(receiverNum int) {
 		packet[14] = 0x00 // C3 - control byte 3
 		packet[15] = 0x00 // C4 - control byte 4
 
-		// Pack 63 IQ samples with mic samples interleaved for frame 1
-		// Format: I(3) Q(3) Mic(2) repeated 63 times = 504 bytes
+		// Pack IQ samples with all receivers interleaved for frame 1
+		// Format: RX0_I(3) RX0_Q(3) RX1_I(3) RX1_Q(3) ... Mic(2) repeated samplesPerFrame times
 		frameOffset := 16
-		for i := 0; i < 63; i++ {
-			// Copy I and Q samples (6 bytes)
-			copy(packet[frameOffset:frameOffset+6], rcv.packetBuf[i*6:(i+1)*6])
-			frameOffset += 6
+		for sampleIdx := 0; sampleIdx < samplesPerFrame; sampleIdx++ {
+			// Interleave all enabled receivers' samples
+			for _, rcv := range enabledReceivers {
+				rcv.mu.Lock()
+				// Copy I and Q samples (6 bytes) for this receiver
+				copy(packet[frameOffset:frameOffset+6], rcv.packetBuf[sampleIdx*6:(sampleIdx+1)*6])
+				rcv.mu.Unlock()
+				frameOffset += 6
+			}
 			// Add mic sample (2 bytes, zeros for now)
 			packet[frameOffset] = 0x00
 			packet[frameOffset+1] = 0x00
 			frameOffset += 2
 		}
-		// Frame 1 ends at offset 8+512 = 520
 
 		// Frame 2 (512 bytes starting at offset 520)
 		packet[520] = 0x7F // Sync 0
@@ -652,13 +669,17 @@ func (s *Protocol1Server) receiverThread(receiverNum int) {
 		packet[526] = 0x00 // C3 - control byte 3
 		packet[527] = 0x00 // C4 - control byte 4
 
-		// Pack 63 IQ samples with mic samples interleaved for frame 2
-		// Format: I(3) Q(3) Mic(2) repeated 63 times = 504 bytes
+		// Pack IQ samples with all receivers interleaved for frame 2
 		frameOffset = 528
-		for i := 63; i < 126; i++ {
-			// Copy I and Q samples (6 bytes)
-			copy(packet[frameOffset:frameOffset+6], rcv.packetBuf[i*6:(i+1)*6])
-			frameOffset += 6
+		for sampleIdx := samplesPerFrame; sampleIdx < samplesPerFrame*2; sampleIdx++ {
+			// Interleave all enabled receivers' samples
+			for _, rcv := range enabledReceivers {
+				rcv.mu.Lock()
+				// Copy I and Q samples (6 bytes) for this receiver
+				copy(packet[frameOffset:frameOffset+6], rcv.packetBuf[sampleIdx*6:(sampleIdx+1)*6])
+				rcv.mu.Unlock()
+				frameOffset += 6
+			}
 			// Add mic sample (2 bytes, zeros for now)
 			packet[frameOffset] = 0x00
 			packet[frameOffset+1] = 0x00
@@ -672,22 +693,24 @@ func (s *Protocol1Server) receiverThread(receiverNum int) {
 		} else if s.sharedSock != nil {
 			sock = s.sharedSock
 		} else {
-			log.Printf("Protocol1: Receiver %d cannot send - no socket available", receiverNum)
+			log.Printf("Protocol1: Cannot send - no socket available")
 			continue
 		}
 
 		_, err := sock.WriteToUDP(packet, clientAddr)
 		if err != nil {
-			log.Printf("Protocol1: Receiver %d send error: %v", receiverNum, err)
+			log.Printf("Protocol1: Send error: %v", err)
 			continue
 		}
 
 		// Increment sequence number
 		s.seqNum++
 
-		// Signal completion
+		// Signal completion to all enabled receivers
 		s.doneSendMu.Lock()
-		s.doneSendFlags |= rcv.receiverMask
+		for _, rcv := range enabledReceivers {
+			s.doneSendFlags |= rcv.receiverMask
+		}
 		s.doneSendCond.Broadcast()
 		s.doneSendMu.Unlock()
 	}
@@ -700,10 +723,9 @@ func (s *Protocol1Server) LoadIQData(receiverNum int, samples []complex64) error
 		return fmt.Errorf("invalid receiver number: %d", receiverNum)
 	}
 
-	// Protocol 1 uses 126 samples per packet (63 per frame × 2 frames)
-	if len(samples) != 126 {
-		return fmt.Errorf("expected 126 samples for Protocol 1, got %d", len(samples))
-	}
+	// Calculate expected number of samples based on number of enabled receivers
+	// For now, we'll accept variable length and store what we get
+	// The sender thread will calculate the correct number to use
 
 	rcv := s.receivers[receiverNum]
 
@@ -728,7 +750,12 @@ func (s *Protocol1Server) LoadIQData(receiverNum int, samples []complex64) error
 	const scale = 4000.0
 
 	rcv.mu.Lock()
-	for i := 0; i < 126; i++ {
+	// Store up to 126 samples (maximum for single receiver case)
+	maxSamples := len(samples)
+	if maxSamples > 126 {
+		maxSamples = 126
+	}
+	for i := 0; i < maxSamples; i++ {
 		// Scale from float32 [-1.0, 1.0] to int32 24-bit range
 		// Use moderate scaling to match Protocol 2 signal levels
 		iVal := int32(real(samples[i]) * scale)

@@ -1790,12 +1790,19 @@ func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 
 	sessions := ah.sessions.GetAllSessionsInfo()
 
-	// Enhance with chat usernames if DX cluster websocket handler (with chat) is available
+	// Enhance with chat usernames and LastSeen if DX cluster websocket handler (with chat) is available
 	if ah.dxClusterWsHandler != nil && ah.dxClusterWsHandler.chatManager != nil {
 		for i := range sessions {
 			if userSessionID, ok := sessions[i]["user_session_id"].(string); ok && userSessionID != "" {
 				if username, exists := ah.dxClusterWsHandler.chatManager.GetUsername(userSessionID); exists {
 					sessions[i]["chat_username"] = username
+
+					// Add LastSeen time if available
+					if lastSeen, exists := ah.dxClusterWsHandler.chatManager.GetUserLastSeen(userSessionID); exists {
+						// Calculate time ago
+						secondsAgo := int(time.Since(lastSeen).Seconds())
+						sessions[i]["chat_last_seen_seconds"] = secondsAgo
+					}
 				}
 			}
 		}

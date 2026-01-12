@@ -197,6 +197,17 @@ func (cm *ChatManager) GetUsername(sessionID string) (string, bool) {
 	return username, exists
 }
 
+// GetUserLastSeen retrieves the LastSeen time for a session UUID
+func (cm *ChatManager) GetUserLastSeen(sessionID string) (time.Time, bool) {
+	cm.activeUsersMu.RLock()
+	defer cm.activeUsersMu.RUnlock()
+
+	if user, exists := cm.activeUsers[sessionID]; exists {
+		return user.LastSeen, true
+	}
+	return time.Time{}, false
+}
+
 // UpdateUserStatus updates user status fields (frequency, mode, bandwidth, CAT, TX)
 // All parameters are optional - only provided fields will be updated
 func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]interface{}) error {

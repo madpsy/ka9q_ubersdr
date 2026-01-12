@@ -3106,6 +3106,7 @@
                 const userSessionID = sessions.hasUUID ? key : 'N/A';
                 const userAgent = audioSession?.user_agent || spectrumSession?.user_agent || 'N/A';
                 const chatUsername = audioSession?.chat_username || spectrumSession?.chat_username || '—';
+                const chatLastSeenSeconds = audioSession?.chat_last_seen_seconds || spectrumSession?.chat_last_seen_seconds;
 
                 // Get first seen timestamp and calculate duration
                 const firstSeen = audioSession?.user_session_first_seen || spectrumSession?.user_session_first_seen;
@@ -3196,10 +3197,27 @@
                         dxClusterThroughput = dxKbps.toString();
                     }
 
+                    // Format chat username with LastSeen time
+                    let chatDisplay = chatUsername === '—' ? '<em style="color: #999;">—</em>' : '<strong style="color: #667eea;">' + chatUsername + '</strong>';
+                    if (chatUsername !== '—' && chatLastSeenSeconds !== undefined && chatLastSeenSeconds !== null) {
+                        // Format time ago (e.g., '20s', '5m', '2h')
+                        let timeAgo;
+                        if (chatLastSeenSeconds < 60) {
+                            timeAgo = chatLastSeenSeconds + 's';
+                        } else if (chatLastSeenSeconds < 3600) {
+                            timeAgo = Math.floor(chatLastSeenSeconds / 60) + 'm';
+                        } else if (chatLastSeenSeconds < 86400) {
+                            timeAgo = Math.floor(chatLastSeenSeconds / 3600) + 'h';
+                        } else {
+                            timeAgo = Math.floor(chatLastSeenSeconds / 86400) + 'd';
+                        }
+                        chatDisplay += ' <span style="color: #999; font-size: 11px;">(' + timeAgo + ')</span>';
+                    }
+
                     row.innerHTML = `
                         <td style="padding: 12px; font-family: monospace; font-size: 12px; max-width: 140px; word-wrap: break-word;">${ipDisplay}</td>
                         <td style="padding: 12px; font-size: 11px; word-break: break-all; max-width: 200px;" title="${userAgent}">${userAgent === 'N/A' ? '<em style="color: #999;">N/A</em>' : userAgent}</td>
-                        <td style="padding: 12px; font-size: 12px;">${chatUsername === '—' ? '<em style="color: #999;">—</em>' : '<strong style="color: #667eea;">' + chatUsername + '</strong>'}</td>
+                        <td style="padding: 12px; font-size: 12px;">${chatDisplay}</td>
                         <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${firstSeenDisplay}</td>
                         <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${lastSeenDisplay}</td>
                         <td style="padding: 12px; font-size: 12px; text-align: center;">${audioThroughput}</td>

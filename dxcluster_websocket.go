@@ -127,7 +127,7 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 			mqttPublisher = prometheusMetrics.mqttPublisher
 		}
 
-		handler.chatManager = NewChatManager(handler, chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatLogger, mqttPublisher)
+		handler.chatManager = NewChatManager(handler, sessions, chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatLogger, mqttPublisher)
 		log.Printf("Chat: Initialized with %d buffered messages, max %d users, rate limits: %d msg/sec, %d msg/min, %d updates/sec, logging: %v, MQTT: %v",
 			chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatConfig.LogToCSV, mqttPublisher != nil)
 	}
@@ -240,11 +240,6 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 		Chat:         false,
 	}
 	h.connSubscriptionsMu.Unlock()
-
-	// Store IP address for chat logging
-	if h.chatManager != nil {
-		h.chatManager.SetSessionIP(userSessionID, clientIP)
-	}
 
 	log.Printf("DX Cluster WebSocket: Client connected, user_session_id: %s, source IP: %s, client IP: %s (total: %d)", userSessionID, sourceIP, clientIP, clientCount)
 

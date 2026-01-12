@@ -42,10 +42,6 @@ type ChatManager struct {
 	sessionUsernames   map[string]string
 	sessionUsernamesMu sync.RWMutex
 
-	// Map session UUID to IP address
-	sessionIPs   map[string]string
-	sessionIPsMu sync.RWMutex
-
 	// Chat message buffer for new connections
 	messageBuffer   []ChatMessage
 	messageBufferMu sync.RWMutex
@@ -53,6 +49,9 @@ type ChatManager struct {
 
 	// Reference to websocket handler for broadcasting
 	wsHandler *DXClusterWebSocketHandler
+
+	// Reference to session manager for IP lookups
+	sessionManager *SessionManager
 
 	// Active users list
 	activeUsers   map[string]*ChatUser
@@ -72,13 +71,13 @@ type ChatManager struct {
 }
 
 // NewChatManager creates a new chat manager
-func NewChatManager(wsHandler *DXClusterWebSocketHandler, maxMessages int, maxUsers int, rateLimitPerSecond int, rateLimitPerMinute int, updateRateLimitPerSecond int, chatLogger *ChatLogger, mqttPublisher *MQTTPublisher) *ChatManager {
+func NewChatManager(wsHandler *DXClusterWebSocketHandler, sessionManager *SessionManager, maxMessages int, maxUsers int, rateLimitPerSecond int, rateLimitPerMinute int, updateRateLimitPerSecond int, chatLogger *ChatLogger, mqttPublisher *MQTTPublisher) *ChatManager {
 	cm := &ChatManager{
 		sessionUsernames:         make(map[string]string),
-		sessionIPs:               make(map[string]string),
 		messageBuffer:            make([]ChatMessage, 0, maxMessages),
 		maxMessages:              maxMessages,
 		wsHandler:                wsHandler,
+		sessionManager:           sessionManager,
 		activeUsers:              make(map[string]*ChatUser),
 		maxUsers:                 maxUsers,
 		rateLimitPerSecond:       rateLimitPerSecond,
@@ -97,19 +96,23 @@ func NewChatManager(wsHandler *DXClusterWebSocketHandler, maxMessages int, maxUs
 	return cm
 }
 
-// SetSessionIP associates an IP address with a session UUID
-func (cm *ChatManager) SetSessionIP(sessionID string, ipAddress string) {
-	cm.sessionIPsMu.Lock()
-	cm.sessionIPs[sessionID] = ipAddress
-	cm.sessionIPsMu.Unlock()
-}
-
-// GetSessionIP retrieves the IP address for a session UUID
+// GetSessionIP retrieves the IP address for a session UUID from SessionManager
 func (cm *ChatManager) GetSessionIP(sessionID string) string {
-	cm.sessionIPsMu.RLock()
-	ip := cm.sessionIPs[sessionID]
-	cm.sessionIPsMu.RUnlock()
-	return ip
+	if cm.sessionManager == nil {
+		return ""
+	}
+
+	// Look up IP from any active session with this UserSessionID
+	cm.sessionManager.mu.RLock()
+	defer cm.sessionManager.mu.RUnlock()
+
+	for _, session := range cm.sessionManager.sessions {
+		if session.UserSessionID == sessionID && session.ClientIP != "" {
+			return session.ClientIP
+		}
+	}
+
+	return ""
 }
 
 // SetUsername associates a username with a session UUID
@@ -445,10 +448,6 @@ func (cm *ChatManager) RemoveUser(sessionID string) {
 	username, existed := cm.sessionUsernames[sessionID]
 	delete(cm.sessionUsernames, sessionID)
 	cm.sessionUsernamesMu.Unlock()
-
-	cm.sessionIPsMu.Lock()
-	delete(cm.sessionIPs, sessionID)
-	cm.sessionIPsMu.Unlock()
 
 	cm.activeUsersMu.Lock()
 	delete(cm.activeUsers, sessionID)

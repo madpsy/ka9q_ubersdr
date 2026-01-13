@@ -369,6 +369,9 @@ class ChatUI {
         const savedState = localStorage.getItem('ubersdr_chat_expanded');
         this.isExpanded = savedState === 'true';
 
+        // Generate random username placeholder: user<4 random digits>
+        const randomUsername = 'user' + Math.floor(1000 + Math.random() * 9000);
+
         const chatHTML = `
             <div id="chat-panel" class="chat-panel ${this.isExpanded ? 'expanded' : 'collapsed'}">
                 <!-- Chat content (slides out from right) -->
@@ -383,7 +386,7 @@ class ChatUI {
                             <div id="chat-username-input-area" class="chat-input-area">
                                 <div style="position: relative; flex: 1;">
                                     <input type="text" id="chat-username-input"
-                                           placeholder="Choose a username..."
+                                           placeholder="${randomUsername}"
                                            maxlength="15"
                                            class="chat-input"
                                            style="padding-right: 30px;">

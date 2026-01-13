@@ -1243,9 +1243,16 @@ async function fetchSiteDescription() {
                 // Update receiver callsign if available
                 if (data.receiver && data.receiver.callsign) {
                     const callsignEl = document.getElementById('receiver-callsign');
+                    console.log('[fetchSiteDescription] Callsign element:', callsignEl);
+                    console.log('[fetchSiteDescription] Callsign value:', data.receiver.callsign);
                     if (callsignEl) {
                         callsignEl.textContent = data.receiver.callsign;
+                        console.log('[fetchSiteDescription] Callsign set to:', callsignEl.textContent);
+                    } else {
+                        console.error('[fetchSiteDescription] Callsign element not found!');
                     }
+                } else {
+                    console.warn('[fetchSiteDescription] No callsign in data:', data);
                 }
 
                 // Show band conditions button if noise floor monitoring is enabled

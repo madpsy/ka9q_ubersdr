@@ -4328,6 +4328,94 @@
             metricsLogIntervalField.appendChild(metricsLogIntervalSmall);
             reportingSection.appendChild(metricsLogIntervalField);
 
+            // WSJT-X UDP Broadcasting subsection
+            const wsjtxUDPTitle = document.createElement('h4');
+            wsjtxUDPTitle.textContent = 'WSJT-X UDP Protocol Broadcasting';
+            wsjtxUDPTitle.style.marginTop = '20px';
+            wsjtxUDPTitle.style.marginBottom = '10px';
+            wsjtxUDPTitle.style.color = '#555';
+            reportingSection.appendChild(wsjtxUDPTitle);
+
+            const wsjtxUDPEnabledField = createConfigField('WSJT-X UDP Enabled', 'checkbox', currentDecoderConfig.wsjtx_udp_enabled || false, 'wsjtx_udp_enabled');
+            const wsjtxUDPSmall = document.createElement('small');
+            wsjtxUDPSmall.textContent = 'Broadcast decoded spots using WSJT-X UDP protocol for integration with JTAlert, GridTracker, and other compatible applications';
+            wsjtxUDPEnabledField.appendChild(wsjtxUDPSmall);
+            reportingSection.appendChild(wsjtxUDPEnabledField);
+
+            const wsjtxUDPHostField = createConfigField('UDP Host', 'text', currentDecoderConfig.wsjtx_udp_host || '127.0.0.1', 'wsjtx_udp_host');
+            wsjtxUDPHostField.querySelector('input').placeholder = '127.0.0.1 or 239.255.0.1 (multicast)';
+            const wsjtxUDPHostSmall = document.createElement('small');
+            wsjtxUDPHostSmall.textContent = 'UDP host address (use 127.0.0.1 for localhost, or multicast address like 239.255.0.1)';
+            wsjtxUDPHostField.appendChild(wsjtxUDPHostSmall);
+            reportingSection.appendChild(wsjtxUDPHostField);
+
+            const wsjtxUDPPortField = createConfigField('UDP Port', 'number', currentDecoderConfig.wsjtx_udp_port || 2237, 'wsjtx_udp_port');
+            wsjtxUDPPortField.querySelector('input').placeholder = '2237';
+            wsjtxUDPPortField.querySelector('input').min = '1024';
+            wsjtxUDPPortField.querySelector('input').max = '65535';
+            const wsjtxUDPPortSmall = document.createElement('small');
+            wsjtxUDPPortSmall.textContent = 'UDP port number (default: 2237, standard WSJT-X port)';
+            wsjtxUDPPortField.appendChild(wsjtxUDPPortSmall);
+            reportingSection.appendChild(wsjtxUDPPortField);
+
+            const wsjtxUDPClientIDField = createConfigField('Client ID', 'text', currentDecoderConfig.wsjtx_udp_client_id || 'UberSDR', 'wsjtx_udp_client_id');
+            wsjtxUDPClientIDField.querySelector('input').placeholder = 'UberSDR';
+            const wsjtxUDPClientIDSmall = document.createElement('small');
+            wsjtxUDPClientIDSmall.textContent = 'Unique client identifier (appears in receiving applications)';
+            wsjtxUDPClientIDField.appendChild(wsjtxUDPClientIDSmall);
+            reportingSection.appendChild(wsjtxUDPClientIDField);
+
+            // WSJT-X UDP Enabled Modes
+            const wsjtxModesLabel = document.createElement('label');
+            wsjtxModesLabel.textContent = 'Enabled Modes (mode-selective, not band-selective)';
+            wsjtxModesLabel.style.display = 'block';
+            wsjtxModesLabel.style.marginTop = '15px';
+            wsjtxModesLabel.style.marginBottom = '10px';
+            wsjtxModesLabel.style.fontWeight = 'bold';
+            reportingSection.appendChild(wsjtxModesLabel);
+
+            const wsjtxModesContainer = document.createElement('div');
+            wsjtxModesContainer.style.marginLeft = '20px';
+            wsjtxModesContainer.style.marginBottom = '10px';
+
+            const enabledModes = currentDecoderConfig.wsjtx_udp_enabled_modes || { FT8: true, FT4: false, WSPR: false };
+            
+            ['FT8', 'FT4', 'WSPR'].forEach(mode => {
+                const modeCheckbox = document.createElement('div');
+                modeCheckbox.style.marginBottom = '8px';
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = `wsjtx_mode_${mode}`;
+                checkbox.checked = enabledModes[mode] || false;
+                checkbox.dataset.mode = mode;
+                checkbox.addEventListener('change', (e) => {
+                    if (!currentDecoderConfig.wsjtx_udp_enabled_modes) {
+                        currentDecoderConfig.wsjtx_udp_enabled_modes = {};
+                    }
+                    currentDecoderConfig.wsjtx_udp_enabled_modes[mode] = e.target.checked;
+                });
+                
+                const label = document.createElement('label');
+                label.htmlFor = `wsjtx_mode_${mode}`;
+                label.textContent = ` ${mode}`;
+                label.style.marginLeft = '5px';
+                label.style.cursor = 'pointer';
+                
+                modeCheckbox.appendChild(checkbox);
+                modeCheckbox.appendChild(label);
+                wsjtxModesContainer.appendChild(modeCheckbox);
+            });
+
+            const wsjtxModesSmall = document.createElement('small');
+            wsjtxModesSmall.textContent = 'Select which modes to broadcast. All enabled bands for a mode will be broadcast if that mode is enabled.';
+            wsjtxModesSmall.style.display = 'block';
+            wsjtxModesSmall.style.marginTop = '5px';
+            wsjtxModesSmall.style.color = '#666';
+            wsjtxModesContainer.appendChild(wsjtxModesSmall);
+
+            reportingSection.appendChild(wsjtxModesContainer);
+
             container.appendChild(reportingSection);
 
             // Bands section

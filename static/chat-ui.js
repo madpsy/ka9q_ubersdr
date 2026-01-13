@@ -436,6 +436,18 @@ class ChatUI {
                     <span id="chat-user-count-badge" class="chat-user-count-badge" style="display:none;">0</span>
                 </div>
             </div>
+
+            <!-- Leave Chat Confirmation Modal -->
+            <div id="chat-leave-modal" class="chat-modal" style="display:none;">
+                <div class="chat-modal-content">
+                    <h3>Leave Chat?</h3>
+                    <p>Are you sure you want to leave the chat?</p>
+                    <div class="chat-modal-buttons">
+                        <button class="chat-btn chat-btn-secondary" onclick="chatUI.hideLeaveChatModal()">Cancel</button>
+                        <button class="chat-btn chat-btn-danger" onclick="chatUI.confirmLeaveChat()">Leave</button>
+                    </div>
+                </div>
+            </div>
         `;
 
         // Inject CSS
@@ -976,6 +988,57 @@ class ChatUI {
                     padding: 5px 8px;
                     font-size: 11px;
                 }
+            }
+
+            /* Leave Chat Modal */
+            .chat-modal {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.7);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 1000;
+            }
+
+            .chat-modal-content {
+                background: #2a2a2a;
+                border: 1px solid #4a9eff;
+                border-radius: 8px;
+                padding: 20px;
+                min-width: 300px;
+                max-width: 400px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            }
+
+            .chat-modal-content h3 {
+                margin: 0 0 12px 0;
+                color: #fff;
+                font-size: 18px;
+            }
+
+            .chat-modal-content p {
+                margin: 0 0 20px 0;
+                color: #ddd;
+                font-size: 14px;
+            }
+
+            .chat-modal-buttons {
+                display: flex;
+                gap: 10px;
+                justify-content: flex-end;
+            }
+
+            .chat-btn-secondary {
+                background: #555;
+                color: #fff;
+            }
+
+            .chat-btn-secondary:hover {
+                background: #666;
             }
         `;
         document.head.appendChild(style);
@@ -1670,14 +1733,30 @@ class ChatUI {
     }
 
     /**
-     * Leave chat
+     * Show leave chat confirmation modal
      */
-    leaveChat() {
-        // Show confirmation dialog
-        if (!confirm('Are you sure you want to leave the chat?')) {
-            return; // User cancelled
+    showLeaveChatModal() {
+        const modal = document.getElementById('chat-leave-modal');
+        if (modal) {
+            modal.style.display = 'flex';
         }
+    }
 
+    /**
+     * Hide leave chat confirmation modal
+     */
+    hideLeaveChatModal() {
+        const modal = document.getElementById('chat-leave-modal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    /**
+     * Confirm and execute leave chat
+     */
+    confirmLeaveChat() {
+        this.hideLeaveChatModal();
         this.chat.leave();
 
         // Clear saved username from localStorage
@@ -1697,6 +1776,13 @@ class ChatUI {
         if (this.isExpanded) {
             this.togglePanel();
         }
+    }
+
+    /**
+     * Leave chat (shows confirmation modal)
+     */
+    leaveChat() {
+        this.showLeaveChatModal();
     }
 
     /**

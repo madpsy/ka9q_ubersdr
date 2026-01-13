@@ -564,12 +564,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (audioStartButton && audioStartOverlay) {
         // Disable button and show "Please wait..." while checking connection
-        const originalHTML = audioStartButton.innerHTML;
         audioStartButton.disabled = true;
         audioStartButton.innerHTML = '<span>Please wait...</span>';
 
-        // Check if connection will be allowed
-        checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML);
+        // Check if connection will be allowed (don't pass originalHTML)
+        checkConnectionOnLoad(audioStartButton, audioStartOverlay);
 
         audioStartButton.addEventListener('click', async () => {
             // Hide overlay
@@ -985,7 +984,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Check connection status on page load
-async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML, password = null) {
+async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, password = null) {
     try {
         const requestBody = {
             user_session_id: userSessionID
@@ -1083,7 +1082,16 @@ async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, origin
             // Enable the play button immediately (or after short delay)
             setTimeout(() => {
                 audioStartButton.disabled = false;
-                audioStartButton.innerHTML = originalHTML;
+                // Restore the button content with callsign preserved
+                const callsignEl = document.getElementById('receiver-callsign');
+                const callsignText = callsignEl ? callsignEl.textContent : '';
+                audioStartButton.innerHTML = `
+                    <span id="receiver-callsign" class="receiver-callsign">${callsignText}</span>
+                    <svg width="80" height="80" viewBox="0 0 80 80">
+                        <polygon points="25,15 25,65 65,40" fill="white"/>
+                    </svg>
+                    <span>Click to Start</span>
+                `;
                 audioStartButton.style.backgroundColor = ''; // Reset color
                 audioStartButton.style.cursor = ''; // Reset cursor
             }, password ? 500 : 2000); // Shorter delay if password was used
@@ -1093,7 +1101,16 @@ async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, origin
         // On error, enable button after delay anyway
         setTimeout(() => {
             audioStartButton.disabled = false;
-            audioStartButton.innerHTML = originalHTML;
+            // Restore the button content with callsign preserved
+            const callsignEl = document.getElementById('receiver-callsign');
+            const callsignText = callsignEl ? callsignEl.textContent : '';
+            audioStartButton.innerHTML = `
+                <span id="receiver-callsign" class="receiver-callsign">${callsignText}</span>
+                <svg width="80" height="80" viewBox="0 0 80 80">
+                    <polygon points="25,15 25,65 65,40" fill="white"/>
+                </svg>
+                <span>Click to Start</span>
+            `;
         }, 2000);
     }
 }
@@ -1125,15 +1142,9 @@ window.submitBypassPassword = async function() {
         errorMessage.style.display = 'none';
     }
 
-    // Get the original HTML from the button's data attribute or reconstruct it
-    const originalHTML = `<svg width="80" height="80" viewBox="0 0 80 80">
-                    <polygon points="25,15 25,65 65,40" fill="white"/>
-                </svg>
-                <span>Click to Start</span>`;
-
     // Retry connection check with password
     try {
-        await checkConnectionOnLoad(audioStartButton, document.getElementById('audio-start-overlay'), originalHTML, password);
+        await checkConnectionOnLoad(audioStartButton, document.getElementById('audio-start-overlay'), password);
 
         // Check if connection was successful
         if (bypassPassword === password) {

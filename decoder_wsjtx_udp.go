@@ -21,7 +21,8 @@ type WSJTXUDPBroadcaster struct {
 	schemaVersion   uint32
 	conn            *net.UDPConn
 	remoteAddr      *net.UDPAddr
-	mu              sync.RWMutex
+	mu              sync.RWMutex // Protects state (running, enabled, etc.)
+	sendMutex       sync.Mutex   // Serializes UDP sends to prevent batch interleaving
 	heartbeatTicker *time.Ticker
 	stopChan        chan struct{}
 	running         bool
@@ -157,14 +158,20 @@ func (w *WSJTXUDPBroadcaster) IsModeEnabled(mode string) bool {
 
 // SendDecode sends a decode message (Type 2) for FT8/FT4
 func (w *WSJTXUDPBroadcaster) SendDecode(decode *DecodeInfo) error {
-	w.mu.Lock()
+	// Lock send mutex to serialize all sends (prevents batch interleaving)
+	w.sendMutex.Lock()
+	defer w.sendMutex.Unlock()
 
+	// Check running state
+	w.mu.RLock()
 	if !w.running {
-		w.mu.Unlock()
+		w.mu.RUnlock()
 		return fmt.Errorf("broadcaster not running")
 	}
+	w.mu.RUnlock()
 
 	// Check if we need to send a Status message first (band/mode/freq changed)
+	w.mu.Lock()
 	needStatus := (decode.BandName != w.lastBandName ||
 		decode.DialFrequency != w.lastDialFreq ||
 		decode.Mode != w.lastMode)
@@ -174,20 +181,15 @@ func (w *WSJTXUDPBroadcaster) SendDecode(decode *DecodeInfo) error {
 		w.lastBandName = decode.BandName
 		w.lastDialFreq = decode.DialFrequency
 		w.lastMode = decode.Mode
+	}
+	w.mu.Unlock()
 
-		// Release lock temporarily to send Status
-		w.mu.Unlock()
-
-		// Send Status message first
+	// Send Status message first if needed (still under sendMutex)
+	if needStatus {
 		if err := w.SendStatus(decode.DialFrequency, decode.Mode, decode.BandName); err != nil {
 			log.Printf("WSJT-X UDP: Failed to send Status for %s: %v", decode.BandName, err)
 		}
-
-		// Re-acquire lock for sending Decode
-		w.mu.Lock()
 	}
-
-	defer w.mu.Unlock()
 
 	// Build message
 	buf := new(bytes.Buffer)
@@ -223,14 +225,20 @@ func (w *WSJTXUDPBroadcaster) SendDecode(decode *DecodeInfo) error {
 
 // SendWSPRDecode sends a WSPR decode message (Type 10)
 func (w *WSJTXUDPBroadcaster) SendWSPRDecode(decode *DecodeInfo) error {
-	w.mu.Lock()
+	// Lock send mutex to serialize all sends (prevents batch interleaving)
+	w.sendMutex.Lock()
+	defer w.sendMutex.Unlock()
 
+	// Check running state
+	w.mu.RLock()
 	if !w.running {
-		w.mu.Unlock()
+		w.mu.RUnlock()
 		return fmt.Errorf("broadcaster not running")
 	}
+	w.mu.RUnlock()
 
 	// Check if we need to send a Status message first (band/mode/freq changed)
+	w.mu.Lock()
 	needStatus := (decode.BandName != w.lastBandName ||
 		decode.DialFrequency != w.lastDialFreq ||
 		decode.Mode != w.lastMode)
@@ -240,20 +248,15 @@ func (w *WSJTXUDPBroadcaster) SendWSPRDecode(decode *DecodeInfo) error {
 		w.lastBandName = decode.BandName
 		w.lastDialFreq = decode.DialFrequency
 		w.lastMode = decode.Mode
+	}
+	w.mu.Unlock()
 
-		// Release lock temporarily to send Status
-		w.mu.Unlock()
-
-		// Send Status message first
+	// Send Status message first if needed (still under sendMutex)
+	if needStatus {
 		if err := w.SendStatus(decode.DialFrequency, decode.Mode, decode.BandName); err != nil {
 			log.Printf("WSJT-X UDP: Failed to send Status for %s: %v", decode.BandName, err)
 		}
-
-		// Re-acquire lock for sending WSPR Decode
-		w.mu.Lock()
 	}
-
-	defer w.mu.Unlock()
 
 	// Build message
 	buf := new(bytes.Buffer)
@@ -285,11 +288,13 @@ func (w *WSJTXUDPBroadcaster) SendWSPRDecode(decode *DecodeInfo) error {
 }
 
 // SendStatus sends a status message (Type 1) with dial frequency and mode
+// Note: This is called from within SendDecode/SendWSPRDecode which already hold sendMutex
 func (w *WSJTXUDPBroadcaster) SendStatus(dialFreq uint64, mode string, bandName string) error {
 	w.mu.RLock()
-	defer w.mu.RUnlock()
+	running := w.running
+	w.mu.RUnlock()
 
-	if !w.running {
+	if !running {
 		return fmt.Errorf("broadcaster not running")
 	}
 

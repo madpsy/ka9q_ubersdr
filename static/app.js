@@ -1390,9 +1390,8 @@ async function fetchSiteDescription() {
                     mapLink.style.marginTop = '5px';
                     mapLink.style.fontSize = '12px';
                     mapLink.style.textAlign = 'center';
-                    // Use Google Maps with a labeled marker showing the receiver name
-                    const mapLabel = encodeURIComponent(name + (location ? ' - ' + location : ''));
-                    mapLink.innerHTML = `<a href="https://www.google.com/maps/search/?api=1&query=${lat},${lon}&query_place_id=${mapLabel}" target="_blank" style="color: #007bff;">View larger map</a>`;
+                    // Use Google Maps with exact coordinates - this will show a pin at the precise location
+                    mapLink.innerHTML = `<a href="https://www.google.com/maps?q=${lat},${lon}" target="_blank" style="color: #007bff;">View larger map</a>`;
                     descriptionEl.appendChild(mapLink);
                 }
             }

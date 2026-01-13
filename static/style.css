@@ -217,18 +217,20 @@
 }
 
 .audio-start-button .receiver-callsign {
-    display: block;
+    display: block !important;
     font-size: 1.8em;
-    color: #00ff00;
-    text-shadow: 0 0 10px rgba(0, 255, 0, 0.8), 0 2px 4px rgba(0, 0, 0, 0.5);
+    color: white;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
     letter-spacing: 0.1em;
     font-family: 'Courier New', monospace;
+    font-weight: bold;
     margin-bottom: 10px;
-    min-height: 1.8em;
+    visibility: visible !important;
+    opacity: 1 !important;
 }
 
 .audio-start-button .receiver-callsign:empty {
-    display: none;
+    display: none !important;
 }
 
 .overlay-buttons-container {

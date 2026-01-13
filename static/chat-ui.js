@@ -1717,16 +1717,18 @@ class ChatUI {
         document.getElementById('chat-mute-btn').style.display = 'none';
         document.getElementById('chat-zoom-btn').style.display = 'none';
 
-        // Clear username input and validation indicator
+        // Generate a new random username and populate the input
         const usernameInput = document.getElementById('chat-username-input');
         const validationIndicator = document.getElementById('chat-username-validation');
         const joinBtn = document.getElementById('chat-join-btn');
 
-        usernameInput.value = '';
-        validationIndicator.style.display = 'none';
-        joinBtn.disabled = true;
-        joinBtn.style.opacity = '0.5';
-        joinBtn.style.cursor = 'not-allowed';
+        // Generate new random username: user<4 random digits>
+        const randomUsername = 'user' + Math.floor(1000 + Math.random() * 9000);
+        usernameInput.value = randomUsername;
+
+        // Trigger validation for the new random username
+        const event = new Event('input', { bubbles: true });
+        usernameInput.dispatchEvent(event);
 
         // Clear username from chat object
         this.chat.username = null;

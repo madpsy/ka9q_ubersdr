@@ -186,8 +186,8 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 20px;
-    padding: 40px 60px;
+    gap: 10px;
+    padding: 30px 50px;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     border: none;
     border-radius: 20px;
@@ -218,13 +218,13 @@
 
 .receiver-callsign {
     display: block !important;
-    font-size: 1.8em;
+    font-size: 1.4em;
     color: white !important;
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
     letter-spacing: 0.1em;
     font-family: 'Courier New', monospace;
     font-weight: bold;
-    margin-bottom: 10px;
+    margin-bottom: 0;
     visibility: visible !important;
     opacity: 1 !important;
     line-height: 1.2;

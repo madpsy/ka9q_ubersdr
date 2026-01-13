@@ -228,7 +228,6 @@
     visibility: visible !important;
     opacity: 1 !important;
     line-height: 1.2;
-    min-height: 2.16em; /* 1.8em font-size × 1.2 line-height = 2.16em - reserves space even when empty */
 }
 
 .overlay-buttons-container {

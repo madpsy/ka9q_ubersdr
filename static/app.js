@@ -564,11 +564,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (audioStartButton && audioStartOverlay) {
         // Disable button and show "Please wait..." while checking connection
+        const originalHTML = audioStartButton.innerHTML;
         audioStartButton.disabled = true;
         audioStartButton.innerHTML = '<span>Please wait...</span>';
 
-        // Check if connection will be allowed (don't pass originalHTML)
-        checkConnectionOnLoad(audioStartButton, audioStartOverlay);
+        // Check if connection will be allowed
+        checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML);
 
         audioStartButton.addEventListener('click', async () => {
             // Hide overlay
@@ -984,7 +985,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Check connection status on page load
-async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, password = null) {
+async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML, password = null) {
     try {
         const requestBody = {
             user_session_id: userSessionID
@@ -1082,16 +1083,7 @@ async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, passwo
             // Enable the play button immediately (or after short delay)
             setTimeout(() => {
                 audioStartButton.disabled = false;
-                // Restore the button content with callsign preserved
-                const callsignEl = document.getElementById('receiver-callsign');
-                const callsignText = callsignEl ? callsignEl.textContent : '';
-                audioStartButton.innerHTML = `
-                    <span id="receiver-callsign" class="receiver-callsign">${callsignText}</span>
-                    <svg width="80" height="80" viewBox="0 0 80 80">
-                        <polygon points="25,15 25,65 65,40" fill="white"/>
-                    </svg>
-                    <span>Click to Start</span>
-                `;
+                audioStartButton.innerHTML = originalHTML;
                 audioStartButton.style.backgroundColor = ''; // Reset color
                 audioStartButton.style.cursor = ''; // Reset cursor
             }, password ? 500 : 2000); // Shorter delay if password was used
@@ -1101,16 +1093,7 @@ async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, passwo
         // On error, enable button after delay anyway
         setTimeout(() => {
             audioStartButton.disabled = false;
-            // Restore the button content with callsign preserved
-            const callsignEl = document.getElementById('receiver-callsign');
-            const callsignText = callsignEl ? callsignEl.textContent : '';
-            audioStartButton.innerHTML = `
-                <span id="receiver-callsign" class="receiver-callsign">${callsignText}</span>
-                <svg width="80" height="80" viewBox="0 0 80 80">
-                    <polygon points="25,15 25,65 65,40" fill="white"/>
-                </svg>
-                <span>Click to Start</span>
-            `;
+            audioStartButton.innerHTML = originalHTML;
         }, 2000);
     }
 }
@@ -1142,9 +1125,15 @@ window.submitBypassPassword = async function() {
         errorMessage.style.display = 'none';
     }
 
+    // Get the original HTML from the button's data attribute or reconstruct it
+    const originalHTML = `<svg width="80" height="80" viewBox="0 0 80 80">
+                    <polygon points="25,15 25,65 65,40" fill="white"/>
+                </svg>
+                <span>Click to Start</span>`;
+
     // Retry connection check with password
     try {
-        await checkConnectionOnLoad(audioStartButton, document.getElementById('audio-start-overlay'), password);
+        await checkConnectionOnLoad(audioStartButton, document.getElementById('audio-start-overlay'), originalHTML, password);
 
         // Check if connection was successful
         if (bypassPassword === password) {
@@ -1252,11 +1241,20 @@ async function fetchSiteDescription() {
                 }
 
                 // Update receiver callsign if available
+                console.log('[DEBUG] Checking for receiver callsign in API data:', data.receiver);
                 if (data.receiver && data.receiver.callsign) {
+                    console.log('[DEBUG] Callsign found:', data.receiver.callsign);
                     const callsignEl = document.getElementById('receiver-callsign');
+                    console.log('[DEBUG] Callsign element:', callsignEl);
                     if (callsignEl) {
                         callsignEl.textContent = data.receiver.callsign;
+                        console.log('[DEBUG] Callsign set to:', callsignEl.textContent);
+                        console.log('[DEBUG] Callsign element after setting:', callsignEl.outerHTML);
+                    } else {
+                        console.log('[DEBUG] Callsign element not found in DOM');
                     }
+                } else {
+                    console.log('[DEBUG] No callsign in API response');
                 }
 
                 // Show band conditions button if noise floor monitoring is enabled

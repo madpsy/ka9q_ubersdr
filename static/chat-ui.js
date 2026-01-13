@@ -990,7 +990,7 @@ class ChatUI {
         const validationIndicator = document.getElementById('chat-username-validation');
         const joinBtn = document.getElementById('chat-join-btn');
 
-        usernameInput.addEventListener('input', (e) => {
+        const validateUsername = (e) => {
             const value = e.target.value;
             // Allow alphanumeric, hyphens, underscores, forward slashes
             const cleaned = value.replace(/[^A-Za-z0-9\-_\/]/g, '');
@@ -1053,7 +1053,14 @@ class ChatUI {
                     joinBtn.style.cursor = 'pointer';
                 }
             }
-        });
+        };
+
+        usernameInput.addEventListener('input', validateUsername);
+
+        // Trigger validation immediately if there's a pre-filled value
+        if (usernameInput.value) {
+            validateUsername({ target: usernameInput });
+        }
 
         // Join button
         joinBtn.addEventListener('click', () => {

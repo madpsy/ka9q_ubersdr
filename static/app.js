@@ -1390,7 +1390,7 @@ async function fetchSiteDescription() {
                     mapLink.style.marginTop = '5px';
                     mapLink.style.fontSize = '12px';
                     mapLink.style.textAlign = 'center';
-                    mapLink.innerHTML = `<a href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=15/${lat}/${lon}" target="_blank" style="color: #007bff;">View larger map</a>`;
+                    mapLink.innerHTML = `<a href="https://www.google.com/maps?q=${lat},${lon}&z=15" target="_blank" style="color: #007bff;">View larger map</a>`;
                     descriptionEl.appendChild(mapLink);
                 }
             }

@@ -6,3 +6,4 @@ clients/python/venv
 clients/python/build
 clients/python/dist
 collector/instances.db
+.vscode

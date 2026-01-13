@@ -240,10 +240,11 @@ func (s *Protocol1Server) mainThread() {
 			}
 			s.handleDiscovery(addr)
 
-		case n == Protocol1ControlSize:
+		case n == Protocol1ControlSize || n == Protocol1DataSize:
 			// Control packet (start/stop, frequency changes, etc.)
+			// Accept both 1024 and 1032 byte packets (Thetis sends 1032)
 			if debugDiscovery {
-				log.Printf("Protocol1: Control packet from %s (cmd=0x%02x)", addr, cmd)
+				log.Printf("Protocol1: Control packet from %s (cmd=0x%02x, %d bytes)", addr, cmd, n)
 			}
 			s.handleControl(buffer[:n], addr)
 
@@ -283,7 +284,18 @@ func (s *Protocol1Server) handleDiscovery(addr *net.UDPAddr) {
 
 	// Bytes 11-59: Reserved/zeros
 
-	_, err := s.sock.WriteToUDP(response, addr)
+	// Use shared socket if available (socket-less mode), otherwise use own socket
+	sock := s.sock
+	if sock == nil {
+		sock = s.sharedSock
+	}
+
+	if sock == nil {
+		log.Printf("Protocol1: Cannot send discovery response - no socket available")
+		return
+	}
+
+	_, err := sock.WriteToUDP(response, addr)
 	if err != nil {
 		log.Printf("Protocol1: Failed to send discovery response: %v", err)
 		return
@@ -366,7 +378,7 @@ func (s *Protocol1Server) handleControl(buffer []byte, addr *net.UDPAddr) {
 		if !s.running {
 			s.running = true
 			s.clientAddr = addr
-			log.Printf("Protocol1: Radio started by client %s", addr)
+			log.Printf("Protocol1: Radio STARTING by client %s (socket=%v, sharedSock=%v)", addr, s.sock != nil, s.sharedSock != nil)
 
 			// Start single sender thread that interleaves all receivers
 			s.wg.Add(1)
@@ -755,8 +767,14 @@ func (s *Protocol1Server) senderThread() {
 		var sock *net.UDPConn
 		if s.sock != nil {
 			sock = s.sock
+			if debugSeqNum && s.seqNum%100 == 0 {
+				log.Printf("Protocol1: Sending seq=%d via own socket to %s", s.seqNum, clientAddr)
+			}
 		} else if s.sharedSock != nil {
 			sock = s.sharedSock
+			if debugSeqNum && s.seqNum%100 == 0 {
+				log.Printf("Protocol1: Sending seq=%d via shared socket to %s", s.seqNum, clientAddr)
+			}
 		} else {
 			log.Printf("Protocol1: Cannot send - no socket available")
 			continue
@@ -766,6 +784,11 @@ func (s *Protocol1Server) senderThread() {
 		if err != nil {
 			log.Printf("Protocol1: Send error: %v", err)
 			continue
+		}
+
+		// Log first few packets to confirm sending is working
+		if s.seqNum < 5 {
+			log.Printf("Protocol1: Successfully sent IQ packet seq=%d (%d bytes) to %s", s.seqNum, len(packet), clientAddr)
 		}
 
 		// Increment sequence number

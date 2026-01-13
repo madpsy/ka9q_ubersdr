@@ -47,8 +47,9 @@ const (
 	PortDDC0        = 1035 // DDC ports are 1035-1044 (1035 + receiver_num)
 
 	// Firmware version
-	// Use Hermes-Lite2 cicrx version: FW=72 (0x48), Protocol=8
-	FirmwareVersion = 72
+	// Use Hermes-Lite2 standard version: FW=64 (0x40)
+	// Real HL2 uses 0x40, not 0x48
+	FirmwareVersion = 64
 	ProtocolVersion = 8
 )
 
@@ -73,6 +74,10 @@ type Protocol2Server struct {
 
 	// Protocol 1 server for handling Protocol 1 data packets (optional)
 	protocol1Server *Protocol1Server
+
+	// Track which clients have sent Protocol 1 discovery (to avoid confusing them with Protocol 2 responses)
+	protocol1Clients map[string]time.Time // key is "ip:port", value is last seen time
+	protocol1Mu      sync.RWMutex
 
 	// Sockets
 	discoverySock *net.UDPConn
@@ -135,9 +140,10 @@ func NewProtocol2Server(config Protocol2Config) (*Protocol2Server, error) {
 	}
 
 	s := &Protocol2Server{
-		config:   config,
-		stopChan: make(chan struct{}),
-		bits:     0x08, // Enable fractional frequency mode by default
+		config:           config,
+		stopChan:         make(chan struct{}),
+		bits:             0x08, // Enable fractional frequency mode by default
+		protocol1Clients: make(map[string]time.Time),
 	}
 
 	s.sendCond = sync.NewCond(&s.sendMu)
@@ -199,7 +205,7 @@ func (s *Protocol2Server) Start() error {
 	}
 
 	// Setup discovery socket (port 1024)
-	// Always bind to 0.0.0.0:1024 to receive broadcast packets
+	// Bind to 0.0.0.0 to receive broadcast packets, but use SO_BINDTODEVICE to control source IP
 	// SO_BINDTODEVICE (if interface specified) restricts to specific interface
 	// SO_REUSEPORT allows multiple instances to coexist
 	lc := createListenConfig(s.config.Interface != "")
@@ -432,6 +438,21 @@ func (s *Protocol2Server) discoveryThread() {
 			if debugDiscovery {
 				log.Printf("Protocol2: Identified as standard HPSDR DISCOVERY packet (byte[4]=0x02)")
 			}
+
+			// Check if this client has recently sent Protocol 1 discovery
+			// If so, don't respond with Protocol 2 to avoid confusing the client
+			clientKey := addr.String()
+			s.protocol1Mu.RLock()
+			lastP1Time, isP1Client := s.protocol1Clients[clientKey]
+			s.protocol1Mu.RUnlock()
+
+			if isP1Client && time.Since(lastP1Time) < 5*time.Second {
+				if debugDiscovery {
+					log.Printf("Protocol2: Suppressing Protocol 2 discovery response to %s (Protocol 1 client)", addr)
+				}
+				continue
+			}
+
 			s.handleDiscovery(addr)
 			continue
 		}
@@ -464,6 +485,13 @@ func (s *Protocol2Server) discoveryThread() {
 				if debugDiscovery {
 					log.Printf("Protocol2: Received HPSDR Protocol 1 discovery from %s", addr)
 				}
+
+				// Mark this client as a Protocol 1 client
+				clientKey := addr.String()
+				s.protocol1Mu.Lock()
+				s.protocol1Clients[clientKey] = time.Now()
+				s.protocol1Mu.Unlock()
+
 				// Send Protocol 1 discovery response
 				s.handleProtocol1Discovery(addr)
 				continue
@@ -471,12 +499,16 @@ func (s *Protocol2Server) discoveryThread() {
 
 			// Control/data packets - forward to Protocol 1 server if available
 			if s.protocol1Server != nil {
-				if debugDiscovery {
-					log.Printf("Protocol2: Forwarding Protocol 1 packet (cmd=0x%02x, %d bytes) from %s to Protocol1Server", cmd, n, addr)
+				// Accept 64-byte Program packets, 1024-byte control packets, and 1032-byte data packets
+				if n == 64 || n == 1024 || n == 1032 {
+					log.Printf("Protocol2: Forwarding Protocol 1 control/data packet (cmd=0x%02x, %d bytes) from %s to Protocol1Server", cmd, n, addr)
+					// Forward to Protocol 1 server's handler
+					s.protocol1Server.handleControlFromDiscoveryPort(buffer[:n], addr)
+					continue
+				} else {
+					log.Printf("Protocol2: Received Protocol 1 packet with unexpected size: cmd=0x%02x, %d bytes from %s", cmd, n, addr)
+					continue
 				}
-				// Forward to Protocol 1 server's handler
-				s.protocol1Server.handleControlFromDiscoveryPort(buffer[:n], addr)
-				continue
 			} else {
 				// No Protocol 1 server available
 				if debugDiscovery {
@@ -487,8 +519,10 @@ func (s *Protocol2Server) discoveryThread() {
 		}
 
 		// Unknown packet format
-		if debugDiscovery {
-			log.Printf("Protocol2: Unknown packet format: %d bytes, byte[4]=0x%02x", n, buffer[4])
+		log.Printf("Protocol2: Unknown packet format: %d bytes from %s", n, addr)
+		if n >= 5 {
+			log.Printf("Protocol2: First 5 bytes: %02x %02x %02x %02x %02x",
+				buffer[0], buffer[1], buffer[2], buffer[3], buffer[4])
 		}
 	}
 }
@@ -514,11 +548,12 @@ func (s *Protocol2Server) handleDiscovery(addr *net.UDPAddr) {
 	// Byte 11: Device type (0x06 = HermesLite)
 	response[11] = s.config.DeviceType
 
-	// Byte 12: Firmware version (VERSION_MAJOR)
+	// Byte 12: Firmware version (code version)
 	response[12] = FirmwareVersion
 
-	// Byte 13: Protocol version (VERSION_MINOR)
-	response[13] = ProtocolVersion
+	// Byte 13: Reserved (0x00 for standard HPSDR compatibility)
+	// Note: Some implementations use this for board variant, but standard is 0x00
+	response[13] = 0x00
 
 	// Bytes 14-19: Reserved/zeros
 
@@ -530,14 +565,15 @@ func (s *Protocol2Server) handleDiscovery(addr *net.UDPAddr) {
 	// BANDSCOPE_BITS = 0x01, BOARD = 5 -> 0x45
 	response[21] = 0x45
 
-	// Byte 22: Protocol info
-	response[22] = 3
+	// Byte 22: Protocol info (0 = basic protocol, no extensions)
+	// Thetis may be sensitive to this value - use 0 for maximum compatibility
+	response[22] = 0
 
 	// Bytes 23-59: zeros
 
 	s.discoverySock.WriteToUDP(response, addr)
-	log.Printf("Protocol2: Discovery response sent to %s (FW=%d.%d, Board=0x%02x, Receivers=%d)",
-		addr, FirmwareVersion, ProtocolVersion, response[21], s.config.NumReceivers)
+	log.Printf("Protocol2: Discovery response sent to %s (FW=%d, Board=0x%02x, Receivers=%d)",
+		addr, FirmwareVersion, response[21], s.config.NumReceivers)
 
 	if debugDiscovery {
 		log.Printf("Protocol2: Discovery response details:")
@@ -552,7 +588,7 @@ func (s *Protocol2Server) handleDiscovery(addr *net.UDPAddr) {
 			response[5], response[6], response[7], response[8], response[9], response[10])
 		log.Printf("Protocol2:   Device Type: 0x%02x", response[11])
 		log.Printf("Protocol2:   Firmware: %d", response[12])
-		log.Printf("Protocol2:   Protocol: %d", response[13])
+		log.Printf("Protocol2:   Reserved[13]: 0x%02x", response[13])
 		log.Printf("Protocol2:   Receivers: %d", response[20])
 		log.Printf("Protocol2:   Board ID: 0x%02x", response[21])
 		log.Printf("Protocol2:   Protocol Info: %d", response[22])

@@ -25,6 +25,11 @@ type WSJTXUDPBroadcaster struct {
 	heartbeatTicker *time.Ticker
 	stopChan        chan struct{}
 	running         bool
+
+	// Track last band/mode to send Status when switching
+	lastBandName string
+	lastDialFreq uint64
+	lastMode     string
 }
 
 // WSJT-X UDP Protocol constants
@@ -152,12 +157,37 @@ func (w *WSJTXUDPBroadcaster) IsModeEnabled(mode string) bool {
 
 // SendDecode sends a decode message (Type 2) for FT8/FT4
 func (w *WSJTXUDPBroadcaster) SendDecode(decode *DecodeInfo) error {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
+	w.mu.Lock()
 
 	if !w.running {
+		w.mu.Unlock()
 		return fmt.Errorf("broadcaster not running")
 	}
+
+	// Check if we need to send a Status message first (band/mode/freq changed)
+	needStatus := (decode.BandName != w.lastBandName ||
+		decode.DialFrequency != w.lastDialFreq ||
+		decode.Mode != w.lastMode)
+
+	if needStatus {
+		// Update tracking
+		w.lastBandName = decode.BandName
+		w.lastDialFreq = decode.DialFrequency
+		w.lastMode = decode.Mode
+
+		// Release lock temporarily to send Status
+		w.mu.Unlock()
+
+		// Send Status message first
+		if err := w.SendStatus(decode.DialFrequency, decode.Mode, decode.BandName); err != nil {
+			log.Printf("WSJT-X UDP: Failed to send Status for %s: %v", decode.BandName, err)
+		}
+
+		// Re-acquire lock for sending Decode
+		w.mu.Lock()
+	}
+
+	defer w.mu.Unlock()
 
 	// Build message
 	buf := new(bytes.Buffer)
@@ -193,12 +223,37 @@ func (w *WSJTXUDPBroadcaster) SendDecode(decode *DecodeInfo) error {
 
 // SendWSPRDecode sends a WSPR decode message (Type 10)
 func (w *WSJTXUDPBroadcaster) SendWSPRDecode(decode *DecodeInfo) error {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
+	w.mu.Lock()
 
 	if !w.running {
+		w.mu.Unlock()
 		return fmt.Errorf("broadcaster not running")
 	}
+
+	// Check if we need to send a Status message first (band/mode/freq changed)
+	needStatus := (decode.BandName != w.lastBandName ||
+		decode.DialFrequency != w.lastDialFreq ||
+		decode.Mode != w.lastMode)
+
+	if needStatus {
+		// Update tracking
+		w.lastBandName = decode.BandName
+		w.lastDialFreq = decode.DialFrequency
+		w.lastMode = decode.Mode
+
+		// Release lock temporarily to send Status
+		w.mu.Unlock()
+
+		// Send Status message first
+		if err := w.SendStatus(decode.DialFrequency, decode.Mode, decode.BandName); err != nil {
+			log.Printf("WSJT-X UDP: Failed to send Status for %s: %v", decode.BandName, err)
+		}
+
+		// Re-acquire lock for sending WSPR Decode
+		w.mu.Lock()
+	}
+
+	defer w.mu.Unlock()
 
 	// Build message
 	buf := new(bytes.Buffer)
@@ -223,6 +278,50 @@ func (w *WSJTXUDPBroadcaster) SendWSPRDecode(decode *DecodeInfo) error {
 	w.writeString(buf, decode.Locator)     // Grid
 	w.writeInt32(buf, int32(decode.DBm))   // Power (dBm)
 	w.writeBool(buf, false)                // Off air
+
+	// Send datagram
+	_, err := w.conn.Write(buf.Bytes())
+	return err
+}
+
+// SendStatus sends a status message (Type 1) with dial frequency and mode
+func (w *WSJTXUDPBroadcaster) SendStatus(dialFreq uint64, mode string, bandName string) error {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if !w.running {
+		return fmt.Errorf("broadcaster not running")
+	}
+
+	// Build message
+	buf := new(bytes.Buffer)
+
+	// Write header
+	if err := w.writeHeader(buf, wsjtxMsgStatus); err != nil {
+		return err
+	}
+
+	// Write payload (Status message fields)
+	w.writeUint64(buf, dialFreq) // Dial frequency (Hz)
+	w.writeString(buf, mode)     // Mode (e.g., "FT8", "FT4", "WSPR")
+	w.writeString(buf, "")       // DX call (empty)
+	w.writeString(buf, "")       // Report (empty)
+	w.writeString(buf, mode)     // Tx mode (same as mode)
+	w.writeBool(buf, false)      // Tx enabled
+	w.writeBool(buf, false)      // Transmitting
+	w.writeBool(buf, true)       // Decoding
+	w.writeUint32(buf, 0)        // Rx DF (0)
+	w.writeUint32(buf, 0)        // Tx DF (0)
+	w.writeString(buf, "")       // DE call (empty, could use receiver callsign)
+	w.writeString(buf, "")       // DE grid (empty, could use receiver locator)
+	w.writeString(buf, "")       // DX grid (empty)
+	w.writeBool(buf, false)      // Tx watchdog
+	w.writeString(buf, "")       // Sub-mode (empty)
+	w.writeBool(buf, false)      // Fast mode
+	w.writeBool(buf, false)      // Special operation mode (uint8 in schema 3, but bool works)
+	w.writeUint32(buf, 0)        // Frequency tolerance (Hz)
+	w.writeUint32(buf, 0)        // T/R period (seconds)
+	w.writeString(buf, bandName) // Configuration name (use band name)
 
 	// Send datagram
 	_, err := w.conn.Write(buf.Bytes())

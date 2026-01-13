@@ -1240,6 +1240,14 @@ async function fetchSiteDescription() {
                     }
                 }
 
+                // Update receiver callsign if available
+                if (data.receiver && data.receiver.callsign) {
+                    const callsignEl = document.getElementById('receiver-callsign');
+                    if (callsignEl) {
+                        callsignEl.textContent = data.receiver.callsign;
+                    }
+                }
+
                 // Show band conditions button if noise floor monitoring is enabled
                 if (data.noise_floor === true) {
                     const bandConditionsBtn = document.getElementById('band-conditions-button');

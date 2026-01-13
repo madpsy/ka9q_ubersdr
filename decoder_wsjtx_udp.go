@@ -174,13 +174,17 @@ func (w *WSJTXUDPBroadcaster) SendDecode(decode *DecodeInfo) error {
 	qtime := w.timeToQTime(decode.Timestamp)
 	w.writeUint32(buf, qtime)
 
-	w.writeInt32(buf, int32(decode.SNR))                 // SNR
-	w.writeDouble(buf, float64(decode.DT))               // Delta time
-	w.writeUint32(buf, uint32(decode.Frequency%1000000)) // Delta frequency (offset from dial)
-	w.writeString(buf, decode.Mode)                      // Mode
-	w.writeString(buf, decode.Message)                   // Message text
-	w.writeBool(buf, false)                              // Low confidence
-	w.writeBool(buf, false)                              // Off air
+	// Calculate delta frequency (offset from dial frequency in Hz)
+	// decode.Frequency is the actual RF frequency, decode.DialFrequency is the center/dial frequency
+	deltaFreq := int64(decode.Frequency) - int64(decode.DialFrequency)
+
+	w.writeInt32(buf, int32(decode.SNR))   // SNR
+	w.writeDouble(buf, float64(decode.DT)) // Delta time
+	w.writeUint32(buf, uint32(deltaFreq))  // Delta frequency (offset from dial)
+	w.writeString(buf, decode.Mode)        // Mode
+	w.writeString(buf, decode.Message)     // Message text
+	w.writeBool(buf, false)                // Low confidence
+	w.writeBool(buf, false)                // Off air
 
 	// Send datagram
 	_, err := w.conn.Write(buf.Bytes())

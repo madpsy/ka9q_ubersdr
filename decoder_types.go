@@ -8,19 +8,20 @@ import (
 // DecodeInfo represents a decoded signal with all relevant information
 type DecodeInfo struct {
 	// Common fields for all modes
-	Callsign   string
-	Locator    string
-	Country    string  // DXCC country name from CTY.DAT
-	CQZone     int     // CQ Zone from CTY.DAT
-	ITUZone    int     // ITU Zone from CTY.DAT
-	Continent  string  // Continent code from CTY.DAT (e.g., "NA", "EU", "AS")
-	TimeOffset float64 // UTC time offset from CTY.DAT
-	SNR        int
-	Frequency  uint64 // Actual RF frequency in Hz
-	Timestamp  time.Time
-	Mode       string // "FT8", "FT4", "WSPR"
-	Message    string
-	BandName   string // Name of the decoder band (e.g., "20m_FT8")
+	Callsign      string
+	Locator       string
+	Country       string  // DXCC country name from CTY.DAT
+	CQZone        int     // CQ Zone from CTY.DAT
+	ITUZone       int     // ITU Zone from CTY.DAT
+	Continent     string  // Continent code from CTY.DAT (e.g., "NA", "EU", "AS")
+	TimeOffset    float64 // UTC time offset from CTY.DAT
+	SNR           int
+	Frequency     uint64 // Actual RF frequency in Hz
+	DialFrequency uint64 // Dial frequency (center frequency) in Hz
+	Timestamp     time.Time
+	Mode          string // "FT8", "FT4", "WSPR"
+	Message       string
+	BandName      string // Name of the decoder band (e.g., "20m_FT8")
 
 	// Distance and bearing (calculated if receiver locator is configured)
 	DistanceKm *float64 `json:"distance_km,omitempty"`

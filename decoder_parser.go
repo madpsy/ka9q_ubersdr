@@ -95,16 +95,17 @@ func ParseFT8Line(line string, dialFreq uint64, mode DecoderMode) (*DecodeInfo, 
 	ctyInfo := GetCallsignInfo(callsign)
 
 	info := &DecodeInfo{
-		Callsign:    callsign,
-		Locator:     locator,
-		SNR:         snr,
-		Frequency:   frequency,
-		Timestamp:   timestamp,
-		Mode:        mode.String(),
-		Message:     message,
-		HasCallsign: callsign != "",
-		HasLocator:  isValidGridLocatorForMode(locator, mode),
-		IsWSPR:      false,
+		Callsign:      callsign,
+		Locator:       locator,
+		SNR:           snr,
+		Frequency:     frequency,
+		DialFrequency: dialFreq,
+		Timestamp:     timestamp,
+		Mode:          mode.String(),
+		Message:       message,
+		HasCallsign:   callsign != "",
+		HasLocator:    isValidGridLocatorForMode(locator, mode),
+		IsWSPR:        false,
 	}
 
 	// Populate CTY information if available
@@ -199,20 +200,21 @@ func ParseWSPRLine(line string, dialFreq uint64) (*DecodeInfo, error) {
 	ctyInfo := GetCallsignInfo(callsign)
 
 	info := &DecodeInfo{
-		Callsign:    callsign,
-		Locator:     locator,
-		SNR:         snr,
-		Frequency:   dialFreq, // Receiver frequency
-		TxFrequency: txFrequency,
-		Timestamp:   timestamp,
-		Mode:        "WSPR",
-		Message:     fmt.Sprintf("%s %s %d", callsign, locator, dbm),
-		DT:          float32(dt),
-		Drift:       0, // Drift not in wsprd output format
-		DBm:         dbm,
-		HasCallsign: isValidCallsign(callsign),
-		HasLocator:  locator != "" && isValidGridLocator(locator),
-		IsWSPR:      true,
+		Callsign:      callsign,
+		Locator:       locator,
+		SNR:           snr,
+		Frequency:     dialFreq, // Receiver frequency
+		DialFrequency: dialFreq,
+		TxFrequency:   txFrequency,
+		Timestamp:     timestamp,
+		Mode:          "WSPR",
+		Message:       fmt.Sprintf("%s %s %d", callsign, locator, dbm),
+		DT:            float32(dt),
+		Drift:         0, // Drift not in wsprd output format
+		DBm:           dbm,
+		HasCallsign:   isValidCallsign(callsign),
+		HasLocator:    locator != "" && isValidGridLocator(locator),
+		IsWSPR:        true,
 	}
 
 	// Populate CTY information if available

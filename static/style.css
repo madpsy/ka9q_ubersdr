@@ -216,6 +216,14 @@
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
+.audio-start-button .receiver-callsign {
+    font-size: 1.8em;
+    color: #00ff00;
+    text-shadow: 0 0 10px rgba(0, 255, 0, 0.8), 0 2px 4px rgba(0, 0, 0, 0.5);
+    letter-spacing: 0.1em;
+    font-family: 'Courier New', monospace;
+}
+
 .overlay-buttons-container {
     display: flex;
     gap: 15px;

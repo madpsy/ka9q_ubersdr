@@ -2202,25 +2202,86 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
         }
     });
 
-    // Draw each unique spot that's within the visible range
-    // Draw in reverse order so newest spots (at start of array) are drawn last and appear on top
-    let drawnCount = 0;
-    for (let i = uniqueSpots.length - 1; i >= 0; i--) {
-        const spot = uniqueSpots[i];
-        // Only draw if frequency is within visible range
+    // First pass: calculate positions for visible spots
+    const visibleSpots = [];
+    uniqueSpots.forEach(spot => {
+        // Only process if frequency is within visible range
         if (spot.frequency < startFreq || spot.frequency > endFreq) {
-            continue;
+            return;
         }
-        drawnCount++;
 
         // Calculate x position
         const x = ((spot.frequency - startFreq) / (endFreq - startFreq)) * spectrumDisplay.width;
 
-        // Draw at same height as bookmarks (y=20) but use different color
-        const labelY = 20;
-        
+        // Measure label width
+        ctx.font = 'bold 10px monospace';
+        const labelWidth = ctx.measureText(spot.dx_call).width + 8;
+
+        visibleSpots.push({
+            spot: spot,
+            x: x,
+            labelWidth: labelWidth,
+            row: 0  // Will be assigned: 0 = bottom row, 1 = top row
+        });
+    });
+
+    // Sort by x position
+    visibleSpots.sort((a, b) => a.x - b.x);
+
+    // Simple two-row collision detection (same algorithm as bookmarks)
+    // Assign spots to rows to avoid overlaps
+    const row0Spots = []; // Bottom row
+    const row1Spots = []; // Top row
+
+    visibleSpots.forEach(current => {
+        // Check if it overlaps with any spot in row 0
+        const overlapsRow0 = row0Spots.some(other => {
+            const currentLeft = current.x - current.labelWidth / 2;
+            const currentRight = current.x + current.labelWidth / 2;
+            const otherLeft = other.x - other.labelWidth / 2;
+            const otherRight = other.x + other.labelWidth / 2;
+            // 3px gap threshold
+            return !(currentRight + 3 < otherLeft || currentLeft - 3 > otherRight);
+        });
+
+        if (!overlapsRow0) {
+            // No overlap in row 0, place it there
+            current.row = 0;
+            row0Spots.push(current);
+        } else {
+            // Overlaps row 0, try row 1
+            const overlapsRow1 = row1Spots.some(other => {
+                const currentLeft = current.x - current.labelWidth / 2;
+                const currentRight = current.x + current.labelWidth / 2;
+                const otherLeft = other.x - other.labelWidth / 2;
+                const otherRight = other.x + other.labelWidth / 2;
+                return !(currentRight + 3 < otherLeft || currentLeft - 3 > otherRight);
+            });
+
+            if (!overlapsRow1) {
+                // No overlap in row 1, place it there
+                current.row = 1;
+                row1Spots.push(current);
+            } else {
+                // Overlaps both rows - place in row 0 anyway (will overlap)
+                current.row = 0;
+                row0Spots.push(current);
+            }
+        }
+    });
+
+    // Draw spots with row assignments
+    const labelHeight = 12;
+    const arrowLength = 6;
+    const rowSpacing = 13; // Tight vertical spacing between rows (same as bookmarks)
+
+    visibleSpots.forEach(item => {
+        const { spot, x, labelWidth, row } = item;
+        // Row 0 at y=20, Row 1 at y=7 (20 - 13)
+        const labelY = 20 - (row * rowSpacing);
+
         if (shouldLog) {
-            console.log(`Drawing ${spot.dx_call} at x=${x.toFixed(0)}, y=${labelY}`);
+            console.log(`Drawing ${spot.dx_call} at x=${x.toFixed(0)}, y=${labelY}, row=${row}`);
         }
 
         // Draw spot label
@@ -2229,9 +2290,6 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
         ctx.textBaseline = 'top';
 
         // Background for label - use cyan/blue for CW spots (different from DX cluster green)
-        const labelWidth = ctx.measureText(spot.dx_call).width + 8;
-        const labelHeight = 12;
-
         ctx.fillStyle = 'rgba(23, 162, 184, 0.95)'; // Cyan background for CW
         ctx.fillRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);
 
@@ -2244,14 +2302,14 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
         ctx.fillStyle = '#FFFFFF'; // White text
         ctx.fillText(spot.dx_call, x, labelY + 2);
 
-        // Draw downward arrow below label
-        const arrowY = labelY + labelHeight;
-        const arrowLength = 6;
+        // Draw downward arrow - extends from label to baseline
+        const arrowStartY = labelY + labelHeight;
+        const arrowTipY = 20 + labelHeight + arrowLength; // Always point to same baseline
         ctx.fillStyle = 'rgba(23, 162, 184, 0.95)';
         ctx.beginPath();
-        ctx.moveTo(x, arrowY + arrowLength); // Arrow tip
-        ctx.lineTo(x - 4, arrowY); // Left point
-        ctx.lineTo(x + 4, arrowY); // Right point
+        ctx.moveTo(x, arrowTipY); // Arrow tip at baseline
+        ctx.lineTo(x - 4, arrowStartY); // Left point at label bottom
+        ctx.lineTo(x + 4, arrowStartY); // Right point at label bottom
         ctx.closePath();
         ctx.fill();
 
@@ -2265,16 +2323,16 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
             x: x,
             y: labelY,
             width: labelWidth,
-            height: labelHeight + arrowLength,
+            height: labelHeight + (arrowTipY - arrowStartY),
             spot: spot
         });
-    }
+    });
 
     // Update window reference
     window.cwSpotPositions = cwSpotPositions;
     
-    if (shouldLog && drawnCount > 0) {
-        console.log('Drew', drawnCount, 'CW spot markers on spectrum');
+    if (shouldLog && visibleSpots.length > 0) {
+        console.log('Drew', visibleSpots.length, 'CW spot markers on spectrum with collision detection');
     }
 }
 

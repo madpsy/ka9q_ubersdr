@@ -1085,7 +1085,16 @@ async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, origin
             // Enable the play button immediately (or after short delay)
             setTimeout(() => {
                 audioStartButton.disabled = false;
+                // Preserve the callsign text before restoring HTML
+                const callsignEl = document.getElementById('receiver-callsign');
+                const callsignText = callsignEl ? callsignEl.textContent : '';
                 audioStartButton.innerHTML = originalHTML;
+                // Re-populate the callsign after restoring HTML
+                const newCallsignEl = document.getElementById('receiver-callsign');
+                if (newCallsignEl && callsignText) {
+                    newCallsignEl.textContent = callsignText;
+                    console.log('[Callsign] Restored after button enable:', callsignText);
+                }
                 audioStartButton.style.backgroundColor = ''; // Reset color
                 audioStartButton.style.cursor = ''; // Reset cursor
             }, password ? 500 : 2000); // Shorter delay if password was used
@@ -1095,7 +1104,15 @@ async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, origin
         // On error, enable button after delay anyway
         setTimeout(() => {
             audioStartButton.disabled = false;
+            // Preserve the callsign text before restoring HTML
+            const callsignEl = document.getElementById('receiver-callsign');
+            const callsignText = callsignEl ? callsignEl.textContent : '';
             audioStartButton.innerHTML = originalHTML;
+            // Re-populate the callsign after restoring HTML
+            const newCallsignEl = document.getElementById('receiver-callsign');
+            if (newCallsignEl && callsignText) {
+                newCallsignEl.textContent = callsignText;
+            }
         }, 2000);
     }
 }

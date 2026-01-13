@@ -645,9 +645,9 @@ func (c *DXClusterClient) addSpotToBuffer(spot DXSpot) {
 	// Add spot to buffer
 	c.spotBuffer = append(c.spotBuffer, spot)
 
-	// If buffer exceeds size, remove oldest spot
+	// If buffer exceeds max size, keep only the most recent spots
 	if len(c.spotBuffer) > c.bufferSize {
-		c.spotBuffer = c.spotBuffer[1:]
+		c.spotBuffer = c.spotBuffer[len(c.spotBuffer)-c.bufferSize:]
 	}
 }
 

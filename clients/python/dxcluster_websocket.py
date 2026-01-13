@@ -81,7 +81,6 @@ class DXClusterWebSocket:
                 time.sleep(30)  # Every 30 seconds
                 if self.connected and self.ws:
                     try:
-                        print("[DXCluster WebSocket] Sending JSON ping to server")
                         self.send_message({'type': 'ping'})
                     except Exception as e:
                         print(f"[DXCluster WebSocket] Failed to send ping: {e}")
@@ -125,11 +124,10 @@ class DXClusterWebSocket:
 
             if msg_type == 'ping':
                 # Respond to JSON ping with JSON pong
-                print("[DXCluster WebSocket] Received JSON ping from server, sending pong")
                 self.send_message({'type': 'pong'})
             elif msg_type == 'pong':
-                # Log pong responses (response to our pings)
-                print("[DXCluster WebSocket] Received JSON pong from server")
+                # Pong received (response to our pings)
+                pass
             elif msg_type == 'cw_spot':
                 self._notify_cw_spot(data.get('data', {}))
             elif msg_type == 'digital_spot':

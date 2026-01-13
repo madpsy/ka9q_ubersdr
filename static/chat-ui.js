@@ -386,7 +386,8 @@ class ChatUI {
                             <div id="chat-username-input-area" class="chat-input-area">
                                 <div style="position: relative; flex: 1;">
                                     <input type="text" id="chat-username-input"
-                                           placeholder="${randomUsername}"
+                                           placeholder="Choose a username..."
+                                           value="${randomUsername}"
                                            maxlength="15"
                                            class="chat-input"
                                            style="padding-right: 30px;">

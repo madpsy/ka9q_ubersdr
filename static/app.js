@@ -564,9 +564,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (audioStartButton && audioStartOverlay) {
         // Disable button and show "Please wait..." while checking connection
+        // Store original HTML but keep the receiver-callsign element structure
         const originalHTML = audioStartButton.innerHTML;
         audioStartButton.disabled = true;
-        audioStartButton.innerHTML = '<span>Please wait...</span>';
+        // Keep the callsign element in the DOM so it can be populated later
+        audioStartButton.innerHTML = '<span id="receiver-callsign" class="receiver-callsign"></span><span>Please wait...</span>';
 
         // Check if connection will be allowed
         checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML);
@@ -1241,20 +1243,12 @@ async function fetchSiteDescription() {
                 }
 
                 // Update receiver callsign if available
-                console.log('[DEBUG] Checking for receiver callsign in API data:', data.receiver);
                 if (data.receiver && data.receiver.callsign) {
-                    console.log('[DEBUG] Callsign found:', data.receiver.callsign);
                     const callsignEl = document.getElementById('receiver-callsign');
-                    console.log('[DEBUG] Callsign element:', callsignEl);
                     if (callsignEl) {
                         callsignEl.textContent = data.receiver.callsign;
-                        console.log('[DEBUG] Callsign set to:', callsignEl.textContent);
-                        console.log('[DEBUG] Callsign element after setting:', callsignEl.outerHTML);
-                    } else {
-                        console.log('[DEBUG] Callsign element not found in DOM');
+                        console.log('[Callsign] Set to:', data.receiver.callsign);
                     }
-                } else {
-                    console.log('[DEBUG] No callsign in API response');
                 }
 
                 // Show band conditions button if noise floor monitoring is enabled

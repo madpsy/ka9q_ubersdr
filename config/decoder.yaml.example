@@ -65,6 +65,25 @@ decoder:
                                                  # Example: decoder_summaries/daily/2024/11/14/FT8-20m-summary.json
                                                  # Updated every minute for fast API responses
 
+  # WSJT-X UDP Protocol Broadcasting
+  # Broadcasts decoded spots using the WSJT-X UDP protocol for integration with third-party applications
+  # Compatible with JTAlert, GridTracker, and other WSJT-X-compatible software
+  wsjtx_udp_enabled: false              # Enable WSJT-X UDP protocol broadcasting
+  wsjtx_udp_host: "127.0.0.1"          # UDP host (use "127.0.0.1" for localhost, or "239.255.0.1" for multicast)
+  wsjtx_udp_port: 2237                  # UDP port (default: 2237, standard WSJT-X port)
+  wsjtx_udp_client_id: "UberSDR"       # Unique client identifier (appears in receiving applications)
+  wsjtx_udp_enabled_modes:              # Modes to broadcast (mode-selective, not band-selective)
+    FT8: true                           # Broadcast FT8 decodes from all bands
+    FT4: false                          # Don't broadcast FT4 decodes
+    WSPR: false                         # Don't broadcast WSPR decodes
+  # Notes:
+  # - Mode-selective: Enable/disable by mode (FT8, FT4, WSPR), not by individual band
+  # - All enabled bands for a mode will be broadcast if that mode is enabled
+  # - Uses standard WSJT-X UDP protocol (schema version 3)
+  # - Sends Decode messages (Type 2) for FT8/FT4, WSPRDecode messages (Type 10) for WSPR
+  # - Heartbeat sent every 15 seconds to maintain connection
+  # - Compatible with WSJT-X message_aggregator and other UDP servers
+
   # Band configurations
   # Each band creates a dedicated audio channel for decoding
   bands:

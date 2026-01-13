@@ -166,6 +166,13 @@ type DecoderConfig struct {
 	// Metrics summary configuration
 	MetricsSummaryDataDir string `yaml:"metrics_summary_data_dir"` // Directory for metrics summary files (relative or absolute, default: data_dir/decoder_summaries)
 
+	// WSJT-X UDP Protocol Broadcasting
+	WSJTXUDPEnabled      bool            `yaml:"wsjtx_udp_enabled"`       // Enable WSJT-X UDP protocol broadcasting
+	WSJTXUDPHost         string          `yaml:"wsjtx_udp_host"`          // UDP host (e.g., "127.0.0.1" or "239.255.0.1" for multicast)
+	WSJTXUDPPort         int             `yaml:"wsjtx_udp_port"`          // UDP port (default: 2237)
+	WSJTXUDPClientID     string          `yaml:"wsjtx_udp_client_id"`     // Unique client identifier (default: "UberSDR")
+	WSJTXUDPEnabledModes map[string]bool `yaml:"wsjtx_udp_enabled_modes"` // Modes to broadcast (e.g., {"FT8": true, "FT4": false, "WSPR": false})
+
 	// Band configurations
 	Bands []DecoderBandConfig `yaml:"bands"`
 }

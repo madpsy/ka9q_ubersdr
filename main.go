@@ -765,6 +765,26 @@ func main() {
 		// Spot logging removed
 	})
 
+	// Initialize WSJT-X UDP broadcaster if enabled
+	var wsjtxBroadcaster *WSJTXUDPBroadcaster
+	if config.Decoder.Enabled && config.Decoder.WSJTXUDPEnabled {
+		wsjtxBroadcaster = NewWSJTXUDPBroadcaster(
+			config.Decoder.WSJTXUDPHost,
+			config.Decoder.WSJTXUDPPort,
+			config.Decoder.WSJTXUDPClientID,
+			config.Decoder.WSJTXUDPEnabledModes,
+		)
+		if err := wsjtxBroadcaster.Start(); err != nil {
+			log.Printf("Warning: Failed to start WSJT-X UDP broadcaster: %v", err)
+			wsjtxBroadcaster = nil
+		} else {
+			log.Printf("WSJT-X UDP broadcaster started: %s:%d (ID: %s, modes: %v)",
+				config.Decoder.WSJTXUDPHost, config.Decoder.WSJTXUDPPort,
+				config.Decoder.WSJTXUDPClientID, config.Decoder.WSJTXUDPEnabledModes)
+			defer wsjtxBroadcaster.Stop()
+		}
+	}
+
 	// Start multi-decoder and register callback for digital spots
 	if multiDecoder != nil {
 		if err := multiDecoder.Start(); err != nil {
@@ -782,6 +802,19 @@ func main() {
 					// Determine band name from frequency using the same logic as DX cluster
 					bandName := frequencyToBand(float64(decode.Frequency))
 					prometheusMetrics.mqttPublisher.PublishDigitalDecode(decode, bandName)
+				}
+
+				// Broadcast to WSJT-X UDP if enabled and mode is enabled
+				if wsjtxBroadcaster != nil && wsjtxBroadcaster.IsModeEnabled(decode.Mode) {
+					var err error
+					if decode.IsWSPR {
+						err = wsjtxBroadcaster.SendWSPRDecode(&decode)
+					} else {
+						err = wsjtxBroadcaster.SendDecode(&decode)
+					}
+					if err != nil {
+						log.Printf("Failed to send WSJT-X UDP message: %v", err)
+					}
 				}
 			})
 			defer multiDecoder.Stop()

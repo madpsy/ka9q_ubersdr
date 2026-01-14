@@ -2561,7 +2561,7 @@ class SpectrumDisplay {
         this.overlayCtx.textBaseline = 'top';
 
         // Background for label
-        const labelWidth = this.overlayCtx.measureText(freqLabel).width + 10;
+        const labelWidth = this.overlayCtx.measureText(freqLabel).width + 6;
         const labelHeight = 16;
         const labelY = 1;
 

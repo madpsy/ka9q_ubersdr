@@ -326,6 +326,15 @@ func (usm *UserSpectrumManager) parseStatusPacket(payload []byte) {
 				numBins := length / 4
 				binData = make([]float32, numBins)
 
+				// Debug: Log spectrum parameters once per packet
+				if DebugMode && foundFreq && foundBinBW && foundBinCount {
+					totalBW := float64(radiodBinBW) * float64(numBins)
+					startF := float64(radiodFreq) - (totalBW / 2.0)
+					endF := float64(radiodFreq) + (totalBW / 2.0)
+					log.Printf("DEBUG: Spectrum SSRC=0x%08x CenterFreq=%d Hz, BinBW=%.1f Hz, Bins=%d, Range=%.1f-%.1f MHz",
+						ssrc, radiodFreq, radiodBinBW, numBins, startF/1e6, endF/1e6)
+				}
+
 				// Parse power values and convert to dB
 				for j := 0; j < numBins; j++ {
 					bits := binary.BigEndian.Uint32(payload[i+j*4 : i+j*4+4])
@@ -347,9 +356,16 @@ func (usm *UserSpectrumManager) parseStatusPacket(payload []byte) {
 						binFreq := usm.calculateBinFrequency(j, radiodFreq, radiodBinBW, numBins)
 
 						// Find matching frequency range and add its gain
-						for _, freqRange := range usm.config.Spectrum.GainDBFrequencyRanges {
+						for rangeName, freqRange := range usm.config.Spectrum.GainDBFrequencyRanges {
 							if binFreq >= freqRange.StartFreq && binFreq <= freqRange.EndFreq {
 								totalGain += float32(freqRange.GainDB)
+								// Debug: Log when gain is applied (only for first few bins to avoid spam)
+								if DebugMode && j < 5 {
+									log.Printf("DEBUG: Bin %d (%.3f MHz) matches range '%s' (%.3f-%.3f MHz), applying %.1f dB gain (total: %.1f dB)",
+										j, float64(binFreq)/1e6, rangeName,
+										float64(freqRange.StartFreq)/1e6, float64(freqRange.EndFreq)/1e6,
+										freqRange.GainDB, totalGain)
+								}
 								break // Use first matching range
 							}
 						}
@@ -583,25 +599,21 @@ func (usm *UserSpectrumManager) checkAudioParameterMismatch(ssrc uint32, radiodF
 }
 
 // calculateBinFrequency determines the center frequency of a spectrum bin
+// Uses the same calculation as spectrum-display.js for consistency
 // binIndex: index of the bin (0 to numBins-1)
 // centerFreq: center frequency of the spectrum in Hz
 // binBW: bandwidth per bin in Hz
 // numBins: total number of bins
 func (usm *UserSpectrumManager) calculateBinFrequency(binIndex int, centerFreq uint64, binBW float32, numBins int) uint64 {
-	// radiod's FFT bins start at the lowest frequency (not centered)
-	// Bin 0 = centerFreq - (totalBandwidth / 2)
-	// Bin N-1 = centerFreq + (totalBandwidth / 2)
+	// Match frontend calculation exactly:
+	// const startFreq = this.centerFreq - this.totalBandwidth / 2;
+	// const freq = startFreq + (binIndex / totalBins) * this.totalBandwidth;
 
-	// Calculate total bandwidth
 	totalBandwidth := float64(binBW) * float64(numBins)
-
-	// Calculate starting frequency (lowest frequency in the spectrum)
 	startFreq := float64(centerFreq) - (totalBandwidth / 2.0)
 
-	// Calculate this bin's center frequency
-	// Each bin is binBW wide, so bin N starts at startFreq + (N * binBW)
-	// The center of bin N is at startFreq + (N * binBW) + (binBW / 2)
-	binFreq := startFreq + (float64(binIndex) * float64(binBW)) + (float64(binBW) / 2.0)
+	// Calculate bin frequency using the same formula as frontend
+	binFreq := startFreq + (float64(binIndex)/float64(numBins))*totalBandwidth
 
 	// Ensure we don't return negative frequencies
 	if binFreq < 0 {

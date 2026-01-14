@@ -940,12 +940,12 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
     // Draw spots with row assignments
     const labelHeight = 12;
     const arrowLength = 6;
-    const rowSpacing = 13; // Tight vertical spacing between rows (same as bookmarks)
+    const rowSpacing = 15; // Vertical spacing between rows (matches bookmarks)
 
     visibleSpots.forEach(item => {
         const { spot, x, labelWidth, row } = item;
-        // Row 0 at y=20, Row 1 at y=7 (20 - 13)
-        const labelY = 20 - (row * rowSpacing);
+        // Row 0 at y=28, Row 1 at y=13 (28 - 15) - matches bookmark positioning
+        const labelY = 28 - (row * rowSpacing);
 
         if (shouldLog) {
             console.log(`Drawing ${spot.dx_call} at x=${x.toFixed(0)}, y=${labelY}, row=${row}`);
@@ -971,7 +971,7 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
 
         // Draw downward arrow - extends from label to baseline
         const arrowStartY = labelY + labelHeight;
-        const arrowTipY = 20 + labelHeight + arrowLength; // Always point to same baseline
+        const arrowTipY = 28 + labelHeight + arrowLength; // Always point to same baseline (adjusted for new position)
         ctx.fillStyle = 'rgba(40, 167, 69, 0.95)';
         ctx.beginPath();
         ctx.moveTo(x, arrowTipY); // Arrow tip at baseline

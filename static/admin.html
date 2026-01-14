@@ -4992,29 +4992,25 @@
                     // Simple YAML parsing for decoder config
                     const lines = text.split('\n');
                     importedConfig = {};
-                    let currentSection = null;
                     let currentBand = null;
                     let inBands = false;
                     let inEnabledModes = false;
+                    let indent = 0;
 
-                    for (const line of lines) {
+                    for (let i = 0; i < lines.length; i++) {
+                        const line = lines[i];
                         const trimmed = line.trim();
                         
                         // Skip comments and empty lines
                         if (!trimmed || trimmed.startsWith('#')) continue;
                         
-                        // Check for decoder: section
-                        if (trimmed === 'decoder:') {
-                            currentSection = 'decoder';
-                            continue;
-                        }
-                        
-                        // Skip if not in decoder section
-                        if (currentSection !== 'decoder') continue;
+                        // Calculate indentation
+                        const lineIndent = line.search(/\S/);
                         
                         // Check for bands array
                         if (trimmed === 'bands:') {
                             inBands = true;
+                            inEnabledModes = false;
                             importedConfig.bands = [];
                             continue;
                         }
@@ -5022,25 +5018,35 @@
                         // Check for wsjtx_udp_enabled_modes
                         if (trimmed === 'wsjtx_udp_enabled_modes:') {
                             inEnabledModes = true;
+                            inBands = false;
+                            if (currentBand) {
+                                importedConfig.bands.push(currentBand);
+                                currentBand = null;
+                            }
                             importedConfig.wsjtx_udp_enabled_modes = {};
                             continue;
                         }
                         
-                        // Parse bands
+                        // Parse bands (format: "      -" on one line, then properties indented further)
                         if (inBands) {
-                            if (trimmed.startsWith('- name:')) {
+                            if (trimmed === '-') {
+                                // Save previous band
                                 if (currentBand) {
                                     importedConfig.bands.push(currentBand);
                                 }
+                                // Start new band
                                 currentBand = {
-                                    name: trimmed.substring(7).trim().replace(/^["']|["']$/g, ''),
+                                    name: '',
                                     mode: 'FT8',
                                     frequency: 0,
                                     depth: 2,
                                     enabled: true
                                 };
-                            } else if (currentBand) {
-                                if (trimmed.startsWith('mode:')) {
+                            } else if (currentBand && lineIndent > 6) {
+                                // Band property
+                                if (trimmed.startsWith('name:')) {
+                                    currentBand.name = trimmed.substring(5).trim().replace(/^["']|["']$/g, '');
+                                } else if (trimmed.startsWith('mode:')) {
                                     currentBand.mode = trimmed.substring(5).trim().replace(/^["']|["']$/g, '');
                                 } else if (trimmed.startsWith('frequency:')) {
                                     currentBand.frequency = parseInt(trimmed.substring(10).trim());
@@ -5048,26 +5054,57 @@
                                     currentBand.depth = parseInt(trimmed.substring(6).trim());
                                 } else if (trimmed.startsWith('enabled:')) {
                                     currentBand.enabled = trimmed.substring(8).trim() === 'true';
-                                } else if (!trimmed.startsWith('-') && !trimmed.includes(':')) {
-                                    // End of bands section
-                                    if (currentBand) {
-                                        importedConfig.bands.push(currentBand);
-                                        currentBand = null;
-                                    }
-                                    inBands = false;
+                                }
+                            } else if (lineIndent <= 2 && trimmed.includes(':')) {
+                                // End of bands section, start of new top-level field
+                                if (currentBand) {
+                                    importedConfig.bands.push(currentBand);
+                                    currentBand = null;
+                                }
+                                inBands = false;
+                                // Process this line as top-level field
+                                const colonIndex = trimmed.indexOf(':');
+                                const key = trimmed.substring(0, colonIndex).trim();
+                                const value = trimmed.substring(colonIndex + 1).trim().replace(/^["']|["']$/g, '');
+                                
+                                if (value === 'true') {
+                                    importedConfig[key] = true;
+                                } else if (value === 'false') {
+                                    importedConfig[key] = false;
+                                } else if (!isNaN(value) && value !== '') {
+                                    importedConfig[key] = parseInt(value);
+                                } else if (value) {
+                                    importedConfig[key] = value;
                                 }
                             }
                         } else if (inEnabledModes) {
                             // Parse wsjtx_udp_enabled_modes
                             if (trimmed.match(/^(FT8|FT4|WSPR):/)) {
-                                const [mode, value] = trimmed.split(':');
-                                importedConfig.wsjtx_udp_enabled_modes[mode.trim()] = value.trim() === 'true';
-                            } else if (!trimmed.includes(':')) {
+                                const colonIndex = trimmed.indexOf(':');
+                                const mode = trimmed.substring(0, colonIndex).trim();
+                                const value = trimmed.substring(colonIndex + 1).trim();
+                                importedConfig.wsjtx_udp_enabled_modes[mode] = value === 'true';
+                            } else if (lineIndent <= 2 && trimmed.includes(':') && !trimmed.match(/^(FT8|FT4|WSPR):/)) {
+                                // End of enabled modes section
                                 inEnabledModes = false;
+                                // Process this line as top-level field
+                                const colonIndex = trimmed.indexOf(':');
+                                const key = trimmed.substring(0, colonIndex).trim();
+                                const value = trimmed.substring(colonIndex + 1).trim().replace(/^["']|["']$/g, '');
+                                
+                                if (value === 'true') {
+                                    importedConfig[key] = true;
+                                } else if (value === 'false') {
+                                    importedConfig[key] = false;
+                                } else if (!isNaN(value) && value !== '') {
+                                    importedConfig[key] = parseInt(value);
+                                } else if (value) {
+                                    importedConfig[key] = value;
+                                }
                             }
                         } else {
-                            // Parse top-level decoder fields
-                            if (trimmed.includes(':')) {
+                            // Parse top-level decoder fields (indent 2)
+                            if (lineIndent === 2 && trimmed.includes(':') && trimmed !== 'bands:' && trimmed !== 'wsjtx_udp_enabled_modes:') {
                                 const colonIndex = trimmed.indexOf(':');
                                 const key = trimmed.substring(0, colonIndex).trim();
                                 const value = trimmed.substring(colonIndex + 1).trim().replace(/^["']|["']$/g, '');

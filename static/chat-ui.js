@@ -1139,14 +1139,26 @@ class ChatUI {
         });
 
         // Send button
-        document.getElementById('chat-send-btn').addEventListener('click', () => {
+        const sendBtn = document.getElementById('chat-send-btn');
+        sendBtn.addEventListener('click', () => {
             this.sendMessage();
         });
 
-        // Message input - show mention suggestions as they type
-        document.getElementById('chat-message-input').addEventListener('input', (e) => {
+        // Message input - show mention suggestions as they type and update send button state
+        const messageInput = document.getElementById('chat-message-input');
+        messageInput.addEventListener('input', (e) => {
             this.updateMentionSuggestions();
+            // Update send button state based on input content
+            const hasContent = e.target.value.trim().length > 0;
+            sendBtn.disabled = !hasContent;
+            sendBtn.style.opacity = hasContent ? '1' : '0.5';
+            sendBtn.style.cursor = hasContent ? 'pointer' : 'not-allowed';
         });
+
+        // Initialize send button as disabled (no message on load)
+        sendBtn.disabled = true;
+        sendBtn.style.opacity = '0.5';
+        sendBtn.style.cursor = 'not-allowed';
 
         // Leave button
         document.getElementById('chat-leave-btn').addEventListener('click', () => {
@@ -1594,10 +1606,15 @@ class ChatUI {
      */
     sendMessage() {
         const input = document.getElementById('chat-message-input');
+        const sendBtn = document.getElementById('chat-send-btn');
         const message = input.value.trim();
 
         if (this.chat.sendMessage(message)) {
             input.value = '';
+            // Disable send button after clearing input
+            sendBtn.disabled = true;
+            sendBtn.style.opacity = '0.5';
+            sendBtn.style.cursor = 'not-allowed';
             input.focus();
         }
     }

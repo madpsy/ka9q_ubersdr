@@ -1184,7 +1184,11 @@ class ChatUI {
                 if (hasSuggestions && this.tabCompletionIndex >= 0) {
                     this.completeMention();
                 } else {
-                    this.sendMessage();
+                    // Only send if there's content
+                    const messageInput = document.getElementById('chat-message-input');
+                    if (messageInput && messageInput.value.trim().length > 0) {
+                        this.sendMessage();
+                    }
                 }
                 // Reset tab completion
                 this.tabCompletionIndex = -1;
@@ -1608,6 +1612,11 @@ class ChatUI {
         const input = document.getElementById('chat-message-input');
         const sendBtn = document.getElementById('chat-send-btn');
         const message = input.value.trim();
+
+        // Don't send empty messages
+        if (message.length === 0) {
+            return;
+        }
 
         if (this.chat.sendMessage(message)) {
             input.value = '';

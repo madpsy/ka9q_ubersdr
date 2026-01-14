@@ -289,8 +289,8 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
 
     visibleBookmarks.forEach(item => {
         const { bookmark, x, labelWidth, row } = item;
-        // Row 0 at y=25, Row 1 at y=10 (25 - 15) - positioned lower in the 45px area
-        const labelY = 25 - (row * rowSpacing);
+        // Row 0 at y=28, Row 1 at y=13 (28 - 15) - shifted down to avoid band name overlap
+        const labelY = 28 - (row * rowSpacing);
 
         // Draw bookmark label
         ctx.font = 'bold 10px monospace';
@@ -312,7 +312,7 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
 
         // Draw downward arrow - extends from label to baseline
         const arrowStartY = labelY + labelHeight;
-        const arrowTipY = 25 + labelHeight + arrowLength; // Always point to same baseline (adjusted for new position)
+        const arrowTipY = 28 + labelHeight + arrowLength; // Always point to same baseline (adjusted for new position)
         ctx.fillStyle = 'rgba(255, 215, 0, 0.95)';
         ctx.beginPath();
         ctx.moveTo(x, arrowTipY); // Arrow tip at baseline

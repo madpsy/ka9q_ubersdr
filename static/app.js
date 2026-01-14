@@ -4140,7 +4140,7 @@ function performFrequencyShift() {
 
     // Get current dial frequency
     const freqInput = document.getElementById('frequency');
-    const currentDialFreq = parseInt(freqInput.value);
+    const currentDialFreq = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
 
     // Calculate new dial frequency based on mode
     let newDialFreq;

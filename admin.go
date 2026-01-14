@@ -33,40 +33,21 @@ func marshalYAMLWithIntegerFrequencies(config map[string]interface{}) ([]byte, e
 }
 
 // convertFrequencies recursively converts frequency fields from float64 to uint64
+// Handles any field named "frequency" or ending in "_frequency" or "_freq"
 func convertFrequencies(v interface{}) {
 	switch val := v.(type) {
 	case map[string]interface{}:
-		// Check if this is a decoder band with a frequency field
-		if freq, ok := val["frequency"]; ok {
-			switch f := freq.(type) {
-			case float64:
-				val["frequency"] = uint64(f)
-			case int:
-				val["frequency"] = uint64(f)
-			case int64:
-				val["frequency"] = uint64(f)
-			}
-		}
-		// Check for start_freq field (used in frequency gain ranges)
-		if startFreq, ok := val["start_freq"]; ok {
-			switch f := startFreq.(type) {
-			case float64:
-				val["start_freq"] = uint64(f)
-			case int:
-				val["start_freq"] = uint64(f)
-			case int64:
-				val["start_freq"] = uint64(f)
-			}
-		}
-		// Check for end_freq field (used in frequency gain ranges)
-		if endFreq, ok := val["end_freq"]; ok {
-			switch f := endFreq.(type) {
-			case float64:
-				val["end_freq"] = uint64(f)
-			case int:
-				val["end_freq"] = uint64(f)
-			case int64:
-				val["end_freq"] = uint64(f)
+		// Convert any field ending in "frequency", "_frequency", or "_freq"
+		for key, value := range val {
+			if key == "frequency" || strings.HasSuffix(key, "_frequency") || strings.HasSuffix(key, "_freq") {
+				switch f := value.(type) {
+				case float64:
+					val[key] = uint64(f)
+				case int:
+					val[key] = uint64(f)
+				case int64:
+					val[key] = uint64(f)
+				}
 			}
 		}
 		// Recursively process all map values

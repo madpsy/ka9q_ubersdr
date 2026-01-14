@@ -60,9 +60,9 @@ function drawAmateurBandBackgrounds(spectrumDisplay) {
             const bandWidth = bandEndX - bandStartX;
             
             if (bandWidth > 0) {
-                // Draw semi-transparent colored rectangle (35px height for bookmark area)
+                // Draw semi-transparent colored rectangle (45px height for bookmark area)
                 ctx.fillStyle = band.color;
-                ctx.fillRect(bandStartX, 0, bandWidth, 35);
+                ctx.fillRect(bandStartX, 0, bandWidth, 45);
 
                 // Prepare label styling
                 ctx.font = 'bold 9px monospace';

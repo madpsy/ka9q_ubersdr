@@ -162,10 +162,10 @@ class SpectrumDisplay {
         this.overlayDiv.style.pointerEvents = 'none'; // Let clicks pass through to elements below
         // Position and size will be set dynamically based on canvas position
 
-        // Create canvas inside overlay div (65px: 35px bookmarks + 30px frequency scale)
+        // Create canvas inside overlay div (75px: 45px bookmarks + 30px frequency scale)
         this.overlayCanvas = document.createElement('canvas');
         this.overlayCanvas.width = this.width;
-        this.overlayCanvas.height = 65;
+        this.overlayCanvas.height = 75;
         this.overlayCanvas.style.pointerEvents = 'auto'; // Enable pointer events on canvas for bookmark clicks
         this.overlayCanvas.style.cursor = 'default';
         this.overlayDiv.appendChild(this.overlayCanvas);
@@ -617,12 +617,12 @@ class SpectrumDisplay {
     setupBandwidthDragHandlers() {
         // Add mousedown handler to detect clicks on bandwidth bracket
         this.overlayCanvas.addEventListener('mousedown', (e) => {
-            // Only handle in bookmark area (top 35px)
+            // Only handle in bookmark area (top 45px)
             const rect = this.overlayCanvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
-            if (y > 35 || !this.currentTunedFreq || !this.totalBandwidth) return;
+            if (y > 45 || !this.currentTunedFreq || !this.totalBandwidth) return;
 
             // Calculate bandwidth edge positions
             const effectiveCenterFreq = this.isDragging ?
@@ -678,7 +678,7 @@ class SpectrumDisplay {
                 const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
 
-                if (y <= 35 && this.currentTunedFreq && this.totalBandwidth) {
+                if (y <= 45 && this.currentTunedFreq && this.totalBandwidth) {
                     const effectiveCenterFreq = this.isDragging ?
                         this.centerFreq + this.predictedFreqOffset :
                         this.centerFreq;
@@ -1715,7 +1715,7 @@ class SpectrumDisplay {
         const ctx = this.lineGraphCtx;
         const graphHeight = 300;
         const graphWidth = this.width;
-        const graphTopMargin = 70; // Space for frequency scale at top (35px) + bookmarks overlay (35px)
+        const graphTopMargin = 80; // Space for frequency scale at top (45px) + bookmarks overlay (45px)
         const graphDrawHeight = graphHeight - graphTopMargin; // Actual drawing area height
 
         // Clear canvas - black background for entire graph
@@ -2406,7 +2406,7 @@ class SpectrumDisplay {
             this.overlayDiv.style.width = rect.width + 'px';
         }
         
-        this.overlayDiv.style.height = '65px'; // 35px bookmarks + 30px frequency scale
+        this.overlayDiv.style.height = '75px'; // 45px bookmarks + 30px frequency scale
     }
 
     // Draw cursor showing currently tuned frequency and bandwidth on overlay canvas
@@ -2629,13 +2629,13 @@ class SpectrumDisplay {
         const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
         const endFreq = effectiveCenterFreq + this.totalBandwidth / 2;
 
-        // Draw grey background for bookmark area (0-35px) - always visible
+        // Draw grey background for bookmark area (0-45px) - always visible
         ctx.fillStyle = '#adb5bd';
-        ctx.fillRect(0, 0, this.width, 35);
+        ctx.fillRect(0, 0, this.width, 45);
 
-        // Draw black background for frequency scale area (35-65px)
+        // Draw black background for frequency scale area (45-75px)
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        ctx.fillRect(0, 35, this.width, 30);
+        ctx.fillRect(0, 45, this.width, 30);
 
         // Calculate appropriate frequency step based on available width
         const minLabelSpacing = 80; // Minimum pixels between labels
@@ -2664,16 +2664,16 @@ class SpectrumDisplay {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // Draw major ticks and labels (offset by 35px for bookmarks)
+        // Draw major ticks and labels (offset by 45px for bookmarks)
         const firstFreq = Math.ceil(startFreq / freqStep) * freqStep;
         for (let freq = firstFreq; freq <= endFreq; freq += freqStep) {
             const x = ((freq - startFreq) / this.totalBandwidth) * this.width;
 
-            // Draw tick mark (offset by 35px)
+            // Draw tick mark (offset by 45px)
             ctx.fillStyle = '#ffffff';
-            ctx.fillRect(x - 1, 35, 2, 12);
+            ctx.fillRect(x - 1, 45, 2, 12);
 
-            // Draw label (offset by 35px)
+            // Draw label (offset by 45px)
             ctx.fillStyle = '#ffffff';
             ctx.strokeStyle = '#000000';
             ctx.lineWidth = 3;
@@ -2683,7 +2683,7 @@ class SpectrumDisplay {
             ctx.fillText(label, x, 55);
         }
 
-        // Draw minor ticks (at 1/5 of major step, offset by 35px)
+        // Draw minor ticks (at 1/5 of major step, offset by 45px)
         const minorStep = freqStep / 5;
         ctx.fillStyle = '#ffffff';
         const firstMinor = Math.ceil(startFreq / minorStep) * minorStep;
@@ -2692,8 +2692,8 @@ class SpectrumDisplay {
             if (Math.abs(freq % freqStep) < 1) continue;
 
             const x = ((freq - startFreq) / this.totalBandwidth) * this.width;
-            // Draw minor tick (8 pixels tall, 1.5 pixels wide, offset by 35px)
-            ctx.fillRect(x - 0.75, 35, 1.5, 8);
+            // Draw minor tick (8 pixels tall, 1.5 pixels wide, offset by 45px)
+            ctx.fillRect(x - 0.75, 45, 1.5, 8);
         }
     }
 
@@ -2921,9 +2921,9 @@ class SpectrumDisplay {
         this.lineGraphCtx.fillStyle = '#000';
         this.lineGraphCtx.fillRect(0, 0, this.lineGraphCanvas.width, this.lineGraphCanvas.height);
 
-        // Restore grey background for bookmarks area (top 35px)
+        // Restore grey background for bookmarks area (top 45px)
         this.lineGraphCtx.fillStyle = '#adb5bd';
-        this.lineGraphCtx.fillRect(0, 0, this.lineGraphCanvas.width, 35);
+        this.lineGraphCtx.fillRect(0, 0, this.lineGraphCanvas.width, 45);
 
         // Draw shifted content
         // Negative offset = drag right = shift content left
@@ -2933,21 +2933,21 @@ class SpectrumDisplay {
         // Fill gaps with appropriate background
         if (pixelShift > 0) {
             // Shifted right, fill left edge
-            // Top 35px: grey for bookmarks
+            // Top 45px: grey for bookmarks
             this.lineGraphCtx.fillStyle = '#adb5bd';
-            this.lineGraphCtx.fillRect(0, 0, pixelShift, 35);
+            this.lineGraphCtx.fillRect(0, 0, pixelShift, 45);
             // Rest: black for graph
             this.lineGraphCtx.fillStyle = '#000';
-            this.lineGraphCtx.fillRect(0, 35, pixelShift, this.lineGraphCanvas.height - 35);
+            this.lineGraphCtx.fillRect(0, 45, pixelShift, this.lineGraphCanvas.height - 45);
         } else {
             // Shifted left, fill right edge
             const rightEdge = this.lineGraphCanvas.width + pixelShift;
-            // Top 35px: grey for bookmarks
+            // Top 45px: grey for bookmarks
             this.lineGraphCtx.fillStyle = '#adb5bd';
-            this.lineGraphCtx.fillRect(rightEdge, 0, -pixelShift, 35);
+            this.lineGraphCtx.fillRect(rightEdge, 0, -pixelShift, 45);
             // Rest: black for graph
             this.lineGraphCtx.fillStyle = '#000';
-            this.lineGraphCtx.fillRect(rightEdge, 35, -pixelShift, this.lineGraphCanvas.height - 35);
+            this.lineGraphCtx.fillRect(rightEdge, 45, -pixelShift, this.lineGraphCanvas.height - 45);
         }
     }
 
@@ -3266,8 +3266,8 @@ class SpectrumDisplay {
 
             // If we didn't drag (dragDidMove is false), treat it as a click
             if (!this.dragDidMove) {
-                // Check if click is on a bookmark (top 35 pixels where bookmarks are drawn)
-                if (y <= 35 && typeof window.bookmarks !== 'undefined' && typeof window.handleBookmarkClick === 'function') {
+                // Check if click is on a bookmark (top 45 pixels where bookmarks are drawn)
+                if (y <= 45 && typeof window.bookmarks !== 'undefined' && typeof window.handleBookmarkClick === 'function') {
                     const startFreq = this.centerFreq - this.totalBandwidth / 2;
                     const endFreq = this.centerFreq + this.totalBandwidth / 2;
 
@@ -3806,8 +3806,8 @@ class SpectrumDisplay {
             return;
         }
 
-        // Check if mouse is over a bookmark (bookmarks are in overlay canvas at top, height 35px)
-        if (window.bookmarkPositions && window.bookmarkPositions.length > 0 && this.mouseY <= 35) {
+        // Check if mouse is over a bookmark (bookmarks are in overlay canvas at top, height 45px)
+        if (window.bookmarkPositions && window.bookmarkPositions.length > 0 && this.mouseY <= 45) {
             for (let pos of window.bookmarkPositions) {
                 // Check if mouse is within bookmark bounds (x position only, y is already checked)
                 if (this.mouseX >= pos.x - pos.width / 2 &&

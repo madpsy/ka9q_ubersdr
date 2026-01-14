@@ -5682,14 +5682,15 @@
                 // Load frontend status first (at top of Monitor tab)
                 await loadFrontendStatus();
 
-                // Fetch system load, tunnel status, instance reporter, noise floor, space weather, decoder, and CW Skimmer health
+                // Fetch system load, tunnel status, instance reporter, noise floor, space weather, decoder, CW Skimmer, and MQTT health
                 const fetchPromises = [
                     authenticatedFetch('/admin/system-load'),
                     authenticatedFetch('/admin/instance-reporter-health'),
                     authenticatedFetch('/admin/noisefloor-health'),
                     authenticatedFetch('/admin/spaceweather-health'),
                     authenticatedFetch('/admin/decoder-health'),
-                    authenticatedFetch('/admin/cwskimmer-health')
+                    authenticatedFetch('/admin/cwskimmer-health'),
+                    authenticatedFetch('/admin/mqtt-health')
                 ];
 
                 // Add tunnel status fetch if tunnel server is enabled
@@ -5698,9 +5699,9 @@
                     tunnelStatusPromise = fetchTunnelStatus();
                 }
 
-                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, decoderResponse, cwSkimmerResponse] = await Promise.all(fetchPromises);
+                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, decoderResponse, cwSkimmerResponse, mqttResponse] = await Promise.all(fetchPromises);
 
-                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !decoderResponse || !cwSkimmerResponse) {
+                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse) {
                     // Auth failed, stop auto-refresh
                     stopMonitorAutoRefresh();
                     return;
@@ -5712,15 +5713,16 @@
                 const swHealth = (swResponse.ok || swResponse.status === 503) ? await swResponse.json() : null;
                 const decoderHealth = (decoderResponse.ok || decoderResponse.status === 503) ? await decoderResponse.json() : null;
                 const cwSkimmerHealth = (cwSkimmerResponse.ok || cwSkimmerResponse.status === 503) ? await cwSkimmerResponse.json() : null;
+                const mqttHealth = (mqttResponse.ok || mqttResponse.status === 503) ? await mqttResponse.json() : null;
 
                 // Wait for tunnel status if it was fetched
                 const tunnelStatus = tunnelStatusPromise ? await tunnelStatusPromise : null;
 
-                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth }, false);
+                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth }, false);
 
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!monitorRefreshInterval) {
-                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false);
+                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false);
                     if (allHealthy) {
                         showAlert('Health check completed - all systems healthy', 'success');
                     } else {
@@ -5759,13 +5761,14 @@
 
         async function loadMonitorHealthDetailed() {
             try {
-                // Fetch tunnel status, instance reporter, noise floor, space weather, decoder, and CW Skimmer detailed diagnostics
+                // Fetch tunnel status, instance reporter, noise floor, space weather, decoder, CW Skimmer, and MQTT detailed diagnostics
                 const fetchPromises = [
                     authenticatedFetch('/admin/instance-reporter-health'),
                     authenticatedFetch('/admin/noisefloor-health?detailed=true'),
                     authenticatedFetch('/admin/spaceweather-health?detailed=true'),
                     authenticatedFetch('/admin/decoder-health?detailed=true'),
-                    authenticatedFetch('/admin/cwskimmer-health?detailed=true')
+                    authenticatedFetch('/admin/cwskimmer-health?detailed=true'),
+                    authenticatedFetch('/admin/mqtt-health')
                 ];
 
                 // Add tunnel status fetch if tunnel server is enabled
@@ -5774,20 +5777,21 @@
                     tunnelStatusPromise = fetchTunnelStatus();
                 }
 
-                const [instanceReporterResponse, nfResponse, swResponse, decoderResponse, cwSkimmerResponse] = await Promise.all(fetchPromises);
+                const [instanceReporterResponse, nfResponse, swResponse, decoderResponse, cwSkimmerResponse, mqttResponse] = await Promise.all(fetchPromises);
 
-                if (!instanceReporterResponse || !nfResponse || !swResponse || !decoderResponse || !cwSkimmerResponse) return; // Auth failed, already handled
+                if (!instanceReporterResponse || !nfResponse || !swResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse) return; // Auth failed, already handled
 
                 const instanceReporterDiag = (instanceReporterResponse.ok || instanceReporterResponse.status === 503) ? await instanceReporterResponse.json() : null;
                 const nfDiag = (nfResponse.ok || nfResponse.status === 503) ? await nfResponse.json() : null;
                 const swDiag = (swResponse.ok || swResponse.status === 503) ? await swResponse.json() : null;
                 const decoderDiag = (decoderResponse.ok || decoderResponse.status === 503) ? await decoderResponse.json() : null;
                 const cwSkimmerDiag = (cwSkimmerResponse.ok || cwSkimmerResponse.status === 503) ? await cwSkimmerResponse.json() : null;
+                const mqttDiag = (mqttResponse.ok || mqttResponse.status === 503) ? await mqttResponse.json() : null;
 
                 // Wait for tunnel status if it was fetched
                 const tunnelStatus = tunnelStatusPromise ? await tunnelStatusPromise : null;
 
-                renderMonitorHealth({ tunnel: tunnelStatus, instanceReporter: instanceReporterDiag, noiseFloor: nfDiag, spaceWeather: swDiag, decoder: decoderDiag, cwSkimmer: cwSkimmerDiag }, true);
+                renderMonitorHealth({ tunnel: tunnelStatus, instanceReporter: instanceReporterDiag, noiseFloor: nfDiag, spaceWeather: swDiag, decoder: decoderDiag, cwSkimmer: cwSkimmerDiag, mqtt: mqttDiag }, true);
                 showAlert('Detailed diagnostics loaded successfully', 'success');
             } catch (error) {
                 showAlert('Error loading detailed diagnostics: ' + error.message, 'error');
@@ -5916,8 +5920,9 @@
                 const hasSpaceWeatherIssues = data.spaceWeather && !data.spaceWeather.healthy;
                 const hasDecoderIssues = data.decoder && !data.decoder.healthy;
                 const hasCWSkimmerIssues = data.cwSkimmer && data.cwSkimmer.enabled && !data.cwSkimmer.healthy;
+                const hasMQTTIssues = data.mqtt && data.mqtt.enabled && !data.mqtt.healthy;
 
-                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasDecoderIssues || hasCWSkimmerIssues) {
+                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues) {
                     const warningBanner = document.createElement('div');
                     warningBanner.style.padding = '20px';
                     warningBanner.style.background = '#fff3cd';
@@ -5977,6 +5982,12 @@
                     if (hasCWSkimmerIssues) {
                         const li = document.createElement('li');
                         li.innerHTML = '<strong>CW Skimmer:</strong> ' + (data.cwSkimmer.issues && data.cwSkimmer.issues.length > 0 ? data.cwSkimmer.issues.join(', ') : 'System unhealthy');
+                        issuesList.appendChild(li);
+                    }
+
+                    if (hasMQTTIssues) {
+                        const li = document.createElement('li');
+                        li.innerHTML = '<strong>MQTT:</strong> ' + (data.mqtt.issues && data.mqtt.issues.length > 0 ? data.mqtt.issues.join(', ') : 'System unhealthy');
                         issuesList.appendChild(li);
                     }
 
@@ -6110,6 +6121,11 @@
                 // Render CW Skimmer health status
                 if (data.cwSkimmer) {
                     renderCWSkimmerHealth(container, data.cwSkimmer);
+                }
+
+                // Render MQTT health status
+                if (data.mqtt) {
+                    renderMQTTHealth(container, data.mqtt);
                 }
             }
         }
@@ -6700,6 +6716,149 @@
             const stats = [
                 { label: 'Connection Status', value: data.connected ? 'Connected' : 'Disconnected', icon: data.connected ? '🟢' : '🔴' },
                 { label: 'Recent Spots', value: recentSpots ? 'Yes' : 'No', icon: recentSpots ? '✅' : '⚠️' }
+            ];
+
+            stats.forEach(stat => {
+                const statCard = document.createElement('div');
+                statCard.style.padding = '15px';
+                statCard.style.background = '#f8f9fa';
+                statCard.style.borderRadius = '5px';
+                statCard.style.textAlign = 'center';
+                statCard.innerHTML = `
+                    <div style="font-size: 24px; margin-bottom: 5px;">${stat.icon}</div>
+                    <div style="font-size: 18px; font-weight: bold; color: #667eea; margin-bottom: 5px;">${stat.value}</div>
+                    <div style="font-size: 12px; color: #666;">${stat.label}</div>
+                `;
+                statsDiv.appendChild(statCard);
+            });
+            statusSection.appendChild(statsDiv);
+
+            // Issues list
+            if (data.issues && data.issues.length > 0) {
+                const issuesDiv = document.createElement('div');
+                issuesDiv.style.padding = '15px';
+                issuesDiv.style.background = '#fff3cd';
+                issuesDiv.style.border = '1px solid #ffeaa7';
+                issuesDiv.style.borderRadius = '5px';
+                issuesDiv.style.marginBottom = '20px';
+
+                const issuesTitle = document.createElement('strong');
+                issuesTitle.textContent = '⚠️ Issues Detected:';
+                issuesTitle.style.display = 'block';
+                issuesTitle.style.marginBottom = '10px';
+                issuesDiv.appendChild(issuesTitle);
+
+                const issuesList = document.createElement('ul');
+                issuesList.style.marginLeft = '20px';
+                data.issues.forEach(issue => {
+                    const li = document.createElement('li');
+                    li.textContent = issue;
+                    li.style.marginBottom = '5px';
+                    issuesList.appendChild(li);
+                });
+                issuesDiv.appendChild(issuesList);
+                statusSection.appendChild(issuesDiv);
+            }
+
+            container.appendChild(statusSection);
+        }
+
+        function renderMQTTHealth(container, data) {
+            // Only render if MQTT is enabled
+            if (!data.enabled) {
+                return;
+            }
+
+            // Render MQTT health status
+            const statusSection = document.createElement('div');
+            statusSection.className = 'config-section';
+
+            const statusIcon = data.healthy ? '✅' : '❌';
+            const statusColor = data.healthy ? '#28a745' : '#dc3545';
+
+            statusSection.innerHTML = `
+                <h3 style="color: ${statusColor};">${statusIcon} MQTT Publisher Health</h3>
+            `;
+
+            // Overall status
+            const statusDiv = document.createElement('div');
+            statusDiv.style.padding = '15px';
+            statusDiv.style.background = data.healthy ? '#d4edda' : '#f8d7da';
+            statusDiv.style.border = `1px solid ${data.healthy ? '#c3e6cb' : '#f5c6cb'}`;
+            statusDiv.style.borderRadius = '5px';
+            statusDiv.style.marginBottom = '20px';
+
+            const connectedText = data.connected ? 'Yes' : 'No';
+            const connectedColor = data.connected ? '#28a745' : '#dc3545';
+
+            // Parse broker URL to extract host and port
+            let brokerHost = 'N/A';
+            let brokerPort = 'N/A';
+            if (data.broker) {
+                try {
+                    // Handle formats like "tcp://host:port" or "ssl://host:port"
+                    const brokerMatch = data.broker.match(/^(?:tcp|ssl):\/\/([^:]+):(\d+)$/);
+                    if (brokerMatch) {
+                        brokerHost = brokerMatch[1];
+                        brokerPort = brokerMatch[2];
+                    } else {
+                        // Fallback: just show the whole broker string
+                        brokerHost = data.broker;
+                    }
+                } catch (e) {
+                    brokerHost = data.broker;
+                }
+            }
+
+            // Format last message time
+            let lastMessageDisplay = 'N/A';
+            if (data.last_message_time) {
+                try {
+                    const lastMessageDate = new Date(data.last_message_time);
+                    const now = new Date();
+                    const diffMs = now - lastMessageDate;
+                    const diffSecs = Math.floor(diffMs / 1000);
+
+                    if (diffSecs < 60) {
+                        lastMessageDisplay = `${diffSecs}s ago`;
+                    } else if (diffSecs < 3600) {
+                        lastMessageDisplay = `${Math.floor(diffSecs / 60)}m ago`;
+                    } else if (diffSecs < 86400) {
+                        lastMessageDisplay = `${Math.floor(diffSecs / 3600)}h ago`;
+                    } else {
+                        lastMessageDisplay = `${Math.floor(diffSecs / 86400)}d ago`;
+                    }
+                } catch (e) {
+                    lastMessageDisplay = data.last_message_time;
+                }
+            }
+
+            statusDiv.innerHTML = `
+                <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
+                <span style="color: #666; font-size: 14px;">Enabled: ${data.enabled ? 'Yes' : 'No'}</span><br>
+                <span style="color: ${connectedColor}; font-size: 14px; font-weight: bold;">Connected: ${connectedText}</span><br>
+                <span style="color: #667eea; font-size: 14px; font-weight: bold;">Broker Host: ${brokerHost}</span><br>
+                <span style="color: #667eea; font-size: 14px; font-weight: bold;">Broker Port: ${brokerPort}</span><br>
+                <span style="color: #666; font-size: 14px;">Connection Uptime: ${data.uptime || 'N/A'}</span><br>
+                <span style="color: #666; font-size: 14px;">Reconnections: ${data.reconnects || 0}</span><br>
+                <span style="color: #666; font-size: 14px;">Messages Sent: ${data.messages_sent ? data.messages_sent.toLocaleString() : 0}</span><br>
+                <span style="color: #666; font-size: 14px;">Last Message: ${lastMessageDisplay}</span><br>
+                <span style="color: #666; font-size: 14px;">QoS Level: ${data.qos !== undefined ? data.qos : 'N/A'}</span>
+            `;
+            statusSection.appendChild(statusDiv);
+
+            // Connection statistics
+            const statsDiv = document.createElement('div');
+            statsDiv.style.display = 'grid';
+            statsDiv.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
+            statsDiv.style.gap = '15px';
+            statsDiv.style.marginBottom = '20px';
+
+            const stats = [
+                { label: 'Connection Status', value: data.connected ? 'Connected' : 'Disconnected', icon: data.connected ? '🟢' : '🔴' },
+                { label: 'Messages Sent', value: data.messages_sent ? data.messages_sent.toLocaleString() : 0, icon: '📤' },
+                { label: 'Reconnections', value: data.reconnects || 0, icon: '🔄' },
+                { label: 'Uptime', value: data.uptime || 'N/A', icon: '⏱️' }
             ];
 
             stats.forEach(stat => {

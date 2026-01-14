@@ -157,6 +157,7 @@ type DecoderConfig struct {
 	SpotsLogEnabled      bool   `yaml:"spots_log_enabled"`       // Enable CSV logging of all spots
 	SpotsLogDataDir      string `yaml:"spots_log_data_dir"`      // Directory for spots CSV files (relative or absolute, default: data_dir/spots)
 	SpotsLogLocatorsOnly bool   `yaml:"spots_log_locators_only"` // Only log spots with valid locators to CSV (default: true)
+	SpotsLogMaxAgeDays   int    `yaml:"spots_log_max_age_days"`  // Maximum age of spots log files in days (default: 90, 0 = no cleanup)
 
 	// Metrics logging configuration
 	MetricsLogEnabled      bool   `yaml:"metrics_log_enabled"`       // Enable JSON Lines logging of decoder metrics

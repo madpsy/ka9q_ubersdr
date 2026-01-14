@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -24,6 +25,14 @@ type MQTTPublisher struct {
 	metrics             *PrometheusMetrics
 	noiseFloorMonitor   *NoiseFloorMonitor
 	spaceWeatherMonitor *SpaceWeatherMonitor
+
+	// Health tracking
+	mu              sync.RWMutex
+	connectedAt     time.Time
+	reconnectCount  int
+	lastDisconnect  time.Time
+	messagesSent    int64
+	lastMessageTime time.Time
 }
 
 // MetricPayload represents a metric message for MQTT
@@ -105,14 +114,30 @@ func NewMQTTPublisher(config *MQTTConfig, metrics *PrometheusMetrics, noiseFloor
 		opts.SetTLSConfig(tlsConfig)
 	}
 
+	publisher := &MQTTPublisher{
+		config:              config,
+		metrics:             metrics,
+		noiseFloorMonitor:   noiseFloorMonitor,
+		spaceWeatherMonitor: spaceWeatherMonitor,
+	}
+
 	// Set connection handlers
 	opts.SetOnConnectHandler(func(client mqtt.Client) {
+		publisher.mu.Lock()
+		publisher.connectedAt = time.Now()
+		publisher.mu.Unlock()
 		log.Println("MQTT: Connected to broker")
 	})
 	opts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
+		publisher.mu.Lock()
+		publisher.lastDisconnect = time.Now()
+		publisher.mu.Unlock()
 		log.Printf("MQTT: Connection lost: %v", err)
 	})
 	opts.SetReconnectingHandler(func(client mqtt.Client, opts *mqtt.ClientOptions) {
+		publisher.mu.Lock()
+		publisher.reconnectCount++
+		publisher.mu.Unlock()
 		log.Println("MQTT: Attempting to reconnect...")
 	})
 
@@ -148,15 +173,14 @@ func NewMQTTPublisher(config *MQTTConfig, metrics *PrometheusMetrics, noiseFloor
 	// If not connected after retries, log warning but continue (auto-reconnect will handle it)
 	if !connected {
 		log.Printf("MQTT: Failed to connect after 2 attempts, will retry in background (auto-reconnect enabled)")
+	} else {
+		publisher.mu.Lock()
+		publisher.connectedAt = time.Now()
+		publisher.mu.Unlock()
 	}
 
-	return &MQTTPublisher{
-		client:              client,
-		config:              config,
-		metrics:             metrics,
-		noiseFloorMonitor:   noiseFloorMonitor,
-		spaceWeatherMonitor: spaceWeatherMonitor,
-	}, nil
+	publisher.client = client
+	return publisher, nil
 }
 
 // StartPublisher starts the background publishing goroutines
@@ -446,6 +470,12 @@ func (mp *MQTTPublisher) publish(topic string, payload MetricPayload) {
 		log.Printf("MQTT ERROR: Failed to publish to topic %s: %v", topic, token.Error())
 		return
 	}
+
+	// Track successful message
+	mp.mu.Lock()
+	mp.messagesSent++
+	mp.lastMessageTime = time.Now()
+	mp.mu.Unlock()
 }
 
 // publishSpectrumData publishes FFT spectrum data for all bands
@@ -480,6 +510,12 @@ func (mp *MQTTPublisher) publishSpectrumData(config *Config) {
 			token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
 			if token.Wait() && token.Error() != nil {
 				log.Printf("MQTT ERROR: Failed to publish wideband spectrum: %v", token.Error())
+			} else {
+				// Track successful message
+				mp.mu.Lock()
+				mp.messagesSent++
+				mp.lastMessageTime = time.Now()
+				mp.mu.Unlock()
 			}
 		}
 	}
@@ -530,6 +566,12 @@ func (mp *MQTTPublisher) publishSpectrumData(config *Config) {
 			log.Printf("MQTT ERROR: Failed to publish spectrum for band %s: %v", band.Name, token.Error())
 			continue
 		}
+
+		// Track successful message
+		mp.mu.Lock()
+		mp.messagesSent++
+		mp.lastMessageTime = time.Now()
+		mp.mu.Unlock()
 	}
 }
 
@@ -580,6 +622,12 @@ func (mp *MQTTPublisher) publishSpaceWeather(numericMetrics map[string]interface
 		log.Printf("MQTT ERROR: Failed to publish spaceweather: %v", token.Error())
 		return
 	}
+
+	// Track successful message
+	mp.mu.Lock()
+	mp.messagesSent++
+	mp.lastMessageTime = time.Now()
+	mp.mu.Unlock()
 
 	if DebugMode {
 		log.Printf("MQTT DEBUG: Published spaceweather with %d fields", len(payload))
@@ -832,4 +880,62 @@ func (mp *MQTTPublisher) Disconnect() {
 		mp.client.Disconnect(250)
 		log.Println("MQTT: Disconnected from broker")
 	}
+}
+
+// GetHealthStatus returns the current MQTT connection health status
+func (mp *MQTTPublisher) GetHealthStatus() map[string]interface{} {
+	mp.mu.RLock()
+	defer mp.mu.RUnlock()
+
+	status := map[string]interface{}{
+		"enabled":    true,
+		"connected":  mp.client.IsConnected(),
+		"broker":     mp.config.Broker,
+		"qos":        mp.config.QoS,
+		"reconnects": mp.reconnectCount,
+	}
+
+	// Calculate connection uptime if connected
+	if mp.client.IsConnected() && !mp.connectedAt.IsZero() {
+		uptime := time.Since(mp.connectedAt)
+		status["connected_at"] = mp.connectedAt.Format(time.RFC3339)
+		status["uptime_seconds"] = int(uptime.Seconds())
+
+		// Format uptime in human-readable format
+		days := int(uptime.Hours() / 24)
+		hours := int(uptime.Hours()) % 24
+		minutes := int(uptime.Minutes()) % 60
+		seconds := int(uptime.Seconds()) % 60
+
+		if days > 0 {
+			status["uptime"] = fmt.Sprintf("%dd %dh %dm", days, hours, minutes)
+		} else if hours > 0 {
+			status["uptime"] = fmt.Sprintf("%dh %dm %ds", hours, minutes, seconds)
+		} else if minutes > 0 {
+			status["uptime"] = fmt.Sprintf("%dm %ds", minutes, seconds)
+		} else {
+			status["uptime"] = fmt.Sprintf("%ds", seconds)
+		}
+	} else {
+		status["connected_at"] = nil
+		status["uptime_seconds"] = 0
+		status["uptime"] = "N/A"
+	}
+
+	// Add last disconnect time if available
+	if !mp.lastDisconnect.IsZero() {
+		status["last_disconnect"] = mp.lastDisconnect.Format(time.RFC3339)
+		timeSinceDisconnect := time.Since(mp.lastDisconnect)
+		status["seconds_since_disconnect"] = int(timeSinceDisconnect.Seconds())
+	}
+
+	// Add message statistics
+	status["messages_sent"] = mp.messagesSent
+	if !mp.lastMessageTime.IsZero() {
+		status["last_message_time"] = mp.lastMessageTime.Format(time.RFC3339)
+		timeSinceMessage := time.Since(mp.lastMessageTime)
+		status["seconds_since_message"] = int(timeSinceMessage.Seconds())
+	}
+
+	return status
 }

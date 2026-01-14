@@ -44,6 +44,10 @@ decoder:
   spots_log_locators_only: true        # Only log/show spots with valid grid locators (default: true)
                                        # When false, logs and shows all spots including those without locators
                                        # Applies to both CSV logging and history view
+  spots_log_max_age_days: 90           # Maximum age of spots log files in days (default: 90)
+                                       # Files older than this will be automatically deleted
+                                       # Cleanup runs once per hour
+                                       # Set to 0 to disable automatic cleanup
   
   # Metrics Logging (JSON Lines format for time-series data)
   # Logs decoder performance metrics (decode counts, execution times, etc.)

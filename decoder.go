@@ -116,12 +116,16 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 	// Initialize spots logger (independent of reporting)
 	// Path resolution is handled in main.go before this is called
 	if config.SpotsLogEnabled {
-		logger, err := NewSpotsLogger(config.SpotsLogDataDir, true)
+		logger, err := NewSpotsLogger(config.SpotsLogDataDir, true, config.SpotsLogMaxAgeDays)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize spots logger: %w", err)
 		}
 		md.spotsLogger = logger
-		log.Printf("Spots CSV logging enabled: %s", config.SpotsLogDataDir)
+		if config.SpotsLogMaxAgeDays > 0 {
+			log.Printf("Spots CSV logging enabled: %s (cleanup: %d days)", config.SpotsLogDataDir, config.SpotsLogMaxAgeDays)
+		} else {
+			log.Printf("Spots CSV logging enabled: %s (no cleanup)", config.SpotsLogDataDir)
+		}
 	}
 
 	// Initialize metrics logger (JSON Lines format)

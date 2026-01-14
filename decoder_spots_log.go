@@ -15,7 +15,8 @@ import (
 // SpotsLogger handles CSV logging of decoder spots (FT8/FT4/WSPR)
 // Logs all spots to separate CSV files organized by mode/date/band
 type SpotsLogger struct {
-	dataDir string
+	dataDir    string
+	maxAgeDays int // Maximum age of log files in days (0 = no cleanup)
 
 	// CSV logging (one file per mode/date/band combination)
 	openFiles  map[string]*os.File    // key: mode/date/band
@@ -23,7 +24,8 @@ type SpotsLogger struct {
 	fileMu     sync.Mutex
 
 	// Control
-	enabled bool
+	enabled   bool
+	stopClean chan struct{} // Signal to stop cleanup goroutine
 }
 
 // SpotRecord represents a decoded spot from CSV
@@ -89,7 +91,7 @@ func matchesDirection(bearing float64, direction string) bool {
 }
 
 // NewSpotsLogger creates a new spots logger
-func NewSpotsLogger(dataDir string, enabled bool) (*SpotsLogger, error) {
+func NewSpotsLogger(dataDir string, enabled bool, maxAgeDays int) (*SpotsLogger, error) {
 	if !enabled {
 		return &SpotsLogger{enabled: false}, nil
 	}
@@ -99,11 +101,23 @@ func NewSpotsLogger(dataDir string, enabled bool) (*SpotsLogger, error) {
 		return nil, fmt.Errorf("failed to create spots log directory: %w", err)
 	}
 
+	// Default to 90 days if not specified
+	if maxAgeDays == 0 {
+		maxAgeDays = 90
+	}
+
 	sl := &SpotsLogger{
 		dataDir:    dataDir,
+		maxAgeDays: maxAgeDays,
 		enabled:    true,
 		openFiles:  make(map[string]*os.File),
 		csvWriters: make(map[string]*csv.Writer),
+		stopClean:  make(chan struct{}),
+	}
+
+	// Start cleanup goroutine if maxAgeDays > 0
+	if maxAgeDays > 0 {
+		go sl.cleanupLoop()
 	}
 
 	return sl, nil
@@ -217,10 +231,15 @@ func (sl *SpotsLogger) getOrCreateWriter(decode *DecodeInfo) (*csv.Writer, error
 	return writer, nil
 }
 
-// Close closes all open CSV files
+// Close closes all open CSV files and stops the cleanup goroutine
 func (sl *SpotsLogger) Close() error {
 	if !sl.enabled {
 		return nil
+	}
+
+	// Stop cleanup goroutine
+	if sl.stopClean != nil {
+		close(sl.stopClean)
 	}
 
 	sl.fileMu.Lock()
@@ -1494,4 +1513,141 @@ func formatHourlyDistribution(hourly map[int]int) map[string]int {
 		result[key] = hourly[hour]
 	}
 	return result
+}
+
+// cleanupLoop runs hourly to clean up old spot log files
+func (sl *SpotsLogger) cleanupLoop() {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	// Run cleanup immediately on start
+	if err := sl.cleanupOldFiles(); err != nil {
+		log.Printf("Error during initial spots log cleanup: %v", err)
+	}
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := sl.cleanupOldFiles(); err != nil {
+				log.Printf("Error during spots log cleanup: %v", err)
+			}
+		case <-sl.stopClean:
+			return
+		}
+	}
+}
+
+// cleanupOldFiles removes spot log files older than maxAgeDays
+func (sl *SpotsLogger) cleanupOldFiles() error {
+	if sl.maxAgeDays <= 0 {
+		return nil // Cleanup disabled
+	}
+
+	cutoffDate := time.Now().AddDate(0, 0, -sl.maxAgeDays)
+	log.Printf("Cleaning up spots logs older than %d days (before %s)", sl.maxAgeDays, cutoffDate.Format("2006-01-02"))
+
+	removedCount := 0
+
+	// Check all modes
+	modes := []string{"FT8", "FT4", "WSPR"}
+	for _, mode := range modes {
+		modePath := filepath.Join(sl.dataDir, mode)
+
+		// Check if mode directory exists
+		if _, err := os.Stat(modePath); os.IsNotExist(err) {
+			continue
+		}
+
+		// Walk through year directories
+		yearDirs, err := os.ReadDir(modePath)
+		if err != nil {
+			log.Printf("Warning: error reading mode directory %s: %v", modePath, err)
+			continue
+		}
+
+		for _, yearDir := range yearDirs {
+			if !yearDir.IsDir() {
+				continue
+			}
+			year := yearDir.Name()
+			yearPath := filepath.Join(modePath, year)
+
+			// Walk through month directories
+			monthDirs, err := os.ReadDir(yearPath)
+			if err != nil {
+				log.Printf("Warning: error reading year directory %s: %v", yearPath, err)
+				continue
+			}
+
+			for _, monthDir := range monthDirs {
+				if !monthDir.IsDir() {
+					continue
+				}
+				month := monthDir.Name()
+				monthPath := filepath.Join(yearPath, month)
+
+				// Walk through day directories
+				dayDirs, err := os.ReadDir(monthPath)
+				if err != nil {
+					log.Printf("Warning: error reading month directory %s: %v", monthPath, err)
+					continue
+				}
+
+				for _, dayDir := range dayDirs {
+					if !dayDir.IsDir() {
+						continue
+					}
+					day := dayDir.Name()
+
+					// Parse date from directory structure
+					dateStr := fmt.Sprintf("%s-%s-%s", year, month, day)
+					dirDate, err := time.Parse("2006-01-02", dateStr)
+					if err != nil {
+						log.Printf("Warning: invalid date directory %s: %v", dateStr, err)
+						continue
+					}
+
+					// Check if directory is older than cutoff
+					if dirDate.Before(cutoffDate) {
+						dayPath := filepath.Join(monthPath, day)
+						log.Printf("Removing old spots log directory: %s", dayPath)
+						if err := os.RemoveAll(dayPath); err != nil {
+							log.Printf("Warning: error removing directory %s: %v", dayPath, err)
+						} else {
+							removedCount++
+						}
+					}
+				}
+
+				// Check if month directory is now empty and remove it
+				if isEmpty, _ := isDirEmpty(monthPath); isEmpty {
+					log.Printf("Removing empty month directory: %s", monthPath)
+					os.Remove(monthPath)
+				}
+			}
+
+			// Check if year directory is now empty and remove it
+			if isEmpty, _ := isDirEmpty(yearPath); isEmpty {
+				log.Printf("Removing empty year directory: %s", yearPath)
+				os.Remove(yearPath)
+			}
+		}
+	}
+
+	if removedCount > 0 {
+		log.Printf("Spots log cleanup completed: removed %d old directories", removedCount)
+	} else {
+		log.Printf("Spots log cleanup completed: no old directories to remove")
+	}
+
+	return nil
+}
+
+// isDirEmpty checks if a directory is empty
+func isDirEmpty(path string) (bool, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return false, err
+	}
+	return len(entries) == 0, nil
 }

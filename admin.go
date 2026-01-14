@@ -252,6 +252,7 @@ type AdminHandler struct {
 	cwSkimmerConfig     *CWSkimmerConfig
 	cwSkimmerClient     *CWSkimmerClient
 	instanceReporter    *InstanceReporter
+	mqttPublisher       *MQTTPublisher
 	loginAttempts       *LoginAttemptTracker
 }
 
@@ -314,7 +315,7 @@ func (ah *AdminHandler) restartServer() {
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher) *AdminHandler {
 	return &AdminHandler{
 		config:              config,
 		configFile:          configFile,
@@ -332,6 +333,7 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		cwSkimmerConfig:     cwSkimmerConfig,
 		cwSkimmerClient:     cwSkimmerClient,
 		instanceReporter:    instanceReporter,
+		mqttPublisher:       mqttPublisher,
 		loginAttempts:       NewLoginAttemptTracker(),
 	}
 }
@@ -4607,5 +4609,61 @@ func (ah *AdminHandler) HandleForceUpdate(w http.ResponseWriter, r *http.Request
 		"version": versionToWrite,
 	}); err != nil {
 		log.Printf("Error encoding response: %v", err)
+	}
+}
+
+// HandleMQTTHealth serves the health status of the MQTT publisher
+// This is an admin-only endpoint, so IP ban checking is not needed (handled by auth middleware)
+func (ah *AdminHandler) HandleMQTTHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Build health status response
+	status := map[string]interface{}{
+		"enabled": ah.config.MQTT.Enabled,
+		"healthy": false,
+		"issues":  []string{},
+	}
+
+	// If not enabled, return early
+	if !ah.config.MQTT.Enabled {
+		status["issues"] = []string{"MQTT is not enabled"}
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(status); err != nil {
+			log.Printf("Error encoding MQTT health status: %v", err)
+		}
+		return
+	}
+
+	// Check if MQTT publisher exists
+	if ah.mqttPublisher == nil {
+		status["issues"] = []string{"MQTT publisher not initialized"}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		if err := json.NewEncoder(w).Encode(status); err != nil {
+			log.Printf("Error encoding MQTT health status: %v", err)
+		}
+		return
+	}
+
+	// Get health status from MQTT publisher
+	healthData := ah.mqttPublisher.GetHealthStatus()
+
+	// Merge health data into status
+	for k, v := range healthData {
+		status[k] = v
+	}
+
+	// Determine overall health
+	connected := status["connected"].(bool)
+	if connected {
+		status["healthy"] = true
+		w.WriteHeader(http.StatusOK)
+	} else {
+		status["healthy"] = false
+		status["issues"] = []string{"Not connected to MQTT broker"}
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		log.Printf("Error encoding MQTT health status: %v", err)
 	}
 }

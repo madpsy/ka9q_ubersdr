@@ -4667,7 +4667,12 @@
                 input.value = value;
                 input.dataset.key = key;
                 input.addEventListener('change', (e) => {
-                    currentDecoderConfig[e.target.dataset.key] = e.target.value;
+                    // Convert to appropriate type
+                    if (type === 'number') {
+                        currentDecoderConfig[e.target.dataset.key] = parseInt(e.target.value) || 0;
+                    } else {
+                        currentDecoderConfig[e.target.dataset.key] = e.target.value;
+                    }
                 });
                 field.appendChild(input);
             }

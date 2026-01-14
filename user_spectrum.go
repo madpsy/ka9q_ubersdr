@@ -338,24 +338,8 @@ func (usm *UserSpectrumManager) parseStatusPacket(payload []byte) {
 						binData[j] = -120.0 // Noise floor
 					}
 
-					// Apply master gain adjustment from config
-					totalGain := float32(usm.config.Spectrum.GainDB)
-
-					// Apply frequency-specific gain if ranges are configured
-					if len(usm.config.Spectrum.GainDBFrequencyRanges) > 0 && foundFreq && foundBinBW {
-						// Calculate the center frequency for this bin
-						binFreq := usm.calculateBinFrequency(j, radiodFreq, radiodBinBW, numBins)
-
-						// Find matching frequency range and add its gain
-						for _, freqRange := range usm.config.Spectrum.GainDBFrequencyRanges {
-							if binFreq >= freqRange.StartFreq && binFreq <= freqRange.EndFreq {
-								totalGain += float32(freqRange.GainDB)
-								break // Use first matching range
-							}
-						}
-					}
-
-					binData[j] += totalGain
+					// Apply only master gain here - frequency-specific gain will be applied per-session
+					binData[j] += float32(usm.config.Spectrum.GainDB)
 				}
 				foundBinData = true
 
@@ -391,24 +375,8 @@ func (usm *UserSpectrumManager) parseStatusPacket(payload []byte) {
 					binData[j] = -120.0 // Noise floor
 				}
 
-				// Apply master gain adjustment from config
-				totalGain := float32(usm.config.Spectrum.GainDB)
-
-				// Apply frequency-specific gain if ranges are configured
-				if len(usm.config.Spectrum.GainDBFrequencyRanges) > 0 && foundFreq && foundBinBW {
-					// Calculate the center frequency for this bin
-					binFreq := usm.calculateBinFrequency(j, radiodFreq, radiodBinBW, numBins)
-
-					// Find matching frequency range and add its gain
-					for _, freqRange := range usm.config.Spectrum.GainDBFrequencyRanges {
-						if binFreq >= freqRange.StartFreq && binFreq <= freqRange.EndFreq {
-							totalGain += float32(freqRange.GainDB)
-							break // Use first matching range
-						}
-					}
-				}
-
-				binData[j] += totalGain
+				// Apply only master gain here - frequency-specific gain will be applied per-session
+				binData[j] += float32(usm.config.Spectrum.GainDB)
 			}
 			foundBinData = true
 
@@ -608,6 +576,7 @@ func (usm *UserSpectrumManager) calculateBinFrequency(binIndex int, centerFreq u
 }
 
 // distributeSpectrum sends spectrum data to the appropriate session
+// Applies frequency-specific gain based on the session's actual center frequency and bin bandwidth
 func (usm *UserSpectrumManager) distributeSpectrum(ssrc uint32, data []float32) {
 	session, ok := usm.sessions.GetSessionBySSRC(ssrc)
 	if !ok {
@@ -618,11 +587,68 @@ func (usm *UserSpectrumManager) distributeSpectrum(ssrc uint32, data []float32) 
 		return
 	}
 
-	// Send to session's spectrum channel (non-blocking)
-	select {
-	case session.SpectrumChan <- data:
-		// Data sent successfully
-	default:
-		// Channel full, drop data
+	// Apply frequency-specific gain per-session if configured
+	if len(usm.config.Spectrum.GainDBFrequencyRanges) > 0 {
+		// Get session parameters (these reflect the user's actual view)
+		session.mu.RLock()
+		sessionFreq := session.Frequency
+		sessionBinBW := session.BinBandwidth
+		sessionBinCount := session.BinCount
+		session.mu.RUnlock()
+
+		// Create a copy of the data to apply session-specific gain
+		sessionData := make([]float32, len(data))
+		copy(sessionData, data)
+
+		// Apply frequency-specific gain to each bin based on session's view
+		for j := 0; j < len(sessionData); j++ {
+			// Calculate bin frequency using session's parameters (not radiod's)
+			binFreq := usm.calculateBinFrequencyForSession(j, sessionFreq, float32(sessionBinBW), sessionBinCount)
+
+			// Find matching frequency range and apply its gain
+			for _, freqRange := range usm.config.Spectrum.GainDBFrequencyRanges {
+				if binFreq >= freqRange.StartFreq && binFreq <= freqRange.EndFreq {
+					sessionData[j] += float32(freqRange.GainDB)
+					break // Use first matching range
+				}
+			}
+		}
+
+		// Send session-specific data
+		select {
+		case session.SpectrumChan <- sessionData:
+			// Data sent successfully
+		default:
+			// Channel full, drop data
+		}
+	} else {
+		// No frequency-specific gain configured, send original data
+		select {
+		case session.SpectrumChan <- data:
+			// Data sent successfully
+		default:
+			// Channel full, drop data
+		}
 	}
+}
+
+// calculateBinFrequencyForSession calculates bin frequency using session parameters
+// This matches the frontend's calculation exactly
+func (usm *UserSpectrumManager) calculateBinFrequencyForSession(binIndex int, centerFreq uint64, binBW float32, numBins int) uint64 {
+	// Match frontend calculation exactly:
+	// const startFreq = this.centerFreq - this.totalBandwidth / 2;
+	// const freq = startFreq + (binIndex / totalBins) * this.totalBandwidth;
+
+	totalBandwidth := float64(binBW) * float64(numBins)
+	startFreq := float64(centerFreq) - (totalBandwidth / 2.0)
+
+	// Calculate bin frequency using the same formula as frontend
+	binFreq := startFreq + (float64(binIndex)/float64(numBins))*totalBandwidth
+
+	// Ensure we don't return negative frequencies
+	if binFreq < 0 {
+		return 0
+	}
+
+	return uint64(binFreq)
 }

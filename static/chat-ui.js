@@ -1938,6 +1938,7 @@ class ChatUI {
      */
     insertEmoji(emoji) {
         const input = document.getElementById('chat-message-input');
+        const sendBtn = document.getElementById('chat-send-btn');
         const start = input.selectionStart;
         const end = input.selectionEnd;
         const text = input.value;
@@ -1948,6 +1949,12 @@ class ChatUI {
         // Move cursor after emoji
         const newPos = start + emoji.length;
         input.setSelectionRange(newPos, newPos);
+
+        // Update send button state since we now have content
+        const hasContent = input.value.trim().length > 0;
+        sendBtn.disabled = !hasContent;
+        sendBtn.style.opacity = hasContent ? '1' : '0.5';
+        sendBtn.style.cursor = hasContent ? 'pointer' : 'not-allowed';
 
         // Focus input
         input.focus();

@@ -5005,6 +5005,9 @@
             } catch (error) {
                 showAlert('Error importing decoder configuration: ' + error.message, 'error');
             }
+
+            // Reset file input
+            event.target.value = '';
         }
 
         // CW Skimmer configuration management
@@ -5360,6 +5363,9 @@
             } catch (error) {
                 showAlert('Error importing CW Skimmer configuration: ' + error.message, 'error');
             }
+
+            // Reset file input
+            event.target.value = '';
         }
 
         // Radiod configuration management

@@ -124,15 +124,23 @@ type OpusConfig struct {
 	Complexity int  `yaml:"complexity"`
 }
 
+// FrequencyGainRange defines a frequency-dependent gain adjustment
+type FrequencyGainRange struct {
+	StartFreq uint64  `yaml:"start_freq"` // Start frequency in Hz
+	EndFreq   uint64  `yaml:"end_freq"`   // End frequency in Hz
+	GainDB    float64 `yaml:"gain_db"`    // Gain adjustment in dB for this range (added to master gain_db)
+}
+
 // SpectrumConfig contains spectrum analyzer settings
 type SpectrumConfig struct {
-	Enabled            bool                  `yaml:"enabled"`
-	Default            SpectrumDefaultConfig `yaml:"default"`
-	PollPeriodMs       int                   `yaml:"poll_period_ms"`
-	MaxSessionsPerUser int                   `yaml:"max_sessions_per_user"`
-	GainDB             float64               `yaml:"gain_db"`            // Gain adjustment in dB applied to spectrum data
-	DeltaThresholdDB   float64               `yaml:"delta_threshold_db"` // Delta encoding threshold in dB for binary mode
-	Smoothing          SmoothingConfig       `yaml:"smoothing"`          // Smoothing settings for waterfall display
+	Enabled               bool                  `yaml:"enabled"`
+	Default               SpectrumDefaultConfig `yaml:"default"`
+	PollPeriodMs          int                   `yaml:"poll_period_ms"`
+	MaxSessionsPerUser    int                   `yaml:"max_sessions_per_user"`
+	GainDB                float64               `yaml:"gain_db"`                  // Master gain adjustment in dB applied to all spectrum data
+	GainDBFrequencyRanges []FrequencyGainRange  `yaml:"gain_db_frequency_ranges"` // Per-frequency gain adjustments (added to master gain_db)
+	DeltaThresholdDB      float64               `yaml:"delta_threshold_db"`       // Delta encoding threshold in dB for binary mode
+	Smoothing             SmoothingConfig       `yaml:"smoothing"`                // Smoothing settings for waterfall display
 }
 
 // SmoothingConfig contains smoothing parameters for spectrum data
@@ -468,6 +476,19 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.Spectrum.Smoothing.SpatialSigma == 0 {
 		config.Spectrum.Smoothing.SpatialSigma = 1.5 // Moderate Gaussian smoothing
 	}
+
+	// Validate master gain_db (clamp to -100 to +100 dB range)
+	if config.Spectrum.GainDB > 100 {
+		fmt.Printf("Warning: spectrum.gain_db (%.1f) exceeds maximum (+100 dB), clamping to +100 dB\n", config.Spectrum.GainDB)
+		config.Spectrum.GainDB = 100
+	}
+	if config.Spectrum.GainDB < -100 {
+		fmt.Printf("Warning: spectrum.gain_db (%.1f) is below minimum (-100 dB), clamping to -100 dB\n", config.Spectrum.GainDB)
+		config.Spectrum.GainDB = -100
+	}
+
+	// Validate and clean up frequency gain ranges
+	config.Spectrum.validateFrequencyGainRanges()
 
 	// Set DX cluster defaults if not specified
 	if config.DXCluster.Port == 0 {
@@ -872,4 +893,53 @@ func (irc *InstanceReportingConfig) IsTunnelServer(ipStr string) bool {
 	}
 
 	return false
+}
+
+// validateFrequencyGainRanges validates and cleans up frequency gain ranges
+// Removes invalid ranges and logs warnings for user errors
+func (sc *SpectrumConfig) validateFrequencyGainRanges() {
+	if len(sc.GainDBFrequencyRanges) == 0 {
+		return
+	}
+
+	validRanges := make([]FrequencyGainRange, 0, len(sc.GainDBFrequencyRanges))
+
+	for i, r := range sc.GainDBFrequencyRanges {
+		// Check if end frequency is less than or equal to start frequency
+		if r.EndFreq <= r.StartFreq {
+			fmt.Printf("Warning: Ignoring invalid frequency gain range #%d: end_freq (%d Hz) must be greater than start_freq (%d Hz)\n",
+				i+1, r.EndFreq, r.StartFreq)
+			continue
+		}
+
+		// Check if frequency range is reasonable (within HF range: 0-30 MHz)
+		const maxHFFreq = 30000000 // 30 MHz
+		if r.StartFreq > maxHFFreq {
+			fmt.Printf("Warning: Ignoring frequency gain range #%d: start_freq (%d Hz) exceeds maximum HF frequency (30 MHz)\n",
+				i+1, r.StartFreq)
+			continue
+		}
+
+		// Validate and clamp gain_db to -100 to +100 dB range
+		if r.GainDB > 100 {
+			fmt.Printf("Warning: Frequency gain range #%d gain_db (%.1f) exceeds maximum (+100 dB), clamping to +100 dB\n",
+				i+1, r.GainDB)
+			r.GainDB = 100
+		}
+		if r.GainDB < -100 {
+			fmt.Printf("Warning: Frequency gain range #%d gain_db (%.1f) is below minimum (-100 dB), clamping to -100 dB\n",
+				i+1, r.GainDB)
+			r.GainDB = -100
+		}
+
+		// Range is valid, keep it
+		validRanges = append(validRanges, r)
+	}
+
+	// Replace with validated ranges
+	sc.GainDBFrequencyRanges = validRanges
+
+	if len(validRanges) > 0 {
+		fmt.Printf("Loaded %d frequency-dependent gain range(s)\n", len(validRanges))
+	}
 }

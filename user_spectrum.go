@@ -338,8 +338,24 @@ func (usm *UserSpectrumManager) parseStatusPacket(payload []byte) {
 						binData[j] = -120.0 // Noise floor
 					}
 
-					// Apply gain adjustment from config
-					binData[j] += float32(usm.config.Spectrum.GainDB)
+					// Apply master gain adjustment from config
+					totalGain := float32(usm.config.Spectrum.GainDB)
+
+					// Apply frequency-specific gain if ranges are configured
+					if len(usm.config.Spectrum.GainDBFrequencyRanges) > 0 && foundFreq && foundBinBW {
+						// Calculate the center frequency for this bin
+						binFreq := usm.calculateBinFrequency(j, radiodFreq, radiodBinBW, numBins)
+
+						// Find matching frequency range and add its gain
+						for _, freqRange := range usm.config.Spectrum.GainDBFrequencyRanges {
+							if binFreq >= freqRange.StartFreq && binFreq <= freqRange.EndFreq {
+								totalGain += float32(freqRange.GainDB)
+								break // Use first matching range
+							}
+						}
+					}
+
+					binData[j] += totalGain
 				}
 				foundBinData = true
 
@@ -375,8 +391,24 @@ func (usm *UserSpectrumManager) parseStatusPacket(payload []byte) {
 					binData[j] = -120.0 // Noise floor
 				}
 
-				// Apply gain adjustment from config
-				binData[j] += float32(usm.config.Spectrum.GainDB)
+				// Apply master gain adjustment from config
+				totalGain := float32(usm.config.Spectrum.GainDB)
+
+				// Apply frequency-specific gain if ranges are configured
+				if len(usm.config.Spectrum.GainDBFrequencyRanges) > 0 && foundFreq && foundBinBW {
+					// Calculate the center frequency for this bin
+					binFreq := usm.calculateBinFrequency(j, radiodFreq, radiodBinBW, numBins)
+
+					// Find matching frequency range and add its gain
+					for _, freqRange := range usm.config.Spectrum.GainDBFrequencyRanges {
+						if binFreq >= freqRange.StartFreq && binFreq <= freqRange.EndFreq {
+							totalGain += float32(freqRange.GainDB)
+							break // Use first matching range
+						}
+					}
+				}
+
+				binData[j] += totalGain
 			}
 			foundBinData = true
 
@@ -548,6 +580,26 @@ func (usm *UserSpectrumManager) checkAudioParameterMismatch(ssrc uint32, radiodF
 			}
 		}
 	}
+}
+
+// calculateBinFrequency determines the center frequency of a spectrum bin
+// binIndex: index of the bin (0 to numBins-1)
+// centerFreq: center frequency of the spectrum in Hz
+// binBW: bandwidth per bin in Hz
+// numBins: total number of bins
+func (usm *UserSpectrumManager) calculateBinFrequency(binIndex int, centerFreq uint64, binBW float32, numBins int) uint64 {
+	// Calculate offset from center frequency
+	// Bins are centered around centerFreq, so bin 0 is at the lowest frequency
+	offsetBins := binIndex - (numBins / 2)
+	offsetHz := float64(offsetBins) * float64(binBW)
+	binFreq := float64(centerFreq) + offsetHz
+
+	// Ensure we don't return negative frequencies
+	if binFreq < 0 {
+		return 0
+	}
+
+	return uint64(binFreq)
 }
 
 // distributeSpectrum sends spectrum data to the appropriate session

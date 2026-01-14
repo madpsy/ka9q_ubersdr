@@ -333,12 +333,98 @@ spectrum:
   poll_period_ms: 100
   # Maximum spectrum sessions per user (to prevent abuse)
   max_sessions_per_user: 2
-  # Gain adjustment in dB applied to all spectrum data
+  # Master gain adjustment in dB applied to all spectrum data
+  # This is a global offset applied to all frequencies
   # Positive values increase displayed signal levels (brighten)
   # Negative values decrease displayed signal levels (darken)
   # Default: 0 (no adjustment)
   # Example: 20 adds 20 dB to all spectrum values
   gain_db: 0
+
+  # Frequency-dependent gain adjustments (optional)
+  # Allows per-band calibration to compensate for antenna gain variations,
+  # cable losses, or other frequency-dependent effects
+  # Each range adds its gain_db to the master gain_db value
+  #
+  # Use cases:
+  #   - Compensate for antenna gain variations across bands
+  #   - Adjust for frequency-dependent cable losses
+  #   - Calibrate S-meter readings to match real-world signal reports
+  #   - Normalize spectrum display across different frequency ranges
+  #
+  # Format:
+  #   - start_freq: Start frequency in Hz
+  #   - end_freq: End frequency in Hz
+  #   - gain_db: Gain adjustment in dB (positive or negative)
+  #
+  # Example: If master gain_db = 5.0 and a range has gain_db = 2.0,
+  #          signals in that range will have total gain of 7.0 dB
+  #
+  # Note: Overlapping ranges are allowed - first match is used
+  #
+  # Default: Empty list (no frequency-dependent adjustments)
+  # All ranges below are set to 0.0 dB (no adjustment) by default
+  # Modify the gain_db values as needed to calibrate your system
+  gain_db_frequency_ranges:
+    # 2200m band (136 kHz)
+    - start_freq: 135700
+      end_freq: 137800
+      gain_db: 0.0
+
+    # 630m band (472-479 kHz)
+    - start_freq: 472000
+      end_freq: 479000
+      gain_db: 0.0
+
+    # 160m band (1.8-2.0 MHz)
+    - start_freq: 1800000
+      end_freq: 2000000
+      gain_db: 0.0
+
+    # 80m band (3.5-4.0 MHz)
+    - start_freq: 3500000
+      end_freq: 4000000
+      gain_db: 0.0
+
+    # 60m band (5.25-5.45 MHz)
+    - start_freq: 5250000
+      end_freq: 5450000
+      gain_db: 0.0
+
+    # 40m band (7.0-7.2 MHz)
+    - start_freq: 7000000
+      end_freq: 7200000
+      gain_db: 0.0
+
+    # 30m band (10.1-10.15 MHz)
+    - start_freq: 10100000
+      end_freq: 10150000
+      gain_db: 0.0
+
+    # 20m band (14.0-14.35 MHz)
+    - start_freq: 14000000
+      end_freq: 14350000
+      gain_db: 0.0
+
+    # 17m band (18.068-18.168 MHz)
+    - start_freq: 18068000
+      end_freq: 18168000
+      gain_db: 0.0
+
+    # 15m band (21.0-21.45 MHz)
+    - start_freq: 21000000
+      end_freq: 21450000
+      gain_db: 0.0
+
+    # 12m band (24.89-24.99 MHz)
+    - start_freq: 24890000
+      end_freq: 24990000
+      gain_db: 0.0
+
+    # 10m band (28.0-29.7 MHz)
+    - start_freq: 28000000
+      end_freq: 29700000
+      gain_db: 0.0
 
   # Binary protocol delta encoding threshold in dB
   # When using binary mode (mode=binary), only bins that change by more than this threshold

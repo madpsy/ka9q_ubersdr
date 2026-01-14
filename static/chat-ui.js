@@ -2246,7 +2246,7 @@ class ChatUI {
             const freqMHz = (user.frequency / 1000000).toFixed(3);
             element.title = `Click to tune to ${freqMHz} MHz (${user.mode.toUpperCase()})`;
         } else {
-            element.title = 'Click to tune to user';
+            element.title = 'No frequency for user';
         }
     }
 

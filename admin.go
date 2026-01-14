@@ -47,6 +47,28 @@ func convertFrequencies(v interface{}) {
 				val["frequency"] = uint64(f)
 			}
 		}
+		// Check for start_freq field (used in frequency gain ranges)
+		if startFreq, ok := val["start_freq"]; ok {
+			switch f := startFreq.(type) {
+			case float64:
+				val["start_freq"] = uint64(f)
+			case int:
+				val["start_freq"] = uint64(f)
+			case int64:
+				val["start_freq"] = uint64(f)
+			}
+		}
+		// Check for end_freq field (used in frequency gain ranges)
+		if endFreq, ok := val["end_freq"]; ok {
+			switch f := endFreq.(type) {
+			case float64:
+				val["end_freq"] = uint64(f)
+			case int:
+				val["end_freq"] = uint64(f)
+			case int64:
+				val["end_freq"] = uint64(f)
+			}
+		}
 		// Recursively process all map values
 		for _, v2 := range val {
 			convertFrequencies(v2)

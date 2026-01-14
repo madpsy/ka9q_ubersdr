@@ -588,11 +588,20 @@ func (usm *UserSpectrumManager) checkAudioParameterMismatch(ssrc uint32, radiodF
 // binBW: bandwidth per bin in Hz
 // numBins: total number of bins
 func (usm *UserSpectrumManager) calculateBinFrequency(binIndex int, centerFreq uint64, binBW float32, numBins int) uint64 {
-	// Calculate offset from center frequency
-	// Bins are centered around centerFreq, so bin 0 is at the lowest frequency
-	offsetBins := binIndex - (numBins / 2)
-	offsetHz := float64(offsetBins) * float64(binBW)
-	binFreq := float64(centerFreq) + offsetHz
+	// radiod's FFT bins start at the lowest frequency (not centered)
+	// Bin 0 = centerFreq - (totalBandwidth / 2)
+	// Bin N-1 = centerFreq + (totalBandwidth / 2)
+
+	// Calculate total bandwidth
+	totalBandwidth := float64(binBW) * float64(numBins)
+
+	// Calculate starting frequency (lowest frequency in the spectrum)
+	startFreq := float64(centerFreq) - (totalBandwidth / 2.0)
+
+	// Calculate this bin's center frequency
+	// Each bin is binBW wide, so bin N starts at startFreq + (N * binBW)
+	// The center of bin N is at startFreq + (N * binBW) + (binBW / 2)
+	binFreq := startFreq + (float64(binIndex) * float64(binBW)) + (float64(binBW) / 2.0)
 
 	// Ensure we don't return negative frequencies
 	if binFreq < 0 {

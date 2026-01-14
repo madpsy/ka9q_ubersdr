@@ -4977,18 +4977,26 @@
         }
 
         async function handleDecoderConfigImport(event) {
+            console.log('handleDecoderConfigImport called');
             const file = event.target.files[0];
-            if (!file) return;
+            console.log('Selected file:', file);
+            if (!file) {
+                console.log('No file selected');
+                return;
+            }
 
             try {
                 const text = await file.text();
+                console.log('File read, length:', text.length, 'filename:', file.name);
 
                 // Try to parse as JSON first, then YAML
                 let importedConfig;
                 if (file.name.endsWith('.json')) {
+                    console.log('Processing as JSON');
                     const data = JSON.parse(text);
                     importedConfig = data.decoder || data;
                 } else {
+                    console.log('File is YAML, showing alert');
                     // For YAML, we'll send it to the server to parse
                     showAlert('YAML import: Please use the visual editor to modify decoder configuration', 'info');
                     // Reset file input before returning
@@ -4997,21 +5005,25 @@
                 }
 
                 if (!confirm('This will replace your current decoder configuration. Are you sure?')) {
+                    console.log('User cancelled import');
                     // Reset file input before returning
                     event.target.value = '';
                     return;
                 }
 
+                console.log('Importing config:', importedConfig);
                 // Update current decoder config
                 currentDecoderConfig = importedConfig;
                 renderDecoderConfig();
                 showAlert('Decoder configuration imported successfully. Click "Save Configuration" to apply changes.', 'success');
             } catch (error) {
+                console.error('Error importing decoder configuration:', error);
                 showAlert('Error importing decoder configuration: ' + error.message, 'error');
             }
 
             // Reset file input
             event.target.value = '';
+            console.log('File input reset');
         }
 
         // CW Skimmer configuration management

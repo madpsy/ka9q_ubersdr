@@ -4303,7 +4303,7 @@ function enableFrequencyTracking() {
 
                 // Get current dial frequency
                 const freqInput = document.getElementById('frequency');
-                const currentDialFreq = parseInt(freqInput.value);
+                const currentDialFreq = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
 
                 // Check drift from start frequency
                 const driftFromStart = Math.abs(currentDialFreq - oscilloscope.trackingStartFreq);

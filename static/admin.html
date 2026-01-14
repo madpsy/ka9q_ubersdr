@@ -5484,11 +5484,34 @@
                     const data = JSON.parse(text);
                     importedConfig = data;
                 } else {
-                    // For YAML, we'll send it to the server to parse
-                    showAlert('YAML import: Please use the visual editor to modify CW Skimmer configuration', 'info');
-                    // Reset file input before returning
-                    event.target.value = '';
-                    return;
+                    // Simple YAML parsing for CW Skimmer config (flat key-value pairs)
+                    const lines = text.split('\n');
+                    importedConfig = {};
+
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+
+                        // Skip comments and empty lines
+                        if (!trimmed || trimmed.startsWith('#')) continue;
+
+                        // Parse key-value pairs
+                        if (trimmed.includes(':')) {
+                            const colonIndex = trimmed.indexOf(':');
+                            const key = trimmed.substring(0, colonIndex).trim();
+                            const value = trimmed.substring(colonIndex + 1).trim().replace(/^["']|["']$/g, '');
+
+                            // Convert to appropriate type
+                            if (value === 'true') {
+                                importedConfig[key] = true;
+                            } else if (value === 'false') {
+                                importedConfig[key] = false;
+                            } else if (!isNaN(value) && value !== '') {
+                                importedConfig[key] = parseInt(value);
+                            } else if (value) {
+                                importedConfig[key] = value;
+                            }
+                        }
+                    }
                 }
 
                 if (!confirm('This will replace your current CW Skimmer configuration. Are you sure?')) {

@@ -4291,6 +4291,15 @@
             spotsLogLocatorsOnlyField.appendChild(spotsLogLocatorsSmall);
             reportingSection.appendChild(spotsLogLocatorsOnlyField);
 
+            const spotsLogMaxAgeDaysField = createConfigField('Max Age (days)', 'number', currentDecoderConfig.spots_log_max_age_days || 90, 'spots_log_max_age_days');
+            spotsLogMaxAgeDaysField.querySelector('input').placeholder = '90';
+            spotsLogMaxAgeDaysField.querySelector('input').min = '0';
+            spotsLogMaxAgeDaysField.querySelector('input').max = '3650';
+            const spotsLogMaxAgeSmall = document.createElement('small');
+            spotsLogMaxAgeSmall.textContent = 'Maximum age of spots log files in days. Files older than this will be automatically deleted. Cleanup runs once per hour. Set to 0 to disable automatic cleanup (default: 90)';
+            spotsLogMaxAgeDaysField.appendChild(spotsLogMaxAgeSmall);
+            reportingSection.appendChild(spotsLogMaxAgeDaysField);
+
             // Metrics Logging subsection
             const metricsLoggingTitle = document.createElement('h4');
             metricsLoggingTitle.textContent = 'Metrics Logging (JSON Lines)';

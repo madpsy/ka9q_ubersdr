@@ -326,15 +326,6 @@ func (usm *UserSpectrumManager) parseStatusPacket(payload []byte) {
 				numBins := length / 4
 				binData = make([]float32, numBins)
 
-				// Debug: Log spectrum parameters once per packet
-				if DebugMode && foundFreq && foundBinBW && foundBinCount {
-					totalBW := float64(radiodBinBW) * float64(numBins)
-					startF := float64(radiodFreq) - (totalBW / 2.0)
-					endF := float64(radiodFreq) + (totalBW / 2.0)
-					log.Printf("DEBUG: Spectrum SSRC=0x%08x CenterFreq=%d Hz, BinBW=%.1f Hz, Bins=%d, Range=%.1f-%.1f MHz",
-						ssrc, radiodFreq, radiodBinBW, numBins, startF/1e6, endF/1e6)
-				}
-
 				// Parse power values and convert to dB
 				for j := 0; j < numBins; j++ {
 					bits := binary.BigEndian.Uint32(payload[i+j*4 : i+j*4+4])
@@ -356,16 +347,9 @@ func (usm *UserSpectrumManager) parseStatusPacket(payload []byte) {
 						binFreq := usm.calculateBinFrequency(j, radiodFreq, radiodBinBW, numBins)
 
 						// Find matching frequency range and add its gain
-						for rangeName, freqRange := range usm.config.Spectrum.GainDBFrequencyRanges {
+						for _, freqRange := range usm.config.Spectrum.GainDBFrequencyRanges {
 							if binFreq >= freqRange.StartFreq && binFreq <= freqRange.EndFreq {
 								totalGain += float32(freqRange.GainDB)
-								// Debug: Log when gain is applied (only for first few bins to avoid spam)
-								if DebugMode && j < 5 {
-									log.Printf("DEBUG: Bin %d (%.3f MHz) matches range '%s' (%.3f-%.3f MHz), applying %.1f dB gain (total: %.1f dB)",
-										j, float64(binFreq)/1e6, rangeName,
-										float64(freqRange.StartFreq)/1e6, float64(freqRange.EndFreq)/1e6,
-										freqRange.GainDB, totalGain)
-								}
 								break // Use first matching range
 							}
 						}

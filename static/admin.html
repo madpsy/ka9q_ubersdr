@@ -4977,53 +4977,137 @@
         }
 
         async function handleDecoderConfigImport(event) {
-            console.log('handleDecoderConfigImport called');
             const file = event.target.files[0];
-            console.log('Selected file:', file);
-            if (!file) {
-                console.log('No file selected');
-                return;
-            }
+            if (!file) return;
 
             try {
                 const text = await file.text();
-                console.log('File read, length:', text.length, 'filename:', file.name);
 
                 // Try to parse as JSON first, then YAML
                 let importedConfig;
                 if (file.name.endsWith('.json')) {
-                    console.log('Processing as JSON');
                     const data = JSON.parse(text);
                     importedConfig = data.decoder || data;
                 } else {
-                    console.log('File is YAML, showing alert');
-                    // For YAML, we'll send it to the server to parse
-                    showAlert('YAML import: Please use the visual editor to modify decoder configuration', 'info');
-                    // Reset file input before returning
-                    event.target.value = '';
-                    return;
+                    // Simple YAML parsing for decoder config
+                    const lines = text.split('\n');
+                    importedConfig = {};
+                    let currentSection = null;
+                    let currentBand = null;
+                    let inBands = false;
+                    let inEnabledModes = false;
+
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        
+                        // Skip comments and empty lines
+                        if (!trimmed || trimmed.startsWith('#')) continue;
+                        
+                        // Check for decoder: section
+                        if (trimmed === 'decoder:') {
+                            currentSection = 'decoder';
+                            continue;
+                        }
+                        
+                        // Skip if not in decoder section
+                        if (currentSection !== 'decoder') continue;
+                        
+                        // Check for bands array
+                        if (trimmed === 'bands:') {
+                            inBands = true;
+                            importedConfig.bands = [];
+                            continue;
+                        }
+                        
+                        // Check for wsjtx_udp_enabled_modes
+                        if (trimmed === 'wsjtx_udp_enabled_modes:') {
+                            inEnabledModes = true;
+                            importedConfig.wsjtx_udp_enabled_modes = {};
+                            continue;
+                        }
+                        
+                        // Parse bands
+                        if (inBands) {
+                            if (trimmed.startsWith('- name:')) {
+                                if (currentBand) {
+                                    importedConfig.bands.push(currentBand);
+                                }
+                                currentBand = {
+                                    name: trimmed.substring(7).trim().replace(/^["']|["']$/g, ''),
+                                    mode: 'FT8',
+                                    frequency: 0,
+                                    depth: 2,
+                                    enabled: true
+                                };
+                            } else if (currentBand) {
+                                if (trimmed.startsWith('mode:')) {
+                                    currentBand.mode = trimmed.substring(5).trim().replace(/^["']|["']$/g, '');
+                                } else if (trimmed.startsWith('frequency:')) {
+                                    currentBand.frequency = parseInt(trimmed.substring(10).trim());
+                                } else if (trimmed.startsWith('depth:')) {
+                                    currentBand.depth = parseInt(trimmed.substring(6).trim());
+                                } else if (trimmed.startsWith('enabled:')) {
+                                    currentBand.enabled = trimmed.substring(8).trim() === 'true';
+                                } else if (!trimmed.startsWith('-') && !trimmed.includes(':')) {
+                                    // End of bands section
+                                    if (currentBand) {
+                                        importedConfig.bands.push(currentBand);
+                                        currentBand = null;
+                                    }
+                                    inBands = false;
+                                }
+                            }
+                        } else if (inEnabledModes) {
+                            // Parse wsjtx_udp_enabled_modes
+                            if (trimmed.match(/^(FT8|FT4|WSPR):/)) {
+                                const [mode, value] = trimmed.split(':');
+                                importedConfig.wsjtx_udp_enabled_modes[mode.trim()] = value.trim() === 'true';
+                            } else if (!trimmed.includes(':')) {
+                                inEnabledModes = false;
+                            }
+                        } else {
+                            // Parse top-level decoder fields
+                            if (trimmed.includes(':')) {
+                                const colonIndex = trimmed.indexOf(':');
+                                const key = trimmed.substring(0, colonIndex).trim();
+                                const value = trimmed.substring(colonIndex + 1).trim().replace(/^["']|["']$/g, '');
+                                
+                                // Convert to appropriate type
+                                if (value === 'true') {
+                                    importedConfig[key] = true;
+                                } else if (value === 'false') {
+                                    importedConfig[key] = false;
+                                } else if (!isNaN(value) && value !== '') {
+                                    importedConfig[key] = parseInt(value);
+                                } else if (value) {
+                                    importedConfig[key] = value;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Add last band if exists
+                    if (currentBand) {
+                        importedConfig.bands.push(currentBand);
+                    }
                 }
 
                 if (!confirm('This will replace your current decoder configuration. Are you sure?')) {
-                    console.log('User cancelled import');
                     // Reset file input before returning
                     event.target.value = '';
                     return;
                 }
 
-                console.log('Importing config:', importedConfig);
                 // Update current decoder config
                 currentDecoderConfig = importedConfig;
                 renderDecoderConfig();
                 showAlert('Decoder configuration imported successfully. Click "Save Configuration" to apply changes.', 'success');
             } catch (error) {
-                console.error('Error importing decoder configuration:', error);
                 showAlert('Error importing decoder configuration: ' + error.message, 'error');
             }
 
             // Reset file input
             event.target.value = '';
-            console.log('File input reset');
         }
 
         // CW Skimmer configuration management

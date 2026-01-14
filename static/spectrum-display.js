@@ -645,8 +645,8 @@ class SpectrumDisplay {
                 [xLow, xHigh] = [xHigh, xLow];
             }
 
-            // Check if click is near bandwidth bracket (y=30, within hitTolerance)
-            const bracketY = 30;
+            // Check if click is near bandwidth bracket (y=45, within hitTolerance)
+            const bracketY = 45;
             if (Math.abs(y - bracketY) > this.bandwidthDragState.hitTolerance) return;
 
             // Check if click is near low or high edge
@@ -695,7 +695,7 @@ class SpectrumDisplay {
                             [xLow, xHigh] = [xHigh, xLow];
                         }
 
-                        const bracketY = 30;
+                        const bracketY = 45;
                         const nearBracket = Math.abs(y - bracketY) <= this.bandwidthDragState.hitTolerance;
                         const nearLow = Math.abs(x - xLow) <= this.bandwidthDragState.hitTolerance;
                         const nearHigh = Math.abs(x - xHigh) <= this.bandwidthDragState.hitTolerance;
@@ -2595,7 +2595,7 @@ class SpectrumDisplay {
 
         // Draw bandwidth bracket if both edges are visible
         if (xLow >= 0 && xLow <= this.width && xHigh >= 0 && xHigh <= this.width) {
-            const bracketY = 30; // Position for bracket (at bottom of overlay, top of waterfall)
+            const bracketY = 45; // Position for bracket (at top of frequency scale section)
             const bracketHeight = 8;
 
             // Draw horizontal line connecting the edges (thicker)

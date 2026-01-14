@@ -2562,7 +2562,7 @@ class SpectrumDisplay {
 
         // Background for label
         const labelWidth = this.overlayCtx.measureText(freqLabel).width + 6;
-        const labelHeight = 16;
+        const labelHeight = 14;
         const labelY = 1;
 
         this.overlayCtx.fillStyle = 'rgba(255, 165, 0, 0.95)'; // Orange background

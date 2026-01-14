@@ -5433,14 +5433,17 @@
                 const result = await response.json();
                 showAlert(result.message || 'CW Skimmer configuration saved successfully', 'success');
 
-                if (result.restart) {
-                    showAlert('Server is restarting... Please wait and refresh the page in a few seconds.', 'info');
-                    setTimeout(() => location.reload(), 5000);
+                // If restarting, show countdown overlay
+                if (restart && result.restart) {
+                    setTimeout(() => {
+                        showRestartCountdown();
+                    }, 500);
                 }
             } catch (error) {
                 showAlert('Error saving CW Skimmer configuration: ' + error.message, 'error');
             } finally {
-                if (saveButton) {
+                // Re-enable save button (unless restarting)
+                if (saveButton && !restart) {
                     saveButton.disabled = false;
                     saveButton.textContent = originalText;
                 }

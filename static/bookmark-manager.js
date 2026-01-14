@@ -285,12 +285,12 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
     // Draw bookmarks with row assignments
     const labelHeight = 12;
     const arrowLength = 6;
-    const rowSpacing = 13; // Tight vertical spacing between rows
+    const rowSpacing = 15; // Vertical spacing between rows (increased from 13)
 
     visibleBookmarks.forEach(item => {
         const { bookmark, x, labelWidth, row } = item;
-        // Row 0 at y=20, Row 1 at y=7 (20 - 13)
-        const labelY = 20 - (row * rowSpacing);
+        // Row 0 at y=25, Row 1 at y=10 (25 - 15) - positioned lower in the 45px area
+        const labelY = 25 - (row * rowSpacing);
 
         // Draw bookmark label
         ctx.font = 'bold 10px monospace';
@@ -312,7 +312,7 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
 
         // Draw downward arrow - extends from label to baseline
         const arrowStartY = labelY + labelHeight;
-        const arrowTipY = 20 + labelHeight + arrowLength; // Always point to same baseline
+        const arrowTipY = 25 + labelHeight + arrowLength; // Always point to same baseline (adjusted for new position)
         ctx.fillStyle = 'rgba(255, 215, 0, 0.95)';
         ctx.beginPath();
         ctx.moveTo(x, arrowTipY); // Arrow tip at baseline

@@ -600,23 +600,41 @@ func (usm *UserSpectrumManager) distributeSpectrum(ssrc uint32, data []float32) 
 		sessionData := make([]float32, len(data))
 		copy(sessionData, data)
 
-		// Apply frequency-specific gain to each bin based on session's view
-		for j := 0; j < len(sessionData); j++ {
-			// Calculate bin frequency using session's parameters (not radiod's)
+		// CRITICAL FIX: Unwrap FFT data before applying frequency-specific gain
+		// Radiod sends data in standard FFT order: [positive freqs (DC to +Nyquist), negative freqs (-Nyquist to DC)]
+		// We need to unwrap to: [negative freqs, positive freqs] for correct low-to-high frequency mapping
+		// This matches what the frontend does in spectrum-display.js lines 1505-1521
+		halfBins := len(sessionData) / 2
+		unwrapped := make([]float32, len(sessionData))
+
+		// Put second half (negative frequencies) first
+		copy(unwrapped[0:halfBins], sessionData[halfBins:])
+		// Put first half (positive frequencies) second
+		copy(unwrapped[halfBins:], sessionData[0:halfBins])
+
+		// Apply frequency-specific gain to each bin (now in low-to-high frequency order)
+		for j := 0; j < len(unwrapped); j++ {
+			// Calculate bin frequency using session's parameters
 			binFreq := usm.calculateBinFrequencyForSession(j, sessionFreq, float32(sessionBinBW), sessionBinCount)
 
 			// Find matching frequency range and apply its gain
 			for _, freqRange := range usm.config.Spectrum.GainDBFrequencyRanges {
 				if binFreq >= freqRange.StartFreq && binFreq <= freqRange.EndFreq {
-					sessionData[j] += float32(freqRange.GainDB)
+					unwrapped[j] += float32(freqRange.GainDB)
 					break // Use first matching range
 				}
 			}
 		}
 
+		// Wrap the data back to FFT order before sending (frontend will unwrap it again)
+		// This ensures the data format matches what the frontend expects
+		wrapped := make([]float32, len(unwrapped))
+		copy(wrapped[0:halfBins], unwrapped[halfBins:])
+		copy(wrapped[halfBins:], unwrapped[0:halfBins])
+
 		// Send session-specific data
 		select {
-		case session.SpectrumChan <- sessionData:
+		case session.SpectrumChan <- wrapped:
 			// Data sent successfully
 		default:
 			// Channel full, drop data

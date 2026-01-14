@@ -942,7 +942,11 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
     const arrowLength = 6;
     const rowSpacing = 15; // Vertical spacing between rows (matches bookmarks)
 
-    visibleSpots.forEach(item => {
+    // Draw row 1 (top row) first, then row 0 (bottom row)
+    // This ensures row 0 labels appear on top and aren't obscured by row 1 arrows
+    const sortedByRow = [...visibleSpots].sort((a, b) => b.row - a.row);
+
+    sortedByRow.forEach(item => {
         const { spot, x, labelWidth, row } = item;
         // Row 0 at y=28, Row 1 at y=13 (28 - 15) - matches bookmark positioning
         const labelY = 28 - (row * rowSpacing);

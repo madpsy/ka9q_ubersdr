@@ -287,7 +287,11 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
     const arrowLength = 6;
     const rowSpacing = 15; // Vertical spacing between rows (increased from 13)
 
-    visibleBookmarks.forEach(item => {
+    // Draw row 1 (top row) first, then row 0 (bottom row)
+    // This ensures row 0 labels appear on top and aren't obscured by row 1 arrows
+    const sortedByRow = [...visibleBookmarks].sort((a, b) => b.row - a.row);
+    
+    sortedByRow.forEach(item => {
         const { bookmark, x, labelWidth, row } = item;
         // Row 0 at y=28, Row 1 at y=13 (28 - 15) - shifted down to avoid band name overlap
         const labelY = 28 - (row * rowSpacing);

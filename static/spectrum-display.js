@@ -2577,12 +2577,12 @@ class SpectrumDisplay {
         this.overlayCtx.fillStyle = '#ffffff';
         this.overlayCtx.fillText(freqLabel, x, labelY + 2);
 
-        // Draw longer downward arrow below label
+        // Draw longer downward arrow below label - extends to top of frequency scale (y=45)
         const arrowY = labelY + labelHeight;
-        const arrowLength = 14; // Longer arrow
+        const arrowLength = 45 - arrowY; // Arrow extends to y=45 (top of frequency scale)
         this.overlayCtx.fillStyle = 'rgba(255, 165, 0, 0.95)';
         this.overlayCtx.beginPath();
-        this.overlayCtx.moveTo(x, arrowY + arrowLength); // Arrow tip (longer)
+        this.overlayCtx.moveTo(x, arrowY + arrowLength); // Arrow tip at y=45
         this.overlayCtx.lineTo(x - 6, arrowY); // Left point
         this.overlayCtx.lineTo(x + 6, arrowY); // Right point
         this.overlayCtx.closePath();

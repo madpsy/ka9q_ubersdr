@@ -1319,6 +1319,7 @@
         async function logout() {
             stopSessionsAutoRefresh();
             stopMonitorAutoRefresh();
+            stopSystemAutoRefresh();
 
             try {
                 await fetch('/admin/logout', {
@@ -1367,6 +1368,11 @@
             // Stop radiod channels auto-refresh when leaving radiod-channels tab
             if (tab !== 'radiod-channels') {
                 stopRadiodChannelsAutoRefresh();
+            }
+
+            // Stop system auto-refresh when leaving system tab
+            if (tab !== 'system') {
+                stopSystemAutoRefresh();
             }
 
             if (tab === 'sessions') {
@@ -1436,6 +1442,7 @@
                 document.getElementById('systemTab').classList.add('active');
                 document.getElementById('systemButtons').style.display = 'flex';
                 loadSystemStats();
+                startSystemAutoRefresh();
             }
         }
 
@@ -3059,6 +3066,9 @@
 
         // Monitor health management
         let monitorRefreshInterval = null;
+
+        // System stats management
+        let systemRefreshInterval = null;
 
         async function loadSessions() {
             try {
@@ -5470,14 +5480,47 @@
         async function loadSystemStats() {
             try {
                 const response = await authenticatedFetch('/admin/system-stats');
-                if (!response) return; // Auth failed, already handled
+                if (!response) {
+                    // Auth failed, stop auto-refresh
+                    stopSystemAutoRefresh();
+                    return;
+                }
                 if (!response.ok) throw new Error('Failed to load system stats');
 
                 const stats = await response.json();
                 renderSystemStats(stats);
-                showAlert('System statistics loaded successfully', 'success');
+                
+                // Only show alert on manual refresh, not on auto-refresh
+                if (!systemRefreshInterval) {
+                    showAlert('System statistics loaded successfully', 'success');
+                }
             } catch (error) {
-                showAlert('Error loading system statistics: ' + error.message, 'error');
+                // Only show error alert if not auto-refreshing to avoid spam
+                if (!systemRefreshInterval) {
+                    showAlert('Error loading system statistics: ' + error.message, 'error');
+                } else {
+                    // Log error silently during auto-refresh
+                    console.error('Error loading system statistics during auto-refresh:', error);
+                }
+            }
+        }
+
+        function startSystemAutoRefresh() {
+            // Clear any existing interval
+            if (systemRefreshInterval) {
+                clearInterval(systemRefreshInterval);
+            }
+
+            // Start auto-refresh every 60 seconds
+            systemRefreshInterval = setInterval(() => {
+                loadSystemStats();
+            }, 60000);
+        }
+
+        function stopSystemAutoRefresh() {
+            if (systemRefreshInterval) {
+                clearInterval(systemRefreshInterval);
+                systemRefreshInterval = null;
             }
         }
 

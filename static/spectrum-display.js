@@ -2679,8 +2679,8 @@ class SpectrumDisplay {
             ctx.lineWidth = 3;
 
             const label = this.formatFrequencyScale(freq);
-            ctx.strokeText(label, x, 55);
-            ctx.fillText(label, x, 55);
+            ctx.strokeText(label, x, 65);
+            ctx.fillText(label, x, 65);
         }
 
         // Draw minor ticks (at 1/5 of major step, offset by 45px)

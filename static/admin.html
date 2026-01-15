@@ -1502,6 +1502,13 @@
             container.innerHTML = '';
             container.classList.remove('loading');
 
+            // Add global info box at the top
+            const globalInfoDiv = document.createElement('div');
+            globalInfoDiv.className = 'alert alert-info';
+            globalInfoDiv.style.marginBottom = '20px';
+            globalInfoDiv.innerHTML = 'ℹ️ You can edit basic settings using the <a href="/setup-wizard.html" style="color: #0c5460; font-weight: bold; text-decoration: underline;">Setup Wizard</a>';
+            container.appendChild(globalInfoDiv);
+
             for (const [section, values] of Object.entries(currentConfig)) {
                 if (typeof values === 'object' && values !== null) {
                     const sectionDiv = document.createElement('div');

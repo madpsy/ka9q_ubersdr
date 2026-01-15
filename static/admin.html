@@ -1526,6 +1526,15 @@
                     const content = document.createElement('div');
                     content.className = 'config-section-content';
 
+                    // Add info message for instance_reporting section
+                    if (section === 'instance_reporting') {
+                        const infoDiv = document.createElement('div');
+                        infoDiv.className = 'alert alert-info';
+                        infoDiv.style.marginBottom = '15px';
+                        infoDiv.innerHTML = 'ℹ️ You can change these manually or use the <a href="/create_public.html" style="color: #0c5460; font-weight: bold; text-decoration: underline;">Create Public Instance Wizard</a>';
+                        content.appendChild(infoDiv);
+                    }
+
                     renderFields(content, values, section);
                     sectionDiv.appendChild(content);
 

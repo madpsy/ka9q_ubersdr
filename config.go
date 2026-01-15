@@ -126,9 +126,10 @@ type OpusConfig struct {
 
 // FrequencyGainRange defines a frequency-dependent gain adjustment
 type FrequencyGainRange struct {
-	StartFreq uint64  `yaml:"start_freq"` // Start frequency in Hz
-	EndFreq   uint64  `yaml:"end_freq"`   // End frequency in Hz
-	GainDB    float64 `yaml:"gain_db"`    // Gain adjustment in dB for this range (added to master gain_db)
+	StartFreq    uint64  `yaml:"start_freq"`    // Start frequency in Hz
+	EndFreq      uint64  `yaml:"end_freq"`      // End frequency in Hz
+	GainDB       float64 `yaml:"gain_db"`       // Gain adjustment in dB for this range (added to master gain_db)
+	TransitionHz uint64  `yaml:"transition_hz"` // Transition width in Hz (0 = hard cutoff, default behavior)
 }
 
 // SpectrumConfig contains spectrum analyzer settings

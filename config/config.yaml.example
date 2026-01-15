@@ -356,6 +356,12 @@ spectrum:
   #   - start_freq: Start frequency in Hz
   #   - end_freq: End frequency in Hz
   #   - gain_db: Gain adjustment in dB (positive or negative)
+  #   - transition_hz: Transition width in Hz (0 = hard cutoff, creates smooth slopes)
+  #
+  # Transition behavior:
+  #   - 0 Hz: Hard cutoff (instant on/off at start_freq and end_freq)
+  #   - Non-zero: Smooth linear ramp over the specified width
+  #   - Example: transition_hz: 20000 creates a 20 kHz smooth transition on each side
   #
   # Example: If master gain_db = 5.0 and a range has gain_db = 2.0,
   #          signals in that range will have total gain of 7.0 dB
@@ -371,61 +377,73 @@ spectrum:
       start_freq: 135700
       end_freq: 137800
       gain_db: 0.0
+      transition_hz: 20000      # 20 kHz smooth transition
 
     630m:
       start_freq: 472000
       end_freq: 479000
       gain_db: 0.0
+      transition_hz: 30000      # 30 kHz smooth transition
 
     160m:
       start_freq: 1800000
       end_freq: 2000000
       gain_db: 0.0
+      transition_hz: 50000      # 50 kHz smooth transition
 
     80m:
       start_freq: 3500000
       end_freq: 4000000
       gain_db: 0.0
+      transition_hz: 75000      # 75 kHz smooth transition
 
     60m:
       start_freq: 5250000
       end_freq: 5450000
       gain_db: 0.0
+      transition_hz: 50000      # 50 kHz smooth transition
 
     40m:
       start_freq: 7000000
       end_freq: 7200000
       gain_db: 0.0
+      transition_hz: 50000      # 50 kHz smooth transition
 
     30m:
       start_freq: 10100000
       end_freq: 10150000
       gain_db: 0.0
+      transition_hz: 25000      # 25 kHz smooth transition (narrow band)
 
     20m:
       start_freq: 14000000
       end_freq: 14350000
       gain_db: 0.0
+      transition_hz: 75000      # 75 kHz smooth transition
 
     17m:
       start_freq: 18068000
       end_freq: 18168000
       gain_db: 0.0
+      transition_hz: 50000      # 50 kHz smooth transition
 
     15m:
       start_freq: 21000000
       end_freq: 21450000
       gain_db: 0.0
+      transition_hz: 100000     # 100 kHz smooth transition
 
     12m:
       start_freq: 24890000
       end_freq: 24990000
       gain_db: 0.0
+      transition_hz: 50000      # 50 kHz smooth transition
 
     10m:
       start_freq: 28000000
       end_freq: 29700000
       gain_db: 0.0
+      transition_hz: 150000     # 150 kHz smooth transition (wide band)
 
   # Binary protocol delta encoding threshold in dB
   # When using binary mode (mode=binary), only bins that change by more than this threshold

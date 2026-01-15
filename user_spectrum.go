@@ -616,10 +616,37 @@ func (usm *UserSpectrumManager) distributeSpectrum(ssrc uint32, data []float32) 
 				binFreq = sessionFreq - uint64(float64(len(sessionData)-j)*sessionBinBW)
 			}
 
-			// Find matching frequency range and apply its gain
+			// Find matching frequency range and apply its gain with optional transition
 			for _, freqRange := range usm.config.Spectrum.GainDBFrequencyRanges {
+				var gainMultiplier float32 = 0.0
+
+				// Check if we're in the full gain zone (inside the range)
 				if binFreq >= freqRange.StartFreq && binFreq <= freqRange.EndFreq {
-					sessionData[j] += float32(freqRange.GainDB)
+					gainMultiplier = 1.0
+				} else if freqRange.TransitionHz > 0 {
+					// Apply linear transition zones outside the range
+					if binFreq < freqRange.StartFreq {
+						// Below start frequency - check if in transition zone
+						distanceOutside := freqRange.StartFreq - binFreq
+						if distanceOutside <= freqRange.TransitionHz {
+							// Linear ramp: 0 at (start - transition), 1.0 at start
+							gainMultiplier = float32(freqRange.TransitionHz-distanceOutside) / float32(freqRange.TransitionHz)
+						}
+						// else: too far below, gainMultiplier stays 0
+					} else if binFreq > freqRange.EndFreq {
+						// Above end frequency - check if in transition zone
+						distanceOutside := binFreq - freqRange.EndFreq
+						if distanceOutside <= freqRange.TransitionHz {
+							// Linear ramp: 1.0 at end, 0 at (end + transition)
+							gainMultiplier = float32(freqRange.TransitionHz-distanceOutside) / float32(freqRange.TransitionHz)
+						}
+						// else: too far above, gainMultiplier stays 0
+					}
+				}
+
+				// Apply the gain with the multiplier
+				if gainMultiplier > 0 {
+					sessionData[j] += float32(freqRange.GainDB) * gainMultiplier
 					break // Use first matching range
 				}
 			}

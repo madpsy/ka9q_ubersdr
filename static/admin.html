@@ -5923,8 +5923,13 @@
                             <div style="font-size: 11px; color: #999; margin-top: 3px;">(since last overrange)</div>
                         </div>
                     </div>
-                    <div style="margin-top: 10px; text-align: right; font-size: 11px; color: #999;">
-                        Last Update: ${data.last_update ? new Date(data.last_update).toLocaleString() : 'N/A'}
+                    <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+                        <div style="color: #dc3545; font-weight: bold;">
+                            ${data.input_samprate && data.input_samprate !== 64800000 ? '⚠️ Using unsupported sample rate. Behaviour and performance may be impacted.' : ''}
+                        </div>
+                        <div style="color: #999;">
+                            Last Update: ${data.last_update ? new Date(data.last_update).toLocaleString() : 'N/A'}
+                        </div>
                     </div>
                 `;
 

@@ -1810,8 +1810,16 @@
         }
 
         function exportConfig() {
-            // Export current config as YAML
-            const yamlContent = convertConfigToYAML(currentConfig);
+            // Create a copy of the config for export
+            const exportConfig = JSON.parse(JSON.stringify(currentConfig));
+
+            // Remove the masked password field from admin section
+            if (exportConfig.admin && exportConfig.admin.password) {
+                delete exportConfig.admin.password;
+            }
+
+            // Export config as YAML
+            const yamlContent = convertConfigToYAML(exportConfig);
             const blob = new Blob([yamlContent], { type: 'text/yaml' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');

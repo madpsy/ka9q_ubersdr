@@ -1832,6 +1832,13 @@
             const file = event.target.files[0];
             if (!file) return;
 
+            // Show warning dialog first, before reading the file
+            if (!confirm('This will replace your current configuration. Are you sure?')) {
+                // Reset file input before returning
+                event.target.value = '';
+                return;
+            }
+
             try {
                 const text = await file.text();
 
@@ -1842,10 +1849,8 @@
                 } else {
                     // For YAML, we'll send it to the server to parse
                     showAlert('YAML import: Please use the visual editor to modify configuration', 'info');
-                    return;
-                }
-
-                if (!confirm('This will replace your current configuration. Are you sure?')) {
+                    // Reset file input before returning
+                    event.target.value = '';
                     return;
                 }
 

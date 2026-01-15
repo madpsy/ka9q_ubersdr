@@ -445,6 +445,12 @@ spectrum:
       gain_db: 0.0
       transition_hz: 150000     # 150 kHz smooth transition (wide band)
 
+    broadcast:
+      start_freq: 300000
+      end_freq: 1640000
+      gain_db: 0.0
+      transition_hz: 60000      # 60 kHz smooth transition
+
   # Binary protocol delta encoding threshold in dB
   # When using binary mode (mode=binary), only bins that change by more than this threshold
   # are transmitted in delta frames, significantly reducing bandwidth

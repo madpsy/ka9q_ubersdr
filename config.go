@@ -933,6 +933,24 @@ func (sc *SpectrumConfig) validateFrequencyGainRanges() {
 			r.GainDB = -100
 		}
 
+		// Validate transition_hz
+		if r.TransitionHz > 0 {
+			bandwidth := r.EndFreq - r.StartFreq
+			// Warn if transition is larger than the band itself
+			if r.TransitionHz > bandwidth {
+				fmt.Printf("Warning: Frequency gain range '%s' transition_hz (%d Hz) is larger than the band width (%d Hz)\n",
+					name, r.TransitionHz, bandwidth)
+				fmt.Printf("         This may cause unexpected behavior. Consider reducing transition_hz.\n")
+			}
+			// Warn if transition is excessively large (> 10 MHz)
+			const maxTransition = 10000000 // 10 MHz
+			if r.TransitionHz > maxTransition {
+				fmt.Printf("Warning: Frequency gain range '%s' transition_hz (%d Hz) exceeds recommended maximum (10 MHz), clamping to 10 MHz\n",
+					name, r.TransitionHz)
+				r.TransitionHz = maxTransition
+			}
+		}
+
 		// Range is valid, keep it
 		validRanges[name] = r
 	}

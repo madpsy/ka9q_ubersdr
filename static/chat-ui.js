@@ -1647,10 +1647,14 @@ class ChatUI {
 
         const partialUsername = match[1].toLowerCase();
 
-        // Find matching usernames
+        // Find matching usernames (exclude our own username)
+        const ourUsername = this.chat.username;
         this.tabCompletionMatches = this.chat.activeUsers
             .map(u => u.username)
-            .filter(username => username.toLowerCase().startsWith(partialUsername))
+            .filter(username =>
+                username !== ourUsername &&
+                username.toLowerCase().startsWith(partialUsername)
+            )
             .sort();
 
         if (this.tabCompletionMatches.length === 0) {

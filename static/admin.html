@@ -4502,11 +4502,15 @@
                 bands.forEach((band, index) => {
                     const row = document.createElement('tr');
                     row.style.borderBottom = '1px solid #dee2e6';
+                    
+                    // Ensure depth is properly set (use band.depth if it exists, otherwise use default)
+                    const displayDepth = band.depth !== undefined && band.depth !== null ? band.depth : (band.mode === 'WSPR' ? 10000 : 2);
+                    
                     row.innerHTML = `
                         <td style="padding: 8px;"><strong>${band.name}</strong></td>
                         <td style="padding: 8px;"><span style="color: #667eea;">${band.mode}</span></td>
                         <td style="padding: 8px;">${(band.frequency || 0).toLocaleString()}</td>
-                        <td style="padding: 8px; text-align: center;">${band.depth || (band.mode === 'WSPR' ? 10000 : 2)}</td>
+                        <td style="padding: 8px; text-align: center;">${displayDepth}</td>
                         <td style="padding: 8px; text-align: center;">${band.enabled ? '✓' : '—'}</td>
                         <td style="padding: 8px; text-align: center;">
                             <button class="btn" style="padding: 4px 8px; font-size: 11px; margin-right: 5px;" onclick="editDecoderBand(${index})">Edit</button>
@@ -4945,11 +4949,14 @@
                 return;
             }
 
+            // Update depth for all matching bands
             matchingBands.forEach(band => {
                 band.depth = depth;
             });
 
+            // Re-render the decoder config to show updated values
             renderDecoderConfig();
+            
             showAlert(`Set depth to ${depth} for ${matchingBands.length} ${mode} band${matchingBands.length > 1 ? 's' : ''}. Click "Save Configuration" to apply changes.`, 'info');
         }
 

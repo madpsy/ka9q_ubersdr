@@ -4956,8 +4956,10 @@
 
             // Re-render the decoder config to show updated values
             renderDecoderConfig();
-            
-            showAlert(`Set depth to ${depth} for ${matchingBands.length} ${mode} band${matchingBands.length > 1 ? 's' : ''}. Click "Save Configuration" to apply changes.`, 'info');
+
+            // Show alert with reminder to save and restart
+            const depthLabel = mode === 'WSPR' ? `${depth} cycles` : `depth ${depth}`;
+            alert(`✓ Set ${depthLabel} for ${matchingBands.length} ${mode} band${matchingBands.length > 1 ? 's' : ''}.\n\n⚠️ Remember to click "Save & Restart" at the bottom of the page for changes to take effect.`);
         }
 
         async function saveDecoderConfig(restart = false) {

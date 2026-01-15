@@ -4532,6 +4532,26 @@
             depthControlsGrid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(250px, 1fr))';
             depthControlsGrid.style.gap = '15px';
 
+            // Calculate current depth for each mode by checking if all bands have the same depth
+            const decoderBands = currentDecoderConfig.bands || [];
+
+            // Helper function to get current depth for a mode
+            const getCurrentDepth = (mode, defaultDepth) => {
+                const modeBands = decoderBands.filter(band => band.mode === mode);
+                if (modeBands.length === 0) return defaultDepth;
+
+                // Check if all bands have the same depth
+                const firstDepth = modeBands[0].depth;
+                const allSame = modeBands.every(band => band.depth === firstDepth);
+
+                return allSame ? firstDepth : defaultDepth;
+            };
+
+            // Get current depths for each mode
+            const currentFT8Depth = getCurrentDepth('FT8', 2);
+            const currentFT4Depth = getCurrentDepth('FT4', 2);
+            const currentWSPRDepth = getCurrentDepth('WSPR', 10000);
+
             // FT8 depth control
             const ft8Control = document.createElement('div');
             ft8Control.style.display = 'flex';
@@ -4540,9 +4560,9 @@
             ft8Control.innerHTML = `
                 <label style="font-weight: 500; min-width: 60px;">FT8:</label>
                 <select id="bulkDepthFT8" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 5px;">
-                    <option value="1">Depth 1 (Fast)</option>
-                    <option value="2" selected>Depth 2 (Balanced, Default)</option>
-                    <option value="3">Depth 3 (Deep)</option>
+                    <option value="1" ${currentFT8Depth === 1 ? 'selected' : ''}>Depth 1 (Fast)</option>
+                    <option value="2" ${currentFT8Depth === 2 ? 'selected' : ''}>Depth 2 (Balanced, Default)</option>
+                    <option value="3" ${currentFT8Depth === 3 ? 'selected' : ''}>Depth 3 (Deep)</option>
                 </select>
                 <button class="btn" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" onclick="setBulkDepth('FT8')">Apply</button>
             `;
@@ -4556,9 +4576,9 @@
             ft4Control.innerHTML = `
                 <label style="font-weight: 500; min-width: 60px;">FT4:</label>
                 <select id="bulkDepthFT4" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 5px;">
-                    <option value="1">Depth 1 (Fast)</option>
-                    <option value="2" selected>Depth 2 (Balanced, Default)</option>
-                    <option value="3">Depth 3 (Deep)</option>
+                    <option value="1" ${currentFT4Depth === 1 ? 'selected' : ''}>Depth 1 (Fast)</option>
+                    <option value="2" ${currentFT4Depth === 2 ? 'selected' : ''}>Depth 2 (Balanced, Default)</option>
+                    <option value="3" ${currentFT4Depth === 3 ? 'selected' : ''}>Depth 3 (Deep)</option>
                 </select>
                 <button class="btn" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" onclick="setBulkDepth('FT4')">Apply</button>
             `;
@@ -4572,10 +4592,10 @@
             wsprControl.innerHTML = `
                 <label style="font-weight: 500; min-width: 60px;">WSPR:</label>
                 <select id="bulkDepthWSPR" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 5px;">
-                    <option value="5000">5000 cycles (Fast)</option>
-                    <option value="10000" selected>10000 cycles (Default)</option>
-                    <option value="20000">20000 cycles (Deep)</option>
-                    <option value="50000">50000 cycles (Very Deep)</option>
+                    <option value="5000" ${currentWSPRDepth === 5000 ? 'selected' : ''}>5000 cycles (Fast)</option>
+                    <option value="10000" ${currentWSPRDepth === 10000 ? 'selected' : ''}>10000 cycles (Default)</option>
+                    <option value="20000" ${currentWSPRDepth === 20000 ? 'selected' : ''}>20000 cycles (Deep)</option>
+                    <option value="50000" ${currentWSPRDepth === 50000 ? 'selected' : ''}>50000 cycles (Very Deep)</option>
                 </select>
                 <button class="btn" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" onclick="setBulkDepth('WSPR')">Apply</button>
             `;

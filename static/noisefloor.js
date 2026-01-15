@@ -1367,6 +1367,12 @@ class NoiseFloorMonitor {
             const ctx = document.getElementById(canvasId);
             if (!ctx) return;
 
+            // Hide loading message once data is received
+            const loadingEl = document.getElementById('wideband-loading');
+            if (loadingEl) {
+                loadingEl.style.display = 'none';
+            }
+
             // Calculate frequency labels correctly
             // The FFT is centered, so we need to calculate based on center frequency
             // After unwrapping: data goes from (center - bandwidth/2) to (center + bandwidth/2)

@@ -1022,7 +1022,7 @@ instance_reporting:
 
 # Frequency Reference Tracking
 # Tracks an external reference tone to monitor frequency accuracy
-# Uses a narrow 5 kHz spectrum window to detect and track the reference signal
+# Uses a narrow 2.5 kHz spectrum window to detect and track the reference signal
 frequency_reference:
   # Enable frequency reference tracking (default: false)
   # When enabled, creates a dedicated spectrum session to monitor the reference tone

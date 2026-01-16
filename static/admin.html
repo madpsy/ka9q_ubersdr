@@ -749,9 +749,9 @@
                             <!-- Mini spectrum display (1 kHz wide) -->
                             <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6;">
                                 <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
-                                    Spectrum View (1 kHz wide)
+                                    Spectrum View (1 kHz wide) - Scroll to zoom
                                 </div>
-                                <canvas id="refSpectrumCanvas" style="width: 100%; height: 150px; background: #2c3e50; border-radius: 5px;"></canvas>
+                                <canvas id="refSpectrumCanvas" style="width: 100%; height: 200px; background: #2c3e50; border-radius: 5px; cursor: zoom-in;"></canvas>
                             </div>
                         </div>
                     </div>
@@ -6024,6 +6024,9 @@
         }
 
         function renderFrequencyReference(data) {
+            // Store data globally for zoom redraw
+            window.lastFreqRefData = data;
+
             // Update expected frequency (from backend config)
             const expectedFreqMHz = (data.expected_frequency / 1e6).toFixed(6);
             document.getElementById('refExpectedFreq').textContent = expectedFreqMHz + ' MHz';
@@ -6045,8 +6048,8 @@
                 const offsetHz = data.frequency_offset;
                 offsetEl.textContent = (offsetHz >= 0 ? '+' : '') + offsetHz.toFixed(2) + ' Hz';
 
-                // Color code: green if < 1 Hz, yellow if < 5 Hz, red if >= 5 Hz
-                if (Math.abs(offsetHz) < 1) {
+                // Color code: green if <= 1 Hz, yellow if < 5 Hz, red if >= 5 Hz
+                if (Math.abs(offsetHz) <= 1) {
                     offsetEl.style.color = '#28a745'; // Green - excellent
                 } else if (Math.abs(offsetHz) < 5) {
                     offsetEl.style.color = '#ffc107'; // Yellow - acceptable
@@ -6083,13 +6086,16 @@
             }
         }
 
+        // Zoom state for reference spectrum
+        let refSpectrumZoom = 1.0;
+
         function drawReferenceSpectrum(data) {
             const canvas = document.getElementById('refSpectrumCanvas');
             if (!canvas) return;
 
             const ctx = canvas.getContext('2d');
             const width = canvas.width = canvas.offsetWidth;
-            const height = canvas.height = 150;
+            const height = canvas.height = 200; // Increased height for labels
 
             // Clear canvas
             ctx.fillStyle = '#2c3e50';
@@ -6098,24 +6104,59 @@
             const spectrum = data.spectrum_data;
             if (!spectrum || spectrum.length === 0) return;
 
+            // Apply zoom (1.0 = full width, 2.0 = 2x zoom, etc.)
+            const centerBin = spectrum.length / 2;
+            const visibleBins = Math.floor(spectrum.length / refSpectrumZoom);
+            const startBin = Math.max(0, Math.floor(centerBin - visibleBins / 2));
+            const endBin = Math.min(spectrum.length, Math.floor(centerBin + visibleBins / 2));
+            const visibleSpectrum = spectrum.slice(startBin, endBin);
+
             // Find min/max for scaling
-            let min = Math.min(...spectrum);
-            let max = Math.max(...spectrum);
+            let min = Math.min(...visibleSpectrum);
+            let max = Math.max(...visibleSpectrum);
             const range = max - min;
 
             if (range === 0) return;
+
+            // Reserve space for labels
+            const chartTop = 35;
+            const chartBottom = height - 25;
+            const chartHeight = chartBottom - chartTop;
+            const chartLeft = 45;
+            const chartRight = width - 10;
+            const chartWidth = chartRight - chartLeft;
+
+            // Draw dBFS scale on left
+            ctx.fillStyle = '#fff';
+            ctx.font = '9px monospace';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+
+            for (let i = 0; i <= 4; i++) {
+                const y = chartTop + (i / 4) * chartHeight;
+                const dbValue = max - (i / 4) * range;
+                ctx.fillText(dbValue.toFixed(1), chartLeft - 5, y);
+
+                // Draw horizontal grid line
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(chartLeft, y);
+                ctx.lineTo(chartRight, y);
+                ctx.stroke();
+            }
 
             // Draw spectrum line
             ctx.strokeStyle = '#00ff00';
             ctx.lineWidth = 1.5;
             ctx.beginPath();
 
-            const binWidth = width / spectrum.length;
+            const binWidth = chartWidth / visibleSpectrum.length;
 
-            for (let i = 0; i < spectrum.length; i++) {
-                const x = i * binWidth;
-                const normalized = (spectrum[i] - min) / range;
-                const y = height - (normalized * height * 0.9) - (height * 0.05);
+            for (let i = 0; i < visibleSpectrum.length; i++) {
+                const x = chartLeft + i * binWidth;
+                const normalized = (visibleSpectrum[i] - min) / range;
+                const y = chartBottom - (normalized * chartHeight);
 
                 if (i === 0) {
                     ctx.moveTo(x, y);
@@ -6126,45 +6167,83 @@
 
             ctx.stroke();
 
+            // Calculate frequency range being displayed
+            const totalBandwidth = 1000; // 1 kHz total
+            const visibleBandwidth = totalBandwidth / refSpectrumZoom;
+            const startFreq = -visibleBandwidth / 2;
+            const endFreq = visibleBandwidth / 2;
+
             // Draw center line (expected frequency - yellow dashed)
+            const centerX = chartLeft + chartWidth / 2;
             ctx.strokeStyle = 'rgba(255, 255, 0, 0.6)';
             ctx.lineWidth = 2;
             ctx.setLineDash([5, 5]);
             ctx.beginPath();
-            ctx.moveTo(width / 2, 0);
-            ctx.lineTo(width / 2, height);
+            ctx.moveTo(centerX, chartTop);
+            ctx.lineTo(centerX, chartBottom);
             ctx.stroke();
             ctx.setLineDash([]);
 
-            // Draw detected peak marker (red solid) - peak_bin from backend
-            if (data.peak_bin >= 0 && data.peak_bin < spectrum.length) {
-                const peakX = data.peak_bin * binWidth;
+            // Draw detected peak marker (red solid) - adjust for zoom
+            if (data.peak_bin >= 0 && data.peak_bin >= startBin && data.peak_bin < endBin) {
+                const peakBinInView = data.peak_bin - startBin;
+                const peakX = chartLeft + peakBinInView * binWidth;
                 ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
                 ctx.lineWidth = 2;
                 ctx.beginPath();
-                ctx.moveTo(peakX, 0);
-                ctx.lineTo(peakX, height);
+                ctx.moveTo(peakX, chartTop);
+                ctx.lineTo(peakX, chartBottom);
                 ctx.stroke();
             }
 
-            // Draw frequency labels
+            // Draw frequency markers at bottom
             ctx.fillStyle = '#fff';
             ctx.font = '10px monospace';
             ctx.textAlign = 'left';
-            ctx.fillText('-500 Hz', 5, height - 5);
+            ctx.textBaseline = 'top';
+            ctx.fillText(startFreq.toFixed(0) + ' Hz', chartLeft, chartBottom + 5);
             ctx.textAlign = 'center';
-            ctx.fillText('0', width / 2, height - 5);
+            ctx.fillText('0 Hz', centerX, chartBottom + 5);
             ctx.textAlign = 'right';
-            ctx.fillText('+500 Hz', width - 5, height - 5);
+            ctx.fillText('+' + endFreq.toFixed(0) + ' Hz', chartRight, chartBottom + 5);
 
-            // Draw legend
+            // Draw legend at top
             ctx.textAlign = 'left';
             ctx.font = '9px monospace';
             ctx.fillStyle = 'rgba(255, 255, 0, 0.8)';
-            ctx.fillText('— Expected', 10, 15);
+            ctx.fillText('— Expected', 10, 10);
             ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
-            ctx.fillText('— Detected', 10, 28);
+            ctx.fillText('— Detected', 10, 23);
+
+            // Draw zoom indicator
+            ctx.textAlign = 'right';
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.fillText('Zoom: ' + refSpectrumZoom.toFixed(1) + 'x (scroll to zoom)', width - 10, 10);
         }
+
+        // Add mouse wheel zoom handler for reference spectrum
+        document.addEventListener('DOMContentLoaded', function() {
+            const canvas = document.getElementById('refSpectrumCanvas');
+            if (canvas) {
+                canvas.addEventListener('wheel', function(e) {
+                    e.preventDefault();
+
+                    // Zoom in/out with mouse wheel
+                    if (e.deltaY < 0) {
+                        // Scroll up = zoom in
+                        refSpectrumZoom = Math.min(10, refSpectrumZoom * 1.2);
+                    } else {
+                        // Scroll down = zoom out
+                        refSpectrumZoom = Math.max(1, refSpectrumZoom / 1.2);
+                    }
+
+                    // Redraw with new zoom
+                    if (window.lastFreqRefData) {
+                        drawReferenceSpectrum(window.lastFreqRefData);
+                    }
+                });
+            }
+        });
 
         async function loadMonitorHealth() {
             try {

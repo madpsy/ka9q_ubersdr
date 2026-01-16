@@ -9536,6 +9536,10 @@
                             rowBg = '#e0f2f1'; // Light teal/cyan
                             channelDisplay = `<strong style="color: #00897b;">📊 ${channel.channel_name}</strong>`;
                             break;
+                        case 'reference':
+                            rowBg = '#f3e5f5'; // Light purple
+                            channelDisplay = `<strong style="color: #9c27b0;">📡 ${channel.channel_name}</strong>`;
+                            break;
                         case 'user_audio':
                             rowBg = '#e8f5e9'; // Light green
                             channelDisplay = `<span style="color: #28a745;">👤 ${channel.channel_name}</span>`;
@@ -9559,6 +9563,9 @@
                             break;
                         case 'noisefloor':
                             channelDisplay = `<strong style="color: #00897b;">📊 ${channel.channel_name}</strong>`;
+                            break;
+                        case 'reference':
+                            channelDisplay = `<strong style="color: #9c27b0;">📡 ${channel.channel_name}</strong>`;
                             break;
                         case 'user_audio':
                             channelDisplay = `<span style="color: #28a745;">👤 ${channel.channel_name}</span>`;

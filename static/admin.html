@@ -6228,13 +6228,13 @@
             ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
             ctx.fillText((endAbsFreq / 1e6).toFixed(6) + ' MHz', chartRight, chartBottom + 15);
 
-            // Draw legend at top
+            // Draw legend at top (inset from left edge)
             ctx.textAlign = 'left';
             ctx.font = '9px monospace';
             ctx.fillStyle = 'rgba(255, 255, 0, 0.8)';
-            ctx.fillText('— Expected', 10, 10);
+            ctx.fillText('— Expected', chartLeft + 5, 10);
             ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
-            ctx.fillText('— Detected', 10, 23);
+            ctx.fillText('— Detected', chartLeft + 5, 23);
 
             // Draw zoom indicator
             ctx.textAlign = 'right';
@@ -6242,10 +6242,11 @@
             ctx.fillText('Zoom: ' + refSpectrumZoom.toFixed(1) + 'x (scroll to zoom)', width - 10, 10);
         }
 
-        // Add mouse wheel zoom handler for reference spectrum
+        // Add mouse wheel zoom and hover handlers for reference spectrum
         document.addEventListener('DOMContentLoaded', function() {
             const canvas = document.getElementById('refSpectrumCanvas');
             if (canvas) {
+                // Wheel zoom handler
                 canvas.addEventListener('wheel', function(e) {
                     e.preventDefault();
 
@@ -6259,6 +6260,104 @@
                     }
 
                     // Redraw with new zoom
+                    if (window.lastFreqRefData) {
+                        drawReferenceSpectrum(window.lastFreqRefData);
+                    }
+                });
+
+                // Mouse move handler for tooltip
+                canvas.addEventListener('mousemove', function(e) {
+                    if (!window.lastFreqRefData || !window.lastFreqRefData.spectrum_data) return;
+
+                    const rect = canvas.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mouseY = e.clientY - rect.top;
+
+                    // Redraw spectrum with hover line
+                    drawReferenceSpectrum(window.lastFreqRefData);
+
+                    const ctx = canvas.getContext('2d');
+                    const width = canvas.width;
+                    const height = canvas.height;
+
+                    // Chart dimensions (must match drawReferenceSpectrum)
+                    const chartTop = 35;
+                    const chartBottom = height - 35;
+                    const chartLeft = 45;
+                    const chartRight = width - 10;
+                    const chartWidth = chartRight - chartLeft;
+
+                    // Check if mouse is within chart area
+                    if (mouseX < chartLeft || mouseX > chartRight || mouseY < chartTop || mouseY > chartBottom) {
+                        return;
+                    }
+
+                    // Calculate which bin we're hovering over
+                    const spectrum = window.lastFreqRefData.spectrum_data;
+                    const centerBin = spectrum.length / 2;
+                    const visibleBins = Math.floor(spectrum.length / refSpectrumZoom);
+                    const startBin = Math.max(0, Math.floor(centerBin - visibleBins / 2));
+                    const endBin = Math.min(spectrum.length, Math.floor(centerBin + visibleBins / 2));
+
+                    const binIndex = Math.floor((mouseX - chartLeft) / chartWidth * (endBin - startBin)) + startBin;
+
+                    if (binIndex >= 0 && binIndex < spectrum.length) {
+                        // Draw vertical hover line
+                        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                        ctx.lineWidth = 1;
+                        ctx.setLineDash([2, 2]);
+                        ctx.beginPath();
+                        ctx.moveTo(mouseX, chartTop);
+                        ctx.lineTo(mouseX, chartBottom);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+
+                        // Calculate frequencies
+                        const binBandwidth = window.lastFreqRefData.bin_bandwidth || 2.0;
+                        const expectedFreq = window.lastFreqRefData.expected_frequency;
+                        const relativeFreq = (binIndex - centerBin) * binBandwidth;
+                        const absoluteFreq = expectedFreq + relativeFreq;
+                        const dbfs = spectrum[binIndex];
+
+                        // Draw tooltip
+                        const tooltipLines = [
+                            'Freq: ' + (absoluteFreq / 1e6).toFixed(6) + ' MHz',
+                            'Offset: ' + (relativeFreq >= 0 ? '+' : '') + relativeFreq.toFixed(1) + ' Hz',
+                            'Power: ' + dbfs.toFixed(1) + ' dBFS'
+                        ];
+
+                        ctx.font = '10px monospace';
+                        const lineHeight = 14;
+                        const padding = 6;
+                        const maxWidth = Math.max(...tooltipLines.map(line => ctx.measureText(line).width));
+                        const tooltipWidth = maxWidth + padding * 2;
+                        const tooltipHeight = tooltipLines.length * lineHeight + padding * 2;
+
+                        // Position tooltip (avoid edges)
+                        let tooltipX = mouseX + 10;
+                        let tooltipY = mouseY - tooltipHeight - 10;
+                        if (tooltipX + tooltipWidth > width) tooltipX = mouseX - tooltipWidth - 10;
+                        if (tooltipY < 0) tooltipY = mouseY + 10;
+
+                        // Draw tooltip background
+                        ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+                        ctx.fillRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+                        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                        ctx.lineWidth = 1;
+                        ctx.strokeRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+
+                        // Draw tooltip text
+                        ctx.fillStyle = '#fff';
+                        ctx.textAlign = 'left';
+                        ctx.textBaseline = 'top';
+                        tooltipLines.forEach((line, i) => {
+                            ctx.fillText(line, tooltipX + padding, tooltipY + padding + i * lineHeight);
+                        });
+                    }
+                });
+
+                // Clear hover line when mouse leaves
+                canvas.addEventListener('mouseleave', function() {
                     if (window.lastFreqRefData) {
                         drawReferenceSpectrum(window.lastFreqRefData);
                     }

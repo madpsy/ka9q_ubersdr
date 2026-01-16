@@ -5,6 +5,7 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"sort"
 	"sync"
 	"time"
 )
@@ -25,6 +26,8 @@ type FrequencyReferenceMonitor struct {
 	detectedFreq    float64   // Detected frequency in Hz (from peak detection + interpolation)
 	frequencyOffset float64   // Offset from expected in Hz (detected - expected)
 	signalStrength  float32   // Peak power in dBFS
+	snr             float32   // Signal-to-noise ratio in dB (peak - noise floor)
+	noiseFloor      float32   // Noise floor in dBFS (P5 percentile)
 	peakBin         int       // Bin index of detected peak
 	lastUpdate      time.Time // Last update timestamp
 	latestSpectrum  []float32 // Latest unwrapped spectrum data for frontend display
@@ -219,6 +222,10 @@ func (frm *FrequencyReferenceMonitor) processSpectrum(spectrum []float32) {
 	// Detect peak frequency (ALL CALCULATIONS IN BACKEND)
 	detectedFreq, signalStrength, peakBin := frm.detectPeakFrequency(unwrapped)
 
+	// Calculate SNR (signal-to-noise ratio) and noise floor
+	// Use same method as noise floor: peak power - noise floor (P5)
+	snr, noiseFloor := frm.calculateSNR(unwrapped, signalStrength)
+
 	// Calculate offset from expected frequency
 	expectedFreq := float64(frm.config.FrequencyReference.Frequency)
 	offset := detectedFreq - expectedFreq
@@ -228,6 +235,8 @@ func (frm *FrequencyReferenceMonitor) processSpectrum(spectrum []float32) {
 	frm.detectedFreq = detectedFreq
 	frm.frequencyOffset = offset
 	frm.signalStrength = signalStrength
+	frm.snr = snr
+	frm.noiseFloor = noiseFloor
 	frm.peakBin = peakBin
 	frm.lastUpdate = time.Now()
 	// Store unwrapped spectrum for frontend display
@@ -236,8 +245,8 @@ func (frm *FrequencyReferenceMonitor) processSpectrum(spectrum []float32) {
 	frm.mu.Unlock()
 
 	if DebugMode {
-		log.Printf("Frequency reference: detected=%.2f Hz, expected=%.0f Hz, offset=%+.2f Hz, strength=%.1f dBFS, bin=%d",
-			detectedFreq, expectedFreq, offset, signalStrength, peakBin)
+		log.Printf("Frequency reference: detected=%.2f Hz, expected=%.0f Hz, offset=%+.2f Hz, strength=%.1f dBFS, SNR=%.1f dB, bin=%d",
+			detectedFreq, expectedFreq, offset, signalStrength, snr, peakBin)
 	}
 }
 
@@ -307,6 +316,30 @@ func (frm *FrequencyReferenceMonitor) detectPeakFrequency(spectrum []float32) (f
 	return detectedFreq, maxPower, maxBin
 }
 
+// calculateSNR calculates the signal-to-noise ratio and noise floor
+// Uses the same method as noise floor monitoring: peak power - noise floor (P5)
+// Returns: SNR (dB), noise floor (dBFS)
+func (frm *FrequencyReferenceMonitor) calculateSNR(spectrum []float32, peakPower float32) (float32, float32) {
+	if len(spectrum) == 0 {
+		return 0, -999
+	}
+
+	// Sort data to find 5th percentile (noise floor)
+	sorted := make([]float32, len(spectrum))
+	copy(sorted, spectrum)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i] < sorted[j]
+	})
+
+	n := len(sorted)
+	noiseFloor := sorted[n*5/100] // 5th percentile
+
+	// SNR = Signal - Noise (in dB)
+	snr := peakPower - noiseFloor
+
+	return snr, noiseFloor
+}
+
 // GetStatus returns the current frequency reference status
 // All calculations are already done in processSpectrum()
 // Frontend receives pre-calculated values ready for display
@@ -325,11 +358,13 @@ func (frm *FrequencyReferenceMonitor) GetStatus() map[string]interface{} {
 		"expected_frequency": frm.config.FrequencyReference.Frequency, // Hz
 		"detected_frequency": frm.detectedFreq,                        // Hz (calculated in backend)
 		"frequency_offset":   frm.frequencyOffset,                     // Hz (calculated in backend)
-		"signal_strength":    frm.signalStrength,                      // dBFS
+		"signal_strength":    frm.signalStrength,                      // dBFS (peak power)
+		"snr":                frm.snr,                                 // dB (signal-to-noise ratio)
+		"noise_floor":        frm.noiseFloor,                          // dBFS (P5 percentile)
 		"peak_bin":           frm.peakBin,                             // Bin index for marker
 		"spectrum_data":      frm.latestSpectrum,                      // Full FFT array for chart
 		"last_update":        frm.lastUpdate,                          // Timestamp
-		"bin_count":          frm.binCount,                            // 1024
-		"bin_bandwidth":      frm.binBandwidth,                        // ~9.77 Hz
+		"bin_count":          frm.binCount,                            // 500
+		"bin_bandwidth":      frm.binBandwidth,                        // 2.0 Hz
 	}
 }

@@ -727,7 +727,7 @@
                     <div id="frequencyReferenceSection" class="config-section" style="display: none;">
                         <h3>📡 Frequency Reference Tracking</h3>
                         <div id="frequencyReferenceDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
-                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 15px; margin-bottom: 20px;">
                                 <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                                     <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Expected Frequency</div>
                                     <div style="font-size: 18px; font-weight: bold; color: #667eea;" id="refExpectedFreq">—</div>
@@ -743,6 +743,14 @@
                                 <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                                     <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Signal Strength</div>
                                     <div style="font-size: 18px; font-weight: bold; color: #667eea;" id="refSignalStrength">—</div>
+                                </div>
+                                <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                                    <div style="font-size: 12px; color: #666; margin-bottom: 5px;">SNR</div>
+                                    <div style="font-size: 18px; font-weight: bold; color: #667eea;" id="refSNR">—</div>
+                                </div>
+                                <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                                    <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Noise Floor</div>
+                                    <div style="font-size: 18px; font-weight: bold; color: #667eea;" id="refNoiseFloor">—</div>
                                 </div>
                             </div>
 
@@ -6080,6 +6088,34 @@
                 strengthEl.style.color = '#666';
             }
 
+            // Update SNR (from backend)
+            const snrEl = document.getElementById('refSNR');
+            if (data.snr !== null && data.snr !== undefined && data.snr > 0) {
+                snrEl.textContent = data.snr.toFixed(1) + ' dB';
+
+                // Color code by SNR
+                if (data.snr > 20) {
+                    snrEl.style.color = '#28a745'; // Excellent (> 20 dB)
+                } else if (data.snr > 10) {
+                    snrEl.style.color = '#ffc107'; // Good (10-20 dB)
+                } else {
+                    snrEl.style.color = '#dc3545'; // Poor (< 10 dB)
+                }
+            } else {
+                snrEl.textContent = '—';
+                snrEl.style.color = '#666';
+            }
+
+            // Update noise floor (from backend)
+            const noiseFloorEl = document.getElementById('refNoiseFloor');
+            if (data.noise_floor !== null && data.noise_floor !== undefined && data.noise_floor > -200) {
+                noiseFloorEl.textContent = data.noise_floor.toFixed(1) + ' dBFS';
+                noiseFloorEl.style.color = '#667eea';
+            } else {
+                noiseFloorEl.textContent = '—';
+                noiseFloorEl.style.color = '#666';
+            }
+
             // Draw mini spectrum (data from backend)
             if (data.spectrum_data && data.spectrum_data.length > 0) {
                 drawReferenceSpectrum(data);
@@ -6319,11 +6355,16 @@
                         const absoluteFreq = expectedFreq + relativeFreq;
                         const dbfs = spectrum[binIndex];
 
+                        // Calculate SNR for this bin using noise floor from backend
+                        const noiseFloor = window.lastFreqRefData.noise_floor || -999;
+                        const binSNR = dbfs - noiseFloor;
+
                         // Draw tooltip
                         const tooltipLines = [
                             'Freq: ' + (absoluteFreq / 1e6).toFixed(6) + ' MHz',
                             'Offset: ' + (relativeFreq >= 0 ? '+' : '') + relativeFreq.toFixed(1) + ' Hz',
-                            'Power: ' + dbfs.toFixed(1) + ' dBFS'
+                            'Power: ' + dbfs.toFixed(1) + ' dBFS',
+                            'SNR: ' + binSNR.toFixed(1) + ' dB'
                         ];
 
                         ctx.font = '10px monospace';

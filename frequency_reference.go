@@ -251,7 +251,7 @@ func (frm *FrequencyReferenceMonitor) processSpectrum(spectrum []float32) {
 }
 
 // detectPeakFrequency finds the strongest signal in the spectrum and calculates its precise frequency
-// Uses parabolic interpolation for sub-bin accuracy
+// For flat-top signals (like reference tones), uses centroid calculation across contiguous peak bins
 // Returns: detected frequency (Hz), signal strength (dBFS), peak bin index
 func (frm *FrequencyReferenceMonitor) detectPeakFrequency(spectrum []float32) (float64, float32, int) {
 	if len(spectrum) == 0 {
@@ -273,42 +273,68 @@ func (frm *FrequencyReferenceMonitor) detectPeakFrequency(spectrum []float32) (f
 		return 0, maxPower, maxBin
 	}
 
-	// Apply parabolic interpolation for sub-bin accuracy
-	// This improves frequency resolution from ~9.77 Hz to ~0.1 Hz
-	var interpolatedBin float64
-	if maxBin > 0 && maxBin < len(spectrum)-1 {
-		// Get three points around the peak
-		alpha := float64(spectrum[maxBin-1])
-		beta := float64(spectrum[maxBin])
-		gamma := float64(spectrum[maxBin+1])
+	// For flat-top signals, use centroid calculation over a narrow range
+	// Only consider bins CONTIGUOUS with the peak to avoid distant noise peaks
+	threshold := maxPower - 3.0 // 3 dB below peak
 
-		// Parabolic interpolation formula
-		// p = 0.5 * (alpha - gamma) / (alpha - 2*beta + gamma)
-		// This gives the fractional bin offset from maxBin
-		denominator := alpha - 2*beta + gamma
-		if math.Abs(denominator) > 0.001 {
-			p := 0.5 * (alpha - gamma) / denominator
-			// Clamp p to reasonable range [-0.5, 0.5]
-			if p > 0.5 {
-				p = 0.5
-			} else if p < -0.5 {
-				p = -0.5
-			}
-			interpolatedBin = float64(maxBin) + p
-		} else {
-			// Denominator too small, no interpolation
-			interpolatedBin = float64(maxBin)
-		}
+	// Find contiguous range around peak that's above threshold
+	startBin := maxBin
+	endBin := maxBin
+
+	// Expand left while above threshold
+	for i := maxBin - 1; i >= 0 && spectrum[i] >= threshold; i-- {
+		startBin = i
+	}
+
+	// Expand right while above threshold
+	for i := maxBin + 1; i < len(spectrum) && spectrum[i] >= threshold; i++ {
+		endBin = i
+	}
+
+	// Calculate centroid only over this contiguous range
+	var weightedSum float64
+	var totalWeight float64
+
+	for i := startBin; i <= endBin; i++ {
+		// Convert dBFS to linear power for proper weighting
+		linearPower := math.Pow(10.0, float64(spectrum[i])/10.0)
+		weightedSum += float64(i) * linearPower
+		totalWeight += linearPower
+	}
+
+	// Calculate centroid (power-weighted average bin position)
+	var centroidBin float64
+	if totalWeight > 0 {
+		centroidBin = weightedSum / totalWeight
 	} else {
-		// Peak is at edge, can't interpolate
-		interpolatedBin = float64(maxBin)
+		// Fallback to parabolic interpolation if centroid fails
+		if maxBin > 0 && maxBin < len(spectrum)-1 {
+			alpha := float64(spectrum[maxBin-1])
+			beta := float64(spectrum[maxBin])
+			gamma := float64(spectrum[maxBin+1])
+
+			denominator := alpha - 2*beta + gamma
+			if math.Abs(denominator) > 0.001 {
+				p := 0.5 * (alpha - gamma) / denominator
+				if p > 0.5 {
+					p = 0.5
+				} else if p < -0.5 {
+					p = -0.5
+				}
+				centroidBin = float64(maxBin) + p
+			} else {
+				centroidBin = float64(maxBin)
+			}
+		} else {
+			centroidBin = float64(maxBin)
+		}
 	}
 
 	// Convert bin index to frequency
 	// After unwrapping: bins 0 to N/2-1 are negative frequencies (below center)
 	//                   bins N/2 to N-1 are positive frequencies (above center)
 	centerBin := float64(len(spectrum)) / 2.0
-	binOffset := interpolatedBin - centerBin
+	binOffset := centroidBin - centerBin
 
 	// Frequency = center + (bin offset from center) * bin bandwidth
 	detectedFreq := float64(frm.centerFreq) + (binOffset * frm.binBandwidth)

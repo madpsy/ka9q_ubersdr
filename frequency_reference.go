@@ -10,14 +10,14 @@ import (
 )
 
 // FrequencyReferenceMonitor tracks an external frequency reference tone
-// Uses a narrow 2.5 kHz spectrum window to detect and track the reference signal
+// Uses a narrow 1 kHz spectrum window to detect and track the reference signal
 // All frequency calculations are performed in the backend
 type FrequencyReferenceMonitor struct {
 	config   *Config
 	radiod   *RadiodController
 	sessions *SessionManager
 
-	// Narrow spectrum session (2.5 kHz wide)
+	// Narrow spectrum session (1 kHz wide)
 	refSpectrum   *BandSpectrum
 	spectrumReady bool
 
@@ -54,7 +54,7 @@ func NewFrequencyReferenceMonitor(config *Config, radiod *RadiodController, sess
 		stopChan:     make(chan struct{}),
 		centerFreq:   config.FrequencyReference.Frequency,
 		binCount:     1024,
-		binBandwidth: 2500.0 / 1024.0, // 2.5 kHz / 1024 bins = ~2.44 Hz/bin
+		binBandwidth: 1000.0 / 1024.0, // 1 kHz / 1024 bins = ~0.98 Hz/bin
 	}
 
 	return frm, nil
@@ -68,7 +68,7 @@ func (frm *FrequencyReferenceMonitor) Start() error {
 
 	frm.running = true
 
-	log.Printf("Creating frequency reference spectrum session at %.6f MHz (2.5 kHz wide, %.2f Hz resolution)",
+	log.Printf("Creating frequency reference spectrum session at %.6f MHz (1 kHz wide, %.2f Hz resolution)",
 		float64(frm.centerFreq)/1e6, frm.binBandwidth)
 
 	// Generate random SSRC
@@ -90,7 +90,7 @@ func (frm *FrequencyReferenceMonitor) Start() error {
 	}
 	frm.sessions.mu.RUnlock()
 
-	// Create narrow spectrum channel (2.5 kHz wide centered on reference frequency)
+	// Create narrow spectrum channel (1 kHz wide centered on reference frequency)
 	channelName := "frequency-reference"
 	if err := frm.radiod.CreateSpectrumChannel(
 		channelName,
@@ -128,8 +128,8 @@ func (frm *FrequencyReferenceMonitor) Start() error {
 	frm.refSpectrum = &BandSpectrum{
 		Band: NoiseFloorBand{
 			Name:            "frequency-reference",
-			Start:           frm.centerFreq - 1250, // -1.25 kHz
-			End:             frm.centerFreq + 1250, // +1.25 kHz
+			Start:           frm.centerFreq - 500, // -500 Hz
+			End:             frm.centerFreq + 500, // +500 Hz
 			CenterFrequency: frm.centerFreq,
 			BinCount:        frm.binCount,
 			BinBandwidth:    frm.binBandwidth,
@@ -145,7 +145,7 @@ func (frm *FrequencyReferenceMonitor) Start() error {
 	frm.wg.Add(1)
 	go frm.monitorLoop()
 
-	log.Printf("Frequency reference monitor started (%.6f MHz ± 1.25 kHz, %.2f Hz resolution)",
+	log.Printf("Frequency reference monitor started (%.6f MHz ± 500 Hz, %.2f Hz resolution)",
 		float64(frm.centerFreq)/1e6, frm.binBandwidth)
 
 	return nil

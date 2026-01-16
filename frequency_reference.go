@@ -53,8 +53,8 @@ func NewFrequencyReferenceMonitor(config *Config, radiod *RadiodController, sess
 		sessions:     sessions,
 		stopChan:     make(chan struct{}),
 		centerFreq:   config.FrequencyReference.Frequency,
-		binCount:     512,
-		binBandwidth: 1000.0 / 512.0, // 1 kHz / 512 bins = ~1.95 Hz/bin
+		binCount:     500,
+		binBandwidth: 2.0, // 2 Hz/bin (radiod minimum), 500 bins × 2 Hz = 1000 Hz total
 	}
 
 	return frm, nil

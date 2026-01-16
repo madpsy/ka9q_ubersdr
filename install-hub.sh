@@ -3,8 +3,94 @@
 # Exit on error
 set -e
 
+# Parse command line arguments
+IGNORE_RX888=0
+IGNORE_PORTS=0
+for arg in "$@"; do
+    case $arg in
+        --ignore-rx888)
+            IGNORE_RX888=1
+            shift
+            ;;
+        --ignore-ports)
+            IGNORE_PORTS=1
+            shift
+            ;;
+    esac
+done
+
 echo "=== UberSDR Docker Hub Installation Script ==="
 echo
+
+INSTALLED_MARKER="$HOME/ubersdr/installed"
+
+# Pre-flight checks (only if not already installed)
+if [ ! -f "$INSTALLED_MARKER" ]; then
+    echo "Running pre-flight checks..."
+    echo
+
+    ports=(80 443 8080 8073)
+    VENDOR=04b4
+    PRODUCT=00f1
+
+    free_count=0
+    rx_found=0
+
+    # --- Port checks (show output regardless) ---
+    if (( IGNORE_PORTS )); then
+        echo "Port checks skipped (--ignore-ports)"
+        free_count=1  # Pretend at least one is free
+    else
+        for p in "${ports[@]}"; do
+            if ss -ltnH "( sport = :$p )" | grep -q .; then
+                echo "Port $p in use"
+            else
+                echo "Port $p free"
+                ((free_count++))
+            fi
+        done
+    fi
+
+    # --- RX888 check (sysfs, no lsusb) ---
+    if (( IGNORE_RX888 )); then
+        echo "RX888 device check skipped (--ignore-rx888)"
+        rx_found=1  # Pretend it was found
+    else
+        for d in /sys/bus/usb/devices/*; do
+            [[ -f $d/idVendor && -f $d/idProduct ]] || continue
+            if [[ $(<"$d/idVendor") == "$VENDOR" && $(<"$d/idProduct") == "$PRODUCT" ]]; then
+                rx_found=1
+                break
+            fi
+        done
+
+        if (( rx_found )); then
+            echo "RX888 device found"
+        else
+            echo "RX888 device not found"
+        fi
+    fi
+
+    # --- Decide exit code ---
+    # Exit 1 if none are free OR RX888 missing
+    if (( free_count == 0 || rx_found == 0 )); then
+        echo
+        echo "Pre-flight checks failed. Installation cannot continue."
+        if (( free_count == 0 )); then
+            echo "Error: All required ports are in use."
+            echo "Hint: Use --ignore-ports to skip this check."
+        fi
+        if (( rx_found == 0 )); then
+            echo "Error: RX888 MKII not detected."
+            echo "Hint: Use --ignore-rx888 to skip this check."
+        fi
+        exit 1
+    fi
+
+    echo
+    echo "Pre-flight checks passed!"
+    echo
+fi
 
 # Install dependencies
 echo "Installing dependencies..."
@@ -26,8 +112,7 @@ if groups $USER | grep -q '\bdocker\b'; then
 else
     echo "Adding user $USER to the docker group..."
     sudo usermod -aG docker $USER
-    echo "User added to docker group. You may need to log out and back in for this to take effect."
-    echo "Alternatively, you can run: newgrp docker"
+    echo "User added to docker group."
 fi
 
 if groups $USER | grep -q '\bsudo\b'; then
@@ -84,7 +169,6 @@ echo "Creating ~/ubersdr directory..."
 mkdir -p ~/ubersdr
 
 # Check if this is a fresh installation
-INSTALLED_MARKER="$HOME/ubersdr/installed"
 if [ -f "$INSTALLED_MARKER" ]; then
     echo "Existing installation detected. Preserving docker-compose.yml file."
 else

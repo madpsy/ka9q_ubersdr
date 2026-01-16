@@ -244,8 +244,9 @@ type NoiseFloorBand struct {
 
 // FrequencyReferenceConfig contains frequency reference tracking settings
 type FrequencyReferenceConfig struct {
-	Enabled   bool   `yaml:"enabled"`   // Enable/disable frequency reference tracking
-	Frequency uint64 `yaml:"frequency"` // Reference tone frequency in Hz (default: 25000000 = 25 MHz)
+	Enabled   bool    `yaml:"enabled"`   // Enable/disable frequency reference tracking
+	Frequency uint64  `yaml:"frequency"` // Reference tone frequency in Hz (default: 25000000 = 25 MHz)
+	MinSNR    float32 `yaml:"min_snr"`   // Minimum SNR in dB to consider a peak valid (default: 20)
 }
 
 // PrometheusConfig contains Prometheus metrics settings
@@ -550,6 +551,9 @@ func LoadConfig(filename string) (*Config, error) {
 	// Set frequency reference defaults if not specified
 	if config.FrequencyReference.Frequency == 0 {
 		config.FrequencyReference.Frequency = 25000000 // 25 MHz default
+	}
+	if config.FrequencyReference.MinSNR == 0 {
+		config.FrequencyReference.MinSNR = 20.0 // 20 dB default
 	}
 
 	// Set default allowed hosts if not specified (localhost only for security)

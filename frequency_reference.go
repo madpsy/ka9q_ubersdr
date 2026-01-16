@@ -274,6 +274,25 @@ func (frm *FrequencyReferenceMonitor) detectPeakFrequency(spectrum []float32) (f
 		return 0, maxPower, maxBin
 	}
 
+	// Calculate noise floor to check SNR (P5 percentile)
+	sorted := make([]float32, len(spectrum))
+	copy(sorted, spectrum)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i] < sorted[j]
+	})
+	noiseFloor := sorted[len(sorted)*5/100]
+
+	// Check if peak meets minimum SNR threshold
+	peakSNR := maxPower - noiseFloor
+	minSNR := frm.config.FrequencyReference.MinSNR
+	if peakSNR < minSNR {
+		// Peak is too weak (likely noise), return no detection
+		if DebugMode {
+			log.Printf("Frequency reference: peak SNR %.1f dB below minimum %.1f dB, ignoring", peakSNR, minSNR)
+		}
+		return 0, maxPower, -1
+	}
+
 	// Check if there's a strong peak near the center (expected frequency)
 	// If so, prefer it over a slightly stronger peak further away
 	centerBinIdx := len(spectrum) / 2
@@ -291,11 +310,17 @@ func (frm *FrequencyReferenceMonitor) detectPeakFrequency(spectrum []float32) (f
 		}
 	}
 
-	// If center peak is within 20 dB of the global max, prefer it
-	// This handles cases where the reference tone is weaker than a spurious signal
-	if centerPeakBin >= 0 && (maxPower-centerPeakPower) <= 20.0 {
+	// Check if center peak also meets minimum SNR threshold
+	centerPeakSNR := centerPeakPower - noiseFloor
+
+	// If center peak has sufficient SNR and is within 30 dB of global max, prefer it
+	// This prioritizes the reference tone at the expected frequency
+	if centerPeakBin >= 0 && centerPeakSNR >= minSNR && (maxPower-centerPeakPower) <= 30.0 {
 		maxBin = centerPeakBin
 		maxPower = centerPeakPower
+		if DebugMode {
+			log.Printf("Frequency reference: preferring center peak (SNR %.1f dB) over global max", centerPeakSNR)
+		}
 	}
 
 	// For flat-top signals, use centroid calculation over a narrow range

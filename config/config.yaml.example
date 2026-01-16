@@ -1028,8 +1028,14 @@ frequency_reference:
   # When enabled, creates a dedicated spectrum session to monitor the reference tone
   enabled: false
 
-  # Reference tone frequency in Hz (default: 25000000 = 25 MHz)
+  # Reference tone frequency in Hz (default: 10000000 = 10 MHz)
   # This is the expected frequency of your external reference signal
   # The system will detect the actual frequency and calculate any offset
   # Common reference frequencies: 10 MHz, 25 MHz, or GPS-disciplined oscillator output
-  frequency: 25000000
+  frequency: 10000000
+
+  # Minimum SNR threshold in dB (default: 20)
+  # Peaks below this SNR will be ignored to prevent tracking noise
+  # Set lower (e.g., 10) for weaker reference signals
+  # Set higher (e.g., 30) for very clean environments
+  min_snr: 20

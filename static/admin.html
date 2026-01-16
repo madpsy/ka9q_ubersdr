@@ -6069,41 +6069,34 @@
                 offsetEl.style.color = '#666';
             }
 
-            // Update signal strength (from backend)
-            const strengthEl = document.getElementById('refSignalStrength');
-            if (data.signal_strength !== null && data.signal_strength !== undefined && data.signal_strength > -200) {
-                strengthEl.textContent = data.signal_strength.toFixed(1) + ' dBFS';
-
-                // Color code by signal strength (dBFS scale: 0 = max, -100 = noise floor)
-                // Reference tone signals typically -70 to -90 dBFS are good
-                if (data.signal_strength > -90) {
-                    strengthEl.style.color = '#28a745'; // Good signal (> -90 dBFS)
-                } else if (data.signal_strength > -100) {
-                    strengthEl.style.color = '#ffc107'; // Weak (-90 to -100 dBFS)
-                } else {
-                    strengthEl.style.color = '#dc3545'; // Very weak (< -100 dBFS)
-                }
-            } else {
-                strengthEl.textContent = '—';
-                strengthEl.style.color = '#666';
-            }
-
-            // Update SNR (from backend)
+            // Update SNR (from backend) - calculate color first
+            let snrColor = '#666';
             const snrEl = document.getElementById('refSNR');
             if (data.snr !== null && data.snr !== undefined && data.snr > 0) {
                 snrEl.textContent = data.snr.toFixed(1) + ' dB';
 
                 // Color code by SNR
                 if (data.snr > 20) {
-                    snrEl.style.color = '#28a745'; // Excellent (> 20 dB)
+                    snrColor = '#28a745'; // Excellent (> 20 dB)
                 } else if (data.snr > 10) {
-                    snrEl.style.color = '#ffc107'; // Good (10-20 dB)
+                    snrColor = '#ffc107'; // Good (10-20 dB)
                 } else {
-                    snrEl.style.color = '#dc3545'; // Poor (< 10 dB)
+                    snrColor = '#dc3545'; // Poor (< 10 dB)
                 }
+                snrEl.style.color = snrColor;
             } else {
                 snrEl.textContent = '—';
                 snrEl.style.color = '#666';
+            }
+
+            // Update signal strength (from backend) - use same color as SNR
+            const strengthEl = document.getElementById('refSignalStrength');
+            if (data.signal_strength !== null && data.signal_strength !== undefined && data.signal_strength > -200) {
+                strengthEl.textContent = data.signal_strength.toFixed(1) + ' dBFS';
+                strengthEl.style.color = snrColor; // Match SNR color
+            } else {
+                strengthEl.textContent = '—';
+                strengthEl.style.color = '#666';
             }
 
             // Update noise floor (from backend)

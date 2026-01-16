@@ -751,7 +751,7 @@
                                 <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
                                     Spectrum View (1 kHz wide) - Scroll to zoom
                                 </div>
-                                <canvas id="refSpectrumCanvas" style="width: 100%; height: 200px; background: #2c3e50; border-radius: 5px; cursor: zoom-in;"></canvas>
+                                <canvas id="refSpectrumCanvas" style="width: 100%; height: 220px; background: #2c3e50; border-radius: 5px; cursor: zoom-in;"></canvas>
                             </div>
                         </div>
                     </div>
@@ -6095,7 +6095,7 @@
 
             const ctx = canvas.getContext('2d');
             const width = canvas.width = canvas.offsetWidth;
-            const height = canvas.height = 200; // Increased height for labels
+            const height = canvas.height = 220; // Increased height for two rows of labels
 
             // Clear canvas
             ctx.fillStyle = '#2c3e50';
@@ -6118,9 +6118,9 @@
 
             if (range === 0) return;
 
-            // Reserve space for labels
+            // Reserve space for labels (more space at bottom for two rows)
             const chartTop = 35;
-            const chartBottom = height - 25;
+            const chartBottom = height - 35;
             const chartHeight = chartBottom - chartTop;
             const chartLeft = 45;
             const chartRight = width - 10;
@@ -6196,16 +6196,37 @@
                 ctx.stroke();
             }
 
-            // Draw frequency markers at bottom
+            // Draw frequency markers at bottom (both relative Hz and absolute MHz)
+            const expectedFreqHz = data.expected_frequency;
+            const startAbsFreq = expectedFreqHz + startFreq;
+            const centerAbsFreq = expectedFreqHz;
+            const endAbsFreq = expectedFreqHz + endFreq;
+
             ctx.fillStyle = '#fff';
-            ctx.font = '10px monospace';
+            ctx.font = '9px monospace';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'top';
+            // Left: relative Hz
             ctx.fillText(startFreq.toFixed(0) + ' Hz', chartLeft, chartBottom + 5);
+            // Left: absolute MHz
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.fillText((startAbsFreq / 1e6).toFixed(6) + ' MHz', chartLeft, chartBottom + 15);
+
+            ctx.fillStyle = '#fff';
             ctx.textAlign = 'center';
+            // Center: relative Hz
             ctx.fillText('0 Hz', centerX, chartBottom + 5);
+            // Center: absolute MHz
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.fillText((centerAbsFreq / 1e6).toFixed(6) + ' MHz', centerX, chartBottom + 15);
+
+            ctx.fillStyle = '#fff';
             ctx.textAlign = 'right';
+            // Right: relative Hz
             ctx.fillText('+' + endFreq.toFixed(0) + ' Hz', chartRight, chartBottom + 5);
+            // Right: absolute MHz
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.fillText((endAbsFreq / 1e6).toFixed(6) + ' MHz', chartRight, chartBottom + 15);
 
             // Draw legend at top
             ctx.textAlign = 'left';

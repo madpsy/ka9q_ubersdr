@@ -252,6 +252,7 @@ func (frm *FrequencyReferenceMonitor) processSpectrum(spectrum []float32) {
 
 // detectPeakFrequency finds the strongest signal in the spectrum and calculates its precise frequency
 // For flat-top signals (like reference tones), uses centroid calculation across contiguous peak bins
+// Prefers peaks near the center (expected frequency) when they're reasonably strong
 // Returns: detected frequency (Hz), signal strength (dBFS), peak bin index
 func (frm *FrequencyReferenceMonitor) detectPeakFrequency(spectrum []float32) (float64, float32, int) {
 	if len(spectrum) == 0 {
@@ -271,6 +272,30 @@ func (frm *FrequencyReferenceMonitor) detectPeakFrequency(spectrum []float32) (f
 
 	if maxBin < 0 || maxBin >= len(spectrum) {
 		return 0, maxPower, maxBin
+	}
+
+	// Check if there's a strong peak near the center (expected frequency)
+	// If so, prefer it over a slightly stronger peak further away
+	centerBinIdx := len(spectrum) / 2
+	centerRegionStart := centerBinIdx - 5 // ±5 bins = ±10 Hz
+	centerRegionEnd := centerBinIdx + 5
+
+	// Find strongest peak in center region
+	centerPeakPower := float32(-999)
+	centerPeakBin := -1
+
+	for i := centerRegionStart; i <= centerRegionEnd && i >= 0 && i < len(spectrum); i++ {
+		if spectrum[i] > centerPeakPower {
+			centerPeakPower = spectrum[i]
+			centerPeakBin = i
+		}
+	}
+
+	// If center peak is within 6 dB of the global max, prefer it
+	// This handles cases where the reference tone is slightly weaker than a spurious signal
+	if centerPeakBin >= 0 && (maxPower-centerPeakPower) <= 6.0 {
+		maxBin = centerPeakBin
+		maxPower = centerPeakPower
 	}
 
 	// For flat-top signals, use centroid calculation over a narrow range

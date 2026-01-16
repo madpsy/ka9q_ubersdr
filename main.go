@@ -458,6 +458,18 @@ func main() {
 		defer noiseFloorMonitor.Stop()
 	}
 
+	// Create frequency reference monitor
+	freqRefMonitor, err := NewFrequencyReferenceMonitor(config, radiod, sessions)
+	if err != nil {
+		log.Fatalf("Failed to initialize frequency reference monitor: %v", err)
+	}
+	if freqRefMonitor != nil {
+		if err := freqRefMonitor.Start(); err != nil {
+			log.Fatalf("Failed to start frequency reference monitor: %v", err)
+		}
+		defer freqRefMonitor.Stop()
+	}
+
 	// Initialize Prometheus metrics if enabled (must be before multi-decoder)
 	var prometheusMetrics *PrometheusMetrics
 	if config.Prometheus.Enabled {
@@ -971,6 +983,11 @@ func main() {
 	http.HandleFunc("/api/noisefloor/aggregate", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorAggregate(w, r, noiseFloorMonitor, ipBanManager, aggregateRateLimiter, prometheusMetrics)
 	}))
+
+	// Frequency reference endpoint
+	http.HandleFunc("/api/frequency-reference", func(w http.ResponseWriter, r *http.Request) {
+		handleFrequencyReference(w, r, freqRefMonitor)
+	})
 
 	// Decoder spots endpoints (with gzip compression, IP ban checking, and rate limiting)
 	http.HandleFunc("/api/decoder/spots", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
@@ -2342,6 +2359,20 @@ func handleNoiseFloorConfig(w http.ResponseWriter, r *http.Request, config *Conf
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding noise floor config: %v", err)
+	}
+}
+
+// handleFrequencyReference serves the current frequency reference tracking status
+// Returns pre-calculated frequency, offset, signal strength, and spectrum data
+func handleFrequencyReference(w http.ResponseWriter, r *http.Request, frm *FrequencyReferenceMonitor) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get status from monitor (all calculations done in backend)
+	status := frm.GetStatus()
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		log.Printf("Error encoding frequency reference status: %v", err)
 	}
 }
 

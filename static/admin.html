@@ -723,6 +723,39 @@
                         </div>
                     </div>
 
+                    <!-- Frequency Reference Section -->
+                    <div id="frequencyReferenceSection" class="config-section" style="display: none;">
+                        <h3>📡 Frequency Reference Tracking</h3>
+                        <div id="frequencyReferenceDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                                <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                                    <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Expected Frequency</div>
+                                    <div style="font-size: 18px; font-weight: bold; color: #667eea;" id="refExpectedFreq">—</div>
+                                </div>
+                                <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                                    <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Detected Frequency</div>
+                                    <div style="font-size: 18px; font-weight: bold;" id="refDetectedFreq">—</div>
+                                </div>
+                                <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                                    <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Frequency Offset</div>
+                                    <div style="font-size: 18px; font-weight: bold;" id="refOffset">—</div>
+                                </div>
+                                <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                                    <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Signal Strength</div>
+                                    <div style="font-size: 18px; font-weight: bold; color: #667eea;" id="refSignalStrength">—</div>
+                                </div>
+                            </div>
+
+                            <!-- Mini spectrum display (10 kHz wide) -->
+                            <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6;">
+                                <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                                    Spectrum View (10 kHz wide)
+                                </div>
+                                <canvas id="refSpectrumCanvas" style="width: 100%; height: 150px; background: #2c3e50; border-radius: 5px;"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
                     <div id="monitorHealth" class="loading">
                         <div class="spinner"></div>
                         <p>Loading health status...</p>
@@ -5970,10 +6003,175 @@
             }
         }
 
+        // Frequency Reference Monitoring
+        async function loadFrequencyReference() {
+            try {
+                const response = await authenticatedFetch('/api/frequency-reference');
+                if (!response || !response.ok) return;
+
+                const data = await response.json();
+
+                if (data.enabled) {
+                    document.getElementById('frequencyReferenceSection').style.display = 'block';
+                    renderFrequencyReference(data);
+                } else {
+                    document.getElementById('frequencyReferenceSection').style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Error loading frequency reference:', error);
+                document.getElementById('frequencyReferenceSection').style.display = 'none';
+            }
+        }
+
+        function renderFrequencyReference(data) {
+            // Update expected frequency (from backend config)
+            const expectedFreqMHz = (data.expected_frequency / 1e6).toFixed(6);
+            document.getElementById('refExpectedFreq').textContent = expectedFreqMHz + ' MHz';
+
+            // Update detected frequency (calculated in backend)
+            const detectedEl = document.getElementById('refDetectedFreq');
+            if (data.detected_frequency > 0) {
+                const detectedFreqMHz = (data.detected_frequency / 1e6).toFixed(6);
+                detectedEl.textContent = detectedFreqMHz + ' MHz';
+                detectedEl.style.color = '#28a745';
+            } else {
+                detectedEl.textContent = 'No signal';
+                detectedEl.style.color = '#dc3545';
+            }
+
+            // Update offset (calculated in backend) with color coding
+            const offsetEl = document.getElementById('refOffset');
+            if (data.frequency_offset !== null && data.frequency_offset !== undefined && data.detected_frequency > 0) {
+                const offsetHz = data.frequency_offset;
+                offsetEl.textContent = (offsetHz >= 0 ? '+' : '') + offsetHz.toFixed(2) + ' Hz';
+
+                // Color code: green if < 1 Hz, yellow if < 5 Hz, red if >= 5 Hz
+                if (Math.abs(offsetHz) < 1) {
+                    offsetEl.style.color = '#28a745'; // Green - excellent
+                } else if (Math.abs(offsetHz) < 5) {
+                    offsetEl.style.color = '#ffc107'; // Yellow - acceptable
+                } else {
+                    offsetEl.style.color = '#dc3545'; // Red - needs attention
+                }
+            } else {
+                offsetEl.textContent = '—';
+                offsetEl.style.color = '#666';
+            }
+
+            // Update signal strength (from backend)
+            const strengthEl = document.getElementById('refSignalStrength');
+            if (data.signal_strength !== null && data.signal_strength !== undefined && data.signal_strength > -200) {
+                strengthEl.textContent = data.signal_strength.toFixed(1) + ' dBFS';
+
+                // Color code by signal strength
+                if (data.signal_strength > -20) {
+                    strengthEl.style.color = '#28a745'; // Strong
+                } else if (data.signal_strength > -40) {
+                    strengthEl.style.color = '#ffc107'; // Medium
+                } else {
+                    strengthEl.style.color = '#dc3545'; // Weak
+                }
+            } else {
+                strengthEl.textContent = '—';
+                strengthEl.style.color = '#666';
+            }
+
+            // Draw mini spectrum (data from backend)
+            if (data.spectrum_data && data.spectrum_data.length > 0) {
+                drawReferenceSpectrum(data);
+            }
+        }
+
+        function drawReferenceSpectrum(data) {
+            const canvas = document.getElementById('refSpectrumCanvas');
+            if (!canvas) return;
+
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width = canvas.offsetWidth;
+            const height = canvas.height = 150;
+
+            // Clear canvas
+            ctx.fillStyle = '#2c3e50';
+            ctx.fillRect(0, 0, width, height);
+
+            const spectrum = data.spectrum_data;
+            if (!spectrum || spectrum.length === 0) return;
+
+            // Find min/max for scaling
+            let min = Math.min(...spectrum);
+            let max = Math.max(...spectrum);
+            const range = max - min;
+
+            if (range === 0) return;
+
+            // Draw spectrum line
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+
+            const binWidth = width / spectrum.length;
+
+            for (let i = 0; i < spectrum.length; i++) {
+                const x = i * binWidth;
+                const normalized = (spectrum[i] - min) / range;
+                const y = height - (normalized * height * 0.9) - (height * 0.05);
+
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+
+            ctx.stroke();
+
+            // Draw center line (expected frequency - yellow dashed)
+            ctx.strokeStyle = 'rgba(255, 255, 0, 0.6)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(width / 2, 0);
+            ctx.lineTo(width / 2, height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Draw detected peak marker (red solid) - peak_bin from backend
+            if (data.peak_bin >= 0 && data.peak_bin < spectrum.length) {
+                const peakX = data.peak_bin * binWidth;
+                ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(peakX, 0);
+                ctx.lineTo(peakX, height);
+                ctx.stroke();
+            }
+
+            // Draw frequency labels
+            ctx.fillStyle = '#fff';
+            ctx.font = '10px monospace';
+            ctx.textAlign = 'left';
+            ctx.fillText('-5 kHz', 5, height - 5);
+            ctx.textAlign = 'center';
+            ctx.fillText('0', width / 2, height - 5);
+            ctx.textAlign = 'right';
+            ctx.fillText('+5 kHz', width - 5, height - 5);
+
+            // Draw legend
+            ctx.textAlign = 'left';
+            ctx.font = '9px monospace';
+            ctx.fillStyle = 'rgba(255, 255, 0, 0.8)';
+            ctx.fillText('— Expected', 10, 15);
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
+            ctx.fillText('— Detected', 10, 28);
+        }
+
         async function loadMonitorHealth() {
             try {
                 // Load frontend status first (at top of Monitor tab)
                 await loadFrontendStatus();
+
+                // Load frequency reference status
+                await loadFrequencyReference();
 
                 // Fetch system load, tunnel status, instance reporter, noise floor, space weather, decoder, CW Skimmer, and MQTT health
                 const fetchPromises = [

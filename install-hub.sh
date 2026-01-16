@@ -33,20 +33,19 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
     VENDOR=04b4
     PRODUCT=00f1
 
-    free_count=0
+    ports_in_use=0
     rx_found=0
 
     # --- Port checks (show output regardless) ---
     if (( IGNORE_PORTS )); then
         echo "Port checks skipped (--ignore-ports)"
-        free_count=1  # Pretend at least one is free
     else
         for p in "${ports[@]}"; do
             if ss -ltnH "( sport = :$p )" | grep -q .; then
                 echo "Port $p in use"
+                ((ports_in_use++)) || true
             else
                 echo "Port $p free"
-                ((free_count++))
             fi
         done
     fi
@@ -56,13 +55,19 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
         echo "RX888 device check skipped (--ignore-rx888)"
         rx_found=1  # Pretend it was found
     else
+        # Temporarily disable exit on error for the USB device check
+        set +e
         for d in /sys/bus/usb/devices/*; do
-            [[ -f $d/idVendor && -f $d/idProduct ]] || continue
+            # Skip if glob didn't match or files don't exist
+            [[ -e "$d" ]] || continue
+            [[ -f "$d/idVendor" && -f "$d/idProduct" ]] || continue
             if [[ $(<"$d/idVendor") == "$VENDOR" && $(<"$d/idProduct") == "$PRODUCT" ]]; then
                 rx_found=1
                 break
             fi
         done
+        # Re-enable exit on error
+        set -e
 
         if (( rx_found )); then
             echo "RX888 device found"
@@ -72,18 +77,21 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
     fi
 
     # --- Decide exit code ---
-    # Exit 1 if none are free OR RX888 missing
-    if (( free_count == 0 || rx_found == 0 )); then
+    # Exit 1 if any ports are in use OR RX888 missing
+    if (( ports_in_use > 0 || rx_found == 0 )); then
         echo
         echo "Pre-flight checks failed. Installation cannot continue."
-        if (( free_count == 0 )); then
-            echo "Error: All required ports are in use."
+        if (( ports_in_use > 0 )); then
+            echo "Error: One or more required ports are in use."
             echo "Hint: Use --ignore-ports to skip this check."
         fi
         if (( rx_found == 0 )); then
             echo "Error: RX888 MKII not detected."
             echo "Hint: Use --ignore-rx888 to skip this check."
         fi
+        echo
+        # Ensure output is flushed before exit when piped
+        sleep 0.1
         exit 1
     fi
 

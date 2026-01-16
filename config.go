@@ -10,24 +10,25 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Admin             AdminConfig             `yaml:"admin"`
-	Radiod            RadiodConfig            `yaml:"radiod"`
-	Server            ServerConfig            `yaml:"server"`
-	Audio             AudioConfig             `yaml:"audio"`
-	Spectrum          SpectrumConfig          `yaml:"spectrum"`
-	NoiseFloor        NoiseFloorConfig        `yaml:"noisefloor"`
-	Decoder           DecoderConfig           `yaml:"decoder"`
-	Prometheus        PrometheusConfig        `yaml:"prometheus"`
-	MQTT              MQTTConfig              `yaml:"mqtt"`
-	Logging           LoggingConfig           `yaml:"logging"`
-	DXCluster         DXClusterConfig         `yaml:"dxcluster"`
-	Chat              ChatConfig              `yaml:"chat"`
-	SpaceWeather      SpaceWeatherConfig      `yaml:"spaceweather"`
-	InstanceReporting InstanceReportingConfig `yaml:"instance_reporting"`
-	Bookmarks         []Bookmark              `yaml:"bookmarks"`
-	Bands             []Band                  `yaml:"bands"`
-	Extensions        []string                `yaml:"extensions"`
-	DefaultExtension  string                  `yaml:"default_extension,omitempty"`
+	Admin              AdminConfig              `yaml:"admin"`
+	Radiod             RadiodConfig             `yaml:"radiod"`
+	Server             ServerConfig             `yaml:"server"`
+	Audio              AudioConfig              `yaml:"audio"`
+	Spectrum           SpectrumConfig           `yaml:"spectrum"`
+	NoiseFloor         NoiseFloorConfig         `yaml:"noisefloor"`
+	Decoder            DecoderConfig            `yaml:"decoder"`
+	Prometheus         PrometheusConfig         `yaml:"prometheus"`
+	MQTT               MQTTConfig               `yaml:"mqtt"`
+	Logging            LoggingConfig            `yaml:"logging"`
+	DXCluster          DXClusterConfig          `yaml:"dxcluster"`
+	Chat               ChatConfig               `yaml:"chat"`
+	SpaceWeather       SpaceWeatherConfig       `yaml:"spaceweather"`
+	InstanceReporting  InstanceReportingConfig  `yaml:"instance_reporting"`
+	FrequencyReference FrequencyReferenceConfig `yaml:"frequency_reference"`
+	Bookmarks          []Bookmark               `yaml:"bookmarks"`
+	Bands              []Band                   `yaml:"bands"`
+	Extensions         []string                 `yaml:"extensions"`
+	DefaultExtension   string                   `yaml:"default_extension,omitempty"`
 }
 
 // AdminConfig contains admin authentication settings
@@ -239,6 +240,12 @@ type NoiseFloorBand struct {
 	BinCount        int     `yaml:"bin_count"`        // Number of FFT bins for this band
 	BinBandwidth    float64 `yaml:"bin_bandwidth"`    // Bandwidth per bin in Hz for this band
 	FT8Frequency    uint64  `yaml:"ft8_frequency"`    // FT8 frequency for SNR calculation (0 = disabled)
+}
+
+// FrequencyReferenceConfig contains frequency reference tracking settings
+type FrequencyReferenceConfig struct {
+	Enabled   bool   `yaml:"enabled"`   // Enable/disable frequency reference tracking
+	Frequency uint64 `yaml:"frequency"` // Reference tone frequency in Hz (default: 25000000 = 25 MHz)
 }
 
 // PrometheusConfig contains Prometheus metrics settings
@@ -539,6 +546,11 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	// Note: DataDir will be set relative to config directory in main.go
 	// Default is "noisefloor" subdirectory in config directory
+
+	// Set frequency reference defaults if not specified
+	if config.FrequencyReference.Frequency == 0 {
+		config.FrequencyReference.Frequency = 25000000 // 25 MHz default
+	}
 
 	// Set default allowed hosts if not specified (localhost only for security)
 	if config.Prometheus.Enabled && len(config.Prometheus.AllowedHosts) == 0 {

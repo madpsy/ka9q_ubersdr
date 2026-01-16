@@ -291,9 +291,9 @@ func (frm *FrequencyReferenceMonitor) detectPeakFrequency(spectrum []float32) (f
 		}
 	}
 
-	// If center peak is within 6 dB of the global max, prefer it
-	// This handles cases where the reference tone is slightly weaker than a spurious signal
-	if centerPeakBin >= 0 && (maxPower-centerPeakPower) <= 6.0 {
+	// If center peak is within 20 dB of the global max, prefer it
+	// This handles cases where the reference tone is weaker than a spurious signal
+	if centerPeakBin >= 0 && (maxPower-centerPeakPower) <= 20.0 {
 		maxBin = centerPeakBin
 		maxPower = centerPeakPower
 	}

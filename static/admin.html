@@ -6056,8 +6056,8 @@
                 const offsetHz = data.frequency_offset;
                 offsetEl.textContent = (offsetHz >= 0 ? '+' : '') + offsetHz.toFixed(2) + ' Hz';
 
-                // Color code: green if <= 1 Hz, yellow if < 5 Hz, red if >= 5 Hz
-                if (Math.abs(offsetHz) <= 1) {
+                // Color code: green if <= 2 Hz, yellow if < 5 Hz, red if >= 5 Hz
+                if (Math.abs(offsetHz) <= 2) {
                     offsetEl.style.color = '#28a745'; // Green - excellent
                 } else if (Math.abs(offsetHz) < 5) {
                     offsetEl.style.color = '#ffc107'; // Yellow - acceptable

@@ -109,6 +109,7 @@ func (frm *FrequencyReferenceMonitor) Start() error {
 	sessionID := fmt.Sprintf("frequency-reference-%08x", ssrc)
 	session := &Session{
 		ID:           sessionID,
+		ChannelName:  "frequency-reference", // Used to identify channel type in radiod channels list
 		SSRC:         ssrc,
 		IsSpectrum:   true,
 		Frequency:    frm.centerFreq,

@@ -28,7 +28,7 @@ type RadiodChannelInfo struct {
 	OutputDataPackets int64     `json:"output_data_packets"`
 	LastUpdate        time.Time `json:"last_update"`
 	TimeSinceUpdate   string    `json:"time_since_update"`
-	ChannelType       string    `json:"channel_type"` // "decoder", "noisefloor", "user_audio", "user_spectrum", "unknown"
+	ChannelType       string    `json:"channel_type"` // "decoder", "noisefloor", "reference", "user_audio", "user_spectrum", "unknown"
 	ChannelName       string    `json:"channel_name"` // Descriptive name based on type
 	SessionID         string    `json:"session_id"`   // UberSDR session ID if applicable
 	IsInternal        bool      `json:"is_internal"`  // True for decoder/noisefloor channels
@@ -180,6 +180,12 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 				} else {
 					channelName = "Noise Floor"
 				}
+			} else if len(sessID) >= 19 && sessID[:19] == "frequency-reference" {
+				// Frequency reference session
+				channelType = "reference"
+				channelName = "Frequency Reference"
+				isInternal = true
+				noiseFloorCount++ // Count with noise floor for internal channels
 			} else {
 				// User session (audio or spectrum)
 				isInternal = false

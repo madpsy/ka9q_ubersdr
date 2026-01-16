@@ -6064,13 +6064,13 @@
                 strengthEl.textContent = data.signal_strength.toFixed(1) + ' dBFS';
 
                 // Color code by signal strength (dBFS scale: 0 = max, -100 = noise floor)
-                // Typical spectrum signals are -60 to -90 dBFS
-                if (data.signal_strength > -60) {
-                    strengthEl.style.color = '#28a745'; // Strong (> -60 dBFS)
-                } else if (data.signal_strength > -80) {
-                    strengthEl.style.color = '#ffc107'; // Medium (-60 to -80 dBFS)
+                // Typical reference tone signals are -70 to -90 dBFS
+                if (data.signal_strength > -70) {
+                    strengthEl.style.color = '#28a745'; // Strong (> -70 dBFS)
+                } else if (data.signal_strength > -90) {
+                    strengthEl.style.color = '#ffc107'; // Medium (-70 to -90 dBFS)
                 } else {
-                    strengthEl.style.color = '#dc3545'; // Weak (< -80 dBFS)
+                    strengthEl.style.color = '#dc3545'; // Weak (< -90 dBFS)
                 }
             } else {
                 strengthEl.textContent = '—';

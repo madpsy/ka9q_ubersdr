@@ -30,7 +30,7 @@ FROM ubuntu:24.04
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install runtime dependencies including yq for YAML merging, WSJT-X, libopus, and js8
+# Install runtime dependencies including yq for YAML merging, WSJT-X, libopus, and js8 dependencies
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     wget \
@@ -38,6 +38,11 @@ RUN apt-get update && apt-get install -y \
     wsjtx \
     libopus0 \
     libopusfile0 \
+    libqt6core6 \
+    libqt6network6 \
+    libcurl4 \
+    libfftw3-single3 \
+    libgfortran5 \
     && wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq \
     && chmod +x /usr/bin/yq \
     && wget https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/js8 -O /usr/bin/js8 \

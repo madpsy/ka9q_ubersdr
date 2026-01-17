@@ -244,10 +244,6 @@ func (frm *FrequencyReferenceMonitor) processSpectrum(spectrum []float32) {
 	copy(frm.latestSpectrum, unwrapped)
 	frm.mu.Unlock()
 
-	if DebugMode {
-		log.Printf("Frequency reference: detected=%.2f Hz, expected=%.0f Hz, offset=%+.2f Hz, strength=%.1f dBFS, SNR=%.1f dB, bin=%d",
-			detectedFreq, expectedFreq, offset, signalStrength, snr, peakBin)
-	}
 }
 
 // detectPeakFrequency finds the strongest signal in the spectrum and calculates its precise frequency
@@ -318,9 +314,6 @@ func (frm *FrequencyReferenceMonitor) detectPeakFrequency(spectrum []float32) (f
 	if centerPeakBin >= 0 && centerPeakSNR >= minSNR && (maxPower-centerPeakPower) <= 30.0 {
 		maxBin = centerPeakBin
 		maxPower = centerPeakPower
-		if DebugMode {
-			log.Printf("Frequency reference: preferring center peak (SNR %.1f dB) over global max", centerPeakSNR)
-		}
 	}
 
 	// For flat-top signals, use centroid calculation over a narrow range

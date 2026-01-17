@@ -4467,9 +4467,9 @@
             wsjtxModesContainer.style.marginLeft = '20px';
             wsjtxModesContainer.style.marginBottom = '10px';
 
-            const enabledModes = currentDecoderConfig.wsjtx_udp_enabled_modes || { FT8: true, FT4: false, WSPR: false };
+            const enabledModes = currentDecoderConfig.wsjtx_udp_enabled_modes || { FT8: true, FT4: false, WSPR: false, JS8: false };
             
-            ['FT8', 'FT4', 'WSPR'].forEach(mode => {
+            ['FT8', 'FT4', 'WSPR', 'JS8'].forEach(mode => {
                 const modeCheckbox = document.createElement('div');
                 modeCheckbox.style.marginBottom = '8px';
                 
@@ -4596,6 +4596,7 @@
             const currentFT8Depth = getCurrentDepth('FT8', 2);
             const currentFT4Depth = getCurrentDepth('FT4', 2);
             const currentWSPRDepth = getCurrentDepth('WSPR', 10000);
+            const currentJS8Depth = getCurrentDepth('JS8', 2);
 
             // FT8 depth control
             const ft8Control = document.createElement('div');
@@ -4646,6 +4647,22 @@
             `;
             depthControlsGrid.appendChild(wsprControl);
 
+            // JS8 depth control
+            const js8Control = document.createElement('div');
+            js8Control.style.display = 'flex';
+            js8Control.style.alignItems = 'center';
+            js8Control.style.gap = '10px';
+            js8Control.innerHTML = `
+                <label style="font-weight: 500; min-width: 60px;">JS8:</label>
+                <select id="bulkDepthJS8" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 5px;">
+                    <option value="1" ${currentJS8Depth === 1 ? 'selected' : ''}>Depth 1 (Fast)</option>
+                    <option value="2" ${currentJS8Depth === 2 ? 'selected' : ''}>Depth 2 (Balanced, Default)</option>
+                    <option value="3" ${currentJS8Depth === 3 ? 'selected' : ''}>Depth 3 (Deep)</option>
+                </select>
+                <button class="btn" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" onclick="setBulkDepth('JS8')">Apply</button>
+            `;
+            depthControlsGrid.appendChild(js8Control);
+
             depthControlsSection.appendChild(depthControlsGrid);
 
             const depthNote = document.createElement('small');
@@ -4693,6 +4710,12 @@
             enableWSPRBtn.onclick = () => enableDecoderBandsByMode('WSPR');
             bandButtonsContainer.appendChild(enableWSPRBtn);
 
+            const enableJS8Btn = document.createElement('button');
+            enableJS8Btn.className = 'btn btn-secondary';
+            enableJS8Btn.textContent = 'Enable All JS8';
+            enableJS8Btn.onclick = () => enableDecoderBandsByMode('JS8');
+            bandButtonsContainer.appendChild(enableJS8Btn);
+
             bandsSection.appendChild(bandButtonsContainer);
 
             container.appendChild(bandsSection);
@@ -4718,6 +4741,7 @@
                         <option value="FT8">FT8</option>
                         <option value="FT4">FT4</option>
                         <option value="WSPR">WSPR</option>
+                        <option value="JS8">JS8</option>
                     </select>
                 </div>
                 <div class="config-field">
@@ -5178,12 +5202,12 @@
                             }
                         } else if (inEnabledModes) {
                             // Parse wsjtx_udp_enabled_modes
-                            if (trimmed.match(/^(FT8|FT4|WSPR):/)) {
+                            if (trimmed.match(/^(FT8|FT4|WSPR|JS8):/)) {
                                 const colonIndex = trimmed.indexOf(':');
                                 const mode = trimmed.substring(0, colonIndex).trim();
                                 const value = trimmed.substring(colonIndex + 1).trim();
                                 importedConfig.wsjtx_udp_enabled_modes[mode] = value === 'true';
-                            } else if (lineIndent <= 2 && trimmed.includes(':') && !trimmed.match(/^(FT8|FT4|WSPR):/)) {
+                            } else if (lineIndent <= 2 && trimmed.includes(':') && !trimmed.match(/^(FT8|FT4|WSPR|JS8):/)) {
                                 // End of enabled modes section
                                 inEnabledModes = false;
                                 // Process this line as top-level field

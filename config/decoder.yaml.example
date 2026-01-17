@@ -12,7 +12,7 @@ decoder:
   # Decoder binary paths (absolute paths recommended)
   jt9_path: "/usr/bin/jt9"      # Path to jt9 binary (for FT8/FT4)
   wsprd_path: "/usr/bin/wsprd"  # Path to wsprd binary (for WSPR)
-  js8_path: "/usr/bin/js8"      # Path to js8 binary (for JS8)
+  js8_path: "/usr/bin/js8"      # Path to js8 binary (for >)
 
   # Keep WAV files after decoding (useful for debugging)
   keep_wav: false
@@ -244,7 +244,7 @@ decoder:
       enabled: false
 
     # ========================================
-    # JS8 bands (160m - 10m)
+    # JS8 bands
     # JS8Call is a streaming mode (continuous audio feed)
     # ========================================
     - name: "40m-js8"
@@ -259,45 +259,9 @@ decoder:
       enabled: false
       depth: 2
 
-    - name: "30m-js8"
-      mode: "JS8"
-      frequency: 10130000  # 10.130 MHz
-      enabled: false
-      depth: 2
-
     - name: "80m-js8"
       mode: "JS8"
       frequency: 3578000   # 3.578 MHz
-      enabled: false
-      depth: 2
-
-    - name: "60m-js8"
-      mode: "JS8"
-      frequency: 5357000   # 5.357 MHz (same as FT8)
-      enabled: false
-      depth: 2
-
-    - name: "17m-js8"
-      mode: "JS8"
-      frequency: 18104000  # 18.104 MHz
-      enabled: false
-      depth: 2
-
-    - name: "15m-js8"
-      mode: "JS8"
-      frequency: 21078000  # 21.078 MHz
-      enabled: false
-      depth: 2
-
-    - name: "12m-js8"
-      mode: "JS8"
-      frequency: 24922000  # 24.922 MHz
-      enabled: false
-      depth: 2
-
-    - name: "10m-js8"
-      mode: "JS8"
-      frequency: 28078000  # 28.078 MHz
       enabled: false
       depth: 2
 

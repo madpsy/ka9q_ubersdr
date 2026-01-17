@@ -352,6 +352,7 @@ func (sd *StreamingDecoder) Stop() error {
 		done <- sd.cmd.Wait()
 	}()
 
+	var exitErr error
 	select {
 	case err := <-done:
 		if err != nil {
@@ -359,14 +360,21 @@ func (sd *StreamingDecoder) Stop() error {
 		} else {
 			log.Printf("Streaming decoder for %s exited cleanly", sd.band.Config.Name)
 		}
-		return err
+		exitErr = err
 	case <-time.After(5 * time.Second):
 		log.Printf("Streaming decoder for %s did not exit within timeout, killing", sd.band.Config.Name)
 		if err := sd.cmd.Process.Kill(); err != nil {
-			return fmt.Errorf("failed to kill decoder: %w", err)
+			exitErr = fmt.Errorf("failed to kill decoder: %w", err)
+		} else {
+			exitErr = fmt.Errorf("decoder killed after timeout")
 		}
-		return fmt.Errorf("decoder killed after timeout")
 	}
+
+	// Close result channel to unblock any goroutines reading from it
+	// This must be done after the process has exited to ensure no more results will be sent
+	close(sd.resultChan)
+
+	return exitErr
 }
 
 // ParseStreamingDecoderLine parses a line of streaming decoder output (JS8Call format)

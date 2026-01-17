@@ -151,7 +151,11 @@ func (md *MultiDecoder) GetHealthStatus() DecoderHealthStatus {
 		band.mu.Unlock()
 
 		// Consider stale if no decoder invocation in 3x cycle time OR no data in 3x cycle time
+		// For streaming modes (CycleTime = 0), use a fixed threshold of 30 seconds
 		staleThreshold := modeInfo.CycleTime * 3
+		if modeInfo.IsStreaming && staleThreshold == 0 {
+			staleThreshold = 30 * time.Second
+		}
 		timeSinceInvoke := time.Since(lastInvoke)
 		timeSinceData := time.Since(lastData)
 
@@ -297,6 +301,9 @@ func (md *MultiDecoder) GetStartupDiagnostics() DecoderHealthDiagnostics {
 		timeSinceInvoke := time.Since(lastInvoke)
 		timeSinceData := time.Since(lastData)
 		staleThreshold := modeInfo.CycleTime * 3
+		if modeInfo.IsStreaming && staleThreshold == 0 {
+			staleThreshold = 30 * time.Second
+		}
 
 		// Band is stale if:
 		// 1. Decoder hasn't been invoked in 3x cycle time (and has been invoked at least once)

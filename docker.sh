@@ -4,12 +4,27 @@
 VERSION=$(grep -oP 'const Version = "\K[^"]+' version.go)
 IMAGE=madpsy/ka9q_ubersdr
 
-# Check for --no-latest flag
+# Parse command line flags
 TAG_LATEST=true
-if [[ "$1" == "--no-latest" ]]; then
-    TAG_LATEST=false
-    echo "Running in --no-latest mode (will not tag as latest)"
-fi
+NO_CACHE=""
+
+for arg in "$@"; do
+    case $arg in
+        --no-latest)
+            TAG_LATEST=false
+            echo "Running in --no-latest mode (will not tag as latest)"
+            ;;
+        --no-cache)
+            NO_CACHE="--no-cache"
+            echo "Running in --no-cache mode (will rebuild all layers)"
+            ;;
+        *)
+            echo "Unknown option: $arg"
+            echo "Usage: $0 [--no-latest] [--no-cache]"
+            exit 1
+            ;;
+    esac
+done
 
 echo "Ensure version.go has been version bumped"
 echo "Current version: $VERSION"
@@ -19,7 +34,7 @@ echo ""
 
 # Build image with version tag
 echo "Building Docker image..."
-if ! docker build -t $IMAGE:$VERSION -f docker/Dockerfile .; then
+if ! docker build $NO_CACHE -t $IMAGE:$VERSION -f docker/Dockerfile .; then
     echo "ERROR: Docker build failed!"
     exit 1
 fi

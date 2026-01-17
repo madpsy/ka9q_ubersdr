@@ -256,16 +256,13 @@ func (sd *StreamingDecoder) readStdout() {
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		if DebugMode {
-			log.Printf("Decoder output [%s]: %s", sd.band.Config.Name, line)
-		}
+		// Always log stdout from JS8 to help with debugging
+		log.Printf("JS8 stdout [%s]: %s", sd.band.Config.Name, line)
 
 		// Parse the output line
 		decode, err := ParseStreamingDecoderLine(line, sd.band.Config.Frequency, sd.config.ReceiverLocator, sd.ctyDatabase)
 		if err != nil {
-			if DebugMode {
-				log.Printf("Failed to parse decoder line: %v (line: %s)", err, line)
-			}
+			log.Printf("JS8 parse error [%s]: %v (line: %s)", sd.band.Config.Name, err, line)
 			continue
 		}
 

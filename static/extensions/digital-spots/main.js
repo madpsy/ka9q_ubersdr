@@ -1,5 +1,5 @@
 // Digital Spots Extension for ka9q UberSDR
-// Displays real-time FT8, FT4, and WSPR spots from the multi-decoder
+// Displays real-time FT8, FT4, WSPR, and JS8 spots from the multi-decoder
 
 class DigitalSpotsExtension extends DecoderExtension {
     constructor() {

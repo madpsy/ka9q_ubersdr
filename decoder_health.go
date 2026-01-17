@@ -160,11 +160,17 @@ func (md *MultiDecoder) GetHealthStatus() DecoderHealthStatus {
 		timeSinceData := time.Since(lastData)
 
 		// Band is stale if:
-		// 1. Decoder hasn't been invoked in 3x cycle time (and has been invoked at least once)
-		// 2. OR no data processed in 3x cycle time (and has processed data at least once)
-		// This ensures WSPR (2min cycle) isn't marked stale within its normal cycle
-		isStale := (!lastInvoke.IsZero() && timeSinceInvoke > staleThreshold) ||
-			(!lastData.IsZero() && timeSinceData > staleThreshold)
+		// For streaming modes: only check data flow (decoder runs continuously)
+		// For batch modes: check both decoder invocation AND data flow
+		var isStale bool
+		if modeInfo.IsStreaming {
+			// Streaming modes: only check if data is flowing
+			isStale = !lastData.IsZero() && timeSinceData > staleThreshold
+		} else {
+			// Batch modes: check both decoder invocation and data flow
+			isStale = (!lastInvoke.IsZero() && timeSinceInvoke > staleThreshold) ||
+				(!lastData.IsZero() && timeSinceData > staleThreshold)
+		}
 
 		bandHealth := DecoderBandHealth{
 			Name:              band.Config.Name,
@@ -306,10 +312,17 @@ func (md *MultiDecoder) GetStartupDiagnostics() DecoderHealthDiagnostics {
 		}
 
 		// Band is stale if:
-		// 1. Decoder hasn't been invoked in 3x cycle time (and has been invoked at least once)
-		// 2. OR no audio data received in 30 seconds (and has received data at least once)
-		isStale := (!lastInvoke.IsZero() && timeSinceInvoke > staleThreshold) ||
-			(!lastData.IsZero() && timeSinceData > 30*time.Second)
+		// For streaming modes: only check data flow (decoder runs continuously)
+		// For batch modes: check both decoder invocation AND data flow
+		var isStale bool
+		if modeInfo.IsStreaming {
+			// Streaming modes: only check if data is flowing
+			isStale = !lastData.IsZero() && timeSinceData > staleThreshold
+		} else {
+			// Batch modes: check both decoder invocation and data flow
+			isStale = (!lastInvoke.IsZero() && timeSinceInvoke > staleThreshold) ||
+				(!lastData.IsZero() && timeSinceData > 30*time.Second)
+		}
 
 		bandDiag := DecoderBandDiagnostics{
 			Name:              band.Config.Name,

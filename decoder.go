@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
 	"log"
 	"math/rand"
@@ -440,8 +441,11 @@ func (md *MultiDecoder) streamingMonitorLoop(band *DecoderBand) {
 			return
 
 		case audioPacket := <-band.AudioChan:
+			// Convert PCM data from big-endian (radiod format) to little-endian (js8 expects)
+			pcmLE := convertBigEndianToLittleEndian(audioPacket.PCMData)
+
 			// Write PCM data to streaming decoder
-			if err := decoder.WriteAudio(audioPacket.PCMData); err != nil {
+			if err := decoder.WriteAudio(pcmLE); err != nil {
 				log.Printf("Error writing audio to streaming decoder for %s: %v", band.Config.Name, err)
 			}
 		}
@@ -814,4 +818,24 @@ func (md *MultiDecoder) metricsWriteLoop() {
 			}
 		}
 	}
+}
+
+// convertBigEndianToLittleEndian converts PCM int16 samples from big-endian to little-endian
+func convertBigEndianToLittleEndian(data []byte) []byte {
+	if len(data)%2 != 0 {
+		log.Printf("Warning: PCM data length is not even (%d bytes), truncating", len(data))
+		data = data[:len(data)-1]
+	}
+
+	numSamples := len(data) / 2
+	result := make([]byte, len(data))
+
+	for i := 0; i < numSamples; i++ {
+		// Read as big-endian int16
+		sample := int16(binary.BigEndian.Uint16(data[i*2 : i*2+2]))
+		// Write as little-endian int16
+		binary.LittleEndian.PutUint16(result[i*2:i*2+2], uint16(sample))
+	}
+
+	return result
 }

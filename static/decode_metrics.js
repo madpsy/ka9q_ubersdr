@@ -334,7 +334,7 @@ class DecodeMetricsDashboard {
                     summary.daily_breakdown.forEach(day => {
                         const date = day.date;
                         if (!dailyData[date]) {
-                            dailyData[date] = { FT8: 0, FT4: 0, WSPR: 0 };
+                            dailyData[date] = { FT8: 0, FT4: 0, WSPR: 0, JS8: 0 };
                         }
                         if (dailyData[date][summary.mode] !== undefined) {
                             dailyData[date][summary.mode] += day.spots;
@@ -439,7 +439,7 @@ class DecodeMetricsDashboard {
                     summary.daily_breakdown.forEach(day => {
                         const date = day.date;
                         if (!dailyData[date]) {
-                            dailyData[date] = { FT8: 0, FT4: 0, WSPR: 0 };
+                            dailyData[date] = { FT8: 0, FT4: 0, WSPR: 0, JS8: 0 };
                         }
                         if (dailyData[date][summary.mode] !== undefined) {
                             dailyData[date][summary.mode] += day.spots;
@@ -550,7 +550,7 @@ class DecodeMetricsDashboard {
                     summary.monthly_breakdown.forEach(month => {
                         const monthKey = month.month;
                         if (!monthlyData[monthKey]) {
-                            monthlyData[monthKey] = { FT8: 0, FT4: 0, WSPR: 0 };
+                            monthlyData[monthKey] = { FT8: 0, FT4: 0, WSPR: 0, JS8: 0 };
                         }
                         if (monthlyData[monthKey][summary.mode] !== undefined) {
                             monthlyData[monthKey][summary.mode] += month.spots;
@@ -564,7 +564,7 @@ class DecodeMetricsDashboard {
                 if (!summary.monthly_breakdown || summary.monthly_breakdown.length === 0) {
                     const currentMonth = `${year}-${String(today.getMonth() + 1).padStart(2, '0')}`;
                     if (!monthlyData[currentMonth]) {
-                        monthlyData[currentMonth] = { FT8: 0, FT4: 0, WSPR: 0 };
+                        monthlyData[currentMonth] = { FT8: 0, FT4: 0, WSPR: 0, JS8: 0 };
                     }
                     if (monthlyData[currentMonth][summary.mode] !== undefined) {
                         monthlyData[currentMonth][summary.mode] += summary.total_spots;
@@ -576,17 +576,18 @@ class DecodeMetricsDashboard {
 
             // Create labels for all 12 months and prepare data
             const monthLabels = [];
-            const monthlyDataArrays = { FT8: [], FT4: [], WSPR: [] };
+            const monthlyDataArrays = { FT8: [], FT4: [], WSPR: [], JS8: [] };
 
             for (let month = 1; month <= 12; month++) {
                 const monthKey = `${year}-${String(month).padStart(2, '0')}`;
                 monthLabels.push(new Date(year, month - 1).toLocaleDateString('en-US', { month: 'short' }));
 
                 // Use data if available, otherwise 0
-                const monthData = monthlyData[monthKey] || { FT8: 0, FT4: 0, WSPR: 0 };
+                const monthData = monthlyData[monthKey] || { FT8: 0, FT4: 0, WSPR: 0, JS8: 0 };
                 monthlyDataArrays.FT8.push(monthData.FT8);
                 monthlyDataArrays.FT4.push(monthData.FT4);
                 monthlyDataArrays.WSPR.push(monthData.WSPR);
+                monthlyDataArrays.JS8.push(monthData.JS8);
             }
 
             const datasets = Object.keys(this.MODE_COLORS).map(mode => ({

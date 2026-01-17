@@ -326,6 +326,14 @@ func (md *MultiDecoder) bandMonitorLoop(band *DecoderBand) {
 	defer md.wg.Done()
 
 	modeInfo := GetModeInfo(band.Config.Mode)
+
+	// Check if this is a streaming mode
+	if modeInfo.IsStreaming {
+		md.streamingMonitorLoop(band)
+		return
+	}
+
+	// Batch mode (WAV file based)
 	cycleTime := modeInfo.CycleTime
 	recordingTime := modeInfo.TransmissionTime
 	if md.config.IncludeDeadTime {
@@ -350,6 +358,92 @@ func (md *MultiDecoder) bandMonitorLoop(band *DecoderBand) {
 			// Process audio packet (LastDataTime will be updated when decoder completes)
 			// Extract PCM data from the audio packet (RTP timestamp not needed for decoders)
 			md.processAudioPacket(band, audioPacket.PCMData, time.Now())
+		}
+	}
+}
+
+// streamingMonitorLoop handles streaming decoders (JS8, etc.)
+func (md *MultiDecoder) streamingMonitorLoop(band *DecoderBand) {
+	// Get decoder binary path based on mode
+	var binaryPath string
+	switch band.Config.Mode {
+	case ModeJS8:
+		binaryPath = md.config.JS8Path
+	default:
+		log.Printf("Error: Unknown streaming mode %s", band.Config.Mode)
+		return
+	}
+
+	// Create streaming decoder
+	decoder, err := NewStreamingDecoder(binaryPath, band, md.config, globalCTY)
+	if err != nil {
+		log.Printf("Error creating streaming decoder for %s: %v", band.Config.Name, err)
+		return
+	}
+	defer decoder.Stop()
+
+	// Start goroutine to process decoder results
+	md.wg.Add(1)
+	go func() {
+		defer md.wg.Done()
+		for decode := range decoder.GetResults() {
+			// Update last data time
+			band.mu.Lock()
+			band.LastDataTime = time.Now()
+			band.mu.Unlock()
+
+			// Update statistics
+			md.stats.IncrementDecodes(band.Config.Name, 1)
+			md.stats.IncrementSpots(band.Config.Name, 1)
+
+			// Record decode metrics (streaming modes don't have cycles, use 0)
+			if md.prometheusMetrics != nil {
+				md.prometheusMetrics.RecordDigitalDecode(decode.Mode, band.Config.Name, decode.Callsign, 0)
+			}
+
+			// Record decode in summary aggregator
+			if md.summaryAggregator != nil {
+				md.summaryAggregator.RecordDecode(decode.Mode, band.Config.Name, decode.Timestamp)
+			}
+
+			// Log to CSV
+			if md.spotsLogger != nil {
+				shouldLog := true
+				if md.config.SpotsLogLocatorsOnly && !decode.HasLocator {
+					shouldLog = false
+				}
+				if shouldLog {
+					if err := md.spotsLogger.LogSpot(decode); err != nil {
+						log.Printf("Warning: Failed to log spot to CSV: %v", err)
+					}
+				}
+			}
+
+			// Notify callback for websocket broadcasting
+			md.notifyDecode(*decode)
+
+			// Submit to PSKReporter (if valid locator)
+			if md.pskReporter != nil && decode.Locator != "" {
+				if err := md.pskReporter.Submit(decode); err != nil {
+					log.Printf("Warning: Failed to submit to PSKReporter: %v", err)
+				} else {
+					md.stats.IncrementPSKReporter(1)
+				}
+			}
+		}
+	}()
+
+	// Feed audio to streaming decoder
+	for {
+		select {
+		case <-md.stopChan:
+			return
+
+		case audioPacket := <-band.AudioChan:
+			// Write PCM data to streaming decoder
+			if err := decoder.WriteAudio(audioPacket.PCMData); err != nil {
+				log.Printf("Error writing audio to streaming decoder for %s: %v", band.Config.Name, err)
+			}
 		}
 	}
 }

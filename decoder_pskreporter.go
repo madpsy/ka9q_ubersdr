@@ -112,6 +112,8 @@ func (psk *PSKReporter) Connect() error {
 }
 
 // Submit adds a report to the queue
+// If a matching report (same callsign/band/mode) already exists in the queue without a locator,
+// and the new report has a locator, update the existing report instead of adding a duplicate
 func (psk *PSKReporter) Submit(decode *DecodeInfo) error {
 	if !psk.running {
 		return fmt.Errorf("PSKReporter not running")
@@ -132,6 +134,23 @@ func (psk *PSKReporter) Submit(decode *DecodeInfo) error {
 
 	psk.queueMutex.Lock()
 	defer psk.queueMutex.Unlock()
+
+	// Check if we can enhance an existing queued report with a locator
+	if report.Locator != "" {
+		for i := range psk.reportQueue {
+			existing := &psk.reportQueue[i]
+			if existing.Callsign == report.Callsign &&
+				isSameBand(existing.Frequency, report.Frequency) &&
+				existing.Mode == report.Mode &&
+				existing.Locator == "" {
+				// Enhance the existing report with the locator
+				existing.Locator = report.Locator
+				existing.SNR = report.SNR             // Update SNR too
+				existing.EpochTime = report.EpochTime // Update timestamp
+				return nil
+			}
+		}
+	}
 
 	if len(psk.reportQueue) >= PSKMaxQueueSize {
 		return fmt.Errorf("PSKReporter queue full")
@@ -163,7 +182,7 @@ func (psk *PSKReporter) sendThread() {
 
 		// Clean up old sent reports
 		psk.cleanupSentReports()
-	
+
 		// Make packets from queued reports
 		reportCount := 0
 		for psk.running {
@@ -280,7 +299,7 @@ func (psk *PSKReporter) makePackets() int {
 		hasLocator := report.Locator != "" && isValidGridLocator(report.Locator)
 		recordLen := psk.buildSenderRecord(packet[offset:], &report, hasLocator)
 		offset += recordLen
-	
+
 		// Track sent report with current timestamp
 		psk.sentMutex.Lock()
 		report.EpochTime = time.Now() // Update to send time

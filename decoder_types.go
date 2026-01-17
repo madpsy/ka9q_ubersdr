@@ -19,7 +19,8 @@ type DecodeInfo struct {
 	Frequency     uint64 // Actual RF frequency in Hz
 	DialFrequency uint64 // Dial frequency (center frequency) in Hz
 	Timestamp     time.Time
-	Mode          string // "FT8", "FT4", "WSPR"
+	Mode          string // "FT8", "FT4", "WSPR", "JS8"
+	Submode       string // JS8 submode: "A" (Normal), "B" (Fast), "C" (Turbo), "E" (Slow)
 	Message       string
 	BandName      string // Name of the decoder band (e.g., "20m_FT8")
 

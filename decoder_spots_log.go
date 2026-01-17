@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// SpotsLogger handles CSV logging of decoder spots (FT8/FT4/WSPR)
+// SpotsLogger handles CSV logging of decoder spots (FT8/FT4/WSPR/JS8)
 // Logs all spots to separate CSV files organized by mode/date/band
 type SpotsLogger struct {
 	dataDir    string
@@ -303,7 +303,7 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, c
 	}
 
 	// Determine which modes to query
-	modes := []string{"FT8", "FT4", "WSPR"}
+	modes := []string{"FT8", "FT4", "WSPR", "JS8"}
 	if mode != "" {
 		modes = []string{mode}
 	}
@@ -558,7 +558,7 @@ func (sl *SpotsLogger) GetAvailableDates() ([]string, error) {
 	dateMap := make(map[string]bool)
 
 	// Check all modes
-	modes := []string{"FT8", "FT4", "WSPR"}
+	modes := []string{"FT8", "FT4", "WSPR", "JS8"}
 	for _, mode := range modes {
 		modePath := filepath.Join(sl.dataDir, mode)
 
@@ -636,7 +636,7 @@ func (sl *SpotsLogger) GetAvailableNames() ([]string, error) {
 	nameMap := make(map[string]bool)
 
 	// Check all modes
-	modes := []string{"FT8", "FT4", "WSPR"}
+	modes := []string{"FT8", "FT4", "WSPR", "JS8"}
 	for _, mode := range modes {
 		modePath := filepath.Join(sl.dataDir, mode)
 
@@ -1549,7 +1549,7 @@ func (sl *SpotsLogger) cleanupOldFiles() error {
 	removedCount := 0
 
 	// Check all modes
-	modes := []string{"FT8", "FT4", "WSPR"}
+	modes := []string{"FT8", "FT4", "WSPR", "JS8"}
 	for _, mode := range modes {
 		modePath := filepath.Join(sl.dataDir, mode)
 

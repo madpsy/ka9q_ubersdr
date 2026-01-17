@@ -646,6 +646,11 @@ func (h *DXClusterWebSocketHandler) BroadcastDigitalSpot(decode DecodeInfo) {
 		"tx_frequency": decode.TxFrequency,
 	}
 
+	// Add submode for JS8 (A=Normal, B=Fast, C=Turbo, E=Slow)
+	if decode.Submode != "" {
+		data["submode"] = decode.Submode
+	}
+
 	// Add distance and bearing if available (pre-calculated during parsing)
 	if decode.DistanceKm != nil {
 		data["distance_km"] = *decode.DistanceKm

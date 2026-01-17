@@ -12,6 +12,7 @@ const (
 	ModeWSPR DecoderMode = iota
 	ModeFT8
 	ModeFT4
+	ModeJS8
 )
 
 // String returns the string representation of the decoder mode
@@ -23,6 +24,8 @@ func (m DecoderMode) String() string {
 		return "FT8"
 	case ModeFT4:
 		return "FT4"
+	case ModeJS8:
+		return "JS8"
 	default:
 		return "Unknown"
 	}
@@ -58,6 +61,8 @@ func ModeFromString(s string) (DecoderMode, error) {
 		return ModeFT8, nil
 	case "FT4", "ft4":
 		return ModeFT4, nil
+	case "JS8", "js8":
+		return ModeJS8, nil
 	default:
 		return 0, fmt.Errorf("unknown decoder mode: %s", s)
 	}
@@ -70,6 +75,7 @@ type ModeInfo struct {
 	DecoderCommand   string        // Command to run decoder (e.g., "jt9")
 	DecoderArgs      []string      // Arguments for decoder
 	Preset           string        // Radiod preset to use (e.g., "usb")
+	IsStreaming      bool          // True for streaming modes (continuous audio feed)
 }
 
 // GetModeInfo returns the mode information for a given decoder mode
@@ -82,6 +88,7 @@ func GetModeInfo(mode DecoderMode) ModeInfo {
 			DecoderCommand:   "wsprd",
 			DecoderArgs:      []string{"-f", "{freq}", "-C", "{depth}", "-w", "{file}"},
 			Preset:           "usb",
+			IsStreaming:      false,
 		}
 	case ModeFT8:
 		return ModeInfo{
@@ -90,6 +97,7 @@ func GetModeInfo(mode DecoderMode) ModeInfo {
 			DecoderCommand:   "jt9",
 			DecoderArgs:      []string{"-8", "-d", "{depth}", "{file}"},
 			Preset:           "usb",
+			IsStreaming:      false,
 		}
 	case ModeFT4:
 		return ModeInfo{
@@ -98,6 +106,16 @@ func GetModeInfo(mode DecoderMode) ModeInfo {
 			DecoderCommand:   "jt9",
 			DecoderArgs:      []string{"-5", "-d", "{depth}", "{file}"},
 			Preset:           "usb",
+			IsStreaming:      false,
+		}
+	case ModeJS8:
+		return ModeInfo{
+			CycleTime:        0, // No fixed cycles for streaming mode
+			TransmissionTime: 0,
+			DecoderCommand:   "js8",
+			DecoderArgs:      []string{"--stdin", "-d", "{depth}"},
+			Preset:           "usb",
+			IsStreaming:      true,
 		}
 	default:
 		return ModeInfo{}
@@ -139,6 +157,7 @@ type DecoderConfig struct {
 	// Binary paths
 	JT9Path   string `yaml:"jt9_path"`   // Path to jt9 binary (for FT8/FT4)
 	WSPRDPath string `yaml:"wsprd_path"` // Path to wsprd binary (for WSPR)
+	JS8Path   string `yaml:"js8_path"`   // Path to js8 binary (for JS8)
 
 	// Recording options
 	IncludeDeadTime bool `yaml:"include_dead_time"` // Record entire cycle including dead time
@@ -195,6 +214,7 @@ func (dc *DecoderConfig) Validate() error {
 	// Check if any bands need specific decoders
 	needsJT9 := false
 	needsWSPRD := false
+	needsJS8 := false
 	for _, band := range dc.Bands {
 		if !band.Enabled {
 			continue
@@ -205,6 +225,9 @@ func (dc *DecoderConfig) Validate() error {
 		if band.Mode == ModeWSPR {
 			needsWSPRD = true
 		}
+		if band.Mode == ModeJS8 {
+			needsJS8 = true
+		}
 	}
 
 	// Validate binary paths for needed decoders
@@ -213,6 +236,9 @@ func (dc *DecoderConfig) Validate() error {
 	}
 	if needsWSPRD && dc.WSPRDPath == "" {
 		return fmt.Errorf("wsprd_path required for WSPR decoding")
+	}
+	if needsJS8 && dc.JS8Path == "" {
+		return fmt.Errorf("js8_path required for JS8 decoding")
 	}
 
 	// Validate receiver info if reporting is enabled
@@ -239,6 +265,11 @@ func (dc *DecoderConfig) Validate() error {
 				// WSPR uses cycles, should be positive
 				if band.Depth < 1 {
 					return fmt.Errorf("band %s: WSPR cycles must be positive (got %d)", band.Name, band.Depth)
+				}
+			} else if band.Mode == ModeJS8 {
+				// JS8 uses depth 1-3 (same as FT8/FT4)
+				if band.Depth < 1 || band.Depth > 3 {
+					return fmt.Errorf("band %s: JS8 depth must be between 1 and 3 (got %d)", band.Name, band.Depth)
 				}
 			} else {
 				// FT8/FT4 use depth 1-3

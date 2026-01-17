@@ -388,6 +388,11 @@ func (md *MultiDecoder) streamingMonitorLoop(band *DecoderBand) {
 	go func() {
 		defer md.wg.Done()
 		for decode := range decoder.GetResults() {
+			// Skip JS8 spots without a valid callsign (they're just noise/partial decodes)
+			if decode.Mode == "JS8" && !decode.HasCallsign {
+				continue
+			}
+
 			// Update last data time
 			band.mu.Lock()
 			band.LastDataTime = time.Now()

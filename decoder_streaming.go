@@ -248,7 +248,10 @@ func (sd *StreamingDecoder) WriteAudio(pcmData []byte) error {
 
 	_, err := sd.stdin.Write(pcmData)
 	if err != nil {
-		log.Printf("Error writing to decoder stdin for %s: %v", sd.band.Config.Name, err)
+		// Don't log "broken pipe" errors - these are expected when decoder exits/restarts
+		if !strings.Contains(err.Error(), "broken pipe") {
+			log.Printf("Error writing to decoder stdin for %s: %v", sd.band.Config.Name, err)
+		}
 		return fmt.Errorf("failed to write audio: %w", err)
 	}
 

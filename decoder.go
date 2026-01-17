@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -459,7 +460,10 @@ func (md *MultiDecoder) streamingMonitorLoop(band *DecoderBand) {
 
 			// Write PCM data to streaming decoder
 			if err := decoder.WriteAudio(pcmLE); err != nil {
-				log.Printf("Error writing audio to streaming decoder for %s: %v", band.Config.Name, err)
+				// Don't log "broken pipe" errors - these are expected when decoder exits/restarts
+				if !strings.Contains(err.Error(), "broken pipe") {
+					log.Printf("Error writing audio to streaming decoder for %s: %v", band.Config.Name, err)
+				}
 			}
 		}
 	}

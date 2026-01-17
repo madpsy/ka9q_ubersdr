@@ -134,6 +134,9 @@ func NewStreamingDecoder(binaryPath string, band *DecoderBand, config *DecoderCo
 
 	log.Printf("Started streaming decoder for %s (PID: %d, binary: %s)", band.Config.Name, cmd.Process.Pid, binaryPath)
 
+	// Record decoder invocation for health monitoring
+	RecordDecoderInvoke(band.Config.Name)
+
 	return sd, nil
 }
 
@@ -222,6 +225,9 @@ func (sd *StreamingDecoder) restart() error {
 	go sd.readStderr()
 
 	log.Printf("Restarted streaming decoder for %s (PID: %d)", sd.band.Config.Name, cmd.Process.Pid)
+
+	// Record decoder invocation for health monitoring
+	RecordDecoderInvoke(sd.band.Config.Name)
 
 	return nil
 }

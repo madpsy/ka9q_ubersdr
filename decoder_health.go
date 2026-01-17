@@ -173,13 +173,15 @@ func (md *MultiDecoder) GetHealthStatus() DecoderHealthStatus {
 
 		status.Bands = append(status.Bands, bandHealth)
 
-		// Add issues
-		if lastInvoke.IsZero() {
-			status.Issues = append(status.Issues, "Band "+band.Config.Name+": decoder has never been invoked")
-			status.Healthy = false
-		} else if isStale {
-			status.Issues = append(status.Issues, "Band "+band.Config.Name+": no decoder invocation in "+timeSinceInvoke.Round(time.Second).String())
-			status.Healthy = false
+		// Add issues - skip decoder invocation check for streaming modes
+		if !modeInfo.IsStreaming {
+			if lastInvoke.IsZero() {
+				status.Issues = append(status.Issues, "Band "+band.Config.Name+": decoder has never been invoked")
+				status.Healthy = false
+			} else if isStale {
+				status.Issues = append(status.Issues, "Band "+band.Config.Name+": no decoder invocation in "+timeSinceInvoke.Round(time.Second).String())
+				status.Healthy = false
+			}
 		}
 
 		// Check for data flow - use same threshold as decoder invocation (3x cycle time)

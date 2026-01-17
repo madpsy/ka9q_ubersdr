@@ -444,6 +444,11 @@ func (md *MultiDecoder) streamingMonitorLoop(band *DecoderBand) {
 			return
 
 		case audioPacket := <-band.AudioChan:
+			// Update last data time when audio is received
+			band.mu.Lock()
+			band.LastDataTime = time.Now()
+			band.mu.Unlock()
+
 			// Convert PCM data from big-endian (radiod format) to little-endian (js8 expects)
 			pcmLE := convertBigEndianToLittleEndian(audioPacket.PCMData)
 

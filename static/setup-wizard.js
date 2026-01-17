@@ -403,6 +403,8 @@
                             band.enabled = formData.ft4Enabled || false;
                         } else if (band.mode === 'WSPR') {
                             band.enabled = formData.wsprEnabled || false;
+                        } else if (band.mode === 'JS8') {
+                            band.enabled = formData.js8Enabled || false;
                         }
                     });
                 }

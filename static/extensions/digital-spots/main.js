@@ -1587,8 +1587,8 @@ class DigitalSpotsExtension extends DecoderExtension {
             spotsByMode[spot.mode].push(spot);
         });
 
-        // Sort modes in preferred order: FT8, FT4, WSPR, then others alphabetically
-        const modeOrder = { 'FT8': 1, 'FT4': 2, 'WSPR': 3 };
+        // Sort modes in preferred order: FT8, FT4, WSPR, JS8, then others alphabetically
+        const modeOrder = { 'FT8': 1, 'FT4': 2, 'WSPR': 3, 'JS8': 4 };
         const modes = Object.keys(spotsByMode).sort((a, b) => {
             const orderA = modeOrder[a] || 999;
             const orderB = modeOrder[b] || 999;
@@ -1841,7 +1841,7 @@ class DigitalSpotsExtension extends DecoderExtension {
                     // < -25 dB: red (very weak)
                 };
             } else {
-                // FT8/FT4 typical range: -24 to +20 dB
+                // FT8/FT4/JS8 typical range: -24 to +20 dB
                 thresholds = {
                     strong: 5,     // >= +5 dB: green (strong)
                     good: -5,      // >= -5 dB: yellow (good)

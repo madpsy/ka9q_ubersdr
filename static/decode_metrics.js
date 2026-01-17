@@ -15,7 +15,8 @@ class DecodeMetricsDashboard {
         this.MODE_COLORS = {
             'FT8': 'rgba(54, 162, 235, 0.8)',
             'FT4': 'rgba(255, 159, 64, 0.8)',
-            'WSPR': 'rgba(75, 192, 192, 0.8)'
+            'WSPR': 'rgba(75, 192, 192, 0.8)',
+            'JS8': 'rgba(153, 102, 255, 0.8)'
         };
         this.BAND_COLORS = {
             '160m': 'rgba(139, 0, 0, 0.8)',

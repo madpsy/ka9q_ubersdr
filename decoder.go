@@ -423,9 +423,9 @@ func (md *MultiDecoder) streamingMonitorLoop(band *DecoderBand) {
 			// Notify callback for websocket broadcasting
 			md.notifyDecode(*decode)
 
-			// Submit to PSKReporter (JS8 mode: always submit, other modes: only with valid locator)
+			// Submit to PSKReporter (WSPR requires locator, FT8/FT4/JS8 do not)
 			if md.pskReporter != nil {
-				shouldSubmit := decode.Mode == "JS8" || decode.Locator != ""
+				shouldSubmit := decode.Mode != "WSPR" || decode.Locator != ""
 				if shouldSubmit {
 					if err := md.pskReporter.Submit(decode); err != nil {
 						log.Printf("Warning: Failed to submit to PSKReporter: %v", err)
@@ -666,10 +666,10 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 				// Notify callback for websocket broadcasting
 				md.notifyDecode(*decode)
 
-				// Submit to PSKReporter (JS8 mode: always submit, other modes: only with valid locator)
+				// Submit to PSKReporter (WSPR requires locator, FT8/FT4/JS8 do not)
 				// This matches ka9q_multidecoder behavior which sends FT8/FT4/WSPR to PSKReporter
 				if md.pskReporter != nil {
-					shouldSubmit := decode.Mode == "JS8" || decode.Locator != ""
+					shouldSubmit := decode.Mode != "WSPR" || decode.Locator != ""
 					if shouldSubmit {
 						if err := md.pskReporter.Submit(decode); err != nil {
 							log.Printf("Warning: Failed to submit to PSKReporter: %v", err)

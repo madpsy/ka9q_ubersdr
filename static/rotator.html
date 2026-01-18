@@ -513,12 +513,21 @@
                 }
                 
                 // Update position
-                document.getElementById('current-azimuth').textContent = data.position.azimuth.toFixed(1);
+                const azimuth = data.position.azimuth;
+                document.getElementById('current-azimuth').textContent = azimuth.toFixed(1);
                 document.getElementById('moving-status').textContent = data.moving ? 'Yes' : 'No';
+                
+                // Update azimuth input field with current value
+                const azimuthInput = document.getElementById('target-azimuth');
+                if (!azimuthInput.value || azimuthInput === document.activeElement) {
+                    // Don't update if user is currently typing
+                } else {
+                    azimuthInput.value = Math.round(azimuth);
+                }
                 
                 // Update needle
                 const needle = document.getElementById('needle');
-                needle.style.transform = `translate(-50%, -50%) rotate(${data.position.azimuth}deg)`;
+                needle.style.transform = `translate(-50%, -50%) rotate(${azimuth}deg)`;
                 
             } catch (error) {
                 console.error('Failed to update position:', error);

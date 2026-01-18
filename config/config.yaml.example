@@ -1052,7 +1052,7 @@ rotctl:
   # Rotctld daemon hostname or IP address (default: localhost)
   # The host where rotctld is running
   # Examples: "localhost", "192.168.1.100", "rotator.local"
-  host: "localhost"
+  host: "172.20.0.1"
 
   # Rotctld daemon port (default: 4533)
   # Standard rotctld port is 4533 (rigctld uses 4532)

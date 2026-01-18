@@ -168,9 +168,10 @@ type DecoderConfig struct {
 	ReceiverAntenna  string `yaml:"receiver_antenna"`
 
 	// Reporting
-	PSKReporterEnabled bool   `yaml:"pskreporter_enabled"`
-	WSPRNetEnabled     bool   `yaml:"wsprnet_enabled"`
-	WSPRNetCallsign    string `yaml:"wsprnet_callsign"` // Optional: if set, use this callsign for WSPRNet instead of receiver_callsign
+	PSKReporterEnabled        bool   `yaml:"pskreporter_enabled"`
+	PSKReporterRequireLocator bool   `yaml:"pskreporter_require_locator"` // Require locator for digital spots (FT8/FT4/JS8) to PSKReporter (default: false, WSPR always requires locator)
+	WSPRNetEnabled            bool   `yaml:"wsprnet_enabled"`
+	WSPRNetCallsign           string `yaml:"wsprnet_callsign"` // Optional: if set, use this callsign for WSPRNet instead of receiver_callsign
 
 	// CSV Logging (independent of reporting)
 	SpotsLogEnabled      bool   `yaml:"spots_log_enabled"`       // Enable CSV logging of all spots

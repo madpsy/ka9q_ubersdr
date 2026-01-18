@@ -429,9 +429,23 @@ func (md *MultiDecoder) streamingMonitorLoop(band *DecoderBand) {
 			// Notify callback for websocket broadcasting
 			md.notifyDecode(*decode)
 
-			// Submit to PSKReporter (WSPR requires locator, FT8/FT4/JS8 do not)
+			// Submit to PSKReporter
+			// WSPR always requires locator
+			// FT8/FT4/JS8 require locator only if pskreporter_require_locator is true
 			if md.pskReporter != nil {
-				shouldSubmit := decode.Mode != "WSPR" || decode.Locator != ""
+				shouldSubmit := false
+				if decode.Mode == "WSPR" {
+					// WSPR always requires locator
+					shouldSubmit = decode.Locator != ""
+				} else {
+					// FT8/FT4/JS8: check config option
+					if md.config.PSKReporterRequireLocator {
+						shouldSubmit = decode.Locator != ""
+					} else {
+						shouldSubmit = true
+					}
+				}
+
 				if shouldSubmit {
 					if err := md.pskReporter.Submit(decode); err != nil {
 						log.Printf("Warning: Failed to submit to PSKReporter: %v", err)
@@ -680,10 +694,23 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 				// Notify callback for websocket broadcasting
 				md.notifyDecode(*decode)
 
-				// Submit to PSKReporter (WSPR requires locator, FT8/FT4/JS8 do not)
-				// This matches ka9q_multidecoder behavior which sends FT8/FT4/WSPR to PSKReporter
+				// Submit to PSKReporter
+				// WSPR always requires locator
+				// FT8/FT4/JS8 require locator only if pskreporter_require_locator is true
 				if md.pskReporter != nil {
-					shouldSubmit := decode.Mode != "WSPR" || decode.Locator != ""
+					shouldSubmit := false
+					if decode.Mode == "WSPR" {
+						// WSPR always requires locator
+						shouldSubmit = decode.Locator != ""
+					} else {
+						// FT8/FT4/JS8: check config option
+						if md.config.PSKReporterRequireLocator {
+							shouldSubmit = decode.Locator != ""
+						} else {
+							shouldSubmit = true
+						}
+					}
+
 					if shouldSubmit {
 						if err := md.pskReporter.Submit(decode); err != nil {
 							log.Printf("Warning: Failed to submit to PSKReporter: %v", err)

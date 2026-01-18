@@ -29,10 +29,15 @@ decoder:
   receiver_antenna: "Loop"
 
   # Reporting services
-  pskreporter_enabled: false  # Enable PSKReporter spot reporting
-  wsprnet_enabled: false      # Enable WSPRNet spot reporting
-  wsprnet_callsign: ""        # Optional: Override callsign for WSPRNet (if empty, uses receiver_callsign)
-                              # Use this if you want different callsigns for PSKReporter and WSPRNet
+  pskreporter_enabled: false              # Enable PSKReporter spot reporting
+  pskreporter_require_locator: false      # Require grid locator for digital spots (FT8/FT4/JS8) to PSKReporter
+                                          # false (default): Send all digital spots with or without locator
+                                          # true: Only send digital spots that include a grid locator
+                                          # Note: WSPR always requires locator regardless of this setting
+                                          # Note: CW spots (from CW Skimmer) are always sent without locator
+  wsprnet_enabled: false                  # Enable WSPRNet spot reporting
+  wsprnet_callsign: ""                    # Optional: Override callsign for WSPRNet (if empty, uses receiver_callsign)
+                                          # Use this if you want different callsigns for PSKReporter and WSPRNet
 
   # CSV Logging (independent of reporting services)
   # Logs all decoded spots to CSV files organized by mode/date/band

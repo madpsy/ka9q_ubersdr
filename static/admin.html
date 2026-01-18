@@ -4327,9 +4327,15 @@
 
             const pskReporterField = createConfigField('PSKReporter Enabled', 'checkbox', currentDecoderConfig.pskreporter_enabled || false, 'pskreporter_enabled');
             const pskSmall = document.createElement('small');
-            pskSmall.textContent = 'Report FT8/FT4 spots to PSKReporter';
+            pskSmall.textContent = 'Report FT8/FT4/JS8 spots to PSKReporter';
             pskReporterField.appendChild(pskSmall);
             reportingSection.appendChild(pskReporterField);
+
+            const pskRequireLocatorField = createConfigField('PSKReporter Require Locator', 'checkbox', currentDecoderConfig.pskreporter_require_locator || false, 'pskreporter_require_locator');
+            const pskRequireLocatorSmall = document.createElement('small');
+            pskRequireLocatorSmall.textContent = 'Only send digital spots (FT8/FT4/JS8) with grid locators to PSKReporter (default: false). WSPR always requires locator. CW spots never have locators.';
+            pskRequireLocatorField.appendChild(pskRequireLocatorSmall);
+            reportingSection.appendChild(pskRequireLocatorField);
 
             const wsprNetField = createConfigField('WSPRNet Enabled', 'checkbox', currentDecoderConfig.wsprnet_enabled || false, 'wsprnet_enabled');
             const wsprSmall = document.createElement('small');

@@ -245,7 +245,12 @@ func (h *RotctlAPIHandler) HandleSetPosition(w http.ResponseWriter, r *http.Requ
 
 	// Check authentication
 	if !h.authenticatePostRequest(&req) {
-		http.Error(w, "Unauthorized - invalid password", http.StatusUnauthorized)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Unauthorized - invalid password",
+		})
 		return
 	}
 
@@ -305,7 +310,12 @@ func (h *RotctlAPIHandler) HandleCommand(w http.ResponseWriter, r *http.Request)
 
 	// Check authentication
 	if !h.authenticatePostRequest(&req) {
-		http.Error(w, "Unauthorized - invalid password", http.StatusUnauthorized)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Unauthorized - invalid password",
+		})
 		return
 	}
 

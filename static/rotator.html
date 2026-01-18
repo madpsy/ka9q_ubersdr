@@ -187,9 +187,26 @@
             gap: 10px;
         }
 
+        .azimuth-input-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+
+        .azimuth-input-wrapper::after {
+            content: '°';
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            pointer-events: none;
+            font-size: 14px;
+            color: #fff;
+            opacity: 0.8;
+        }
+
         .azimuth-input-overlay input {
             width: 80px;
-            padding: 10px;
+            padding: 10px 20px 10px 10px;
             font-size: 14px;
             text-align: center;
         }
@@ -538,7 +555,9 @@
             </div>
             
             <div class="azimuth-input-overlay">
-                <input type="number" id="target-azimuth" placeholder="0-360" min="0" max="360" step="1" oninput="this.value = Math.round(this.value)">
+                <div class="azimuth-input-wrapper">
+                    <input type="number" id="target-azimuth" placeholder="0-360" min="0" max="360" step="1" oninput="this.value = Math.round(this.value)">
+                </div>
                 <button onclick="setPosition()">Go</button>
             </div>
             

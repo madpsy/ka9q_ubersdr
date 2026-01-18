@@ -453,7 +453,8 @@
                 const response = await fetch('/api/rotctl/status');
                 const data = await response.json();
                 
-                if (data.error) {
+                // Check if rotctl is disabled (not just an error)
+                if (data.enabled === false) {
                     document.getElementById('connection-status').textContent = 'Disabled';
                     document.getElementById('status-indicator').className = 'status-indicator disconnected';
                     document.getElementById('connection-duration').textContent = '';
@@ -464,6 +465,10 @@
                 let statusText = data.connected ? 'Connected' : 'Disconnected';
                 if (data.read_only) {
                     statusText += ' (Read-Only)';
+                }
+                if (data.error && data.connected) {
+                    // Show error but keep connected status
+                    statusText += ' (Error)';
                 }
                 document.getElementById('connection-status').textContent = statusText;
                 document.getElementById('status-indicator').className = data.connected ? 'status-indicator connected' : 'status-indicator disconnected';

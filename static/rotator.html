@@ -492,7 +492,55 @@
             line-height: 1.5;
         }
 
-        @media (max-width: 600px) {
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            h1 {
+                font-size: 1.8em;
+                margin-bottom: 3px;
+            }
+
+            .subtitle {
+                font-size: 1em;
+                margin-bottom: 10px;
+            }
+
+            .status-bar {
+                padding: 10px;
+                gap: 8px;
+            }
+
+            .status-label {
+                font-size: 0.75em;
+            }
+
+            .status-value {
+                font-size: 1.2em;
+            }
+
+            .map-container {
+                padding: 10px;
+                margin-bottom: 15px;
+            }
+
+            #azimuthal-map {
+                width: 100%;
+                height: auto;
+                max-width: 100vw;
+            }
+
+            /* Reorganize overlays for mobile - stack them below the map */
+            .compass-container {
+                position: relative;
+                top: auto;
+                left: auto;
+                margin: 15px auto;
+                display: flex;
+                justify-content: center;
+            }
+
             .compass {
                 width: 150px;
                 height: 150px;
@@ -511,13 +559,169 @@
                 font-size: 12px;
             }
 
-            h1 {
-                font-size: 2em;
+            .compass-needle {
+                height: 55px;
             }
 
-            #azimuthal-map {
+            /* Move all overlays below the map */
+            .azimuth-input-overlay,
+            .adjustment-overlay,
+            .quick-actions-overlay,
+            .password-overlay {
+                position: relative;
+                top: auto;
+                left: auto;
+                right: auto;
+                bottom: auto;
+                margin: 10px auto;
+                max-width: 100%;
+            }
+
+            .azimuth-input-overlay {
+                flex-direction: row;
+                justify-content: center;
+                align-items: center;
+            }
+
+            .azimuth-input-overlay input {
+                width: 100px;
+                font-size: 16px;
+            }
+
+            .azimuth-input-overlay button {
+                padding: 10px 20px;
+                font-size: 16px;
+            }
+
+            .adjustment-overlay {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 8px;
+                max-width: 300px;
+            }
+
+            .adjustment-overlay button {
+                padding: 12px 8px;
+                font-size: 13px;
+                min-width: auto;
+            }
+
+            .quick-actions-overlay {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+                max-width: 300px;
+            }
+
+            .quick-actions-overlay button {
+                padding: 12px 16px;
+                font-size: 14px;
+                white-space: normal;
+            }
+
+            .quick-actions-row {
+                grid-column: 1 / -1;
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+            }
+
+            .password-overlay {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 5px;
+            }
+
+            .password-overlay input {
                 width: 100%;
-                height: auto;
+                max-width: 300px;
+                font-size: 16px;
+            }
+
+            button {
+                font-size: 15px;
+                padding: 12px 20px;
+            }
+
+            input[type="number"], input[type="password"] {
+                font-size: 16px;
+            }
+
+            .map-tooltip {
+                font-size: 11px;
+                padding: 6px 10px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            h1 {
+                font-size: 1.5em;
+            }
+
+            .subtitle {
+                font-size: 0.9em;
+            }
+
+            .status-bar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .status-item {
+                flex-direction: row;
+                justify-content: space-between;
+                padding: 8px 0;
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+            }
+
+            .status-item:last-child {
+                border-bottom: none;
+            }
+
+            .status-label {
+                text-align: left;
+                margin-bottom: 0;
+            }
+
+            .status-value {
+                text-align: right;
+                font-size: 1.1em;
+            }
+
+            .compass {
+                width: 130px;
+                height: 130px;
+            }
+
+            .compass-tick {
+                transform-origin: 50% 60px;
+            }
+
+            .compass-label {
+                transform-origin: 50% 45px;
+                font-size: 9px;
+            }
+
+            .compass-label.cardinal {
+                font-size: 11px;
+            }
+
+            .compass-needle {
+                height: 50px;
+            }
+
+            .adjustment-overlay {
+                grid-template-columns: repeat(2, 1fr);
+                max-width: 250px;
+            }
+
+            .quick-actions-overlay {
+                max-width: 250px;
+            }
+
+            .password-overlay input {
+                max-width: 250px;
             }
         }
     </style>
@@ -712,12 +916,18 @@
             receiverLat = centerLat;
             receiverLon = centerLon;
             
-            const width = 800;
-            const height = 800;
+            // Calculate responsive size
+            const container = document.querySelector('.container');
+            const containerWidth = container.offsetWidth;
+            const maxSize = Math.min(containerWidth - 40, 800); // 40px for padding
+            const width = maxSize;
+            const height = maxSize;
             
             svg = d3.select("#azimuthal-map")
                 .attr("width", width)
-                .attr("height", height);
+                .attr("height", height)
+                .attr("viewBox", `0 0 ${width} ${height}`)
+                .attr("preserveAspectRatio", "xMidYMid meet");
             
             // Create azimuthal equidistant projection centered on receiver
             projection = d3.geoAzimuthalEquidistant()
@@ -905,8 +1115,10 @@
         function updateAzimuthLineOnMap(azimuth) {
             if (!svg || !projection || !receiverLat || !receiverLon) return;
             
-            const width = 800;
-            const height = 800;
+            // Get current SVG dimensions
+            const svgElement = document.getElementById('azimuthal-map');
+            const width = parseFloat(svgElement.getAttribute('width'));
+            const height = parseFloat(svgElement.getAttribute('height'));
             const centerX = width / 2;
             const centerY = height / 2;
             

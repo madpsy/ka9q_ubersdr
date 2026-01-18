@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rotator Control - UberSDR</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://d3js.org/d3-geo.v3.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/topojson@3"></script>
     <style>
         * {
             margin: 0;
@@ -89,21 +92,185 @@
             box-shadow: 0 0 10px #f44336;
         }
 
-        .compass-container {
+        .map-container {
             background: rgba(255,255,255,0.1);
             backdrop-filter: blur(10px);
             border-radius: 20px;
-            padding: 30px;
+            padding: 0;
             margin-bottom: 20px;
             display: flex;
-            justify-content: center;
+            flex-direction: column;
             align-items: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #azimuthal-map {
+            background: #1a252f;
+            border-radius: 10px;
+            display: block;
+        }
+
+        .country {
+            fill: #2c3e50;
+            stroke: #4a5f7f;
+            stroke-width: 0.5;
+        }
+
+        .graticule {
+            fill: none;
+            stroke: rgba(255,255,255,0.1);
+            stroke-width: 0.5;
+        }
+
+        .azimuth-line {
+            stroke: #4CAF50;
+            stroke-width: 2;
+            fill: none;
+            stroke-linecap: round;
+        }
+
+        .beam-cone {
+            fill: rgba(76, 175, 80, 0.2);
+            stroke: #4CAF50;
+            stroke-width: 2;
+        }
+
+        .distance-circle {
+            fill: none;
+            stroke: rgba(255,255,255,0.2);
+            stroke-width: 1;
+            stroke-dasharray: 2,2;
+        }
+
+        .distance-label {
+            fill: rgba(255,255,255,0.5);
+            font-size: 10px;
+            text-anchor: middle;
+        }
+
+        .compass-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+        }
+
+        .quick-actions-overlay {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .quick-actions-overlay button {
+            padding: 10px 20px;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+
+        .quick-actions-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .azimuth-input-overlay {
+            position: absolute;
+            top: 20px;
+            right: 390px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .azimuth-input-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+
+        .azimuth-input-wrapper::after {
+            content: '°';
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            pointer-events: none;
+            font-size: 14px;
+            color: #fff;
+            opacity: 0.8;
+        }
+
+        .azimuth-input-overlay input {
+            width: 80px;
+            padding: 10px 20px 10px 10px;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .azimuth-input-overlay button {
+            padding: 10px 16px;
+            font-size: 14px;
+        }
+
+        .adjustment-overlay {
+            position: absolute;
+            top: 20px;
+            right: 240px;
+            z-index: 100;
+            display: grid;
+            grid-template-columns: auto auto;
+            gap: 10px;
+        }
+
+        .adjustment-overlay button {
+            padding: 10px 16px;
+            font-size: 14px;
+            min-width: 60px;
+        }
+
+        .password-overlay {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .password-overlay label {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .password-overlay input {
+            width: 200px;
+            padding: 10px;
+            font-size: 14px;
+        }
+
+        .map-tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            pointer-events: none;
+            z-index: 1000;
+            white-space: nowrap;
+            display: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
         }
 
         .compass {
             position: relative;
-            width: 400px;
-            height: 400px;
+            width: 200px;
+            height: 200px;
             border-radius: 50%;
             background: radial-gradient(circle, #2c3e50 0%, #1a252f 100%);
             box-shadow: 0 10px 40px rgba(0,0,0,0.5), inset 0 0 20px rgba(0,0,0,0.3);
@@ -119,60 +286,60 @@
 
         .compass-tick {
             position: absolute;
-            width: 2px;
-            height: 15px;
+            width: 1px;
+            height: 8px;
             background: rgba(255,255,255,0.5);
             left: 50%;
-            top: 10px;
-            transform-origin: 50% 190px;
+            top: 5px;
+            transform-origin: 50% 95px;
         }
 
         .compass-tick.major {
-            height: 25px;
-            width: 3px;
+            height: 12px;
+            width: 2px;
             background: rgba(255,255,255,0.8);
         }
 
         .compass-label {
             position: absolute;
             left: 50%;
-            top: 40px;
+            top: 20px;
             transform: translateX(-50%);
-            font-size: 18px;
+            font-size: 12px;
             font-weight: bold;
             color: #fff;
-            transform-origin: 50% 160px;
+            transform-origin: 50% 80px;
         }
 
         .compass-label.cardinal {
-            font-size: 24px;
+            font-size: 14px;
             color: #4CAF50;
         }
 
         .compass-center {
             position: absolute;
-            width: 20px;
-            height: 20px;
+            width: 10px;
+            height: 10px;
             background: #4CAF50;
             border-radius: 50%;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            box-shadow: 0 0 20px #4CAF50;
+            box-shadow: 0 0 10px #4CAF50;
             z-index: 10;
         }
 
         .compass-needle {
             position: absolute;
-            width: 6px;
-            height: 140px;
+            width: 3px;
+            height: 70px;
             background: linear-gradient(to bottom, #ff4444 0%, #ff4444 50%, #fff 50%, #fff 100%);
             left: 50%;
             top: 50%;
             transform-origin: 50% 50%;
             transform: translate(-50%, -50%) rotate(0deg);
-            border-radius: 3px;
-            box-shadow: 0 0 10px rgba(255,68,68,0.5);
+            border-radius: 2px;
+            box-shadow: 0 0 5px rgba(255,68,68,0.5);
             transition: transform 0.5s ease-out;
             z-index: 5;
         }
@@ -182,36 +349,12 @@
             position: absolute;
             width: 0;
             height: 0;
-            border-left: 8px solid transparent;
-            border-right: 8px solid transparent;
-            border-bottom: 20px solid #ff4444;
-            top: -20px;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-bottom: 10px solid #ff4444;
+            top: -10px;
             left: 50%;
             transform: translateX(-50%);
-        }
-
-        .controls {
-            background: rgba(255,255,255,0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-
-        .control-group {
-            margin-bottom: 20px;
-        }
-
-        .control-group label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 500;
-        }
-
-        .control-row {
-            display: flex;
-            gap: 10px;
-            align-items: center;
         }
 
         input[type="number"], input[type="password"] {
@@ -351,20 +494,30 @@
 
         @media (max-width: 600px) {
             .compass {
-                width: 300px;
-                height: 300px;
+                width: 150px;
+                height: 150px;
             }
 
             .compass-tick {
-                transform-origin: 50% 140px;
+                transform-origin: 50% 70px;
             }
 
             .compass-label {
-                transform-origin: 50% 110px;
+                transform-origin: 50% 55px;
+                font-size: 10px;
+            }
+
+            .compass-label.cardinal {
+                font-size: 12px;
             }
 
             h1 {
                 font-size: 2em;
+            }
+
+            #azimuthal-map {
+                width: 100%;
+                height: auto;
             }
         }
     </style>
@@ -388,6 +541,9 @@
             <div class="status-item">
                 <div class="status-label">Receiver Location</div>
                 <div class="status-value" style="font-size: 1.1em;" id="receiver-location">Loading...</div>
+                <div class="status-label" style="font-size: 0.8em; margin-top: 5px;">
+                    <span id="receiver-location-name"></span>
+                </div>
             </div>
             <div class="status-item">
                 <div class="status-label">Azimuth</div>
@@ -404,56 +560,62 @@
             <p id="error-message"></p>
         </div>
 
-        <div class="compass-container">
-            <div class="compass" id="compass">
-                <div class="compass-ring" id="compass-ring"></div>
-                <div class="compass-needle" id="needle"></div>
-                <div class="compass-center"></div>
-            </div>
-        </div>
-
-        <div class="controls">
-            <div class="control-group">
-                <label>Set Azimuth</label>
-                <div class="control-row">
-                    <input type="number" id="target-azimuth" placeholder="Azimuth (0-360)" min="0" max="360" step="1" oninput="this.value = Math.round(this.value)">
-                    <button onclick="setPosition()">Go</button>
-                </div>
-                <div class="increment-buttons">
-                    <button onclick="adjustAzimuth(-30)">-30°</button>
-                    <button onclick="adjustAzimuth(-10)">-10°</button>
-                    <button onclick="adjustAzimuth(-5)">-5°</button>
-                    <span class="label">Adjust</span>
-                    <button onclick="adjustAzimuth(5)">+5°</button>
-                    <button onclick="adjustAzimuth(10)">+10°</button>
-                    <button onclick="adjustAzimuth(30)">+30°</button>
+        <div class="map-container">
+            <svg id="azimuthal-map" width="800" height="800"></svg>
+            
+            <div class="compass-container">
+                <div class="compass" id="compass">
+                    <div class="compass-ring" id="compass-ring"></div>
+                    <div class="compass-needle" id="needle"></div>
+                    <div class="compass-center"></div>
                 </div>
             </div>
-
-            <div class="control-group">
-                <label>Quick Actions</label>
-                <div class="button-group">
-                    <button onclick="setAzimuth(0)">North (0°)</button>
-                    <button onclick="setAzimuth(90)">East (90°)</button>
-                    <button onclick="setAzimuth(180)">South (180°)</button>
-                    <button onclick="setAzimuth(270)">West (270°)</button>
+            
+            <div class="azimuth-input-overlay">
+                <div class="azimuth-input-wrapper">
+                    <input type="number" id="target-azimuth" placeholder="0-360" min="0" max="360" step="1" oninput="this.value = Math.round(this.value)">
+                </div>
+                <button onclick="setPosition()">Go</button>
+            </div>
+            
+            <div class="adjustment-overlay">
+                <button onclick="adjustAzimuth(-30)">-30°</button>
+                <button onclick="adjustAzimuth(30)">+30°</button>
+                <button onclick="adjustAzimuth(-10)">-10°</button>
+                <button onclick="adjustAzimuth(10)">+10°</button>
+                <button onclick="adjustAzimuth(-5)">-5°</button>
+                <button onclick="adjustAzimuth(5)">+5°</button>
+            </div>
+            
+            <div class="quick-actions-overlay">
+                <button onclick="setAzimuth(0)">North (0°)</button>
+                <button onclick="setAzimuth(90)">East (90°)</button>
+                <button onclick="setAzimuth(180)">South (180°)</button>
+                <button onclick="setAzimuth(270)">West (270°)</button>
+                <div class="quick-actions-row">
                     <button class="danger" onclick="stopRotator()">⏹ Stop</button>
                     <button onclick="parkRotator()">🅿 Park</button>
                 </div>
             </div>
-
-            <div class="control-group">
-                <label for="password">Password (required for control)</label>
-                <input type="password" id="password" placeholder="Enter rotator control password">
+            
+            <div class="password-overlay">
+                <input type="password" id="password" placeholder="Enter password">
             </div>
-
-            <div class="message" id="message"></div>
+            
+            <div class="map-tooltip" id="map-tooltip"></div>
         </div>
+
+        <div class="message" id="message"></div>
     </div>
 
     <script>
         let savedPassword = localStorage.getItem('rotctl_password') || '';
         let updateInterval = null;
+        
+        // Azimuthal map variables
+        let svg, projection, path, azimuthLineElement, beamConeElement;
+        let receiverLat, receiverLon;
+        const beamWidth = 90; // degrees
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
@@ -480,7 +642,28 @@
                     setPosition();
                 }
             });
+            
+            // Add password input handler to enable/disable buttons
+            document.getElementById('password').addEventListener('input', updateButtonStates);
+            
+            // Initial button state check
+            updateButtonStates();
         });
+
+        function updateButtonStates() {
+            const password = document.getElementById('password').value;
+            const hasPassword = password.length > 0;
+            
+            // Get all control buttons
+            const goButton = document.querySelector('button[onclick="setPosition()"]');
+            const adjustButtons = document.querySelectorAll('.adjustment-overlay button');
+            const quickActionButtons = document.querySelectorAll('.quick-actions-overlay button');
+            
+            // Enable/disable based on password
+            if (goButton) goButton.disabled = !hasPassword;
+            adjustButtons.forEach(btn => btn.disabled = !hasPassword);
+            quickActionButtons.forEach(btn => btn.disabled = !hasPassword);
+        }
 
         async function fetchReceiverLocation() {
             try {
@@ -507,6 +690,14 @@
                     const lat = data.receiver.gps.lat.toFixed(4);
                     const lon = data.receiver.gps.lon.toFixed(4);
                     document.getElementById('receiver-location').textContent = `${lat}, ${lon}`;
+                    
+                    // Update location name if available
+                    if (data.receiver.location) {
+                        document.getElementById('receiver-location-name').textContent = data.receiver.location;
+                    }
+                    
+                    // Initialize azimuthal map with receiver location
+                    initializeAzimuthalMap(data.receiver.gps.lat, data.receiver.gps.lon);
                 } else {
                     document.getElementById('receiver-location').textContent = 'N/A';
                 }
@@ -515,6 +706,272 @@
                 document.getElementById('receiver-location').textContent = 'Error';
                 document.getElementById('subtitle').textContent = '';
             }
+        }
+
+        async function initializeAzimuthalMap(centerLat, centerLon) {
+            receiverLat = centerLat;
+            receiverLon = centerLon;
+            
+            const width = 800;
+            const height = 800;
+            
+            svg = d3.select("#azimuthal-map")
+                .attr("width", width)
+                .attr("height", height);
+            
+            // Create azimuthal equidistant projection centered on receiver
+            projection = d3.geoAzimuthalEquidistant()
+                .center([centerLon, centerLat])
+                .scale(width / 2 / Math.PI * 0.9)
+                .translate([width / 2, height / 2])
+                .clipAngle(180);
+            
+            path = d3.geoPath().projection(projection);
+            
+            // Draw graticule (grid lines)
+            const graticule = d3.geoGraticule();
+            svg.append("path")
+                .datum(graticule)
+                .attr("class", "graticule")
+                .attr("d", path);
+            
+            // Draw distance circles (every 2000km)
+            drawDistanceCircles(centerLat, centerLon);
+            
+            // Load and draw world map
+            try {
+                const response = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
+                const world = await response.json();
+                const countries = topojson.feature(world, world.objects.countries);
+                
+                svg.append("g")
+                    .selectAll("path")
+                    .data(countries.features)
+                    .enter().append("path")
+                    .attr("class", "country")
+                    .attr("d", path);
+            } catch (error) {
+                console.error('Failed to load world map:', error);
+            }
+            
+            // Draw center point (receiver location)
+            svg.append("circle")
+                .attr("cx", width / 2)
+                .attr("cy", height / 2)
+                .attr("r", 6)
+                .attr("fill", "#ff4444")
+                .attr("stroke", "#fff")
+                .attr("stroke-width", 2);
+            
+            // Create beam cone element (will be a path showing the beamwidth)
+            beamConeElement = svg.append("path")
+                .attr("class", "beam-cone");
+            
+            // Create center azimuth line element
+            azimuthLineElement = svg.append("line")
+                .attr("class", "azimuth-line")
+                .attr("x1", width / 2)
+                .attr("y1", height / 2);
+            
+            // Add click handler to map
+            svg.on("click", handleMapClick);
+            
+            // Add mouse move handler for tooltip
+            svg.on("mousemove", handleMapMouseMove);
+            svg.on("mouseleave", handleMapMouseLeave);
+        }
+
+        function handleMapMouseMove(event) {
+            if (!projection || !receiverLat || !receiverLon) return;
+            
+            const tooltip = document.getElementById('map-tooltip');
+            const [mouseX, mouseY] = d3.pointer(event);
+            const coords = projection.invert([mouseX, mouseY]);
+            
+            if (!coords) {
+                tooltip.style.display = 'none';
+                return;
+            }
+            
+            const [clickLon, clickLat] = coords;
+            
+            // Calculate bearing and distance
+            const bearing = calculateBearing(receiverLat, receiverLon, clickLat, clickLon);
+            const distance = calculateDistance(receiverLat, receiverLon, clickLat, clickLon);
+            
+            // Update tooltip content
+            tooltip.textContent = `${Math.round(bearing)}° | ${distance.toLocaleString()} km`;
+            tooltip.style.display = 'block';
+            
+            // Position tooltip near cursor (offset to avoid covering the point)
+            const mapContainer = document.querySelector('.map-container');
+            const rect = mapContainer.getBoundingClientRect();
+            tooltip.style.left = (event.clientX - rect.left + 15) + 'px';
+            tooltip.style.top = (event.clientY - rect.top + 15) + 'px';
+        }
+
+        function handleMapMouseLeave() {
+            const tooltip = document.getElementById('map-tooltip');
+            tooltip.style.display = 'none';
+        }
+
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Earth radius in km
+            const φ1 = lat1 * Math.PI / 180;
+            const φ2 = lat2 * Math.PI / 180;
+            const Δφ = (lat2 - lat1) * Math.PI / 180;
+            const Δλ = (lon2 - lon1) * Math.PI / 180;
+            
+            const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                      Math.cos(φ1) * Math.cos(φ2) *
+                      Math.sin(Δλ/2) * Math.sin(Δλ/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            
+            return Math.round(R * c);
+        }
+
+        function handleMapClick(event) {
+            if (!projection || !receiverLat || !receiverLon) return;
+            
+            const [mouseX, mouseY] = d3.pointer(event);
+            const coords = projection.invert([mouseX, mouseY]);
+            
+            if (!coords) return;
+            
+            const [clickLon, clickLat] = coords;
+            
+            // Calculate bearing from receiver to clicked point
+            const bearing = calculateBearing(receiverLat, receiverLon, clickLat, clickLon);
+            const roundedBearing = Math.round(bearing);
+            
+            // Set the azimuth input
+            document.getElementById('target-azimuth').value = roundedBearing;
+            
+            // Check if password is entered
+            const password = document.getElementById('password').value;
+            if (password) {
+                // Automatically send the command
+                setAzimuth(roundedBearing);
+            } else {
+                // Show message to enter password
+                showMessage(`Map clicked: bearing ${roundedBearing}°. Enter password and click "Go" to move rotator.`, 'success');
+            }
+        }
+
+        function calculateBearing(lat1, lon1, lat2, lon2) {
+            const φ1 = lat1 * Math.PI / 180;
+            const φ2 = lat2 * Math.PI / 180;
+            const Δλ = (lon2 - lon1) * Math.PI / 180;
+            
+            const y = Math.sin(Δλ) * Math.cos(φ2);
+            const x = Math.cos(φ1) * Math.sin(φ2) -
+                      Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+            
+            let bearing = Math.atan2(y, x) * 180 / Math.PI;
+            
+            // Normalize to 0-360
+            bearing = (bearing + 360) % 360;
+            
+            return bearing;
+        }
+
+        function drawDistanceCircles(centerLat, centerLon) {
+            const distances = [2000, 4000, 6000, 8000, 10000, 12000]; // km
+            
+            distances.forEach(distance => {
+                const circle = d3.geoCircle()
+                    .center([centerLon, centerLat])
+                    .radius(distance / 111.32); // Convert km to degrees (approximate)
+                
+                svg.append("path")
+                    .datum(circle())
+                    .attr("class", "distance-circle")
+                    .attr("d", path);
+                
+                // Add distance label at top (0 degrees)
+                const labelPoint = calculateDestinationPoint(centerLat, centerLon, 0, distance);
+                const projected = projection([labelPoint[1], labelPoint[0]]);
+                
+                if (projected) {
+                    svg.append("text")
+                        .attr("class", "distance-label")
+                        .attr("x", projected[0])
+                        .attr("y", projected[1] - 5)
+                        .text(distance + " km");
+                }
+            });
+        }
+
+        function updateAzimuthLineOnMap(azimuth) {
+            if (!svg || !projection || !receiverLat || !receiverLon) return;
+            
+            const width = 800;
+            const height = 800;
+            const centerX = width / 2;
+            const centerY = height / 2;
+            
+            // Calculate endpoint at edge of map (use large distance)
+            const distance = 15000; // km
+            const endpoint = calculateDestinationPoint(receiverLat, receiverLon, azimuth, distance);
+            const projected = projection([endpoint[1], endpoint[0]]);
+            
+            // Update center line
+            if (projected && azimuthLineElement) {
+                azimuthLineElement
+                    .attr("x2", projected[0])
+                    .attr("y2", projected[1]);
+            }
+            
+            // Draw beam cone as a simple wedge (±2.5 degrees from center)
+            if (beamConeElement) {
+                const halfBeam = beamWidth / 2;
+                const leftBearing = azimuth - halfBeam;
+                const rightBearing = azimuth + halfBeam;
+                
+                // Calculate the two edge endpoints
+                const leftEndpoint = calculateDestinationPoint(receiverLat, receiverLon, leftBearing, distance);
+                const rightEndpoint = calculateDestinationPoint(receiverLat, receiverLon, rightBearing, distance);
+                
+                const leftProj = projection([leftEndpoint[1], leftEndpoint[0]]);
+                const rightProj = projection([rightEndpoint[1], rightEndpoint[0]]);
+                
+                if (leftProj && rightProj) {
+                    // Create a simple wedge: center -> left edge -> arc -> right edge -> back to center
+                    // For simplicity, we'll create points along the arc at the far end
+                    const arcPoints = [];
+                    const numArcPoints = 30;
+                    
+                    for (let i = 0; i <= numArcPoints; i++) {
+                        const bearing = leftBearing + (rightBearing - leftBearing) * (i / numArcPoints);
+                        const point = calculateDestinationPoint(receiverLat, receiverLon, bearing, distance);
+                        const proj = projection([point[1], point[0]]);
+                        if (proj) arcPoints.push(proj);
+                    }
+                    
+                    // Build path: start at center, go to left edge, follow arc, come back to center
+                    let pathData = `M ${centerX},${centerY} L ${leftProj[0]},${leftProj[1]}`;
+                    arcPoints.forEach(p => {
+                        pathData += ` L ${p[0]},${p[1]}`;
+                    });
+                    pathData += ` Z`;
+                    
+                    beamConeElement.attr("d", pathData);
+                }
+            }
+        }
+
+        function calculateDestinationPoint(lat, lon, bearing, distance) {
+            const R = 6371; // Earth radius in km
+            const lat1 = lat * Math.PI / 180;
+            const lon1 = lon * Math.PI / 180;
+            const brng = bearing * Math.PI / 180;
+            
+            const lat2 = Math.asin(Math.sin(lat1) * Math.cos(distance/R) +
+                                   Math.cos(lat1) * Math.sin(distance/R) * Math.cos(brng));
+            const lon2 = lon1 + Math.atan2(Math.sin(brng) * Math.sin(distance/R) * Math.cos(lat1),
+                                            Math.cos(distance/R) - Math.sin(lat1) * Math.sin(lat2));
+            
+            return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
         }
 
         function createCompass() {
@@ -625,6 +1082,9 @@
                 // Update needle
                 const needle = document.getElementById('needle');
                 needle.style.transform = `translate(-50%, -50%) rotate(${azimuth}deg)`;
+                
+                // Update azimuth line on map
+                updateAzimuthLineOnMap(azimuth);
                 
             } catch (error) {
                 console.error('Failed to update position:', error);

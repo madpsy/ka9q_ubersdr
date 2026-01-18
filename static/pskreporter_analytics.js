@@ -32,6 +32,25 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('load-countries-btn').addEventListener('click', loadCountries);
     document.getElementById('clear-filters-btn').addEventListener('click', clearFilters);
 
+    // Add Enter key listener to input fields
+    document.getElementById('callsign-search').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            loadAnalytics();
+        }
+    });
+    
+    document.getElementById('country-search').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            loadAnalytics();
+        }
+    });
+
+    // Add change listeners to dropdowns
+    document.getElementById('hours-select').addEventListener('change', loadAnalytics);
+    document.getElementById('mode-select').addEventListener('change', loadAnalytics);
+    document.getElementById('band-select').addEventListener('change', loadAnalytics);
+    document.getElementById('locator-filter').addEventListener('change', loadAnalytics);
+
     // Load receiver name
     loadReceiverName();
 

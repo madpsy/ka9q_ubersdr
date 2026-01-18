@@ -421,6 +421,9 @@ function displayCountries(data) {
         return;
     }
 
+    // Get country filter
+    const countryFilter = document.getElementById('country-search').value.trim().toLowerCase();
+
     // Calculate statistics
     const allCountries = new Set();
     const countriesByMode = {};
@@ -431,6 +434,11 @@ function displayCountries(data) {
         Object.keys(modes).forEach(mode => {
             const countries = modes[mode];
             countries.forEach(country => {
+                // Apply country filter
+                if (countryFilter && !country.toLowerCase().includes(countryFilter)) {
+                    return;
+                }
+                
                 allCountries.add(country);
 
                 if (!countriesByMode[mode]) {
@@ -491,7 +499,16 @@ function displayCountries(data) {
         html += `<h3 style="margin-bottom: 15px; color: #ffffff;">📻 ${escapeHtml(band)}</h3>`;
 
         modeNames.forEach(mode => {
-            const countries = modes[mode];
+            const allCountries = modes[mode];
+            // Apply country filter
+            const countries = allCountries.filter(country => {
+                if (!countryFilter) return true;
+                return country.toLowerCase().includes(countryFilter);
+            });
+            
+            // Skip if no countries match the filter
+            if (countries.length === 0) return;
+            
             countries.sort();
 
             html += `

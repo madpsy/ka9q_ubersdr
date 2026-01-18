@@ -541,6 +541,9 @@
             <div class="status-item">
                 <div class="status-label">Receiver Location</div>
                 <div class="status-value" style="font-size: 1.1em;" id="receiver-location">Loading...</div>
+                <div class="status-label" style="font-size: 0.8em; margin-top: 5px;">
+                    <span id="receiver-location-name"></span>
+                </div>
             </div>
             <div class="status-item">
                 <div class="status-label">Azimuth</div>
@@ -687,6 +690,11 @@
                     const lat = data.receiver.gps.lat.toFixed(4);
                     const lon = data.receiver.gps.lon.toFixed(4);
                     document.getElementById('receiver-location').textContent = `${lat}, ${lon}`;
+                    
+                    // Update location name if available
+                    if (data.receiver.location) {
+                        document.getElementById('receiver-location-name').textContent = data.receiver.location;
+                    }
                     
                     // Initialize azimuthal map with receiver location
                     initializeAzimuthalMap(data.receiver.gps.lat, data.receiver.gps.lon);

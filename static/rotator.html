@@ -177,6 +177,22 @@
             gap: 10px;
         }
 
+        .adjustment-overlay {
+            position: absolute;
+            top: 20px;
+            right: 240px;
+            z-index: 100;
+            display: grid;
+            grid-template-columns: auto auto;
+            gap: 10px;
+        }
+
+        .adjustment-overlay button {
+            padding: 10px 16px;
+            font-size: 14px;
+            min-width: 60px;
+        }
+
         .compass {
             position: relative;
             width: 200px;
@@ -502,6 +518,15 @@
                 </div>
             </div>
             
+            <div class="adjustment-overlay">
+                <button onclick="adjustAzimuth(-30)">-30°</button>
+                <button onclick="adjustAzimuth(30)">+30°</button>
+                <button onclick="adjustAzimuth(-10)">-10°</button>
+                <button onclick="adjustAzimuth(10)">+10°</button>
+                <button onclick="adjustAzimuth(-5)">-5°</button>
+                <button onclick="adjustAzimuth(5)">+5°</button>
+            </div>
+            
             <div class="quick-actions-overlay">
                 <button onclick="setAzimuth(0)">North (0°)</button>
                 <button onclick="setAzimuth(90)">East (90°)</button>
@@ -520,15 +545,6 @@
                 <div class="control-row">
                     <input type="number" id="target-azimuth" placeholder="Azimuth (0-360)" min="0" max="360" step="1" oninput="this.value = Math.round(this.value)">
                     <button onclick="setPosition()">Go</button>
-                </div>
-                <div class="increment-buttons">
-                    <button onclick="adjustAzimuth(-30)">-30°</button>
-                    <button onclick="adjustAzimuth(-10)">-10°</button>
-                    <button onclick="adjustAzimuth(-5)">-5°</button>
-                    <span class="label">Adjust</span>
-                    <button onclick="adjustAzimuth(5)">+5°</button>
-                    <button onclick="adjustAzimuth(10)">+10°</button>
-                    <button onclick="adjustAzimuth(30)">+30°</button>
                 </div>
             </div>
 

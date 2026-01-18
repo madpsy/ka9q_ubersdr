@@ -94,7 +94,7 @@ func NewWSPRNet(callsign, locator, programName, programVersion string) (*WSPRNet
 		programName:      programName,
 		programVersion:   programVersion,
 		httpClient: &http.Client{
-			Timeout:   3 * time.Second,
+			Timeout:   10 * time.Second,
 			Transport: transport,
 		},
 		reportQueue: make([]WSPRReport, 0, WSPRMaxQueueSize),
@@ -265,7 +265,10 @@ func (w *WSPRNet) sendReport(report *WSPRReport) bool {
 	// Send request using shared client for connection reuse
 	resp, err := w.httpClient.Do(req)
 	if err != nil {
-		log.Printf("WSPRNet: Failed to send request: %v", err)
+		// Don't log timeout errors as they're common and will be retried
+		if !strings.Contains(err.Error(), "context deadline exceeded") {
+			log.Printf("WSPRNet: Failed to send request: %v", err)
+		}
 		return false
 	}
 	defer resp.Body.Close()

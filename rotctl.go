@@ -499,9 +499,11 @@ type RotatorState struct {
 
 // RotatorController manages rotator state and provides thread-safe access
 type RotatorController struct {
-	client *RotctlClient
-	state  *RotatorState
-	mu     sync.RWMutex
+	client        *RotctlClient
+	state         *RotatorState
+	mu            sync.RWMutex
+	targetPos     *Position
+	movingUntil   time.Time
 }
 
 // NewRotatorController creates a new rotator controller
@@ -542,6 +544,31 @@ func (rc *RotatorController) UpdateState() error {
 	rc.state.LastError = nil
 	rc.state.UpdatedAt = time.Now()
 
+	// Check if we're still moving based on time or position difference
+	now := time.Now()
+	if now.Before(rc.movingUntil) {
+		rc.state.Moving = true
+	} else if rc.targetPos != nil {
+		// Check if we've reached the target (within 1 degree tolerance)
+		azDiff := rc.targetPos.Azimuth - pos.Azimuth
+		elDiff := rc.targetPos.Elevation - pos.Elevation
+		if azDiff < 0 {
+			azDiff = -azDiff
+		}
+		if elDiff < 0 {
+			elDiff = -elDiff
+		}
+		
+		if azDiff > 1.0 || elDiff > 1.0 {
+			rc.state.Moving = true
+		} else {
+			rc.state.Moving = false
+			rc.targetPos = nil
+		}
+	} else {
+		rc.state.Moving = false
+	}
+
 	return nil
 }
 
@@ -562,14 +589,17 @@ func (rc *RotatorController) GetState() RotatorState {
 func (rc *RotatorController) SetPosition(azimuth, elevation float64) error {
 	rc.mu.Lock()
 	rc.state.Moving = true
+	rc.targetPos = &Position{Azimuth: azimuth, Elevation: elevation}
+	rc.movingUntil = time.Now().Add(2 * time.Second) // Assume moving for at least 2 seconds
 	rc.mu.Unlock()
 
 	err := rc.client.SetPosition(azimuth, elevation)
 
 	rc.mu.Lock()
-	rc.state.Moving = false
 	if err != nil {
 		rc.state.LastError = err
+		rc.state.Moving = false
+		rc.targetPos = nil
 	}
 	rc.mu.Unlock()
 
@@ -578,16 +608,24 @@ func (rc *RotatorController) SetPosition(azimuth, elevation float64) error {
 
 // SetAzimuth sets only the azimuth
 func (rc *RotatorController) SetAzimuth(azimuth float64) error {
+	// Get current elevation for target position
+	rc.mu.RLock()
+	currentEl := rc.state.Position.Elevation
+	rc.mu.RUnlock()
+
 	rc.mu.Lock()
 	rc.state.Moving = true
+	rc.targetPos = &Position{Azimuth: azimuth, Elevation: currentEl}
+	rc.movingUntil = time.Now().Add(2 * time.Second) // Assume moving for at least 2 seconds
 	rc.mu.Unlock()
 
 	err := rc.client.SetAzimuth(azimuth)
 
 	rc.mu.Lock()
-	rc.state.Moving = false
 	if err != nil {
 		rc.state.LastError = err
+		rc.state.Moving = false
+		rc.targetPos = nil
 	}
 	rc.mu.Unlock()
 
@@ -596,16 +634,24 @@ func (rc *RotatorController) SetAzimuth(azimuth float64) error {
 
 // SetElevation sets only the elevation
 func (rc *RotatorController) SetElevation(elevation float64) error {
+	// Get current azimuth for target position
+	rc.mu.RLock()
+	currentAz := rc.state.Position.Azimuth
+	rc.mu.RUnlock()
+
 	rc.mu.Lock()
 	rc.state.Moving = true
+	rc.targetPos = &Position{Azimuth: currentAz, Elevation: elevation}
+	rc.movingUntil = time.Now().Add(2 * time.Second) // Assume moving for at least 2 seconds
 	rc.mu.Unlock()
 
 	err := rc.client.SetElevation(elevation)
 
 	rc.mu.Lock()
-	rc.state.Moving = false
 	if err != nil {
 		rc.state.LastError = err
+		rc.state.Moving = false
+		rc.targetPos = nil
 	}
 	rc.mu.Unlock()
 

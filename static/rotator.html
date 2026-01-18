@@ -29,9 +29,17 @@
 
         h1 {
             text-align: center;
-            margin-bottom: 10px;
+            margin-bottom: 5px;
             font-size: 2.5em;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .subtitle {
+            text-align: center;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+            opacity: 0.9;
+            font-weight: 300;
         }
 
         .status-bar {
@@ -364,6 +372,7 @@
 <body>
     <div class="container">
         <h1>🛰️ Rotator Control</h1>
+        <div class="subtitle" id="subtitle">Loading...</div>
         
         <div class="status-bar">
             <div class="status-item">
@@ -405,11 +414,6 @@
 
         <div class="controls">
             <div class="control-group">
-                <label for="password">Password (required for control)</label>
-                <input type="password" id="password" placeholder="Enter rotator control password">
-            </div>
-
-            <div class="control-group">
                 <label>Set Azimuth</label>
                 <div class="control-row">
                     <input type="number" id="target-azimuth" placeholder="Azimuth (0-360)" min="0" max="360" step="1">
@@ -436,6 +440,11 @@
                     <button class="danger" onclick="stopRotator()">⏹ Stop</button>
                     <button onclick="parkRotator()">🅿 Park</button>
                 </div>
+            </div>
+
+            <div class="control-group">
+                <label for="password">Password (required for control)</label>
+                <input type="password" id="password" placeholder="Enter rotator control password">
             </div>
 
             <div class="message" id="message"></div>
@@ -478,6 +487,22 @@
                 const response = await fetch('/api/description');
                 const data = await response.json();
                 
+                // Update subtitle with callsign and name
+                if (data.receiver) {
+                    const callsign = data.receiver.callsign || '';
+                    const name = data.receiver.name || '';
+                    if (callsign && name) {
+                        document.getElementById('subtitle').textContent = `${callsign} - ${name}`;
+                    } else if (callsign) {
+                        document.getElementById('subtitle').textContent = callsign;
+                    } else if (name) {
+                        document.getElementById('subtitle').textContent = name;
+                    } else {
+                        document.getElementById('subtitle').textContent = '';
+                    }
+                }
+                
+                // Update location
                 if (data.receiver && data.receiver.gps) {
                     const lat = data.receiver.gps.lat.toFixed(4);
                     const lon = data.receiver.gps.lon.toFixed(4);
@@ -488,6 +513,7 @@
             } catch (error) {
                 console.error('Failed to fetch receiver location:', error);
                 document.getElementById('receiver-location').textContent = 'Error';
+                document.getElementById('subtitle').textContent = '';
             }
         }
 

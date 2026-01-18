@@ -1021,6 +1021,14 @@ func main() {
 		handleBandPredictions(w, r, multiDecoder, spaceWeatherMonitor, ipBanManager, fftRateLimiter)
 	}))
 
+	// PSKReporter analytics endpoints (with gzip compression, IP ban checking, and rate limiting)
+	http.HandleFunc("/api/pskreporter/stats", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handlePSKReporterStats(w, r, multiDecoder, ipBanManager, fftRateLimiter)
+	}))
+	http.HandleFunc("/api/pskreporter/countries", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handlePSKReporterCountries(w, r, multiDecoder, ipBanManager, fftRateLimiter)
+	}))
+
 	// CW Skimmer spots endpoints (with gzip compression, IP ban checking, and rate limiting)
 	http.HandleFunc("/api/cwskimmer/spots", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleCWSpotsAPI(w, r, cwSkimmer, ipBanManager, fftRateLimiter, globalCTY)

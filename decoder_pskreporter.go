@@ -55,6 +55,9 @@ type PSKReporter struct {
 	sentReports []PSKReport
 	sentMutex   sync.Mutex
 
+	// Analytics tracking
+	analytics *PSKReporterAnalytics
+
 	// Threading
 	running bool
 	stopCh  chan struct{}
@@ -77,6 +80,7 @@ func NewPSKReporter(callsign, locator, programName, antenna string) (*PSKReporte
 		timeDescriptorsSent: time.Now().Add(-24 * time.Hour),
 		reportQueue:         make([]PSKReport, 0, PSKMaxQueueSize),
 		sentReports:         make([]PSKReport, 0, 1000),
+		analytics:           NewPSKReporterAnalytics(),
 		stopCh:              make(chan struct{}),
 	}
 
@@ -130,6 +134,19 @@ func (psk *PSKReporter) Submit(decode *DecodeInfo) error {
 		Frequency: decode.Frequency,
 		EpochTime: decode.Timestamp,
 		Mode:      decode.Mode,
+	}
+
+	// Record submission for analytics (before queueing)
+	if psk.analytics != nil {
+		psk.analytics.RecordSubmission(PSKReporterSubmission{
+			Callsign:  report.Callsign,
+			Locator:   report.Locator,
+			SNR:       report.SNR,
+			Frequency: report.Frequency,
+			Timestamp: report.EpochTime,
+			Mode:      report.Mode,
+			Sent:      false, // Not sent yet, just queued
+		})
 	}
 
 	psk.queueMutex.Lock()
@@ -308,6 +325,19 @@ func (psk *PSKReporter) makePackets() int {
 
 		// Record that we sent data to PSKReporter
 		RecordPSKReporterSend()
+
+		// Record in analytics that this was actually sent
+		if psk.analytics != nil {
+			psk.analytics.RecordSubmission(PSKReporterSubmission{
+				Callsign:  report.Callsign,
+				Locator:   report.Locator,
+				SNR:       report.SNR,
+				Frequency: report.Frequency,
+				Timestamp: report.EpochTime,
+				Mode:      report.Mode,
+				Sent:      true, // Mark as actually sent
+			})
+		}
 
 		reportCount++
 	}

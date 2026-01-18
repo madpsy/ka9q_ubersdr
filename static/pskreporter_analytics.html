@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PSKReporter Analytics</title>
+    <link rel="stylesheet" href="decoder_spots_analytics.css">
+    <!-- Chart.js for visualizations -->
+    <script src="chart.umd.min.js"></script>
+    <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>📡 PSKReporter Analytics</h1>
+        <div class="subtitle" id="receiver-name">Submission & Locator Tracking</div>
+
+        <div style="text-align: center; margin: 15px 0; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+            <a href="digitalspots_map.html" style="display: inline-block; padding: 10px 20px; background: #4CAF50; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">🔴 Live</a>
+            <a href="decoder_spots_history.html" style="display: inline-block; padding: 10px 20px; background: #2196F3; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">📜 History</a>
+            <a href="decoder_spots_analytics.html" style="display: inline-block; padding: 10px 20px; background: #9C27B0; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">📊 Spots Analytics</a>
+        </div>
+
+        <div class="controls">
+            <div class="control-row">
+                <div class="control-group">
+                    <label for="callsign-search">Callsign:</label>
+                    <input type="text"
+                           id="callsign-search"
+                           placeholder="Search callsign..."
+                           autocomplete="off">
+                </div>
+
+                <div class="control-group">
+                    <label for="country-search">Country:</label>
+                    <input type="text"
+                           id="country-search"
+                           list="countries-datalist"
+                           placeholder="Start typing country name..."
+                           autocomplete="off">
+                    <datalist id="countries-datalist">
+                        <!-- Populated via /api/cty/countries -->
+                    </datalist>
+                </div>
+
+                <div class="control-group">
+                    <label for="hours-select">Time Window:</label>
+                    <select id="hours-select">
+                        <option value="6">Last 6 hours</option>
+                        <option value="12">Last 12 hours</option>
+                        <option value="24" selected>Last 24 hours</option>
+                        <option value="48">Last 48 hours</option>
+                        <option value="72">Last 72 hours</option>
+                        <option value="168">Last 7 days</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="mode-select">Mode:</label>
+                    <select id="mode-select">
+                        <option value="">All Modes</option>
+                        <option value="FT8" selected>FT8</option>
+                        <option value="FT4">FT4</option>
+                        <option value="WSPR">WSPR</option>
+                        <option value="JS8">JS8</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="band-select">Band:</label>
+                    <select id="band-select">
+                        <option value="">All Bands</option>
+                        <option value="160m">160m</option>
+                        <option value="80m">80m</option>
+                        <option value="60m">60m</option>
+                        <option value="40m">40m</option>
+                        <option value="30m">30m</option>
+                        <option value="20m">20m</option>
+                        <option value="17m">17m</option>
+                        <option value="15m">15m</option>
+                        <option value="12m">12m</option>
+                        <option value="10m">10m</option>
+                        <option value="6m">6m</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="control-row">
+                <div class="control-group">
+                    <button id="clear-filters-btn" style="background: #FF9800;">Clear Filters</button>
+                </div>
+
+                <div class="control-group">
+                    <button id="load-btn">Load Analytics</button>
+                </div>
+
+                <div class="control-group">
+                    <button id="load-countries-btn" style="background: #9C27B0;">Load Countries</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="data-container" class="data-container" style="display: none;">
+            <h2 style="margin-bottom: 15px; font-size: 1.3em;" id="data-title">PSKReporter Submissions</h2>
+            
+            <!-- Summary Stats -->
+            <div class="stats-grid" id="stats-grid">
+                <!-- Stats will be inserted here -->
+            </div>
+
+            <!-- Submissions Table -->
+            <div id="submissions-section" class="analytics-section">
+                <h2>📊 Callsign/Band/Mode Statistics</h2>
+                <div style="margin-bottom: 15px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
+                    <strong>Legend:</strong>
+                    <span style="margin-left: 15px;">📍 = Has Locator</span>
+                    <span style="margin-left: 15px;">❌ = No Locator</span>
+                    <span style="margin-left: 15px;">📡 = Sent to PSKReporter</span>
+                    <span style="margin-left: 15px;">⏳ = Queued/Deduplicated</span>
+                </div>
+                <div id="submissions-table" class="submissions-table">
+                    <!-- Table will be inserted here -->
+                </div>
+            </div>
+        </div>
+
+        <div id="countries-container" class="data-container" style="display: none;">
+            <h2 style="margin-bottom: 15px; font-size: 1.3em;">Countries by Band/Mode</h2>
+            
+            <!-- Countries by Band/Mode -->
+            <div id="countries-section" class="analytics-section">
+                <div id="countries-grid" class="countries-grid">
+                    <!-- Countries grid will be inserted here -->
+                </div>
+            </div>
+        </div>
+
+        <div id="status" class="status">Select filters and click "Load Analytics" to begin</div>
+
+        <!-- Loading Overlay -->
+        <div id="loading-overlay" class="loading-overlay" style="display: none;">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Loading data...</div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+        <p>Download <a href="https://ubersdr.org" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/" target="_blank">SDR Interface</a> • <a href="/decoder_spots_history.html" target="_blank">Spots History</a> • <a href="/bandconditions.html" target="_blank">Live Conditions</a> <span id="footer-version"></span></p>
+    </footer>
+
+    <!-- Analytics Script -->
+    <script src="pskreporter_analytics.js"></script>
+</body>
+</html>

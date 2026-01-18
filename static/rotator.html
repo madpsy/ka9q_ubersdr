@@ -96,7 +96,7 @@
             background: rgba(255,255,255,0.1);
             backdrop-filter: blur(10px);
             border-radius: 20px;
-            padding: 0;
+            padding: 20px;
             margin-bottom: 20px;
             display: flex;
             flex-direction: column;
@@ -919,7 +919,7 @@
             // Calculate responsive size
             const container = document.querySelector('.container');
             const containerWidth = container.offsetWidth;
-            const maxSize = Math.min(containerWidth - 40, 800); // 40px for padding
+            const maxSize = Math.min(containerWidth - 80, 800); // Account for container padding (20px) + map-container padding (20px) on both sides
             const width = maxSize;
             const height = maxSize;
             

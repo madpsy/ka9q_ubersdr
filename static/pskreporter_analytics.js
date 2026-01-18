@@ -166,12 +166,14 @@ async function loadCountries() {
     const hours = document.getElementById('hours-select').value;
     const mode = document.getElementById('mode-select').value;
     const band = document.getElementById('band-select').value;
+    const country = document.getElementById('country-search').value.trim();
 
     // Build query parameters
     const params = new URLSearchParams();
     params.append('hours', hours);
     if (mode) params.append('mode', mode);
     if (band) params.append('band', band);
+    if (country) params.append('country', country);
 
     // Show loading
     showLoading(true);

@@ -1742,12 +1742,14 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 	}
 
 	// Get rotator information if available
-	rotatorEnabled := false
-	rotatorAzimuth := -1
+	rotatorInfo := map[string]interface{}{
+		"enabled": false,
+		"azimuth": -1,
+	}
 	if rotctlHandler != nil && config.Rotctl.Enabled {
-		rotatorEnabled = true
+		rotatorInfo["enabled"] = true
 		state := rotctlHandler.controller.GetState()
-		rotatorAzimuth = int(state.Position.Azimuth + 0.5) // Round to nearest integer
+		rotatorInfo["azimuth"] = int(state.Position.Azimuth + 0.5) // Round to nearest integer
 	}
 
 	// Build the response with description plus status information (without sdrs)
@@ -1781,8 +1783,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"spectrum_poll_period": config.Spectrum.PollPeriodMs,
 		"public_uuid":          publicUUID,
 		"cors_enabled":         config.Server.EnableCORS,
-		"rotator":              rotatorEnabled,
-		"rotator_azimuth":      rotatorAzimuth,
+		"rotator":              rotatorInfo,
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

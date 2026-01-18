@@ -96,7 +96,7 @@
             background: rgba(255,255,255,0.1);
             backdrop-filter: blur(10px);
             border-radius: 20px;
-            padding: 20px;
+            padding: 0;
             margin-bottom: 20px;
             display: flex;
             flex-direction: column;
@@ -916,18 +916,12 @@
             receiverLat = centerLat;
             receiverLon = centerLon;
             
-            // Calculate responsive size
-            const container = document.querySelector('.container');
-            const containerWidth = container.offsetWidth;
-            const maxSize = Math.min(containerWidth - 80, 800); // Account for container padding (20px) + map-container padding (20px) on both sides
-            const width = maxSize;
-            const height = maxSize;
+            const width = 800;
+            const height = 800;
             
             svg = d3.select("#azimuthal-map")
                 .attr("width", width)
-                .attr("height", height)
-                .attr("viewBox", `0 0 ${width} ${height}`)
-                .attr("preserveAspectRatio", "xMidYMid meet");
+                .attr("height", height);
             
             // Create azimuthal equidistant projection centered on receiver
             projection = d3.geoAzimuthalEquidistant()
@@ -1115,10 +1109,8 @@
         function updateAzimuthLineOnMap(azimuth) {
             if (!svg || !projection || !receiverLat || !receiverLon) return;
             
-            // Get current SVG dimensions
-            const svgElement = document.getElementById('azimuthal-map');
-            const width = parseFloat(svgElement.getAttribute('width'));
-            const height = parseFloat(svgElement.getAttribute('height'));
+            const width = 800;
+            const height = 800;
             const centerX = width / 2;
             const centerY = height / 2;
             

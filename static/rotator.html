@@ -345,6 +345,10 @@
                 </div>
             </div>
             <div class="status-item">
+                <div class="status-label">Receiver Location</div>
+                <div class="status-value" style="font-size: 1.1em;" id="receiver-location">Loading...</div>
+            </div>
+            <div class="status-item">
                 <div class="status-label">Azimuth</div>
                 <div class="status-value"><span id="current-azimuth">0</span>°</div>
             </div>
@@ -410,13 +414,41 @@
             // Create compass ticks and labels
             createCompass();
             
+            // Fetch receiver location
+            fetchReceiverLocation();
+            
             // Start updates
             updatePosition();
             updateInterval = setInterval(updatePosition, 1000);
 
             // Add click handler to compass
             document.getElementById('compass').addEventListener('click', handleCompassClick);
+            
+            // Add Enter key handler to azimuth input
+            document.getElementById('target-azimuth').addEventListener('keypress', (event) => {
+                if (event.key === 'Enter') {
+                    setPosition();
+                }
+            });
         });
+
+        async function fetchReceiverLocation() {
+            try {
+                const response = await fetch('/api/description');
+                const data = await response.json();
+                
+                if (data.receiver && data.receiver.gps) {
+                    const lat = data.receiver.gps.lat.toFixed(4);
+                    const lon = data.receiver.gps.lon.toFixed(4);
+                    document.getElementById('receiver-location').textContent = `${lat}, ${lon}`;
+                } else {
+                    document.getElementById('receiver-location').textContent = 'N/A';
+                }
+            } catch (error) {
+                console.error('Failed to fetch receiver location:', error);
+                document.getElementById('receiver-location').textContent = 'Error';
+            }
+        }
 
         function createCompass() {
             const ring = document.getElementById('compass-ring');

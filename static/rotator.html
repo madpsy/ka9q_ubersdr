@@ -530,36 +530,27 @@
                 height: auto;
             }
 
-            /* Reorganize overlays for mobile - stack them below the map */
-            .compass-container {
-                position: relative;
-                top: auto;
-                left: auto;
-                margin: 15px auto;
-                display: flex;
-                justify-content: center;
-            }
-
+            /* Keep compass overlaid on mobile */
             .compass {
-                width: 150px;
-                height: 150px;
+                width: 120px;
+                height: 120px;
             }
 
             .compass-tick {
-                transform-origin: 50% 70px;
+                transform-origin: 50% 55px;
             }
 
             .compass-label {
-                transform-origin: 50% 55px;
-                font-size: 10px;
+                transform-origin: 50% 40px;
+                font-size: 9px;
             }
 
             .compass-label.cardinal {
-                font-size: 12px;
+                font-size: 11px;
             }
 
             .compass-needle {
-                height: 55px;
+                height: 45px;
             }
 
             /* Move all overlays below the map */
@@ -689,25 +680,25 @@
             }
 
             .compass {
-                width: 130px;
-                height: 130px;
+                width: 100px;
+                height: 100px;
             }
 
             .compass-tick {
-                transform-origin: 50% 60px;
+                transform-origin: 50% 45px;
             }
 
             .compass-label {
-                transform-origin: 50% 45px;
-                font-size: 9px;
+                transform-origin: 50% 30px;
+                font-size: 8px;
             }
 
             .compass-label.cardinal {
-                font-size: 11px;
+                font-size: 10px;
             }
 
             .compass-needle {
-                height: 50px;
+                height: 38px;
             }
 
             .adjustment-overlay {

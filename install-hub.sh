@@ -231,10 +231,44 @@ else
     echo "Starting UberSDR containers..."
     export ADMIN_PASSWORD="$password"
     sudo -E docker compose -f docker-compose.yml up -d
+    
+    # Verify containers started successfully before creating marker
+    echo "Verifying container startup..."
+    sleep 5  # Give containers time to initialize
+    
+    # Check if all required containers are running
+    if sudo docker compose -f docker-compose.yml ps --status running | grep -q "ka9q-radio" && \
+       sudo docker compose -f docker-compose.yml ps --status running | grep -q "ka9q_ubersdr"; then
+        echo "Containers started successfully."
+        
+        # Wait for ubersdr to become healthy (up to 60 seconds)
+        echo "Waiting for UberSDR to become healthy..."
+        for i in {1..12}; do
+            if sudo docker inspect --format='{{.State.Health.Status}}' ka9q_ubersdr 2>/dev/null | grep -q "healthy"; then
+                echo "UberSDR is healthy!"
+                # Create installed marker file only after successful verification
+                touch ~/ubersdr/installed
+                break
+            fi
+            if [ $i -eq 12 ]; then
+                echo "Warning: UberSDR did not become healthy within 60 seconds."
+                echo "Installation may have issues. Marker file NOT created."
+                echo "You can re-run this script to try again with a new password."
+                exit 1
+            fi
+            sleep 5
+        done
+    else
+        echo "Error: Required containers failed to start."
+        echo "Marker file NOT created. You can re-run this script to try again."
+        exit 1
+    fi
 fi
 
-# Create installed marker file
-touch ~/ubersdr/installed
+# Create/update installed marker file for upgrade path (if not already created above)
+if [ ! -f "$INSTALLED_MARKER" ]; then
+    touch ~/ubersdr/installed
+fi
 
 # Create FFTW Wisdom if it doesn't exist
 WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-config/_data/wisdom"

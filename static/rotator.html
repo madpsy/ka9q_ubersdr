@@ -284,6 +284,31 @@
             display: block;
         }
 
+        .error-banner {
+            background: rgba(244,67,54,0.2);
+            border: 2px solid #f44336;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .error-banner.show {
+            display: block;
+        }
+
+        .error-banner h3 {
+            margin: 0 0 10px 0;
+            font-size: 1.2em;
+            color: #ff6b6b;
+        }
+
+        .error-banner p {
+            margin: 0;
+            font-size: 0.95em;
+            line-height: 1.5;
+        }
+
         @media (max-width: 600px) {
             .compass {
                 width: 300px;
@@ -331,6 +356,11 @@
                 <div class="status-label">Moving</div>
                 <div class="status-value" id="moving-status">No</div>
             </div>
+        </div>
+
+        <div class="error-banner" id="error-banner">
+            <h3>⚠️ Connection Error</h3>
+            <p id="error-message"></p>
         </div>
 
         <div class="compass-container">
@@ -466,12 +496,18 @@
                 if (data.read_only) {
                     statusText += ' (Read-Only)';
                 }
-                if (data.error && data.connected) {
-                    // Show error but keep connected status
-                    statusText += ' (Error)';
-                }
                 document.getElementById('connection-status').textContent = statusText;
                 document.getElementById('status-indicator').className = data.connected ? 'status-indicator connected' : 'status-indicator disconnected';
+                
+                // Show/hide error banner
+                const errorBanner = document.getElementById('error-banner');
+                const errorMessage = document.getElementById('error-message');
+                if (data.error) {
+                    errorMessage.textContent = data.error;
+                    errorBanner.classList.add('show');
+                } else {
+                    errorBanner.classList.remove('show');
+                }
                 
                 // Update connection duration
                 if (data.connected && data.connected_duration_seconds !== undefined) {

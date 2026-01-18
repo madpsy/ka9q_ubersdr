@@ -265,11 +265,6 @@ else
     fi
 fi
 
-# Create/update installed marker file for upgrade path (if not already created above)
-if [ ! -f "$INSTALLED_MARKER" ]; then
-    touch ~/ubersdr/installed
-fi
-
 # Create FFTW Wisdom if it doesn't exist
 WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-config/_data/wisdom"
 if sudo test -f "$WISDOM_FILE"; then

@@ -260,29 +260,29 @@ function displaySubmissionsTable(stats) {
     stats.sort((a, b) => b.submission_count - a.submission_count);
     
     let html = `
-        <table>
+        <table style="width: 100%; border-collapse: collapse; background: rgba(255, 255, 255, 0.05); border-radius: 8px; overflow: hidden;">
             <thead>
-                <tr>
-                    <th>Callsign</th>
-                    <th>Country</th>
-                    <th>Band</th>
-                    <th>Mode</th>
-                    <th>Submissions</th>
-                    <th>Sent</th>
-                    <th>Locators Seen</th>
-                    <th>With Locator</th>
-                    <th>No Locator</th>
-                    <th>Final Locator</th>
-                    <th>First Seen</th>
-                    <th>Last Seen</th>
+                <tr style="background: rgba(255, 255, 255, 0.1);">
+                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid rgba(255, 255, 255, 0.2); white-space: nowrap;">Callsign</th>
+                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid rgba(255, 255, 255, 0.2); white-space: nowrap;">Country</th>
+                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid rgba(255, 255, 255, 0.2); white-space: nowrap;">Band</th>
+                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid rgba(255, 255, 255, 0.2); white-space: nowrap;">Mode</th>
+                    <th style="padding: 12px; text-align: center; border-bottom: 2px solid rgba(255, 255, 255, 0.2); white-space: nowrap;">Submissions</th>
+                    <th style="padding: 12px; text-align: center; border-bottom: 2px solid rgba(255, 255, 255, 0.2); white-space: nowrap;">Sent</th>
+                    <th style="padding: 12px; text-align: center; border-bottom: 2px solid rgba(255, 255, 255, 0.2); white-space: nowrap;">Locators Seen</th>
+                    <th style="padding: 12px; text-align: center; border-bottom: 2px solid rgba(255, 255, 255, 0.2); white-space: nowrap;">With Locator</th>
+                    <th style="padding: 12px; text-align: center; border-bottom: 2px solid rgba(255, 255, 255, 0.2); white-space: nowrap;">No Locator</th>
+                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid rgba(255, 255, 255, 0.2); white-space: nowrap;">Final Locator</th>
+                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid rgba(255, 255, 255, 0.2); white-space: nowrap;">First Seen</th>
+                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid rgba(255, 255, 255, 0.2); white-space: nowrap;">Last Seen</th>
                 </tr>
             </thead>
             <tbody>
     `;
     
     stats.forEach(stat => {
-        const locatorsList = stat.locators && stat.locators.length > 0 
-            ? stat.locators.join(', ') 
+        const locatorsList = stat.locators && stat.locators.length > 0
+            ? stat.locators.join(', ')
             : '-';
         
         const finalLocator = stat.final_locator || '-';
@@ -293,19 +293,19 @@ function displaySubmissionsTable(stats) {
         const lastSeen = new Date(stat.last_seen).toLocaleString();
         
         html += `
-            <tr>
-                <td><strong>${escapeHtml(stat.callsign)}</strong></td>
-                <td>${escapeHtml(stat.country || '-')}</td>
-                <td>${escapeHtml(stat.band)}</td>
-                <td>${escapeHtml(stat.mode)}</td>
-                <td>${stat.submission_count}</td>
-                <td>${sentIcon} ${stat.sent_count}</td>
-                <td title="${escapeHtml(locatorsList)}">${locatorIcon} ${stat.locators ? stat.locators.length : 0}</td>
-                <td>${stat.with_locator_count}</td>
-                <td>${stat.no_locator_count}</td>
-                <td><strong>${escapeHtml(finalLocator)}</strong></td>
-                <td style="font-size: 0.9em;">${firstSeen}</td>
-                <td style="font-size: 0.9em;">${lastSeen}</td>
+            <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.1); transition: background 0.3s ease;" onmouseover="this.style.background='rgba(255, 255, 255, 0.08)'" onmouseout="this.style.background='transparent'">
+                <td style="padding: 10px;"><strong>${escapeHtml(stat.callsign)}</strong></td>
+                <td style="padding: 10px;">${escapeHtml(stat.country || '-')}</td>
+                <td style="padding: 10px;">${escapeHtml(stat.band)}</td>
+                <td style="padding: 10px;">${escapeHtml(stat.mode)}</td>
+                <td style="padding: 10px; text-align: center;">${stat.submission_count}</td>
+                <td style="padding: 10px; text-align: center;">${sentIcon} ${stat.sent_count}</td>
+                <td style="padding: 10px; text-align: center;" title="${escapeHtml(locatorsList)}">${locatorIcon} ${stat.locators ? stat.locators.length : 0}</td>
+                <td style="padding: 10px; text-align: center;">${stat.with_locator_count}</td>
+                <td style="padding: 10px; text-align: center;">${stat.no_locator_count}</td>
+                <td style="padding: 10px;"><strong>${escapeHtml(finalLocator)}</strong></td>
+                <td style="padding: 10px; font-size: 0.9em;">${firstSeen}</td>
+                <td style="padding: 10px; font-size: 0.9em;">${lastSeen}</td>
             </tr>
         `;
     });

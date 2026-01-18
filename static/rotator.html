@@ -671,12 +671,20 @@
             
             // Calculate bearing from receiver to clicked point
             const bearing = calculateBearing(receiverLat, receiverLon, clickLat, clickLon);
+            const roundedBearing = Math.round(bearing);
             
             // Set the azimuth input
-            document.getElementById('target-azimuth').value = Math.round(bearing);
+            document.getElementById('target-azimuth').value = roundedBearing;
             
-            // Show message
-            showMessage(`Map clicked: bearing ${Math.round(bearing)}°. Click "Go" to move rotator.`, 'success');
+            // Check if password is entered
+            const password = document.getElementById('password').value;
+            if (password) {
+                // Automatically send the command
+                setAzimuth(roundedBearing);
+            } else {
+                // Show message to enter password
+                showMessage(`Map clicked: bearing ${roundedBearing}°. Enter password and click "Go" to move rotator.`, 'success');
+            }
         }
 
         function calculateBearing(lat1, lon1, lat2, lon2) {

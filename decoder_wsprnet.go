@@ -52,6 +52,9 @@ type WSPRNet struct {
 	programName      string
 	programVersion   string
 
+	// HTTP client for connection reuse
+	httpClient *http.Client
+
 	// Report queues
 	reportQueue []WSPRReport
 	queueMutex  sync.Mutex
@@ -77,14 +80,26 @@ func NewWSPRNet(callsign, locator, programName, programVersion string) (*WSPRNet
 		return nil, fmt.Errorf("callsign, locator, and program name are required")
 	}
 
+	// Create HTTP transport with connection pooling and compression
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+		DisableCompression:  false, // Enable compression
+	}
+
 	wspr := &WSPRNet{
 		receiverCallsign: callsign,
 		receiverLocator:  locator,
 		programName:      programName,
 		programVersion:   programVersion,
-		reportQueue:      make([]WSPRReport, 0, WSPRMaxQueueSize),
-		retryQueue:       make([]WSPRReport, 0, WSPRMaxQueueSize),
-		stopCh:           make(chan struct{}),
+		httpClient: &http.Client{
+			Timeout:   3 * time.Second,
+			Transport: transport,
+		},
+		reportQueue: make([]WSPRReport, 0, WSPRMaxQueueSize),
+		retryQueue:  make([]WSPRReport, 0, WSPRMaxQueueSize),
+		stopCh:      make(chan struct{}),
 	}
 
 	return wspr, nil
@@ -233,12 +248,7 @@ func (w *WSPRNet) sendReport(report *WSPRReport) bool {
 	// Build POST data
 	postData := w.buildPostData(report)
 
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: 3 * time.Second,
-	}
-
-	// Build request
+	// Build request using shared HTTP client
 	req, err := http.NewRequest("POST", fmt.Sprintf("http://%s/post?", WSPRServerHostname), strings.NewReader(postData))
 	if err != nil {
 		log.Printf("WSPRNet: Failed to create request: %v", err)
@@ -247,12 +257,13 @@ func (w *WSPRNet) sendReport(report *WSPRReport) bool {
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Connection", "Keep-Alive")
+	req.Header.Set("Accept-Encoding", "gzip, deflate")
 	req.Header.Set("Host", WSPRServerHostname)
 	req.Header.Set("Accept-Language", "en-US,*")
 	req.Header.Set("User-Agent", "Mozilla/5.0")
 
-	// Send request
-	resp, err := client.Do(req)
+	// Send request using shared client for connection reuse
+	resp, err := w.httpClient.Do(req)
 	if err != nil {
 		log.Printf("WSPRNet: Failed to send request: %v", err)
 		return false
@@ -335,6 +346,9 @@ func (w *WSPRNet) Stop() {
 
 	// Wait for all worker threads to finish
 	w.wg.Wait()
+
+	// Close idle connections in the HTTP client pool
+	w.httpClient.CloseIdleConnections()
 
 	// Print statistics
 	w.statsMutex.Lock()

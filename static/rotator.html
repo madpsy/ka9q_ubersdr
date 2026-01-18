@@ -751,8 +751,10 @@
         }
 
         function adjustAzimuth(delta) {
+            console.log('adjustAzimuth called with delta:', delta);
             const input = document.getElementById('target-azimuth');
             let currentValue = parseFloat(input.value) || 0;
+            console.log('Current value:', currentValue);
             let newValue = currentValue + delta;
             
             // Wrap around 0-360
@@ -762,7 +764,9 @@
                 newValue -= 360;
             }
             
-            input.value = Math.round(newValue);
+            newValue = Math.round(newValue);
+            console.log('New value:', newValue);
+            input.value = newValue;
         }
 
         function showMessage(text, type) {

@@ -216,6 +216,17 @@
             font-size: 16px;
         }
 
+        /* Remove spinner arrows from number input */
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+
         input[type="number"]:focus, input[type="password"]:focus {
             outline: none;
             border-color: #4CAF50;
@@ -261,6 +272,27 @@
             display: flex;
             gap: 10px;
             flex-wrap: wrap;
+        }
+
+        .increment-buttons {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+            justify-content: center;
+        }
+
+        .increment-buttons button {
+            padding: 8px 16px;
+            font-size: 14px;
+            min-width: 60px;
+        }
+
+        .increment-buttons .label {
+            display: flex;
+            align-items: center;
+            color: rgba(255,255,255,0.8);
+            font-size: 14px;
+            font-weight: 500;
         }
 
         .message {
@@ -382,6 +414,15 @@
                 <div class="control-row">
                     <input type="number" id="target-azimuth" placeholder="Azimuth (0-360)" min="0" max="360" step="1">
                     <button onclick="setPosition()">Go</button>
+                </div>
+                <div class="increment-buttons">
+                    <button onclick="adjustAzimuth(-30)">-30°</button>
+                    <button onclick="adjustAzimuth(-10)">-10°</button>
+                    <button onclick="adjustAzimuth(-5)">-5°</button>
+                    <span class="label">Adjust</span>
+                    <button onclick="adjustAzimuth(5)">+5°</button>
+                    <button onclick="adjustAzimuth(10)">+10°</button>
+                    <button onclick="adjustAzimuth(30)">+30°</button>
                 </div>
             </div>
 
@@ -671,13 +712,15 @@
                 });
                 
                 const data = await response.json();
+                console.log('Stop command response:', data);
                 
                 if (data.success) {
                     showMessage('Rotator stopped', 'success');
                 } else {
-                    showMessage(data.error || 'Failed to stop rotator', 'error');
+                    showMessage(data.error || data.message || 'Failed to stop rotator', 'error');
                 }
             } catch (error) {
+                console.error('Stop command error:', error);
                 showMessage('Network error: ' + error.message, 'error');
             }
         }
@@ -694,15 +737,32 @@
                 });
                 
                 const data = await response.json();
+                console.log('Park command response:', data);
                 
                 if (data.success) {
                     showMessage('Rotator parking', 'success');
                 } else {
-                    showMessage(data.error || 'Failed to park rotator', 'error');
+                    showMessage(data.error || data.message || 'Failed to park rotator', 'error');
                 }
             } catch (error) {
+                console.error('Park command error:', error);
                 showMessage('Network error: ' + error.message, 'error');
             }
+        }
+
+        function adjustAzimuth(delta) {
+            const input = document.getElementById('target-azimuth');
+            let currentValue = parseFloat(input.value) || 0;
+            let newValue = currentValue + delta;
+            
+            // Wrap around 0-360
+            if (newValue < 0) {
+                newValue += 360;
+            } else if (newValue >= 360) {
+                newValue -= 360;
+            }
+            
+            input.value = Math.round(newValue);
         }
 
         function showMessage(text, type) {

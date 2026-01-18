@@ -278,7 +278,10 @@ func (w *WSPRNet) sendReport(report *WSPRReport) bool {
 		return true
 	}
 
-	log.Printf("WSPRNet: Unexpected response: %d %s", resp.StatusCode, resp.Status)
+	// Don't log 500 errors as they're server-side issues and will be retried
+	if resp.StatusCode != 500 {
+		log.Printf("WSPRNet: Unexpected response: %d %s", resp.StatusCode, resp.Status)
+	}
 	return false
 }
 

@@ -130,9 +130,15 @@
 
         .azimuth-line {
             stroke: #4CAF50;
-            stroke-width: 3;
+            stroke-width: 2;
             fill: none;
             stroke-linecap: round;
+        }
+
+        .beam-cone {
+            fill: rgba(76, 175, 80, 0.2);
+            stroke: #4CAF50;
+            stroke-width: 2;
         }
 
         .distance-circle {
@@ -150,7 +156,7 @@
 
         .compass-container {
             position: absolute;
-            top: 30px;
+            top: 80px;
             left: 30px;
             z-index: 100;
         }
@@ -526,8 +532,9 @@
         let updateInterval = null;
         
         // Azimuthal map variables
-        let svg, projection, path, azimuthLineElement;
+        let svg, projection, path, azimuthLineElement, beamConeElement;
         let receiverLat, receiverLon;
+        const beamWidth = 5; // degrees
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
@@ -649,7 +656,11 @@
                 .attr("stroke", "#fff")
                 .attr("stroke-width", 2);
             
-            // Create azimuth line element
+            // Create beam cone element (will be a path showing the beamwidth)
+            beamConeElement = svg.append("path")
+                .attr("class", "beam-cone");
+            
+            // Create center azimuth line element
             azimuthLineElement = svg.append("line")
                 .attr("class", "azimuth-line")
                 .attr("x1", width / 2)
@@ -744,10 +755,45 @@
             const endpoint = calculateDestinationPoint(receiverLat, receiverLon, azimuth, distance);
             const projected = projection([endpoint[1], endpoint[0]]);
             
+            // Update center line
             if (projected && azimuthLineElement) {
                 azimuthLineElement
                     .attr("x2", projected[0])
                     .attr("y2", projected[1]);
+            }
+            
+            // Draw beam cone (±2.5 degrees from center)
+            if (beamConeElement) {
+                const halfBeam = beamWidth / 2;
+                const leftBearing = azimuth - halfBeam;
+                const rightBearing = azimuth + halfBeam;
+                
+                // Calculate points along the beam edges
+                const numPoints = 20; // Number of points to create smooth arc
+                const points = [[centerX, centerY]]; // Start at center
+                
+                // Left edge of beam
+                for (let i = 0; i <= numPoints; i++) {
+                    const dist = (distance / numPoints) * i;
+                    const point = calculateDestinationPoint(receiverLat, receiverLon, leftBearing, dist);
+                    const proj = projection([point[1], point[0]]);
+                    if (proj) points.push(proj);
+                }
+                
+                // Right edge of beam (reverse order to close the path)
+                for (let i = numPoints; i >= 0; i--) {
+                    const dist = (distance / numPoints) * i;
+                    const point = calculateDestinationPoint(receiverLat, receiverLon, rightBearing, dist);
+                    const proj = projection([point[1], point[0]]);
+                    if (proj) points.push(proj);
+                }
+                
+                // Create path data
+                const pathData = points.map((p, i) =>
+                    `${i === 0 ? 'M' : 'L'} ${p[0]},${p[1]}`
+                ).join(' ') + ' Z';
+                
+                beamConeElement.attr("d", pathData);
             }
         }
 

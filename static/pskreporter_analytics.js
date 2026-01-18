@@ -8,7 +8,7 @@ let itemsPerPage = 100;
 let filteredStats = [];
 
 // Band order for sorting
-const BAND_ORDER = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '2m', '1.25m', '70cm'];
+const BAND_ORDER = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '11m', '10m', '6m', '2m', '1.25m', '70cm'];
 
 // Helper function to sort bands
 function sortBands(bands) {

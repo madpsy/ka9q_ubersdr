@@ -291,7 +291,7 @@ func frequencyToBandUint64(freqHz uint64) string {
 		return "160m"
 	} else if freq >= 3.5 && freq < 4.0 {
 		return "80m"
-	} else if freq >= 5.3 && freq < 5.4 {
+	} else if freq >= 5.25 && freq < 5.45 {
 		return "60m"
 	} else if freq >= 7.0 && freq < 7.3 {
 		return "40m"
@@ -305,6 +305,8 @@ func frequencyToBandUint64(freqHz uint64) string {
 		return "15m"
 	} else if freq >= 24.89 && freq < 24.99 {
 		return "12m"
+	} else if freq >= 26.965 && freq < 27.405 {
+		return "11m"
 	} else if freq >= 28.0 && freq < 29.7 {
 		return "10m"
 	} else if freq >= 50.0 && freq < 54.0 {

@@ -117,8 +117,8 @@ func (h *RotctlAPIHandler) authenticatePostRequest(req interface{ GetPassword() 
 
 // PositionResponse represents the rotator position response
 type PositionResponse struct {
-	Azimuth    float64   `json:"azimuth"`
-	Elevation  float64   `json:"elevation"`
+	Azimuth    int       `json:"azimuth"`
+	Elevation  int       `json:"elevation"`
 	Moving     bool      `json:"moving"`
 	Connected  bool      `json:"connected"`
 	LastUpdate time.Time `json:"last_update"`
@@ -168,8 +168,8 @@ func (h *RotctlAPIHandler) HandleGetPosition(w http.ResponseWriter, r *http.Requ
 	h.mu.RUnlock()
 
 	response := PositionResponse{
-		Azimuth:    state.Position.Azimuth,
-		Elevation:  state.Position.Elevation,
+		Azimuth:    int(state.Position.Azimuth + 0.5), // Round to nearest integer
+		Elevation:  int(state.Position.Elevation + 0.5), // Round to nearest integer
 		Moving:     state.Moving,
 		Connected:  h.controller.client.IsConnected(),
 		LastUpdate: lastUpdate,
@@ -189,8 +189,8 @@ func HandleGetPositionDisabled(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"error":     "Rotator control is not enabled",
 		"enabled":   false,
-		"azimuth":   0.0,
-		"elevation": 0.0,
+		"azimuth":   0,
+		"elevation": 0,
 		"moving":    false,
 		"connected": false,
 	})
@@ -364,8 +364,8 @@ func (h *RotctlAPIHandler) HandleStatus(w http.ResponseWriter, r *http.Request) 
 		"host":        h.config.Host,
 		"port":        h.config.Port,
 		"position": map[string]interface{}{
-			"azimuth":   state.Position.Azimuth,
-			"elevation": state.Position.Elevation,
+			"azimuth":   int(state.Position.Azimuth + 0.5), // Round to nearest integer
+			"elevation": int(state.Position.Elevation + 0.5), // Round to nearest integer
 		},
 		"moving":      state.Moving,
 		"last_update": lastUpdate,

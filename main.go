@@ -930,8 +930,31 @@ func main() {
 	http.HandleFunc("/api/extensions", func(w http.ResponseWriter, r *http.Request) {
 		handleExtensions(w, r, config)
 	})
+
+	// Initialize rotctl API handler if enabled (must be before /api/description route)
+	var rotctlHandler *RotctlAPIHandler
+	if config.Rotctl.Enabled {
+		var err error
+		rotctlHandler, err = NewRotctlAPIHandler(&config.Rotctl)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize rotctl API: %v", err)
+			// Register disabled routes if initialization failed
+			RegisterRotctlRoutesDisabled(http.DefaultServeMux)
+			log.Printf("Rotctl API endpoints registered (disabled - initialization failed)")
+			rotctlHandler = nil // Ensure it's nil for description endpoint
+		} else {
+			RegisterRotctlRoutes(http.DefaultServeMux, rotctlHandler)
+			defer rotctlHandler.Close()
+			log.Printf("Rotctl API enabled at /api/rotctl/* (host: %s:%d)", config.Rotctl.Host, config.Rotctl.Port)
+		}
+	} else {
+		// Register disabled routes when rotctl is not enabled
+		RegisterRotctlRoutesDisabled(http.DefaultServeMux)
+		log.Printf("Rotctl API endpoints registered (disabled in configuration)")
+	}
+
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
-		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor)
+		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler)
 	})
 	http.HandleFunc("/api/instance", func(w http.ResponseWriter, r *http.Request) {
 		handleInstanceStatus(w, r, config)
@@ -1057,27 +1080,6 @@ func main() {
 
 	// CTY API endpoints (with IP ban checking)
 	RegisterCTYAPIHandlers(ipBanManager)
-
-	// Initialize rotctl API handler if enabled
-	var rotctlHandler *RotctlAPIHandler
-	if config.Rotctl.Enabled {
-		var err error
-		rotctlHandler, err = NewRotctlAPIHandler(&config.Rotctl)
-		if err != nil {
-			log.Printf("Warning: Failed to initialize rotctl API: %v", err)
-			// Register disabled routes if initialization failed
-			RegisterRotctlRoutesDisabled(http.DefaultServeMux)
-			log.Printf("Rotctl API endpoints registered (disabled - initialization failed)")
-		} else {
-			RegisterRotctlRoutes(http.DefaultServeMux, rotctlHandler)
-			defer rotctlHandler.Close()
-			log.Printf("Rotctl API enabled at /api/rotctl/* (host: %s:%d)", config.Rotctl.Host, config.Rotctl.Port)
-		}
-	} else {
-		// Register disabled routes when rotctl is not enabled
-		RegisterRotctlRoutesDisabled(http.DefaultServeMux)
-		log.Printf("Rotctl API endpoints registered (disabled in configuration)")
-	}
 
 	// Admin authentication endpoints (no auth required)
 	http.HandleFunc("/admin/login", adminHandler.HandleLogin)
@@ -1689,7 +1691,7 @@ func handleExtensions(w http.ResponseWriter, r *http.Request, config *Config) {
 }
 
 // handleDescription serves the description HTML from config plus all status information
-func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor) {
+func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -1739,6 +1741,15 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		snr_0_30, snr_1_8_30 = noiseFloorMonitor.GetWidebandSNR()
 	}
 
+	// Get rotator information if available
+	rotatorEnabled := false
+	rotatorAzimuth := -1
+	if rotctlHandler != nil && config.Rotctl.Enabled {
+		rotatorEnabled = true
+		state := rotctlHandler.controller.GetState()
+		rotatorAzimuth = int(state.Position.Azimuth + 0.5) // Round to nearest integer
+	}
+
 	// Build the response with description plus status information (without sdrs)
 	response := map[string]interface{}{
 		"description": config.Admin.Description,
@@ -1770,6 +1781,8 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"spectrum_poll_period": config.Spectrum.PollPeriodMs,
 		"public_uuid":          publicUUID,
 		"cors_enabled":         config.Server.EnableCORS,
+		"rotator":              rotatorEnabled,
+		"rotator_azimuth":      rotatorAzimuth,
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

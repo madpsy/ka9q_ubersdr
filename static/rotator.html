@@ -416,7 +416,7 @@
             <div class="control-group">
                 <label>Set Azimuth</label>
                 <div class="control-row">
-                    <input type="number" id="target-azimuth" placeholder="Azimuth (0-360)" min="0" max="360" step="1">
+                    <input type="number" id="target-azimuth" placeholder="Azimuth (0-360)" min="0" max="360" step="1" oninput="this.value = Math.round(this.value)">
                     <button onclick="setPosition()">Go</button>
                 </div>
                 <div class="increment-buttons">
@@ -613,7 +613,7 @@
                 
                 // Update position
                 const azimuth = data.position.azimuth;
-                document.getElementById('current-azimuth').textContent = azimuth.toFixed(1);
+                document.getElementById('current-azimuth').textContent = Math.round(azimuth);
                 document.getElementById('moving-status').textContent = data.moving ? 'Yes' : 'No';
                 
                 // Update azimuth input field with current value (unless user is actively typing)

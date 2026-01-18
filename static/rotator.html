@@ -597,29 +597,37 @@
             if (!password) return;
             
             const azimuth = parseFloat(document.getElementById('target-azimuth').value);
-            const elevation = parseFloat(document.getElementById('target-elevation').value);
             
             if (isNaN(azimuth) || azimuth < 0 || azimuth > 360) {
                 showMessage('Azimuth must be between 0 and 360', 'error');
                 return;
             }
             
-            if (isNaN(elevation) || elevation < 0 || elevation > 90) {
-                showMessage('Elevation must be between 0 and 90', 'error');
-                return;
+            // Check if elevation input exists (for future elevation support)
+            const elevationInput = document.getElementById('target-elevation');
+            const payload = { password, azimuth };
+            
+            if (elevationInput) {
+                const elevation = parseFloat(elevationInput.value);
+                if (!isNaN(elevation) && elevation >= 0 && elevation <= 90) {
+                    payload.elevation = elevation;
+                }
             }
             
             try {
                 const response = await fetch('/api/rotctl/position', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password, azimuth, elevation })
+                    body: JSON.stringify(payload)
                 });
                 
                 const data = await response.json();
                 
                 if (data.success) {
-                    showMessage(`Moving to Az: ${azimuth}°, El: ${elevation}°`, 'success');
+                    const message = payload.elevation !== undefined
+                        ? `Moving to Az: ${azimuth}°, El: ${payload.elevation}°`
+                        : `Moving to ${azimuth}°`;
+                    showMessage(message, 'success');
                 } else {
                     showMessage(data.error || 'Failed to set position', 'error');
                 }

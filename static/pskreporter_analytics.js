@@ -3,20 +3,23 @@
 
 let currentData = null;
 let currentCountriesData = null;
+let currentPage = 1;
+let itemsPerPage = 100;
+let filteredStats = [];
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     // Load countries for datalist
     loadCountriesList();
-    
+
     // Set up event listeners
     document.getElementById('load-btn').addEventListener('click', loadAnalytics);
     document.getElementById('load-countries-btn').addEventListener('click', loadCountries);
     document.getElementById('clear-filters-btn').addEventListener('click', clearFilters);
-    
+
     // Load receiver name
     loadReceiverName();
-    
+
     // Load version
     loadVersion();
 });
@@ -27,7 +30,7 @@ async function loadReceiverName() {
         const response = await fetch('/api/description');
         const data = await response.json();
         if (data.receiver && data.receiver.name) {
-            document.getElementById('receiver-name').textContent = 
+            document.getElementById('receiver-name').textContent =
                 `${data.receiver.name} - PSKReporter Submission & Locator Tracking`;
         }
     } catch (error) {
@@ -55,7 +58,7 @@ async function loadCountriesList() {
         const data = await response.json();
         const datalist = document.getElementById('countries-datalist');
         datalist.innerHTML = '';
-        
+
         if (data.countries) {
             data.countries.forEach(country => {
                 const option = document.createElement('option');
@@ -75,6 +78,7 @@ function clearFilters() {
     document.getElementById('hours-select').value = '24';
     document.getElementById('mode-select').value = 'FT8';
     document.getElementById('band-select').value = '';
+    document.getElementById('locator-filter').value = '';
 }
 
 // Load analytics data
@@ -84,7 +88,8 @@ async function loadAnalytics() {
     const hours = document.getElementById('hours-select').value;
     const mode = document.getElementById('mode-select').value;
     const band = document.getElementById('band-select').value;
-    
+    const hasLocator = document.getElementById('locator-filter').value;
+
     // Build query parameters
     const params = new URLSearchParams();
     params.append('hours', hours);
@@ -92,26 +97,27 @@ async function loadAnalytics() {
     if (band) params.append('band', band);
     if (callsign) params.append('callsign', callsign);
     if (country) params.append('country', country);
-    
+    if (hasLocator) params.append('has_locator', hasLocator);
+
     // Show loading
     showLoading(true);
     setStatus('Loading PSKReporter analytics...');
-    
+
     try {
         const response = await fetch(`/api/pskreporter/stats?${params.toString()}`);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-        
+
         const data = await response.json();
         currentData = data;
-        
+
         // Display results
         displayAnalytics(data);
-        
+
         // Hide countries container
         document.getElementById('countries-container').style.display = 'none';
-        
+
         setStatus(`Loaded ${data.count} unique callsign/band/mode combinations`);
     } catch (error) {
         console.error('Error loading analytics:', error);
@@ -126,32 +132,32 @@ async function loadCountries() {
     const hours = document.getElementById('hours-select').value;
     const mode = document.getElementById('mode-select').value;
     const band = document.getElementById('band-select').value;
-    
+
     // Build query parameters
     const params = new URLSearchParams();
     params.append('hours', hours);
     if (mode) params.append('mode', mode);
     if (band) params.append('band', band);
-    
+
     // Show loading
     showLoading(true);
     setStatus('Loading countries by band/mode...');
-    
+
     try {
         const response = await fetch(`/api/pskreporter/countries?${params.toString()}`);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-        
+
         const data = await response.json();
         currentCountriesData = data;
-        
+
         // Display results
         displayCountries(data);
-        
+
         // Hide submissions container
         document.getElementById('data-container').style.display = 'none';
-        
+
         setStatus(`Loaded countries for ${Object.keys(data.countries_by_band_mode || {}).length} bands`);
     } catch (error) {
         console.error('Error loading countries:', error);
@@ -165,7 +171,7 @@ async function loadCountries() {
 function displayAnalytics(data) {
     const container = document.getElementById('data-container');
     container.style.display = 'block';
-    
+
     // Update title
     const title = document.getElementById('data-title');
     const filters = [];
@@ -173,12 +179,12 @@ function displayAnalytics(data) {
     if (data.filters.band) filters.push(data.filters.band);
     if (data.filters.callsign) filters.push(`Callsign: ${data.filters.callsign}`);
     if (data.filters.country) filters.push(`Country: ${data.filters.country}`);
-    
+
     title.textContent = `PSKReporter Submissions${filters.length > 0 ? ' - ' + filters.join(', ') : ''}`;
-    
+
     // Display summary stats
     displaySummaryStats(data);
-    
+
     // Display submissions table
     displaySubmissionsTable(data.stats);
 }
@@ -186,7 +192,7 @@ function displayAnalytics(data) {
 // Display summary statistics
 function displaySummaryStats(data) {
     const statsGrid = document.getElementById('stats-grid');
-    
+
     // Calculate totals
     let totalSubmissions = 0;
     let totalSent = 0;
@@ -194,7 +200,7 @@ function displaySummaryStats(data) {
     let totalNoLocator = 0;
     let uniqueCallsigns = new Set();
     let uniqueCountries = new Set();
-    
+
     data.stats.forEach(stat => {
         totalSubmissions += stat.submission_count;
         totalSent += stat.sent_count;
@@ -203,10 +209,10 @@ function displaySummaryStats(data) {
         uniqueCallsigns.add(stat.callsign);
         if (stat.country) uniqueCountries.add(stat.country);
     });
-    
+
     const sendRate = totalSubmissions > 0 ? ((totalSent / totalSubmissions) * 100).toFixed(1) : 0;
     const locatorRate = totalSubmissions > 0 ? ((totalWithLocator / totalSubmissions) * 100).toFixed(1) : 0;
-    
+
     statsGrid.innerHTML = `
         <div class="stat-card">
             <div class="stat-value">${data.count}</div>
@@ -249,17 +255,59 @@ function displaySummaryStats(data) {
 
 // Display submissions table
 function displaySubmissionsTable(stats) {
+    if (!stats || stats.length === 0) {
+        document.getElementById('submissions-table').innerHTML = '<p>No data available for the selected filters.</p>';
+        return;
+    }
+
+    // Sort by submission count descending
+    stats.sort((a, b) => b.submission_count - a.submission_count);
+
+    // Store filtered stats for pagination
+    filteredStats = stats;
+    currentPage = 1;
+
+    // Render current page
+    renderTablePage();
+}
+
+// Render current page of table
+function renderTablePage() {
     const tableContainer = document.getElementById('submissions-table');
-    
+    const stats = filteredStats;
+
     if (!stats || stats.length === 0) {
         tableContainer.innerHTML = '<p>No data available for the selected filters.</p>';
         return;
     }
-    
-    // Sort by submission count descending
-    stats.sort((a, b) => b.submission_count - a.submission_count);
-    
+
+    const totalPages = Math.ceil(stats.length / itemsPerPage);
+    const startIdx = (currentPage - 1) * itemsPerPage;
+    const endIdx = Math.min(startIdx + itemsPerPage, stats.length);
+    const pageStats = stats.slice(startIdx, endIdx);
+
+    // Pagination info
     let html = `
+        <div style="margin-bottom: 15px; padding: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div>
+                Showing ${startIdx + 1}-${endIdx} of ${stats.length} combinations
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <label style="display: flex; align-items: center; gap: 8px;">
+                    Per page:
+                    <select id="items-per-page" style="padding: 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.15); color: white; border: 1px solid rgba(255, 255, 255, 0.3);">
+                        <option value="50">50</option>
+                        <option value="100" selected>100</option>
+                        <option value="250">250</option>
+                        <option value="500">500</option>
+                        <option value="1000">1000</option>
+                    </select>
+                </label>
+                <button onclick="changePage(-1)" ${currentPage === 1 ? 'disabled' : ''} style="padding: 5px 15px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; ${currentPage === 1 ? 'opacity: 0.5;' : ''}">← Prev</button>
+                <span>Page ${currentPage} of ${totalPages}</span>
+                <button onclick="changePage(1)" ${currentPage === totalPages ? 'disabled' : ''} style="padding: 5px 15px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; ${currentPage === totalPages ? 'opacity: 0.5;' : ''}">Next →</button>
+            </div>
+        </div>
         <table style="width: 100%; border-collapse: collapse; background: rgba(255, 255, 255, 0.05); border-radius: 8px; overflow: hidden;">
             <thead>
                 <tr style="background: rgba(255, 255, 255, 0.1);">
@@ -279,19 +327,19 @@ function displaySubmissionsTable(stats) {
             </thead>
             <tbody>
     `;
-    
-    stats.forEach(stat => {
+
+    pageStats.forEach(stat => {
         const locatorsList = stat.locators && stat.locators.length > 0
             ? stat.locators.join(', ')
             : '-';
-        
+
         const finalLocator = stat.final_locator || '-';
         const locatorIcon = stat.with_locator_count > 0 ? '📍' : '❌';
         const sentIcon = stat.sent_count > 0 ? '📡' : '⏳';
-        
+
         const firstSeen = new Date(stat.first_seen).toLocaleString();
         const lastSeen = new Date(stat.last_seen).toLocaleString();
-        
+
         html += `
             <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.1); transition: background 0.3s ease;" onmouseover="this.style.background='rgba(255, 255, 255, 0.08)'" onmouseout="this.style.background='transparent'">
                 <td style="padding: 10px;"><strong>${escapeHtml(stat.callsign)}</strong></td>
@@ -309,64 +357,75 @@ function displaySubmissionsTable(stats) {
             </tr>
         `;
     });
-    
+
     html += `
             </tbody>
         </table>
     `;
-    
+
     tableContainer.innerHTML = html;
+
+    // Set up pagination listeners
+    setupPaginationListeners();
 }
 
 // Display countries by band/mode
 function displayCountries(data) {
     const container = document.getElementById('countries-container');
     container.style.display = 'block';
-    
+
     const grid = document.getElementById('countries-grid');
-    
+
     const bandModeData = data.countries_by_band_mode || {};
-    
+
     if (Object.keys(bandModeData).length === 0) {
         grid.innerHTML = '<p>No data available for the selected filters.</p>';
         return;
     }
-    
+
     let html = '';
-    
-    // Sort bands
-    const bands = Object.keys(bandModeData).sort();
-    
+
+    // Sort bands by frequency order
+    const bandOrder = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '2m', '1.25m', '70cm'];
+    const bands = Object.keys(bandModeData).sort((a, b) => {
+        const indexA = bandOrder.indexOf(a);
+        const indexB = bandOrder.indexOf(b);
+        if (indexA === -1 && indexB === -1) return a.localeCompare(b);
+        if (indexA === -1) return 1;
+        if (indexB === -1) return -1;
+        return indexA - indexB;
+    });
+
     bands.forEach(band => {
         const modes = bandModeData[band];
         const modeNames = Object.keys(modes).sort();
-        
+
         html += `<div class="band-section" style="margin-bottom: 30px;">`;
-        html += `<h3 style="margin-bottom: 15px; color: #333;">📻 ${escapeHtml(band)}</h3>`;
-        
+        html += `<h3 style="margin-bottom: 15px; color: #ffffff;">📻 ${escapeHtml(band)}</h3>`;
+
         modeNames.forEach(mode => {
             const countries = modes[mode];
             countries.sort();
-            
+
             html += `
-                <div style="margin-bottom: 20px; padding: 15px; background: #f9f9f9; border-radius: 8px;">
-                    <h4 style="margin: 0 0 10px 0; color: #555;">${escapeHtml(mode)} (${countries.length} countries)</h4>
+                <div style="margin-bottom: 20px; padding: 15px; background: rgba(255, 255, 255, 0.08); border-radius: 8px;">
+                    <h4 style="margin: 0 0 10px 0; color: #fff;">${escapeHtml(mode)} (${countries.length} countries)</h4>
                     <div style="display: flex; flex-wrap: wrap; gap: 8px;">
             `;
-            
+
             countries.forEach(country => {
                 html += `<span style="padding: 4px 12px; background: #4CAF50; color: white; border-radius: 4px; font-size: 0.9em;">${escapeHtml(country)}</span>`;
             });
-            
+
             html += `
                     </div>
                 </div>
             `;
         });
-        
+
         html += `</div>`;
     });
-    
+
     grid.innerHTML = html;
 }
 
@@ -385,4 +444,32 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// Change page
+function changePage(delta) {
+    const totalPages = Math.ceil(filteredStats.length / itemsPerPage);
+    currentPage = Math.max(1, Math.min(currentPage + delta, totalPages));
+    renderTablePage();
+
+    // Scroll to top of table
+    document.getElementById('submissions-section').scrollIntoView({ behavior: 'smooth' });
+}
+
+// Change items per page
+function changeItemsPerPage() {
+    const select = document.getElementById('items-per-page');
+    itemsPerPage = parseInt(select.value);
+    currentPage = 1;
+    renderTablePage();
+}
+
+// Set up items per page change listener (called after table is rendered)
+function setupPaginationListeners() {
+    const select = document.getElementById('items-per-page');
+    if (select) {
+        select.value = itemsPerPage;
+        select.removeEventListener('change', changeItemsPerPage);
+        select.addEventListener('change', changeItemsPerPage);
+    }
 }

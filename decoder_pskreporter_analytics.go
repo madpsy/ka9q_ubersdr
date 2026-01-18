@@ -164,10 +164,12 @@ func (pra *PSKReporterAnalytics) GetStats(windowHours int, filters map[string]st
 		}
 	}
 
-	// Convert map to slice
+	// Convert map to slice and apply post-aggregation filters
 	result := make([]PSKReporterStats, 0, len(statsMap))
 	for _, stats := range statsMap {
-		result = append(result, *stats)
+		if matchesStatsFilters(stats, filters) {
+			result = append(result, *stats)
+		}
 	}
 
 	return result
@@ -257,6 +259,25 @@ func matchesFilters(sub PSKReporterSubmission, filters map[string]string) bool {
 	return true
 }
 
+// matchesStatsFilters checks if aggregated stats match post-aggregation filters
+func matchesStatsFilters(stats *PSKReporterStats, filters map[string]string) bool {
+	// Filter by has_locator (yes/no/any)
+	if hasLocator, ok := filters["has_locator"]; ok && hasLocator != "" {
+		switch strings.ToLower(hasLocator) {
+		case "yes", "true", "1":
+			if len(stats.Locators) == 0 {
+				return false
+			}
+		case "no", "false", "0":
+			if len(stats.Locators) > 0 {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
 // frequencyToBandUint64 converts a frequency in Hz (uint64) to a band name
 func frequencyToBandUint64(freqHz uint64) string {
 	freq := float64(freqHz) / 1000000.0 // Convert to MHz
@@ -306,6 +327,7 @@ func frequencyToBandUint64(freqHz uint64) string {
 //   - band: Filter by band (e.g., 20m, 40m)
 //   - callsign: Filter by callsign (partial match)
 //   - country: Filter by country (partial match)
+//   - has_locator: Filter by locator presence (yes/no/any)
 func handlePSKReporterStats(w http.ResponseWriter, r *http.Request, multiDecoder *MultiDecoder, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
 	// Check IP ban
 	if checkIPBan(w, r, ipBanManager) {
@@ -340,10 +362,11 @@ func handlePSKReporterStats(w http.ResponseWriter, r *http.Request, multiDecoder
 	}
 
 	filters := map[string]string{
-		"mode":     r.URL.Query().Get("mode"),
-		"band":     r.URL.Query().Get("band"),
-		"callsign": r.URL.Query().Get("callsign"),
-		"country":  r.URL.Query().Get("country"),
+		"mode":        r.URL.Query().Get("mode"),
+		"band":        r.URL.Query().Get("band"),
+		"callsign":    r.URL.Query().Get("callsign"),
+		"country":     r.URL.Query().Get("country"),
+		"has_locator": r.URL.Query().Get("has_locator"),
 	}
 
 	// Get statistics

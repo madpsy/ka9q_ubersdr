@@ -517,11 +517,9 @@
                 document.getElementById('current-azimuth').textContent = azimuth.toFixed(1);
                 document.getElementById('moving-status').textContent = data.moving ? 'Yes' : 'No';
                 
-                // Update azimuth input field with current value
+                // Update azimuth input field with current value (unless user is actively typing)
                 const azimuthInput = document.getElementById('target-azimuth');
-                if (!azimuthInput.value || azimuthInput === document.activeElement) {
-                    // Don't update if user is currently typing
-                } else {
+                if (document.activeElement !== azimuthInput) {
                     azimuthInput.value = Math.round(azimuth);
                 }
                 

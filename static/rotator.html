@@ -104,12 +104,6 @@
             position: relative;
         }
 
-        .map-container h2 {
-            margin-bottom: 15px;
-            font-size: 1.5em;
-            text-align: center;
-        }
-
         #azimuthal-map {
             background: #1a252f;
             border-radius: 10px;
@@ -476,7 +470,6 @@
         </div>
 
         <div class="map-container">
-            <h2>Azimuthal Equidistant Projection</h2>
             <svg id="azimuthal-map" width="800" height="800"></svg>
             
             <div class="compass-container">
@@ -534,7 +527,7 @@
         // Azimuthal map variables
         let svg, projection, path, azimuthLineElement, beamConeElement;
         let receiverLat, receiverLon;
-        const beamWidth = 5; // degrees
+        const beamWidth = 20; // degrees
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
@@ -762,38 +755,41 @@
                     .attr("y2", projected[1]);
             }
             
-            // Draw beam cone (±2.5 degrees from center)
+            // Draw beam cone as a simple wedge (±2.5 degrees from center)
             if (beamConeElement) {
                 const halfBeam = beamWidth / 2;
                 const leftBearing = azimuth - halfBeam;
                 const rightBearing = azimuth + halfBeam;
                 
-                // Calculate points along the beam edges
-                const numPoints = 20; // Number of points to create smooth arc
-                const points = [[centerX, centerY]]; // Start at center
+                // Calculate the two edge endpoints
+                const leftEndpoint = calculateDestinationPoint(receiverLat, receiverLon, leftBearing, distance);
+                const rightEndpoint = calculateDestinationPoint(receiverLat, receiverLon, rightBearing, distance);
                 
-                // Left edge of beam
-                for (let i = 0; i <= numPoints; i++) {
-                    const dist = (distance / numPoints) * i;
-                    const point = calculateDestinationPoint(receiverLat, receiverLon, leftBearing, dist);
-                    const proj = projection([point[1], point[0]]);
-                    if (proj) points.push(proj);
+                const leftProj = projection([leftEndpoint[1], leftEndpoint[0]]);
+                const rightProj = projection([rightEndpoint[1], rightEndpoint[0]]);
+                
+                if (leftProj && rightProj) {
+                    // Create a simple wedge: center -> left edge -> arc -> right edge -> back to center
+                    // For simplicity, we'll create points along the arc at the far end
+                    const arcPoints = [];
+                    const numArcPoints = 30;
+                    
+                    for (let i = 0; i <= numArcPoints; i++) {
+                        const bearing = leftBearing + (rightBearing - leftBearing) * (i / numArcPoints);
+                        const point = calculateDestinationPoint(receiverLat, receiverLon, bearing, distance);
+                        const proj = projection([point[1], point[0]]);
+                        if (proj) arcPoints.push(proj);
+                    }
+                    
+                    // Build path: start at center, go to left edge, follow arc, come back to center
+                    let pathData = `M ${centerX},${centerY} L ${leftProj[0]},${leftProj[1]}`;
+                    arcPoints.forEach(p => {
+                        pathData += ` L ${p[0]},${p[1]}`;
+                    });
+                    pathData += ` Z`;
+                    
+                    beamConeElement.attr("d", pathData);
                 }
-                
-                // Right edge of beam (reverse order to close the path)
-                for (let i = numPoints; i >= 0; i--) {
-                    const dist = (distance / numPoints) * i;
-                    const point = calculateDestinationPoint(receiverLat, receiverLon, rightBearing, dist);
-                    const proj = projection([point[1], point[0]]);
-                    if (proj) points.push(proj);
-                }
-                
-                // Create path data
-                const pathData = points.map((p, i) =>
-                    `${i === 0 ? 'M' : 'L'} ${p[0]},${p[1]}`
-                ).join(' ') + ' Z';
-                
-                beamConeElement.attr("d", pathData);
             }
         }
 

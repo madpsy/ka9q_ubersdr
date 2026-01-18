@@ -591,7 +591,28 @@
                     setPosition();
                 }
             });
+            
+            // Add password input handler to enable/disable buttons
+            document.getElementById('password').addEventListener('input', updateButtonStates);
+            
+            // Initial button state check
+            updateButtonStates();
         });
+
+        function updateButtonStates() {
+            const password = document.getElementById('password').value;
+            const hasPassword = password.length > 0;
+            
+            // Get all control buttons
+            const goButton = document.querySelector('button[onclick="setPosition()"]');
+            const adjustButtons = document.querySelectorAll('.adjustment-overlay button');
+            const quickActionButtons = document.querySelectorAll('.quick-actions-overlay button');
+            
+            // Enable/disable based on password
+            if (goButton) goButton.disabled = !hasPassword;
+            adjustButtons.forEach(btn => btn.disabled = !hasPassword);
+            quickActionButtons.forEach(btn => btn.disabled = !hasPassword);
+        }
 
         async function fetchReceiverLocation() {
             try {

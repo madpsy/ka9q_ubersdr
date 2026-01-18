@@ -95,10 +95,8 @@ func (h *RotctlAPIHandler) backgroundUpdater() {
 		h.mu.Unlock()
 		
 		if err := h.controller.UpdateState(); err != nil {
-			// Log error but continue - reconnection will be attempted automatically
-			if isConnected {
-				log.Printf("Error updating rotator state: %v", err)
-			}
+			// Error is stored in state and available via API - don't spam logs
+			// Reconnection will be attempted automatically
 		} else {
 			h.mu.Lock()
 			h.lastUpdate = time.Now()

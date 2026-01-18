@@ -349,10 +349,6 @@
                 <div class="status-value"><span id="current-azimuth">0</span>°</div>
             </div>
             <div class="status-item">
-                <div class="status-label">Elevation</div>
-                <div class="status-value"><span id="current-elevation">0</span>°</div>
-            </div>
-            <div class="status-item">
                 <div class="status-label">Moving</div>
                 <div class="status-value" id="moving-status">No</div>
             </div>
@@ -378,10 +374,9 @@
             </div>
 
             <div class="control-group">
-                <label>Set Position</label>
+                <label>Set Azimuth</label>
                 <div class="control-row">
                     <input type="number" id="target-azimuth" placeholder="Azimuth (0-360)" min="0" max="360" step="1">
-                    <input type="number" id="target-elevation" placeholder="Elevation (0-90)" min="0" max="90" step="1">
                     <button onclick="setPosition()">Go</button>
                 </div>
             </div>
@@ -519,7 +514,6 @@
                 
                 // Update position
                 document.getElementById('current-azimuth').textContent = data.position.azimuth.toFixed(1);
-                document.getElementById('current-elevation').textContent = data.position.elevation.toFixed(1);
                 document.getElementById('moving-status').textContent = data.moving ? 'Yes' : 'No';
                 
                 // Update needle

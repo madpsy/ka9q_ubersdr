@@ -378,7 +378,7 @@ function showLoading(show) {
 function setStatus(message, isError = false) {
     const status = document.getElementById('status');
     status.textContent = message;
-    status.style.color = isError ? '#f44336' : '#666';
+    status.style.color = isError ? '#f44336' : '#ffffff';
 }
 
 function escapeHtml(text) {

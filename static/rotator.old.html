@@ -4,9 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rotator Control - UberSDR</title>
-    <script src="https://d3js.org/d3.v7.min.js"></script>
-    <script src="https://d3js.org/d3-geo.v3.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/topojson@3"></script>
     <style>
         * {
             margin: 0;
@@ -92,73 +89,21 @@
             box-shadow: 0 0 10px #f44336;
         }
 
-        .map-container {
+        .compass-container {
             background: rgba(255,255,255,0.1);
             backdrop-filter: blur(10px);
             border-radius: 20px;
-            padding: 20px;
+            padding: 30px;
             margin-bottom: 20px;
             display: flex;
-            flex-direction: column;
+            justify-content: center;
             align-items: center;
-            position: relative;
-        }
-
-        .map-container h2 {
-            margin-bottom: 15px;
-            font-size: 1.5em;
-            text-align: center;
-        }
-
-        #azimuthal-map {
-            background: #1a252f;
-            border-radius: 10px;
-            display: block;
-        }
-
-        .country {
-            fill: #2c3e50;
-            stroke: #4a5f7f;
-            stroke-width: 0.5;
-        }
-
-        .graticule {
-            fill: none;
-            stroke: rgba(255,255,255,0.1);
-            stroke-width: 0.5;
-        }
-
-        .azimuth-line {
-            stroke: #4CAF50;
-            stroke-width: 3;
-            fill: none;
-            stroke-linecap: round;
-        }
-
-        .distance-circle {
-            fill: none;
-            stroke: rgba(255,255,255,0.2);
-            stroke-width: 1;
-            stroke-dasharray: 2,2;
-        }
-
-        .distance-label {
-            fill: rgba(255,255,255,0.5);
-            font-size: 10px;
-            text-anchor: middle;
-        }
-
-        .compass-container {
-            position: absolute;
-            top: 30px;
-            left: 30px;
-            z-index: 100;
         }
 
         .compass {
             position: relative;
-            width: 200px;
-            height: 200px;
+            width: 400px;
+            height: 400px;
             border-radius: 50%;
             background: radial-gradient(circle, #2c3e50 0%, #1a252f 100%);
             box-shadow: 0 10px 40px rgba(0,0,0,0.5), inset 0 0 20px rgba(0,0,0,0.3);
@@ -174,60 +119,60 @@
 
         .compass-tick {
             position: absolute;
-            width: 1px;
-            height: 8px;
+            width: 2px;
+            height: 15px;
             background: rgba(255,255,255,0.5);
             left: 50%;
-            top: 5px;
-            transform-origin: 50% 95px;
+            top: 10px;
+            transform-origin: 50% 190px;
         }
 
         .compass-tick.major {
-            height: 12px;
-            width: 2px;
+            height: 25px;
+            width: 3px;
             background: rgba(255,255,255,0.8);
         }
 
         .compass-label {
             position: absolute;
             left: 50%;
-            top: 20px;
+            top: 40px;
             transform: translateX(-50%);
-            font-size: 12px;
+            font-size: 18px;
             font-weight: bold;
             color: #fff;
-            transform-origin: 50% 80px;
+            transform-origin: 50% 160px;
         }
 
         .compass-label.cardinal {
-            font-size: 14px;
+            font-size: 24px;
             color: #4CAF50;
         }
 
         .compass-center {
             position: absolute;
-            width: 10px;
-            height: 10px;
+            width: 20px;
+            height: 20px;
             background: #4CAF50;
             border-radius: 50%;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            box-shadow: 0 0 10px #4CAF50;
+            box-shadow: 0 0 20px #4CAF50;
             z-index: 10;
         }
 
         .compass-needle {
             position: absolute;
-            width: 3px;
-            height: 70px;
+            width: 6px;
+            height: 140px;
             background: linear-gradient(to bottom, #ff4444 0%, #ff4444 50%, #fff 50%, #fff 100%);
             left: 50%;
             top: 50%;
             transform-origin: 50% 50%;
             transform: translate(-50%, -50%) rotate(0deg);
-            border-radius: 2px;
-            box-shadow: 0 0 5px rgba(255,68,68,0.5);
+            border-radius: 3px;
+            box-shadow: 0 0 10px rgba(255,68,68,0.5);
             transition: transform 0.5s ease-out;
             z-index: 5;
         }
@@ -237,10 +182,10 @@
             position: absolute;
             width: 0;
             height: 0;
-            border-left: 5px solid transparent;
-            border-right: 5px solid transparent;
-            border-bottom: 10px solid #ff4444;
-            top: -10px;
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-bottom: 20px solid #ff4444;
+            top: -20px;
             left: 50%;
             transform: translateX(-50%);
         }
@@ -406,30 +351,20 @@
 
         @media (max-width: 600px) {
             .compass {
-                width: 150px;
-                height: 150px;
+                width: 300px;
+                height: 300px;
             }
 
             .compass-tick {
-                transform-origin: 50% 70px;
+                transform-origin: 50% 140px;
             }
 
             .compass-label {
-                transform-origin: 50% 55px;
-                font-size: 10px;
-            }
-
-            .compass-label.cardinal {
-                font-size: 12px;
+                transform-origin: 50% 110px;
             }
 
             h1 {
                 font-size: 2em;
-            }
-
-            #azimuthal-map {
-                width: 100%;
-                height: auto;
             }
         }
     </style>
@@ -469,16 +404,11 @@
             <p id="error-message"></p>
         </div>
 
-        <div class="map-container">
-            <h2>Azimuthal Equidistant Projection</h2>
-            <svg id="azimuthal-map" width="800" height="800"></svg>
-            
-            <div class="compass-container">
-                <div class="compass" id="compass">
-                    <div class="compass-ring" id="compass-ring"></div>
-                    <div class="compass-needle" id="needle"></div>
-                    <div class="compass-center"></div>
-                </div>
+        <div class="compass-container">
+            <div class="compass" id="compass">
+                <div class="compass-ring" id="compass-ring"></div>
+                <div class="compass-needle" id="needle"></div>
+                <div class="compass-center"></div>
             </div>
         </div>
 
@@ -524,10 +454,6 @@
     <script>
         let savedPassword = localStorage.getItem('rotctl_password') || '';
         let updateInterval = null;
-        
-        // Azimuthal map variables
-        let svg, projection, path, azimuthLineElement;
-        let receiverLat, receiverLon;
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
@@ -581,9 +507,6 @@
                     const lat = data.receiver.gps.lat.toFixed(4);
                     const lon = data.receiver.gps.lon.toFixed(4);
                     document.getElementById('receiver-location').textContent = `${lat}, ${lon}`;
-                    
-                    // Initialize azimuthal map with receiver location
-                    initializeAzimuthalMap(data.receiver.gps.lat, data.receiver.gps.lon);
                 } else {
                     document.getElementById('receiver-location').textContent = 'N/A';
                 }
@@ -592,129 +515,6 @@
                 document.getElementById('receiver-location').textContent = 'Error';
                 document.getElementById('subtitle').textContent = '';
             }
-        }
-
-        async function initializeAzimuthalMap(centerLat, centerLon) {
-            receiverLat = centerLat;
-            receiverLon = centerLon;
-            
-            const width = 800;
-            const height = 800;
-            
-            svg = d3.select("#azimuthal-map")
-                .attr("width", width)
-                .attr("height", height);
-            
-            // Create azimuthal equidistant projection centered on receiver
-            projection = d3.geoAzimuthalEquidistant()
-                .center([centerLon, centerLat])
-                .scale(width / 2 / Math.PI * 0.9)
-                .translate([width / 2, height / 2])
-                .clipAngle(180);
-            
-            path = d3.geoPath().projection(projection);
-            
-            // Draw graticule (grid lines)
-            const graticule = d3.geoGraticule();
-            svg.append("path")
-                .datum(graticule)
-                .attr("class", "graticule")
-                .attr("d", path);
-            
-            // Draw distance circles (every 2000km)
-            drawDistanceCircles(centerLat, centerLon);
-            
-            // Load and draw world map
-            try {
-                const response = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
-                const world = await response.json();
-                const countries = topojson.feature(world, world.objects.countries);
-                
-                svg.append("g")
-                    .selectAll("path")
-                    .data(countries.features)
-                    .enter().append("path")
-                    .attr("class", "country")
-                    .attr("d", path);
-            } catch (error) {
-                console.error('Failed to load world map:', error);
-            }
-            
-            // Draw center point (receiver location)
-            svg.append("circle")
-                .attr("cx", width / 2)
-                .attr("cy", height / 2)
-                .attr("r", 6)
-                .attr("fill", "#ff4444")
-                .attr("stroke", "#fff")
-                .attr("stroke-width", 2);
-            
-            // Create azimuth line element
-            azimuthLineElement = svg.append("line")
-                .attr("class", "azimuth-line")
-                .attr("x1", width / 2)
-                .attr("y1", height / 2);
-        }
-
-        function drawDistanceCircles(centerLat, centerLon) {
-            const distances = [2000, 4000, 6000, 8000, 10000, 12000]; // km
-            
-            distances.forEach(distance => {
-                const circle = d3.geoCircle()
-                    .center([centerLon, centerLat])
-                    .radius(distance / 111.32); // Convert km to degrees (approximate)
-                
-                svg.append("path")
-                    .datum(circle())
-                    .attr("class", "distance-circle")
-                    .attr("d", path);
-                
-                // Add distance label at top (0 degrees)
-                const labelPoint = calculateDestinationPoint(centerLat, centerLon, 0, distance);
-                const projected = projection([labelPoint[1], labelPoint[0]]);
-                
-                if (projected) {
-                    svg.append("text")
-                        .attr("class", "distance-label")
-                        .attr("x", projected[0])
-                        .attr("y", projected[1] - 5)
-                        .text(distance + " km");
-                }
-            });
-        }
-
-        function updateAzimuthLineOnMap(azimuth) {
-            if (!svg || !projection || !receiverLat || !receiverLon) return;
-            
-            const width = 800;
-            const height = 800;
-            const centerX = width / 2;
-            const centerY = height / 2;
-            
-            // Calculate endpoint at edge of map (use large distance)
-            const distance = 15000; // km
-            const endpoint = calculateDestinationPoint(receiverLat, receiverLon, azimuth, distance);
-            const projected = projection([endpoint[1], endpoint[0]]);
-            
-            if (projected && azimuthLineElement) {
-                azimuthLineElement
-                    .attr("x2", projected[0])
-                    .attr("y2", projected[1]);
-            }
-        }
-
-        function calculateDestinationPoint(lat, lon, bearing, distance) {
-            const R = 6371; // Earth radius in km
-            const lat1 = lat * Math.PI / 180;
-            const lon1 = lon * Math.PI / 180;
-            const brng = bearing * Math.PI / 180;
-            
-            const lat2 = Math.asin(Math.sin(lat1) * Math.cos(distance/R) +
-                                   Math.cos(lat1) * Math.sin(distance/R) * Math.cos(brng));
-            const lon2 = lon1 + Math.atan2(Math.sin(brng) * Math.sin(distance/R) * Math.cos(lat1),
-                                            Math.cos(distance/R) - Math.sin(lat1) * Math.sin(lat2));
-            
-            return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
         }
 
         function createCompass() {
@@ -825,9 +625,6 @@
                 // Update needle
                 const needle = document.getElementById('needle');
                 needle.style.transform = `translate(-50%, -50%) rotate(${azimuth}deg)`;
-                
-                // Update azimuth line on map
-                updateAzimuthLineOnMap(azimuth);
                 
             } catch (error) {
                 console.error('Failed to update position:', error);

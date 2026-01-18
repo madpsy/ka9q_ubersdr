@@ -7,6 +7,21 @@ let currentPage = 1;
 let itemsPerPage = 100;
 let filteredStats = [];
 
+// Band order for sorting
+const BAND_ORDER = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '2m', '1.25m', '70cm'];
+
+// Helper function to sort bands
+function sortBands(bands) {
+    return bands.sort((a, b) => {
+        const indexA = BAND_ORDER.indexOf(a);
+        const indexB = BAND_ORDER.indexOf(b);
+        if (indexA === -1 && indexB === -1) return a.localeCompare(b);
+        if (indexA === -1) return 1;
+        if (indexB === -1) return -1;
+        return indexA - indexB;
+    });
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     // Load countries for datalist
@@ -375,26 +390,77 @@ function displayCountries(data) {
     container.style.display = 'block';
 
     const grid = document.getElementById('countries-grid');
+    const statsGrid = document.getElementById('countries-stats-grid');
 
     const bandModeData = data.countries_by_band_mode || {};
 
     if (Object.keys(bandModeData).length === 0) {
         grid.innerHTML = '<p>No data available for the selected filters.</p>';
+        statsGrid.innerHTML = '';
         return;
     }
+
+    // Calculate statistics
+    const allCountries = new Set();
+    const countriesByMode = {};
+    const countriesByBand = {};
+
+    Object.keys(bandModeData).forEach(band => {
+        const modes = bandModeData[band];
+        Object.keys(modes).forEach(mode => {
+            const countries = modes[mode];
+            countries.forEach(country => {
+                allCountries.add(country);
+
+                if (!countriesByMode[mode]) {
+                    countriesByMode[mode] = new Set();
+                }
+                countriesByMode[mode].add(country);
+
+                if (!countriesByBand[band]) {
+                    countriesByBand[band] = new Set();
+                }
+                countriesByBand[band].add(country);
+            });
+        });
+    });
+
+    // Display stats cards
+    let statsHtml = `
+        <div class="stat-card">
+            <div class="stat-value">${allCountries.size}</div>
+            <div class="stat-label">Total Unique Countries</div>
+        </div>
+    `;
+
+    // Add stats by mode
+    Object.keys(countriesByMode).sort().forEach(mode => {
+        statsHtml += `
+            <div class="stat-card">
+                <div class="stat-value">${countriesByMode[mode].size}</div>
+                <div class="stat-label">${mode} Countries</div>
+            </div>
+        `;
+    });
+
+    // Add stats by band (sorted)
+    const sortedBands = sortBands(Object.keys(countriesByBand));
+
+    sortedBands.forEach(band => {
+        statsHtml += `
+            <div class="stat-card">
+                <div class="stat-value">${countriesByBand[band].size}</div>
+                <div class="stat-label">${band} Countries</div>
+            </div>
+        `;
+    });
+
+    statsGrid.innerHTML = statsHtml;
 
     let html = '';
 
     // Sort bands by frequency order
-    const bandOrder = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '2m', '1.25m', '70cm'];
-    const bands = Object.keys(bandModeData).sort((a, b) => {
-        const indexA = bandOrder.indexOf(a);
-        const indexB = bandOrder.indexOf(b);
-        if (indexA === -1 && indexB === -1) return a.localeCompare(b);
-        if (indexA === -1) return 1;
-        if (indexB === -1) return -1;
-        return indexA - indexB;
-    });
+    const bands = sortBands(Object.keys(bandModeData));
 
     bands.forEach(band => {
         const modes = bandModeData[band];

@@ -1039,3 +1039,68 @@ frequency_reference:
   # Set lower (e.g., 10) for weaker reference signals
   # Set higher (e.g., 30) for very clean environments
   min_snr: 20
+
+# Rotator Control (rotctl) Integration
+# Provides remote control of antenna rotators via Hamlib's rotctld protocol
+# Exposes a JSON API for reading position and controlling the rotator
+rotctl:
+  # Enable rotator control integration (default: false)
+  # When enabled, connects to a rotctld daemon and exposes control API
+  # When disabled, API endpoints return appropriate "not enabled" responses
+  enabled: false
+
+  # Rotctld daemon hostname or IP address (default: localhost)
+  # The host where rotctld is running
+  # Examples: "localhost", "192.168.1.100", "rotator.local"
+  host: "localhost"
+
+  # Rotctld daemon port (default: 4533)
+  # Standard rotctld port is 4533 (rigctld uses 4532)
+  port: 4533
+
+  # Update interval in milliseconds (default: 2000)
+  # How often to poll rotctld for position updates in the background
+  # Lower values = more responsive but more network traffic
+  # Higher values = less responsive but lower overhead
+  # Recommended: 1000-5000ms depending on your needs
+  #   1000ms = very responsive (1 second updates)
+  #   2000ms = balanced (2 second updates) - default
+  #   5000ms = relaxed (5 second updates)
+  update_interval: 2000
+
+  # API password for control operations (optional)
+  # This password is required for all POST requests (position changes, commands)
+  # GET requests (reading position/status) do not require authentication
+  # Use a strong, unique password different from your admin password
+  #
+  # Behavior:
+  #   - If password is set: Full control mode (read + write with authentication)
+  #   - If password is empty: Read-only mode (status/position readable, control disabled)
+  #   - If enabled is false: All endpoints return "not enabled" responses
+  password: ""
+
+  # API Endpoints:
+  #   GET  /api/rotctl/position - Get current rotator position (no auth)
+  #   GET  /api/rotctl/status   - Get detailed status (no auth)
+  #   POST /api/rotctl/position - Set rotator position (password required)
+  #   POST /api/rotctl/command  - Execute commands: stop, park, reset (password required)
+  #
+  # Example usage:
+  #   # Read position (no password needed)
+  #   curl http://localhost:8080/api/rotctl/position
+  #
+  #   # Set position (password required in JSON body)
+  #   curl -X POST http://localhost:8080/api/rotctl/position \
+  #     -H "Content-Type: application/json" \
+  #     -d '{"password":"your_password","azimuth":270.0,"elevation":30.0}'
+  #
+  #   # Stop rotator (password required)
+  #   curl -X POST http://localhost:8080/api/rotctl/command \
+  #     -H "Content-Type: application/json" \
+  #     -d '{"password":"your_password","command":"stop"}'
+  #
+  # Connection features:
+  #   - Automatic reconnection with exponential backoff (1s → 60s)
+  #   - Unlimited retry attempts for resilience
+  #   - Background state updates every 2 seconds
+  #   - Thread-safe operations

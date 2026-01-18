@@ -1058,6 +1058,27 @@ func main() {
 	// CTY API endpoints (with IP ban checking)
 	RegisterCTYAPIHandlers(ipBanManager)
 
+	// Initialize rotctl API handler if enabled
+	var rotctlHandler *RotctlAPIHandler
+	if config.Rotctl.Enabled {
+		var err error
+		rotctlHandler, err = NewRotctlAPIHandler(&config.Rotctl)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize rotctl API: %v", err)
+			// Register disabled routes if initialization failed
+			RegisterRotctlRoutesDisabled(http.DefaultServeMux)
+			log.Printf("Rotctl API endpoints registered (disabled - initialization failed)")
+		} else {
+			RegisterRotctlRoutes(http.DefaultServeMux, rotctlHandler)
+			defer rotctlHandler.Close()
+			log.Printf("Rotctl API enabled at /api/rotctl/* (host: %s:%d)", config.Rotctl.Host, config.Rotctl.Port)
+		}
+	} else {
+		// Register disabled routes when rotctl is not enabled
+		RegisterRotctlRoutesDisabled(http.DefaultServeMux)
+		log.Printf("Rotctl API endpoints registered (disabled in configuration)")
+	}
+
 	// Admin authentication endpoints (no auth required)
 	http.HandleFunc("/admin/login", adminHandler.HandleLogin)
 	http.HandleFunc("/admin/logout", adminHandler.HandleLogout)

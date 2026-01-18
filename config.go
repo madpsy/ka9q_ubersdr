@@ -25,6 +25,7 @@ type Config struct {
 	SpaceWeather       SpaceWeatherConfig       `yaml:"spaceweather"`
 	InstanceReporting  InstanceReportingConfig  `yaml:"instance_reporting"`
 	FrequencyReference FrequencyReferenceConfig `yaml:"frequency_reference"`
+	Rotctl             RotctlConfig             `yaml:"rotctl"`
 	Bookmarks          []Bookmark               `yaml:"bookmarks"`
 	Bands              []Band                   `yaml:"bands"`
 	Extensions         []string                 `yaml:"extensions"`

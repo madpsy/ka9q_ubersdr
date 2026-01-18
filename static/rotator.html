@@ -156,6 +156,27 @@
             z-index: 100;
         }
 
+        .quick-actions-overlay {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .quick-actions-overlay button {
+            padding: 10px 20px;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+
+        .quick-actions-row {
+            display: flex;
+            gap: 10px;
+        }
+
         .compass {
             position: relative;
             width: 200px;
@@ -480,6 +501,15 @@
                     <div class="compass-center"></div>
                 </div>
             </div>
+            
+            <div class="quick-actions-overlay">
+                <button onclick="setAzimuth(0)">North (0°)</button>
+                <button onclick="setAzimuth(90)">East (90°)</button>
+                <button onclick="setAzimuth(180)">South (180°)</button>
+                <button onclick="setAzimuth(270)">West (270°)</button>
+                <button class="danger" onclick="stopRotator()">⏹ Stop</button>
+                <button onclick="parkRotator()">🅿 Park</button>
+            </div>
         </div>
 
         <div class="controls">
@@ -497,18 +527,6 @@
                     <button onclick="adjustAzimuth(5)">+5°</button>
                     <button onclick="adjustAzimuth(10)">+10°</button>
                     <button onclick="adjustAzimuth(30)">+30°</button>
-                </div>
-            </div>
-
-            <div class="control-group">
-                <label>Quick Actions</label>
-                <div class="button-group">
-                    <button onclick="setAzimuth(0)">North (0°)</button>
-                    <button onclick="setAzimuth(90)">East (90°)</button>
-                    <button onclick="setAzimuth(180)">South (180°)</button>
-                    <button onclick="setAzimuth(270)">West (270°)</button>
-                    <button class="danger" onclick="stopRotator()">⏹ Stop</button>
-                    <button onclick="parkRotator()">🅿 Park</button>
                 </div>
             </div>
 

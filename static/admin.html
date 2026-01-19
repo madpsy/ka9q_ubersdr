@@ -5848,6 +5848,26 @@
             positionsSection.innerHTML = '<h3>⏰ Scheduled Positions</h3>';
 
             const positions = currentRotatorSchedulerConfig.positions || [];
+
+            // Add timeline visualization
+            const timelineContainer = document.createElement('div');
+            timelineContainer.style.marginBottom = '20px';
+            timelineContainer.style.padding = '20px';
+            timelineContainer.style.background = '#fff';
+            timelineContainer.style.borderRadius = '5px';
+            timelineContainer.style.border = '1px solid #dee2e6';
+
+            const timelineCanvas = document.createElement('canvas');
+            timelineCanvas.id = 'rotatorTimeline';
+            timelineCanvas.style.width = '100%';
+            timelineCanvas.style.height = '120px';
+            timelineCanvas.style.display = 'block';
+            timelineContainer.appendChild(timelineCanvas);
+
+            positionsSection.appendChild(timelineContainer);
+
+            // Draw the timeline after adding to DOM
+            setTimeout(() => drawRotatorTimeline(positions), 0);
             if (positions.length === 0) {
                 const noPositions = document.createElement('p');
                 noPositions.style.textAlign = 'center';
@@ -6233,6 +6253,112 @@
 
             // Reset file input
             event.target.value = '';
+        }
+
+        // Draw rotator timeline visualization
+        function drawRotatorTimeline(positions) {
+            const canvas = document.getElementById('rotatorTimeline');
+            if (!canvas) return;
+
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width = canvas.offsetWidth;
+            const height = canvas.height = 120;
+
+            // Clear canvas
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, width, height);
+
+            // Define margins
+            const marginLeft = 50;
+            const marginRight = 50;
+            const marginTop = 20;
+            const marginBottom = 40;
+            const timelineY = height - marginBottom - 10;
+            const timelineWidth = width - marginLeft - marginRight;
+
+            // Draw timeline base line
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(marginLeft, timelineY);
+            ctx.lineTo(marginLeft + timelineWidth, timelineY);
+            ctx.stroke();
+
+            // Draw hour notches and labels (00:00 to 23:00)
+            ctx.fillStyle = '#333';
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+
+            for (let hour = 0; hour <= 23; hour++) {
+                const x = marginLeft + (hour / 23) * timelineWidth;
+
+                // Draw notch
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(x, timelineY);
+                ctx.lineTo(x, timelineY + 8);
+                ctx.stroke();
+
+                // Draw hour label (every 3 hours to avoid crowding)
+                if (hour % 3 === 0) {
+                    const hourStr = hour.toString().padStart(2, '0') + ':00';
+                    ctx.fillStyle = '#666';
+                    ctx.fillText(hourStr, x, timelineY + 12);
+                }
+            }
+
+            // Filter enabled positions only
+            const enabledPositions = positions.filter(pos => pos.enabled !== false);
+
+            // Draw position markers
+            enabledPositions.forEach(pos => {
+                // Parse time (HH:MM format)
+                const timeParts = pos.time.split(':');
+                const hours = parseInt(timeParts[0]);
+                const minutes = parseInt(timeParts[1]);
+
+                // Calculate position on timeline (0-23 hours)
+                const timeInHours = hours + (minutes / 60);
+                const x = marginLeft + (timeInHours / 23) * timelineWidth;
+
+                // Draw vertical line from timeline up
+                ctx.strokeStyle = '#667eea';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(x, timelineY);
+                ctx.lineTo(x, marginTop + 20);
+                ctx.stroke();
+
+                // Draw marker circle
+                ctx.fillStyle = '#667eea';
+                ctx.beginPath();
+                ctx.arc(x, timelineY, 5, 0, 2 * Math.PI);
+                ctx.fill();
+
+                // Draw bearing label above the line
+                ctx.fillStyle = '#667eea';
+                ctx.font = 'bold 12px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+                ctx.fillText(pos.bearing + '°', x, marginTop + 15);
+
+                // Draw time label above bearing
+                ctx.fillStyle = '#333';
+                ctx.font = '10px sans-serif';
+                ctx.fillText(pos.time, x, marginTop);
+            });
+
+            // Draw start/end labels
+            ctx.fillStyle = '#999';
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.fillText('00:00', marginLeft - 20, timelineY + 12);
+
+            ctx.textAlign = 'right';
+            ctx.fillText('23:59', marginLeft + timelineWidth + 20, timelineY + 12);
         }
 
         // Radiod configuration management

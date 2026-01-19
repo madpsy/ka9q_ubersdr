@@ -5866,8 +5866,11 @@
 
             positionsSection.appendChild(timelineContainer);
 
-            // Draw the timeline after adding to DOM
-            setTimeout(() => drawRotatorTimeline(positions), 0);
+            // Draw the timeline and setup hover events after adding to DOM
+            setTimeout(() => {
+                drawRotatorTimeline(positions);
+                setupRotatorTimelineHover(timelineCanvas);
+            }, 0);
             if (positions.length === 0) {
                 const noPositions = document.createElement('p');
                 noPositions.style.textAlign = 'center';
@@ -6389,9 +6392,8 @@
             ctx.fillText('23:59', marginLeft + timelineWidth + 25, timelineY + 12);
         }
 
-        // Add hover tooltip for rotator timeline
-        document.addEventListener('DOMContentLoaded', function() {
-            const canvas = document.getElementById('rotatorTimeline');
+        // Setup hover tooltip for rotator timeline
+        function setupRotatorTimelineHover(canvas) {
             if (!canvas) return;
 
             canvas.addEventListener('mousemove', function(e) {
@@ -6409,11 +6411,12 @@
                 const timelineY = canvas.height - marginBottom - 10;
 
                 // Redraw timeline to clear previous tooltip
-                drawRotatorTimeline(canvas.rotatorPositions.map(p => ({
+                const originalPositions = canvas.rotatorPositions.map(p => ({
                     time: p.time,
                     bearing: p.bearing,
                     enabled: true
-                })));
+                }));
+                drawRotatorTimeline(originalPositions);
 
                 // Check if mouse is near any position marker
                 const hoverRadius = 15;
@@ -6439,7 +6442,7 @@
 
                     // Position tooltip above the marker
                     let tooltipX = hoveredPos.x - tooltipWidth / 2;
-                    const tooltipY = timelineY - 30;
+                    const tooltipY = timelineY - 35;
 
                     // Keep tooltip within canvas bounds
                     if (tooltipX < 5) tooltipX = 5;
@@ -6468,13 +6471,14 @@
                 if (!canvas.rotatorPositions) return;
                 canvas.style.cursor = 'default';
                 // Redraw to clear tooltip
-                drawRotatorTimeline(canvas.rotatorPositions.map(p => ({
+                const originalPositions = canvas.rotatorPositions.map(p => ({
                     time: p.time,
                     bearing: p.bearing,
                     enabled: true
-                })));
+                }));
+                drawRotatorTimeline(originalPositions);
             });
-        });
+        }
 
         // Radiod configuration management
         let currentRadiodConfig = '';

@@ -379,13 +379,16 @@ class RotatorDisplay {
     }
     
     startUpdates() {
-        // Initial update
-        this.updatePosition();
-        
-        // Set up interval
-        this.updateTimer = setInterval(() => {
+        // Only start automatic updates if updateInterval is greater than 0
+        if (this.updateInterval > 0) {
+            // Initial update
             this.updatePosition();
-        }, this.updateInterval);
+            
+            // Set up interval
+            this.updateTimer = setInterval(() => {
+                this.updatePosition();
+            }, this.updateInterval);
+        }
     }
     
     stopUpdates() {

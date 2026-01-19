@@ -263,7 +263,7 @@ class RotatorUI {
             showPassword: false,
             mapSize: 500,
             compassSize: 150,
-            updateInterval: 1000
+            updateInterval: 3000  // Update every 3 seconds (vs 1 second in rotator.html)
         });
     }
     

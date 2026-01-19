@@ -434,6 +434,7 @@
     </style>
     <script src="chart.umd.min.js"></script>
     <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="suncalc.js"></script>
 </head>
 <body>
     <div class="container">
@@ -6288,6 +6289,72 @@
             const marginBottom = 40;
             const timelineY = height - marginBottom - 10;
             const timelineWidth = width - marginLeft - marginRight;
+
+            // Draw day/night shading if we have location data
+            if (currentConfig && currentConfig.location && currentConfig.location.latitude && currentConfig.location.longitude && typeof SunCalc !== 'undefined') {
+                const lat = currentConfig.location.latitude;
+                const lon = currentConfig.location.longitude;
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+
+                // Calculate sunrise and sunset times for today
+                const times = SunCalc.getTimes(today, lat, lon);
+                const sunrise = times.sunrise;
+                const sunset = times.sunset;
+
+                // Convert sunrise/sunset to hours (0-24)
+                const sunriseHours = sunrise.getHours() + sunrise.getMinutes() / 60;
+                const sunsetHours = sunset.getHours() + sunset.getMinutes() / 60;
+
+                // Draw night period before sunrise (00:00 to sunrise)
+                if (sunriseHours > 0) {
+                    const nightWidth = (sunriseHours / 24) * timelineWidth;
+                    ctx.fillStyle = 'rgba(100, 100, 150, 0.15)'; // Light blue-gray for night
+                    ctx.fillRect(marginLeft, marginTop, nightWidth, timelineY - marginTop);
+                }
+
+                // Draw night period after sunset (sunset to 24:00)
+                if (sunsetHours < 24) {
+                    const nightStart = (sunsetHours / 24) * timelineWidth;
+                    const nightWidth = timelineWidth - nightStart;
+                    ctx.fillStyle = 'rgba(100, 100, 150, 0.15)'; // Light blue-gray for night
+                    ctx.fillRect(marginLeft + nightStart, marginTop, nightWidth, timelineY - marginTop);
+                }
+
+                // Draw sunrise/sunset markers
+                const sunriseX = marginLeft + (sunriseHours / 24) * timelineWidth;
+                const sunsetX = marginLeft + (sunsetHours / 24) * timelineWidth;
+
+                // Sunrise marker (orange line)
+                ctx.strokeStyle = 'rgba(255, 165, 0, 0.5)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 3]);
+                ctx.beginPath();
+                ctx.moveTo(sunriseX, marginTop);
+                ctx.lineTo(sunriseX, timelineY);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Sunset marker (orange line)
+                ctx.strokeStyle = 'rgba(255, 140, 0, 0.5)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 3]);
+                ctx.beginPath();
+                ctx.moveTo(sunsetX, marginTop);
+                ctx.lineTo(sunsetX, timelineY);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Add sunrise/sunset labels at top
+                ctx.fillStyle = 'rgba(255, 140, 0, 0.8)';
+                ctx.font = '10px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                const sunriseTime = sunrise.getHours().toString().padStart(2, '0') + ':' + sunrise.getMinutes().toString().padStart(2, '0');
+                const sunsetTime = sunset.getHours().toString().padStart(2, '0') + ':' + sunset.getMinutes().toString().padStart(2, '0');
+                ctx.fillText('☀️ ' + sunriseTime, sunriseX, marginTop - 15);
+                ctx.fillText('🌙 ' + sunsetTime, sunsetX, marginTop - 15);
+            }
 
             // Draw timeline base line
             ctx.strokeStyle = '#333';

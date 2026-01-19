@@ -33,6 +33,7 @@ class RotatorUI {
                 <div id="rotator-content" class="rotator-content" style="display:${this.isExpanded ? 'flex' : 'none'};">
                     <div id="rotator-display-container" class="rotator-display-container">
                         <!-- Rotator display will be injected here -->
+                        <div id="rotator-azimuth-display" class="rotator-azimuth-display">0°</div>
                         <button id="rotator-controls-button" class="rotator-controls-button" onclick="rotatorUI.openControls()">
                             Controls
                         </button>
@@ -158,6 +159,23 @@ class RotatorUI {
                 margin: 0 !important;
             }
             
+            /* Azimuth display in top-right */
+            .rotator-azimuth-display {
+                position: absolute;
+                top: 20px;
+                right: 20px;
+                padding: 8px 12px;
+                background: rgba(0, 0, 0, 0.6);
+                color: white;
+                border-radius: 6px;
+                font-size: 16px;
+                font-weight: 600;
+                z-index: 100;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+                min-width: 50px;
+                text-align: center;
+            }
+            
             /* Controls button in bottom-left */
             .rotator-controls-button {
                 position: absolute;
@@ -265,6 +283,38 @@ class RotatorUI {
             compassSize: 150,
             updateInterval: 3000  // Update every 3 seconds (vs 1 second in rotator.html)
         });
+        
+        // Start updating azimuth display
+        this.startAzimuthUpdates();
+    }
+    
+    /**
+     * Start updating the azimuth display
+     */
+    startAzimuthUpdates() {
+        this.updateAzimuthDisplay();
+        this.azimuthUpdateTimer = setInterval(() => {
+            this.updateAzimuthDisplay();
+        }, 3000);
+    }
+    
+    /**
+     * Update the azimuth display in top-right
+     */
+    async updateAzimuthDisplay() {
+        try {
+            const response = await fetch('/api/rotctl/status');
+            const data = await response.json();
+            
+            if (data.position && data.position.azimuth !== undefined) {
+                const azimuthElement = document.getElementById('rotator-azimuth-display');
+                if (azimuthElement) {
+                    azimuthElement.textContent = Math.round(data.position.azimuth) + '°';
+                }
+            }
+        } catch (error) {
+            console.error('[RotatorUI] Failed to update azimuth display:', error);
+        }
     }
     
     /**
@@ -281,6 +331,10 @@ class RotatorUI {
         if (this.rotatorDisplay) {
             this.rotatorDisplay.destroy();
             this.rotatorDisplay = null;
+        }
+        if (this.azimuthUpdateTimer) {
+            clearInterval(this.azimuthUpdateTimer);
+            this.azimuthUpdateTimer = null;
         }
     }
 }

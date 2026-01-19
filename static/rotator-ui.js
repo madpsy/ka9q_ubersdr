@@ -305,8 +305,45 @@ class RotatorUI {
             updateInterval: 3000  // Update every 3 seconds (vs 1 second in rotator.html)
         });
         
+        // Fetch and display location
+        this.fetchReceiverLocation();
+        
         // Start updating azimuth display
         this.startAzimuthUpdates();
+    }
+    
+    /**
+     * Fetch receiver location and display it
+     */
+    async fetchReceiverLocation() {
+        try {
+            const response = await fetch('/api/description');
+            const data = await response.json();
+            
+            const locationElement = document.getElementById('rotator-location-display');
+            if (!locationElement) return;
+            
+            if (data.receiver && data.receiver.gps) {
+                const lat = data.receiver.gps.lat.toFixed(4);
+                const lon = data.receiver.gps.lon.toFixed(4);
+                let locationText = `${lat}, ${lon}`;
+                
+                // Add location name if available
+                if (data.receiver.location) {
+                    locationText = `${data.receiver.location} (${lat}, ${lon})`;
+                }
+                
+                locationElement.textContent = locationText;
+            } else {
+                locationElement.textContent = 'Location N/A';
+            }
+        } catch (error) {
+            console.error('[RotatorUI] Failed to fetch receiver location:', error);
+            const locationElement = document.getElementById('rotator-location-display');
+            if (locationElement) {
+                locationElement.textContent = 'Location Error';
+            }
+        }
     }
     
     /**

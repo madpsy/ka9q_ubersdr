@@ -997,8 +997,20 @@
             
             const [clickLon, clickLat] = coords;
             
-            // Calculate bearing and distance
-            const bearing = calculateBearing(receiverLat, receiverLon, clickLat, clickLon);
+            // On azimuthal equidistant projection, bearing is preserved from center
+            // Calculate bearing directly from screen coordinates
+            const width = 800;
+            const height = 800;
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const dx = mouseX - centerX;
+            const dy = mouseY - centerY;
+            
+            // Calculate bearing from screen coordinates (0° = North/up, clockwise)
+            let bearing = Math.atan2(dx, -dy) * 180 / Math.PI;
+            if (bearing < 0) bearing += 360;
+            
+            // Calculate distance using great circle formula
             const distance = calculateDistance(receiverLat, receiverLon, clickLat, clickLon);
             
             // Update tooltip content

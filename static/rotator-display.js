@@ -13,7 +13,8 @@ class RotatorDisplay {
         this.showPassword = options.showPassword || false; // default false
         this.mapSize = options.mapSize || 800;
         this.compassSize = options.compassSize || 200;
-        this.updateInterval = options.updateInterval || 1000;
+        // Use !== undefined to allow 0 as a valid value (disables automatic updates)
+        this.updateInterval = options.updateInterval !== undefined ? options.updateInterval : 1000;
         
         // State
         this.svg = null;

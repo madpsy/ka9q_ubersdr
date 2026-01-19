@@ -221,7 +221,7 @@ class RotatorUI {
             showCompass: true,
             showControls: false,
             showPassword: false,
-            mapSize: 480,
+            mapSize: 500,
             compassSize: 150,
             updateInterval: 1000
         });

@@ -6301,34 +6301,64 @@
                 ctx.lineTo(x, timelineY + 8);
                 ctx.stroke();
 
-                // Draw hour label (every 3 hours to avoid crowding)
-                if (hour % 3 === 0) {
+                // Draw hour label (every 3 hours to avoid crowding, but skip 00:00 since we have start label)
+                if (hour % 3 === 0 && hour !== 0) {
                     const hourStr = hour.toString().padStart(2, '0') + ':00';
                     ctx.fillStyle = '#666';
                     ctx.fillText(hourStr, x, timelineY + 12);
                 }
             }
 
-            // Filter enabled positions only
-            const enabledPositions = positions.filter(pos => pos.enabled !== false);
+            // Filter enabled positions only and sort by time
+            const enabledPositions = positions
+                .filter(pos => pos.enabled !== false)
+                .map(pos => {
+                    const timeParts = pos.time.split(':');
+                    const hours = parseInt(timeParts[0]);
+                    const minutes = parseInt(timeParts[1]);
+                    const timeInHours = hours + (minutes / 60);
+                    return { ...pos, timeInHours };
+                })
+                .sort((a, b) => a.timeInHours - b.timeInHours);
+
+            // Detect overlapping positions and assign vertical levels
+            const minSpacing = 40; // Minimum pixels between labels to avoid overlap
+            const positionsWithLevels = [];
+
+            enabledPositions.forEach((pos, index) => {
+                const x = marginLeft + (pos.timeInHours / 23) * timelineWidth;
+                let level = 0; // 0 = top level, 1 = bottom level
+
+                // Check if this position is too close to any previous position at level 0
+                for (let i = positionsWithLevels.length - 1; i >= 0; i--) {
+                    const prevPos = positionsWithLevels[i];
+                    const prevX = marginLeft + (prevPos.timeInHours / 23) * timelineWidth;
+
+                    if (Math.abs(x - prevX) < minSpacing) {
+                        // Too close - use opposite level
+                        level = prevPos.level === 0 ? 1 : 0;
+                        break;
+                    }
+                }
+
+                positionsWithLevels.push({ ...pos, x, level });
+            });
 
             // Draw position markers
-            enabledPositions.forEach(pos => {
-                // Parse time (HH:MM format)
-                const timeParts = pos.time.split(':');
-                const hours = parseInt(timeParts[0]);
-                const minutes = parseInt(timeParts[1]);
+            positionsWithLevels.forEach(pos => {
+                const x = pos.x;
+                const level = pos.level;
 
-                // Calculate position on timeline (0-23 hours)
-                const timeInHours = hours + (minutes / 60);
-                const x = marginLeft + (timeInHours / 23) * timelineWidth;
+                // Calculate Y positions based on level
+                const labelY = level === 0 ? marginTop : marginTop + 30;
+                const lineTopY = level === 0 ? marginTop + 20 : marginTop + 50;
 
                 // Draw vertical line from timeline up
                 ctx.strokeStyle = '#667eea';
                 ctx.lineWidth = 2;
                 ctx.beginPath();
                 ctx.moveTo(x, timelineY);
-                ctx.lineTo(x, marginTop + 20);
+                ctx.lineTo(x, lineTopY);
                 ctx.stroke();
 
                 // Draw marker circle
@@ -6342,23 +6372,23 @@
                 ctx.font = 'bold 12px sans-serif';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'bottom';
-                ctx.fillText(pos.bearing + '°', x, marginTop + 15);
+                ctx.fillText(pos.bearing + '°', x, lineTopY - 5);
 
                 // Draw time label above bearing
                 ctx.fillStyle = '#333';
                 ctx.font = '10px sans-serif';
-                ctx.fillText(pos.time, x, marginTop);
+                ctx.fillText(pos.time, x, labelY);
             });
 
-            // Draw start/end labels
+            // Draw start/end labels (outside the hour notches)
             ctx.fillStyle = '#999';
             ctx.font = '11px sans-serif';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'top';
-            ctx.fillText('00:00', marginLeft - 20, timelineY + 12);
+            ctx.fillText('00:00', marginLeft - 25, timelineY + 12);
 
             ctx.textAlign = 'right';
-            ctx.fillText('23:59', marginLeft + timelineWidth + 20, timelineY + 12);
+            ctx.fillText('23:59', marginLeft + timelineWidth + 25, timelineY + 12);
         }
 
         // Radiod configuration management

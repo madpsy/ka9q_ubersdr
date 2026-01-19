@@ -33,6 +33,7 @@ class RotatorUI {
                 <div id="rotator-content" class="rotator-content" style="display:${this.isExpanded ? 'flex' : 'none'};">
                     <div id="rotator-display-container" class="rotator-display-container">
                         <!-- Rotator display will be injected here -->
+                        <div id="rotator-location-display" class="rotator-location-display">Loading...</div>
                         <div id="rotator-azimuth-display" class="rotator-azimuth-display">0°</div>
                         <button id="rotator-controls-button" class="rotator-controls-button" onclick="rotatorUI.openControls()">
                             Controls
@@ -157,6 +158,26 @@ class RotatorUI {
                 left: 20px !important;
                 z-index: 100 !important;
                 margin: 0 !important;
+            }
+            
+            /* Location display in top-center */
+            .rotator-location-display {
+                position: absolute;
+                top: 10px;
+                left: 50%;
+                transform: translateX(-50%);
+                padding: 6px 12px;
+                background: rgba(0, 0, 0, 0.6);
+                color: white;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 500;
+                z-index: 100;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+                white-space: nowrap;
+                max-width: 80%;
+                overflow: hidden;
+                text-overflow: ellipsis;
             }
             
             /* Azimuth display in top-right */

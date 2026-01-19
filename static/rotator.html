@@ -1166,7 +1166,8 @@
             const R = 6371; // Earth radius in km
             const lat1 = lat * Math.PI / 180;
             const lon1 = lon * Math.PI / 180;
-            const brng = bearing * Math.PI / 180;
+            // Convert from navigational bearing (0° = North, clockwise) to mathematical bearing (0° = East, counterclockwise)
+            const brng = (90 - bearing) * Math.PI / 180;
             
             const lat2 = Math.asin(Math.sin(lat1) * Math.cos(distance/R) +
                                    Math.cos(lat1) * Math.sin(distance/R) * Math.cos(brng));

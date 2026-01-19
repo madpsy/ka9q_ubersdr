@@ -15,7 +15,7 @@
 # - The scheduler checks every minute, so positions are executed within 1 minute of scheduled time
 
 # Enable or disable the scheduler
-enabled: true
+enabled: false
 
 # List of scheduled positions
 # Each entry specifies a time and bearing

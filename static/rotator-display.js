@@ -84,6 +84,9 @@ class RotatorDisplay {
         
         this.svg = d3.select(svg);
         
+        // Create tooltip element
+        this.createTooltip(container);
+        
         // Create azimuthal equidistant projection centered on receiver
         this.projection = d3.geoAzimuthalEquidistant()
             .center([this.receiverLon, this.receiverLat])
@@ -153,6 +156,112 @@ class RotatorDisplay {
             .style("stroke-width", "2")
             .style("fill", "none")
             .style("stroke-linecap", "round");
+        
+        // Add mouse event handlers
+        this.svg.on("mousemove", (event) => this.handleMapMouseMove(event));
+        this.svg.on("mouseleave", () => this.handleMapMouseLeave());
+        this.svg.on("click", (event) => this.handleMapClick(event));
+    }
+    
+    createTooltip(container) {
+        const tooltip = document.createElement('div');
+        tooltip.id = `${this.containerId}-tooltip`;
+        tooltip.style.position = 'absolute';
+        tooltip.style.background = 'rgba(0, 0, 0, 0.8)';
+        tooltip.style.color = '#fff';
+        tooltip.style.padding = '8px 12px';
+        tooltip.style.borderRadius = '6px';
+        tooltip.style.fontSize = '13px';
+        tooltip.style.pointerEvents = 'none';
+        tooltip.style.zIndex = '1000';
+        tooltip.style.whiteSpace = 'nowrap';
+        tooltip.style.display = 'none';
+        tooltip.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+        container.appendChild(tooltip);
+        this.tooltip = tooltip;
+    }
+    
+    handleMapMouseMove(event) {
+        if (!this.projection || !this.receiverLat || !this.receiverLon) return;
+        
+        const [mouseX, mouseY] = d3.pointer(event);
+        const coords = this.projection.invert([mouseX, mouseY]);
+        
+        if (!coords) {
+            this.tooltip.style.display = 'none';
+            return;
+        }
+        
+        const [clickLon, clickLat] = coords;
+        
+        // Calculate bearing from screen coordinates (0° = North/up, clockwise)
+        const centerX = this.mapSize / 2;
+        const centerY = this.mapSize / 2;
+        const dx = mouseX - centerX;
+        const dy = mouseY - centerY;
+        
+        let bearing = Math.atan2(dx, -dy) * 180 / Math.PI;
+        if (bearing < 0) bearing += 360;
+        
+        // Calculate distance using great circle formula
+        const distance = this.calculateDistance(this.receiverLat, this.receiverLon, clickLat, clickLon);
+        
+        // Update tooltip content
+        this.tooltip.textContent = `${Math.round(bearing)}° | ${distance.toLocaleString()} km`;
+        this.tooltip.style.display = 'block';
+        
+        // Position tooltip near cursor (offset to avoid covering the point)
+        const container = document.getElementById(this.containerId);
+        const rect = container.getBoundingClientRect();
+        this.tooltip.style.left = (event.clientX - rect.left + 15) + 'px';
+        this.tooltip.style.top = (event.clientY - rect.top + 15) + 'px';
+    }
+    
+    handleMapMouseLeave() {
+        if (this.tooltip) {
+            this.tooltip.style.display = 'none';
+        }
+    }
+    
+    handleMapClick(event) {
+        if (!this.projection || !this.receiverLat || !this.receiverLon) return;
+        
+        const [mouseX, mouseY] = d3.pointer(event);
+        const coords = this.projection.invert([mouseX, mouseY]);
+        
+        if (!coords) return;
+        
+        // Calculate bearing from screen coordinates (0° = North/up, clockwise)
+        const centerX = this.mapSize / 2;
+        const centerY = this.mapSize / 2;
+        const dx = mouseX - centerX;
+        const dy = mouseY - centerY;
+        
+        let bearing = Math.atan2(dx, -dy) * 180 / Math.PI;
+        if (bearing < 0) bearing += 360;
+        
+        const roundedBearing = Math.round(bearing);
+        
+        // Emit custom event that can be handled by the parent page
+        const mapClickEvent = new CustomEvent('rotator-map-click', {
+            detail: { bearing: roundedBearing }
+        });
+        document.dispatchEvent(mapClickEvent);
+    }
+    
+    calculateDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371; // Earth radius in km
+        const φ1 = lat1 * Math.PI / 180;
+        const φ2 = lat2 * Math.PI / 180;
+        const Δφ = (lat2 - lat1) * Math.PI / 180;
+        const Δλ = (lon2 - lon1) * Math.PI / 180;
+        
+        const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                  Math.cos(φ1) * Math.cos(φ2) *
+                  Math.sin(Δλ/2) * Math.sin(Δλ/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        
+        return Math.round(R * c);
     }
     
     drawDistanceCircles(includeLabels = true) {

@@ -625,6 +625,23 @@
             // Add password input handler to enable/disable buttons
             document.getElementById('password').addEventListener('input', updateButtonStates);
             
+            // Listen for map click events from RotatorDisplay
+            document.addEventListener('rotator-map-click', (event) => {
+                const bearing = event.detail.bearing;
+                // Set the azimuth input
+                document.getElementById('target-azimuth').value = bearing;
+                
+                // Check if password is entered
+                const password = document.getElementById('password').value;
+                if (password) {
+                    // Automatically send the command
+                    setAzimuth(bearing);
+                } else {
+                    // Show message to enter password
+                    showMessage(`Map clicked: bearing ${bearing}°. Enter password and click "Go" to move rotator.`, 'success');
+                }
+            });
+            
             // Initial button state check
             updateButtonStates();
         });

@@ -143,6 +143,16 @@ class RotatorUI {
                 display: flex;
                 flex-direction: column;
                 align-items: center;
+                position: relative;
+            }
+            
+            /* Position compass overlay on top-left of map */
+            #rotator-display-container-compass {
+                position: absolute !important;
+                top: 20px !important;
+                left: 20px !important;
+                z-index: 100 !important;
+                margin: 0 !important;
             }
             
             /* Mobile responsive styles */

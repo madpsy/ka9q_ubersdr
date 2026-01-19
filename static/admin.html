@@ -6210,8 +6210,17 @@
                             importedConfig.enabled = value === 'true';
                         }
                         
-                        // Parse positions
-                        if (trimmed === '-') {
+                        // Parse positions - handle both "- time:" format and standalone "-" format
+                        if (trimmed.startsWith('- time:')) {
+                            // Save previous position if exists
+                            if (currentPosition) {
+                                importedConfig.positions.push(currentPosition);
+                            }
+                            // Start new position and parse time on same line
+                            currentPosition = { time: '', bearing: 0, enabled: true };
+                            currentPosition.time = trimmed.substring(7).trim().replace(/^["']|["']$/g, '');
+                        } else if (trimmed === '-') {
+                            // Standalone dash format
                             if (currentPosition) {
                                 importedConfig.positions.push(currentPosition);
                             }

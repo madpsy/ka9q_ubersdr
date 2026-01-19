@@ -298,6 +298,20 @@ class RotatorDisplay {
         needle.style.boxShadow = '0 0 5px rgba(255,68,68,0.5)';
         needle.style.transition = 'transform 0.5s ease-out';
         needle.style.zIndex = '5';
+        
+        // Create arrow tip at the top of the needle
+        const arrow = document.createElement('div');
+        arrow.style.position = 'absolute';
+        arrow.style.width = '0';
+        arrow.style.height = '0';
+        arrow.style.borderLeft = '5px solid transparent';
+        arrow.style.borderRight = '5px solid transparent';
+        arrow.style.borderBottom = '10px solid #ff4444';
+        arrow.style.top = '-10px';
+        arrow.style.left = '50%';
+        arrow.style.transform = 'translateX(-50%)';
+        needle.appendChild(arrow);
+        
         compassDiv.appendChild(needle);
         
         // Create center point

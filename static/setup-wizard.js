@@ -26,6 +26,7 @@
         // Auto-fill callsign fields when main callsign is entered
         document.getElementById('callsign').addEventListener('input', function(e) {
             const callsign = e.target.value.toUpperCase();
+            e.target.value = callsign; // Update the field itself to uppercase
             document.getElementById('dxclusterCallsign').value = callsign;
             document.getElementById('receiverCallsign').value = callsign;
         });

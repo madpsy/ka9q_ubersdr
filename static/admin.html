@@ -6458,6 +6458,30 @@
                 ctx.fillText(pos.bearing + '°', x, labelY);
             });
 
+            // Draw current time marker (black dashed line)
+            const now = new Date();
+            const currentHours = now.getHours() + now.getMinutes() / 60;
+            const currentX = marginLeft + (currentHours / 24) * timelineWidth;
+
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(currentX, marginTop);
+            ctx.lineTo(currentX, timelineY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Add "NOW" label above the current time line
+            ctx.fillStyle = '#000';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            const currentTimeStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+            ctx.fillText('NOW', currentX, marginTop - 5);
+            ctx.font = '9px sans-serif';
+            ctx.fillText(currentTimeStr, currentX, marginTop + 8);
+
             // Draw start/end labels (outside the hour notches)
             ctx.fillStyle = '#999';
             ctx.font = '11px sans-serif';

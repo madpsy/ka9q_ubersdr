@@ -1,0 +1,410 @@
+/**
+ * UberSDR Rotator Display Component
+ * Reusable rotator visualization with configurable display options
+ */
+
+class RotatorDisplay {
+    constructor(options = {}) {
+        // Configuration options
+        this.containerId = options.containerId || 'rotator-container';
+        this.showMap = options.showMap !== false; // default true
+        this.showCompass = options.showCompass !== false; // default true
+        this.showControls = options.showControls || false; // default false
+        this.showPassword = options.showPassword || false; // default false
+        this.mapSize = options.mapSize || 800;
+        this.compassSize = options.compassSize || 200;
+        this.updateInterval = options.updateInterval || 1000;
+        
+        // State
+        this.svg = null;
+        this.projection = null;
+        this.path = null;
+        this.azimuthLineElement = null;
+        this.beamConeElement = null;
+        this.receiverLat = null;
+        this.receiverLon = null;
+        this.beamWidth = 45; // degrees
+        this.updateTimer = null;
+        
+        // Initialize
+        this.init();
+    }
+    
+    async init() {
+        // Fetch receiver location
+        await this.fetchReceiverLocation();
+        
+        // Create UI elements
+        if (this.showMap) {
+            this.createMap();
+        }
+        if (this.showCompass) {
+            this.createCompass();
+        }
+        
+        // Start position updates
+        this.startUpdates();
+    }
+    
+    async fetchReceiverLocation() {
+        try {
+            const response = await fetch('/api/description');
+            const data = await response.json();
+            
+            if (data.receiver && data.receiver.gps) {
+                this.receiverLat = data.receiver.gps.lat;
+                this.receiverLon = data.receiver.gps.lon;
+                return true;
+            }
+        } catch (error) {
+            console.error('[RotatorDisplay] Failed to fetch receiver location:', error);
+        }
+        return false;
+    }
+    
+    async createMap() {
+        const container = document.getElementById(this.containerId);
+        if (!container) {
+            console.error('[RotatorDisplay] Container not found:', this.containerId);
+            return;
+        }
+        
+        // Create SVG for map
+        const mapDiv = document.createElement('div');
+        mapDiv.id = `${this.containerId}-map`;
+        mapDiv.style.position = 'relative';
+        container.appendChild(mapDiv);
+        
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.id = `${this.containerId}-map-svg`;
+        svg.setAttribute('width', this.mapSize);
+        svg.setAttribute('height', this.mapSize);
+        svg.setAttribute('viewBox', `0 0 ${this.mapSize} ${this.mapSize}`);
+        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        svg.style.background = '#1a252f';
+        svg.style.borderRadius = '10px';
+        svg.style.display = 'block';
+        mapDiv.appendChild(svg);
+        
+        this.svg = d3.select(svg);
+        
+        // Create azimuthal equidistant projection centered on receiver
+        this.projection = d3.geoAzimuthalEquidistant()
+            .center([this.receiverLon, this.receiverLat])
+            .scale(this.mapSize / 2 / Math.PI * 0.9)
+            .translate([this.mapSize / 2, this.mapSize / 2])
+            .clipAngle(180);
+        
+        this.path = d3.geoPath().projection(this.projection);
+        
+        // Draw graticule (grid lines)
+        const graticule = d3.geoGraticule();
+        this.svg.append("path")
+            .datum(graticule)
+            .attr("class", "graticule")
+            .attr("d", this.path)
+            .style("fill", "none")
+            .style("stroke", "rgba(255,255,255,0.1)")
+            .style("stroke-width", "0.5");
+        
+        // Draw distance circles
+        this.drawDistanceCircles();
+        
+        // Load and draw world map
+        try {
+            const response = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
+            const world = await response.json();
+            const countries = topojson.feature(world, world.objects.countries);
+            
+            this.svg.append("g")
+                .selectAll("path")
+                .data(countries.features)
+                .enter().append("path")
+                .attr("class", "country")
+                .attr("d", this.path)
+                .style("fill", "#2c3e50")
+                .style("stroke", "#4a5f7f")
+                .style("stroke-width", "0.5");
+        } catch (error) {
+            console.error('[RotatorDisplay] Failed to load world map:', error);
+        }
+        
+        // Draw center point (receiver location)
+        this.svg.append("circle")
+            .attr("cx", this.mapSize / 2)
+            .attr("cy", this.mapSize / 2)
+            .attr("r", 6)
+            .attr("fill", "#ff4444")
+            .attr("stroke", "#fff")
+            .attr("stroke-width", 2);
+        
+        // Create beam cone element
+        this.beamConeElement = this.svg.append("path")
+            .attr("class", "beam-cone")
+            .style("fill", "rgba(218, 165, 32, 0.2)")
+            .style("stroke", "#DAA520")
+            .style("stroke-width", "2");
+        
+        // Create center azimuth line element
+        this.azimuthLineElement = this.svg.append("line")
+            .attr("class", "azimuth-line")
+            .attr("x1", this.mapSize / 2)
+            .attr("y1", this.mapSize / 2)
+            .style("stroke", "#DAA520")
+            .style("stroke-width", "2")
+            .style("fill", "none")
+            .style("stroke-linecap", "round");
+    }
+    
+    drawDistanceCircles() {
+        const distances = [2000, 4000, 6000, 8000, 10000, 12000]; // km
+        
+        distances.forEach(distance => {
+            const circle = d3.geoCircle()
+                .center([this.receiverLon, this.receiverLat])
+                .radius(distance / 111.32); // Convert km to degrees (approximate)
+            
+            this.svg.append("path")
+                .datum(circle())
+                .attr("class", "distance-circle")
+                .attr("d", this.path)
+                .style("fill", "none")
+                .style("stroke", "rgba(255,255,255,0.2)")
+                .style("stroke-width", "1")
+                .style("stroke-dasharray", "2,2");
+            
+            // Add distance label at top (0 degrees)
+            const labelPoint = this.calculateDestinationPoint(this.receiverLat, this.receiverLon, 0, distance);
+            const projected = this.projection([labelPoint[1], labelPoint[0]]);
+            
+            if (projected) {
+                this.svg.append("text")
+                    .attr("class", "distance-label")
+                    .attr("x", projected[0])
+                    .attr("y", projected[1] - 5)
+                    .text(distance + " km")
+                    .style("fill", "rgba(255,255,255,0.5)")
+                    .style("font-size", "10px")
+                    .style("text-anchor", "middle");
+            }
+        });
+    }
+    
+    calculateDestinationPoint(lat, lon, bearing, distance) {
+        const R = 6371; // Earth radius in km
+        const δ = distance / R; // Angular distance in radians
+        const θ = bearing * Math.PI / 180; // Bearing in radians (0° = North, clockwise)
+        
+        const φ1 = lat * Math.PI / 180;
+        const λ1 = lon * Math.PI / 180;
+        
+        const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) +
+                             Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
+        
+        const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1),
+                                   Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2));
+        
+        return [φ2 * 180 / Math.PI, λ2 * 180 / Math.PI];
+    }
+    
+    createCompass() {
+        const container = document.getElementById(this.containerId);
+        if (!container) {
+            console.error('[RotatorDisplay] Container not found:', this.containerId);
+            return;
+        }
+        
+        // Create compass container
+        const compassDiv = document.createElement('div');
+        compassDiv.id = `${this.containerId}-compass`;
+        compassDiv.style.position = 'relative';
+        compassDiv.style.width = this.compassSize + 'px';
+        compassDiv.style.height = this.compassSize + 'px';
+        compassDiv.style.borderRadius = '50%';
+        compassDiv.style.background = 'radial-gradient(circle, #2c3e50 0%, #1a252f 100%)';
+        compassDiv.style.boxShadow = '0 10px 40px rgba(0,0,0,0.5), inset 0 0 20px rgba(0,0,0,0.3)';
+        compassDiv.style.margin = '20px auto';
+        container.appendChild(compassDiv);
+        
+        // Create compass ring
+        const ring = document.createElement('div');
+        ring.id = `${this.containerId}-compass-ring`;
+        ring.style.position = 'absolute';
+        ring.style.width = '100%';
+        ring.style.height = '100%';
+        ring.style.borderRadius = '50%';
+        compassDiv.appendChild(ring);
+        
+        // Create ticks and labels
+        const cardinals = ['N', 'E', 'S', 'W'];
+        const cardinalAngles = [0, 90, 180, 270];
+        
+        for (let i = 0; i < 360; i += 5) {
+            const tick = document.createElement('div');
+            tick.style.position = 'absolute';
+            tick.style.width = '1px';
+            tick.style.height = '8px';
+            tick.style.background = 'rgba(255,255,255,0.5)';
+            tick.style.left = '50%';
+            tick.style.top = '5px';
+            tick.style.transformOrigin = `50% ${this.compassSize/2 - 5}px`;
+            tick.style.transform = `rotate(${i}deg)`;
+            
+            if (i % 30 === 0) {
+                tick.style.height = '12px';
+                tick.style.width = '2px';
+                tick.style.background = 'rgba(255,255,255,0.8)';
+                
+                // Add label for major ticks
+                const label = document.createElement('div');
+                label.style.position = 'absolute';
+                label.style.left = '50%';
+                label.style.top = '20px';
+                label.style.transform = 'translateX(-50%)';
+                label.style.fontSize = '12px';
+                label.style.fontWeight = 'bold';
+                label.style.color = '#fff';
+                label.style.transformOrigin = `50% ${this.compassSize/2 - 20}px`;
+                label.style.transform = `translateX(-50%) rotate(${i}deg)`;
+                
+                const cardinalIndex = cardinalAngles.indexOf(i);
+                if (cardinalIndex !== -1) {
+                    label.textContent = cardinals[cardinalIndex];
+                    label.style.fontSize = '14px';
+                    label.style.color = '#4CAF50';
+                } else {
+                    label.textContent = i;
+                }
+                
+                ring.appendChild(label);
+            }
+            
+            ring.appendChild(tick);
+        }
+        
+        // Create needle
+        const needle = document.createElement('div');
+        needle.id = `${this.containerId}-compass-needle`;
+        needle.style.position = 'absolute';
+        needle.style.width = '3px';
+        needle.style.height = (this.compassSize * 0.35) + 'px';
+        needle.style.background = 'linear-gradient(to bottom, #ff4444 0%, #ff4444 50%, #fff 50%, #fff 100%)';
+        needle.style.left = '50%';
+        needle.style.top = '50%';
+        needle.style.transformOrigin = '50% 50%';
+        needle.style.transform = 'translate(-50%, -50%) rotate(0deg)';
+        needle.style.borderRadius = '2px';
+        needle.style.boxShadow = '0 0 5px rgba(255,68,68,0.5)';
+        needle.style.transition = 'transform 0.5s ease-out';
+        needle.style.zIndex = '5';
+        compassDiv.appendChild(needle);
+        
+        // Create center point
+        const center = document.createElement('div');
+        center.style.position = 'absolute';
+        center.style.width = '10px';
+        center.style.height = '10px';
+        center.style.background = '#4CAF50';
+        center.style.borderRadius = '50%';
+        center.style.top = '50%';
+        center.style.left = '50%';
+        center.style.transform = 'translate(-50%, -50%)';
+        center.style.boxShadow = '0 0 10px #4CAF50';
+        center.style.zIndex = '10';
+        compassDiv.appendChild(center);
+    }
+    
+    updateAzimuthDisplay(azimuth) {
+        // Update map
+        if (this.showMap && this.svg && this.projection) {
+            const centerX = this.mapSize / 2;
+            const centerY = this.mapSize / 2;
+            const radius = this.mapSize / 2;
+            
+            // Convert azimuth to radians (0° = North/up, clockwise)
+            const angleRad = (azimuth - 90) * Math.PI / 180;
+            
+            // Calculate endpoint
+            const endX = centerX + radius * Math.cos(angleRad);
+            const endY = centerY + radius * Math.sin(angleRad);
+            
+            // Update center line
+            if (this.azimuthLineElement) {
+                this.azimuthLineElement
+                    .attr("x2", endX)
+                    .attr("y2", endY);
+            }
+            
+            // Draw beam cone
+            if (this.beamConeElement) {
+                const halfBeam = this.beamWidth / 2;
+                const leftAzimuth = azimuth - halfBeam;
+                const rightAzimuth = azimuth + halfBeam;
+                
+                const leftAngleRad = (leftAzimuth - 90) * Math.PI / 180;
+                const rightAngleRad = (rightAzimuth - 90) * Math.PI / 180;
+                
+                const leftX = centerX + radius * Math.cos(leftAngleRad);
+                const leftY = centerY + radius * Math.sin(leftAngleRad);
+                const rightX = centerX + radius * Math.cos(rightAngleRad);
+                const rightY = centerY + radius * Math.sin(rightAngleRad);
+                
+                const largeArcFlag = this.beamWidth > 180 ? 1 : 0;
+                const pathData = `M ${centerX},${centerY} L ${leftX},${leftY} A ${radius},${radius} 0 ${largeArcFlag} 1 ${rightX},${rightY} Z`;
+                
+                this.beamConeElement.attr("d", pathData);
+            }
+        }
+        
+        // Update compass needle
+        if (this.showCompass) {
+            const needle = document.getElementById(`${this.containerId}-compass-needle`);
+            if (needle) {
+                needle.style.transform = `translate(-50%, -50%) rotate(${azimuth}deg)`;
+            }
+        }
+    }
+    
+    async updatePosition() {
+        try {
+            const response = await fetch('/api/rotctl/status');
+            const data = await response.json();
+            
+            if (data.position && data.position.azimuth !== undefined) {
+                this.updateAzimuthDisplay(data.position.azimuth);
+            }
+        } catch (error) {
+            console.error('[RotatorDisplay] Failed to update position:', error);
+        }
+    }
+    
+    startUpdates() {
+        // Initial update
+        this.updatePosition();
+        
+        // Set up interval
+        this.updateTimer = setInterval(() => {
+            this.updatePosition();
+        }, this.updateInterval);
+    }
+    
+    stopUpdates() {
+        if (this.updateTimer) {
+            clearInterval(this.updateTimer);
+            this.updateTimer = null;
+        }
+    }
+    
+    destroy() {
+        this.stopUpdates();
+        const container = document.getElementById(this.containerId);
+        if (container) {
+            container.innerHTML = '';
+        }
+    }
+}
+
+// Export for use in other scripts
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = RotatorDisplay;
+}

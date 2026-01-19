@@ -1,0 +1,1490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rotator Control - UberSDR</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://d3js.org/d3-geo.v3.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/topojson@3"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 800px;
+            width: 100%;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 5px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .subtitle {
+            text-align: center;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+            opacity: 0.9;
+            font-weight: 300;
+        }
+
+        .status-bar {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .status-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .status-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-bottom: 5px;
+        }
+
+        .status-value {
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-left: 8px;
+        }
+
+        .status-indicator.connected {
+            background: #4CAF50;
+            box-shadow: 0 0 10px #4CAF50;
+        }
+
+        .status-indicator.disconnected {
+            background: #f44336;
+            box-shadow: 0 0 10px #f44336;
+        }
+
+        .map-container {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 0;
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #azimuthal-map {
+            background: #1a252f;
+            border-radius: 10px;
+            display: block;
+        }
+
+        .country {
+            fill: #2c3e50;
+            stroke: #4a5f7f;
+            stroke-width: 0.5;
+        }
+
+        .graticule {
+            fill: none;
+            stroke: rgba(255,255,255,0.1);
+            stroke-width: 0.5;
+        }
+
+        .azimuth-line {
+            stroke: #DAA520;
+            stroke-width: 2;
+            fill: none;
+            stroke-linecap: round;
+        }
+
+        .beam-cone {
+            fill: rgba(218, 165, 32, 0.2);
+            stroke: #DAA520;
+            stroke-width: 2;
+        }
+
+        .distance-circle {
+            fill: none;
+            stroke: rgba(255,255,255,0.2);
+            stroke-width: 1;
+            stroke-dasharray: 2,2;
+        }
+
+        .distance-label {
+            fill: rgba(255,255,255,0.5);
+            font-size: 10px;
+            text-anchor: middle;
+        }
+
+        .compass-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+        }
+
+        .quick-actions-overlay {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .quick-actions-overlay button {
+            padding: 10px 20px;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+
+        .quick-actions-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .azimuth-input-overlay {
+            position: absolute;
+            top: 20px;
+            right: 390px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .azimuth-input-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+
+        .azimuth-input-wrapper::after {
+            content: '°';
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            pointer-events: none;
+            font-size: 14px;
+            color: #fff;
+            opacity: 0.8;
+        }
+
+        .azimuth-input-overlay input {
+            width: 80px;
+            padding: 10px 20px 10px 10px;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .azimuth-input-overlay button {
+            padding: 10px 16px;
+            font-size: 14px;
+        }
+
+        .adjustment-overlay {
+            position: absolute;
+            top: 20px;
+            right: 240px;
+            z-index: 100;
+            display: grid;
+            grid-template-columns: auto auto;
+            gap: 10px;
+        }
+
+        .adjustment-overlay button {
+            padding: 10px 16px;
+            font-size: 14px;
+            min-width: 60px;
+        }
+
+        .password-overlay {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .password-overlay label {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .password-overlay input {
+            width: 200px;
+            padding: 10px;
+            font-size: 14px;
+        }
+
+        .map-tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            pointer-events: none;
+            z-index: 1000;
+            white-space: nowrap;
+            display: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+
+        .compass {
+            position: relative;
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            background: radial-gradient(circle, #2c3e50 0%, #1a252f 100%);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5), inset 0 0 20px rgba(0,0,0,0.3);
+            cursor: pointer;
+        }
+
+        .compass-ring {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+        }
+
+        .compass-tick {
+            position: absolute;
+            width: 1px;
+            height: 8px;
+            background: rgba(255,255,255,0.5);
+            left: 50%;
+            top: 5px;
+            transform-origin: 50% 95px;
+        }
+
+        .compass-tick.major {
+            height: 12px;
+            width: 2px;
+            background: rgba(255,255,255,0.8);
+        }
+
+        .compass-label {
+            position: absolute;
+            left: 50%;
+            top: 20px;
+            transform: translateX(-50%);
+            font-size: 12px;
+            font-weight: bold;
+            color: #fff;
+            transform-origin: 50% 80px;
+        }
+
+        .compass-label.cardinal {
+            font-size: 14px;
+            color: #4CAF50;
+        }
+
+        .compass-center {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background: #4CAF50;
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 10px #4CAF50;
+            z-index: 10;
+        }
+
+        .compass-needle {
+            position: absolute;
+            width: 3px;
+            height: 70px;
+            background: linear-gradient(to bottom, #ff4444 0%, #ff4444 50%, #fff 50%, #fff 100%);
+            left: 50%;
+            top: 50%;
+            transform-origin: 50% 50%;
+            transform: translate(-50%, -50%) rotate(0deg);
+            border-radius: 2px;
+            box-shadow: 0 0 5px rgba(255,68,68,0.5);
+            transition: transform 0.5s ease-out;
+            z-index: 5;
+        }
+
+        .compass-needle::before {
+            content: '';
+            position: absolute;
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-bottom: 10px solid #ff4444;
+            top: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        input[type="number"], input[type="password"] {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            font-size: 16px;
+        }
+
+        /* Remove spinner arrows from number input */
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+
+        input[type="number"]:focus, input[type="password"]:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            background: #4CAF50;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        button:hover {
+            background: #45a049;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(76,175,80,0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        button.danger {
+            background: #f44336;
+        }
+
+        button.danger:hover {
+            background: #da190b;
+        }
+
+        button.park {
+            background: #2196F3;
+        }
+
+        button.park:hover {
+            background: #1976D2;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .increment-buttons {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+            justify-content: center;
+        }
+
+        .increment-buttons button {
+            padding: 8px 16px;
+            font-size: 14px;
+            min-width: 60px;
+        }
+
+        .increment-buttons .label {
+            display: flex;
+            align-items: center;
+            color: rgba(255,255,255,0.8);
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .message {
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .message.success {
+            background: rgba(76,175,80,0.2);
+            border: 1px solid #4CAF50;
+        }
+
+        .message.error {
+            background: rgba(244,67,54,0.2);
+            border: 1px solid #f44336;
+        }
+
+        .message.show {
+            display: block;
+        }
+
+        .error-banner {
+            background: rgba(244,67,54,0.2);
+            border: 2px solid #f44336;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .error-banner.show {
+            display: block;
+        }
+
+        .error-banner h3 {
+            margin: 0 0 10px 0;
+            font-size: 1.2em;
+            color: #ff6b6b;
+        }
+
+        .error-banner p {
+            margin: 0;
+            font-size: 0.95em;
+            line-height: 1.5;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            h1 {
+                font-size: 1.8em;
+                margin-bottom: 3px;
+            }
+
+            .subtitle {
+                font-size: 1em;
+                margin-bottom: 10px;
+            }
+
+            .status-bar {
+                padding: 10px;
+                gap: 8px;
+            }
+
+            .status-label {
+                font-size: 0.75em;
+            }
+
+            .status-value {
+                font-size: 1.2em;
+            }
+
+            .map-container {
+                padding: 10px;
+                margin-bottom: 15px;
+            }
+
+            #azimuthal-map {
+                max-width: 100%;
+                height: auto;
+            }
+
+            /* Keep compass overlaid on mobile */
+            .compass {
+                width: 120px;
+                height: 120px;
+            }
+
+            .compass-tick {
+                transform-origin: 50% 55px;
+            }
+
+            .compass-label {
+                transform-origin: 50% 40px;
+                font-size: 9px;
+            }
+
+            .compass-label.cardinal {
+                font-size: 11px;
+            }
+
+            .compass-needle {
+                height: 45px;
+            }
+
+            /* Move all overlays below the map */
+            .azimuth-input-overlay,
+            .adjustment-overlay,
+            .quick-actions-overlay,
+            .password-overlay {
+                position: relative;
+                top: auto;
+                left: auto;
+                right: auto;
+                bottom: auto;
+                margin: 10px auto;
+                max-width: 100%;
+            }
+
+            .azimuth-input-overlay {
+                flex-direction: row;
+                justify-content: center;
+                align-items: center;
+            }
+
+            .azimuth-input-overlay input {
+                width: 100px;
+                font-size: 16px;
+            }
+
+            .azimuth-input-overlay button {
+                padding: 10px 20px;
+                font-size: 16px;
+            }
+
+            .adjustment-overlay {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 8px;
+                max-width: 300px;
+            }
+
+            .adjustment-overlay button {
+                padding: 12px 8px;
+                font-size: 13px;
+                min-width: auto;
+            }
+
+            .quick-actions-overlay {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+                max-width: 300px;
+            }
+
+            .quick-actions-overlay button {
+                padding: 12px 16px;
+                font-size: 14px;
+                white-space: normal;
+            }
+
+            .quick-actions-row {
+                grid-column: 1 / -1;
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+            }
+
+            .password-overlay {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 5px;
+            }
+
+            .password-overlay input {
+                width: 100%;
+                max-width: 300px;
+                font-size: 16px;
+            }
+
+            button {
+                font-size: 15px;
+                padding: 12px 20px;
+            }
+
+            input[type="number"], input[type="password"] {
+                font-size: 16px;
+            }
+
+            .map-tooltip {
+                font-size: 11px;
+                padding: 6px 10px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            h1 {
+                font-size: 1.5em;
+            }
+
+            .subtitle {
+                font-size: 0.9em;
+            }
+
+            .status-bar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .status-item {
+                flex-direction: column;
+                align-items: center;
+                padding: 8px 0;
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+            }
+
+            .status-item:last-child {
+                border-bottom: none;
+            }
+
+            .status-label {
+                text-align: center;
+                margin-bottom: 5px;
+            }
+
+            .status-value {
+                text-align: center;
+                font-size: 1.1em;
+            }
+
+            .compass {
+                width: 100px;
+                height: 100px;
+            }
+
+            .compass-tick {
+                transform-origin: 50% 45px;
+            }
+
+            .compass-label {
+                transform-origin: 50% 30px;
+                font-size: 8px;
+            }
+
+            .compass-label.cardinal {
+                font-size: 10px;
+            }
+
+            .compass-needle {
+                height: 38px;
+            }
+
+            .adjustment-overlay {
+                grid-template-columns: repeat(2, 1fr);
+                max-width: 250px;
+            }
+
+            .quick-actions-overlay {
+                max-width: 250px;
+            }
+
+            .password-overlay input {
+                max-width: 250px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛰️ Rotator Control</h1>
+        <div class="subtitle" id="subtitle">Loading...</div>
+        
+        <div class="status-bar">
+            <div class="status-item">
+                <div class="status-label">Status</div>
+                <div class="status-value">
+                    <span id="connection-status">Connecting...</span>
+                    <span class="status-indicator disconnected" id="status-indicator"></span>
+                </div>
+                <div class="status-label" style="font-size: 0.8em; margin-top: 5px;">
+                    <span id="connection-duration"></span>
+                </div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Receiver Location</div>
+                <div class="status-value" style="font-size: 1.1em;" id="receiver-location">Loading...</div>
+                <div class="status-label" style="font-size: 0.8em; margin-top: 5px;">
+                    <span id="receiver-location-name"></span>
+                </div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Azimuth</div>
+                <div class="status-value"><span id="current-azimuth">0</span>°</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Moving</div>
+                <div class="status-value" id="moving-status">No</div>
+            </div>
+        </div>
+
+        <div class="error-banner" id="error-banner">
+            <h3>⚠️ Connection Error</h3>
+            <p id="error-message"></p>
+        </div>
+
+        <div class="map-container">
+            <svg id="azimuthal-map" width="800" height="800" viewBox="0 0 800 800" preserveAspectRatio="xMidYMid meet"></svg>
+            
+            <div class="compass-container">
+                <div class="compass" id="compass">
+                    <div class="compass-ring" id="compass-ring"></div>
+                    <div class="compass-needle" id="needle"></div>
+                    <div class="compass-center"></div>
+                </div>
+            </div>
+            
+            <div class="azimuth-input-overlay">
+                <div class="azimuth-input-wrapper">
+                    <input type="number" id="target-azimuth" placeholder="0-360" min="0" max="360" step="1" oninput="this.value = Math.round(this.value)">
+                </div>
+                <button onclick="setPosition()">Go</button>
+            </div>
+            
+            <div class="adjustment-overlay">
+                <button onclick="adjustAzimuth(-30)">-30°</button>
+                <button onclick="adjustAzimuth(30)">+30°</button>
+                <button onclick="adjustAzimuth(-10)">-10°</button>
+                <button onclick="adjustAzimuth(10)">+10°</button>
+                <button onclick="adjustAzimuth(-5)">-5°</button>
+                <button onclick="adjustAzimuth(5)">+5°</button>
+            </div>
+            
+            <div class="quick-actions-overlay">
+                <button onclick="setAzimuth(0)">North (0°)</button>
+                <button onclick="setAzimuth(90)">East (90°)</button>
+                <button onclick="setAzimuth(180)">South (180°)</button>
+                <button onclick="setAzimuth(270)">West (270°)</button>
+                <div class="quick-actions-row">
+                    <button class="danger" onclick="stopRotator()">⏹ Stop</button>
+                    <button class="park" onclick="parkRotator()">🅿 Park</button>
+                </div>
+            </div>
+            
+            <div class="password-overlay">
+                <input type="password" id="password" placeholder="Enter password">
+            </div>
+            
+            <div class="map-tooltip" id="map-tooltip"></div>
+        </div>
+
+        <div class="message" id="message"></div>
+    </div>
+
+    <script>
+        let savedPassword = localStorage.getItem('rotctl_password') || '';
+        let updateInterval = null;
+        
+        // Azimuthal map variables
+        let svg, projection, path, azimuthLineElement, beamConeElement;
+        let receiverLat, receiverLon;
+        const beamWidth = 45; // degrees
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            if (savedPassword) {
+                document.getElementById('password').value = savedPassword;
+            }
+            
+            // Create compass ticks and labels
+            createCompass();
+            
+            // Fetch receiver location
+            fetchReceiverLocation();
+            
+            // Start updates
+            updatePosition();
+            updateInterval = setInterval(updatePosition, 1000);
+
+            // Add click handler to compass
+            document.getElementById('compass').addEventListener('click', handleCompassClick);
+            
+            // Add Enter key handler to azimuth input
+            document.getElementById('target-azimuth').addEventListener('keypress', (event) => {
+                if (event.key === 'Enter') {
+                    setPosition();
+                }
+            });
+            
+            // Add password input handler to enable/disable buttons
+            document.getElementById('password').addEventListener('input', updateButtonStates);
+            
+            // Initial button state check
+            updateButtonStates();
+        });
+
+        function updateButtonStates() {
+            const password = document.getElementById('password').value;
+            const hasPassword = password.length > 0;
+            
+            // Get all control buttons
+            const goButton = document.querySelector('button[onclick="setPosition()"]');
+            const adjustButtons = document.querySelectorAll('.adjustment-overlay button');
+            const quickActionButtons = document.querySelectorAll('.quick-actions-overlay button');
+            
+            // Enable/disable based on password
+            if (goButton) goButton.disabled = !hasPassword;
+            adjustButtons.forEach(btn => btn.disabled = !hasPassword);
+            quickActionButtons.forEach(btn => btn.disabled = !hasPassword);
+        }
+
+        async function fetchReceiverLocation() {
+            try {
+                const response = await fetch('/api/description');
+                const data = await response.json();
+                
+                // Update subtitle with callsign and name
+                if (data.receiver) {
+                    const callsign = data.receiver.callsign || '';
+                    const name = data.receiver.name || '';
+                    if (callsign && name) {
+                        document.getElementById('subtitle').textContent = `${callsign} - ${name}`;
+                    } else if (callsign) {
+                        document.getElementById('subtitle').textContent = callsign;
+                    } else if (name) {
+                        document.getElementById('subtitle').textContent = name;
+                    } else {
+                        document.getElementById('subtitle').textContent = '';
+                    }
+                }
+                
+                // Update location
+                if (data.receiver && data.receiver.gps) {
+                    const lat = data.receiver.gps.lat.toFixed(4);
+                    const lon = data.receiver.gps.lon.toFixed(4);
+                    document.getElementById('receiver-location').textContent = `${lat}, ${lon}`;
+                    
+                    // Update location name if available
+                    if (data.receiver.location) {
+                        document.getElementById('receiver-location-name').textContent = data.receiver.location;
+                    }
+                    
+                    // Initialize azimuthal map with receiver location
+                    initializeAzimuthalMap(data.receiver.gps.lat, data.receiver.gps.lon);
+                } else {
+                    document.getElementById('receiver-location').textContent = 'N/A';
+                }
+            } catch (error) {
+                console.error('Failed to fetch receiver location:', error);
+                document.getElementById('receiver-location').textContent = 'Error';
+                document.getElementById('subtitle').textContent = '';
+            }
+        }
+
+        async function initializeAzimuthalMap(centerLat, centerLon) {
+            receiverLat = centerLat;
+            receiverLon = centerLon;
+            
+            const width = 800;
+            const height = 800;
+            
+            svg = d3.select("#azimuthal-map")
+                .attr("width", width)
+                .attr("height", height);
+            
+            // Create azimuthal equidistant projection centered on receiver
+            projection = d3.geoAzimuthalEquidistant()
+                .center([centerLon, centerLat])
+                .scale(width / 2 / Math.PI * 0.9)
+                .translate([width / 2, height / 2])
+                .clipAngle(180);
+            
+            path = d3.geoPath().projection(projection);
+            
+            // Draw graticule (grid lines)
+            const graticule = d3.geoGraticule();
+            svg.append("path")
+                .datum(graticule)
+                .attr("class", "graticule")
+                .attr("d", path);
+            
+            // Draw distance circles (every 2000km)
+            drawDistanceCircles(centerLat, centerLon);
+            
+            // Load and draw world map
+            try {
+                const response = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
+                const world = await response.json();
+                const countries = topojson.feature(world, world.objects.countries);
+                
+                svg.append("g")
+                    .selectAll("path")
+                    .data(countries.features)
+                    .enter().append("path")
+                    .attr("class", "country")
+                    .attr("d", path);
+            } catch (error) {
+                console.error('Failed to load world map:', error);
+            }
+            
+            // Draw center point (receiver location)
+            svg.append("circle")
+                .attr("cx", width / 2)
+                .attr("cy", height / 2)
+                .attr("r", 6)
+                .attr("fill", "#ff4444")
+                .attr("stroke", "#fff")
+                .attr("stroke-width", 2);
+            
+            // Create beam cone element (will be a path showing the beamwidth)
+            beamConeElement = svg.append("path")
+                .attr("class", "beam-cone");
+            
+            // Create center azimuth line element
+            azimuthLineElement = svg.append("line")
+                .attr("class", "azimuth-line")
+                .attr("x1", width / 2)
+                .attr("y1", height / 2);
+            
+            // Add click handler to map
+            svg.on("click", handleMapClick);
+            
+            // Add mouse move handler for tooltip
+            svg.on("mousemove", handleMapMouseMove);
+            svg.on("mouseleave", handleMapMouseLeave);
+        }
+
+        function handleMapMouseMove(event) {
+            if (!projection || !receiverLat || !receiverLon) return;
+            
+            const tooltip = document.getElementById('map-tooltip');
+            const [mouseX, mouseY] = d3.pointer(event);
+            const coords = projection.invert([mouseX, mouseY]);
+            
+            if (!coords) {
+                tooltip.style.display = 'none';
+                return;
+            }
+            
+            const [clickLon, clickLat] = coords;
+            
+            // On azimuthal equidistant projection, bearing is preserved from center
+            // Calculate bearing directly from screen coordinates
+            const width = 800;
+            const height = 800;
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const dx = mouseX - centerX;
+            const dy = mouseY - centerY;
+            
+            // Calculate bearing from screen coordinates (0° = North/up, clockwise)
+            let bearing = Math.atan2(dx, -dy) * 180 / Math.PI;
+            if (bearing < 0) bearing += 360;
+            
+            // Calculate distance using great circle formula
+            const distance = calculateDistance(receiverLat, receiverLon, clickLat, clickLon);
+            
+            // Update tooltip content
+            tooltip.textContent = `${Math.round(bearing)}° | ${distance.toLocaleString()} km`;
+            tooltip.style.display = 'block';
+            
+            // Position tooltip near cursor (offset to avoid covering the point)
+            const mapContainer = document.querySelector('.map-container');
+            const rect = mapContainer.getBoundingClientRect();
+            tooltip.style.left = (event.clientX - rect.left + 15) + 'px';
+            tooltip.style.top = (event.clientY - rect.top + 15) + 'px';
+        }
+
+        function handleMapMouseLeave() {
+            const tooltip = document.getElementById('map-tooltip');
+            tooltip.style.display = 'none';
+        }
+
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Earth radius in km
+            const φ1 = lat1 * Math.PI / 180;
+            const φ2 = lat2 * Math.PI / 180;
+            const Δφ = (lat2 - lat1) * Math.PI / 180;
+            const Δλ = (lon2 - lon1) * Math.PI / 180;
+            
+            const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                      Math.cos(φ1) * Math.cos(φ2) *
+                      Math.sin(Δλ/2) * Math.sin(Δλ/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            
+            return Math.round(R * c);
+        }
+
+        function handleMapClick(event) {
+            if (!projection || !receiverLat || !receiverLon) return;
+            
+            const [mouseX, mouseY] = d3.pointer(event);
+            const coords = projection.invert([mouseX, mouseY]);
+            
+            if (!coords) return;
+            
+            // On azimuthal equidistant projection, bearing is preserved from center
+            // Calculate bearing directly from screen coordinates
+            const width = 800;
+            const height = 800;
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const dx = mouseX - centerX;
+            const dy = mouseY - centerY;
+            
+            // Calculate bearing from screen coordinates (0° = North/up, clockwise)
+            let bearing = Math.atan2(dx, -dy) * 180 / Math.PI;
+            if (bearing < 0) bearing += 360;
+            
+            const roundedBearing = Math.round(bearing);
+            
+            // Set the azimuth input
+            document.getElementById('target-azimuth').value = roundedBearing;
+            
+            // Check if password is entered
+            const password = document.getElementById('password').value;
+            if (password) {
+                // Automatically send the command
+                setAzimuth(roundedBearing);
+            } else {
+                // Show message to enter password
+                showMessage(`Map clicked: bearing ${roundedBearing}°. Enter password and click "Go" to move rotator.`, 'success');
+            }
+        }
+
+        function calculateBearing(lat1, lon1, lat2, lon2) {
+            const φ1 = lat1 * Math.PI / 180;
+            const φ2 = lat2 * Math.PI / 180;
+            const Δλ = (lon2 - lon1) * Math.PI / 180;
+            
+            const y = Math.sin(Δλ) * Math.cos(φ2);
+            const x = Math.cos(φ1) * Math.sin(φ2) -
+                      Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+            
+            let bearing = Math.atan2(y, x) * 180 / Math.PI;
+            
+            // Normalize to 0-360
+            bearing = (bearing + 360) % 360;
+            
+            return bearing;
+        }
+
+        function drawDistanceCircles(centerLat, centerLon) {
+            const distances = [2000, 4000, 6000, 8000, 10000, 12000]; // km
+            
+            distances.forEach(distance => {
+                const circle = d3.geoCircle()
+                    .center([centerLon, centerLat])
+                    .radius(distance / 111.32); // Convert km to degrees (approximate)
+                
+                svg.append("path")
+                    .datum(circle())
+                    .attr("class", "distance-circle")
+                    .attr("d", path);
+                
+                // Add distance label at top (0 degrees)
+                const labelPoint = calculateDestinationPoint(centerLat, centerLon, 0, distance);
+                const projected = projection([labelPoint[1], labelPoint[0]]);
+                
+                if (projected) {
+                    svg.append("text")
+                        .attr("class", "distance-label")
+                        .attr("x", projected[0])
+                        .attr("y", projected[1] - 5)
+                        .text(distance + " km");
+                }
+            });
+        }
+
+        function updateAzimuthLineOnMap(azimuth) {
+            if (!svg || !projection || !receiverLat || !receiverLon) return;
+            
+            const width = 800;
+            const height = 800;
+            const centerX = width / 2;
+            const centerY = height / 2;
+            
+            // On an azimuthal projection, we can draw directly using angles
+            // The azimuth is measured clockwise from North (0° at top)
+            // In screen coordinates: 0° points up, 90° points right
+            const radius = width / 2; // Draw to edge of map
+            
+            // Convert azimuth to radians (0° = North/up, clockwise)
+            const angleRad = (azimuth - 90) * Math.PI / 180; // Subtract 90 to convert from North=0 to East=0
+            
+            // Calculate endpoint
+            const endX = centerX + radius * Math.cos(angleRad);
+            const endY = centerY + radius * Math.sin(angleRad);
+            
+            // Update center line
+            if (azimuthLineElement) {
+                azimuthLineElement
+                    .attr("x2", endX)
+                    .attr("y2", endY);
+            }
+            
+            // Draw beam cone as a simple wedge
+            if (beamConeElement) {
+                const halfBeam = beamWidth / 2;
+                const leftAzimuth = azimuth - halfBeam;
+                const rightAzimuth = azimuth + halfBeam;
+                
+                // Convert to screen angles
+                const leftAngleRad = (leftAzimuth - 90) * Math.PI / 180;
+                const rightAngleRad = (rightAzimuth - 90) * Math.PI / 180;
+                
+                // Calculate edge endpoints
+                const leftX = centerX + radius * Math.cos(leftAngleRad);
+                const leftY = centerY + radius * Math.sin(leftAngleRad);
+                const rightX = centerX + radius * Math.cos(rightAngleRad);
+                const rightY = centerY + radius * Math.sin(rightAngleRad);
+                
+                // Create arc path
+                const largeArcFlag = beamWidth > 180 ? 1 : 0;
+                
+                // Build path: start at center, line to left edge, arc to right edge, line back to center
+                const pathData = `M ${centerX},${centerY} L ${leftX},${leftY} A ${radius},${radius} 0 ${largeArcFlag} 1 ${rightX},${rightY} Z`;
+                
+                beamConeElement.attr("d", pathData);
+            }
+        }
+
+        function calculateDestinationPoint(lat, lon, bearing, distance) {
+            const R = 6371; // Earth radius in km
+            const δ = distance / R; // Angular distance in radians
+            const θ = bearing * Math.PI / 180; // Bearing in radians (0° = North, clockwise)
+            
+            const φ1 = lat * Math.PI / 180;
+            const λ1 = lon * Math.PI / 180;
+            
+            const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) +
+                                 Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
+            
+            const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1),
+                                       Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2));
+            
+            return [φ2 * 180 / Math.PI, λ2 * 180 / Math.PI];
+        }
+
+        function createCompass() {
+            const ring = document.getElementById('compass-ring');
+            const cardinals = ['N', 'E', 'S', 'W'];
+            const cardinalAngles = [0, 90, 180, 270];
+            
+            // Create ticks and labels
+            for (let i = 0; i < 360; i += 5) {
+                const tick = document.createElement('div');
+                tick.className = 'compass-tick';
+                
+                if (i % 30 === 0) {
+                    tick.classList.add('major');
+                    
+                    // Add label for major ticks
+                    const label = document.createElement('div');
+                    label.className = 'compass-label';
+                    
+                    const cardinalIndex = cardinalAngles.indexOf(i);
+                    if (cardinalIndex !== -1) {
+                        label.textContent = cardinals[cardinalIndex];
+                        label.classList.add('cardinal');
+                    } else {
+                        label.textContent = i;
+                    }
+                    
+                    label.style.transform = `translateX(-50%) rotate(${i}deg)`;
+                    ring.appendChild(label);
+                }
+                
+                tick.style.transform = `rotate(${i}deg)`;
+                ring.appendChild(tick);
+            }
+        }
+
+        function handleCompassClick(event) {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            const clickX = event.clientX - centerX;
+            const clickY = event.clientY - centerY;
+            
+            // Calculate angle (0° = North, clockwise)
+            let angle = Math.atan2(clickX, -clickY) * (180 / Math.PI);
+            if (angle < 0) angle += 360;
+            
+            // Round to nearest degree
+            angle = Math.round(angle);
+            
+            // Set target azimuth
+            document.getElementById('target-azimuth').value = angle;
+            
+            // Show message
+            showMessage(`Click detected at ${angle}°. Click "Go" to move rotator.`, 'success');
+        }
+
+        async function updatePosition() {
+            try {
+                const response = await fetch('/api/rotctl/status');
+                const data = await response.json();
+                
+                // Check if rotctl is disabled (not just an error)
+                if (data.enabled === false) {
+                    document.getElementById('connection-status').textContent = 'Disabled';
+                    document.getElementById('status-indicator').className = 'status-indicator disconnected';
+                    document.getElementById('connection-duration').textContent = '';
+                    return;
+                }
+                
+                // Update status
+                let statusText = data.connected ? 'Connected' : 'Disconnected';
+                if (data.read_only) {
+                    statusText += ' (Read-Only)';
+                }
+                document.getElementById('connection-status').textContent = statusText;
+                document.getElementById('status-indicator').className = data.connected ? 'status-indicator connected' : 'status-indicator disconnected';
+                
+                // Show/hide error banner
+                const errorBanner = document.getElementById('error-banner');
+                const errorMessage = document.getElementById('error-message');
+                if (data.error) {
+                    errorMessage.textContent = data.error;
+                    errorBanner.classList.add('show');
+                } else {
+                    errorBanner.classList.remove('show');
+                }
+                
+                // Update connection duration
+                if (data.connected && data.connected_duration_seconds !== undefined) {
+                    const duration = formatDuration(data.connected_duration_seconds);
+                    document.getElementById('connection-duration').textContent = duration;
+                } else {
+                    document.getElementById('connection-duration').textContent = '';
+                }
+                
+                // Update position
+                const azimuth = data.position.azimuth;
+                document.getElementById('current-azimuth').textContent = Math.round(azimuth);
+                document.getElementById('moving-status').textContent = data.moving ? 'Yes' : 'No';
+                
+                // Update azimuth input field with current value (unless user is actively typing)
+                const azimuthInput = document.getElementById('target-azimuth');
+                if (document.activeElement !== azimuthInput) {
+                    azimuthInput.value = Math.round(azimuth);
+                }
+                
+                // Update needle
+                const needle = document.getElementById('needle');
+                needle.style.transform = `translate(-50%, -50%) rotate(${azimuth}deg)`;
+                
+                // Update azimuth line on map
+                updateAzimuthLineOnMap(azimuth);
+                
+            } catch (error) {
+                console.error('Failed to update position:', error);
+                document.getElementById('connection-status').textContent = 'Error';
+                document.getElementById('status-indicator').className = 'status-indicator disconnected';
+                document.getElementById('connection-duration').textContent = '';
+            }
+        }
+
+        function formatDuration(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            
+            if (hours > 0) {
+                return `${hours}h ${minutes}m ${secs}s`;
+            } else if (minutes > 0) {
+                return `${minutes}m ${secs}s`;
+            } else {
+                return `${secs}s`;
+            }
+        }
+
+        function getPassword() {
+            const password = document.getElementById('password').value;
+            if (!password) {
+                showMessage('Please enter password', 'error');
+                return null;
+            }
+            // Save password to localStorage
+            localStorage.setItem('rotctl_password', password);
+            return password;
+        }
+
+        async function setPosition() {
+            const password = getPassword();
+            if (!password) return;
+            
+            const azimuth = parseFloat(document.getElementById('target-azimuth').value);
+            
+            if (isNaN(azimuth) || azimuth < 0 || azimuth > 360) {
+                showMessage('Azimuth must be between 0 and 360', 'error');
+                return;
+            }
+            
+            // Check if elevation input exists (for future elevation support)
+            const elevationInput = document.getElementById('target-elevation');
+            const payload = { password, azimuth };
+            
+            if (elevationInput) {
+                const elevation = parseFloat(elevationInput.value);
+                if (!isNaN(elevation) && elevation >= 0 && elevation <= 90) {
+                    payload.elevation = elevation;
+                }
+            }
+            
+            try {
+                const response = await fetch('/api/rotctl/position', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    const message = payload.elevation !== undefined
+                        ? `Moving to Az: ${azimuth}°, El: ${payload.elevation}°`
+                        : `Moving to ${azimuth}°`;
+                    showMessage(message, 'success');
+                } else {
+                    showMessage(data.error || 'Failed to set position', 'error');
+                }
+            } catch (error) {
+                showMessage('Network error: ' + error.message, 'error');
+            }
+        }
+
+        async function setAzimuth(azimuth) {
+            const password = getPassword();
+            if (!password) return;
+            
+            try {
+                const response = await fetch('/api/rotctl/position', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password, azimuth })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showMessage(`Moving to ${azimuth}°`, 'success');
+                } else {
+                    showMessage(data.error || 'Failed to set azimuth', 'error');
+                }
+            } catch (error) {
+                showMessage('Network error: ' + error.message, 'error');
+            }
+        }
+
+        async function stopRotator() {
+            const password = getPassword();
+            if (!password) return;
+            
+            try {
+                const response = await fetch('/api/rotctl/command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password, command: 'stop' })
+                });
+                
+                const data = await response.json();
+                console.log('Stop command response:', data);
+                
+                if (data.success) {
+                    showMessage('Rotator stopped', 'success');
+                } else {
+                    showMessage(data.error || data.message || 'Failed to stop rotator', 'error');
+                }
+            } catch (error) {
+                console.error('Stop command error:', error);
+                showMessage('Network error: ' + error.message, 'error');
+            }
+        }
+
+        async function parkRotator() {
+            const password = getPassword();
+            if (!password) return;
+            
+            try {
+                const response = await fetch('/api/rotctl/command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password, command: 'park' })
+                });
+                
+                const data = await response.json();
+                console.log('Park command response:', data);
+                
+                if (data.success) {
+                    showMessage('Rotator parking', 'success');
+                } else {
+                    showMessage(data.error || data.message || 'Failed to park rotator', 'error');
+                }
+            } catch (error) {
+                console.error('Park command error:', error);
+                showMessage('Network error: ' + error.message, 'error');
+            }
+        }
+
+        function adjustAzimuth(delta) {
+            const input = document.getElementById('target-azimuth');
+            let currentValue = parseFloat(input.value) || 0;
+            let newValue = currentValue + delta;
+            
+            // Wrap around 0-360
+            if (newValue < 0) {
+                newValue += 360;
+            } else if (newValue >= 360) {
+                newValue -= 360;
+            }
+            
+            newValue = Math.round(newValue);
+            input.value = newValue;
+            
+            // Automatically send the command
+            setAzimuth(newValue);
+        }
+
+        function showMessage(text, type) {
+            const message = document.getElementById('message');
+            message.textContent = text;
+            message.className = `message ${type} show`;
+            
+            setTimeout(() => {
+                message.classList.remove('show');
+            }, 5000);
+        }
+    </script>
+</body>
+</html>

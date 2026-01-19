@@ -1047,6 +1047,64 @@
         })();
     </script>
     <script src="dxcluster-client.js"></script>
+    <!-- Rotator scripts loaded conditionally based on rotator.enabled -->
+    <script>
+        // Load rotator scripts only if rotator is enabled
+        (async function() {
+            try {
+                const data = await window.descriptionPromise;
+                if (data && data.rotator && data.rotator.enabled === true) {
+                    console.log('[Rotator] Rotator is enabled, loading rotator scripts');
+                    // Load D3.js and topojson dependencies first
+                    const d3Script = document.createElement('script');
+                    d3Script.src = 'https://d3js.org/d3.v7.min.js';
+                    document.head.appendChild(d3Script);
+                    await new Promise((resolve, reject) => {
+                        d3Script.onload = resolve;
+                        d3Script.onerror = reject;
+                    });
+                    
+                    const d3GeoScript = document.createElement('script');
+                    d3GeoScript.src = 'https://d3js.org/d3-geo.v3.min.js';
+                    document.head.appendChild(d3GeoScript);
+                    await new Promise((resolve, reject) => {
+                        d3GeoScript.onload = resolve;
+                        d3GeoScript.onerror = reject;
+                    });
+                    
+                    const topojsonScript = document.createElement('script');
+                    topojsonScript.src = 'https://cdn.jsdelivr.net/npm/topojson@3';
+                    document.head.appendChild(topojsonScript);
+                    await new Promise((resolve, reject) => {
+                        topojsonScript.onload = resolve;
+                        topojsonScript.onerror = reject;
+                    });
+                    
+                    // Load rotator scripts dynamically
+                    const scripts = ['rotator-display.js', 'rotator-ui.js'];
+                    for (const src of scripts) {
+                        const script = document.createElement('script');
+                        script.src = src;
+                        document.body.appendChild(script);
+                        await new Promise((resolve, reject) => {
+                            script.onload = resolve;
+                            script.onerror = reject;
+                        });
+                    }
+                    console.log('[Rotator] Rotator scripts loaded successfully');
+                    
+                    // Initialize rotator UI
+                    if (typeof initializeRotatorUI === 'function') {
+                        initializeRotatorUI();
+                    }
+                } else {
+                    console.log('[Rotator] Rotator is disabled, skipping rotator scripts');
+                }
+            } catch (error) {
+                console.error('[Rotator] Error loading rotator scripts:', error);
+            }
+        })();
+    </script>
     <!-- Chat scripts loaded conditionally based on chat_enabled -->
     <script>
         // Queue for pending chat initialization (in case WebSocket connects before scripts load)

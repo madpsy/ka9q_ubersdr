@@ -518,8 +518,19 @@ class RotatorDisplay {
             if (data.position && data.position.azimuth !== undefined) {
                 this.updateAzimuthDisplay(data.position.azimuth);
             }
+            
+            // Emit status update event for other components to listen to
+            const statusEvent = new CustomEvent('rotator-status-update', {
+                detail: data
+            });
+            document.dispatchEvent(statusEvent);
         } catch (error) {
             console.error('[RotatorDisplay] Failed to update position:', error);
+            // Emit disconnected status on error
+            const statusEvent = new CustomEvent('rotator-status-update', {
+                detail: { connected: false }
+            });
+            document.dispatchEvent(statusEvent);
         }
     }
     

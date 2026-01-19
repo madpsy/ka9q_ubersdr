@@ -294,12 +294,24 @@ class RotatorUI {
             // Initialize rotator display if not already done
             if (!this.rotatorDisplay) {
                 this.initializeRotatorDisplay();
+            } else {
+                // Resume updates if already initialized
+                if (this.rotatorDisplay.updateTimer === null && this.rotatorDisplay.updateInterval > 0) {
+                    this.rotatorDisplay.startUpdates();
+                }
+                // Do an immediate fetch
+                this.fetchRotatorStatus();
             }
         } else {
             panel.classList.remove('expanded');
             panel.classList.add('collapsed');
             content.style.display = 'none';
             if (arrow) arrow.style.display = 'none';
+            
+            // Stop updates when collapsed to save resources
+            if (this.rotatorDisplay) {
+                this.rotatorDisplay.stopUpdates();
+            }
         }
         
         // Save state to localStorage
@@ -330,8 +342,52 @@ class RotatorUI {
         // Fetch and display location
         this.fetchReceiverLocation();
         
-        // Start updating azimuth display
-        this.startAzimuthUpdates();
+        // Listen for rotator status updates from RotatorDisplay
+        document.addEventListener('rotator-status-update', (event) => {
+            this.handleStatusUpdate(event.detail);
+        });
+        
+        // Do an initial status fetch
+        this.fetchRotatorStatus();
+    }
+    
+    /**
+     * Fetch rotator status and update displays
+     */
+    async fetchRotatorStatus() {
+        try {
+            const response = await fetch('/api/rotctl/status');
+            const data = await response.json();
+            this.handleStatusUpdate(data);
+        } catch (error) {
+            console.error('[RotatorUI] Failed to fetch rotator status:', error);
+            this.handleStatusUpdate({ connected: false });
+        }
+    }
+    
+    /**
+     * Handle status update from RotatorDisplay or direct fetch
+     */
+    handleStatusUpdate(data) {
+        // Update azimuth
+        if (data.position && data.position.azimuth !== undefined) {
+            const azimuthElement = document.getElementById('rotator-azimuth-display');
+            if (azimuthElement) {
+                azimuthElement.textContent = Math.round(data.position.azimuth) + '°';
+            }
+        }
+        
+        // Update status indicator
+        const statusIndicator = document.getElementById('rotator-status-indicator');
+        if (statusIndicator) {
+            if (data.connected) {
+                statusIndicator.className = 'rotator-status-indicator connected';
+                statusIndicator.title = 'Connected';
+            } else {
+                statusIndicator.className = 'rotator-status-indicator disconnected';
+                statusIndicator.title = 'Disconnected';
+            }
+        }
     }
     
     /**
@@ -368,54 +424,6 @@ class RotatorUI {
     }
     
     /**
-     * Start updating the azimuth display
-     */
-    startAzimuthUpdates() {
-        this.updateAzimuthDisplay();
-        this.azimuthUpdateTimer = setInterval(() => {
-            this.updateAzimuthDisplay();
-        }, 3000);
-    }
-    
-    /**
-     * Update the azimuth display in top-right and status indicator
-     */
-    async updateAzimuthDisplay() {
-        try {
-            const response = await fetch('/api/rotctl/status');
-            const data = await response.json();
-            
-            // Update azimuth
-            if (data.position && data.position.azimuth !== undefined) {
-                const azimuthElement = document.getElementById('rotator-azimuth-display');
-                if (azimuthElement) {
-                    azimuthElement.textContent = Math.round(data.position.azimuth) + '°';
-                }
-            }
-            
-            // Update status indicator
-            const statusIndicator = document.getElementById('rotator-status-indicator');
-            if (statusIndicator) {
-                if (data.connected) {
-                    statusIndicator.className = 'rotator-status-indicator connected';
-                    statusIndicator.title = 'Connected';
-                } else {
-                    statusIndicator.className = 'rotator-status-indicator disconnected';
-                    statusIndicator.title = 'Disconnected';
-                }
-            }
-        } catch (error) {
-            console.error('[RotatorUI] Failed to update azimuth display:', error);
-            // On error, show disconnected
-            const statusIndicator = document.getElementById('rotator-status-indicator');
-            if (statusIndicator) {
-                statusIndicator.className = 'rotator-status-indicator disconnected';
-                statusIndicator.title = 'Disconnected';
-            }
-        }
-    }
-    
-    /**
      * Open rotator controls in a new tab
      */
     openControls() {
@@ -429,10 +437,6 @@ class RotatorUI {
         if (this.rotatorDisplay) {
             this.rotatorDisplay.destroy();
             this.rotatorDisplay = null;
-        }
-        if (this.azimuthUpdateTimer) {
-            clearInterval(this.azimuthUpdateTimer);
-            this.azimuthUpdateTimer = null;
         }
     }
 }

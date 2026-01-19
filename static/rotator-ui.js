@@ -34,6 +34,9 @@ class RotatorUI {
                     <div id="rotator-display-container" class="rotator-display-container">
                         <!-- Rotator display will be injected here -->
                     </div>
+                    <button id="rotator-controls-button" class="rotator-controls-button" onclick="rotatorUI.openControls()">
+                        Controls
+                    </button>
                 </div>
             </div>
         `;
@@ -155,6 +158,34 @@ class RotatorUI {
                 margin: 0 !important;
             }
             
+            /* Controls button in bottom-left */
+            .rotator-controls-button {
+                position: absolute;
+                bottom: 10px;
+                left: 10px;
+                padding: 8px 16px;
+                background: rgba(76, 175, 80, 0.9);
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                z-index: 100;
+                transition: all 0.2s;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            }
+            
+            .rotator-controls-button:hover {
+                background: rgba(76, 175, 80, 1);
+                transform: translateY(-1px);
+                box-shadow: 0 3px 8px rgba(0,0,0,0.4);
+            }
+            
+            .rotator-controls-button:active {
+                transform: translateY(0);
+            }
+            
             /* Mobile responsive styles */
             @media (max-width: 768px) {
                 .rotator-panel.expanded {
@@ -234,6 +265,13 @@ class RotatorUI {
             compassSize: 150,
             updateInterval: 1000
         });
+    }
+    
+    /**
+     * Open rotator controls in a new tab
+     */
+    openControls() {
+        window.open('/rotator.html', '_blank');
     }
     
     /**

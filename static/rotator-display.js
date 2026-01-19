@@ -74,17 +74,24 @@ class RotatorDisplay {
         const mapDiv = document.createElement('div');
         mapDiv.id = `${this.containerId}-map`;
         mapDiv.style.position = 'relative';
+        mapDiv.style.width = '100%';
+        mapDiv.style.height = 'auto';
+        mapDiv.style.display = 'flex';
+        mapDiv.style.justifyContent = 'center';
+        mapDiv.style.alignItems = 'center';
         container.appendChild(mapDiv);
         
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         svg.id = `${this.containerId}-map-svg`;
-        svg.setAttribute('width', this.mapSize);
-        svg.setAttribute('height', this.mapSize);
+        svg.setAttribute('width', '100%');
+        svg.setAttribute('height', '100%');
         svg.setAttribute('viewBox', `0 0 ${this.mapSize} ${this.mapSize}`);
         svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
         svg.style.background = '#1a252f';
         svg.style.borderRadius = '10px';
         svg.style.display = 'block';
+        svg.style.maxWidth = '100%';
+        svg.style.maxHeight = '100%';
         mapDiv.appendChild(svg);
         
         this.svg = d3.select(svg);

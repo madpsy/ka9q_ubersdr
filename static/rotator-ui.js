@@ -104,7 +104,7 @@ class RotatorUI {
                 flex-direction: column;
                 justify-content: center;
                 align-items: center;
-                gap: 4px;
+                gap: 6px;
                 font-size: 20px;
                 border: 1px solid rgba(100, 100, 100, 0.5);
                 border-left: none;

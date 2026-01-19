@@ -398,8 +398,10 @@ class RotatorUI {
             if (statusIndicator) {
                 if (data.connected) {
                     statusIndicator.className = 'rotator-status-indicator connected';
+                    statusIndicator.title = 'Connected';
                 } else {
                     statusIndicator.className = 'rotator-status-indicator disconnected';
+                    statusIndicator.title = 'Disconnected';
                 }
             }
         } catch (error) {
@@ -408,6 +410,7 @@ class RotatorUI {
             const statusIndicator = document.getElementById('rotator-status-indicator');
             if (statusIndicator) {
                 statusIndicator.className = 'rotator-status-indicator disconnected';
+                statusIndicator.title = 'Disconnected';
             }
         }
     }

@@ -219,10 +219,19 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 	rs.mu.RLock()
 	defer rs.mu.RUnlock()
 
+	// Count enabled positions
+	enabledCount := 0
+	for _, pos := range rs.config.Positions {
+		if pos.Enabled {
+			enabledCount++
+		}
+	}
+
 	status := map[string]interface{}{
-		"enabled":        rs.config.Enabled,
-		"running":        rs.running,
-		"position_count": len(rs.config.Positions),
+		"enabled":                rs.config.Enabled,
+		"running":                rs.running,
+		"position_count":         len(rs.config.Positions),
+		"enabled_position_count": enabledCount,
 	}
 
 	if rs.config.Enabled && len(rs.config.Positions) > 0 {
@@ -259,7 +268,7 @@ func (rs *RotatorScheduler) getNextScheduledPosition() *ScheduledPosition {
 	now := time.Now()
 	currentMinutes := now.Hour()*60 + now.Minute()
 
-	// Convert all positions to minutes since midnight and sort
+	// Convert all ENABLED positions to minutes since midnight and sort
 	type posWithMinutes struct {
 		pos     ScheduledPosition
 		minutes int
@@ -267,6 +276,11 @@ func (rs *RotatorScheduler) getNextScheduledPosition() *ScheduledPosition {
 
 	positionsWithMinutes := make([]posWithMinutes, 0, len(rs.config.Positions))
 	for _, pos := range rs.config.Positions {
+		// Skip disabled positions
+		if !pos.Enabled {
+			continue
+		}
+
 		t, err := time.Parse("15:04", pos.Time)
 		if err != nil {
 			continue
@@ -283,14 +297,14 @@ func (rs *RotatorScheduler) getNextScheduledPosition() *ScheduledPosition {
 		return positionsWithMinutes[i].minutes < positionsWithMinutes[j].minutes
 	})
 
-	// Find next position after current time
+	// Find next enabled position after current time
 	for _, pwm := range positionsWithMinutes {
 		if pwm.minutes > currentMinutes {
 			return &pwm.pos
 		}
 	}
 
-	// If no position found after current time, return first position (tomorrow)
+	// If no position found after current time, return first enabled position (tomorrow)
 	if len(positionsWithMinutes) > 0 {
 		return &positionsWithMinutes[0].pos
 	}

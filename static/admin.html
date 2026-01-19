@@ -5790,10 +5790,15 @@
 
             const running = currentRotatorSchedulerConfig.running || false;
             const positionCount = (currentRotatorSchedulerConfig.positions || []).length;
+            const enabledCount = currentRotatorSchedulerConfig.enabled_position_count || 0;
             const nextPosition = currentRotatorSchedulerConfig.next_position;
 
             let statusHTML = `<strong>Status:</strong> ${running ? '<span style="color: #28a745;">Running</span>' : '<span style="color: #999;">Stopped</span>'}<br>`;
-            statusHTML += `<strong>Scheduled Positions:</strong> ${positionCount}<br>`;
+            if (positionCount > 0 && enabledCount !== positionCount) {
+                statusHTML += `<strong>Scheduled Positions:</strong> ${enabledCount} enabled (${positionCount} total)<br>`;
+            } else {
+                statusHTML += `<strong>Scheduled Positions:</strong> ${positionCount}<br>`;
+            }
             
             if (nextPosition) {
                 statusHTML += `<strong>Next Position:</strong> ${nextPosition.time} → ${nextPosition.bearing}°`;

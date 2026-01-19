@@ -25,6 +25,7 @@ type InstanceReporter struct {
 	sessions            *SessionManager
 	dxClusterWsHandler  *DXClusterWebSocketHandler // For getting chat user count
 	noiseFloorMonitor   *NoiseFloorMonitor         // For getting SNR measurements
+	rotctlHandler       *RotctlAPIHandler          // For getting rotator information
 	configPath          string
 	httpClient          *http.Client
 	stopChan            chan struct{}
@@ -70,6 +71,7 @@ type InstanceReport struct {
 	ChatUsers        int                    `json:"chat_users"`        // Number of active chat users
 	SNR_0_30MHz      int                    `json:"snr_0_30_mhz"`      // SNR for 0-30 MHz (dynamic range in dB, -1 if unavailable)
 	SNR_1_8_30MHz    int                    `json:"snr_1_8_30_mhz"`    // SNR for 1.8-30 MHz HF bands (dynamic range in dB, -1 if unavailable)
+	Rotator          map[string]interface{} `json:"rotator"`           // Rotator information (enabled, connected, azimuth)
 	Test             bool                   `json:"test,omitempty"`    // If true, this is a test report - collector will verify /api/description instead of full callback
 	StartupReport    bool                   `json:"startup_report"`    // If true, this is a startup report sent regardless of instance_reporting.enabled
 }
@@ -114,6 +116,14 @@ func (ir *InstanceReporter) SetNoiseFloorMonitor(monitor *NoiseFloorMonitor) {
 	ir.noiseFloorMonitor = monitor
 }
 
+// SetRotctlHandler sets the rotctl handler for rotator information
+// This must be called after the handler is initialized (after NewInstanceReporter)
+func (ir *InstanceReporter) SetRotctlHandler(handler *RotctlAPIHandler) {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
+	ir.rotctlHandler = handler
+}
+
 // getChatUserCount returns the current number of active chat users (thread-safe)
 func (ir *InstanceReporter) getChatUserCount() int {
 	ir.mu.RLock()
@@ -139,6 +149,28 @@ func (ir *InstanceReporter) getSNRMeasurements() (int, int) {
 
 	snr_0_30, snr_1_8_30 := monitor.GetWidebandSNR()
 	return int(snr_0_30), int(snr_1_8_30)
+}
+
+// getRotatorInfo returns the current rotator information (thread-safe)
+func (ir *InstanceReporter) getRotatorInfo() map[string]interface{} {
+	ir.mu.RLock()
+	handler := ir.rotctlHandler
+	ir.mu.RUnlock()
+
+	rotatorInfo := map[string]interface{}{
+		"enabled":   false,
+		"connected": false,
+		"azimuth":   -1,
+	}
+
+	if handler != nil && ir.config.Rotctl.Enabled {
+		rotatorInfo["enabled"] = true
+		rotatorInfo["connected"] = handler.controller.client.IsConnected()
+		state := handler.controller.GetState()
+		rotatorInfo["azimuth"] = int(state.Position.Azimuth + 0.5) // Round to nearest integer
+	}
+
+	return rotatorInfo
 }
 
 // Start begins the instance reporting service
@@ -392,6 +424,9 @@ func (ir *InstanceReporter) sendReport() error {
 	// Get SNR measurements (thread-safe)
 	snr_0_30, snr_1_8_30 := ir.getSNRMeasurements()
 
+	// Get rotator information (thread-safe)
+	rotatorInfo := ir.getRotatorInfo()
+
 	report := InstanceReport{
 		UUID:             ir.config.InstanceReporting.InstanceUUID,
 		Callsign:         ir.config.Admin.Callsign,
@@ -423,6 +458,7 @@ func (ir *InstanceReporter) sendReport() error {
 		ChatUsers:        chatUserCount,
 		SNR_0_30MHz:      snr_0_30,
 		SNR_1_8_30MHz:    snr_1_8_30,
+		Rotator:          rotatorInfo,
 	}
 
 	jsonData, err := json.Marshal(report)
@@ -726,6 +762,9 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 	// Get SNR measurements (thread-safe)
 	snr_0_30, snr_1_8_30 := ir.getSNRMeasurements()
 
+	// Get rotator information (thread-safe)
+	rotatorInfo := ir.getRotatorInfo()
+
 	report := InstanceReport{
 		UUID:             instanceUUID,
 		Callsign:         adminCallsign,
@@ -757,6 +796,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		ChatUsers:        chatUserCount,
 		SNR_0_30MHz:      snr_0_30,
 		SNR_1_8_30MHz:    snr_1_8_30,
+		Rotator:          rotatorInfo,
 		Test:             isTest,
 	}
 
@@ -1029,6 +1069,13 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			snr_1_8_30 = int(snr_1_8_30_f)
 		}
 
+		// Get rotator information (not available at startup, so use default values)
+		rotatorInfo := map[string]interface{}{
+			"enabled":   config.Rotctl.Enabled,
+			"connected": false,
+			"azimuth":   -1,
+		}
+
 		// Build the report
 		report := InstanceReport{
 			UUID:             config.InstanceReporting.InstanceUUID,
@@ -1061,6 +1108,7 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			ChatUsers:        0, // Chat users not available at startup
 			SNR_0_30MHz:      snr_0_30,
 			SNR_1_8_30MHz:    snr_1_8_30,
+			Rotator:          rotatorInfo,
 			StartupReport:    true,
 		}
 

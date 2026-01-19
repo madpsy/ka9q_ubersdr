@@ -937,6 +937,12 @@ func main() {
 		}
 	}
 
+	// Set the rotctl handler in instance reporter for rotator information
+	// This must be done after both are initialized
+	if instanceReporter != nil && rotctlHandler != nil {
+		instanceReporter.SetRotctlHandler(rotctlHandler)
+	}
+
 	// Initialize admin handler (pass all components for proper shutdown during restart)
 	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler)
 

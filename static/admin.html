@@ -6344,14 +6344,17 @@
                 positionsWithLevels.push({ ...pos, x, level });
             });
 
+            // Store positions data for hover detection
+            canvas.rotatorPositions = positionsWithLevels;
+
             // Draw position markers
             positionsWithLevels.forEach(pos => {
                 const x = pos.x;
                 const level = pos.level;
 
-                // Calculate Y positions based on level
-                const labelY = level === 0 ? marginTop : marginTop + 30;
-                const lineTopY = level === 0 ? marginTop + 20 : marginTop + 50;
+                // Calculate Y positions based on level (no time label, just bearing)
+                const labelY = level === 0 ? marginTop + 10 : marginTop + 40;
+                const lineTopY = level === 0 ? marginTop + 25 : marginTop + 55;
 
                 // Draw vertical line from timeline up
                 ctx.strokeStyle = '#667eea';
@@ -6367,17 +6370,12 @@
                 ctx.arc(x, timelineY, 5, 0, 2 * Math.PI);
                 ctx.fill();
 
-                // Draw bearing label above the line
+                // Draw bearing label only (no time)
                 ctx.fillStyle = '#667eea';
                 ctx.font = 'bold 12px sans-serif';
                 ctx.textAlign = 'center';
-                ctx.textBaseline = 'bottom';
-                ctx.fillText(pos.bearing + '°', x, lineTopY - 5);
-
-                // Draw time label above bearing
-                ctx.fillStyle = '#333';
-                ctx.font = '10px sans-serif';
-                ctx.fillText(pos.time, x, labelY);
+                ctx.textBaseline = 'middle';
+                ctx.fillText(pos.bearing + '°', x, labelY);
             });
 
             // Draw start/end labels (outside the hour notches)
@@ -6390,6 +6388,93 @@
             ctx.textAlign = 'right';
             ctx.fillText('23:59', marginLeft + timelineWidth + 25, timelineY + 12);
         }
+
+        // Add hover tooltip for rotator timeline
+        document.addEventListener('DOMContentLoaded', function() {
+            const canvas = document.getElementById('rotatorTimeline');
+            if (!canvas) return;
+
+            canvas.addEventListener('mousemove', function(e) {
+                if (!canvas.rotatorPositions) return;
+
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
+                const mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+                const ctx = canvas.getContext('2d');
+                const marginLeft = 50;
+                const marginRight = 50;
+                const marginTop = 20;
+                const marginBottom = 40;
+                const timelineY = canvas.height - marginBottom - 10;
+
+                // Redraw timeline to clear previous tooltip
+                drawRotatorTimeline(canvas.rotatorPositions.map(p => ({
+                    time: p.time,
+                    bearing: p.bearing,
+                    enabled: true
+                })));
+
+                // Check if mouse is near any position marker
+                const hoverRadius = 15;
+                let hoveredPos = null;
+
+                for (const pos of canvas.rotatorPositions) {
+                    const distance = Math.sqrt(Math.pow(mouseX - pos.x, 2) + Math.pow(mouseY - timelineY, 2));
+                    if (distance <= hoverRadius) {
+                        hoveredPos = pos;
+                        break;
+                    }
+                }
+
+                // Draw tooltip if hovering over a position
+                if (hoveredPos) {
+                    canvas.style.cursor = 'pointer';
+
+                    const tooltipText = `${hoveredPos.time} → ${hoveredPos.bearing}°`;
+                    ctx.font = '12px sans-serif';
+                    const textWidth = ctx.measureText(tooltipText).width;
+                    const tooltipWidth = textWidth + 16;
+                    const tooltipHeight = 24;
+
+                    // Position tooltip above the marker
+                    let tooltipX = hoveredPos.x - tooltipWidth / 2;
+                    const tooltipY = timelineY - 30;
+
+                    // Keep tooltip within canvas bounds
+                    if (tooltipX < 5) tooltipX = 5;
+                    if (tooltipX + tooltipWidth > canvas.width - 5) tooltipX = canvas.width - tooltipWidth - 5;
+
+                    // Draw tooltip background
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+                    ctx.fillRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+
+                    // Draw tooltip border
+                    ctx.strokeStyle = '#667eea';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+
+                    // Draw tooltip text
+                    ctx.fillStyle = '#fff';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(tooltipText, tooltipX + tooltipWidth / 2, tooltipY + tooltipHeight / 2);
+                } else {
+                    canvas.style.cursor = 'default';
+                }
+            });
+
+            canvas.addEventListener('mouseleave', function() {
+                if (!canvas.rotatorPositions) return;
+                canvas.style.cursor = 'default';
+                // Redraw to clear tooltip
+                drawRotatorTimeline(canvas.rotatorPositions.map(p => ({
+                    time: p.time,
+                    bearing: p.bearing,
+                    enabled: true
+                })));
+            });
+        });
 
         // Radiod configuration management
         let currentRadiodConfig = '';

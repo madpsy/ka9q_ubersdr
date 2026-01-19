@@ -5850,16 +5850,19 @@
                     
                     const escapedTime = pos.time.replace(/'/g, "\\'").replace(/"/g, '&quot;');
                     const isEnabled = pos.enabled !== false; // Default to true if not specified
-                    const enabledIcon = isEnabled ? '✓' : '—';
-                    const enabledColor = isEnabled ? '#28a745' : '#999';
+                    const enabledIcon = isEnabled ? '✓' : '✗';
+                    const enabledColor = isEnabled ? '#28a745' : '#dc3545';
+                    const toggleButtonText = isEnabled ? 'Disable' : 'Enable';
+                    const toggleButtonClass = isEnabled ? 'btn-secondary' : 'btn';
                     
                     row.innerHTML = `
                         <td style="padding: 12px; text-align: center;">
-                            <span style="color: ${enabledColor}; font-size: 18px; font-weight: bold; cursor: pointer;" onclick="togglePositionEnabled('${escapedTime}')" title="Click to ${isEnabled ? 'disable' : 'enable'}">${enabledIcon}</span>
+                            <span style="color: ${enabledColor}; font-size: 18px; font-weight: bold;">${enabledIcon}</span>
                         </td>
                         <td style="padding: 12px;"><strong>${pos.time}</strong></td>
                         <td style="padding: 12px;"><span style="color: #667eea; font-weight: bold;">${pos.bearing}°</span></td>
                         <td style="padding: 12px; text-align: center; white-space: nowrap;">
+                            <button class="btn ${toggleButtonClass}" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="togglePositionEnabled('${escapedTime}')">${toggleButtonText}</button>
                             <button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="editScheduledPosition('${escapedTime}')">Edit</button>
                             <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteScheduledPosition('${escapedTime}')">Delete</button>
                         </td>

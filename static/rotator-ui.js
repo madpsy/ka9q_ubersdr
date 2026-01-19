@@ -35,6 +35,7 @@ class RotatorUI {
                         <!-- Rotator display will be injected here -->
                         <div id="rotator-location-display" class="rotator-location-display">Loading...</div>
                         <div id="rotator-azimuth-display" class="rotator-azimuth-display">0°</div>
+                        <div id="rotator-status-indicator" class="rotator-status-indicator disconnected"></div>
                         <button id="rotator-controls-button" class="rotator-controls-button" onclick="rotatorUI.openControls()">
                             Controls
                         </button>
@@ -170,14 +171,13 @@ class RotatorUI {
                 background: rgba(0, 0, 0, 0.6);
                 color: white;
                 border-radius: 6px;
-                font-size: 13px;
+                font-size: 12px;
                 font-weight: 500;
                 z-index: 100;
                 box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-                white-space: nowrap;
+                text-align: center;
+                line-height: 1.4;
                 max-width: 80%;
-                overflow: hidden;
-                text-overflow: ellipsis;
             }
             
             /* Azimuth display in top-right */
@@ -195,6 +195,28 @@ class RotatorUI {
                 box-shadow: 0 2px 6px rgba(0,0,0,0.3);
                 min-width: 50px;
                 text-align: center;
+            }
+            
+            /* Status indicator in bottom-right */
+            .rotator-status-indicator {
+                position: absolute;
+                bottom: 15px;
+                right: 15px;
+                width: 12px;
+                height: 12px;
+                border-radius: 50%;
+                z-index: 100;
+                transition: background 0.3s, box-shadow 0.3s;
+            }
+            
+            .rotator-status-indicator.connected {
+                background: #4CAF50;
+                box-shadow: 0 0 10px #4CAF50;
+            }
+            
+            .rotator-status-indicator.disconnected {
+                background: #f44336;
+                box-shadow: 0 0 10px #f44336;
             }
             
             /* Controls button in bottom-left */
@@ -326,14 +348,13 @@ class RotatorUI {
             if (data.receiver && data.receiver.gps) {
                 const lat = data.receiver.gps.lat.toFixed(4);
                 const lon = data.receiver.gps.lon.toFixed(4);
-                let locationText = `${lat}, ${lon}`;
                 
-                // Add location name if available
+                // Format: coordinates on top, location name below
                 if (data.receiver.location) {
-                    locationText = `${data.receiver.location} (${lat}, ${lon})`;
+                    locationElement.innerHTML = `${lat}, ${lon}<br>${data.receiver.location}`;
+                } else {
+                    locationElement.textContent = `${lat}, ${lon}`;
                 }
-                
-                locationElement.textContent = locationText;
             } else {
                 locationElement.textContent = 'Location N/A';
             }
@@ -357,21 +378,37 @@ class RotatorUI {
     }
     
     /**
-     * Update the azimuth display in top-right
+     * Update the azimuth display in top-right and status indicator
      */
     async updateAzimuthDisplay() {
         try {
             const response = await fetch('/api/rotctl/status');
             const data = await response.json();
             
+            // Update azimuth
             if (data.position && data.position.azimuth !== undefined) {
                 const azimuthElement = document.getElementById('rotator-azimuth-display');
                 if (azimuthElement) {
                     azimuthElement.textContent = Math.round(data.position.azimuth) + '°';
                 }
             }
+            
+            // Update status indicator
+            const statusIndicator = document.getElementById('rotator-status-indicator');
+            if (statusIndicator) {
+                if (data.connected) {
+                    statusIndicator.className = 'rotator-status-indicator connected';
+                } else {
+                    statusIndicator.className = 'rotator-status-indicator disconnected';
+                }
+            }
         } catch (error) {
             console.error('[RotatorUI] Failed to update azimuth display:', error);
+            // On error, show disconnected
+            const statusIndicator = document.getElementById('rotator-status-indicator');
+            if (statusIndicator) {
+                statusIndicator.className = 'rotator-status-indicator disconnected';
+            }
         }
     }
     

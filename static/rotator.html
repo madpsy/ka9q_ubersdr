@@ -419,6 +419,14 @@
             background: #da190b;
         }
 
+        button.park {
+            background: #2196F3;
+        }
+
+        button.park:hover {
+            background: #1976D2;
+        }
+
         .button-group {
             display: flex;
             gap: 10px;
@@ -788,7 +796,7 @@
                 <button onclick="setAzimuth(270)">West (270°)</button>
                 <div class="quick-actions-row">
                     <button class="danger" onclick="stopRotator()">⏹ Stop</button>
-                    <button onclick="parkRotator()">🅿 Park</button>
+                    <button class="park" onclick="parkRotator()">🅿 Park</button>
                 </div>
             </div>
             

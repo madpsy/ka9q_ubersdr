@@ -5862,7 +5862,7 @@
             const timelineCanvas = document.createElement('canvas');
             timelineCanvas.id = 'rotatorTimeline';
             timelineCanvas.style.width = '100%';
-            timelineCanvas.style.height = '140px';
+            timelineCanvas.style.height = '160px';
             timelineCanvas.style.display = 'block';
             timelineContainer.appendChild(timelineCanvas);
 
@@ -6276,7 +6276,7 @@
 
             const ctx = canvas.getContext('2d');
             const width = canvas.width = canvas.offsetWidth;
-            const height = canvas.height = 140;
+            const height = canvas.height = 160;
 
             // Clear canvas
             ctx.fillStyle = '#ffffff';
@@ -6285,7 +6285,7 @@
             // Define margins
             const marginLeft = 50;
             const marginRight = 50;
-            const marginTop = 35;  // Increased to make room for NOW label at top
+            const marginTop = 50;  // Increased to make room for NOW label at top
             const marginBottom = 40;
             const timelineY = height - marginBottom - 10;
             const timelineWidth = width - marginLeft - marginRight;

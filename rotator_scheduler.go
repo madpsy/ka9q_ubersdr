@@ -332,12 +332,13 @@ func (rs *RotatorScheduler) Reload() error {
 		return err
 	}
 
-	// Restart if it was running and still enabled
+	// Start if enabled and has positions (regardless of whether it was running before)
+	// This allows the scheduler to start when enabled is toggled from false to true
 	rs.mu.RLock()
 	shouldStart := rs.config.Enabled && len(rs.config.Positions) > 0
 	rs.mu.RUnlock()
 
-	if wasRunning && shouldStart {
+	if shouldStart {
 		return rs.Start()
 	}
 

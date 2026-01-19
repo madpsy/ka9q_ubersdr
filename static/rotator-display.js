@@ -103,8 +103,8 @@ class RotatorDisplay {
             .style("stroke", "rgba(255,255,255,0.1)")
             .style("stroke-width", "0.5");
         
-        // Draw distance circles
-        this.drawDistanceCircles();
+        // Draw distance circles (without labels first)
+        this.drawDistanceCircles(false);
         
         // Load and draw world map
         try {
@@ -124,6 +124,9 @@ class RotatorDisplay {
         } catch (error) {
             console.error('[RotatorDisplay] Failed to load world map:', error);
         }
+        
+        // Draw distance labels AFTER countries so they appear on top
+        this.drawDistanceLabels();
         
         // Draw center point (receiver location)
         this.svg.append("circle")
@@ -152,7 +155,7 @@ class RotatorDisplay {
             .style("stroke-linecap", "round");
     }
     
-    drawDistanceCircles() {
+    drawDistanceCircles(includeLabels = true) {
         const distances = [2000, 4000, 6000, 8000, 10000, 12000]; // km
         
         distances.forEach(distance => {
@@ -169,6 +172,29 @@ class RotatorDisplay {
                 .style("stroke-width", "1")
                 .style("stroke-dasharray", "2,2");
             
+            if (includeLabels) {
+                // Add distance label at top (0 degrees)
+                const labelPoint = this.calculateDestinationPoint(this.receiverLat, this.receiverLon, 0, distance);
+                const projected = this.projection([labelPoint[1], labelPoint[0]]);
+                
+                if (projected) {
+                    this.svg.append("text")
+                        .attr("class", "distance-label")
+                        .attr("x", projected[0])
+                        .attr("y", projected[1] - 5)
+                        .text(distance + " km")
+                        .style("fill", "rgba(255,255,255,0.5)")
+                        .style("font-size", "10px")
+                        .style("text-anchor", "middle");
+                }
+            }
+        });
+    }
+    
+    drawDistanceLabels() {
+        const distances = [2000, 4000, 6000, 8000, 10000, 12000]; // km
+        
+        distances.forEach(distance => {
             // Add distance label at top (0 degrees)
             const labelPoint = this.calculateDestinationPoint(this.receiverLat, this.receiverLon, 0, distance);
             const projected = this.projection([labelPoint[1], labelPoint[0]]);

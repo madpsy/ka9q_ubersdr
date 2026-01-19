@@ -8638,11 +8638,21 @@
                 const schedulerRunningColor = schedulerRunning ? '#28a745' : '#999';
                 const schedulerEnabledColor = schedulerEnabled ? '#28a745' : '#999';
 
+                const schedulerEnabledPositionCount = data.scheduler.enabled_position_count || 0;
+
+                // Build position count display
+                let positionCountDisplay = '';
+                if (schedulerPositionCount > 0 && schedulerEnabledPositionCount !== schedulerPositionCount) {
+                    positionCountDisplay = `${schedulerEnabledPositionCount} enabled (${schedulerPositionCount} total)`;
+                } else {
+                    positionCountDisplay = `${schedulerPositionCount}`;
+                }
+
                 schedulerHTML = `<br>
                 <span style="color: #666; font-size: 14px; margin-top: 10px; display: block; border-top: 1px solid #dee2e6; padding-top: 10px;"><strong>Scheduler:</strong></span>
                 <span style="color: ${schedulerEnabledColor}; font-size: 14px; font-weight: bold;">Enabled: ${schedulerEnabled ? 'Yes' : 'No'}</span><br>
                 <span style="color: ${schedulerRunningColor}; font-size: 14px; font-weight: bold;">Running: ${schedulerRunning ? 'Yes' : 'No'}</span><br>
-                <span style="color: #667eea; font-size: 14px;">Scheduled Positions: ${schedulerPositionCount}</span>`;
+                <span style="color: #667eea; font-size: 14px;">Scheduled Positions: ${positionCountDisplay}</span>`;
 
                 if (data.scheduler.next_position) {
                     schedulerHTML += `<br><span style="color: #667eea; font-size: 14px;">Next Position: ${data.scheduler.next_position.time} → ${data.scheduler.next_position.bearing}°</span>`;

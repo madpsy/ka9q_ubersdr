@@ -6288,14 +6288,14 @@
             ctx.lineTo(marginLeft + timelineWidth, timelineY);
             ctx.stroke();
 
-            // Draw hour notches and labels (00:00 to 23:00)
+            // Draw hour notches and labels (00:00 to 24:00)
             ctx.fillStyle = '#333';
             ctx.font = '11px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
 
-            for (let hour = 0; hour <= 23; hour++) {
-                const x = marginLeft + (hour / 23) * timelineWidth;
+            for (let hour = 0; hour <= 24; hour++) {
+                const x = marginLeft + (hour / 24) * timelineWidth;
 
                 // Draw notch
                 ctx.strokeStyle = '#333';
@@ -6305,8 +6305,8 @@
                 ctx.lineTo(x, timelineY + 8);
                 ctx.stroke();
 
-                // Draw hour label (every 3 hours to avoid crowding, but skip 00:00 since we have start label)
-                if (hour % 3 === 0 && hour !== 0) {
+                // Draw hour label (every 3 hours to avoid crowding, but skip 00:00 and 24:00 since we have start/end labels)
+                if (hour % 3 === 0 && hour !== 0 && hour !== 24) {
                     const hourStr = hour.toString().padStart(2, '0') + ':00';
                     ctx.fillStyle = '#666';
                     ctx.fillText(hourStr, x, timelineY + 12);
@@ -6330,13 +6330,13 @@
             const positionsWithLevels = [];
 
             enabledPositions.forEach((pos, index) => {
-                const x = marginLeft + (pos.timeInHours / 23) * timelineWidth;
+                const x = marginLeft + (pos.timeInHours / 24) * timelineWidth;
                 let level = 0; // 0 = top level, 1 = bottom level
 
                 // Check if this position is too close to any previous position at level 0
                 for (let i = positionsWithLevels.length - 1; i >= 0; i--) {
                     const prevPos = positionsWithLevels[i];
-                    const prevX = marginLeft + (prevPos.timeInHours / 23) * timelineWidth;
+                    const prevX = marginLeft + (prevPos.timeInHours / 24) * timelineWidth;
 
                     if (Math.abs(x - prevX) < minSpacing) {
                         // Too close - use opposite level

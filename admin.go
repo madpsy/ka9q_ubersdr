@@ -4813,6 +4813,15 @@ func (ah *AdminHandler) handleUpdateRotatorSchedulerConfig(w http.ResponseWriter
 		return
 	}
 
+	// Filter out status fields - only keep configuration fields (enabled and positions)
+	filteredConfig := map[string]interface{}{}
+	if enabled, ok := config["enabled"]; ok {
+		filteredConfig["enabled"] = enabled
+	}
+	if positions, ok := config["positions"]; ok {
+		filteredConfig["positions"] = positions
+	}
+
 	// Backup existing file with timestamp before replacing
 	schedulerPath := ah.rotatorScheduler.configPath
 	if _, err := os.Stat(schedulerPath); err == nil {
@@ -4825,8 +4834,8 @@ func (ah *AdminHandler) handleUpdateRotatorSchedulerConfig(w http.ResponseWriter
 		}
 	}
 
-	// Convert to YAML and write to file
-	yamlData, err := yaml.Marshal(config)
+	// Convert to YAML and write to file (using filtered config)
+	yamlData, err := yaml.Marshal(filteredConfig)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to marshal scheduler config: %v", err), http.StatusInternalServerError)
 		return

@@ -25,7 +25,9 @@ class RotatorUI {
             <div id="rotator-panel" class="rotator-panel ${this.isExpanded ? 'expanded' : 'collapsed'}">
                 <!-- Rotator tab (always visible, on left edge) -->
                 <div id="rotator-header" class="rotator-header" onclick="rotatorUI.togglePanel()">
+                    <span id="rotator-tab-bearing" class="rotator-tab-bearing" style="display:${this.isExpanded ? 'none' : 'block'};">0°</span>
                     <span>🛰️</span>
+                    <span id="rotator-tab-status" class="rotator-tab-status disconnected" style="display:${this.isExpanded ? 'none' : 'block'};"></span>
                     <span id="rotator-collapse-arrow" class="rotator-collapse-arrow" style="display:${this.isExpanded ? 'block' : 'none'};">←</span>
                 </div>
                 
@@ -102,6 +104,7 @@ class RotatorUI {
                 flex-direction: column;
                 justify-content: center;
                 align-items: center;
+                gap: 4px;
                 font-size: 20px;
                 border: 1px solid rgba(100, 100, 100, 0.5);
                 border-left: none;
@@ -110,6 +113,30 @@ class RotatorUI {
                 flex-shrink: 0;
                 position: relative;
                 overflow: visible;
+            }
+            
+            .rotator-tab-bearing {
+                font-size: 11px;
+                font-weight: 600;
+                color: #fff;
+                line-height: 1;
+            }
+            
+            .rotator-tab-status {
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                transition: background 0.3s, box-shadow 0.3s;
+            }
+            
+            .rotator-tab-status.connected {
+                background: #4CAF50;
+                box-shadow: 0 0 6px #4CAF50;
+            }
+            
+            .rotator-tab-status.disconnected {
+                background: #f44336;
+                box-shadow: 0 0 6px #f44336;
             }
             
             .rotator-header:hover {
@@ -284,12 +311,16 @@ class RotatorUI {
         const panel = document.getElementById('rotator-panel');
         const content = document.getElementById('rotator-content');
         const arrow = document.getElementById('rotator-collapse-arrow');
+        const tabBearing = document.getElementById('rotator-tab-bearing');
+        const tabStatus = document.getElementById('rotator-tab-status');
         
         if (this.isExpanded) {
             panel.classList.remove('collapsed');
             panel.classList.add('expanded');
             content.style.display = 'flex';
             if (arrow) arrow.style.display = 'block';
+            if (tabBearing) tabBearing.style.display = 'none';
+            if (tabStatus) tabStatus.style.display = 'none';
             
             // Initialize rotator display if not already done
             if (!this.rotatorDisplay) {
@@ -307,11 +338,11 @@ class RotatorUI {
             panel.classList.add('collapsed');
             content.style.display = 'none';
             if (arrow) arrow.style.display = 'none';
+            if (tabBearing) tabBearing.style.display = 'block';
+            if (tabStatus) tabStatus.style.display = 'block';
             
-            // Stop updates when collapsed to save resources
-            if (this.rotatorDisplay) {
-                this.rotatorDisplay.stopUpdates();
-            }
+            // Keep updates running when collapsed to show bearing on tab
+            // (updates continue but map is hidden)
         }
         
         // Save state to localStorage
@@ -369,15 +400,21 @@ class RotatorUI {
      * Handle status update from RotatorDisplay or direct fetch
      */
     handleStatusUpdate(data) {
-        // Update azimuth
+        // Update azimuth in expanded view
         if (data.position && data.position.azimuth !== undefined) {
             const azimuthElement = document.getElementById('rotator-azimuth-display');
             if (azimuthElement) {
                 azimuthElement.textContent = Math.round(data.position.azimuth) + '°';
             }
+            
+            // Update bearing on collapsed tab button
+            const tabBearing = document.getElementById('rotator-tab-bearing');
+            if (tabBearing) {
+                tabBearing.textContent = Math.round(data.position.azimuth) + '°';
+            }
         }
         
-        // Update status indicator
+        // Update status indicator in expanded view
         const statusIndicator = document.getElementById('rotator-status-indicator');
         if (statusIndicator) {
             if (data.connected) {
@@ -386,6 +423,16 @@ class RotatorUI {
             } else {
                 statusIndicator.className = 'rotator-status-indicator disconnected';
                 statusIndicator.title = 'Disconnected';
+            }
+        }
+        
+        // Update status indicator on collapsed tab button
+        const tabStatus = document.getElementById('rotator-tab-status');
+        if (tabStatus) {
+            if (data.connected) {
+                tabStatus.className = 'rotator-tab-status connected';
+            } else {
+                tabStatus.className = 'rotator-tab-status disconnected';
             }
         }
     }

@@ -241,6 +241,7 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 			positions[i] = map[string]interface{}{
 				"time":    pos.Time,
 				"bearing": pos.Bearing,
+				"enabled": pos.Enabled,
 			}
 		}
 		status["positions"] = positions

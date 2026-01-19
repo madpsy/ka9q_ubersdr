@@ -308,6 +308,8 @@ func (rs *RotatorScheduler) Reload() error {
 	// Stop if running
 	if wasRunning {
 		rs.Stop()
+		// Recreate the stop channel for next start
+		rs.stopChan = make(chan struct{})
 	}
 
 	// Reload config

@@ -1164,17 +1164,19 @@
 
         function calculateDestinationPoint(lat, lon, bearing, distance) {
             const R = 6371; // Earth radius in km
-            const lat1 = lat * Math.PI / 180;
-            const lon1 = lon * Math.PI / 180;
-            // Convert from navigational bearing (0° = North, clockwise) to mathematical bearing (0° = East, counterclockwise)
-            const brng = (90 - bearing) * Math.PI / 180;
+            const δ = distance / R; // Angular distance in radians
+            const θ = bearing * Math.PI / 180; // Bearing in radians (0° = North, clockwise)
             
-            const lat2 = Math.asin(Math.sin(lat1) * Math.cos(distance/R) +
-                                   Math.cos(lat1) * Math.sin(distance/R) * Math.cos(brng));
-            const lon2 = lon1 + Math.atan2(Math.sin(brng) * Math.sin(distance/R) * Math.cos(lat1),
-                                            Math.cos(distance/R) - Math.sin(lat1) * Math.sin(lat2));
+            const φ1 = lat * Math.PI / 180;
+            const λ1 = lon * Math.PI / 180;
             
-            return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
+            const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) +
+                                 Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
+            
+            const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1),
+                                       Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2));
+            
+            return [φ2 * 180 / Math.PI, λ2 * 180 / Math.PI];
         }
 
         function createCompass() {

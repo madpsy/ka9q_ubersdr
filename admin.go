@@ -256,6 +256,7 @@ type AdminHandler struct {
 	cwSkimmerClient     *CWSkimmerClient
 	instanceReporter    *InstanceReporter
 	mqttPublisher       *MQTTPublisher
+	rotctlHandler       *RotctlAPIHandler
 	loginAttempts       *LoginAttemptTracker
 }
 
@@ -318,7 +319,7 @@ func (ah *AdminHandler) restartServer() {
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler) *AdminHandler {
 	return &AdminHandler{
 		config:              config,
 		configFile:          configFile,
@@ -337,6 +338,7 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		cwSkimmerClient:     cwSkimmerClient,
 		instanceReporter:    instanceReporter,
 		mqttPublisher:       mqttPublisher,
+		rotctlHandler:       rotctlHandler,
 		loginAttempts:       NewLoginAttemptTracker(),
 	}
 }
@@ -4668,5 +4670,90 @@ func (ah *AdminHandler) HandleMQTTHealth(w http.ResponseWriter, r *http.Request)
 
 	if err := json.NewEncoder(w).Encode(status); err != nil {
 		log.Printf("Error encoding MQTT health status: %v", err)
+	}
+}
+
+// HandleRotctlHealth serves the health status of the rotator control client
+// This is an admin-only endpoint, so IP ban checking is not needed (handled by auth middleware)
+func (ah *AdminHandler) HandleRotctlHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Build health status response
+	status := map[string]interface{}{
+		"enabled": ah.config.Rotctl.Enabled,
+		"healthy": false,
+		"issues":  []string{},
+	}
+
+	// If not enabled, return early
+	if !ah.config.Rotctl.Enabled {
+		status["issues"] = []string{"Rotator control is not enabled"}
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(status); err != nil {
+			log.Printf("Error encoding rotctl health status: %v", err)
+		}
+		return
+	}
+
+	// Check if rotctl handler exists
+	if ah.rotctlHandler == nil {
+		status["issues"] = []string{"Rotator control handler not initialized"}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		if err := json.NewEncoder(w).Encode(status); err != nil {
+			log.Printf("Error encoding rotctl health status: %v", err)
+		}
+		return
+	}
+
+	// Get connection status
+	connected := ah.rotctlHandler.controller.client.IsConnected()
+	status["connected"] = connected
+
+	// Get current state
+	state := ah.rotctlHandler.controller.GetState()
+	status["azimuth"] = int(state.Position.Azimuth + 0.5)     // Round to nearest integer
+	status["elevation"] = int(state.Position.Elevation + 0.5) // Round to nearest integer
+
+	// Get connection info
+	status["host"] = ah.config.Rotctl.Host
+	status["port"] = ah.config.Rotctl.Port
+	status["update_interval"] = ah.config.Rotctl.UpdateInterval
+
+	// Get connection duration if connected
+	ah.rotctlHandler.mu.RLock()
+	connectedSince := ah.rotctlHandler.connectedSince
+	ah.rotctlHandler.mu.RUnlock()
+
+	if connected && !connectedSince.IsZero() {
+		duration := time.Since(connectedSince)
+		status["connected_duration_seconds"] = int(duration.Seconds())
+		status["connected_since"] = connectedSince.Format(time.RFC3339)
+		
+		// Format duration in human-readable format
+		status["connected_duration"] = formatDuration(duration)
+	}
+
+	// Check for errors
+	if state.LastError != nil {
+		status["last_error"] = state.LastError.Error()
+	}
+
+	// Check connection status
+	if !connected {
+		status["issues"] = append(status["issues"].([]string), "Not connected to rotctld")
+	}
+
+	// Determine overall health
+	issues := status["issues"].([]string)
+	if len(issues) == 0 {
+		status["healthy"] = true
+		w.WriteHeader(http.StatusOK)
+	} else {
+		status["healthy"] = false
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		log.Printf("Error encoding rotctl health status: %v", err)
 	}
 }

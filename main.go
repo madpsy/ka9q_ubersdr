@@ -903,8 +903,21 @@ func main() {
 		instanceReporter.SetNoiseFloorMonitor(noiseFloorMonitor)
 	}
 
+	// Initialize rotctl API handler if enabled (must be before admin handler)
+	var rotctlHandler *RotctlAPIHandler
+	if config.Rotctl.Enabled {
+		var err error
+		rotctlHandler, err = NewRotctlAPIHandler(&config.Rotctl)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize rotctl API: %v", err)
+			rotctlHandler = nil // Ensure it's nil
+		} else {
+			log.Printf("Rotctl API initialized (host: %s:%d)", config.Rotctl.Host, config.Rotctl.Port)
+		}
+	}
+
 	// Initialize admin handler (pass all components for proper shutdown during restart)
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher)
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler)
 
 	// Setup HTTP routes
 	http.HandleFunc("/connection", func(w http.ResponseWriter, r *http.Request) {
@@ -931,22 +944,15 @@ func main() {
 		handleExtensions(w, r, config)
 	})
 
-	// Initialize rotctl API handler if enabled (must be before /api/description route)
-	var rotctlHandler *RotctlAPIHandler
-	if config.Rotctl.Enabled {
-		var err error
-		rotctlHandler, err = NewRotctlAPIHandler(&config.Rotctl)
-		if err != nil {
-			log.Printf("Warning: Failed to initialize rotctl API: %v", err)
-			// Register disabled routes if initialization failed
-			RegisterRotctlRoutesDisabled(http.DefaultServeMux)
-			log.Printf("Rotctl API endpoints registered (disabled - initialization failed)")
-			rotctlHandler = nil // Ensure it's nil for description endpoint
-		} else {
-			RegisterRotctlRoutes(http.DefaultServeMux, rotctlHandler)
-			defer rotctlHandler.Close()
-			log.Printf("Rotctl API enabled at /api/rotctl/* (host: %s:%d)", config.Rotctl.Host, config.Rotctl.Port)
-		}
+	// Register rotctl API routes (rotctlHandler was initialized earlier, before admin handler)
+	if rotctlHandler != nil {
+		RegisterRotctlRoutes(http.DefaultServeMux, rotctlHandler)
+		defer rotctlHandler.Close()
+		log.Printf("Rotctl API enabled at /api/rotctl/* (host: %s:%d)", config.Rotctl.Host, config.Rotctl.Port)
+	} else if config.Rotctl.Enabled {
+		// Rotctl was enabled but failed to initialize
+		RegisterRotctlRoutesDisabled(http.DefaultServeMux)
+		log.Printf("Rotctl API endpoints registered (disabled - initialization failed)")
 	} else {
 		// Register disabled routes when rotctl is not enabled
 		RegisterRotctlRoutesDisabled(http.DefaultServeMux)
@@ -1121,6 +1127,7 @@ func main() {
 	}))
 	http.HandleFunc("/admin/cwskimmer-health", adminHandler.AuthMiddleware(adminHandler.HandleCWSkimmerHealth))
 	http.HandleFunc("/admin/mqtt-health", adminHandler.AuthMiddleware(adminHandler.HandleMQTTHealth))
+	http.HandleFunc("/admin/rotctl-health", adminHandler.AuthMiddleware(adminHandler.HandleRotctlHealth))
 	http.HandleFunc("/admin/instance-reporter-health", adminHandler.AuthMiddleware(adminHandler.HandleInstanceReporterHealth))
 	http.HandleFunc("/admin/instance-reporter-trigger", adminHandler.AuthMiddleware(adminHandler.HandleInstanceReporterTrigger))
 	http.HandleFunc("/admin/tunnel-server-health", adminHandler.AuthMiddleware(adminHandler.HandleTunnelServerHealth))

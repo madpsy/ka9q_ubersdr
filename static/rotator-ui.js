@@ -33,10 +33,10 @@ class RotatorUI {
                 <div id="rotator-content" class="rotator-content" style="display:${this.isExpanded ? 'flex' : 'none'};">
                     <div id="rotator-display-container" class="rotator-display-container">
                         <!-- Rotator display will be injected here -->
+                        <button id="rotator-controls-button" class="rotator-controls-button" onclick="rotatorUI.openControls()">
+                            Controls
+                        </button>
                     </div>
-                    <button id="rotator-controls-button" class="rotator-controls-button" onclick="rotatorUI.openControls()">
-                        Controls
-                    </button>
                 </div>
             </div>
         `;

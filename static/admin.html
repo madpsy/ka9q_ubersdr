@@ -5773,9 +5773,38 @@
             enabledSelect.dataset.key = 'enabled';
             enabledSelect.innerHTML = '<option value="true">Yes</option><option value="false">No</option>';
             enabledSelect.value = (currentRotatorSchedulerConfig.enabled === true || currentRotatorSchedulerConfig.enabled === 'true') ? 'true' : 'false';
-            enabledSelect.addEventListener('change', (e) => {
-                currentRotatorSchedulerConfig.enabled = e.target.value === 'true';
-                saveRotatorSchedulerConfig();
+            enabledSelect.addEventListener('change', async (e) => {
+                const newEnabledState = e.target.value === 'true';
+                
+                // Only send the enabled field to avoid overwriting positions
+                try {
+                    showAlert('Updating scheduler enabled state...', 'info');
+
+                    const response = await authenticatedFetch('/admin/rotator-scheduler-config', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            enabled: newEnabledState,
+                            positions: currentRotatorSchedulerConfig.positions || []
+                        })
+                    });
+
+                    if (!response) return; // Auth failed
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(errorText || 'Failed to update enabled state');
+                    }
+
+                    const result = await response.json();
+                    showAlert(result.message || 'Scheduler enabled state updated successfully', 'success');
+                    
+                    // Reload to get updated status
+                    await loadRotatorSchedulerConfig();
+                } catch (error) {
+                    showAlert('Error updating scheduler enabled state: ' + error.message, 'error');
+                    // Revert the dropdown
+                    enabledSelect.value = currentRotatorSchedulerConfig.enabled ? 'true' : 'false';
+                }
             });
             enabledDiv.appendChild(enabledSelect);
             statusDiv.appendChild(enabledDiv);

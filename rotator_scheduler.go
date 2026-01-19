@@ -234,8 +234,19 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 		"enabled_position_count": enabledCount,
 	}
 
+	// Always add all positions (even when disabled or empty)
+	positions := make([]map[string]interface{}, len(rs.config.Positions))
+	for i, pos := range rs.config.Positions {
+		positions[i] = map[string]interface{}{
+			"time":    pos.Time,
+			"bearing": pos.Bearing,
+			"enabled": pos.Enabled,
+		}
+	}
+	status["positions"] = positions
+
+	// Add next scheduled position only if enabled and has positions
 	if rs.config.Enabled && len(rs.config.Positions) > 0 {
-		// Add next scheduled position
 		nextPos := rs.getNextScheduledPosition()
 		if nextPos != nil {
 			status["next_position"] = map[string]interface{}{
@@ -243,17 +254,6 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 				"bearing": nextPos.Bearing,
 			}
 		}
-
-		// Add all positions
-		positions := make([]map[string]interface{}, len(rs.config.Positions))
-		for i, pos := range rs.config.Positions {
-			positions[i] = map[string]interface{}{
-				"time":    pos.Time,
-				"bearing": pos.Bearing,
-				"enabled": pos.Enabled,
-			}
-		}
-		status["positions"] = positions
 	}
 
 	return status

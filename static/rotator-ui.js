@@ -8,6 +8,7 @@ class RotatorUI {
     constructor() {
         this.isExpanded = false;
         this.rotatorDisplay = null;
+        this.statusUpdateTimer = null;
         
         // Load saved state from localStorage
         const savedState = localStorage.getItem('ubersdr_rotator_expanded');
@@ -15,6 +16,32 @@ class RotatorUI {
         
         this.createRotatorPanel();
         this.setupEventHandlers();
+        
+        // Start fetching status immediately for collapsed tab display
+        this.startStatusUpdates();
+    }
+    
+    /**
+     * Start periodic status updates for the collapsed tab
+     */
+    startStatusUpdates() {
+        // Do an immediate fetch
+        this.fetchRotatorStatus();
+        
+        // Set up periodic updates every 3 seconds
+        this.statusUpdateTimer = setInterval(() => {
+            this.fetchRotatorStatus();
+        }, 3000);
+    }
+    
+    /**
+     * Stop periodic status updates
+     */
+    stopStatusUpdates() {
+        if (this.statusUpdateTimer) {
+            clearInterval(this.statusUpdateTimer);
+            this.statusUpdateTimer = null;
+        }
     }
     
     /**

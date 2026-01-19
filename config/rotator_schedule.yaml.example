@@ -18,27 +18,32 @@
 enabled: false
 
 # List of scheduled positions
-# Each entry specifies a time and bearing
+# Each entry specifies a time, bearing, and enabled state
 positions:
   # Morning - point east for sunrise propagation
   - time: "06:00"
     bearing: 90
+    enabled: true
 
   # Mid-morning - point northeast
   - time: "09:30"
     bearing: 45
+    enabled: true
 
   # Afternoon - point west
   - time: "14:00"
     bearing: 270
+    enabled: true
 
   # Evening - point northwest for sunset propagation
   - time: "18:00"
     bearing: 315
+    enabled: true
 
   # Night - point north
   - time: "22:00"
     bearing: 0
+    enabled: true
 
 # Example configurations for different use cases:
 

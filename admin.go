@@ -4730,7 +4730,7 @@ func (ah *AdminHandler) HandleRotctlHealth(w http.ResponseWriter, r *http.Reques
 		duration := time.Since(connectedSince)
 		status["connected_duration_seconds"] = int(duration.Seconds())
 		status["connected_since"] = connectedSince.Format(time.RFC3339)
-		
+
 		// Format duration in human-readable format
 		status["connected_duration"] = formatDuration(duration)
 	}
@@ -4738,6 +4738,12 @@ func (ah *AdminHandler) HandleRotctlHealth(w http.ResponseWriter, r *http.Reques
 	// Check for errors
 	if state.LastError != nil {
 		status["last_error"] = state.LastError.Error()
+	}
+
+	// Add scheduler information if available
+	if ah.rotatorScheduler != nil {
+		schedulerStatus := ah.rotatorScheduler.GetStatus()
+		status["scheduler"] = schedulerStatus
 	}
 
 	// Check connection status
@@ -4831,6 +4837,11 @@ func (ah *AdminHandler) handleUpdateRotatorSchedulerConfig(w http.ResponseWriter
 		return
 	}
 
+	// Reload scheduler to apply changes immediately
+	if err := ah.rotatorScheduler.Reload(); err != nil {
+		log.Printf("Warning: Failed to reload scheduler after config update: %v", err)
+	}
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
@@ -4909,6 +4920,11 @@ func (ah *AdminHandler) handleAddRotatorPosition(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// Reload scheduler
+	if err := ah.rotatorScheduler.Reload(); err != nil {
+		log.Printf("Warning: Failed to reload scheduler after add: %v", err)
+	}
+
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
@@ -4916,17 +4932,11 @@ func (ah *AdminHandler) handleAddRotatorPosition(w http.ResponseWriter, r *http.
 	})
 }
 
-// handleUpdateRotatorPosition updates a position by index
+// handleUpdateRotatorPosition updates a position by time
 func (ah *AdminHandler) handleUpdateRotatorPosition(w http.ResponseWriter, r *http.Request) {
-	indexStr := r.URL.Query().Get("index")
-	if indexStr == "" {
-		http.Error(w, "Index parameter required", http.StatusBadRequest)
-		return
-	}
-
-	index, err := strconv.Atoi(indexStr)
-	if err != nil {
-		http.Error(w, "Invalid index", http.StatusBadRequest)
+	timeParam := r.URL.Query().Get("time")
+	if timeParam == "" {
+		http.Error(w, "Time parameter required", http.StatusBadRequest)
 		return
 	}
 
@@ -4961,13 +4971,29 @@ func (ah *AdminHandler) handleUpdateRotatorPosition(w http.ResponseWriter, r *ht
 
 	// Get positions array
 	positions, ok := config["positions"].([]interface{})
-	if !ok || index < 0 || index >= len(positions) {
-		http.Error(w, "Invalid position index", http.StatusBadRequest)
+	if !ok {
+		http.Error(w, "Invalid config structure", http.StatusInternalServerError)
+		return
+	}
+
+	// Find position by time
+	positionIndex := -1
+	for i, posInterface := range positions {
+		if posMap, ok := posInterface.(map[string]interface{}); ok {
+			if time, ok := posMap["time"].(string); ok && time == timeParam {
+				positionIndex = i
+				break
+			}
+		}
+	}
+
+	if positionIndex == -1 {
+		http.Error(w, fmt.Sprintf("Position at time '%s' not found", timeParam), http.StatusNotFound)
 		return
 	}
 
 	// Update position at index
-	positions[index] = updatedPos
+	positions[positionIndex] = updatedPos
 	config["positions"] = positions
 
 	// Write back to file
@@ -4982,6 +5008,11 @@ func (ah *AdminHandler) handleUpdateRotatorPosition(w http.ResponseWriter, r *ht
 		return
 	}
 
+	// Reload scheduler
+	if err := ah.rotatorScheduler.Reload(); err != nil {
+		log.Printf("Warning: Failed to reload scheduler after update: %v", err)
+	}
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
@@ -4989,17 +5020,11 @@ func (ah *AdminHandler) handleUpdateRotatorPosition(w http.ResponseWriter, r *ht
 	})
 }
 
-// handleDeleteRotatorPosition deletes a position by index
+// handleDeleteRotatorPosition deletes a position by time
 func (ah *AdminHandler) handleDeleteRotatorPosition(w http.ResponseWriter, r *http.Request) {
-	indexStr := r.URL.Query().Get("index")
-	if indexStr == "" {
-		http.Error(w, "Index parameter required", http.StatusBadRequest)
-		return
-	}
-
-	index, err := strconv.Atoi(indexStr)
-	if err != nil {
-		http.Error(w, "Invalid index", http.StatusBadRequest)
+	timeParam := r.URL.Query().Get("time")
+	if timeParam == "" {
+		http.Error(w, "Time parameter required", http.StatusBadRequest)
 		return
 	}
 
@@ -5022,13 +5047,29 @@ func (ah *AdminHandler) handleDeleteRotatorPosition(w http.ResponseWriter, r *ht
 
 	// Get positions array
 	positions, ok := config["positions"].([]interface{})
-	if !ok || index < 0 || index >= len(positions) {
-		http.Error(w, "Invalid position index", http.StatusBadRequest)
+	if !ok {
+		http.Error(w, "Invalid config structure", http.StatusInternalServerError)
+		return
+	}
+
+	// Find position by time
+	positionIndex := -1
+	for i, posInterface := range positions {
+		if posMap, ok := posInterface.(map[string]interface{}); ok {
+			if time, ok := posMap["time"].(string); ok && time == timeParam {
+				positionIndex = i
+				break
+			}
+		}
+	}
+
+	if positionIndex == -1 {
+		http.Error(w, fmt.Sprintf("Position at time '%s' not found", timeParam), http.StatusNotFound)
 		return
 	}
 
 	// Remove position at index
-	positions = append(positions[:index], positions[index+1:]...)
+	positions = append(positions[:positionIndex], positions[positionIndex+1:]...)
 	config["positions"] = positions
 
 	// Write back to file
@@ -5041,6 +5082,11 @@ func (ah *AdminHandler) handleDeleteRotatorPosition(w http.ResponseWriter, r *ht
 	if err := os.WriteFile(schedulerPath, yamlData, 0644); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write config file: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	// Reload scheduler
+	if err := ah.rotatorScheduler.Reload(); err != nil {
+		log.Printf("Warning: Failed to reload scheduler after delete: %v", err)
 	}
 
 	w.WriteHeader(http.StatusOK)

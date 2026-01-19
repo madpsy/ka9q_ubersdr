@@ -733,6 +733,14 @@
                             <small>Azimuth bearing in degrees (0-360)</small>
                             <small id="scheduledPositionBearingError" style="color: #dc3545; display: none;"></small>
                         </div>
+                        <div class="config-field">
+                            <label>Enabled</label>
+                            <select id="newScheduledPositionEnabled">
+                                <option value="true">Yes</option>
+                                <option value="false">No</option>
+                            </select>
+                            <small>Enable or disable this scheduled position</small>
+                        </div>
                         <button class="btn" id="saveScheduledPositionBtn" onclick="saveScheduledPosition()">Save Position</button>
                         <button class="btn btn-secondary" onclick="cancelScheduledPositionForm()">Cancel</button>
                     </div>
@@ -5822,6 +5830,7 @@
                 const thead = document.createElement('thead');
                 thead.innerHTML = `
                     <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                        <th style="padding: 12px; text-align: center; width: 80px;">Enabled</th>
                         <th style="padding: 12px; text-align: left;">Time</th>
                         <th style="padding: 12px; text-align: left;">Bearing</th>
                         <th style="padding: 12px; text-align: center;">Actions</th>
@@ -5834,9 +5843,20 @@
                     const row = document.createElement('tr');
                     row.style.borderBottom = '1px solid #dee2e6';
                     
+                    // Gray out disabled positions
+                    if (pos.enabled === false) {
+                        row.style.opacity = '0.5';
+                    }
+                    
                     const escapedTime = pos.time.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                    const isEnabled = pos.enabled !== false; // Default to true if not specified
+                    const enabledIcon = isEnabled ? '✓' : '—';
+                    const enabledColor = isEnabled ? '#28a745' : '#999';
                     
                     row.innerHTML = `
+                        <td style="padding: 12px; text-align: center;">
+                            <span style="color: ${enabledColor}; font-size: 18px; font-weight: bold; cursor: pointer;" onclick="togglePositionEnabled('${escapedTime}')" title="Click to ${isEnabled ? 'disable' : 'enable'}">${enabledIcon}</span>
+                        </td>
                         <td style="padding: 12px;"><strong>${pos.time}</strong></td>
                         <td style="padding: 12px;"><span style="color: #667eea; font-weight: bold;">${pos.bearing}°</span></td>
                         <td style="padding: 12px; text-align: center; white-space: nowrap;">
@@ -5859,6 +5879,7 @@
             document.getElementById('addScheduledPositionForm').style.display = 'block';
             document.getElementById('newScheduledPositionTime').value = '';
             document.getElementById('newScheduledPositionBearing').value = '';
+            document.getElementById('newScheduledPositionEnabled').value = 'true';
             validateScheduledPositionForm();
             document.getElementById('addScheduledPositionForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
@@ -5875,8 +5896,24 @@
             document.getElementById('addScheduledPositionForm').style.display = 'block';
             document.getElementById('newScheduledPositionTime').value = time;
             document.getElementById('newScheduledPositionBearing').value = position.bearing;
+            document.getElementById('newScheduledPositionEnabled').value = (position.enabled !== false) ? 'true' : 'false';
             validateScheduledPositionForm();
             document.getElementById('addScheduledPositionForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        async function togglePositionEnabled(time) {
+            const positions = currentRotatorSchedulerConfig.positions || [];
+            const position = positions.find(p => p.time === time);
+            if (!position) {
+                showAlert('Position not found: ' + time, 'error');
+                return;
+            }
+
+            // Toggle enabled state
+            position.enabled = !position.enabled;
+
+            // Save the updated config
+            await saveRotatorSchedulerConfig();
         }
 
         function cancelScheduledPositionForm() {
@@ -5945,6 +5982,7 @@
         async function saveScheduledPosition() {
             const time = document.getElementById('newScheduledPositionTime').value.trim();
             const bearing = parseFloat(document.getElementById('newScheduledPositionBearing').value);
+            const enabled = document.getElementById('newScheduledPositionEnabled').value === 'true';
             const originalTime = document.getElementById('editScheduledPositionIndex').value;
 
             if (!time || isNaN(bearing)) {
@@ -5957,7 +5995,7 @@
                 return;
             }
 
-            const positionData = { time, bearing };
+            const positionData = { time, bearing, enabled };
 
             try {
                 const isEditing = originalTime !== '';
@@ -6063,6 +6101,7 @@
             currentRotatorSchedulerConfig.positions.forEach(pos => {
                 yamlContent += `  - time: "${pos.time}"\n`;
                 yamlContent += `    bearing: ${pos.bearing}\n`;
+                yamlContent += `    enabled: ${pos.enabled !== false}\n`;
             });
 
             const blob = new Blob([yamlContent], { type: 'text/yaml' });
@@ -6115,12 +6154,15 @@
                             if (currentPosition) {
                                 importedConfig.positions.push(currentPosition);
                             }
-                            currentPosition = { time: '', bearing: 0 };
+                            currentPosition = { time: '', bearing: 0, enabled: true };
                         } else if (currentPosition) {
                             if (trimmed.startsWith('time:')) {
                                 currentPosition.time = trimmed.substring(5).trim().replace(/^["']|["']$/g, '');
                             } else if (trimmed.startsWith('bearing:')) {
                                 currentPosition.bearing = parseFloat(trimmed.substring(8).trim());
+                            } else if (trimmed.startsWith('enabled:')) {
+                                const value = trimmed.substring(8).trim();
+                                currentPosition.enabled = value === 'true';
                             }
                         }
                     }
@@ -8203,6 +8245,26 @@
                 connectedDurationDisplay = data.connected_duration;
             }
 
+            // Add scheduler information if available
+            let schedulerHTML = '';
+            if (data.scheduler) {
+                const schedulerRunning = data.scheduler.running || false;
+                const schedulerEnabled = data.scheduler.enabled || false;
+                const schedulerPositionCount = data.scheduler.position_count || 0;
+                const schedulerRunningColor = schedulerRunning ? '#28a745' : '#999';
+                const schedulerEnabledColor = schedulerEnabled ? '#28a745' : '#999';
+
+                schedulerHTML = `<br>
+                <span style="color: #666; font-size: 14px; margin-top: 10px; display: block; border-top: 1px solid #dee2e6; padding-top: 10px;"><strong>Scheduler:</strong></span>
+                <span style="color: ${schedulerEnabledColor}; font-size: 14px; font-weight: bold;">Enabled: ${schedulerEnabled ? 'Yes' : 'No'}</span><br>
+                <span style="color: ${schedulerRunningColor}; font-size: 14px; font-weight: bold;">Running: ${schedulerRunning ? 'Yes' : 'No'}</span><br>
+                <span style="color: #667eea; font-size: 14px;">Scheduled Positions: ${schedulerPositionCount}</span>`;
+
+                if (data.scheduler.next_position) {
+                    schedulerHTML += `<br><span style="color: #667eea; font-size: 14px;">Next Position: ${data.scheduler.next_position.time} → ${data.scheduler.next_position.bearing}°</span>`;
+                }
+            }
+
             statusDiv.innerHTML = `
                 <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
                 <span style="color: #666; font-size: 14px;">Enabled: ${data.enabled ? 'Yes' : 'No'}</span><br>
@@ -8211,6 +8273,7 @@
                 <span style="color: #667eea; font-size: 14px; font-weight: bold;">Port: ${data.port || 'N/A'}</span><br>
                 <span style="color: #666; font-size: 14px;">Update Interval: ${data.update_interval || 'N/A'} ms</span><br>
                 <span style="color: #666; font-size: 14px;">Connected Duration: ${connectedDurationDisplay}</span>
+                ${schedulerHTML}
             `;
             statusSection.appendChild(statusDiv);
 

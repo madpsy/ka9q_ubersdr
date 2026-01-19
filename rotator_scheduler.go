@@ -15,6 +15,7 @@ import (
 type ScheduledPosition struct {
 	Time    string  `yaml:"time"`    // Time in HH:MM format (24-hour)
 	Bearing float64 `yaml:"bearing"` // Azimuth bearing in degrees (0-360)
+	Enabled bool    `yaml:"enabled"` // Enable/disable this position (default: true)
 }
 
 // RotatorScheduleConfig represents the configuration for scheduled rotator positions
@@ -181,6 +182,11 @@ func (rs *RotatorScheduler) checkScheduledPositions() {
 	rs.mu.RUnlock()
 
 	for _, pos := range positions {
+		// Skip disabled positions
+		if !pos.Enabled {
+			continue
+		}
+
 		if pos.Time == currentTime {
 			rs.executeScheduledPosition(&pos)
 		}
@@ -191,7 +197,7 @@ func (rs *RotatorScheduler) checkScheduledPositions() {
 func (rs *RotatorScheduler) executeScheduledPosition(pos *ScheduledPosition) {
 	// Check if rotator is connected
 	if !rs.controller.client.IsConnected() {
-		log.Printf("Skipping scheduled position (time=%s, bearing=%.0f°) - rotator not connected", 
+		log.Printf("Skipping scheduled position (time=%s, bearing=%.0f°) - rotator not connected",
 			pos.Time, pos.Bearing)
 		return
 	}
@@ -200,7 +206,7 @@ func (rs *RotatorScheduler) executeScheduledPosition(pos *ScheduledPosition) {
 
 	// Set the azimuth (keeping current elevation)
 	if err := rs.controller.SetAzimuth(pos.Bearing); err != nil {
-		log.Printf("Failed to set scheduled position (time=%s, bearing=%.0f°): %v", 
+		log.Printf("Failed to set scheduled position (time=%s, bearing=%.0f°): %v",
 			pos.Time, pos.Bearing, err)
 		return
 	}
@@ -294,7 +300,7 @@ func (rs *RotatorScheduler) getNextScheduledPosition() *ScheduledPosition {
 // Reload reloads the configuration from disk
 func (rs *RotatorScheduler) Reload() error {
 	wasRunning := false
-	
+
 	rs.mu.Lock()
 	wasRunning = rs.running
 	rs.mu.Unlock()

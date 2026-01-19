@@ -138,11 +138,12 @@ class RotatorUI {
             .rotator-display-container {
                 width: 100%;
                 height: 100%;
-                padding: 10px;
+                padding: 0;
                 overflow: auto;
                 display: flex;
                 flex-direction: column;
                 align-items: center;
+                justify-content: center;
             }
             
             /* Mobile responsive styles */
@@ -220,7 +221,7 @@ class RotatorUI {
             showCompass: true,
             showControls: false,
             showPassword: false,
-            mapSize: 400,
+            mapSize: 480,
             compassSize: 150,
             updateInterval: 1000
         });

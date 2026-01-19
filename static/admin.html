@@ -6291,9 +6291,9 @@
             const timelineWidth = width - marginLeft - marginRight;
 
             // Draw day/night shading if we have location data
-            if (currentConfig && currentConfig.location && currentConfig.location.latitude && currentConfig.location.longitude && typeof SunCalc !== 'undefined') {
-                const lat = currentConfig.location.latitude;
-                const lon = currentConfig.location.longitude;
+            if (currentConfig && currentConfig.admin && currentConfig.admin.gps && currentConfig.admin.gps.lat && currentConfig.admin.gps.lon && typeof SunCalc !== 'undefined') {
+                const lat = currentConfig.admin.gps.lat;
+                const lon = currentConfig.admin.gps.lon;
                 const today = new Date();
                 today.setHours(0, 0, 0, 0);
 

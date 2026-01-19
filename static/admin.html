@@ -5775,18 +5775,18 @@
             enabledSelect.value = (currentRotatorSchedulerConfig.enabled === true || currentRotatorSchedulerConfig.enabled === 'true') ? 'true' : 'false';
             enabledSelect.addEventListener('change', async (e) => {
                 const newEnabledState = e.target.value === 'true';
-                
-                // Only send the enabled field to avoid overwriting positions
+
+                // Update the enabled state in the current config object
+                currentRotatorSchedulerConfig.enabled = newEnabledState;
+
+                // Save the entire config (preserving all positions)
                 try {
                     showAlert('Updating scheduler enabled state...', 'info');
 
                     const response = await authenticatedFetch('/admin/rotator-scheduler-config', {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            enabled: newEnabledState,
-                            positions: currentRotatorSchedulerConfig.positions || []
-                        })
+                        body: JSON.stringify(currentRotatorSchedulerConfig)
                     });
 
                     if (!response) return; // Auth failed
@@ -5797,12 +5797,13 @@
 
                     const result = await response.json();
                     showAlert(result.message || 'Scheduler enabled state updated successfully', 'success');
-                    
+
                     // Reload to get updated status
                     await loadRotatorSchedulerConfig();
                 } catch (error) {
                     showAlert('Error updating scheduler enabled state: ' + error.message, 'error');
-                    // Revert the dropdown
+                    // Revert both the dropdown and the config object
+                    currentRotatorSchedulerConfig.enabled = !newEnabledState;
                     enabledSelect.value = currentRotatorSchedulerConfig.enabled ? 'true' : 'false';
                 }
             });

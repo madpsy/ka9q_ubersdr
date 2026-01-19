@@ -1,0 +1,87 @@
+# Rotator Scheduler Configuration
+# This file configures scheduled rotator positioning at specific times of day
+#
+# The scheduler will automatically move the rotator to the specified bearing
+# at the configured times. This is useful for:
+# - Pointing at different regions at different times of day
+# - Following propagation patterns
+# - Automated antenna positioning for scheduled operations
+#
+# IMPORTANT: 
+# - The scheduler only runs if rotctl is enabled in the main config
+# - Commands are only sent when the rotator is connected
+# - Times are in 24-hour format (HH:MM)
+# - Bearings are in degrees (0-360)
+# - The scheduler checks every minute, so positions are executed within 1 minute of scheduled time
+
+# Enable or disable the scheduler
+enabled: true
+
+# List of scheduled positions
+# Each entry specifies a time and bearing
+positions:
+  # Morning - point east for sunrise propagation
+  - time: "06:00"
+    bearing: 90
+
+  # Mid-morning - point northeast
+  - time: "09:30"
+    bearing: 45
+
+  # Afternoon - point west
+  - time: "14:00"
+    bearing: 270
+
+  # Evening - point northwest for sunset propagation
+  - time: "18:00"
+    bearing: 315
+
+  # Night - point north
+  - time: "22:00"
+    bearing: 0
+
+# Example configurations for different use cases:
+
+# Example 1: Simple day/night switching
+# positions:
+#   - time: "08:00"
+#     bearing: 90    # East during day
+#   - time: "20:00"
+#     bearing: 270   # West during night
+
+# Example 2: Following the sun across the sky
+# positions:
+#   - time: "06:00"
+#     bearing: 90    # East at sunrise
+#   - time: "09:00"
+#     bearing: 120   # Southeast
+#   - time: "12:00"
+#     bearing: 180   # South at noon
+#   - time: "15:00"
+#     bearing: 240   # Southwest
+#   - time: "18:00"
+#     bearing: 270   # West at sunset
+#   - time: "21:00"
+#     bearing: 0     # North at night
+
+# Example 3: Contest operation schedule
+# positions:
+#   - time: "00:00"
+#     bearing: 0     # North America
+#   - time: "06:00"
+#     bearing: 90    # Asia
+#   - time: "12:00"
+#     bearing: 180   # Oceania
+#   - time: "18:00"
+#     bearing: 270   # Europe
+
+# Example 4: Specific target bearings
+# positions:
+#   - time: "07:00"
+#     bearing: 45    # Point to Japan
+#   - time: "14:00"
+#     bearing: 315   # Point to USA West Coast
+#   - time: "20:00"
+#     bearing: 285   # Point to USA East Coast
+#   - time: "23:00"
+#     bearing: 60    # Point to Australia

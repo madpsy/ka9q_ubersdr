@@ -257,6 +257,7 @@ type AdminHandler struct {
 	instanceReporter    *InstanceReporter
 	mqttPublisher       *MQTTPublisher
 	rotctlHandler       *RotctlAPIHandler
+	rotatorScheduler    *RotatorScheduler
 	loginAttempts       *LoginAttemptTracker
 }
 
@@ -319,7 +320,7 @@ func (ah *AdminHandler) restartServer() {
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler) *AdminHandler {
 	return &AdminHandler{
 		config:              config,
 		configFile:          configFile,
@@ -339,6 +340,7 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		instanceReporter:    instanceReporter,
 		mqttPublisher:       mqttPublisher,
 		rotctlHandler:       rotctlHandler,
+		rotatorScheduler:    rotatorScheduler,
 		loginAttempts:       NewLoginAttemptTracker(),
 	}
 }
@@ -4756,4 +4758,330 @@ func (ah *AdminHandler) HandleRotctlHealth(w http.ResponseWriter, r *http.Reques
 	if err := json.NewEncoder(w).Encode(status); err != nil {
 		log.Printf("Error encoding rotctl health status: %v", err)
 	}
+}
+
+// HandleRotatorSchedulerConfig handles GET and PUT requests for rotator scheduler configuration
+func (ah *AdminHandler) HandleRotatorSchedulerConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		ah.handleGetRotatorSchedulerConfig(w, r)
+	case http.MethodPut:
+		ah.handleUpdateRotatorSchedulerConfig(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleGetRotatorSchedulerConfig returns the rotator scheduler configuration
+func (ah *AdminHandler) handleGetRotatorSchedulerConfig(w http.ResponseWriter, r *http.Request) {
+	// Check if rotator scheduler exists
+	if ah.rotatorScheduler == nil {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"enabled":   false,
+			"positions": []interface{}{},
+		})
+		return
+	}
+
+	// Get status which includes config
+	status := ah.rotatorScheduler.GetStatus()
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(status)
+}
+
+// handleUpdateRotatorSchedulerConfig updates the rotator scheduler configuration
+func (ah *AdminHandler) handleUpdateRotatorSchedulerConfig(w http.ResponseWriter, r *http.Request) {
+	// Check if rotator scheduler exists
+	if ah.rotatorScheduler == nil {
+		http.Error(w, "Rotator scheduler not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	var config map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Backup existing file with timestamp before replacing
+	schedulerPath := ah.rotatorScheduler.configPath
+	if _, err := os.Stat(schedulerPath); err == nil {
+		timestamp := time.Now().Format("20060102-150405")
+		backupPath := fmt.Sprintf("%s.%s", schedulerPath, timestamp)
+		if err := os.Rename(schedulerPath, backupPath); err != nil {
+			log.Printf("Warning: Failed to backup rotator_schedule.yaml: %v", err)
+		} else {
+			log.Printf("Backed up rotator_schedule.yaml to %s", backupPath)
+		}
+	}
+
+	// Convert to YAML and write to file
+	yamlData, err := yaml.Marshal(config)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal scheduler config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(schedulerPath, yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write scheduler config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Rotator scheduler configuration updated successfully",
+	})
+}
+
+// HandleRotatorSchedulerPosition handles POST, PUT, DELETE requests for individual positions
+func (ah *AdminHandler) HandleRotatorSchedulerPosition(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if rotator scheduler exists
+	if ah.rotatorScheduler == nil {
+		http.Error(w, "Rotator scheduler not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPost:
+		ah.handleAddRotatorPosition(w, r)
+	case http.MethodPut:
+		ah.handleUpdateRotatorPosition(w, r)
+	case http.MethodDelete:
+		ah.handleDeleteRotatorPosition(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleAddRotatorPosition adds a new scheduled position
+func (ah *AdminHandler) handleAddRotatorPosition(w http.ResponseWriter, r *http.Request) {
+	var newPos map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&newPos); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if newPos["time"] == "" || newPos["bearing"] == nil {
+		http.Error(w, "Time and bearing are required", http.StatusBadRequest)
+		return
+	}
+
+	// Read current config
+	ah.rotatorScheduler.mu.RLock()
+	schedulerPath := ah.rotatorScheduler.configPath
+	ah.rotatorScheduler.mu.RUnlock()
+
+	data, err := os.ReadFile(schedulerPath)
+	var config map[string]interface{}
+	if err == nil {
+		yaml.Unmarshal(data, &config)
+	} else {
+		config = make(map[string]interface{})
+	}
+
+	// Get positions array
+	var positions []interface{}
+	if existing, ok := config["positions"].([]interface{}); ok {
+		positions = existing
+	}
+
+	// Add new position
+	positions = append(positions, newPos)
+	config["positions"] = positions
+
+	// Write back to file
+	yamlData, err := yaml.Marshal(config)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(schedulerPath, yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Position added successfully",
+	})
+}
+
+// handleUpdateRotatorPosition updates a position by index
+func (ah *AdminHandler) handleUpdateRotatorPosition(w http.ResponseWriter, r *http.Request) {
+	indexStr := r.URL.Query().Get("index")
+	if indexStr == "" {
+		http.Error(w, "Index parameter required", http.StatusBadRequest)
+		return
+	}
+
+	index, err := strconv.Atoi(indexStr)
+	if err != nil {
+		http.Error(w, "Invalid index", http.StatusBadRequest)
+		return
+	}
+
+	var updatedPos map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&updatedPos); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if updatedPos["time"] == "" || updatedPos["bearing"] == nil {
+		http.Error(w, "Time and bearing are required", http.StatusBadRequest)
+		return
+	}
+
+	// Read current config
+	ah.rotatorScheduler.mu.RLock()
+	schedulerPath := ah.rotatorScheduler.configPath
+	ah.rotatorScheduler.mu.RUnlock()
+
+	data, err := os.ReadFile(schedulerPath)
+	if err != nil {
+		http.Error(w, "Failed to read config file", http.StatusInternalServerError)
+		return
+	}
+
+	var config map[string]interface{}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get positions array
+	positions, ok := config["positions"].([]interface{})
+	if !ok || index < 0 || index >= len(positions) {
+		http.Error(w, "Invalid position index", http.StatusBadRequest)
+		return
+	}
+
+	// Update position at index
+	positions[index] = updatedPos
+	config["positions"] = positions
+
+	// Write back to file
+	yamlData, err := yaml.Marshal(config)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(schedulerPath, yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Position updated successfully",
+	})
+}
+
+// handleDeleteRotatorPosition deletes a position by index
+func (ah *AdminHandler) handleDeleteRotatorPosition(w http.ResponseWriter, r *http.Request) {
+	indexStr := r.URL.Query().Get("index")
+	if indexStr == "" {
+		http.Error(w, "Index parameter required", http.StatusBadRequest)
+		return
+	}
+
+	index, err := strconv.Atoi(indexStr)
+	if err != nil {
+		http.Error(w, "Invalid index", http.StatusBadRequest)
+		return
+	}
+
+	// Read current config
+	ah.rotatorScheduler.mu.RLock()
+	schedulerPath := ah.rotatorScheduler.configPath
+	ah.rotatorScheduler.mu.RUnlock()
+
+	data, err := os.ReadFile(schedulerPath)
+	if err != nil {
+		http.Error(w, "Failed to read config file", http.StatusInternalServerError)
+		return
+	}
+
+	var config map[string]interface{}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get positions array
+	positions, ok := config["positions"].([]interface{})
+	if !ok || index < 0 || index >= len(positions) {
+		http.Error(w, "Invalid position index", http.StatusBadRequest)
+		return
+	}
+
+	// Remove position at index
+	positions = append(positions[:index], positions[index+1:]...)
+	config["positions"] = positions
+
+	// Write back to file
+	yamlData, err := yaml.Marshal(config)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(schedulerPath, yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Position deleted successfully",
+	})
+}
+
+// HandleRotatorSchedulerReload handles POST requests to reload the scheduler
+func (ah *AdminHandler) HandleRotatorSchedulerReload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if rotator scheduler exists
+	if ah.rotatorScheduler == nil {
+		http.Error(w, "Rotator scheduler not initialized", http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": "Rotator scheduler not initialized",
+		})
+		return
+	}
+
+	// Reload the scheduler
+	if err := ah.rotatorScheduler.Reload(); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to reload scheduler: %v", err), http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": fmt.Sprintf("Failed to reload scheduler: %v", err),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Rotator scheduler reloaded successfully",
+	})
 }

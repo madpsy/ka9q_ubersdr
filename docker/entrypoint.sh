@@ -98,6 +98,14 @@ initialize_configs() {
         merge_config_keys "/app/config/cwskimmer.yaml" "/etc/ka9q_ubersdr/cwskimmer.yaml.example" "cwskimmer.yaml"
     fi
 
+    if [ ! -f "/app/config/rotator_schedule.yaml" ]; then
+        echo "Initializing rotator_schedule.yaml from example..."
+        cp /etc/ka9q_ubersdr/rotator_schedule.yaml.example /app/config/rotator_schedule.yaml
+    else
+        # Merge missing keys from example into existing config (like config.yaml)
+        merge_config_keys "/app/config/rotator_schedule.yaml" "/etc/ka9q_ubersdr/rotator_schedule.yaml.example" "rotator_schedule.yaml"
+    fi
+
     # Initialize CTY.DAT directory if it doesn't exist
     if [ ! -d "/app/config/cty" ]; then
         echo "Initializing cty directory..."

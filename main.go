@@ -905,6 +905,7 @@ func main() {
 
 	// Initialize rotctl API handler if enabled (must be before admin handler)
 	var rotctlHandler *RotctlAPIHandler
+	var rotatorScheduler *RotatorScheduler
 	if config.Rotctl.Enabled {
 		var err error
 		rotctlHandler, err = NewRotctlAPIHandler(&config.Rotctl)
@@ -913,11 +914,31 @@ func main() {
 			rotctlHandler = nil // Ensure it's nil
 		} else {
 			log.Printf("Rotctl API initialized (host: %s:%d)", config.Rotctl.Host, config.Rotctl.Port)
+
+			// Initialize rotator scheduler if rotctl is working
+			schedulerConfigPath := "rotator_schedule.yaml"
+			if *configDir != "." {
+				schedulerConfigPath = *configDir + "/rotator_schedule.yaml"
+			}
+
+			rotatorScheduler, err = NewRotatorScheduler(schedulerConfigPath, rotctlHandler.controller)
+			if err != nil {
+				log.Printf("Warning: Failed to initialize rotator scheduler: %v", err)
+				rotatorScheduler = nil
+			} else {
+				// Start the scheduler (it will check if enabled in config)
+				if err := rotatorScheduler.Start(); err != nil {
+					log.Printf("Warning: Failed to start rotator scheduler: %v", err)
+					rotatorScheduler = nil
+				} else if rotatorScheduler != nil {
+					defer rotatorScheduler.Stop()
+				}
+			}
 		}
 	}
 
 	// Initialize admin handler (pass all components for proper shutdown during restart)
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler)
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler)
 
 	// Setup HTTP routes
 	http.HandleFunc("/connection", func(w http.ResponseWriter, r *http.Request) {
@@ -1128,6 +1149,9 @@ func main() {
 	http.HandleFunc("/admin/cwskimmer-health", adminHandler.AuthMiddleware(adminHandler.HandleCWSkimmerHealth))
 	http.HandleFunc("/admin/mqtt-health", adminHandler.AuthMiddleware(adminHandler.HandleMQTTHealth))
 	http.HandleFunc("/admin/rotctl-health", adminHandler.AuthMiddleware(adminHandler.HandleRotctlHealth))
+	http.HandleFunc("/admin/rotator-scheduler-config", adminHandler.AuthMiddleware(adminHandler.HandleRotatorSchedulerConfig))
+	http.HandleFunc("/admin/rotator-scheduler-position", adminHandler.AuthMiddleware(adminHandler.HandleRotatorSchedulerPosition))
+	http.HandleFunc("/admin/rotator-scheduler-reload", adminHandler.AuthMiddleware(adminHandler.HandleRotatorSchedulerReload))
 	http.HandleFunc("/admin/instance-reporter-health", adminHandler.AuthMiddleware(adminHandler.HandleInstanceReporterHealth))
 	http.HandleFunc("/admin/instance-reporter-trigger", adminHandler.AuthMiddleware(adminHandler.HandleInstanceReporterTrigger))
 	http.HandleFunc("/admin/tunnel-server-health", adminHandler.AuthMiddleware(adminHandler.HandleTunnelServerHealth))

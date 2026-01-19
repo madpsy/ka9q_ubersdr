@@ -480,6 +480,7 @@
                     <button class="tab" onclick="switchTab('extensions')">Extensions</button>
                     <button class="tab" onclick="switchTab('decoder')">Decoder</button>
                     <button class="tab" onclick="switchTab('cwskimmer')">CW Skimmer</button>
+                    <button class="tab" id="rotatorTab" onclick="switchTab('rotator')" style="display: none;">Rotator</button>
                     <button class="tab" onclick="switchTab('chat')">Chat</button>
                     <button class="tab" onclick="switchTab('monitor')">Monitor</button>
                     <button class="tab" onclick="switchTab('system')">System</button>
@@ -709,6 +710,40 @@
                     <button class="btn btn-secondary" onclick="importCWSkimmerConfig()">Import Config</button>
                 </div>
 
+                <!-- Rotator Tab -->
+                <div id="rotatorSchedulerTab" class="tab-content">
+                    <div class="alert alert-info" style="margin-bottom: 20px;">
+                        ℹ️ <strong>Note:</strong> Scheduler changes take effect immediately without requiring a server restart.
+                    </div>
+                    <div id="rotatorSchedulerConfig" class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading rotator scheduler configuration...</p>
+                    </div>
+                    <div id="addScheduledPositionForm" style="display: none; margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px;">
+                        <h3 id="scheduledPositionFormTitle">Add Scheduled Position</h3>
+                        <input type="hidden" id="editScheduledPositionIndex" value="">
+                        <div class="config-field">
+                            <label>Time (24-hour format)</label>
+                            <input type="time" id="newScheduledPositionTime" required oninput="validateScheduledPositionForm()">
+                            <small id="scheduledPositionTimeError" style="color: #dc3545; display: none;"></small>
+                        </div>
+                        <div class="config-field">
+                            <label>Bearing (degrees)</label>
+                            <input type="number" id="newScheduledPositionBearing" placeholder="0-360" min="0" max="360" step="1" required oninput="validateScheduledPositionForm()">
+                            <small>Azimuth bearing in degrees (0-360)</small>
+                            <small id="scheduledPositionBearingError" style="color: #dc3545; display: none;"></small>
+                        </div>
+                        <button class="btn" id="saveScheduledPositionBtn" onclick="saveScheduledPosition()">Save Position</button>
+                        <button class="btn btn-secondary" onclick="cancelScheduledPositionForm()">Cancel</button>
+                    </div>
+                </div>
+                <div class="button-group" id="rotatorSchedulerButtons" style="display: none;">
+                    <button class="btn" onclick="showAddScheduledPositionForm()">Add Scheduled Position</button>
+                    <button class="btn btn-secondary" onclick="loadRotatorSchedulerConfig()">Reload</button>
+                    <button class="btn btn-secondary" onclick="exportRotatorSchedule()">Export Schedule</button>
+                    <button class="btn btn-secondary" onclick="importRotatorSchedule()">Import Schedule</button>
+                </div>
+
                 <!-- Monitor Tab -->
                 <div id="monitorTab" class="tab-content">
                     <!-- System Health Warnings Section (always at top, before frontend status) -->
@@ -887,6 +922,7 @@
                 <input type="file" id="sdrsharpFileInput" accept=".xml" style="display: none;" onchange="handleSDRSharpImport(event)">
                 <input type="file" id="decoderConfigFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleDecoderConfigImport(event)">
                 <input type="file" id="cwskimmerConfigFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleCWSkimmerConfigImport(event)">
+                <input type="file" id="rotatorScheduleFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleRotatorScheduleImport(event)">
             </div>
         </div>
 
@@ -1395,6 +1431,8 @@
             document.getElementById('chatButtons').style.display = 'none';
             document.getElementById('monitorButtons').style.display = 'none';
             document.getElementById('systemButtons').style.display = 'none';
+            const rotatorSchedulerButtons = document.getElementById('rotatorSchedulerButtons');
+            if (rotatorSchedulerButtons) rotatorSchedulerButtons.style.display = 'none';
 
             // Stop sessions auto-refresh when leaving sessions tab
             if (tab !== 'sessions') {
@@ -1467,19 +1505,25 @@
                 document.getElementById('cwskimmerTab').classList.add('active');
                 document.getElementById('cwskimmerButtons').style.display = 'flex';
                 loadCWSkimmerConfig();
-            } else if (tab === 'chat') {
+            } else if (tab === 'rotator') {
                 document.querySelector('.tab:nth-child(11)').classList.add('active');
+                document.getElementById('rotatorSchedulerTab').classList.add('active');
+                const rotatorSchedulerButtons = document.getElementById('rotatorSchedulerButtons');
+                if (rotatorSchedulerButtons) rotatorSchedulerButtons.style.display = 'flex';
+                loadRotatorSchedulerConfig();
+            } else if (tab === 'chat') {
+                document.querySelector('.tab:nth-child(12)').classList.add('active');
                 document.getElementById('chatTab').classList.add('active');
                 document.getElementById('chatButtons').style.display = 'flex';
                 loadChatLogs();
             } else if (tab === 'monitor') {
-                document.querySelector('.tab:nth-child(12)').classList.add('active');
+                document.querySelector('.tab:nth-child(13)').classList.add('active');
                 document.getElementById('monitorTab').classList.add('active');
                 document.getElementById('monitorButtons').style.display = 'flex';
                 loadMonitorHealth();
                 startMonitorAutoRefresh();
             } else if (tab === 'system') {
-                document.querySelector('.tab:nth-child(13)').classList.add('active');
+                document.querySelector('.tab:nth-child(14)').classList.add('active');
                 document.getElementById('systemTab').classList.add('active');
                 document.getElementById('systemButtons').style.display = 'flex';
                 loadSystemStats();
@@ -1500,9 +1544,22 @@
                 renderVisualEditor();
                 updatePublicInstanceButton();
                 updateCallsignNameDisplay();
+                updateRotatorTabVisibility();
                 showAlert('Configuration loaded successfully', 'success');
             } catch (error) {
                 showAlert('Error loading configuration: ' + error.message, 'error');
+            }
+        }
+
+        // Update rotator tab visibility based on rotctl enabled status
+        function updateRotatorTabVisibility() {
+            const rotatorTab = document.getElementById('rotatorTab');
+            if (rotatorTab && currentConfig.rotctl) {
+                if (currentConfig.rotctl.enabled === true) {
+                    rotatorTab.style.display = 'inline-block';
+                } else {
+                    rotatorTab.style.display = 'none';
+                }
             }
         }
 
@@ -5658,6 +5715,441 @@
                 showAlert('CW Skimmer configuration imported successfully. Click "Save Configuration" to apply changes.', 'success');
             } catch (error) {
                 showAlert('Error importing CW Skimmer configuration: ' + error.message, 'error');
+            }
+
+            // Reset file input
+            event.target.value = '';
+        }
+
+        // Rotator Scheduler configuration management
+        let currentRotatorSchedulerConfig = {};
+
+        async function loadRotatorSchedulerConfig() {
+            try {
+                const response = await authenticatedFetch('/admin/rotator-scheduler-config');
+                if (!response) return; // Auth failed, already handled
+                if (!response.ok) throw new Error('Failed to load rotator scheduler config');
+
+                const data = await response.json();
+                currentRotatorSchedulerConfig = data;
+                renderRotatorScheduler();
+                showAlert('Rotator scheduler configuration loaded successfully', 'success');
+            } catch (error) {
+                showAlert('Error loading rotator scheduler configuration: ' + error.message, 'error');
+            }
+        }
+
+        function renderRotatorScheduler() {
+            const container = document.getElementById('rotatorSchedulerConfig');
+            container.innerHTML = '';
+            container.classList.remove('loading');
+
+            // Status Section
+            const statusSection = document.createElement('div');
+            statusSection.className = 'config-section';
+            statusSection.innerHTML = '<h3>📅 Scheduler Status</h3>';
+
+            const statusDiv = document.createElement('div');
+            statusDiv.style.padding = '15px';
+            statusDiv.style.background = '#f8f9fa';
+            statusDiv.style.borderRadius = '5px';
+            statusDiv.style.marginBottom = '20px';
+
+            // Enabled toggle
+            const enabledDiv = document.createElement('div');
+            enabledDiv.className = 'config-field';
+            const enabledLabel = document.createElement('label');
+            enabledLabel.textContent = 'Scheduler Enabled';
+            enabledDiv.appendChild(enabledLabel);
+            const enabledSelect = document.createElement('select');
+            enabledSelect.dataset.key = 'enabled';
+            enabledSelect.innerHTML = '<option value="true">Yes</option><option value="false">No</option>';
+            enabledSelect.value = (currentRotatorSchedulerConfig.enabled === true || currentRotatorSchedulerConfig.enabled === 'true') ? 'true' : 'false';
+            enabledSelect.addEventListener('change', (e) => {
+                currentRotatorSchedulerConfig.enabled = e.target.value === 'true';
+                saveRotatorSchedulerConfig();
+            });
+            enabledDiv.appendChild(enabledSelect);
+            statusDiv.appendChild(enabledDiv);
+
+            // Status display
+            const statusInfoDiv = document.createElement('div');
+            statusInfoDiv.style.marginTop = '15px';
+            statusInfoDiv.style.padding = '10px';
+            statusInfoDiv.style.background = '#fff';
+            statusInfoDiv.style.borderRadius = '5px';
+            statusInfoDiv.style.border = '1px solid #dee2e6';
+
+            const running = currentRotatorSchedulerConfig.running || false;
+            const positionCount = (currentRotatorSchedulerConfig.positions || []).length;
+            const nextPosition = currentRotatorSchedulerConfig.next_position;
+
+            let statusHTML = `<strong>Status:</strong> ${running ? '<span style="color: #28a745;">Running</span>' : '<span style="color: #999;">Stopped</span>'}<br>`;
+            statusHTML += `<strong>Scheduled Positions:</strong> ${positionCount}<br>`;
+            
+            if (nextPosition) {
+                statusHTML += `<strong>Next Position:</strong> ${nextPosition.time} → ${nextPosition.bearing}°`;
+            } else if (positionCount > 0) {
+                statusHTML += `<strong>Next Position:</strong> <em style="color: #999;">None (all positions passed for today)</em>`;
+            } else {
+                statusHTML += `<strong>Next Position:</strong> <em style="color: #999;">No positions configured</em>`;
+            }
+
+            statusInfoDiv.innerHTML = statusHTML;
+            statusDiv.appendChild(statusInfoDiv);
+            statusSection.appendChild(statusDiv);
+            container.appendChild(statusSection);
+
+            // Positions Section
+            const positionsSection = document.createElement('div');
+            positionsSection.className = 'config-section';
+            positionsSection.innerHTML = '<h3>⏰ Scheduled Positions</h3>';
+
+            const positions = currentRotatorSchedulerConfig.positions || [];
+            if (positions.length === 0) {
+                const noPositions = document.createElement('p');
+                noPositions.style.textAlign = 'center';
+                noPositions.style.color = '#666';
+                noPositions.style.padding = '20px';
+                noPositions.innerHTML = '<em>No scheduled positions configured. Click "Add Scheduled Position" to create one.</em>';
+                positionsSection.appendChild(noPositions);
+            } else {
+                const table = document.createElement('table');
+                table.style.width = '100%';
+                table.style.borderCollapse = 'collapse';
+                table.style.marginBottom = '15px';
+
+                const thead = document.createElement('thead');
+                thead.innerHTML = `
+                    <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                        <th style="padding: 12px; text-align: left;">Time</th>
+                        <th style="padding: 12px; text-align: left;">Bearing</th>
+                        <th style="padding: 12px; text-align: center;">Actions</th>
+                    </tr>
+                `;
+                table.appendChild(thead);
+
+                const tbody = document.createElement('tbody');
+                positions.forEach((pos, index) => {
+                    const row = document.createElement('tr');
+                    row.style.borderBottom = '1px solid #dee2e6';
+                    
+                    const escapedTime = pos.time.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                    
+                    row.innerHTML = `
+                        <td style="padding: 12px;"><strong>${pos.time}</strong></td>
+                        <td style="padding: 12px;"><span style="color: #667eea; font-weight: bold;">${pos.bearing}°</span></td>
+                        <td style="padding: 12px; text-align: center; white-space: nowrap;">
+                            <button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="editScheduledPosition('${escapedTime}')">Edit</button>
+                            <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteScheduledPosition('${escapedTime}')">Delete</button>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+                table.appendChild(tbody);
+                positionsSection.appendChild(table);
+            }
+
+            container.appendChild(positionsSection);
+        }
+
+        function showAddScheduledPositionForm() {
+            document.getElementById('scheduledPositionFormTitle').textContent = 'Add Scheduled Position';
+            document.getElementById('editScheduledPositionIndex').value = '';
+            document.getElementById('addScheduledPositionForm').style.display = 'block';
+            document.getElementById('newScheduledPositionTime').value = '';
+            document.getElementById('newScheduledPositionBearing').value = '';
+            validateScheduledPositionForm();
+            document.getElementById('addScheduledPositionForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function editScheduledPosition(time) {
+            const positions = currentRotatorSchedulerConfig.positions || [];
+            const position = positions.find(p => p.time === time);
+            if (!position) {
+                showAlert('Position not found: ' + time, 'error');
+                return;
+            }
+            document.getElementById('scheduledPositionFormTitle').textContent = 'Edit Scheduled Position';
+            document.getElementById('editScheduledPositionIndex').value = time;
+            document.getElementById('addScheduledPositionForm').style.display = 'block';
+            document.getElementById('newScheduledPositionTime').value = time;
+            document.getElementById('newScheduledPositionBearing').value = position.bearing;
+            validateScheduledPositionForm();
+            document.getElementById('addScheduledPositionForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function cancelScheduledPositionForm() {
+            document.getElementById('addScheduledPositionForm').style.display = 'none';
+            document.getElementById('editScheduledPositionIndex').value = '';
+            document.getElementById('scheduledPositionTimeError').style.display = 'none';
+            document.getElementById('scheduledPositionBearingError').style.display = 'none';
+        }
+
+        function validateScheduledPositionForm() {
+            const time = document.getElementById('newScheduledPositionTime').value.trim();
+            const bearingValue = document.getElementById('newScheduledPositionBearing').value.trim();
+            const originalTime = document.getElementById('editScheduledPositionIndex').value;
+            const isEditing = originalTime !== '';
+
+            let isValid = true;
+            const saveBtn = document.getElementById('saveScheduledPositionBtn');
+
+            // Validate time
+            const timeError = document.getElementById('scheduledPositionTimeError');
+            if (!time) {
+                timeError.textContent = 'Time is required';
+                timeError.style.display = 'block';
+                isValid = false;
+            } else {
+                timeError.style.display = 'none';
+            }
+
+            // Validate bearing
+            const bearingError = document.getElementById('scheduledPositionBearingError');
+            const bearing = parseFloat(bearingValue);
+            if (!bearingValue || isNaN(bearing)) {
+                bearingError.textContent = 'Bearing is required';
+                bearingError.style.display = 'block';
+                isValid = false;
+            } else if (bearing < 0 || bearing > 360) {
+                bearingError.textContent = 'Bearing must be between 0 and 360 degrees';
+                bearingError.style.display = 'block';
+                isValid = false;
+            } else {
+                // Check for duplicate time
+                const positions = currentRotatorSchedulerConfig.positions || [];
+                const isDuplicate = positions.some(pos => {
+                    if (isEditing && pos.time === originalTime) {
+                        return false;
+                    }
+                    return pos.time === time;
+                });
+
+                if (isDuplicate) {
+                    bearingError.textContent = `A position at ${time} already exists`;
+                    bearingError.style.display = 'block';
+                    isValid = false;
+                } else {
+                    bearingError.style.display = 'none';
+                }
+            }
+
+            if (saveBtn) {
+                saveBtn.disabled = !isValid;
+            }
+
+            return isValid;
+        }
+
+        async function saveScheduledPosition() {
+            const time = document.getElementById('newScheduledPositionTime').value.trim();
+            const bearing = parseFloat(document.getElementById('newScheduledPositionBearing').value);
+            const originalTime = document.getElementById('editScheduledPositionIndex').value;
+
+            if (!time || isNaN(bearing)) {
+                showAlert('Please fill in all required fields', 'error');
+                return;
+            }
+
+            if (bearing < 0 || bearing > 360) {
+                showAlert('Bearing must be between 0 and 360 degrees', 'error');
+                return;
+            }
+
+            const positionData = { time, bearing };
+
+            try {
+                const isEditing = originalTime !== '';
+
+                if (isEditing) {
+                    // Update existing position
+                    const response = await fetch(`/admin/rotator-scheduler-position?time=${encodeURIComponent(originalTime)}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(positionData)
+                    });
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(errorText || 'Failed to update position');
+                    }
+
+                    const result = await response.json();
+                    showAlert(result.message, 'success');
+                } else {
+                    // Add new position
+                    const response = await fetch('/admin/rotator-scheduler-position', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(positionData)
+                    });
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(errorText || 'Failed to add position');
+                    }
+
+                    const result = await response.json();
+                    showAlert(result.message, 'success');
+                }
+
+                cancelScheduledPositionForm();
+                await loadRotatorSchedulerConfig();
+            } catch (error) {
+                showAlert('Error saving scheduled position: ' + error.message, 'error');
+            }
+        }
+
+        async function deleteScheduledPosition(time) {
+            if (!confirm(`Are you sure you want to delete the scheduled position at ${time}?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/admin/rotator-scheduler-position?time=${encodeURIComponent(time)}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to delete position');
+                }
+
+                const result = await response.json();
+                showAlert(result.message, 'success');
+                await loadRotatorSchedulerConfig();
+            } catch (error) {
+                showAlert('Error deleting scheduled position: ' + error.message, 'error');
+            }
+        }
+
+        async function saveRotatorSchedulerConfig() {
+            try {
+                showAlert('Saving rotator scheduler configuration...', 'info');
+
+                const response = await authenticatedFetch('/admin/rotator-scheduler-config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(currentRotatorSchedulerConfig)
+                });
+
+                if (!response) return; // Auth failed, already handled
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to save rotator scheduler config');
+                }
+
+                const result = await response.json();
+                showAlert(result.message || 'Rotator scheduler configuration saved successfully', 'success');
+                
+                // Reload to get updated status
+                await loadRotatorSchedulerConfig();
+            } catch (error) {
+                showAlert('Error saving rotator scheduler configuration: ' + error.message, 'error');
+            }
+        }
+
+        function exportRotatorSchedule() {
+            if (!currentRotatorSchedulerConfig.positions || currentRotatorSchedulerConfig.positions.length === 0) {
+                showAlert('No scheduled positions to export', 'info');
+                return;
+            }
+
+            // Convert to YAML format
+            let yamlContent = '# Rotator Scheduler Configuration\n';
+            yamlContent += `enabled: ${currentRotatorSchedulerConfig.enabled || false}\n\n`;
+            yamlContent += 'positions:\n';
+            currentRotatorSchedulerConfig.positions.forEach(pos => {
+                yamlContent += `  - time: "${pos.time}"\n`;
+                yamlContent += `    bearing: ${pos.bearing}\n`;
+            });
+
+            const blob = new Blob([yamlContent], { type: 'text/yaml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'rotator_schedule.yaml';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showAlert('Rotator schedule exported successfully', 'success');
+        }
+
+        function importRotatorSchedule() {
+            document.getElementById('rotatorScheduleFileInput').click();
+        }
+
+        async function handleRotatorScheduleImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                let importedConfig;
+
+                if (file.name.endsWith('.json')) {
+                    const data = JSON.parse(text);
+                    importedConfig = data;
+                } else {
+                    // Simple YAML parsing for rotator schedule
+                    const lines = text.split('\n');
+                    importedConfig = { enabled: false, positions: [] };
+                    let currentPosition = null;
+
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        
+                        // Skip comments and empty lines
+                        if (!trimmed || trimmed.startsWith('#')) continue;
+                        
+                        // Parse enabled field
+                        if (trimmed.startsWith('enabled:')) {
+                            const value = trimmed.substring(8).trim();
+                            importedConfig.enabled = value === 'true';
+                        }
+                        
+                        // Parse positions
+                        if (trimmed === '-') {
+                            if (currentPosition) {
+                                importedConfig.positions.push(currentPosition);
+                            }
+                            currentPosition = { time: '', bearing: 0 };
+                        } else if (currentPosition) {
+                            if (trimmed.startsWith('time:')) {
+                                currentPosition.time = trimmed.substring(5).trim().replace(/^["']|["']$/g, '');
+                            } else if (trimmed.startsWith('bearing:')) {
+                                currentPosition.bearing = parseFloat(trimmed.substring(8).trim());
+                            }
+                        }
+                    }
+                    
+                    if (currentPosition) {
+                        importedConfig.positions.push(currentPosition);
+                    }
+                }
+
+                if (!importedConfig.positions || importedConfig.positions.length === 0) {
+                    showAlert('No valid positions found in file', 'error');
+                    event.target.value = '';
+                    return;
+                }
+
+                if (!confirm(`This will replace your current schedule with ${importedConfig.positions.length} position(s). Are you sure?`)) {
+                    event.target.value = '';
+                    return;
+                }
+
+                // Update current config
+                currentRotatorSchedulerConfig = importedConfig;
+                
+                // Save to server
+                await saveRotatorSchedulerConfig();
+                
+                showAlert(`Successfully imported ${importedConfig.positions.length} scheduled position(s)`, 'success');
+            } catch (error) {
+                showAlert('Error importing rotator schedule: ' + error.message, 'error');
             }
 
             // Reset file input

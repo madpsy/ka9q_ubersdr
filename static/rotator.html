@@ -1112,53 +1112,48 @@
             const centerX = width / 2;
             const centerY = height / 2;
             
-            // Calculate endpoint at edge of map (use large distance)
-            const distance = 15000; // km
-            const endpoint = calculateDestinationPoint(receiverLat, receiverLon, azimuth, distance);
-            const projected = projection([endpoint[1], endpoint[0]]);
+            // On an azimuthal projection, we can draw directly using angles
+            // The azimuth is measured clockwise from North (0° at top)
+            // In screen coordinates: 0° points up, 90° points right
+            const radius = width / 2; // Draw to edge of map
+            
+            // Convert azimuth to radians (0° = North/up, clockwise)
+            const angleRad = (azimuth - 90) * Math.PI / 180; // Subtract 90 to convert from North=0 to East=0
+            
+            // Calculate endpoint
+            const endX = centerX + radius * Math.cos(angleRad);
+            const endY = centerY + radius * Math.sin(angleRad);
             
             // Update center line
-            if (projected && azimuthLineElement) {
+            if (azimuthLineElement) {
                 azimuthLineElement
-                    .attr("x2", projected[0])
-                    .attr("y2", projected[1]);
+                    .attr("x2", endX)
+                    .attr("y2", endY);
             }
             
-            // Draw beam cone as a simple wedge (±2.5 degrees from center)
+            // Draw beam cone as a simple wedge
             if (beamConeElement) {
                 const halfBeam = beamWidth / 2;
-                const leftBearing = azimuth - halfBeam;
-                const rightBearing = azimuth + halfBeam;
+                const leftAzimuth = azimuth - halfBeam;
+                const rightAzimuth = azimuth + halfBeam;
                 
-                // Calculate the two edge endpoints
-                const leftEndpoint = calculateDestinationPoint(receiverLat, receiverLon, leftBearing, distance);
-                const rightEndpoint = calculateDestinationPoint(receiverLat, receiverLon, rightBearing, distance);
+                // Convert to screen angles
+                const leftAngleRad = (leftAzimuth - 90) * Math.PI / 180;
+                const rightAngleRad = (rightAzimuth - 90) * Math.PI / 180;
                 
-                const leftProj = projection([leftEndpoint[1], leftEndpoint[0]]);
-                const rightProj = projection([rightEndpoint[1], rightEndpoint[0]]);
+                // Calculate edge endpoints
+                const leftX = centerX + radius * Math.cos(leftAngleRad);
+                const leftY = centerY + radius * Math.sin(leftAngleRad);
+                const rightX = centerX + radius * Math.cos(rightAngleRad);
+                const rightY = centerY + radius * Math.sin(rightAngleRad);
                 
-                if (leftProj && rightProj) {
-                    // Create a simple wedge: center -> left edge -> arc -> right edge -> back to center
-                    // For simplicity, we'll create points along the arc at the far end
-                    const arcPoints = [];
-                    const numArcPoints = 30;
-                    
-                    for (let i = 0; i <= numArcPoints; i++) {
-                        const bearing = leftBearing + (rightBearing - leftBearing) * (i / numArcPoints);
-                        const point = calculateDestinationPoint(receiverLat, receiverLon, bearing, distance);
-                        const proj = projection([point[1], point[0]]);
-                        if (proj) arcPoints.push(proj);
-                    }
-                    
-                    // Build path: start at center, go to left edge, follow arc, come back to center
-                    let pathData = `M ${centerX},${centerY} L ${leftProj[0]},${leftProj[1]}`;
-                    arcPoints.forEach(p => {
-                        pathData += ` L ${p[0]},${p[1]}`;
-                    });
-                    pathData += ` Z`;
-                    
-                    beamConeElement.attr("d", pathData);
-                }
+                // Create arc path
+                const largeArcFlag = beamWidth > 180 ? 1 : 0;
+                
+                // Build path: start at center, line to left edge, arc to right edge, line back to center
+                const pathData = `M ${centerX},${centerY} L ${leftX},${leftY} A ${radius},${radius} 0 ${largeArcFlag} 1 ${rightX},${rightY} Z`;
+                
+                beamConeElement.attr("d", pathData);
             }
         }
 

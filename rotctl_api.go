@@ -11,11 +11,12 @@ import (
 
 // RotctlConfig contains rotctl client configuration
 type RotctlConfig struct {
-	Enabled        bool   `yaml:"enabled"`          // Enable/disable rotctl integration
-	Host           string `yaml:"host"`             // Rotctld hostname or IP
-	Port           int    `yaml:"port"`             // Rotctld port (default: 4533)
-	Password       string `yaml:"password"`         // Password required for API access
-	UpdateInterval int    `yaml:"update_interval"`  // Update interval in milliseconds (default: 2000)
+	Enabled        bool    `yaml:"enabled"`          // Enable/disable rotctl integration
+	Host           string  `yaml:"host"`             // Rotctld hostname or IP
+	Port           int     `yaml:"port"`             // Rotctld port (default: 4533)
+	Password       string  `yaml:"password"`         // Password required for API access
+	UpdateInterval int     `yaml:"update_interval"`  // Update interval in milliseconds (default: 2000)
+	ParkAzimuth    float64 `yaml:"park_azimuth"`     // Azimuth to move to when park command is executed (default: 0)
 }
 
 // RotctlAPIHandler handles HTTP API requests for rotator control
@@ -328,8 +329,10 @@ func (h *RotctlAPIHandler) HandleCommand(w http.ResponseWriter, r *http.Request)
 		err = h.controller.Stop()
 		message = "Stopping rotator"
 	case "park":
-		err = h.controller.Park()
-		message = "Parking rotator"
+		// Move to configured park azimuth instead of using rotctld park command
+		parkAzimuth := h.config.ParkAzimuth
+		err = h.controller.SetAzimuth(parkAzimuth)
+		message = fmt.Sprintf("Parking rotator at %.0f°", parkAzimuth)
 	case "reset":
 		err = h.controller.GetClient().Reset()
 		message = "Resetting rotator"

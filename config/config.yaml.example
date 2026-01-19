@@ -1079,6 +1079,17 @@ rotctl:
   #   - If enabled is false: All endpoints return "not enabled" responses
   password: ""
 
+  # Park azimuth position in degrees (default: 0)
+  # When the park command is executed, the rotator will move to this azimuth
+  # instead of using the rotctld park command (which may not be supported by all rotators)
+  # Range: 0-360 degrees
+  # Common values:
+  #   0 = North (default)
+  #   180 = South
+  #   270 = West
+  # The elevation will remain at its current position
+  park_azimuth: 0
+
   # API Endpoints:
   #   GET  /api/rotctl/position - Get current rotator position (no auth)
   #   GET  /api/rotctl/status   - Get detailed status (no auth)

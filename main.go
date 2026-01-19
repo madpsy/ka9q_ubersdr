@@ -1743,11 +1743,13 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 
 	// Get rotator information if available
 	rotatorInfo := map[string]interface{}{
-		"enabled": false,
-		"azimuth": -1,
+		"enabled":   false,
+		"connected": false,
+		"azimuth":   -1,
 	}
 	if rotctlHandler != nil && config.Rotctl.Enabled {
 		rotatorInfo["enabled"] = true
+		rotatorInfo["connected"] = rotctlHandler.controller.client.IsConnected()
 		state := rotctlHandler.controller.GetState()
 		rotatorInfo["azimuth"] = int(state.Position.Azimuth + 0.5) // Round to nearest integer
 	}

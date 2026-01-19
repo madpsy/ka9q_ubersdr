@@ -139,11 +139,10 @@ class RotatorUI {
                 width: 100%;
                 height: 100%;
                 padding: 0;
-                overflow: auto;
+                overflow: hidden;
                 display: flex;
                 flex-direction: column;
                 align-items: center;
-                justify-content: center;
             }
             
             /* Mobile responsive styles */

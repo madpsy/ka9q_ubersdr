@@ -5,7 +5,7 @@ class DecodeRatesDashboard {
     constructor() {
         this.charts = new Map(); // Map of band name to Chart instance
         this.autoRefreshInterval = null;
-        this.autoRefreshSeconds = 30;
+        this.autoRefreshSeconds = 900; // 15 minutes = 900 seconds
         this.countdownInterval = null;
         this.isLoading = false;
         this.allBands = []; // Store all bands data
@@ -82,7 +82,11 @@ class DecodeRatesDashboard {
             if (secondsLeft <= 0) {
                 secondsLeft = this.autoRefreshSeconds;
             }
-            refreshInfo.textContent = `Auto-refresh in ${secondsLeft}s`;
+            
+            // Format as MM:SS
+            const minutes = Math.floor(secondsLeft / 60);
+            const seconds = secondsLeft % 60;
+            refreshInfo.textContent = `Auto-refresh in ${minutes}:${seconds.toString().padStart(2, '0')}`;
         }, 1000);
     }
 

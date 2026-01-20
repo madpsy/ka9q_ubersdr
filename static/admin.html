@@ -7643,7 +7643,10 @@
                                     color: '#dc3545'
                                 },
                                 ticks: {
-                                    color: '#dc3545'
+                                    color: '#dc3545',
+                                    callback: function(value) {
+                                        return value.toFixed(2);
+                                    }
                                 },
                                 grid: {
                                     drawOnChartArea: true
@@ -7819,7 +7822,10 @@
                                     color: '#dc3545'
                                 },
                                 ticks: {
-                                    color: '#dc3545'
+                                    color: '#dc3545',
+                                    callback: function(value) {
+                                        return value.toFixed(2);
+                                    }
                                 },
                                 grid: {
                                     drawOnChartArea: true

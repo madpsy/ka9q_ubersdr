@@ -19,9 +19,9 @@ merge_config_keys() {
         echo "Created backup: $backup_file"
 
         # Merge configs: example provides defaults, user config overrides
-        # Using yq's merge operator where example is base and user overrides it
+        # Strip comments to prevent exponential duplication on repeated merges
         local temp_file="${user_config}.tmp"
-        if yq eval-all '. as $item ireduce ({}; . * $item)' "$example_config" "$user_config" > "$temp_file" 2>/dev/null; then
+        if yq eval-all '(select(fileIndex == 0) | ... comments="") * (select(fileIndex == 1) | ... comments="")' "$example_config" "$user_config" > "$temp_file" 2>/dev/null; then
             # Verify the merged file is valid YAML
             if yq eval '.' "$temp_file" > /dev/null 2>&1; then
                 # Check if there are actual differences
@@ -43,12 +43,23 @@ merge_config_keys() {
     fi
 }
 
+# Function to clean up old backup files
+cleanup_old_backups() {
+    echo "Cleaning up backup files older than 1 week..."
+    # Find and delete .backup.* files older than 7 days in /app/config
+    find /app/config -name "*.backup.*" -type f -mtime +7 -delete 2>/dev/null || true
+    echo "✓ Old backups cleaned up"
+}
+
 # Function to initialize config files from examples if they don't exist
 initialize_configs() {
     echo "Checking configuration files in /app/config..."
 
     # Create config directory if it doesn't exist
     mkdir -p /app/config
+
+    # Clean up old backup files
+    cleanup_old_backups
     
     # Copy example configs from /etc/ka9q_ubersdr if they don't exist in /app/config
     if [ ! -f "/app/config/config.yaml" ]; then

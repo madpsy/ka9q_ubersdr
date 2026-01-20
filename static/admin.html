@@ -7168,12 +7168,8 @@
 
         async function loadFrequencyReference() {
             try {
-                // Fetch current status, minute history, and hourly history in parallel
-                const [statusResponse, minuteHistoryResponse, hourlyHistoryResponse] = await Promise.all([
-                    authenticatedFetch('/api/frequency-reference'),
-                    authenticatedFetch('/api/frequency-reference/history/minute'),
-                    authenticatedFetch('/api/frequency-reference/history/hour')
-                ]);
+                // Fetch current status first
+                const statusResponse = await authenticatedFetch('/api/frequency-reference');
 
                 if (!statusResponse || !statusResponse.ok) return;
 
@@ -7182,6 +7178,12 @@
                 if (data.enabled) {
                     document.getElementById('frequencyReferenceSection').style.display = 'block';
                     renderFrequencyReference(data);
+
+                    // Only fetch history data if frequency reference is enabled
+                    const [minuteHistoryResponse, hourlyHistoryResponse] = await Promise.all([
+                        authenticatedFetch('/api/frequency-reference/history/minute'),
+                        authenticatedFetch('/api/frequency-reference/history/hour')
+                    ]);
 
                     // Render minute history chart if data available
                     if (minuteHistoryResponse && minuteHistoryResponse.ok) {

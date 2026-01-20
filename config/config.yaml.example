@@ -1040,6 +1040,15 @@ frequency_reference:
   # Set higher (e.g., 30) for very clean environments
   min_snr: 20
 
+  # Maximum frequency drift in Hz (default: 25)
+  # Only signals within ±max_drift_freq Hz of the expected frequency will be considered
+  # This prevents false locks on nearby interference or unrelated signals
+  # Set lower (e.g., 10) for very stable references like GPSDO
+  # Set higher (e.g., 50-100) for less stable oscillators or if you expect larger drift
+  # Example: If frequency is 10 MHz and max_drift_freq is 25, only signals
+  #          between 9.999975 MHz and 10.000025 MHz will be detected
+  max_drift_freq: 25
+
 # Rotator Control (rotctl) Integration
 # Provides remote control of antenna rotators via Hamlib's rotctld protocol
 # Exposes a JSON API for reading position and controlling the rotator

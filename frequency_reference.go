@@ -198,8 +198,8 @@ func (frm *FrequencyReferenceMonitor) Start() error {
 	frm.wg.Add(1)
 	go frm.hourlyAggregateLoop()
 
-	log.Printf("Frequency reference monitor started (%.6f MHz ± 500 Hz, %.2f Hz resolution)",
-		float64(frm.centerFreq)/1e6, frm.binBandwidth)
+	log.Printf("Frequency reference monitor started (%.6f MHz ± 500 Hz, %.2f Hz resolution, max drift: ±%.1f Hz)",
+		float64(frm.centerFreq)/1e6, frm.binBandwidth, frm.config.FrequencyReference.MaxDriftFreq)
 
 	return nil
 }
@@ -548,19 +548,37 @@ func (frm *FrequencyReferenceMonitor) hourlyAggregateLoop() {
 // detectPeakFrequency finds the strongest signal in the spectrum and calculates its precise frequency
 // For flat-top signals (like reference tones), uses centroid calculation across contiguous peak bins
 // Prefers peaks near the center (expected frequency) when they're reasonably strong
+// Only searches within max_drift_freq Hz of the expected frequency to avoid false locks
 // Returns: detected frequency (Hz), signal strength (dBFS), peak bin index
 func (frm *FrequencyReferenceMonitor) detectPeakFrequency(spectrum []float32) (float64, float32, int) {
 	if len(spectrum) == 0 {
 		return 0, -999, -1
 	}
 
-	// Find bin with maximum power
+	// Calculate search range based on max_drift_freq
+	// Only search within ±max_drift_freq Hz of expected frequency
+	maxDriftHz := frm.config.FrequencyReference.MaxDriftFreq
+	centerBinIdx := len(spectrum) / 2
+	driftBins := int(maxDriftHz / frm.binBandwidth)
+
+	searchStart := centerBinIdx - driftBins
+	searchEnd := centerBinIdx + driftBins
+
+	// Clamp to spectrum bounds
+	if searchStart < 0 {
+		searchStart = 0
+	}
+	if searchEnd >= len(spectrum) {
+		searchEnd = len(spectrum) - 1
+	}
+
+	// Find bin with maximum power within allowed drift range
 	maxPower := float32(-999)
 	maxBin := -1
 
-	for i, power := range spectrum {
-		if power > maxPower {
-			maxPower = power
+	for i := searchStart; i <= searchEnd; i++ {
+		if spectrum[i] > maxPower {
+			maxPower = spectrum[i]
 			maxBin = i
 		}
 	}
@@ -590,7 +608,6 @@ func (frm *FrequencyReferenceMonitor) detectPeakFrequency(spectrum []float32) (f
 
 	// Check if there's a strong peak near the center (expected frequency)
 	// If so, prefer it over a slightly stronger peak further away
-	centerBinIdx := len(spectrum) / 2
 	centerRegionStart := centerBinIdx - 5 // ±5 bins = ±10 Hz
 	centerRegionEnd := centerBinIdx + 5
 

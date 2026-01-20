@@ -698,6 +698,15 @@ func (frm *FrequencyReferenceMonitor) detectPeakFrequency(spectrum []float32) (f
 	// Frequency = center + (bin offset from center) * bin bandwidth
 	detectedFreq := float64(frm.centerFreq) + (binOffset * frm.binBandwidth)
 
+	// Final validation: ensure detected frequency is within max_drift_freq
+	// This catches cases where centroid calculation drifted outside the allowed range
+	expectedFreq := float64(frm.config.FrequencyReference.Frequency)
+	frequencyOffset := math.Abs(detectedFreq - expectedFreq)
+	if frequencyOffset > maxDriftHz {
+		// Detected frequency is outside allowed drift range, reject it
+		return 0, maxPower, -1
+	}
+
 	return detectedFreq, maxPower, maxBin
 }
 

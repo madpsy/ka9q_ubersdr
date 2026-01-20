@@ -293,7 +293,7 @@ class DecodeRatesDashboard {
             options: {
                 responsive: true,
                 maintainAspectRatio: true,
-                aspectRatio: 1.8,
+                aspectRatio: 2.5,
                 animation: {
                     duration: 0 // Disable animation for smoother updates
                 },

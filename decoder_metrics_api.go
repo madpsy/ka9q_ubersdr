@@ -1172,8 +1172,26 @@ func handleDecodeRatesAll(w http.ResponseWriter, r *http.Request, md *MultiDecod
 		summaryMap[key] = summary
 	}
 
-	// Process each enabled decoder band
-	for _, bandConfig := range md.config.GetEnabledBands() {
+	// Get enabled bands and sort them by mode, then by frequency
+	enabledBands := md.config.GetEnabledBands()
+
+	// Sort: first by mode alphabetically, then by frequency numerically
+	for i := 0; i < len(enabledBands); i++ {
+		for j := i + 1; j < len(enabledBands); j++ {
+			// Compare modes first
+			if enabledBands[i].Mode.String() > enabledBands[j].Mode.String() {
+				enabledBands[i], enabledBands[j] = enabledBands[j], enabledBands[i]
+			} else if enabledBands[i].Mode.String() == enabledBands[j].Mode.String() {
+				// Same mode, compare by frequency
+				if enabledBands[i].Frequency > enabledBands[j].Frequency {
+					enabledBands[i], enabledBands[j] = enabledBands[j], enabledBands[i]
+				}
+			}
+		}
+	}
+
+	// Process each enabled decoder band (now sorted)
+	for _, bandConfig := range enabledBands {
 		mode := bandConfig.Mode.String()
 		band := bandConfig.Name
 		key := fmt.Sprintf("%s:%s", mode, band)

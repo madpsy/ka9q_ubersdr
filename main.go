@@ -1040,9 +1040,12 @@ func main() {
 		handleNoiseFloorAggregate(w, r, noiseFloorMonitor, ipBanManager, aggregateRateLimiter, prometheusMetrics)
 	}))
 
-	// Frequency reference endpoint
+	// Frequency reference endpoints
 	http.HandleFunc("/api/frequency-reference", func(w http.ResponseWriter, r *http.Request) {
 		handleFrequencyReference(w, r, freqRefMonitor)
+	})
+	http.HandleFunc("/api/frequency-reference/history", func(w http.ResponseWriter, r *http.Request) {
+		handleFrequencyReferenceHistory(w, r, freqRefMonitor)
 	})
 
 	// Decoder spots endpoints (with gzip compression, IP ban checking, and rate limiting)
@@ -2456,6 +2459,31 @@ func handleFrequencyReference(w http.ResponseWriter, r *http.Request, frm *Frequ
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(status); err != nil {
 		log.Printf("Error encoding frequency reference status: %v", err)
+	}
+}
+
+// handleFrequencyReferenceHistory serves the historical frequency reference data
+// Returns up to 60 minutes of 1-minute aggregated mean values
+func handleFrequencyReferenceHistory(w http.ResponseWriter, r *http.Request, frm *FrequencyReferenceMonitor) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if frm == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Frequency reference monitoring is not enabled",
+		})
+		return
+	}
+
+	// Get historical data from monitor
+	history := frm.GetHistory()
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"history": history,
+		"count":   len(history),
+	}); err != nil {
+		log.Printf("Error encoding frequency reference history: %v", err)
 	}
 }
 

@@ -38,10 +38,37 @@ type FrequencyReferenceMonitor struct {
 	binCount     int     // Number of FFT bins
 	binBandwidth float64 // Frequency per bin in Hz
 
+	// Historical tracking (1-second samples, 1-minute means)
+	samples         []FrequencyReferenceSample  // Current minute's samples (up to 60)
+	history         []FrequencyReferenceHistory // Historical minute means (up to 60)
+	historyMu       sync.RWMutex
+	sampleTicker    *time.Ticker
+	aggregateTicker *time.Ticker
+
 	// Control
 	running  bool
 	stopChan chan struct{}
 	wg       sync.WaitGroup
+}
+
+// FrequencyReferenceSample represents a single 1-second sample
+type FrequencyReferenceSample struct {
+	DetectedFreq    float64
+	FrequencyOffset float64
+	SignalStrength  float32
+	SNR             float32
+	NoiseFloor      float32
+	Timestamp       time.Time
+}
+
+// FrequencyReferenceHistory represents aggregated 1-minute mean values
+type FrequencyReferenceHistory struct {
+	DetectedFreq    float64   `json:"detected_frequency"`
+	FrequencyOffset float64   `json:"frequency_offset"`
+	SignalStrength  float32   `json:"signal_strength"`
+	SNR             float32   `json:"snr"`
+	NoiseFloor      float32   `json:"noise_floor"`
+	Timestamp       time.Time `json:"timestamp"`
 }
 
 // NewFrequencyReferenceMonitor creates a new frequency reference monitor
@@ -145,9 +172,23 @@ func (frm *FrequencyReferenceMonitor) Start() error {
 
 	frm.spectrumReady = true
 
+	// Initialize historical tracking
+	frm.samples = make([]FrequencyReferenceSample, 0, 60)
+	frm.history = make([]FrequencyReferenceHistory, 0, 60)
+	frm.sampleTicker = time.NewTicker(1 * time.Second)
+	frm.aggregateTicker = time.NewTicker(1 * time.Minute)
+
 	// Start monitoring loop
 	frm.wg.Add(1)
 	go frm.monitorLoop()
+
+	// Start sampling loop
+	frm.wg.Add(1)
+	go frm.sampleLoop()
+
+	// Start aggregation loop
+	frm.wg.Add(1)
+	go frm.aggregateLoop()
 
 	log.Printf("Frequency reference monitor started (%.6f MHz ± 500 Hz, %.2f Hz resolution)",
 		float64(frm.centerFreq)/1e6, frm.binBandwidth)
@@ -163,6 +204,15 @@ func (frm *FrequencyReferenceMonitor) Stop() {
 
 	frm.running = false
 	close(frm.stopChan)
+
+	// Stop tickers
+	if frm.sampleTicker != nil {
+		frm.sampleTicker.Stop()
+	}
+	if frm.aggregateTicker != nil {
+		frm.aggregateTicker.Stop()
+	}
+
 	frm.wg.Wait()
 
 	// Disable spectrum channel
@@ -244,6 +294,97 @@ func (frm *FrequencyReferenceMonitor) processSpectrum(spectrum []float32) {
 	copy(frm.latestSpectrum, unwrapped)
 	frm.mu.Unlock()
 
+}
+
+// sampleLoop collects samples every 1 second
+func (frm *FrequencyReferenceMonitor) sampleLoop() {
+	defer frm.wg.Done()
+
+	for {
+		select {
+		case <-frm.stopChan:
+			return
+
+		case <-frm.sampleTicker.C:
+			// Take a snapshot of current values
+			frm.mu.RLock()
+			sample := FrequencyReferenceSample{
+				DetectedFreq:    frm.detectedFreq,
+				FrequencyOffset: frm.frequencyOffset,
+				SignalStrength:  frm.signalStrength,
+				SNR:             frm.snr,
+				NoiseFloor:      frm.noiseFloor,
+				Timestamp:       time.Now(),
+			}
+			frm.mu.RUnlock()
+
+			// Add to current minute's samples
+			frm.historyMu.Lock()
+			frm.samples = append(frm.samples, sample)
+			// Keep only last 60 samples (shouldn't exceed this, but safety check)
+			if len(frm.samples) > 60 {
+				frm.samples = frm.samples[len(frm.samples)-60:]
+			}
+			frm.historyMu.Unlock()
+		}
+	}
+}
+
+// aggregateLoop calculates mean values every 1 minute
+func (frm *FrequencyReferenceMonitor) aggregateLoop() {
+	defer frm.wg.Done()
+
+	for {
+		select {
+		case <-frm.stopChan:
+			return
+
+		case <-frm.aggregateTicker.C:
+			frm.historyMu.Lock()
+
+			// Calculate means from samples if we have any
+			if len(frm.samples) > 0 {
+				var sumDetectedFreq float64
+				var sumFrequencyOffset float64
+				var sumSignalStrength float32
+				var sumSNR float32
+				var sumNoiseFloor float32
+
+				for _, sample := range frm.samples {
+					sumDetectedFreq += sample.DetectedFreq
+					sumFrequencyOffset += sample.FrequencyOffset
+					sumSignalStrength += sample.SignalStrength
+					sumSNR += sample.SNR
+					sumNoiseFloor += sample.NoiseFloor
+				}
+
+				count := float64(len(frm.samples))
+				countFloat32 := float32(len(frm.samples))
+
+				historyEntry := FrequencyReferenceHistory{
+					DetectedFreq:    sumDetectedFreq / count,
+					FrequencyOffset: sumFrequencyOffset / count,
+					SignalStrength:  sumSignalStrength / countFloat32,
+					SNR:             sumSNR / countFloat32,
+					NoiseFloor:      sumNoiseFloor / countFloat32,
+					Timestamp:       time.Now(),
+				}
+
+				// Add to history
+				frm.history = append(frm.history, historyEntry)
+
+				// Keep only last 60 entries (60 minutes)
+				if len(frm.history) > 60 {
+					frm.history = frm.history[len(frm.history)-60:]
+				}
+
+				// Clear samples for next minute
+				frm.samples = frm.samples[:0]
+			}
+
+			frm.historyMu.Unlock()
+		}
+	}
 }
 
 // detectPeakFrequency finds the strongest signal in the spectrum and calculates its precise frequency
@@ -436,4 +577,20 @@ func (frm *FrequencyReferenceMonitor) GetStatus() map[string]interface{} {
 		"bin_count":          frm.binCount,                            // 500
 		"bin_bandwidth":      frm.binBandwidth,                        // 2.0 Hz
 	}
+}
+
+// GetHistory returns the historical frequency reference data (up to 60 minutes)
+func (frm *FrequencyReferenceMonitor) GetHistory() []FrequencyReferenceHistory {
+	if frm == nil {
+		return nil
+	}
+
+	frm.historyMu.RLock()
+	defer frm.historyMu.RUnlock()
+
+	// Return a copy to avoid race conditions
+	historyCopy := make([]FrequencyReferenceHistory, len(frm.history))
+	copy(historyCopy, frm.history)
+
+	return historyCopy
 }

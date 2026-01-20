@@ -540,7 +540,7 @@ func (crl *ConnectionRateLimiter) GetStats() int {
 
 // RotctlRateLimiter manages rate limiters for rotctl endpoint requests per IP
 // Different endpoints have different rate limits:
-// - Status endpoint: 2 requests per second
+// - Status endpoint: 5 requests per second
 // - Command/Position endpoints: 1 request per second
 type RotctlRateLimiter struct {
 	limiters map[string]map[string]*RateLimiter // map[ip]map[endpoint]*RateLimiter
@@ -571,8 +571,8 @@ func (rrl *RotctlRateLimiter) AllowRequest(ip, endpoint string) bool {
 		var refillRate float64
 		var maxTokens float64
 		if endpoint == "status" {
-			refillRate = 2.0 // 2 requests per second
-			maxTokens = 2.0
+			refillRate = 5.0 // 5 requests per second
+			maxTokens = 5.0
 		} else {
 			refillRate = 1.0 // 1 request per second
 			maxTokens = 1.0

@@ -403,7 +403,7 @@ func (h *RotctlAPIHandler) HandleStatus(w http.ResponseWriter, r *http.Request) 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": "Rate limit exceeded - maximum 2 requests per second",
+			"error": "Rate limit exceeded - maximum 5 requests per second",
 		})
 		return
 	}

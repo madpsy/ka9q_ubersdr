@@ -35,48 +35,60 @@ RIG_ECONF = -13  # Invalid configuration
 class RotatorAPI:
     """Interface to ka9q_ubersdr rotator API."""
 
-    def __init__(self, server_url: str, password: Optional[str] = None):
+    def __init__(self, server_url: str, password: Optional[str] = None, position_callback: Optional[callable] = None):
         """Initialize rotator API interface.
 
         Args:
             server_url: Base URL of ka9q_ubersdr server (e.g., http://localhost:8073)
             password: Optional password for rotator control
+            position_callback: Optional callback function that returns (azimuth, elevation) tuple
         """
         self.server_url = server_url.rstrip('/')
         self.password = password
         self.timeout = 5
+        self.position_callback = position_callback
+
+        # Cache for position data (used if no callback provided)
+        self.cached_azimuth = 0.0
+        self.cached_elevation = 0.0
+        self.cache_lock = threading.Lock()
+
+        # Rate limiting for API calls (1 per second)
+        self.last_api_call = 0.0
+        self.min_api_interval = 1.0  # seconds
 
     def get_position(self) -> Tuple[int, float, float]:
-        """Get current rotator position.
+        """Get current rotator position from cache.
 
         Returns:
             Tuple of (error_code, azimuth, elevation)
         """
         try:
-            url = f"{self.server_url}/api/rotctl/status"
-            response = requests.get(url, timeout=self.timeout)
+            # If we have a callback (from rotator window), use it
+            if self.position_callback:
+                az, el = self.position_callback()
+                return RIG_OK, az, el
 
-            if response.status_code == 204:
-                return RIG_ENAVAIL, 0.0, 0.0
+            # Otherwise return cached values
+            with self.cache_lock:
+                return RIG_OK, self.cached_azimuth, self.cached_elevation
 
-            response.raise_for_status()
-            data = response.json()
-
-            position = data.get('position', {})
-            azimuth = position.get('azimuth', 0.0)
-            elevation = position.get('elevation', 0.0)
-
-            return RIG_OK, azimuth, elevation
-
-        except requests.exceptions.Timeout:
-            return RIG_ETIMEOUT, 0.0, 0.0
-        except requests.exceptions.RequestException:
-            return RIG_EIO, 0.0, 0.0
         except Exception:
             return RIG_EINTERNAL, 0.0, 0.0
 
+    def update_position(self, azimuth: float, elevation: float):
+        """Update cached position (called by rotator window).
+
+        Args:
+            azimuth: Current azimuth
+            elevation: Current elevation
+        """
+        with self.cache_lock:
+            self.cached_azimuth = azimuth
+            self.cached_elevation = elevation
+
     def set_position(self, azimuth: float, elevation: float) -> int:
-        """Set rotator position.
+        """Set rotator position with rate limiting (max 1 call per second).
 
         Args:
             azimuth: Target azimuth in degrees (0-359)
@@ -87,6 +99,16 @@ class RotatorAPI:
         """
         if not self.password:
             return RIG_ECONF
+
+        # Rate limiting
+        import time
+        current_time = time.time()
+        with self.cache_lock:
+            time_since_last_call = current_time - self.last_api_call
+            if time_since_last_call < self.min_api_interval:
+                # Too soon, return OK but don't actually send
+                return RIG_OK
+            self.last_api_call = current_time
 
         try:
             url = f"{self.server_url}/api/rotctl/position"
@@ -113,13 +135,23 @@ class RotatorAPI:
             return RIG_EINTERNAL
 
     def stop(self) -> int:
-        """Stop rotator movement.
+        """Stop rotator movement with rate limiting (max 1 call per second).
 
         Returns:
             Error code (RIG_OK on success)
         """
         if not self.password:
             return RIG_ECONF
+
+        # Rate limiting
+        import time
+        current_time = time.time()
+        with self.cache_lock:
+            time_since_last_call = current_time - self.last_api_call
+            if time_since_last_call < self.min_api_interval:
+                # Too soon, return OK but don't actually send
+                return RIG_OK
+            self.last_api_call = current_time
 
         try:
             url = f"{self.server_url}/api/rotctl/command"
@@ -146,13 +178,23 @@ class RotatorAPI:
             return RIG_EINTERNAL
 
     def park(self) -> int:
-        """Park the rotator.
+        """Park the rotator with rate limiting (max 1 call per second).
 
         Returns:
             Error code (RIG_OK on success)
         """
         if not self.password:
             return RIG_ECONF
+
+        # Rate limiting
+        import time
+        current_time = time.time()
+        with self.cache_lock:
+            time_since_last_call = current_time - self.last_api_call
+            if time_since_last_call < self.min_api_interval:
+                # Too soon, return OK but don't actually send
+                return RIG_OK
+            self.last_api_call = current_time
 
         try:
             url = f"{self.server_url}/api/rotctl/command"

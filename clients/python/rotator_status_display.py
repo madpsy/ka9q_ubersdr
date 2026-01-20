@@ -65,6 +65,7 @@ class RotatorStatusDisplay:
         # Refresh control
         self.refresh_job = None
         self.running = True
+        self.last_refresh_time = 0.0  # Track last refresh for rate limiting
         
         # Create window
         self.window = tk.Toplevel(parent)
@@ -77,8 +78,11 @@ class RotatorStatusDisplay:
         # Handle window close
         self.window.protocol("WM_DELETE_WINDOW", self.on_close)
         
-        # Load saved password for this instance
+        # Load saved password for this instance (before adding trace)
         self.load_saved_password()
+        
+        # Now add password trace after loading saved password
+        self.password_var.trace_add('write', lambda *args: self.on_password_changed())
         
         # Fetch initial status immediately to check read_only status
         # This will enable/disable controls appropriately
@@ -200,8 +204,7 @@ class RotatorStatusDisplay:
         self.password_var = tk.StringVar()
         self.password_entry = ttk.Entry(password_row, textvariable=self.password_var, show='*', width=20)
         self.password_entry.pack(side=tk.LEFT, padx=(0, 5))
-        # Trace password changes to enable/disable buttons AND save password
-        self.password_var.trace_add('write', lambda *args: self.on_password_changed())
+        # Note: Trace will be added after loading saved password to prevent triggering on initial load
         
         # Delete button to clear saved password
         self.delete_password_btn = ttk.Button(password_row, text="Clear", width=6, command=self.delete_saved_password)
@@ -945,22 +948,34 @@ class RotatorStatusDisplay:
             self.refresh_job = self.window.after(3000, self.refresh_data)
     
     def _fetch_data_thread(self):
-        """Fetch data from server (runs in background thread)."""
+        """Fetch data from server (runs in background thread) with rate limiting."""
+        import time
+
+        # Rate limiting: don't fetch more than once per second
+        # This prevents spam when refresh_data() is called multiple times rapidly
+        current_time = time.time()
+        time_since_last = current_time - self.last_refresh_time
+        if time_since_last < 1.0:
+            # Too soon, skip this fetch
+            return
+
+        self.last_refresh_time = current_time
+
         try:
             url = f"{self.base_url}/api/rotctl/status"
             response = requests.get(url, timeout=5)
-            
+
             if response.status_code == 204:
                 self.window.after(0, lambda: self.status_label.config(
                     text="No data available", foreground='orange'))
                 return
-            
+
             response.raise_for_status()
             data = response.json()
-            
+
             # Update display on main thread
             self.window.after(0, lambda: self.update_display(data))
-            
+
         except requests.exceptions.RequestException as e:
             error_msg = f"Network error: {e}"
             self.window.after(0, lambda: self.display_error(error_msg))
@@ -1110,16 +1125,23 @@ class RotatorStatusDisplay:
             # Get password from UI (use the same password as for direct control)
             password = self.password_var.get().strip() if self.password_var.get().strip() else None
 
-            # Create rotator API interface with password
-            rotator_api = RotatorAPI(self.base_url, password)
+            # Create rotator API interface with password and position callback
+            # The callback returns the current position from our cached status_data
+            def get_current_position():
+                if self.status_data:
+                    position = self.status_data.get('position', {})
+                    return position.get('azimuth', 0.0), position.get('elevation', 0.0)
+                return 0.0, 0.0
+
+            rotator_api = RotatorAPI(self.base_url, password, position_callback=get_current_position)
 
             # Create server
             self.rotctl_server_instance = RotctldServer('127.0.0.1', port, rotator_api)
 
-            # Start server in background thread
+            # Start server in background thread (NOT daemon so we can properly join it)
             self.rotctl_server_thread = threading.Thread(
                 target=self._run_rotctl_server,
-                daemon=True
+                daemon=False
             )
             self.rotctl_server_thread.start()
 
@@ -1188,6 +1210,8 @@ class RotatorStatusDisplay:
 
     def stop_rotctl_server(self):
         """Stop the rotctl server."""
+        print("Stopping rotctl server...")
+
         # Cancel monitoring
         if self.rotctl_monitor_job:
             self.window.after_cancel(self.rotctl_monitor_job)
@@ -1195,32 +1219,67 @@ class RotatorStatusDisplay:
 
         # Stop server
         if self.rotctl_server_instance:
+            print("Calling server.stop()...")
             self.rotctl_server_instance.stop()
-            self.rotctl_server_instance = None
 
         # Wait for thread to finish
         if self.rotctl_server_thread and self.rotctl_server_thread.is_alive():
-            self.rotctl_server_thread.join(timeout=2.0)
+            print("Waiting for server thread to finish...")
+            self.rotctl_server_thread.join(timeout=3.0)
+            if self.rotctl_server_thread.is_alive():
+                print("WARNING: Server thread did not stop cleanly")
+            else:
+                print("Server thread stopped")
             self.rotctl_server_thread = None
 
+        self.rotctl_server_instance = None
         self.rotctl_server_running = False
         self.rotctl_connected_clients = []
         self.rotctl_start_stop_btn.config(text="Start")
         self.rotctl_status_label.config(text="Stopped", foreground='gray')
         self.rotctl_clients_label.config(text="None", foreground='gray')
         self.rotctl_port_entry.config(state='normal')
+        print("Rotctl server stopped")
 
     def on_close(self):
         """Handle window close event."""
+        print("on_close() called")
         self.running = False
         if self.refresh_job:
             self.window.after_cancel(self.refresh_job)
 
-        # Stop rotctl server if running
-        if self.rotctl_server_running:
+        # Stop rotctl server if running - MUST happen before window.destroy()
+        if self.rotctl_server_running or self.rotctl_server_instance:
+            print("Stopping rotctl server from on_close...")
             self.stop_rotctl_server()
+            # Give it a moment to fully stop
+            import time
+            time.sleep(0.5)
 
         self.window.destroy()
+        print("Window destroyed")
+
+    def __del__(self):
+        """Cleanup when object is destroyed."""
+        print("__del__() called - cleaning up rotctl server")
+        # Ensure rotctl server is stopped even if on_close wasn't called
+        try:
+            if hasattr(self, 'rotctl_server_instance') and self.rotctl_server_instance:
+                print("Stopping rotctl server from __del__...")
+                self.rotctl_server_instance.stop()
+                
+                # Wait for thread to finish
+                if hasattr(self, 'rotctl_server_thread') and self.rotctl_server_thread:
+                    if self.rotctl_server_thread.is_alive():
+                        print("Waiting for server thread in __del__...")
+                        self.rotctl_server_thread.join(timeout=3.0)
+                        if self.rotctl_server_thread.is_alive():
+                            print("WARNING: Server thread still alive after __del__ cleanup")
+                        else:
+                            print("Server thread stopped in __del__")
+                print("Rotctl server cleanup complete in __del__")
+        except Exception as e:
+            print(f"Error in __del__ cleanup: {e}")
 
 
 def create_rotator_status_window(parent, server_url: str, use_tls: bool = False, instance_uuid: Optional[str] = None):

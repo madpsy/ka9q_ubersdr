@@ -6389,7 +6389,11 @@ class RadioGUI:
 
         # Close rotator status window
         if self.rotator_status_window and self.rotator_status_window.winfo_exists():
-            self.rotator_status_window.destroy()
+            # Call on_close() to properly cleanup rotctl server before destroying
+            if self.rotator_status_display:
+                self.rotator_status_display.on_close()
+            else:
+                self.rotator_status_window.destroy()
             self.rotator_status_window = None
             self.rotator_status_display = None
             self.log_status("Rotator status window closed")

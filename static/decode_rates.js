@@ -298,8 +298,8 @@ class DecodeRatesDashboard {
             datasets: [{
                 label: `${band.mode} ${band.band_name}`,
                 data: dataPoints,
-                borderColor: '#4CAF50',
-                backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                borderColor: '#ef4444',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
                 tension: 0.4,
                 fill: true,
                 pointRadius: 2,

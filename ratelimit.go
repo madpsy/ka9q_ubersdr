@@ -537,3 +537,90 @@ func (crl *ConnectionRateLimiter) GetStats() int {
 	defer crl.mu.RUnlock()
 	return len(crl.limiters)
 }
+
+// RotctlRateLimiter manages rate limiters for rotctl endpoint requests per IP
+// Different endpoints have different rate limits:
+// - Status endpoint: 2 requests per second
+// - Command/Position endpoints: 1 request per second
+type RotctlRateLimiter struct {
+	limiters map[string]map[string]*RateLimiter // map[ip]map[endpoint]*RateLimiter
+	mu       sync.RWMutex
+}
+
+// NewRotctlRateLimiter creates a new rotctl endpoint rate limiter
+func NewRotctlRateLimiter() *RotctlRateLimiter {
+	return &RotctlRateLimiter{
+		limiters: make(map[string]map[string]*RateLimiter),
+	}
+}
+
+// AllowRequest checks if a rotctl request is allowed for the given IP and endpoint
+// endpoint should be "status", "command", or "position"
+// Returns true if allowed, false if rate limit exceeded
+func (rrl *RotctlRateLimiter) AllowRequest(ip, endpoint string) bool {
+	rrl.mu.Lock()
+	ipLimiters, exists := rrl.limiters[ip]
+	if !exists {
+		ipLimiters = make(map[string]*RateLimiter)
+		rrl.limiters[ip] = ipLimiters
+	}
+
+	endpointLimiter, exists := ipLimiters[endpoint]
+	if !exists {
+		// Determine rate based on endpoint
+		var refillRate float64
+		var maxTokens float64
+		if endpoint == "status" {
+			refillRate = 2.0 // 2 requests per second
+			maxTokens = 2.0
+		} else {
+			refillRate = 1.0 // 1 request per second
+			maxTokens = 1.0
+		}
+
+		endpointLimiter = &RateLimiter{
+			tokens:     maxTokens,
+			maxTokens:  maxTokens,
+			refillRate: refillRate,
+			lastRefill: time.Now(),
+		}
+		ipLimiters[endpoint] = endpointLimiter
+	}
+	rrl.mu.Unlock()
+
+	return endpointLimiter.Allow()
+}
+
+// Cleanup removes rate limiters for IPs that haven't been used recently
+func (rrl *RotctlRateLimiter) Cleanup() {
+	rrl.mu.Lock()
+	defer rrl.mu.Unlock()
+
+	now := time.Now()
+	for ip, ipLimiters := range rrl.limiters {
+		for endpoint, limiter := range ipLimiters {
+			limiter.mu.Lock()
+			// Remove limiters that haven't been used in the last 10 minutes
+			if now.Sub(limiter.lastRefill) > 10*time.Minute {
+				delete(ipLimiters, endpoint)
+			}
+			limiter.mu.Unlock()
+		}
+		// Remove IP entry if no endpoints left
+		if len(ipLimiters) == 0 {
+			delete(rrl.limiters, ip)
+		}
+	}
+}
+
+// GetStats returns the current number of tracked IPs and total endpoint limiters
+func (rrl *RotctlRateLimiter) GetStats() (int, int) {
+	rrl.mu.RLock()
+	defer rrl.mu.RUnlock()
+
+	totalEndpoints := 0
+	for _, ipLimiters := range rrl.limiters {
+		totalEndpoints += len(ipLimiters)
+	}
+	return len(rrl.limiters), totalEndpoints
+}

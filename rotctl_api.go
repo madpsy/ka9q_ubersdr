@@ -23,6 +23,7 @@ type RotctlConfig struct {
 type RotctlAPIHandler struct {
 	controller     *RotatorController
 	config         *RotctlConfig
+	rateLimiter    *RotctlRateLimiter
 	mu             sync.RWMutex
 	lastUpdate     time.Time
 	connectedSince time.Time
@@ -55,9 +56,10 @@ func NewRotctlAPIHandler(config *RotctlConfig) (*RotctlAPIHandler, error) {
 	controller := NewRotatorController(config.Host, config.Port)
 
 	handler := &RotctlAPIHandler{
-		controller: controller,
-		config:     config,
-		lastUpdate: time.Now(),
+		controller:  controller,
+		config:      config,
+		rateLimiter: NewRotctlRateLimiter(),
+		lastUpdate:  time.Now(),
 	}
 
 	// Connect to rotctld
@@ -159,6 +161,17 @@ type CommandResponse struct {
 // HandleGetPosition handles GET /api/rotctl/position
 // No authentication required for read operations
 func (h *RotctlAPIHandler) HandleGetPosition(w http.ResponseWriter, r *http.Request) {
+	// Apply rate limiting
+	clientIP := getClientIP(r)
+	if !h.rateLimiter.AllowRequest(clientIP, "position") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": "Rate limit exceeded - maximum 1 request per second",
+		})
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 
 	// Get current state
@@ -237,6 +250,18 @@ func (h *RotctlAPIHandler) HandleSetPosition(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Apply rate limiting
+	clientIP := getClientIP(r)
+	if !h.rateLimiter.AllowRequest(clientIP, "position") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Rate limit exceeded - maximum 1 request per second",
+		})
+		return
+	}
+
 	// Decode request
 	var req SetPositionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -302,6 +327,18 @@ func (h *RotctlAPIHandler) HandleCommand(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Apply rate limiting
+	clientIP := getClientIP(r)
+	if !h.rateLimiter.AllowRequest(clientIP, "command") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Rate limit exceeded - maximum 1 request per second",
+		})
+		return
+	}
+
 	// Decode request
 	var req CommandRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -360,6 +397,17 @@ func (h *RotctlAPIHandler) HandleCommand(w http.ResponseWriter, r *http.Request)
 // HandleStatus handles GET /api/rotctl/status
 // No authentication required for read operations
 func (h *RotctlAPIHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
+	// Apply rate limiting
+	clientIP := getClientIP(r)
+	if !h.rateLimiter.AllowRequest(clientIP, "status") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": "Rate limit exceeded - maximum 2 requests per second",
+		})
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 
 	state := h.controller.GetState()

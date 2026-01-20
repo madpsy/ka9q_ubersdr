@@ -7146,7 +7146,7 @@
                     </div>
                     <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
                         <div style="color: #dc3545; font-weight: bold;">
-                            ${data.input_samprate && data.input_samprate !== 64800000 ? '⚠️ Using unsupported sample rate. Behaviour and performance may be impacted.' : ''}
+                            ${data.input_samprate && Math.abs(data.input_samprate - 64800000) > 1000 ? '⚠️ Using unsupported sample rate. Behaviour and performance may be impacted.' : ''}
                         </div>
                         <div style="color: #999;">
                             Last Update: ${data.last_update ? new Date(data.last_update).toLocaleString() : 'N/A'}

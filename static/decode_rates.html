@@ -162,25 +162,34 @@
         }
 
         #charts-container {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 20px;
+            display: grid !important;
+            grid-template-columns: repeat(3, 1fr) !important;
+            gap: 20px !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            overflow: hidden !important;
         }
 
         @media (max-width: 1400px) {
             #charts-container {
-                grid-template-columns: repeat(2, 1fr);
+                grid-template-columns: repeat(2, 1fr) !important;
             }
         }
 
         @media (max-width: 768px) {
             #charts-container {
-                grid-template-columns: 1fr;
+                grid-template-columns: 1fr !important;
             }
         }
 
+        .chart-container {
+            min-width: 0 !important;
+            max-width: 100% !important;
+        }
+
         .chart-container canvas {
-            min-height: 350px;
+            min-height: 350px !important;
+            max-width: 100% !important;
         }
     </style>
 </head>

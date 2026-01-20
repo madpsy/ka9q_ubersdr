@@ -1074,8 +1074,7 @@ func generateTimeSeriesFromSnapshotsOnly(combinations []struct{ Mode, Band strin
 }
 
 // handleDecodeRatesAll serves decode rates for all decoder bands in a single response
-// This endpoint is optimized for the decode rates dashboard which shows all bands at once
-// It requires metrics logging to be enabled to provide accurate per-interval decode rates
+// This endpoint uses the summary aggregator's hourly breakdown to provide accurate per-hour decode rates
 func handleDecodeRatesAll(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
 	// Check if IP is banned
 	if checkIPBan(w, r, ipBanManager) {
@@ -1084,19 +1083,10 @@ func handleDecodeRatesAll(w http.ResponseWriter, r *http.Request, md *MultiDecod
 
 	w.Header().Set("Content-Type", "application/json")
 
-	if md == nil || md.prometheusMetrics == nil || md.prometheusMetrics.digitalMetrics == nil {
+	if md == nil || md.summaryAggregator == nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Decode metrics are not available",
-		})
-		return
-	}
-
-	// Check if metrics logging is enabled - required for accurate rate data
-	if md.metricsLogger == nil || !md.metricsLogger.enabled {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Metrics logging must be enabled for decode rates. Please enable metrics_log_enabled in decoder configuration.",
+			"error": "Metrics summary service is not available. Please enable metrics_log_enabled in decoder configuration.",
 		})
 		return
 	}
@@ -1113,13 +1103,6 @@ func handleDecodeRatesAll(w http.ResponseWriter, r *http.Request, md *MultiDecod
 		return
 	}
 
-	// Fixed parameters for this endpoint: 24 hours, 15 minute intervals
-	hours := 24
-	interval := 15 * time.Minute
-	now := time.Now()
-	endTime := now
-	startTime := now.Add(-time.Duration(hours) * time.Hour)
-
 	// Get all decoder band names from configuration
 	if md.config == nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -1129,23 +1112,29 @@ func handleDecodeRatesAll(w http.ResponseWriter, r *http.Request, md *MultiDecod
 		return
 	}
 
-	// Read metrics from files - this is required for accurate rate data
-	fileSnapshots, err := md.metricsLogger.ReadMetricsFromFiles(startTime, endTime)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": fmt.Sprintf("Failed to read metrics from files: %v", err),
-		})
-		log.Printf("Error reading metrics from files: %v", err)
-		return
-	}
+	now := time.Now()
 
-	if len(fileSnapshots) == 0 {
-		w.WriteHeader(http.StatusNoContent)
-		json.NewEncoder(w).Encode(map[string]string{
-			"message": "No metrics data available yet. Metrics logging must run for at least one interval before data is available.",
-		})
-		return
+	// Get summaries for today and yesterday to cover last 24 hours
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	yesterday := today.AddDate(0, 0, -1)
+
+	todaySummaries := md.summaryAggregator.GetAllSummariesFromMemory("day", today)
+	yesterdaySummaries := md.summaryAggregator.GetAllSummariesFromMemory("day", yesterday)
+
+	// If no data in memory, try reading from disk
+	if len(todaySummaries) == 0 {
+		var err error
+		todaySummaries, err = md.summaryAggregator.ReadAllSummaries("day", today)
+		if err != nil {
+			log.Printf("Warning: error reading today's summaries: %v", err)
+		}
+	}
+	if len(yesterdaySummaries) == 0 {
+		var err error
+		yesterdaySummaries, err = md.summaryAggregator.ReadAllSummaries("day", yesterday)
+		if err != nil {
+			log.Printf("Warning: error reading yesterday's summaries: %v", err)
+		}
 	}
 
 	// Build response with one entry per decoder band
@@ -1165,30 +1154,105 @@ func handleDecodeRatesAll(w http.ResponseWriter, r *http.Request, md *MultiDecod
 		Interval string            `json:"interval"`
 		Bands    []BandDecodeRates `json:"bands"`
 	}{
-		Interval: interval.String(),
+		Interval: "1h", // Hourly data
 		Bands:    make([]BandDecodeRates, 0),
 	}
 
-	response.TimeWindow.Hours = hours
-	response.TimeWindow.Start = startTime
-	response.TimeWindow.End = endTime
+	response.TimeWindow.Hours = 24
+	response.TimeWindow.Start = yesterday
+	response.TimeWindow.End = now
+
+	// Combine summaries from both days
+	allSummaries := append(todaySummaries, yesterdaySummaries...)
+
+	// Group summaries by mode/band
+	summaryMap := make(map[string]MetricsSummary)
+	for _, summary := range allSummaries {
+		key := fmt.Sprintf("%s:%s", summary.Mode, summary.Band)
+		summaryMap[key] = summary
+	}
 
 	// Process each enabled decoder band
 	for _, bandConfig := range md.config.GetEnabledBands() {
-		// Create combination for this band
-		combinations := []struct{ Mode, Band string }{
-			{Mode: bandConfig.Mode.String(), Band: bandConfig.Name},
+		mode := bandConfig.Mode.String()
+		band := bandConfig.Name
+		key := fmt.Sprintf("%s:%s", mode, band)
+
+		// Build time series from hourly breakdown data
+		timeSeries := make([]TimeSeriesPoint, 0)
+
+		// Get summaries for this band from both days
+		var todaySummary, yesterdaySummary *MetricsSummary
+		for _, summary := range todaySummaries {
+			if summary.Mode == mode && summary.Band == band {
+				summaryCopy := summary
+				todaySummary = &summaryCopy
+				break
+			}
+		}
+		for _, summary := range yesterdaySummaries {
+			if summary.Mode == mode && summary.Band == band {
+				summaryCopy := summary
+				yesterdaySummary = &summaryCopy
+				break
+			}
 		}
 
-		// Generate time series for this band using ONLY file snapshots
-		// This ensures we get per-interval rates, not cumulative counts
-		timeSeries := generateTimeSeriesFromSnapshotsOnly(
-			combinations,
-			interval,
-			startTime,
-			endTime,
-			fileSnapshots,
-		)
+		// Build time series for last 24 hours using hourly breakdown
+		currentHour := now.Hour()
+
+		// Add yesterday's hours (from current hour + 1 to 23)
+		if yesterdaySummary != nil && yesterdaySummary.HourlyBreakdown != nil {
+			for hour := currentHour + 1; hour < 24; hour++ {
+				timestamp := yesterday.Add(time.Duration(hour) * time.Hour)
+				if timestamp.Before(now.Add(-24 * time.Hour)) {
+					continue // Skip if outside 24-hour window
+				}
+
+				point := TimeSeriesPoint{
+					Timestamp: timestamp,
+					Interval:  "1h",
+					Data:      make(map[string]ModeBandSummary),
+				}
+
+				if hour < len(yesterdaySummary.HourlyBreakdown) {
+					spots := yesterdaySummary.HourlyBreakdown[hour].Spots
+					if spots > 0 {
+						point.Data[key] = ModeBandSummary{
+							Mode:        mode,
+							Band:        band,
+							DecodeCount: int(spots),
+						}
+						timeSeries = append(timeSeries, point)
+					}
+				}
+			}
+		}
+
+		// Add today's hours (from 0 to current hour)
+		if todaySummary != nil && todaySummary.HourlyBreakdown != nil {
+			for hour := 0; hour <= currentHour; hour++ {
+				timestamp := today.Add(time.Duration(hour) * time.Hour)
+
+				point := TimeSeriesPoint{
+					Timestamp: timestamp,
+					Interval:  "1h",
+					Data:      make(map[string]ModeBandSummary),
+				}
+
+				if hour < len(todaySummary.HourlyBreakdown) {
+					spots := todaySummary.HourlyBreakdown[hour].Spots
+					if spots > 0 {
+						point.Data[key] = ModeBandSummary{
+							Mode:        mode,
+							Band:        band,
+							DecodeCount: int(spots),
+						}
+						timeSeries = append(timeSeries, point)
+					}
+				}
+			}
+		}
 
 		// Add to response
 		bandRates := BandDecodeRates{

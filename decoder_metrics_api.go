@@ -1016,8 +1016,66 @@ func handleDecoderBandNames(w http.ResponseWriter, r *http.Request, md *MultiDec
 	}
 }
 
+// generateTimeSeriesFromSnapshotsOnly creates time-bucketed decode data using ONLY file snapshots
+// This ensures accurate per-interval rates instead of cumulative counts from in-memory data
+func generateTimeSeriesFromSnapshotsOnly(combinations []struct{ Mode, Band string }, interval time.Duration, startTime, endTime time.Time, fileSnapshots map[string][]MetricsSnapshot) []TimeSeriesPoint {
+	// Calculate number of buckets
+	duration := endTime.Sub(startTime)
+	numBuckets := int(duration / interval)
+	if numBuckets > 1000 {
+		numBuckets = 1000 // Cap at 1000 buckets
+	}
+	if numBuckets < 1 {
+		numBuckets = 1
+	}
+
+	timeSeries := make([]TimeSeriesPoint, 0, numBuckets)
+
+	// Create buckets
+	for i := 0; i < numBuckets; i++ {
+		bucketStart := startTime.Add(time.Duration(i) * interval)
+		bucketEnd := bucketStart.Add(interval)
+
+		point := TimeSeriesPoint{
+			Timestamp: bucketStart,
+			Interval:  interval.String(),
+			Data:      make(map[string]ModeBandSummary),
+		}
+
+		// For each mode/band combination
+		for _, combo := range combinations {
+			key := fmt.Sprintf("%s:%s", combo.Mode, combo.Band)
+
+			// Use ONLY file snapshots - no fallback to in-memory data
+			if fileSnapshots != nil {
+				snapshots := fileSnapshots[key]
+				if len(snapshots) > 0 {
+					decodeCount, uniqueCallsigns := estimateCountsFromSnapshots(snapshots, bucketStart, bucketEnd, interval)
+
+					if decodeCount > 0 {
+						point.Data[key] = ModeBandSummary{
+							Mode:            combo.Mode,
+							Band:            combo.Band,
+							DecodeCount:     decodeCount,
+							UniqueCallsigns: uniqueCallsigns,
+						}
+					}
+				}
+			}
+		}
+
+		// Only add point if it has data
+		if len(point.Data) > 0 {
+			timeSeries = append(timeSeries, point)
+		}
+	}
+
+	return timeSeries
+}
+
 // handleDecodeRatesAll serves decode rates for all decoder bands in a single response
 // This endpoint is optimized for the decode rates dashboard which shows all bands at once
+// It requires metrics logging to be enabled to provide accurate per-interval decode rates
 func handleDecodeRatesAll(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
 	// Check if IP is banned
 	if checkIPBan(w, r, ipBanManager) {
@@ -1030,6 +1088,15 @@ func handleDecodeRatesAll(w http.ResponseWriter, r *http.Request, md *MultiDecod
 		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]string{
 			"error": "Decode metrics are not available",
+		})
+		return
+	}
+
+	// Check if metrics logging is enabled - required for accurate rate data
+	if md.metricsLogger == nil || !md.metricsLogger.enabled {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Metrics logging must be enabled for decode rates. Please enable metrics_log_enabled in decoder configuration.",
 		})
 		return
 	}
@@ -1062,14 +1129,23 @@ func handleDecodeRatesAll(w http.ResponseWriter, r *http.Request, md *MultiDecod
 		return
 	}
 
-	// Read metrics from files if available
-	var fileSnapshots map[string][]MetricsSnapshot
-	if md.metricsLogger != nil && md.metricsLogger.enabled {
-		var err error
-		fileSnapshots, err = md.metricsLogger.ReadMetricsFromFiles(startTime, endTime)
-		if err != nil {
-			log.Printf("Warning: error reading metrics from files: %v", err)
-		}
+	// Read metrics from files - this is required for accurate rate data
+	fileSnapshots, err := md.metricsLogger.ReadMetricsFromFiles(startTime, endTime)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to read metrics from files: %v", err),
+		})
+		log.Printf("Error reading metrics from files: %v", err)
+		return
+	}
+
+	if len(fileSnapshots) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "No metrics data available yet. Metrics logging must run for at least one interval before data is available.",
+		})
+		return
 	}
 
 	// Build response with one entry per decoder band
@@ -1104,9 +1180,9 @@ func handleDecodeRatesAll(w http.ResponseWriter, r *http.Request, md *MultiDecod
 			{Mode: bandConfig.Mode.String(), Band: bandConfig.Name},
 		}
 
-		// Generate time series for this band
-		timeSeries := generateTimeSeriesWithFiles(
-			md.prometheusMetrics.digitalMetrics,
+		// Generate time series for this band using ONLY file snapshots
+		// This ensures we get per-interval rates, not cumulative counts
+		timeSeries := generateTimeSeriesFromSnapshotsOnly(
 			combinations,
 			interval,
 			startTime,

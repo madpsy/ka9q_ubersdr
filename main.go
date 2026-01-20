@@ -1813,11 +1813,12 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"enabled": freqRefStatus["enabled"],
 	}
 
-	// Only include additional fields if enabled
+	// Only include additional fields if enabled AND we have averaged history data
 	if enabled, ok := freqRefStatus["enabled"].(bool); ok && enabled {
 		// Get the latest minute history value (most recent aggregated data)
 		history := freqRefMonitor.GetHistory()
 		if len(history) > 0 {
+			// Only include tracking fields when we have averaged data
 			latest := history[len(history)-1]
 			freqRefInfo["expected_frequency"] = freqRefStatus["expected_frequency"]
 			freqRefInfo["detected_frequency"] = latest.DetectedFreq
@@ -1825,15 +1826,8 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 			freqRefInfo["signal_strength"] = latest.SignalStrength
 			freqRefInfo["snr"] = latest.SNR
 			freqRefInfo["noise_floor"] = latest.NoiseFloor
-		} else {
-			// Fallback to current values if no history yet
-			freqRefInfo["expected_frequency"] = freqRefStatus["expected_frequency"]
-			freqRefInfo["detected_frequency"] = freqRefStatus["detected_frequency"]
-			freqRefInfo["frequency_offset"] = freqRefStatus["frequency_offset"]
-			freqRefInfo["signal_strength"] = freqRefStatus["signal_strength"]
-			freqRefInfo["snr"] = freqRefStatus["snr"]
-			freqRefInfo["noise_floor"] = freqRefStatus["noise_floor"]
 		}
+		// If no history yet, only return enabled: true (no tracking fields)
 	}
 
 	// Build the response with description plus status information (without sdrs)

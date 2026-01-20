@@ -184,7 +184,7 @@ func (ir *InstanceReporter) getRotatorInfo() map[string]interface{} {
 }
 
 // getFrequencyReferenceInfo returns the current frequency reference information (thread-safe)
-// Always returns an object with enabled field, plus tracking data if enabled
+// Always returns an object with enabled field, plus tracking data only when averaged history is available
 // Uses the latest minute history value (aggregated data) instead of real-time values
 func (ir *InstanceReporter) getFrequencyReferenceInfo() map[string]interface{} {
 	ir.mu.RLock()
@@ -205,11 +205,12 @@ func (ir *InstanceReporter) getFrequencyReferenceInfo() map[string]interface{} {
 		"enabled": freqRefStatus["enabled"],
 	}
 
-	// Only include additional fields if enabled
+	// Only include additional fields if enabled AND we have averaged history data
 	if enabled, ok := freqRefStatus["enabled"].(bool); ok && enabled {
 		// Get the latest minute history value (most recent aggregated data)
 		history := monitor.GetHistory()
 		if len(history) > 0 {
+			// Only include tracking fields when we have averaged data
 			latest := history[len(history)-1]
 			freqRefInfo["expected_frequency"] = freqRefStatus["expected_frequency"]
 			freqRefInfo["detected_frequency"] = latest.DetectedFreq
@@ -217,15 +218,8 @@ func (ir *InstanceReporter) getFrequencyReferenceInfo() map[string]interface{} {
 			freqRefInfo["signal_strength"] = latest.SignalStrength
 			freqRefInfo["snr"] = latest.SNR
 			freqRefInfo["noise_floor"] = latest.NoiseFloor
-		} else {
-			// Fallback to current values if no history yet
-			freqRefInfo["expected_frequency"] = freqRefStatus["expected_frequency"]
-			freqRefInfo["detected_frequency"] = freqRefStatus["detected_frequency"]
-			freqRefInfo["frequency_offset"] = freqRefStatus["frequency_offset"]
-			freqRefInfo["signal_strength"] = freqRefStatus["signal_strength"]
-			freqRefInfo["snr"] = freqRefStatus["snr"]
-			freqRefInfo["noise_floor"] = freqRefStatus["noise_floor"]
 		}
+		// If no history yet, only return enabled: true (no tracking fields)
 	}
 
 	return freqRefInfo

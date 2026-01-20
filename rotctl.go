@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -33,12 +34,12 @@ type Position struct {
 
 // RotatorInfo contains information about the rotator capabilities
 type RotatorInfo struct {
-	Model         string
-	MinAzimuth    float64
-	MaxAzimuth    float64
-	MinElevation  float64
-	MaxElevation  float64
-	HasElevation  bool
+	Model        string
+	MinAzimuth   float64
+	MaxAzimuth   float64
+	MinElevation float64
+	MaxElevation float64
+	HasElevation bool
 }
 
 // NewRotctlClient creates a new rotctl client instance
@@ -199,10 +200,10 @@ func (r *RotctlClient) sendCommand(cmd string) (string, error) {
 // sendCommandWithRetry sends a command with optional automatic retry on connection failure
 func (r *RotctlClient) sendCommandWithRetry(cmd string, allowRetry bool) (string, error) {
 	r.mu.Lock()
-	
+
 	if !r.connected || r.conn == nil {
 		r.mu.Unlock()
-		
+
 		// Try to reconnect if auto-reconnect is enabled
 		if allowRetry && r.autoReconnect {
 			if err := r.reconnect(); err != nil {
@@ -211,7 +212,7 @@ func (r *RotctlClient) sendCommandWithRetry(cmd string, allowRetry bool) (string
 			// Retry the command once after reconnection
 			return r.sendCommandWithRetry(cmd, false)
 		}
-		
+
 		return "", fmt.Errorf("not connected to rotctld")
 	}
 
@@ -226,7 +227,7 @@ func (r *RotctlClient) sendCommandWithRetry(cmd string, allowRetry bool) (string
 	if err != nil {
 		r.disconnectLocked()
 		r.mu.Unlock()
-		
+
 		// Try to reconnect if auto-reconnect is enabled
 		if allowRetry && r.autoReconnect {
 			if reconnErr := r.reconnect(); reconnErr == nil {
@@ -234,7 +235,7 @@ func (r *RotctlClient) sendCommandWithRetry(cmd string, allowRetry bool) (string
 				return r.sendCommandWithRetry(cmd, false)
 			}
 		}
-		
+
 		return "", fmt.Errorf("failed to send command: %w", err)
 	}
 
@@ -251,7 +252,7 @@ func (r *RotctlClient) sendCommandWithRetry(cmd string, allowRetry bool) (string
 		if err != nil {
 			r.disconnectLocked()
 			r.mu.Unlock()
-			
+
 			// Try to reconnect if auto-reconnect is enabled
 			if allowRetry && r.autoReconnect {
 				if reconnErr := r.reconnect(); reconnErr == nil {
@@ -259,7 +260,7 @@ func (r *RotctlClient) sendCommandWithRetry(cmd string, allowRetry bool) (string
 					return r.sendCommandWithRetry(cmd, false)
 				}
 			}
-			
+
 			return "", fmt.Errorf("failed to read response: %w", err)
 		}
 
@@ -288,7 +289,7 @@ func (r *RotctlClient) sendCommandWithRetry(cmd string, allowRetry bool) (string
 				if err != nil {
 					r.disconnectLocked()
 					r.mu.Unlock()
-					
+
 					// Try to reconnect if auto-reconnect is enabled
 					if allowRetry && r.autoReconnect {
 						if reconnErr := r.reconnect(); reconnErr == nil {
@@ -296,7 +297,7 @@ func (r *RotctlClient) sendCommandWithRetry(cmd string, allowRetry bool) (string
 							return r.sendCommandWithRetry(cmd, false)
 						}
 					}
-					
+
 					return "", fmt.Errorf("failed to read second line: %w", err)
 				}
 				response.WriteString(line2)
@@ -381,20 +382,32 @@ func (r *RotctlClient) GetPosition() (*Position, error) {
 
 // SetPosition sets the rotator to the specified position
 func (r *RotctlClient) SetPosition(azimuth, elevation float64) error {
+	log.Printf("Rotator: Setting position to azimuth=%.1f°, elevation=%.1f°", azimuth, elevation)
+
 	cmd := fmt.Sprintf("P %.6f %.6f", azimuth, elevation)
 	response, err := r.sendCommand(cmd)
 	if err != nil {
+		log.Printf("Rotator: Failed to set position: %v", err)
 		return err
 	}
 
-	return checkResponse(response)
+	if err := checkResponse(response); err != nil {
+		log.Printf("Rotator: Error response when setting position: %v", err)
+		return err
+	}
+
+	log.Printf("Rotator: Successfully set position to azimuth=%.1f°, elevation=%.1f°", azimuth, elevation)
+	return nil
 }
 
 // SetAzimuth sets only the azimuth, keeping elevation unchanged
 func (r *RotctlClient) SetAzimuth(azimuth float64) error {
+	log.Printf("Rotator: Setting azimuth to %.1f°", azimuth)
+
 	// Get current position first
 	pos, err := r.GetPosition()
 	if err != nil {
+		log.Printf("Rotator: Failed to get current position: %v", err)
 		return fmt.Errorf("failed to get current position: %w", err)
 	}
 
@@ -403,9 +416,12 @@ func (r *RotctlClient) SetAzimuth(azimuth float64) error {
 
 // SetElevation sets only the elevation, keeping azimuth unchanged
 func (r *RotctlClient) SetElevation(elevation float64) error {
+	log.Printf("Rotator: Setting elevation to %.1f°", elevation)
+
 	// Get current position first
 	pos, err := r.GetPosition()
 	if err != nil {
+		log.Printf("Rotator: Failed to get current position: %v", err)
 		return fmt.Errorf("failed to get current position: %w", err)
 	}
 
@@ -530,7 +546,7 @@ func (rc *RotatorController) Disconnect() error {
 // UpdateState polls the rotator and updates the cached state
 func (rc *RotatorController) UpdateState() error {
 	pos, err := rc.client.GetPosition()
-	
+
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 
@@ -554,12 +570,12 @@ func (rc *RotatorController) UpdateState() error {
 		if elDiff < 0 {
 			elDiff = -elDiff
 		}
-		
+
 		// Handle azimuth wrap-around (e.g., 359° to 1° is only 2° difference)
 		if azDiff > 180 {
 			azDiff = 360 - azDiff
 		}
-		
+
 		// Still moving if we're more than 2 degrees away from target
 		if azDiff > 2.0 || elDiff > 2.0 {
 			rc.state.Moving = true
@@ -590,6 +606,8 @@ func (rc *RotatorController) GetState() RotatorState {
 
 // SetPosition sets the rotator position and updates state
 func (rc *RotatorController) SetPosition(azimuth, elevation float64) error {
+	log.Printf("RotatorController: Requesting position change to azimuth=%.1f°, elevation=%.1f°", azimuth, elevation)
+
 	rc.mu.Lock()
 	rc.state.Moving = true
 	rc.targetPos = &Position{Azimuth: azimuth, Elevation: elevation}
@@ -602,6 +620,9 @@ func (rc *RotatorController) SetPosition(azimuth, elevation float64) error {
 		rc.state.LastError = err
 		rc.state.Moving = false
 		rc.targetPos = nil
+		log.Printf("RotatorController: Position change failed: %v", err)
+	} else {
+		log.Printf("RotatorController: Position change command sent successfully")
 	}
 	// Don't set Moving to false here - let UpdateState determine it based on position
 	rc.mu.Unlock()
@@ -611,6 +632,8 @@ func (rc *RotatorController) SetPosition(azimuth, elevation float64) error {
 
 // SetAzimuth sets only the azimuth
 func (rc *RotatorController) SetAzimuth(azimuth float64) error {
+	log.Printf("RotatorController: Requesting azimuth change to %.1f°", azimuth)
+
 	// Get current elevation for target position
 	rc.mu.RLock()
 	currentEl := rc.state.Position.Elevation
@@ -628,6 +651,9 @@ func (rc *RotatorController) SetAzimuth(azimuth float64) error {
 		rc.state.LastError = err
 		rc.state.Moving = false
 		rc.targetPos = nil
+		log.Printf("RotatorController: Azimuth change failed: %v", err)
+	} else {
+		log.Printf("RotatorController: Azimuth change command sent successfully")
 	}
 	// Don't set Moving to false here - let UpdateState determine it based on position
 	rc.mu.Unlock()
@@ -637,6 +663,8 @@ func (rc *RotatorController) SetAzimuth(azimuth float64) error {
 
 // SetElevation sets only the elevation
 func (rc *RotatorController) SetElevation(elevation float64) error {
+	log.Printf("RotatorController: Requesting elevation change to %.1f°", elevation)
+
 	// Get current azimuth for target position
 	rc.mu.RLock()
 	currentAz := rc.state.Position.Azimuth
@@ -654,6 +682,9 @@ func (rc *RotatorController) SetElevation(elevation float64) error {
 		rc.state.LastError = err
 		rc.state.Moving = false
 		rc.targetPos = nil
+		log.Printf("RotatorController: Elevation change failed: %v", err)
+	} else {
+		log.Printf("RotatorController: Elevation change command sent successfully")
 	}
 	// Don't set Moving to false here - let UpdateState determine it based on position
 	rc.mu.Unlock()

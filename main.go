@@ -1158,6 +1158,7 @@ func main() {
 	http.HandleFunc("/admin/rotator-scheduler-config", adminHandler.AuthMiddleware(adminHandler.HandleRotatorSchedulerConfig))
 	http.HandleFunc("/admin/rotator-scheduler-position", adminHandler.AuthMiddleware(adminHandler.HandleRotatorSchedulerPosition))
 	http.HandleFunc("/admin/rotator-scheduler-reload", adminHandler.AuthMiddleware(adminHandler.HandleRotatorSchedulerReload))
+	http.HandleFunc("/admin/rotator-scheduler-logs", adminHandler.AuthMiddleware(adminHandler.HandleRotatorSchedulerLogs))
 	http.HandleFunc("/admin/instance-reporter-health", adminHandler.AuthMiddleware(adminHandler.HandleInstanceReporterHealth))
 	http.HandleFunc("/admin/instance-reporter-trigger", adminHandler.AuthMiddleware(adminHandler.HandleInstanceReporterTrigger))
 	http.HandleFunc("/admin/tunnel-server-health", adminHandler.AuthMiddleware(adminHandler.HandleTunnelServerHealth))

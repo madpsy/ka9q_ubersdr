@@ -24,14 +24,24 @@ type RotatorScheduleConfig struct {
 	Positions []ScheduledPosition `yaml:"positions"` // List of scheduled positions
 }
 
+// ScheduleTriggerLog represents a single schedule trigger event
+type ScheduleTriggerLog struct {
+	Timestamp time.Time `json:"timestamp"`
+	Time      string    `json:"time"`            // Scheduled time (HH:MM)
+	Bearing   float64   `json:"bearing"`         // Target bearing
+	Success   bool      `json:"success"`         // Whether the trigger was successful
+	Error     string    `json:"error,omitempty"` // Error message if failed
+}
+
 // RotatorScheduler manages scheduled rotator positioning
 type RotatorScheduler struct {
-	config     *RotatorScheduleConfig
-	controller *RotatorController
-	mu         sync.RWMutex
-	stopChan   chan struct{}
-	running    bool
-	configPath string
+	config      *RotatorScheduleConfig
+	controller  *RotatorController
+	mu          sync.RWMutex
+	stopChan    chan struct{}
+	running     bool
+	configPath  string
+	triggerLogs []ScheduleTriggerLog // Circular buffer of up to 100 trigger events
 }
 
 // NewRotatorScheduler creates a new rotator scheduler
@@ -195,8 +205,17 @@ func (rs *RotatorScheduler) checkScheduledPositions() {
 
 // executeScheduledPosition executes a scheduled position change
 func (rs *RotatorScheduler) executeScheduledPosition(pos *ScheduledPosition) {
+	triggerLog := ScheduleTriggerLog{
+		Timestamp: time.Now(),
+		Time:      pos.Time,
+		Bearing:   pos.Bearing,
+		Success:   false,
+	}
+
 	// Check if rotator is connected
 	if !rs.controller.client.IsConnected() {
+		triggerLog.Error = "rotator not connected"
+		rs.addTriggerLog(triggerLog)
 		log.Printf("Skipping scheduled position (time=%s, bearing=%.0f°) - rotator not connected",
 			pos.Time, pos.Bearing)
 		return
@@ -206,12 +225,44 @@ func (rs *RotatorScheduler) executeScheduledPosition(pos *ScheduledPosition) {
 
 	// Set the azimuth (keeping current elevation)
 	if err := rs.controller.SetAzimuth(pos.Bearing); err != nil {
+		triggerLog.Error = err.Error()
+		rs.addTriggerLog(triggerLog)
 		log.Printf("Failed to set scheduled position (time=%s, bearing=%.0f°): %v",
 			pos.Time, pos.Bearing, err)
 		return
 	}
 
+	triggerLog.Success = true
+	rs.addTriggerLog(triggerLog)
 	log.Printf("Successfully set rotator to scheduled bearing %.0f°", pos.Bearing)
+}
+
+// addTriggerLog adds a trigger log entry, maintaining a maximum of 100 entries
+func (rs *RotatorScheduler) addTriggerLog(log ScheduleTriggerLog) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+
+	// Add the new log entry
+	rs.triggerLogs = append(rs.triggerLogs, log)
+
+	// Keep only the last 100 entries
+	if len(rs.triggerLogs) > 100 {
+		rs.triggerLogs = rs.triggerLogs[len(rs.triggerLogs)-100:]
+	}
+}
+
+// GetTriggerLogs returns the trigger logs (most recent first)
+func (rs *RotatorScheduler) GetTriggerLogs() []ScheduleTriggerLog {
+	rs.mu.RLock()
+	defer rs.mu.RUnlock()
+
+	// Return a copy in reverse order (most recent first)
+	logs := make([]ScheduleTriggerLog, len(rs.triggerLogs))
+	for i, log := range rs.triggerLogs {
+		logs[len(rs.triggerLogs)-1-i] = log
+	}
+
+	return logs
 }
 
 // GetStatus returns the current scheduler status

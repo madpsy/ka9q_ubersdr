@@ -5140,3 +5140,38 @@ func (ah *AdminHandler) HandleRotatorSchedulerReload(w http.ResponseWriter, r *h
 		"message": "Rotator scheduler reloaded successfully",
 	})
 }
+
+// HandleRotatorSchedulerLogs handles GET requests to retrieve scheduler trigger logs
+func (ah *AdminHandler) HandleRotatorSchedulerLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if rotator scheduler exists
+	if ah.rotatorScheduler == nil {
+		http.Error(w, "Rotator scheduler not initialized", http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":   "not_initialized",
+			"message": "Rotator scheduler not initialized",
+			"logs":    []interface{}{},
+			"count":   0,
+		})
+		return
+	}
+
+	// Get trigger logs
+	logs := ah.rotatorScheduler.GetTriggerLogs()
+
+	response := map[string]interface{}{
+		"logs":  logs,
+		"count": len(logs),
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding rotator scheduler logs: %v", err)
+	}
+}

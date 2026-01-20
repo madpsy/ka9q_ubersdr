@@ -5933,6 +5933,183 @@
             }
 
             container.appendChild(positionsSection);
+
+            // Logs Section
+            const logsSection = document.createElement('div');
+            logsSection.className = 'config-section';
+            logsSection.innerHTML = '<h3>📋 Logs</h3>';
+            logsSection.id = 'rotatorSchedulerLogsSection';
+
+            // Create logs container
+            const logsContainer = document.createElement('div');
+            logsContainer.id = 'rotatorSchedulerLogsContainer';
+            logsContainer.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading logs...</p></div>';
+            logsSection.appendChild(logsContainer);
+
+            container.appendChild(logsSection);
+
+            // Load logs after rendering
+            loadRotatorSchedulerLogs();
+        }
+
+        // Rotator Scheduler Logs Management
+        let currentRotatorLogs = [];
+        let rotatorLogsCurrentPage = 1;
+        const rotatorLogsPerPage = 10;
+
+        async function loadRotatorSchedulerLogs() {
+            try {
+                const response = await authenticatedFetch('/admin/rotator-scheduler-logs');
+                if (!response) return; // Auth failed
+                if (!response.ok) throw new Error('Failed to load scheduler logs');
+
+                const data = await response.json();
+                currentRotatorLogs = data.logs || [];
+                rotatorLogsCurrentPage = 1; // Reset to first page
+                renderRotatorSchedulerLogs();
+            } catch (error) {
+                const container = document.getElementById('rotatorSchedulerLogsContainer');
+                if (container) {
+                    container.innerHTML = `<p style="text-align: center; color: #dc3545; padding: 20px;">Error loading logs: ${error.message}</p>`;
+                }
+            }
+        }
+
+        function renderRotatorSchedulerLogs() {
+            const container = document.getElementById('rotatorSchedulerLogsContainer');
+            if (!container) return;
+
+            container.innerHTML = '';
+
+            if (currentRotatorLogs.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #666; padding: 20px;"><em>No trigger logs yet</em></p>';
+                return;
+            }
+
+            // Calculate pagination
+            const totalPages = Math.ceil(currentRotatorLogs.length / rotatorLogsPerPage);
+            const startIndex = (rotatorLogsCurrentPage - 1) * rotatorLogsPerPage;
+            const endIndex = Math.min(startIndex + rotatorLogsPerPage, currentRotatorLogs.length);
+            const pageData = currentRotatorLogs.slice(startIndex, endIndex);
+
+            // Create summary
+            const summaryDiv = document.createElement('div');
+            summaryDiv.style.marginBottom = '15px';
+            summaryDiv.style.padding = '10px';
+            summaryDiv.style.background = '#e3f2fd';
+            summaryDiv.style.borderRadius = '5px';
+            summaryDiv.style.fontSize = '14px';
+
+            const successCount = currentRotatorLogs.filter(log => log.success).length;
+            const failureCount = currentRotatorLogs.length - successCount;
+
+            summaryDiv.innerHTML = `
+                <strong>Summary:</strong> ${currentRotatorLogs.length} trigger(s) logged
+                <span style="margin-left: 20px;">• <span style="color: #28a745;">✓ ${successCount} successful</span></span>
+                <span style="margin-left: 20px;">• <span style="color: #dc3545;">✗ ${failureCount} failed</span></span>
+            `;
+            container.appendChild(summaryDiv);
+
+            // Create table
+            const table = document.createElement('table');
+            table.style.width = '100%';
+            table.style.borderCollapse = 'collapse';
+            table.style.marginBottom = '15px';
+
+            const thead = document.createElement('thead');
+            thead.innerHTML = `
+                <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                    <th style="padding: 10px; text-align: left;">Timestamp</th>
+                    <th style="padding: 10px; text-align: center;">Time</th>
+                    <th style="padding: 10px; text-align: center;">Bearing</th>
+                    <th style="padding: 10px; text-align: center;">Status</th>
+                    <th style="padding: 10px; text-align: left;">Error</th>
+                </tr>
+            `;
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            pageData.forEach(log => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #dee2e6';
+
+                // Format timestamp
+                const timestamp = new Date(log.timestamp);
+                const timestampStr = timestamp.toLocaleString();
+
+                // Status icon and color
+                const statusIcon = log.success ? '✓' : '✗';
+                const statusColor = log.success ? '#28a745' : '#dc3545';
+                const statusText = log.success ? 'Success' : 'Failed';
+
+                // Error display
+                const errorDisplay = log.error ?
+                    `<span style="color: #dc3545; font-style: italic;">${log.error}</span>` :
+                    '<em style="color: #999;">—</em>';
+
+                row.innerHTML = `
+                    <td style="padding: 10px; font-size: 12px; white-space: nowrap;">${timestampStr}</td>
+                    <td style="padding: 10px; text-align: center; font-family: monospace; font-weight: bold;">${log.time}</td>
+                    <td style="padding: 10px; text-align: center; color: #667eea; font-weight: bold;">${log.bearing}°</td>
+                    <td style="padding: 10px; text-align: center;">
+                        <span style="color: ${statusColor}; font-weight: bold; font-size: 16px;">${statusIcon}</span>
+                        <span style="color: ${statusColor}; font-size: 12px; margin-left: 5px;">${statusText}</span>
+                    </td>
+                    <td style="padding: 10px; font-size: 12px;">${errorDisplay}</td>
+                `;
+                tbody.appendChild(row);
+            });
+            table.appendChild(tbody);
+            container.appendChild(table);
+
+            // Add pagination controls
+            if (totalPages > 1) {
+                const paginationDiv = document.createElement('div');
+                paginationDiv.style.display = 'flex';
+                paginationDiv.style.justifyContent = 'center';
+                paginationDiv.style.alignItems = 'center';
+                paginationDiv.style.gap = '10px';
+                paginationDiv.style.marginTop = '15px';
+
+                // Previous button
+                const prevBtn = document.createElement('button');
+                prevBtn.className = 'btn btn-secondary';
+                prevBtn.textContent = '← Previous';
+                prevBtn.style.padding = '6px 12px';
+                prevBtn.style.fontSize = '12px';
+                prevBtn.disabled = rotatorLogsCurrentPage === 1;
+                prevBtn.onclick = () => {
+                    if (rotatorLogsCurrentPage > 1) {
+                        rotatorLogsCurrentPage--;
+                        renderRotatorSchedulerLogs();
+                    }
+                };
+                paginationDiv.appendChild(prevBtn);
+
+                // Page info
+                const pageInfo = document.createElement('span');
+                pageInfo.style.fontSize = '14px';
+                pageInfo.style.color = '#666';
+                pageInfo.textContent = `Page ${rotatorLogsCurrentPage} of ${totalPages} (${startIndex + 1}-${endIndex} of ${currentRotatorLogs.length})`;
+                paginationDiv.appendChild(pageInfo);
+
+                // Next button
+                const nextBtn = document.createElement('button');
+                nextBtn.className = 'btn btn-secondary';
+                nextBtn.textContent = 'Next →';
+                nextBtn.style.padding = '6px 12px';
+                nextBtn.style.fontSize = '12px';
+                nextBtn.disabled = rotatorLogsCurrentPage === totalPages;
+                nextBtn.onclick = () => {
+                    if (rotatorLogsCurrentPage < totalPages) {
+                        rotatorLogsCurrentPage++;
+                        renderRotatorSchedulerLogs();
+                    }
+                };
+                paginationDiv.appendChild(nextBtn);
+
+                container.appendChild(paginationDiv);
+            }
         }
 
         function showAddScheduledPositionForm() {

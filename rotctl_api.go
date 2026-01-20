@@ -11,12 +11,12 @@ import (
 
 // RotctlConfig contains rotctl client configuration
 type RotctlConfig struct {
-	Enabled        bool    `yaml:"enabled"`          // Enable/disable rotctl integration
-	Host           string  `yaml:"host"`             // Rotctld hostname or IP
-	Port           int     `yaml:"port"`             // Rotctld port (default: 4533)
-	Password       string  `yaml:"password"`         // Password required for API access
-	UpdateInterval int     `yaml:"update_interval"`  // Update interval in milliseconds (default: 2000)
-	ParkAzimuth    float64 `yaml:"park_azimuth"`     // Azimuth to move to when park command is executed (default: 0)
+	Enabled        bool    `yaml:"enabled"`         // Enable/disable rotctl integration
+	Host           string  `yaml:"host"`            // Rotctld hostname or IP
+	Port           int     `yaml:"port"`            // Rotctld port (default: 4533)
+	Password       string  `yaml:"password"`        // Password required for API access
+	UpdateInterval int     `yaml:"update_interval"` // Update interval in milliseconds (default: 2000)
+	ParkAzimuth    float64 `yaml:"park_azimuth"`    // Azimuth to move to when park command is executed (default: 0)
 }
 
 // RotctlAPIHandler handles HTTP API requests for rotator control
@@ -82,7 +82,7 @@ func (h *RotctlAPIHandler) backgroundUpdater() {
 
 	for range ticker.C {
 		isConnected := h.controller.client.IsConnected()
-		
+
 		h.mu.Lock()
 		// Track connection state changes
 		if isConnected && !h.wasConnected {
@@ -94,7 +94,7 @@ func (h *RotctlAPIHandler) backgroundUpdater() {
 			h.wasConnected = false
 		}
 		h.mu.Unlock()
-		
+
 		if err := h.controller.UpdateState(); err != nil {
 			// Error is stored in state and available via API - don't spam logs
 			// Reconnection will be attempted automatically
@@ -160,7 +160,7 @@ type CommandResponse struct {
 // No authentication required for read operations
 func (h *RotctlAPIHandler) HandleGetPosition(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	// Get current state
 	state := h.controller.GetState()
 
@@ -169,7 +169,7 @@ func (h *RotctlAPIHandler) HandleGetPosition(w http.ResponseWriter, r *http.Requ
 	h.mu.RUnlock()
 
 	response := PositionResponse{
-		Azimuth:    int(state.Position.Azimuth + 0.5), // Round to nearest integer
+		Azimuth:    int(state.Position.Azimuth + 0.5),   // Round to nearest integer
 		Elevation:  int(state.Position.Elevation + 0.5), // Round to nearest integer
 		Moving:     state.Moving,
 		Connected:  h.controller.client.IsConnected(),
@@ -361,7 +361,7 @@ func (h *RotctlAPIHandler) HandleCommand(w http.ResponseWriter, r *http.Request)
 // No authentication required for read operations
 func (h *RotctlAPIHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	state := h.controller.GetState()
 	isConnected := h.controller.client.IsConnected()
 
@@ -371,13 +371,11 @@ func (h *RotctlAPIHandler) HandleStatus(w http.ResponseWriter, r *http.Request) 
 	h.mu.RUnlock()
 
 	status := map[string]interface{}{
-		"enabled":     true,
-		"connected":   isConnected,
-		"read_only":   h.config.Password == "",
-		"host":        h.config.Host,
-		"port":        h.config.Port,
+		"enabled":   true,
+		"connected": isConnected,
+		"read_only": h.config.Password == "",
 		"position": map[string]interface{}{
-			"azimuth":   int(state.Position.Azimuth + 0.5), // Round to nearest integer
+			"azimuth":   int(state.Position.Azimuth + 0.5),   // Round to nearest integer
 			"elevation": int(state.Position.Elevation + 0.5), // Round to nearest integer
 		},
 		"moving":      state.Moving,

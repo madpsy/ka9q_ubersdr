@@ -85,6 +85,14 @@ except ImportError:
     SPACE_WEATHER_AVAILABLE = False
     print("Warning: Space weather display not available (missing dependencies)")
 
+# Import rotator status display
+try:
+    from rotator_status_display import create_rotator_status_window
+    ROTATOR_STATUS_AVAILABLE = True
+except ImportError:
+    ROTATOR_STATUS_AVAILABLE = False
+    print("Warning: Rotator status display not available (missing dependencies)")
+
 # Import public instances display
 try:
     from public_instances_display import create_public_instances_window
@@ -370,6 +378,10 @@ class RadioGUI:
         # Space weather display (separate window)
         self.space_weather_window = None
         self.space_weather_display = None
+
+        # Rotator status display (separate window)
+        self.rotator_status_window = None
+        self.rotator_status_display = None
 
         # Public instances display (separate window)
         self.public_instances_window = None
@@ -1753,6 +1765,14 @@ class RadioGUI:
                 self.space_weather_btn.pack(side=tk.LEFT, padx=(0, 5))
             else:
                 self.space_weather_btn = None
+
+            # Rotator button (conditionally shown based on server capability)
+            if ROTATOR_STATUS_AVAILABLE:
+                self.rotator_btn = ttk.Button(button_frame, text="Rotator",
+                                              command=self.open_rotator_status_window)
+                # Don't pack yet - will be shown after connection if server supports it
+            else:
+                self.rotator_btn = None
 
             # MIDI controller button
             self.midi_btn = ttk.Button(button_frame, text="MIDI", width=6,
@@ -5595,6 +5615,43 @@ class RadioGUI:
             messagebox.showerror("Error", f"Failed to open space weather: {e}")
             self.log_status(f"ERROR: Failed to open space weather - {e}")
 
+    def open_rotator_status_window(self):
+        """Open a separate rotator status display window."""
+        # Don't open multiple windows
+        if self.rotator_status_window and self.rotator_status_window.winfo_exists():
+            self.rotator_status_window.lift()  # Bring to front
+            return
+
+        if not self.connected:
+            messagebox.showinfo("Not Connected", "Please connect to the server first.")
+            return
+
+        try:
+            from rotator_status_display import create_rotator_status_window
+
+            # Get server URL and TLS setting
+            hostname = self.server_var.get().strip()
+            port = self.port_var.get().strip()
+            server = f"{hostname}:{port}" if ':' not in hostname else hostname
+            use_tls = self.tls_var.get()
+
+            # Get instance UUID from server description
+            instance_uuid = None
+            if self.client and hasattr(self.client, 'server_description'):
+                instance_uuid = self.client.server_description.get('public_uuid', '')
+
+            # Create rotator status window with instance UUID for password saving
+            self.rotator_status_display = create_rotator_status_window(
+                self.root, server, use_tls, instance_uuid
+            )
+            self.rotator_status_window = self.rotator_status_display.window
+
+            self.log_status("Rotator status window opened")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open rotator status: {e}")
+            self.log_status(f"ERROR: Failed to open rotator status - {e}")
+
     def open_eq_window(self):
         """Open the 10-band equalizer window."""
         # Check if window exists and is visible
@@ -6330,6 +6387,13 @@ class RadioGUI:
             self.space_weather_display = None
             self.log_status("Space weather window closed")
 
+        # Close rotator status window
+        if self.rotator_status_window and self.rotator_status_window.winfo_exists():
+            self.rotator_status_window.destroy()
+            self.rotator_status_window = None
+            self.rotator_status_display = None
+            self.log_status("Rotator status window closed")
+
         # Close public instances window
         if self.public_instances_window and self.public_instances_window.winfo_exists():
             self.public_instances_window.destroy()
@@ -6699,6 +6763,18 @@ class RadioGUI:
                                 elif self.chat_btn:
                                     self.chat_btn.pack_forget()
 
+                                # Pack rotator button if enabled and connected
+                                rotator_enabled = desc.get('rotator', {}).get('enabled', False)
+                                rotator_connected = desc.get('rotator', {}).get('connected', False)
+                                if self.rotator_btn and rotator_enabled and rotator_connected:
+                                    if scroll_label:
+                                        self.rotator_btn.pack(side=tk.LEFT, padx=(0, 5), before=scroll_label)
+                                    else:
+                                        self.rotator_btn.pack(side=tk.LEFT, padx=(0, 5))
+                                    self.log_status("Rotator control available on this server")
+                                elif self.rotator_btn:
+                                    self.rotator_btn.pack_forget()
+
                             # Print loading message before opening GUI windows
                             print("Loading GUI (may take a moment)...", file=sys.stderr)
 
@@ -7051,6 +7127,10 @@ class RadioGUI:
         # Close space weather window if open
         if self.space_weather_window and self.space_weather_window.winfo_exists():
             self.space_weather_window.destroy()
+
+        # Close rotator status window if open
+        if self.rotator_status_window and self.rotator_status_window.winfo_exists():
+            self.rotator_status_window.destroy()
 
         # Close public instances window if open
         if self.public_instances_window and self.public_instances_window.winfo_exists():

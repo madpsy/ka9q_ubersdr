@@ -160,17 +160,11 @@
 
         #charts-container {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(3, 1fr);
             gap: 20px;
         }
 
-        @media (max-width: 1600px) {
-            #charts-container {
-                grid-template-columns: repeat(3, 1fr);
-            }
-        }
-
-        @media (max-width: 1200px) {
+        @media (max-width: 1400px) {
             #charts-container {
                 grid-template-columns: repeat(2, 1fr);
             }
@@ -180,6 +174,10 @@
             #charts-container {
                 grid-template-columns: 1fr;
             }
+        }
+
+        .chart-container canvas {
+            min-height: 350px;
         }
     </style>
 </head>
@@ -204,7 +202,19 @@
                 <div id="status-message">Loading...</div>
                 <div class="auto-refresh-info" id="refresh-info">Auto-refresh in 30s</div>
             </div>
-            <button id="refresh-btn" class="refresh-btn">🔄 Refresh Now</button>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <label for="mode-filter" style="font-size: 0.9em;">Mode:</label>
+                <select id="mode-filter" style="padding: 8px 12px; border: none; border-radius: 6px; background: rgba(255, 255, 255, 0.9); color: #333; font-size: 1em; min-width: 120px;">
+                    <option value="">All Modes</option>
+                </select>
+                <div id="frequency-filter-container" style="display: none; gap: 10px; align-items: center;">
+                    <label for="frequency-filter" style="font-size: 0.9em;">Frequency:</label>
+                    <select id="frequency-filter" style="padding: 8px 12px; border: none; border-radius: 6px; background: rgba(255, 255, 255, 0.9); color: #333; font-size: 1em; min-width: 150px;">
+                        <option value="">All Frequencies</option>
+                    </select>
+                </div>
+                <button id="refresh-btn" class="refresh-btn">🔄 Refresh Now</button>
+            </div>
         </div>
 
         <div id="loading" class="loading" style="display: none;">Loading decode rates...</div>

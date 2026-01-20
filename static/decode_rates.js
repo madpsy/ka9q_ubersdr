@@ -8,6 +8,9 @@ class DecodeRatesDashboard {
         this.autoRefreshSeconds = 30;
         this.countdownInterval = null;
         this.isLoading = false;
+        this.allBands = []; // Store all bands data
+        this.selectedMode = ''; // Current mode filter
+        this.selectedFrequency = ''; // Current frequency filter
         
         this.init();
         this.loadVersion();
@@ -19,6 +22,20 @@ class DecodeRatesDashboard {
         // Manual refresh button
         document.getElementById('refresh-btn').addEventListener('click', () => {
             this.loadData();
+        });
+
+        // Mode filter dropdown
+        document.getElementById('mode-filter').addEventListener('change', (e) => {
+            this.selectedMode = e.target.value;
+            this.selectedFrequency = ''; // Reset frequency filter when mode changes
+            this.updateFrequencyFilter();
+            this.filterAndRenderCharts();
+        });
+
+        // Frequency filter dropdown
+        document.getElementById('frequency-filter').addEventListener('change', (e) => {
+            this.selectedFrequency = e.target.value;
+            this.filterAndRenderCharts();
         });
     }
 
@@ -102,7 +119,14 @@ class DecodeRatesDashboard {
                 return;
             }
 
-            this.renderCharts(data);
+            // Store all bands data
+            this.allBands = data.bands;
+            
+            // Update mode filter dropdown
+            this.updateModeFilter();
+            
+            // Render charts with current filter
+            this.filterAndRenderCharts();
             
             const now = new Date();
             statusEl.textContent = `Last updated: ${now.toLocaleTimeString()} • ${data.bands.length} band(s)`;
@@ -122,9 +146,93 @@ class DecodeRatesDashboard {
         }
     }
 
+    updateModeFilter() {
+        const modeFilter = document.getElementById('mode-filter');
+        const currentValue = modeFilter.value;
+
+        // Get unique modes from all bands
+        const modes = new Set();
+        this.allBands.forEach(band => {
+            modes.add(band.mode);
+        });
+
+        // Sort modes alphabetically
+        const sortedModes = Array.from(modes).sort();
+
+        // Update dropdown options (keep "All Modes" option)
+        modeFilter.innerHTML = '<option value="">All Modes</option>';
+        sortedModes.forEach(mode => {
+            const option = document.createElement('option');
+            option.value = mode;
+            option.textContent = mode;
+            modeFilter.appendChild(option);
+        });
+
+        // Restore previous selection if it still exists
+        if (currentValue && sortedModes.includes(currentValue)) {
+            modeFilter.value = currentValue;
+        }
+
+        // Update frequency filter visibility
+        this.updateFrequencyFilter();
+    }
+
+    updateFrequencyFilter() {
+        const frequencyFilterContainer = document.getElementById('frequency-filter-container');
+        const frequencyFilter = document.getElementById('frequency-filter');
+
+        // Show frequency filter only when a specific mode is selected
+        if (this.selectedMode) {
+            frequencyFilterContainer.style.display = 'flex';
+
+            // Get unique frequencies for the selected mode
+            const frequencies = new Set();
+            this.allBands.forEach(band => {
+                if (band.mode === this.selectedMode) {
+                    frequencies.add(band.frequency);
+                }
+            });
+
+            // Sort frequencies numerically
+            const sortedFrequencies = Array.from(frequencies).sort((a, b) => a - b);
+
+            // Update dropdown options
+            frequencyFilter.innerHTML = '<option value="">All Frequencies</option>';
+            sortedFrequencies.forEach(freq => {
+                const option = document.createElement('option');
+                option.value = freq;
+                option.textContent = `${(freq / 1e6).toFixed(3)} MHz`;
+                frequencyFilter.appendChild(option);
+            });
+
+            // Reset selection
+            frequencyFilter.value = this.selectedFrequency;
+        } else {
+            // Hide frequency filter when "All Modes" is selected
+            frequencyFilterContainer.style.display = 'none';
+            this.selectedFrequency = '';
+        }
+    }
+
+    filterAndRenderCharts() {
+        // Filter bands based on selected mode and frequency
+        let filteredBands = this.allBands;
+
+        if (this.selectedMode) {
+            filteredBands = filteredBands.filter(band => band.mode === this.selectedMode);
+        }
+
+        if (this.selectedFrequency) {
+            filteredBands = filteredBands.filter(band => band.frequency == this.selectedFrequency);
+        }
+
+        // Render charts with filtered data
+        this.renderCharts({ bands: filteredBands });
+    }
+
     renderCharts(data) {
         const container = document.getElementById('charts-container');
-        
+
         // Track which bands we've seen in this update
         const activeBands = new Set();
 
@@ -185,7 +293,7 @@ class DecodeRatesDashboard {
             options: {
                 responsive: true,
                 maintainAspectRatio: true,
-                aspectRatio: 3,
+                aspectRatio: 1.8,
                 animation: {
                     duration: 0 // Disable animation for smoother updates
                 },

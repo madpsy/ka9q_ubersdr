@@ -333,7 +333,7 @@ class DecodeRatesDashboard {
                                 const decodesPerInterval = context.parsed.y;
                                 const intervalMinutes = 15; // 15-minute intervals
                                 const decodesPerHour = (decodesPerInterval / intervalMinutes) * 60;
-                                return `${decodesPerInterval} decodes (${decodesPerHour.toFixed(1)}/hour)`;
+                                return `${decodesPerInterval} decodes (${decodesPerHour.toFixed(0)}/hour)`;
                             }
                         }
                     }

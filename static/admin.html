@@ -7661,7 +7661,10 @@
                                     color: '#28a745'
                                 },
                                 ticks: {
-                                    color: '#28a745'
+                                    color: '#28a745',
+                                    callback: function(value) {
+                                        return value.toFixed(1);
+                                    }
                                 },
                                 grid: {
                                     drawOnChartArea: false
@@ -7840,7 +7843,10 @@
                                     color: '#28a745'
                                 },
                                 ticks: {
-                                    color: '#28a745'
+                                    color: '#28a745',
+                                    callback: function(value) {
+                                        return value.toFixed(1);
+                                    }
                                 },
                                 grid: {
                                     drawOnChartArea: false

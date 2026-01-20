@@ -772,9 +772,18 @@ func (frm *FrequencyReferenceMonitor) GetHistory() []FrequencyReferenceHistory {
 	frm.historyMu.RLock()
 	defer frm.historyMu.RUnlock()
 
-	// Return a copy to avoid race conditions
+	// Return a copy with rounded values for display
 	historyCopy := make([]FrequencyReferenceHistory, len(frm.history))
-	copy(historyCopy, frm.history)
+	for i, entry := range frm.history {
+		historyCopy[i] = FrequencyReferenceHistory{
+			DetectedFreq:    math.Round(entry.DetectedFreq*100) / 100,                   // 2 decimal places
+			FrequencyOffset: math.Round(entry.FrequencyOffset*100) / 100,                // 2 decimal places
+			SignalStrength:  float32(math.Round(float64(entry.SignalStrength)*10) / 10), // 1 decimal place
+			SNR:             float32(math.Round(float64(entry.SNR)*10) / 10),            // 1 decimal place
+			NoiseFloor:      float32(math.Round(float64(entry.NoiseFloor)*10) / 10),     // 1 decimal place
+			Timestamp:       entry.Timestamp,
+		}
+	}
 
 	return historyCopy
 }
@@ -789,9 +798,18 @@ func (frm *FrequencyReferenceMonitor) GetHourlyHistory() []FrequencyReferenceHis
 	frm.historyMu.RLock()
 	defer frm.historyMu.RUnlock()
 
-	// Start with a copy of stored complete hours
+	// Start with a copy of stored complete hours with rounded values
 	result := make([]FrequencyReferenceHistory, len(frm.hourlyHistory))
-	copy(result, frm.hourlyHistory)
+	for i, entry := range frm.hourlyHistory {
+		result[i] = FrequencyReferenceHistory{
+			DetectedFreq:    math.Round(entry.DetectedFreq*100) / 100,                   // 2 decimal places
+			FrequencyOffset: math.Round(entry.FrequencyOffset*100) / 100,                // 2 decimal places
+			SignalStrength:  float32(math.Round(float64(entry.SignalStrength)*10) / 10), // 1 decimal place
+			SNR:             float32(math.Round(float64(entry.SNR)*10) / 10),            // 1 decimal place
+			NoiseFloor:      float32(math.Round(float64(entry.NoiseFloor)*10) / 10),     // 1 decimal place
+			Timestamp:       entry.Timestamp,
+		}
+	}
 
 	// Calculate and append current partial hour from minute-level history
 	if len(frm.history) > 0 {
@@ -816,11 +834,11 @@ func (frm *FrequencyReferenceMonitor) GetHourlyHistory() []FrequencyReferenceHis
 		countFloat32 := float32(len(filteredHistory))
 
 		partialHourEntry := FrequencyReferenceHistory{
-			DetectedFreq:    sumDetectedFreq / count,
-			FrequencyOffset: sumFrequencyOffset / count,
-			SignalStrength:  sumSignalStrength / countFloat32,
-			SNR:             sumSNR / countFloat32,
-			NoiseFloor:      sumNoiseFloor / countFloat32,
+			DetectedFreq:    math.Round((sumDetectedFreq/count)*100) / 100,                        // 2 decimal places
+			FrequencyOffset: math.Round((sumFrequencyOffset/count)*100) / 100,                     // 2 decimal places
+			SignalStrength:  float32(math.Round(float64(sumSignalStrength/countFloat32)*10) / 10), // 1 decimal place
+			SNR:             float32(math.Round(float64(sumSNR/countFloat32)*10) / 10),            // 1 decimal place
+			NoiseFloor:      float32(math.Round(float64(sumNoiseFloor/countFloat32)*10) / 10),     // 1 decimal place
 			Timestamp:       time.Now(),
 		}
 

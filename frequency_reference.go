@@ -319,6 +319,7 @@ func (frm *FrequencyReferenceMonitor) sampleLoop() {
 		case <-frm.sampleTicker.C:
 			// Take a snapshot of current values
 			frm.mu.RLock()
+			detectedFreq := frm.detectedFreq
 			sample := FrequencyReferenceSample{
 				DetectedFreq:    frm.detectedFreq,
 				FrequencyOffset: frm.frequencyOffset,
@@ -329,16 +330,102 @@ func (frm *FrequencyReferenceMonitor) sampleLoop() {
 			}
 			frm.mu.RUnlock()
 
-			// Add to current minute's samples
-			frm.historyMu.Lock()
-			frm.samples = append(frm.samples, sample)
-			// Keep only last 60 samples (shouldn't exceed this, but safety check)
-			if len(frm.samples) > 60 {
-				frm.samples = frm.samples[len(frm.samples)-60:]
+			// Only sample if we have a valid detection (detected frequency > 0)
+			// Skip samples when no signal is detected to avoid polluting statistics
+			if detectedFreq > 0 {
+				// Add to current minute's samples
+				frm.historyMu.Lock()
+				frm.samples = append(frm.samples, sample)
+				// Keep only last 60 samples (shouldn't exceed this, but safety check)
+				if len(frm.samples) > 60 {
+					frm.samples = frm.samples[len(frm.samples)-60:]
+				}
+				frm.historyMu.Unlock()
 			}
-			frm.historyMu.Unlock()
 		}
 	}
+}
+
+// removeOutliersSamples removes outliers from samples using IQR method on frequency offset
+// Returns filtered samples, or original if too few samples to filter
+func removeOutliersSamples(samples []FrequencyReferenceSample) []FrequencyReferenceSample {
+	if len(samples) < 4 {
+		return samples // Need at least 4 samples for meaningful IQR
+	}
+
+	// Extract frequency offsets and sort them
+	offsets := make([]float64, len(samples))
+	for i, s := range samples {
+		offsets[i] = s.FrequencyOffset
+	}
+	sort.Float64s(offsets)
+
+	// Calculate quartiles
+	n := len(offsets)
+	q1 := offsets[n/4]
+	q3 := offsets[3*n/4]
+	iqr := q3 - q1
+
+	// Calculate bounds (1.5 * IQR is standard for outlier detection)
+	lowerBound := q1 - 1.5*iqr
+	upperBound := q3 + 1.5*iqr
+
+	// Filter samples within bounds
+	filtered := make([]FrequencyReferenceSample, 0, len(samples))
+	for _, s := range samples {
+		if s.FrequencyOffset >= lowerBound && s.FrequencyOffset <= upperBound {
+			filtered = append(filtered, s)
+		}
+	}
+
+	// If we filtered out too many samples (>50%), return original
+	// This prevents over-filtering when data is legitimately variable
+	if len(filtered) < len(samples)/2 {
+		return samples
+	}
+
+	return filtered
+}
+
+// removeOutliersHistory removes outliers from history entries using IQR method on frequency offset
+// Returns filtered history, or original if too few entries to filter
+func removeOutliersHistory(history []FrequencyReferenceHistory) []FrequencyReferenceHistory {
+	if len(history) < 4 {
+		return history // Need at least 4 entries for meaningful IQR
+	}
+
+	// Extract frequency offsets and sort them
+	offsets := make([]float64, len(history))
+	for i, h := range history {
+		offsets[i] = h.FrequencyOffset
+	}
+	sort.Float64s(offsets)
+
+	// Calculate quartiles
+	n := len(offsets)
+	q1 := offsets[n/4]
+	q3 := offsets[3*n/4]
+	iqr := q3 - q1
+
+	// Calculate bounds (1.5 * IQR is standard for outlier detection)
+	lowerBound := q1 - 1.5*iqr
+	upperBound := q3 + 1.5*iqr
+
+	// Filter history within bounds
+	filtered := make([]FrequencyReferenceHistory, 0, len(history))
+	for _, h := range history {
+		if h.FrequencyOffset >= lowerBound && h.FrequencyOffset <= upperBound {
+			filtered = append(filtered, h)
+		}
+	}
+
+	// If we filtered out too many entries (>50%), return original
+	// This prevents over-filtering when data is legitimately variable
+	if len(filtered) < len(history)/2 {
+		return history
+	}
+
+	return filtered
 }
 
 // aggregateLoop calculates mean values every 1 minute
@@ -355,13 +442,16 @@ func (frm *FrequencyReferenceMonitor) aggregateLoop() {
 
 			// Calculate means from samples if we have any
 			if len(frm.samples) > 0 {
+				// Remove outliers using IQR method
+				filteredSamples := removeOutliersSamples(frm.samples)
+
 				var sumDetectedFreq float64
 				var sumFrequencyOffset float64
 				var sumSignalStrength float32
 				var sumSNR float32
 				var sumNoiseFloor float32
 
-				for _, sample := range frm.samples {
+				for _, sample := range filteredSamples {
 					sumDetectedFreq += sample.DetectedFreq
 					sumFrequencyOffset += sample.FrequencyOffset
 					sumSignalStrength += sample.SignalStrength
@@ -369,8 +459,8 @@ func (frm *FrequencyReferenceMonitor) aggregateLoop() {
 					sumNoiseFloor += sample.NoiseFloor
 				}
 
-				count := float64(len(frm.samples))
-				countFloat32 := float32(len(frm.samples))
+				count := float64(len(filteredSamples))
+				countFloat32 := float32(len(filteredSamples))
 
 				historyEntry := FrequencyReferenceHistory{
 					DetectedFreq:    sumDetectedFreq / count,
@@ -412,13 +502,16 @@ func (frm *FrequencyReferenceMonitor) hourlyAggregateLoop() {
 
 			// Calculate means from the last 60 minute entries if we have any
 			if len(frm.history) > 0 {
+				// Remove outliers using IQR method
+				filteredHistory := removeOutliersHistory(frm.history)
+
 				var sumDetectedFreq float64
 				var sumFrequencyOffset float64
 				var sumSignalStrength float32
 				var sumSNR float32
 				var sumNoiseFloor float32
 
-				for _, entry := range frm.history {
+				for _, entry := range filteredHistory {
 					sumDetectedFreq += entry.DetectedFreq
 					sumFrequencyOffset += entry.FrequencyOffset
 					sumSignalStrength += entry.SignalStrength
@@ -426,8 +519,8 @@ func (frm *FrequencyReferenceMonitor) hourlyAggregateLoop() {
 					sumNoiseFloor += entry.NoiseFloor
 				}
 
-				count := float64(len(frm.history))
-				countFloat32 := float32(len(frm.history))
+				count := float64(len(filteredHistory))
+				countFloat32 := float32(len(filteredHistory))
 
 				hourlyEntry := FrequencyReferenceHistory{
 					DetectedFreq:    sumDetectedFreq / count,
@@ -676,13 +769,16 @@ func (frm *FrequencyReferenceMonitor) GetHourlyHistory() []FrequencyReferenceHis
 
 	// Calculate and append current partial hour from minute-level history
 	if len(frm.history) > 0 {
+		// Remove outliers using IQR method for partial hour calculation
+		filteredHistory := removeOutliersHistory(frm.history)
+
 		var sumDetectedFreq float64
 		var sumFrequencyOffset float64
 		var sumSignalStrength float32
 		var sumSNR float32
 		var sumNoiseFloor float32
 
-		for _, entry := range frm.history {
+		for _, entry := range filteredHistory {
 			sumDetectedFreq += entry.DetectedFreq
 			sumFrequencyOffset += entry.FrequencyOffset
 			sumSignalStrength += entry.SignalStrength
@@ -690,8 +786,8 @@ func (frm *FrequencyReferenceMonitor) GetHourlyHistory() []FrequencyReferenceHis
 			sumNoiseFloor += entry.NoiseFloor
 		}
 
-		count := float64(len(frm.history))
-		countFloat32 := float32(len(frm.history))
+		count := float64(len(filteredHistory))
+		countFloat32 := float32(len(filteredHistory))
 
 		partialHourEntry := FrequencyReferenceHistory{
 			DetectedFreq:    sumDetectedFreq / count,

@@ -1015,3 +1015,118 @@ func handleDecoderBandNames(w http.ResponseWriter, r *http.Request, md *MultiDec
 		log.Printf("Error encoding decoder band names: %v", err)
 	}
 }
+
+// handleDecodeRatesAll serves decode rates for all decoder bands in a single response
+// This endpoint is optimized for the decode rates dashboard which shows all bands at once
+func handleDecodeRatesAll(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if md == nil || md.prometheusMetrics == nil || md.prometheusMetrics.digitalMetrics == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Decode metrics are not available",
+		})
+		return
+	}
+
+	// Check rate limit (1 request per 2 seconds per IP)
+	clientIP := getClientIP(r)
+	rateLimitKey := "decode-rates-all"
+	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+		})
+		log.Printf("Decode rates all endpoint rate limit exceeded for IP: %s", clientIP)
+		return
+	}
+
+	// Fixed parameters for this endpoint: 24 hours, 15 minute intervals
+	hours := 24
+	interval := 15 * time.Minute
+	now := time.Now()
+	endTime := now
+	startTime := now.Add(-time.Duration(hours) * time.Hour)
+
+	// Get all decoder band names from configuration
+	if md.config == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Decoder configuration is not available",
+		})
+		return
+	}
+
+	// Read metrics from files if available
+	var fileSnapshots map[string][]MetricsSnapshot
+	if md.metricsLogger != nil && md.metricsLogger.enabled {
+		var err error
+		fileSnapshots, err = md.metricsLogger.ReadMetricsFromFiles(startTime, endTime)
+		if err != nil {
+			log.Printf("Warning: error reading metrics from files: %v", err)
+		}
+	}
+
+	// Build response with one entry per decoder band
+	type BandDecodeRates struct {
+		BandName   string            `json:"band_name"`
+		Mode       string            `json:"mode"`
+		Frequency  uint64            `json:"frequency"`
+		TimeSeries []TimeSeriesPoint `json:"time_series"`
+	}
+
+	response := struct {
+		TimeWindow struct {
+			Hours int       `json:"hours"`
+			Start time.Time `json:"start"`
+			End   time.Time `json:"end"`
+		} `json:"time_window"`
+		Interval string            `json:"interval"`
+		Bands    []BandDecodeRates `json:"bands"`
+	}{
+		Interval: interval.String(),
+		Bands:    make([]BandDecodeRates, 0),
+	}
+
+	response.TimeWindow.Hours = hours
+	response.TimeWindow.Start = startTime
+	response.TimeWindow.End = endTime
+
+	// Process each enabled decoder band
+	for _, bandConfig := range md.config.GetEnabledBands() {
+		// Create combination for this band
+		combinations := []struct{ Mode, Band string }{
+			{Mode: bandConfig.Mode.String(), Band: bandConfig.Name},
+		}
+
+		// Generate time series for this band
+		timeSeries := generateTimeSeriesWithFiles(
+			md.prometheusMetrics.digitalMetrics,
+			combinations,
+			interval,
+			startTime,
+			endTime,
+			fileSnapshots,
+		)
+
+		// Add to response
+		bandRates := BandDecodeRates{
+			BandName:   bandConfig.Name,
+			Mode:       bandConfig.Mode.String(),
+			Frequency:  bandConfig.Frequency,
+			TimeSeries: timeSeries,
+		}
+
+		response.Bands = append(response.Bands, bandRates)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding decode rates all response: %v", err)
+	}
+}

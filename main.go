@@ -1815,12 +1815,25 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 
 	// Only include additional fields if enabled
 	if enabled, ok := freqRefStatus["enabled"].(bool); ok && enabled {
-		freqRefInfo["expected_frequency"] = freqRefStatus["expected_frequency"]
-		freqRefInfo["detected_frequency"] = freqRefStatus["detected_frequency"]
-		freqRefInfo["frequency_offset"] = freqRefStatus["frequency_offset"]
-		freqRefInfo["signal_strength"] = freqRefStatus["signal_strength"]
-		freqRefInfo["snr"] = freqRefStatus["snr"]
-		freqRefInfo["noise_floor"] = freqRefStatus["noise_floor"]
+		// Get the latest minute history value (most recent aggregated data)
+		history := freqRefMonitor.GetHistory()
+		if len(history) > 0 {
+			latest := history[len(history)-1]
+			freqRefInfo["expected_frequency"] = freqRefStatus["expected_frequency"]
+			freqRefInfo["detected_frequency"] = latest.DetectedFreq
+			freqRefInfo["frequency_offset"] = latest.FrequencyOffset
+			freqRefInfo["signal_strength"] = latest.SignalStrength
+			freqRefInfo["snr"] = latest.SNR
+			freqRefInfo["noise_floor"] = latest.NoiseFloor
+		} else {
+			// Fallback to current values if no history yet
+			freqRefInfo["expected_frequency"] = freqRefStatus["expected_frequency"]
+			freqRefInfo["detected_frequency"] = freqRefStatus["detected_frequency"]
+			freqRefInfo["frequency_offset"] = freqRefStatus["frequency_offset"]
+			freqRefInfo["signal_strength"] = freqRefStatus["signal_strength"]
+			freqRefInfo["snr"] = freqRefStatus["snr"]
+			freqRefInfo["noise_floor"] = freqRefStatus["noise_floor"]
+		}
 	}
 
 	// Build the response with description plus status information (without sdrs)

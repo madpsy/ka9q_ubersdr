@@ -185,6 +185,7 @@ func (ir *InstanceReporter) getRotatorInfo() map[string]interface{} {
 
 // getFrequencyReferenceInfo returns the current frequency reference information (thread-safe)
 // Always returns an object with enabled field, plus tracking data if enabled
+// Uses the latest minute history value (aggregated data) instead of real-time values
 func (ir *InstanceReporter) getFrequencyReferenceInfo() map[string]interface{} {
 	ir.mu.RLock()
 	monitor := ir.freqRefMonitor
@@ -206,12 +207,25 @@ func (ir *InstanceReporter) getFrequencyReferenceInfo() map[string]interface{} {
 
 	// Only include additional fields if enabled
 	if enabled, ok := freqRefStatus["enabled"].(bool); ok && enabled {
-		freqRefInfo["expected_frequency"] = freqRefStatus["expected_frequency"]
-		freqRefInfo["detected_frequency"] = freqRefStatus["detected_frequency"]
-		freqRefInfo["frequency_offset"] = freqRefStatus["frequency_offset"]
-		freqRefInfo["signal_strength"] = freqRefStatus["signal_strength"]
-		freqRefInfo["snr"] = freqRefStatus["snr"]
-		freqRefInfo["noise_floor"] = freqRefStatus["noise_floor"]
+		// Get the latest minute history value (most recent aggregated data)
+		history := monitor.GetHistory()
+		if len(history) > 0 {
+			latest := history[len(history)-1]
+			freqRefInfo["expected_frequency"] = freqRefStatus["expected_frequency"]
+			freqRefInfo["detected_frequency"] = latest.DetectedFreq
+			freqRefInfo["frequency_offset"] = latest.FrequencyOffset
+			freqRefInfo["signal_strength"] = latest.SignalStrength
+			freqRefInfo["snr"] = latest.SNR
+			freqRefInfo["noise_floor"] = latest.NoiseFloor
+		} else {
+			// Fallback to current values if no history yet
+			freqRefInfo["expected_frequency"] = freqRefStatus["expected_frequency"]
+			freqRefInfo["detected_frequency"] = freqRefStatus["detected_frequency"]
+			freqRefInfo["frequency_offset"] = freqRefStatus["frequency_offset"]
+			freqRefInfo["signal_strength"] = freqRefStatus["signal_strength"]
+			freqRefInfo["snr"] = freqRefStatus["snr"]
+			freqRefInfo["noise_floor"] = freqRefStatus["noise_floor"]
+		}
 	}
 
 	return freqRefInfo

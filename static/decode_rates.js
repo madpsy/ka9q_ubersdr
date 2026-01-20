@@ -12,6 +12,14 @@ class DecodeRatesDashboard {
         this.selectedMode = ''; // Current mode filter
         this.selectedFrequency = ''; // Current frequency filter
         
+        // Mode colors - high contrast against purple background
+        this.MODE_COLORS = {
+            'FT8': '#00ff00',    // Bright green
+            'FT4': '#ffff00',    // Bright yellow
+            'WSPR': '#00ffff',   // Cyan
+            'JS8': '#ff6600',    // Orange
+        };
+        
         this.init();
         this.loadVersion();
         this.loadData();
@@ -297,7 +305,7 @@ class DecodeRatesDashboard {
             options: {
                 responsive: true,
                 maintainAspectRatio: true,
-                aspectRatio: 2.5,
+                aspectRatio: 3,
                 animation: {
                     duration: 0 // Disable animation for smoother updates
                 },
@@ -406,12 +414,23 @@ class DecodeRatesDashboard {
         // Sort by timestamp
         dataPoints.sort((a, b) => a.x - b.x);
 
+        // Get color for this mode
+        const modeColor = this.MODE_COLORS[band.mode] || '#ef4444'; // Default to red if mode not found
+        
+        // Convert hex to rgba for background
+        const hexToRgba = (hex, alpha) => {
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        };
+
         return {
             datasets: [{
                 label: `${band.mode} ${band.band_name}`,
                 data: dataPoints,
-                borderColor: '#ef4444',
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                borderColor: modeColor,
+                backgroundColor: hexToRgba(modeColor, 0.1),
                 tension: 0.4,
                 fill: true,
                 pointRadius: 2,

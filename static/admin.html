@@ -806,13 +806,29 @@
                                 <canvas id="refSpectrumCanvas" style="width: 100%; height: 220px; background: #2c3e50; border-radius: 5px; cursor: zoom-in;"></canvas>
                             </div>
 
-                            <!-- Historical tracking chart (dual axis: offset + SNR) -->
+                            <!-- Historical tracking chart - 60 minutes (dual axis: offset + SNR) -->
                             <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
                                 <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
                                     Historical Tracking (Last 60 Minutes)
                                 </div>
                                 <div style="height: 250px; position: relative;">
                                     <canvas id="refHistoryCanvas"></canvas>
+                                </div>
+                                <div id="refHistoryStats" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+                                    <!-- Stats will be populated by JavaScript -->
+                                </div>
+                            </div>
+
+                            <!-- Historical tracking chart - 24 hours (dual axis: offset + SNR) -->
+                            <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
+                                <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                                    Historical Tracking (Last 24 Hours)
+                                </div>
+                                <div style="height: 250px; position: relative;">
+                                    <canvas id="refHourlyCanvas"></canvas>
+                                </div>
+                                <div id="refHourlyStats" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+                                    <!-- Stats will be populated by JavaScript -->
                                 </div>
                             </div>
                         </div>
@@ -7148,13 +7164,15 @@
 
         // Frequency Reference Monitoring
         let refHistoryChart = null;
+        let refHourlyChart = null;
 
         async function loadFrequencyReference() {
             try {
-                // Fetch both current status and history in parallel
-                const [statusResponse, historyResponse] = await Promise.all([
+                // Fetch current status, minute history, and hourly history in parallel
+                const [statusResponse, minuteHistoryResponse, hourlyHistoryResponse] = await Promise.all([
                     authenticatedFetch('/api/frequency-reference'),
-                    authenticatedFetch('/api/frequency-reference/history')
+                    authenticatedFetch('/api/frequency-reference/history/minute'),
+                    authenticatedFetch('/api/frequency-reference/history/hour')
                 ]);
 
                 if (!statusResponse || !statusResponse.ok) return;
@@ -7165,10 +7183,16 @@
                     document.getElementById('frequencyReferenceSection').style.display = 'block';
                     renderFrequencyReference(data);
 
-                    // Render history chart if data available
-                    if (historyResponse && historyResponse.ok) {
-                        const historyData = await historyResponse.json();
-                        renderFrequencyReferenceHistory(historyData);
+                    // Render minute history chart if data available
+                    if (minuteHistoryResponse && minuteHistoryResponse.ok) {
+                        const minuteHistoryData = await minuteHistoryResponse.json();
+                        renderFrequencyReferenceHistory(minuteHistoryData);
+                    }
+
+                    // Render hourly history chart if data available
+                    if (hourlyHistoryResponse && hourlyHistoryResponse.ok) {
+                        const hourlyHistoryData = await hourlyHistoryResponse.json();
+                        renderFrequencyReferenceHourlyHistory(hourlyHistoryData);
                     }
                 } else {
                     document.getElementById('frequencyReferenceSection').style.display = 'none';
@@ -7656,11 +7680,12 @@
                                             label += ': ';
                                         }
                                         if (context.parsed.y !== null) {
-                                            label += context.parsed.y.toFixed(2);
                                             if (context.datasetIndex === 0) {
-                                                label += ' Hz';
+                                                // Frequency offset - 2 decimal places
+                                                label += context.parsed.y.toFixed(2) + ' Hz';
                                             } else {
-                                                label += ' dB';
+                                                // SNR - 1 decimal place
+                                                label += context.parsed.y.toFixed(1) + ' dB';
                                             }
                                         }
                                         return label;
@@ -7685,6 +7710,217 @@
 
             // Update without animation
             refHistoryChart.update('none');
+
+            // Calculate and display statistics for frequency offset
+            if (history.length > 0) {
+                const offsets = history.map(entry => entry.frequency_offset);
+                const avg = offsets.reduce((a, b) => a + b, 0) / offsets.length;
+                const min = Math.min(...offsets);
+                const max = Math.max(...offsets);
+
+                // Calculate standard deviation
+                const variance = offsets.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) / offsets.length;
+                const stdDev = Math.sqrt(variance);
+
+                // Update stats display
+                const statsDiv = document.getElementById('refHistoryStats');
+                if (statsDiv) {
+                    statsDiv.innerHTML = `
+                        <div style="text-align: center;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 3px;">Average Offset</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #667eea;">${avg.toFixed(2)} Hz</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 3px;">Std Deviation</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #667eea;">${stdDev.toFixed(2)} Hz</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 3px;">Min Offset</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #28a745;">${min.toFixed(2)} Hz</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 3px;">Max Offset</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #dc3545;">${max.toFixed(2)} Hz</div>
+                        </div>
+                    `;
+                }
+            }
+        }
+
+        function renderFrequencyReferenceHourlyHistory(data) {
+            const canvas = document.getElementById('refHourlyCanvas');
+            if (!canvas) return;
+
+            const history = data.history || [];
+
+            // If chart doesn't exist yet, create it
+            if (!refHourlyChart) {
+                const ctx = canvas.getContext('2d');
+                refHourlyChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [
+                            {
+                                label: 'Frequency Offset (Hz)',
+                                data: [],
+                                borderColor: '#dc3545',
+                                backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                                borderWidth: 2,
+                                fill: true,
+                                tension: 0.4,
+                                pointRadius: 3,
+                                pointHoverRadius: 5,
+                                yAxisID: 'y-offset'
+                            },
+                            {
+                                label: 'SNR (dB)',
+                                data: [],
+                                borderColor: '#28a745',
+                                backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                                borderWidth: 2,
+                                fill: true,
+                                tension: 0.4,
+                                pointRadius: 3,
+                                pointHoverRadius: 5,
+                                yAxisID: 'y-snr'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    unit: 'hour',
+                                    displayFormats: {
+                                        hour: 'HH:mm'
+                                    },
+                                    tooltipFormat: 'MMM dd, HH:mm'
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Time'
+                                }
+                            },
+                            'y-offset': {
+                                type: 'linear',
+                                position: 'left',
+                                title: {
+                                    display: true,
+                                    text: 'Frequency Offset (Hz)',
+                                    color: '#dc3545'
+                                },
+                                ticks: {
+                                    color: '#dc3545'
+                                },
+                                grid: {
+                                    drawOnChartArea: true
+                                }
+                            },
+                            'y-snr': {
+                                type: 'linear',
+                                position: 'right',
+                                title: {
+                                    display: true,
+                                    text: 'SNR (dB)',
+                                    color: '#28a745'
+                                },
+                                ticks: {
+                                    color: '#28a745'
+                                },
+                                grid: {
+                                    drawOnChartArea: false
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false,
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        if (context.parsed.y !== null) {
+                                            if (context.datasetIndex === 0) {
+                                                // Frequency offset - 2 decimal places
+                                                label += context.parsed.y.toFixed(2) + ' Hz';
+                                            } else {
+                                                // SNR - 1 decimal place
+                                                label += context.parsed.y.toFixed(1) + ' dB';
+                                            }
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Update chart data (no animation, no flicker)
+            if (history.length === 0) {
+                refHourlyChart.data.labels = [];
+                refHourlyChart.data.datasets[0].data = [];
+                refHourlyChart.data.datasets[1].data = [];
+            } else {
+                refHourlyChart.data.labels = history.map(entry => new Date(entry.timestamp));
+                refHourlyChart.data.datasets[0].data = history.map(entry => entry.frequency_offset);
+                refHourlyChart.data.datasets[1].data = history.map(entry => entry.snr);
+            }
+
+            // Update without animation
+            refHourlyChart.update('none');
+
+            // Calculate and display statistics for frequency offset
+            if (history.length > 0) {
+                const offsets = history.map(entry => entry.frequency_offset);
+                const avg = offsets.reduce((a, b) => a + b, 0) / offsets.length;
+                const min = Math.min(...offsets);
+                const max = Math.max(...offsets);
+
+                // Calculate standard deviation
+                const variance = offsets.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) / offsets.length;
+                const stdDev = Math.sqrt(variance);
+
+                // Update stats display
+                const statsDiv = document.getElementById('refHourlyStats');
+                if (statsDiv) {
+                    statsDiv.innerHTML = `
+                        <div style="text-align: center;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 3px;">Average Offset</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #667eea;">${avg.toFixed(2)} Hz</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 3px;">Std Deviation</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #667eea;">${stdDev.toFixed(2)} Hz</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 3px;">Min Offset</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #28a745;">${min.toFixed(2)} Hz</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 3px;">Max Offset</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #dc3545;">${max.toFixed(2)} Hz</div>
+                        </div>
+                    `;
+                }
+            }
         }
 
         async function loadMonitorHealth() {

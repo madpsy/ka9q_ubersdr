@@ -38,12 +38,14 @@ type FrequencyReferenceMonitor struct {
 	binCount     int     // Number of FFT bins
 	binBandwidth float64 // Frequency per bin in Hz
 
-	// Historical tracking (1-second samples, 1-minute means)
+	// Historical tracking (1-second samples, 1-minute means, 1-hour means)
 	samples         []FrequencyReferenceSample  // Current minute's samples (up to 60)
 	history         []FrequencyReferenceHistory // Historical minute means (up to 60)
+	hourlyHistory   []FrequencyReferenceHistory // Historical hour means (up to 24)
 	historyMu       sync.RWMutex
 	sampleTicker    *time.Ticker
 	aggregateTicker *time.Ticker
+	hourlyTicker    *time.Ticker
 
 	// Control
 	running  bool
@@ -175,8 +177,10 @@ func (frm *FrequencyReferenceMonitor) Start() error {
 	// Initialize historical tracking
 	frm.samples = make([]FrequencyReferenceSample, 0, 60)
 	frm.history = make([]FrequencyReferenceHistory, 0, 60)
+	frm.hourlyHistory = make([]FrequencyReferenceHistory, 0, 24)
 	frm.sampleTicker = time.NewTicker(1 * time.Second)
 	frm.aggregateTicker = time.NewTicker(1 * time.Minute)
+	frm.hourlyTicker = time.NewTicker(1 * time.Hour)
 
 	// Start monitoring loop
 	frm.wg.Add(1)
@@ -189,6 +193,10 @@ func (frm *FrequencyReferenceMonitor) Start() error {
 	// Start aggregation loop
 	frm.wg.Add(1)
 	go frm.aggregateLoop()
+
+	// Start hourly aggregation loop
+	frm.wg.Add(1)
+	go frm.hourlyAggregateLoop()
 
 	log.Printf("Frequency reference monitor started (%.6f MHz ± 500 Hz, %.2f Hz resolution)",
 		float64(frm.centerFreq)/1e6, frm.binBandwidth)
@@ -211,6 +219,9 @@ func (frm *FrequencyReferenceMonitor) Stop() {
 	}
 	if frm.aggregateTicker != nil {
 		frm.aggregateTicker.Stop()
+	}
+	if frm.hourlyTicker != nil {
+		frm.hourlyTicker.Stop()
 	}
 
 	frm.wg.Wait()
@@ -380,6 +391,60 @@ func (frm *FrequencyReferenceMonitor) aggregateLoop() {
 
 				// Clear samples for next minute
 				frm.samples = frm.samples[:0]
+			}
+
+			frm.historyMu.Unlock()
+		}
+	}
+}
+
+// hourlyAggregateLoop calculates mean values every 1 hour from minute-level history
+func (frm *FrequencyReferenceMonitor) hourlyAggregateLoop() {
+	defer frm.wg.Done()
+
+	for {
+		select {
+		case <-frm.stopChan:
+			return
+
+		case <-frm.hourlyTicker.C:
+			frm.historyMu.Lock()
+
+			// Calculate means from the last 60 minute entries if we have any
+			if len(frm.history) > 0 {
+				var sumDetectedFreq float64
+				var sumFrequencyOffset float64
+				var sumSignalStrength float32
+				var sumSNR float32
+				var sumNoiseFloor float32
+
+				for _, entry := range frm.history {
+					sumDetectedFreq += entry.DetectedFreq
+					sumFrequencyOffset += entry.FrequencyOffset
+					sumSignalStrength += entry.SignalStrength
+					sumSNR += entry.SNR
+					sumNoiseFloor += entry.NoiseFloor
+				}
+
+				count := float64(len(frm.history))
+				countFloat32 := float32(len(frm.history))
+
+				hourlyEntry := FrequencyReferenceHistory{
+					DetectedFreq:    sumDetectedFreq / count,
+					FrequencyOffset: sumFrequencyOffset / count,
+					SignalStrength:  sumSignalStrength / countFloat32,
+					SNR:             sumSNR / countFloat32,
+					NoiseFloor:      sumNoiseFloor / countFloat32,
+					Timestamp:       time.Now(),
+				}
+
+				// Add to hourly history
+				frm.hourlyHistory = append(frm.hourlyHistory, hourlyEntry)
+
+				// Keep only last 24 entries (24 hours)
+				if len(frm.hourlyHistory) > 24 {
+					frm.hourlyHistory = frm.hourlyHistory[len(frm.hourlyHistory)-24:]
+				}
 			}
 
 			frm.historyMu.Unlock()
@@ -593,4 +658,57 @@ func (frm *FrequencyReferenceMonitor) GetHistory() []FrequencyReferenceHistory {
 	copy(historyCopy, frm.history)
 
 	return historyCopy
+}
+
+// GetHourlyHistory returns the hourly aggregated frequency reference data (up to 24 hours)
+// Includes a partial entry for the current hour calculated from available minute-level data
+func (frm *FrequencyReferenceMonitor) GetHourlyHistory() []FrequencyReferenceHistory {
+	if frm == nil {
+		return nil
+	}
+
+	frm.historyMu.RLock()
+	defer frm.historyMu.RUnlock()
+
+	// Start with a copy of stored complete hours
+	result := make([]FrequencyReferenceHistory, len(frm.hourlyHistory))
+	copy(result, frm.hourlyHistory)
+
+	// Calculate and append current partial hour from minute-level history
+	if len(frm.history) > 0 {
+		var sumDetectedFreq float64
+		var sumFrequencyOffset float64
+		var sumSignalStrength float32
+		var sumSNR float32
+		var sumNoiseFloor float32
+
+		for _, entry := range frm.history {
+			sumDetectedFreq += entry.DetectedFreq
+			sumFrequencyOffset += entry.FrequencyOffset
+			sumSignalStrength += entry.SignalStrength
+			sumSNR += entry.SNR
+			sumNoiseFloor += entry.NoiseFloor
+		}
+
+		count := float64(len(frm.history))
+		countFloat32 := float32(len(frm.history))
+
+		partialHourEntry := FrequencyReferenceHistory{
+			DetectedFreq:    sumDetectedFreq / count,
+			FrequencyOffset: sumFrequencyOffset / count,
+			SignalStrength:  sumSignalStrength / countFloat32,
+			SNR:             sumSNR / countFloat32,
+			NoiseFloor:      sumNoiseFloor / countFloat32,
+			Timestamp:       time.Now(),
+		}
+
+		result = append(result, partialHourEntry)
+
+		// Keep only last 24 entries total (23 complete + 1 partial, or up to 24)
+		if len(result) > 24 {
+			result = result[len(result)-24:]
+		}
+	}
+
+	return result
 }

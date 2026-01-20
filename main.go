@@ -1044,8 +1044,11 @@ func main() {
 	http.HandleFunc("/api/frequency-reference", func(w http.ResponseWriter, r *http.Request) {
 		handleFrequencyReference(w, r, freqRefMonitor)
 	})
-	http.HandleFunc("/api/frequency-reference/history", func(w http.ResponseWriter, r *http.Request) {
-		handleFrequencyReferenceHistory(w, r, freqRefMonitor)
+	http.HandleFunc("/api/frequency-reference/history/minute", func(w http.ResponseWriter, r *http.Request) {
+		handleFrequencyReferenceHistoryMinute(w, r, freqRefMonitor)
+	})
+	http.HandleFunc("/api/frequency-reference/history/hour", func(w http.ResponseWriter, r *http.Request) {
+		handleFrequencyReferenceHistoryHour(w, r, freqRefMonitor)
 	})
 
 	// Decoder spots endpoints (with gzip compression, IP ban checking, and rate limiting)
@@ -2462,9 +2465,9 @@ func handleFrequencyReference(w http.ResponseWriter, r *http.Request, frm *Frequ
 	}
 }
 
-// handleFrequencyReferenceHistory serves the historical frequency reference data
+// handleFrequencyReferenceHistoryMinute serves the per-minute historical frequency reference data
 // Returns up to 60 minutes of 1-minute aggregated mean values
-func handleFrequencyReferenceHistory(w http.ResponseWriter, r *http.Request, frm *FrequencyReferenceMonitor) {
+func handleFrequencyReferenceHistoryMinute(w http.ResponseWriter, r *http.Request, frm *FrequencyReferenceMonitor) {
 	w.Header().Set("Content-Type", "application/json")
 
 	if frm == nil {
@@ -2475,7 +2478,7 @@ func handleFrequencyReferenceHistory(w http.ResponseWriter, r *http.Request, frm
 		return
 	}
 
-	// Get historical data from monitor
+	// Get minute-level historical data from monitor
 	history := frm.GetHistory()
 
 	w.WriteHeader(http.StatusOK)
@@ -2483,7 +2486,32 @@ func handleFrequencyReferenceHistory(w http.ResponseWriter, r *http.Request, frm
 		"history": history,
 		"count":   len(history),
 	}); err != nil {
-		log.Printf("Error encoding frequency reference history: %v", err)
+		log.Printf("Error encoding frequency reference minute history: %v", err)
+	}
+}
+
+// handleFrequencyReferenceHistoryHour serves the per-hour historical frequency reference data
+// Returns up to 24 hours of 1-hour aggregated mean values
+func handleFrequencyReferenceHistoryHour(w http.ResponseWriter, r *http.Request, frm *FrequencyReferenceMonitor) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if frm == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Frequency reference monitoring is not enabled",
+		})
+		return
+	}
+
+	// Get hour-level historical data from monitor
+	hourlyHistory := frm.GetHourlyHistory()
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"history": hourlyHistory,
+		"count":   len(hourlyHistory),
+	}); err != nil {
+		log.Printf("Error encoding frequency reference hourly history: %v", err)
 	}
 }
 

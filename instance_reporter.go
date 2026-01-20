@@ -26,6 +26,7 @@ type InstanceReporter struct {
 	dxClusterWsHandler  *DXClusterWebSocketHandler // For getting chat user count
 	noiseFloorMonitor   *NoiseFloorMonitor         // For getting SNR measurements
 	rotctlHandler       *RotctlAPIHandler          // For getting rotator information
+	freqRefMonitor      *FrequencyReferenceMonitor // For getting frequency reference information
 	configPath          string
 	httpClient          *http.Client
 	stopChan            chan struct{}
@@ -41,39 +42,40 @@ type InstanceReporter struct {
 
 // InstanceReport represents the data sent to the central server
 type InstanceReport struct {
-	UUID             string                 `json:"uuid"`
-	Callsign         string                 `json:"callsign"`
-	Name             string                 `json:"name"`
-	Email            string                 `json:"email"` // Admin email address (private, for Let's Encrypt)
-	Location         string                 `json:"location"`
-	Latitude         float64                `json:"latitude"`
-	Longitude        float64                `json:"longitude"`
-	Altitude         int                    `json:"altitude"`
-	PublicURL        string                 `json:"public_url"`
-	Version          string                 `json:"version"`
-	Timestamp        int64                  `json:"timestamp"`
-	Host             string                 `json:"host,omitempty"`    // Optional: tells clients how to connect to this instance
-	Port             int                    `json:"port,omitempty"`    // Optional: port for client connections
-	TLS              bool                   `json:"tls,omitempty"`     // Optional: whether TLS is required for connections
-	UseMyIP          bool                   `json:"use_myip"`          // Automatically use public IP for public access
-	CreateDomain     bool                   `json:"create_domain"`     // Request automatic DNS subdomain creation
-	CWSkimmer        bool                   `json:"cw_skimmer"`        // Whether CW Skimmer is enabled
-	DigitalDecodes   bool                   `json:"digital_decodes"`   // Whether digital decoding is enabled
-	NoiseFloor       bool                   `json:"noise_floor"`       // Whether noise floor monitoring is enabled
-	MaxClients       int                    `json:"max_clients"`       // Maximum number of clients allowed
-	AvailableClients int                    `json:"available_clients"` // Current number of available client slots
-	MaxSessionTime   int                    `json:"max_session_time"`  // Maximum session time in seconds (0 = unlimited)
-	PublicIQModes    []string               `json:"public_iq_modes"`   // List of IQ modes accessible without authentication
-	CPUModel         string                 `json:"cpu_model"`         // CPU model name
-	Load             map[string]interface{} `json:"load,omitempty"`    // System load averages, CPU cores, and status
-	CORSEnabled      bool                   `json:"cors_enabled"`      // Whether CORS is enabled
-	ChatEnabled      bool                   `json:"chat_enabled"`      // Whether chat is enabled
-	ChatUsers        int                    `json:"chat_users"`        // Number of active chat users
-	SNR_0_30MHz      int                    `json:"snr_0_30_mhz"`      // SNR for 0-30 MHz (dynamic range in dB, -1 if unavailable)
-	SNR_1_8_30MHz    int                    `json:"snr_1_8_30_mhz"`    // SNR for 1.8-30 MHz HF bands (dynamic range in dB, -1 if unavailable)
-	Rotator          map[string]interface{} `json:"rotator"`           // Rotator information (enabled, connected, azimuth)
-	Test             bool                   `json:"test,omitempty"`    // If true, this is a test report - collector will verify /api/description instead of full callback
-	StartupReport    bool                   `json:"startup_report"`    // If true, this is a startup report sent regardless of instance_reporting.enabled
+	UUID               string                 `json:"uuid"`
+	Callsign           string                 `json:"callsign"`
+	Name               string                 `json:"name"`
+	Email              string                 `json:"email"` // Admin email address (private, for Let's Encrypt)
+	Location           string                 `json:"location"`
+	Latitude           float64                `json:"latitude"`
+	Longitude          float64                `json:"longitude"`
+	Altitude           int                    `json:"altitude"`
+	PublicURL          string                 `json:"public_url"`
+	Version            string                 `json:"version"`
+	Timestamp          int64                  `json:"timestamp"`
+	Host               string                 `json:"host,omitempty"`      // Optional: tells clients how to connect to this instance
+	Port               int                    `json:"port,omitempty"`      // Optional: port for client connections
+	TLS                bool                   `json:"tls,omitempty"`       // Optional: whether TLS is required for connections
+	UseMyIP            bool                   `json:"use_myip"`            // Automatically use public IP for public access
+	CreateDomain       bool                   `json:"create_domain"`       // Request automatic DNS subdomain creation
+	CWSkimmer          bool                   `json:"cw_skimmer"`          // Whether CW Skimmer is enabled
+	DigitalDecodes     bool                   `json:"digital_decodes"`     // Whether digital decoding is enabled
+	NoiseFloor         bool                   `json:"noise_floor"`         // Whether noise floor monitoring is enabled
+	MaxClients         int                    `json:"max_clients"`         // Maximum number of clients allowed
+	AvailableClients   int                    `json:"available_clients"`   // Current number of available client slots
+	MaxSessionTime     int                    `json:"max_session_time"`    // Maximum session time in seconds (0 = unlimited)
+	PublicIQModes      []string               `json:"public_iq_modes"`     // List of IQ modes accessible without authentication
+	CPUModel           string                 `json:"cpu_model"`           // CPU model name
+	Load               map[string]interface{} `json:"load,omitempty"`      // System load averages, CPU cores, and status
+	CORSEnabled        bool                   `json:"cors_enabled"`        // Whether CORS is enabled
+	ChatEnabled        bool                   `json:"chat_enabled"`        // Whether chat is enabled
+	ChatUsers          int                    `json:"chat_users"`          // Number of active chat users
+	SNR_0_30MHz        int                    `json:"snr_0_30_mhz"`        // SNR for 0-30 MHz (dynamic range in dB, -1 if unavailable)
+	SNR_1_8_30MHz      int                    `json:"snr_1_8_30_mhz"`      // SNR for 1.8-30 MHz HF bands (dynamic range in dB, -1 if unavailable)
+	Rotator            map[string]interface{} `json:"rotator"`             // Rotator information (enabled, connected, azimuth)
+	FrequencyReference map[string]interface{} `json:"frequency_reference"` // Frequency reference tracking information
+	Test               bool                   `json:"test,omitempty"`      // If true, this is a test report - collector will verify /api/description instead of full callback
+	StartupReport      bool                   `json:"startup_report"`      // If true, this is a startup report sent regardless of instance_reporting.enabled
 }
 
 // NewInstanceReporter creates a new instance reporter
@@ -124,6 +126,14 @@ func (ir *InstanceReporter) SetRotctlHandler(handler *RotctlAPIHandler) {
 	ir.rotctlHandler = handler
 }
 
+// SetFrequencyReferenceMonitor sets the frequency reference monitor for tracking information
+// This must be called after the monitor is initialized (after NewInstanceReporter)
+func (ir *InstanceReporter) SetFrequencyReferenceMonitor(monitor *FrequencyReferenceMonitor) {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
+	ir.freqRefMonitor = monitor
+}
+
 // getChatUserCount returns the current number of active chat users (thread-safe)
 func (ir *InstanceReporter) getChatUserCount() int {
 	ir.mu.RLock()
@@ -171,6 +181,40 @@ func (ir *InstanceReporter) getRotatorInfo() map[string]interface{} {
 	}
 
 	return rotatorInfo
+}
+
+// getFrequencyReferenceInfo returns the current frequency reference information (thread-safe)
+// Always returns an object with enabled field, plus tracking data if enabled
+func (ir *InstanceReporter) getFrequencyReferenceInfo() map[string]interface{} {
+	ir.mu.RLock()
+	monitor := ir.freqRefMonitor
+	ir.mu.RUnlock()
+
+	if monitor == nil {
+		return map[string]interface{}{
+			"enabled": false,
+		}
+	}
+
+	// Get status from monitor
+	freqRefStatus := monitor.GetStatus()
+
+	// Build filtered frequency reference info with only essential fields
+	freqRefInfo := map[string]interface{}{
+		"enabled": freqRefStatus["enabled"],
+	}
+
+	// Only include additional fields if enabled
+	if enabled, ok := freqRefStatus["enabled"].(bool); ok && enabled {
+		freqRefInfo["expected_frequency"] = freqRefStatus["expected_frequency"]
+		freqRefInfo["detected_frequency"] = freqRefStatus["detected_frequency"]
+		freqRefInfo["frequency_offset"] = freqRefStatus["frequency_offset"]
+		freqRefInfo["signal_strength"] = freqRefStatus["signal_strength"]
+		freqRefInfo["snr"] = freqRefStatus["snr"]
+		freqRefInfo["noise_floor"] = freqRefStatus["noise_floor"]
+	}
+
+	return freqRefInfo
 }
 
 // Start begins the instance reporting service
@@ -427,38 +471,42 @@ func (ir *InstanceReporter) sendReport() error {
 	// Get rotator information (thread-safe)
 	rotatorInfo := ir.getRotatorInfo()
 
+	// Get frequency reference information (thread-safe)
+	freqRefInfo := ir.getFrequencyReferenceInfo()
+
 	report := InstanceReport{
-		UUID:             ir.config.InstanceReporting.InstanceUUID,
-		Callsign:         ir.config.Admin.Callsign,
-		Name:             ir.config.Admin.Name,
-		Email:            ir.config.Admin.Email,
-		Location:         ir.config.Admin.Location,
-		Latitude:         ir.config.Admin.GPS.Lat,
-		Longitude:        ir.config.Admin.GPS.Lon,
-		Altitude:         ir.config.Admin.ASL,
-		PublicURL:        publicURL,
-		Version:          Version,
-		Timestamp:        time.Now().Unix(),
-		Host:             host, // Use the host variable (either configured or auto-detected)
-		Port:             ir.config.InstanceReporting.Instance.Port,
-		TLS:              ir.config.InstanceReporting.Instance.TLS,
-		UseMyIP:          ir.config.InstanceReporting.UseMyIP,
-		CreateDomain:     ir.config.InstanceReporting.CreateDomain,
-		CWSkimmer:        cwSkimmerEnabled,
-		DigitalDecodes:   ir.config.Decoder.Enabled,
-		NoiseFloor:       ir.config.NoiseFloor.Enabled,
-		MaxClients:       ir.config.Server.MaxSessions,
-		AvailableClients: availableClients,
-		MaxSessionTime:   ir.config.Server.MaxSessionTime,
-		PublicIQModes:    publicIQModes,
-		CPUModel:         cpuModel,
-		Load:             systemLoad,
-		CORSEnabled:      ir.config.Server.EnableCORS,
-		ChatEnabled:      ir.config.Chat.Enabled,
-		ChatUsers:        chatUserCount,
-		SNR_0_30MHz:      snr_0_30,
-		SNR_1_8_30MHz:    snr_1_8_30,
-		Rotator:          rotatorInfo,
+		UUID:               ir.config.InstanceReporting.InstanceUUID,
+		Callsign:           ir.config.Admin.Callsign,
+		Name:               ir.config.Admin.Name,
+		Email:              ir.config.Admin.Email,
+		Location:           ir.config.Admin.Location,
+		Latitude:           ir.config.Admin.GPS.Lat,
+		Longitude:          ir.config.Admin.GPS.Lon,
+		Altitude:           ir.config.Admin.ASL,
+		PublicURL:          publicURL,
+		Version:            Version,
+		Timestamp:          time.Now().Unix(),
+		Host:               host, // Use the host variable (either configured or auto-detected)
+		Port:               ir.config.InstanceReporting.Instance.Port,
+		TLS:                ir.config.InstanceReporting.Instance.TLS,
+		UseMyIP:            ir.config.InstanceReporting.UseMyIP,
+		CreateDomain:       ir.config.InstanceReporting.CreateDomain,
+		CWSkimmer:          cwSkimmerEnabled,
+		DigitalDecodes:     ir.config.Decoder.Enabled,
+		NoiseFloor:         ir.config.NoiseFloor.Enabled,
+		MaxClients:         ir.config.Server.MaxSessions,
+		AvailableClients:   availableClients,
+		MaxSessionTime:     ir.config.Server.MaxSessionTime,
+		PublicIQModes:      publicIQModes,
+		CPUModel:           cpuModel,
+		Load:               systemLoad,
+		CORSEnabled:        ir.config.Server.EnableCORS,
+		ChatEnabled:        ir.config.Chat.Enabled,
+		ChatUsers:          chatUserCount,
+		SNR_0_30MHz:        snr_0_30,
+		SNR_1_8_30MHz:      snr_1_8_30,
+		Rotator:            rotatorInfo,
+		FrequencyReference: freqRefInfo,
 	}
 
 	jsonData, err := json.Marshal(report)
@@ -765,39 +813,43 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 	// Get rotator information (thread-safe)
 	rotatorInfo := ir.getRotatorInfo()
 
+	// Get frequency reference information (thread-safe)
+	freqRefInfo := ir.getFrequencyReferenceInfo()
+
 	report := InstanceReport{
-		UUID:             instanceUUID,
-		Callsign:         adminCallsign,
-		Name:             ir.config.Admin.Name,
-		Email:            adminEmail,
-		Location:         ir.config.Admin.Location,
-		Latitude:         ir.config.Admin.GPS.Lat,
-		Longitude:        ir.config.Admin.GPS.Lon,
-		Altitude:         ir.config.Admin.ASL,
-		PublicURL:        publicURL,
-		Version:          Version,
-		Timestamp:        time.Now().Unix(),
-		Host:             host,
-		Port:             instancePort,
-		TLS:              instanceTLS,
-		UseMyIP:          useMyIP,
-		CreateDomain:     createDomain,
-		CWSkimmer:        cwSkimmerEnabled,
-		DigitalDecodes:   ir.config.Decoder.Enabled,
-		NoiseFloor:       ir.config.NoiseFloor.Enabled,
-		MaxClients:       ir.config.Server.MaxSessions,
-		AvailableClients: availableClients,
-		MaxSessionTime:   ir.config.Server.MaxSessionTime,
-		PublicIQModes:    publicIQModes,
-		CPUModel:         cpuModel,
-		Load:             systemLoad,
-		CORSEnabled:      ir.config.Server.EnableCORS,
-		ChatEnabled:      ir.config.Chat.Enabled,
-		ChatUsers:        chatUserCount,
-		SNR_0_30MHz:      snr_0_30,
-		SNR_1_8_30MHz:    snr_1_8_30,
-		Rotator:          rotatorInfo,
-		Test:             isTest,
+		UUID:               instanceUUID,
+		Callsign:           adminCallsign,
+		Name:               ir.config.Admin.Name,
+		Email:              adminEmail,
+		Location:           ir.config.Admin.Location,
+		Latitude:           ir.config.Admin.GPS.Lat,
+		Longitude:          ir.config.Admin.GPS.Lon,
+		Altitude:           ir.config.Admin.ASL,
+		PublicURL:          publicURL,
+		Version:            Version,
+		Timestamp:          time.Now().Unix(),
+		Host:               host,
+		Port:               instancePort,
+		TLS:                instanceTLS,
+		UseMyIP:            useMyIP,
+		CreateDomain:       createDomain,
+		CWSkimmer:          cwSkimmerEnabled,
+		DigitalDecodes:     ir.config.Decoder.Enabled,
+		NoiseFloor:         ir.config.NoiseFloor.Enabled,
+		MaxClients:         ir.config.Server.MaxSessions,
+		AvailableClients:   availableClients,
+		MaxSessionTime:     ir.config.Server.MaxSessionTime,
+		PublicIQModes:      publicIQModes,
+		CPUModel:           cpuModel,
+		Load:               systemLoad,
+		CORSEnabled:        ir.config.Server.EnableCORS,
+		ChatEnabled:        ir.config.Chat.Enabled,
+		ChatUsers:          chatUserCount,
+		SNR_0_30MHz:        snr_0_30,
+		SNR_1_8_30MHz:      snr_1_8_30,
+		Rotator:            rotatorInfo,
+		FrequencyReference: freqRefInfo,
+		Test:               isTest,
 	}
 
 	jsonData, err := json.Marshal(report)
@@ -1005,7 +1057,7 @@ func ensureUUIDForStartup(config *Config, configPath string) error {
 
 // SendStartupReport sends a startup report regardless of whether instance reporting is enabled
 // This runs in a non-blocking goroutine with retries and only sends if collector endpoint is configured
-func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, configPath string, noiseFloorMonitor *NoiseFloorMonitor) {
+func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, configPath string, noiseFloorMonitor *NoiseFloorMonitor, freqRefMonitor *FrequencyReferenceMonitor) {
 	// Run in a goroutine to not block startup
 	go func() {
 		// Check if we have the minimum required configuration (collector hostname and port)
@@ -1076,40 +1128,61 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			"azimuth":   -1,
 		}
 
+		// Get frequency reference information
+		freqRefInfo := map[string]interface{}{
+			"enabled": false,
+		}
+		if freqRefMonitor != nil {
+			freqRefStatus := freqRefMonitor.GetStatus()
+			freqRefInfo = map[string]interface{}{
+				"enabled": freqRefStatus["enabled"],
+			}
+			// Only include additional fields if enabled
+			if enabled, ok := freqRefStatus["enabled"].(bool); ok && enabled {
+				freqRefInfo["expected_frequency"] = freqRefStatus["expected_frequency"]
+				freqRefInfo["detected_frequency"] = freqRefStatus["detected_frequency"]
+				freqRefInfo["frequency_offset"] = freqRefStatus["frequency_offset"]
+				freqRefInfo["signal_strength"] = freqRefStatus["signal_strength"]
+				freqRefInfo["snr"] = freqRefStatus["snr"]
+				freqRefInfo["noise_floor"] = freqRefStatus["noise_floor"]
+			}
+		}
+
 		// Build the report
 		report := InstanceReport{
-			UUID:             config.InstanceReporting.InstanceUUID,
-			Callsign:         config.Admin.Callsign,
-			Name:             config.Admin.Name,
-			Email:            config.Admin.Email,
-			Location:         config.Admin.Location,
-			Latitude:         config.Admin.GPS.Lat,
-			Longitude:        config.Admin.GPS.Lon,
-			Altitude:         config.Admin.ASL,
-			PublicURL:        publicURL,
-			Version:          Version,
-			Timestamp:        time.Now().Unix(),
-			Host:             config.InstanceReporting.Instance.Host,
-			Port:             config.InstanceReporting.Instance.Port,
-			TLS:              config.InstanceReporting.Instance.TLS,
-			UseMyIP:          config.InstanceReporting.UseMyIP,
-			CreateDomain:     config.InstanceReporting.CreateDomain,
-			CWSkimmer:        cwSkimmerEnabled,
-			DigitalDecodes:   config.Decoder.Enabled,
-			NoiseFloor:       config.NoiseFloor.Enabled,
-			MaxClients:       config.Server.MaxSessions,
-			AvailableClients: availableClients,
-			MaxSessionTime:   config.Server.MaxSessionTime,
-			PublicIQModes:    publicIQModes,
-			CPUModel:         cpuModel,
-			Load:             systemLoad,
-			CORSEnabled:      config.Server.EnableCORS,
-			ChatEnabled:      config.Chat.Enabled,
-			ChatUsers:        0, // Chat users not available at startup
-			SNR_0_30MHz:      snr_0_30,
-			SNR_1_8_30MHz:    snr_1_8_30,
-			Rotator:          rotatorInfo,
-			StartupReport:    true,
+			UUID:               config.InstanceReporting.InstanceUUID,
+			Callsign:           config.Admin.Callsign,
+			Name:               config.Admin.Name,
+			Email:              config.Admin.Email,
+			Location:           config.Admin.Location,
+			Latitude:           config.Admin.GPS.Lat,
+			Longitude:          config.Admin.GPS.Lon,
+			Altitude:           config.Admin.ASL,
+			PublicURL:          publicURL,
+			Version:            Version,
+			Timestamp:          time.Now().Unix(),
+			Host:               config.InstanceReporting.Instance.Host,
+			Port:               config.InstanceReporting.Instance.Port,
+			TLS:                config.InstanceReporting.Instance.TLS,
+			UseMyIP:            config.InstanceReporting.UseMyIP,
+			CreateDomain:       config.InstanceReporting.CreateDomain,
+			CWSkimmer:          cwSkimmerEnabled,
+			DigitalDecodes:     config.Decoder.Enabled,
+			NoiseFloor:         config.NoiseFloor.Enabled,
+			MaxClients:         config.Server.MaxSessions,
+			AvailableClients:   availableClients,
+			MaxSessionTime:     config.Server.MaxSessionTime,
+			PublicIQModes:      publicIQModes,
+			CPUModel:           cpuModel,
+			Load:               systemLoad,
+			CORSEnabled:        config.Server.EnableCORS,
+			ChatEnabled:        config.Chat.Enabled,
+			ChatUsers:          0, // Chat users not available at startup
+			SNR_0_30MHz:        snr_0_30,
+			SNR_1_8_30MHz:      snr_1_8_30,
+			Rotator:            rotatorInfo,
+			FrequencyReference: freqRefInfo,
+			StartupReport:      true,
 		}
 
 		jsonData, err := json.Marshal(report)

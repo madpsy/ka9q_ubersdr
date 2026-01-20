@@ -883,7 +883,7 @@ func main() {
 
 	// Send startup report (non-blocking, runs regardless of instance_reporting.enabled)
 	// This must be called after sessions is initialized but before HTTP server starts
-	SendStartupReport(config, cwskimmerConfig, sessions, configPath, noiseFloorMonitor)
+	SendStartupReport(config, cwskimmerConfig, sessions, configPath, noiseFloorMonitor, freqRefMonitor)
 
 	// Initialize instance reporter (before admin handler so it can be passed in)
 	var instanceReporter *InstanceReporter
@@ -943,6 +943,12 @@ func main() {
 		instanceReporter.SetRotctlHandler(rotctlHandler)
 	}
 
+	// Set the frequency reference monitor in instance reporter for tracking information
+	// This must be done after both are initialized
+	if instanceReporter != nil && freqRefMonitor != nil {
+		instanceReporter.SetFrequencyReferenceMonitor(freqRefMonitor)
+	}
+
 	// Initialize admin handler (pass all components for proper shutdown during restart)
 	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler)
 
@@ -987,7 +993,7 @@ func main() {
 	}
 
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
-		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler)
+		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor)
 	})
 	http.HandleFunc("/api/instance", func(w http.ResponseWriter, r *http.Request) {
 		handleInstanceStatus(w, r, config)
@@ -1735,7 +1741,7 @@ func handleExtensions(w http.ResponseWriter, r *http.Request, config *Config) {
 }
 
 // handleDescription serves the description HTML from config plus all status information
-func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler) {
+func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -1798,6 +1804,25 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		rotatorInfo["azimuth"] = int(state.Position.Azimuth + 0.5) // Round to nearest integer
 	}
 
+	// Get frequency reference information if available
+	// Always return frequency_reference object, even when disabled
+	freqRefStatus := freqRefMonitor.GetStatus()
+
+	// Build filtered frequency reference info with only essential fields
+	freqRefInfo := map[string]interface{}{
+		"enabled": freqRefStatus["enabled"],
+	}
+
+	// Only include additional fields if enabled
+	if enabled, ok := freqRefStatus["enabled"].(bool); ok && enabled {
+		freqRefInfo["expected_frequency"] = freqRefStatus["expected_frequency"]
+		freqRefInfo["detected_frequency"] = freqRefStatus["detected_frequency"]
+		freqRefInfo["frequency_offset"] = freqRefStatus["frequency_offset"]
+		freqRefInfo["signal_strength"] = freqRefStatus["signal_strength"]
+		freqRefInfo["snr"] = freqRefStatus["snr"]
+		freqRefInfo["noise_floor"] = freqRefStatus["noise_floor"]
+	}
+
 	// Build the response with description plus status information (without sdrs)
 	response := map[string]interface{}{
 		"description": config.Admin.Description,
@@ -1830,6 +1855,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"public_uuid":          publicUUID,
 		"cors_enabled":         config.Server.EnableCORS,
 		"rotator":              rotatorInfo,
+		"frequency_reference":  freqRefInfo,
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

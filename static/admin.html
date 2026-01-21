@@ -8106,6 +8106,47 @@
 
             statusSection.innerHTML = `<h3 style="color: ${statusColor};">💻 System Load</h3>`;
 
+            // Add warning/critical message box if needed
+            if (status === 'warning' || status === 'critical') {
+                const warningBox = document.createElement('div');
+                warningBox.style.padding = '15px';
+                warningBox.style.marginBottom = '15px';
+                warningBox.style.borderRadius = '5px';
+                warningBox.style.fontSize = '14px';
+                warningBox.style.lineHeight = '1.6';
+
+                if (status === 'critical') {
+                    warningBox.style.background = '#f8d7da';
+                    warningBox.style.border = '2px solid #dc3545';
+                    warningBox.style.color = '#721c24';
+                    warningBox.innerHTML = `
+                        <strong style="font-size: 16px;">🚨 CRITICAL: System Overload Detected</strong><br><br>
+                        <strong>Immediate action required:</strong><br>
+                        • Disable decoders for an entire mode (FT8, FT4, or WSPR) in the <a href="#" onclick="switchTab('decoder'); return false;" style="color: #721c24; text-decoration: underline; font-weight: bold;">Decoder tab</a><br>
+                        • Reduce decode depth to 1 for all modes<br>
+                        • Avoid running decoders on every band - focus on key bands only<br>
+                        • Consider upgrading to a more powerful server<br><br>
+                        <em>High CPU load will cause poor decode performance and may impact user experience.</em>
+                    `;
+                } else {
+                    warningBox.style.background = '#fff3cd';
+                    warningBox.style.border = '2px solid #ffc107';
+                    warningBox.style.color = '#856404';
+                    warningBox.innerHTML = `
+                        <strong style="font-size: 15px;">⚠️ WARNING: High System Load</strong><br><br>
+                        <strong>Common causes:</strong><br>
+                        • Too many decoder bands enabled simultaneously<br>
+                        • Decode depths set too high (especially Depth 3)<br>
+                        • WSPR cycles set too high (try reducing to 5000)<br><br>
+                        <strong>Recommended actions:</strong><br>
+                        • Review enabled bands in the <a href="#" onclick="switchTab('decoder'); return false;" style="color: #856404; text-decoration: underline; font-weight: bold;">Decoder tab</a><br>
+                        • Reduce decode depths to 1 or 2<br>
+                        • Disable bands you don't actively monitor
+                    `;
+                }
+                statusSection.appendChild(warningBox);
+            }
+
             const statusDiv = document.createElement('div');
             statusDiv.style.padding = '15px';
             statusDiv.style.background = '#f8f9fa';

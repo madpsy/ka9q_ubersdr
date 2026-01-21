@@ -230,42 +230,44 @@ func ParseWSPRLine(line string, dialFreq uint64) (*DecodeInfo, error) {
 }
 
 // extractCallsignLocator extracts callsign and grid locator from FT8/FT4 message
-// For messages with grid locators, we want the callsign immediately before the grid
-// (the transmitting station), not the first callsign in the message
+// Per FT8 protocol: The transmitting station is ALWAYS the first callsign in the message
+// Examples:
+//
+//	CQ K1ABC FN31        → TX = K1ABC, Grid = FN31
+//	K1ABC M0DEF IO91     → TX = K1ABC, Grid = IO91
+//	K1ABC M0DEF -10      → TX = K1ABC, Grid = ""
+//	K1ABC M0DEF R-09     → TX = K1ABC, Grid = ""
+//	K1ABC M0DEF RR73     → TX = K1ABC, Grid = ""
 func extractCallsignLocator(message string) (string, string) {
 	fields := strings.Fields(message)
 	if len(fields) < 2 {
 		return "", ""
 	}
 
-	// First, find the grid locator
-	var locator string
-	var locatorIndex int = -1
-	for i, field := range fields {
-		if isValidGridLocatorForMode(field, ModeFT8) {
-			locator = field
-			locatorIndex = i
+	// Find the first valid callsign in the message (this is the transmitter)
+	var transmitterCall string
+	for _, field := range fields {
+		if isValidCallsign(field) {
+			transmitterCall = field
 			break
 		}
 	}
 
-	// If we found a grid locator, look for the callsign immediately before it
-	if locatorIndex > 0 {
-		// Check the field before the grid locator
-		if isValidCallsign(fields[locatorIndex-1]) {
-			return fields[locatorIndex-1], locator
-		}
+	// If no valid callsign found, return empty
+	if transmitterCall == "" {
+		return "", ""
 	}
 
-	// Fallback: if no grid locator found, or no callsign before it,
-	// just find the first valid callsign in the message
+	// Now find any grid locator in the message (search all fields)
+	var locator string
 	for _, field := range fields {
-		if isValidCallsign(field) {
-			return field, locator
+		if isValidGridLocatorForMode(field, ModeFT8) {
+			locator = field
+			break
 		}
 	}
 
-	return "", locator
+	return transmitterCall, locator
 }
 
 // isValidCallsign checks if a string looks like a valid amateur radio callsign

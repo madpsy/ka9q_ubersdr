@@ -238,9 +238,20 @@ func ParseWSPRLine(line string, dialFreq uint64) (*DecodeInfo, error) {
 //	K1ABC M0DEF -10      → TX = K1ABC, Grid = ""
 //	K1ABC M0DEF R-09     → TX = K1ABC, Grid = ""
 //	K1ABC M0DEF RR73     → TX = K1ABC, Grid = ""
+//
+// Special case: If message starts with <...>, it's truncated and we can't determine
+// the transmitter reliably, so we skip it:
+//
+//	<...> CU6AB HM58     → TX = "", Grid = "" (truncated, unreliable)
 func extractCallsignLocator(message string) (string, string) {
 	fields := strings.Fields(message)
 	if len(fields) < 2 {
+		return "", ""
+	}
+
+	// Check if message is truncated (starts with <...>)
+	// In this case, we can't reliably determine the transmitter
+	if fields[0] == "<...>" {
 		return "", ""
 	}
 

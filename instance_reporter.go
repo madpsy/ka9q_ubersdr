@@ -49,6 +49,8 @@ type InstanceReport struct {
 	Location           string                 `json:"location"`
 	Latitude           float64                `json:"latitude"`
 	Longitude          float64                `json:"longitude"`
+	GPSEnabled         bool                   `json:"gps_enabled"`  // Whether GPS time synchronization is enabled
+	TDOAEnabled        bool                   `json:"tdoa_enabled"` // Whether TDOA calculations are enabled
 	Altitude           int                    `json:"altitude"`
 	PublicURL          string                 `json:"public_url"`
 	Version            string                 `json:"version"`
@@ -490,6 +492,8 @@ func (ir *InstanceReporter) sendReport() error {
 		Location:           ir.config.Admin.Location,
 		Latitude:           ir.config.Admin.GPS.Lat,
 		Longitude:          ir.config.Admin.GPS.Lon,
+		GPSEnabled:         ir.config.Admin.GPS.GPSEnabled,
+		TDOAEnabled:        ir.config.Admin.GPS.TDOAEnabled,
 		Altitude:           ir.config.Admin.ASL,
 		PublicURL:          publicURL,
 		Version:            Version,
@@ -832,6 +836,8 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		Location:           ir.config.Admin.Location,
 		Latitude:           ir.config.Admin.GPS.Lat,
 		Longitude:          ir.config.Admin.GPS.Lon,
+		GPSEnabled:         ir.config.Admin.GPS.GPSEnabled,
+		TDOAEnabled:        ir.config.Admin.GPS.TDOAEnabled,
 		Altitude:           ir.config.Admin.ASL,
 		PublicURL:          publicURL,
 		Version:            Version,
@@ -1165,6 +1171,8 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			Location:           config.Admin.Location,
 			Latitude:           config.Admin.GPS.Lat,
 			Longitude:          config.Admin.GPS.Lon,
+			GPSEnabled:         config.Admin.GPS.GPSEnabled,
+			TDOAEnabled:        config.Admin.GPS.TDOAEnabled,
 			Altitude:           config.Admin.ASL,
 			PublicURL:          publicURL,
 			Version:            Version,

@@ -19,6 +19,10 @@ admin:
   gps:
     lat: 51.507  # Latitude
     lon: -0.128  # Longitude
+    # Enable GPS time synchronization (default: false)
+    gps_enabled: false
+    # Enable TDOA (Time Difference of Arrival) calculations (default: false)
+    tdoa_enabled: false
   # Height above sea level (meters)
   asl: 30
   # Location description

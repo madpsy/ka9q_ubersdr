@@ -1844,8 +1844,10 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 			"callsign":   config.Admin.Callsign,
 			"public_url": publicURL,
 			"gps": map[string]interface{}{
-				"lat": config.Admin.GPS.Lat,
-				"lon": config.Admin.GPS.Lon,
+				"lat":          config.Admin.GPS.Lat,
+				"lon":          config.Admin.GPS.Lon,
+				"gps_enabled":  config.Admin.GPS.GPSEnabled,
+				"tdoa_enabled": config.Admin.GPS.TDOAEnabled,
 			},
 			"asl":            config.Admin.ASL,
 			"location":       config.Admin.Location,

@@ -51,10 +51,12 @@ type AdminConfig struct {
 	LoginBanDuration     int       `yaml:"login_ban_duration"`     // Duration of temporary ban after max attempts in seconds (default: 900 = 15 minutes)
 }
 
-// GPSConfig contains GPS coordinates
+// GPSConfig contains GPS coordinates and time synchronization settings
 type GPSConfig struct {
-	Lat float64 `yaml:"lat"`
-	Lon float64 `yaml:"lon"`
+	Lat         float64 `yaml:"lat"`
+	Lon         float64 `yaml:"lon"`
+	GPSEnabled  bool    `yaml:"gps_enabled"`  // Enable GPS time synchronization (default: false)
+	TDOAEnabled bool    `yaml:"tdoa_enabled"` // Enable TDOA calculations (default: false)
 }
 
 // Bookmark represents a frequency bookmark

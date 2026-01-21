@@ -7089,7 +7089,7 @@
         async function loadFrontendStatus() {
             try {
                 const response = await authenticatedFetch('/admin/frontend-status');
-                if (!response) return; // Auth failed, already handled
+                if (!response) return null; // Auth failed, already handled
 
                 const frontendStatusSection = document.getElementById('frontendStatusSection');
                 const frontendStatusDisplay = document.getElementById('frontendStatusDisplay');
@@ -7097,7 +7097,7 @@
                 if (!response.ok) {
                     // Frontend status not available (wideband channel not found)
                     frontendStatusSection.style.display = 'none';
-                    return;
+                    return null;
                 }
 
                 const data = await response.json();
@@ -7174,10 +7174,14 @@
                 `;
 
                 frontendStatusSection.style.display = 'block';
+
+                // Return data for health monitoring
+                return data;
             } catch (error) {
                 console.error('Error loading frontend status:', error);
                 // Hide section on error
                 document.getElementById('frontendStatusSection').style.display = 'none';
+                return null;
             }
         }
 
@@ -7958,8 +7962,8 @@
 
         async function loadMonitorHealth() {
             try {
-                // Load frontend status first (at top of Monitor tab)
-                await loadFrontendStatus();
+                // Load frontend status first (at top of Monitor tab) - now includes health status
+                const frontendStatusData = await loadFrontendStatus();
 
                 // Load frequency reference status
                 await loadFrequencyReference();
@@ -8004,11 +8008,11 @@
                 // Wait for tunnel status if it was fetched
                 const tunnelStatus = tunnelStatusPromise ? await tunnelStatusPromise : null;
 
-                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth }, false);
+                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, frontendStatus: frontendStatusData, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth }, false);
 
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!monitorRefreshInterval) {
-                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (freqRefHealth?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false);
+                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (freqRefHealth?.healthy !== false) && (frontendStatusData?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false);
                     if (allHealthy) {
                         showAlert('Health check completed - all systems healthy', 'success');
                     } else {
@@ -8251,13 +8255,14 @@
                 const hasNoiseFloorIssues = data.noiseFloor && !data.noiseFloor.healthy;
                 const hasSpaceWeatherIssues = data.spaceWeather && !data.spaceWeather.healthy;
                 const hasFrequencyReferenceIssues = data.frequencyReference && data.frequencyReference.enabled && !data.frequencyReference.healthy;
+                const hasFrontendStatusIssues = data.frontendStatus && !data.frontendStatus.healthy;
                 const hasDecoderIssues = data.decoder && !data.decoder.healthy;
                 const hasCWSkimmerIssues = data.cwSkimmer && data.cwSkimmer.enabled && !data.cwSkimmer.healthy;
                 const hasMQTTIssues = data.mqtt && data.mqtt.enabled && !data.mqtt.healthy;
                 const hasRotctlIssues = data.rotctl && data.rotctl.enabled && !data.rotctl.healthy;
                 const hasSystemLoadIssues = data.system_load && (data.system_load.status === 'warning' || data.system_load.status === 'critical');
 
-                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasFrequencyReferenceIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues || hasRotctlIssues || hasSystemLoadIssues) {
+                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasFrequencyReferenceIssues || hasFrontendStatusIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues || hasRotctlIssues || hasSystemLoadIssues) {
                     const warningBanner = document.createElement('div');
                     warningBanner.style.padding = '20px';
                     warningBanner.style.background = '#fff3cd';
@@ -8311,6 +8316,12 @@
                     if (hasFrequencyReferenceIssues) {
                         const li = document.createElement('li');
                         li.innerHTML = '<strong>Frequency Reference:</strong> ' + (data.frequencyReference.issues && data.frequencyReference.issues.length > 0 ? data.frequencyReference.issues.join(', ') : 'System unhealthy');
+                        issuesList.appendChild(li);
+                    }
+
+                    if (hasFrontendStatusIssues) {
+                        const li = document.createElement('li');
+                        li.innerHTML = '<strong>SDR Frontend:</strong> ' + (data.frontendStatus.issues && data.frontendStatus.issues.length > 0 ? data.frontendStatus.issues.join(', ') : 'System unhealthy');
                         issuesList.appendChild(li);
                     }
 
@@ -8859,6 +8870,232 @@
 
                 const issuesTitle = document.createElement('strong');
                 issuesTitle.textContent = '⚠️ Issues Detected:';
+                issuesTitle.style.display = 'block';
+                issuesTitle.style.marginBottom = '10px';
+                issuesDiv.appendChild(issuesTitle);
+
+                const issuesList = document.createElement('ul');
+                issuesList.style.marginLeft = '20px';
+                data.issues.forEach(issue => {
+                    const li = document.createElement('li');
+                    li.textContent = issue;
+                    li.style.marginBottom = '5px';
+                    issuesList.appendChild(li);
+                });
+                issuesDiv.appendChild(issuesList);
+                statusSection.appendChild(issuesDiv);
+            }
+
+            container.appendChild(statusSection);
+        }
+
+        function renderFrontendStatusHealth(container, data) {
+            // Only render if we have frontend status data
+            if (!data || data.healthy === undefined) {
+                return;
+            }
+
+            // Render frontend status health
+            const statusSection = document.createElement('div');
+            statusSection.className = 'config-section';
+
+            const statusIcon = data.healthy ? '✅' : '❌';
+            const statusColor = data.healthy ? '#28a745' : (data.status === 'critical' ? '#dc3545' : '#ffc107');
+
+            statusSection.innerHTML = `
+                <h3 style="color: ${statusColor};">${statusIcon} SDR Frontend Health</h3>
+            `;
+
+            // Overall status
+            const statusDiv = document.createElement('div');
+            statusDiv.style.padding = '15px';
+            statusDiv.style.background = data.healthy ? '#d4edda' : (data.status === 'critical' ? '#f8d7da' : '#fff3cd');
+            statusDiv.style.border = `1px solid ${data.healthy ? '#c3e6cb' : (data.status === 'critical' ? '#f5c6cb' : '#ffeaa7')}`;
+            statusDiv.style.borderRadius = '5px';
+            statusDiv.style.marginBottom = '20px';
+
+            const overrangesPerSec = data.overranges_per_second !== undefined ? data.overranges_per_second.toFixed(1) : 'N/A';
+
+            statusDiv.innerHTML = `
+                <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : (data.status === 'critical' ? 'Critical' : 'Warning')}</strong><br>
+                <span style="color: #666; font-size: 14px;">A/D Overranges: <strong>${overrangesPerSec}</strong> per second</span><br>
+                <span style="color: #666; font-size: 14px;">Total Overranges: ${data.ad_overranges ? data.ad_overranges.toLocaleString() : 'N/A'}</span><br>
+                <span style="color: #666; font-size: 14px;">Stable For: ${data.time_since_overrange || 'N/A'}</span>
+            `;
+            statusSection.appendChild(statusDiv);
+
+            // Statistics
+            const statsDiv = document.createElement('div');
+            statsDiv.style.display = 'grid';
+            statsDiv.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
+            statsDiv.style.gap = '15px';
+            statsDiv.style.marginBottom = '20px';
+
+            // Determine color for overranges
+            let overrangeColor = '#28a745'; // Green
+            let overrangeIcon = '✅';
+            if (data.overranges_per_second > 100) {
+                overrangeColor = '#dc3545'; // Red
+                overrangeIcon = '🚨';
+            } else if (data.overranges_per_second > 1) {
+                overrangeColor = '#ffc107'; // Yellow
+                overrangeIcon = '⚠️';
+            }
+
+            const stats = [
+                {
+                    label: 'Overranges/sec',
+                    value: overrangesPerSec,
+                    icon: overrangeIcon,
+                    color: overrangeColor
+                },
+                {
+                    label: 'IF Power',
+                    value: data.if_power !== null && data.if_power !== undefined ? data.if_power.toFixed(1) + ' dBFS' : 'N/A',
+                    icon: '📊',
+                    color: '#667eea'
+                }
+            ];
+
+            stats.forEach(stat => {
+                const statCard = document.createElement('div');
+                statCard.style.padding = '15px';
+                statCard.style.background = '#f8f9fa';
+                statCard.style.borderRadius = '5px';
+                statCard.style.textAlign = 'center';
+                statCard.innerHTML = `
+                    <div style="font-size: 24px; margin-bottom: 5px;">${stat.icon}</div>
+                    <div style="font-size: 18px; font-weight: bold; color: ${stat.color}; margin-bottom: 5px;">${stat.value}</div>
+                    <div style="font-size: 12px; color: #666;">${stat.label}</div>
+                `;
+                statsDiv.appendChild(statCard);
+            });
+            statusSection.appendChild(statsDiv);
+
+            // Issues list
+            if (data.issues && data.issues.length > 0) {
+                const issuesDiv = document.createElement('div');
+                issuesDiv.style.padding = '15px';
+                issuesDiv.style.background = data.status === 'critical' ? '#f8d7da' : '#fff3cd';
+                issuesDiv.style.border = `1px solid ${data.status === 'critical' ? '#f5c6cb' : '#ffeaa7'}`;
+                issuesDiv.style.borderRadius = '5px';
+                issuesDiv.style.marginBottom = '20px';
+
+                const issuesTitle = document.createElement('strong');
+                issuesTitle.textContent = data.status === 'critical' ? '🚨 Critical Issues:' : '⚠️ Issues Detected:';
+                issuesTitle.style.display = 'block';
+                issuesTitle.style.marginBottom = '10px';
+                issuesDiv.appendChild(issuesTitle);
+
+                const issuesList = document.createElement('ul');
+                issuesList.style.marginLeft = '20px';
+                data.issues.forEach(issue => {
+                    const li = document.createElement('li');
+                    li.textContent = issue;
+                    li.style.marginBottom = '5px';
+                    issuesList.appendChild(li);
+                });
+                issuesDiv.appendChild(issuesList);
+                statusSection.appendChild(issuesDiv);
+            }
+
+            container.appendChild(statusSection);
+        }
+
+        function renderFrontendStatusHealth(container, data) {
+            // Only render if we have frontend status data
+            if (!data || data.healthy === undefined) {
+                return;
+            }
+
+            // Render frontend status health
+            const statusSection = document.createElement('div');
+            statusSection.className = 'config-section';
+
+            const statusIcon = data.healthy ? '✅' : '❌';
+            const statusColor = data.healthy ? '#28a745' : (data.status === 'critical' ? '#dc3545' : '#ffc107');
+
+            statusSection.innerHTML = `
+                <h3 style="color: ${statusColor};">${statusIcon} SDR Frontend Health</h3>
+            `;
+
+            // Overall status
+            const statusDiv = document.createElement('div');
+            statusDiv.style.padding = '15px';
+            statusDiv.style.background = data.healthy ? '#d4edda' : (data.status === 'critical' ? '#f8d7da' : '#fff3cd');
+            statusDiv.style.border = `1px solid ${data.healthy ? '#c3e6cb' : (data.status === 'critical' ? '#f5c6cb' : '#ffeaa7')}`;
+            statusDiv.style.borderRadius = '5px';
+            statusDiv.style.marginBottom = '20px';
+
+            const overrangesPerSec = data.overranges_per_second !== undefined ? data.overranges_per_second.toFixed(1) : 'N/A';
+
+            statusDiv.innerHTML = `
+                <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : (data.status === 'critical' ? 'Critical' : 'Warning')}</strong><br>
+                <span style="color: #666; font-size: 14px;">A/D Overranges: <strong>${overrangesPerSec}</strong> per second</span><br>
+                <span style="color: #666; font-size: 14px;">Total Overranges: ${data.ad_overranges ? data.ad_overranges.toLocaleString() : 'N/A'}</span><br>
+                <span style="color: #666; font-size: 14px;">Stable For: ${data.time_since_overrange || 'N/A'}</span>
+            `;
+            statusSection.appendChild(statusDiv);
+
+            // Statistics
+            const statsDiv = document.createElement('div');
+            statsDiv.style.display = 'grid';
+            statsDiv.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
+            statsDiv.style.gap = '15px';
+            statsDiv.style.marginBottom = '20px';
+
+            // Determine color for overranges
+            let overrangeColor = '#28a745'; // Green
+            let overrangeIcon = '✅';
+            if (data.overranges_per_second > 100) {
+                overrangeColor = '#dc3545'; // Red
+                overrangeIcon = '🚨';
+            } else if (data.overranges_per_second > 1) {
+                overrangeColor = '#ffc107'; // Yellow
+                overrangeIcon = '⚠️';
+            }
+
+            const stats = [
+                {
+                    label: 'Overranges/sec',
+                    value: overrangesPerSec,
+                    icon: overrangeIcon,
+                    color: overrangeColor
+                },
+                {
+                    label: 'IF Power',
+                    value: data.if_power !== null && data.if_power !== undefined ? data.if_power.toFixed(1) + ' dBFS' : 'N/A',
+                    icon: '📊',
+                    color: '#667eea'
+                }
+            ];
+
+            stats.forEach(stat => {
+                const statCard = document.createElement('div');
+                statCard.style.padding = '15px';
+                statCard.style.background = '#f8f9fa';
+                statCard.style.borderRadius = '5px';
+                statCard.style.textAlign = 'center';
+                statCard.innerHTML = `
+                    <div style="font-size: 24px; margin-bottom: 5px;">${stat.icon}</div>
+                    <div style="font-size: 18px; font-weight: bold; color: ${stat.color}; margin-bottom: 5px;">${stat.value}</div>
+                    <div style="font-size: 12px; color: #666;">${stat.label}</div>
+                `;
+                statsDiv.appendChild(statCard);
+            });
+            statusSection.appendChild(statsDiv);
+
+            // Issues list
+            if (data.issues && data.issues.length > 0) {
+                const issuesDiv = document.createElement('div');
+                issuesDiv.style.padding = '15px';
+                issuesDiv.style.background = data.status === 'critical' ? '#f8d7da' : '#fff3cd';
+                issuesDiv.style.border = `1px solid ${data.status === 'critical' ? '#f5c6cb' : '#ffeaa7'}`;
+                issuesDiv.style.borderRadius = '5px';
+                issuesDiv.style.marginBottom = '20px';
+
+                const issuesTitle = document.createElement('strong');
+                issuesTitle.textContent = data.status === 'critical' ? '🚨 Critical Issues:' : '⚠️ Issues Detected:';
                 issuesTitle.style.display = 'block';
                 issuesTitle.style.marginBottom = '10px';
                 issuesDiv.appendChild(issuesTitle);

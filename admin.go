@@ -1896,19 +1896,44 @@ func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Requ
 		timeSinceOverrange = "N/A"
 	}
 
+	// Calculate overranges per second
+	var overrangesPerSecond float64
+	if frontendStatus.InputSamprate > 0 {
+		overrangesPerSecond = float64(frontendStatus.ADOverranges) / float64(frontendStatus.InputSamprate)
+	}
+
+	// Determine health status based on overranges per second
+	healthy := true
+	status := "ok"
+	issues := []string{}
+
+	if overrangesPerSecond > 100 {
+		healthy = false
+		status = "critical"
+		issues = append(issues, fmt.Sprintf("Critical: %.1f A/D overranges per second (>100 threshold). RF input may be too strong - reduce gain or add attenuation.", overrangesPerSecond))
+	} else if overrangesPerSecond > 1 {
+		healthy = false
+		status = "warning"
+		issues = append(issues, fmt.Sprintf("Warning: %.1f A/D overranges per second (>1 threshold). Consider reducing RF gain or adding attenuation.", overrangesPerSecond))
+	}
+
 	response := map[string]interface{}{
-		"lna_gain":             frontendStatus.LNAGain,
-		"mixer_gain":           frontendStatus.MixerGain,
-		"if_gain":              frontendStatus.IFGain,
-		"rf_gain":              sanitizeFloat(frontendStatus.RFGain),
-		"rf_atten":             sanitizeFloat(frontendStatus.RFAtten),
-		"rf_agc":               frontendStatus.RFAGC,
-		"if_power":             sanitizeFloat(frontendStatus.IFPower),
-		"ad_overranges":        frontendStatus.ADOverranges,
-		"samples_since_over":   frontendStatus.SamplesSinceOver,
-		"time_since_overrange": timeSinceOverrange,
-		"input_samprate":       frontendStatus.InputSamprate,
-		"last_update":          frontendStatus.LastUpdate.Format(time.RFC3339),
+		"lna_gain":              frontendStatus.LNAGain,
+		"mixer_gain":            frontendStatus.MixerGain,
+		"if_gain":               frontendStatus.IFGain,
+		"rf_gain":               sanitizeFloat(frontendStatus.RFGain),
+		"rf_atten":              sanitizeFloat(frontendStatus.RFAtten),
+		"rf_agc":                frontendStatus.RFAGC,
+		"if_power":              sanitizeFloat(frontendStatus.IFPower),
+		"ad_overranges":         frontendStatus.ADOverranges,
+		"overranges_per_second": overrangesPerSecond,
+		"samples_since_over":    frontendStatus.SamplesSinceOver,
+		"time_since_overrange":  timeSinceOverrange,
+		"input_samprate":        frontendStatus.InputSamprate,
+		"last_update":           frontendStatus.LastUpdate.Format(time.RFC3339),
+		"healthy":               healthy,
+		"status":                status,
+		"issues":                issues,
 	}
 
 	w.WriteHeader(http.StatusOK)

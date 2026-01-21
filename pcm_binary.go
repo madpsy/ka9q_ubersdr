@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"math"
 	"sync"
-	"time"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -152,22 +151,22 @@ func NewPCMBinaryEncoderWithVersion(useCompression bool, version uint8) *PCMBina
 //
 // Parameters:
 //   - pcmData: Raw PCM audio data (big-endian int16 samples from radiod)
-//   - rtpTimestamp: RTP timestamp for drift-free audio alignment
+//   - gpsTimeNs: GPS-synchronized Unix timestamp in nanoseconds
 //   - sampleRate: Audio sample rate in Hz
 //   - channels: Number of audio channels (1=mono, 2=stereo)
 //
 // Returns:
 //   - Encoded packet ready for WebSocket transmission
 //   - Error if encoding fails
-func (e *PCMBinaryEncoder) EncodePCMPacket(pcmData []byte, rtpTimestamp uint32, sampleRate int, channels int) ([]byte, error) {
-	return e.EncodePCMPacketWithSignalQuality(pcmData, rtpTimestamp, sampleRate, channels, -999.0, -999.0)
+func (e *PCMBinaryEncoder) EncodePCMPacket(pcmData []byte, gpsTimeNs int64, sampleRate int, channels int) ([]byte, error) {
+	return e.EncodePCMPacketWithSignalQuality(pcmData, gpsTimeNs, sampleRate, channels, -999.0, -999.0)
 }
 
 // EncodePCMPacketWithSignalQuality encodes a PCM audio packet with optional signal quality metrics
 //
 // Parameters:
 //   - pcmData: Raw PCM audio data (big-endian int16 samples from radiod)
-//   - rtpTimestamp: RTP timestamp for drift-free audio alignment
+//   - gpsTimeNs: GPS-synchronized Unix timestamp in nanoseconds
 //   - sampleRate: Audio sample rate in Hz
 //   - channels: Number of audio channels (1=mono, 2=stereo)
 //   - basebandPower: Baseband signal power in dBFS (use -999.0 for no data)
@@ -176,7 +175,7 @@ func (e *PCMBinaryEncoder) EncodePCMPacket(pcmData []byte, rtpTimestamp uint32, 
 // Returns:
 //   - Encoded packet ready for WebSocket transmission
 //   - Error if encoding fails
-func (e *PCMBinaryEncoder) EncodePCMPacketWithSignalQuality(pcmData []byte, rtpTimestamp uint32, sampleRate int, channels int, basebandPower, noiseDensity float32) ([]byte, error) {
+func (e *PCMBinaryEncoder) EncodePCMPacketWithSignalQuality(pcmData []byte, gpsTimeNs int64, sampleRate int, channels int, basebandPower, noiseDensity float32) ([]byte, error) {
 	e.encoderMu.Lock()
 	defer e.encoderMu.Unlock()
 
@@ -193,14 +192,14 @@ func (e *PCMBinaryEncoder) EncodePCMPacketWithSignalQuality(pcmData []byte, rtpT
 
 	if needFullHeader {
 		// FULL HEADER PACKET (29 or 37 bytes + data, depending on version)
-		packet = e.buildFullHeaderPacket(pcmData, rtpTimestamp, sampleRate, channels, basebandPower, noiseDensity)
+		packet = e.buildFullHeaderPacket(pcmData, gpsTimeNs, sampleRate, channels, basebandPower, noiseDensity)
 
 		// Update tracking
 		e.lastSampleRate = sampleRate
 		e.lastChannels = channels
 	} else {
 		// MINIMAL HEADER PACKET (13 bytes + data)
-		packet = e.buildMinimalHeaderPacket(pcmData, rtpTimestamp)
+		packet = e.buildMinimalHeaderPacket(pcmData, gpsTimeNs)
 	}
 
 	// Apply compression if enabled
@@ -215,7 +214,7 @@ func (e *PCMBinaryEncoder) EncodePCMPacketWithSignalQuality(pcmData []byte, rtpT
 }
 
 // buildFullHeaderPacket creates a packet with full metadata header (29 or 37 bytes depending on version)
-func (e *PCMBinaryEncoder) buildFullHeaderPacket(pcmData []byte, rtpTimestamp uint32, sampleRate int, channels int, basebandPower, noiseDensity float32) []byte {
+func (e *PCMBinaryEncoder) buildFullHeaderPacket(pcmData []byte, gpsTimeNs int64, sampleRate int, channels int, basebandPower, noiseDensity float32) []byte {
 	// Determine header size based on version
 	headerSize := PCMFullHeaderSizeV1
 	if e.version >= PCMBinaryVersion2 {
@@ -242,14 +241,14 @@ func (e *PCMBinaryEncoder) buildFullHeaderPacket(pcmData []byte, rtpTimestamp ui
 	}
 	offset += 1
 
-	// RTP timestamp (8 bytes): Sample count for drift-free synchronization
-	// This is critical for maintaining audio timing across network jitter
-	binary.LittleEndian.PutUint64(packet[offset:], uint64(rtpTimestamp))
+	// GPS timestamp (8 bytes): GPS-synchronized Unix time in nanoseconds
+	// Used for TDOA, multi-server alignment, and latency measurement
+	binary.LittleEndian.PutUint64(packet[offset:], uint64(gpsTimeNs))
 	offset += 8
 
-	// Wall clock time (8 bytes): NTP-synced time in milliseconds
-	// Used for multi-server alignment and latency measurement
-	binary.LittleEndian.PutUint64(packet[offset:], uint64(time.Now().UnixMilli()))
+	// Wall clock time (8 bytes): Deprecated, kept for protocol compatibility
+	// Now contains the same GPS timestamp in milliseconds for backward compatibility
+	binary.LittleEndian.PutUint64(packet[offset:], uint64(gpsTimeNs/1e6))
 	offset += 8
 
 	// Sample rate (4 bytes): Audio sample rate in Hz
@@ -286,7 +285,7 @@ func (e *PCMBinaryEncoder) buildFullHeaderPacket(pcmData []byte, rtpTimestamp ui
 }
 
 // buildMinimalHeaderPacket creates a packet with minimal header (13 bytes)
-func (e *PCMBinaryEncoder) buildMinimalHeaderPacket(pcmData []byte, rtpTimestamp uint32) []byte {
+func (e *PCMBinaryEncoder) buildMinimalHeaderPacket(pcmData []byte, gpsTimeNs int64) []byte {
 	// Allocate buffer: 13 byte header + PCM data
 	packet := make([]byte, PCMMinimalHeaderSize+len(pcmData))
 	offset := 0
@@ -299,8 +298,8 @@ func (e *PCMBinaryEncoder) buildMinimalHeaderPacket(pcmData []byte, rtpTimestamp
 	packet[offset] = e.version
 	offset += 1
 
-	// RTP timestamp (8 bytes): Only essential timing info in minimal header
-	binary.LittleEndian.PutUint64(packet[offset:], uint64(rtpTimestamp))
+	// GPS timestamp (8 bytes): GPS-synchronized Unix time in nanoseconds
+	binary.LittleEndian.PutUint64(packet[offset:], uint64(gpsTimeNs))
 	offset += 8
 
 	// Reserved (2 bytes): For future use

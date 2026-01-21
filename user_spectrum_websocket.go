@@ -572,7 +572,8 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinarySpectrum(conn *wsConn, sessi
 		}
 	}
 
-	timestamp := time.Now().UnixMilli()
+	// GPS-synchronized timestamp in nanoseconds (consistent with audio timestamps)
+	timestamp := time.Now().UnixNano()
 
 	var packet []byte
 	if sendFullFrame {
@@ -752,7 +753,8 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinary8Spectrum(conn *wsConn, sess
 		}
 	}
 
-	timestamp := time.Now().UnixMilli()
+	// GPS-synchronized timestamp in nanoseconds (consistent with audio timestamps)
+	timestamp := time.Now().UnixNano()
 
 	var packet []byte
 	if sendFullFrame {

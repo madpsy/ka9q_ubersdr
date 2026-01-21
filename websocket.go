@@ -995,8 +995,8 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				if version >= 2 {
 					// Version 2: include signal quality metrics
 					packet = make([]byte, 21+len(opusData))
-					// Timestamp (8 bytes, little-endian uint64)
-					binary.LittleEndian.PutUint64(packet[0:8], uint64(audioPacket.RTPTimestamp))
+					// GPS timestamp in nanoseconds (8 bytes, little-endian uint64)
+					binary.LittleEndian.PutUint64(packet[0:8], uint64(audioPacket.GPSTimeNs))
 					// Sample rate (4 bytes, little-endian uint32)
 					binary.LittleEndian.PutUint32(packet[8:12], uint32(session.SampleRate))
 					// Channels (1 byte)
@@ -1010,8 +1010,8 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				} else {
 					// Version 1: original format
 					packet = make([]byte, 13+len(opusData))
-					// Timestamp (8 bytes, little-endian uint64)
-					binary.LittleEndian.PutUint64(packet[0:8], uint64(audioPacket.RTPTimestamp))
+					// GPS timestamp in nanoseconds (8 bytes, little-endian uint64)
+					binary.LittleEndian.PutUint64(packet[0:8], uint64(audioPacket.GPSTimeNs))
 					// Sample rate (4 bytes, little-endian uint32)
 					binary.LittleEndian.PutUint32(packet[8:12], uint32(session.SampleRate))
 					// Channels (1 byte)
@@ -1067,7 +1067,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				// Version 2: First packet or metadata change: full header (37 bytes), subsequent: minimal (13 bytes)
 				packet, err := pcmBinaryEncoder.EncodePCMPacketWithSignalQuality(
 					audioPacket.PCMData,
-					audioPacket.RTPTimestamp,
+					audioPacket.GPSTimeNs,
 					session.SampleRate,
 					session.Channels,
 					basebandPower,

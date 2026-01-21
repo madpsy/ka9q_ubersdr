@@ -7,16 +7,18 @@ import (
 	"net"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/pion/rtp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/sys/unix"
 )
 
-// AudioPacket represents an audio packet with PCM data and RTP timestamp
+// AudioPacket represents an audio packet with PCM data and timestamps
 type AudioPacket struct {
 	PCMData      []byte
-	RTPTimestamp uint32 // RTP timestamp representing audio capture time
+	RTPTimestamp uint32 // RTP timestamp from radiod (kept for reference)
+	GPSTimeNs    int64  // GPS-synchronized Unix time in nanoseconds
 }
 
 // AudioReceiver receives PCM audio from radiod multicast streams
@@ -142,7 +144,6 @@ func (ar *AudioReceiver) Stop() {
 	log.Println("Audio receiver stopped")
 }
 
-
 // receiveLoop continuously receives and processes audio packets
 func (ar *AudioReceiver) receiveLoop() {
 	buffer := make([]byte, 65536)
@@ -167,6 +168,10 @@ func (ar *AudioReceiver) receiveLoop() {
 			continue
 		}
 
+		// Capture GPS-synchronized timestamp immediately after packet arrival
+		// This is done once per packet regardless of client count for efficiency
+		gpsTimeNs := time.Now().UnixNano()
+
 		if n < 12 {
 			// Too small to be valid RTP
 			if DebugMode {
@@ -183,22 +188,22 @@ func (ar *AudioReceiver) receiveLoop() {
 			}
 			continue
 		}
-	
+
 		packetCount++
-		
+
 		// Route to appropriate session using SSRC from RTP header
-		// Pass both payload and RTP timestamp for accurate audio alignment
-		ar.routeAudio(packet.SSRC, packet.Payload, packet.Timestamp)
+		// Pass payload, RTP timestamp, and GPS timestamp
+		ar.routeAudio(packet.SSRC, packet.Payload, packet.Timestamp, gpsTimeNs)
 	}
-	
+
 	if DebugMode {
 		log.Printf("DEBUG: Audio receive loop exited after %d packets", packetCount)
 	}
 }
 
 // routeAudio routes audio data to the appropriate session based on RTP SSRC
-// The RTP timestamp represents when the audio was captured and is used for alignment
-func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp uint32) {
+// The GPS timestamp represents when the packet arrived at ubersdr (GPS-synchronized)
+func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp uint32, gpsTimeNs int64) {
 	// Look up session by SSRC
 	session, ok := ar.sessions.GetSessionBySSRC(ssrc)
 	if !ok {
@@ -211,10 +216,11 @@ func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp ui
 	dataCopy := make([]byte, len(pcmData))
 	copy(dataCopy, pcmData)
 
-	// Create audio packet with PCM data and RTP timestamp
+	// Create audio packet with PCM data and timestamps
 	audioPacket := AudioPacket{
 		PCMData:      dataCopy,
 		RTPTimestamp: rtpTimestamp,
+		GPSTimeNs:    gpsTimeNs,
 	}
 
 	// Send audio packet to session's channel

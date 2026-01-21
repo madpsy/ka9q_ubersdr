@@ -852,3 +852,85 @@ func (frm *FrequencyReferenceMonitor) GetHourlyHistory() []FrequencyReferenceHis
 
 	return result
 }
+
+// GetHealthStatus analyzes the 60-minute history to determine health status
+// Returns health status with mean offset, standard deviation, and any issues
+func (frm *FrequencyReferenceMonitor) GetHealthStatus() map[string]interface{} {
+	if frm == nil {
+		return map[string]interface{}{
+			"enabled": false,
+			"healthy": true,
+		}
+	}
+
+	frm.historyMu.RLock()
+	history := frm.history
+	frm.historyMu.RUnlock()
+
+	// Check if we have recent data (within last 5 minutes)
+	frm.mu.RLock()
+	lastUpdate := frm.lastUpdate
+	frm.mu.RUnlock()
+
+	timeSinceUpdate := time.Since(lastUpdate)
+	
+	result := map[string]interface{}{
+		"enabled":       true,
+		"healthy":       true,
+		"issues":        []string{},
+		"mean_offset":   0.0,
+		"stddev_offset": 0.0,
+	}
+
+	issues := []string{}
+
+	// Check data freshness
+	if timeSinceUpdate > 5*time.Minute {
+		issues = append(issues, fmt.Sprintf("No data received in last %.0f minutes", timeSinceUpdate.Minutes()))
+		result["healthy"] = false
+	}
+
+	// Need at least 10 minutes of data for meaningful statistics
+	if len(history) < 10 {
+		if len(history) > 0 {
+			issues = append(issues, fmt.Sprintf("Insufficient history data (%d minutes, need 10+)", len(history)))
+		} else {
+			issues = append(issues, "No history data available yet")
+		}
+		result["issues"] = issues
+		result["healthy"] = len(issues) == 0
+		return result
+	}
+
+	// Calculate mean and standard deviation of frequency offsets
+	var sumOffset float64
+	for _, entry := range history {
+		sumOffset += entry.FrequencyOffset
+	}
+	meanOffset := sumOffset / float64(len(history))
+
+	var sumSquaredDiff float64
+	for _, entry := range history {
+		diff := entry.FrequencyOffset - meanOffset
+		sumSquaredDiff += diff * diff
+	}
+	stddevOffset := math.Sqrt(sumSquaredDiff / float64(len(history)))
+
+	result["mean_offset"] = math.Round(meanOffset*100) / 100       // 2 decimal places
+	result["stddev_offset"] = math.Round(stddevOffset*100) / 100   // 2 decimal places
+
+	// Check for instability (high standard deviation)
+	if stddevOffset > 2.0 {
+		issues = append(issues, fmt.Sprintf("Unstable frequency reference (stddev: %.2f Hz > 2 Hz threshold)", stddevOffset))
+	}
+
+	// Check for consistent offset (mean offset too high)
+	if math.Abs(meanOffset) > 3.0 {
+		issues = append(issues, fmt.Sprintf("Consistent frequency offset (mean: %.2f Hz, exceeds ±3 Hz threshold)", meanOffset))
+	}
+
+	result["issues"] = issues
+	result["healthy"] = len(issues) == 0
+
+	return result
+}

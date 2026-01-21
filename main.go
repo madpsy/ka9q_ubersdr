@@ -1164,6 +1164,9 @@ func main() {
 	http.HandleFunc("/admin/spaceweather-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleSpaceWeatherHealth(w, r, spaceWeatherMonitor)
 	}))
+	http.HandleFunc("/admin/frequency-reference-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleFrequencyReferenceHealth(w, r, freqRefMonitor)
+	}))
 	http.HandleFunc("/admin/decoder-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleDecoderHealth(w, r, multiDecoder)
 	}))
@@ -2612,6 +2615,32 @@ func handleSpaceWeatherHealth(w http.ResponseWriter, r *http.Request, swm *Space
 
 	if err := json.NewEncoder(w).Encode(status); err != nil {
 		log.Printf("Error encoding space weather health status: %v", err)
+	}
+}
+
+// handleFrequencyReferenceHealth serves the health status of the frequency reference monitor
+// This is an admin-only endpoint, so IP ban checking is not needed (handled by auth middleware)
+func handleFrequencyReferenceHealth(w http.ResponseWriter, r *http.Request, frm *FrequencyReferenceMonitor) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Return health status
+	status := frm.GetHealthStatus()
+
+	// Extract healthy field from map
+	healthy, ok := status["healthy"].(bool)
+	if !ok {
+		healthy = true // Default to healthy if field missing
+	}
+
+	// Set appropriate HTTP status code
+	if healthy {
+		w.WriteHeader(http.StatusOK)
+	} else {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		log.Printf("Error encoding frequency reference health status: %v", err)
 	}
 }
 

@@ -7964,12 +7964,13 @@
                 // Load frequency reference status
                 await loadFrequencyReference();
 
-                // Fetch system load, tunnel status, instance reporter, noise floor, space weather, decoder, CW Skimmer, MQTT, and rotctl health
+                // Fetch system load, tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, and rotctl health
                 const fetchPromises = [
                     authenticatedFetch('/admin/system-load'),
                     authenticatedFetch('/admin/instance-reporter-health'),
                     authenticatedFetch('/admin/noisefloor-health'),
                     authenticatedFetch('/admin/spaceweather-health'),
+                    authenticatedFetch('/admin/frequency-reference-health'),
                     authenticatedFetch('/admin/decoder-health'),
                     authenticatedFetch('/admin/cwskimmer-health'),
                     authenticatedFetch('/admin/mqtt-health'),
@@ -7982,9 +7983,9 @@
                     tunnelStatusPromise = fetchTunnelStatus();
                 }
 
-                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse] = await Promise.all(fetchPromises);
+                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse] = await Promise.all(fetchPromises);
 
-                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse) {
+                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse) {
                     // Auth failed, stop auto-refresh
                     stopMonitorAutoRefresh();
                     return;
@@ -7994,6 +7995,7 @@
                 const instanceReporterHealth = (instanceReporterResponse.ok || instanceReporterResponse.status === 503) ? await instanceReporterResponse.json() : null;
                 const nfHealth = (nfResponse.ok || nfResponse.status === 503) ? await nfResponse.json() : null;
                 const swHealth = (swResponse.ok || swResponse.status === 503) ? await swResponse.json() : null;
+                const freqRefHealth = (freqRefResponse.ok || freqRefResponse.status === 503) ? await freqRefResponse.json() : null;
                 const decoderHealth = (decoderResponse.ok || decoderResponse.status === 503) ? await decoderResponse.json() : null;
                 const cwSkimmerHealth = (cwSkimmerResponse.ok || cwSkimmerResponse.status === 503) ? await cwSkimmerResponse.json() : null;
                 const mqttHealth = (mqttResponse.ok || mqttResponse.status === 503) ? await mqttResponse.json() : null;
@@ -8002,11 +8004,11 @@
                 // Wait for tunnel status if it was fetched
                 const tunnelStatus = tunnelStatusPromise ? await tunnelStatusPromise : null;
 
-                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth }, false);
+                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth }, false);
 
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!monitorRefreshInterval) {
-                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false);
+                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (freqRefHealth?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false);
                     if (allHealthy) {
                         showAlert('Health check completed - all systems healthy', 'success');
                     } else {
@@ -8045,11 +8047,12 @@
 
         async function loadMonitorHealthDetailed() {
             try {
-                // Fetch tunnel status, instance reporter, noise floor, space weather, decoder, CW Skimmer, MQTT, and rotctl detailed diagnostics
+                // Fetch tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, and rotctl detailed diagnostics
                 const fetchPromises = [
                     authenticatedFetch('/admin/instance-reporter-health'),
                     authenticatedFetch('/admin/noisefloor-health?detailed=true'),
                     authenticatedFetch('/admin/spaceweather-health?detailed=true'),
+                    authenticatedFetch('/admin/frequency-reference-health'),
                     authenticatedFetch('/admin/decoder-health?detailed=true'),
                     authenticatedFetch('/admin/cwskimmer-health?detailed=true'),
                     authenticatedFetch('/admin/mqtt-health'),
@@ -8062,13 +8065,14 @@
                     tunnelStatusPromise = fetchTunnelStatus();
                 }
 
-                const [instanceReporterResponse, nfResponse, swResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse] = await Promise.all(fetchPromises);
+                const [instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse] = await Promise.all(fetchPromises);
 
-                if (!instanceReporterResponse || !nfResponse || !swResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse) return; // Auth failed, already handled
+                if (!instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse) return; // Auth failed, already handled
 
                 const instanceReporterDiag = (instanceReporterResponse.ok || instanceReporterResponse.status === 503) ? await instanceReporterResponse.json() : null;
                 const nfDiag = (nfResponse.ok || nfResponse.status === 503) ? await nfResponse.json() : null;
                 const swDiag = (swResponse.ok || swResponse.status === 503) ? await swResponse.json() : null;
+                const freqRefDiag = (freqRefResponse.ok || freqRefResponse.status === 503) ? await freqRefResponse.json() : null;
                 const decoderDiag = (decoderResponse.ok || decoderResponse.status === 503) ? await decoderResponse.json() : null;
                 const cwSkimmerDiag = (cwSkimmerResponse.ok || cwSkimmerResponse.status === 503) ? await cwSkimmerResponse.json() : null;
                 const mqttDiag = (mqttResponse.ok || mqttResponse.status === 503) ? await mqttResponse.json() : null;
@@ -8077,7 +8081,7 @@
                 // Wait for tunnel status if it was fetched
                 const tunnelStatus = tunnelStatusPromise ? await tunnelStatusPromise : null;
 
-                renderMonitorHealth({ tunnel: tunnelStatus, instanceReporter: instanceReporterDiag, noiseFloor: nfDiag, spaceWeather: swDiag, decoder: decoderDiag, cwSkimmer: cwSkimmerDiag, mqtt: mqttDiag, rotctl: rotctlDiag }, true);
+                renderMonitorHealth({ tunnel: tunnelStatus, instanceReporter: instanceReporterDiag, noiseFloor: nfDiag, spaceWeather: swDiag, frequencyReference: freqRefDiag, decoder: decoderDiag, cwSkimmer: cwSkimmerDiag, mqtt: mqttDiag, rotctl: rotctlDiag }, true);
                 showAlert('Detailed diagnostics loaded successfully', 'success');
             } catch (error) {
                 showAlert('Error loading detailed diagnostics: ' + error.message, 'error');
@@ -8246,13 +8250,14 @@
                 const hasInstanceReporterIssues = data.instanceReporter && data.instanceReporter.enabled && !data.instanceReporter.healthy;
                 const hasNoiseFloorIssues = data.noiseFloor && !data.noiseFloor.healthy;
                 const hasSpaceWeatherIssues = data.spaceWeather && !data.spaceWeather.healthy;
+                const hasFrequencyReferenceIssues = data.frequencyReference && data.frequencyReference.enabled && !data.frequencyReference.healthy;
                 const hasDecoderIssues = data.decoder && !data.decoder.healthy;
                 const hasCWSkimmerIssues = data.cwSkimmer && data.cwSkimmer.enabled && !data.cwSkimmer.healthy;
                 const hasMQTTIssues = data.mqtt && data.mqtt.enabled && !data.mqtt.healthy;
                 const hasRotctlIssues = data.rotctl && data.rotctl.enabled && !data.rotctl.healthy;
                 const hasSystemLoadIssues = data.system_load && (data.system_load.status === 'warning' || data.system_load.status === 'critical');
 
-                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues || hasRotctlIssues || hasSystemLoadIssues) {
+                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasFrequencyReferenceIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues || hasRotctlIssues || hasSystemLoadIssues) {
                     const warningBanner = document.createElement('div');
                     warningBanner.style.padding = '20px';
                     warningBanner.style.background = '#fff3cd';
@@ -8300,6 +8305,12 @@
                     if (hasSpaceWeatherIssues) {
                         const li = document.createElement('li');
                         li.innerHTML = '<strong>Space Weather Monitor:</strong> ' + (data.spaceWeather.issues && data.spaceWeather.issues.length > 0 ? data.spaceWeather.issues.join(', ') : 'System unhealthy');
+                        issuesList.appendChild(li);
+                    }
+
+                    if (hasFrequencyReferenceIssues) {
+                        const li = document.createElement('li');
+                        li.innerHTML = '<strong>Frequency Reference:</strong> ' + (data.frequencyReference.issues && data.frequencyReference.issues.length > 0 ? data.frequencyReference.issues.join(', ') : 'System unhealthy');
                         issuesList.appendChild(li);
                     }
 
@@ -8720,6 +8731,122 @@
                 `;
                 statusSection.appendChild(dataDiv);
             }
+
+            // Issues list
+            if (data.issues && data.issues.length > 0) {
+                const issuesDiv = document.createElement('div');
+                issuesDiv.style.padding = '15px';
+                issuesDiv.style.background = '#fff3cd';
+                issuesDiv.style.border = '1px solid #ffeaa7';
+                issuesDiv.style.borderRadius = '5px';
+                issuesDiv.style.marginBottom = '20px';
+
+                const issuesTitle = document.createElement('strong');
+                issuesTitle.textContent = '⚠️ Issues Detected:';
+                issuesTitle.style.display = 'block';
+                issuesTitle.style.marginBottom = '10px';
+                issuesDiv.appendChild(issuesTitle);
+
+                const issuesList = document.createElement('ul');
+                issuesList.style.marginLeft = '20px';
+                data.issues.forEach(issue => {
+                    const li = document.createElement('li');
+                    li.textContent = issue;
+                    li.style.marginBottom = '5px';
+                    issuesList.appendChild(li);
+                });
+                issuesDiv.appendChild(issuesList);
+                statusSection.appendChild(issuesDiv);
+            }
+
+            container.appendChild(statusSection);
+        }
+
+        function renderFrequencyReferenceHealth(container, data) {
+            // Only render if frequency reference is enabled
+            if (!data.enabled) {
+                return;
+            }
+
+            // Render frequency reference health status
+            const statusSection = document.createElement('div');
+            statusSection.className = 'config-section';
+
+            const statusIcon = data.healthy ? '✅' : '❌';
+            const statusColor = data.healthy ? '#28a745' : '#dc3545';
+
+            statusSection.innerHTML = `
+                <h3 style="color: ${statusColor};">${statusIcon} Frequency Reference Health</h3>
+            `;
+
+            // Overall status
+            const statusDiv = document.createElement('div');
+            statusDiv.style.padding = '15px';
+            statusDiv.style.background = data.healthy ? '#d4edda' : '#f8d7da';
+            statusDiv.style.border = `1px solid ${data.healthy ? '#c3e6cb' : '#f5c6cb'}`;
+            statusDiv.style.borderRadius = '5px';
+            statusDiv.style.marginBottom = '20px';
+            statusDiv.innerHTML = `
+                <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
+                <span style="color: #666; font-size: 14px;">Enabled: ${data.enabled ? 'Yes' : 'No'}</span>
+            `;
+            statusSection.appendChild(statusDiv);
+
+            // Statistics
+            const statsDiv = document.createElement('div');
+            statsDiv.style.display = 'grid';
+            statsDiv.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
+            statsDiv.style.gap = '15px';
+            statsDiv.style.marginBottom = '20px';
+
+            // Determine color for mean offset
+            const meanOffset = data.mean_offset || 0;
+            const meanOffsetAbs = Math.abs(meanOffset);
+            let meanOffsetColor = '#28a745'; // Green
+            if (meanOffsetAbs > 3.0) {
+                meanOffsetColor = '#dc3545'; // Red
+            } else if (meanOffsetAbs > 2.0) {
+                meanOffsetColor = '#ffc107'; // Yellow
+            }
+
+            // Determine color for stddev
+            const stddevOffset = data.stddev_offset || 0;
+            let stddevColor = '#28a745'; // Green
+            if (stddevOffset > 2.0) {
+                stddevColor = '#dc3545'; // Red
+            } else if (stddevOffset > 1.0) {
+                stddevColor = '#ffc107'; // Yellow
+            }
+
+            const stats = [
+                {
+                    label: 'Mean Offset (60 min)',
+                    value: meanOffset !== undefined ? (meanOffset >= 0 ? '+' : '') + meanOffset.toFixed(2) + ' Hz' : 'N/A',
+                    icon: '📊',
+                    color: meanOffsetColor
+                },
+                {
+                    label: 'Std Deviation (60 min)',
+                    value: stddevOffset !== undefined ? stddevOffset.toFixed(2) + ' Hz' : 'N/A',
+                    icon: '📈',
+                    color: stddevColor
+                }
+            ];
+
+            stats.forEach(stat => {
+                const statCard = document.createElement('div');
+                statCard.style.padding = '15px';
+                statCard.style.background = '#f8f9fa';
+                statCard.style.borderRadius = '5px';
+                statCard.style.textAlign = 'center';
+                statCard.innerHTML = `
+                    <div style="font-size: 24px; margin-bottom: 5px;">${stat.icon}</div>
+                    <div style="font-size: 18px; font-weight: bold; color: ${stat.color}; margin-bottom: 5px;">${stat.value}</div>
+                    <div style="font-size: 12px; color: #666;">${stat.label}</div>
+                `;
+                statsDiv.appendChild(statCard);
+            });
+            statusSection.appendChild(statsDiv);
 
             // Issues list
             if (data.issues && data.issues.length > 0) {

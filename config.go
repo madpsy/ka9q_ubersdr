@@ -216,6 +216,7 @@ type InstanceReportingConfig struct {
 	TunnelServerURI     string                 `yaml:"tunnel_server_uri"`     // Tunnel server WebSocket URI (default: wss://tunnel.ubersdr.org/tunnel/connect)
 	BetaFrontend        bool                   `yaml:"beta_frontend"`         // Enable beta frontend features (default: false)
 	tunnelServerIPs     []string               // Resolved IPs of tunnel server (internal use)
+	instanceReporterIPs []string               // Resolved IPs of instance reporter (internal use)
 }
 
 // InstanceConnectionInfo contains connection details for this instance
@@ -330,6 +331,15 @@ func LoadConfig(filename string) (*Config, error) {
 			fmt.Printf("Warning: X-Real-IP header will not be trusted. Falling back to X-Forwarded-For.\n")
 			// Clear the hostname so IsTunnelServer() returns false
 			config.InstanceReporting.TunnelServerHost = ""
+		}
+	}
+
+	// Resolve instance reporter hostname to IPs if configured
+	// Non-fatal: if DNS fails, log warning and continue (instance reporter won't get IQ48 access)
+	if config.InstanceReporting.Hostname != "" {
+		if err := config.InstanceReporting.resolveInstanceReporterIPs(); err != nil {
+			fmt.Printf("Warning: Failed to resolve instance_reporting.hostname '%s': %v\n", config.InstanceReporting.Hostname, err)
+			fmt.Printf("Warning: Instance reporter IPs will not have automatic IQ48 access.\n")
 		}
 	}
 
@@ -911,6 +921,53 @@ func (irc *InstanceReportingConfig) IsTunnelServer(ipStr string) bool {
 	// Check against all resolved IPs
 	for _, tunnelIP := range irc.tunnelServerIPs {
 		resolvedIP := net.ParseIP(tunnelIP)
+		if resolvedIP != nil && resolvedIP.Equal(ip) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// resolveInstanceReporterIPs resolves the instance reporter hostname to IP addresses
+func (irc *InstanceReportingConfig) resolveInstanceReporterIPs() error {
+	if irc.Hostname == "" {
+		return nil
+	}
+
+	fmt.Printf("Resolving instance reporter hostname: %s\n", irc.Hostname)
+
+	// Resolve hostname to IPs
+	ips, err := net.LookupHost(irc.Hostname)
+	if err != nil {
+		return fmt.Errorf("failed to resolve instance reporter hostname %s: %w", irc.Hostname, err)
+	}
+
+	if len(ips) == 0 {
+		return fmt.Errorf("no IPs found for instance reporter hostname %s", irc.Hostname)
+	}
+
+	irc.instanceReporterIPs = ips
+	fmt.Printf("Instance reporter resolved to %d IP(s): %v\n", len(ips), ips)
+	fmt.Printf("These IPs will have automatic access to IQ48 mode\n")
+	return nil
+}
+
+// IsInstanceReporter checks if an IP address belongs to the configured instance reporter
+func (irc *InstanceReportingConfig) IsInstanceReporter(ipStr string) bool {
+	if len(irc.instanceReporterIPs) == 0 {
+		return false
+	}
+
+	// Parse the IP to normalize it
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+
+	// Check against all resolved IPs
+	for _, reporterIP := range irc.instanceReporterIPs {
+		resolvedIP := net.ParseIP(reporterIP)
 		if resolvedIP != nil && resolvedIP.Equal(ip) {
 			return true
 		}

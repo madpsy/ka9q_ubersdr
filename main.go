@@ -1462,13 +1462,17 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 	}
 
 	// Build list of allowed IQ modes for this user
-	// Bypassed users get all modes, non-bypassed users get public modes only
+	// Bypassed users get all modes, instance reporter gets IQ48, non-bypassed users get public modes only
 	allowedIQModes := []string{}
 	wideIQModes := []string{"iq48", "iq96", "iq192", "iq384"}
+	isInstanceReporter := sessions.config.InstanceReporting.IsInstanceReporter(clientIP)
 
 	if isBypassed {
 		// Bypassed users can access all wide IQ modes
 		allowedIQModes = wideIQModes
+	} else if isInstanceReporter {
+		// Instance reporter can access IQ48 only
+		allowedIQModes = []string{"iq48"}
 	} else {
 		// Non-bypassed users can only access public IQ modes
 		for _, mode := range wideIQModes {

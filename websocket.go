@@ -450,7 +450,14 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		// Check if wide IQ mode requires bypass (via IP list or password)
 		// Unless the mode is configured as public
 		isPublic := wsh.config.Server.PublicIQModes[m]
-		if wideIQModes[m] && !isPublic && !wsh.config.Server.IsIPTimeoutBypassed(clientIP, password) {
+		isBypassed := wsh.config.Server.IsIPTimeoutBypassed(clientIP, password)
+		isInstanceReporter := wsh.config.InstanceReporting.IsInstanceReporter(clientIP)
+
+		// Allow instance reporter IPs to access IQ48 mode specifically
+		if m == "iq48" && isInstanceReporter {
+			// Instance reporter can always access IQ48
+			log.Printf("Allowed IQ48 mode for instance reporter IP: %s", clientIP)
+		} else if wideIQModes[m] && !isPublic && !isBypassed {
 			log.Printf("Rejected WebSocket connection: wide IQ mode '%s' requires bypass from %s (client IP: %s)", m, sourceIP, clientIP)
 			wsh.sendError(conn, fmt.Sprintf("Mode '%s' is only available for authorized IPs or with valid password", m))
 			return
@@ -720,7 +727,14 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 				// Unless the mode is configured as public
 				// Note: password is stored in session during creation
 				isPublicMode := wsh.config.Server.PublicIQModes[msg.Mode]
-				if wideIQModes[msg.Mode] && !isPublicMode && !wsh.config.Server.IsIPTimeoutBypassed(currentSession.ClientIP, currentSession.BypassPassword) {
+				isBypassed := wsh.config.Server.IsIPTimeoutBypassed(currentSession.ClientIP, currentSession.BypassPassword)
+				isInstanceReporter := wsh.config.InstanceReporting.IsInstanceReporter(currentSession.ClientIP)
+
+				// Allow instance reporter IPs to access IQ48 mode specifically
+				if msg.Mode == "iq48" && isInstanceReporter {
+					// Instance reporter can always access IQ48
+					log.Printf("Allowed IQ48 mode change for instance reporter IP: %s", currentSession.ClientIP)
+				} else if wideIQModes[msg.Mode] && !isPublicMode && !isBypassed {
 					wsh.sendError(conn, fmt.Sprintf("Mode '%s' is only available for authorized IPs or with valid password", msg.Mode))
 					continue // Don't close connection, just reject this tune request
 				}

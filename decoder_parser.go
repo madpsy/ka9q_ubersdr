@@ -230,43 +230,48 @@ func ParseWSPRLine(line string, dialFreq uint64) (*DecodeInfo, error) {
 }
 
 // extractCallsignLocator extracts callsign and grid locator from FT8/FT4 message
-// Per FT8 protocol: The transmitting station is ALWAYS the first callsign in the message
+// Per FT8 protocol: The transmitting station is the SECOND callsign (or first after CQ)
 // Examples:
 //
-//	CQ K1ABC FN31        → TX = K1ABC, Grid = FN31
-//	K1ABC M0DEF IO91     → TX = K1ABC, Grid = IO91
-//	K1ABC M0DEF -10      → TX = K1ABC, Grid = ""
-//	K1ABC M0DEF R-09     → TX = K1ABC, Grid = ""
-//	K1ABC M0DEF RR73     → TX = K1ABC, Grid = ""
-//
-// Special case: If message starts with <...>, it's truncated and we can't determine
-// the transmitter reliably, so we skip it:
-//
-//	<...> CU6AB HM58     → TX = "", Grid = "" (truncated, unreliable)
+//	CQ MM3NDH IO86       → TX = MM3NDH, Grid = IO86
+//	SV3AUW MM3NDH IO86   → TX = MM3NDH, Grid = IO86
+//	SV3AUW MM3NDH -15    → TX = MM3NDH, Grid = ""
+//	SV3AUW MM3NDH R-15   → TX = MM3NDH, Grid = ""
+//	SV3AUW MM3NDH RR73   → TX = MM3NDH, Grid = ""
+//	SV3AUW MM3NDH 73     → TX = MM3NDH, Grid = ""
+//	<...> CU6AB HM58     → TX = CU6AB, Grid = HM58 (truncated but still valid)
 func extractCallsignLocator(message string) (string, string) {
 	fields := strings.Fields(message)
 	if len(fields) < 2 {
 		return "", ""
 	}
 
-	// Check if message is truncated (starts with <...>)
-	// In this case, we can't reliably determine the transmitter
-	if fields[0] == "<...>" {
-		return "", ""
-	}
-
-	// Find the first valid callsign in the message (this is the transmitter)
-	var transmitterCall string
+	// Find all valid callsigns in the message
+	var callsigns []string
 	for _, field := range fields {
 		if isValidCallsign(field) {
-			transmitterCall = field
-			break
+			callsigns = append(callsigns, field)
 		}
 	}
 
-	// If no valid callsign found, return empty
-	if transmitterCall == "" {
+	// Need at least one callsign
+	if len(callsigns) == 0 {
 		return "", ""
+	}
+
+	// Determine transmitter:
+	// - If first field is "CQ", transmitter is the first callsign after CQ
+	// - Otherwise, transmitter is the second callsign (if present), else first
+	var transmitterCall string
+	if fields[0] == "CQ" || fields[0] == "CQ_" {
+		// CQ message: transmitter is first callsign
+		transmitterCall = callsigns[0]
+	} else if len(callsigns) >= 2 {
+		// Directed message: transmitter is second callsign
+		transmitterCall = callsigns[1]
+	} else {
+		// Only one callsign found, use it
+		transmitterCall = callsigns[0]
 	}
 
 	// Now find any grid locator in the message (search all fields)

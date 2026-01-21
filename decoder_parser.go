@@ -230,56 +230,47 @@ func ParseWSPRLine(line string, dialFreq uint64) (*DecodeInfo, error) {
 }
 
 // extractCallsignLocator extracts callsign and grid locator from FT8/FT4 message
-// Per FT8 protocol: The transmitting station is the SECOND callsign (or first after CQ)
+// Uses position-based parsing to avoid ambiguity (some strings can be both callsign and grid)
 // Examples:
 //
-//	CQ MM3NDH IO86       → TX = MM3NDH, Grid = IO86
-//	SV3AUW MM3NDH IO86   → TX = MM3NDH, Grid = IO86
-//	SV3AUW MM3NDH -15    → TX = MM3NDH, Grid = ""
-//	SV3AUW MM3NDH R-15   → TX = MM3NDH, Grid = ""
-//	SV3AUW MM3NDH RR73   → TX = MM3NDH, Grid = ""
-//	SV3AUW MM3NDH 73     → TX = MM3NDH, Grid = ""
-//	<...> CU6AB HM58     → TX = CU6AB, Grid = HM58 (truncated but still valid)
+//	CQ MM3NDH IO86       → TX = MM3NDH (field[1]), Grid = IO86 (field[2])
+//	SV3AUW MM3NDH IO86   → TX = MM3NDH (field[1]), Grid = IO86 (field[2])
+//	SV3AUW MM3NDH -15    → TX = MM3NDH (field[1]), Grid = ""
+//	SV3AUW MM3NDH R-15   → TX = MM3NDH (field[1]), Grid = ""
+//	SV3AUW MM3NDH RR73   → TX = MM3NDH (field[1]), Grid = ""
+//	SV3AUW MM3NDH 73     → TX = MM3NDH (field[1]), Grid = ""
+//	<...> DL9SFE JN48    → TX = DL9SFE (field[1]), Grid = JN48 (field[2])
 func extractCallsignLocator(message string) (string, string) {
 	fields := strings.Fields(message)
 	if len(fields) < 2 {
 		return "", ""
 	}
 
-	// Find all valid callsigns in the message
-	var callsigns []string
-	for _, field := range fields {
-		if isValidCallsign(field) {
-			callsigns = append(callsigns, field)
-		}
-	}
-
-	// Need at least one callsign
-	if len(callsigns) == 0 {
-		return "", ""
-	}
-
-	// Determine transmitter:
-	// - If first field is "CQ", transmitter is the first callsign after CQ
-	// - Otherwise, transmitter is the second callsign (if present), else first
 	var transmitterCall string
-	if fields[0] == "CQ" || fields[0] == "CQ_" {
-		// CQ message: transmitter is first callsign
-		transmitterCall = callsigns[0]
-	} else if len(callsigns) >= 2 {
-		// Directed message: transmitter is second callsign
-		transmitterCall = callsigns[1]
-	} else {
-		// Only one callsign found, use it
-		transmitterCall = callsigns[0]
-	}
-
-	// Now find any grid locator in the message (search all fields)
 	var locator string
-	for _, field := range fields {
-		if isValidGridLocatorForMode(field, ModeFT8) {
-			locator = field
-			break
+
+	// Position-based parsing:
+	// - If starts with "CQ" or "<...>": TX = field[1], Grid = field[2] (if valid)
+	// - Otherwise: TX = field[1], Grid = field[2] (if valid)
+	// This avoids ambiguity where strings like "HJ54FF" could be both callsign and grid
+
+	if fields[0] == "CQ" || fields[0] == "CQ_" || fields[0] == "<...>" {
+		// CQ or truncated message: transmitter is field[1]
+		if len(fields) >= 2 && isValidCallsign(fields[1]) {
+			transmitterCall = fields[1]
+		}
+		// Grid is field[2] if present and valid
+		if len(fields) >= 3 && isValidGridLocatorForMode(fields[2], ModeFT8) {
+			locator = fields[2]
+		}
+	} else {
+		// Directed message: transmitter is field[1] (second field)
+		if len(fields) >= 2 && isValidCallsign(fields[1]) {
+			transmitterCall = fields[1]
+		}
+		// Grid is field[2] if present and valid
+		if len(fields) >= 3 && isValidGridLocatorForMode(fields[2], ModeFT8) {
+			locator = fields[2]
 		}
 	}
 

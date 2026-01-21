@@ -8250,8 +8250,9 @@
                 const hasCWSkimmerIssues = data.cwSkimmer && data.cwSkimmer.enabled && !data.cwSkimmer.healthy;
                 const hasMQTTIssues = data.mqtt && data.mqtt.enabled && !data.mqtt.healthy;
                 const hasRotctlIssues = data.rotctl && data.rotctl.enabled && !data.rotctl.healthy;
+                const hasSystemLoadIssues = data.system_load && (data.system_load.status === 'warning' || data.system_load.status === 'critical');
 
-                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues || hasRotctlIssues) {
+                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues || hasRotctlIssues || hasSystemLoadIssues) {
                     const warningBanner = document.createElement('div');
                     warningBanner.style.padding = '20px';
                     warningBanner.style.background = '#fff3cd';
@@ -8323,6 +8324,17 @@
                     if (hasRotctlIssues) {
                         const li = document.createElement('li');
                         li.innerHTML = '<strong>Rotator Control:</strong> ' + (data.rotctl.issues && data.rotctl.issues.length > 0 ? data.rotctl.issues.join(', ') : 'System unhealthy');
+                        issuesList.appendChild(li);
+                    }
+
+                    if (hasSystemLoadIssues) {
+                        const li = document.createElement('li');
+                        const status = data.system_load.status;
+                        if (status === 'critical') {
+                            li.innerHTML = '<strong>System Load:</strong> CRITICAL - System overloaded. Disable decoder modes or reduce depths immediately.';
+                        } else {
+                            li.innerHTML = '<strong>System Load:</strong> High load detected. Consider reducing decoder bands or depths.';
+                        }
                         issuesList.appendChild(li);
                     }
 

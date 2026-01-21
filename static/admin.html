@@ -4670,6 +4670,25 @@
             depthControlsSection.style.borderRadius = '5px';
             depthControlsSection.innerHTML = '<h4 style="margin-bottom: 15px; color: #333;">Set Decode Depth by Mode</h4>';
 
+            // Add CPU requirements warning box
+            const cpuWarningBox = document.createElement('div');
+            cpuWarningBox.style.marginBottom = '15px';
+            cpuWarningBox.style.padding = '12px';
+            cpuWarningBox.style.background = '#fff3cd';
+            cpuWarningBox.style.border = '1px solid #ffc107';
+            cpuWarningBox.style.borderRadius = '5px';
+            cpuWarningBox.style.fontSize = '13px';
+            cpuWarningBox.style.lineHeight = '1.6';
+            cpuWarningBox.innerHTML = `
+                <strong style="color: #856404;">⚠️ CPU Requirements:</strong>
+                <span style="color: #856404;">
+                    Depth 2 uses ~2× more CPU than Depth 1. Depth 3 uses ~3× more CPU than Depth 1.
+                    WSPR cycles scale linearly (20000 cycles = 2× CPU vs 10000 cycles).
+                    Monitor system load to avoid overloading your server.
+                </span>
+            `;
+            depthControlsSection.appendChild(cpuWarningBox);
+
             const depthControlsGrid = document.createElement('div');
             depthControlsGrid.style.display = 'grid';
             depthControlsGrid.style.gridTemplateColumns = 'repeat(2, 1fr)';

@@ -58,6 +58,7 @@ function parseRadiodConfig(configText) {
 function isParameterCommented(configText, section, param) {
     const lines = configText.split('\n');
     let inSection = false;
+    let foundParam = false;
     
     for (const line of lines) {
         const trimmed = line.trim();
@@ -74,23 +75,28 @@ function isParameterCommented(configText, section, param) {
             break;
         }
         
-        // Check if this line contains the parameter
-        if (inSection && trimmed.includes(param)) {
-            // Check if the line starts with # (commented out)
-            // We need to check the original line, not trimmed
+        // Check if this line contains the parameter as a key=value pair
+        if (inSection) {
+            // Check the original line (not trimmed) to preserve leading whitespace/comments
             const lineStart = line.trimStart();
-            if (lineStart.startsWith('#')) {
+            
+            // Check if this line defines the parameter (key = value or key=value)
+            const paramPattern = new RegExp(`^${param}\\s*=`);
+            const commentedParamPattern = new RegExp(`^#\\s*${param}\\s*=`);
+            
+            if (commentedParamPattern.test(lineStart)) {
+                // Found commented parameter
                 return true;
             }
             
-            // Check if it's a key=value pair (not commented)
-            if (trimmed.startsWith(param + '=') || trimmed.startsWith(param + ' =')) {
+            if (paramPattern.test(lineStart)) {
+                // Found uncommented parameter
                 return false;
             }
         }
     }
     
-    // Parameter not found or section not found
+    // Parameter not found in section
     return true; // Treat as commented if not found
 }
 

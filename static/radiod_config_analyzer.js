@@ -1,6 +1,9 @@
 // Radiod Configuration Analyzer
 // Parses radiod config and generates warnings based on configuration values
 
+// Global variable to track pending save operation
+let pendingRadiodSave = null;
+
 /**
  * Parse INI-style radiod configuration
  * @param {string} configText - The raw config text
@@ -274,5 +277,107 @@ function updateRadiodConfigWarnings(configText) {
             // Insert after radiodWarning
             radiodWarning.parentNode.insertBefore(warningsDiv, editor);
         }
+    }
+}
+
+/**
+ * Check if there are any warnings before saving
+ * @param {boolean} restart - Whether this is a save & restart operation
+ * @returns {boolean} True if save should proceed, false if cancelled
+ */
+function checkRadiodWarningsBeforeSave(restart) {
+    const editor = document.getElementById('radiodConfigEditor');
+    if (!editor) return true;
+    
+    const configText = editor.value;
+    const analysis = analyzeRadiodConfig(configText);
+    
+    // If no warnings or errors, proceed with save
+    if (analysis.warnings.length === 0 && analysis.errors.length === 0) {
+        return true;
+    }
+    
+    // Store the restart flag for later use
+    pendingRadiodSave = { restart: restart };
+    
+    // Show modal with warnings
+    showRadiodWarningsModal(analysis);
+    
+    // Return false to prevent immediate save
+    return false;
+}
+
+/**
+ * Show modal with radiod config warnings
+ * @param {Object} analysis - Analysis results
+ */
+function showRadiodWarningsModal(analysis) {
+    const modal = document.getElementById('radiodWarningsModal');
+    const content = document.getElementById('radiodWarningsModalContent');
+    
+    if (!modal || !content) return;
+    
+    let html = '<p style="margin-bottom: 20px; font-size: 15px;">The following issues were detected in your radiod configuration:</p>';
+    
+    // Render errors
+    if (analysis.errors.length > 0) {
+        html += '<div style="margin-bottom: 15px; padding: 15px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 5px;">';
+        html += '<strong style="color: #721c24;">❌ Errors:</strong>';
+        html += '<ul style="margin: 10px 0 0 20px; color: #721c24; line-height: 1.8;">';
+        analysis.errors.forEach(error => {
+            html += `<li>${error}</li>`;
+        });
+        html += '</ul></div>';
+    }
+    
+    // Render warnings
+    if (analysis.warnings.length > 0) {
+        html += '<div style="margin-bottom: 15px; padding: 15px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px;">';
+        html += '<strong style="color: #856404;">⚠️ Warnings:</strong>';
+        html += '<ul style="margin: 10px 0 0 20px; color: #856404; line-height: 1.8;">';
+        analysis.warnings.forEach(warning => {
+            html += `<li><strong>${warning.message}</strong>`;
+            if (warning.suggestion) {
+                html += `<br><em style="font-size: 13px;">💡 ${warning.suggestion}</em>`;
+            }
+            html += '</li>';
+        });
+        html += '</ul></div>';
+    }
+    
+    html += '<p style="margin-top: 20px; font-size: 14px; color: #666;"><strong>Do you want to save this configuration anyway?</strong></p>';
+    
+    content.innerHTML = html;
+    modal.style.display = 'block';
+}
+
+/**
+ * Close radiod warnings modal
+ */
+function closeRadiodWarningsModal() {
+    const modal = document.getElementById('radiodWarningsModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    pendingRadiodSave = null;
+    
+    // Reload the config to discard any unsaved changes
+    if (typeof loadRadiodConfig === 'function') {
+        loadRadiodConfig();
+    }
+}
+
+/**
+ * Confirm save after viewing warnings
+ * This is called when user clicks "Save Anyway" in the modal
+ */
+function confirmRadiodSave() {
+    closeRadiodWarningsModal();
+    
+    if (pendingRadiodSave) {
+        // Proceed with the actual save operation
+        // Call the original save function with bypass flag
+        actualSaveRadiodConfig(pendingRadiodSave.restart);
+        pendingRadiodSave = null;
     }
 }

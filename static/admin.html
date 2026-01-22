@@ -1171,6 +1171,27 @@
             </div>
         </div>
 
+        <!-- Radiod Config Warnings Modal -->
+        <div id="radiodWarningsModal" class="modal">
+            <div class="modal-content" style="max-width: 700px;">
+                <div class="modal-header">
+                    <h2>⚠️ Configuration Warnings</h2>
+                    <button class="modal-close" onclick="closeRadiodWarningsModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="radiodWarningsModalContent" style="padding: 20px;">
+                        <!-- Content will be populated by JavaScript -->
+                    </div>
+                    <div style="padding: 0 20px 20px 20px; display: flex; gap: 10px; justify-content: flex-end;">
+                        <button class="btn btn-secondary" onclick="closeRadiodWarningsModal()">Cancel</button>
+                        <button class="btn btn-danger" onclick="confirmRadiodSave()" style="font-weight: bold;">
+                            Save Anyway
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Force Update Modal -->
         <div id="forceUpdateModal" class="modal">
             <div class="modal-content" style="max-width: 500px;">
@@ -6855,11 +6876,21 @@
             // Analyze config and show warnings
             updateRadiodConfigWarnings(currentRadiodConfig);
 
+            // Add event listener to update warnings when user edits the config
+            // Remove existing listener first to avoid duplicates
+            editor.removeEventListener('input', handleRadiodConfigEdit);
+            editor.addEventListener('input', handleRadiodConfigEdit);
+
             // Reset editing state when loading
             radiodEditingEnabled = false;
             editor.readOnly = true;
             editor.style.background = '#f5f5f5';
             document.getElementById('radiodWarning').style.display = 'block';
+        }
+
+        function handleRadiodConfigEdit(event) {
+            // Update warnings in real-time as user edits
+            updateRadiodConfigWarnings(event.target.value);
         }
 
         function enableRadiodEditing() {
@@ -6878,6 +6909,17 @@
                 return;
             }
 
+            // Check for warnings before saving
+            if (!checkRadiodWarningsBeforeSave(restart)) {
+                // Warnings detected, modal will be shown
+                return;
+            }
+
+            // No warnings, proceed with save
+            await actualSaveRadiodConfig(restart);
+        }
+
+        async function actualSaveRadiodConfig(restart = false) {
             const saveButton = event?.target || document.querySelector('#radiodButtons .btn');
             const originalText = saveButton?.textContent;
             if (saveButton) {

@@ -7583,6 +7583,14 @@
 
         async function loadLoadHistory() {
             try {
+                // Fetch CPU core count from system-load endpoint
+                const systemLoadResponse = await authenticatedFetch('/admin/system-load');
+                let cpuCores = 0;
+                if (systemLoadResponse && systemLoadResponse.ok) {
+                    const systemLoadData = await systemLoadResponse.json();
+                    cpuCores = systemLoadData.cpu_cores || 0;
+                }
+
                 // Fetch 60-minute history
                 const historyResponse = await authenticatedFetch('/admin/load-history');
                 if (!historyResponse || !historyResponse.ok) {
@@ -7604,6 +7612,42 @@
                 const load5Data = history.map(entry => entry.load_5min);
                 const load15Data = history.map(entry => entry.load_15min);
 
+                // Create background zone datasets if we have CPU core info
+                const backgroundDatasets = [];
+                if (cpuCores > 0) {
+                    // Green zone: 0 to cores
+                    backgroundDatasets.push({
+                        label: 'OK Zone',
+                        data: labels.map(() => cpuCores),
+                        backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                        borderWidth: 0,
+                        fill: 'origin',
+                        pointRadius: 0,
+                        order: 10
+                    });
+                    // Orange zone: cores to 2x cores
+                    backgroundDatasets.push({
+                        label: 'Warning Zone',
+                        data: labels.map(() => cpuCores * 2),
+                        backgroundColor: 'rgba(255, 140, 0, 0.1)',
+                        borderWidth: 0,
+                        fill: '-1',
+                        pointRadius: 0,
+                        order: 9
+                    });
+                    // Red zone: > 2x cores (extend to max of data or 2.5x cores)
+                    const maxLoad = Math.max(...load1Data, ...load5Data, ...load15Data, cpuCores * 2.5);
+                    backgroundDatasets.push({
+                        label: 'Critical Zone',
+                        data: labels.map(() => maxLoad),
+                        backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                        borderWidth: 0,
+                        fill: '-1',
+                        pointRadius: 0,
+                        order: 8
+                    });
+                }
+
                 // Destroy existing chart if it exists
                 if (loadHistoryChart) {
                     loadHistoryChart.destroy();
@@ -7616,6 +7660,7 @@
                     data: {
                         labels: labels,
                         datasets: [
+                            ...backgroundDatasets,
                             {
                                 label: '1 min',
                                 data: load1Data,
@@ -7623,7 +7668,8 @@
                                 backgroundColor: 'rgba(102, 126, 234, 0.1)',
                                 borderWidth: 2,
                                 pointRadius: 2,
-                                tension: 0.3
+                                tension: 0.3,
+                                order: 1
                             },
                             {
                                 label: '5 min',
@@ -7632,16 +7678,18 @@
                                 backgroundColor: 'rgba(240, 147, 251, 0.1)',
                                 borderWidth: 2,
                                 pointRadius: 2,
-                                tension: 0.3
+                                tension: 0.3,
+                                order: 2
                             },
                             {
                                 label: '15 min',
                                 data: load15Data,
-                                borderColor: '#4facfe',
-                                backgroundColor: 'rgba(79, 172, 254, 0.1)',
+                                borderColor: '#ff9500',
+                                backgroundColor: 'rgba(255, 149, 0, 0.1)',
                                 borderWidth: 2,
                                 pointRadius: 2,
-                                tension: 0.3
+                                tension: 0.3,
+                                order: 3
                             }
                         ]
                     },
@@ -7728,6 +7776,42 @@
                 const hourlyLoad5Data = hourlyHistory.map(entry => entry.load_5min);
                 const hourlyLoad15Data = hourlyHistory.map(entry => entry.load_15min);
 
+                // Create background zone datasets for hourly chart
+                const hourlyBackgroundDatasets = [];
+                if (cpuCores > 0) {
+                    // Green zone: 0 to cores
+                    hourlyBackgroundDatasets.push({
+                        label: 'OK Zone',
+                        data: hourlyLabels.map(() => cpuCores),
+                        backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                        borderWidth: 0,
+                        fill: 'origin',
+                        pointRadius: 0,
+                        order: 10
+                    });
+                    // Orange zone: cores to 2x cores
+                    hourlyBackgroundDatasets.push({
+                        label: 'Warning Zone',
+                        data: hourlyLabels.map(() => cpuCores * 2),
+                        backgroundColor: 'rgba(255, 140, 0, 0.1)',
+                        borderWidth: 0,
+                        fill: '-1',
+                        pointRadius: 0,
+                        order: 9
+                    });
+                    // Red zone: > 2x cores
+                    const maxHourlyLoad = Math.max(...hourlyLoad1Data, ...hourlyLoad5Data, ...hourlyLoad15Data, cpuCores * 2.5);
+                    hourlyBackgroundDatasets.push({
+                        label: 'Critical Zone',
+                        data: hourlyLabels.map(() => maxHourlyLoad),
+                        backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                        borderWidth: 0,
+                        fill: '-1',
+                        pointRadius: 0,
+                        order: 8
+                    });
+                }
+
                 // Destroy existing hourly chart if it exists
                 if (loadHourlyChart) {
                     loadHourlyChart.destroy();
@@ -7740,6 +7824,7 @@
                     data: {
                         labels: hourlyLabels,
                         datasets: [
+                            ...hourlyBackgroundDatasets,
                             {
                                 label: '1 min',
                                 data: hourlyLoad1Data,
@@ -7747,7 +7832,8 @@
                                 backgroundColor: 'rgba(102, 126, 234, 0.1)',
                                 borderWidth: 2,
                                 pointRadius: 2,
-                                tension: 0.3
+                                tension: 0.3,
+                                order: 1
                             },
                             {
                                 label: '5 min',
@@ -7756,16 +7842,18 @@
                                 backgroundColor: 'rgba(240, 147, 251, 0.1)',
                                 borderWidth: 2,
                                 pointRadius: 2,
-                                tension: 0.3
+                                tension: 0.3,
+                                order: 2
                             },
                             {
                                 label: '15 min',
                                 data: hourlyLoad15Data,
-                                borderColor: '#4facfe',
-                                backgroundColor: 'rgba(79, 172, 254, 0.1)',
+                                borderColor: '#ff9500',
+                                backgroundColor: 'rgba(255, 149, 0, 0.1)',
                                 borderWidth: 2,
                                 pointRadius: 2,
-                                tension: 0.3
+                                tension: 0.3,
+                                order: 3
                             }
                         ]
                     },
@@ -8864,43 +8952,47 @@
             `;
             statusSection.appendChild(statusDiv);
 
-            // Add historical tracking charts
-            const historyDiv60 = document.createElement('div');
-            historyDiv60.style.background = '#fff';
-            historyDiv60.style.padding = '10px';
-            historyDiv60.style.borderRadius = '5px';
-            historyDiv60.style.border = '1px solid #dee2e6';
-            historyDiv60.style.marginTop = '15px';
-            historyDiv60.innerHTML = `
-                <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
-                    Historical Tracking (Last 60 Minutes)
-                </div>
-                <div style="height: 250px; position: relative;">
-                    <canvas id="loadHistoryCanvas"></canvas>
-                </div>
-            `;
-            statusSection.appendChild(historyDiv60);
+            // Add historical tracking charts (only if they don't exist yet)
+            if (!document.getElementById('loadHistoryCanvas')) {
+                const historyDiv60 = document.createElement('div');
+                historyDiv60.style.background = '#fff';
+                historyDiv60.style.padding = '10px';
+                historyDiv60.style.borderRadius = '5px';
+                historyDiv60.style.border = '1px solid #dee2e6';
+                historyDiv60.style.marginTop = '15px';
+                historyDiv60.innerHTML = `
+                    <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                        Historical Tracking (Last 60 Minutes)
+                    </div>
+                    <div style="height: 250px; position: relative;">
+                        <canvas id="loadHistoryCanvas"></canvas>
+                    </div>
+                `;
+                statusSection.appendChild(historyDiv60);
 
-            const historyDiv24 = document.createElement('div');
-            historyDiv24.style.background = '#fff';
-            historyDiv24.style.padding = '10px';
-            historyDiv24.style.borderRadius = '5px';
-            historyDiv24.style.border = '1px solid #dee2e6';
-            historyDiv24.style.marginTop = '15px';
-            historyDiv24.innerHTML = `
-                <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
-                    Historical Tracking (Last 24 Hours)
-                </div>
-                <div style="height: 250px; position: relative;">
-                    <canvas id="loadHourlyCanvas"></canvas>
-                </div>
-            `;
-            statusSection.appendChild(historyDiv24);
+                const historyDiv24 = document.createElement('div');
+                historyDiv24.style.background = '#fff';
+                historyDiv24.style.padding = '10px';
+                historyDiv24.style.borderRadius = '5px';
+                historyDiv24.style.border = '1px solid #dee2e6';
+                historyDiv24.style.marginTop = '15px';
+                historyDiv24.innerHTML = `
+                    <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                        Historical Tracking (Last 24 Hours)
+                    </div>
+                    <div style="height: 250px; position: relative;">
+                        <canvas id="loadHourlyCanvas"></canvas>
+                    </div>
+                `;
+                statusSection.appendChild(historyDiv24);
 
-            container.appendChild(statusSection);
+                container.appendChild(statusSection);
 
-            // Load load history charts
-            await loadLoadHistory();
+                // Load load history charts (only on first creation)
+                await loadLoadHistory();
+            } else {
+                container.appendChild(statusSection);
+            }
         }
 
         // Fetch tunnel status from local proxy endpoint

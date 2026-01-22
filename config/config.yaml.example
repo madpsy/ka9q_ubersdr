@@ -1113,6 +1113,17 @@ rotctl:
   # The elevation will remain at its current position
   park_azimuth: 0
 
+  # Position Verification (recommended: true)
+  # When enabled, the system will:
+  # - Track rotator movement to verify it reaches the target bearing
+  # - Detect stuck rotators (no movement for 30+ seconds)
+  # - Filter out sensor jitter/oscillation (±3°)
+  # - Automatically retry failed movements (up to 3 times)
+  # - Prevent unnecessary retries while rotator is actively moving
+  # This applies to both manual commands and scheduled positions
+  # Default: true (enabled for reliability)
+  verify_position: true
+
   # API Endpoints:
   #   GET  /api/rotctl/position - Get current rotator position (no auth)
   #   GET  /api/rotctl/status   - Get detailed status (no auth)

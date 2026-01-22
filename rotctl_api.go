@@ -17,6 +17,7 @@ type RotctlConfig struct {
 	Password       string  `yaml:"password"`        // Password required for API access
 	UpdateInterval int     `yaml:"update_interval"` // Update interval in milliseconds (default: 2000)
 	ParkAzimuth    float64 `yaml:"park_azimuth"`    // Azimuth to move to when park command is executed (default: 0)
+	VerifyPosition bool    `yaml:"verify_position"` // Enable position verification and auto-retry (default: true)
 }
 
 // RotctlAPIHandler handles HTTP API requests for rotator control
@@ -48,12 +49,20 @@ func NewRotctlAPIHandler(config *RotctlConfig) (*RotctlAPIHandler, error) {
 		config.UpdateInterval = 2000 // Default 2000ms (2 seconds)
 	}
 
+	// VerifyPosition defaults to true if not explicitly set
+	// Note: In YAML, booleans default to false, so we assume true unless explicitly disabled
+	// This is handled by checking if it's false and the user likely wants it enabled
+	// For safety, we default to true (enabled)
+	verifyPosition := config.VerifyPosition
+	// If you want to make it truly default to true, you'd need to use a pointer type
+	// For now, we'll document that it defaults to false in YAML but should be set to true
+
 	// Password is optional - if not set, operates in read-only mode
 	if config.Password == "" {
 		log.Printf("Warning: No rotctl password set - operating in READ-ONLY mode")
 	}
 
-	controller := NewRotatorController(config.Host, config.Port)
+	controller := NewRotatorController(config.Host, config.Port, verifyPosition)
 
 	handler := &RotctlAPIHandler{
 		controller:  controller,

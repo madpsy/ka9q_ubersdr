@@ -513,16 +513,45 @@ type RotatorState struct {
 	UpdatedAt time.Time
 }
 
+// PositionSample represents a position measurement at a specific time
+type PositionSample struct {
+	Position  Position
+	Timestamp time.Time
+}
+
+// MovementTrend represents analysis of rotator movement over time
+type MovementTrend struct {
+	IsRealMovement      bool
+	NetAzimuthChange    float64
+	NetElevationChange  float64
+	MaxJitter           float64
+	ConsistentDirection bool
+}
+
 // RotatorController manages rotator state and provides thread-safe access
 type RotatorController struct {
-	client    *RotctlClient
-	state     *RotatorState
-	mu        sync.RWMutex
-	targetPos *Position
+	client             *RotctlClient
+	state              *RotatorState
+	mu                 sync.RWMutex
+	targetPos          *Position
+	verifyPosition     bool // Enable position verification
+	positionHistory    []PositionSample
+	historySize        int
+	jitterThreshold    float64
+	trendThreshold     float64
+	minSamplesForTrend int
+	commandStartTime   time.Time
+	lastMovementTime   time.Time
+	retryCount         int
+	maxRetries         int
+	retryTimeout       time.Duration
+	stuckThreshold     time.Duration
+	successTolerance   float64
+	closeTolerance     float64
 }
 
 // NewRotatorController creates a new rotator controller
-func NewRotatorController(host string, port int) *RotatorController {
+func NewRotatorController(host string, port int, verifyPosition bool) *RotatorController {
 	return &RotatorController{
 		client: NewRotctlClient(host, port),
 		state: &RotatorState{
@@ -530,6 +559,17 @@ func NewRotatorController(host string, port int) *RotatorController {
 			Moving:    false,
 			UpdatedAt: time.Now(),
 		},
+		verifyPosition:     verifyPosition,
+		positionHistory:    make([]PositionSample, 0, 5),
+		historySize:        5,
+		jitterThreshold:    3.0,              // ±3° oscillation is considered noise
+		trendThreshold:     5.0,              // Must move 5° net to be "definitely moving"
+		minSamplesForTrend: 3,                // Need 3 samples to detect trend
+		maxRetries:         3,                // Maximum retry attempts
+		retryTimeout:       90 * time.Second, // 90 seconds per attempt
+		stuckThreshold:     30 * time.Second, // Declare stuck after 30s of no movement
+		successTolerance:   2.0,              // Within 2° = success
+		closeTolerance:     5.0,              // Within 5° after timeout = close enough
 	}
 }
 
@@ -546,6 +586,7 @@ func (rc *RotatorController) Disconnect() error {
 // UpdateState polls the rotator and updates the cached state
 func (rc *RotatorController) UpdateState() error {
 	pos, err := rc.client.GetPosition()
+	now := time.Now()
 
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
@@ -557,32 +598,81 @@ func (rc *RotatorController) UpdateState() error {
 
 	rc.state.Position = pos
 	rc.state.LastError = nil
-	rc.state.UpdatedAt = time.Now()
+	rc.state.UpdatedAt = now
 
-	// Check if we're still moving based on target position
-	if rc.targetPos != nil {
-		// Check if we've reached the target (within 2 degree tolerance)
-		azDiff := rc.targetPos.Azimuth - pos.Azimuth
-		elDiff := rc.targetPos.Elevation - pos.Elevation
-		if azDiff < 0 {
-			azDiff = -azDiff
-		}
-		if elDiff < 0 {
-			elDiff = -elDiff
-		}
+	// If position verification is disabled, use simple logic
+	if !rc.verifyPosition {
+		// Simple mode: just check if we're within tolerance
+		if rc.targetPos != nil {
+			azDiff := rc.calculateAzimuthDelta(rc.targetPos.Azimuth, pos.Azimuth)
+			elDiff := abs(rc.targetPos.Elevation - pos.Elevation)
 
-		// Handle azimuth wrap-around (e.g., 359° to 1° is only 2° difference)
-		if azDiff > 180 {
-			azDiff = 360 - azDiff
-		}
-
-		// Still moving if we're more than 2 degrees away from target
-		if azDiff > 2.0 || elDiff > 2.0 {
-			rc.state.Moving = true
+			if azDiff <= rc.successTolerance && elDiff <= rc.successTolerance {
+				rc.state.Moving = false
+				rc.targetPos = nil
+			} else {
+				rc.state.Moving = true
+			}
 		} else {
-			// Reached target
+			rc.state.Moving = false
+		}
+		return nil
+	}
+
+	// Position verification enabled - use advanced logic
+	if rc.targetPos != nil {
+		// Add current position to history
+		rc.addPositionSample(pos, now)
+
+		// Calculate distance from target
+		azDiff := rc.calculateAzimuthDelta(rc.targetPos.Azimuth, pos.Azimuth)
+		elDiff := abs(rc.targetPos.Elevation - pos.Elevation)
+
+		// Check if we've reached the target (within success tolerance)
+		if azDiff <= rc.successTolerance && elDiff <= rc.successTolerance {
+			log.Printf("Rotator reached target: azimuth=%.1f°, elevation=%.1f° (within %.1f°)",
+				pos.Azimuth, pos.Elevation, rc.successTolerance)
 			rc.state.Moving = false
 			rc.targetPos = nil
+			rc.retryCount = 0
+			rc.positionHistory = rc.positionHistory[:0] // Clear history
+			return nil
+		}
+
+		// Check how long we've been trying
+		elapsed := now.Sub(rc.commandStartTime)
+
+		// Detect if rotator is actually moving
+		trend := rc.calculateMovementTrend()
+
+		if trend.IsRealMovement {
+			// Rotator is making progress - reset stuck timer
+			rc.lastMovementTime = now
+
+			// Only fail if exceeding absolute maximum time
+			if elapsed > rc.retryTimeout {
+				// Check if we're "close enough" after timeout
+				if azDiff <= rc.closeTolerance && elDiff <= rc.closeTolerance {
+					log.Printf("Rotator close enough after timeout: %.1f° from target (tolerance: %.1f°)",
+						max(azDiff, elDiff), rc.closeTolerance)
+					rc.state.Moving = false
+					rc.targetPos = nil
+					rc.retryCount = 0
+					rc.positionHistory = rc.positionHistory[:0]
+					return nil
+				}
+
+				// Still too far - retry
+				log.Printf("Rotator timeout after %v, still %.1f° from target", elapsed, max(azDiff, elDiff))
+				rc.retryCommand()
+			}
+		} else {
+			// Not moving - check if stuck
+			timeSinceMovement := now.Sub(rc.lastMovementTime)
+			if timeSinceMovement > rc.stuckThreshold {
+				log.Printf("Rotator stuck (no movement for %v), %.1f° from target", timeSinceMovement, max(azDiff, elDiff))
+				rc.retryCommand()
+			}
 		}
 	} else {
 		rc.state.Moving = false
@@ -611,6 +701,14 @@ func (rc *RotatorController) SetPosition(azimuth, elevation float64) error {
 	rc.mu.Lock()
 	rc.state.Moving = true
 	rc.targetPos = &Position{Azimuth: azimuth, Elevation: elevation}
+
+	// Initialize timers for position verification
+	if rc.verifyPosition {
+		rc.commandStartTime = time.Now()
+		rc.lastMovementTime = time.Now()
+		rc.retryCount = 0
+		rc.positionHistory = rc.positionHistory[:0] // Clear history
+	}
 	rc.mu.Unlock()
 
 	err := rc.client.SetPosition(azimuth, elevation)
@@ -642,6 +740,14 @@ func (rc *RotatorController) SetAzimuth(azimuth float64) error {
 	rc.mu.Lock()
 	rc.state.Moving = true
 	rc.targetPos = &Position{Azimuth: azimuth, Elevation: currentEl}
+
+	// Initialize timers for position verification
+	if rc.verifyPosition {
+		rc.commandStartTime = time.Now()
+		rc.lastMovementTime = time.Now()
+		rc.retryCount = 0
+		rc.positionHistory = rc.positionHistory[:0] // Clear history
+	}
 	rc.mu.Unlock()
 
 	err := rc.client.SetAzimuth(azimuth)
@@ -709,6 +815,236 @@ func (rc *RotatorController) Stop() error {
 // Park parks the rotator
 func (rc *RotatorController) Park() error {
 	return rc.client.Park()
+}
+
+// Helper functions for position verification
+
+// abs returns the absolute value of a float64
+func abs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// max returns the maximum of two float64 values
+func max(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// calculateAzimuthDelta calculates the shortest angular distance between two azimuths
+func (rc *RotatorController) calculateAzimuthDelta(from, to float64) float64 {
+	delta := abs(to - from)
+	// Handle wrap-around (e.g., 359° to 1° = 2°, not 358°)
+	if delta > 180 {
+		delta = 360 - delta
+	}
+	return delta
+}
+
+// addPositionSample adds a position sample to the history
+func (rc *RotatorController) addPositionSample(pos *Position, timestamp time.Time) {
+	sample := PositionSample{
+		Position:  *pos,
+		Timestamp: timestamp,
+	}
+
+	rc.positionHistory = append(rc.positionHistory, sample)
+
+	// Keep only recent history
+	if len(rc.positionHistory) > rc.historySize {
+		rc.positionHistory = rc.positionHistory[1:]
+	}
+}
+
+// calculateMovementTrend analyzes position history to detect real movement vs jitter
+func (rc *RotatorController) calculateMovementTrend() MovementTrend {
+	if len(rc.positionHistory) < rc.minSamplesForTrend {
+		return MovementTrend{IsRealMovement: false}
+	}
+
+	oldest := rc.positionHistory[0]
+	newest := rc.positionHistory[len(rc.positionHistory)-1]
+	timeSpan := newest.Timestamp.Sub(oldest.Timestamp).Seconds()
+
+	if timeSpan < 1.0 {
+		return MovementTrend{IsRealMovement: false}
+	}
+
+	// Calculate NET change (start to end)
+	netAzChange := rc.calculateAzimuthDelta(oldest.Position.Azimuth, newest.Position.Azimuth)
+	netElChange := abs(newest.Position.Elevation - oldest.Position.Elevation)
+
+	// Calculate maximum jitter (oscillation range)
+	maxJitter := rc.calculateMaxJitter()
+
+	// Check for consistent direction
+	consistentDirection := rc.hasConsistentDirection()
+
+	// Determine if this is real movement or just jitter
+	isRealMovement := false
+
+	// Strategy 1: Net change exceeds jitter threshold
+	if netAzChange > rc.jitterThreshold || netElChange > rc.jitterThreshold {
+		// Strategy 2: Net change shows consistent trend (not oscillating)
+		if maxJitter < rc.jitterThreshold {
+			// Low jitter + net change = real movement
+			isRealMovement = true
+		} else if netAzChange > rc.trendThreshold || netElChange > rc.trendThreshold {
+			// High jitter but large net change = slow movement with noise
+			isRealMovement = true
+		}
+	}
+
+	// Strategy 3: Check for consistent direction
+	if !isRealMovement && consistentDirection {
+		isRealMovement = true
+	}
+
+	return MovementTrend{
+		IsRealMovement:      isRealMovement,
+		NetAzimuthChange:    netAzChange,
+		NetElevationChange:  netElChange,
+		MaxJitter:           maxJitter,
+		ConsistentDirection: consistentDirection,
+	}
+}
+
+// calculateMaxJitter calculates the maximum oscillation range in the position history
+func (rc *RotatorController) calculateMaxJitter() float64 {
+	if len(rc.positionHistory) < 2 {
+		return 0
+	}
+
+	var minAz, maxAz, minEl, maxEl float64
+	minAz = rc.positionHistory[0].Position.Azimuth
+	maxAz = minAz
+	minEl = rc.positionHistory[0].Position.Elevation
+	maxEl = minEl
+
+	for _, sample := range rc.positionHistory {
+		if sample.Position.Azimuth < minAz {
+			minAz = sample.Position.Azimuth
+		}
+		if sample.Position.Azimuth > maxAz {
+			maxAz = sample.Position.Azimuth
+		}
+		if sample.Position.Elevation < minEl {
+			minEl = sample.Position.Elevation
+		}
+		if sample.Position.Elevation > maxEl {
+			maxEl = sample.Position.Elevation
+		}
+	}
+
+	azJitter := maxAz - minAz
+	elJitter := maxEl - minEl
+
+	// Handle azimuth wrap-around
+	if azJitter > 180 {
+		azJitter = 360 - azJitter
+	}
+
+	return max(azJitter, elJitter)
+}
+
+// hasConsistentDirection checks if movement is consistently in one direction
+func (rc *RotatorController) hasConsistentDirection() bool {
+	if len(rc.positionHistory) < 3 {
+		return false
+	}
+
+	// Check if movement is consistently in one direction
+	positiveSteps := 0
+	negativeSteps := 0
+
+	for i := 1; i < len(rc.positionHistory); i++ {
+		prev := rc.positionHistory[i-1].Position.Azimuth
+		curr := rc.positionHistory[i].Position.Azimuth
+		delta := curr - prev
+
+		// Handle wrap-around
+		if delta > 180 {
+			delta -= 360
+		} else if delta < -180 {
+			delta += 360
+		}
+
+		if delta > 0.5 {
+			positiveSteps++
+		} else if delta < -0.5 {
+			negativeSteps++
+		}
+	}
+
+	// Consistent if 80% of steps are in same direction
+	totalSteps := positiveSteps + negativeSteps
+	if totalSteps == 0 {
+		return false
+	}
+
+	consistency := float64(max(float64(positiveSteps), float64(negativeSteps))) / float64(totalSteps)
+	return consistency > 0.8
+}
+
+// retryCommand retries the position command if within retry limits
+func (rc *RotatorController) retryCommand() {
+	if rc.retryCount >= rc.maxRetries {
+		log.Printf("Rotator: Max retries (%d) reached, giving up on target azimuth=%.1f°, elevation=%.1f°",
+			rc.maxRetries, rc.targetPos.Azimuth, rc.targetPos.Elevation)
+		rc.state.LastError = fmt.Errorf("failed to reach target after %d retries", rc.maxRetries)
+		rc.state.Moving = false
+		rc.targetPos = nil
+		rc.retryCount = 0
+		rc.positionHistory = rc.positionHistory[:0]
+		return
+	}
+
+	rc.retryCount++
+	log.Printf("Rotator: Retry %d/%d - Stopping rotator before resending command", rc.retryCount, rc.maxRetries)
+
+	// Clear position history for fresh tracking
+	rc.positionHistory = rc.positionHistory[:0]
+
+	// Reset timers
+	rc.commandStartTime = time.Now()
+	rc.lastMovementTime = time.Now()
+
+	// Save target position
+	targetAz := rc.targetPos.Azimuth
+	targetEl := rc.targetPos.Elevation
+
+	// Unlock mutex to send commands (avoid deadlock)
+	rc.mu.Unlock()
+
+	// IMPORTANT: Send stop command first before reissuing bearing command
+	// This ensures the rotator isn't still trying to execute the previous command
+	stopErr := rc.client.Stop()
+	if stopErr != nil {
+		log.Printf("Rotator: Stop command failed during retry: %v", stopErr)
+	} else {
+		log.Printf("Rotator: Stopped successfully, now resending position command to azimuth=%.1f°, elevation=%.1f°",
+			targetAz, targetEl)
+	}
+
+	// Small delay to let the rotator settle after stop
+	time.Sleep(500 * time.Millisecond)
+
+	// Resend position command
+	err := rc.client.SetPosition(targetAz, targetEl)
+
+	// Re-lock mutex
+	rc.mu.Lock()
+
+	if err != nil {
+		log.Printf("Rotator: Retry command failed: %v", err)
+		rc.state.LastError = err
+	} else {
+		log.Printf("Rotator: Retry command sent successfully")
+	}
 }
 
 // GetClient returns the underlying rotctl client for direct access

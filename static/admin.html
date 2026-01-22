@@ -435,6 +435,7 @@
     <script src="chart.umd.min.js"></script>
     <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
     <script src="suncalc.js"></script>
+    <script src="radiod_config_analyzer.js"></script>
 </head>
 <body>
     <div class="container">
@@ -6850,6 +6851,9 @@
             container.style.display = 'none';
             editor.style.display = 'block';
             editor.value = currentRadiodConfig;
+
+            // Analyze config and show warnings
+            updateRadiodConfigWarnings(currentRadiodConfig);
 
             // Reset editing state when loading
             radiodEditingEnabled = false;

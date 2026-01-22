@@ -7648,9 +7648,16 @@
                     });
                 }
 
+                // Check if canvas exists in DOM
+                const canvas = document.getElementById('loadHistoryCanvas');
+                if (!canvas) {
+                    console.log('Load history canvas not found in DOM');
+                    return;
+                }
+
                 // Only create chart if it doesn't exist yet
                 if (!loadHistoryChart) {
-                    const ctx = document.getElementById('loadHistoryCanvas').getContext('2d');
+                    const ctx = canvas.getContext('2d');
                     loadHistoryChart = new Chart(ctx, {
                     type: 'line',
                     data: {
@@ -7750,6 +7757,25 @@
                         }
                     }
                 });
+                } else {
+                    // Chart exists, just update the data
+                    loadHistoryChart.data.labels = labels;
+                    loadHistoryChart.data.datasets.forEach((dataset, index) => {
+                        if (index === 0 && dataset.label === 'OK Zone') {
+                            // Skip background zones, they don't change
+                        } else if (index === 1 && dataset.label === 'Warning Zone') {
+                            // Skip
+                        } else if (index === 2 && dataset.label === 'Critical Zone') {
+                            // Skip
+                        } else if (dataset.label === '1 min') {
+                            dataset.data = load1Data;
+                        } else if (dataset.label === '5 min') {
+                            dataset.data = load5Data;
+                        } else if (dataset.label === '15 min') {
+                            dataset.data = load15Data;
+                        }
+                    });
+                    loadHistoryChart.update('none');
                 }
 
                 // Fetch 24-hour history
@@ -7809,9 +7835,16 @@
                     });
                 }
 
+                // Check if hourly canvas exists in DOM
+                const hourlyCanvas = document.getElementById('loadHourlyCanvas');
+                if (!hourlyCanvas) {
+                    console.log('Load hourly canvas not found in DOM');
+                    return;
+                }
+
                 // Only create hourly chart if it doesn't exist yet
                 if (!loadHourlyChart) {
-                    const hourlyCtx = document.getElementById('loadHourlyCanvas').getContext('2d');
+                    const hourlyCtx = hourlyCanvas.getContext('2d');
                     loadHourlyChart = new Chart(hourlyCtx, {
                     type: 'line',
                     data: {
@@ -7911,6 +7944,25 @@
                         }
                     }
                 });
+                } else {
+                    // Chart exists, just update the data
+                    loadHourlyChart.data.labels = hourlyLabels;
+                    loadHourlyChart.data.datasets.forEach((dataset, index) => {
+                        if (index === 0 && dataset.label === 'OK Zone') {
+                            // Skip background zones, they don't change
+                        } else if (index === 1 && dataset.label === 'Warning Zone') {
+                            // Skip
+                        } else if (index === 2 && dataset.label === 'Critical Zone') {
+                            // Skip
+                        } else if (dataset.label === '1 min') {
+                            dataset.data = hourlyLoad1Data;
+                        } else if (dataset.label === '5 min') {
+                            dataset.data = hourlyLoad5Data;
+                        } else if (dataset.label === '15 min') {
+                            dataset.data = hourlyLoad15Data;
+                        }
+                    });
+                    loadHourlyChart.update('none');
                 }
 
             } catch (error) {

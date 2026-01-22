@@ -855,6 +855,31 @@
                         </div>
                     </div>
 
+                    <!-- System Load History Section -->
+                    <div id="systemLoadHistorySection" class="config-section" style="display: none;">
+                        <h3>💻 System Load History</h3>
+                        
+                        <!-- Historical tracking chart - 60 minutes -->
+                        <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                                Historical Tracking (Last 60 Minutes)
+                            </div>
+                            <div style="height: 250px; position: relative;">
+                                <canvas id="loadHistoryCanvas"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Historical tracking chart - 24 hours -->
+                        <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                                Historical Tracking (Last 24 Hours)
+                            </div>
+                            <div style="height: 250px; position: relative;">
+                                <canvas id="loadHourlyCanvas"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
                     <div id="monitorHealth" class="loading">
                         <div class="spinner"></div>
                         <p>Loading health status...</p>
@@ -8998,47 +9023,11 @@
             `;
             statusSection.appendChild(statusDiv);
 
-            // Add historical tracking charts (only if they don't exist yet)
-            if (!document.getElementById('loadHistoryCanvas')) {
-                const historyDiv60 = document.createElement('div');
-                historyDiv60.style.background = '#fff';
-                historyDiv60.style.padding = '10px';
-                historyDiv60.style.borderRadius = '5px';
-                historyDiv60.style.border = '1px solid #dee2e6';
-                historyDiv60.style.marginTop = '15px';
-                historyDiv60.innerHTML = `
-                    <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
-                        Historical Tracking (Last 60 Minutes)
-                    </div>
-                    <div style="height: 250px; position: relative;">
-                        <canvas id="loadHistoryCanvas"></canvas>
-                    </div>
-                `;
-                statusSection.appendChild(historyDiv60);
+            container.appendChild(statusSection);
 
-                const historyDiv24 = document.createElement('div');
-                historyDiv24.style.background = '#fff';
-                historyDiv24.style.padding = '10px';
-                historyDiv24.style.borderRadius = '5px';
-                historyDiv24.style.border = '1px solid #dee2e6';
-                historyDiv24.style.marginTop = '15px';
-                historyDiv24.innerHTML = `
-                    <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
-                        Historical Tracking (Last 24 Hours)
-                    </div>
-                    <div style="height: 250px; position: relative;">
-                        <canvas id="loadHourlyCanvas"></canvas>
-                    </div>
-                `;
-                statusSection.appendChild(historyDiv24);
-
-                container.appendChild(statusSection);
-
-                // Load load history charts (only on first creation)
-                await loadLoadHistory();
-            } else {
-                container.appendChild(statusSection);
-            }
+            // Show the load history section and load charts
+            document.getElementById('systemLoadHistorySection').style.display = 'block';
+            await loadLoadHistory();
         }
 
         // Fetch tunnel status from local proxy endpoint

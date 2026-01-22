@@ -496,6 +496,16 @@ func main() {
 		log.Printf("Warning: Wideband spectrum session not found, frontend history tracking disabled")
 	}
 
+	// Initialize load history tracker
+	loadHistory := NewLoadHistoryTracker()
+	if err := loadHistory.Start(); err != nil {
+		log.Printf("Warning: Failed to start load history tracker: %v", err)
+		loadHistory = nil
+	} else {
+		defer loadHistory.Stop()
+		log.Printf("Load history tracker started")
+	}
+
 	// Initialize Prometheus metrics if enabled (must be before multi-decoder)
 	var prometheusMetrics *PrometheusMetrics
 	if config.Prometheus.Enabled {
@@ -976,7 +986,7 @@ func main() {
 	}
 
 	// Initialize admin handler (pass all components for proper shutdown during restart)
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, frontendHistory)
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, frontendHistory, loadHistory)
 
 	// Setup HTTP routes
 	http.HandleFunc("/connection", func(w http.ResponseWriter, r *http.Request) {
@@ -1177,6 +1187,8 @@ func main() {
 	http.HandleFunc("/admin/channel-status", adminHandler.AuthMiddleware(adminHandler.HandleChannelStatus))
 	http.HandleFunc("/admin/radiod-channels", adminHandler.AuthMiddleware(adminHandler.HandleRadiodChannels))
 	http.HandleFunc("/admin/system-load", adminHandler.AuthMiddleware(adminHandler.HandleSystemLoad))
+	http.HandleFunc("/admin/load-history", adminHandler.AuthMiddleware(adminHandler.HandleLoadHistory))
+	http.HandleFunc("/admin/load-hourly-history", adminHandler.AuthMiddleware(adminHandler.HandleLoadHourlyHistory))
 	http.HandleFunc("/admin/kick", adminHandler.AuthMiddleware(adminHandler.HandleKickUser))
 	http.HandleFunc("/admin/ban", adminHandler.AuthMiddleware(adminHandler.HandleBanUser))
 	http.HandleFunc("/admin/unban", adminHandler.AuthMiddleware(adminHandler.HandleUnbanIP))

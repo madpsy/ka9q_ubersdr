@@ -260,6 +260,7 @@ type AdminHandler struct {
 	rotatorScheduler    *RotatorScheduler
 	loginAttempts       *LoginAttemptTracker
 	frontendHistory     *FrontendHistoryTracker
+	loadHistory         *LoadHistoryTracker
 }
 
 // restartServer triggers a server restart after a short delay
@@ -321,7 +322,7 @@ func (ah *AdminHandler) restartServer() {
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, frontendHistory *FrontendHistoryTracker) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker) *AdminHandler {
 	return &AdminHandler{
 		config:              config,
 		configFile:          configFile,
@@ -344,6 +345,7 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		rotatorScheduler:    rotatorScheduler,
 		loginAttempts:       NewLoginAttemptTracker(),
 		frontendHistory:     frontendHistory,
+		loadHistory:         loadHistory,
 	}
 }
 
@@ -5258,5 +5260,63 @@ func (ah *AdminHandler) HandleRotatorSchedulerLogs(w http.ResponseWriter, r *htt
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding rotator scheduler logs: %v", err)
+	}
+}
+
+// HandleLoadHistory returns the 60-minute load history data
+func (ah *AdminHandler) HandleLoadHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if load history tracker exists
+	if ah.loadHistory == nil {
+		http.Error(w, "Load history tracker not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Get history data
+	history := ah.loadHistory.GetHistory()
+
+	response := map[string]interface{}{
+		"history": history,
+		"count":   len(history),
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding load history: %v", err)
+	}
+}
+
+// HandleLoadHourlyHistory returns the 24-hour load history data
+func (ah *AdminHandler) HandleLoadHourlyHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if load history tracker exists
+	if ah.loadHistory == nil {
+		http.Error(w, "Load history tracker not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Get hourly history data
+	hourlyHistory := ah.loadHistory.GetHourlyHistory()
+
+	response := map[string]interface{}{
+		"history": hourlyHistory,
+		"count":   len(hourlyHistory),
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding load hourly history: %v", err)
 	}
 }

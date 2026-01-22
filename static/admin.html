@@ -7258,6 +7258,8 @@
         // Frontend History Monitoring
         let frontendHistoryChart = null;
         let frontendHourlyChart = null;
+        let loadHistoryChart = null;
+        let loadHourlyChart = null;
 
         async function loadFrontendHistory() {
             try {
@@ -7576,6 +7578,261 @@
 
             } catch (error) {
                 console.error('Error loading frontend history:', error);
+            }
+        }
+
+        async function loadLoadHistory() {
+            try {
+                // Fetch 60-minute history
+                const historyResponse = await authenticatedFetch('/admin/load-history');
+                if (!historyResponse || !historyResponse.ok) {
+                    console.log('Load history not available');
+                    return;
+                }
+
+                const historyData = await historyResponse.json();
+                const history = historyData.history || [];
+
+                if (history.length === 0) {
+                    console.log('No load history data available yet');
+                    return;
+                }
+
+                // Prepare data for Chart.js (three lines for 1, 5, 15 minute averages)
+                const labels = history.map(entry => new Date(entry.timestamp));
+                const load1Data = history.map(entry => entry.load_1min);
+                const load5Data = history.map(entry => entry.load_5min);
+                const load15Data = history.map(entry => entry.load_15min);
+
+                // Destroy existing chart if it exists
+                if (loadHistoryChart) {
+                    loadHistoryChart.destroy();
+                }
+
+                // Create chart
+                const ctx = document.getElementById('loadHistoryCanvas').getContext('2d');
+                loadHistoryChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: '1 min',
+                                data: load1Data,
+                                borderColor: '#667eea',
+                                backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                                borderWidth: 2,
+                                pointRadius: 2,
+                                tension: 0.3
+                            },
+                            {
+                                label: '5 min',
+                                data: load5Data,
+                                borderColor: '#f093fb',
+                                backgroundColor: 'rgba(240, 147, 251, 0.1)',
+                                borderWidth: 2,
+                                pointRadius: 2,
+                                tension: 0.3
+                            },
+                            {
+                                label: '15 min',
+                                data: load15Data,
+                                borderColor: '#4facfe',
+                                backgroundColor: 'rgba(79, 172, 254, 0.1)',
+                                borderWidth: 2,
+                                pointRadius: 2,
+                                tension: 0.3
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        if (context.parsed.y !== null) {
+                                            label += context.parsed.y.toFixed(2);
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    unit: 'minute',
+                                    displayFormats: {
+                                        minute: 'HH:mm'
+                                    },
+                                    tooltipFormat: 'HH:mm:ss'
+                                },
+                                ticks: {
+                                    source: 'data'
+                                },
+                                bounds: 'data',
+                                offset: false,
+                                title: {
+                                    display: true,
+                                    text: 'Time'
+                                }
+                            },
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                title: {
+                                    display: true,
+                                    text: 'Load Average'
+                                },
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+
+                // Fetch 24-hour history
+                const hourlyResponse = await authenticatedFetch('/admin/load-hourly-history');
+                if (!hourlyResponse || !hourlyResponse.ok) {
+                    console.log('Load hourly history not available');
+                    return;
+                }
+
+                const hourlyData = await hourlyResponse.json();
+                const hourlyHistory = hourlyData.history || [];
+
+                if (hourlyHistory.length === 0) {
+                    console.log('No load hourly history data available yet');
+                    return;
+                }
+
+                // Prepare data for hourly chart
+                const hourlyLabels = hourlyHistory.map(entry => new Date(entry.timestamp));
+                const hourlyLoad1Data = hourlyHistory.map(entry => entry.load_1min);
+                const hourlyLoad5Data = hourlyHistory.map(entry => entry.load_5min);
+                const hourlyLoad15Data = hourlyHistory.map(entry => entry.load_15min);
+
+                // Destroy existing hourly chart if it exists
+                if (loadHourlyChart) {
+                    loadHourlyChart.destroy();
+                }
+
+                // Create hourly chart
+                const hourlyCtx = document.getElementById('loadHourlyCanvas').getContext('2d');
+                loadHourlyChart = new Chart(hourlyCtx, {
+                    type: 'line',
+                    data: {
+                        labels: hourlyLabels,
+                        datasets: [
+                            {
+                                label: '1 min',
+                                data: hourlyLoad1Data,
+                                borderColor: '#667eea',
+                                backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                                borderWidth: 2,
+                                pointRadius: 2,
+                                tension: 0.3
+                            },
+                            {
+                                label: '5 min',
+                                data: hourlyLoad5Data,
+                                borderColor: '#f093fb',
+                                backgroundColor: 'rgba(240, 147, 251, 0.1)',
+                                borderWidth: 2,
+                                pointRadius: 2,
+                                tension: 0.3
+                            },
+                            {
+                                label: '15 min',
+                                data: hourlyLoad15Data,
+                                borderColor: '#4facfe',
+                                backgroundColor: 'rgba(79, 172, 254, 0.1)',
+                                borderWidth: 2,
+                                pointRadius: 2,
+                                tension: 0.3
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        if (context.parsed.y !== null) {
+                                            label += context.parsed.y.toFixed(2);
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    unit: 'hour',
+                                    displayFormats: {
+                                        hour: 'HH:mm'
+                                    },
+                                    tooltipFormat: 'MMM D, HH:mm'
+                                },
+                                ticks: {
+                                    source: 'data'
+                                },
+                                bounds: 'data',
+                                offset: false,
+                                title: {
+                                    display: true,
+                                    text: 'Time'
+                                }
+                            },
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                title: {
+                                    display: true,
+                                    text: 'Load Average'
+                                },
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error loading load history:', error);
             }
         }
 
@@ -8489,7 +8746,7 @@
             }
         }
 
-        function renderSystemLoadHealth(container, systemLoad) {
+        async function renderSystemLoadHealth(container, systemLoad) {
             const statusSection = document.createElement('div');
             statusSection.className = 'config-section';
 
@@ -8606,7 +8863,44 @@
                 </div>
             `;
             statusSection.appendChild(statusDiv);
+
+            // Add historical tracking charts
+            const historyDiv60 = document.createElement('div');
+            historyDiv60.style.background = '#fff';
+            historyDiv60.style.padding = '10px';
+            historyDiv60.style.borderRadius = '5px';
+            historyDiv60.style.border = '1px solid #dee2e6';
+            historyDiv60.style.marginTop = '15px';
+            historyDiv60.innerHTML = `
+                <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                    Historical Tracking (Last 60 Minutes)
+                </div>
+                <div style="height: 250px; position: relative;">
+                    <canvas id="loadHistoryCanvas"></canvas>
+                </div>
+            `;
+            statusSection.appendChild(historyDiv60);
+
+            const historyDiv24 = document.createElement('div');
+            historyDiv24.style.background = '#fff';
+            historyDiv24.style.padding = '10px';
+            historyDiv24.style.borderRadius = '5px';
+            historyDiv24.style.border = '1px solid #dee2e6';
+            historyDiv24.style.marginTop = '15px';
+            historyDiv24.innerHTML = `
+                <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                    Historical Tracking (Last 24 Hours)
+                </div>
+                <div style="height: 250px; position: relative;">
+                    <canvas id="loadHourlyCanvas"></canvas>
+                </div>
+            `;
+            statusSection.appendChild(historyDiv24);
+
             container.appendChild(statusSection);
+
+            // Load load history charts
+            await loadLoadHistory();
         }
 
         // Fetch tunnel status from local proxy endpoint

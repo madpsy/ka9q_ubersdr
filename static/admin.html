@@ -855,30 +855,6 @@
                         </div>
                     </div>
 
-                    <!-- System Load History Section -->
-                    <div id="systemLoadHistorySection" class="config-section" style="display: none;">
-                        <h3>💻 System Load History</h3>
-                        
-                        <!-- Historical tracking chart - 60 minutes -->
-                        <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
-                            <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
-                                Historical Tracking (Last 60 Minutes)
-                            </div>
-                            <div style="height: 250px; position: relative;">
-                                <canvas id="loadHistoryCanvas"></canvas>
-                            </div>
-                        </div>
-
-                        <!-- Historical tracking chart - 24 hours -->
-                        <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
-                            <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
-                                Historical Tracking (Last 24 Hours)
-                            </div>
-                            <div style="height: 250px; position: relative;">
-                                <canvas id="loadHourlyCanvas"></canvas>
-                            </div>
-                        </div>
-                    </div>
 
                     <div id="monitorHealth" class="loading">
                         <div class="spinner"></div>
@@ -9025,10 +9001,48 @@
             `;
             statusSection.appendChild(statusDiv);
 
+            // Add load history graphs directly under the load averages
+            const historyDiv = document.createElement('div');
+            historyDiv.style.marginTop = '20px';
+
+            // Historical tracking chart - 60 minutes
+            const history60Div = document.createElement('div');
+            history60Div.style.background = '#fff';
+            history60Div.style.padding = '10px';
+            history60Div.style.borderRadius = '5px';
+            history60Div.style.border = '1px solid #dee2e6';
+            history60Div.style.marginBottom = '15px';
+            history60Div.innerHTML = `
+                <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                    Historical Tracking (Last 60 Minutes)
+                </div>
+                <div style="height: 250px; position: relative;">
+                    <canvas id="loadHistoryCanvas"></canvas>
+                </div>
+            `;
+            historyDiv.appendChild(history60Div);
+
+            // Historical tracking chart - 24 hours
+            const history24Div = document.createElement('div');
+            history24Div.style.background = '#fff';
+            history24Div.style.padding = '10px';
+            history24Div.style.borderRadius = '5px';
+            history24Div.style.border = '1px solid #dee2e6';
+            history24Div.innerHTML = `
+                <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                    Historical Tracking (Last 24 Hours)
+                </div>
+                <div style="height: 250px; position: relative;">
+                    <canvas id="loadHourlyCanvas"></canvas>
+                </div>
+            `;
+            historyDiv.appendChild(history24Div);
+
+            statusSection.appendChild(historyDiv);
+
             container.appendChild(statusSection);
 
-            // Show the load history section and load charts
-            document.getElementById('systemLoadHistorySection').style.display = 'block';
+            // Load the charts
             await loadLoadHistory();
         }
 

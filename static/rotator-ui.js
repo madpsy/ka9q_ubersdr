@@ -53,7 +53,7 @@ class RotatorUI {
                 <!-- Rotator tab (always visible, on left edge) -->
                 <div id="rotator-header" class="rotator-header" onclick="rotatorUI.togglePanel()">
                     <span id="rotator-tab-bearing" class="rotator-tab-bearing" style="display:${this.isExpanded ? 'none' : 'block'};">0°</span>
-                    <span>🛰️</span>
+                    <span>🧭</span>
                     <span id="rotator-tab-status" class="rotator-tab-status disconnected" style="display:${this.isExpanded ? 'none' : 'block'};"></span>
                     <span id="rotator-collapse-arrow" class="rotator-collapse-arrow" style="display:${this.isExpanded ? 'block' : 'none'};">←</span>
                 </div>

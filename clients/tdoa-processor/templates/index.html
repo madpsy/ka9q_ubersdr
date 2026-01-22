@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TDOA Processor - UberSDR</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: #4CAF50;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #888;
+            margin-bottom: 30px;
+        }
+        
+        .section {
+            background: #2a2a2a;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid #333;
+        }
+        
+        .section h2 {
+            color: #4CAF50;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        
+        .session-list {
+            display: grid;
+            gap: 15px;
+        }
+        
+        .session-card {
+            background: #333;
+            border: 2px solid #444;
+            border-radius: 6px;
+            padding: 15px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .session-card:hover {
+            border-color: #4CAF50;
+            background: #3a3a3a;
+        }
+        
+        .session-card.selected {
+            border-color: #4CAF50;
+            background: #2d4a2d;
+        }
+        
+        .session-time {
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #4CAF50;
+            margin-bottom: 8px;
+        }
+        
+        .session-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .info-item {
+            color: #aaa;
+        }
+        
+        .info-label {
+            color: #666;
+            font-size: 0.9em;
+        }
+        
+        .receiver-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        
+        .receiver-badge {
+            background: #444;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            color: #4CAF50;
+        }
+        
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        label {
+            color: #aaa;
+            font-size: 0.9em;
+        }
+        
+        input[type="number"], input[type="text"] {
+            background: #333;
+            border: 1px solid #444;
+            color: #e0e0e0;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 1em;
+        }
+        
+        input[type="number"]:focus, input[type="text"]:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+        
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        
+        .results {
+            display: none;
+        }
+        
+        .results.show {
+            display: block;
+        }
+        
+        .result-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+        }
+        
+        .result-card {
+            background: #333;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #4CAF50;
+        }
+        
+        .result-title {
+            color: #4CAF50;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .result-value {
+            font-size: 1.2em;
+            color: #e0e0e0;
+            margin-bottom: 5px;
+        }
+        
+        .result-label {
+            color: #888;
+            font-size: 0.9em;
+        }
+        
+        .tdoa-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        
+        .tdoa-table th, .tdoa-table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #444;
+        }
+        
+        .tdoa-table th {
+            background: #333;
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        
+        .tdoa-table tr:hover {
+            background: #333;
+        }
+        
+        .confidence-bar {
+            height: 6px;
+            background: #444;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+        
+        .confidence-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #f44336, #ff9800, #4CAF50);
+            transition: width 0.3s;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+        
+        .spinner {
+            border: 3px solid #333;
+            border-top: 3px solid #4CAF50;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .error {
+            background: #5a2a2a;
+            border-left: 4px solid #f44336;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 15px;
+        }
+        
+        .position-display {
+            background: #2d4a2d;
+            padding: 20px;
+            border-radius: 6px;
+            border: 2px solid #4CAF50;
+            margin-top: 15px;
+        }
+        
+        .position-coords {
+            font-size: 1.3em;
+            color: #4CAF50;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        #map {
+            height: 500px;
+            width: 100%;
+            border-radius: 6px;
+            margin-top: 20px;
+            border: 2px solid #4CAF50;
+        }
+        
+        .map-container {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        
+        .receiver-label {
+            background: rgba(76, 175, 80, 0.9) !important;
+            border: 2px solid white !important;
+            border-radius: 4px !important;
+            color: white !important;
+            font-weight: bold !important;
+            font-size: 12px !important;
+            padding: 4px 8px !important;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3) !important;
+        }
+        
+        .receiver-label::before {
+            border-top-color: rgba(76, 175, 80, 0.9) !important;
+        }
+        
+        .transmitter-label {
+            background: rgba(255, 152, 0, 0.9) !important;
+            border: 2px solid white !important;
+            border-radius: 4px !important;
+            color: white !important;
+            font-weight: bold !important;
+            font-size: 12px !important;
+            padding: 4px 8px !important;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3) !important;
+        }
+        
+        .transmitter-label::before {
+            border-top-color: rgba(255, 152, 0, 0.9) !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛰️ TDOA Processor</h1>
+        <p class="subtitle">Time Difference of Arrival Geolocation for UberSDR</p>
+        
+        <div class="section">
+            <h2>📁 Available Recording Sessions</h2>
+            <div id="sessionList" class="session-list">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Loading sessions...</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>⚙️ Signal Selection</h2>
+            <p style="color: #aaa; margin-bottom: 15px;">
+                Select which signal within the recorded bandwidth to locate:
+            </p>
+            
+            <div id="frequencySelector" style="display: none;">
+                <div style="background: #333; padding: 20px; border-radius: 6px; margin-bottom: 20px;">
+                    <div style="color: #4CAF50; font-weight: bold; margin-bottom: 15px;">📡 Frequency Range</div>
+                    
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px; color: #aaa; font-size: 0.9em;">
+                        <span id="lowFreq">14.050 MHz</span>
+                        <span style="color: #4CAF50;" id="centerFreqLabel">Center: 14.074 MHz</span>
+                        <span id="highFreq">14.098 MHz</span>
+                    </div>
+                    
+                    <div style="position: relative; height: 60px; background: linear-gradient(90deg, #1a1a1a 0%, #2d4a2d 50%, #1a1a1a 100%); border-radius: 4px; margin-bottom: 15px;">
+                        <div style="position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: #4CAF50;"></div>
+                        <div id="targetMarker" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 20px; height: 20px; background: #ff9800; border: 3px solid #fff; border-radius: 50%; cursor: pointer; display: none;"></div>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label for="freqSlider" style="color: #aaa; display: block; margin-bottom: 8px;">
+                            🎯 Target Frequency: <span id="targetFreqDisplay" style="color: #4CAF50; font-weight: bold;">14.074000 MHz</span>
+                        </label>
+                        <input type="range" id="freqSlider" min="-24000" max="24000" value="0" step="10"
+                               style="width: 100%; height: 8px; background: #444; border-radius: 4px; outline: none; cursor: pointer;"
+                               oninput="updateFromSlider()">
+                        <div style="display: flex; justify-content: space-between; margin-top: 5px; font-size: 0.85em; color: #666;">
+                            <span>-24 kHz</span>
+                            <span>0</span>
+                            <span>+24 kHz</span>
+                        </div>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <div>
+                            <label for="freqInput" style="color: #aaa; font-size: 0.9em;">Frequency (MHz)</label>
+                            <input type="number" id="freqInput" step="0.000001"
+                                   style="width: 100%; background: #2a2a2a; border: 1px solid #444; color: #e0e0e0; padding: 8px; border-radius: 4px;"
+                                   oninput="updateFromFreqInput()">
+                        </div>
+                        <div>
+                            <label for="offsetInput" style="color: #aaa; font-size: 0.9em;">Offset (Hz)</label>
+                            <input type="number" id="offsetInput" step="100" value="0"
+                                   style="width: 100%; background: #2a2a2a; border: 1px solid #444; color: #e0e0e0; padding: 8px; border-radius: 4px;"
+                                   oninput="updateFromOffsetInput()">
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="background: #333; padding: 15px; border-radius: 6px; margin-bottom: 15px;">
+                    <label for="bandwidth" style="color: #aaa; display: block; margin-bottom: 8px;">
+                        📏 Filter Bandwidth: <span id="bandwidthDisplay" style="color: #4CAF50; font-weight: bold;">2500 Hz</span>
+                    </label>
+                    <input type="range" id="bandwidth" min="10" max="24000" value="2500" step="10"
+                           style="width: 100%; height: 8px; background: #444; border-radius: 4px; outline: none; cursor: pointer;"
+                           oninput="updateBandwidthDisplay()">
+                    <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
+                        <button onclick="setBandwidth(50)" style="padding: 6px 12px; font-size: 0.9em;">Narrow CW (50 Hz)</button>
+                        <button onclick="setBandwidth(500)" style="padding: 6px 12px; font-size: 0.9em;">CW (500 Hz)</button>
+                        <button onclick="setBandwidth(2500)" style="padding: 6px 12px; font-size: 0.9em;">FT8 (2.5 kHz)</button>
+                        <button onclick="setBandwidth(24000)" style="padding: 6px 12px; font-size: 0.9em;">Wideband (24 kHz)</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="display: flex; gap: 15px; align-items: flex-end;">
+                <div style="flex: 1;">
+                    <label for="transmitterName" style="color: #aaa; font-size: 0.9em;">Transmitter Name (optional)</label>
+                    <input type="text" id="transmitterName" placeholder="e.g., BBC Radio 4, FT8 Station"
+                           style="width: 100%; background: #333; border: 1px solid #444; color: #e0e0e0; padding: 10px; border-radius: 4px;">
+                </div>
+                <button id="processBtn" onclick="processTDOA()" disabled style="flex-shrink: 0;">🔍 Locate Signal</button>
+            </div>
+        </div>
+        
+        <div id="results" class="results section">
+            <h2>📊 Results</h2>
+            <div id="resultsContent"></div>
+            
+            <div id="mapContainer" class="map-container" style="display: none;">
+                <h3 style="color: #4CAF50; margin-bottom: 15px;">🗺️ Geolocation Map</h3>
+                <div id="map"></div>
+                <div style="margin-top: 10px; color: #aaa; font-size: 0.9em;">
+                    <strong>Legend:</strong>
+                    <span style="color: #4CAF50;">🟢 Receivers</span> |
+                    <span style="color: #ff9800;">🟠 Estimated Transmitter</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let selectedSession = null;
+        let sessions = [];
+        
+        // Load sessions on page load
+        window.addEventListener('load', loadSessions);
+        
+        async function loadSessions() {
+            try {
+                const response = await fetch('/api/sessions');
+                const data = await response.json();
+                
+                if (data.success) {
+                    sessions = data.sessions;
+                    displaySessions(sessions);
+                } else {
+                    document.getElementById('sessionList').innerHTML = 
+                        `<div class="error">Error: ${data.error}</div>`;
+                }
+            } catch (error) {
+                document.getElementById('sessionList').innerHTML = 
+                    `<div class="error">Failed to load sessions: ${error.message}</div>`;
+            }
+        }
+        
+        function displaySessions(sessions) {
+            const container = document.getElementById('sessionList');
+            
+            if (sessions.length === 0) {
+                container.innerHTML = '<p style="color: #888;">No recording sessions found</p>';
+                return;
+            }
+            
+            container.innerHTML = sessions.map((session, idx) => `
+                <div class="session-card" onclick="selectSession('${session.timestamp}')">
+                    <div class="session-time">${session.time_str}</div>
+                    <div class="session-info">
+                        <div class="info-item">
+                            <div class="info-label">Frequency</div>
+                            <div>${session.frequency_mhz.toFixed(3)} MHz</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Receivers</div>
+                            <div>${session.receiver_count}</div>
+                        </div>
+                    </div>
+                    <div class="receiver-list">
+                        ${session.receivers.map(r => `<span class="receiver-badge">${r}</span>`).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        function selectSession(timestamp) {
+            selectedSession = timestamp;
+            
+            // Update UI
+            document.querySelectorAll('.session-card').forEach(card => {
+                card.classList.remove('selected');
+            });
+            event.currentTarget.classList.add('selected');
+            
+            // Enable process button
+            document.getElementById('processBtn').disabled = false;
+            
+            // Show frequency selector
+            const session = sessions.find(s => s.timestamp === timestamp);
+            if (session) {
+                const centerMHz = session.frequency_mhz;
+                const lowMHz = centerMHz - 0.024;
+                const highMHz = centerMHz + 0.024;
+                
+                document.getElementById('lowFreq').textContent = `${lowMHz.toFixed(3)} MHz`;
+                document.getElementById('centerFreqLabel').textContent = `Center: ${centerMHz.toFixed(3)} MHz`;
+                document.getElementById('highFreq').textContent = `${highMHz.toFixed(3)} MHz`;
+                document.getElementById('freqInput').value = centerMHz.toFixed(6);
+                document.getElementById('frequencySelector').style.display = 'block';
+                
+                updateFrequencyDisplay();
+            }
+        }
+        
+        function updateFromSlider() {
+            const session = sessions.find(s => s.timestamp === selectedSession);
+            if (!session) return;
+            
+            const offsetHz = parseFloat(document.getElementById('freqSlider').value);
+            const centerMHz = session.frequency_mhz;
+            const targetMHz = centerMHz + (offsetHz / 1e6);
+            
+            document.getElementById('offsetInput').value = offsetHz;
+            document.getElementById('freqInput').value = targetMHz.toFixed(6);
+            document.getElementById('targetFreqDisplay').textContent = `${targetMHz.toFixed(6)} MHz`;
+            
+            updateMarkerPosition(offsetHz);
+        }
+        
+        function updateFromFreqInput() {
+            const session = sessions.find(s => s.timestamp === selectedSession);
+            if (!session) return;
+            
+            const targetMHz = parseFloat(document.getElementById('freqInput').value);
+            const centerMHz = session.frequency_mhz;
+            const offsetHz = (targetMHz - centerMHz) * 1e6;
+            
+            // Clamp to range
+            const clampedOffset = Math.max(-24000, Math.min(24000, offsetHz));
+            
+            document.getElementById('freqSlider').value = clampedOffset;
+            document.getElementById('offsetInput').value = clampedOffset;
+            document.getElementById('targetFreqDisplay').textContent = `${targetMHz.toFixed(6)} MHz`;
+            
+            updateMarkerPosition(clampedOffset);
+        }
+        
+        function updateFromOffsetInput() {
+            const session = sessions.find(s => s.timestamp === selectedSession);
+            if (!session) return;
+            
+            const offsetHz = parseFloat(document.getElementById('offsetInput').value);
+            const centerMHz = session.frequency_mhz;
+            const targetMHz = centerMHz + (offsetHz / 1e6);
+            
+            document.getElementById('freqSlider').value = offsetHz;
+            document.getElementById('freqInput').value = targetMHz.toFixed(6);
+            document.getElementById('targetFreqDisplay').textContent = `${targetMHz.toFixed(6)} MHz`;
+            
+            updateMarkerPosition(offsetHz);
+        }
+        
+        function updateMarkerPosition(offsetHz) {
+            const marker = document.getElementById('targetMarker');
+            const percent = ((offsetHz + 24000) / 48000) * 100;
+            marker.style.left = `${percent}%`;
+            marker.style.display = offsetHz !== 0 ? 'block' : 'none';
+        }
+        
+        function updateFrequencyDisplay() {
+            updateFromSlider();
+        }
+        
+        function setBandwidth(bw) {
+            document.getElementById('bandwidth').value = bw;
+            updateBandwidthDisplay();
+        }
+        
+        function updateBandwidthDisplay() {
+            const bw = document.getElementById('bandwidth').value;
+            document.getElementById('bandwidthDisplay').textContent = `${bw} Hz`;
+        }
+        
+        async function processTDOA() {
+            if (!selectedSession) return;
+            
+            const offset = parseFloat(document.getElementById('offsetInput').value);
+            const bandwidth = parseFloat(document.getElementById('bandwidth').value);
+            const transmitterName = document.getElementById('transmitterName').value.trim();
+            
+            // Show loading
+            const resultsDiv = document.getElementById('results');
+            const resultsContent = document.getElementById('resultsContent');
+            resultsDiv.classList.add('show');
+            resultsContent.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Processing TDOA...</p>
+                </div>
+            `;
+            
+            try {
+                const response = await fetch('/api/process', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        timestamp: selectedSession,
+                        offset: offset,
+                        bandwidth: bandwidth,
+                        no_position: false
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Add transmitter name to data
+                    data.transmitterName = transmitterName;
+                    displayResults(data);
+                } else {
+                    resultsContent.innerHTML = `<div class="error">Error: ${data.error}</div>`;
+                }
+            } catch (error) {
+                resultsContent.innerHTML = `<div class="error">Failed to process: ${error.message}</div>`;
+            }
+        }
+        
+        function displayResults(data) {
+            const content = document.getElementById('resultsContent');
+            
+            let html = '<div class="result-grid">';
+            
+            // Receivers
+            html += '<div class="result-card">';
+            html += '<div class="result-title">Receivers</div>';
+            data.receivers.forEach(rx => {
+                html += `<div style="margin-bottom: 10px;">`;
+                html += `<strong>${rx.callsign}</strong> (${rx.hostname})<br>`;
+                html += `<small style="color: #888;">${rx.location}</small><br>`;
+                html += `<small style="color: #666;">${rx.latitude.toFixed(4)}°N, ${rx.longitude.toFixed(4)}°E</small>`;
+                html += `</div>`;
+            });
+            html += '</div>';
+            
+            // Processing params
+            html += '<div class="result-card">';
+            html += '<div class="result-title">Processing Parameters</div>';
+            html += `<div class="result-value">${data.processing_params.offset_hz > 0 ? '+' : ''}${data.processing_params.offset_hz} Hz</div>`;
+            html += `<div class="result-label">Frequency Offset</div>`;
+            html += `<div class="result-value">${data.processing_params.bandwidth_hz} Hz</div>`;
+            html += `<div class="result-label">Bandwidth</div>`;
+            html += '</div>';
+            
+            html += '</div>';
+            
+            // Spectrum Display
+            if (data.spectrum_data && data.spectrum_data.length > 0) {
+                html += '<h3 style="margin-top: 20px; color: #4CAF50;">📊 Signal Spectrum</h3>';
+                html += '<div style="background: #333; padding: 20px; border-radius: 6px; margin-bottom: 20px;">';
+                
+                data.spectrum_data.forEach(spectrum => {
+                    html += `<div style="margin-bottom: 30px;">`;
+                    html += `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">`;
+                    html += `<div>`;
+                    html += `<strong style="color: #4CAF50;">${spectrum.callsign}</strong>`;
+                    html += `<span style="color: #888; margin-left: 10px;">${spectrum.location}</span>`;
+                    html += `</div>`;
+                    html += `<div style="text-align: right; font-size: 0.9em;">`;
+                    // Display true RF frequency (center + offset)
+                    const trueFreqHz = data.processing_params.center_freq_hz + spectrum.peak_freq_hz;
+                    const trueFreqMHz = (trueFreqHz / 1e6).toFixed(6);
+                    html += `<div style="color: #aaa;">Peak: <span style="color: #4CAF50;">${trueFreqMHz} MHz</span> at ${spectrum.peak_power_db.toFixed(1)} dB</div>`;
+                    html += `<div style="color: #aaa;">SNR: <span style="color: ${spectrum.snr_db > 10 ? '#4CAF50' : spectrum.snr_db > 5 ? '#ff9800' : '#f44336'}">${spectrum.snr_db.toFixed(1)} dB</span></div>`;
+                    html += `</div>`;
+                    html += `</div>`;
+                    
+                    // Create canvas for spectrum plot
+                    const canvasId = `spectrum_${spectrum.callsign}`;
+                    html += `<canvas id="${canvasId}" style="width: 100%; height: 150px; background: #2a2a2a; border-radius: 4px;"></canvas>`;
+                    html += `</div>`;
+                });
+                
+                html += '</div>';
+                
+                // Draw spectrums after HTML is inserted
+                setTimeout(() => {
+                    data.spectrum_data.forEach(spectrum => {
+                        drawSpectrum(`spectrum_${spectrum.callsign}`, spectrum,
+                                    data.processing_params.offset_hz,
+                                    data.processing_params.bandwidth_hz,
+                                    data.processing_params.center_freq_hz);
+                    });
+                }, 100);
+            }
+            
+            // Position or error message
+            if (data.position && data.position.latitude && data.position.longitude) {
+                html += '<div class="position-display">';
+                html += '<div class="result-title">📍 Estimated Position</div>';
+                html += `<div class="position-coords">${data.position.latitude.toFixed(4)}°N, ${data.position.longitude.toFixed(4)}°E</div>`;
+                if (data.position.uncertainty_km !== undefined) {
+                    html += `<div style="color: #aaa; margin-top: 8px;">Uncertainty: ±${data.position.uncertainty_km.toFixed(1)} km</div>`;
+                }
+                html += `<a href="https://www.google.com/maps?q=${data.position.latitude},${data.position.longitude}" target="_blank" style="color: #4CAF50;">View on Google Maps</a>`;
+                html += '</div>';
+            } else if (data.position_error) {
+                html += '<div style="background: #3a3a2a; padding: 15px; border-radius: 6px; border-left: 4px solid #ff9800; margin-top: 15px;">';
+                html += '<div style="color: #ff9800; font-weight: bold; margin-bottom: 8px;">⚠️ Position Estimation Failed</div>';
+                html += '<div style="color: #aaa;">' + data.position_error + '</div>';
+                html += '</div>';
+            }
+            
+            // TDOA Results Table
+            html += '<h3 style="margin-top: 20px; color: #4CAF50;">TDOA Measurements</h3>';
+            html += '<table class="tdoa-table">';
+            html += '<thead><tr>';
+            html += '<th>Receiver Pair</th>';
+            html += '<th>TDOA (μs)</th>';
+            html += '<th>Distance Diff (km)</th>';
+            html += '<th>SNR (dB)</th>';
+            html += '<th>Confidence</th>';
+            html += '</tr></thead><tbody>';
+            
+            data.tdoa_results.forEach(result => {
+                html += '<tr>';
+                html += `<td>${result.receiver1} ↔ ${result.receiver2}</td>`;
+                html += `<td>${result.tdoa_microseconds > 0 ? '+' : ''}${result.tdoa_microseconds.toFixed(1)}</td>`;
+                html += `<td>${result.distance_diff_km > 0 ? '+' : ''}${result.distance_diff_km.toFixed(2)}</td>`;
+                html += `<td>`;
+                html += `<div style="font-size: 0.9em;">`;
+                html += `${result.receiver1}: <span style="color: ${result.snr_db_rx1 > 10 ? '#4CAF50' : result.snr_db_rx1 > 5 ? '#ff9800' : '#f44336'}">${result.snr_db_rx1.toFixed(1)}</span><br>`;
+                html += `${result.receiver2}: <span style="color: ${result.snr_db_rx2 > 10 ? '#4CAF50' : result.snr_db_rx2 > 5 ? '#ff9800' : '#f44336'}">${result.snr_db_rx2.toFixed(1)}</span>`;
+                html += `</div>`;
+                html += `</td>`;
+                html += `<td>`;
+                html += `${result.confidence.toFixed(4)}`;
+                html += `<div class="confidence-bar"><div class="confidence-fill" style="width: ${result.confidence * 100}%"></div></div>`;
+                html += `</td>`;
+                html += '</tr>';
+            });
+            
+            html += '</tbody></table>';
+            
+            content.innerHTML = html;
+            
+            // Always show map if we have receivers
+            if (data.receivers && data.receivers.length > 0) {
+                showMap(data);
+            }
+        }
+        
+        let map = null;
+        
+        function showMap(data) {
+            const mapContainer = document.getElementById('mapContainer');
+            mapContainer.style.display = 'block';
+            
+            // Initialize map if not already done
+            if (!map) {
+                map = L.map('map');
+                
+                // Add OpenStreetMap tiles
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors',
+                    maxZoom: 19
+                }).addTo(map);
+            } else {
+                // Clear existing markers
+                map.eachLayer(layer => {
+                    if (layer instanceof L.Marker || layer instanceof L.Circle) {
+                        map.removeLayer(layer);
+                    }
+                });
+            }
+            
+            // Add receiver markers (green)
+            const receiverIcon = L.divIcon({
+                className: 'custom-div-icon',
+                html: '<div style="background-color: #4CAF50; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white;"></div>',
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
+            });
+            
+            const bounds = [];
+            
+            data.receivers.forEach(rx => {
+                const marker = L.marker([rx.latitude, rx.longitude], { icon: receiverIcon })
+                    .addTo(map)
+                    .bindPopup(`
+                        <strong>${rx.callsign}</strong><br>
+                        ${rx.location}<br>
+                        ${rx.hostname}<br>
+                        <small>${rx.latitude.toFixed(4)}°N, ${rx.longitude.toFixed(4)}°E</small>
+                    `)
+                    .bindTooltip(rx.callsign, {
+                        permanent: true,
+                        direction: 'top',
+                        className: 'receiver-label',
+                        offset: [0, -10]
+                    });
+                bounds.push([rx.latitude, rx.longitude]);
+            });
+            
+            // Add estimated position marker (orange) only if position is valid
+            if (data.position && data.position.latitude && data.position.longitude) {
+                const txIcon = L.divIcon({
+                    className: 'custom-div-icon',
+                    html: '<div style="background-color: #ff9800; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 10px rgba(255,152,0,0.5);"></div>',
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12]
+                });
+                
+                const txMarker = L.marker([data.position.latitude, data.position.longitude], { icon: txIcon })
+                    .addTo(map)
+                    .bindPopup(`
+                        <strong>📡 Estimated Transmitter</strong><br>
+                        ${data.transmitterName ? `<strong>${data.transmitterName}</strong><br>` : ''}
+                        ${data.position.latitude.toFixed(4)}°N, ${data.position.longitude.toFixed(4)}°E<br>
+                        <a href="https://www.google.com/maps?q=${data.position.latitude},${data.position.longitude}" target="_blank">Open in Google Maps</a>
+                    `);
+                
+                // Add permanent tooltip if transmitter name is provided
+                if (data.transmitterName) {
+                    txMarker.bindTooltip(data.transmitterName, {
+                        permanent: true,
+                        direction: 'top',
+                        className: 'transmitter-label',
+                        offset: [0, -12]
+                    });
+                }
+                
+                bounds.push([data.position.latitude, data.position.longitude]);
+                
+                // Draw circles from each receiver to show TDOA hyperbolas (simplified)
+                data.receivers.forEach(rx => {
+                    const distance = calculateDistance(
+                        rx.latitude, rx.longitude,
+                        data.position.latitude, data.position.longitude
+                    );
+                    
+                    // Draw a faint circle showing distance
+                    L.circle([rx.latitude, rx.longitude], {
+                        radius: distance * 1000, // convert km to meters
+                        color: '#4CAF50',
+                        fillColor: '#4CAF50',
+                        fillOpacity: 0.05,
+                        weight: 1,
+                        opacity: 0.3
+                    }).addTo(map);
+                });
+            }
+            
+            // Fit map to show all markers
+            if (bounds.length > 0) {
+                map.fitBounds(bounds, { padding: [50, 50] });
+            }
+        }
+        
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            // Haversine formula to calculate distance in km
+            const R = 6371; // Earth radius in km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+        
+        function drawSpectrum(canvasId, spectrum, targetOffsetHz, bandwidthHz, centerFreqHz) {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) return;
+            
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width = canvas.offsetWidth;
+            const height = canvas.height = canvas.offsetHeight;
+            
+            // Clear canvas
+            ctx.fillStyle = '#2a2a2a';
+            ctx.fillRect(0, 0, width, height);
+            
+            const freqs = spectrum.frequencies;
+            const power = spectrum.power_db;
+            
+            if (freqs.length === 0) return;
+            
+            // Convert offset frequencies to actual RF frequencies
+            const actualFreqs = freqs.map(f => f + centerFreqHz);
+            
+            // Find min/max for scaling
+            const minPower = Math.min(...power);
+            const maxPower = Math.max(...power);
+            const powerRange = maxPower - minPower;
+            
+            const minFreq = actualFreqs[0];
+            const maxFreq = actualFreqs[actualFreqs.length - 1];
+            const freqRange = maxFreq - minFreq;
+            
+            // Margins
+            const marginLeft = 50;
+            const marginRight = 20;
+            const marginTop = 20;
+            const marginBottom = 30;
+            
+            const plotWidth = width - marginLeft - marginRight;
+            const plotHeight = height - marginTop - marginBottom;
+            
+            // Draw grid
+            ctx.strokeStyle = '#444';
+            ctx.lineWidth = 1;
+            
+            // Horizontal grid lines (power)
+            for (let i = 0; i <= 4; i++) {
+                const y = marginTop + (plotHeight * i / 4);
+                ctx.beginPath();
+                ctx.moveTo(marginLeft, y);
+                ctx.lineTo(marginLeft + plotWidth, y);
+                ctx.stroke();
+                
+                // Labels
+                const powerVal = maxPower - (powerRange * i / 4);
+                ctx.fillStyle = '#666';
+                ctx.font = '10px monospace';
+                ctx.textAlign = 'right';
+                ctx.fillText(powerVal.toFixed(0) + ' dB', marginLeft - 5, y + 3);
+            }
+            
+            // Vertical grid lines (frequency)
+            for (let i = 0; i <= 4; i++) {
+                const x = marginLeft + (plotWidth * i / 4);
+                ctx.beginPath();
+                ctx.moveTo(x, marginTop);
+                ctx.lineTo(x, marginTop + plotHeight);
+                ctx.stroke();
+                
+                // Labels - show actual RF frequency in MHz
+                const freqVal = minFreq + (freqRange * i / 4);
+                ctx.fillStyle = '#666';
+                ctx.font = '10px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText((freqVal / 1e6).toFixed(6) + ' MHz', x, height - 10);
+            }
+            
+            // Draw spectrum line
+            ctx.strokeStyle = '#4CAF50';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            
+            for (let i = 0; i < actualFreqs.length; i++) {
+                const x = marginLeft + ((actualFreqs[i] - minFreq) / freqRange) * plotWidth;
+                const y = marginTop + plotHeight - ((power[i] - minPower) / powerRange) * plotHeight;
+                
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.stroke();
+            
+            // Fill under curve
+            ctx.lineTo(marginLeft + plotWidth, marginTop + plotHeight);
+            ctx.lineTo(marginLeft, marginTop + plotHeight);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(76, 175, 80, 0.1)';
+            ctx.fill();
+            
+            // Mark bandwidth region (convert to actual RF frequency)
+            if (bandwidthHz) {
+                const bwStart = targetOffsetHz - bandwidthHz / 2 + centerFreqHz;
+                const bwEnd = targetOffsetHz + bandwidthHz / 2 + centerFreqHz;
+                
+                if (bwEnd >= minFreq && bwStart <= maxFreq) {
+                    const xStart = marginLeft + Math.max(0, ((bwStart - minFreq) / freqRange)) * plotWidth;
+                    const xEnd = marginLeft + Math.min(1, ((bwEnd - minFreq) / freqRange)) * plotWidth;
+                    
+                    // Draw shaded bandwidth region
+                    ctx.fillStyle = 'rgba(255, 152, 0, 0.15)';
+                    ctx.fillRect(xStart, marginTop, xEnd - xStart, plotHeight);
+                    
+                    // Draw bandwidth edges
+                    ctx.strokeStyle = '#ff9800';
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([3, 3]);
+                    
+                    if (bwStart >= minFreq) {
+                        ctx.beginPath();
+                        ctx.moveTo(xStart, marginTop);
+                        ctx.lineTo(xStart, marginTop + plotHeight);
+                        ctx.stroke();
+                    }
+                    
+                    if (bwEnd <= maxFreq) {
+                        ctx.beginPath();
+                        ctx.moveTo(xEnd, marginTop);
+                        ctx.lineTo(xEnd, marginTop + plotHeight);
+                        ctx.stroke();
+                    }
+                    
+                    ctx.setLineDash([]);
+                }
+            }
+            
+            // Mark target frequency (center line) - convert to actual RF frequency
+            const targetFreqHz = targetOffsetHz + centerFreqHz;
+            if (targetFreqHz >= minFreq && targetFreqHz <= maxFreq) {
+                const x = marginLeft + ((targetFreqHz - minFreq) / freqRange) * plotWidth;
+                
+                ctx.strokeStyle = '#ff9800';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(x, marginTop);
+                ctx.lineTo(x, marginTop + plotHeight);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                
+                // Label
+                ctx.fillStyle = '#ff9800';
+                ctx.font = 'bold 11px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Target', x, marginTop - 5);
+            }
+            
+            // Mark peak - convert to actual RF frequency
+            const peakFreqActual = spectrum.peak_freq_hz + centerFreqHz;
+            if (peakFreqActual >= minFreq && peakFreqActual <= maxFreq) {
+                const x = marginLeft + ((peakFreqActual - minFreq) / freqRange) * plotWidth;
+                const peakPowerIdx = actualFreqs.findIndex(f => Math.abs(f - peakFreqActual) < 1);
+                if (peakPowerIdx >= 0) {
+                    const y = marginTop + plotHeight - ((power[peakPowerIdx] - minPower) / powerRange) * plotHeight;
+                    
+                    ctx.fillStyle = '#4CAF50';
+                    ctx.beginPath();
+                    ctx.arc(x, y, 4, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
+            }
+        }
+    </script>
+</body>
+</html>

@@ -11698,6 +11698,7 @@
             let noiseFloorCount = 0;
             let userAudioCount = 0;
             let userSpectrumCount = 0;
+            let referenceCount = 0;
             let unknownCount = 0;
 
             filteredChannels.forEach(ch => {
@@ -11706,6 +11707,7 @@
                     case 'noisefloor': noiseFloorCount++; break;
                     case 'user_audio': userAudioCount++; break;
                     case 'user_spectrum': userSpectrumCount++; break;
+                    case 'reference': referenceCount++; break;
                     default: unknownCount++; break;
                 }
             });
@@ -11730,6 +11732,7 @@
                 <span style="margin-left: 20px;">• Noise Floor: <strong style="color: #9c27b0;">${noiseFloorCount}</strong></span>
                 <span style="margin-left: 20px;">• User Audio: <strong style="color: #28a745;">${userAudioCount}</strong></span>
                 <span style="margin-left: 20px;">• User Spectrum: <strong style="color: #ff9800;">${userSpectrumCount}</strong></span>
+                ${referenceCount > 0 ? `<span style="margin-left: 20px;">• Frequency Reference: <strong style="color: #ffc107;">${referenceCount}</strong></span>` : ''}
                 ${unknownCount > 0 ? `<span style="margin-left: 20px;">• Unknown: <strong style="color: #999;">${unknownCount}</strong></span>` : ''}
             `;
 
@@ -11797,6 +11800,7 @@
                     'noisefloor': 'Noise Floor',
                     'user_audio': 'User Audio',
                     'user_spectrum': 'User Spectrum',
+                    'reference': 'Frequency Reference',
                     'unknown': 'Unknown'
                 };
                 option.textContent = typeLabels[type] || type;
@@ -11932,6 +11936,7 @@
             let noiseFloorCount = 0;
             let userAudioCount = 0;
             let userSpectrumCount = 0;
+            let referenceCount = 0;
             let unknownCount = 0;
 
             filteredChannels.forEach(ch => {
@@ -11940,6 +11945,7 @@
                     case 'noisefloor': noiseFloorCount++; break;
                     case 'user_audio': userAudioCount++; break;
                     case 'user_spectrum': userSpectrumCount++; break;
+                    case 'reference': referenceCount++; break;
                     default: unknownCount++; break;
                 }
             });
@@ -11955,6 +11961,7 @@
                     <span style="margin-left: 20px;">• Noise Floor: <strong style="color: #9c27b0;">${noiseFloorCount}</strong></span>
                     <span style="margin-left: 20px;">• User Audio: <strong style="color: #28a745;">${userAudioCount}</strong></span>
                     <span style="margin-left: 20px;">• User Spectrum: <strong style="color: #ff9800;">${userSpectrumCount}</strong></span>
+                    ${referenceCount > 0 ? `<span style="margin-left: 20px;">• Frequency Reference: <strong style="color: #ffc107;">${referenceCount}</strong></span>` : ''}
                     ${unknownCount > 0 ? `<span style="margin-left: 20px;">• Unknown: <strong style="color: #999;">${unknownCount}</strong></span>` : ''}
                 `;
             }

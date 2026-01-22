@@ -377,13 +377,17 @@ function closeRadiodWarningsModal() {
  * Confirm save after viewing warnings
  * This is called when user clicks "Save Anyway" in the modal
  */
-function confirmRadiodSave() {
-    closeRadiodWarningsModal();
+async function confirmRadiodSave() {
+    const modal = document.getElementById('radiodWarningsModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
     
     if (pendingRadiodSave) {
-        // Proceed with the actual save operation
-        // Call the original save function with bypass flag
-        actualSaveRadiodConfig(pendingRadiodSave.restart);
+        const restart = pendingRadiodSave.restart;
         pendingRadiodSave = null;
+        
+        // Proceed with the actual save operation
+        await actualSaveRadiodConfig(restart);
     }
 }

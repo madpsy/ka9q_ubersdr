@@ -470,6 +470,32 @@ func main() {
 		defer freqRefMonitor.Stop()
 	}
 
+	// Initialize frontend history tracker
+	// Find the wideband spectrum session SSRC for tracking
+	var widebandSSRC uint32
+	sessions.mu.RLock()
+	for id, session := range sessions.sessions {
+		if len(id) >= 19 && id[:19] == "noisefloor-wideband" {
+			widebandSSRC = session.SSRC
+			break
+		}
+	}
+	sessions.mu.RUnlock()
+
+	var frontendHistory *FrontendHistoryTracker
+	if widebandSSRC != 0 {
+		frontendHistory = NewFrontendHistoryTracker(radiod.frontendTracker, widebandSSRC)
+		if err := frontendHistory.Start(); err != nil {
+			log.Printf("Warning: Failed to start frontend history tracker: %v", err)
+			frontendHistory = nil
+		} else {
+			defer frontendHistory.Stop()
+			log.Printf("Frontend history tracker started")
+		}
+	} else {
+		log.Printf("Warning: Wideband spectrum session not found, frontend history tracking disabled")
+	}
+
 	// Initialize Prometheus metrics if enabled (must be before multi-decoder)
 	var prometheusMetrics *PrometheusMetrics
 	if config.Prometheus.Enabled {
@@ -950,7 +976,7 @@ func main() {
 	}
 
 	// Initialize admin handler (pass all components for proper shutdown during restart)
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler)
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, frontendHistory)
 
 	// Setup HTTP routes
 	http.HandleFunc("/connection", func(w http.ResponseWriter, r *http.Request) {
@@ -1146,6 +1172,8 @@ func main() {
 	http.HandleFunc("/admin/extensions-available", adminHandler.AuthMiddleware(adminHandler.HandleAvailableExtensions))
 	http.HandleFunc("/admin/sessions", adminHandler.AuthMiddleware(adminHandler.HandleSessions))
 	http.HandleFunc("/admin/frontend-status", adminHandler.AuthMiddleware(adminHandler.HandleFrontendStatus))
+	http.HandleFunc("/admin/frontend-history", adminHandler.AuthMiddleware(adminHandler.HandleFrontendHistory))
+	http.HandleFunc("/admin/frontend-hourly-history", adminHandler.AuthMiddleware(adminHandler.HandleFrontendHourlyHistory))
 	http.HandleFunc("/admin/channel-status", adminHandler.AuthMiddleware(adminHandler.HandleChannelStatus))
 	http.HandleFunc("/admin/radiod-channels", adminHandler.AuthMiddleware(adminHandler.HandleRadiodChannels))
 	http.HandleFunc("/admin/system-load", adminHandler.AuthMiddleware(adminHandler.HandleSystemLoad))

@@ -765,6 +765,26 @@
                             <div class="spinner" style="margin: 20px auto;"></div>
                             <p style="text-align: center; color: #666;">Loading frontend status...</p>
                         </div>
+
+                        <!-- Historical tracking chart - 60 minutes -->
+                        <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                                Historical Tracking (Last 60 Minutes)
+                            </div>
+                            <div style="height: 250px; position: relative;">
+                                <canvas id="frontendHistoryCanvas"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Historical tracking chart - 24 hours -->
+                        <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                                Historical Tracking (Last 24 Hours)
+                            </div>
+                            <div style="height: 250px; position: relative;">
+                                <canvas id="frontendHourlyCanvas"></canvas>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Frequency Reference Section -->
@@ -7142,7 +7162,7 @@
                         </div>
                         <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 12px; color: #666; margin-bottom: 5px;">RF AGC</div>
-                            <div style="font-size: 20px; font-weight: bold; color: ${data.rf_agc ? '#28a745' : '#dc3545'};">${data.rf_agc ? 'ON' : 'OFF'}</div>
+                            <div style="font-size: 20px; font-weight: bold; color: ${data.rf_agc ? '#28a745' : '#667eea'};">${data.rf_agc ? 'ON' : 'OFF'}</div>
                         </div>
                         <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 12px; color: #666; margin-bottom: 5px;">RF Gain</div>
@@ -7186,6 +7206,309 @@
                 // Hide section on error
                 document.getElementById('frontendStatusSection').style.display = 'none';
                 return null;
+            }
+        }
+
+        // Frontend History Monitoring
+        let frontendHistoryChart = null;
+        let frontendHourlyChart = null;
+
+        async function loadFrontendHistory() {
+            try {
+                // Fetch 60-minute history
+                const historyResponse = await authenticatedFetch('/admin/frontend-history');
+                if (!historyResponse || !historyResponse.ok) {
+                    console.log('Frontend history not available');
+                    return;
+                }
+
+                const historyData = await historyResponse.json();
+                const history = historyData.history || [];
+
+                if (history.length === 0) {
+                    console.log('No frontend history data available yet');
+                    return;
+                }
+
+                // Prepare data for Chart.js (dual axis: RF Gain + IF Power, with overrange rate as bars)
+                const labels = history.map(entry => {
+                    const date = new Date(entry.timestamp);
+                    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                });
+
+                const rfGainData = history.map(entry => entry.rf_gain);
+                const ifPowerData = history.map(entry => entry.if_power);
+                const overrangeRateData = history.map(entry => entry.overrange_rate);
+
+                // Destroy existing chart if it exists
+                if (frontendHistoryChart) {
+                    frontendHistoryChart.destroy();
+                }
+
+                // Create chart
+                const ctx = document.getElementById('frontendHistoryCanvas').getContext('2d');
+                frontendHistoryChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'RF Gain',
+                                data: rfGainData,
+                                borderColor: '#667eea',
+                                backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                                borderWidth: 2,
+                                pointRadius: 2,
+                                yAxisID: 'y',
+                                tension: 0.3
+                            },
+                            {
+                                label: 'IF Power (dBFS)',
+                                data: ifPowerData,
+                                borderColor: '#f093fb',
+                                backgroundColor: 'rgba(240, 147, 251, 0.1)',
+                                borderWidth: 2,
+                                pointRadius: 2,
+                                yAxisID: 'y1',
+                                tension: 0.3
+                            },
+                            {
+                                label: 'Overrange Rate (/sec)',
+                                data: overrangeRateData,
+                                type: 'bar',
+                                backgroundColor: 'rgba(220, 53, 69, 0.5)',
+                                borderColor: '#dc3545',
+                                borderWidth: 1,
+                                yAxisID: 'y2',
+                                barThickness: 'flex'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        if (context.parsed.y !== null) {
+                                            label += context.parsed.y.toFixed(2);
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                display: true,
+                                title: {
+                                    display: true,
+                                    text: 'Time'
+                                }
+                            },
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                title: {
+                                    display: true,
+                                    text: 'RF Gain',
+                                    color: '#667eea'
+                                },
+                                ticks: {
+                                    color: '#667eea'
+                                }
+                            },
+                            y1: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                title: {
+                                    display: true,
+                                    text: 'IF Power (dBFS)',
+                                    color: '#f093fb'
+                                },
+                                ticks: {
+                                    color: '#f093fb'
+                                },
+                                grid: {
+                                    drawOnChartArea: false
+                                }
+                            },
+                            y2: {
+                                type: 'linear',
+                                display: false,
+                                position: 'right',
+                                min: 0,
+                                grid: {
+                                    drawOnChartArea: false
+                                }
+                            }
+                        }
+                    }
+                });
+
+                // Fetch 24-hour history
+                const hourlyResponse = await authenticatedFetch('/admin/frontend-hourly-history');
+                if (!hourlyResponse || !hourlyResponse.ok) {
+                    console.log('Frontend hourly history not available');
+                    return;
+                }
+
+                const hourlyData = await hourlyResponse.json();
+                const hourlyHistory = hourlyData.history || [];
+
+                if (hourlyHistory.length === 0) {
+                    console.log('No frontend hourly history data available yet');
+                    return;
+                }
+
+                // Prepare data for hourly chart
+                const hourlyLabels = hourlyHistory.map(entry => {
+                    const date = new Date(entry.timestamp);
+                    return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                });
+
+                const hourlyRFGainData = hourlyHistory.map(entry => entry.rf_gain);
+                const hourlyIFPowerData = hourlyHistory.map(entry => entry.if_power);
+                const hourlyOverrangeRateData = hourlyHistory.map(entry => entry.overrange_rate);
+
+                // Destroy existing chart if it exists
+                if (frontendHourlyChart) {
+                    frontendHourlyChart.destroy();
+                }
+
+                // Create hourly chart
+                const hourlyCtx = document.getElementById('frontendHourlyCanvas').getContext('2d');
+                frontendHourlyChart = new Chart(hourlyCtx, {
+                    type: 'line',
+                    data: {
+                        labels: hourlyLabels,
+                        datasets: [
+                            {
+                                label: 'RF Gain',
+                                data: hourlyRFGainData,
+                                borderColor: '#667eea',
+                                backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                                borderWidth: 2,
+                                pointRadius: 2,
+                                yAxisID: 'y',
+                                tension: 0.3
+                            },
+                            {
+                                label: 'IF Power (dBFS)',
+                                data: hourlyIFPowerData,
+                                borderColor: '#f093fb',
+                                backgroundColor: 'rgba(240, 147, 251, 0.1)',
+                                borderWidth: 2,
+                                pointRadius: 2,
+                                yAxisID: 'y1',
+                                tension: 0.3
+                            },
+                            {
+                                label: 'Overrange Rate (/sec)',
+                                data: hourlyOverrangeRateData,
+                                type: 'bar',
+                                backgroundColor: 'rgba(220, 53, 69, 0.5)',
+                                borderColor: '#dc3545',
+                                borderWidth: 1,
+                                yAxisID: 'y2',
+                                barThickness: 'flex'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        if (context.parsed.y !== null) {
+                                            label += context.parsed.y.toFixed(2);
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                display: true,
+                                title: {
+                                    display: true,
+                                    text: 'Time'
+                                }
+                            },
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                title: {
+                                    display: true,
+                                    text: 'RF Gain',
+                                    color: '#667eea'
+                                },
+                                ticks: {
+                                    color: '#667eea'
+                                }
+                            },
+                            y1: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                title: {
+                                    display: true,
+                                    text: 'IF Power (dBFS)',
+                                    color: '#f093fb'
+                                },
+                                ticks: {
+                                    color: '#f093fb'
+                                },
+                                grid: {
+                                    drawOnChartArea: false
+                                }
+                            },
+                            y2: {
+                                type: 'linear',
+                                display: false,
+                                position: 'right',
+                                min: 0,
+                                grid: {
+                                    drawOnChartArea: false
+                                }
+                            }
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error loading frontend history:', error);
             }
         }
 
@@ -7968,6 +8291,9 @@
             try {
                 // Load frontend status first (at top of Monitor tab) - now includes health status
                 const frontendStatusData = await loadFrontendStatus();
+
+                // Load frontend history charts
+                await loadFrontendHistory();
 
                 // Load frequency reference status
                 await loadFrequencyReference();

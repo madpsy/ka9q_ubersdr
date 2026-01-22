@@ -856,6 +856,34 @@
                     </div>
 
 
+                    <!-- System Load History Section (static container for charts) -->
+                    <div id="systemLoadHistorySection" class="config-section" style="display: none;">
+                        <h3 id="systemLoadHistoryTitle">💻 System Load</h3>
+                        <div id="systemLoadHistoryDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                            <!-- Load averages will be populated by JavaScript -->
+                        </div>
+
+                        <!-- Historical tracking chart - 60 minutes -->
+                        <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                                Historical Tracking (Last 60 Minutes)
+                            </div>
+                            <div style="height: 250px; position: relative;">
+                                <canvas id="loadHistoryCanvas"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Historical tracking chart - 24 hours -->
+                        <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                                Historical Tracking (Last 24 Hours)
+                            </div>
+                            <div style="height: 250px; position: relative;">
+                                <canvas id="loadHourlyCanvas"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
                     <div id="monitorHealth" class="loading">
                         <div class="spinner"></div>
                         <p>Loading health status...</p>
@@ -8884,8 +8912,11 @@
         }
 
         async function renderSystemLoadHealth(container, systemLoad) {
-            const statusSection = document.createElement('div');
-            statusSection.className = 'config-section';
+            // Show the static section
+            const systemLoadSection = document.getElementById('systemLoadHistorySection');
+            if (systemLoadSection) {
+                systemLoadSection.style.display = 'block';
+            }
 
             // Determine status color and icon based on backend status field
             const status = systemLoad.status || 'ok';
@@ -8903,55 +8934,16 @@
                 statusText = 'WARNING';
             }
 
-            statusSection.innerHTML = `<h3 style="color: ${statusColor};">💻 System Load</h3>`;
-
-            // Add warning/critical message box if needed
-            if (status === 'warning' || status === 'critical') {
-                const warningBox = document.createElement('div');
-                warningBox.style.padding = '15px';
-                warningBox.style.marginBottom = '15px';
-                warningBox.style.borderRadius = '5px';
-                warningBox.style.fontSize = '14px';
-                warningBox.style.lineHeight = '1.6';
-
-                if (status === 'critical') {
-                    warningBox.style.background = '#f8d7da';
-                    warningBox.style.border = '2px solid #dc3545';
-                    warningBox.style.color = '#721c24';
-                    warningBox.innerHTML = `
-                        <strong style="font-size: 16px;">🚨 CRITICAL: System Overload Detected</strong><br><br>
-                        <strong>Immediate action required:</strong><br>
-                        • Disable decoders for an entire mode (FT8, FT4, or WSPR) in the <a href="#" onclick="switchTab('decoder'); return false;" style="color: #721c24; text-decoration: underline; font-weight: bold;">Decoder tab</a><br>
-                        • Reduce decode depth to 1 for all modes<br>
-                        • Avoid running decoders on every band - focus on key bands only<br>
-                        • Consider upgrading to a more powerful server<br><br>
-                        <em>High CPU load will cause poor decode performance and may impact user experience.</em>
-                    `;
-                } else {
-                    warningBox.style.background = '#fff3cd';
-                    warningBox.style.border = '2px solid #ffc107';
-                    warningBox.style.color = '#856404';
-                    warningBox.innerHTML = `
-                        <strong style="font-size: 15px;">⚠️ WARNING: High System Load</strong><br><br>
-                        <strong>Common causes:</strong><br>
-                        • Too many decoder bands enabled simultaneously<br>
-                        • Decode depths set too high (especially Depth 3)<br>
-                        • WSPR cycles set too high (try reducing to 5000)<br><br>
-                        <strong>Recommended actions:</strong><br>
-                        • Review enabled bands in the <a href="#" onclick="switchTab('decoder'); return false;" style="color: #856404; text-decoration: underline; font-weight: bold;">Decoder tab</a><br>
-                        • Reduce decode depths to 1 or 2<br>
-                        • Disable bands you don't actively monitor<br>
-                        • Consider upgrading to a more powerful CPU
-                    `;
-                }
-                statusSection.appendChild(warningBox);
+            // Update title color
+            const titleEl = document.getElementById('systemLoadHistoryTitle');
+            if (titleEl) {
+                titleEl.style.color = statusColor;
+                titleEl.textContent = '💻 System Load';
             }
 
-            const statusDiv = document.createElement('div');
-            statusDiv.style.padding = '15px';
-            statusDiv.style.background = '#f8f9fa';
-            statusDiv.style.borderRadius = '5px';
-            statusDiv.style.marginBottom = '20px';
+            // Update the display div content
+            const displayDiv = document.getElementById('systemLoadHistoryDisplay');
+            if (!displayDiv) return;
 
             // Parse load values and CPU cores
             const load1 = parseFloat(systemLoad.load_1min) || 0;
@@ -8972,7 +8964,41 @@
             const color5 = getLoadColor(load5, cpuCores);
             const color15 = getLoadColor(load15, cpuCores);
 
-            statusDiv.innerHTML = `
+            let displayHTML = '';
+
+            // Add warning/critical message box if needed
+            if (status === 'warning' || status === 'critical') {
+                if (status === 'critical') {
+                    displayHTML += `
+                        <div style="padding: 15px; margin-bottom: 15px; border-radius: 5px; font-size: 14px; line-height: 1.6; background: #f8d7da; border: 2px solid #dc3545; color: #721c24;">
+                            <strong style="font-size: 16px;">🚨 CRITICAL: System Overload Detected</strong><br><br>
+                            <strong>Immediate action required:</strong><br>
+                            • Disable decoders for an entire mode (FT8, FT4, or WSPR) in the <a href="#" onclick="switchTab('decoder'); return false;" style="color: #721c24; text-decoration: underline; font-weight: bold;">Decoder tab</a><br>
+                            • Reduce decode depth to 1 for all modes<br>
+                            • Avoid running decoders on every band - focus on key bands only<br>
+                            • Consider upgrading to a more powerful server<br><br>
+                            <em>High CPU load will cause poor decode performance and may impact user experience.</em>
+                        </div>
+                    `;
+                } else {
+                    displayHTML += `
+                        <div style="padding: 15px; margin-bottom: 15px; border-radius: 5px; font-size: 14px; line-height: 1.6; background: #fff3cd; border: 2px solid #ffc107; color: #856404;">
+                            <strong style="font-size: 15px;">⚠️ WARNING: High System Load</strong><br><br>
+                            <strong>Common causes:</strong><br>
+                            • Too many decoder bands enabled simultaneously<br>
+                            • Decode depths set too high (especially Depth 3)<br>
+                            • WSPR cycles set too high (try reducing to 5000)<br><br>
+                            <strong>Recommended actions:</strong><br>
+                            • Review enabled bands in the <a href="#" onclick="switchTab('decoder'); return false;" style="color: #856404; text-decoration: underline; font-weight: bold;">Decoder tab</a><br>
+                            • Reduce decode depths to 1 or 2<br>
+                            • Disable bands you don't actively monitor<br>
+                            • Consider upgrading to a more powerful CPU
+                        </div>
+                    `;
+                }
+            }
+
+            displayHTML += `
                 <div style="margin-bottom: 15px;">
                     <strong style="font-size: 16px; color: ${statusColor};">Status: ${statusIcon} ${statusText}</strong>
                 </div>
@@ -8999,50 +9025,10 @@
                     <span style="color: #dc3545;">●</span> CRITICAL (load ≥ 2× cores)
                 </div>
             `;
-            statusSection.appendChild(statusDiv);
 
-            // Add load history graphs directly under the load averages
-            const historyDiv = document.createElement('div');
-            historyDiv.style.marginTop = '20px';
+            displayDiv.innerHTML = displayHTML;
 
-            // Historical tracking chart - 60 minutes
-            const history60Div = document.createElement('div');
-            history60Div.style.background = '#fff';
-            history60Div.style.padding = '10px';
-            history60Div.style.borderRadius = '5px';
-            history60Div.style.border = '1px solid #dee2e6';
-            history60Div.style.marginBottom = '15px';
-            history60Div.innerHTML = `
-                <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
-                    Historical Tracking (Last 60 Minutes)
-                </div>
-                <div style="height: 250px; position: relative;">
-                    <canvas id="loadHistoryCanvas"></canvas>
-                </div>
-            `;
-            historyDiv.appendChild(history60Div);
-
-            // Historical tracking chart - 24 hours
-            const history24Div = document.createElement('div');
-            history24Div.style.background = '#fff';
-            history24Div.style.padding = '10px';
-            history24Div.style.borderRadius = '5px';
-            history24Div.style.border = '1px solid #dee2e6';
-            history24Div.innerHTML = `
-                <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
-                    Historical Tracking (Last 24 Hours)
-                </div>
-                <div style="height: 250px; position: relative;">
-                    <canvas id="loadHourlyCanvas"></canvas>
-                </div>
-            `;
-            historyDiv.appendChild(history24Div);
-
-            statusSection.appendChild(historyDiv);
-
-            container.appendChild(statusSection);
-
-            // Load the charts
+            // Load the charts (only once, they will update themselves)
             await loadLoadHistory();
         }
 

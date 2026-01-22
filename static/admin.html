@@ -7231,10 +7231,8 @@
                 }
 
                 // Prepare data for Chart.js (dual axis: RF Gain + IF Power, with overrange rate as bars)
-                const labels = history.map(entry => {
-                    const date = new Date(entry.timestamp);
-                    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-                });
+                // Use Date objects directly for labels (same as frequency reference)
+                const labels = history.map(entry => new Date(entry.timestamp));
 
                 const rfGainData = history.map(entry => entry.rf_gain);
                 const ifPowerData = history.map(entry => entry.if_power);
@@ -7313,7 +7311,14 @@
                         },
                         scales: {
                             x: {
-                                display: true,
+                                type: 'time',
+                                time: {
+                                    unit: 'minute',
+                                    displayFormats: {
+                                        minute: 'HH:mm'
+                                    },
+                                    tooltipFormat: 'HH:mm:ss'
+                                },
                                 title: {
                                     display: true,
                                     text: 'Time'
@@ -7377,10 +7382,8 @@
                 }
 
                 // Prepare data for hourly chart
-                const hourlyLabels = hourlyHistory.map(entry => {
-                    const date = new Date(entry.timestamp);
-                    return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-                });
+                // Use Date objects directly for labels (same as frequency reference)
+                const hourlyLabels = hourlyHistory.map(entry => new Date(entry.timestamp));
 
                 const hourlyRFGainData = hourlyHistory.map(entry => entry.rf_gain);
                 const hourlyIFPowerData = hourlyHistory.map(entry => entry.if_power);
@@ -7459,7 +7462,14 @@
                         },
                         scales: {
                             x: {
-                                display: true,
+                                type: 'time',
+                                time: {
+                                    unit: 'hour',
+                                    displayFormats: {
+                                        hour: 'HH:mm'
+                                    },
+                                    tooltipFormat: 'MMM dd, HH:mm'
+                                },
                                 title: {
                                     display: true,
                                     text: 'Time'

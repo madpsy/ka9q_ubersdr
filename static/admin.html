@@ -7648,14 +7648,10 @@
                     });
                 }
 
-                // Destroy existing chart if it exists
-                if (loadHistoryChart) {
-                    loadHistoryChart.destroy();
-                }
-
-                // Create chart
-                const ctx = document.getElementById('loadHistoryCanvas').getContext('2d');
-                loadHistoryChart = new Chart(ctx, {
+                // Only create chart if it doesn't exist yet
+                if (!loadHistoryChart) {
+                    const ctx = document.getElementById('loadHistoryCanvas').getContext('2d');
+                    loadHistoryChart = new Chart(ctx, {
                     type: 'line',
                     data: {
                         labels: labels,
@@ -7754,6 +7750,7 @@
                         }
                     }
                 });
+                }
 
                 // Fetch 24-hour history
                 const hourlyResponse = await authenticatedFetch('/admin/load-hourly-history');
@@ -7812,14 +7809,10 @@
                     });
                 }
 
-                // Destroy existing hourly chart if it exists
-                if (loadHourlyChart) {
-                    loadHourlyChart.destroy();
-                }
-
-                // Create hourly chart
-                const hourlyCtx = document.getElementById('loadHourlyCanvas').getContext('2d');
-                loadHourlyChart = new Chart(hourlyCtx, {
+                // Only create hourly chart if it doesn't exist yet
+                if (!loadHourlyChart) {
+                    const hourlyCtx = document.getElementById('loadHourlyCanvas').getContext('2d');
+                    loadHourlyChart = new Chart(hourlyCtx, {
                     type: 'line',
                     data: {
                         labels: hourlyLabels,
@@ -7918,6 +7911,7 @@
                         }
                     }
                 });
+                }
 
             } catch (error) {
                 console.error('Error loading load history:', error);

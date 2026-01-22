@@ -924,6 +924,16 @@ instance_reporting:
   # including: UUID, callsign, location, public URL, and basic statistics
   enabled: false
 
+  # Notify when instance disconnects (default: true)
+  # When enabled, sends a notification to the central server when this instance
+  # is shutting down or disconnecting gracefully
+  notify_instance_disconnected: true
+
+  # Notify on instance startup (default: false)
+  # When enabled, sends an immediate notification to the central server when
+  # this instance starts up, before the first regular reporting interval
+  notify_instance_startup: false
+
   # Create DNS subdomain for this instance (optional)
   # When enabled, the collector will create a DNS A record pointing
   # <callsign>.instance.ubersdr.org to your public IP address

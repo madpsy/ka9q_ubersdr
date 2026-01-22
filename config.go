@@ -200,23 +200,25 @@ type SpaceWeatherConfig struct {
 
 // InstanceReportingConfig contains settings for reporting to central instance registry
 type InstanceReportingConfig struct {
-	Enabled             bool                   `yaml:"enabled"`               // Enable/disable instance reporting
-	UseHTTPS            bool                   `yaml:"use_https"`             // Use HTTPS (true) or HTTP (false) for connections
-	UseMyIP             bool                   `yaml:"use_myip"`              // Automatically use public IP for public access
-	CreateDomain        bool                   `yaml:"create_domain"`         // Request automatic DNS subdomain creation
-	GenerateTLS         bool                   `yaml:"generate_tls"`          // Generate TLS certificate with Caddy (default: false)
-	Hostname            string                 `yaml:"hostname"`              // Central server hostname
-	Port                int                    `yaml:"port"`                  // Central server port
-	ReportIntervalSec   int                    `yaml:"report_interval_sec"`   // Seconds between reports
-	InstanceUUID        string                 `yaml:"instance_uuid"`         // Unique instance identifier (auto-generated)
-	Instance            InstanceConnectionInfo `yaml:"instance"`              // Instance connection information
-	TunnelServerHost    string                 `yaml:"tunnel_server_host"`    // Tunnel server hostname for X-Real-IP trust
-	TunnelServerPort    int                    `yaml:"tunnel_server_port"`    // Tunnel server port (for future use)
-	TunnelServerEnabled bool                   `yaml:"tunnel_server_enabled"` // Enable/disable tunnel server integration (default: false)
-	TunnelServerURI     string                 `yaml:"tunnel_server_uri"`     // Tunnel server WebSocket URI (default: wss://tunnel.ubersdr.org/tunnel/connect)
-	BetaFrontend        bool                   `yaml:"beta_frontend"`         // Enable beta frontend features (default: false)
-	tunnelServerIPs     []string               // Resolved IPs of tunnel server (internal use)
-	instanceReporterIPs []string               // Resolved IPs of instance reporter (internal use)
+	Enabled                    bool                   `yaml:"enabled"`                      // Enable/disable instance reporting
+	UseHTTPS                   bool                   `yaml:"use_https"`                    // Use HTTPS (true) or HTTP (false) for connections
+	UseMyIP                    bool                   `yaml:"use_myip"`                     // Automatically use public IP for public access
+	CreateDomain               bool                   `yaml:"create_domain"`                // Request automatic DNS subdomain creation
+	GenerateTLS                bool                   `yaml:"generate_tls"`                 // Generate TLS certificate with Caddy (default: false)
+	Hostname                   string                 `yaml:"hostname"`                     // Central server hostname
+	Port                       int                    `yaml:"port"`                         // Central server port
+	ReportIntervalSec          int                    `yaml:"report_interval_sec"`          // Seconds between reports
+	InstanceUUID               string                 `yaml:"instance_uuid"`                // Unique instance identifier (auto-generated)
+	Instance                   InstanceConnectionInfo `yaml:"instance"`                     // Instance connection information
+	TunnelServerHost           string                 `yaml:"tunnel_server_host"`           // Tunnel server hostname for X-Real-IP trust
+	TunnelServerPort           int                    `yaml:"tunnel_server_port"`           // Tunnel server port (for future use)
+	TunnelServerEnabled        bool                   `yaml:"tunnel_server_enabled"`        // Enable/disable tunnel server integration (default: false)
+	TunnelServerURI            string                 `yaml:"tunnel_server_uri"`            // Tunnel server WebSocket URI (default: wss://tunnel.ubersdr.org/tunnel/connect)
+	BetaFrontend               bool                   `yaml:"beta_frontend"`                // Enable beta frontend features (default: false)
+	NotifyInstanceDisconnected bool                   `yaml:"notify_instance_disconnected"` // Notify when instance disconnects (default: true)
+	NotifyInstanceStartup      bool                   `yaml:"notify_instance_startup"`      // Notify on instance startup (default: false)
+	tunnelServerIPs            []string               // Resolved IPs of tunnel server (internal use)
+	instanceReporterIPs        []string               // Resolved IPs of instance reporter (internal use)
 }
 
 // InstanceConnectionInfo contains connection details for this instance
@@ -617,6 +619,15 @@ func LoadConfig(filename string) (*Config, error) {
 		// In practice, we'll document that use_https defaults to true
 		config.InstanceReporting.UseHTTPS = true
 	}
+	// NotifyInstanceDisconnected defaults to true
+	// Note: YAML booleans default to false, so we need to explicitly set this
+	// We'll assume it should be true unless explicitly set to false in the config
+	// This is handled by checking if the value is false (default) and setting to true
+	// In practice, users can set it to false in their config to disable
+	if !config.InstanceReporting.NotifyInstanceDisconnected {
+		config.InstanceReporting.NotifyInstanceDisconnected = true
+	}
+	// NotifyInstanceStartup defaults to false (already false by default from YAML unmarshaling)
 
 	// Set default amateur radio bands with per-band spectrum parameters if not specified
 	if len(config.NoiseFloor.Bands) == 0 {

@@ -77,7 +77,7 @@ class RotatorDisplay {
         svg.setAttribute('height', this.mapSize);
         svg.setAttribute('viewBox', `0 0 ${this.mapSize} ${this.mapSize}`);
         svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-        svg.style.background = 'transparent';
+        svg.style.background = 'rgba(26, 37, 47, 0.6)';
         svg.style.borderRadius = '10px';
         svg.style.display = 'block';
         container.appendChild(svg);

@@ -7785,13 +7785,14 @@
                 } else {
                     // Chart exists, just update the data
                     loadHistoryChart.data.labels = labels;
-                    loadHistoryChart.data.datasets.forEach((dataset, index) => {
-                        if (index === 0 && dataset.label === 'OK Zone') {
-                            // Skip background zones, they don't change
-                        } else if (index === 1 && dataset.label === 'Warning Zone') {
-                            // Skip
-                        } else if (index === 2 && dataset.label === 'Critical Zone') {
-                            // Skip
+                    loadHistoryChart.data.datasets.forEach((dataset) => {
+                        if (dataset.label === 'OK Zone') {
+                            dataset.data = labels.map(() => cpuCores);
+                        } else if (dataset.label === 'Warning Zone') {
+                            dataset.data = labels.map(() => cpuCores * 2);
+                        } else if (dataset.label === 'Critical Zone') {
+                            const maxLoad = Math.max(...load1Data, ...load5Data, ...load15Data, cpuCores * 2.5);
+                            dataset.data = labels.map(() => maxLoad);
                         } else if (dataset.label === '1 min') {
                             dataset.data = load1Data;
                         } else if (dataset.label === '5 min') {
@@ -7972,13 +7973,14 @@
                 } else {
                     // Chart exists, just update the data
                     loadHourlyChart.data.labels = hourlyLabels;
-                    loadHourlyChart.data.datasets.forEach((dataset, index) => {
-                        if (index === 0 && dataset.label === 'OK Zone') {
-                            // Skip background zones, they don't change
-                        } else if (index === 1 && dataset.label === 'Warning Zone') {
-                            // Skip
-                        } else if (index === 2 && dataset.label === 'Critical Zone') {
-                            // Skip
+                    loadHourlyChart.data.datasets.forEach((dataset) => {
+                        if (dataset.label === 'OK Zone') {
+                            dataset.data = hourlyLabels.map(() => cpuCores);
+                        } else if (dataset.label === 'Warning Zone') {
+                            dataset.data = hourlyLabels.map(() => cpuCores * 2);
+                        } else if (dataset.label === 'Critical Zone') {
+                            const maxHourlyLoad = Math.max(...hourlyLoad1Data, ...hourlyLoad5Data, ...hourlyLoad15Data, cpuCores * 2.5);
+                            dataset.data = hourlyLabels.map(() => maxHourlyLoad);
                         } else if (dataset.label === '1 min') {
                             dataset.data = hourlyLoad1Data;
                         } else if (dataset.label === '5 min') {

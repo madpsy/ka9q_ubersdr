@@ -838,6 +838,15 @@
                                 <div id="refHistoryStats" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
                                     <!-- Stats will be populated by JavaScript -->
                                 </div>
+                                <!-- Auto-Calibration Button -->
+                                <div style="margin-top: 15px; text-align: center;">
+                                    <button class="btn" onclick="showAutoCalibrationModal()" style="background: #28a745; font-weight: bold; padding: 10px 20px;">
+                                        🎯 Apply Auto-Calibration to Radiod
+                                    </button>
+                                    <div style="margin-top: 8px; font-size: 12px; color: #666;">
+                                        Automatically calculate and apply clock calibration based on 1-minute average offset
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Historical tracking chart - 24 hours (dual axis: offset + SNR) -->
@@ -1250,6 +1259,27 @@
                                 🔄 Force Update Now
                             </button>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Auto-Calibration Modal -->
+        <div id="autoCalibrationModal" class="modal">
+            <div class="modal-content" style="max-width: 600px;">
+                <div class="modal-header">
+                    <h2>📊 Automatic Clock Calibration</h2>
+                    <button class="modal-close" onclick="closeAutoCalibrationModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="autoCalibrationContent" style="padding: 20px;">
+                        <!-- Content will be populated by JavaScript -->
+                    </div>
+                    <div style="padding: 0 20px 20px 20px; display: flex; gap: 10px; justify-content: flex-end;">
+                        <button class="btn btn-secondary" onclick="closeAutoCalibrationModal()">Cancel</button>
+                        <button class="btn" onclick="applyAutoCalibration()" id="applyCalibrationBtn" style="font-weight: bold; background: #28a745;">
+                            Apply Calibration
+                        </button>
                     </div>
                 </div>
             </div>
@@ -2600,17 +2630,17 @@
                 'T14': 'Numbers Stations',
                 'T15': 'Special'
             };
-            
+
             const converted = [];
-            
+
             for (const entry of kiwiBookmarks) {
                 if (!Array.isArray(entry) || entry.length < 3) continue;
-                
+
                 const [freqKHz, mode, name, comment, options] = entry;
-                
+
                 // Convert frequency from kHz to Hz
                 const frequency = Math.round(freqKHz * 1000);
-                
+
                 // Map KiwiSDR modes to UberSDR modes
                 const modeMap = {
                     'USB': 'usb', 'LSB': 'lsb',
@@ -2618,13 +2648,13 @@
                     'AM': 'am', 'AMN': 'am',
                     'FM': 'fm', 'NFM': 'nfm'
                 };
-                
+
                 const bookmark = {
                     name: name || `${freqKHz} kHz`,
                     frequency: frequency,
                     mode: modeMap[mode] || mode.toLowerCase()
                 };
-                
+
                 // Extract group from type code (T1-T15)
                 if (options) {
                     for (const key in options) {
@@ -2633,7 +2663,7 @@
                             break;
                         }
                     }
-                    
+
                     // Extract extension from 'p' parameter
                     if (options.p) {
                         const preset = options.p.toString();
@@ -2644,7 +2674,7 @@
                         }
                     }
                 }
-                
+
                 // Add comment if present and decode URL-encoded characters
                 if (comment && comment.trim()) {
                     try {
@@ -2656,10 +2686,10 @@
                         bookmark.comment = comment;
                     }
                 }
-                
+
                 converted.push(bookmark);
             }
-            
+
             return converted;
         }
 
@@ -2670,21 +2700,21 @@
             try {
                 const text = await file.text();
                 const data = JSON.parse(text);
-                
+
                 // Validate KiwiSDR format
                 if (!data.dx || !Array.isArray(data.dx)) {
                     showAlert('Invalid KiwiSDR bookmark file. Expected JSON with "dx" array.', 'error');
                     return;
                 }
-                
+
                 // Convert KiwiSDR bookmarks to UberSDR format
                 const importedBookmarks = convertKiwiSDRBookmarks(data.dx);
-                
+
                 if (importedBookmarks.length === 0) {
                     showAlert('No valid bookmarks found in KiwiSDR file', 'error');
                     return;
                 }
-                
+
                 // Ask user if they want to replace or merge
                 const action = confirm(
                     `Found ${importedBookmarks.length} KiwiSDR bookmark(s).\n\n` +
@@ -4637,11 +4667,11 @@
             wsjtxModesContainer.style.marginBottom = '10px';
 
             const enabledModes = currentDecoderConfig.wsjtx_udp_enabled_modes || { FT8: true, FT4: false, WSPR: false, JS8: false };
-            
+
             ['FT8', 'FT4', 'WSPR', 'JS8'].forEach(mode => {
                 const modeCheckbox = document.createElement('div');
                 modeCheckbox.style.marginBottom = '8px';
-                
+
                 const checkbox = document.createElement('input');
                 checkbox.type = 'checkbox';
                 checkbox.id = `wsjtx_mode_${mode}`;
@@ -4653,13 +4683,13 @@
                     }
                     currentDecoderConfig.wsjtx_udp_enabled_modes[mode] = e.target.checked;
                 });
-                
+
                 const label = document.createElement('label');
                 label.htmlFor = `wsjtx_mode_${mode}`;
                 label.textContent = ` ${mode}`;
                 label.style.marginLeft = '5px';
                 label.style.cursor = 'pointer';
-                
+
                 modeCheckbox.appendChild(checkbox);
                 modeCheckbox.appendChild(label);
                 wsjtxModesContainer.appendChild(modeCheckbox);
@@ -4712,10 +4742,10 @@
                 bands.forEach((band, index) => {
                     const row = document.createElement('tr');
                     row.style.borderBottom = '1px solid #dee2e6';
-                    
+
                     // Ensure depth is properly set (use band.depth if it exists, otherwise use default)
                     const displayDepth = band.depth !== undefined && band.depth !== null ? band.depth : (band.mode === 'WSPR' ? 10000 : 2);
-                    
+
                     row.innerHTML = `
                         <td style="padding: 8px;"><strong>${band.name}</strong></td>
                         <td style="padding: 8px;"><span style="color: #667eea;">${band.mode}</span></td>
@@ -5311,13 +5341,13 @@
                     for (let i = 0; i < lines.length; i++) {
                         const line = lines[i];
                         const trimmed = line.trim();
-                        
+
                         // Skip comments and empty lines
                         if (!trimmed || trimmed.startsWith('#')) continue;
-                        
+
                         // Calculate indentation
                         const lineIndent = line.search(/\S/);
-                        
+
                         // Check for bands array
                         if (trimmed === 'bands:') {
                             inBands = true;
@@ -5325,7 +5355,7 @@
                             importedConfig.bands = [];
                             continue;
                         }
-                        
+
                         // Check for wsjtx_udp_enabled_modes
                         if (trimmed === 'wsjtx_udp_enabled_modes:') {
                             inEnabledModes = true;
@@ -5337,7 +5367,7 @@
                             importedConfig.wsjtx_udp_enabled_modes = {};
                             continue;
                         }
-                        
+
                         // Parse bands (format: "      -" on one line, then properties indented further)
                         if (inBands) {
                             if (trimmed === '-') {
@@ -5377,7 +5407,7 @@
                                 const colonIndex = trimmed.indexOf(':');
                                 const key = trimmed.substring(0, colonIndex).trim();
                                 const value = trimmed.substring(colonIndex + 1).trim().replace(/^["']|["']$/g, '');
-                                
+
                                 if (value === 'true') {
                                     importedConfig[key] = true;
                                 } else if (value === 'false') {
@@ -5402,7 +5432,7 @@
                                 const colonIndex = trimmed.indexOf(':');
                                 const key = trimmed.substring(0, colonIndex).trim();
                                 const value = trimmed.substring(colonIndex + 1).trim().replace(/^["']|["']$/g, '');
-                                
+
                                 if (value === 'true') {
                                     importedConfig[key] = true;
                                 } else if (value === 'false') {
@@ -5419,7 +5449,7 @@
                                 const colonIndex = trimmed.indexOf(':');
                                 const key = trimmed.substring(0, colonIndex).trim();
                                 const value = trimmed.substring(colonIndex + 1).trim().replace(/^["']|["']$/g, '');
-                                
+
                                 // Convert to appropriate type
                                 if (value === 'true') {
                                     importedConfig[key] = true;
@@ -5433,7 +5463,7 @@
                             }
                         }
                     }
-                    
+
                     // Add last band if exists
                     if (currentBand) {
                         importedConfig.bands.push(currentBand);
@@ -5946,7 +5976,7 @@
             } else {
                 statusHTML += `<strong>Scheduled Positions:</strong> ${positionCount}<br>`;
             }
-            
+
             if (nextPosition) {
                 statusHTML += `<strong>Next Position:</strong> ${nextPosition.time} → ${nextPosition.bearing}°`;
             } else if (positionCount > 0) {
@@ -6017,19 +6047,19 @@
                 positions.forEach((pos, index) => {
                     const row = document.createElement('tr');
                     row.style.borderBottom = '1px solid #dee2e6';
-                    
+
                     // Gray out disabled positions
                     if (pos.enabled === false) {
                         row.style.opacity = '0.5';
                     }
-                    
+
                     const escapedTime = pos.time.replace(/'/g, "\\'").replace(/"/g, '&quot;');
                     const isEnabled = pos.enabled !== false; // Default to true if not specified
                     const enabledIcon = isEnabled ? '✓' : '✗';
                     const enabledColor = isEnabled ? '#28a745' : '#dc3545';
                     const toggleButtonText = isEnabled ? 'Disable' : 'Enable';
                     const toggleButtonClass = isEnabled ? 'btn-secondary' : 'btn';
-                    
+
                     row.innerHTML = `
                         <td style="padding: 12px; text-align: center;">
                             <span style="color: ${enabledColor}; font-size: 18px; font-weight: bold;">${enabledIcon}</span>
@@ -6435,7 +6465,7 @@
 
                 const result = await response.json();
                 showAlert(result.message || 'Rotator scheduler configuration saved successfully', 'success');
-                
+
                 // Reload to get updated status
                 await loadRotatorSchedulerConfig();
             } catch (error) {
@@ -6494,16 +6524,16 @@
 
                     for (const line of lines) {
                         const trimmed = line.trim();
-                        
+
                         // Skip comments and empty lines
                         if (!trimmed || trimmed.startsWith('#')) continue;
-                        
+
                         // Parse enabled field
                         if (trimmed.startsWith('enabled:')) {
                             const value = trimmed.substring(8).trim();
                             importedConfig.enabled = value === 'true';
                         }
-                        
+
                         // Parse positions - handle both "- time:" format and standalone "-" format
                         if (trimmed.startsWith('- time:')) {
                             // Save previous position if exists
@@ -6530,7 +6560,7 @@
                             }
                         }
                     }
-                    
+
                     if (currentPosition) {
                         importedConfig.positions.push(currentPosition);
                     }
@@ -6549,10 +6579,10 @@
 
                 // Update current config
                 currentRotatorSchedulerConfig = importedConfig;
-                
+
                 // Save to server
                 await saveRotatorSchedulerConfig();
-                
+
                 showAlert(`Successfully imported ${importedConfig.positions.length} scheduled position(s)`, 'success');
             } catch (error) {
                 showAlert('Error importing rotator schedule: ' + error.message, 'error');
@@ -7026,7 +7056,7 @@
 
                 const stats = await response.json();
                 renderSystemStats(stats);
-                
+
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!systemRefreshInterval) {
                     showAlert('System statistics loaded successfully', 'success');
@@ -8418,7 +8448,7 @@
             if (!canvas) return;
 
             const history = data.history || [];
-            
+
             // If chart doesn't exist yet, create it
             if (!refHistoryChart) {
                 const ctx = canvas.getContext('2d');
@@ -12851,6 +12881,248 @@
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('chatStartDate').value = today;
             document.getElementById('chatEndDate').value = today;
+        });
+
+        // Auto-Calibration Functions
+        let calculatedCalibrationValue = null;
+        let calibrationData = null;
+
+        async function showAutoCalibrationModal() {
+            try {
+                // Fetch current frequency reference status
+                const response = await authenticatedFetch('/api/frequency-reference');
+                if (!response || !response.ok) {
+                    showAlert('Failed to load frequency reference data', 'error');
+                    return;
+                }
+
+                const data = await response.json();
+
+                // Check if frequency reference is enabled
+                if (!data.enabled) {
+                    showAlert('Frequency Reference Tracking is not enabled. Please enable it in the Config tab first.', 'error');
+                    return;
+                }
+
+                // Check if we have valid tracking data
+                if (!data.detected_frequency || data.detected_frequency <= 0) {
+                    showAlert('No valid frequency reference signal detected. Please ensure the reference signal is being received.', 'error');
+                    return;
+                }
+
+                // Fetch 1-minute history to get average offset
+                const historyResponse = await authenticatedFetch('/api/frequency-reference/history/minute');
+                if (!historyResponse || !historyResponse.ok) {
+                    showAlert('Failed to load frequency reference history', 'error');
+                    return;
+                }
+
+                const historyData = await historyResponse.json();
+                const history = historyData.history || [];
+
+                // Check if we have enough data (at least 10 data points for 1-minute average)
+                if (history.length < 10) {
+                    showAlert(`Insufficient data for calibration. Need at least 10 data points (1 minute), currently have ${history.length}. Please wait for more data to accumulate.`, 'error');
+                    return;
+                }
+
+                // Calculate average offset from history
+                const offsets = history.map(entry => entry.frequency_offset);
+                const avgOffset = offsets.reduce((a, b) => a + b, 0) / offsets.length;
+
+                // Calculate standard deviation for quality check
+                const variance = offsets.reduce((sum, val) => sum + Math.pow(val - avgOffset, 2), 0) / offsets.length;
+                const stdDev = Math.sqrt(variance);
+
+                // Check signal quality (SNR should be reasonable)
+                const avgSNR = history.map(e => e.snr).reduce((a, b) => a + b, 0) / history.length;
+                if (avgSNR < 10) {
+                    if (!confirm(`⚠️ Warning: Signal quality is low (SNR: ${avgSNR.toFixed(1)} dB).\n\nCalibration may be inaccurate. Continue anyway?`)) {
+                        return;
+                    }
+                }
+
+                // Check if offset is stable (low standard deviation)
+                if (stdDev > 2.0) {
+                    if (!confirm(`⚠️ Warning: Frequency offset is unstable (Std Dev: ${stdDev.toFixed(2)} Hz).\n\nCalibration may be inaccurate. Continue anyway?`)) {
+                        return;
+                    }
+                }
+
+                // Calculate PPM calibration value
+                const expectedFreq = data.expected_frequency;
+                const ppmError = avgOffset / expectedFreq;
+                const calibrateValue = -ppmError; // Negative to correct in opposite direction
+
+                // Store for later use
+                calculatedCalibrationValue = calibrateValue;
+                calibrationData = {
+                    expectedFreq: expectedFreq,
+                    detectedFreq: data.detected_frequency,
+                    avgOffset: avgOffset,
+                    stdDev: stdDev,
+                    avgSNR: avgSNR,
+                    dataPoints: history.length,
+                    ppmError: ppmError,
+                    calibrateValue: calibrateValue
+                };
+
+                // Populate modal content
+                const content = document.getElementById('autoCalibrationContent');
+                content.innerHTML = `
+                    <div style="background: #e3f2fd; padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 2px solid #2196f3;">
+                        <h3 style="margin-top: 0; color: #1976d2;">📊 Calibration Calculation</h3>
+
+                        <div style="margin-bottom: 15px;">
+                            <strong>Measurement Data (${calibrationData.dataPoints} samples over 1 minute):</strong>
+                            <div style="margin-left: 20px; margin-top: 8px; font-family: monospace; font-size: 13px; line-height: 1.8;">
+                                Expected Frequency: <strong style="color: #667eea;">${(expectedFreq / 1e6).toFixed(6)} MHz</strong><br>
+                                Detected Frequency: <strong style="color: #28a745;">${(calibrationData.detectedFreq / 1e6).toFixed(6)} MHz</strong><br>
+                                Average Offset: <strong style="color: ${Math.abs(avgOffset) > 5 ? '#dc3545' : '#ffc107'};">${avgOffset >= 0 ? '+' : ''}${avgOffset.toFixed(2)} Hz</strong><br>
+                                Std Deviation: <strong>${stdDev.toFixed(2)} Hz</strong><br>
+                                Average SNR: <strong style="color: ${avgSNR > 20 ? '#28a745' : avgSNR > 10 ? '#ffc107' : '#dc3545'};">${avgSNR.toFixed(1)} dB</strong>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 15px; padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <strong>Calculation:</strong>
+                            <div style="margin-left: 20px; margin-top: 8px; font-family: monospace; font-size: 13px; line-height: 1.8;">
+                                PPM Error = Offset / Expected Frequency<br>
+                                PPM Error = ${avgOffset.toFixed(2)} Hz / ${expectedFreq.toLocaleString()} Hz<br>
+                                PPM Error = <strong style="color: #667eea;">${ppmError.toExponential(3)}</strong> (${(ppmError * 1e6).toFixed(3)} ppm)
+                            </div>
+                        </div>
+
+                        <div style="padding: 15px; background: #fff3cd; border-radius: 5px; border: 2px solid #ffc107;">
+                            <strong style="color: #856404;">Proposed Radiod Configuration Change:</strong>
+                            <div style="margin-top: 10px; padding: 10px; background: #fff; border-radius: 3px; font-family: monospace; font-size: 14px; border: 1px solid #dee2e6;">
+                                <span style="color: #999;">calibrate = 0</span> → <strong style="color: #28a745;">calibrate = ${calibrateValue.toExponential(6)}</strong>
+                            </div>
+                            <div style="margin-top: 10px; font-size: 12px; color: #856404;">
+                                <em>(Negative value corrects in opposite direction of measured error)</em>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="padding: 0 20px 10px 20px;">
+                        <div style="background: #fff3cd; padding: 12px; border-radius: 5px; border: 1px solid #ffc107; font-size: 13px; color: #856404;">
+                            ⚠️ <strong>Important:</strong> This will modify your radiod configuration. You must restart radiod (or the entire server) for the calibration to take effect.
+                        </div>
+                    </div>
+                `;
+
+                // Show modal
+                document.getElementById('autoCalibrationModal').style.display = 'block';
+
+            } catch (error) {
+                showAlert('Error preparing auto-calibration: ' + error.message, 'error');
+            }
+        }
+
+        function closeAutoCalibrationModal() {
+            const modal = document.getElementById('autoCalibrationModal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+            calculatedCalibrationValue = null;
+            calibrationData = null;
+        }
+
+        async function applyAutoCalibration() {
+            if (calculatedCalibrationValue === null || calibrationData === null) {
+                showAlert('No calibration data available', 'error');
+                return;
+            }
+
+            try {
+                // Close the modal first
+                closeAutoCalibrationModal();
+
+                // Show progress message
+                showAlert('Applying calibration to radiod configuration...', 'info');
+
+                // Switch to radiod tab
+                switchTab('radiod');
+
+                // Wait a moment for tab to load
+                await new Promise(resolve => setTimeout(resolve, 500));
+
+                // Enable radiod editing if not already enabled
+                if (!radiodEditingEnabled) {
+                    enableRadiodEditing();
+                }
+
+                // Get the current radiod config
+                const editor = document.getElementById('radiodConfigEditor');
+                if (!editor) {
+                    showAlert('Radiod config editor not found', 'error');
+                    return;
+                }
+
+                let configText = editor.value;
+
+                // Format the calibration value in scientific notation
+                const calibrateValueStr = calculatedCalibrationValue.toExponential(6);
+
+                // Find and replace the calibrate line
+                // Match patterns like:
+                // calibrate = 0
+                // calibrate = -1e-6
+                // calibrate = 1.234e-6
+                // calibrate=0 (no spaces)
+                const calibrateRegex = /^(\s*)calibrate\s*=\s*[^\n#]+/m;
+
+                if (calibrateRegex.test(configText)) {
+                    // Replace existing calibrate line
+                    configText = configText.replace(calibrateRegex, `$1calibrate = ${calibrateValueStr}  # Auto-calibrated based on frequency reference tracking`);
+                } else {
+                    // If calibrate line doesn't exist, add it after the [global] section or at the beginning
+                    const globalSectionRegex = /^\[global\]\s*$/m;
+                    if (globalSectionRegex.test(configText)) {
+                        configText = configText.replace(globalSectionRegex, `[global]\ncalibrate = ${calibrateValueStr}  # Auto-calibrated based on frequency reference tracking`);
+                    } else {
+                        // Add at the very beginning
+                        configText = `calibrate = ${calibrateValueStr}  # Auto-calibrated based on frequency reference tracking\n\n` + configText;
+                    }
+                }
+
+                // Update the editor
+                editor.value = configText;
+                currentRadiodConfig = configText;
+
+                // Show success message with details
+                const offsetHz = calibrationData.avgOffset;
+                const ppmValue = (calibrationData.ppmError * 1e6).toFixed(3);
+
+                showAlert(
+                    `✓ Calibration applied successfully!\n\n` +
+                    `Average Offset: ${offsetHz >= 0 ? '+' : ''}${offsetHz.toFixed(2)} Hz\n` +
+                    `PPM Correction: ${calibrateValueStr} (${ppmValue} ppm)\n\n` +
+                    `The radiod config has been updated. Click "Save & Restart Radiod" to apply the changes.`,
+                    'success'
+                );
+
+                // Scroll to the calibrate line in the editor
+                const lines = configText.split('\n');
+                const calibrateLineIndex = lines.findIndex(line => line.includes('calibrate ='));
+                if (calibrateLineIndex >= 0) {
+                    // Highlight the line by scrolling to it
+                    editor.focus();
+                    const lineHeight = 16; // Approximate line height in pixels
+                    editor.scrollTop = calibrateLineIndex * lineHeight;
+                }
+
+            } catch (error) {
+                showAlert('Error applying calibration: ' + error.message, 'error');
+            }
+        }
+
+        // Close auto-calibration modal when clicking outside
+        window.addEventListener('click', function(event) {
+            const modal = document.getElementById('autoCalibrationModal');
+            if (event.target === modal) {
+                closeAutoCalibrationModal();
+            }
         });
     </script>
 </body>

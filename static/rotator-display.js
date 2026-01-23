@@ -391,7 +391,7 @@ class RotatorDisplay {
         // Create ticks and labels
         const cardinals = ['N', 'E', 'S', 'W'];
         const cardinalAngles = [0, 90, 180, 270];
-        
+
         for (let i = 0; i < 360; i += 5) {
             const tick = document.createElement('div');
             tick.style.position = 'absolute';
@@ -402,24 +402,24 @@ class RotatorDisplay {
             tick.style.top = '5px';
             tick.style.transformOrigin = `50% ${this.compassSize/2 - 5}px`;
             tick.style.transform = `rotate(${i}deg)`;
-            
+
             if (i % 30 === 0) {
                 tick.style.height = '12px';
                 tick.style.width = '2px';
                 tick.style.background = 'rgba(255,255,255,0.8)';
-                
+
                 // Add label for major ticks
                 const label = document.createElement('div');
                 label.style.position = 'absolute';
                 label.style.left = '50%';
                 label.style.top = '20px';
-                label.style.transform = 'translateX(-50%)';
                 label.style.fontSize = '12px';
                 label.style.fontWeight = 'bold';
                 label.style.color = '#fff';
                 label.style.transformOrigin = `50% ${this.compassSize/2 - 20}px`;
+                // Keep label upright by rotating it around the compass center
                 label.style.transform = `translateX(-50%) rotate(${i}deg)`;
-                
+
                 const cardinalIndex = cardinalAngles.indexOf(i);
                 if (cardinalIndex !== -1) {
                     label.textContent = cardinals[cardinalIndex];
@@ -428,10 +428,10 @@ class RotatorDisplay {
                 } else {
                     label.textContent = i;
                 }
-                
+
                 ring.appendChild(label);
             }
-            
+
             ring.appendChild(tick);
         }
         
@@ -523,10 +523,11 @@ class RotatorDisplay {
             }
         }
         
-        // Update compass needle
+        // Update compass needle (compass uses standard rotation: 0° = North/up)
         if (this.showCompass) {
             const needle = document.getElementById(`${this.containerId}-compass-needle`);
             if (needle) {
+                // Compass needle rotates directly with azimuth (0° = North, clockwise)
                 needle.style.transform = `translate(-50%, -50%) rotate(${azimuth}deg)`;
             }
         }

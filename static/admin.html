@@ -12955,7 +12955,7 @@
                 // Calculate PPM calibration value (incremental correction)
                 const expectedFreq = data.expected_frequency;
                 const ppmError = avgOffset / expectedFreq;
-                const calibrateValue = -ppmError; // Negative to correct in opposite direction
+                const calibrateValue = ppmError; // Direct correction - same sign as measured error
 
                 // Fetch current radiod config to check for existing calibration
                 let existingCalibrate = 0;
@@ -13038,7 +13038,7 @@
                                 <span style="color: #999;">calibrate = ${existingCalibrate.toExponential(6)}</span> → <strong style="color: #28a745;">calibrate = ${newCalibrateValue.toExponential(6)}</strong>
                             </div>
                             <div style="margin-top: 10px; font-size: 12px; color: #856404;">
-                                <em>(Adds incremental correction to existing calibration. Negative values correct in opposite direction of measured error.)</em>
+                                <em>(Adds incremental correction to existing calibration. Negative offset requires negative calibration to speed up oscillator.)</em>
                             </div>
                         </div>
                     </div>

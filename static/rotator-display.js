@@ -104,7 +104,7 @@ class RotatorDisplay {
             .attr("class", "graticule")
             .attr("d", this.path)
             .style("fill", "none")
-            .style("stroke", "rgba(255,255,255,0.1)")
+            .style("stroke", "rgba(255,255,255,0.15)")
             .style("stroke-width", "0.5");
         
         // Draw distance circles (without labels first)
@@ -122,9 +122,9 @@ class RotatorDisplay {
                 .enter().append("path")
                 .attr("class", "country")
                 .attr("d", this.path)
-                .style("fill", "#2c3e50")
-                .style("stroke", "#4a5f7f")
-                .style("stroke-width", "0.5");
+                .style("fill", "#3d5a80")
+                .style("stroke", "#98c1d9")
+                .style("stroke-width", "1");
         } catch (error) {
             console.error('[RotatorDisplay] Failed to load world map:', error);
         }

@@ -416,6 +416,14 @@ function renderTablePage() {
 
     // Set up pagination listeners
     setupPaginationListeners();
+
+    // Restore focus to filter input if it was focused
+    const filterInput = document.getElementById('table-filter');
+    if (filterInput && document.activeElement && document.activeElement.id === 'table-filter') {
+        filterInput.focus();
+        // Restore cursor position to end
+        filterInput.setSelectionRange(filterInput.value.length, filterInput.value.length);
+    }
 }
 
 // Display countries by band/mode
@@ -583,18 +591,19 @@ function changeItemsPerPage() {
 
 // Apply real-time table filter
 function applyTableFilter(filterText) {
-    tableFilter = filterText.toLowerCase().trim();
+    const lowerFilter = filterText.toLowerCase().trim();
+    tableFilter = filterText.trim(); // Store original case for display
 
-    if (!tableFilter) {
+    if (!lowerFilter) {
         // No filter, show all stats
         filteredStats = allStats;
     } else {
         // Filter by callsign, country, or locator
         filteredStats = allStats.filter(stat => {
-            const callsignMatch = stat.callsign.toLowerCase().includes(tableFilter);
-            const countryMatch = stat.country && stat.country.toLowerCase().includes(tableFilter);
-            const locatorMatch = stat.final_locator && stat.final_locator.toLowerCase().includes(tableFilter);
-            const locatorsMatch = stat.locators && stat.locators.some(loc => loc.toLowerCase().includes(tableFilter));
+            const callsignMatch = stat.callsign.toLowerCase().includes(lowerFilter);
+            const countryMatch = stat.country && stat.country.toLowerCase().includes(lowerFilter);
+            const locatorMatch = stat.final_locator && stat.final_locator.toLowerCase().includes(lowerFilter);
+            const locatorsMatch = stat.locators && stat.locators.some(loc => loc.toLowerCase().includes(lowerFilter));
 
             return callsignMatch || countryMatch || locatorMatch || locatorsMatch;
         });
@@ -602,7 +611,25 @@ function applyTableFilter(filterText) {
 
     // Reset to first page when filtering
     currentPage = 1;
+
+    // Store which element has focus before re-rendering
+    const activeElementId = document.activeElement ? document.activeElement.id : null;
+    const cursorPosition = document.activeElement && document.activeElement.id === 'table-filter'
+        ? document.activeElement.selectionStart
+        : null;
+
     renderTablePage();
+
+    // Restore focus and cursor position
+    if (activeElementId === 'table-filter') {
+        const filterInput = document.getElementById('table-filter');
+        if (filterInput) {
+            filterInput.focus();
+            if (cursorPosition !== null) {
+                filterInput.setSelectionRange(cursorPosition, cursorPosition);
+            }
+        }
+    }
 }
 
 // Set up items per page change listener (called after table is rendered)

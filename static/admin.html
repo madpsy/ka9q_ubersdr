@@ -795,30 +795,34 @@
                     <div id="frequencyReferenceSection" class="config-section" style="display: none;">
                         <h3>📡 Frequency Reference Tracking</h3>
                         <div id="frequencyReferenceDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
-                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 15px; margin-bottom: 20px;">
-                                <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                                    <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Expected Frequency</div>
-                                    <div style="font-size: 18px; font-weight: bold; color: #667eea;" id="refExpectedFreq">—</div>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px;">
+                                <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                                    <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Expected Frequency</div>
+                                    <div style="font-size: 16px; font-weight: bold; color: #667eea;" id="refExpectedFreq">—</div>
                                 </div>
-                                <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                                    <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Detected Frequency</div>
-                                    <div style="font-size: 18px; font-weight: bold;" id="refDetectedFreq">—</div>
+                                <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                                    <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Detected Frequency</div>
+                                    <div style="font-size: 16px; font-weight: bold;" id="refDetectedFreq">—</div>
                                 </div>
-                                <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                                    <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Frequency Offset</div>
-                                    <div style="font-size: 18px; font-weight: bold;" id="refOffset">—</div>
+                                <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                                    <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Frequency Offset</div>
+                                    <div style="font-size: 16px; font-weight: bold;" id="refOffset">—</div>
                                 </div>
-                                <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                                    <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Signal Strength</div>
-                                    <div style="font-size: 18px; font-weight: bold; color: #667eea;" id="refSignalStrength">—</div>
+                                <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                                    <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Calibration</div>
+                                    <div style="font-size: 16px; font-weight: bold; color: #667eea;" id="refCalibration">—</div>
                                 </div>
-                                <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                                    <div style="font-size: 12px; color: #666; margin-bottom: 5px;">SNR</div>
-                                    <div style="font-size: 18px; font-weight: bold; color: #667eea;" id="refSNR">—</div>
+                                <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                                    <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Signal Strength</div>
+                                    <div style="font-size: 16px; font-weight: bold; color: #667eea;" id="refSignalStrength">—</div>
                                 </div>
-                                <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                                    <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Noise Floor</div>
-                                    <div style="font-size: 18px; font-weight: bold; color: #667eea;" id="refNoiseFloor">—</div>
+                                <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                                    <div style="font-size: 11px; color: #666; margin-bottom: 5px;">SNR</div>
+                                    <div style="font-size: 16px; font-weight: bold; color: #667eea;" id="refSNR">—</div>
+                                </div>
+                                <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                                    <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Noise Floor</div>
+                                    <div style="font-size: 16px; font-weight: bold; color: #667eea;" id="refNoiseFloor">—</div>
                                 </div>
                             </div>
 
@@ -8116,6 +8120,31 @@
                 offsetEl.style.color = '#666';
             }
 
+            // Update calibration value (fetch from radiod config)
+            const calibrationEl = document.getElementById('refCalibration');
+            fetchCurrentCalibration().then(calibrateValue => {
+                if (calibrateValue !== null) {
+                    const ppm = (calibrateValue * 1e6).toFixed(3);
+                    calibrationEl.textContent = calibrateValue.toExponential(2);
+                    calibrationEl.title = `${ppm} ppm`;
+                    // Color code based on magnitude
+                    if (Math.abs(calibrateValue) < 1e-7) {
+                        calibrationEl.style.color = '#28a745'; // Green - well calibrated
+                    } else if (Math.abs(calibrateValue) < 5e-7) {
+                        calibrationEl.style.color = '#ffc107'; // Yellow - some drift
+                    } else {
+                        calibrationEl.style.color = '#dc3545'; // Red - significant drift
+                    }
+                } else {
+                    calibrationEl.textContent = '0';
+                    calibrationEl.style.color = '#28a745';
+                    calibrationEl.title = '0 ppm';
+                }
+            }).catch(() => {
+                calibrationEl.textContent = '—';
+                calibrationEl.style.color = '#666';
+            });
+
             // Update SNR (from backend) - calculate color first
             let snrColor = '#666';
             const snrEl = document.getElementById('refSNR');
@@ -13208,6 +13237,30 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 closeAutoCalibrationModal();
             }
         });
+
+        // Fetch current calibration value from radiod config
+        async function fetchCurrentCalibration() {
+            try {
+                const response = await authenticatedFetch('/admin/radiod-config');
+                if (!response || !response.ok) return null;
+
+                const data = await response.json();
+                const configText = data.config || '';
+
+                // Extract calibration value
+                const calibrateRegex = /^(\s*)calibrate\s*=\s*([^\n#]+)/m;
+                const match = configText.match(calibrateRegex);
+                if (match && match[2]) {
+                    const value = match[2].trim();
+                    const calibrate = parseFloat(value);
+                    return isNaN(calibrate) ? 0 : calibrate;
+                }
+                return 0; // Default to 0 if not found
+            } catch (error) {
+                console.error('Error fetching calibration value:', error);
+                return null;
+            }
+        }
     </script>
 </body>
 </html>

@@ -523,12 +523,13 @@ class RotatorDisplay {
             }
         }
         
-        // Update compass needle (compass uses standard rotation: 0° = North/up)
+        // Update compass needle
         if (this.showCompass) {
             const needle = document.getElementById(`${this.containerId}-compass-needle`);
             if (needle) {
-                // Compass needle rotates directly with azimuth (0° = North, clockwise)
-                needle.style.transform = `translate(-50%, -50%) rotate(${azimuth}deg)`;
+                // CSS rotation: 0° = East (right), so subtract 90° to make 0° = North (up)
+                // Then add azimuth to rotate clockwise from North
+                needle.style.transform = `translate(-50%, -50%) rotate(${azimuth - 90}deg)`;
             }
         }
     }

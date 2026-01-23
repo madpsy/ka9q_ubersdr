@@ -88,8 +88,9 @@ class RotatorDisplay {
         this.createTooltip(container);
         
         // Create azimuthal equidistant projection centered on receiver
+        // Rotate by -90 degrees to align North with the top of the map
         this.projection = d3.geoAzimuthalEquidistant()
-            .center([this.receiverLon, this.receiverLat])
+            .rotate([-this.receiverLon, -this.receiverLat, 0])
             .scale(this.mapSize / 2 / Math.PI * 0.9)
             .translate([this.mapSize / 2, this.mapSize / 2])
             .clipAngle(180);
@@ -194,14 +195,8 @@ class RotatorDisplay {
         
         const [clickLon, clickLat] = coords;
         
-        // Calculate bearing from screen coordinates (0° = North/up, clockwise)
-        const centerX = this.mapSize / 2;
-        const centerY = this.mapSize / 2;
-        const dx = mouseX - centerX;
-        const dy = centerY - mouseY; // Inverted: positive dy means North
-        
-        let bearing = Math.atan2(dx, dy) * 180 / Math.PI;
-        if (bearing < 0) bearing += 360;
+        // Calculate true bearing using great circle formula
+        const bearing = this.calculateBearing(this.receiverLat, this.receiverLon, clickLat, clickLon);
         
         // Calculate distance using great circle formula
         const distance = this.calculateDistance(this.receiverLat, this.receiverLon, clickLat, clickLon);
@@ -231,15 +226,10 @@ class RotatorDisplay {
         
         if (!coords) return;
         
-        // Calculate bearing from screen coordinates (0° = North/up, clockwise)
-        const centerX = this.mapSize / 2;
-        const centerY = this.mapSize / 2;
-        const dx = mouseX - centerX;
-        const dy = centerY - mouseY; // Inverted: positive dy means North
+        const [clickLon, clickLat] = coords;
         
-        let bearing = Math.atan2(dx, dy) * 180 / Math.PI;
-        if (bearing < 0) bearing += 360;
-        
+        // Calculate true bearing using great circle formula
+        const bearing = this.calculateBearing(this.receiverLat, this.receiverLon, clickLat, clickLon);
         const roundedBearing = Math.round(bearing);
         
         // Emit custom event that can be handled by the parent page
@@ -249,6 +239,23 @@ class RotatorDisplay {
         document.dispatchEvent(mapClickEvent);
     }
     
+    calculateBearing(lat1, lon1, lat2, lon2) {
+        // Calculate initial bearing from point 1 to point 2
+        const φ1 = lat1 * Math.PI / 180;
+        const φ2 = lat2 * Math.PI / 180;
+        const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+        const y = Math.sin(Δλ) * Math.cos(φ2);
+        const x = Math.cos(φ1) * Math.sin(φ2) -
+                  Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+
+        let bearing = Math.atan2(y, x) * 180 / Math.PI;
+        // Normalize to 0-360
+        bearing = (bearing + 360) % 360;
+
+        return bearing;
+    }
+
     calculateDistance(lat1, lon1, lat2, lon2) {
         const R = 6371; // Earth radius in km
         const φ1 = lat1 * Math.PI / 180;

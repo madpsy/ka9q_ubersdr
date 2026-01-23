@@ -12965,11 +12965,12 @@
                     return;
                 }
 
-                // Calculate PPM calibration value (incremental correction)
+                // Calculate PPM calibration value
+                // calibrate is "clock error fraction" - same sign as the error
+                // If offset is -0.25 Hz (slow), calibrate = -2.5e-8 (clock running slow)
                 const expectedFreq = data.expected_frequency;
                 const ppmError = avgOffset / expectedFreq;
-                // Invert sign: negative offset (slow) needs positive calibrate to speed up
-                const calibrateValue = -ppmError;
+                const calibrateValue = ppmError; // Same sign as offset - no inversion
 
                 // Fetch current radiod config to check for existing calibration
                 let existingCalibrate = 0;
@@ -13053,7 +13054,7 @@
                                 <span style="color: #999;">calibrate = ${existingCalibrate.toExponential(6)}</span> → <strong style="color: #28a745;">calibrate = ${newCalibrateValue.toExponential(6)}</strong>
                             </div>
                             <div style="margin-top: 10px; font-size: 12px; color: #856404;">
-                                <em>(Adds incremental correction to existing calibration. Negative offset requires positive calibration to speed up oscillator.)</em>
+                                <em>(Calibrate represents clock error fraction. Negative offset = clock running slow = negative calibrate value.)</em>
                             </div>
                             <div style="margin-top: 15px; padding: 12px; background: #e3f2fd; border-radius: 5px; border: 1px solid #2196f3; font-size: 13px; color: #0d47a1;">
                                 💡 <strong>Tip:</strong> If applying calibration makes your offset worse instead of better, set <code style="background: #fff; padding: 2px 6px; border-radius: 3px;">calibrate = 0</code> in your radiod config and restart. Your oscillator may already be well-calibrated.

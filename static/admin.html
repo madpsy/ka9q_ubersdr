@@ -12952,19 +12952,6 @@
                     }
                 }
 
-                // Don't calibrate if offset is within measurement noise (< 2× standard deviation)
-                // This prevents chasing statistical noise instead of real systematic errors
-                const noiseThreshold = Math.max(0.3, 2 * stdDev);
-                if (Math.abs(avgOffset) < noiseThreshold) {
-                    showAlert(
-                        `Frequency offset (${avgOffset >= 0 ? '+' : ''}${avgOffset.toFixed(2)} Hz) is within measurement noise (±${noiseThreshold.toFixed(2)} Hz).\n\n` +
-                        `Standard deviation: ${stdDev.toFixed(2)} Hz\n\n` +
-                        `No calibration needed - offset is not statistically significant.`,
-                        'info'
-                    );
-                    return;
-                }
-
                 // Calculate PPM calibration value
                 // calibrate is "clock error fraction" - same sign as the error
                 // If offset is -0.25 Hz (slow), calibrate = -2.5e-8 (clock running slow)

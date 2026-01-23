@@ -12952,18 +12952,24 @@
                     }
                 }
 
-                // Don't calibrate if offset is already very small (< 0.3 Hz)
-                // This prevents unnecessary calibration when oscillator is already accurate
-                if (Math.abs(avgOffset) < 0.3) {
-                    showAlert(`Frequency offset is already excellent (${avgOffset >= 0 ? '+' : ''}${avgOffset.toFixed(2)} Hz). No calibration needed.`, 'info');
+                // Don't calibrate if offset is within measurement noise (< 2× standard deviation)
+                // This prevents chasing statistical noise instead of real systematic errors
+                const noiseThreshold = Math.max(0.3, 2 * stdDev);
+                if (Math.abs(avgOffset) < noiseThreshold) {
+                    showAlert(
+                        `Frequency offset (${avgOffset >= 0 ? '+' : ''}${avgOffset.toFixed(2)} Hz) is within measurement noise (±${noiseThreshold.toFixed(2)} Hz).\n\n` +
+                        `Standard deviation: ${stdDev.toFixed(2)} Hz\n\n` +
+                        `No calibration needed - offset is not statistically significant.`,
+                        'info'
+                    );
                     return;
                 }
 
                 // Calculate PPM calibration value (incremental correction)
                 const expectedFreq = data.expected_frequency;
                 const ppmError = avgOffset / expectedFreq;
-                // No sign inversion - calibrate parameter directly represents the error
-                const calibrateValue = ppmError;
+                // Invert sign: negative offset (slow) needs positive calibrate to speed up
+                const calibrateValue = -ppmError;
 
                 // Fetch current radiod config to check for existing calibration
                 let existingCalibrate = 0;
@@ -13004,8 +13010,8 @@
                 };
 
                 // Calculate new cumulative calibration value
-                // Subtract the error from existing calibration to correct it
-                const newCalibrateValue = existingCalibrate - calibrateValue;
+                // Add the correction to existing calibration
+                const newCalibrateValue = existingCalibrate + calibrateValue;
                 const existingPPM = (existingCalibrate * 1e6).toFixed(3);
                 const incrementalPPM = (calibrateValue * 1e6).toFixed(3);
                 const newPPM = (newCalibrateValue * 1e6).toFixed(3);
@@ -13036,7 +13042,7 @@
                                 <br>
                                 <strong>Cumulative Calibration:</strong><br>
                                 Existing: ${existingCalibrate.toExponential(6)} (${existingPPM} ppm)<br>
-                                - Error: ${calibrateValue.toExponential(6)} (${incrementalPPM} ppm)<br>
+                                + Incremental: ${calibrateValue.toExponential(6)} (${incrementalPPM} ppm)<br>
                                 = <strong style="color: #28a745;">New Total: ${newCalibrateValue.toExponential(6)} (${newPPM} ppm)</strong>
                             </div>
                         </div>
@@ -13047,7 +13053,10 @@
                                 <span style="color: #999;">calibrate = ${existingCalibrate.toExponential(6)}</span> → <strong style="color: #28a745;">calibrate = ${newCalibrateValue.toExponential(6)}</strong>
                             </div>
                             <div style="margin-top: 10px; font-size: 12px; color: #856404;">
-                                <em>(Subtracts measured error from existing calibration. Positive offset means oscillator is running fast, so calibration is reduced.)</em>
+                                <em>(Adds incremental correction to existing calibration. Negative offset requires positive calibration to speed up oscillator.)</em>
+                            </div>
+                            <div style="margin-top: 15px; padding: 12px; background: #e3f2fd; border-radius: 5px; border: 1px solid #2196f3; font-size: 13px; color: #0d47a1;">
+                                💡 <strong>Tip:</strong> If applying calibration makes your offset worse instead of better, set <code style="background: #fff; padding: 2px 6px; border-radius: 3px;">calibrate = 0</code> in your radiod config and restart. Your oscillator may already be well-calibrated.
                             </div>
                         </div>
                     </div>
@@ -13080,6 +13089,24 @@
             if (calculatedCalibrationValue === null || calibrationData === null) {
                 showAlert('No calibration data available', 'error');
                 return;
+            }
+// Warn user if they're about to make things worse
+const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
+                       Math.sign(calibrationData.existingCalibrate) === Math.sign(calibrationData.existingCalibrate + calculatedCalibrationValue) &&
+                       Math.abs(calibrationData.existingCalibrate + calculatedCalibrationValue) > Math.abs(calibrationData.existingCalibrate));
+
+            
+            if (willMakeWorse) {
+                if (!confirm(
+                    `⚠️ WARNING: This calibration will increase the magnitude of your existing calibration.\n\n` +
+                    `Existing: ${calibrationData.existingCalibrate.toExponential(6)}\n` +
+                    `New: ${(calibrationData.existingCalibrate + calculatedCalibrationValue).toExponential(6)}\n\n` +
+                    `If your previous calibration made things worse, this will make it even worse.\n\n` +
+                    `Consider setting calibrate = 0 instead.\n\n` +
+                    `Continue anyway?`
+                )) {
+                    return;
+                }
             }
 
             try {

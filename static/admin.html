@@ -8125,8 +8125,9 @@
             fetchCurrentCalibration().then(calibrateValue => {
                 if (calibrateValue !== null) {
                     const ppm = (calibrateValue * 1e6).toFixed(3);
-                    calibrationEl.textContent = calibrateValue.toExponential(2);
-                    calibrationEl.title = `${ppm} ppm`;
+                    const sign = calibrateValue >= 0 ? '+' : '';
+                    calibrationEl.textContent = `${sign}${ppm} ppm`;
+                    calibrationEl.title = `${calibrateValue.toExponential(6)} (raw value)`;
                     // Color code based on magnitude
                     if (Math.abs(calibrateValue) < 1e-7) {
                         calibrationEl.style.color = '#28a745'; // Green - well calibrated
@@ -8136,9 +8137,9 @@
                         calibrationEl.style.color = '#dc3545'; // Red - significant drift
                     }
                 } else {
-                    calibrationEl.textContent = '0';
+                    calibrationEl.textContent = '0.000 ppm';
                     calibrationEl.style.color = '#28a745';
-                    calibrationEl.title = '0 ppm';
+                    calibrationEl.title = '0.000000e+0 (raw value)';
                 }
             }).catch(() => {
                 calibrationEl.textContent = '—';

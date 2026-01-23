@@ -13063,8 +13063,8 @@
             if (modal) {
                 modal.style.display = 'none';
             }
-            calculatedCalibrationValue = null;
-            calibrationData = null;
+            // Don't clear calibration data here - it's needed if user clicks Apply
+            // Data will be cleared when new calibration is calculated
         }
 
         async function applyAutoCalibration() {

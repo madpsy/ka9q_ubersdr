@@ -29,6 +29,7 @@
 #include <random>
 #include <algorithm>
 #include <set>
+#include <memory>
 #include <curl/curl.h>
 #include <zstd.h>
 
@@ -206,8 +207,9 @@ private:
     bool _useTLS;
     
     // WebSocket clients (only one will be used based on protocol)
-    tls_client _tlsClient;
-    plain_client _plainClient;
+    // Using unique_ptr to allow reconstruction after stop()
+    std::unique_ptr<tls_client> _tlsClient;
+    std::unique_ptr<plain_client> _plainClient;
     websocketpp::connection_hdl _wsHandle;
     std::thread _wsThread;
     std::atomic<bool> _streaming;
@@ -759,9 +761,9 @@ void SoapyUberSDR::sendTuneCommand(uint64_t freq, const std::string &mode)
         ss << "{\"type\":\"tune\",\"frequency\":" << freq << ",\"mode\":\"" << mode << "\"}";
 
         if (_useTLS) {
-            _tlsClient.send(_wsHandle, ss.str(), websocketpp::frame::opcode::text);
+            _tlsClient->send(_wsHandle, ss.str(), websocketpp::frame::opcode::text);
         } else {
-            _plainClient.send(_wsHandle, ss.str(), websocketpp::frame::opcode::text);
+            _plainClient->send(_wsHandle, ss.str(), websocketpp::frame::opcode::text);
         }
 
         SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyUberSDR: Sent tune command: %s", ss.str().c_str());
@@ -951,13 +953,16 @@ void SoapyUberSDR::connectWebSocket()
     SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Connecting to %s [%s]", wsURL.c_str(), _useTLS ? "TLS" : "Plain");
 
     if (_useTLS) {
+        // Reconstruct TLS client to ensure clean state after previous stop()
+        _tlsClient.reset(new tls_client());
+
         // TLS WebSocket connection
-        _tlsClient.clear_access_channels(websocketpp::log::alevel::all);
-        _tlsClient.clear_error_channels(websocketpp::log::elevel::all);
-        _tlsClient.init_asio();
+        _tlsClient->clear_access_channels(websocketpp::log::alevel::all);
+        _tlsClient->clear_error_channels(websocketpp::log::elevel::all);
+        _tlsClient->init_asio();
 
         // Set up TLS/SSL context for secure WebSocket connections
-        _tlsClient.set_tls_init_handler([](websocketpp::connection_hdl) {
+        _tlsClient->set_tls_init_handler([](websocketpp::connection_hdl) {
             context_ptr ctx = websocketpp::lib::make_shared<websocketpp::lib::asio::ssl::context>(
                 websocketpp::lib::asio::ssl::context::sslv23);
 
@@ -975,52 +980,55 @@ void SoapyUberSDR::connectWebSocket()
             return ctx;
         });
 
-        _tlsClient.set_user_agent("UberSDR_Soapy/1.0");
+        _tlsClient->set_user_agent("UberSDR_Soapy/1.0");
 
-        _tlsClient.set_message_handler([this](websocketpp::connection_hdl hdl, tls_message_ptr msg) {
+        _tlsClient->set_message_handler([this](websocketpp::connection_hdl hdl, tls_message_ptr msg) {
             handleTLSMessage(hdl, msg);
         });
 
         websocketpp::lib::error_code ec;
-        tls_client::connection_ptr con = _tlsClient.get_connection(wsURL, ec);
+        tls_client::connection_ptr con = _tlsClient->get_connection(wsURL, ec);
         if (ec) {
             throw std::runtime_error("TLS WebSocket connection failed: " + ec.message());
         }
 
         _wsHandle = con->get_handle();
-        _tlsClient.connect(con);
+        _tlsClient->connect(con);
 
         _wsThread = std::thread([this]() {
             try {
-                _tlsClient.run();
+                _tlsClient->run();
             } catch (const std::exception &e) {
                 SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: TLS WebSocket thread error: %s", e.what());
             }
         });
     } else {
+        // Reconstruct plain client to ensure clean state after previous stop()
+        _plainClient.reset(new plain_client());
+
         // Plain WebSocket connection
-        _plainClient.clear_access_channels(websocketpp::log::alevel::all);
-        _plainClient.clear_error_channels(websocketpp::log::elevel::all);
-        _plainClient.init_asio();
+        _plainClient->clear_access_channels(websocketpp::log::alevel::all);
+        _plainClient->clear_error_channels(websocketpp::log::elevel::all);
+        _plainClient->init_asio();
 
-        _plainClient.set_user_agent("UberSDR_Soapy/1.0");
+        _plainClient->set_user_agent("UberSDR_Soapy/1.0");
 
-        _plainClient.set_message_handler([this](websocketpp::connection_hdl hdl, plain_message_ptr msg) {
+        _plainClient->set_message_handler([this](websocketpp::connection_hdl hdl, plain_message_ptr msg) {
             handlePlainMessage(hdl, msg);
         });
 
         websocketpp::lib::error_code ec;
-        plain_client::connection_ptr con = _plainClient.get_connection(wsURL, ec);
+        plain_client::connection_ptr con = _plainClient->get_connection(wsURL, ec);
         if (ec) {
             throw std::runtime_error("Plain WebSocket connection failed: " + ec.message());
         }
 
         _wsHandle = con->get_handle();
-        _plainClient.connect(con);
+        _plainClient->connect(con);
 
         _wsThread = std::thread([this]() {
             try {
-                _plainClient.run();
+                _plainClient->run();
             } catch (const std::exception &e) {
                 SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: Plain WebSocket thread error: %s", e.what());
             }
@@ -1038,17 +1046,20 @@ void SoapyUberSDR::disconnectWebSocket()
     _connected = false;
 
     try {
-        if (_useTLS) {
-            _tlsClient.close(_wsHandle, websocketpp::close::status::normal, "");
-            _tlsClient.stop();
-        } else {
-            _plainClient.close(_wsHandle, websocketpp::close::status::normal, "");
-            _plainClient.stop();
+        if (_useTLS && _tlsClient) {
+            _tlsClient->close(_wsHandle, websocketpp::close::status::normal, "");
+            _tlsClient->stop();
+        } else if (_plainClient) {
+            _plainClient->close(_wsHandle, websocketpp::close::status::normal, "");
+            _plainClient->stop();
         }
     } catch (...) {}
 
     if (_wsThread.joinable())
         _wsThread.join();
+
+    // Note: Client will be reconstructed in connectWebSocket() on next activation
+    // This avoids the "invalid state" error from reusing a stopped client
 
     SoapySDR::log(SOAPY_SDR_INFO, "SoapyUberSDR: WebSocket disconnected");
 }

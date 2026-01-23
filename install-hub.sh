@@ -31,10 +31,11 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
 
     ports=(80 443 8080 8073)
     VENDOR=04b4
-    PRODUCT=00f1
+    VALID_PRODUCTS=(00f1 00f3)
 
     ports_in_use=0
     rx_found=0
+    vendor_found=0
 
     # --- Port checks (show output regardless) ---
     if (( IGNORE_PORTS )); then
@@ -54,6 +55,7 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
     if (( IGNORE_RX888 )); then
         echo "RX888 device check skipped (--ignore-rx888)"
         rx_found=1  # Pretend it was found
+        vendor_found=1
     else
         # Temporarily disable exit on error for the USB device check
         set +e
@@ -61,8 +63,28 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
             # Skip if glob didn't match or files don't exist
             [[ -e "$d" ]] || continue
             [[ -f "$d/idVendor" && -f "$d/idProduct" ]] || continue
-            if [[ $(<"$d/idVendor") == "$VENDOR" && $(<"$d/idProduct") == "$PRODUCT" ]]; then
-                rx_found=1
+
+            device_vendor=$(<"$d/idVendor")
+            device_product=$(<"$d/idProduct")
+
+            if [[ "$device_vendor" == "$VENDOR" ]]; then
+                vendor_found=1
+                # Check if product ID matches any valid product
+                product_match=0
+                for valid_product in "${VALID_PRODUCTS[@]}"; do
+                    if [[ "$device_product" == "$valid_product" ]]; then
+                        product_match=1
+                        break
+                    fi
+                done
+
+                if (( product_match )); then
+                    rx_found=1
+                    echo "RX888 device found (vendor: $device_vendor, product: $device_product)"
+                else
+                    echo "Warning: Device with correct vendor ID ($device_vendor) found, but product ID ($device_product) doesn't match expected values (${VALID_PRODUCTS[*]})"
+                    rx_found=1  # Still consider it found since vendor matches
+                fi
                 break
             fi
         done
@@ -70,7 +92,9 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
         set -e
 
         if (( rx_found )); then
-            echo "RX888 device found"
+            if (( vendor_found == 0 )); then
+                echo "RX888 device not found (vendor ID mismatch)"
+            fi
         else
             echo "RX888 device not found"
         fi

@@ -762,6 +762,9 @@
                     <!-- SDR Frontend Status Section -->
                     <div id="frontendStatusSection" class="config-section" style="display: none;">
                         <h3>📡 SDR Frontend Status</h3>
+                        <div class="alert alert-info" style="margin-bottom: 15px;">
+                            ℹ️ <strong>About A/D Overranges:</strong> Overranges are expected during automatic gain control (AGC) operation. The AGC uses hysteresis—allowing some overranges before adjusting gain—to learn optimal levels. What matters is that overranges remain under control, not that they're zero.
+                        </div>
                         <div id="frontendStatusDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
                             <div class="spinner" style="margin: 20px auto;"></div>
                             <p style="text-align: center; color: #666;">Loading frontend status...</p>

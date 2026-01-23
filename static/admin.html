@@ -12949,10 +12949,34 @@
                     }
                 }
 
-                // Calculate PPM calibration value
+                // Calculate PPM calibration value (incremental correction)
                 const expectedFreq = data.expected_frequency;
                 const ppmError = avgOffset / expectedFreq;
                 const calibrateValue = -ppmError; // Negative to correct in opposite direction
+
+                // Fetch current radiod config to check for existing calibration
+                let existingCalibrate = 0;
+                try {
+                    const radiodResponse = await authenticatedFetch('/admin/radiod-config');
+                    if (radiodResponse && radiodResponse.ok) {
+                        const radiodData = await radiodResponse.json();
+                        const configText = radiodData.config || '';
+
+                        // Extract existing calibration value
+                        const calibrateRegex = /^(\s*)calibrate\s*=\s*([^\n#]+)/m;
+                        const match = configText.match(calibrateRegex);
+                        if (match && match[2]) {
+                            const existingValue = match[2].trim();
+                            existingCalibrate = parseFloat(existingValue);
+                            if (isNaN(existingCalibrate)) {
+                                existingCalibrate = 0;
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error reading existing calibration:', error);
+                    // Continue with existingCalibrate = 0
+                }
 
                 // Store for later use
                 calculatedCalibrationValue = calibrateValue;
@@ -12964,8 +12988,15 @@
                     avgSNR: avgSNR,
                     dataPoints: history.length,
                     ppmError: ppmError,
-                    calibrateValue: calibrateValue
+                    calibrateValue: calibrateValue,
+                    existingCalibrate: existingCalibrate
                 };
+
+                // Calculate new cumulative calibration value
+                const newCalibrateValue = existingCalibrate + calibrateValue;
+                const existingPPM = (existingCalibrate * 1e6).toFixed(3);
+                const incrementalPPM = (calibrateValue * 1e6).toFixed(3);
+                const newPPM = (newCalibrateValue * 1e6).toFixed(3);
 
                 // Populate modal content
                 const content = document.getElementById('autoCalibrationContent');
@@ -12974,11 +13005,11 @@
                         <h3 style="margin-top: 0; color: #1976d2;">📊 Calibration Calculation</h3>
 
                         <div style="margin-bottom: 15px;">
-                            <strong>Measurement Data (${calibrationData.dataPoints} samples over 1 minute):</strong>
+                            <strong>Measurement Data (${calibrationData.dataPoints} minute averages):</strong>
                             <div style="margin-left: 20px; margin-top: 8px; font-family: monospace; font-size: 13px; line-height: 1.8;">
                                 Expected Frequency: <strong style="color: #667eea;">${(expectedFreq / 1e6).toFixed(6)} MHz</strong><br>
                                 Detected Frequency: <strong style="color: #28a745;">${(calibrationData.detectedFreq / 1e6).toFixed(6)} MHz</strong><br>
-                                Average Offset: <strong style="color: ${Math.abs(avgOffset) > 5 ? '#dc3545' : '#ffc107'};">${avgOffset >= 0 ? '+' : ''}${avgOffset.toFixed(2)} Hz</strong><br>
+                                Average Offset: <strong style="color: ${Math.abs(avgOffset) > 5 ? '#dc3545' : '#ffc107'};">${avgOffset >= 0 ? '+' : ''}${avgOffset.toFixed(2)} Hz</strong> (residual after current calibration)<br>
                                 Std Deviation: <strong>${stdDev.toFixed(2)} Hz</strong><br>
                                 Average SNR: <strong style="color: ${avgSNR > 20 ? '#28a745' : avgSNR > 10 ? '#ffc107' : '#dc3545'};">${avgSNR.toFixed(1)} dB</strong>
                             </div>
@@ -12987,19 +13018,24 @@
                         <div style="margin-bottom: 15px; padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <strong>Calculation:</strong>
                             <div style="margin-left: 20px; margin-top: 8px; font-family: monospace; font-size: 13px; line-height: 1.8;">
-                                PPM Error = Offset / Expected Frequency<br>
-                                PPM Error = ${avgOffset.toFixed(2)} Hz / ${expectedFreq.toLocaleString()} Hz<br>
-                                PPM Error = <strong style="color: #667eea;">${ppmError.toExponential(3)}</strong> (${(ppmError * 1e6).toFixed(3)} ppm)
+                                Incremental PPM Error = Offset / Expected Frequency<br>
+                                Incremental PPM Error = ${avgOffset.toFixed(2)} Hz / ${expectedFreq.toLocaleString()} Hz<br>
+                                Incremental PPM Error = <strong style="color: #667eea;">${ppmError.toExponential(3)}</strong> (${(ppmError * 1e6).toFixed(3)} ppm)<br>
+                                <br>
+                                <strong>Cumulative Calibration:</strong><br>
+                                Existing: ${existingCalibrate.toExponential(6)} (${existingPPM} ppm)<br>
+                                + Incremental: ${calibrateValue.toExponential(6)} (${incrementalPPM} ppm)<br>
+                                = <strong style="color: #28a745;">New Total: ${newCalibrateValue.toExponential(6)} (${newPPM} ppm)</strong>
                             </div>
                         </div>
 
                         <div style="padding: 15px; background: #fff3cd; border-radius: 5px; border: 2px solid #ffc107;">
                             <strong style="color: #856404;">Proposed Radiod Configuration Change:</strong>
                             <div style="margin-top: 10px; padding: 10px; background: #fff; border-radius: 3px; font-family: monospace; font-size: 14px; border: 1px solid #dee2e6;">
-                                <span style="color: #999;">calibrate = 0</span> → <strong style="color: #28a745;">calibrate = ${calibrateValue.toExponential(6)}</strong>
+                                <span style="color: #999;">calibrate = ${existingCalibrate.toExponential(6)}</span> → <strong style="color: #28a745;">calibrate = ${newCalibrateValue.toExponential(6)}</strong>
                             </div>
                             <div style="margin-top: 10px; font-size: 12px; color: #856404;">
-                                <em>(Negative value corrects in opposite direction of measured error)</em>
+                                <em>(Adds incremental correction to existing calibration. Negative values correct in opposite direction of measured error.)</em>
                             </div>
                         </div>
                     </div>
@@ -13061,20 +13097,29 @@
 
                 let configText = editor.value;
 
-                // Format the calibration value in scientific notation
-                const calibrateValueStr = calculatedCalibrationValue.toExponential(6);
+                // Extract existing calibration value if present
+                const calibrateRegex = /^(\s*)calibrate\s*=\s*([^\n#]+)/m;
+                const match = configText.match(calibrateRegex);
+                let existingCalibrate = 0;
+
+                if (match && match[2]) {
+                    // Parse existing calibration value (handles scientific notation)
+                    const existingValue = match[2].trim();
+                    existingCalibrate = parseFloat(existingValue);
+                    if (isNaN(existingCalibrate)) {
+                        existingCalibrate = 0;
+                    }
+                }
+
+                // Add the new correction to the existing calibration
+                // This is important because the measured offset is AFTER the existing calibration is applied
+                const newCalibrateValue = existingCalibrate + calculatedCalibrationValue;
+                const calibrateValueStr = newCalibrateValue.toExponential(6);
 
                 // Find and replace the calibrate line
-                // Match patterns like:
-                // calibrate = 0
-                // calibrate = -1e-6
-                // calibrate = 1.234e-6
-                // calibrate=0 (no spaces)
-                const calibrateRegex = /^(\s*)calibrate\s*=\s*[^\n#]+/m;
-
-                if (calibrateRegex.test(configText)) {
+                if (match) {
                     // Replace existing calibrate line
-                    configText = configText.replace(calibrateRegex, `$1calibrate = ${calibrateValueStr}  # Auto-calibrated based on frequency reference tracking`);
+                    configText = configText.replace(calibrateRegex, `$1calibrate = ${calibrateValueStr}  # Auto-calibrated: ${existingCalibrate.toExponential(6)} + ${calculatedCalibrationValue.toExponential(6)}`);
                 } else {
                     // If calibrate line doesn't exist, add it after the [global] section or at the beginning
                     const globalSectionRegex = /^\[global\]\s*$/m;
@@ -13090,18 +13135,6 @@
                 editor.value = configText;
                 currentRadiodConfig = configText;
 
-                // Show success message with details
-                const offsetHz = calibrationData.avgOffset;
-                const ppmValue = (calibrationData.ppmError * 1e6).toFixed(3);
-
-                showAlert(
-                    `✓ Calibration applied successfully!\n\n` +
-                    `Average Offset: ${offsetHz >= 0 ? '+' : ''}${offsetHz.toFixed(2)} Hz\n` +
-                    `PPM Correction: ${calibrateValueStr} (${ppmValue} ppm)\n\n` +
-                    `The radiod config has been updated. Click "Save & Restart Radiod" to apply the changes.`,
-                    'success'
-                );
-
                 // Scroll to the calibrate line in the editor
                 const lines = configText.split('\n');
                 const calibrateLineIndex = lines.findIndex(line => line.includes('calibrate ='));
@@ -13110,6 +13143,30 @@
                     editor.focus();
                     const lineHeight = 16; // Approximate line height in pixels
                     editor.scrollTop = calibrateLineIndex * lineHeight;
+                }
+
+                // Show success message with details and ask if user wants to save & restart
+                const offsetHz = calibrationData.avgOffset;
+                const ppmValue = (calibrationData.ppmError * 1e6).toFixed(3);
+
+                const confirmRestart = confirm(
+                    `✓ Calibration applied successfully!\n\n` +
+                    `Average Offset: ${offsetHz >= 0 ? '+' : ''}${offsetHz.toFixed(2)} Hz\n` +
+                    `PPM Correction: ${calibrateValueStr} (${ppmValue} ppm)\n\n` +
+                    `Do you want to save and restart radiod now?\n\n` +
+                    `Click OK to save & restart immediately.\n` +
+                    `Click Cancel to review the changes first (you can save manually later).`
+                );
+
+                if (confirmRestart) {
+                    // Save and restart radiod
+                    await saveRadiodConfigAndRestart();
+                } else {
+                    // Just show success message
+                    showAlert(
+                        `Calibration value updated in radiod config. Review the changes and click "Save & Restart Radiod" when ready.`,
+                        'success'
+                    );
                 }
 
             } catch (error) {

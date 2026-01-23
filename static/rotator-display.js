@@ -198,9 +198,9 @@ class RotatorDisplay {
         const centerX = this.mapSize / 2;
         const centerY = this.mapSize / 2;
         const dx = mouseX - centerX;
-        const dy = mouseY - centerY;
+        const dy = centerY - mouseY; // Inverted: positive dy means North
         
-        let bearing = Math.atan2(dx, -dy) * 180 / Math.PI;
+        let bearing = Math.atan2(dx, dy) * 180 / Math.PI;
         if (bearing < 0) bearing += 360;
         
         // Calculate distance using great circle formula
@@ -235,9 +235,9 @@ class RotatorDisplay {
         const centerX = this.mapSize / 2;
         const centerY = this.mapSize / 2;
         const dx = mouseX - centerX;
-        const dy = mouseY - centerY;
+        const dy = centerY - mouseY; // Inverted: positive dy means North
         
-        let bearing = Math.atan2(dx, -dy) * 180 / Math.PI;
+        let bearing = Math.atan2(dx, dy) * 180 / Math.PI;
         if (bearing < 0) bearing += 360;
         
         const roundedBearing = Math.round(bearing);
@@ -467,7 +467,7 @@ class RotatorDisplay {
             const radius = this.mapSize / 2;
             
             // Convert azimuth to radians (0° = North/up, clockwise)
-            const angleRad = (azimuth - 90) * Math.PI / 180;
+            const angleRad = (90 - azimuth) * Math.PI / 180;
             
             // Calculate endpoint
             const endX = centerX + radius * Math.cos(angleRad);
@@ -486,8 +486,8 @@ class RotatorDisplay {
                 const leftAzimuth = azimuth - halfBeam;
                 const rightAzimuth = azimuth + halfBeam;
                 
-                const leftAngleRad = (leftAzimuth - 90) * Math.PI / 180;
-                const rightAngleRad = (rightAzimuth - 90) * Math.PI / 180;
+                const leftAngleRad = (90 - leftAzimuth) * Math.PI / 180;
+                const rightAngleRad = (90 - rightAzimuth) * Math.PI / 180;
                 
                 const leftX = centerX + radius * Math.cos(leftAngleRad);
                 const leftY = centerY + radius * Math.sin(leftAngleRad);

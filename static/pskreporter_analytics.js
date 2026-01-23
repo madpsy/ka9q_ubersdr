@@ -6,6 +6,8 @@ let currentCountriesData = null;
 let currentPage = 1;
 let itemsPerPage = 100;
 let filteredStats = [];
+let allStats = []; // Store all stats before filtering
+let tableFilter = ''; // Real-time table filter
 
 // Band order for sorting
 const BAND_ORDER = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '11m', '10m', '6m', '2m', '1.25m', '70cm'];
@@ -299,7 +301,9 @@ function displaySubmissionsTable(stats) {
     // Sort by submission count descending
     stats.sort((a, b) => b.submission_count - a.submission_count);
 
-    // Store filtered stats for pagination
+    // Store all stats and reset filter
+    allStats = stats;
+    tableFilter = '';
     filteredStats = stats;
     currentPage = 1;
 
@@ -322,26 +326,35 @@ function renderTablePage() {
     const endIdx = Math.min(startIdx + itemsPerPage, stats.length);
     const pageStats = stats.slice(startIdx, endIdx);
 
-    // Pagination info
+    // Real-time filter input and pagination info
     let html = `
-        <div style="margin-bottom: 15px; padding: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-            <div>
-                Showing ${startIdx + 1}-${endIdx} of ${stats.length} combinations
+        <div style="margin-bottom: 15px; padding: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px;">
+            <div style="margin-bottom: 10px;">
+                <input type="text"
+                       id="table-filter"
+                       placeholder="🔍 Filter by callsign, country, or locator..."
+                       value="${escapeHtml(tableFilter)}"
+                       style="width: 100%; padding: 10px; border-radius: 4px; background: rgba(255, 255, 255, 0.15); color: white; border: 1px solid rgba(255, 255, 255, 0.3); font-size: 1em;">
             </div>
-            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                <label style="display: flex; align-items: center; gap: 8px;">
-                    Per page:
-                    <select id="items-per-page" style="padding: 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.15); color: white; border: 1px solid rgba(255, 255, 255, 0.3);">
-                        <option value="50">50</option>
-                        <option value="100" selected>100</option>
-                        <option value="250">250</option>
-                        <option value="500">500</option>
-                        <option value="1000">1000</option>
-                    </select>
-                </label>
-                <button onclick="changePage(-1)" ${currentPage === 1 ? 'disabled' : ''} style="padding: 5px 15px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; ${currentPage === 1 ? 'opacity: 0.5;' : ''}">← Prev</button>
-                <span>Page ${currentPage} of ${totalPages}</span>
-                <button onclick="changePage(1)" ${currentPage === totalPages ? 'disabled' : ''} style="padding: 5px 15px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; ${currentPage === totalPages ? 'opacity: 0.5;' : ''}">Next →</button>
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <div>
+                    Showing ${startIdx + 1}-${endIdx} of ${stats.length} combinations
+                </div>
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <label style="display: flex; align-items: center; gap: 8px;">
+                        Per page:
+                        <select id="items-per-page" style="padding: 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.15); color: white; border: 1px solid rgba(255, 255, 255, 0.3);">
+                            <option value="50">50</option>
+                            <option value="100" selected>100</option>
+                            <option value="250">250</option>
+                            <option value="500">500</option>
+                            <option value="1000">1000</option>
+                        </select>
+                    </label>
+                    <button onclick="changePage(-1)" ${currentPage === 1 ? 'disabled' : ''} style="padding: 5px 15px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; ${currentPage === 1 ? 'opacity: 0.5;' : ''}">← Prev</button>
+                    <span>Page ${currentPage} of ${totalPages}</span>
+                    <button onclick="changePage(1)" ${currentPage === totalPages ? 'disabled' : ''} style="padding: 5px 15px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; ${currentPage === totalPages ? 'opacity: 0.5;' : ''}">Next →</button>
+                </div>
             </div>
         </div>
         <table style="width: 100%; border-collapse: collapse; background: rgba(255, 255, 255, 0.05); border-radius: 8px; overflow: hidden;">
@@ -568,6 +581,30 @@ function changeItemsPerPage() {
     renderTablePage();
 }
 
+// Apply real-time table filter
+function applyTableFilter(filterText) {
+    tableFilter = filterText.toLowerCase().trim();
+
+    if (!tableFilter) {
+        // No filter, show all stats
+        filteredStats = allStats;
+    } else {
+        // Filter by callsign, country, or locator
+        filteredStats = allStats.filter(stat => {
+            const callsignMatch = stat.callsign.toLowerCase().includes(tableFilter);
+            const countryMatch = stat.country && stat.country.toLowerCase().includes(tableFilter);
+            const locatorMatch = stat.final_locator && stat.final_locator.toLowerCase().includes(tableFilter);
+            const locatorsMatch = stat.locators && stat.locators.some(loc => loc.toLowerCase().includes(tableFilter));
+
+            return callsignMatch || countryMatch || locatorMatch || locatorsMatch;
+        });
+    }
+
+    // Reset to first page when filtering
+    currentPage = 1;
+    renderTablePage();
+}
+
 // Set up items per page change listener (called after table is rendered)
 function setupPaginationListeners() {
     const select = document.getElementById('items-per-page');
@@ -576,4 +613,16 @@ function setupPaginationListeners() {
         select.removeEventListener('change', changeItemsPerPage);
         select.addEventListener('change', changeItemsPerPage);
     }
+
+    // Set up table filter listener
+    const filterInput = document.getElementById('table-filter');
+    if (filterInput) {
+        filterInput.removeEventListener('input', handleTableFilterInput);
+        filterInput.addEventListener('input', handleTableFilterInput);
+    }
+}
+
+// Handle table filter input
+function handleTableFilterInput(e) {
+    applyTableFilter(e.target.value);
 }

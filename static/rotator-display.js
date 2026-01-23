@@ -489,7 +489,7 @@ class RotatorDisplay {
             const radius = this.mapSize / 2;
             
             // Convert azimuth to radians (0° = North/up, clockwise)
-            const angleRad = (90 - azimuth) * Math.PI / 180;
+            const angleRad = (azimuth - 90) * Math.PI / 180;
             
             // Calculate endpoint
             const endX = centerX + radius * Math.cos(angleRad);
@@ -508,8 +508,8 @@ class RotatorDisplay {
                 const leftAzimuth = azimuth - halfBeam;
                 const rightAzimuth = azimuth + halfBeam;
                 
-                const leftAngleRad = (90 - leftAzimuth) * Math.PI / 180;
-                const rightAngleRad = (90 - rightAzimuth) * Math.PI / 180;
+                const leftAngleRad = (leftAzimuth - 90) * Math.PI / 180;
+                const rightAngleRad = (rightAzimuth - 90) * Math.PI / 180;
                 
                 const leftX = centerX + radius * Math.cos(leftAngleRad);
                 const leftY = centerY + radius * Math.sin(leftAngleRad);
@@ -527,9 +527,7 @@ class RotatorDisplay {
         if (this.showCompass) {
             const needle = document.getElementById(`${this.containerId}-compass-needle`);
             if (needle) {
-                // CSS rotation: 0° = East (right), so subtract 90° to make 0° = North (up)
-                // Then add azimuth to rotate clockwise from North
-                needle.style.transform = `translate(-50%, -50%) rotate(${azimuth - 90}deg)`;
+                needle.style.transform = `translate(-50%, -50%) rotate(${azimuth}deg)`;
             }
         }
     }

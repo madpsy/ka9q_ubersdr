@@ -13034,57 +13034,99 @@
                 const incrementalPPM = (calibrateValue * 1e6).toFixed(3);
                 const newPPM = (newCalibrateValue * 1e6).toFixed(3);
 
+                // Check if calibration values are the same (no change needed)
+                const noChangeNeeded = Math.abs(newCalibrateValue - existingCalibrate) < 1e-10;
+
                 // Populate modal content
                 const content = document.getElementById('autoCalibrationContent');
-                content.innerHTML = `
-                    <div style="background: #e3f2fd; padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 2px solid #2196f3;">
-                        <h3 style="margin-top: 0; color: #1976d2;">📊 Calibration Calculation</h3>
+                
+                if (noChangeNeeded) {
+                    // Show "no change needed" message
+                    content.innerHTML = `
+                        <div style="background: #d4edda; padding: 20px; border-radius: 5px; margin-bottom: 20px; border: 2px solid #28a745; text-align: center;">
+                            <h3 style="margin-top: 0; color: #155724;">✓ No Calibration Change Needed</h3>
+                            <p style="font-size: 16px; color: #155724; margin: 15px 0;">
+                                Your clock is already well-calibrated! The calculated correction is negligible.
+                            </p>
+                            <div style="margin-top: 20px; padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                                <strong>Current Status:</strong>
+                                <div style="margin-left: 20px; margin-top: 8px; font-family: monospace; font-size: 13px; line-height: 1.8; text-align: left;">
+                                    Average Offset: <strong style="color: #28a745;">${avgOffset >= 0 ? '+' : ''}${avgOffset.toFixed(2)} Hz</strong><br>
+                                    Std Deviation: <strong>${stdDev.toFixed(2)} Hz</strong><br>
+                                    Average SNR: <strong style="color: ${avgSNR > 20 ? '#28a745' : avgSNR > 10 ? '#ffc107' : '#dc3545'};">${avgSNR.toFixed(1)} dB</strong><br>
+                                    Current Calibration: <strong style="color: #667eea;">${existingCalibrate.toExponential(6)} (${existingPPM} ppm)</strong>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Disable the Apply Calibration button
+                    const applyBtn = document.getElementById('applyCalibrationBtn');
+                    if (applyBtn) {
+                        applyBtn.disabled = true;
+                        applyBtn.style.background = '#ccc';
+                        applyBtn.style.cursor = 'not-allowed';
+                    }
+                } else {
+                    // Show normal calibration UI
+                    content.innerHTML = `
+                        <div style="background: #e3f2fd; padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 2px solid #2196f3;">
+                            <h3 style="margin-top: 0; color: #1976d2;">📊 Calibration Calculation</h3>
 
-                        <div style="margin-bottom: 15px;">
-                            <strong>Measurement Data (${calibrationData.dataPoints} minute averages):</strong>
-                            <div style="margin-left: 20px; margin-top: 8px; font-family: monospace; font-size: 13px; line-height: 1.8;">
-                                Expected Frequency: <strong style="color: #667eea;">${(expectedFreq / 1e6).toFixed(6)} MHz</strong><br>
-                                Detected Frequency: <strong style="color: #28a745;">${(calibrationData.detectedFreq / 1e6).toFixed(6)} MHz</strong><br>
-                                Average Offset: <strong style="color: ${Math.abs(avgOffset) > 5 ? '#dc3545' : '#ffc107'};">${avgOffset >= 0 ? '+' : ''}${avgOffset.toFixed(2)} Hz</strong> (residual after current calibration)<br>
-                                Std Deviation: <strong>${stdDev.toFixed(2)} Hz</strong><br>
-                                Average SNR: <strong style="color: ${avgSNR > 20 ? '#28a745' : avgSNR > 10 ? '#ffc107' : '#dc3545'};">${avgSNR.toFixed(1)} dB</strong>
+                            <div style="margin-bottom: 15px;">
+                                <strong>Measurement Data (${calibrationData.dataPoints} minute averages):</strong>
+                                <div style="margin-left: 20px; margin-top: 8px; font-family: monospace; font-size: 13px; line-height: 1.8;">
+                                    Expected Frequency: <strong style="color: #667eea;">${(expectedFreq / 1e6).toFixed(6)} MHz</strong><br>
+                                    Detected Frequency: <strong style="color: #28a745;">${(calibrationData.detectedFreq / 1e6).toFixed(6)} MHz</strong><br>
+                                    Average Offset: <strong style="color: ${Math.abs(avgOffset) > 5 ? '#dc3545' : '#ffc107'};">${avgOffset >= 0 ? '+' : ''}${avgOffset.toFixed(2)} Hz</strong> (residual after current calibration)<br>
+                                    Std Deviation: <strong>${stdDev.toFixed(2)} Hz</strong><br>
+                                    Average SNR: <strong style="color: ${avgSNR > 20 ? '#28a745' : avgSNR > 10 ? '#ffc107' : '#dc3545'};">${avgSNR.toFixed(1)} dB</strong>
+                                </div>
+                            </div>
+
+                            <div style="margin-bottom: 15px; padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                                <strong>Calculation:</strong>
+                                <div style="margin-left: 20px; margin-top: 8px; font-family: monospace; font-size: 13px; line-height: 1.8;">
+                                    Incremental PPM Error = Offset / Expected Frequency<br>
+                                    Incremental PPM Error = ${avgOffset.toFixed(2)} Hz / ${expectedFreq.toLocaleString()} Hz<br>
+                                    Incremental PPM Error = <strong style="color: #667eea;">${ppmError.toExponential(3)}</strong> (${(ppmError * 1e6).toFixed(3)} ppm)<br>
+                                    <br>
+                                    <strong>Cumulative Calibration:</strong><br>
+                                    Existing: ${existingCalibrate.toExponential(6)} (${existingPPM} ppm)<br>
+                                    + Incremental: ${calibrateValue.toExponential(6)} (${incrementalPPM} ppm)<br>
+                                    = <strong style="color: #28a745;">New Total: ${newCalibrateValue.toExponential(6)} (${newPPM} ppm)</strong>
+                                </div>
+                            </div>
+
+                            <div style="padding: 15px; background: #fff3cd; border-radius: 5px; border: 2px solid #ffc107;">
+                                <strong style="color: #856404;">Proposed Radiod Configuration Change:</strong>
+                                <div style="margin-top: 10px; padding: 10px; background: #fff; border-radius: 3px; font-family: monospace; font-size: 14px; border: 1px solid #dee2e6;">
+                                    <span style="color: #999;">calibrate = ${existingCalibrate.toExponential(6)}</span> → <strong style="color: #28a745;">calibrate = ${newCalibrateValue.toExponential(6)}</strong>
+                                </div>
+                                <div style="margin-top: 10px; font-size: 12px; color: #856404;">
+                                    <em>(Calibrate correction is opposite sign of offset. Negative offset requires positive calibrate to speed up oscillator.)</em>
+                                </div>
+                                <div style="margin-top: 15px; padding: 12px; background: #e3f2fd; border-radius: 5px; border: 1px solid #2196f3; font-size: 13px; color: #0d47a1;">
+                                    💡 <strong>Tip:</strong> If applying calibration makes your offset worse instead of better, set <code style="background: #fff; padding: 2px 6px; border-radius: 3px;">calibrate = 0</code> in your radiod config and restart. Your oscillator may already be well-calibrated.
+                                </div>
                             </div>
                         </div>
 
-                        <div style="margin-bottom: 15px; padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                            <strong>Calculation:</strong>
-                            <div style="margin-left: 20px; margin-top: 8px; font-family: monospace; font-size: 13px; line-height: 1.8;">
-                                Incremental PPM Error = Offset / Expected Frequency<br>
-                                Incremental PPM Error = ${avgOffset.toFixed(2)} Hz / ${expectedFreq.toLocaleString()} Hz<br>
-                                Incremental PPM Error = <strong style="color: #667eea;">${ppmError.toExponential(3)}</strong> (${(ppmError * 1e6).toFixed(3)} ppm)<br>
-                                <br>
-                                <strong>Cumulative Calibration:</strong><br>
-                                Existing: ${existingCalibrate.toExponential(6)} (${existingPPM} ppm)<br>
-                                + Incremental: ${calibrateValue.toExponential(6)} (${incrementalPPM} ppm)<br>
-                                = <strong style="color: #28a745;">New Total: ${newCalibrateValue.toExponential(6)} (${newPPM} ppm)</strong>
+                        <div style="padding: 0 20px 10px 20px;">
+                            <div style="background: #fff3cd; padding: 12px; border-radius: 5px; border: 1px solid #ffc107; font-size: 13px; color: #856404;">
+                                ⚠️ <strong>Important:</strong> This will modify your radiod configuration. You must restart radiod (or the entire server) for the calibration to take effect.
                             </div>
                         </div>
-
-                        <div style="padding: 15px; background: #fff3cd; border-radius: 5px; border: 2px solid #ffc107;">
-                            <strong style="color: #856404;">Proposed Radiod Configuration Change:</strong>
-                            <div style="margin-top: 10px; padding: 10px; background: #fff; border-radius: 3px; font-family: monospace; font-size: 14px; border: 1px solid #dee2e6;">
-                                <span style="color: #999;">calibrate = ${existingCalibrate.toExponential(6)}</span> → <strong style="color: #28a745;">calibrate = ${newCalibrateValue.toExponential(6)}</strong>
-                            </div>
-                            <div style="margin-top: 10px; font-size: 12px; color: #856404;">
-                                <em>(Calibrate correction is opposite sign of offset. Negative offset requires positive calibrate to speed up oscillator.)</em>
-                            </div>
-                            <div style="margin-top: 15px; padding: 12px; background: #e3f2fd; border-radius: 5px; border: 1px solid #2196f3; font-size: 13px; color: #0d47a1;">
-                                💡 <strong>Tip:</strong> If applying calibration makes your offset worse instead of better, set <code style="background: #fff; padding: 2px 6px; border-radius: 3px;">calibrate = 0</code> in your radiod config and restart. Your oscillator may already be well-calibrated.
-                            </div>
-                        </div>
-                    </div>
-
-                    <div style="padding: 0 20px 10px 20px;">
-                        <div style="background: #fff3cd; padding: 12px; border-radius: 5px; border: 1px solid #ffc107; font-size: 13px; color: #856404;">
-                            ⚠️ <strong>Important:</strong> This will modify your radiod configuration. You must restart radiod (or the entire server) for the calibration to take effect.
-                        </div>
-                    </div>
-                `;
+                    `;
+                    
+                    // Enable the Apply Calibration button
+                    const applyBtn = document.getElementById('applyCalibrationBtn');
+                    if (applyBtn) {
+                        applyBtn.disabled = false;
+                        applyBtn.style.background = '#28a745';
+                        applyBtn.style.cursor = 'pointer';
+                    }
+                }
 
                 // Show modal
                 document.getElementById('autoCalibrationModal').style.display = 'block';

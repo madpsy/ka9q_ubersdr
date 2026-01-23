@@ -26,6 +26,8 @@ class RotatorDisplay {
         this.receiverLon = null;
         this.beamWidth = 45; // degrees
         this.updateTimer = null;
+        this.currentZoom = 1;
+        this.mapGroup = null;
         
         // Initialize
         this.init();
@@ -83,7 +85,20 @@ class RotatorDisplay {
         container.appendChild(svg);
         
         this.svg = d3.select(svg);
-        
+
+        // Create a group for all map elements (for zooming)
+        this.mapGroup = this.svg.append("g");
+
+        // Add zoom behavior
+        const zoom = d3.zoom()
+            .scaleExtent([0.5, 8])  // Allow zoom from 0.5x to 8x
+            .on("zoom", (event) => {
+                this.mapGroup.attr("transform", event.transform);
+                this.currentZoom = event.transform.k;
+            });
+
+        this.svg.call(zoom);
+
         // Create tooltip element
         this.createTooltip(container);
         
@@ -99,24 +114,24 @@ class RotatorDisplay {
         
         // Draw graticule (grid lines)
         const graticule = d3.geoGraticule();
-        this.svg.append("path")
+        this.mapGroup.append("path")
             .datum(graticule)
             .attr("class", "graticule")
             .attr("d", this.path)
             .style("fill", "none")
             .style("stroke", "rgba(255,255,255,0.15)")
             .style("stroke-width", "0.5");
-        
+
         // Draw distance circles (without labels first)
         this.drawDistanceCircles(false);
-        
+
         // Load and draw world map
         try {
             const response = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
             const world = await response.json();
             const countries = topojson.feature(world, world.objects.countries);
-            
-            this.svg.append("g")
+
+            this.mapGroup.append("g")
                 .selectAll("path")
                 .data(countries.features)
                 .enter().append("path")
@@ -128,28 +143,28 @@ class RotatorDisplay {
         } catch (error) {
             console.error('[RotatorDisplay] Failed to load world map:', error);
         }
-        
+
         // Draw distance labels AFTER countries so they appear on top
         this.drawDistanceLabels();
-        
+
         // Draw center point (receiver location)
-        this.svg.append("circle")
+        this.mapGroup.append("circle")
             .attr("cx", this.mapSize / 2)
             .attr("cy", this.mapSize / 2)
             .attr("r", 6)
             .attr("fill", "#ff4444")
             .attr("stroke", "#fff")
             .attr("stroke-width", 2);
-        
+
         // Create beam cone element
-        this.beamConeElement = this.svg.append("path")
+        this.beamConeElement = this.mapGroup.append("path")
             .attr("class", "beam-cone")
             .style("fill", "rgba(218, 165, 32, 0.2)")
             .style("stroke", "#DAA520")
             .style("stroke-width", "2");
-        
+
         // Create center azimuth line element
-        this.azimuthLineElement = this.svg.append("line")
+        this.azimuthLineElement = this.mapGroup.append("line")
             .attr("class", "azimuth-line")
             .attr("x1", this.mapSize / 2)
             .attr("y1", this.mapSize / 2)
@@ -279,7 +294,7 @@ class RotatorDisplay {
                 .center([this.receiverLon, this.receiverLat])
                 .radius(distance / 111.32); // Convert km to degrees (approximate)
             
-            this.svg.append("path")
+            this.mapGroup.append("path")
                 .datum(circle())
                 .attr("class", "distance-circle")
                 .attr("d", this.path)
@@ -287,14 +302,14 @@ class RotatorDisplay {
                 .style("stroke", "rgba(255,255,255,0.2)")
                 .style("stroke-width", "1")
                 .style("stroke-dasharray", "2,2");
-            
+
             if (includeLabels) {
                 // Add distance label at top (0 degrees)
                 const labelPoint = this.calculateDestinationPoint(this.receiverLat, this.receiverLon, 0, distance);
                 const projected = this.projection([labelPoint[1], labelPoint[0]]);
-                
+
                 if (projected) {
-                    this.svg.append("text")
+                    this.mapGroup.append("text")
                         .attr("class", "distance-label")
                         .attr("x", projected[0])
                         .attr("y", projected[1] - 5)
@@ -314,9 +329,9 @@ class RotatorDisplay {
             // Add distance label at top (0 degrees)
             const labelPoint = this.calculateDestinationPoint(this.receiverLat, this.receiverLon, 0, distance);
             const projected = this.projection([labelPoint[1], labelPoint[0]]);
-            
+
             if (projected) {
-                this.svg.append("text")
+                this.mapGroup.append("text")
                     .attr("class", "distance-label")
                     .attr("x", projected[0])
                     .attr("y", projected[1] - 5)

@@ -104,6 +104,14 @@ class RotatorDisplay {
                 this.currentZoom = event.transform.k;
                 this.currentTransform = event.transform;
 
+                // Update receiver marker position to follow the map center
+                if (this.receiverMarker) {
+                    const centerScreen = this.currentTransform.apply([this.mapSize / 2, this.mapSize / 2]);
+                    this.receiverMarker
+                        .attr("cx", centerScreen[0])
+                        .attr("cy", centerScreen[1]);
+                }
+
                 // Redraw markers when zoom level changes significantly
                 if (Math.abs(this.currentZoom - previousZoom) > 0.1) {
                     this.redrawMarkersAfterZoom();
@@ -160,8 +168,9 @@ class RotatorDisplay {
         // Draw distance labels AFTER countries so they appear on top
         this.drawDistanceLabels();
 
-        // Draw center point (receiver location)
-        this.mapGroup.append("circle")
+        // Draw center point (receiver location) in markerGroup so it doesn't scale with zoom
+        // Position it at the center in screen coordinates
+        this.receiverMarker = this.markerGroup.append("circle")
             .attr("cx", this.mapSize / 2)
             .attr("cy", this.mapSize / 2)
             .attr("r", 6)

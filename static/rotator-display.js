@@ -633,19 +633,32 @@ class RotatorDisplay {
         
         console.log(`[RotatorDisplay] Found ${countriesInCone.length} countries in cone`);
         
-        // Sort by distance (closest first) and limit to 10 countries
-        countriesInCone.sort((a, b) => a.distance_km - b.distance_km);
-        const limitedCountries = countriesInCone.slice(0, 10);
+        // Group countries by distance ranges to ensure distribution across the cone
+        const distanceRanges = [
+            { min: 0, max: 2000, limit: 3 },
+            { min: 2000, max: 5000, limit: 3 },
+            { min: 5000, max: 10000, limit: 3 },
+            { min: 10000, max: Infinity, limit: 3 }
+        ];
         
-        console.log(`[RotatorDisplay] Showing ${limitedCountries.length} cone markers`);
+        let selectedCountries = [];
+        distanceRanges.forEach(range => {
+            const inRange = countriesInCone.filter(c =>
+                c.distance_km >= range.min && c.distance_km < range.max
+            );
+            // Sort by distance within range and take the limit
+            inRange.sort((a, b) => a.distance_km - b.distance_km);
+            selectedCountries = selectedCountries.concat(inRange.slice(0, range.limit));
+        });
+        
+        console.log(`[RotatorDisplay] Selected ${selectedCountries.length} countries across distance ranges`);
         
         // Track marker positions for collision detection
         const markerPositions = [];
-        const minDistance = 25; // Minimum distance between markers in pixels (reduced for more markers)
         
-        // Add markers for countries in cone
+        // Add markers for selected countries
         let addedCount = 0;
-        limitedCountries.forEach(country => {
+        selectedCountries.forEach(country => {
             const destPoint = this.calculateDestinationPoint(
                 this.receiverLat, this.receiverLon,
                 country.bearing, country.distance_km
@@ -658,6 +671,9 @@ class RotatorDisplay {
             }
             
             const [x, y] = projected;
+            
+            // Distance-aware collision detection: closer countries need less spacing
+            const minDistance = country.distance_km < 2000 ? 30 : 20;
             
             // Check for collision with existing markers
             const hasCollision = markerPositions.some(pos => {

@@ -537,12 +537,20 @@ class RotatorDisplay {
      * @param {string} countryName - Name of the country
      * @param {number} bearing - Bearing in degrees
      * @param {number} distance - Distance in kilometers
+     * @param {Array} allCountries - Optional array of all countries for showing cone markers
+     * @param {number} currentAzimuth - Current rotator azimuth for cone calculation
      */
-    showCountryMarker(countryName, bearing, distance) {
+    showCountryMarker(countryName, bearing, distance, allCountries = null, currentAzimuth = null) {
         if (!this.showMap || !this.mapGroup || !this.projection) return;
         
-        // Remove any existing country marker
+        // Remove any existing country markers
         this.mapGroup.selectAll('.country-marker').remove();
+        this.mapGroup.selectAll('.cone-marker').remove();
+        
+        // Show smaller markers for countries within the beam cone if data provided
+        if (allCountries && currentAzimuth !== null) {
+            this.showConeMarkers(allCountries, currentAzimuth, bearing);
+        }
         
         // Calculate the position on the map using bearing and distance
         const destPoint = this.calculateDestinationPoint(this.receiverLat, this.receiverLon, bearing, distance);
@@ -552,7 +560,7 @@ class RotatorDisplay {
         
         const [x, y] = projected;
         
-        // Create marker group
+        // Create marker group for selected country (larger, on top)
         const markerGroup = this.mapGroup.append('g')
             .attr('class', 'country-marker')
             .attr('transform', `translate(${x}, ${y})`);
@@ -588,11 +596,99 @@ class RotatorDisplay {
     }
     
     /**
+     * Show smaller markers for countries within the beam cone
+     * @param {Array} allCountries - Array of all countries
+     * @param {number} currentAzimuth - Current rotator azimuth
+     * @param {number} selectedBearing - Bearing of the selected country to exclude
+     */
+    showConeMarkers(allCountries, currentAzimuth, selectedBearing) {
+        const halfBeam = this.beamWidth / 2;
+        const minBearing = currentAzimuth - halfBeam;
+        const maxBearing = currentAzimuth + halfBeam;
+        
+        // Find countries within the cone
+        const countriesInCone = allCountries.filter(country => {
+            // Skip the selected country
+            if (country.bearing === selectedBearing) return false;
+            
+            // Check if bearing is within cone (handle wrap-around at 0/360)
+            let inCone = false;
+            if (minBearing < 0) {
+                inCone = country.bearing >= (360 + minBearing) || country.bearing <= maxBearing;
+            } else if (maxBearing > 360) {
+                inCone = country.bearing >= minBearing || country.bearing <= (maxBearing - 360);
+            } else {
+                inCone = country.bearing >= minBearing && country.bearing <= maxBearing;
+            }
+            
+            return inCone;
+        });
+        
+        // Sort by distance (closest first) and limit to 10 countries
+        countriesInCone.sort((a, b) => a.distance_km - b.distance_km);
+        const limitedCountries = countriesInCone.slice(0, 10);
+        
+        // Track marker positions for collision detection
+        const markerPositions = [];
+        const minDistance = 30; // Minimum distance between markers in pixels
+        
+        // Add markers for countries in cone
+        limitedCountries.forEach(country => {
+            const destPoint = this.calculateDestinationPoint(
+                this.receiverLat, this.receiverLon,
+                country.bearing, country.distance_km
+            );
+            const projected = this.projection([destPoint[1], destPoint[0]]);
+            
+            if (!projected) return;
+            
+            const [x, y] = projected;
+            
+            // Check for collision with existing markers
+            const hasCollision = markerPositions.some(pos => {
+                const dx = pos.x - x;
+                const dy = pos.y - y;
+                return Math.sqrt(dx * dx + dy * dy) < minDistance;
+            });
+            
+            if (hasCollision) return; // Skip this marker
+            
+            // Record position
+            markerPositions.push({ x, y });
+            
+            // Create smaller marker group
+            const markerGroup = this.mapGroup.append('g')
+                .attr('class', 'cone-marker')
+                .attr('transform', `translate(${x}, ${y})`);
+            
+            // Add smaller marker circle
+            markerGroup.append('circle')
+                .attr('r', 4)
+                .attr('fill', 'rgba(255, 193, 7, 0.8)')
+                .attr('stroke', '#fff')
+                .attr('stroke-width', 1)
+                .style('filter', 'drop-shadow(0 0 3px rgba(255, 193, 7, 0.6))');
+            
+            // Add country name label (smaller)
+            markerGroup.append('text')
+                .attr('x', 0)
+                .attr('y', -10)
+                .attr('text-anchor', 'middle')
+                .attr('fill', 'rgba(255, 255, 255, 0.9)')
+                .attr('font-size', '10px')
+                .attr('font-weight', 'normal')
+                .style('text-shadow', '0 0 3px rgba(0,0,0,0.8)')
+                .text(country.name);
+        });
+    }
+    
+    /**
      * Clear the country marker from the map
      */
     clearCountryMarker() {
         if (this.mapGroup) {
             this.mapGroup.selectAll('.country-marker').remove();
+            this.mapGroup.selectAll('.cone-marker').remove();
         }
     }
     

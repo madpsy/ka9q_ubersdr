@@ -1010,7 +1010,7 @@
             input.placeholder = 'Type a country...';
         }
 
-        function handleCountryInput(event) {
+        async function handleCountryInput(event) {
             const input = event.target;
             const inputValue = input.value;
             
@@ -1029,12 +1029,26 @@
             if (matchedCountry) {
                 const bearing = matchedCountry.bearing;
                 
-                // Show marker on map
+                // Get current azimuth for cone calculation
+                let currentAzimuth = 0;
+                try {
+                    const response = await fetch('/api/rotctl/status');
+                    const data = await response.json();
+                    if (data.position && data.position.azimuth !== undefined) {
+                        currentAzimuth = data.position.azimuth;
+                    }
+                } catch (error) {
+                    console.error('Failed to get current azimuth:', error);
+                }
+                
+                // Show marker on map with cone markers
                 if (rotatorDisplay) {
                     rotatorDisplay.showCountryMarker(
                         matchedCountry.name,
                         bearing,
-                        matchedCountry.distance_km
+                        matchedCountry.distance_km,
+                        countriesData,
+                        currentAzimuth
                     );
                 }
                 

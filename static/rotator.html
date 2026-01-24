@@ -1002,7 +1002,7 @@
             countries.forEach(country => {
                 const option = document.createElement('option');
                 option.value = country.bearing;
-                option.textContent = `${country.name} (${country.continent})`;
+                option.textContent = `${country.name} (${country.continent}) ${country.bearing}°`;
                 option.dataset.country = JSON.stringify(country);
                 select.appendChild(option);
             });
@@ -1016,12 +1016,25 @@
             const bearing = parseInt(select.value);
             
             if (isNaN(bearing)) {
-                return; // No country selected
+                // Clear marker if no country selected
+                if (rotatorDisplay) {
+                    rotatorDisplay.clearCountryMarker();
+                }
+                return;
             }
             
             // Get the country data from the option
             const selectedOption = select.options[select.selectedIndex];
             const countryData = JSON.parse(selectedOption.dataset.country);
+            
+            // Show marker on map
+            if (rotatorDisplay) {
+                rotatorDisplay.showCountryMarker(
+                    countryData.name,
+                    bearing,
+                    countryData.distance_km
+                );
+            }
             
             // Set the azimuth input
             document.getElementById('target-azimuth').value = bearing;

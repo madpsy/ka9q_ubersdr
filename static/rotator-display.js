@@ -532,6 +532,70 @@ class RotatorDisplay {
         }
     }
     
+    /**
+     * Show a marker for a country on the azimuthal map
+     * @param {string} countryName - Name of the country
+     * @param {number} bearing - Bearing in degrees
+     * @param {number} distance - Distance in kilometers
+     */
+    showCountryMarker(countryName, bearing, distance) {
+        if (!this.showMap || !this.mapGroup || !this.projection) return;
+        
+        // Remove any existing country marker
+        this.mapGroup.selectAll('.country-marker').remove();
+        
+        // Calculate the position on the map using bearing and distance
+        const destPoint = this.calculateDestinationPoint(this.receiverLat, this.receiverLon, bearing, distance);
+        const projected = this.projection([destPoint[1], destPoint[0]]);
+        
+        if (!projected) return;
+        
+        const [x, y] = projected;
+        
+        // Create marker group
+        const markerGroup = this.mapGroup.append('g')
+            .attr('class', 'country-marker')
+            .attr('transform', `translate(${x}, ${y})`);
+        
+        // Add marker circle
+        markerGroup.append('circle')
+            .attr('r', 8)
+            .attr('fill', '#4CAF50')
+            .attr('stroke', '#fff')
+            .attr('stroke-width', 2)
+            .style('filter', 'drop-shadow(0 0 6px rgba(76, 175, 80, 0.8))');
+        
+        // Add country name label
+        markerGroup.append('text')
+            .attr('x', 0)
+            .attr('y', -15)
+            .attr('text-anchor', 'middle')
+            .attr('fill', '#fff')
+            .attr('font-size', '14px')
+            .attr('font-weight', 'bold')
+            .style('text-shadow', '0 0 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.6)')
+            .text(countryName);
+        
+        // Add distance/bearing label below
+        markerGroup.append('text')
+            .attr('x', 0)
+            .attr('y', 25)
+            .attr('text-anchor', 'middle')
+            .attr('fill', '#4CAF50')
+            .attr('font-size', '11px')
+            .style('text-shadow', '0 0 4px rgba(0,0,0,0.8)')
+            .text(`${bearing}° | ${Math.round(distance)} km`);
+    }
+    
+    /**
+     * Clear the country marker from the map
+     */
+    clearCountryMarker() {
+        if (this.mapGroup) {
+            this.mapGroup.selectAll('.country-marker').remove();
+        }
+    }
+    
     async updatePosition() {
         try {
             const response = await fetch('/api/rotctl/status');

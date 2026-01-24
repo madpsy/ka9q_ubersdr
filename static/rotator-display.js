@@ -545,14 +545,15 @@ class RotatorDisplay {
             const endX = centerX + radius * Math.cos(angleRad);
             const endY = centerY + radius * Math.sin(angleRad);
             
-            // Update center line
+            // Update center line with zoom-adjusted stroke width
             if (this.azimuthLineElement) {
                 this.azimuthLineElement
                     .attr("x2", endX)
-                    .attr("y2", endY);
+                    .attr("y2", endY)
+                    .style("stroke-width", 2 / this.currentZoom);
             }
             
-            // Draw beam cone
+            // Draw beam cone with zoom-adjusted stroke width
             if (this.beamConeElement) {
                 const halfBeam = this.beamWidth / 2;
                 const leftAzimuth = azimuth - halfBeam;
@@ -569,7 +570,9 @@ class RotatorDisplay {
                 const largeArcFlag = this.beamWidth > 180 ? 1 : 0;
                 const pathData = `M ${centerX},${centerY} L ${leftX},${leftY} A ${radius},${radius} 0 ${largeArcFlag} 1 ${rightX},${rightY} Z`;
                 
-                this.beamConeElement.attr("d", pathData);
+                this.beamConeElement
+                    .attr("d", pathData)
+                    .style("stroke-width", 2 / this.currentZoom);
             }
         }
         

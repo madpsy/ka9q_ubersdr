@@ -676,10 +676,55 @@
             // Listen for map click events from RotatorDisplay
             document.addEventListener('rotator-map-click', (event) => {
                 const bearing = event.detail.bearing;
+                const distance = event.detail.distance;
+                
                 // Set the azimuth input
                 document.getElementById('target-azimuth').value = bearing;
                 
-                // Check if password is entered
+                // Find the closest country by bearing and distance
+                if (countriesData.length > 0) {
+                    const closestCountry = findClosestCountry(bearing, distance);
+                    if (closestCountry) {
+                        // Set the country input to trigger the selection
+                        const countryInput = document.getElementById('country-input');
+                        countryInput.value = `${closestCountry.name} (${closestCountry.continent}) ${closestCountry.bearing}°`;
+                        
+                        // Manually trigger the country selection
+                        selectedCountry = closestCountry;
+                        
+                        // Show marker on map with cone markers
+                        if (rotatorDisplay) {
+                            // Get current azimuth for cone calculation
+                            fetch('/api/rotctl/status')
+                                .then(response => response.json())
+                                .then(data => {
+                                    const currentAzimuth = data.position?.azimuth || 0;
+                                    rotatorDisplay.showCountryMarker(
+                                        closestCountry.name,
+                                        closestCountry.bearing,
+                                        closestCountry.distance_km,
+                                        countriesData,
+                                        currentAzimuth
+                                    );
+                                })
+                                .catch(error => console.error('Failed to get current azimuth:', error));
+                        }
+                        
+                        // Check if password is entered
+                        const password = document.getElementById('password').value;
+                        if (password) {
+                            // Automatically send the command
+                            setAzimuth(closestCountry.bearing);
+                            showMessage(`Pointing at ${closestCountry.name} (${closestCountry.continent}) - Bearing: ${closestCountry.bearing}°, Distance: ${Math.round(closestCountry.distance_km)} km`, 'success');
+                        } else {
+                            // Show message to enter password
+                            showMessage(`Selected ${closestCountry.name} (${closestCountry.continent}) - Bearing: ${closestCountry.bearing}°. Enter password and click "Go" to move rotator.`, 'success');
+                        }
+                        return;
+                    }
+                }
+                
+                // Fallback if no country found
                 const password = document.getElementById('password').value;
                 if (password) {
                     // Automatically send the command
@@ -1093,6 +1138,44 @@
                     rotatorDisplay.clearCountryMarker();
                 }
             }
+        }
+
+        /**
+         * Find the closest country to a given bearing and distance
+         * @param {number} targetBearing - Target bearing in degrees
+         * @param {number} targetDistance - Target distance in km
+         * @returns {Object|null} - Closest country object or null
+         */
+        function findClosestCountry(targetBearing, targetDistance) {
+            if (!countriesData || countriesData.length === 0) return null;
+
+            let closestCountry = null;
+            let minScore = Infinity;
+
+            // Weight factors for scoring (bearing is more important than distance)
+            const bearingWeight = 1.0;
+            const distanceWeight = 0.1; // Distance in km, so we scale it down
+
+            countriesData.forEach(country => {
+                // Calculate bearing difference (handle wrap-around at 0/360)
+                let bearingDiff = Math.abs(country.bearing - targetBearing);
+                if (bearingDiff > 180) {
+                    bearingDiff = 360 - bearingDiff;
+                }
+
+                // Calculate distance difference
+                const distanceDiff = Math.abs(country.distance_km - targetDistance);
+
+                // Calculate weighted score (lower is better)
+                const score = (bearingDiff * bearingWeight) + (distanceDiff * distanceWeight);
+
+                if (score < minScore) {
+                    minScore = score;
+                    closestCountry = country;
+                }
+            });
+
+            return closestCountry;
         }
     </script>
 </body>

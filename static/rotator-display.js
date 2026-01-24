@@ -250,18 +250,21 @@ class RotatorDisplay {
         const [transformedX, transformedY] = this.currentTransform.invert([mouseX, mouseY]);
 
         const coords = this.projection.invert([transformedX, transformedY]);
-        
+
         if (!coords) return;
-        
+
         const [clickLon, clickLat] = coords;
-        
+
         // Calculate true bearing using great circle formula
         const bearing = this.calculateBearing(this.receiverLat, this.receiverLon, clickLat, clickLon);
         const roundedBearing = Math.round(bearing);
-        
+
+        // Calculate distance using great circle formula
+        const distance = this.calculateDistance(this.receiverLat, this.receiverLon, clickLat, clickLon);
+
         // Emit custom event that can be handled by the parent page
         const mapClickEvent = new CustomEvent('rotator-map-click', {
-            detail: { bearing: roundedBearing }
+            detail: { bearing: roundedBearing, distance: distance }
         });
         document.dispatchEvent(mapClickEvent);
     }

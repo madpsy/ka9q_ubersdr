@@ -571,10 +571,13 @@ class RotatorUI {
     async handleMapClick(detail) {
         const bearing = detail.bearing;
 
-        // Check if password is available
+        // Check if password is available, recheck localStorage if not
         if (!this.savedPassword) {
-            console.log('[RotatorUI] No password available. Click "Controls" button to set password.');
-            return;
+            this.savedPassword = localStorage.getItem('rotctl_password') || '';
+            if (!this.savedPassword) {
+                console.log('[RotatorUI] No password available. Click "Controls" button to set password.');
+                return;
+            }
         }
 
         // Send command to rotator

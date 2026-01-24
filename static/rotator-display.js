@@ -96,8 +96,14 @@ class RotatorDisplay {
             .scaleExtent([0.5, 8])  // Allow zoom from 0.5x to 8x
             .on("zoom", (event) => {
                 this.mapGroup.attr("transform", event.transform);
+                const previousZoom = this.currentZoom;
                 this.currentZoom = event.transform.k;
                 this.currentTransform = event.transform;
+
+                // Redraw markers when zoom level changes significantly
+                if (Math.abs(this.currentZoom - previousZoom) > 0.1) {
+                    this.redrawMarkersAfterZoom();
+                }
             });
 
         this.svg.call(zoom);
@@ -588,37 +594,42 @@ class RotatorDisplay {
         
         const [x, y] = projected;
         
-        // Create marker group for selected country (larger, on top)
+        // Create marker group for selected country (larger, on top) with inverse zoom scaling
         const markerGroup = this.mapGroup.append('g')
             .attr('class', 'country-marker')
-            .attr('transform', `translate(${x}, ${y})`);
+            .attr('transform', `translate(${x}, ${y}) scale(${1 / this.currentZoom})`);
         
-        // Add marker circle
+        // Add marker circle (size adjusted for inverse scaling)
+        const markerRadius = 8 * this.currentZoom;
         markerGroup.append('circle')
-            .attr('r', 8)
+            .attr('r', markerRadius)
             .attr('fill', '#4CAF50')
             .attr('stroke', '#fff')
-            .attr('stroke-width', 2)
+            .attr('stroke-width', 2 * this.currentZoom)
             .style('filter', 'drop-shadow(0 0 6px rgba(76, 175, 80, 0.8))');
         
-        // Add country name label
+        // Add country name label (font size adjusted for inverse scaling)
+        const nameFontSize = 14 * this.currentZoom;
+        const nameLabelOffset = -15 * this.currentZoom;
         markerGroup.append('text')
             .attr('x', 0)
-            .attr('y', -15)
+            .attr('y', nameLabelOffset)
             .attr('text-anchor', 'middle')
             .attr('fill', '#fff')
-            .attr('font-size', '14px')
+            .attr('font-size', `${nameFontSize}px`)
             .attr('font-weight', 'bold')
             .style('text-shadow', '0 0 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.6)')
             .text(countryName);
         
-        // Add distance/bearing label below
+        // Add distance/bearing label below (font size adjusted for inverse scaling)
+        const infoFontSize = 11 * this.currentZoom;
+        const infoLabelOffset = 25 * this.currentZoom;
         markerGroup.append('text')
             .attr('x', 0)
-            .attr('y', 25)
+            .attr('y', infoLabelOffset)
             .attr('text-anchor', 'middle')
             .attr('fill', '#4CAF50')
-            .attr('font-size', '11px')
+            .attr('font-size', `${infoFontSize}px`)
             .style('text-shadow', '0 0 4px rgba(0,0,0,0.8)')
             .text(`${bearing}° | ${Math.round(distance)} km`);
     }
@@ -694,8 +705,10 @@ class RotatorDisplay {
             
             const [x, y] = projected;
             
-            // Distance-aware collision detection: closer countries need less spacing
-            const minDistance = country.distance_km < 2000 ? 30 : 20;
+            // Zoom-aware collision detection: when zoomed in, allow markers to be closer
+            // This allows more countries to be displayed in the zoomed area
+            const baseDistance = country.distance_km < 2000 ? 30 : 20;
+            const minDistance = baseDistance / this.currentZoom;
             
             // Check for collision with existing markers
             const hasCollision = markerPositions.some(pos => {
@@ -709,26 +722,29 @@ class RotatorDisplay {
             // Record position
             markerPositions.push({ x, y });
             
-            // Create smaller marker group
+            // Create smaller marker group with inverse zoom scaling
             const markerGroup = this.mapGroup.append('g')
                 .attr('class', 'cone-marker')
-                .attr('transform', `translate(${x}, ${y})`);
+                .attr('transform', `translate(${x}, ${y}) scale(${1 / this.currentZoom})`);
             
-            // Add smaller marker circle
+            // Add smaller marker circle (size adjusted for inverse scaling)
+            const markerRadius = 4 * this.currentZoom;
             markerGroup.append('circle')
-                .attr('r', 4)
+                .attr('r', markerRadius)
                 .attr('fill', 'rgba(255, 193, 7, 0.8)')
                 .attr('stroke', '#fff')
-                .attr('stroke-width', 1)
+                .attr('stroke-width', this.currentZoom)
                 .style('filter', 'drop-shadow(0 0 3px rgba(255, 193, 7, 0.6))');
             
-            // Add country name label (smaller, no bearing/distance)
+            // Add country name label (font size adjusted for inverse scaling)
+            const fontSize = 10 * this.currentZoom;
+            const labelOffset = -10 * this.currentZoom;
             markerGroup.append('text')
                 .attr('x', 0)
-                .attr('y', -10)
+                .attr('y', labelOffset)
                 .attr('text-anchor', 'middle')
                 .attr('fill', 'rgba(255, 255, 255, 0.9)')
-                .attr('font-size', '10px')
+                .attr('font-size', `${fontSize}px`)
                 .attr('font-weight', 'normal')
                 .style('text-shadow', '0 0 3px rgba(0,0,0,0.8)')
                 .text(country.name);
@@ -760,6 +776,19 @@ class RotatorDisplay {
             this.mapGroup.selectAll('.country-marker').remove();
             this.mapGroup.selectAll('.cone-marker').remove();
         }
+    }
+
+    /**
+     * Redraw markers after zoom level changes to show more/fewer countries
+     * This is called from rotator.html's updateStatus function
+     */
+    redrawMarkersAfterZoom() {
+        // This will be triggered by the parent page's updateStatus function
+        // which already has the logic to redraw markers based on selectedCountry
+        const event = new CustomEvent('rotator-zoom-changed', {
+            detail: { zoom: this.currentZoom }
+        });
+        document.dispatchEvent(event);
     }
 
     /**

@@ -730,6 +730,12 @@
                             <small id="scheduledPositionTimeError" style="color: #dc3545; display: none;"></small>
                         </div>
                         <div class="config-field">
+                            <label>Country (Optional)</label>
+                            <input type="text" id="newScheduledPositionCountry" list="scheduled-position-country-list" placeholder="Type a country..." autocomplete="off" oninput="handleScheduledPositionCountryInput()">
+                            <datalist id="scheduled-position-country-list"></datalist>
+                            <small>Select a country to automatically set the bearing</small>
+                        </div>
+                        <div class="config-field">
                             <label>Bearing (degrees)</label>
                             <input type="number" id="newScheduledPositionBearing" placeholder="0-360" min="0" max="360" step="1" required oninput="validateScheduledPositionForm()">
                             <small>Azimuth bearing in degrees (0-360)</small>
@@ -5885,6 +5891,7 @@
 
         // Rotator Scheduler configuration management
         let currentRotatorSchedulerConfig = {};
+        let scheduledPositionCountriesData = [];
 
         async function loadRotatorSchedulerConfig() {
             try {
@@ -6265,18 +6272,23 @@
             }
         }
 
-        function showAddScheduledPositionForm() {
+        async function showAddScheduledPositionForm() {
             document.getElementById('scheduledPositionFormTitle').textContent = 'Add Scheduled Position';
             document.getElementById('editScheduledPositionIndex').value = '';
             document.getElementById('addScheduledPositionForm').style.display = 'block';
             document.getElementById('newScheduledPositionTime').value = '';
+            document.getElementById('newScheduledPositionCountry').value = '';
             document.getElementById('newScheduledPositionBearing').value = '';
             document.getElementById('newScheduledPositionEnabled').value = 'true';
+            
+            // Fetch countries for the dropdown
+            await fetchScheduledPositionCountries();
+            
             validateScheduledPositionForm();
             document.getElementById('addScheduledPositionForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
-        function editScheduledPosition(time) {
+        async function editScheduledPosition(time) {
             const positions = currentRotatorSchedulerConfig.positions || [];
             const position = positions.find(p => p.time === time);
             if (!position) {
@@ -6287,8 +6299,13 @@
             document.getElementById('editScheduledPositionIndex').value = time;
             document.getElementById('addScheduledPositionForm').style.display = 'block';
             document.getElementById('newScheduledPositionTime').value = time;
+            document.getElementById('newScheduledPositionCountry').value = '';
             document.getElementById('newScheduledPositionBearing').value = position.bearing;
             document.getElementById('newScheduledPositionEnabled').value = (position.enabled !== false) ? 'true' : 'false';
+            
+            // Fetch countries for the dropdown
+            await fetchScheduledPositionCountries();
+            
             validateScheduledPositionForm();
             document.getElementById('addScheduledPositionForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
@@ -6308,9 +6325,68 @@
             await saveRotatorSchedulerConfig();
         }
 
+        async function fetchScheduledPositionCountries() {
+            try {
+                const response = await fetch('/api/rotctl/countries');
+                const data = await response.json();
+
+                if (data.success && data.countries) {
+                    scheduledPositionCountriesData = data.countries;
+                    populateScheduledPositionCountryDatalist(data.countries);
+                } else {
+                    console.error('Failed to fetch countries:', data.error);
+                }
+            } catch (error) {
+                console.error('Failed to fetch countries:', error);
+            }
+        }
+
+        function populateScheduledPositionCountryDatalist(countries) {
+            const datalist = document.getElementById('scheduled-position-country-list');
+
+            // Clear existing options
+            datalist.innerHTML = '';
+
+            // Add countries sorted by name
+            countries.forEach(country => {
+                const option = document.createElement('option');
+                option.value = `${country.name} (${country.continent}) ${country.bearing}°`;
+                option.dataset.bearing = country.bearing;
+                option.dataset.country = JSON.stringify(country);
+                datalist.appendChild(option);
+            });
+        }
+
+        function handleScheduledPositionCountryInput() {
+            const input = document.getElementById('newScheduledPositionCountry');
+            const inputValue = input.value;
+
+            // Check if the input matches a country option
+            const datalist = document.getElementById('scheduled-position-country-list');
+            const options = datalist.querySelectorAll('option');
+
+            let matchedCountry = null;
+            for (const option of options) {
+                if (option.value === inputValue) {
+                    matchedCountry = JSON.parse(option.dataset.country);
+                    break;
+                }
+            }
+
+            if (matchedCountry) {
+                // Automatically populate the bearing field
+                const bearingInput = document.getElementById('newScheduledPositionBearing');
+                bearingInput.value = matchedCountry.bearing;
+
+                // Trigger validation
+                validateScheduledPositionForm();
+            }
+        }
+
         function cancelScheduledPositionForm() {
             document.getElementById('addScheduledPositionForm').style.display = 'none';
             document.getElementById('editScheduledPositionIndex').value = '';
+            document.getElementById('newScheduledPositionCountry').value = '';
             document.getElementById('scheduledPositionTimeError').style.display = 'none';
             document.getElementById('scheduledPositionBearingError').style.display = 'none';
         }

@@ -220,6 +220,42 @@
             font-size: 14px;
         }
 
+        .country-overlay {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .country-overlay label {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .country-overlay select {
+            width: 250px;
+            padding: 10px;
+            font-size: 14px;
+            border: 2px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            cursor: pointer;
+        }
+
+        .country-overlay select:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+
+        .country-overlay select option {
+            background: #2a5298;
+            color: #fff;
+        }
+
         input[type="number"], input[type="password"] {
             flex: 1;
             padding: 12px;
@@ -373,7 +409,8 @@
             .azimuth-input-overlay,
             .adjustment-overlay,
             .controls-overlay,
-            .password-overlay {
+            .password-overlay,
+            .country-overlay {
                 position: relative;
                 top: auto;
                 left: auto;
@@ -442,6 +479,16 @@
                 font-size: 16px;
             }
 
+            .country-overlay {
+                align-items: center;
+            }
+
+            .country-overlay select {
+                width: 100%;
+                max-width: 300px;
+                font-size: 16px;
+            }
+
             button {
                 font-size: 15px;
                 padding: 12px 20px;
@@ -501,6 +548,10 @@
             }
 
             .password-overlay input {
+                max-width: 250px;
+            }
+
+            .country-overlay select {
                 max-width: 250px;
             }
         }
@@ -577,6 +628,13 @@
             <div class="password-overlay">
                 <input type="password" id="password" placeholder="Enter password">
             </div>
+            
+            <div class="country-overlay">
+                <label for="country-select">Point at Country:</label>
+                <select id="country-select">
+                    <option value="">Loading countries...</option>
+                </select>
+            </div>
         </div>
 
         <div class="message" id="message"></div>
@@ -586,6 +644,7 @@
         let savedPassword = localStorage.getItem('rotctl_password') || '';
         let updateInterval = null;
         let rotatorDisplay = null;
+        let countriesData = [];
         
         // Initialize
         document.addEventListener('DOMContentLoaded', async () => {
@@ -643,6 +702,9 @@
             
             // Initial button state check
             updateButtonStates();
+            
+            // Fetch countries for dropdown
+            await fetchCountries();
         });
 
         function updateButtonStates() {
@@ -916,6 +978,70 @@
             setTimeout(() => {
                 message.classList.remove('show');
             }, 5000);
+        }
+
+        async function fetchCountries() {
+            try {
+                const response = await fetch('/api/rotctl/countries');
+                const data = await response.json();
+                
+                if (data.success && data.countries) {
+                    countriesData = data.countries;
+                    populateCountryDropdown(data.countries);
+                } else {
+                    console.error('Failed to fetch countries:', data.error);
+                    document.getElementById('country-select').innerHTML = '<option value="">Countries unavailable</option>';
+                }
+            } catch (error) {
+                console.error('Failed to fetch countries:', error);
+                document.getElementById('country-select').innerHTML = '<option value="">Error loading countries</option>';
+            }
+        }
+
+        function populateCountryDropdown(countries) {
+            const select = document.getElementById('country-select');
+            
+            // Clear existing options
+            select.innerHTML = '<option value="">Select a country...</option>';
+            
+            // Add countries sorted by name
+            countries.forEach(country => {
+                const option = document.createElement('option');
+                option.value = country.bearing;
+                option.textContent = `${country.name} (${country.continent})`;
+                option.dataset.country = JSON.stringify(country);
+                select.appendChild(option);
+            });
+            
+            // Add change event listener
+            select.addEventListener('change', handleCountrySelection);
+        }
+
+        function handleCountrySelection(event) {
+            const select = event.target;
+            const bearing = parseInt(select.value);
+            
+            if (isNaN(bearing)) {
+                return; // No country selected
+            }
+            
+            // Get the country data from the option
+            const selectedOption = select.options[select.selectedIndex];
+            const countryData = JSON.parse(selectedOption.dataset.country);
+            
+            // Set the azimuth input
+            document.getElementById('target-azimuth').value = bearing;
+            
+            // Check if password is entered
+            const password = document.getElementById('password').value;
+            if (password) {
+                // Automatically send the command
+                setAzimuth(bearing);
+                showMessage(`Pointing at ${countryData.name} (${countryData.continent}) - Bearing: ${bearing}°, Distance: ${Math.round(countryData.distance_km)} km`, 'success');
+            } else {
+                // Show message to enter password
+                showMessage(`Selected ${countryData.name} (${countryData.continent}) - Bearing: ${bearing}°. Enter password and click "Go" to move rotator.`, 'success');
+            }
         }
     </script>
 </body>

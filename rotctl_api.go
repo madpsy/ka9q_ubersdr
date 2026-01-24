@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -453,8 +455,110 @@ func (h *RotctlAPIHandler) HandleStatus(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(status)
 }
 
+// CountryBearingInfo represents a country with its bearing from the receiver
+type CountryBearingInfo struct {
+	Name       string  `json:"name"`
+	PrimaryPfx string  `json:"primary_prefix"`
+	CQZone     int     `json:"cq_zone"`
+	ITUZone    int     `json:"itu_zone"`
+	Continent  string  `json:"continent"`
+	Latitude   float64 `json:"latitude"`
+	Longitude  float64 `json:"longitude"`
+	Bearing    int     `json:"bearing"`     // Bearing in degrees from receiver location (rounded to whole number)
+	Distance   float64 `json:"distance_km"` // Distance in kilometers from receiver location
+}
+
+// HandleGetCountries handles GET /api/rotctl/countries
+// Returns all countries with calculated bearings from the receiver's location
+// No authentication required for read operations
+func (h *RotctlAPIHandler) HandleGetCountries(w http.ResponseWriter, r *http.Request, receiverLat, receiverLon float64) {
+	// Apply rate limiting
+	clientIP := getClientIP(r)
+	if !h.rateLimiter.AllowRequest(clientIP, "countries") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": "Rate limit exceeded - maximum 1 request per second",
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if CTY database is loaded
+	if globalCTY == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": "CTY database is not loaded",
+		})
+		return
+	}
+
+	globalCTY.mu.RLock()
+	defer globalCTY.mu.RUnlock()
+
+	// Get optional continent filter
+	continentFilter := r.URL.Query().Get("continent")
+	if continentFilter != "" {
+		continentFilter = strings.ToUpper(continentFilter)
+	}
+
+	// Calculate bearings for all countries
+	countries := make([]CountryBearingInfo, 0, len(globalCTY.entities))
+	for _, entity := range globalCTY.entities {
+		// Apply continent filter if specified
+		if continentFilter != "" && entity.Continent != continentFilter {
+			continue
+		}
+
+		// Calculate distance and bearing from receiver to country
+		distance, bearing := CalculateDistanceAndBearing(
+			receiverLat, receiverLon,
+			entity.Latitude, entity.Longitude,
+		)
+
+		countries = append(countries, CountryBearingInfo{
+			Name:       entity.Name,
+			PrimaryPfx: entity.PrimaryPfx,
+			CQZone:     entity.CQZone,
+			ITUZone:    entity.ITUZone,
+			Continent:  entity.Continent,
+			Latitude:   entity.Latitude,
+			Longitude:  entity.Longitude,
+			Bearing:    int(bearing + 0.5), // Round to nearest whole number
+			Distance:   distance,
+		})
+	}
+
+	// Sort by name
+	sort.Slice(countries, func(i, j int) bool {
+		return countries[i].Name < countries[j].Name
+	})
+
+	response := map[string]interface{}{
+		"success":      true,
+		"countries":    countries,
+		"count":        len(countries),
+		"receiver_lat": receiverLat,
+		"receiver_lon": receiverLon,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}
+
+// HandleGetCountriesDisabled handles GET /api/rotctl/countries when rotctl is disabled
+func HandleGetCountriesDisabled(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": false,
+		"error":   "Rotator control is not enabled",
+	})
+}
+
 // RegisterRotctlRoutes registers rotctl API routes with the HTTP server
-func RegisterRotctlRoutes(mux *http.ServeMux, handler *RotctlAPIHandler) {
+func RegisterRotctlRoutes(mux *http.ServeMux, handler *RotctlAPIHandler, receiverLat, receiverLon float64) {
 	mux.HandleFunc("/api/rotctl/position", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			handler.HandleGetPosition(w, r)
@@ -467,6 +571,9 @@ func RegisterRotctlRoutes(mux *http.ServeMux, handler *RotctlAPIHandler) {
 
 	mux.HandleFunc("/api/rotctl/command", handler.HandleCommand)
 	mux.HandleFunc("/api/rotctl/status", handler.HandleStatus)
+	mux.HandleFunc("/api/rotctl/countries", func(w http.ResponseWriter, r *http.Request) {
+		handler.HandleGetCountries(w, r, receiverLat, receiverLon)
+	})
 }
 
 // RegisterRotctlRoutesDisabled registers rotctl API routes that return "not enabled" responses
@@ -483,4 +590,5 @@ func RegisterRotctlRoutesDisabled(mux *http.ServeMux) {
 
 	mux.HandleFunc("/api/rotctl/command", HandleCommandDisabled)
 	mux.HandleFunc("/api/rotctl/status", HandleStatusDisabled)
+	mux.HandleFunc("/api/rotctl/countries", HandleGetCountriesDisabled)
 }

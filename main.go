@@ -1015,7 +1015,7 @@ func main() {
 
 	// Register rotctl API routes (rotctlHandler was initialized earlier, before admin handler)
 	if rotctlHandler != nil {
-		RegisterRotctlRoutes(http.DefaultServeMux, rotctlHandler)
+		RegisterRotctlRoutes(http.DefaultServeMux, rotctlHandler, config.Admin.GPS.Lat, config.Admin.GPS.Lon)
 		defer rotctlHandler.Close()
 		log.Printf("Rotctl API enabled at /api/rotctl/* (host: %s:%d)", config.Rotctl.Host, config.Rotctl.Port)
 	} else if config.Rotctl.Enabled {

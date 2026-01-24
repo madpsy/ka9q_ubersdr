@@ -736,29 +736,52 @@
             });
 
             // Listen for zoom change events to redraw markers
-            document.addEventListener('rotator-zoom-changed', () => {
+            document.addEventListener('rotator-zoom-changed', (event) => {
                 // Redraw markers with new zoom level
                 if (rotatorDisplay && countriesData.length > 0) {
-                    // Get current azimuth
-                    fetch('/api/rotctl/status')
-                        .then(response => response.json())
-                        .then(data => {
-                            const currentAzimuth = data.position?.azimuth || 0;
-                            if (selectedCountry) {
-                                // Redraw selected country with cone markers
-                                rotatorDisplay.showCountryMarker(
-                                    selectedCountry.name,
-                                    selectedCountry.bearing,
-                                    selectedCountry.distance_km,
-                                    countriesData,
-                                    currentAzimuth
-                                );
-                            } else {
-                                // Just redraw cone markers
-                                rotatorDisplay.updateConeMarkers(countriesData, currentAzimuth);
-                            }
-                        })
-                        .catch(error => console.error('Failed to redraw markers after zoom:', error));
+                    // Check if we should skip status fetch (for zoom-only updates)
+                    const skipStatusFetch = event.detail?.skipStatusFetch || false;
+
+                    if (skipStatusFetch) {
+                        // Use the last known azimuth from the status display
+                        const currentAzimuthText = document.getElementById('current-azimuth')?.textContent;
+                        const currentAzimuth = currentAzimuthText ? parseFloat(currentAzimuthText) : 0;
+
+                        if (selectedCountry) {
+                            // Redraw selected country with cone markers
+                            rotatorDisplay.showCountryMarker(
+                                selectedCountry.name,
+                                selectedCountry.bearing,
+                                selectedCountry.distance_km,
+                                countriesData,
+                                currentAzimuth
+                            );
+                        } else {
+                            // Just redraw cone markers
+                            rotatorDisplay.updateConeMarkers(countriesData, currentAzimuth);
+                        }
+                    } else {
+                        // Fetch current azimuth from API
+                        fetch('/api/rotctl/status')
+                            .then(response => response.json())
+                            .then(data => {
+                                const currentAzimuth = data.position?.azimuth || 0;
+                                if (selectedCountry) {
+                                    // Redraw selected country with cone markers
+                                    rotatorDisplay.showCountryMarker(
+                                        selectedCountry.name,
+                                        selectedCountry.bearing,
+                                        selectedCountry.distance_km,
+                                        countriesData,
+                                        currentAzimuth
+                                    );
+                                } else {
+                                    // Just redraw cone markers
+                                    rotatorDisplay.updateConeMarkers(countriesData, currentAzimuth);
+                                }
+                            })
+                            .catch(error => console.error('Failed to redraw markers after zoom:', error));
+                    }
                 }
             });
 

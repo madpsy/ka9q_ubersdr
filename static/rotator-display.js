@@ -875,7 +875,10 @@ class RotatorDisplay {
         // This will be triggered by the parent page's updateStatus function
         // which already has the logic to redraw markers based on selectedCountry
         const event = new CustomEvent('rotator-zoom-changed', {
-            detail: { zoom: this.currentZoom }
+            detail: {
+                zoom: this.currentZoom,
+                skipStatusFetch: true  // Don't fetch status, just redraw with more/fewer countries
+            }
         });
         document.dispatchEvent(event);
     }

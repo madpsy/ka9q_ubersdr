@@ -592,6 +592,7 @@ class RotatorUI {
                     const currentAzimuth = statusData.position?.azimuth || 0;
 
                     // Show marker on map with cone markers
+                    // Pass closestCountry.bearing to showCountryMarker so it can be excluded from cone markers
                     this.rotatorDisplay.showCountryMarker(
                         closestCountry.name,
                         closestCountry.bearing,

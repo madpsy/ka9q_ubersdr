@@ -641,7 +641,7 @@ class RotatorDisplay {
         
         // Track marker positions for collision detection
         const markerPositions = [];
-        const minDistance = 40; // Minimum distance between markers in pixels
+        const minDistance = 25; // Minimum distance between markers in pixels (reduced for more markers)
         
         // Add markers for countries in cone
         let addedCount = 0;

@@ -54,6 +54,7 @@ class RotatorStatusDisplay:
         
         # Data storage
         self.status_data: Optional[Dict] = None
+        self.countries_data: Optional[list] = None
         
         # Widget references for updates
         self.status_labels = {}
@@ -87,6 +88,9 @@ class RotatorStatusDisplay:
         # Fetch initial status immediately to check read_only status
         # This will enable/disable controls appropriately
         self.fetch_initial_status()
+        
+        # Fetch countries list
+        self.fetch_countries()
         
         # Start periodic data refresh (after initial fetch)
         self.window.after(self.update_interval, self.refresh_data)
@@ -272,7 +276,7 @@ class RotatorStatusDisplay:
         btn.pack(side=tk.LEFT, padx=2)
         self.control_buttons.append(btn)
         
-        # Manual azimuth input
+        # Manual azimuth input and country selection
         manual_row = ttk.Frame(control_frame)
         manual_row.pack(fill=tk.X, pady=(5, 0))
         
@@ -283,11 +287,17 @@ class RotatorStatusDisplay:
         self.azimuth_entry.pack(side=tk.LEFT, padx=(0, 5))
         self.azimuth_entry.bind('<Return>', lambda e: self.set_azimuth())
         
-        self.go_button = ttk.Button(manual_row, text="Go", width=6, command=self.set_azimuth)
+        ttk.Label(manual_row, text="or", foreground='gray').pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.country_var = tk.StringVar()
+        self.country_combo = ttk.Combobox(manual_row, textvariable=self.country_var,
+                                          width=25, state='readonly')
+        self.country_combo.pack(side=tk.LEFT, padx=(0, 5))
+        self.country_combo.bind('<<ComboboxSelected>>', self.on_country_selected)
+        
+        self.go_button = ttk.Button(manual_row, text="Go", width=6, command=self.set_azimuth_or_country)
         self.go_button.pack(side=tk.LEFT, padx=2)
         self.control_buttons.append(self.go_button)
-        
-        ttk.Label(manual_row, text="(0-359°)", foreground='gray').pack(side=tk.LEFT, padx=(5, 0))
         
         # Command buttons (Stop and Park)
         command_row = ttk.Frame(control_frame)
@@ -1077,6 +1087,78 @@ class RotatorStatusDisplay:
             # Still clear the field even if file operation failed
             self.last_saved_password = None
             self.password_var.set("")
+    
+    def fetch_countries(self):
+        """Fetch countries list from server."""
+        def fetch_in_thread():
+            try:
+                url = f"{self.base_url}/api/rotctl/countries"
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                
+                if data.get('success') and 'countries' in data:
+                    countries = data['countries']
+                    # Update UI on main thread
+                    self.window.after(0, lambda: self.update_countries_dropdown(countries))
+                else:
+                    print("Failed to load countries from API")
+                    
+            except requests.exceptions.RequestException as e:
+                print(f"Network error fetching countries: {e}")
+            except Exception as e:
+                print(f"Error fetching countries: {e}")
+        
+        # Run in background thread
+        thread = threading.Thread(target=fetch_in_thread, daemon=True)
+        thread.start()
+    
+    def update_countries_dropdown(self, countries: list):
+        """Update the countries dropdown with fetched data.
+        
+        Args:
+            countries: List of country dictionaries from API
+        """
+        self.countries_data = countries
+        
+        # Create display strings: "Country Name (Bearing°)"
+        country_options = []
+        for country in countries:
+            name = country.get('name', 'Unknown')
+            bearing = country.get('bearing', 0)
+            display = f"{name} ({bearing}°)"
+            country_options.append(display)
+        
+        # Update combobox
+        self.country_combo['values'] = country_options
+        
+        print(f"Loaded {len(countries)} countries for rotator control")
+    
+    def on_country_selected(self, event=None):
+        """Handle country selection from dropdown."""
+        # Populate azimuth input with country's bearing and automatically send command
+        selected = self.country_var.get()
+        if selected and self.countries_data:
+            try:
+                # Format is "Country Name (Bearing°)"
+                bearing_str = selected.split('(')[1].split('°')[0]
+                bearing = int(bearing_str)
+                # Set the bearing in the azimuth input
+                self.azimuth_input_var.set(str(bearing))
+                # Automatically send the command
+                self.set_azimuth()
+            except (IndexError, ValueError):
+                pass
+    
+    def set_azimuth_or_country(self):
+        """Set azimuth from manual input or selected country."""
+        manual_azimuth = self.azimuth_input_var.get().strip()
+        
+        if manual_azimuth:
+            # Use the set_azimuth method which validates and sends the command
+            self.set_azimuth()
+        else:
+            messagebox.showwarning("No Input", "Please enter an azimuth or select a country")
     
     def validate_rotctl_port(self):
         """Validate the rotctl port input."""

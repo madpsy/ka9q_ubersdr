@@ -678,7 +678,7 @@
                 const bearing = event.detail.bearing;
                 const distance = event.detail.distance;
                 
-                // Set the azimuth input
+                // Set the azimuth input to the exact cursor bearing
                 document.getElementById('target-azimuth').value = bearing;
                 
                 // Find the closest country by bearing and distance
@@ -713,12 +713,12 @@
                         // Check if password is entered
                         const password = document.getElementById('password').value;
                         if (password) {
-                            // Automatically send the command
-                            setAzimuth(closestCountry.bearing);
-                            showMessage(`Pointing at ${closestCountry.name} (${closestCountry.continent}) - Bearing: ${closestCountry.bearing}°, Distance: ${Math.round(closestCountry.distance_km)} km`, 'success');
+                            // Automatically send the command with the exact cursor bearing
+                            setAzimuth(bearing);
+                            showMessage(`Pointing at ${closestCountry.name} (${closestCountry.continent}) - Cursor bearing: ${bearing}° (Country center: ${closestCountry.bearing}°), Distance: ${Math.round(closestCountry.distance_km)} km`, 'success');
                         } else {
                             // Show message to enter password
-                            showMessage(`Selected ${closestCountry.name} (${closestCountry.continent}) - Bearing: ${closestCountry.bearing}°. Enter password and click "Go" to move rotator.`, 'success');
+                            showMessage(`Selected ${closestCountry.name} (${closestCountry.continent}) - Cursor bearing: ${bearing}° (Country center: ${closestCountry.bearing}°). Enter password and click "Go" to move rotator.`, 'success');
                         }
                         return;
                     }

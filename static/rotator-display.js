@@ -29,6 +29,7 @@ class RotatorDisplay {
         this.currentZoom = 1;
         this.currentTransform = d3.zoomIdentity;
         this.mapGroup = null;
+        this.countriesData = []; // Store countries data for tooltip
         
         // Initialize
         this.init();
@@ -209,24 +210,33 @@ class RotatorDisplay {
         const [transformedX, transformedY] = this.currentTransform.invert([mouseX, mouseY]);
 
         const coords = this.projection.invert([transformedX, transformedY]);
-        
+
         if (!coords) {
             this.tooltip.style.display = 'none';
             return;
         }
-        
+
         const [clickLon, clickLat] = coords;
-        
+
         // Calculate true bearing using great circle formula
         const bearing = this.calculateBearing(this.receiverLat, this.receiverLon, clickLat, clickLon);
-        
+
         // Calculate distance using great circle formula
         const distance = this.calculateDistance(this.receiverLat, this.receiverLon, clickLat, clickLon);
-        
+
+        // Find nearest country if countries data is available
+        let tooltipHTML = `${Math.round(bearing)}° | ${distance.toLocaleString()} km`;
+        if (this.countriesData && this.countriesData.length > 0) {
+            const nearestCountry = this.findClosestCountry(bearing, distance);
+            if (nearestCountry) {
+                tooltipHTML += `<br><span style="color: #4CAF50;">${nearestCountry.name}</span>`;
+            }
+        }
+
         // Update tooltip content
-        this.tooltip.textContent = `${Math.round(bearing)}° | ${distance.toLocaleString()} km`;
+        this.tooltip.innerHTML = tooltipHTML;
         this.tooltip.style.display = 'block';
-        
+
         // Position tooltip near cursor (offset to avoid covering the point)
         const container = document.getElementById(this.containerId);
         const rect = container.getBoundingClientRect();
@@ -747,6 +757,52 @@ class RotatorDisplay {
             this.mapGroup.selectAll('.country-marker').remove();
             this.mapGroup.selectAll('.cone-marker').remove();
         }
+    }
+
+    /**
+     * Set countries data for tooltip display
+     * @param {Array} countries - Array of country objects with bearing and distance_km
+     */
+    setCountriesData(countries) {
+        this.countriesData = countries || [];
+    }
+
+    /**
+     * Find the closest country to a given bearing and distance
+     * @param {number} targetBearing - Target bearing in degrees
+     * @param {number} targetDistance - Target distance in km
+     * @returns {Object|null} - Closest country object or null
+     */
+    findClosestCountry(targetBearing, targetDistance) {
+        if (!this.countriesData || this.countriesData.length === 0) return null;
+
+        let closestCountry = null;
+        let minScore = Infinity;
+
+        // Weight factors for scoring (bearing is more important than distance)
+        const bearingWeight = 1.0;
+        const distanceWeight = 0.1; // Distance in km, so we scale it down
+
+        this.countriesData.forEach(country => {
+            // Calculate bearing difference (handle wrap-around at 0/360)
+            let bearingDiff = Math.abs(country.bearing - targetBearing);
+            if (bearingDiff > 180) {
+                bearingDiff = 360 - bearingDiff;
+            }
+
+            // Calculate distance difference
+            const distanceDiff = Math.abs(country.distance_km - targetDistance);
+
+            // Calculate weighted score (lower is better)
+            const score = (bearingDiff * bearingWeight) + (distanceDiff * distanceWeight);
+
+            if (score < minScore) {
+                minScore = score;
+                closestCountry = country;
+            }
+        });
+
+        return closestCountry;
     }
     
     async updatePosition() {

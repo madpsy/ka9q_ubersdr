@@ -1038,10 +1038,15 @@
             try {
                 const response = await fetch('/api/rotctl/countries');
                 const data = await response.json();
-                
+
                 if (data.success && data.countries) {
                     countriesData = data.countries;
                     populateCountryDatalist(data.countries);
+
+                    // Pass countries data to rotator display for tooltip
+                    if (rotatorDisplay) {
+                        rotatorDisplay.setCountriesData(data.countries);
+                    }
                 } else {
                     console.error('Failed to fetch countries:', data.error);
                 }

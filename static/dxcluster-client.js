@@ -12,6 +12,7 @@ class DXClusterClient {
         this.receivedDigitalSpots = []; // Buffer for digital spots received before callbacks registered
         this.receivedCWSpots = []; // Buffer for CW spots received before callbacks registered
         this.maxBufferedSpots = 100; // Maximum spots to buffer
+        this.pendingSubscriptions = new Set(); // Queue for subscriptions when WebSocket not ready
     }
 
     connect() {
@@ -47,6 +48,9 @@ class DXClusterClient {
                     clearTimeout(this.reconnectTimer);
                     this.reconnectTimer = null;
                 }
+                
+                // Send any pending subscriptions
+                this.processPendingSubscriptions();
                 
                 // Initialize chat UI if not already initialized and chat is enabled
                 // Always call this - it will handle queuing if scripts aren't loaded yet
@@ -117,6 +121,19 @@ class DXClusterClient {
         } catch (error) {
             console.error('[DX Cluster] Error checking chat_enabled status:', error);
         }
+    }
+
+    processPendingSubscriptions() {
+        if (this.pendingSubscriptions.size === 0) return;
+
+        console.log('[DX Cluster] Processing', this.pendingSubscriptions.size, 'pending subscriptions');
+
+        this.pendingSubscriptions.forEach(type => {
+            this.ws.send(JSON.stringify({ type: type }));
+            console.log('[DX Cluster] Sent pending subscription:', type);
+        });
+
+        this.pendingSubscriptions.clear();
     }
 
     handleMessage(message) {
@@ -298,6 +315,9 @@ class DXClusterClient {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             console.log('[DX Cluster] Subscribing to DX spots');
             this.ws.send(JSON.stringify({ type: 'subscribe_dx_spots' }));
+        } else {
+            console.log('[DX Cluster] Queueing DX spots subscription (WebSocket not ready)');
+            this.pendingSubscriptions.add('subscribe_dx_spots');
         }
     }
 
@@ -305,6 +325,9 @@ class DXClusterClient {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             console.log('[DX Cluster] Subscribing to digital spots');
             this.ws.send(JSON.stringify({ type: 'subscribe_digital_spots' }));
+        } else {
+            console.log('[DX Cluster] Queueing digital spots subscription (WebSocket not ready)');
+            this.pendingSubscriptions.add('subscribe_digital_spots');
         }
     }
 
@@ -312,6 +335,9 @@ class DXClusterClient {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             console.log('[DX Cluster] Subscribing to CW spots');
             this.ws.send(JSON.stringify({ type: 'subscribe_cw_spots' }));
+        } else {
+            console.log('[DX Cluster] Queueing CW spots subscription (WebSocket not ready)');
+            this.pendingSubscriptions.add('subscribe_cw_spots');
         }
     }
 
@@ -319,6 +345,9 @@ class DXClusterClient {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             console.log('[DX Cluster] Subscribing to chat');
             this.ws.send(JSON.stringify({ type: 'subscribe_chat' }));
+        } else {
+            console.log('[DX Cluster] Queueing chat subscription (WebSocket not ready)');
+            this.pendingSubscriptions.add('subscribe_chat');
         }
     }
 

@@ -623,7 +623,6 @@
             </div>
             
             <div class="country-overlay">
-                <label for="country-select">Point at Country:</label>
                 <select id="country-select">
                     <option value="">Loading countries...</option>
                 </select>
@@ -708,11 +707,13 @@
             const goButton = document.querySelector('button[onclick="setPosition()"]');
             const adjustButtons = document.querySelectorAll('.adjustment-overlay button');
             const controlButtons = document.querySelectorAll('.controls-overlay button');
+            const countrySelect = document.getElementById('country-select');
             
             // Enable/disable based on password
             if (goButton) goButton.disabled = !hasPassword;
             adjustButtons.forEach(btn => btn.disabled = !hasPassword);
             controlButtons.forEach(btn => btn.disabled = !hasPassword);
+            if (countrySelect) countrySelect.disabled = !hasPassword;
         }
 
         async function fetchReceiverLocation() {

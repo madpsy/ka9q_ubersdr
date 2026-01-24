@@ -594,42 +594,37 @@ class RotatorDisplay {
         
         const [x, y] = projected;
         
-        // Create marker group for selected country (larger, on top) with inverse zoom scaling
+        // Create marker group for selected country (larger, on top)
         const markerGroup = this.mapGroup.append('g')
             .attr('class', 'country-marker')
-            .attr('transform', `translate(${x}, ${y}) scale(${1 / this.currentZoom})`);
+            .attr('transform', `translate(${x}, ${y})`);
         
-        // Add marker circle (size adjusted for inverse scaling)
-        const markerRadius = 8 * this.currentZoom;
+        // Add marker circle
         markerGroup.append('circle')
-            .attr('r', markerRadius)
+            .attr('r', 8)
             .attr('fill', '#4CAF50')
             .attr('stroke', '#fff')
-            .attr('stroke-width', 2 * this.currentZoom)
+            .attr('stroke-width', 2)
             .style('filter', 'drop-shadow(0 0 6px rgba(76, 175, 80, 0.8))');
         
-        // Add country name label (font size adjusted for inverse scaling)
-        const nameFontSize = 14 * this.currentZoom;
-        const nameLabelOffset = -15 * this.currentZoom;
+        // Add country name label
         markerGroup.append('text')
             .attr('x', 0)
-            .attr('y', nameLabelOffset)
+            .attr('y', -15)
             .attr('text-anchor', 'middle')
             .attr('fill', '#fff')
-            .attr('font-size', `${nameFontSize}px`)
+            .attr('font-size', '14px')
             .attr('font-weight', 'bold')
             .style('text-shadow', '0 0 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.6)')
             .text(countryName);
         
-        // Add distance/bearing label below (font size adjusted for inverse scaling)
-        const infoFontSize = 11 * this.currentZoom;
-        const infoLabelOffset = 25 * this.currentZoom;
+        // Add distance/bearing label below
         markerGroup.append('text')
             .attr('x', 0)
-            .attr('y', infoLabelOffset)
+            .attr('y', 25)
             .attr('text-anchor', 'middle')
             .attr('fill', '#4CAF50')
-            .attr('font-size', `${infoFontSize}px`)
+            .attr('font-size', '11px')
             .style('text-shadow', '0 0 4px rgba(0,0,0,0.8)')
             .text(`${bearing}° | ${Math.round(distance)} km`);
     }
@@ -672,11 +667,13 @@ class RotatorDisplay {
         
         // Group countries by distance ranges to ensure distribution across the cone
         // Start from 1000km since we filter out closer countries
+        // Increase limits based on zoom level to show more countries when zoomed in
+        const zoomMultiplier = Math.max(1, Math.floor(this.currentZoom));
         const distanceRanges = [
-            { min: 1000, max: 3000, limit: 3 },
-            { min: 3000, max: 6000, limit: 3 },
-            { min: 6000, max: 10000, limit: 3 },
-            { min: 10000, max: Infinity, limit: 3 }
+            { min: 1000, max: 3000, limit: 3 * zoomMultiplier },
+            { min: 3000, max: 6000, limit: 3 * zoomMultiplier },
+            { min: 6000, max: 10000, limit: 3 * zoomMultiplier },
+            { min: 10000, max: Infinity, limit: 3 * zoomMultiplier }
         ];
         
         let selectedCountries = [];
@@ -722,29 +719,26 @@ class RotatorDisplay {
             // Record position
             markerPositions.push({ x, y });
             
-            // Create smaller marker group with inverse zoom scaling
+            // Create smaller marker group
             const markerGroup = this.mapGroup.append('g')
                 .attr('class', 'cone-marker')
-                .attr('transform', `translate(${x}, ${y}) scale(${1 / this.currentZoom})`);
+                .attr('transform', `translate(${x}, ${y})`);
             
-            // Add smaller marker circle (size adjusted for inverse scaling)
-            const markerRadius = 4 * this.currentZoom;
+            // Add smaller marker circle
             markerGroup.append('circle')
-                .attr('r', markerRadius)
+                .attr('r', 4)
                 .attr('fill', 'rgba(255, 193, 7, 0.8)')
                 .attr('stroke', '#fff')
-                .attr('stroke-width', this.currentZoom)
+                .attr('stroke-width', 1)
                 .style('filter', 'drop-shadow(0 0 3px rgba(255, 193, 7, 0.6))');
             
-            // Add country name label (font size adjusted for inverse scaling)
-            const fontSize = 10 * this.currentZoom;
-            const labelOffset = -10 * this.currentZoom;
+            // Add country name label (smaller, no bearing/distance)
             markerGroup.append('text')
                 .attr('x', 0)
-                .attr('y', labelOffset)
+                .attr('y', -10)
                 .attr('text-anchor', 'middle')
                 .attr('fill', 'rgba(255, 255, 255, 0.9)')
-                .attr('font-size', `${fontSize}px`)
+                .attr('font-size', '10px')
                 .attr('font-weight', 'normal')
                 .style('text-shadow', '0 0 3px rgba(0,0,0,0.8)')
                 .text(country.name);

@@ -808,15 +808,21 @@
                 if (rotatorDisplay) {
                     rotatorDisplay.updateAzimuthDisplay(azimuth);
                     
-                    // Update cone markers if a country is selected
-                    if (selectedCountry) {
-                        rotatorDisplay.showCountryMarker(
-                            selectedCountry.name,
-                            selectedCountry.bearing,
-                            selectedCountry.distance_km,
-                            countriesData,
-                            azimuth
-                        );
+                    // Always update cone markers to show countries in current beam direction
+                    if (countriesData.length > 0) {
+                        if (selectedCountry) {
+                            // If a country is selected, show it with cone markers
+                            rotatorDisplay.showCountryMarker(
+                                selectedCountry.name,
+                                selectedCountry.bearing,
+                                selectedCountry.distance_km,
+                                countriesData,
+                                azimuth
+                            );
+                        } else {
+                            // No country selected, just show cone markers
+                            rotatorDisplay.updateConeMarkers(countriesData, azimuth);
+                        }
                     }
                 }
                 

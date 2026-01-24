@@ -705,6 +705,21 @@ class RotatorDisplay {
     }
     
     /**
+     * Update cone markers to show countries in current beam direction
+     * @param {Array} allCountries - Array of all countries
+     * @param {number} currentAzimuth - Current rotator azimuth
+     */
+    updateConeMarkers(allCountries, currentAzimuth) {
+        if (!this.showMap || !this.mapGroup || !this.projection) return;
+        
+        // Remove existing cone markers (but not country marker)
+        this.mapGroup.selectAll('.cone-marker').remove();
+        
+        // Show cone markers
+        this.showConeMarkers(allCountries, currentAzimuth, null);
+    }
+    
+    /**
      * Clear the country marker from the map
      */
     clearCountryMarker() {

@@ -265,7 +265,7 @@ class DXClusterExtension extends DecoderExtension {
             this.filterAndRenderSpots();
             this.updateLastUpdate();
             this.renderDebounceTimeout = null;
-        }, 50); // 50ms debounce - batches rapid spot arrivals
+        }, 250); // 250ms debounce - batches spot arrivals without blocking audio
 
         // If this is a buffered spot (initial burst), schedule a marker redraw after a delay
         // This ensures markers appear even if spectrum data hasn't arrived yet
@@ -610,7 +610,8 @@ class DXClusterExtension extends DecoderExtension {
     }
 
     startAgeUpdates() {
-        // Update ages every second and re-render if age filter is active
+        // Update ages every second, but only re-render every 30 seconds to reduce DOM manipulation
+        let ageCheckCounter = 0;
         this.ageUpdateInterval = setInterval(() => {
             const ageCells = document.querySelectorAll('.spot-age');
             ageCells.forEach(cell => {
@@ -620,9 +621,14 @@ class DXClusterExtension extends DecoderExtension {
                 }
             });
 
-            // If age filter is active, re-render to remove spots that have aged out
+            // If age filter is active, re-render every 30 seconds to remove aged-out spots
+            // This reduces DOM manipulation from every second to every 30 seconds
             if (this.ageFilter !== null) {
-                this.filterAndRenderSpots();
+                ageCheckCounter++;
+                if (ageCheckCounter >= 30) {
+                    ageCheckCounter = 0;
+                    this.filterAndRenderSpots();
+                }
             }
         }, 1000);
     }

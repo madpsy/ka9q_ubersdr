@@ -9,7 +9,8 @@ class RotatorUI {
         this.isExpanded = false;
         this.rotatorDisplay = null;
         this.statusUpdateTimer = null;
-        
+        this.countriesData = []; // Store countries data for cone markers
+
         // Load saved state from localStorage
         const savedState = localStorage.getItem('ubersdr_rotator_expanded');
         this.isExpanded = savedState === 'true';
@@ -400,6 +401,9 @@ class RotatorUI {
         // Fetch and display location
         this.fetchReceiverLocation();
         
+        // Fetch countries for cone markers
+        this.fetchCountries();
+
         // Listen for rotator status updates from RotatorDisplay
         document.addEventListener('rotator-status-update', (event) => {
             this.handleStatusUpdate(event.detail);
@@ -438,6 +442,11 @@ class RotatorUI {
             const tabBearing = document.getElementById('rotator-tab-bearing');
             if (tabBearing) {
                 tabBearing.textContent = Math.round(data.position.azimuth) + '°';
+            }
+
+            // Update cone markers to show countries in current beam direction
+            if (this.rotatorDisplay && this.countriesData.length > 0) {
+                this.rotatorDisplay.updateConeMarkers(this.countriesData, data.position.azimuth);
             }
         }
         
@@ -497,6 +506,29 @@ class RotatorUI {
         }
     }
     
+    /**
+     * Fetch countries data for cone markers
+     */
+    async fetchCountries() {
+        try {
+            const response = await fetch('/api/rotctl/countries');
+            const data = await response.json();
+
+            if (data.success && data.countries) {
+                this.countriesData = data.countries;
+
+                // Pass countries data to rotator display for tooltip
+                if (this.rotatorDisplay) {
+                    this.rotatorDisplay.setCountriesData(data.countries);
+                }
+            } else {
+                console.error('[RotatorUI] Failed to fetch countries:', data.error);
+            }
+        } catch (error) {
+            console.error('[RotatorUI] Failed to fetch countries:', error);
+        }
+    }
+
     /**
      * Open rotator controls in a new tab
      */

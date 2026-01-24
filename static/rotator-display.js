@@ -162,6 +162,7 @@ class RotatorDisplay {
         // Create beam cone element
         this.beamConeElement = this.mapGroup.append("path")
             .attr("class", "beam-cone")
+            .attr("d", "")  // Initialize with empty path (invisible)
             .style("fill", "rgba(218, 165, 32, 0.2)")
             .style("stroke", "#DAA520")
             .style("stroke-width", "2");
@@ -171,6 +172,8 @@ class RotatorDisplay {
             .attr("class", "azimuth-line")
             .attr("x1", this.mapSize / 2)
             .attr("y1", this.mapSize / 2)
+            .attr("x2", this.mapSize / 2)  // Initialize to center (invisible)
+            .attr("y2", this.mapSize / 2)  // Initialize to center (invisible)
             .style("stroke", "#DAA520")
             .style("stroke-width", "2")
             .style("fill", "none")

@@ -225,14 +225,6 @@
             bottom: 20px;
             right: 20px;
             z-index: 100;
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-
-        .country-overlay label {
-            font-size: 12px;
-            opacity: 0.9;
         }
 
         .country-overlay select {
@@ -249,6 +241,11 @@
         .country-overlay select:focus {
             outline: none;
             border-color: #4CAF50;
+        }
+
+        .country-overlay select:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
 
         .country-overlay select option {
@@ -477,10 +474,6 @@
                 width: 100%;
                 max-width: 300px;
                 font-size: 16px;
-            }
-
-            .country-overlay {
-                align-items: center;
             }
 
             .country-overlay select {

@@ -779,11 +779,24 @@ class RotatorDisplay {
         let closestCountry = null;
         let minScore = Infinity;
 
-        // Weight factors for scoring (bearing is more important than distance)
-        const bearingWeight = 1.0;
-        const distanceWeight = 0.1; // Distance in km, so we scale it down
+        // Filter countries that are within reasonable distance range (±2000km)
+        const distanceThreshold = 2000;
+        const candidates = this.countriesData.filter(country => {
+            const distanceDiff = Math.abs(country.distance_km - targetDistance);
+            return distanceDiff <= distanceThreshold;
+        });
 
-        this.countriesData.forEach(country => {
+        // If no candidates within threshold, use all countries but weight distance more heavily
+        const countriesToCheck = candidates.length > 0 ? candidates : this.countriesData;
+        const useStrictDistance = candidates.length === 0;
+
+        // Weight factors for scoring
+        // When within threshold: bearing matters more
+        // When outside threshold: distance matters much more
+        const bearingWeight = useStrictDistance ? 0.5 : 2.0;
+        const distanceWeight = useStrictDistance ? 0.5 : 0.05;
+
+        countriesToCheck.forEach(country => {
             // Calculate bearing difference (handle wrap-around at 0/360)
             let bearingDiff = Math.abs(country.bearing - targetBearing);
             if (bearingDiff > 180) {

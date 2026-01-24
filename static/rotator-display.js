@@ -742,16 +742,57 @@ class RotatorDisplay {
                 .attr('stroke-width', 1)
                 .style('filter', 'drop-shadow(0 0 3px rgba(255, 193, 7, 0.6))');
             
-            // Add country name label (smaller, no bearing/distance)
-            markerGroup.append('text')
-                .attr('x', 0)
-                .attr('y', -10)
-                .attr('text-anchor', 'middle')
-                .attr('fill', 'rgba(255, 255, 255, 0.9)')
-                .attr('font-size', '12px')
-                .attr('font-weight', 'bold')
-                .style('text-shadow', '0 0 3px rgba(0,0,0,0.8)')
-                .text(country.name);
+            // Add country name label with text wrapping for long names
+            const maxCharsPerLine = 12;
+            const countryName = country.name;
+
+            if (countryName.length <= maxCharsPerLine) {
+                // Short name - single line
+                markerGroup.append('text')
+                    .attr('x', 0)
+                    .attr('y', -10)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', 'rgba(255, 255, 255, 0.9)')
+                    .attr('font-size', '12px')
+                    .attr('font-weight', 'bold')
+                    .style('text-shadow', '0 0 3px rgba(0,0,0,0.8)')
+                    .text(countryName);
+            } else {
+                // Long name - split into two lines
+                const words = countryName.split(' ');
+                let line1 = '';
+                let line2 = '';
+
+                // Try to split at a space
+                if (words.length > 1) {
+                    const midPoint = Math.ceil(words.length / 2);
+                    line1 = words.slice(0, midPoint).join(' ');
+                    line2 = words.slice(midPoint).join(' ');
+                } else {
+                    // No spaces, split in middle
+                    const mid = Math.ceil(countryName.length / 2);
+                    line1 = countryName.substring(0, mid);
+                    line2 = countryName.substring(mid);
+                }
+
+                const textElement = markerGroup.append('text')
+                    .attr('x', 0)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', 'rgba(255, 255, 255, 0.9)')
+                    .attr('font-size', '12px')
+                    .attr('font-weight', 'bold')
+                    .style('text-shadow', '0 0 3px rgba(0,0,0,0.8)');
+
+                textElement.append('tspan')
+                    .attr('x', 0)
+                    .attr('dy', '-16')
+                    .text(line1);
+
+                textElement.append('tspan')
+                    .attr('x', 0)
+                    .attr('dy', '12')
+                    .text(line2);
+            }
             
             addedCount++;
         });

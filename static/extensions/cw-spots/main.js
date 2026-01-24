@@ -276,7 +276,16 @@ class CWSpotsExtension extends DecoderExtension {
         // Invalidate spectrum marker cache when spots change
         if (window.spectrumDisplay) {
             window.spectrumDisplay.invalidateMarkerCache();
-            window.spectrumDisplay.draw();
+
+            // Schedule redraw on next animation frame (non-blocking)
+            // This prevents audio interruption by deferring the redraw
+            if (!this.spectrumRedrawScheduled) {
+                this.spectrumRedrawScheduled = true;
+                requestAnimationFrame(() => {
+                    window.spectrumDisplay.draw();
+                    this.spectrumRedrawScheduled = false;
+                });
+            }
         }
 
         // Only update UI if panel is visible

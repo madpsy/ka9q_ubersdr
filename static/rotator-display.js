@@ -602,9 +602,16 @@ class RotatorDisplay {
      * @param {number} selectedBearing - Bearing of the selected country to exclude
      */
     showConeMarkers(allCountries, currentAzimuth, selectedBearing) {
+        if (!allCountries || allCountries.length === 0) {
+            console.log('[RotatorDisplay] No countries data for cone markers');
+            return;
+        }
+        
         const halfBeam = this.beamWidth / 2;
         const minBearing = currentAzimuth - halfBeam;
         const maxBearing = currentAzimuth + halfBeam;
+        
+        console.log(`[RotatorDisplay] Beam cone: ${minBearing.toFixed(1)}° to ${maxBearing.toFixed(1)}° (center: ${currentAzimuth}°)`);
         
         // Find countries within the cone
         const countriesInCone = allCountries.filter(country => {
@@ -624,15 +631,20 @@ class RotatorDisplay {
             return inCone;
         });
         
+        console.log(`[RotatorDisplay] Found ${countriesInCone.length} countries in cone`);
+        
         // Sort by distance (closest first) and limit to 10 countries
         countriesInCone.sort((a, b) => a.distance_km - b.distance_km);
         const limitedCountries = countriesInCone.slice(0, 10);
         
+        console.log(`[RotatorDisplay] Showing ${limitedCountries.length} cone markers`);
+        
         // Track marker positions for collision detection
         const markerPositions = [];
-        const minDistance = 30; // Minimum distance between markers in pixels
+        const minDistance = 40; // Minimum distance between markers in pixels
         
         // Add markers for countries in cone
+        let addedCount = 0;
         limitedCountries.forEach(country => {
             const destPoint = this.calculateDestinationPoint(
                 this.receiverLat, this.receiverLon,
@@ -640,7 +652,10 @@ class RotatorDisplay {
             );
             const projected = this.projection([destPoint[1], destPoint[0]]);
             
-            if (!projected) return;
+            if (!projected) {
+                console.log(`[RotatorDisplay] Could not project ${country.name}`);
+                return;
+            }
             
             const [x, y] = projected;
             
@@ -651,7 +666,10 @@ class RotatorDisplay {
                 return Math.sqrt(dx * dx + dy * dy) < minDistance;
             });
             
-            if (hasCollision) return; // Skip this marker
+            if (hasCollision) {
+                console.log(`[RotatorDisplay] Skipping ${country.name} due to collision`);
+                return;
+            }
             
             // Record position
             markerPositions.push({ x, y });
@@ -669,7 +687,7 @@ class RotatorDisplay {
                 .attr('stroke-width', 1)
                 .style('filter', 'drop-shadow(0 0 3px rgba(255, 193, 7, 0.6))');
             
-            // Add country name label (smaller)
+            // Add country name label (smaller, no bearing/distance)
             markerGroup.append('text')
                 .attr('x', 0)
                 .attr('y', -10)
@@ -679,7 +697,11 @@ class RotatorDisplay {
                 .attr('font-weight', 'normal')
                 .style('text-shadow', '0 0 3px rgba(0,0,0,0.8)')
                 .text(country.name);
+            
+            addedCount++;
         });
+        
+        console.log(`[RotatorDisplay] Added ${addedCount} cone markers to map`);
     }
     
     /**

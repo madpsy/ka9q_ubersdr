@@ -91,6 +91,10 @@ class RotatorDisplay {
         // Create a group for all map elements (for zooming)
         this.mapGroup = this.svg.append("g");
 
+        // Create a separate group for markers that will be manually positioned
+        // This group is NOT transformed by zoom, so markers stay constant size
+        this.markerGroup = this.svg.append("g");
+
         // Add zoom behavior
         const zoom = d3.zoom()
             .scaleExtent([0.5, 8])  // Allow zoom from 0.5x to 8x
@@ -578,8 +582,8 @@ class RotatorDisplay {
         if (!this.showMap || !this.mapGroup || !this.projection) return;
         
         // Remove any existing country markers
-        this.mapGroup.selectAll('.country-marker').remove();
-        this.mapGroup.selectAll('.cone-marker').remove();
+        this.markerGroup.selectAll('.country-marker').remove();
+        this.markerGroup.selectAll('.cone-marker').remove();
         
         // Show smaller markers for countries within the beam cone if data provided
         if (allCountries && currentAzimuth !== null) {
@@ -593,11 +597,14 @@ class RotatorDisplay {
         if (!projected) return;
         
         const [x, y] = projected;
-        
+
+        // Transform coordinates from map space to screen space
+        const screenCoords = this.currentTransform.apply([x, y]);
+
         // Create marker group for selected country (larger, on top)
-        const markerGroup = this.mapGroup.append('g')
+        const markerGroup = this.markerGroup.append('g')
             .attr('class', 'country-marker')
-            .attr('transform', `translate(${x}, ${y})`);
+            .attr('transform', `translate(${screenCoords[0]}, ${screenCoords[1]})`);
         
         // Add marker circle
         markerGroup.append('circle')
@@ -701,28 +708,31 @@ class RotatorDisplay {
             if (!projected) return;
             
             const [x, y] = projected;
-            
-            // Zoom-aware collision detection: when zoomed in, allow markers to be closer
-            // This allows more countries to be displayed in the zoomed area
+
+            // Transform coordinates from map space to screen space
+            const screenCoords = this.currentTransform.apply([x, y]);
+
+            // Zoom-aware collision detection in screen space
+            // This allows more countries to be displayed when zoomed in
             const baseDistance = country.distance_km < 2000 ? 30 : 20;
-            const minDistance = baseDistance / this.currentZoom;
-            
-            // Check for collision with existing markers
+            const minDistance = baseDistance;
+
+            // Check for collision with existing markers (in screen space)
             const hasCollision = markerPositions.some(pos => {
-                const dx = pos.x - x;
-                const dy = pos.y - y;
+                const dx = pos.x - screenCoords[0];
+                const dy = pos.y - screenCoords[1];
                 return Math.sqrt(dx * dx + dy * dy) < minDistance;
             });
-            
+
             if (hasCollision) return;
-            
-            // Record position
-            markerPositions.push({ x, y });
-            
+
+            // Record position (in screen space)
+            markerPositions.push({ x: screenCoords[0], y: screenCoords[1] });
+
             // Create smaller marker group
-            const markerGroup = this.mapGroup.append('g')
+            const markerGroup = this.markerGroup.append('g')
                 .attr('class', 'cone-marker')
-                .attr('transform', `translate(${x}, ${y})`);
+                .attr('transform', `translate(${screenCoords[0]}, ${screenCoords[1]})`);
             
             // Add smaller marker circle
             markerGroup.append('circle')
@@ -756,7 +766,7 @@ class RotatorDisplay {
         if (!this.showMap || !this.mapGroup || !this.projection) return;
         
         // Remove existing cone markers (but not country marker)
-        this.mapGroup.selectAll('.cone-marker').remove();
+        this.markerGroup.selectAll('.cone-marker').remove();
         
         // Show cone markers
         this.showConeMarkers(allCountries, currentAzimuth, null);
@@ -766,9 +776,9 @@ class RotatorDisplay {
      * Clear the country marker from the map
      */
     clearCountryMarker() {
-        if (this.mapGroup) {
-            this.mapGroup.selectAll('.country-marker').remove();
-            this.mapGroup.selectAll('.cone-marker').remove();
+        if (this.markerGroup) {
+            this.markerGroup.selectAll('.country-marker').remove();
+            this.markerGroup.selectAll('.cone-marker').remove();
         }
     }
 

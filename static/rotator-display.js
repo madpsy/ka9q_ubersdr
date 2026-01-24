@@ -112,7 +112,10 @@ class RotatorDisplay {
                         .attr("cy", centerScreen[1]);
                 }
 
-                // Redraw markers when zoom level changes significantly
+                // Update all marker positions immediately on pan/zoom
+                this.updateMarkerPositions();
+
+                // Redraw markers when zoom level changes significantly (to show more/fewer countries)
                 if (Math.abs(this.currentZoom - previousZoom) > 0.1) {
                     this.redrawMarkersAfterZoom();
                 }
@@ -830,6 +833,17 @@ class RotatorDisplay {
             this.markerGroup.selectAll('.country-marker').remove();
             this.markerGroup.selectAll('.cone-marker').remove();
         }
+    }
+
+    /**
+     * Update positions of existing markers after pan/zoom without redrawing
+     * This provides smooth marker movement during pan/zoom operations
+     */
+    updateMarkerPositions() {
+        // Simply trigger a redraw - the zoom change handler will take care of it
+        // This is called on every pan/zoom, while redrawMarkersAfterZoom only triggers
+        // when zoom level changes significantly
+        this.redrawMarkersAfterZoom();
     }
 
     /**

@@ -11,6 +11,7 @@ class RotatorUI {
         this.statusUpdateTimer = null;
         this.countriesData = []; // Store countries data for cone markers
         this.savedPassword = localStorage.getItem('rotctl_password') || ''; // Load saved password
+        this.selectedCountry = null; // Track selected country to exclude from cone markers
 
         // Load saved state from localStorage
         const savedState = localStorage.getItem('ubersdr_rotator_expanded');
@@ -469,7 +470,19 @@ class RotatorUI {
 
             // Update cone markers to show countries in current beam direction
             if (this.rotatorDisplay && this.countriesData.length > 0) {
-                this.rotatorDisplay.updateConeMarkers(this.countriesData, data.position.azimuth);
+                // If a country is selected, redraw with it excluded from cone markers
+                if (this.selectedCountry) {
+                    this.rotatorDisplay.showCountryMarker(
+                        this.selectedCountry.name,
+                        this.selectedCountry.bearing,
+                        this.selectedCountry.distance_km,
+                        this.countriesData,
+                        data.position.azimuth
+                    );
+                } else {
+                    // No country selected, just show cone markers
+                    this.rotatorDisplay.updateConeMarkers(this.countriesData, data.position.azimuth);
+                }
             }
         }
         
@@ -585,6 +598,9 @@ class RotatorUI {
         if (this.countriesData.length > 0 && this.rotatorDisplay) {
             const closestCountry = this.rotatorDisplay.findClosestCountry(bearing, distance);
             if (closestCountry) {
+                // Store selected country so it can be excluded from cone markers in status updates
+                this.selectedCountry = closestCountry;
+
                 // Get current azimuth for cone calculation
                 try {
                     const statusResponse = await fetch('/api/rotctl/status');

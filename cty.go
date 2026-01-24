@@ -153,19 +153,25 @@ func parseEntityLine(line string) (*CTYEntity, error) {
 	}
 
 	// Longitude (column 51-60)
-	// Note: CTY.DAT stores longitude as positive values
-	// Western Hemisphere longitudes must be negated
+	// IMPORTANT: CTY.DAT stores longitude in "degrees West" format
+	// All values are positive and represent degrees West of Greenwich (0°)
+	// We need to negate to convert to standard East-positive format (-180 to +180)
+	// Example: USA at 91.87 in file = 91.87°W = -91.87° in standard format
+	// Example: UK at 0.13 in file = 0.13°W = -0.13° in standard format
+	// Example: Japan would be stored as 320.13 (360-39.87) = 39.87°E in standard format
 	if lon, err := strconv.ParseFloat(strings.TrimSpace(parts[5]), 64); err == nil {
-		entity.Longitude = lon
+		// Convert from West-positive to East-positive (standard)
+		// If lon > 180, it's actually in the Eastern Hemisphere
+		if lon > 180 {
+			entity.Longitude = 360 - lon
+		} else {
+			entity.Longitude = -lon
+		}
 	}
 
 	// Time offset (column 61-69)
 	if offset, err := strconv.ParseFloat(strings.TrimSpace(parts[6]), 64); err == nil {
 		entity.TimeOffset = offset
-		// Negate longitude for Western Hemisphere (negative time offset)
-		if offset < 0 {
-			entity.Longitude = -entity.Longitude
-		}
 	}
 
 	// Primary prefix (column 70-75)

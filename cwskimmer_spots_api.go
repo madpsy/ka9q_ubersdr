@@ -80,9 +80,9 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name, callsign, conti
 			// Enrich with latitude/longitude from CTY.dat
 			if ctyDatabase != nil {
 				if info := ctyDatabase.LookupCallsignFull(spot.Callsign); info != nil {
-					// CTY.dat uses West-positive longitude, negate to get standard East-positive
+					// CTY.dat longitude is now correctly parsed in standard East-positive format
 					lat := info.Latitude
-					lon := -info.Longitude
+					lon := info.Longitude
 					spot.Latitude = &lat
 					spot.Longitude = &lon
 				}

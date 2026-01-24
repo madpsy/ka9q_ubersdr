@@ -27,6 +27,7 @@ class RotatorDisplay {
         this.beamWidth = 45; // degrees
         this.updateTimer = null;
         this.currentZoom = 1;
+        this.currentTransform = d3.zoomIdentity;
         this.mapGroup = null;
         
         // Initialize
@@ -95,6 +96,7 @@ class RotatorDisplay {
             .on("zoom", (event) => {
                 this.mapGroup.attr("transform", event.transform);
                 this.currentZoom = event.transform.k;
+                this.currentTransform = event.transform;
             });
 
         this.svg.call(zoom);
@@ -199,9 +201,14 @@ class RotatorDisplay {
     
     handleMapMouseMove(event) {
         if (!this.projection || !this.receiverLat || !this.receiverLon) return;
-        
+
+        // Get mouse coordinates relative to SVG
         const [mouseX, mouseY] = d3.pointer(event);
-        const coords = this.projection.invert([mouseX, mouseY]);
+
+        // Apply inverse transform to get coordinates in the map's coordinate system
+        const [transformedX, transformedY] = this.currentTransform.invert([mouseX, mouseY]);
+
+        const coords = this.projection.invert([transformedX, transformedY]);
         
         if (!coords) {
             this.tooltip.style.display = 'none';
@@ -235,9 +242,14 @@ class RotatorDisplay {
     
     handleMapClick(event) {
         if (!this.projection || !this.receiverLat || !this.receiverLon) return;
-        
+
+        // Get mouse coordinates relative to SVG
         const [mouseX, mouseY] = d3.pointer(event);
-        const coords = this.projection.invert([mouseX, mouseY]);
+
+        // Apply inverse transform to get coordinates in the map's coordinate system
+        const [transformedX, transformedY] = this.currentTransform.invert([mouseX, mouseY]);
+
+        const coords = this.projection.invert([transformedX, transformedY]);
         
         if (!coords) return;
         
@@ -603,15 +615,12 @@ class RotatorDisplay {
      */
     showConeMarkers(allCountries, currentAzimuth, selectedBearing) {
         if (!allCountries || allCountries.length === 0) {
-            console.log('[RotatorDisplay] No countries data for cone markers');
             return;
         }
         
         const halfBeam = this.beamWidth / 2;
         const minBearing = currentAzimuth - halfBeam;
         const maxBearing = currentAzimuth + halfBeam;
-        
-        console.log(`[RotatorDisplay] Beam cone: ${minBearing.toFixed(1)}° to ${maxBearing.toFixed(1)}° (center: ${currentAzimuth}°)`);
         
         // Find countries within the cone
         const countriesInCone = allCountries.filter(country => {
@@ -634,8 +643,6 @@ class RotatorDisplay {
             return inCone;
         });
         
-        console.log(`[RotatorDisplay] Found ${countriesInCone.length} countries in cone`);
-        
         // Group countries by distance ranges to ensure distribution across the cone
         // Start from 1000km since we filter out closer countries
         const distanceRanges = [
@@ -655,8 +662,6 @@ class RotatorDisplay {
             selectedCountries = selectedCountries.concat(inRange.slice(0, range.limit));
         });
         
-        console.log(`[RotatorDisplay] Selected ${selectedCountries.length} countries across distance ranges`);
-        
         // Track marker positions for collision detection
         const markerPositions = [];
         
@@ -669,10 +674,7 @@ class RotatorDisplay {
             );
             const projected = this.projection([destPoint[1], destPoint[0]]);
             
-            if (!projected) {
-                console.log(`[RotatorDisplay] Could not project ${country.name}`);
-                return;
-            }
+            if (!projected) return;
             
             const [x, y] = projected;
             
@@ -686,10 +688,7 @@ class RotatorDisplay {
                 return Math.sqrt(dx * dx + dy * dy) < minDistance;
             });
             
-            if (hasCollision) {
-                console.log(`[RotatorDisplay] Skipping ${country.name} due to collision`);
-                return;
-            }
+            if (hasCollision) return;
             
             // Record position
             markerPositions.push({ x, y });
@@ -720,8 +719,6 @@ class RotatorDisplay {
             
             addedCount++;
         });
-        
-        console.log(`[RotatorDisplay] Added ${addedCount} cone markers to map`);
     }
     
     /**

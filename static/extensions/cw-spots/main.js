@@ -749,6 +749,8 @@ class CWSpotsExtension extends DecoderExtension {
     }
 
     startAgeUpdates() {
+        // Update ages every second, but only re-render every 30 seconds to reduce DOM manipulation
+        let ageCheckCounter = 0;
         this.ageUpdateInterval = setInterval(() => {
             const panel = document.querySelector('.decoder-extension-panel');
             const isPanelVisible = panel && panel.style.display !== 'none';
@@ -762,14 +764,14 @@ class CWSpotsExtension extends DecoderExtension {
                     }
                 });
 
-                if (this.ageFilter !== null && !this.lastAgeFilterCheck) {
-                    this.lastAgeFilterCheck = Date.now();
-                }
-
-                if (this.ageFilter !== null && this.lastAgeFilterCheck &&
-                    (Date.now() - this.lastAgeFilterCheck) > 10000) {
-                    this.lastAgeFilterCheck = Date.now();
-                    this.filterAndRenderSpots();
+                // If age filter is active, re-render every 30 seconds to remove aged-out spots
+                // This reduces DOM manipulation from every 10 seconds to every 30 seconds
+                if (this.ageFilter !== null) {
+                    ageCheckCounter++;
+                    if (ageCheckCounter >= 30) {
+                        ageCheckCounter = 0;
+                        this.filterAndRenderSpots();
+                    }
                 }
             }
 

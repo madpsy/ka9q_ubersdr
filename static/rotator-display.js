@@ -618,6 +618,9 @@ class RotatorDisplay {
             // Skip the selected country
             if (country.bearing === selectedBearing) return false;
             
+            // Skip countries within 1000km of receiver
+            if (country.distance_km < 1000) return false;
+            
             // Check if bearing is within cone (handle wrap-around at 0/360)
             let inCone = false;
             if (minBearing < 0) {
@@ -634,10 +637,11 @@ class RotatorDisplay {
         console.log(`[RotatorDisplay] Found ${countriesInCone.length} countries in cone`);
         
         // Group countries by distance ranges to ensure distribution across the cone
+        // Start from 1000km since we filter out closer countries
         const distanceRanges = [
-            { min: 0, max: 2000, limit: 3 },
-            { min: 2000, max: 5000, limit: 3 },
-            { min: 5000, max: 10000, limit: 3 },
+            { min: 1000, max: 3000, limit: 3 },
+            { min: 3000, max: 6000, limit: 3 },
+            { min: 6000, max: 10000, limit: 3 },
             { min: 10000, max: Infinity, limit: 3 }
         ];
         

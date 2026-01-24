@@ -1057,7 +1057,7 @@
                     console.log('[Rotator] Rotator is enabled, loading rotator scripts');
                     // Load D3.js and topojson dependencies first
                     const d3Script = document.createElement('script');
-                    d3Script.src = 'https://d3js.org/d3.v7.min.js';
+                    d3Script.src = 'd3.v7.min.js';
                     document.head.appendChild(d3Script);
                     await new Promise((resolve, reject) => {
                         d3Script.onload = resolve;
@@ -1065,7 +1065,7 @@
                     });
                     
                     const d3GeoScript = document.createElement('script');
-                    d3GeoScript.src = 'https://d3js.org/d3-geo.v3.min.js';
+                    d3GeoScript.src = 'd3-geo.v3.min.js';
                     document.head.appendChild(d3GeoScript);
                     await new Promise((resolve, reject) => {
                         d3GeoScript.onload = resolve;
@@ -1073,7 +1073,7 @@
                     });
                     
                     const topojsonScript = document.createElement('script');
-                    topojsonScript.src = 'https://cdn.jsdelivr.net/npm/topojson@3';
+                    topojsonScript.src = 'topojson.v3.min.js';
                     document.head.appendChild(topojsonScript);
                     await new Promise((resolve, reject) => {
                         topojsonScript.onload = resolve;

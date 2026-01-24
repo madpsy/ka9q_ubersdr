@@ -227,7 +227,7 @@
             z-index: 100;
         }
 
-        .country-overlay select {
+        .country-overlay input {
             width: 250px;
             padding: 10px;
             font-size: 14px;
@@ -235,22 +235,20 @@
             border-radius: 8px;
             background: rgba(255,255,255,0.1);
             color: #fff;
-            cursor: pointer;
         }
 
-        .country-overlay select:focus {
+        .country-overlay input:focus {
             outline: none;
             border-color: #4CAF50;
         }
 
-        .country-overlay select:disabled {
+        .country-overlay input:disabled {
             opacity: 0.5;
             cursor: not-allowed;
         }
 
-        .country-overlay select option {
-            background: #2a5298;
-            color: #fff;
+        .country-overlay input::placeholder {
+            color: rgba(255,255,255,0.6);
         }
 
         input[type="number"], input[type="password"] {
@@ -476,7 +474,7 @@
                 font-size: 16px;
             }
 
-            .country-overlay select {
+            .country-overlay input {
                 width: 100%;
                 max-width: 300px;
                 font-size: 16px;
@@ -544,7 +542,7 @@
                 max-width: 250px;
             }
 
-            .country-overlay select {
+            .country-overlay input {
                 max-width: 250px;
             }
         }
@@ -623,9 +621,8 @@
             </div>
             
             <div class="country-overlay">
-                <select id="country-select">
-                    <option value="">Loading countries...</option>
-                </select>
+                <input type="text" id="country-input" list="country-list" placeholder="Type a country..." autocomplete="off">
+                <datalist id="country-list"></datalist>
             </div>
         </div>
 
@@ -707,13 +704,13 @@
             const goButton = document.querySelector('button[onclick="setPosition()"]');
             const adjustButtons = document.querySelectorAll('.adjustment-overlay button');
             const controlButtons = document.querySelectorAll('.controls-overlay button');
-            const countrySelect = document.getElementById('country-select');
+            const countryInput = document.getElementById('country-input');
             
             // Enable/disable based on password
             if (goButton) goButton.disabled = !hasPassword;
             adjustButtons.forEach(btn => btn.disabled = !hasPassword);
             controlButtons.forEach(btn => btn.disabled = !hasPassword);
-            if (countrySelect) countrySelect.disabled = !hasPassword;
+            if (countryInput) countryInput.disabled = !hasPassword;
         }
 
         async function fetchReceiverLocation() {
@@ -981,73 +978,84 @@
                 
                 if (data.success && data.countries) {
                     countriesData = data.countries;
-                    populateCountryDropdown(data.countries);
+                    populateCountryDatalist(data.countries);
                 } else {
                     console.error('Failed to fetch countries:', data.error);
-                    document.getElementById('country-select').innerHTML = '<option value="">Countries unavailable</option>';
                 }
             } catch (error) {
                 console.error('Failed to fetch countries:', error);
-                document.getElementById('country-select').innerHTML = '<option value="">Error loading countries</option>';
             }
         }
 
-        function populateCountryDropdown(countries) {
-            const select = document.getElementById('country-select');
+        function populateCountryDatalist(countries) {
+            const datalist = document.getElementById('country-list');
+            const input = document.getElementById('country-input');
             
             // Clear existing options
-            select.innerHTML = '<option value="">Select a country...</option>';
+            datalist.innerHTML = '';
             
             // Add countries sorted by name
             countries.forEach(country => {
                 const option = document.createElement('option');
-                option.value = country.bearing;
-                option.textContent = `${country.name} (${country.continent}) ${country.bearing}°`;
+                option.value = `${country.name} (${country.continent}) ${country.bearing}°`;
+                option.dataset.bearing = country.bearing;
                 option.dataset.country = JSON.stringify(country);
-                select.appendChild(option);
+                datalist.appendChild(option);
             });
             
-            // Add change event listener
-            select.addEventListener('change', handleCountrySelection);
+            // Add input event listener for selection
+            input.addEventListener('input', handleCountryInput);
+            
+            // Update placeholder when loaded
+            input.placeholder = 'Type a country...';
         }
 
-        function handleCountrySelection(event) {
-            const select = event.target;
-            const bearing = parseInt(select.value);
+        function handleCountryInput(event) {
+            const input = event.target;
+            const inputValue = input.value;
             
-            if (isNaN(bearing)) {
-                // Clear marker if no country selected
+            // Check if the input matches a country option
+            const datalist = document.getElementById('country-list');
+            const options = datalist.querySelectorAll('option');
+            
+            let matchedCountry = null;
+            for (const option of options) {
+                if (option.value === inputValue) {
+                    matchedCountry = JSON.parse(option.dataset.country);
+                    break;
+                }
+            }
+            
+            if (matchedCountry) {
+                const bearing = matchedCountry.bearing;
+                
+                // Show marker on map
+                if (rotatorDisplay) {
+                    rotatorDisplay.showCountryMarker(
+                        matchedCountry.name,
+                        bearing,
+                        matchedCountry.distance_km
+                    );
+                }
+                
+                // Set the azimuth input
+                document.getElementById('target-azimuth').value = bearing;
+                
+                // Check if password is entered
+                const password = document.getElementById('password').value;
+                if (password) {
+                    // Automatically send the command
+                    setAzimuth(bearing);
+                    showMessage(`Pointing at ${matchedCountry.name} (${matchedCountry.continent}) - Bearing: ${bearing}°, Distance: ${Math.round(matchedCountry.distance_km)} km`, 'success');
+                } else {
+                    // Show message to enter password
+                    showMessage(`Selected ${matchedCountry.name} (${matchedCountry.continent}) - Bearing: ${bearing}°. Enter password and click "Go" to move rotator.`, 'success');
+                }
+            } else if (inputValue === '') {
+                // Clear marker if input is cleared
                 if (rotatorDisplay) {
                     rotatorDisplay.clearCountryMarker();
                 }
-                return;
-            }
-            
-            // Get the country data from the option
-            const selectedOption = select.options[select.selectedIndex];
-            const countryData = JSON.parse(selectedOption.dataset.country);
-            
-            // Show marker on map
-            if (rotatorDisplay) {
-                rotatorDisplay.showCountryMarker(
-                    countryData.name,
-                    bearing,
-                    countryData.distance_km
-                );
-            }
-            
-            // Set the azimuth input
-            document.getElementById('target-azimuth').value = bearing;
-            
-            // Check if password is entered
-            const password = document.getElementById('password').value;
-            if (password) {
-                // Automatically send the command
-                setAzimuth(bearing);
-                showMessage(`Pointing at ${countryData.name} (${countryData.continent}) - Bearing: ${bearing}°, Distance: ${Math.round(countryData.distance_km)} km`, 'success');
-            } else {
-                // Show message to enter password
-                showMessage(`Selected ${countryData.name} (${countryData.continent}) - Bearing: ${bearing}°. Enter password and click "Go" to move rotator.`, 'success');
             }
         }
     </script>

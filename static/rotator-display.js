@@ -130,7 +130,7 @@ class RotatorDisplay {
 
         // Load and draw world map
         try {
-            const response = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
+            const response = await fetch('countries-110m.json');
             const world = await response.json();
             const countries = topojson.feature(world, world.objects.countries);
 

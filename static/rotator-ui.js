@@ -570,6 +570,7 @@ class RotatorUI {
      */
     async handleMapClick(detail) {
         const bearing = detail.bearing;
+        const distance = detail.distance;
 
         // Check if password is available, recheck localStorage if not
         if (!this.savedPassword) {
@@ -580,7 +581,31 @@ class RotatorUI {
             }
         }
 
-        // Send command to rotator
+        // Find the closest country by bearing and distance (same as rotator.html)
+        if (this.countriesData.length > 0 && this.rotatorDisplay) {
+            const closestCountry = this.rotatorDisplay.findClosestCountry(bearing, distance);
+            if (closestCountry) {
+                // Get current azimuth for cone calculation
+                try {
+                    const statusResponse = await fetch('/api/rotctl/status');
+                    const statusData = await statusResponse.json();
+                    const currentAzimuth = statusData.position?.azimuth || 0;
+
+                    // Show marker on map with cone markers
+                    this.rotatorDisplay.showCountryMarker(
+                        closestCountry.name,
+                        closestCountry.bearing,
+                        closestCountry.distance_km,
+                        this.countriesData,
+                        currentAzimuth
+                    );
+                } catch (error) {
+                    console.error('[RotatorUI] Failed to get current azimuth for marker:', error);
+                }
+            }
+        }
+
+        // Send command to rotator with the exact cursor bearing (not country center)
         try {
             const response = await fetch('/api/rotctl/position', {
                 method: 'POST',

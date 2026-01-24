@@ -306,9 +306,16 @@ class DXClusterExtension extends DecoderExtension {
         // This ensures DX spot markers are redrawn on the spectrum display
         if (window.spectrumDisplay) {
             window.spectrumDisplay.invalidateMarkerCache();
-            // Force immediate redraw of markers by calling draw()
-            // draw() will handle the case where spectrumData doesn't exist yet
-            window.spectrumDisplay.draw();
+
+            // Schedule redraw on next animation frame (non-blocking)
+            // This prevents audio interruption by deferring the redraw
+            if (!this.spectrumRedrawScheduled) {
+                this.spectrumRedrawScheduled = true;
+                requestAnimationFrame(() => {
+                    window.spectrumDisplay.draw();
+                    this.spectrumRedrawScheduled = false;
+                });
+            }
         }
 
         // Start with all spots (backend already filters to 0-30 MHz)

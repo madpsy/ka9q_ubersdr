@@ -10,6 +10,7 @@ class RotatorUI {
         this.rotatorDisplay = null;
         this.statusUpdateTimer = null;
         this.countriesData = []; // Store countries data for cone markers
+        this.savedPassword = localStorage.getItem('rotctl_password') || ''; // Load saved password
 
         // Load saved state from localStorage
         const savedState = localStorage.getItem('ubersdr_rotator_expanded');
@@ -167,6 +168,17 @@ class RotatorUI {
                 box-shadow: 0 0 6px #f44336;
             }
             
+            /* Flashing animation for moving state */
+            @keyframes flash {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.3; }
+            }
+
+            .rotator-tab-status.moving,
+            .rotator-status-indicator.moving {
+                animation: flash 1s infinite;
+            }
+
             .rotator-header:hover {
                 background: rgba(70, 70, 70, 0.6);
             }
@@ -410,6 +422,11 @@ class RotatorUI {
             this.handleStatusUpdate(event.detail);
         });
         
+        // Listen for map click events from RotatorDisplay
+        document.addEventListener('rotator-map-click', (event) => {
+            this.handleMapClick(event.detail);
+        });
+
         // Do an initial status fetch
         this.fetchRotatorStatus();
     }
@@ -459,23 +476,36 @@ class RotatorUI {
         // Update status indicator in expanded view
         const statusIndicator = document.getElementById('rotator-status-indicator');
         if (statusIndicator) {
+            let className = 'rotator-status-indicator';
             if (data.connected) {
-                statusIndicator.className = 'rotator-status-indicator connected';
+                className += ' connected';
                 statusIndicator.title = 'Connected';
             } else {
-                statusIndicator.className = 'rotator-status-indicator disconnected';
+                className += ' disconnected';
                 statusIndicator.title = 'Disconnected';
             }
+            // Add moving class if rotator is moving
+            if (data.moving) {
+                className += ' moving';
+                statusIndicator.title += ' (Moving)';
+            }
+            statusIndicator.className = className;
         }
         
         // Update status indicator on collapsed tab button
         const tabStatus = document.getElementById('rotator-tab-status');
         if (tabStatus) {
+            let className = 'rotator-tab-status';
             if (data.connected) {
-                tabStatus.className = 'rotator-tab-status connected';
+                className += ' connected';
             } else {
-                tabStatus.className = 'rotator-tab-status disconnected';
+                className += ' disconnected';
             }
+            // Add moving class if rotator is moving
+            if (data.moving) {
+                className += ' moving';
+            }
+            tabStatus.className = className;
         }
     }
     
@@ -532,6 +562,46 @@ class RotatorUI {
             }
         } catch (error) {
             console.error('[RotatorUI] Failed to fetch countries:', error);
+        }
+    }
+
+    /**
+     * Handle map click event
+     */
+    async handleMapClick(detail) {
+        const bearing = detail.bearing;
+
+        // Check if password is available
+        if (!this.savedPassword) {
+            console.log('[RotatorUI] No password available. Click "Controls" button to set password.');
+            return;
+        }
+
+        // Send command to rotator
+        try {
+            const response = await fetch('/api/rotctl/position', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    password: this.savedPassword,
+                    azimuth: bearing
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                console.log(`[RotatorUI] Moving to ${bearing}°`);
+            } else {
+                console.error('[RotatorUI] Failed to set azimuth:', data.error);
+                // If password is wrong, clear it
+                if (data.error && data.error.toLowerCase().includes('password')) {
+                    this.savedPassword = '';
+                    localStorage.removeItem('rotctl_password');
+                }
+            }
+        } catch (error) {
+            console.error('[RotatorUI] Network error:', error);
         }
     }
 

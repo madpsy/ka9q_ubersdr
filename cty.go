@@ -153,6 +153,8 @@ func parseEntityLine(line string) (*CTYEntity, error) {
 	}
 
 	// Longitude (column 51-60)
+	// Note: CTY.DAT stores longitude as positive values
+	// Western Hemisphere longitudes must be negated
 	if lon, err := strconv.ParseFloat(strings.TrimSpace(parts[5]), 64); err == nil {
 		entity.Longitude = lon
 	}
@@ -160,6 +162,10 @@ func parseEntityLine(line string) (*CTYEntity, error) {
 	// Time offset (column 61-69)
 	if offset, err := strconv.ParseFloat(strings.TrimSpace(parts[6]), 64); err == nil {
 		entity.TimeOffset = offset
+		// Negate longitude for Western Hemisphere (negative time offset)
+		if offset < 0 {
+			entity.Longitude = -entity.Longitude
+		}
 	}
 
 	// Primary prefix (column 70-75)

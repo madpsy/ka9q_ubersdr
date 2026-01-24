@@ -449,13 +449,30 @@ class DecodeMetricsDashboard {
                 }
             });
 
-            // Sort dates and prepare chart data
-            const dates = Object.keys(dailyData).sort();
-            const labels = dates.map(d => new Date(d).getDate());
-            
+            // Get the current month and year to determine days in month
+            const today = new Date();
+            const year = today.getFullYear();
+            const month = today.getMonth();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+            // Create labels for all days in the month
+            const labels = [];
+            const monthlyDataArrays = { FT8: [], FT4: [], WSPR: [], JS8: [] };
+
+            for (let day = 1; day <= daysInMonth; day++) {
+                labels.push(day);
+                const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                const dayData = dailyData[dateKey] || { FT8: 0, FT4: 0, WSPR: 0, JS8: 0 };
+
+                monthlyDataArrays.FT8.push(dayData.FT8);
+                monthlyDataArrays.FT4.push(dayData.FT4);
+                monthlyDataArrays.WSPR.push(dayData.WSPR);
+                monthlyDataArrays.JS8.push(dayData.JS8);
+            }
+
             const datasets = Object.keys(this.MODE_COLORS).map(mode => ({
                 label: mode,
-                data: dates.map(date => dailyData[date][mode] || 0),
+                data: monthlyDataArrays[mode],
                 backgroundColor: this.MODE_COLORS[mode],
                 borderColor: this.MODE_COLORS[mode].replace('0.8', '1'),
                 borderWidth: 1
@@ -767,20 +784,40 @@ class DecodeMetricsDashboard {
                 }
             });
 
-            const dates = Object.keys(dailyData).sort();
-            const labels = dates.map(d => new Date(d).getDate());
+            // Get the current month and year to determine days in month
+            const today = new Date();
+            const year = today.getFullYear();
+            const month = today.getMonth();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
 
+            // Collect all bands that appear in the data
             const allBands = new Set();
             Object.values(dailyData).forEach(dayData => {
                 Object.keys(dayData).forEach(band => allBands.add(band));
             });
 
             const sortedBands = this.sortBands(Array.from(allBands));
+
+            // Create labels for all days in the month
+            const labels = [];
+            const monthlyDataArrays = {};
+            sortedBands.forEach(band => { monthlyDataArrays[band] = []; });
+
+            for (let day = 1; day <= daysInMonth; day++) {
+                labels.push(day);
+                const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                const dayData = dailyData[dateKey] || {};
+
+                sortedBands.forEach(band => {
+                    monthlyDataArrays[band].push(dayData[band] || 0);
+                });
+            }
+
             const datasets = sortedBands.map(band => {
                 const color = this.getBandColor(band);
                 return {
                     label: band,
-                    data: dates.map(date => dailyData[date][band] || 0),
+                    data: monthlyDataArrays[band],
                     backgroundColor: color,
                     borderColor: color.replace('0.8', '1'),
                     borderWidth: 1

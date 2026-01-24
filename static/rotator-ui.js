@@ -387,6 +387,7 @@ class RotatorUI {
         }
         
         // Create rotator display with map and compass, no controls
+        // Set updateInterval to 0 to disable automatic fetching - we'll update manually
         this.rotatorDisplay = new RotatorDisplay({
             containerId: 'rotator-display-container',
             showMap: true,
@@ -395,7 +396,7 @@ class RotatorUI {
             showPassword: false,
             mapSize: 500,
             compassSize: 150,
-            updateInterval: 3000  // Update every 3 seconds (vs 1 second in rotator.html)
+            updateInterval: 0  // Disable automatic updates, we handle them in rotator-ui.js
         });
         
         // Fetch and display location
@@ -442,6 +443,11 @@ class RotatorUI {
             const tabBearing = document.getElementById('rotator-tab-bearing');
             if (tabBearing) {
                 tabBearing.textContent = Math.round(data.position.azimuth) + '°';
+            }
+
+            // Manually update the rotator display azimuth
+            if (this.rotatorDisplay) {
+                this.rotatorDisplay.updateAzimuthDisplay(data.position.azimuth);
             }
 
             // Update cone markers to show countries in current beam direction

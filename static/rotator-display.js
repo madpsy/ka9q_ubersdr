@@ -112,7 +112,7 @@ class RotatorDisplay {
                         .attr("cy", centerScreen[1]);
                 }
 
-                // Update all marker positions immediately on pan/zoom
+                // Update all marker positions immediately based on their stored map coordinates
                 this.updateMarkerPositions();
 
                 // Redraw markers when zoom level changes significantly (to show more/fewer countries)
@@ -616,7 +616,8 @@ class RotatorDisplay {
         // Create marker group for selected country (larger, on top)
         const markerGroup = this.markerGroup.append('g')
             .attr('class', 'country-marker')
-            .attr('transform', `translate(${screenCoords[0]}, ${screenCoords[1]})`);
+            .attr('transform', `translate(${screenCoords[0]}, ${screenCoords[1]})`)
+            .datum({ mapX: x, mapY: y, name: countryName, bearing: bearing, distance: distance });
         
         // Add marker circle
         markerGroup.append('circle')
@@ -741,10 +742,11 @@ class RotatorDisplay {
             // Record position (in screen space)
             markerPositions.push({ x: screenCoords[0], y: screenCoords[1] });
 
-            // Create smaller marker group
+            // Create smaller marker group and store map coordinates
             const markerGroup = this.markerGroup.append('g')
                 .attr('class', 'cone-marker')
-                .attr('transform', `translate(${screenCoords[0]}, ${screenCoords[1]})`);
+                .attr('transform', `translate(${screenCoords[0]}, ${screenCoords[1]})`)
+                .datum({ mapX: x, mapY: y, name: country.name });
             
             // Add smaller marker circle
             markerGroup.append('circle')
@@ -836,14 +838,33 @@ class RotatorDisplay {
     }
 
     /**
-     * Update positions of existing markers after pan/zoom without redrawing
-     * This provides smooth marker movement during pan/zoom operations
+     * Update marker positions based on current zoom/pan transform
+     * Uses stored map coordinates to recalculate screen positions
      */
     updateMarkerPositions() {
-        // Simply trigger a redraw - the zoom change handler will take care of it
-        // This is called on every pan/zoom, while redrawMarkersAfterZoom only triggers
-        // when zoom level changes significantly
-        this.redrawMarkersAfterZoom();
+        if (!this.markerGroup) return;
+
+        const self = this;
+
+        // Update all country markers
+        this.markerGroup.selectAll('.country-marker').each(function() {
+            const marker = d3.select(this);
+            const data = marker.datum();
+            if (data && data.mapX !== undefined && data.mapY !== undefined) {
+                const screenCoords = self.currentTransform.apply([data.mapX, data.mapY]);
+                marker.attr('transform', `translate(${screenCoords[0]}, ${screenCoords[1]})`);
+            }
+        });
+
+        // Update all cone markers
+        this.markerGroup.selectAll('.cone-marker').each(function() {
+            const marker = d3.select(this);
+            const data = marker.datum();
+            if (data && data.mapX !== undefined && data.mapY !== undefined) {
+                const screenCoords = self.currentTransform.apply([data.mapX, data.mapY]);
+                marker.attr('transform', `translate(${screenCoords[0]}, ${screenCoords[1]})`);
+            }
+        });
     }
 
     /**

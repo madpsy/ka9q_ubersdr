@@ -748,8 +748,8 @@ class RotatorDisplay {
                 .attr('y', -10)
                 .attr('text-anchor', 'middle')
                 .attr('fill', 'rgba(255, 255, 255, 0.9)')
-                .attr('font-size', '10px')
-                .attr('font-weight', 'normal')
+                .attr('font-size', '12px')
+                .attr('font-weight', 'bold')
                 .style('text-shadow', '0 0 3px rgba(0,0,0,0.8)')
                 .text(country.name);
             

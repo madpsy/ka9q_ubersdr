@@ -29,10 +29,10 @@ class RotatorUI {
         // Do an immediate fetch
         this.fetchRotatorStatus();
         
-        // Set up periodic updates every 3 seconds
+        // Set up periodic updates every 1 second (same as rotator.html)
         this.statusUpdateTimer = setInterval(() => {
             this.fetchRotatorStatus();
-        }, 3000);
+        }, 1000);
     }
     
     /**

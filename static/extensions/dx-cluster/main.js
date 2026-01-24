@@ -28,6 +28,7 @@ class DXClusterExtension extends DecoderExtension {
         this.newSpotId = null; // Track ID of the newest spot to highlight
         this.spotIdCounter = 0; // Counter for unique spot IDs
         this.ageUpdateInterval = null; // Timer for updating spot ages
+        this.renderDebounceTimeout = null; // Debounce timer for batching spot updates
 
         // Continent code to name mapping
         this.continentNames = {
@@ -254,11 +255,17 @@ class DXClusterExtension extends DecoderExtension {
             this.spots = this.spots.slice(0, this.maxSpots);
         }
 
-        // Update display
-        this.filterAndRenderSpots();
+        // Debounce display updates to batch multiple spots together
+        // This prevents audio interruption when receiving buffered spots
+        if (this.renderDebounceTimeout) {
+            clearTimeout(this.renderDebounceTimeout);
+        }
 
-        // Update last update time
-        this.updateLastUpdate();
+        this.renderDebounceTimeout = setTimeout(() => {
+            this.filterAndRenderSpots();
+            this.updateLastUpdate();
+            this.renderDebounceTimeout = null;
+        }, 50); // 50ms debounce - batches rapid spot arrivals
 
         // If this is a buffered spot (initial burst), schedule a marker redraw after a delay
         // This ensures markers appear even if spectrum data hasn't arrived yet

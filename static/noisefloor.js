@@ -1464,6 +1464,15 @@ class NoiseFloorMonitor {
                     this.wideBandChart.options.scales.y.min = yMin;
                     this.wideBandChart.options.scales.y.max = yMax;
 
+                    // Preserve existing noise analysis annotations
+                    const existingAnnotations = this.wideBandChart.options.plugins.annotation.annotations || {};
+                    const noiseAnnotations = {};
+                    Object.keys(existingAnnotations).forEach(key => {
+                        if (key.startsWith('noise-')) {
+                            noiseAnnotations[key] = existingAnnotations[key];
+                        }
+                    });
+
                     // Update annotations with new min/max/P5 values
                     this.wideBandChart.options.plugins.annotation.annotations = {
                         p5Line: {
@@ -1516,7 +1525,8 @@ class NoiseFloorMonitor {
                                 font: { size: 10, weight: 'bold' },
                                 padding: 4
                             }
-                        }
+                        },
+                        ...noiseAnnotations  // Restore noise analysis annotations
                     };
 
                     // Apply zoom after update

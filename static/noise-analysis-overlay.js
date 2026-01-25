@@ -164,7 +164,7 @@ class NoiseAnalysisOverlay {
                 }
             });
             
-            this.chart.update('none'); // Update without animation
+            // Don't call update here - let the caller decide when to update
         }
     }
     
@@ -176,9 +176,6 @@ class NoiseAnalysisOverlay {
             return;
         }
         
-        // Clear existing noise overlays
-        this.clearOverlay();
-        
         // Ensure annotation plugin is initialized
         if (!this.chart.options.plugins.annotation) {
             this.chart.options.plugins.annotation = { annotations: {} };
@@ -189,13 +186,27 @@ class NoiseAnalysisOverlay {
         
         const annotations = this.chart.options.plugins.annotation.annotations;
         
+        // Save existing non-noise annotations
+        const preservedAnnotations = {};
+        Object.keys(annotations).forEach(key => {
+            if (!key.startsWith('noise-')) {
+                preservedAnnotations[key] = annotations[key];
+            }
+        });
+        
+        // Clear only noise annotations
+        this.clearOverlay();
+        
+        // Restore preserved annotations
+        Object.assign(annotations, preservedAnnotations);
+        
         // Add annotations for each detected noise source
         this.analysisData.sources.forEach((source, index) => {
             this.addNoiseAnnotation(annotations, source, index);
         });
         
-        // Update chart
-        this.chart.update('none'); // Update without animation for smooth overlay
+        // Update chart without animation
+        this.chart.update('none');
     }
     
     /**

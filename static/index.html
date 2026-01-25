@@ -18,6 +18,142 @@
     <script src="filters.js"></script>
 </head>
 <body>
+    <!-- KiwiSDR CAT sync compatibility markers (hidden) -->
+    <div id="id-kiwi-container" style="display: none"></div>
+    <form name="form_freq" style="display: none">
+        <input type="text" />
+    </form>
+
+    <!-- KiwiSDR CAT sync compatibility script -->
+    <script>
+        (function () {
+            const w = window;
+            const state = (w.__catsync_state = w.__catsync_state || { hz: null, mode: null, requestedHz: null });
+            const q = (w.__catsync_q = w.__catsync_q || []);
+
+            const noopFreqsetComplete = function () {};
+            w.__catsync_noop_freqset_complete = noopFreqsetComplete;
+            w.freqset_complete = w.freqset_complete || noopFreqsetComplete;
+
+            function flush() {
+                while (q.length) {
+                    const item = q.shift();
+                    if (!item) break;
+                    try {
+                        if (item.fn === 'setfreq' && typeof w.__catsync_setfreq_impl === 'function') {
+                            w.__catsync_setfreq_impl.apply(null, item.args);
+                        } else if (item.fn === 'setmode' && typeof w.__catsync_setmode_impl === 'function') {
+                            w.__catsync_setmode_impl.apply(null, item.args);
+                        } else if (item.fn === 'zoom_step' && typeof w.__catsync_zoom_step_impl === 'function') {
+                            w.__catsync_zoom_step_impl.apply(null, item.args);
+                        }
+                    } catch {
+                        // ignore
+                    }
+                }
+            }
+
+            w.__catsync_flush = flush;
+
+            function parseMaybeKHzOrMHzToHz(raw) {
+                const s = String(raw ?? '').trim().replace(',', '.');
+                const v = Number.parseFloat(s);
+                if (!Number.isFinite(v) || v <= 0) return null;
+
+                // Heuristic:
+                // - typical ham HF in kHz: 3500..30000
+                // - typical VHF in MHz: 144.390
+                if (v < 1000) return Math.round(v * 1_000_000); // MHz -> Hz
+                if (v < 1_000_000) return Math.round(v * 1_000); // kHz -> Hz
+                return Math.round(v); // already Hz
+            }
+
+            function installLegacyFrequencyForms() {
+                try {
+                    const kiwiForm = document.forms && document.forms['form_freq'];
+                    const kiwiInput = kiwiForm && kiwiForm.elements && kiwiForm.elements[0];
+                    if (kiwiInput && !kiwiInput.__catsync_patched) {
+                        const desc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(kiwiInput), 'value');
+                        Object.defineProperty(kiwiInput, 'value', {
+                            configurable: true,
+                            enumerable: true,
+                            get() {
+                                return desc && desc.get ? desc.get.call(this) : '';
+                            },
+                            set(v) {
+                                if (desc && desc.set) desc.set.call(this, v);
+                                const hz = parseMaybeKHzOrMHzToHz(v);
+                                if (hz != null) w.setfreq(hz);
+                            },
+                        });
+                        kiwiInput.__catsync_patched = true;
+                    }
+                } catch {
+                    // ignore
+                }
+            }
+
+            // KiwiSDR-ish APIs CATsync expects.
+            w.setfreq = function (hz) {
+                const num = Number(hz);
+                if (!Number.isFinite(num) || num <= 0) return false;
+                const rounded = Math.round(num);
+                state.requestedHz = rounded;
+
+                if (typeof w.__catsync_setfreq_impl === 'function') {
+                    const ok = w.__catsync_setfreq_impl(rounded);
+                    return ok !== false;
+                }
+
+                q.push({ fn: 'setfreq', args: [rounded] });
+                return true;
+            };
+
+            installLegacyFrequencyForms();
+
+            w.ext_set_mode = function (mode) {
+                const raw = String(mode || '');
+                state.mode = raw.toUpperCase();
+
+                if (typeof w.__catsync_setmode_impl === 'function') {
+                    const ok = w.__catsync_setmode_impl(raw);
+                    return ok !== false;
+                }
+
+                q.push({ fn: 'setmode', args: [raw] });
+                return true;
+            };
+
+            // Minimal Kiwi-compatible zoom API.
+            w.ext_zoom = w.ext_zoom || { TO_BAND: 0 };
+            w.zoom_step = function (action) {
+                if (typeof w.__catsync_zoom_step_impl === 'function') {
+                    const ok = w.__catsync_zoom_step_impl(action);
+                    return ok !== false;
+                }
+
+                q.push({ fn: 'zoom_step', args: [action] });
+                return true;
+            };
+
+            // Read-backs some CATsync integrations use.
+            w.ext_get_mode = w.ext_get_mode || function () {
+                return state.mode;
+            };
+            w.ext_get_freq = w.ext_get_freq || function () {
+                return state.hz;
+            };
+            w.ext_get_freq_kHz = w.ext_get_freq_kHz || function () {
+                return state.hz == null ? 0 : state.hz / 1000;
+            };
+
+            // Some integrations (including the CATsync demo app) install this callback.
+            w.injection_environment_changed = w.injection_environment_changed || function () {};
+
+            flush();
+        })();
+    </script>
+
     <!-- Notification Toast -->
     <div id="notification-toast" class="notification-toast"></div>
     

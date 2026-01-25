@@ -2037,6 +2037,11 @@ function updateStatus(msg) {
     // Update page title
     updatePageTitle();
 
+    // Update CAT sync state
+    if (typeof updateCATSyncState === 'function') {
+        updateCATSyncState();
+    }
+
     // Only log status updates that are NOT from periodic sync (i.e., user-initiated changes)
     // Check if this is a significant change by comparing with last logged values
     if (!window.lastLoggedStatus ||
@@ -2770,6 +2775,11 @@ function handleFrequencyChange() {
     // Update URL with new frequency
     updateURL();
 
+    // Update CAT sync state
+    if (typeof updateCATSyncState === 'function') {
+        updateCATSyncState();
+    }
+
     // Notify extensions of frequency change
     if (window.radioAPI) {
         window.radioAPI.notifyFrequencyChange(frequency);
@@ -3216,6 +3226,11 @@ function setMode(mode, preserveBandwidth = false) {
 
     // Update URL with new mode
     updateURL();
+
+    // Update CAT sync state
+    if (typeof updateCATSyncState === 'function') {
+        updateCATSyncState();
+    }
 
     // Notify extensions of mode change
     if (window.radioAPI) {
@@ -7754,7 +7769,169 @@ document.addEventListener('DOMContentLoaded', () => {
             updateFrequencyDisplay();
         });
     }
+
+    // KiwiSDR CAT sync integration - connect implementation hooks
+    const w = window;
+    
+    // Frequency setter implementation
+    const setfreqImpl = (hz) => {
+        const rounded = Math.round(Number(hz));
+        if (!Number.isFinite(rounded) || rounded <= 0) return false;
+        
+        w.__catsync_state = w.__catsync_state || { hz: null, mode: null, requestedHz: null };
+        w.__catsync_state.requestedHz = rounded;
+        w.__catsync_state.hz = rounded;
+        
+        // Use the existing setFrequencyInputValue function
+        setFrequencyInputValue(rounded);
+        updateBandButtons(rounded);
+        updateBandSelector();
+        updateURL();
+        
+        // Notify extensions
+        if (window.radioAPI) {
+            window.radioAPI.notifyFrequencyChange(rounded);
+        }
+        
+        // Auto-tune if connected
+        if (wsManager.isConnected()) {
+            autoTune();
+        } else {
+            connect();
+        }
+        
+        return true;
+    };
+    
+    // Mode setter implementation
+    const setmodeImpl = (mode) => {
+        const raw = String(mode || '').trim().toUpperCase();
+        
+        // Map KiwiSDR mode names to ka9q_ubersdr modes
+        const modeMap = {
+            'WFM': 'fm',
+            'NFM': 'nfm',
+            'NBFM': 'nfm',
+            'CWU': 'cwu',
+            'CWL': 'cwl',
+            'DIGU': 'usb',
+            'DIGL': 'lsb',
+            'DSB': 'am',
+            'USB': 'usb',
+            'LSB': 'lsb',
+            'AM': 'am',
+            'SAM': 'sam',
+            'FM': 'fm',
+            'CW': 'cwu'  // Default CW to CWU
+        };
+        
+        const mappedMode = modeMap[raw] || raw.toLowerCase();
+        const validModes = ['usb', 'lsb', 'cwu', 'cwl', 'am', 'sam', 'fm', 'nfm'];
+        const finalMode = validModes.includes(mappedMode) ? mappedMode : 'usb';
+        
+        w.__catsync_state = w.__catsync_state || { hz: null, mode: null, requestedHz: null };
+        w.__catsync_state.mode = finalMode.toUpperCase();
+        
+        setMode(finalMode);
+        return true;
+    };
+    
+    // Zoom step implementation (for band zoom)
+    const zoomStepImpl = (action) => {
+        const toBand = w.ext_zoom?.TO_BAND;
+        const isToBand = action === toBand || action === 'TO_BAND' || action === 0;
+        
+        if (!isToBand) return true; // Ignore other zoom actions
+        
+        // Zoom to show current band
+        const freqInput = document.getElementById('frequency');
+        const frequency = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
+        
+        if (frequency > 0 && window.amateurBands) {
+            // Find the band containing current frequency
+            const band = window.amateurBands.find(b => frequency >= b.start && frequency <= b.end);
+            if (band) {
+                const bandWidth = band.end - band.start;
+                const centerFreq = Math.round((band.start + band.end) / 2);
+                
+                if (spectrumDisplay && spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
+                    const minBandWidth = 100000; // 100 kHz minimum
+                    const effectiveBandWidth = Math.max(bandWidth, minBandWidth);
+                    const binCount = 1024;
+                    const binBandwidth = effectiveBandWidth / binCount;
+                    
+                    spectrumDisplay.ws.send(JSON.stringify({
+                        type: 'zoom',
+                        frequency: centerFreq,
+                        binBandwidth: binBandwidth
+                    }));
+                    
+                    log(`CAT sync: Zoomed to ${band.label || 'band'}`);
+                }
+            }
+        }
+        
+        return true;
+    };
+    
+    // Register implementation hooks
+    w.__catsync_setfreq_impl = setfreqImpl;
+    w.__catsync_setmode_impl = setmodeImpl;
+    w.__catsync_zoom_step_impl = zoomStepImpl;
+    
+    // Flush any queued commands
+    if (typeof w.__catsync_flush === 'function') {
+        w.__catsync_flush();
+    }
+    
+    console.log('[CAT sync] Implementation hooks registered');
 });
+
+// Update CAT sync state when frequency/mode changes
+function updateCATSyncState() {
+    const w = window;
+    if (!w.__catsync_state) return;
+    
+    const freqInput = document.getElementById('frequency');
+    const frequency = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : null;
+    
+    if (frequency != null) {
+        w.__catsync_state.hz = Math.round(frequency);
+    }
+    w.__catsync_state.mode = currentMode.toUpperCase();
+    
+    // Notify external integrations of changes
+    const lastNotified = w.__catsync_last_notified || { hz: null, mode: null };
+    const freqChanged = frequency != null && frequency !== lastNotified.hz;
+    const modeChanged = currentMode !== lastNotified.mode;
+    
+    if (freqChanged || modeChanged) {
+        try {
+            if (typeof w.injection_environment_changed === 'function') {
+                console.debug('[CAT sync] injection_environment_changed', { freqChanged, modeChanged, frequency, mode: currentMode });
+                w.injection_environment_changed({ freq: freqChanged, mode: modeChanged });
+            }
+        } catch (e) {
+            console.error('[CAT sync] Error calling injection_environment_changed:', e);
+        }
+        
+        w.__catsync_last_notified = { hz: frequency, mode: currentMode };
+    }
+    
+    // Call freqset_complete if we reached the requested frequency
+    const requestedHz = w.__catsync_state.requestedHz;
+    if (requestedHz != null && frequency != null && Math.round(frequency) === requestedHz) {
+        try {
+            const noop = w.__catsync_noop_freqset_complete;
+            if (typeof w.freqset_complete === 'function' && w.freqset_complete !== noop) {
+                w.freqset_complete();
+            }
+        } catch (e) {
+            console.error('[CAT sync] Error calling freqset_complete:', e);
+        }
+        w.__catsync_state.requestedHz = null;
+    }
+}
 
 // Expose toggle function globally
 window.toggleFrequencyUnit = toggleFrequencyUnit;

@@ -1522,6 +1522,12 @@ class NoiseFloorMonitor {
 
                     // Apply zoom after update
                     this.applyWidebandZoomToChart();
+                    
+                    // Reapply noise overlay if it's enabled
+                    if (window.noiseAnalysisOverlay && window.noiseAnalysisOverlay.enabled) {
+                        window.noiseAnalysisOverlay.updateOverlay();
+                    }
+                    
                     return;
                 }
            }

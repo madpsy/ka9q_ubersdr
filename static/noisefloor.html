@@ -506,6 +506,15 @@
                     </div>
                 </div>
                 
+                <!-- Noise Analysis Toggle -->
+                <div style="margin-bottom: 10px; padding: 10px; background: rgba(0, 0, 0, 0.2); border-radius: 8px;">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.95em;">
+                        <input type="checkbox" id="noise-analysis-toggle" style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>🔍 Show RF Noise Analysis Overlay</span>
+                        <span id="noise-analysis-status" style="font-size: 0.85em; opacity: 0.7; margin-left: auto;">(Click to enable)</span>
+                    </label>
+                </div>
+                
                 <!-- Zoom Controls -->
                 <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 20px; margin-bottom: 15px; padding: 15px; background: rgba(0, 0, 0, 0.2); border-radius: 8px; align-items: start;">
                     <div>
@@ -635,6 +644,40 @@
     <script src="date-picker.js"></script>
     <script src="opus-decoder.min.js"></script>
     <script src="minimal-radio.js"></script>
+    <script src="noise-analysis-overlay.js"></script>
     <script src="noisefloor.js"></script>
+    <script>
+        // Initialize noise analysis overlay after noisefloor.js creates the wideband chart
+        // This will be called from noisefloor.js after the chart is created
+        window.initNoiseAnalysisOverlay = function(widebandChart) {
+            if (!widebandChart) {
+                console.warn('Wideband chart not available for noise analysis overlay');
+                return;
+            }
+
+            // Create noise analysis overlay instance
+            window.noiseAnalysisOverlay = new NoiseAnalysisOverlay(widebandChart);
+
+            // Set up checkbox toggle
+            const toggleCheckbox = document.getElementById('noise-analysis-toggle');
+            const statusText = document.getElementById('noise-analysis-status');
+
+            if (toggleCheckbox && statusText) {
+                toggleCheckbox.addEventListener('change', function() {
+                    if (this.checked) {
+                        window.noiseAnalysisOverlay.enable();
+                        statusText.textContent = '(Active - updating every 10s)';
+                        statusText.style.color = '#4CAF50';
+                    } else {
+                        window.noiseAnalysisOverlay.disable();
+                        statusText.textContent = '(Click to enable)';
+                        statusText.style.color = '';
+                    }
+                });
+            }
+
+            console.log('Noise analysis overlay initialized. Check the box above the spectrum to enable.');
+        };
+    </script>
 </body>
 </html>

@@ -1075,6 +1075,9 @@ func main() {
 	http.HandleFunc("/api/noisefloor/fft/wideband", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorWideBandFFT(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
 	}))
+	http.HandleFunc("/api/noisefloor/analyze", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleNoiseAnalysis(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
+	}))
 	http.HandleFunc("/api/noisefloor/config", func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorConfig(w, r, config, ipBanManager)
 	})

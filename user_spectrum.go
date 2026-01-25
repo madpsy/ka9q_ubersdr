@@ -578,6 +578,16 @@ func (usm *UserSpectrumManager) calculateBinFrequency(binIndex int, centerFreq u
 // distributeSpectrum sends spectrum data to the appropriate session
 // Applies frequency-specific gain based on the session's actual center frequency and bin bandwidth
 func (usm *UserSpectrumManager) distributeSpectrum(ssrc uint32, data []float32) {
+	// Defer recovery to handle any panics from sending on closed channels
+	defer func() {
+		if r := recover(); r != nil {
+			// Channel was likely closed during session cleanup - this is expected during shutdown
+			if DebugMode {
+				log.Printf("DEBUG: Recovered from panic in distributeSpectrum for SSRC 0x%08x: %v", ssrc, r)
+			}
+		}
+	}()
+
 	session, ok := usm.sessions.GetSessionBySSRC(ssrc)
 	if !ok {
 		return
@@ -585,6 +595,15 @@ func (usm *UserSpectrumManager) distributeSpectrum(ssrc uint32, data []float32) 
 
 	if !session.IsSpectrum {
 		return
+	}
+
+	// Check if session is being destroyed (Done channel closed)
+	select {
+	case <-session.Done:
+		// Session is being destroyed, don't send data
+		return
+	default:
+		// Session is still active, continue
 	}
 
 	// Apply frequency-specific gain per-session if configured

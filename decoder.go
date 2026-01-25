@@ -773,8 +773,18 @@ func (md *MultiDecoder) Stop() {
 			delete(md.sessions.ssrcToSession, band.SSRC)
 			md.sessions.mu.Unlock()
 
-			// Close audio channel
-			close(band.AudioChan)
+			// Close audio channel safely (check if not already closed)
+			if band.AudioChan != nil {
+				// Use defer/recover to handle potential double-close
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							// Channel was already closed, ignore
+						}
+					}()
+					close(band.AudioChan)
+				}()
+			}
 		}
 	}
 

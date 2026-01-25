@@ -238,7 +238,18 @@ func (frm *FrequencyReferenceMonitor) Stop() {
 		delete(frm.sessions.ssrcToSession, frm.refSpectrum.SSRC)
 		frm.sessions.mu.Unlock()
 
-		close(frm.refSpectrum.SpectrumChan)
+		// Close spectrum channel safely (check if not already closed)
+		if frm.refSpectrum.SpectrumChan != nil {
+			// Use defer/recover to handle potential double-close
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						// Channel was already closed, ignore
+					}
+				}()
+				close(frm.refSpectrum.SpectrumChan)
+			}()
+		}
 	}
 
 	log.Printf("Frequency reference monitor stopped")
@@ -873,7 +884,7 @@ func (frm *FrequencyReferenceMonitor) GetHealthStatus() map[string]interface{} {
 	frm.mu.RUnlock()
 
 	timeSinceUpdate := time.Since(lastUpdate)
-	
+
 	result := map[string]interface{}{
 		"enabled":       true,
 		"healthy":       true,
@@ -916,8 +927,8 @@ func (frm *FrequencyReferenceMonitor) GetHealthStatus() map[string]interface{} {
 	}
 	stddevOffset := math.Sqrt(sumSquaredDiff / float64(len(history)))
 
-	result["mean_offset"] = math.Round(meanOffset*100) / 100       // 2 decimal places
-	result["stddev_offset"] = math.Round(stddevOffset*100) / 100   // 2 decimal places
+	result["mean_offset"] = math.Round(meanOffset*100) / 100     // 2 decimal places
+	result["stddev_offset"] = math.Round(stddevOffset*100) / 100 // 2 decimal places
 
 	// Check for instability (high standard deviation)
 	if stddevOffset > 2.0 {

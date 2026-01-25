@@ -541,8 +541,18 @@ func (nfm *NoiseFloorMonitor) Stop() {
 			delete(nfm.sessions.ssrcToSession, nfm.wideBandSpectrum.SSRC)
 			nfm.sessions.mu.Unlock()
 
-			// Close spectrum channel
-			close(nfm.wideBandSpectrum.SpectrumChan)
+			// Close spectrum channel safely (check if not already closed)
+			if nfm.wideBandSpectrum.SpectrumChan != nil {
+				// Use defer/recover to handle potential double-close
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							// Channel was already closed, ignore
+						}
+					}()
+					close(nfm.wideBandSpectrum.SpectrumChan)
+				}()
+			}
 		}
 
 		// Disable per-band spectrum channels
@@ -559,8 +569,18 @@ func (nfm *NoiseFloorMonitor) Stop() {
 			delete(nfm.sessions.ssrcToSession, bandSpectrum.SSRC)
 			nfm.sessions.mu.Unlock()
 
-			// Close spectrum channel
-			close(bandSpectrum.SpectrumChan)
+			// Close spectrum channel safely (check if not already closed)
+			if bandSpectrum.SpectrumChan != nil {
+				// Use defer/recover to handle potential double-close
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							// Channel was already closed, ignore
+						}
+					}()
+					close(bandSpectrum.SpectrumChan)
+				}()
+			}
 		}
 	}
 

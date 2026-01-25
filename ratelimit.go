@@ -259,11 +259,18 @@ func (frl *FFTRateLimiter) AllowRequest(ip, band string) bool {
 
 	bandLimiter, exists := ipLimiters[band]
 	if !exists {
-		// Create a rate limiter with 1 token max, refilling at 0.5 tokens/sec (1 per 2 seconds)
+		// Determine rate based on band/endpoint
+		var refillRate float64
+		if band == "noise-analysis" {
+			refillRate = 1.0 // 1 request per second for noise analysis
+		} else {
+			refillRate = 0.5 // 1 request per 2 seconds for FFT data
+		}
+
 		bandLimiter = &RateLimiter{
 			tokens:     1.0,
 			maxTokens:  1.0,
-			refillRate: 0.5, // 1 request per 2 seconds
+			refillRate: refillRate,
 			lastRefill: time.Now(),
 		}
 		ipLimiters[band] = bandLimiter

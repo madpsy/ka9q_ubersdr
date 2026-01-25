@@ -104,12 +104,12 @@ func handleNoiseAnalysis(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 		return
 	}
 
-	// Check rate limit (1 request per 2 seconds per IP for noise analysis)
+	// Check rate limit (1 request per second per IP for noise analysis)
 	clientIP := getClientIP(r)
 	if !rateLimiter.AllowRequest(clientIP, "noise-analysis") {
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+			"error": "Rate limit exceeded. Please wait 1 second between requests.",
 		})
 		log.Printf("Noise analysis rate limit exceeded for IP: %s", clientIP)
 		return

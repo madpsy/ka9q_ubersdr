@@ -29,7 +29,7 @@ Required:
 
 Options:
   -s, --speed    Serial speed/baud (default: 9600)
-  -b, --bind     Bind address for rotctld -T (default: 127.0.0.1)
+  -b, --bind     Bind address for rotctld -T (default: 0.0.0.0)
   -p, --port     TCP port for rotctld -t (default: 4533)
   --bin          Path to rotctld binary (default: /usr/bin/rotctld)
   --extra        Extra args appended to rotctld (quoted string)
@@ -167,7 +167,7 @@ main() {
 
   local NAME="" DEVICE="" MODEL=""
   local SPEED="9600"
-  local BIND="127.0.0.1"
+  local BIND="0.0.0.0"
   local PORT="4533"
   local BIN="/usr/bin/rotctld"
   local EXTRA=""

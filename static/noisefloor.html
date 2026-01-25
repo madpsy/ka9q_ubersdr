@@ -435,6 +435,106 @@
         .date-picker-footer button {
             padding: 8px 16px;
         }
+
+        /* Warning Modal Styles */
+        .warning-modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .warning-modal-overlay.active {
+            display: flex;
+        }
+
+        .warning-modal {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            border: 2px solid #FF9800;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            max-width: 500px;
+            width: 90%;
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                transform: translateY(-50px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .warning-modal-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid rgba(255, 152, 0, 0.3);
+        }
+
+        .warning-modal-icon {
+            font-size: 3em;
+            line-height: 1;
+        }
+
+        .warning-modal-header h3 {
+            margin: 0;
+            font-size: 1.5em;
+            color: #FF9800;
+        }
+
+        .warning-modal-body {
+            margin-bottom: 25px;
+            line-height: 1.6;
+        }
+
+        .warning-modal-body p {
+            margin-bottom: 15px;
+        }
+
+        .warning-modal-body strong {
+            color: #FF9800;
+        }
+
+        .warning-modal-footer {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .warning-modal-footer button {
+            padding: 10px 20px;
+            font-size: 1em;
+        }
+
+        .warning-modal-footer .btn-cancel {
+            background: #666;
+        }
+
+        .warning-modal-footer .btn-cancel:hover {
+            background: #555;
+        }
+
+        .warning-modal-footer .btn-proceed {
+            background: #FF9800;
+        }
+
+        .warning-modal-footer .btn-proceed:hover {
+            background: #F57C00;
+        }
     </style>
 </head>
 <body>
@@ -671,6 +771,25 @@
         </div>
     </div>
 
+    <!-- Warning Modal for Noise Analysis -->
+    <div id="noiseAnalysisWarningModal" class="warning-modal-overlay">
+        <div class="warning-modal">
+            <div class="warning-modal-header">
+                <div class="warning-modal-icon">⚠️</div>
+                <h3>Proof of Concept Feature</h3>
+            </div>
+            <div class="warning-modal-body">
+                <p><strong>Warning:</strong> The RF Noise Analysis Overlay is currently a proof of concept.</p>
+                <p>The algorithms used for noise detection and classification <strong>do not work well, if at all</strong>, at this time.</p>
+                <p>This feature is provided for experimental purposes only and should not be relied upon for accurate noise analysis.</p>
+            </div>
+            <div class="warning-modal-footer">
+                <button class="btn-cancel" onclick="closeNoiseAnalysisWarning(false)">Cancel</button>
+                <button class="btn-proceed" onclick="closeNoiseAnalysisWarning(true)">I Understand, Proceed</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Footer -->
     <footer class="site-footer">
         <p>Download <a href="https://ubersdr.org" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/" target="_blank">SDR Interface</a> <span id="footer-version"></span></p>
@@ -686,6 +805,30 @@
     <script src="noise-analysis-overlay.js"></script>
     <script src="noisefloor.js"></script>
     <script>
+        // Function to close the noise analysis warning modal
+        window.closeNoiseAnalysisWarning = function(proceed) {
+            const modal = document.getElementById('noiseAnalysisWarningModal');
+            const toggleCheckbox = document.getElementById('noise-analysis-toggle');
+            const statusText = document.getElementById('noise-analysis-status');
+            const filtersContainer = document.getElementById('noise-type-filters');
+
+            modal.classList.remove('active');
+
+            if (proceed) {
+                // User accepted the warning, enable the feature
+                window.noiseAnalysisOverlay.enable();
+                statusText.textContent = '(Active - updating every 10s)';
+                statusText.style.color = '#4CAF50';
+                // Show filter checkboxes
+                if (filtersContainer) {
+                    filtersContainer.style.display = 'flex';
+                }
+            } else {
+                // User cancelled, uncheck the checkbox
+                toggleCheckbox.checked = false;
+            }
+        };
+
         // Initialize noise analysis overlay after noisefloor.js creates the wideband chart
         // This will be called from noisefloor.js after the chart is created
         window.initNoiseAnalysisOverlay = function(widebandChart) {
@@ -701,18 +844,15 @@
             const toggleCheckbox = document.getElementById('noise-analysis-toggle');
             const statusText = document.getElementById('noise-analysis-status');
             const filtersContainer = document.getElementById('noise-type-filters');
+            const modal = document.getElementById('noiseAnalysisWarningModal');
 
             if (toggleCheckbox && statusText) {
                 toggleCheckbox.addEventListener('change', function() {
                     if (this.checked) {
-                        window.noiseAnalysisOverlay.enable();
-                        statusText.textContent = '(Active - updating every 10s)';
-                        statusText.style.color = '#4CAF50';
-                        // Show filter checkboxes
-                        if (filtersContainer) {
-                            filtersContainer.style.display = 'flex';
-                        }
+                        // Show warning modal instead of enabling directly
+                        modal.classList.add('active');
                     } else {
+                        // Disable the overlay
                         window.noiseAnalysisOverlay.disable();
                         statusText.textContent = '(Click to enable)';
                         statusText.style.color = '';

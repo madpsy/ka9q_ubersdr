@@ -169,7 +169,8 @@ main() {
   local SPEED="9600"
   local BIND="0.0.0.0"
   local PORT="4533"
-  local BIN="/usr/bin/rotctld"
+  # Auto-detect rotctld binary location, fallback to /usr/bin/rotctld
+  local BIN="$(command -v rotctld 2>/dev/null || echo /usr/bin/rotctld)"
   local EXTRA=""
   local NO_START="0"
 
@@ -234,7 +235,8 @@ EOF
 
   # Create/update templated unit (idempotent)
   # NOTE: EnvironmentFile uses %i (instance name).
-  cat > "$UNIT_PATH" <<'EOF'
+  # We use regular EOF (not 'EOF') to allow $BIN to be expanded by bash
+  cat > "$UNIT_PATH" <<EOF
 [Unit]
 Description=Hamlib rotctld for %i
 After=network.target
@@ -251,8 +253,8 @@ User=nobody
 Group=dialout
 SupplementaryGroups=dialout
 
-# Start rotctld
-ExecStart=$ROTCTLD_BIN -T $ROTCTLD_BIND -t $ROTCTLD_PORT -m $ROTCTLD_MODEL -r $ROTCTLD_DEVICE -s $ROTCTLD_SPEED $ROTCTLD_EXTRA
+# Start rotctld (binary path is hardcoded, arguments use environment variables)
+ExecStart=$BIN -T \$ROTCTLD_BIND -t \$ROTCTLD_PORT -m \$ROTCTLD_MODEL -r \$ROTCTLD_DEVICE -s \$ROTCTLD_SPEED \$ROTCTLD_EXTRA
 
 Restart=always
 RestartSec=3

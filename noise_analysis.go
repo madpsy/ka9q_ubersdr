@@ -129,13 +129,16 @@ func handleNoiseAnalysis(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 
 	// Parse query parameters for noise type filtering
 	query := r.URL.Query()
-	enabledTypes := parseNoiseTypeFilters(query)
+	enabledTypes, hasFilters := parseNoiseTypeFilters(query)
 
 	// Perform noise analysis
 	result := analyzeRFNoise(fft)
 
-	// Filter results based on enabled types
-	if len(enabledTypes) > 0 {
+	// If NO filters specified, return empty sources (user must explicitly request types)
+	if !hasFilters {
+		result.Sources = []NoiseSource{}
+	} else {
+		// Filter results to only include explicitly enabled types
 		filteredSources := []NoiseSource{}
 		for _, source := range result.Sources {
 			if enabledTypes[source.Type] {
@@ -154,8 +157,8 @@ func handleNoiseAnalysis(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 }
 
 // parseNoiseTypeFilters parses query parameters to determine which noise types are enabled
-// Returns a map of enabled types. If no filters specified, returns empty map (all enabled)
-func parseNoiseTypeFilters(query map[string][]string) map[NoiseType]bool {
+// Returns a map of enabled types and a boolean indicating if any filters were specified
+func parseNoiseTypeFilters(query map[string][]string) (map[NoiseType]bool, bool) {
 	enabledTypes := make(map[NoiseType]bool)
 
 	// Check each noise type parameter
@@ -183,12 +186,8 @@ func parseNoiseTypeFilters(query map[string][]string) map[NoiseType]bool {
 		}
 	}
 
-	// If no filters specified, return empty map (all types enabled)
-	if !hasAnyFilter {
-		return make(map[NoiseType]bool)
-	}
-
-	return enabledTypes
+	// Return the enabled types and whether any filters were specified
+	return enabledTypes, hasAnyFilter
 }
 
 // analyzeRFNoise performs comprehensive RF noise analysis on FFT data

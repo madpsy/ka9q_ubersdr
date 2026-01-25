@@ -129,13 +129,19 @@ class NoiseAnalysisOverlay {
      * Build query string for noise type filters
      */
     buildFilterQueryString() {
-        const enabledTypes = this.getEnabledNoiseTypes();
+        const checkboxes = document.querySelectorAll('.noise-type-filter');
         
-        // If all types are enabled, don't send any filters (default behavior)
-        const allCheckboxes = document.querySelectorAll('.noise-type-filter');
-        if (enabledTypes.length === allCheckboxes.length) {
-            return '';
+        // If no checkboxes exist yet (overlay not initialized), send all types
+        if (checkboxes.length === 0) {
+            // Default: request all types
+            const allTypes = ['wideband_flat', 'wideband_sloped', 'harmonic', 'switching_supply',
+                            'broadband_peak', 'narrowband_spike', 'comb', 'am_broadcast'];
+            const params = new URLSearchParams();
+            allTypes.forEach(type => params.append(type, 'true'));
+            return '?' + params.toString();
         }
+        
+        const enabledTypes = this.getEnabledNoiseTypes();
         
         // Build query string with enabled types
         const params = new URLSearchParams();
@@ -143,6 +149,7 @@ class NoiseAnalysisOverlay {
             params.append(type, 'true');
         });
         
+        // Return query string with parameters (or empty if nothing selected)
         return params.toString() ? '?' + params.toString() : '';
     }
     

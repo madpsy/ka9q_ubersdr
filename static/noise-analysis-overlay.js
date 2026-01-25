@@ -186,22 +186,11 @@ class NoiseAnalysisOverlay {
         
         const annotations = this.chart.options.plugins.annotation.annotations;
         
-        // Save existing non-noise annotations
-        const preservedAnnotations = {};
-        Object.keys(annotations).forEach(key => {
-            if (!key.startsWith('noise-')) {
-                preservedAnnotations[key] = annotations[key];
-            }
-        });
-        
-        // Clear only noise annotations
+        // Clear only noise annotations (don't touch other annotations)
         this.clearOverlay();
         
-        // Restore preserved annotations
-        Object.assign(annotations, preservedAnnotations);
-        
-        // Limit to top 10 sources to prevent performance issues and recursion errors
-        const maxSources = 10;
+        // Limit to top 5 sources to prevent performance issues
+        const maxSources = 5;
         const topSources = this.analysisData.sources.slice(0, maxSources);
         
         if (this.analysisData.sources.length > maxSources) {
@@ -209,75 +198,36 @@ class NoiseAnalysisOverlay {
         }
         
         // Add annotations for each detected noise source
-        let annotationsAdded = 0;
         topSources.forEach((source, index) => {
-            try {
-                this.addNoiseAnnotation(annotations, source, index);
-                annotationsAdded++;
-            } catch (error) {
-                console.error(`Error adding annotation for source ${index}:`, error);
-            }
+            this.addNoiseAnnotation(annotations, source, index);
         });
         
-        console.log(`Added ${annotationsAdded} noise annotations to chart`);
+        console.log(`Added ${topSources.length} noise annotations to chart`);
         
         // Update chart without animation
-        try {
-            this.chart.update('none');
-        } catch (error) {
-            console.error('Error updating chart with noise annotations:', error);
-            // If update fails, try clearing and disabling
-            this.clearOverlay();
-            this.disable();
-        }
+        this.chart.update('none');
     }
     
     /**
      * Add an annotation for a noise source
      */
     addNoiseAnnotation(annotations, source, index) {
-        try {
-            const startFreqMHz = source.center_frequency_hz / 1e6 - (source.bandwidth_hz / 2) / 1e6;
-            const endFreqMHz = source.center_frequency_hz / 1e6 + (source.bandwidth_hz / 2) / 1e6;
-            const centerFreqMHz = source.center_frequency_hz / 1e6;
-            
-            // Get colors for this noise type
-            const fillColor = this.noiseColors[source.type] || this.noiseColors['unknown'];
-            const borderColor = this.noiseBorderColors[source.type] || this.noiseBorderColors['unknown'];
-            
-            // Create simple box annotation for the noise region (no nested objects)
-            const boxKey = `noise-box-${index}`;
-            annotations[boxKey] = {
-                type: 'box',
-                xMin: startFreqMHz,
-                xMax: endFreqMHz,
-                backgroundColor: fillColor,
-                borderColor: borderColor,
-                borderWidth: 2,
-                borderDash: source.type === 'am_broadcast' ? [] : [5, 5]
-            };
-            
-            // Add simple label line (separate from box to avoid nesting issues)
-            const labelKey = `noise-label-${index}`;
-            annotations[labelKey] = {
-                type: 'line',
-                xMin: startFreqMHz,
-                xMax: startFreqMHz,
-                borderColor: 'rgba(0, 0, 0, 0)',
-                borderWidth: 0,
-                label: {
-                    display: true,
-                    content: this.formatNoiseLabel(source),
-                    position: 'start',
-                    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                    color: '#fff',
-                    font: { size: 10, weight: 'bold' },
-                    padding: 4
-                }
-            };
-        } catch (error) {
-            console.error('Error adding noise annotation:', error);
-        }
+        const startFreqMHz = source.center_frequency_hz / 1e6 - (source.bandwidth_hz / 2) / 1e6;
+        const endFreqMHz = source.center_frequency_hz / 1e6 + (source.bandwidth_hz / 2) / 1e6;
+        
+        // Get colors for this noise type
+        const fillColor = this.noiseColors[source.type] || 'rgba(150, 150, 150, 0.3)';
+        const borderColor = this.noiseBorderColors[source.type] || 'rgba(150, 150, 150, 0.8)';
+        
+        // Create simple box annotation - use plain object literal
+        annotations[`noise-box-${index}`] = {
+            type: 'box',
+            xMin: startFreqMHz,
+            xMax: endFreqMHz,
+            backgroundColor: fillColor,
+            borderColor: borderColor,
+            borderWidth: 2
+        };
     }
     
     /**

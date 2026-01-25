@@ -252,7 +252,7 @@ Group=dialout
 SupplementaryGroups=dialout
 
 # Start rotctld
-ExecStart=${ROTCTLD_BIN} -T ${ROTCTLD_BIND} -t ${ROTCTLD_PORT} -m ${ROTCTLD_MODEL} -r ${ROTCTLD_DEVICE} -s ${ROTCTLD_SPEED} ${ROTCTLD_EXTRA}
+ExecStart=$ROTCTLD_BIN -T $ROTCTLD_BIND -t $ROTCTLD_PORT -m $ROTCTLD_MODEL -r $ROTCTLD_DEVICE -s $ROTCTLD_SPEED $ROTCTLD_EXTRA
 
 Restart=always
 RestartSec=3

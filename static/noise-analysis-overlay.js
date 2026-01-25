@@ -110,11 +110,49 @@ class NoiseAnalysisOverlay {
     }
     
     /**
+     * Get enabled noise type filters from checkboxes
+     */
+    getEnabledNoiseTypes() {
+        const checkboxes = document.querySelectorAll('.noise-type-filter');
+        const enabledTypes = [];
+        
+        checkboxes.forEach(checkbox => {
+            if (checkbox.checked) {
+                enabledTypes.push(checkbox.dataset.type);
+            }
+        });
+        
+        return enabledTypes;
+    }
+    
+    /**
+     * Build query string for noise type filters
+     */
+    buildFilterQueryString() {
+        const enabledTypes = this.getEnabledNoiseTypes();
+        
+        // If all types are enabled, don't send any filters (default behavior)
+        const allCheckboxes = document.querySelectorAll('.noise-type-filter');
+        if (enabledTypes.length === allCheckboxes.length) {
+            return '';
+        }
+        
+        // Build query string with enabled types
+        const params = new URLSearchParams();
+        enabledTypes.forEach(type => {
+            params.append(type, 'true');
+        });
+        
+        return params.toString() ? '?' + params.toString() : '';
+    }
+    
+    /**
      * Fetch noise analysis data from the backend
      */
     async fetchAnalysisData() {
         try {
-            const response = await fetch('/api/noisefloor/analyze');
+            const queryString = this.buildFilterQueryString();
+            const response = await fetch('/api/noisefloor/analyze' + queryString);
             
             if (!response.ok) {
                 if (response.status === 204) {

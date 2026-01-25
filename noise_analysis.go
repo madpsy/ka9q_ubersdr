@@ -127,14 +127,68 @@ func handleNoiseAnalysis(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 		return
 	}
 
+	// Parse query parameters for noise type filtering
+	query := r.URL.Query()
+	enabledTypes := parseNoiseTypeFilters(query)
+
 	// Perform noise analysis
 	result := analyzeRFNoise(fft)
+
+	// Filter results based on enabled types
+	if len(enabledTypes) > 0 {
+		filteredSources := []NoiseSource{}
+		for _, source := range result.Sources {
+			if enabledTypes[source.Type] {
+				filteredSources = append(filteredSources, source)
+			}
+		}
+		result.Sources = filteredSources
+	}
+
 	result.ProcessingTimeMs = time.Since(startTime).Seconds() * 1000
 
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		log.Printf("Error encoding noise analysis result: %v", err)
 	}
+}
+
+// parseNoiseTypeFilters parses query parameters to determine which noise types are enabled
+// Returns a map of enabled types. If no filters specified, returns empty map (all enabled)
+func parseNoiseTypeFilters(query map[string][]string) map[NoiseType]bool {
+	enabledTypes := make(map[NoiseType]bool)
+
+	// Check each noise type parameter
+	typeParams := map[string]NoiseType{
+		"wideband_flat":    NoiseTypeWidebandFlat,
+		"wideband_sloped":  NoiseTypeWidebandSloped,
+		"harmonic":         NoiseTypeHarmonic,
+		"switching_supply": NoiseTypeSwitchingSupply,
+		"broadband_peak":   NoiseTypeBroadbandPeak,
+		"narrowband_spike": NoiseTypeNarrowbandSpike,
+		"comb":             NoiseTypeComb,
+		"powerline":        NoiseTypePowerline,
+		"am_broadcast":     NoiseTypeAMBroadcast,
+	}
+
+	hasAnyFilter := false
+	for param, noiseType := range typeParams {
+		if values, ok := query[param]; ok && len(values) > 0 {
+			hasAnyFilter = true
+			// Check if value is "true", "1", or "on"
+			val := values[0]
+			if val == "true" || val == "1" || val == "on" {
+				enabledTypes[noiseType] = true
+			}
+		}
+	}
+
+	// If no filters specified, return empty map (all types enabled)
+	if !hasAnyFilter {
+		return make(map[NoiseType]bool)
+	}
+
+	return enabledTypes
 }
 
 // analyzeRFNoise performs comprehensive RF noise analysis on FFT data
@@ -358,18 +412,40 @@ func createAMBroadcastSource(fft *BandFFT, startBin, endBin, peakBin int, baseli
 	}
 }
 
-// detectWidebandNoise detects regions of elevated wideband noise
+// detectWidebandNoise detects regions of elevated wideband noise using multi-scale detection
 func detectWidebandNoise(fft *BandFFT, baseline float32) []NoiseSource {
 	sources := []NoiseSource{}
 
-	// Use sliding window of 1 MHz
-	windowBins := int(1e6 / fft.BinWidth)
+	// Multi-scale detection to catch both wide and narrow elevated regions
+	// Scale 1: Large wideband (1 MHz window, +12 dB threshold) - for truly wideband noise
+	sources = append(sources, detectWidebandAtScale(fft, baseline, 1e6, 12.0, 1e6)...)
+
+	// Scale 2: Medium wideband (400 kHz window, +10 dB threshold) - for moderate-width noise
+	sources = append(sources, detectWidebandAtScale(fft, baseline, 400e3, 10.0, 300e3)...)
+
+	// Scale 3: Narrow elevated regions (150 kHz window, +8 dB threshold) - for narrow bumps
+	sources = append(sources, detectWidebandAtScale(fft, baseline, 150e3, 8.0, 100e3)...)
+
+	// Remove duplicate/overlapping detections (keep the one with highest confidence)
+	sources = mergeOverlappingWidebandSources(sources)
+
+	return sources
+}
+
+// detectWidebandAtScale detects wideband noise at a specific window scale
+func detectWidebandAtScale(fft *BandFFT, baseline float32, windowHz float64, thresholdDB float32, minWidthHz float64) []NoiseSource {
+	sources := []NoiseSource{}
+
+	windowBins := int(windowHz / fft.BinWidth)
 	if windowBins < 10 {
 		windowBins = 10
 	}
+	if windowBins > len(fft.Data) {
+		return sources
+	}
 
-	threshold := baseline + 12.0            // 12 dB above baseline (much more conservative)
-	minWidthBins := int(1e6 / fft.BinWidth) // Minimum 1 MHz to be considered wideband
+	threshold := baseline + thresholdDB
+	minWidthBins := int(minWidthHz / fft.BinWidth)
 
 	inRegion := false
 	startBin := 0
@@ -398,6 +474,59 @@ func detectWidebandNoise(fft *BandFFT, baseline float32) []NoiseSource {
 	}
 
 	return sources
+}
+
+// mergeOverlappingWidebandSources removes duplicate/overlapping wideband detections
+func mergeOverlappingWidebandSources(sources []NoiseSource) []NoiseSource {
+	if len(sources) <= 1 {
+		return sources
+	}
+
+	// Sort by start bin
+	sort.Slice(sources, func(i, j int) bool {
+		return sources[i].StartBin < sources[j].StartBin
+	})
+
+	merged := []NoiseSource{}
+	for i := 0; i < len(sources); i++ {
+		current := sources[i]
+		overlapped := false
+
+		// Check if this overlaps with any already merged source
+		for j := 0; j < len(merged); j++ {
+			// Check for overlap (>50% of bins overlap)
+			overlapStart := current.StartBin
+			if merged[j].StartBin > overlapStart {
+				overlapStart = merged[j].StartBin
+			}
+			overlapEnd := current.EndBin
+			if merged[j].EndBin < overlapEnd {
+				overlapEnd = merged[j].EndBin
+			}
+
+			if overlapEnd > overlapStart {
+				overlapBins := overlapEnd - overlapStart
+				currentBins := current.EndBin - current.StartBin
+				mergedBins := merged[j].EndBin - merged[j].StartBin
+
+				// If >50% overlap, keep the one with higher confidence
+				if float64(overlapBins) > float64(currentBins)*0.5 || float64(overlapBins) > float64(mergedBins)*0.5 {
+					overlapped = true
+					if current.Confidence > merged[j].Confidence {
+						// Replace with higher confidence detection
+						merged[j] = current
+					}
+					break
+				}
+			}
+		}
+
+		if !overlapped {
+			merged = append(merged, current)
+		}
+	}
+
+	return merged
 }
 
 // createWidebandSource creates a wideband noise source from bin range

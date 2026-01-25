@@ -508,11 +508,50 @@
                 
                 <!-- Noise Analysis Toggle -->
                 <div style="margin-bottom: 10px; padding: 10px; background: rgba(0, 0, 0, 0.2); border-radius: 8px;">
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.95em;">
-                        <input type="checkbox" id="noise-analysis-toggle" style="width: 18px; height: 18px; cursor: pointer;">
-                        <span>🔍 Show RF Noise Analysis Overlay</span>
-                        <span id="noise-analysis-status" style="font-size: 0.85em; opacity: 0.7; margin-left: auto;">(Click to enable)</span>
-                    </label>
+                    <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.95em;">
+                            <input type="checkbox" id="noise-analysis-toggle" style="width: 18px; height: 18px; cursor: pointer;">
+                            <span>🔍 Show RF Noise Analysis Overlay</span>
+                            <span id="noise-analysis-status" style="font-size: 0.85em; opacity: 0.7;">(Click to enable)</span>
+                        </label>
+                        
+                        <!-- Noise Type Filters -->
+                        <div id="noise-type-filters" style="display: none; align-items: center; gap: 12px; flex-wrap: wrap; padding-left: 15px; border-left: 2px solid rgba(255,255,255,0.3);">
+                            <span style="font-size: 0.85em; opacity: 0.8; font-weight: bold;">Types:</span>
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 0.85em;">
+                                <input type="checkbox" class="noise-type-filter" data-type="wideband_flat" checked style="cursor: pointer;">
+                                <span>Wideband Flat</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 0.85em;">
+                                <input type="checkbox" class="noise-type-filter" data-type="wideband_sloped" checked style="cursor: pointer;">
+                                <span>Wideband Sloped</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 0.85em;">
+                                <input type="checkbox" class="noise-type-filter" data-type="harmonic" checked style="cursor: pointer;">
+                                <span>Harmonic</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 0.85em;">
+                                <input type="checkbox" class="noise-type-filter" data-type="switching_supply" checked style="cursor: pointer;">
+                                <span>Switching Supply</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 0.85em;">
+                                <input type="checkbox" class="noise-type-filter" data-type="broadband_peak" checked style="cursor: pointer;">
+                                <span>Broadband Peak</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 0.85em;">
+                                <input type="checkbox" class="noise-type-filter" data-type="narrowband_spike" checked style="cursor: pointer;">
+                                <span>Narrowband Spike</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 0.85em;">
+                                <input type="checkbox" class="noise-type-filter" data-type="comb" checked style="cursor: pointer;">
+                                <span>Comb</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 0.85em;">
+                                <input type="checkbox" class="noise-type-filter" data-type="am_broadcast" checked style="cursor: pointer;">
+                                <span>AM Broadcast</span>
+                            </label>
+                        </div>
+                    </div>
                 </div>
                 
                 <!-- Zoom Controls -->
@@ -661,6 +700,7 @@
             // Set up checkbox toggle
             const toggleCheckbox = document.getElementById('noise-analysis-toggle');
             const statusText = document.getElementById('noise-analysis-status');
+            const filtersContainer = document.getElementById('noise-type-filters');
 
             if (toggleCheckbox && statusText) {
                 toggleCheckbox.addEventListener('change', function() {
@@ -668,13 +708,32 @@
                         window.noiseAnalysisOverlay.enable();
                         statusText.textContent = '(Active - updating every 10s)';
                         statusText.style.color = '#4CAF50';
+                        // Show filter checkboxes
+                        if (filtersContainer) {
+                            filtersContainer.style.display = 'flex';
+                        }
                     } else {
                         window.noiseAnalysisOverlay.disable();
                         statusText.textContent = '(Click to enable)';
                         statusText.style.color = '';
+                        // Hide filter checkboxes
+                        if (filtersContainer) {
+                            filtersContainer.style.display = 'none';
+                        }
                     }
                 });
             }
+
+            // Set up filter checkbox listeners
+            const filterCheckboxes = document.querySelectorAll('.noise-type-filter');
+            filterCheckboxes.forEach(checkbox => {
+                checkbox.addEventListener('change', function() {
+                    // Refresh the overlay with new filters
+                    if (window.noiseAnalysisOverlay && window.noiseAnalysisOverlay.enabled) {
+                        window.noiseAnalysisOverlay.fetchAndDisplay();
+                    }
+                });
+            });
 
             console.log('Noise analysis overlay initialized. Check the box above the spectrum to enable.');
         };

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/hashicorp/go-version"
 )
 
 const (
@@ -109,37 +111,64 @@ func WriteVersionFile(version string) error {
 
 // checkVersion fetches the latest version and updates the global variable
 func checkVersion() {
-	version, err := fetchVersionFromGitHub()
+	latestVersionStr, err := fetchVersionFromGitHub()
 	if err != nil {
 		log.Printf("Version check failed: %v (Current version: %s)", err, Version)
 		return
 	}
 
-	setLatestVersion(version)
+	setLatestVersion(latestVersionStr)
 
-	// Always log both current and latest version
-	if version != Version {
-		log.Printf("Version check: Current=%s, Latest=%s ⚠️ UPDATE AVAILABLE", Version, version)
-
-		// Check for regular (non-bypassed) users before writing file
-		regularUserCount := 0
-		if sessionManager != nil {
-			regularUserCount = sessionManager.GetNonBypassedUserCount()
-		}
-
-		if regularUserCount > 0 {
-			// Don't write version file while regular users are connected
-			log.Printf("Version file NOT written: %d regular user(s) connected (bypassed/internal users excluded). Will retry on next check to avoid disrupting active users.", regularUserCount)
+	// Parse versions for semantic comparison
+	currentVer, err := version.NewVersion(Version)
+	if err != nil {
+		log.Printf("Warning: Failed to parse current version '%s': %v (falling back to string comparison)", Version, err)
+		// Fall back to string comparison if current version is invalid
+		if latestVersionStr != Version {
+			log.Printf("Version check: Current=%s, Latest=%s ⚠️ UPDATE AVAILABLE (string comparison)", Version, latestVersionStr)
+			writeVersionFileIfSafe(latestVersionStr)
 		} else {
-			// Safe to write version file - no regular users connected
-			if err := WriteVersionFile(version); err != nil {
-				log.Printf("Warning: Failed to write version file: %v", err)
-			} else {
-				log.Printf("Version file updated: %s (no regular users connected - safe to update)", versionFilePath)
-			}
+			log.Printf("Version check: Current=%s, Latest=%s ✓ Up to date", Version, latestVersionStr)
 		}
+		return
+	}
+
+	latestVer, err := version.NewVersion(latestVersionStr)
+	if err != nil {
+		log.Printf("Warning: Failed to parse latest version '%s': %v (skipping update check)", latestVersionStr, err)
+		log.Printf("Version check: Current=%s, Latest=%s (invalid semver format)", Version, latestVersionStr)
+		return
+	}
+
+	// Compare versions semantically - only update if latest is GREATER than current
+	if latestVer.GreaterThan(currentVer) {
+		log.Printf("Version check: Current=%s, Latest=%s ⚠️ UPDATE AVAILABLE", Version, latestVersionStr)
+		writeVersionFileIfSafe(latestVersionStr)
+	} else if currentVer.GreaterThan(latestVer) {
+		log.Printf("Version check: Current=%s, Latest=%s ℹ️ Running NEWER version than published", Version, latestVersionStr)
 	} else {
-		log.Printf("Version check: Current=%s, Latest=%s ✓ Up to date", Version, version)
+		log.Printf("Version check: Current=%s, Latest=%s ✓ Up to date", Version, latestVersionStr)
+	}
+}
+
+// writeVersionFileIfSafe writes the version file only if no regular users are connected
+func writeVersionFileIfSafe(versionStr string) {
+	// Check for regular (non-bypassed) users before writing file
+	regularUserCount := 0
+	if sessionManager != nil {
+		regularUserCount = sessionManager.GetNonBypassedUserCount()
+	}
+
+	if regularUserCount > 0 {
+		// Don't write version file while regular users are connected
+		log.Printf("Version file NOT written: %d regular user(s) connected (bypassed/internal users excluded). Will retry on next check to avoid disrupting active users.", regularUserCount)
+	} else {
+		// Safe to write version file - no regular users connected
+		if err := WriteVersionFile(versionStr); err != nil {
+			log.Printf("Warning: Failed to write version file: %v", err)
+		} else {
+			log.Printf("Version file updated: %s (no regular users connected - safe to update)", versionFilePath)
+		}
 	}
 }
 

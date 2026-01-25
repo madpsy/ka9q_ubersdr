@@ -368,8 +368,8 @@ func detectWidebandNoise(fft *BandFFT, baseline float32) []NoiseSource {
 		windowBins = 10
 	}
 
-	threshold := baseline + 6.0               // 6 dB above baseline
-	minWidthBins := int(500e3 / fft.BinWidth) // Minimum 500 kHz to be considered wideband
+	threshold := baseline + 12.0            // 12 dB above baseline (much more conservative)
+	minWidthBins := int(1e6 / fft.BinWidth) // Minimum 1 MHz to be considered wideband
 
 	inRegion := false
 	startBin := 0
@@ -502,7 +502,7 @@ func detectHarmonics(fft *BandFFT, baseline float32) []NoiseSource {
 	sources := []NoiseSource{}
 
 	// Find all peaks above threshold
-	peaks := findPeaks(fft, baseline+8.0) // 8 dB above baseline
+	peaks := findPeaks(fft, baseline+15.0) // 15 dB above baseline (much more conservative)
 
 	if len(peaks) < 2 {
 		return sources
@@ -639,8 +639,8 @@ func createHarmonicSource(harmonics []HarmonicPeak, baseline float32) NoiseSourc
 func detectCombPatterns(fft *BandFFT, baseline float32) []NoiseSource {
 	sources := []NoiseSource{}
 
-	peaks := findPeaks(fft, baseline+6.0)
-	if len(peaks) < 4 {
+	peaks := findPeaks(fft, baseline+12.0) // 12 dB above baseline (more conservative)
+	if len(peaks) < 5 {                    // Require at least 5 peaks for comb pattern
 		return sources
 	}
 
@@ -758,7 +758,7 @@ func detectPowerlineNoise(fft *BandFFT, baseline float32) []NoiseSource {
 func detectBroadbandPeaks(fft *BandFFT, baseline float32) []NoiseSource {
 	sources := []NoiseSource{}
 
-	peaks := findPeaks(fft, baseline+12.0) // Strong peaks only
+	peaks := findPeaks(fft, baseline+20.0) // Very strong peaks only (more conservative)
 
 	for _, peak := range peaks {
 		// Check if noise spreads from this peak
@@ -841,8 +841,11 @@ func createBroadbandPeakSource(fft *BandFFT, peak HarmonicPeak, leftSpread, righ
 func detectNarrowbandSpikes(fft *BandFFT, baseline float32) []NoiseSource {
 	sources := []NoiseSource{}
 
-	threshold := baseline + 10.0             // 10 dB above baseline
+	threshold := baseline + 18.0             // 18 dB above baseline (much more conservative)
 	maxWidthBins := int(10e3 / fft.BinWidth) // Max 10 kHz wide
+
+	// Limit total number of spikes to prevent overwhelming the system
+	maxSpikes := 10
 
 	startFreq := float64(fft.StartFreq)
 
@@ -900,6 +903,11 @@ func detectNarrowbandSpikes(fft *BandFFT, baseline float32) []NoiseSource {
 				}
 
 				sources = append(sources, source)
+
+				// Limit total spikes to prevent overwhelming the system
+				if len(sources) >= maxSpikes {
+					return sources
+				}
 			}
 		}
 	}

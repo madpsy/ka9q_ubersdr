@@ -200,8 +200,16 @@ class NoiseAnalysisOverlay {
         // Restore preserved annotations
         Object.assign(annotations, preservedAnnotations);
         
+        // Limit to top 20 sources to prevent performance issues
+        const maxSources = 20;
+        const topSources = this.analysisData.sources.slice(0, maxSources);
+        
+        if (this.analysisData.sources.length > maxSources) {
+            console.log(`Limiting noise overlay to top ${maxSources} of ${this.analysisData.sources.length} detected sources`);
+        }
+        
         // Add annotations for each detected noise source
-        this.analysisData.sources.forEach((source, index) => {
+        topSources.forEach((source, index) => {
             this.addNoiseAnnotation(annotations, source, index);
         });
         

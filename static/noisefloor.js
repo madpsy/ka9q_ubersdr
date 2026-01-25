@@ -1793,6 +1793,11 @@ class NoiseFloorMonitor {
 
             // Apply initial zoom if not at default (full spectrum)
             this.applyWidebandZoomToChart();
+            
+            // Initialize noise analysis overlay if function exists
+            if (typeof window.initNoiseAnalysisOverlay === 'function') {
+                window.initNoiseAnalysisOverlay(this.wideBandChart);
+            }
         } catch (error) {
             console.error('Error creating wide-band spectrum:', error);
         }

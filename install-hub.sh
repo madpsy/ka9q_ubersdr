@@ -290,7 +290,7 @@ else
 fi
 
 # Create FFTW Wisdom if it doesn't exist
-WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-config/_data/wisdom"
+WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom"
 if sudo test -f "$WISDOM_FILE"; then
     echo
     echo "FFTW Wisdom file already exists, skipping creation."

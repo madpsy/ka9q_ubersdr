@@ -63,6 +63,10 @@ class NoiseAnalysisOverlay {
         this.enabled = false;
         this.stopAutoUpdate();
         this.clearOverlay();
+        // Update chart to remove annotations immediately
+        if (this.chart) {
+            this.chart.update('none');
+        }
         console.log('Noise analysis overlay disabled');
     }
     

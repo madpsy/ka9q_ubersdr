@@ -200,8 +200,8 @@ class NoiseAnalysisOverlay {
         // Restore preserved annotations
         Object.assign(annotations, preservedAnnotations);
         
-        // Limit to top 20 sources to prevent performance issues
-        const maxSources = 20;
+        // Limit to top 10 sources to prevent performance issues and recursion errors
+        const maxSources = 10;
         const topSources = this.analysisData.sources.slice(0, maxSources);
         
         if (this.analysisData.sources.length > maxSources) {
@@ -209,103 +209,74 @@ class NoiseAnalysisOverlay {
         }
         
         // Add annotations for each detected noise source
+        let annotationsAdded = 0;
         topSources.forEach((source, index) => {
-            this.addNoiseAnnotation(annotations, source, index);
+            try {
+                this.addNoiseAnnotation(annotations, source, index);
+                annotationsAdded++;
+            } catch (error) {
+                console.error(`Error adding annotation for source ${index}:`, error);
+            }
         });
         
+        console.log(`Added ${annotationsAdded} noise annotations to chart`);
+        
         // Update chart without animation
-        this.chart.update('none');
+        try {
+            this.chart.update('none');
+        } catch (error) {
+            console.error('Error updating chart with noise annotations:', error);
+            // If update fails, try clearing and disabling
+            this.clearOverlay();
+            this.disable();
+        }
     }
     
     /**
      * Add an annotation for a noise source
      */
     addNoiseAnnotation(annotations, source, index) {
-        const startFreqMHz = source.center_frequency_hz / 1e6 - (source.bandwidth_hz / 2) / 1e6;
-        const endFreqMHz = source.center_frequency_hz / 1e6 + (source.bandwidth_hz / 2) / 1e6;
-        const centerFreqMHz = source.center_frequency_hz / 1e6;
-        
-        // Get colors for this noise type
-        const fillColor = this.noiseColors[source.type] || this.noiseColors['unknown'];
-        const borderColor = this.noiseBorderColors[source.type] || this.noiseBorderColors['unknown'];
-        
-        // Create box annotation for the noise region
-        const boxKey = `noise-box-${index}`;
-        annotations[boxKey] = {
-            type: 'box',
-            xMin: startFreqMHz,
-            xMax: endFreqMHz,
-            backgroundColor: fillColor,
-            borderColor: borderColor,
-            borderWidth: 2,
-            borderDash: source.type === 'am_broadcast' ? [] : [5, 5], // Solid for AM, dashed for noise
-            label: {
-                display: true,
-                content: this.formatNoiseLabel(source),
-                enabled: true,
-                position: 'start',
-                backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                color: '#fff',
-                font: {
-                    size: 10,
-                    weight: 'bold'
-                },
-                padding: 4
-            }
-        };
-        
-        // For harmonic sources, add markers for each harmonic
-        if (source.harmonics && source.harmonics.length > 0) {
-            source.harmonics.forEach((harmonic, hIndex) => {
-                const harmFreqMHz = harmonic.frequency_hz / 1e6;
-                const lineKey = `noise-harmonic-${index}-${hIndex}`;
-                
-                annotations[lineKey] = {
-                    type: 'line',
-                    xMin: harmFreqMHz,
-                    xMax: harmFreqMHz,
-                    borderColor: borderColor,
-                    borderWidth: 1,
-                    borderDash: [2, 2],
-                    label: {
-                        display: harmonic.harmonic <= 5, // Only label first 5 harmonics
-                        content: `H${harmonic.harmonic}`,
-                        enabled: true,
-                        position: 'end',
-                        backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                        color: '#fff',
-                        font: {
-                            size: 8
-                        },
-                        padding: 2
-                    }
-                };
-            });
-        }
-        
-        // For broadband peaks, add a marker at the peak
-        if (source.type === 'broadband_peak' && source.peak_bin !== undefined) {
-            const lineKey = `noise-peak-${index}`;
-            annotations[lineKey] = {
-                type: 'line',
-                xMin: centerFreqMHz,
-                xMax: centerFreqMHz,
-                borderColor: 'rgba(255, 0, 0, 0.8)',
+        try {
+            const startFreqMHz = source.center_frequency_hz / 1e6 - (source.bandwidth_hz / 2) / 1e6;
+            const endFreqMHz = source.center_frequency_hz / 1e6 + (source.bandwidth_hz / 2) / 1e6;
+            const centerFreqMHz = source.center_frequency_hz / 1e6;
+            
+            // Get colors for this noise type
+            const fillColor = this.noiseColors[source.type] || this.noiseColors['unknown'];
+            const borderColor = this.noiseBorderColors[source.type] || this.noiseBorderColors['unknown'];
+            
+            // Create simple box annotation for the noise region (no nested objects)
+            const boxKey = `noise-box-${index}`;
+            annotations[boxKey] = {
+                type: 'box',
+                xMin: startFreqMHz,
+                xMax: endFreqMHz,
+                backgroundColor: fillColor,
+                borderColor: borderColor,
                 borderWidth: 2,
+                borderDash: source.type === 'am_broadcast' ? [] : [5, 5]
+            };
+            
+            // Add simple label line (separate from box to avoid nesting issues)
+            const labelKey = `noise-label-${index}`;
+            annotations[labelKey] = {
+                type: 'line',
+                xMin: startFreqMHz,
+                xMax: startFreqMHz,
+                borderColor: 'rgba(0, 0, 0, 0)',
+                borderWidth: 0,
                 label: {
                     display: true,
-                    content: '⚠ Peak',
-                    enabled: true,
+                    content: this.formatNoiseLabel(source),
                     position: 'start',
-                    backgroundColor: 'rgba(255, 0, 0, 0.8)',
+                    backgroundColor: 'rgba(0, 0, 0, 0.7)',
                     color: '#fff',
-                    font: {
-                        size: 9,
-                        weight: 'bold'
-                    },
-                    padding: 3
+                    font: { size: 10, weight: 'bold' },
+                    padding: 4
                 }
             };
+        } catch (error) {
+            console.error('Error adding noise annotation:', error);
         }
     }
     

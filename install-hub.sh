@@ -213,15 +213,15 @@ curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/
 chmod +x ~/ubersdr/caddy-entrypoint.sh
 
 # Migrate FFTW Wisdom file if it exists in the wrong location (before starting containers)
-OLD_WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-config/_data/wisdom"
-WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom"
+#OLD_WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-config/_data/wisdom"
+#WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom"
 
-if sudo test -f "$OLD_WISDOM_FILE" && ! sudo test -f "$WISDOM_FILE"; then
-    echo
-    echo "Found FFTW Wisdom file in old location, migrating to correct location..."
-    sudo mv "$OLD_WISDOM_FILE" "$WISDOM_FILE"
-    echo "FFTW Wisdom file migrated successfully."
-fi
+#if sudo test -f "$OLD_WISDOM_FILE" && ! sudo test -f "$WISDOM_FILE"; then
+#    echo
+#    echo "Found FFTW Wisdom file in old location, migrating to correct location..."
+#    sudo mv "$OLD_WISDOM_FILE" "$WISDOM_FILE"
+#    echo "FFTW Wisdom file migrated successfully."
+#fi
 
 if [ -f "$INSTALLED_MARKER" ]; then
     # Re-installation - don't set new password

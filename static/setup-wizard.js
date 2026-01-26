@@ -285,6 +285,11 @@
                     setFieldValue('maxSessionsIP', config.server.max_sessions_ip);
                 }
 
+                // Pre-fill instance reporting fields
+                if (config.instance_reporting) {
+                    setCheckboxValue('remoteLogging', config.instance_reporting.remote_logging);
+                }
+
                 // Pre-fill DX cluster fields
                 if (config.dxcluster) {
                     setCheckboxValue('dxclusterEnabled', config.dxcluster.enabled);
@@ -360,6 +365,10 @@
                     max_session_time: parseInt(formData.maxSessionTime),
                     max_sessions: parseInt(formData.maxSessions),
                     max_sessions_ip: parseInt(formData.maxSessionsIP)
+                },
+                instance_reporting: {
+                    ...existingConfig.instance_reporting,
+                    remote_logging: formData.remoteLogging
                 },
                 dxcluster: {
                     ...existingConfig.dxcluster,

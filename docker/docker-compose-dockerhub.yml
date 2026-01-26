@@ -208,10 +208,10 @@ services:
     container_name: fluent-bit
     restart: unless-stopped
 
-    # Wait for ubersdr to be healthy before starting (ensures UUID is generated)
-    depends_on:
-      ubersdr:
-        condition: service_healthy
+    # DO NOT wait for ubersdr to be healthy before starting
+    #depends_on:
+    #  ubersdr:
+    #    condition: service_healthy
 
     networks:
       - sdr-network

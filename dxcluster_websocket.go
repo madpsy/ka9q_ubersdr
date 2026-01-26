@@ -208,7 +208,7 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 
 	// Check if User-Agent mapping exists (ensures /connection was called first)
 	if h.sessions.GetUserAgent(userSessionID) == "" {
-		log.Printf("DX Cluster WebSocket: Rejected connection: no User-Agent mapping for user_session_id %s from %s (client IP: %s)", userSessionID, sourceIP, clientIP)
+		// Silently reject connection without logging
 		http.Error(w, "Invalid session. Please refresh the page and try again.", http.StatusBadRequest)
 		return
 	}

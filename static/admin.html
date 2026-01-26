@@ -551,8 +551,8 @@
                             <select id="sourceSelect" onchange="onSourceChange()" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; min-width: 120px;">
                                 <option value="">All sources</option>
                             </select>
-                            <button onclick="loadLogs()" style="background: none; border: none; font-size: 24px; cursor: pointer; padding: 4px 8px;" title="Refresh Now">🔄</button>
-                            <button id="downloadLogsBtn" onclick="downloadLogs()" style="background: none; border: none; font-size: 24px; cursor: pointer; padding: 4px 8px;" disabled title="Download Logs">💾</button>
+                            <button onclick="loadLogs()" style="background: none; border: none; font-size: 24px; cursor: pointer; padding: 4px 8px; opacity: 1; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.6'" onmouseout="this.style.opacity='1'" title="Refresh Now">🔄</button>
+                            <button id="downloadLogsBtn" onclick="downloadLogs()" style="background: none; border: none; font-size: 24px; cursor: pointer; padding: 4px 8px; opacity: 1; transition: opacity 0.2s;" onmouseover="if(!this.disabled) this.style.opacity='0.6'" onmouseout="if(!this.disabled) this.style.opacity='1'" title="Download Logs">💾</button>
                             <label style="display: flex; align-items: center; gap: 5px; margin: 0;">
                                 <input type="checkbox" id="logsAutoRefresh" onchange="onAutoRefreshChange()" checked>
                                 <span>Auto-refresh (5s)</span>

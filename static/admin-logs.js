@@ -274,6 +274,8 @@ function onContainerChange() {
     const downloadBtn = document.getElementById('downloadLogsBtn');
     if (downloadBtn) {
         downloadBtn.disabled = !container;
+        downloadBtn.style.opacity = container ? '1' : '0.3';
+        downloadBtn.style.cursor = container ? 'pointer' : 'not-allowed';
     }
 
     if (container) {
@@ -398,6 +400,8 @@ function initLogsTab() {
     const downloadBtn = document.getElementById('downloadLogsBtn');
     if (downloadBtn) {
         downloadBtn.disabled = !container;
+        downloadBtn.style.opacity = container ? '1' : '0.3';
+        downloadBtn.style.cursor = container ? 'pointer' : 'not-allowed';
     }
 }
 

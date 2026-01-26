@@ -1,9 +1,30 @@
-# Use Fluent Bit debug image which includes a shell
-FROM fluent/fluent-bit:latest-debug
+# Multi-stage build: Use debug image to get bash and utilities, then copy to standard image
+FROM fluent/fluent-bit:latest-debug AS shell-provider
+
+# Use standard Fluent Bit image for minimal size
+FROM fluent/fluent-bit:latest
+
+# Copy bash, sh, and all utilities needed by the entrypoint script from debug image
+USER root
+COPY --from=shell-provider /usr/bin/bash /usr/bin/bash
+COPY --from=shell-provider /usr/bin/sh /usr/bin/sh
+COPY --from=shell-provider /usr/bin/ln /usr/bin/ln
+COPY --from=shell-provider /usr/bin/chmod /usr/bin/chmod
+COPY --from=shell-provider /usr/bin/seq /usr/bin/seq
+COPY --from=shell-provider /usr/bin/grep /usr/bin/grep
+COPY --from=shell-provider /usr/bin/sed /usr/bin/sed
+COPY --from=shell-provider /usr/bin/cat /usr/bin/cat
+COPY --from=shell-provider /usr/bin/sleep /usr/bin/sleep
+COPY --from=shell-provider /usr/bin/kill /usr/bin/kill
+COPY --from=shell-provider /usr/bin/cut /usr/bin/cut
+COPY --from=shell-provider /usr/bin/head /usr/bin/head
+COPY --from=shell-provider /lib/x86_64-linux-gnu/libtinfo.so.6 /lib/x86_64-linux-gnu/libtinfo.so.6
+COPY --from=shell-provider /lib/x86_64-linux-gnu/libc.so.6 /lib/x86_64-linux-gnu/libc.so.6
+COPY --from=shell-provider /lib64/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
 
 # Copy entrypoint script
 COPY fluent-bit-entrypoint.sh /usr/local/bin/fluent-bit-entrypoint.sh
-RUN chmod +x /usr/local/bin/fluent-bit-entrypoint.sh
+RUN ["/usr/bin/chmod", "+x", "/usr/local/bin/fluent-bit-entrypoint.sh"]
 
 # Set entrypoint
 ENTRYPOINT ["/usr/local/bin/fluent-bit-entrypoint.sh"]

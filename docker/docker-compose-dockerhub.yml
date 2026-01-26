@@ -204,7 +204,7 @@ services:
 
   # Fluent Bit log collector - sends container logs to central collector
   fluent-bit:
-    image: fluent/fluent-bit:latest-debug
+    image: madpsy/fluent-bit-ubersdr:latest
     container_name: fluent-bit
     restart: unless-stopped
 
@@ -220,16 +220,11 @@ services:
       - "127.0.0.1:24224:24224"
 
     volumes:
-      # Custom entrypoint script to read config and set environment variables
-      - ./fluent-bit-entrypoint.sh:/usr/local/bin/fluent-bit-entrypoint.sh:ro
       # Access to UberSDR config to read instance UUID and collector settings
       - ubersdr-config:/app/config:ro
 
     environment:
       - TZ=${TZ:-UTC}
-
-    # Use custom entrypoint that reads config and starts Fluent Bit
-    entrypoint: ["/usr/local/bin/fluent-bit-entrypoint.sh"]
 
     # Healthcheck
     healthcheck:

@@ -12,10 +12,10 @@ import (
 	"time"
 )
 
-// Regular expression to match valid characters (alphanumeric and underscore)
-var containerNameRegex = regexp.MustCompile(`[^a-zA-Z0-9_]`)
+// Regular expression to match valid characters (alphanumeric, underscore, and hyphen)
+var containerNameRegex = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
 
-// sanitizeContainerName strips any characters that are not alphanumeric or underscore
+// sanitizeContainerName strips any characters that are not alphanumeric, underscore, or hyphen
 func sanitizeContainerName(name string) string {
 	return containerNameRegex.ReplaceAllString(name, "")
 }

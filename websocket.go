@@ -489,7 +489,6 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 
 	// Check if User-Agent mapping exists (ensures /connection was called first)
 	if wsh.sessions.GetUserAgent(userSessionID) == "" {
-		log.Printf("Rejected Audio WebSocket: no User-Agent mapping for user_session_id %s from %s (client IP: %s)", userSessionID, sourceIP, clientIP)
 		if err := wsh.sendError(conn, "Invalid session. Please refresh the page and try again."); err != nil {
 			log.Printf("Failed to send error message: %v", err)
 		}

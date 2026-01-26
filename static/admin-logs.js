@@ -41,6 +41,15 @@ async function loadContainerNames() {
                 // Auto-select ka9q_ubersdr if available and no previous selection
                 select.value = 'ka9q_ubersdr';
                 currentSelectedContainer = 'ka9q_ubersdr';
+                
+                // Enable download button
+                const downloadBtn = document.getElementById('downloadLogsBtn');
+                if (downloadBtn) {
+                    downloadBtn.disabled = false;
+                    downloadBtn.style.opacity = '1';
+                    downloadBtn.style.cursor = 'pointer';
+                }
+                
                 // Trigger load and auto-refresh
                 loadLogs();
                 const autoRefreshCheckbox = document.getElementById('logsAutoRefresh');

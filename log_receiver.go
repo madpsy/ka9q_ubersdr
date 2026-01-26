@@ -7,9 +7,18 @@ import (
 	"io"
 	"log"
 	"net"
+	"regexp"
 	"sync"
 	"time"
 )
+
+// Regular expression to match valid characters (alphanumeric and underscore)
+var containerNameRegex = regexp.MustCompile(`[^a-zA-Z0-9_]`)
+
+// sanitizeContainerName strips any characters that are not alphanumeric or underscore
+func sanitizeContainerName(name string) string {
+	return containerNameRegex.ReplaceAllString(name, "")
+}
 
 // LogEntry represents a single log entry from Fluent Bit
 type LogEntry struct {
@@ -21,69 +30,122 @@ type LogEntry struct {
 }
 
 // LogReceiver manages the TCP server and log storage
+// Maintains separate rolling windows for each container
 type LogReceiver struct {
-	mu      sync.RWMutex
-	logs    []LogEntry
-	maxSize int
-	port    int
+	mu                  sync.RWMutex
+	logsByContainer     map[string][]LogEntry // Container name -> logs
+	maxSizePerContainer int
+	port                int
 }
 
-// NewLogReceiver creates a new log receiver with specified port and max entries
-func NewLogReceiver(port, maxSize int) *LogReceiver {
+// NewLogReceiver creates a new log receiver with specified port and max entries per container
+func NewLogReceiver(port, maxSizePerContainer int) *LogReceiver {
 	return &LogReceiver{
-		logs:    make([]LogEntry, 0, maxSize),
-		maxSize: maxSize,
-		port:    port,
+		logsByContainer:     make(map[string][]LogEntry),
+		maxSizePerContainer: maxSizePerContainer,
+		port:                port,
 	}
 }
 
-// AddLog adds a log entry to the rolling window
+// AddLog adds a log entry to the rolling window for its container
 func (lr *LogReceiver) AddLog(entry LogEntry) {
 	lr.mu.Lock()
 	defer lr.mu.Unlock()
 
-	// Add the new entry
-	lr.logs = append(lr.logs, entry)
-
-	// If we exceed max size, remove oldest entries
-	if len(lr.logs) > lr.maxSize {
-		// Keep only the most recent maxSize entries
-		lr.logs = lr.logs[len(lr.logs)-lr.maxSize:]
+	containerName := entry.ContainerName
+	if containerName == "" {
+		containerName = "unknown"
 	}
+
+	// Get or create the log slice for this container
+	logs, exists := lr.logsByContainer[containerName]
+	if !exists {
+		logs = make([]LogEntry, 0, lr.maxSizePerContainer)
+	}
+
+	// Add the new entry
+	logs = append(logs, entry)
+
+	// If we exceed max size for this container, remove oldest entries
+	if len(logs) > lr.maxSizePerContainer {
+		logs = logs[len(logs)-lr.maxSizePerContainer:]
+	}
+
+	lr.logsByContainer[containerName] = logs
 }
 
-// GetLogs returns a copy of all logs in the rolling window
-func (lr *LogReceiver) GetLogs() []LogEntry {
+// GetLogs returns logs for a specific container (required parameter)
+func (lr *LogReceiver) GetLogs(containerName string) []LogEntry {
 	lr.mu.RLock()
 	defer lr.mu.RUnlock()
+
+	if containerName == "" {
+		return []LogEntry{}
+	}
+
+	logs, exists := lr.logsByContainer[containerName]
+	if !exists {
+		return []LogEntry{}
+	}
 
 	// Return a copy to prevent external modification
-	logsCopy := make([]LogEntry, len(lr.logs))
-	copy(logsCopy, lr.logs)
+	logsCopy := make([]LogEntry, len(logs))
+	copy(logsCopy, logs)
 	return logsCopy
 }
 
-// GetRecentLogs returns the most recent n logs
-func (lr *LogReceiver) GetRecentLogs(n int) []LogEntry {
+// GetRecentLogs returns the most recent n logs for a specific container
+func (lr *LogReceiver) GetRecentLogs(n int, containerName string) []LogEntry {
 	lr.mu.RLock()
 	defer lr.mu.RUnlock()
 
-	if n > len(lr.logs) {
-		n = len(lr.logs)
+	if containerName == "" {
+		return []LogEntry{}
 	}
 
-	// Get the last n entries
-	start := len(lr.logs) - n
+	logs, exists := lr.logsByContainer[containerName]
+	if !exists {
+		return []LogEntry{}
+	}
+
+	if n > len(logs) {
+		n = len(logs)
+	}
+
+	start := len(logs) - n
 	logsCopy := make([]LogEntry, n)
-	copy(logsCopy, lr.logs[start:])
+	copy(logsCopy, logs[start:])
 	return logsCopy
 }
 
-// GetLogCount returns the current number of logs stored
-func (lr *LogReceiver) GetLogCount() int {
+// GetLogCount returns the number of logs stored for a specific container
+func (lr *LogReceiver) GetLogCount(containerName string) int {
 	lr.mu.RLock()
 	defer lr.mu.RUnlock()
-	return len(lr.logs)
+
+	if containerName == "" {
+		return 0
+	}
+
+	logs, exists := lr.logsByContainer[containerName]
+	if !exists {
+		return 0
+	}
+
+	return len(logs)
+}
+
+// GetContainerNames returns a list of unique container names in the logs
+func (lr *LogReceiver) GetContainerNames() []string {
+	lr.mu.RLock()
+	defer lr.mu.RUnlock()
+
+	names := make([]string, 0, len(lr.logsByContainer))
+	for name := range lr.logsByContainer {
+		names = append(names, name)
+	}
+
+	return names
 }
 
 // handleConnection processes a single TCP connection from Fluent Bit
@@ -141,7 +203,7 @@ func (lr *LogReceiver) handleConnection(conn net.Conn) {
 			entry.Source = sourceVal
 		}
 		if containerNameVal, ok := rawEntry["container_name"].(string); ok {
-			entry.ContainerName = containerNameVal
+			entry.ContainerName = sanitizeContainerName(containerNameVal)
 		}
 
 		// Store all other fields in metadata
@@ -166,7 +228,7 @@ func (lr *LogReceiver) Start() error {
 		return fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
 
-	log.Printf("Log receiver listening on %s (max %d entries)", addr, lr.maxSize)
+	log.Printf("Log receiver listening on %s (max %d entries per container)", addr, lr.maxSizePerContainer)
 
 	go func() {
 		for {

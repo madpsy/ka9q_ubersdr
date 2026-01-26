@@ -436,6 +436,7 @@
     <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
     <script src="suncalc.js"></script>
     <script src="radiod_config_analyzer.js"></script>
+    <script src="admin-logs.js"></script>
 </head>
 <body>
     <div class="container">
@@ -474,6 +475,7 @@
                 <div class="editor-tabs">
                     <button class="tab active" onclick="switchTab('sessions')">Active Sessions</button>
                     <button class="tab" onclick="switchTab('banned')">Banned IPs</button>
+                    <button class="tab" onclick="switchTab('logs')">Logs</button>
                     <button class="tab" onclick="switchTab('visual')">Config</button>
                     <button class="tab" onclick="switchTab('radiod')">Radiod</button>
                     <button class="tab" onclick="switchTab('radiod-channels')">Radiod Channels</button>
@@ -535,6 +537,27 @@
                     <div id="visualEditor" class="loading">
                         <div class="spinner"></div>
                         <p>Loading configuration...</p>
+                    </div>
+                </div>
+
+                <!-- Logs Tab -->
+                <div id="logsTab" class="tab-content">
+                    <div class="config-section">
+                        <h3>📋 Container Logs</h3>
+                        <p style="color: #666; margin-bottom: 15px;">View real-time logs from Docker containers. Logs auto-refresh every 5 seconds.</p>
+                        
+                        <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+                            <label style="font-weight: bold;">Container:</label>
+                            <select id="containerSelect" onchange="onContainerChange()" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; min-width: 200px;">
+                                <option value="">Select a container...</option>
+                            </select>
+                            <button class="btn btn-secondary" onclick="loadLogs()" style="margin: 0;">Refresh Now</button>
+                            <span id="logsCount" style="color: #666; margin-left: auto;"></span>
+                        </div>
+                        
+                        <div id="logsDisplay" style="background: #000; color: #0f0; padding: 15px; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 12px; max-height: 600px; overflow-y: auto; line-height: 1.4;">
+                            <div style="color: #888; padding: 20px; text-align: center;">Please select a container to view logs</div>
+                        </div>
                     </div>
                 </div>
 
@@ -1588,6 +1611,11 @@
                 stopSessionsAutoRefresh();
             }
 
+            // Stop logs auto-refresh when leaving logs tab
+            if (tab !== 'logs') {
+                cleanupLogsTab();
+            }
+
             // Stop monitor auto-refresh when leaving monitor tab
             if (tab !== 'monitor') {
                 stopMonitorAutoRefresh();
@@ -1614,17 +1642,21 @@
                 document.getElementById('bannedTab').classList.add('active');
                 document.getElementById('bannedButtons').style.display = 'flex';
                 loadBannedIPs();
-            } else if (tab === 'visual') {
+            } else if (tab === 'logs') {
                 document.querySelector('.tab:nth-child(3)').classList.add('active');
+                document.getElementById('logsTab').classList.add('active');
+                initLogsTab();
+            } else if (tab === 'visual') {
+                document.querySelector('.tab:nth-child(4)').classList.add('active');
                 document.getElementById('visualTab').classList.add('active');
                 document.getElementById('configButtons').style.display = 'flex';
             } else if (tab === 'radiod') {
-                document.querySelector('.tab:nth-child(4)').classList.add('active');
+                document.querySelector('.tab:nth-child(5)').classList.add('active');
                 document.getElementById('radiodTab').classList.add('active');
                 document.getElementById('radiodButtons').style.display = 'flex';
                 loadRadiodConfig();
             } else if (tab === 'radiod-channels') {
-                document.querySelector('.tab:nth-child(5)').classList.add('active');
+                document.querySelector('.tab:nth-child(6)').classList.add('active');
                 document.getElementById('radiodChannelsTab').classList.add('active');
                 document.getElementById('radiodChannelsButtons').style.display = 'flex';
                 loadRadiodChannels();

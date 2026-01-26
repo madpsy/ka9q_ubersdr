@@ -924,12 +924,12 @@ instance_reporting:
   # including: UUID, callsign, location, public URL, and basic statistics
   enabled: false
 
-  # Enable or disable remote logging via Fluent Bit (default: true)
+  # Enable or disable remote logging via Fluent Bit (default: false)
   # When enabled, Docker container logs are sent to the central collector
   # Uses the same hostname, port, and instance_uuid as instance reporting
   # Logs are sent to /ingest/logs endpoint with Bearer token authentication
   # Set to false to disable log shipping while keeping instance reporting enabled
-  remote_logging: true
+  remote_logging: false
 
   # Notify when instance disconnects (default: true)
   # When enabled, sends a notification to the central server when this instance

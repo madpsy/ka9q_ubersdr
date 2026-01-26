@@ -6,6 +6,7 @@ set -e
 # Parse command line arguments
 IGNORE_RX888=0
 IGNORE_PORTS=0
+FORCE_COMPOSE=0
 for arg in "$@"; do
     case $arg in
         --ignore-rx888)
@@ -14,6 +15,10 @@ for arg in "$@"; do
             ;;
         --ignore-ports)
             IGNORE_PORTS=1
+            shift
+            ;;
+        --force-compose)
+            FORCE_COMPOSE=1
             shift
             ;;
     esac
@@ -201,10 +206,15 @@ echo "Creating ~/ubersdr directory..."
 mkdir -p ~/ubersdr
 
 # Check if this is a fresh installation
-if [ -f "$INSTALLED_MARKER" ]; then
+if [ -f "$INSTALLED_MARKER" ] && [ $FORCE_COMPOSE -eq 0 ]; then
     echo "Existing installation detected. Preserving docker-compose.yml file."
+    echo "Hint: Use --force-compose to overwrite docker-compose.yml."
 else
-    echo "Fetching docker-compose configuration..."
+    if [ $FORCE_COMPOSE -eq 1 ]; then
+        echo "Forcing docker-compose.yml overwrite (--force-compose)..."
+    else
+        echo "Fetching docker-compose configuration..."
+    fi
     curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/docker-compose-dockerhub.yml -o ~/ubersdr/docker-compose.yml
 fi
 

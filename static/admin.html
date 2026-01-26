@@ -548,8 +548,11 @@
                             <select id="containerSelect" onchange="onContainerChange()" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; min-width: 200px;">
                                 <option value="">Select a container...</option>
                             </select>
-                            <button class="btn btn-secondary" onclick="loadLogs()" style="margin: 0;">Refresh Now</button>
-                            <button id="downloadLogsBtn" class="btn btn-secondary" onclick="downloadLogs()" style="margin: 0;" disabled>Download Logs</button>
+                            <select id="sourceSelect" onchange="onSourceChange()" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; min-width: 120px;">
+                                <option value="">All sources</option>
+                            </select>
+                            <button class="btn btn-secondary" onclick="loadLogs()" style="margin: 0;" title="Refresh Now">🔄</button>
+                            <button id="downloadLogsBtn" class="btn btn-secondary" onclick="downloadLogs()" style="margin: 0;" disabled title="Download Logs">💾</button>
                             <label style="display: flex; align-items: center; gap: 5px; margin: 0;">
                                 <input type="checkbox" id="logsAutoRefresh" onchange="onAutoRefreshChange()" checked>
                                 <span>Auto-refresh (5s)</span>

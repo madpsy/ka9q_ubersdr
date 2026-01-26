@@ -93,6 +93,9 @@ async function loadLogs() {
         // Store all logs for filtering
         allLogs = data.logs;
 
+        // Update source dropdown with available sources
+        updateSourceDropdown();
+
         // Apply current filter
         filterAndDisplayLogs();
 
@@ -115,19 +118,69 @@ async function loadLogs() {
 }
 
 /**
- * Filter and display logs based on current filter text
+ * Update source dropdown with available sources from current logs
+ */
+function updateSourceDropdown() {
+    const sourceSelect = document.getElementById('sourceSelect');
+    if (!sourceSelect) return;
+
+    // Save current selection
+    const currentValue = sourceSelect.value;
+
+    // Get unique sources from logs
+    const sources = new Set();
+    allLogs.forEach(log => {
+        if (log.source) {
+            sources.add(log.source);
+        }
+    });
+
+    // Rebuild dropdown
+    sourceSelect.innerHTML = '<option value="">All sources</option>';
+    Array.from(sources).sort().forEach(source => {
+        const option = document.createElement('option');
+        option.value = source;
+        option.textContent = source;
+        sourceSelect.appendChild(option);
+    });
+
+    // Restore selection if it still exists
+    if (currentValue && sources.has(currentValue)) {
+        sourceSelect.value = currentValue;
+    }
+}
+
+/**
+ * Handle source selection change
+ */
+function onSourceChange() {
+    filterAndDisplayLogs();
+}
+
+/**
+ * Filter and display logs based on current filter text and source
  */
 function filterAndDisplayLogs() {
     const display = document.getElementById('logsDisplay');
     const filterInput = document.getElementById('logsFilter');
+    const sourceSelect = document.getElementById('sourceSelect');
     const filterText = filterInput ? filterInput.value.toLowerCase() : '';
+    const sourceFilter = sourceSelect ? sourceSelect.value : '';
 
-    // Filter logs if filter text is provided
-    const logsToDisplay = filterText
-        ? allLogs.filter(log => log.log.toLowerCase().includes(filterText))
-        : allLogs;
+    // Filter logs by source first, then by text
+    let logsToDisplay = allLogs;
 
-    if (logsToDisplay.length === 0 && filterText) {
+    // Filter by source if selected
+    if (sourceFilter) {
+        logsToDisplay = logsToDisplay.filter(log => log.source === sourceFilter);
+    }
+
+    // Filter by text if provided
+    if (filterText) {
+        logsToDisplay = logsToDisplay.filter(log => log.log.toLowerCase().includes(filterText));
+    }
+
+    if (logsToDisplay.length === 0 && (filterText || sourceFilter)) {
         display.innerHTML = '<div style="color: #888; padding: 20px; text-align: center;">No logs match the filter</div>';
         return;
     }
@@ -173,7 +226,7 @@ function filterAndDisplayLogs() {
 
     // Update count display if filtering
     const countDisplay = document.getElementById('logsCount');
-    if (countDisplay && filterText) {
+    if (countDisplay && (filterText || sourceFilter)) {
         countDisplay.textContent = `Showing ${logsToDisplay.length} of ${allLogs.length} logs (filtered)`;
     }
 }

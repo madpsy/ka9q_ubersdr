@@ -8,6 +8,7 @@ FLUENT_BIT_IMAGE=madpsy/fluent-bit-ubersdr
 # Parse command line flags
 TAG_LATEST=true
 NO_CACHE=""
+BUILD_FLUENT_BIT=false
 
 for arg in "$@"; do
     case $arg in
@@ -19,9 +20,13 @@ for arg in "$@"; do
             NO_CACHE="--no-cache"
             echo "Running in --no-cache mode (will rebuild all layers)"
             ;;
+        --fluent-bit)
+            BUILD_FLUENT_BIT=true
+            echo "Will build Fluent Bit image"
+            ;;
         *)
             echo "Unknown option: $arg"
-            echo "Usage: $0 [--no-latest] [--no-cache]"
+            echo "Usage: $0 [--no-latest] [--no-cache] [--fluent-bit]"
             exit 1
             ;;
     esac
@@ -42,20 +47,25 @@ fi
 
 echo "UberSDR build successful!"
 
-# Build Fluent Bit image with version tag
-echo "Building Fluent Bit Docker image..."
-if ! docker build $NO_CACHE -t $FLUENT_BIT_IMAGE:$VERSION -f docker/Dockerfile.fluent-bit docker/; then
-    echo "ERROR: Fluent Bit Docker build failed!"
-    exit 1
+# Build Fluent Bit image with version tag (only if --fluent-bit flag is set)
+if [ "$BUILD_FLUENT_BIT" = true ]; then
+    echo "Building Fluent Bit Docker image..."
+    if ! docker build $NO_CACHE -t $FLUENT_BIT_IMAGE:$VERSION -f docker/Dockerfile.fluent-bit docker/; then
+        echo "ERROR: Fluent Bit Docker build failed!"
+        exit 1
+    fi
+    echo "Fluent Bit build successful!"
+else
+    echo "Skipping Fluent Bit build (use --fluent-bit flag to build)"
 fi
-
-echo "Fluent Bit build successful!"
 
 # Tag version as latest (unless --no-latest flag is set)
 if [ "$TAG_LATEST" = true ]; then
     echo "Tagging as latest..."
     docker tag $IMAGE:$VERSION $IMAGE:latest
-    docker tag $FLUENT_BIT_IMAGE:$VERSION $FLUENT_BIT_IMAGE:latest
+    if [ "$BUILD_FLUENT_BIT" = true ]; then
+        docker tag $FLUENT_BIT_IMAGE:$VERSION $FLUENT_BIT_IMAGE:latest
+    fi
 else
     echo "Skipping 'latest' tag (--no-latest flag set)"
 fi
@@ -68,11 +78,15 @@ if [ "$TAG_LATEST" = true ]; then
     docker push $IMAGE:latest
 fi
 
-echo "Pushing Fluent Bit to Docker Hub..."
-docker push $FLUENT_BIT_IMAGE:$VERSION
+if [ "$BUILD_FLUENT_BIT" = true ]; then
+    echo "Pushing Fluent Bit to Docker Hub..."
+    docker push $FLUENT_BIT_IMAGE:$VERSION
 
-if [ "$TAG_LATEST" = true ]; then
-    docker push $FLUENT_BIT_IMAGE:latest
+    if [ "$TAG_LATEST" = true ]; then
+        docker push $FLUENT_BIT_IMAGE:latest
+    fi
+else
+    echo "Skipping Fluent Bit push (not built)"
 fi
 
 # Commit and push version changes (unless --no-latest flag is set)

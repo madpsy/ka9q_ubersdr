@@ -148,46 +148,6 @@ services:
       retries: 3
       start_period: 10s
 
-  # Fluent Bit log collector - sends container logs to central collector
-  fluent-bit:
-    image: fluent/fluent-bit:latest
-    container_name: fluent-bit
-    restart: unless-stopped
-
-    # Wait for ubersdr to be healthy before starting (ensures UUID is generated)
-    depends_on:
-      ubersdr:
-        condition: service_healthy
-
-    networks:
-      - sdr-network
-
-    volumes:
-      # Fluent Bit configuration
-      - ./fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
-      # Custom entrypoint script to read config and set environment variables
-      - ./fluent-bit-entrypoint.sh:/fluent-bit-entrypoint.sh:ro
-      # Access to UberSDR config to read instance UUID and collector settings
-      - ubersdr-config:/app/config:ro
-      # Access to Docker container logs
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      # Persistent database for tracking log positions
-      - fluent-bit-data:/var/log
-
-    environment:
-      - TZ=${TZ:-UTC}
-
-    # Use custom entrypoint that reads config and starts Fluent Bit
-    entrypoint: ["/fluent-bit-entrypoint.sh"]
-
-    # Healthcheck
-    healthcheck:
-      test: [CMD, pgrep, -x, fluent-bit]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-
 # Shared network between ka9q-radio and ubersdr containers
 # Docker Compose will create this automatically with the specified subnet
 networks:
@@ -205,5 +165,4 @@ volumes:
   caddy-data:
   caddy-config:
   caddy-shared:
-  fluent-bit-data:
   # Note: updater directory is bind-mounted from host (./updater)

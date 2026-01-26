@@ -38,6 +38,13 @@ services:
       retries: 3
       start_period: 10s
 
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: "127.0.0.1:24224"
+        fluentd-async: "true"
+        tag: "ka9q-radio"
+
   # ka9q_ubersdr service - Web interface
   ubersdr:
     image: madpsy/ka9q_ubersdr:latest
@@ -85,6 +92,13 @@ services:
       timeout: 10s
       retries: 3
       start_period: 5s
+
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: "127.0.0.1:24224"
+        fluentd-async: "true"
+        tag: "ubersdr"
 
     # Resource limits (optional)
     # deploy:
@@ -143,6 +157,13 @@ services:
       retries: 3
       start_period: 10s
 
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: "127.0.0.1:24224"
+        fluentd-async: "true"
+        tag: "caddy"
+
   # Tunnel client - Connects local UberSDR to public tunnel server
   tunnel-client:
     image: madpsy/tunnel-client:latest
@@ -173,6 +194,58 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: "127.0.0.1:24224"
+        fluentd-async: "true"
+        tag: "tunnel-client"
+
+  # Fluent Bit log collector - sends container logs to central collector
+  fluent-bit:
+    image: fluent/fluent-bit:latest-debug
+    container_name: fluent-bit
+    restart: unless-stopped
+
+    # Wait for ubersdr to be healthy before starting (ensures UUID is generated)
+    depends_on:
+      ubersdr:
+        condition: service_healthy
+
+    networks:
+      - sdr-network
+
+    ports:
+      - "127.0.0.1:24224:24224"
+
+    volumes:
+      # Fluent Bit configuration
+      - ./fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      # Custom entrypoint script to read config and set environment variables
+      - ./fluent-bit-entrypoint.sh:/usr/local/bin/fluent-bit-entrypoint.sh:ro
+      # Access to UberSDR config to read instance UUID and collector settings
+      - ubersdr-config:/app/config:ro
+
+    environment:
+      - TZ=${TZ:-UTC}
+
+    # Use custom entrypoint that reads config and starts Fluent Bit
+    entrypoint: ["/usr/local/bin/fluent-bit-entrypoint.sh"]
+
+    # Healthcheck
+    healthcheck:
+      test: [CMD, pgrep, -x, fluent-bit]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 # Shared network between ka9q-radio and ubersdr containers
 # Docker Compose will create this automatically with the specified subnet

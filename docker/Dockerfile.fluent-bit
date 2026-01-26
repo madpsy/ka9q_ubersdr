@@ -1,0 +1,9 @@
+# Use Fluent Bit debug image which includes a shell
+FROM fluent/fluent-bit:latest-debug
+
+# Copy entrypoint script
+COPY fluent-bit-entrypoint.sh /usr/local/bin/fluent-bit-entrypoint.sh
+RUN chmod +x /usr/local/bin/fluent-bit-entrypoint.sh
+
+# Set entrypoint
+ENTRYPOINT ["/usr/local/bin/fluent-bit-entrypoint.sh"]

@@ -25,18 +25,18 @@ check_remote_logging() {
 # Function to extract UUID
 get_uuid() {
     if [ -f "$CONFIG_FILE" ]; then
-        grep -A 1 "instance_reporting:" "$CONFIG_FILE" | \
-        grep "instance_uuid:" | \
-        sed 's/.*instance_uuid: *"\(.*\)".*/\1/'
+        # Match both quoted and unquoted UUIDs
+        UUID=$(grep "instance_uuid:" "$CONFIG_FILE" | sed 's/.*instance_uuid: *//; s/"//g; s/ *$//')
+        echo "$UUID"
     fi
 }
 
 # Function to extract hostname
 get_hostname() {
     if [ -f "$CONFIG_FILE" ]; then
-        grep -A 1 "instance_reporting:" "$CONFIG_FILE" | \
-        grep "hostname:" | \
-        sed 's/.*hostname: *"\(.*\)".*/\1/'
+        # Match both quoted and unquoted hostnames
+        HOSTNAME=$(grep "hostname:" "$CONFIG_FILE" | grep -v "tunnel_server_host" | head -1 | sed 's/.*hostname: *//; s/"//g; s/ *$//')
+        echo "$HOSTNAME"
     fi
 }
 
@@ -119,7 +119,7 @@ start_fluent_bit() {
     echo "  Host: $COLLECTOR_HOSTNAME"
     echo "  Port: $COLLECTOR_PORT"
     echo "  TLS: $TLS_ENABLED"
-    echo "  UUID: ${INSTANCE_SECRET_UUID:0:8}..."
+    echo "  UUID: $(echo "$INSTANCE_SECRET_UUID" | cut -c1-8)..."
 
     # Start Fluent Bit in background
     /fluent-bit/bin/fluent-bit -c "$FLUENT_BIT_CONF" &

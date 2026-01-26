@@ -376,6 +376,12 @@ func main() {
 	log.Printf("Server listen: %s", config.Server.Listen)
 	log.Printf("Max sessions: %d", config.Server.MaxSessions)
 
+	// Initialize log receiver on port 6925 with 1000 entry rolling window
+	if err := InitLogReceiver(6925, 1000); err != nil {
+		log.Fatalf("Failed to initialize log receiver: %v", err)
+	}
+	log.Printf("Log receiver listening on port 6925 (max 1000 entries)")
+
 	// Initialize radiod controller
 	radiod, err := NewRadiodController(
 		config.Radiod.StatusGroup,
@@ -1228,6 +1234,7 @@ func main() {
 	http.HandleFunc("/admin/session-activity/events", adminHandler.AuthMiddleware(adminHandler.HandleSessionActivityEvents))
 	http.HandleFunc("/admin/chat/logs", adminHandler.AuthMiddleware(adminHandler.HandleChatLogs))
 	http.HandleFunc("/admin/force-update", adminHandler.AuthMiddleware(adminHandler.HandleForceUpdate))
+	http.HandleFunc("/admin/logs", adminHandler.AuthMiddleware(handleLogsAPI))
 
 	// Open log file for HTTP request logging
 	// If LogFile is a relative path and we have a config directory, prepend it

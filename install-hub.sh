@@ -222,8 +222,7 @@ echo "Fetching caddy-entrypoint.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/caddy-entrypoint.sh -o ~/ubersdr/caddy-entrypoint.sh
 chmod +x ~/ubersdr/caddy-entrypoint.sh
 
-echo "Fetching Fluent Bit configuration files..."
-curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/fluent-bit.conf -o ~/ubersdr/fluent-bit.conf
+echo "Fetching Fluent Bit entrypoint script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/fluent-bit-entrypoint.sh -o ~/ubersdr/fluent-bit-entrypoint.sh
 chmod +x ~/ubersdr/fluent-bit-entrypoint.sh
 

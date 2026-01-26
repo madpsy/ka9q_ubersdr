@@ -2,8 +2,62 @@
 set -e
 
 CONFIG_FILE="/app/config/config.yaml"
-FLUENT_BIT_CONF="/fluent-bit/etc/fluent-bit.conf"
+FLUENT_BIT_CONF="/tmp/fluent-bit.conf"
 FLUENT_BIT_PID=""
+
+# Function to generate Fluent Bit configuration
+# Parameters: $1 = include_http_output (true/false)
+generate_fluent_bit_config() {
+    local include_http="$1"
+
+    cat > "$FLUENT_BIT_CONF" <<EOF
+[SERVICE]
+    Flush        5
+    Daemon       Off
+    Log_Level    error
+    Parsers_File parsers.conf
+
+[INPUT]
+    Name                forward
+    Listen              0.0.0.0
+    Port                24224
+    Mem_Buf_Limit       5MB
+
+[FILTER]
+    Name                modify
+    Match               *
+    Remove              container_id
+
+[OUTPUT]
+    Name                tcp
+    Match               *
+    Host                ka9q_ubersdr
+    Port                6925
+    Format              json_lines
+    Retry_Limit         5
+EOF
+
+    # Only add HTTP output if remote logging is enabled
+    if [ "$include_http" = "true" ]; then
+        cat >> "$FLUENT_BIT_CONF" <<'EOF'
+
+[OUTPUT]
+    Name                http
+    Match               *
+    Host                ${COLLECTOR_HOSTNAME}
+    Port                ${COLLECTOR_PORT}
+    URI                 /ingest/logs
+    Format              json
+    Header              Authorization Bearer ${INSTANCE_SECRET_UUID}
+    tls                 ${TLS_ENABLED}
+    tls.verify          On
+    Retry_Limit         3
+EOF
+        echo "Generated Fluent Bit configuration with HTTP output at $FLUENT_BIT_CONF"
+    else
+        echo "Generated Fluent Bit configuration without HTTP output at $FLUENT_BIT_CONF"
+    fi
+}
 
 # Function to check if remote_logging is enabled
 check_remote_logging() {
@@ -75,7 +129,10 @@ get_use_https() {
 }
 
 # Function to start Fluent Bit
+# Parameters: $1 = remote_logging_enabled (true/false)
 start_fluent_bit() {
+    local remote_logging="$1"
+    
     # Wait for UUID to be generated (max 60 seconds)
     echo "Waiting for instance UUID to be generated..."
     for i in $(seq 1 60); do
@@ -96,30 +153,39 @@ start_fluent_bit() {
         return 1
     fi
 
-    # Extract hostname from config
-    HOSTNAME=$(get_hostname)
-    if [ -z "$HOSTNAME" ]; then
-        echo "ERROR: Failed to get hostname from config"
-        return 1
+    # If remote logging is enabled, extract collector settings
+    if [ "$remote_logging" = "true" ]; then
+        # Extract hostname from config
+        HOSTNAME=$(get_hostname)
+        if [ -z "$HOSTNAME" ]; then
+            echo "ERROR: Failed to get hostname from config"
+            return 1
+        fi
+        export COLLECTOR_HOSTNAME="$HOSTNAME"
+        echo "Using collector hostname: $COLLECTOR_HOSTNAME"
+
+        # Extract port from config
+        PORT=$(get_port)
+        export COLLECTOR_PORT="$PORT"
+        echo "Using collector port: $COLLECTOR_PORT"
+
+        # Extract use_https from config
+        TLS=$(get_use_https)
+        export TLS_ENABLED="$TLS"
+        echo "TLS: $TLS_ENABLED"
+
+        echo "Starting Fluent Bit with remote logging enabled:"
+        echo "  Host: $COLLECTOR_HOSTNAME"
+        echo "  Port: $COLLECTOR_PORT"
+        echo "  TLS: $TLS_ENABLED"
+        echo "  UUID: $(echo "$INSTANCE_SECRET_UUID" | cut -c1-8)..."
+    else
+        echo "Starting Fluent Bit with local TCP forwarding only"
+        echo "  UUID: $(echo "$INSTANCE_SECRET_UUID" | cut -c1-8)..."
     fi
-    export COLLECTOR_HOSTNAME="$HOSTNAME"
-    echo "Using collector hostname: $COLLECTOR_HOSTNAME"
 
-    # Extract port from config
-    PORT=$(get_port)
-    export COLLECTOR_PORT="$PORT"
-    echo "Using collector port: $COLLECTOR_PORT"
-
-    # Extract use_https from config
-    TLS=$(get_use_https)
-    export TLS_ENABLED="$TLS"
-    echo "TLS: $TLS_ENABLED"
-
-    echo "Starting Fluent Bit with configuration:"
-    echo "  Host: $COLLECTOR_HOSTNAME"
-    echo "  Port: $COLLECTOR_PORT"
-    echo "  TLS: $TLS_ENABLED"
-    echo "  UUID: $(echo "$INSTANCE_SECRET_UUID" | cut -c1-8)..."
+    # Generate Fluent Bit configuration file
+    generate_fluent_bit_config "$remote_logging"
 
     # Start Fluent Bit in background
     /fluent-bit/bin/fluent-bit -c "$FLUENT_BIT_CONF" &
@@ -141,13 +207,9 @@ stop_fluent_bit() {
 REMOTE_LOGGING_ENABLED=$(check_remote_logging)
 echo "Initial remote_logging setting: $REMOTE_LOGGING_ENABLED"
 
-if [ "$REMOTE_LOGGING_ENABLED" = "true" ]; then
-    start_fluent_bit
-    LAST_STATE="running"
-else
-    echo "Remote logging is disabled. Waiting for configuration change..."
-    LAST_STATE="stopped"
-fi
+# Always start Fluent Bit (it will run with or without HTTP output based on remote_logging)
+start_fluent_bit "$REMOTE_LOGGING_ENABLED"
+LAST_STATE="running"
 
 # Store last known configuration
 LAST_UUID=$(get_uuid)
@@ -171,15 +233,10 @@ while true; do
         echo "Remote logging setting changed: $REMOTE_LOGGING_ENABLED -> $CURRENT_REMOTE_LOGGING"
         REMOTE_LOGGING_ENABLED="$CURRENT_REMOTE_LOGGING"
         
-        if [ "$REMOTE_LOGGING_ENABLED" = "true" ]; then
-            echo "Enabling remote logging..."
-            start_fluent_bit
-            LAST_STATE="running"
-        else
-            echo "Disabling remote logging..."
-            stop_fluent_bit
-            LAST_STATE="stopped"
-        fi
+        # Restart Fluent Bit with new configuration (with or without HTTP output)
+        echo "Restarting Fluent Bit with updated configuration..."
+        stop_fluent_bit
+        start_fluent_bit "$REMOTE_LOGGING_ENABLED"
         
         # Update last known config
         LAST_UUID="$CURRENT_UUID"
@@ -189,7 +246,7 @@ while true; do
         continue
     fi
     
-    # If logging is enabled, check for configuration changes
+    # If remote logging is enabled, check for collector configuration changes
     if [ "$REMOTE_LOGGING_ENABLED" = "true" ]; then
         CONFIG_CHANGED=false
         
@@ -214,9 +271,9 @@ while true; do
         fi
         
         if [ "$CONFIG_CHANGED" = "true" ]; then
-            echo "Configuration changed, restarting Fluent Bit..."
+            echo "Collector configuration changed, restarting Fluent Bit..."
             stop_fluent_bit
-            start_fluent_bit
+            start_fluent_bit "$REMOTE_LOGGING_ENABLED"
             
             # Update last known config
             LAST_UUID="$CURRENT_UUID"
@@ -226,11 +283,11 @@ while true; do
         fi
     fi
     
-    # Check if Fluent Bit process is still running when it should be
-    if [ "$REMOTE_LOGGING_ENABLED" = "true" ] && [ -n "$FLUENT_BIT_PID" ]; then
+    # Check if Fluent Bit process is still running (should always be running now)
+    if [ -n "$FLUENT_BIT_PID" ]; then
         if ! kill -0 $FLUENT_BIT_PID 2>/dev/null; then
             echo "WARNING: Fluent Bit process died unexpectedly, restarting..."
-            start_fluent_bit
+            start_fluent_bit "$REMOTE_LOGGING_ENABLED"
         fi
     fi
 done

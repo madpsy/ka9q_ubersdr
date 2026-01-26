@@ -208,10 +208,19 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 
 	// Check if User-Agent mapping exists (ensures /connection was called first)
 	if h.sessions.GetUserAgent(userSessionID) == "" {
-		// Silently reject connection without logging
+		log.Printf("Rejected DX Cluster WebSocket: no User-Agent mapping for user_session_id %s from %s (client IP: %s)", userSessionID, sourceIP, clientIP)
 		http.Error(w, "Invalid session. Please refresh the page and try again.", http.StatusBadRequest)
 		return
 	}
+
+	// Check if IP matches the bound IP (ensures UUID is used from same IP as /connection)
+	boundIP := h.sessions.GetUUIDIP(userSessionID)
+	if boundIP != "" && boundIP != clientIP {
+		log.Printf("Rejected DX Cluster WebSocket: IP mismatch for user_session_id %s (bound: %s, actual: %s, source: %s)", userSessionID, boundIP, clientIP, sourceIP)
+		http.Error(w, "Session IP mismatch. Please refresh the page and try again.", http.StatusForbidden)
+		return
+	}
+	log.Printf("DX Cluster WebSocket: UUID %s IP binding validated (bound: %s, actual: %s) ✓", userSessionID, boundIP, clientIP)
 
 	// Upgrade HTTP connection to WebSocket
 	conn, err := h.upgrader.Upgrade(w, r, nil)

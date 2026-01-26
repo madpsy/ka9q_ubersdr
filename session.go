@@ -71,6 +71,7 @@ type SessionManager struct {
 	ipToUUIDs            map[string]map[string]bool // Map of IP address to set of UUIDs (for limiting unique UUIDs per IP)
 	userAgents           map[string]string          // Map of user_session_id to User-Agent string
 	userAgentLastSeen    map[string]time.Time       // Map of user_session_id to last time it had an active session
+	uuidToIP             map[string]string          // Map of user_session_id to bound IP address (for security)
 	uuidAudioSessions    map[string]string          // Map of user_session_id to audio session ID (enforces 1 audio per UUID)
 	uuidSpectrumSessions map[string]string          // Map of user_session_id to spectrum session ID (enforces 1 spectrum per UUID)
 	mu                   sync.RWMutex
@@ -96,6 +97,7 @@ func NewSessionManager(config *Config, radiod *RadiodController) *SessionManager
 		ipToUUIDs:            make(map[string]map[string]bool),
 		userAgents:           make(map[string]string),
 		userAgentLastSeen:    make(map[string]time.Time),
+		uuidToIP:             make(map[string]string),
 		uuidAudioSessions:    make(map[string]string),
 		uuidSpectrumSessions: make(map[string]string),
 		config:               config,
@@ -1095,6 +1097,7 @@ func (sm *SessionManager) cleanupOrphanedUserAgents() {
 			userAgent := sm.userAgents[uuid]
 			delete(sm.userAgents, uuid)
 			delete(sm.userAgentLastSeen, uuid)
+			delete(sm.uuidToIP, uuid)
 			log.Printf("Cleaned up orphaned User-Agent entry for UUID %s (User-Agent: %s, no active session for >5 minutes)",
 				uuid, userAgent)
 		}
@@ -1294,6 +1297,30 @@ func (sm *SessionManager) GetUserAgent(userSessionID string) string {
 	defer sm.mu.RUnlock()
 
 	return sm.userAgents[userSessionID]
+}
+
+// SetUUIDIP binds a UUID to an IP address (overwrites existing binding)
+func (sm *SessionManager) SetUUIDIP(userSessionID, clientIP string) {
+	if userSessionID == "" || clientIP == "" {
+		return
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	sm.uuidToIP[userSessionID] = clientIP
+}
+
+// GetUUIDIP retrieves the bound IP for a UUID
+func (sm *SessionManager) GetUUIDIP(userSessionID string) string {
+	if userSessionID == "" {
+		return ""
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	return sm.uuidToIP[userSessionID]
 }
 
 // AddAudioBytes atomically adds to the audio byte counter and updates sliding window

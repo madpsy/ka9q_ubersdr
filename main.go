@@ -1595,11 +1595,22 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 		}
 	}
 
-	// Connection is allowed - store User-Agent for this session
+	// Connection is allowed - store User-Agent and bind UUID to IP
 	userAgent := r.Header.Get("User-Agent")
 	if userAgent != "" {
 		sessions.SetUserAgent(req.UserSessionID, userAgent)
 	}
+
+	// Bind UUID to IP address for security
+	existingIP := sessions.GetUUIDIP(req.UserSessionID)
+	if existingIP != "" && existingIP != clientIP {
+		log.Printf("/connection: UUID %s rebinding from IP %s to %s", req.UserSessionID, existingIP, clientIP)
+	} else if existingIP == "" {
+		log.Printf("/connection: UUID %s bound to IP %s (new binding)", req.UserSessionID, clientIP)
+	} else {
+		log.Printf("/connection: UUID %s confirmed binding to IP %s (same IP)", req.UserSessionID, clientIP)
+	}
+	sessions.SetUUIDIP(req.UserSessionID, clientIP)
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)

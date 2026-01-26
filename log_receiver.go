@@ -13,11 +13,11 @@ import (
 
 // LogEntry represents a single log entry from Fluent Bit
 type LogEntry struct {
-	Timestamp time.Time              `json:"date"`
-	Log       string                 `json:"log"`
-	Source    string                 `json:"source"`
-	Tag       string                 `json:"tag"`
-	Metadata  map[string]interface{} `json:"-"` // Store any additional fields
+	Timestamp     time.Time              `json:"date"`
+	Log           string                 `json:"log"`
+	Source        string                 `json:"source"`
+	ContainerName string                 `json:"container_name"`
+	Metadata      map[string]interface{} `json:"-"` // Store any additional fields
 }
 
 // LogReceiver manages the TCP server and log storage
@@ -140,13 +140,13 @@ func (lr *LogReceiver) handleConnection(conn net.Conn) {
 		if sourceVal, ok := rawEntry["source"].(string); ok {
 			entry.Source = sourceVal
 		}
-		if tagVal, ok := rawEntry["tag"].(string); ok {
-			entry.Tag = tagVal
+		if containerNameVal, ok := rawEntry["container_name"].(string); ok {
+			entry.ContainerName = containerNameVal
 		}
 
 		// Store all other fields in metadata
 		for key, val := range rawEntry {
-			if key != "date" && key != "log" && key != "source" && key != "tag" {
+			if key != "date" && key != "log" && key != "source" && key != "container_name" {
 				entry.Metadata[key] = val
 			}
 		}

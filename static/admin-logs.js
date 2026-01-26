@@ -37,10 +37,10 @@ async function loadContainerNames() {
             // Restore selection if it still exists
             if (currentValue && data.container_names.includes(currentValue)) {
                 select.value = currentValue;
-            } else if (!currentValue && data.container_names.includes('ka9q-ubersdr')) {
-                // Auto-select ka9q-ubersdr if available and no previous selection
-                select.value = 'ka9q-ubersdr';
-                currentSelectedContainer = 'ka9q-ubersdr';
+            } else if (!currentValue && data.container_names.includes('ka9qubersdr')) {
+                // Auto-select ka9q_ubersdr if available and no previous selection
+                select.value = 'ka9qubersdr';
+                currentSelectedContainer = 'ka9qubersdr';
                 // Trigger load and auto-refresh
                 loadLogs();
                 const autoRefreshCheckbox = document.getElementById('logsAutoRefresh');

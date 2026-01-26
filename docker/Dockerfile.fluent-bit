@@ -18,8 +18,12 @@ COPY --from=shell-provider /usr/bin/sleep /usr/bin/sleep
 COPY --from=shell-provider /usr/bin/kill /usr/bin/kill
 COPY --from=shell-provider /usr/bin/cut /usr/bin/cut
 COPY --from=shell-provider /usr/bin/head /usr/bin/head
+# Copy required shared libraries
 COPY --from=shell-provider /lib/x86_64-linux-gnu/libtinfo.so.6 /lib/x86_64-linux-gnu/libtinfo.so.6
 COPY --from=shell-provider /lib/x86_64-linux-gnu/libc.so.6 /lib/x86_64-linux-gnu/libc.so.6
+COPY --from=shell-provider /lib/x86_64-linux-gnu/libpcre2-8.so.0 /lib/x86_64-linux-gnu/libpcre2-8.so.0
+COPY --from=shell-provider /lib/x86_64-linux-gnu/libacl.so.1 /lib/x86_64-linux-gnu/libacl.so.1
+COPY --from=shell-provider /lib/x86_64-linux-gnu/libselinux.so.1 /lib/x86_64-linux-gnu/libselinux.so.1
 COPY --from=shell-provider /lib64/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
 
 # Copy entrypoint script

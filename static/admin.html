@@ -6029,6 +6029,9 @@
 
         async function loadRotatorSchedulerConfig() {
             try {
+                // Fetch suncalc data first for day/night visualization
+                await fetchSunCalcData();
+
                 const response = await authenticatedFetch('/admin/rotator-scheduler-config');
                 if (!response) return; // Auth failed, already handled
                 if (!response.ok) throw new Error('Failed to load rotator scheduler config');
@@ -6039,6 +6042,22 @@
                 showAlert('Rotator scheduler configuration loaded successfully', 'success');
             } catch (error) {
                 showAlert('Error loading rotator scheduler configuration: ' + error.message, 'error');
+            }
+        }
+
+        // Fetch sun/moon data from /api/suncalc endpoint
+        async function fetchSunCalcData() {
+            try {
+                const response = await fetch('/api/suncalc');
+                if (response.ok) {
+                    window.suncalcData = await response.json();
+                } else {
+                    console.warn('Failed to fetch suncalc data:', response.status);
+                    window.suncalcData = null;
+                }
+            } catch (error) {
+                console.error('Error fetching suncalc data:', error);
+                window.suncalcData = null;
             }
         }
 
@@ -6830,17 +6849,11 @@
             const timelineY = height - marginBottom - 10;
             const timelineWidth = width - marginLeft - marginRight;
 
-            // Draw day/night shading if we have location data
-            if (currentConfig && currentConfig.admin && currentConfig.admin.gps && currentConfig.admin.gps.lat && currentConfig.admin.gps.lon && typeof SunCalc !== 'undefined') {
-                const lat = currentConfig.admin.gps.lat;
-                const lon = currentConfig.admin.gps.lon;
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-
-                // Calculate sunrise and sunset times for today
-                const times = SunCalc.getTimes(today, lat, lon);
-                const sunrise = times.sunrise;
-                const sunset = times.sunset;
+            // Draw day/night shading using data from /api/suncalc endpoint
+            if (window.suncalcData && window.suncalcData.sun && window.suncalcData.sun.times) {
+                const times = window.suncalcData.sun.times;
+                const sunrise = new Date(times.sunrise);
+                const sunset = new Date(times.sunset);
 
                 // Convert sunrise/sunset to hours (0-24)
                 const sunriseHours = sunrise.getHours() + sunrise.getMinutes() / 60;

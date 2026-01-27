@@ -2279,7 +2279,7 @@ input[type="range"]::-moz-range-thumb {
 
 /* In split view, container needs to be tall enough for both line graph and waterfall */
 .spectrum-display-container:has(#spectrum-line-graph-canvas.split-mode) {
-    min-height: 635px; /* 300px line graph + 300px waterfall + 35px overlay */
+    height: 635px; /* 300px line graph + 300px waterfall + 35px controls overlay */
 }
 
 /* In graph-only view, container needs to be tall enough for the full-height line graph */

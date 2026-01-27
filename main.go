@@ -1056,6 +1056,11 @@ func main() {
 		handleSpaceWeatherCSV(w, r, spaceWeatherMonitor, ipBanManager, spaceWeatherRateLimiter)
 	}))
 
+	// SunCalc endpoint (sun/moon position and times)
+	http.HandleFunc("/api/suncalc", func(w http.ResponseWriter, r *http.Request) {
+		handleSunCalcAPI(w, r, config)
+	})
+
 	// Noise floor endpoints (with gzip compression, IP ban checking, and rate limiting)
 	http.HandleFunc("/api/noisefloor/latest", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorLatest(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)

@@ -327,6 +327,7 @@ if [ $GENERATE_WISDOM -eq 1 ]; then
         sudo rm -f "$WISDOM_FILE"
     fi
     echo "Creating FFTW Wisdom... This will take several minutes. Grab a beer and be patient."
+    # Real to complex for 129.6 MSPS would also need rof3240000
     if sudo fftwf-wisdom -v -T 1 -o "$WISDOM_FILE" \
         rof1620000 cob162000 cob81000 cob40500 cob32400 \
         cob16200 cob9600 cob8100 cob6930 cob4860 cob4800 cob3240 cob3200 cob1920 cob1620 cob1600 \

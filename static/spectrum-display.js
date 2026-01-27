@@ -1582,9 +1582,9 @@ class SpectrumDisplay {
         //     this.applyPredictedShift();
         // }
 
-        // Waterfall starts at y=65 (below bookmarks + freq scale) when line graph is hidden, y=0 when visible (split mode - canvas is already positioned below line graph)
+        // Waterfall starts at y=75 (below bookmarks + freq scale) when line graph is hidden, y=0 when visible (split mode - canvas is already positioned below line graph)
         const lineGraphVisible = this.lineGraphCanvas && this.lineGraphCanvas.style.display !== 'none';
-        const waterfallStartY = lineGraphVisible ? 0 : 65;
+        const waterfallStartY = lineGraphVisible ? 0 : 75;
         const waterfallHeight = this.height - waterfallStartY - 1;
 
         // Initialize waterfall image data if needed

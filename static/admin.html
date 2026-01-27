@@ -7252,7 +7252,7 @@
                     .sort((a, b) => a.timeInHours - b.timeInHours);
 
                 // Detect overlapping labels and assign vertical levels (3 tiers)
-                const minSpacing = 65; // Minimum pixels between labels (increased for full names)
+                const minSpacing = 70; // Minimum pixels between labels (increased for full names)
                 const eventsWithLevels = [];
 
                 solarEventMarkers.forEach((event, index) => {
@@ -7262,7 +7262,8 @@
                     // Try each level starting from 0
                     for (let testLevel = 0; testLevel < 3; testLevel++) {
                         let hasConflict = false;
-                        for (let i = eventsWithLevels.length - 1; i >= 0; i--) {
+                        // Check ALL previously placed events at this level
+                        for (let i = 0; i < eventsWithLevels.length; i++) {
                             const prevEvent = eventsWithLevels[i];
                             if (prevEvent.level === testLevel && Math.abs(event.x - prevEvent.x) < minSpacing) {
                                 hasConflict = true;

@@ -6239,10 +6239,6 @@
                                 if (event.detail.position && event.detail.position.azimuth !== undefined) {
                                     // Save actual azimuth for restoring after hover
                                     window.lastRotatorAzimuth = event.detail.position.azimuth;
-                                    // Only update display if not currently hovering over a scheduled position
-                                    if (!window.isHoveringScheduledPosition) {
-                                        window.adminRotatorDisplay.updateAzimuthDisplay(event.detail.position.azimuth);
-                                    }
                                     window.adminRotatorDisplay.updateConeMarkers(data.countries, event.detail.position.azimuth);
                                 }
                             });
@@ -6388,9 +6384,9 @@
                         const timelineCanvas = document.getElementById('rotatorTimeline');
                         if (timelineCanvas && pos.enabled !== false) {
                             drawRotatorTimeline(positions, pos.time);
-                            // Update rotator display to show this bearing
+                            // Lock and update rotator display to show this bearing
                             if (window.adminRotatorDisplay && pos.bearing !== undefined) {
-                                window.isHoveringScheduledPosition = true;
+                                window.adminRotatorDisplay.lockAzimuthDisplay = true;
                                 window.adminRotatorDisplay.updateAzimuthDisplay(pos.bearing);
                             }
                         }
@@ -6400,10 +6396,12 @@
                         const timelineCanvas = document.getElementById('rotatorTimeline');
                         if (timelineCanvas) {
                             drawRotatorTimeline(positions);
-                            // Restore actual rotator position
-                            window.isHoveringScheduledPosition = false;
-                            if (window.adminRotatorDisplay && window.lastRotatorAzimuth !== undefined) {
-                                window.adminRotatorDisplay.updateAzimuthDisplay(window.lastRotatorAzimuth);
+                            // Unlock and restore actual rotator position
+                            if (window.adminRotatorDisplay) {
+                                window.adminRotatorDisplay.lockAzimuthDisplay = false;
+                                if (window.lastRotatorAzimuth !== undefined) {
+                                    window.adminRotatorDisplay.updateAzimuthDisplay(window.lastRotatorAzimuth);
+                                }
                             }
                         }
                     });
@@ -7499,9 +7497,9 @@
                 if (hoveredPos) {
                     canvas.style.cursor = 'pointer';
 
-                    // Update rotator display to show this bearing
+                    // Lock and update rotator display to show this bearing
                     if (window.adminRotatorDisplay && hoveredPos.bearing !== undefined) {
-                        window.isHoveringScheduledPosition = true;
+                        window.adminRotatorDisplay.lockAzimuthDisplay = true;
                         window.adminRotatorDisplay.updateAzimuthDisplay(hoveredPos.bearing);
                     }
 
@@ -7535,10 +7533,12 @@
                     ctx.fillText(tooltipText, tooltipX + tooltipWidth / 2, tooltipY + tooltipHeight / 2);
                 } else {
                     canvas.style.cursor = 'default';
-                    // Restore actual rotator position when not hovering
-                    window.isHoveringScheduledPosition = false;
-                    if (window.adminRotatorDisplay && window.lastRotatorAzimuth !== undefined) {
-                        window.adminRotatorDisplay.updateAzimuthDisplay(window.lastRotatorAzimuth);
+                    // Unlock and restore actual rotator position when not hovering
+                    if (window.adminRotatorDisplay) {
+                        window.adminRotatorDisplay.lockAzimuthDisplay = false;
+                        if (window.lastRotatorAzimuth !== undefined) {
+                            window.adminRotatorDisplay.updateAzimuthDisplay(window.lastRotatorAzimuth);
+                        }
                     }
                 }
             });
@@ -7546,10 +7546,12 @@
             canvas.addEventListener('mouseleave', function() {
                 if (!canvas.rotatorPositions) return;
                 canvas.style.cursor = 'default';
-                // Restore actual rotator position
-                window.isHoveringScheduledPosition = false;
-                if (window.adminRotatorDisplay && window.lastRotatorAzimuth !== undefined) {
-                    window.adminRotatorDisplay.updateAzimuthDisplay(window.lastRotatorAzimuth);
+                // Unlock and restore actual rotator position
+                if (window.adminRotatorDisplay) {
+                    window.adminRotatorDisplay.lockAzimuthDisplay = false;
+                    if (window.lastRotatorAzimuth !== undefined) {
+                        window.adminRotatorDisplay.updateAzimuthDisplay(window.lastRotatorAzimuth);
+                    }
                 }
                 // Redraw to clear tooltip
                 const originalPositions = canvas.rotatorPositions.map(p => ({

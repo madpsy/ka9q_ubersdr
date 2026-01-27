@@ -951,7 +951,10 @@ class RotatorDisplay {
             const data = await response.json();
             
             if (data.position && data.position.azimuth !== undefined) {
-                this.updateAzimuthDisplay(data.position.azimuth);
+                // Only update display if not locked by external hover (backward compatible)
+                if (!this.lockAzimuthDisplay) {
+                    this.updateAzimuthDisplay(data.position.azimuth);
+                }
             }
             
             // Emit status update event for other components to listen to

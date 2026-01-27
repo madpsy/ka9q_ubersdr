@@ -3546,6 +3546,26 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// Session activity directory
+	if ah.config.Server.SessionActivityLogEnabled && ah.config.Server.SessionActivityLogDir != "" {
+		duCmd := exec.Command("du", "-sh", ah.config.Server.SessionActivityLogDir)
+		if duOutput, err := duCmd.CombinedOutput(); err == nil {
+			dataDirs["session_activity"] = string(duOutput)
+		} else {
+			dataDirs["session_activity"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.config.Server.SessionActivityLogDir)
+		}
+	}
+
+	// Web log file
+	if ah.config.Server.LogFile != "" {
+		duCmd := exec.Command("du", "-sh", ah.config.Server.LogFile)
+		if duOutput, err := duCmd.CombinedOutput(); err == nil {
+			dataDirs["web_log"] = string(duOutput)
+		} else {
+			dataDirs["web_log"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.config.Server.LogFile)
+		}
+	}
+
 	// Add data directories to stats if any were found
 	if len(dataDirs) > 0 {
 		stats["data_directories"] = dataDirs

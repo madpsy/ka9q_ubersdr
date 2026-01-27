@@ -4759,7 +4759,7 @@
 
             const wsjtxUDPEnabledField = createConfigField('WSJT-X UDP Enabled', 'checkbox', currentDecoderConfig.wsjtx_udp_enabled || false, 'wsjtx_udp_enabled');
             const wsjtxUDPSmall = document.createElement('small');
-            wsjtxUDPSmall.textContent = 'Broadcast decoded spots using WSJT-X UDP protocol for integration with JTAlert, GridTracker, and other compatible applications';
+            wsjtxUDPSmall.textContent = 'Broadcast decoded spots using WSJT-X UDP protocol for integration with JTAlert, GridTracker, RBN Aggregator and other compatible applications';
             wsjtxUDPEnabledField.appendChild(wsjtxUDPSmall);
             reportingSection.appendChild(wsjtxUDPEnabledField);
 
@@ -7392,7 +7392,9 @@
                     'cwskimmer_spots': 'CW Skimmer Spots',
                     'cwskimmer_summaries': 'CW Skimmer Summaries',
                     'noisefloor': 'Noise Floor',
-                    'spaceweather': 'Space Weather'
+                    'spaceweather': 'Space Weather',
+                    'session_activity': 'Session Activity',
+                    'web_log': 'Web Log'
                 };
 
                 for (const [key, value] of Object.entries(stats.data_directories)) {

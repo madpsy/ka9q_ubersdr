@@ -7273,9 +7273,9 @@
                     const x = event.x;
                     const level = event.level;
 
-                    // Calculate Y position based on level
-                    const labelY = level === 0 ? 2 : 14;
-                    const lineStartY = level === 0 ? 24 : 36;
+                    // Calculate Y position based on level (increased spacing for second tier)
+                    const labelY = level === 0 ? 2 : 22;
+                    const lineStartY = level === 0 ? 24 : 44;
 
                     // Draw dashed vertical line from label to timeline
                     ctx.beginPath();

@@ -105,6 +105,7 @@ type ServerConfig struct {
 	KiwiSDRListen                 string          `yaml:"kiwisdr_listen"`                    // KiwiSDR server listen address (e.g., ":8073", default: ":8073")
 	KiwiSDRPublicEmail            string          `yaml:"kiwisdr_public_email"`              // Public email for KiwiSDR status endpoint (default: "admin@example.com")
 	KiwiSDRSmeterOffset           float32         `yaml:"kiwisdr_smeter_offset"`             // S-meter calibration offset (dBFS to dBm, default: 30.0)
+	LogFileEnabled                bool            `yaml:"logfile_enabled"`                   // Enable HTTP request logging (default: false)
 	LogFile                       string          `yaml:"logfile"`                           // HTTP request log file path
 	SessionActivityLogEnabled     bool            `yaml:"session_activity_log_enabled"`      // Enable session activity logging to disk
 	SessionActivityLogDir         string          `yaml:"session_activity_log_dir"`          // Directory for session activity logs (default: data/session_activity)

@@ -1236,27 +1236,35 @@ func main() {
 	http.HandleFunc("/admin/force-update", adminHandler.AuthMiddleware(adminHandler.HandleForceUpdate))
 	http.HandleFunc("/admin/logs", adminHandler.AuthMiddleware(handleLogsAPI))
 
-	// Open log file for HTTP request logging
-	// If LogFile is a relative path and we have a config directory, prepend it
-	logFilePath := config.Server.LogFile
-	if *configDir != "." && !strings.HasPrefix(logFilePath, "/") {
-		logFilePath = *configDir + "/" + logFilePath
+	// Open log file for HTTP request logging (if enabled)
+	var logFile *os.File
+	if config.Server.LogFileEnabled {
+		// If LogFile is a relative path and we have a config directory, prepend it
+		logFilePath := config.Server.LogFile
+		if *configDir != "." && !strings.HasPrefix(logFilePath, "/") {
+			logFilePath = *configDir + "/" + logFilePath
+		}
+		var err error
+		logFile, err = os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			log.Fatalf("Failed to open log file %s: %v", logFilePath, err)
+		}
+		defer logFile.Close()
+		log.Printf("HTTP request logging enabled: %s", logFilePath)
+	} else {
+		log.Printf("HTTP request logging disabled")
 	}
-	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		log.Fatalf("Failed to open log file %s: %v", logFilePath, err)
-	}
-	defer logFile.Close()
-	log.Printf("HTTP request logging to: %s", logFilePath)
 
 	// Serve static files
 	fs := http.FileServer(http.Dir("static"))
 	http.Handle("/", fs)
 
-	// Wrap the default ServeMux with CORS middleware (if enabled), then logging middleware
+	// Wrap the default ServeMux with CORS middleware (if enabled), then logging middleware (if enabled)
 	var handler http.Handler = http.DefaultServeMux
 	handler = corsMiddleware(config, handler)
-	handler = httpLogger(logFile, handler)
+	if config.Server.LogFileEnabled && logFile != nil {
+		handler = httpLogger(logFile, handler)
+	}
 
 	// Start HTTP server
 	server := &http.Server{

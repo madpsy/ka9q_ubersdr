@@ -243,7 +243,16 @@ server:
   kiwisdr_public_email: "admin@example.com"
   kiwisdr_smeter_offset: 20.0
 
-  # HTTP request log file (Apache combined log format)
+  # HTTP request logging (Apache combined log format)
+  # Enable/disable HTTP request logging to disk (default: false)
+  # When enabled, logs all HTTP requests to the specified logfile
+  # Logs include: client IP, timestamp, method, path, status code, response size, referer, user agent
+  # Useful for monitoring traffic, debugging, security auditing, and performance analysis
+  logfile_enabled: false
+
+  # HTTP request log file path (default: "web.log")
+  # Path can be relative (to working directory) or absolute
+  # Only used when logfile_enabled is true
   logfile: "web.log"
 
   # Session Activity Logging

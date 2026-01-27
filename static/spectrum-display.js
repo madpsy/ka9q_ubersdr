@@ -1849,6 +1849,14 @@ class SpectrumDisplay {
 
         // Draw dBFS scale on left side
         this.drawLineGraphDbScale(minDb, maxDb, graphHeight, graphTopMargin);
+
+        // Draw thin grey separator line at bottom of spectrum (before waterfall)
+        ctx.strokeStyle = '#808080'; // Grey color
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, graphHeight - 1); // Bottom of line graph canvas (y=299)
+        ctx.lineTo(graphWidth, graphHeight - 1);
+        ctx.stroke();
     }
 
 

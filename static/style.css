@@ -2268,7 +2268,7 @@ input[type="range"]::-moz-range-thumb {
 .spectrum-display-container {
     position: relative; /* For absolute positioning of controls overlay and line graph */
     z-index: 1; /* Base stacking context */
-    height: 600px; /* Fixed height to prevent layout shifts */
+    height: 600px; /* Fixed height - controls always at same position */
 }
 
 /* Spectrum frequency overlay - below audio start overlay */
@@ -2277,9 +2277,9 @@ input[type="range"]::-moz-range-thumb {
     background: transparent !important;
 }
 
-/* In split view, container needs to be tall enough for both line graph and waterfall */
+/* In split view, keep container at same height so controls don't jump */
 .spectrum-display-container:has(#spectrum-line-graph-canvas.split-mode) {
-    height: 635px; /* 300px line graph + 300px waterfall + 35px controls overlay */
+    height: 600px; /* Keep same height - controls stay in same position */
 }
 
 /* In graph-only view, container needs to be tall enough for the full-height line graph */

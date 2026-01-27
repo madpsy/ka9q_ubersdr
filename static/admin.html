@@ -437,6 +437,7 @@
     <script src="suncalc.js"></script>
     <script src="radiod_config_analyzer.js"></script>
     <script src="admin-logs.js"></script>
+    <script src="rotator-display.js"></script>
 </head>
 <body>
     <div class="container">
@@ -6190,6 +6191,42 @@
             statusDiv.appendChild(statusInfoDiv);
             statusSection.appendChild(statusDiv);
             container.appendChild(statusSection);
+
+            // Rotator Map Section
+            const mapSection = document.createElement('div');
+            mapSection.className = 'config-section';
+            mapSection.innerHTML = '<h3>🗺️ Rotator Position</h3>';
+
+            const mapContainer = document.createElement('div');
+            mapContainer.id = 'admin-rotator-display-container';
+            mapContainer.style.width = '100%';
+            mapContainer.style.height = '500px';
+            mapContainer.style.background = '#fff';
+            mapContainer.style.borderRadius = '5px';
+            mapContainer.style.border = '1px solid #dee2e6';
+            mapContainer.style.position = 'relative';
+            mapContainer.style.overflow = 'hidden';
+
+            mapSection.appendChild(mapContainer);
+            container.appendChild(mapSection);
+
+            // Initialize rotator display after DOM is ready
+            setTimeout(() => {
+                if (typeof RotatorDisplay !== 'undefined') {
+                    window.adminRotatorDisplay = new RotatorDisplay({
+                        containerId: 'admin-rotator-display-container',
+                        showMap: true,
+                        showCompass: true,
+                        showControls: true,
+                        showPassword: true,
+                        mapSize: 500,
+                        compassSize: 150,
+                        updateInterval: 1000  // Update every second
+                    });
+                } else {
+                    mapContainer.innerHTML = '<div style="padding: 40px; text-align: center; color: #999;">Rotator display library not loaded</div>';
+                }
+            }, 100);
 
             // Positions Section
             const positionsSection = document.createElement('div');

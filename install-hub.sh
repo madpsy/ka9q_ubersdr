@@ -28,9 +28,11 @@ echo "=== UberSDR Docker Hub Installation Script ==="
 echo
 
 INSTALLED_MARKER="$HOME/ubersdr/installed"
+FRESH_INSTALL=0
 
-# Pre-flight checks (only if not already installed)
+# Check if this is a fresh installation
 if [ ! -f "$INSTALLED_MARKER" ]; then
+    FRESH_INSTALL=1
     echo "Running pre-flight checks..."
     echo
 
@@ -310,19 +312,24 @@ else
     fi
 fi
 
-# Create FFTW Wisdom if it doesn't exist (after containers are running)
-WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom"
-if sudo test -f "$WISDOM_FILE"; then
-    echo
-    echo "FFTW Wisdom file already exists, skipping creation."
+# Create FFTW Wisdom only on fresh installations
+if [ $FRESH_INSTALL -eq 1 ]; then
+    WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom"
+    if sudo test -f "$WISDOM_FILE"; then
+        echo
+        echo "FFTW Wisdom file already exists, skipping creation."
+    else
+        echo
+        echo "Creating FFTW Wisdom... This will take several minutes. Grab a beer and be patient."
+        if sudo fftwf-wisdom -v -T 1 -o "$WISDOM_FILE" rof500000 cof36480 cob1920 cob1200 cob960 cob800 cob600 cob480 cob320 cob300 cob200 cob160; then
+            echo "FFTW Wisdom created successfully!"
+        else
+            echo "Warning: FFTW Wisdom creation failed, but installation will continue."
+        fi
+    fi
 else
     echo
-    echo "Creating FFTW Wisdom... This will take several minutes. Grab a beer and be patient."
-    if sudo fftwf-wisdom -v -T 1 -o "$WISDOM_FILE" rof500000 cof36480 cob1920 cob1200 cob960 cob800 cob600 cob480 cob320 cob300 cob200 cob160; then
-        echo "FFTW Wisdom created successfully!"
-    else
-        echo "Warning: FFTW Wisdom creation failed, but installation will continue."
-    fi
+    echo "Re-installation detected. Skipping FFTW Wisdom generation."
 fi
 
 # Setup auto-update cron job

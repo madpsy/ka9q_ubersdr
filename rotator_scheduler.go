@@ -76,6 +76,56 @@ func GetAvailableSolarEvents() []SolarEvent {
 	}
 }
 
+// getAvailableSolarEventsWithTimes returns solar events with their current trigger times for today
+func (rs *RotatorScheduler) getAvailableSolarEventsWithTimes() []map[string]interface{} {
+	events := GetAvailableSolarEvents()
+	sunTimes := rs.getSunTimesForToday()
+
+	result := make([]map[string]interface{}, len(events))
+	for i, event := range events {
+		var eventTime time.Time
+		switch event.Name {
+		case "sunrise":
+			eventTime = sunTimes.Sunrise
+		case "sunset":
+			eventTime = sunTimes.Sunset
+		case "dawn":
+			eventTime = sunTimes.Dawn
+		case "dusk":
+			eventTime = sunTimes.Dusk
+		case "sunriseEnd":
+			eventTime = sunTimes.SunriseEnd
+		case "sunsetStart":
+			eventTime = sunTimes.SunsetStart
+		case "solarNoon":
+			eventTime = sunTimes.SolarNoon
+		case "nadir":
+			eventTime = sunTimes.Nadir
+		case "goldenHour":
+			eventTime = sunTimes.GoldenHour
+		case "goldenHourEnd":
+			eventTime = sunTimes.GoldenHourEnd
+		case "nauticalDawn":
+			eventTime = sunTimes.NauticalDawn
+		case "nauticalDusk":
+			eventTime = sunTimes.NauticalDusk
+		case "nightEnd":
+			eventTime = sunTimes.NightEnd
+		case "night":
+			eventTime = sunTimes.Night
+		}
+
+		result[i] = map[string]interface{}{
+			"name":         event.Name,
+			"display_name": event.DisplayName,
+			"description":  event.Description,
+			"time":         eventTime.Format("15:04"), // HH:MM format for today
+		}
+	}
+
+	return result
+}
+
 // isSolarEvent checks if a time string is a solar event name
 func isSolarEvent(timeStr string) bool {
 	events := GetAvailableSolarEvents()
@@ -423,7 +473,7 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 		"running":                rs.running,
 		"position_count":         len(rs.config.Positions),
 		"enabled_position_count": enabledCount,
-		"solar_events":           GetAvailableSolarEvents(), // Add available solar events
+		"solar_events":           rs.getAvailableSolarEventsWithTimes(), // Add available solar events with times
 	}
 
 	// Always add all positions (even when disabled or empty)

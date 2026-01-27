@@ -6506,13 +6506,16 @@
         function populateSolarEventsDropdown() {
             const select = document.getElementById('newScheduledPositionSolarEvent');
             select.innerHTML = '<option value="">Select event...</option>';
-            
+
             if (availableSolarEvents && availableSolarEvents.length > 0) {
                 availableSolarEvents.forEach(event => {
                     const option = document.createElement('option');
                     option.value = event.name;
-                    option.textContent = event.display_name;
+                    // Include time in display if available
+                    const timeDisplay = event.time ? ` (${event.time})` : '';
+                    option.textContent = `${event.display_name}${timeDisplay}`;
                     option.dataset.description = event.description;
+                    option.dataset.time = event.time || '';
                     select.appendChild(option);
                 });
             }

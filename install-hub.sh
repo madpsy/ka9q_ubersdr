@@ -326,7 +326,7 @@ if [ $GENERATE_WISDOM -eq 1 ]; then
         echo "Moving existing wisdom file to /tmp/..."
         sudo mv "$WISDOM_FILE" /tmp/
     fi
-    echo "Creating FFTW Wisdom... This will take several minutes, if not hours. Grab a beer and be patient."
+    echo "Creating FFTW Wisdom... This will take several minutes, if not hours. Grab a beer and be patient. DO NOT CLOSE YOUR SSH SESSION/TERMINAL!"
     # rof3240000: RX888 MkII at 129.6 MHz
     if sudo fftwf-wisdom -v -T 1 -o "$WISDOM_FILE" \
         rof1620000 cob162000 cob81000 cob40500 cob32400 \

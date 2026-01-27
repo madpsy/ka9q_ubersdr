@@ -7,6 +7,7 @@ set -e
 IGNORE_RX888=0
 IGNORE_PORTS=0
 FORCE_COMPOSE=0
+GENERATE_WISDOM=0
 for arg in "$@"; do
     case $arg in
         --ignore-rx888)
@@ -19,6 +20,10 @@ for arg in "$@"; do
             ;;
         --force-compose)
             FORCE_COMPOSE=1
+            shift
+            ;;
+        --generate-wisdom)
+            GENERATE_WISDOM=1
             shift
             ;;
     esac
@@ -312,16 +317,38 @@ else
     fi
 fi
 
-# Create FFTW Wisdom only on fresh installations
-if [ $FRESH_INSTALL -eq 1 ]; then
-    WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom"
+# Create FFTW Wisdom on fresh installations or when --generate-wisdom is specified
+WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom"
+if [ $GENERATE_WISDOM -eq 1 ]; then
+    echo
+    echo "Forcing FFTW Wisdom generation (--generate-wisdom)..."
+    if sudo test -f "$WISDOM_FILE"; then
+        echo "Removing existing wisdom file..."
+        sudo rm -f "$WISDOM_FILE"
+    fi
+    echo "Creating FFTW Wisdom... This will take several minutes. Grab a beer and be patient."
+    if sudo fftwf-wisdom -v -T 1 -o "$WISDOM_FILE" \
+        rof3240000 \
+        rof1620000 cob162000 cob81000 cob40500 cob32400 \
+        cob16200 cob9600 cob8100 cob6930 cob4860 cob4800 cob3240 cob3200 cob1920 cob1620 cob1600 \
+        cob1200 cob960 cob810 cob800 cob600 cob480 cob405 cob400 cob320 cob300 cob205 cob200 cob160 cob85 cob45 cob15; then
+        echo "FFTW Wisdom created successfully!"
+    else
+        echo "Warning: FFTW Wisdom creation failed, but installation will continue."
+    fi
+elif [ $FRESH_INSTALL -eq 1 ]; then
     if sudo test -f "$WISDOM_FILE"; then
         echo
         echo "FFTW Wisdom file already exists, skipping creation."
+        echo "Hint: Use --generate-wisdom to force regeneration."
     else
         echo
         echo "Creating FFTW Wisdom... This will take several minutes. Grab a beer and be patient."
-        if sudo fftwf-wisdom -v -T 1 -o "$WISDOM_FILE" rof500000 cof36480 cob1920 cob1200 cob960 cob800 cob600 cob480 cob320 cob300 cob200 cob160; then
+        if sudo fftwf-wisdom -v -T 1 -o "$WISDOM_FILE" \
+            rof3240000 \
+            rof1620000 cob162000 cob81000 cob40500 cob32400 \
+            cob16200 cob9600 cob8100 cob6930 cob4860 cob4800 cob3240 cob3200 cob1920 cob1620 cob1600 \
+            cob1200 cob960 cob810 cob800 cob600 cob480 cob405 cob400 cob320 cob300 cob205 cob200 cob160 cob85 cob45 cob15; then
             echo "FFTW Wisdom created successfully!"
         else
             echo "Warning: FFTW Wisdom creation failed, but installation will continue."
@@ -330,6 +357,7 @@ if [ $FRESH_INSTALL -eq 1 ]; then
 else
     echo
     echo "Re-installation detected. Skipping FFTW Wisdom generation."
+    echo "Hint: Use --generate-wisdom to force regeneration."
 fi
 
 # Setup auto-update cron job

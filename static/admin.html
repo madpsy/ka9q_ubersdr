@@ -812,9 +812,29 @@
                         <h3 id="scheduledPositionFormTitle">Add Scheduled Position</h3>
                         <input type="hidden" id="editScheduledPositionIndex" value="">
                         <div class="config-field">
+                            <label>Trigger Type</label>
+                            <select id="newScheduledPositionTriggerType" onchange="handleTriggerTypeChange()">
+                                <option value="fixed">Fixed Time</option>
+                                <option value="solar">Solar Event</option>
+                            </select>
+                            <small>Choose between fixed time or solar event trigger</small>
+                        </div>
+                        <div class="config-field" id="fixedTimeField">
                             <label>Time (24-hour format)</label>
-                            <input type="time" id="newScheduledPositionTime" required oninput="validateScheduledPositionForm()">
+                            <input type="time" id="newScheduledPositionTime" oninput="validateScheduledPositionForm()">
                             <small id="scheduledPositionTimeError" style="color: #dc3545; display: none;"></small>
+                        </div>
+                        <div class="config-field" id="solarEventField" style="display: none;">
+                            <label>Solar Event</label>
+                            <select id="newScheduledPositionSolarEvent" onchange="validateScheduledPositionForm()">
+                                <option value="">Select event...</option>
+                            </select>
+                            <small id="solarEventDescription" style="color: #666; font-style: italic;"></small>
+                        </div>
+                        <div class="config-field" id="offsetField" style="display: none;">
+                            <label>Offset (minutes)</label>
+                            <input type="number" id="newScheduledPositionOffset" placeholder="0" min="-120" max="120" step="1" value="0" oninput="validateScheduledPositionForm()">
+                            <small>Minutes before (-) or after (+) the solar event (range: -120 to +120)</small>
                         </div>
                         <div class="config-field">
                             <label>Country (Optional)</label>
@@ -6061,10 +6081,18 @@
             }
         }
 
+        // Global variable to store solar events
+        let availableSolarEvents = [];
+
         function renderRotatorScheduler() {
             const container = document.getElementById('rotatorSchedulerConfig');
             container.innerHTML = '';
             container.classList.remove('loading');
+
+            // Store solar events if available
+            if (currentRotatorSchedulerConfig.solar_events) {
+                availableSolarEvents = currentRotatorSchedulerConfig.solar_events;
+            }
 
             // Status Section
             const statusSection = document.createElement('div');
@@ -6203,7 +6231,8 @@
                 thead.innerHTML = `
                     <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
                         <th style="padding: 12px; text-align: center; width: 80px;">Enabled</th>
-                        <th style="padding: 12px; text-align: left;">Time</th>
+                        <th style="padding: 12px; text-align: left;">Trigger</th>
+                        <th style="padding: 12px; text-align: left;">Resolved Time</th>
                         <th style="padding: 12px; text-align: left;">Bearing</th>
                         <th style="padding: 12px; text-align: center;">Actions</th>
                     </tr>
@@ -6227,11 +6256,35 @@
                     const toggleButtonText = isEnabled ? 'Disable' : 'Enable';
                     const toggleButtonClass = isEnabled ? 'btn-secondary' : 'btn';
 
+                    // Check if this is a solar event
+                    const isSolar = availableSolarEvents.some(e => e.name === pos.time);
+                    let triggerDisplay = pos.time;
+                    let resolvedTimeDisplay = '—';
+
+                    if (isSolar) {
+                        // Find the display name
+                        const event = availableSolarEvents.find(e => e.name === pos.time);
+                        triggerDisplay = event ? event.display_name : pos.time;
+                        if (pos.offset && pos.offset !== 0) {
+                            const sign = pos.offset > 0 ? '+' : '';
+                            triggerDisplay += ` <span style="color: #666; font-size: 11px;">(${sign}${pos.offset}m)</span>`;
+                        }
+                        triggerDisplay = `<span style="color: #ff9800;">☀️ ${triggerDisplay}</span>`;
+                        // Show resolved time if available
+                        if (pos.resolved_time) {
+                            resolvedTimeDisplay = `<span style="color: #667eea; font-family: monospace;">${pos.resolved_time}</span>`;
+                        }
+                    } else {
+                        triggerDisplay = `<span style="font-family: monospace;">${pos.time}</span>`;
+                        resolvedTimeDisplay = '—';
+                    }
+
                     row.innerHTML = `
                         <td style="padding: 12px; text-align: center;">
                             <span style="color: ${enabledColor}; font-size: 18px; font-weight: bold;">${enabledIcon}</span>
                         </td>
-                        <td style="padding: 12px;"><strong>${pos.time}</strong></td>
+                        <td style="padding: 12px;"><strong>${triggerDisplay}</strong></td>
+                        <td style="padding: 12px;">${resolvedTimeDisplay}</td>
                         <td style="padding: 12px;"><span style="color: #667eea; font-weight: bold;">${pos.bearing}°</span></td>
                         <td style="padding: 12px; text-align: center; white-space: nowrap;">
                             <button class="btn ${toggleButtonClass}" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="togglePositionEnabled('${escapedTime}')">${toggleButtonText}</button>
@@ -6429,16 +6482,69 @@
             document.getElementById('scheduledPositionFormTitle').textContent = 'Add Scheduled Position';
             document.getElementById('editScheduledPositionIndex').value = '';
             document.getElementById('addScheduledPositionForm').style.display = 'block';
+            document.getElementById('newScheduledPositionTriggerType').value = 'fixed';
             document.getElementById('newScheduledPositionTime').value = '';
+            document.getElementById('newScheduledPositionSolarEvent').value = '';
+            document.getElementById('newScheduledPositionOffset').value = '0';
             document.getElementById('newScheduledPositionCountry').value = '';
             document.getElementById('newScheduledPositionBearing').value = '';
             document.getElementById('newScheduledPositionEnabled').value = 'true';
+            
+            // Populate solar events dropdown
+            populateSolarEventsDropdown();
+            
+            // Show fixed time field by default
+            handleTriggerTypeChange();
             
             // Fetch countries for the dropdown
             await fetchScheduledPositionCountries();
             
             validateScheduledPositionForm();
             document.getElementById('addScheduledPositionForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function populateSolarEventsDropdown() {
+            const select = document.getElementById('newScheduledPositionSolarEvent');
+            select.innerHTML = '<option value="">Select event...</option>';
+            
+            if (availableSolarEvents && availableSolarEvents.length > 0) {
+                availableSolarEvents.forEach(event => {
+                    const option = document.createElement('option');
+                    option.value = event.name;
+                    option.textContent = event.display_name;
+                    option.dataset.description = event.description;
+                    select.appendChild(option);
+                });
+            }
+        }
+
+        function handleTriggerTypeChange() {
+            const triggerType = document.getElementById('newScheduledPositionTriggerType').value;
+            const fixedTimeField = document.getElementById('fixedTimeField');
+            const solarEventField = document.getElementById('solarEventField');
+            const offsetField = document.getElementById('offsetField');
+            
+            if (triggerType === 'solar') {
+                fixedTimeField.style.display = 'none';
+                solarEventField.style.display = 'block';
+                offsetField.style.display = 'block';
+                
+                // Update description when event changes
+                const eventSelect = document.getElementById('newScheduledPositionSolarEvent');
+                const descEl = document.getElementById('solarEventDescription');
+                if (eventSelect.selectedIndex > 0) {
+                    const selectedOption = eventSelect.options[eventSelect.selectedIndex];
+                    descEl.textContent = selectedOption.dataset.description || '';
+                } else {
+                    descEl.textContent = '';
+                }
+            } else {
+                fixedTimeField.style.display = 'block';
+                solarEventField.style.display = 'none';
+                offsetField.style.display = 'none';
+            }
+            
+            validateScheduledPositionForm();
         }
 
         async function editScheduledPosition(time) {
@@ -6451,14 +6557,33 @@
             document.getElementById('scheduledPositionFormTitle').textContent = 'Edit Scheduled Position';
             document.getElementById('editScheduledPositionIndex').value = time;
             document.getElementById('addScheduledPositionForm').style.display = 'block';
-            document.getElementById('newScheduledPositionTime').value = time;
+
+            // Populate solar events dropdown
+            populateSolarEventsDropdown();
+
+            // Determine if this is a solar event or fixed time
+            const isSolar = availableSolarEvents.some(e => e.name === time);
+
+            if (isSolar) {
+                document.getElementById('newScheduledPositionTriggerType').value = 'solar';
+                document.getElementById('newScheduledPositionSolarEvent').value = time;
+                document.getElementById('newScheduledPositionOffset').value = position.offset || 0;
+            } else {
+                document.getElementById('newScheduledPositionTriggerType').value = 'fixed';
+                document.getElementById('newScheduledPositionTime').value = time;
+                document.getElementById('newScheduledPositionOffset').value = '0';
+            }
+
             document.getElementById('newScheduledPositionCountry').value = '';
             document.getElementById('newScheduledPositionBearing').value = position.bearing;
             document.getElementById('newScheduledPositionEnabled').value = (position.enabled !== false) ? 'true' : 'false';
-            
+
+            // Show appropriate fields
+            handleTriggerTypeChange();
+
             // Fetch countries for the dropdown
             await fetchScheduledPositionCountries();
-            
+
             validateScheduledPositionForm();
             document.getElementById('addScheduledPositionForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
@@ -6545,7 +6670,9 @@
         }
 
         function validateScheduledPositionForm() {
-            const time = document.getElementById('newScheduledPositionTime').value.trim();
+            const triggerType = document.getElementById('newScheduledPositionTriggerType').value;
+            const fixedTime = document.getElementById('newScheduledPositionTime').value.trim();
+            const solarEvent = document.getElementById('newScheduledPositionSolarEvent').value;
             const bearingValue = document.getElementById('newScheduledPositionBearing').value.trim();
             const originalTime = document.getElementById('editScheduledPositionIndex').value;
             const isEditing = originalTime !== '';
@@ -6553,14 +6680,35 @@
             let isValid = true;
             const saveBtn = document.getElementById('saveScheduledPositionBtn');
 
-            // Validate time
+            // Validate time based on trigger type
             const timeError = document.getElementById('scheduledPositionTimeError');
-            if (!time) {
-                timeError.textContent = 'Time is required';
-                timeError.style.display = 'block';
-                isValid = false;
+            let time = '';
+
+            if (triggerType === 'solar') {
+                if (!solarEvent) {
+                    timeError.textContent = 'Solar event is required';
+                    timeError.style.display = 'block';
+                    isValid = false;
+                } else {
+                    timeError.style.display = 'none';
+                    time = solarEvent;
+                }
+                // Update description
+                const eventSelect = document.getElementById('newScheduledPositionSolarEvent');
+                const descEl = document.getElementById('solarEventDescription');
+                if (eventSelect.selectedIndex > 0) {
+                    const selectedOption = eventSelect.options[eventSelect.selectedIndex];
+                    descEl.textContent = selectedOption.dataset.description || '';
+                }
             } else {
-                timeError.style.display = 'none';
+                if (!fixedTime) {
+                    timeError.textContent = 'Time is required';
+                    timeError.style.display = 'block';
+                    isValid = false;
+                } else {
+                    timeError.style.display = 'none';
+                    time = fixedTime;
+                }
             }
 
             // Validate bearing
@@ -6601,10 +6749,16 @@
         }
 
         async function saveScheduledPosition() {
-            const time = document.getElementById('newScheduledPositionTime').value.trim();
+            const triggerType = document.getElementById('newScheduledPositionTriggerType').value;
+            const fixedTime = document.getElementById('newScheduledPositionTime').value.trim();
+            const solarEvent = document.getElementById('newScheduledPositionSolarEvent').value;
+            const offset = parseInt(document.getElementById('newScheduledPositionOffset').value) || 0;
             const bearing = parseFloat(document.getElementById('newScheduledPositionBearing').value);
             const enabled = document.getElementById('newScheduledPositionEnabled').value === 'true';
             const originalTime = document.getElementById('editScheduledPositionIndex').value;
+
+            // Determine the time value based on trigger type
+            const time = triggerType === 'solar' ? solarEvent : fixedTime;
 
             if (!time || isNaN(bearing)) {
                 showAlert('Please fill in all required fields', 'error');
@@ -6617,6 +6771,11 @@
             }
 
             const positionData = { time, bearing, enabled };
+            
+            // Add offset only for solar events
+            if (triggerType === 'solar' && offset !== 0) {
+                positionData.offset = offset;
+            }
 
             try {
                 const isEditing = originalTime !== '';
@@ -6946,7 +7105,9 @@
             const enabledPositions = positions
                 .filter(pos => pos.enabled !== false)
                 .map(pos => {
-                    const timeParts = pos.time.split(':');
+                    // Use resolved_time if available (for solar events), otherwise use time
+                    const timeStr = pos.resolved_time || pos.time;
+                    const timeParts = timeStr.split(':');
                     const hours = parseInt(timeParts[0]);
                     const minutes = parseInt(timeParts[1]);
                     const timeInHours = hours + (minutes / 60);

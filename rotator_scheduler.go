@@ -13,9 +13,17 @@ import (
 
 // ScheduledPosition represents a single scheduled rotator position
 type ScheduledPosition struct {
-	Time    string  `yaml:"time"`    // Time in HH:MM format (24-hour)
+	Time    string  `yaml:"time"`    // Time in HH:MM format (24-hour) OR solar event name (e.g., "sunrise", "sunset")
 	Bearing float64 `yaml:"bearing"` // Azimuth bearing in degrees (0-360)
 	Enabled bool    `yaml:"enabled"` // Enable/disable this position (default: true)
+	Offset  int     `yaml:"offset"`  // Optional: minutes offset from solar event (+/- for after/before)
+}
+
+// SolarEvent represents a solar event trigger option
+type SolarEvent struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+	Description string `json:"description"`
 }
 
 // RotatorScheduleConfig represents the configuration for scheduled rotator positions
@@ -35,21 +43,58 @@ type ScheduleTriggerLog struct {
 
 // RotatorScheduler manages scheduled rotator positioning
 type RotatorScheduler struct {
-	config      *RotatorScheduleConfig
-	controller  *RotatorController
-	mu          sync.RWMutex
-	stopChan    chan struct{}
-	running     bool
-	configPath  string
-	triggerLogs []ScheduleTriggerLog // Circular buffer of up to 100 trigger events
+	config         *RotatorScheduleConfig
+	controller     *RotatorController
+	mu             sync.RWMutex
+	stopChan       chan struct{}
+	running        bool
+	configPath     string
+	triggerLogs    []ScheduleTriggerLog // Circular buffer of up to 100 trigger events
+	gpsLat         float64              // GPS latitude for solar calculations
+	gpsLon         float64              // GPS longitude for solar calculations
+	cachedSunTimes *SunTimes            // Cached sun times for today
+	lastSunCalc    time.Time            // Last time sun times were calculated
+}
+
+// GetAvailableSolarEvents returns the list of available solar event triggers
+func GetAvailableSolarEvents() []SolarEvent {
+	return []SolarEvent{
+		{Name: "sunrise", DisplayName: "Sunrise", Description: "Sun rises above horizon (gray-line propagation)"},
+		{Name: "sunset", DisplayName: "Sunset", Description: "Sun sets below horizon (gray-line propagation)"},
+		{Name: "dawn", DisplayName: "Dawn", Description: "Civil dawn - sun at -6° (twilight begins)"},
+		{Name: "dusk", DisplayName: "Dusk", Description: "Civil dusk - sun at -6° (twilight ends)"},
+		{Name: "sunriseEnd", DisplayName: "Sunrise End", Description: "Sun fully above horizon"},
+		{Name: "sunsetStart", DisplayName: "Sunset Start", Description: "Sun begins setting"},
+		{Name: "solarNoon", DisplayName: "Solar Noon", Description: "Sun at highest point (peak daytime ionization)"},
+		{Name: "nadir", DisplayName: "Nadir", Description: "Sun at lowest point (deepest night)"},
+		{Name: "goldenHour", DisplayName: "Golden Hour", Description: "Evening golden hour begins"},
+		{Name: "goldenHourEnd", DisplayName: "Golden Hour End", Description: "Morning golden hour ends"},
+		{Name: "nauticalDawn", DisplayName: "Nautical Dawn", Description: "Sun at -12° (nautical twilight)"},
+		{Name: "nauticalDusk", DisplayName: "Nautical Dusk", Description: "Sun at -12° (nautical twilight)"},
+		{Name: "nightEnd", DisplayName: "Night End", Description: "Astronomical twilight begins - sun at -18°"},
+		{Name: "night", DisplayName: "Night", Description: "Astronomical twilight ends - sun at -18°"},
+	}
+}
+
+// isSolarEvent checks if a time string is a solar event name
+func isSolarEvent(timeStr string) bool {
+	events := GetAvailableSolarEvents()
+	for _, event := range events {
+		if event.Name == timeStr {
+			return true
+		}
+	}
+	return false
 }
 
 // NewRotatorScheduler creates a new rotator scheduler
-func NewRotatorScheduler(configPath string, controller *RotatorController) (*RotatorScheduler, error) {
+func NewRotatorScheduler(configPath string, controller *RotatorController, gpsLat, gpsLon float64) (*RotatorScheduler, error) {
 	scheduler := &RotatorScheduler{
 		controller: controller,
 		stopChan:   make(chan struct{}),
 		configPath: configPath,
+		gpsLat:     gpsLat,
+		gpsLon:     gpsLon,
 	}
 
 	// Load configuration
@@ -101,10 +146,18 @@ func (rs *RotatorScheduler) LoadConfig() error {
 
 // validatePosition validates a scheduled position
 func (rs *RotatorScheduler) validatePosition(pos *ScheduledPosition) error {
-	// Validate time format (HH:MM)
-	_, err := time.Parse("15:04", pos.Time)
-	if err != nil {
-		return fmt.Errorf("invalid time format '%s' (expected HH:MM): %w", pos.Time, err)
+	// Check if it's a solar event or fixed time
+	if isSolarEvent(pos.Time) {
+		// Solar event - validate offset range
+		if pos.Offset < -120 || pos.Offset > 120 {
+			return fmt.Errorf("offset %d out of range (must be -120 to +120 minutes)", pos.Offset)
+		}
+	} else {
+		// Fixed time - validate time format (HH:MM)
+		_, err := time.Parse("15:04", pos.Time)
+		if err != nil {
+			return fmt.Errorf("invalid time format '%s' (expected HH:MM or solar event name): %w", pos.Time, err)
+		}
 	}
 
 	// Validate bearing range
@@ -113,6 +166,86 @@ func (rs *RotatorScheduler) validatePosition(pos *ScheduledPosition) error {
 	}
 
 	return nil
+}
+
+// getSunTimesForToday calculates sun times for today (cached)
+func (rs *RotatorScheduler) getSunTimesForToday() *SunTimes {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+
+	now := time.Now()
+
+	// Check if we need to recalculate (cache is older than today)
+	if rs.cachedSunTimes == nil || !isSameDay(rs.lastSunCalc, now) {
+		// Calculate sun times for today
+		rs.cachedSunTimes = &SunTimes{}
+		*rs.cachedSunTimes = GetTimes(now, rs.gpsLat, rs.gpsLon)
+		rs.lastSunCalc = now
+		log.Printf("Calculated sun times for today: sunrise=%s, sunset=%s",
+			rs.cachedSunTimes.Sunrise.Format("15:04"), rs.cachedSunTimes.Sunset.Format("15:04"))
+	}
+
+	return rs.cachedSunTimes
+}
+
+// isSameDay checks if two times are on the same day
+func isSameDay(t1, t2 time.Time) bool {
+	y1, m1, d1 := t1.Date()
+	y2, m2, d2 := t2.Date()
+	return y1 == y2 && m1 == m2 && d1 == d2
+}
+
+// resolvePositionTime resolves a position's time to HH:MM format
+// Handles both fixed times (HH:MM) and solar events (sunrise, sunset, etc.)
+func (rs *RotatorScheduler) resolvePositionTime(pos *ScheduledPosition) (string, error) {
+	// If it's a fixed time, return as-is
+	if !isSolarEvent(pos.Time) {
+		return pos.Time, nil
+	}
+
+	// It's a solar event - calculate the time
+	sunTimes := rs.getSunTimesForToday()
+
+	var eventTime time.Time
+	switch pos.Time {
+	case "sunrise":
+		eventTime = sunTimes.Sunrise
+	case "sunset":
+		eventTime = sunTimes.Sunset
+	case "dawn":
+		eventTime = sunTimes.Dawn
+	case "dusk":
+		eventTime = sunTimes.Dusk
+	case "sunriseEnd":
+		eventTime = sunTimes.SunriseEnd
+	case "sunsetStart":
+		eventTime = sunTimes.SunsetStart
+	case "solarNoon":
+		eventTime = sunTimes.SolarNoon
+	case "nadir":
+		eventTime = sunTimes.Nadir
+	case "goldenHour":
+		eventTime = sunTimes.GoldenHour
+	case "goldenHourEnd":
+		eventTime = sunTimes.GoldenHourEnd
+	case "nauticalDawn":
+		eventTime = sunTimes.NauticalDawn
+	case "nauticalDusk":
+		eventTime = sunTimes.NauticalDusk
+	case "nightEnd":
+		eventTime = sunTimes.NightEnd
+	case "night":
+		eventTime = sunTimes.Night
+	default:
+		return "", fmt.Errorf("unknown solar event: %s", pos.Time)
+	}
+
+	// Apply offset if specified
+	if pos.Offset != 0 {
+		eventTime = eventTime.Add(time.Duration(pos.Offset) * time.Minute)
+	}
+
+	return eventTime.Format("15:04"), nil
 }
 
 // Start starts the scheduler background task
@@ -197,7 +330,14 @@ func (rs *RotatorScheduler) checkScheduledPositions() {
 			continue
 		}
 
-		if pos.Time == currentTime {
+		// Resolve position time (handles both fixed times and solar events)
+		resolvedTime, err := rs.resolvePositionTime(&pos)
+		if err != nil {
+			log.Printf("Error resolving position time for '%s': %v", pos.Time, err)
+			continue
+		}
+
+		if resolvedTime == currentTime {
 			rs.executeScheduledPosition(&pos)
 		}
 	}
@@ -283,16 +423,26 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 		"running":                rs.running,
 		"position_count":         len(rs.config.Positions),
 		"enabled_position_count": enabledCount,
+		"solar_events":           GetAvailableSolarEvents(), // Add available solar events
 	}
 
 	// Always add all positions (even when disabled or empty)
 	positions := make([]map[string]interface{}, len(rs.config.Positions))
 	for i, pos := range rs.config.Positions {
-		positions[i] = map[string]interface{}{
+		posMap := map[string]interface{}{
 			"time":    pos.Time,
 			"bearing": pos.Bearing,
 			"enabled": pos.Enabled,
 		}
+		// Add offset if it's a solar event
+		if isSolarEvent(pos.Time) && pos.Offset != 0 {
+			posMap["offset"] = pos.Offset
+		}
+		// Add resolved time for display
+		if resolvedTime, err := rs.resolvePositionTime(&pos); err == nil {
+			posMap["resolved_time"] = resolvedTime
+		}
+		positions[i] = posMap
 	}
 	status["positions"] = positions
 
@@ -300,10 +450,15 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 	if rs.config.Enabled && len(rs.config.Positions) > 0 {
 		nextPos := rs.getNextScheduledPosition()
 		if nextPos != nil {
-			status["next_position"] = map[string]interface{}{
+			nextPosMap := map[string]interface{}{
 				"time":    nextPos.Time,
 				"bearing": nextPos.Bearing,
 			}
+			// Add resolved time
+			if resolvedTime, err := rs.resolvePositionTime(nextPos); err == nil {
+				nextPosMap["resolved_time"] = resolvedTime
+			}
+			status["next_position"] = nextPosMap
 		}
 	}
 
@@ -332,7 +487,14 @@ func (rs *RotatorScheduler) getNextScheduledPosition() *ScheduledPosition {
 			continue
 		}
 
-		t, err := time.Parse("15:04", pos.Time)
+		// Resolve position time (handles both fixed times and solar events)
+		resolvedTime, err := rs.resolvePositionTime(&pos)
+		if err != nil {
+			log.Printf("Error resolving position time for '%s': %v", pos.Time, err)
+			continue
+		}
+
+		t, err := time.Parse("15:04", resolvedTime)
 		if err != nil {
 			continue
 		}

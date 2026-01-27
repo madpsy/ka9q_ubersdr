@@ -963,7 +963,7 @@ func main() {
 				schedulerConfigPath = *configDir + "/rotator_schedule.yaml"
 			}
 
-			rotatorScheduler, err = NewRotatorScheduler(schedulerConfigPath, rotctlHandler.controller)
+			rotatorScheduler, err = NewRotatorScheduler(schedulerConfigPath, rotctlHandler.controller, config.Admin.GPS.Lat, config.Admin.GPS.Lon)
 			if err != nil {
 				log.Printf("Warning: Failed to initialize rotator scheduler: %v", err)
 				rotatorScheduler = nil

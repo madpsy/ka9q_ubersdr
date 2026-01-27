@@ -6317,6 +6317,22 @@
                             <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteScheduledPosition('${escapedTime}')">Delete</button>
                         </td>
                     `;
+
+                    // Add hover effect to highlight corresponding timeline marker
+                    row.addEventListener('mouseenter', function() {
+                        const timelineCanvas = document.getElementById('rotatorTimeline');
+                        if (timelineCanvas && pos.enabled !== false) {
+                            drawRotatorTimeline(positions, pos.time);
+                        }
+                    });
+
+                    row.addEventListener('mouseleave', function() {
+                        const timelineCanvas = document.getElementById('rotatorTimeline');
+                        if (timelineCanvas) {
+                            drawRotatorTimeline(positions);
+                        }
+                    });
+
                     tbody.appendChild(row);
                 });
                 table.appendChild(tbody);
@@ -7022,7 +7038,7 @@
         }
 
         // Draw rotator timeline visualization
-        function drawRotatorTimeline(positions) {
+        function drawRotatorTimeline(positions, highlightTime = null) {
             const canvas = document.getElementById('rotatorTimeline');
             if (!canvas) return;
 
@@ -7187,27 +7203,30 @@
                 const x = pos.x;
                 const level = pos.level;
 
+                // Check if this position should be highlighted
+                const isHighlighted = highlightTime && pos.time === highlightTime;
+
                 // Calculate Y positions based on level (no time label, just bearing)
                 const labelY = level === 0 ? marginTop + 10 : marginTop + 40;
                 const lineTopY = level === 0 ? marginTop + 25 : marginTop + 55;
 
                 // Draw vertical line from timeline up
-                ctx.strokeStyle = '#667eea';
-                ctx.lineWidth = 2;
+                ctx.strokeStyle = isHighlighted ? '#ff6b6b' : '#667eea';
+                ctx.lineWidth = isHighlighted ? 3 : 2;
                 ctx.beginPath();
                 ctx.moveTo(x, timelineY);
                 ctx.lineTo(x, lineTopY);
                 ctx.stroke();
 
-                // Draw marker circle
-                ctx.fillStyle = '#667eea';
+                // Draw marker circle (larger if highlighted)
+                ctx.fillStyle = isHighlighted ? '#ff6b6b' : '#667eea';
                 ctx.beginPath();
-                ctx.arc(x, timelineY, 5, 0, 2 * Math.PI);
+                ctx.arc(x, timelineY, isHighlighted ? 7 : 5, 0, 2 * Math.PI);
                 ctx.fill();
 
                 // Draw bearing label only (no time)
-                ctx.fillStyle = '#667eea';
-                ctx.font = 'bold 12px sans-serif';
+                ctx.fillStyle = isHighlighted ? '#ff6b6b' : '#667eea';
+                ctx.font = isHighlighted ? 'bold 14px sans-serif' : 'bold 12px sans-serif';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.fillText(pos.bearing + '°', x, labelY);

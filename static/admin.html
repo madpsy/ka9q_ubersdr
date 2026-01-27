@@ -6388,6 +6388,10 @@
                             if (window.adminRotatorDisplay && pos.bearing !== undefined) {
                                 window.adminRotatorDisplay.lockAzimuthDisplay = true;
                                 window.adminRotatorDisplay.updateAzimuthDisplay(pos.bearing);
+                                // Update cone markers to show countries in this direction
+                                if (window.adminRotatorDisplay.countriesData) {
+                                    window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, pos.bearing);
+                                }
                             }
                         }
                     });
@@ -7501,6 +7505,10 @@
                     if (window.adminRotatorDisplay && hoveredPos.bearing !== undefined) {
                         window.adminRotatorDisplay.lockAzimuthDisplay = true;
                         window.adminRotatorDisplay.updateAzimuthDisplay(hoveredPos.bearing);
+                        // Update cone markers to show countries in this direction
+                        if (window.adminRotatorDisplay.countriesData) {
+                            window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, hoveredPos.bearing);
+                        }
                     }
 
                     const tooltipText = `${hoveredPos.time} → ${hoveredPos.bearing}°`;
@@ -7538,6 +7546,10 @@
                         window.adminRotatorDisplay.lockAzimuthDisplay = false;
                         if (window.lastRotatorAzimuth !== undefined) {
                             window.adminRotatorDisplay.updateAzimuthDisplay(window.lastRotatorAzimuth);
+                            // Restore cone markers to actual position
+                            if (window.adminRotatorDisplay.countriesData) {
+                                window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, window.lastRotatorAzimuth);
+                            }
                         }
                     }
                 }
@@ -7551,6 +7563,10 @@
                     window.adminRotatorDisplay.lockAzimuthDisplay = false;
                     if (window.lastRotatorAzimuth !== undefined) {
                         window.adminRotatorDisplay.updateAzimuthDisplay(window.lastRotatorAzimuth);
+                        // Restore cone markers to actual position
+                        if (window.adminRotatorDisplay.countriesData) {
+                            window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, window.lastRotatorAzimuth);
+                        }
                     }
                 }
                 // Redraw to clear tooltip

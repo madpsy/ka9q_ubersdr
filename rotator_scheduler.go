@@ -77,9 +77,14 @@ func GetAvailableSolarEvents() []SolarEvent {
 }
 
 // getAvailableSolarEventsWithTimes returns solar events with their current trigger times for today
+// Note: Caller must NOT hold any locks
 func (rs *RotatorScheduler) getAvailableSolarEventsWithTimes() []map[string]interface{} {
 	events := GetAvailableSolarEvents()
-	sunTimes := rs.getSunTimesForToday()
+
+	// Acquire lock to access cached sun times
+	rs.mu.Lock()
+	sunTimes := rs.getSunTimesForTodayNoLock()
+	rs.mu.Unlock()
 
 	result := make([]map[string]interface{}, len(events))
 	for i, event := range events {
@@ -219,10 +224,8 @@ func (rs *RotatorScheduler) validatePosition(pos *ScheduledPosition) error {
 }
 
 // getSunTimesForToday calculates sun times for today (cached)
-func (rs *RotatorScheduler) getSunTimesForToday() *SunTimes {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-
+// Note: This method does NOT acquire locks - caller must hold appropriate lock
+func (rs *RotatorScheduler) getSunTimesForTodayNoLock() *SunTimes {
 	now := time.Now()
 
 	// Check if we need to recalculate (cache is older than today)
@@ -247,6 +250,7 @@ func isSameDay(t1, t2 time.Time) bool {
 
 // resolvePositionTime resolves a position's time to HH:MM format
 // Handles both fixed times (HH:MM) and solar events (sunrise, sunset, etc.)
+// Note: Caller must NOT hold any locks
 func (rs *RotatorScheduler) resolvePositionTime(pos *ScheduledPosition) (string, error) {
 	// If it's a fixed time, return as-is
 	if !isSolarEvent(pos.Time) {
@@ -254,7 +258,9 @@ func (rs *RotatorScheduler) resolvePositionTime(pos *ScheduledPosition) (string,
 	}
 
 	// It's a solar event - calculate the time
-	sunTimes := rs.getSunTimesForToday()
+	rs.mu.Lock()
+	sunTimes := rs.getSunTimesForTodayNoLock()
+	rs.mu.Unlock()
 
 	var eventTime time.Time
 	switch pos.Time {
@@ -458,7 +464,6 @@ func (rs *RotatorScheduler) GetTriggerLogs() []ScheduleTriggerLog {
 // GetStatus returns the current scheduler status
 func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 	rs.mu.RLock()
-	defer rs.mu.RUnlock()
 
 	// Count enabled positions
 	enabledCount := 0
@@ -468,17 +473,30 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 		}
 	}
 
+	enabled := rs.config.Enabled
+	running := rs.running
+	positionCount := len(rs.config.Positions)
+
+	// Copy positions for processing outside lock
+	positionsCopy := make([]ScheduledPosition, len(rs.config.Positions))
+	copy(positionsCopy, rs.config.Positions)
+
+	rs.mu.RUnlock()
+
+	// Get solar events with times (no lock needed)
+	solarEvents := rs.getAvailableSolarEventsWithTimes()
+
 	status := map[string]interface{}{
-		"enabled":                rs.config.Enabled,
-		"running":                rs.running,
-		"position_count":         len(rs.config.Positions),
+		"enabled":                enabled,
+		"running":                running,
+		"position_count":         positionCount,
 		"enabled_position_count": enabledCount,
-		"solar_events":           rs.getAvailableSolarEventsWithTimes(), // Add available solar events with times
+		"solar_events":           solarEvents,
 	}
 
-	// Always add all positions (even when disabled or empty)
-	positions := make([]map[string]interface{}, len(rs.config.Positions))
-	for i, pos := range rs.config.Positions {
+	// Process positions (no lock needed - using copy)
+	positions := make([]map[string]interface{}, len(positionsCopy))
+	for i, pos := range positionsCopy {
 		posMap := map[string]interface{}{
 			"time":    pos.Time,
 			"bearing": pos.Bearing,
@@ -497,8 +515,12 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 	status["positions"] = positions
 
 	// Add next scheduled position only if enabled and has positions
-	if rs.config.Enabled && len(rs.config.Positions) > 0 {
+	if enabled && len(positionsCopy) > 0 {
+		// Need to acquire lock for getNextScheduledPosition
+		rs.mu.RLock()
 		nextPos := rs.getNextScheduledPosition()
+		rs.mu.RUnlock()
+
 		if nextPos != nil {
 			nextPosMap := map[string]interface{}{
 				"time":    nextPos.Time,

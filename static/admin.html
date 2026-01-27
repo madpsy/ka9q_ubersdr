@@ -570,6 +570,19 @@
                         <div id="logsDisplay" style="background: #000; color: #0f0; padding: 15px; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 12px; max-height: 600px; overflow-y: auto; line-height: 1.4;">
                             <div style="color: #888; padding: 20px; text-align: center;">Please select a container to view logs</div>
                         </div>
+
+                        <!-- Remote Logging Section -->
+                        <div style="margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
+                                <label style="display: flex; align-items: center; gap: 8px; font-weight: bold; cursor: pointer;">
+                                    <input type="checkbox" id="remoteLoggingCheckbox" onchange="onRemoteLoggingChange()" style="width: 18px; height: 18px; cursor: pointer;">
+                                    <span>Enable Remote Logging</span>
+                                </label>
+                            </div>
+                            <div class="alert alert-info" style="margin: 0; font-size: 13px;">
+                                ℹ️ <strong>Remote Logging:</strong> When enabled, system logs will be sent to a remote logging system. This is useful for the developer and for troubleshooting issues. Logs may include system diagnostics, error messages, and operational data. Changes require a server restart to take effect.
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -1337,6 +1350,7 @@
     <script>
         let currentConfig = {};
         let currentTab = 'sessions';
+        let remoteLoggingModalShown = false;
 
         // Sanitize number input to remove non-numeric characters
         function sanitizeNumberInput(input) {
@@ -1657,6 +1671,7 @@
             } else if (tab === 'logs') {
                 document.querySelector('.tab:nth-child(3)').classList.add('active');
                 document.getElementById('logsTab').classList.add('active');
+                updateRemoteLoggingCheckbox();
                 initLogsTab();
             } else if (tab === 'visual') {
                 document.querySelector('.tab:nth-child(4)').classList.add('active');
@@ -1738,6 +1753,7 @@
                 updatePublicInstanceButton();
                 updateCallsignNameDisplay();
                 updateRotatorTabVisibility();
+                updateRemoteLoggingCheckbox();
                 showAlert('Configuration loaded successfully', 'success');
             } catch (error) {
                 showAlert('Error loading configuration: ' + error.message, 'error');
@@ -13422,6 +13438,96 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
             } catch (error) {
                 console.error('Error fetching calibration value:', error);
                 return null;
+            }
+        }
+
+        // Remote Logging Functions
+        function updateRemoteLoggingCheckbox() {
+            const checkbox = document.getElementById('remoteLoggingCheckbox');
+            if (!checkbox) return;
+
+            // Read current value from config
+            const remoteLoggingEnabled = currentConfig?.instance_reporting?.remote_logging || false;
+            checkbox.checked = remoteLoggingEnabled;
+        }
+
+        async function onRemoteLoggingChange() {
+            const checkbox = document.getElementById('remoteLoggingCheckbox');
+            if (!checkbox) return;
+
+            const newValue = checkbox.checked;
+            const oldValue = currentConfig?.instance_reporting?.remote_logging || false;
+
+            // If value hasn't actually changed, do nothing
+            if (newValue === oldValue) return;
+
+            // Show confirmation modal
+            const action = newValue ? 'enable' : 'disable';
+            const confirmed = confirm(
+                `⚠️ WARNING: This will ${action} remote logging and restart the server immediately!\n\n` +
+                `All active user sessions will be disconnected.\n\n` +
+                `Are you sure you want to ${action} remote logging and restart the server?`
+            );
+
+            if (!confirmed) {
+                // Revert checkbox to previous state
+                checkbox.checked = oldValue;
+                return;
+            }
+
+            // Update config value
+            if (!currentConfig.instance_reporting) {
+                currentConfig.instance_reporting = {};
+            }
+            currentConfig.instance_reporting.remote_logging = newValue;
+
+            // Save config and restart
+            await saveRemoteLoggingConfig();
+        }
+
+        async function saveRemoteLoggingConfig() {
+            const checkbox = document.getElementById('remoteLoggingCheckbox');
+            const originalChecked = checkbox ? checkbox.checked : false;
+
+            try {
+                showAlert('Saving remote logging configuration...', 'info');
+
+                const response = await authenticatedFetch('/admin/config?restart=true', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(currentConfig)
+                });
+
+                if (!response) {
+                    // Auth failed, revert checkbox
+                    if (checkbox) checkbox.checked = !originalChecked;
+                    return;
+                }
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to save config');
+                }
+
+                const result = await response.json();
+                showAlert(result.message || 'Remote logging configuration saved successfully', 'success');
+
+                // Show countdown overlay
+                if (result.restart) {
+                    setTimeout(() => {
+                        showRestartCountdown();
+                    }, 500);
+                }
+            } catch (error) {
+                showAlert('Error saving remote logging configuration: ' + error.message, 'error');
+                // Revert checkbox on error
+                if (checkbox) checkbox.checked = !originalChecked;
+                // Revert config value
+                if (currentConfig.instance_reporting) {
+                    currentConfig.instance_reporting.remote_logging = !originalChecked;
+                }
             }
         }
     </script>

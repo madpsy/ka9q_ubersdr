@@ -758,6 +758,14 @@
                     <div class="alert alert-info" style="margin-bottom: 20px;">
                         ℹ️ <strong>Note:</strong> CW Skimmer configuration changes require a server restart to take effect.
                     </div>
+                    <div id="cwskimmerAnalyticsLinks" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; border: 1px solid #dee2e6;">
+                        <strong style="color: #333; margin-bottom: 10px; display: block;">📊 Analytics & Reports:</strong>
+                        <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                            <a href="cwskimmer_map.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">🗺️ CW Spots Map</a>
+                            <a href="cw_spots_history.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📜 CW Spot History</a>
+                            <a href="cw_metrics.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📊 CW Metrics</a>
+                        </div>
+                    </div>
                     <div id="cwskimmerConfig" class="loading">
                         <div class="spinner"></div>
                         <p>Loading CW Skimmer configuration...</p>
@@ -5596,6 +5604,16 @@
         // CW Skimmer configuration management
         let currentCWSkimmerConfig = {};
 
+        // Update CW Skimmer analytics links visibility based on enabled status
+        function updateCWSkimmerAnalyticsLinks() {
+            const linksSection = document.getElementById('cwskimmerAnalyticsLinks');
+            if (linksSection) {
+                // Show links if CW Skimmer is enabled
+                const isEnabled = currentCWSkimmerConfig.enabled === true || currentCWSkimmerConfig.enabled === 'true';
+                linksSection.style.display = isEnabled ? 'block' : 'none';
+            }
+        }
+
         async function loadCWSkimmerConfig() {
             try {
                 const response = await authenticatedFetch('/admin/cwskimmer-config');
@@ -5615,6 +5633,9 @@
             const container = document.getElementById('cwskimmerConfig');
             container.innerHTML = '';
             container.classList.remove('loading');
+
+            // Update analytics links visibility based on CW Skimmer enabled status
+            updateCWSkimmerAnalyticsLinks();
 
             // Connection Settings Section
             const connectionSection = document.createElement('div');
@@ -5640,6 +5661,7 @@
             enabledSelect.value = (currentCWSkimmerConfig.enabled === true || currentCWSkimmerConfig.enabled === 'true') ? 'true' : 'false';
             enabledSelect.addEventListener('change', (e) => {
                 currentCWSkimmerConfig.enabled = e.target.value === 'true';
+                updateCWSkimmerAnalyticsLinks();
             });
             enabledDiv.appendChild(enabledSelect);
             connectionSection.appendChild(enabledDiv);

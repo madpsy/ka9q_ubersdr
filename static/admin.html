@@ -6086,6 +6086,11 @@
 
         function renderRotatorScheduler() {
             const container = document.getElementById('rotatorSchedulerConfig');
+
+            // Save checkbox state before clearing
+            const existingCheckbox = document.getElementById('showAvailableTriggersCheckbox');
+            const checkboxWasChecked = existingCheckbox ? existingCheckbox.checked : false;
+
             container.innerHTML = '';
             container.classList.remove('loading');
 
@@ -6211,6 +6216,14 @@
                 <label for="showAvailableTriggersCheckbox" style="cursor: pointer; font-weight: 500; color: #555;">Show Available Solar Event Triggers</label>
             `;
             timelineContainer.appendChild(checkboxContainer);
+
+            // Restore checkbox state after it's been added to DOM
+            setTimeout(() => {
+                const checkbox = document.getElementById('showAvailableTriggersCheckbox');
+                if (checkbox && checkboxWasChecked) {
+                    checkbox.checked = true;
+                }
+            }, 0);
 
             const timelineCanvas = document.createElement('canvas');
             timelineCanvas.id = 'rotatorTimeline';

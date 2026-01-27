@@ -7244,19 +7244,26 @@
                     })
                     .sort((a, b) => a.timeInHours - b.timeInHours);
 
-                // Detect overlapping labels and assign vertical levels
-                const minSpacing = 50; // Minimum pixels between labels
+                // Detect overlapping labels and assign vertical levels (3 tiers)
+                const minSpacing = 65; // Minimum pixels between labels (increased for full names)
                 const eventsWithLevels = [];
 
                 solarEventMarkers.forEach((event, index) => {
-                    let level = 0; // 0 = top level, 1 = second level
+                    let level = 0; // 0, 1, or 2
 
-                    // Check if this event is too close to any previous event at level 0
-                    for (let i = eventsWithLevels.length - 1; i >= 0; i--) {
-                        const prevEvent = eventsWithLevels[i];
-                        if (Math.abs(event.x - prevEvent.x) < minSpacing) {
-                            // Too close - use opposite level
-                            level = prevEvent.level === 0 ? 1 : 0;
+                    // Check if this event is too close to any previous event
+                    // Try each level starting from 0
+                    for (let testLevel = 0; testLevel < 3; testLevel++) {
+                        let hasConflict = false;
+                        for (let i = eventsWithLevels.length - 1; i >= 0; i--) {
+                            const prevEvent = eventsWithLevels[i];
+                            if (prevEvent.level === testLevel && Math.abs(event.x - prevEvent.x) < minSpacing) {
+                                hasConflict = true;
+                                break;
+                            }
+                        }
+                        if (!hasConflict) {
+                            level = testLevel;
                             break;
                         }
                     }
@@ -7273,9 +7280,9 @@
                     const x = event.x;
                     const level = event.level;
 
-                    // Calculate Y position based on level (increased spacing for second tier)
-                    const labelY = level === 0 ? 2 : 22;
-                    const lineStartY = level === 0 ? 24 : 44;
+                    // Calculate Y position based on level (start lower, below NOW marker)
+                    const labelY = 30 + (level * 20);  // 30, 50, 70
+                    const lineStartY = labelY + 18;     // 48, 68, 88
 
                     // Draw dashed vertical line from label to timeline
                     ctx.beginPath();
@@ -7283,17 +7290,12 @@
                     ctx.lineTo(x, timelineY);
                     ctx.stroke();
 
-                    // Draw event name at top
+                    // Draw event name (full name, no abbreviation)
                     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
                     ctx.font = '8px sans-serif';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'top';
-                    // Abbreviate long names
-                    let displayName = event.display_name;
-                    if (displayName.length > 8) {
-                        displayName = displayName.substring(0, 7) + '.';
-                    }
-                    ctx.fillText(displayName, x, labelY);
+                    ctx.fillText(event.display_name, x, labelY);
 
                     // Draw time below name
                     ctx.font = '7px sans-serif';

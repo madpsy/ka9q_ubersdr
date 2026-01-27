@@ -6234,9 +6234,11 @@
                         if (data.success && data.countries) {
                             window.adminRotatorDisplay.setCountriesData(data.countries);
 
-                            // Listen for status updates to update cone markers
+                            // Listen for status updates to update cone markers and save actual azimuth
                             document.addEventListener('rotator-status-update', (event) => {
                                 if (event.detail.position && event.detail.position.azimuth !== undefined) {
+                                    // Save actual azimuth for restoring after hover
+                                    window.lastRotatorAzimuth = event.detail.position.azimuth;
                                     window.adminRotatorDisplay.updateConeMarkers(data.countries, event.detail.position.azimuth);
                                 }
                             });
@@ -6377,11 +6379,15 @@
                         </td>
                     `;
 
-                    // Add hover effect to highlight corresponding timeline marker
+                    // Add hover effect to highlight corresponding timeline marker and update rotator display
                     row.addEventListener('mouseenter', function() {
                         const timelineCanvas = document.getElementById('rotatorTimeline');
                         if (timelineCanvas && pos.enabled !== false) {
                             drawRotatorTimeline(positions, pos.time);
+                            // Update rotator display to show this bearing
+                            if (window.adminRotatorDisplay && pos.bearing !== undefined) {
+                                window.adminRotatorDisplay.updateAzimuthDisplay(pos.bearing);
+                            }
                         }
                     });
 
@@ -6389,6 +6395,10 @@
                         const timelineCanvas = document.getElementById('rotatorTimeline');
                         if (timelineCanvas) {
                             drawRotatorTimeline(positions);
+                            // Restore actual rotator position
+                            if (window.adminRotatorDisplay && window.lastRotatorAzimuth !== undefined) {
+                                window.adminRotatorDisplay.updateAzimuthDisplay(window.lastRotatorAzimuth);
+                            }
                         }
                     });
 

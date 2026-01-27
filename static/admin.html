@@ -7252,7 +7252,7 @@
                     .sort((a, b) => a.timeInHours - b.timeInHours);
 
                 // Detect overlapping labels and assign vertical levels (3 tiers)
-                const minSpacing = 70; // Minimum pixels between labels (increased for full names)
+                const minSpacing = 45; // Minimum pixels between labels to avoid text overlap
                 const eventsWithLevels = [];
 
                 solarEventMarkers.forEach((event, index) => {

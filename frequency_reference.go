@@ -611,9 +611,6 @@ func (frm *FrequencyReferenceMonitor) detectPeakFrequency(spectrum []float32) (f
 	minSNR := frm.config.FrequencyReference.MinSNR
 	if peakSNR < minSNR {
 		// Peak is too weak (likely noise), return no detection
-		if DebugMode {
-			log.Printf("Frequency reference: peak SNR %.1f dB below minimum %.1f dB, ignoring", peakSNR, minSNR)
-		}
 		return 0, maxPower, -1
 	}
 

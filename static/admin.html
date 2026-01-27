@@ -736,6 +736,17 @@
                     <div class="alert alert-info" style="margin-bottom: 20px;">
                         ℹ️ <strong>Note:</strong> Decoder configuration changes require a server restart to take effect.
                     </div>
+                    <div id="decoderAnalyticsLinks" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; border: 1px solid #dee2e6;">
+                        <strong style="color: #333; margin-bottom: 10px; display: block;">📊 Analytics & Reports:</strong>
+                        <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                            <a href="digitalspots_map.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">🗺️ Live Spots Map</a>
+                            <a href="decode_rates.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📈 Decode Rates</a>
+                            <a href="decoder_spots_history.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📜 Spot History</a>
+                            <a href="decode_metrics.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📊 Decode Metrics</a>
+                            <a href="decoder_spots_analytics.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">🔍 Spot Analysis</a>
+                            <a href="pskreporter_analytics.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📡 PSK Reporter Stats</a>
+                        </div>
+                    </div>
                     <div id="decoderConfig" class="loading">
                         <div class="spinner"></div>
                         <p>Loading decoder configuration...</p>
@@ -4500,6 +4511,16 @@
         // Decoder configuration management
         let currentDecoderConfig = {};
 
+        // Update decoder analytics links visibility based on enabled status
+        function updateDecoderAnalyticsLinks() {
+            const linksSection = document.getElementById('decoderAnalyticsLinks');
+            if (linksSection) {
+                // Show links if decoder is enabled
+                const isEnabled = currentDecoderConfig.enabled === true;
+                linksSection.style.display = isEnabled ? 'block' : 'none';
+            }
+        }
+
         async function loadDecoderConfig() {
             try {
                 const response = await authenticatedFetch('/admin/decoder-config');
@@ -4520,6 +4541,9 @@
             container.innerHTML = '';
             container.classList.remove('loading');
 
+            // Update analytics links visibility based on decoder enabled status
+            updateDecoderAnalyticsLinks();
+
             // Global settings section
             const globalSection = document.createElement('div');
             globalSection.className = 'config-section';
@@ -4527,6 +4551,14 @@
 
             // Enabled checkbox
             const enabledField = createConfigField('Enabled', 'checkbox', currentDecoderConfig.enabled || false, 'enabled');
+            // Add event listener to update analytics links when enabled status changes
+            const enabledSelect = enabledField.querySelector('select');
+            if (enabledSelect) {
+                enabledSelect.addEventListener('change', (e) => {
+                    currentDecoderConfig.enabled = e.target.value === 'true';
+                    updateDecoderAnalyticsLinks();
+                });
+            }
             globalSection.appendChild(enabledField);
 
             // Data directory

@@ -2593,8 +2593,8 @@ class SpectrumDisplay {
         this.overlayCtx.fillStyle = 'rgba(255, 165, 0, 0.95)';
         this.overlayCtx.beginPath();
         this.overlayCtx.moveTo(x, arrowY + arrowLength); // Arrow tip at y=45
-        this.overlayCtx.lineTo(x - 6, arrowY); // Left point
-        this.overlayCtx.lineTo(x + 6, arrowY); // Right point
+        this.overlayCtx.lineTo(x - 3, arrowY); // Left point
+        this.overlayCtx.lineTo(x + 3, arrowY); // Right point
         this.overlayCtx.closePath();
         this.overlayCtx.fill();
 

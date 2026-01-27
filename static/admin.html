@@ -7030,6 +7030,10 @@
             const timelineWidth = width - marginLeft - marginRight;
 
             // Draw day/night shading using data from /api/suncalc endpoint
+            // Check if we should show sunrise/sunset markers
+            let showTriggersCheckbox = document.getElementById('showAvailableTriggersCheckbox');
+            const showSunriseSunsetMarkers = !showTriggersCheckbox || !showTriggersCheckbox.checked;
+
             if (window.suncalcData && window.suncalcData.sun && window.suncalcData.sun.times) {
                 const times = window.suncalcData.sun.times;
                 const sunrise = new Date(times.sunrise);
@@ -7054,39 +7058,42 @@
                     ctx.fillRect(marginLeft + nightStart, marginTop, nightWidth, timelineY - marginTop);
                 }
 
-                // Draw sunrise/sunset markers
-                const sunriseX = marginLeft + (sunriseHours / 24) * timelineWidth;
-                const sunsetX = marginLeft + (sunsetHours / 24) * timelineWidth;
+                // Only draw sunrise/sunset markers if not showing all solar events
+                if (showSunriseSunsetMarkers) {
+                    // Draw sunrise/sunset markers
+                    const sunriseX = marginLeft + (sunriseHours / 24) * timelineWidth;
+                    const sunsetX = marginLeft + (sunsetHours / 24) * timelineWidth;
 
-                // Sunrise marker (orange line)
-                ctx.strokeStyle = 'rgba(255, 165, 0, 0.5)';
-                ctx.lineWidth = 2;
-                ctx.setLineDash([5, 3]);
-                ctx.beginPath();
-                ctx.moveTo(sunriseX, marginTop);
-                ctx.lineTo(sunriseX, timelineY);
-                ctx.stroke();
-                ctx.setLineDash([]);
+                    // Sunrise marker (orange line)
+                    ctx.strokeStyle = 'rgba(255, 165, 0, 0.5)';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([5, 3]);
+                    ctx.beginPath();
+                    ctx.moveTo(sunriseX, marginTop);
+                    ctx.lineTo(sunriseX, timelineY);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
 
-                // Sunset marker (orange line)
-                ctx.strokeStyle = 'rgba(255, 140, 0, 0.5)';
-                ctx.lineWidth = 2;
-                ctx.setLineDash([5, 3]);
-                ctx.beginPath();
-                ctx.moveTo(sunsetX, marginTop);
-                ctx.lineTo(sunsetX, timelineY);
-                ctx.stroke();
-                ctx.setLineDash([]);
+                    // Sunset marker (orange line)
+                    ctx.strokeStyle = 'rgba(255, 140, 0, 0.5)';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([5, 3]);
+                    ctx.beginPath();
+                    ctx.moveTo(sunsetX, marginTop);
+                    ctx.lineTo(sunsetX, timelineY);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
 
-                // Add sunrise/sunset labels at top
-                ctx.fillStyle = 'rgba(255, 140, 0, 0.8)';
-                ctx.font = '10px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'top';
-                const sunriseTime = sunrise.getHours().toString().padStart(2, '0') + ':' + sunrise.getMinutes().toString().padStart(2, '0');
-                const sunsetTime = sunset.getHours().toString().padStart(2, '0') + ':' + sunset.getMinutes().toString().padStart(2, '0');
-                ctx.fillText('☀️ ' + sunriseTime, sunriseX, marginTop - 15);
-                ctx.fillText('🌙 ' + sunsetTime, sunsetX, marginTop - 15);
+                    // Add sunrise/sunset labels at top
+                    ctx.fillStyle = 'rgba(255, 140, 0, 0.8)';
+                    ctx.font = '10px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'top';
+                    const sunriseTime = sunrise.getHours().toString().padStart(2, '0') + ':' + sunrise.getMinutes().toString().padStart(2, '0');
+                    const sunsetTime = sunset.getHours().toString().padStart(2, '0') + ':' + sunset.getMinutes().toString().padStart(2, '0');
+                    ctx.fillText('☀️ ' + sunriseTime, sunriseX, marginTop - 15);
+                    ctx.fillText('🌙 ' + sunsetTime, sunsetX, marginTop - 15);
+                }
             }
 
             // Draw timeline base line
@@ -7229,7 +7236,7 @@
             ctx.fillText('23:59', marginLeft + timelineWidth + 25, timelineY + 12);
 
             // Draw available solar event triggers if checkbox is checked
-            const showTriggersCheckbox = document.getElementById('showAvailableTriggersCheckbox');
+            showTriggersCheckbox = document.getElementById('showAvailableTriggersCheckbox');
             if (showTriggersCheckbox && showTriggersCheckbox.checked && availableSolarEvents && availableSolarEvents.length > 0) {
                 // Parse and sort solar events by time
                 const solarEventMarkers = availableSolarEvents

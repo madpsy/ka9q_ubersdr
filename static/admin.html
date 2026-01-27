@@ -6214,7 +6214,7 @@
             container.appendChild(mapSection);
 
             // Initialize rotator display after DOM is ready
-            setTimeout(() => {
+            setTimeout(async () => {
                 if (typeof RotatorDisplay !== 'undefined') {
                     window.adminRotatorDisplay = new RotatorDisplay({
                         containerId: 'admin-rotator-display-container',
@@ -6226,6 +6226,24 @@
                         compassSize: 150,
                         updateInterval: 1000  // Update every second
                     });
+
+                    // Fetch and set countries data for cone markers
+                    try {
+                        const response = await fetch('/api/rotctl/countries');
+                        const data = await response.json();
+                        if (data.success && data.countries) {
+                            window.adminRotatorDisplay.setCountriesData(data.countries);
+
+                            // Listen for status updates to update cone markers
+                            document.addEventListener('rotator-status-update', (event) => {
+                                if (event.detail.position && event.detail.position.azimuth !== undefined) {
+                                    window.adminRotatorDisplay.updateConeMarkers(data.countries, event.detail.position.azimuth);
+                                }
+                            });
+                        }
+                    } catch (error) {
+                        console.error('Failed to fetch countries data:', error);
+                    }
                 } else {
                     mapContainer.innerHTML = '<div style="padding: 40px; text-align: center; color: #999;">Rotator display library not loaded</div>';
                 }

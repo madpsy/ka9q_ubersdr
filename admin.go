@@ -3556,13 +3556,27 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Web log file
-	if ah.config.Server.LogFile != "" {
-		duCmd := exec.Command("du", "-sh", ah.config.Server.LogFile)
+	// Web log file (in the same directory as session_activity)
+	if ah.config.Server.LogFile != "" && ah.config.Server.SessionActivityLogDir != "" {
+		// Get the parent directory of session_activity
+		logDir := ah.config.Server.SessionActivityLogDir
+		// Remove trailing slash if present
+		logDir = strings.TrimSuffix(logDir, "/")
+		// Get parent directory
+		lastSlash := strings.LastIndex(logDir, "/")
+		if lastSlash > 0 {
+			logDir = logDir[:lastSlash]
+		} else {
+			// If no slash found, use current directory
+			logDir = "."
+		}
+		// Construct full path to web.log
+		webLogPath := logDir + "/" + ah.config.Server.LogFile
+		duCmd := exec.Command("du", "-sh", webLogPath)
 		if duOutput, err := duCmd.CombinedOutput(); err == nil {
 			dataDirs["web_log"] = string(duOutput)
 		} else {
-			dataDirs["web_log"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.config.Server.LogFile)
+			dataDirs["web_log"] = fmt.Sprintf("Error: %v (path: %s)", err, webLogPath)
 		}
 	}
 

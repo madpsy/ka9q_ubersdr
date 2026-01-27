@@ -15,6 +15,7 @@ class RotatorDisplay {
         this.compassSize = options.compassSize || 200;
         // Use !== undefined to allow 0 as a valid value (disables automatic updates)
         this.updateInterval = options.updateInterval !== undefined ? options.updateInterval : 1000;
+        this.backgroundOpacity = options.backgroundOpacity !== undefined ? options.backgroundOpacity : 0.6;
         
         // State
         this.svg = null;
@@ -81,7 +82,7 @@ class RotatorDisplay {
         svg.setAttribute('height', this.mapSize);
         svg.setAttribute('viewBox', `0 0 ${this.mapSize} ${this.mapSize}`);
         svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-        svg.style.background = 'rgba(26, 37, 47, 0.6)';
+        svg.style.background = `rgba(26, 37, 47, ${this.backgroundOpacity})`;
         svg.style.borderRadius = '10px';
         svg.style.display = 'block';
         container.appendChild(svg);

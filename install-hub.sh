@@ -328,7 +328,6 @@ if [ $GENERATE_WISDOM -eq 1 ]; then
     fi
     echo "Creating FFTW Wisdom... This will take several minutes. Grab a beer and be patient."
     if sudo fftwf-wisdom -v -T 1 -o "$WISDOM_FILE" \
-        rof3240000 \
         rof1620000 cob162000 cob81000 cob40500 cob32400 \
         cob16200 cob9600 cob8100 cob6930 cob4860 cob4800 cob3240 cob3200 cob1920 cob1620 cob1600 \
         cob1200 cob960 cob810 cob800 cob600 cob480 cob405 cob400 cob320 cob300 cob205 cob200 cob160 cob85 cob45 cob15; then

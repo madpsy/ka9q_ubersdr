@@ -6239,7 +6239,10 @@
                                 if (event.detail.position && event.detail.position.azimuth !== undefined) {
                                     // Save actual azimuth for restoring after hover
                                     window.lastRotatorAzimuth = event.detail.position.azimuth;
-                                    window.adminRotatorDisplay.updateConeMarkers(data.countries, event.detail.position.azimuth);
+                                    // Only update cone markers if not locked by hover
+                                    if (!window.adminRotatorDisplay.lockAzimuthDisplay) {
+                                        window.adminRotatorDisplay.updateConeMarkers(data.countries, event.detail.position.azimuth);
+                                    }
                                 }
                             });
                         }

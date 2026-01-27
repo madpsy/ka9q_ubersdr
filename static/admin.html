@@ -6200,6 +6200,18 @@
             timelineContainer.style.borderRadius = '5px';
             timelineContainer.style.border = '1px solid #dee2e6';
 
+            // Add checkbox to show available triggers
+            const checkboxContainer = document.createElement('div');
+            checkboxContainer.style.marginBottom = '10px';
+            checkboxContainer.style.display = 'flex';
+            checkboxContainer.style.alignItems = 'center';
+            checkboxContainer.style.gap = '8px';
+            checkboxContainer.innerHTML = `
+                <input type="checkbox" id="showAvailableTriggersCheckbox" onchange="redrawTimelineWithTriggers()" style="width: 18px; height: 18px; cursor: pointer;">
+                <label for="showAvailableTriggersCheckbox" style="cursor: pointer; font-weight: 500; color: #555;">Show Available Solar Event Triggers</label>
+            `;
+            timelineContainer.appendChild(checkboxContainer);
+
             const timelineCanvas = document.createElement('canvas');
             timelineCanvas.id = 'rotatorTimeline';
             timelineCanvas.style.width = '100%';
@@ -6990,6 +7002,12 @@
             event.target.value = '';
         }
 
+        // Redraw timeline when checkbox changes
+        function redrawTimelineWithTriggers() {
+            const positions = currentRotatorSchedulerConfig.positions || [];
+            drawRotatorTimeline(positions);
+        }
+
         // Draw rotator timeline visualization
         function drawRotatorTimeline(positions) {
             const canvas = document.getElementById('rotatorTimeline');
@@ -7209,6 +7227,50 @@
 
             ctx.textAlign = 'right';
             ctx.fillText('23:59', marginLeft + timelineWidth + 25, timelineY + 12);
+
+            // Draw available solar event triggers if checkbox is checked
+            const showTriggersCheckbox = document.getElementById('showAvailableTriggersCheckbox');
+            if (showTriggersCheckbox && showTriggersCheckbox.checked && availableSolarEvents && availableSolarEvents.length > 0) {
+                ctx.strokeStyle = 'rgba(255, 152, 0, 0.4)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 3]);
+                ctx.fillStyle = 'rgba(255, 152, 0, 0.8)';
+                ctx.font = '9px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+
+                availableSolarEvents.forEach((event, index) => {
+                    if (!event.time) return;
+
+                    // Parse event time
+                    const timeParts = event.time.split(':');
+                    const hours = parseInt(timeParts[0]);
+                    const minutes = parseInt(timeParts[1]);
+                    const timeInHours = hours + (minutes / 60);
+                    const x = marginLeft + (timeInHours / 24) * timelineWidth;
+
+                    // Draw dashed vertical line
+                    ctx.beginPath();
+                    ctx.moveTo(x, marginTop);
+                    ctx.lineTo(x, timelineY);
+                    ctx.stroke();
+
+                    // Draw small triangle marker at bottom
+                    ctx.fillStyle = 'rgba(255, 152, 0, 0.8)';
+                    ctx.beginPath();
+                    ctx.moveTo(x, timelineY + 2);
+                    ctx.lineTo(x - 3, timelineY + 8);
+                    ctx.lineTo(x + 3, timelineY + 8);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    // Draw event name below timeline (abbreviated)
+                    const abbrev = event.display_name.substring(0, 4);
+                    ctx.fillText(abbrev, x, timelineY - 2);
+                });
+
+                ctx.setLineDash([]);
+            }
         }
 
         // Setup hover tooltip for rotator timeline

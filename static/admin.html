@@ -7231,27 +7231,59 @@
             // Draw available solar event triggers if checkbox is checked
             const showTriggersCheckbox = document.getElementById('showAvailableTriggersCheckbox');
             if (showTriggersCheckbox && showTriggersCheckbox.checked && availableSolarEvents && availableSolarEvents.length > 0) {
+                // Parse and sort solar events by time
+                const solarEventMarkers = availableSolarEvents
+                    .filter(event => event.time)
+                    .map(event => {
+                        const timeParts = event.time.split(':');
+                        const hours = parseInt(timeParts[0]);
+                        const minutes = parseInt(timeParts[1]);
+                        const timeInHours = hours + (minutes / 60);
+                        const x = marginLeft + (timeInHours / 24) * timelineWidth;
+                        return { ...event, x, timeInHours };
+                    })
+                    .sort((a, b) => a.timeInHours - b.timeInHours);
+
+                // Detect overlapping labels and assign vertical levels
+                const minSpacing = 50; // Minimum pixels between labels
+                const eventsWithLevels = [];
+
+                solarEventMarkers.forEach((event, index) => {
+                    let level = 0; // 0 = top level, 1 = second level
+
+                    // Check if this event is too close to any previous event at level 0
+                    for (let i = eventsWithLevels.length - 1; i >= 0; i--) {
+                        const prevEvent = eventsWithLevels[i];
+                        if (Math.abs(event.x - prevEvent.x) < minSpacing) {
+                            // Too close - use opposite level
+                            level = prevEvent.level === 0 ? 1 : 0;
+                            break;
+                        }
+                    }
+
+                    eventsWithLevels.push({ ...event, level });
+                });
+
+                // Draw solar event markers
                 ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
                 ctx.lineWidth = 1;
                 ctx.setLineDash([4, 4]);
 
-                availableSolarEvents.forEach((event, index) => {
-                    if (!event.time) return;
+                eventsWithLevels.forEach(event => {
+                    const x = event.x;
+                    const level = event.level;
 
-                    // Parse event time
-                    const timeParts = event.time.split(':');
-                    const hours = parseInt(timeParts[0]);
-                    const minutes = parseInt(timeParts[1]);
-                    const timeInHours = hours + (minutes / 60);
-                    const x = marginLeft + (timeInHours / 24) * timelineWidth;
+                    // Calculate Y position based on level
+                    const labelY = level === 0 ? 2 : 14;
+                    const lineStartY = level === 0 ? 24 : 36;
 
-                    // Draw dashed vertical line from top to timeline (same height as NOW marker)
+                    // Draw dashed vertical line from label to timeline
                     ctx.beginPath();
-                    ctx.moveTo(x, 26);  // Start below NOW label
+                    ctx.moveTo(x, lineStartY);
                     ctx.lineTo(x, timelineY);
                     ctx.stroke();
 
-                    // Draw event name at top (same level as NOW)
+                    // Draw event name at top
                     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
                     ctx.font = '8px sans-serif';
                     ctx.textAlign = 'center';
@@ -7261,11 +7293,11 @@
                     if (displayName.length > 8) {
                         displayName = displayName.substring(0, 7) + '.';
                     }
-                    ctx.fillText(displayName, x, 2);
-                    
+                    ctx.fillText(displayName, x, labelY);
+
                     // Draw time below name
                     ctx.font = '7px sans-serif';
-                    ctx.fillText(event.time, x, 12);
+                    ctx.fillText(event.time, x, labelY + 10);
                 });
 
                 ctx.setLineDash([]);

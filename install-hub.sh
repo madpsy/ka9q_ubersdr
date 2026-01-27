@@ -323,8 +323,8 @@ if [ $GENERATE_WISDOM -eq 1 ]; then
     echo
     echo "Generating FFTW Wisdom (--generate-wisdom)..."
     if sudo test -f "$WISDOM_FILE"; then
-        echo "Removing existing wisdom file..."
-        sudo rm -f "$WISDOM_FILE"
+        echo "Moving existing wisdom file to /tmp/..."
+        sudo mv "$WISDOM_FILE" /tmp/
     fi
     echo "Creating FFTW Wisdom... This will take several minutes. Grab a beer and be patient."
     # rof3240000: RX888 MkII at 129.6 MHz

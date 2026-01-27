@@ -7231,13 +7231,9 @@
             // Draw available solar event triggers if checkbox is checked
             const showTriggersCheckbox = document.getElementById('showAvailableTriggersCheckbox');
             if (showTriggersCheckbox && showTriggersCheckbox.checked && availableSolarEvents && availableSolarEvents.length > 0) {
-                ctx.strokeStyle = 'rgba(255, 152, 0, 0.4)';
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
                 ctx.lineWidth = 1;
-                ctx.setLineDash([3, 3]);
-                ctx.fillStyle = 'rgba(255, 152, 0, 0.8)';
-                ctx.font = '9px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'bottom';
+                ctx.setLineDash([4, 4]);
 
                 availableSolarEvents.forEach((event, index) => {
                     if (!event.time) return;
@@ -7249,24 +7245,27 @@
                     const timeInHours = hours + (minutes / 60);
                     const x = marginLeft + (timeInHours / 24) * timelineWidth;
 
-                    // Draw dashed vertical line
+                    // Draw dashed vertical line from top to timeline (same height as NOW marker)
                     ctx.beginPath();
-                    ctx.moveTo(x, marginTop);
+                    ctx.moveTo(x, 26);  // Start below NOW label
                     ctx.lineTo(x, timelineY);
                     ctx.stroke();
 
-                    // Draw small triangle marker at bottom
-                    ctx.fillStyle = 'rgba(255, 152, 0, 0.8)';
-                    ctx.beginPath();
-                    ctx.moveTo(x, timelineY + 2);
-                    ctx.lineTo(x - 3, timelineY + 8);
-                    ctx.lineTo(x + 3, timelineY + 8);
-                    ctx.closePath();
-                    ctx.fill();
-
-                    // Draw event name below timeline (abbreviated)
-                    const abbrev = event.display_name.substring(0, 4);
-                    ctx.fillText(abbrev, x, timelineY - 2);
+                    // Draw event name at top (same level as NOW)
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                    ctx.font = '8px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'top';
+                    // Abbreviate long names
+                    let displayName = event.display_name;
+                    if (displayName.length > 8) {
+                        displayName = displayName.substring(0, 7) + '.';
+                    }
+                    ctx.fillText(displayName, x, 2);
+                    
+                    // Draw time below name
+                    ctx.font = '7px sans-serif';
+                    ctx.fillText(event.time, x, 12);
                 });
 
                 ctx.setLineDash([]);

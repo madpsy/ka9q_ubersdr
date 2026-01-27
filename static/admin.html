@@ -7336,7 +7336,8 @@
                 const originalPositions = canvas.rotatorPositions.map(p => ({
                     time: p.time,
                     bearing: p.bearing,
-                    enabled: true
+                    enabled: true,
+                    resolved_time: p.resolved_time  // Preserve resolved_time for solar events
                 }));
                 drawRotatorTimeline(originalPositions);
 
@@ -7396,7 +7397,8 @@
                 const originalPositions = canvas.rotatorPositions.map(p => ({
                     time: p.time,
                     bearing: p.bearing,
-                    enabled: true
+                    enabled: true,
+                    resolved_time: p.resolved_time  // Preserve resolved_time for solar events
                 }));
                 drawRotatorTimeline(originalPositions);
             });

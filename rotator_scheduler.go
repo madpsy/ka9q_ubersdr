@@ -79,12 +79,18 @@ func GetAvailableSolarEvents() []SolarEvent {
 // getAvailableSolarEventsWithTimes returns solar events with their current trigger times for today
 // Note: Caller must NOT hold any locks
 func (rs *RotatorScheduler) getAvailableSolarEventsWithTimes() []map[string]interface{} {
-	events := GetAvailableSolarEvents()
-
 	// Acquire lock to access cached sun times
 	rs.mu.Lock()
 	sunTimes := rs.getSunTimesForTodayNoLock()
 	rs.mu.Unlock()
+
+	return rs.getAvailableSolarEventsWithTimesNoLock(sunTimes)
+}
+
+// getAvailableSolarEventsWithTimesNoLock returns solar events with their current trigger times for today
+// Note: This version takes pre-fetched sun times and does not acquire any locks
+func (rs *RotatorScheduler) getAvailableSolarEventsWithTimesNoLock(sunTimes *SunTimes) []map[string]interface{} {
+	events := GetAvailableSolarEvents()
 
 	result := make([]map[string]interface{}, len(events))
 	for i, event := range events {
@@ -262,6 +268,19 @@ func (rs *RotatorScheduler) resolvePositionTime(pos *ScheduledPosition) (string,
 	sunTimes := rs.getSunTimesForTodayNoLock()
 	rs.mu.Unlock()
 
+	return rs.resolvePositionTimeNoLock(pos, sunTimes)
+}
+
+// resolvePositionTimeNoLock resolves a position's time to HH:MM format
+// Handles both fixed times (HH:MM) and solar events (sunrise, sunset, etc.)
+// Note: This version takes pre-fetched sun times and does not acquire any locks
+func (rs *RotatorScheduler) resolvePositionTimeNoLock(pos *ScheduledPosition, sunTimes *SunTimes) (string, error) {
+	// If it's a fixed time, return as-is
+	if !isSolarEvent(pos.Time) {
+		return pos.Time, nil
+	}
+
+	// It's a solar event - calculate the time
 	var eventTime time.Time
 	switch pos.Time {
 	case "sunrise":
@@ -481,10 +500,13 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 	positionsCopy := make([]ScheduledPosition, len(rs.config.Positions))
 	copy(positionsCopy, rs.config.Positions)
 
+	// Get sun times while we have the lock
+	sunTimes := rs.getSunTimesForTodayNoLock()
+
 	rs.mu.RUnlock()
 
-	// Get solar events with times (no lock needed)
-	solarEvents := rs.getAvailableSolarEventsWithTimes()
+	// Get solar events with times (pass sun times to avoid re-locking)
+	solarEvents := rs.getAvailableSolarEventsWithTimesNoLock(sunTimes)
 
 	status := map[string]interface{}{
 		"enabled":                enabled,
@@ -506,8 +528,8 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 		if isSolarEvent(pos.Time) && pos.Offset != 0 {
 			posMap["offset"] = pos.Offset
 		}
-		// Add resolved time for display
-		if resolvedTime, err := rs.resolvePositionTime(&pos); err == nil {
+		// Add resolved time for display (pass sun times to avoid locking)
+		if resolvedTime, err := rs.resolvePositionTimeNoLock(&pos, sunTimes); err == nil {
 			posMap["resolved_time"] = resolvedTime
 		}
 		positions[i] = posMap
@@ -526,8 +548,8 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 				"time":    nextPos.Time,
 				"bearing": nextPos.Bearing,
 			}
-			// Add resolved time
-			if resolvedTime, err := rs.resolvePositionTime(nextPos); err == nil {
+			// Add resolved time (pass sun times to avoid locking)
+			if resolvedTime, err := rs.resolvePositionTimeNoLock(nextPos, sunTimes); err == nil {
 				nextPosMap["resolved_time"] = resolvedTime
 			}
 			status["next_position"] = nextPosMap

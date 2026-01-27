@@ -31,6 +31,7 @@ class SpectrumDisplay {
         this.peakHoldData = null;
         this.peakHoldDecayRate = 3.0; // dB per second decay rate (faster decay)
         this.lastPeakHoldUpdate = Date.now();
+        this.peakHoldEnabled = true; // Default to enabled (will be overridden by localStorage in setupScrollHandler)
 
         // Frame buffering for audio synchronization
         this.frameQueue = [];
@@ -1995,7 +1996,8 @@ class SpectrumDisplay {
 
     // Draw peak hold line on line graph
     drawPeakHold(ctx, graphWidth, graphHeight, graphDrawHeight, graphTopMargin, minDb, maxDb) {
-        if (!this.peakHoldData) return;
+        // Skip if peak hold is disabled
+        if (!this.peakHoldEnabled || !this.peakHoldData) return;
 
         const dbRange = maxDb - minDb;
         if (dbRange === 0 || !isFinite(dbRange)) return;
@@ -3542,6 +3544,27 @@ class SpectrumDisplay {
             });
         }
 
+        // Setup peak hold checkbox handler
+        const holdCheckbox = document.getElementById('spectrum-hold-enable');
+        if (holdCheckbox) {
+            // Load saved preference from localStorage (default to true/checked)
+            const savedHoldState = localStorage.getItem('spectrumHoldEnabled');
+            const isHoldEnabled = savedHoldState !== 'false'; // Default to true unless explicitly saved as 'false'
+            holdCheckbox.checked = isHoldEnabled;
+            this.peakHoldEnabled = isHoldEnabled;
+
+        holdCheckbox.addEventListener('change', (e) => {
+            this.peakHoldEnabled = e.target.checked;
+            localStorage.setItem('spectrumHoldEnabled', e.target.checked.toString());
+            console.log(`Spectrum peak hold ${this.peakHoldEnabled ? 'enabled' : 'disabled'}`);
+
+            // Clear peak hold data when disabling
+            if (!this.peakHoldEnabled) {
+                this.peakHoldData = null;
+            }
+        });
+    }
+
         // Setup 1 KHz snap checkbox handler
         const snapCheckbox = document.getElementById('spectrum-snap-enable');
         if (snapCheckbox) {
@@ -3569,7 +3592,7 @@ class SpectrumDisplay {
                 localStorage.setItem('spectrumLineGraphEnabled', enabled.toString());
                 this.toggleLineGraphVisibility(enabled);
 
-                // Enable/disable smooth checkbox based on spectrum visibility
+                // Enable/disable smooth and hold checkboxes based on spectrum visibility
                 if (smoothCheckbox) {
                     smoothCheckbox.disabled = !enabled;
                     if (!enabled) {
@@ -3577,12 +3600,22 @@ class SpectrumDisplay {
                         this.smoothingEnabled = false;
                     }
                 }
+                if (holdCheckbox) {
+                    holdCheckbox.disabled = !enabled;
+                    if (!enabled) {
+                        // Don't uncheck hold when disabling spectrum, just disable it
+                        // This preserves the user's preference for when they re-enable spectrum
+                    }
+                }
             });
         }
 
-        // Initialize smooth checkbox state based on spectrum visibility
+        // Initialize smooth and hold checkbox states based on spectrum visibility
         if (smoothCheckbox && lineGraphToggle) {
             smoothCheckbox.disabled = !lineGraphToggle.checked;
+        }
+        if (holdCheckbox && lineGraphToggle) {
+            holdCheckbox.disabled = !lineGraphToggle.checked;
         }
 
         // Setup manual range controls

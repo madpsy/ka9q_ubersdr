@@ -317,17 +317,17 @@ else
     fi
 fi
 
-# Create FFTW Wisdom on fresh installations or when --generate-wisdom is specified
-WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom"
+# Create FFTW Wisdom only when --generate-wisdom is specified
 if [ $GENERATE_WISDOM -eq 1 ]; then
+    WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom"
     echo
-    echo "Forcing FFTW Wisdom generation (--generate-wisdom)..."
+    echo "Generating FFTW Wisdom (--generate-wisdom)..."
     if sudo test -f "$WISDOM_FILE"; then
         echo "Removing existing wisdom file..."
         sudo rm -f "$WISDOM_FILE"
     fi
     echo "Creating FFTW Wisdom... This will take several minutes. Grab a beer and be patient."
-    # Real to complex for 129.6 MSPS would also need rof3240000
+    # rof3240000: RX888 MkII at 129.6 MHz
     if sudo fftwf-wisdom -v -T 1 -o "$WISDOM_FILE" \
         rof1620000 cob162000 cob81000 cob40500 cob32400 \
         cob16200 cob9600 cob8100 cob6930 cob4860 cob4800 cob3240 cob3200 cob1920 cob1620 cob1600 \
@@ -336,28 +336,10 @@ if [ $GENERATE_WISDOM -eq 1 ]; then
     else
         echo "Warning: FFTW Wisdom creation failed, but installation will continue."
     fi
-elif [ $FRESH_INSTALL -eq 1 ]; then
-    if sudo test -f "$WISDOM_FILE"; then
-        echo
-        echo "FFTW Wisdom file already exists, skipping creation."
-        echo "Hint: Use --generate-wisdom to force regeneration."
-    else
-        echo
-        echo "Creating FFTW Wisdom... This will take several minutes. Grab a beer and be patient."
-        # Real to complex for 129.6 MSPS would also need rof3240000
-        if sudo fftwf-wisdom -v -T 1 -o "$WISDOM_FILE" \
-            rof1620000 rof810000 cob162000 cob81000 cob40500 cob32400 \
-            cob16200 cob9600 cob8100 cob6930 cob4860 cob4800 cob3240 cob3200 cob1920 cob1620 cob1600 \
-            cob1200 cob960 cob810 cob800 cob600 cob480 cob405 cob400 cob320 cob300 cob205 cob200 cob160 cob85 cob45 cob15; then
-            echo "FFTW Wisdom created successfully!"
-        else
-            echo "Warning: FFTW Wisdom creation failed, but installation will continue."
-        fi
-    fi
 else
     echo
-    echo "Re-installation detected. Skipping FFTW Wisdom generation."
-    echo "Hint: Use --generate-wisdom to force regeneration."
+    echo "Skipping FFTW Wisdom generation."
+    echo "Hint: Use --generate-wisdom to generate FFTW wisdom file."
 fi
 
 # Setup auto-update cron job

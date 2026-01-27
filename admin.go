@@ -3468,91 +3468,91 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 
 	// Decoder metrics directory
 	if ah.config.Decoder.Enabled && ah.config.Decoder.MetricsLogEnabled && ah.config.Decoder.MetricsLogDataDir != "" {
-		duCmd := exec.Command("du", "-sh", ah.config.Decoder.MetricsLogDataDir)
-		if duOutput, err := duCmd.CombinedOutput(); err == nil {
-			dataDirs["decoder_metrics"] = string(duOutput)
-		} else {
-			dataDirs["decoder_metrics"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.config.Decoder.MetricsLogDataDir)
+		if _, err := os.Stat(ah.config.Decoder.MetricsLogDataDir); err == nil {
+			duCmd := exec.Command("du", "-sh", ah.config.Decoder.MetricsLogDataDir)
+			if duOutput, err := duCmd.CombinedOutput(); err == nil {
+				dataDirs["decoder_metrics"] = string(duOutput)
+			}
 		}
 	}
 
 	// Decoder spots directory
 	if ah.config.Decoder.Enabled && ah.config.Decoder.SpotsLogEnabled && ah.config.Decoder.SpotsLogDataDir != "" {
-		duCmd := exec.Command("du", "-sh", ah.config.Decoder.SpotsLogDataDir)
-		if duOutput, err := duCmd.CombinedOutput(); err == nil {
-			dataDirs["decoder_spots"] = string(duOutput)
-		} else {
-			dataDirs["decoder_spots"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.config.Decoder.SpotsLogDataDir)
+		if _, err := os.Stat(ah.config.Decoder.SpotsLogDataDir); err == nil {
+			duCmd := exec.Command("du", "-sh", ah.config.Decoder.SpotsLogDataDir)
+			if duOutput, err := duCmd.CombinedOutput(); err == nil {
+				dataDirs["decoder_spots"] = string(duOutput)
+			}
 		}
 	}
 
 	// Decoder metrics summary directory
 	if ah.config.Decoder.Enabled && ah.config.Decoder.MetricsLogEnabled && ah.config.Decoder.MetricsSummaryDataDir != "" {
-		duCmd := exec.Command("du", "-sh", ah.config.Decoder.MetricsSummaryDataDir)
-		if duOutput, err := duCmd.CombinedOutput(); err == nil {
-			dataDirs["decoder_summary"] = string(duOutput)
-		} else {
-			dataDirs["decoder_summary"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.config.Decoder.MetricsSummaryDataDir)
+		if _, err := os.Stat(ah.config.Decoder.MetricsSummaryDataDir); err == nil {
+			duCmd := exec.Command("du", "-sh", ah.config.Decoder.MetricsSummaryDataDir)
+			if duOutput, err := duCmd.CombinedOutput(); err == nil {
+				dataDirs["decoder_summary"] = string(duOutput)
+			}
 		}
 	}
 
 	// Noise floor directory
 	if ah.config.NoiseFloor.Enabled && ah.config.NoiseFloor.DataDir != "" {
-		duCmd := exec.Command("du", "-sh", ah.config.NoiseFloor.DataDir)
-		if duOutput, err := duCmd.CombinedOutput(); err == nil {
-			dataDirs["noisefloor"] = string(duOutput)
-		} else {
-			dataDirs["noisefloor"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.config.NoiseFloor.DataDir)
+		if _, err := os.Stat(ah.config.NoiseFloor.DataDir); err == nil {
+			duCmd := exec.Command("du", "-sh", ah.config.NoiseFloor.DataDir)
+			if duOutput, err := duCmd.CombinedOutput(); err == nil {
+				dataDirs["noisefloor"] = string(duOutput)
+			}
 		}
 	}
 
 	// Space weather directory
 	if ah.config.SpaceWeather.Enabled && ah.config.SpaceWeather.LogToCSV && ah.config.SpaceWeather.DataDir != "" {
-		duCmd := exec.Command("du", "-sh", ah.config.SpaceWeather.DataDir)
-		if duOutput, err := duCmd.CombinedOutput(); err == nil {
-			dataDirs["spaceweather"] = string(duOutput)
-		} else {
-			dataDirs["spaceweather"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.config.SpaceWeather.DataDir)
+		if _, err := os.Stat(ah.config.SpaceWeather.DataDir); err == nil {
+			duCmd := exec.Command("du", "-sh", ah.config.SpaceWeather.DataDir)
+			if duOutput, err := duCmd.CombinedOutput(); err == nil {
+				dataDirs["spaceweather"] = string(duOutput)
+			}
 		}
 	}
 
 	// CW Skimmer spots directory
 	if ah.cwSkimmerConfig != nil && ah.cwSkimmerConfig.Enabled && ah.cwSkimmerConfig.SpotsLogEnabled && ah.cwSkimmerConfig.SpotsLogDataDir != "" {
-		duCmd := exec.Command("du", "-sh", ah.cwSkimmerConfig.SpotsLogDataDir)
-		if duOutput, err := duCmd.CombinedOutput(); err == nil {
-			dataDirs["cwskimmer_spots"] = string(duOutput)
-		} else {
-			dataDirs["cwskimmer_spots"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.cwSkimmerConfig.SpotsLogDataDir)
+		if _, err := os.Stat(ah.cwSkimmerConfig.SpotsLogDataDir); err == nil {
+			duCmd := exec.Command("du", "-sh", ah.cwSkimmerConfig.SpotsLogDataDir)
+			if duOutput, err := duCmd.CombinedOutput(); err == nil {
+				dataDirs["cwskimmer_spots"] = string(duOutput)
+			}
 		}
 	}
 
 	// CW Skimmer metrics directory
 	if ah.cwSkimmerConfig != nil && ah.cwSkimmerConfig.Enabled && ah.cwSkimmerConfig.MetricsLogEnabled && ah.cwSkimmerConfig.MetricsLogDataDir != "" {
-		duCmd := exec.Command("du", "-sh", ah.cwSkimmerConfig.MetricsLogDataDir)
-		if duOutput, err := duCmd.CombinedOutput(); err == nil {
-			dataDirs["cwskimmer_metrics"] = string(duOutput)
-		} else {
-			dataDirs["cwskimmer_metrics"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.cwSkimmerConfig.MetricsLogDataDir)
+		if _, err := os.Stat(ah.cwSkimmerConfig.MetricsLogDataDir); err == nil {
+			duCmd := exec.Command("du", "-sh", ah.cwSkimmerConfig.MetricsLogDataDir)
+			if duOutput, err := duCmd.CombinedOutput(); err == nil {
+				dataDirs["cwskimmer_metrics"] = string(duOutput)
+			}
 		}
 	}
 
 	// CW Skimmer summaries directory
 	if ah.cwSkimmerConfig != nil && ah.cwSkimmerConfig.Enabled && ah.cwSkimmerConfig.MetricsLogEnabled && ah.cwSkimmerConfig.MetricsSummaryDataDir != "" {
-		duCmd := exec.Command("du", "-sh", ah.cwSkimmerConfig.MetricsSummaryDataDir)
-		if duOutput, err := duCmd.CombinedOutput(); err == nil {
-			dataDirs["cwskimmer_summaries"] = string(duOutput)
-		} else {
-			dataDirs["cwskimmer_summaries"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.cwSkimmerConfig.MetricsSummaryDataDir)
+		if _, err := os.Stat(ah.cwSkimmerConfig.MetricsSummaryDataDir); err == nil {
+			duCmd := exec.Command("du", "-sh", ah.cwSkimmerConfig.MetricsSummaryDataDir)
+			if duOutput, err := duCmd.CombinedOutput(); err == nil {
+				dataDirs["cwskimmer_summaries"] = string(duOutput)
+			}
 		}
 	}
 
 	// Session activity directory
 	if ah.config.Server.SessionActivityLogEnabled && ah.config.Server.SessionActivityLogDir != "" {
-		duCmd := exec.Command("du", "-sh", ah.config.Server.SessionActivityLogDir)
-		if duOutput, err := duCmd.CombinedOutput(); err == nil {
-			dataDirs["session_activity"] = string(duOutput)
-		} else {
-			dataDirs["session_activity"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.config.Server.SessionActivityLogDir)
+		if _, err := os.Stat(ah.config.Server.SessionActivityLogDir); err == nil {
+			duCmd := exec.Command("du", "-sh", ah.config.Server.SessionActivityLogDir)
+			if duOutput, err := duCmd.CombinedOutput(); err == nil {
+				dataDirs["session_activity"] = string(duOutput)
+			}
 		}
 	}
 
@@ -3572,11 +3572,12 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 		}
 		// Construct full path to web.log
 		webLogPath := logDir + "/" + ah.config.Server.LogFile
-		duCmd := exec.Command("du", "-sh", webLogPath)
-		if duOutput, err := duCmd.CombinedOutput(); err == nil {
-			dataDirs["web_log"] = string(duOutput)
-		} else {
-			dataDirs["web_log"] = fmt.Sprintf("Error: %v (path: %s)", err, webLogPath)
+		// Check if file exists before running du
+		if _, err := os.Stat(webLogPath); err == nil {
+			duCmd := exec.Command("du", "-sh", webLogPath)
+			if duOutput, err := duCmd.CombinedOutput(); err == nil {
+				dataDirs["web_log"] = string(duOutput)
+			}
 		}
 	}
 

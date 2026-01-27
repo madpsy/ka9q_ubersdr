@@ -833,8 +833,9 @@
                         </div>
                         <div class="config-field" id="offsetField" style="display: none;">
                             <label>Offset (minutes)</label>
-                            <input type="number" id="newScheduledPositionOffset" placeholder="0" min="-120" max="120" step="1" value="0" oninput="validateScheduledPositionForm()">
-                            <small>Minutes before (-) or after (+) the solar event (range: -120 to +120)</small>
+                            <input type="text" id="newScheduledPositionOffset" placeholder="0" value="0" oninput="validateScheduledPositionForm()" pattern="^[+-]?\d+$">
+                            <small>Minutes before (-) or after the solar event (range: -120 to +120). Use negative for before, positive or no sign for after.</small>
+                            <small id="scheduledPositionOffsetError" style="color: #dc3545; display: none;"></small>
                         </div>
                         <div class="config-field">
                             <label>Country (Optional)</label>
@@ -6711,12 +6712,14 @@
             document.getElementById('newScheduledPositionCountry').value = '';
             document.getElementById('scheduledPositionTimeError').style.display = 'none';
             document.getElementById('scheduledPositionBearingError').style.display = 'none';
+            document.getElementById('scheduledPositionOffsetError').style.display = 'none';
         }
 
         function validateScheduledPositionForm() {
             const triggerType = document.getElementById('newScheduledPositionTriggerType').value;
             const fixedTime = document.getElementById('newScheduledPositionTime').value.trim();
             const solarEvent = document.getElementById('newScheduledPositionSolarEvent').value;
+            const offsetValue = document.getElementById('newScheduledPositionOffset').value.trim();
             const bearingValue = document.getElementById('newScheduledPositionBearing').value.trim();
             const originalTime = document.getElementById('editScheduledPositionIndex').value;
             const isEditing = originalTime !== '';
@@ -6736,6 +6739,31 @@
                 } else {
                     timeError.style.display = 'none';
                     time = solarEvent;
+                }
+
+                // Validate offset for solar events
+                const offsetError = document.getElementById('scheduledPositionOffsetError');
+                if (offsetValue === '') {
+                    offsetError.textContent = 'Offset is required (use 0 for no offset)';
+                    offsetError.style.display = 'block';
+                    isValid = false;
+                } else {
+                    // Check if it's a valid number format
+                    const offsetMatch = offsetValue.match(/^[+-]?\d+$/);
+                    if (!offsetMatch) {
+                        offsetError.textContent = 'Offset must be a number (e.g., -30, 0, +15, or 15)';
+                        offsetError.style.display = 'block';
+                        isValid = false;
+                    } else {
+                        const offset = parseInt(offsetValue.replace(/^\+/, ''));
+                        if (offset < -120 || offset > 120) {
+                            offsetError.textContent = 'Offset must be between -120 and +120 minutes';
+                            offsetError.style.display = 'block';
+                            isValid = false;
+                        } else {
+                            offsetError.style.display = 'none';
+                        }
+                    }
                 }
                 // Update description
                 const eventSelect = document.getElementById('newScheduledPositionSolarEvent');
@@ -6796,8 +6824,16 @@
             const triggerType = document.getElementById('newScheduledPositionTriggerType').value;
             const fixedTime = document.getElementById('newScheduledPositionTime').value.trim();
             const solarEvent = document.getElementById('newScheduledPositionSolarEvent').value;
-            const offset = parseInt(document.getElementById('newScheduledPositionOffset').value) || 0;
+            const offsetValue = document.getElementById('newScheduledPositionOffset').value.trim();
+            // Remove leading + if present, then parse
+            const offset = parseInt(offsetValue.replace(/^\+/, '')) || 0;
             const bearing = parseFloat(document.getElementById('newScheduledPositionBearing').value);
+
+            // Validate offset range
+            if (offset < -120 || offset > 120) {
+                showAlert('Offset must be between -120 and +120 minutes', 'error');
+                return;
+            }
             const enabled = document.getElementById('newScheduledPositionEnabled').value === 'true';
             const originalTime = document.getElementById('editScheduledPositionIndex').value;
 

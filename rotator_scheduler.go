@@ -538,10 +538,8 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 
 	// Add next scheduled position only if enabled and has positions
 	if enabled && len(positionsCopy) > 0 {
-		// Need to acquire lock for getNextScheduledPosition
-		rs.mu.RLock()
-		nextPos := rs.getNextScheduledPosition()
-		rs.mu.RUnlock()
+		// Calculate next position without holding lock (use copied positions and sun times)
+		nextPos := rs.getNextScheduledPositionNoLock(positionsCopy, sunTimes)
 
 		if nextPos != nil {
 			nextPosMap := map[string]interface{}{
@@ -565,6 +563,24 @@ func (rs *RotatorScheduler) getNextScheduledPosition() *ScheduledPosition {
 		return nil
 	}
 
+	// Get sun times while we have the lock
+	sunTimes := rs.getSunTimesForTodayNoLock()
+
+	// Make a copy of positions
+	positionsCopy := make([]ScheduledPosition, len(rs.config.Positions))
+	copy(positionsCopy, rs.config.Positions)
+
+	// Use the no-lock version
+	return rs.getNextScheduledPositionNoLock(positionsCopy, sunTimes)
+}
+
+// getNextScheduledPositionNoLock returns the next scheduled position without acquiring locks
+// Takes pre-fetched positions and sun times
+func (rs *RotatorScheduler) getNextScheduledPositionNoLock(positions []ScheduledPosition, sunTimes *SunTimes) *ScheduledPosition {
+	if len(positions) == 0 {
+		return nil
+	}
+
 	now := time.Now()
 	currentMinutes := now.Hour()*60 + now.Minute()
 
@@ -574,15 +590,15 @@ func (rs *RotatorScheduler) getNextScheduledPosition() *ScheduledPosition {
 		minutes int
 	}
 
-	positionsWithMinutes := make([]posWithMinutes, 0, len(rs.config.Positions))
-	for _, pos := range rs.config.Positions {
+	positionsWithMinutes := make([]posWithMinutes, 0, len(positions))
+	for _, pos := range positions {
 		// Skip disabled positions
 		if !pos.Enabled {
 			continue
 		}
 
-		// Resolve position time (handles both fixed times and solar events)
-		resolvedTime, err := rs.resolvePositionTime(&pos)
+		// Resolve position time (handles both fixed times and solar events) - use no-lock version
+		resolvedTime, err := rs.resolvePositionTimeNoLock(&pos, sunTimes)
 		if err != nil {
 			log.Printf("Error resolving position time for '%s': %v", pos.Time, err)
 			continue

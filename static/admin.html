@@ -6227,6 +6227,12 @@
             // Initialize rotator display after DOM is ready
             setTimeout(async () => {
                 if (typeof RotatorDisplay !== 'undefined') {
+                    // Destroy existing instance if it exists to prevent multiple polling intervals
+                    if (window.adminRotatorDisplay) {
+                        window.adminRotatorDisplay.destroy();
+                        window.adminRotatorDisplay = null;
+                    }
+
                     window.adminRotatorDisplay = new RotatorDisplay({
                         containerId: 'admin-rotator-display-container',
                         showMap: true,

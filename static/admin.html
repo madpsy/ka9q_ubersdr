@@ -8305,6 +8305,15 @@
 
             let lastHoverUpdate = 0;
             const hoverThrottle = 100; // Only update every 100ms
+            let isHoveringTimeline = false;
+
+            canvas.addEventListener('mouseenter', function() {
+                isHoveringTimeline = true;
+                // Lock the rotator display to prevent automatic updates
+                if (window.adminRotatorDisplay) {
+                    window.adminRotatorDisplay.lockAzimuthDisplay = true;
+                }
+            });
 
             canvas.addEventListener('mousemove', function(e) {
                 // Throttle hover updates
@@ -8472,6 +8481,7 @@ const tooltipLine2 = timeStr;
             });
 
             canvas.addEventListener('mouseleave', function() {
+                isHoveringTimeline = false;
                 canvas.style.cursor = 'default';
                 if (window.adminRotatorDisplay) {
                     window.adminRotatorDisplay.lockAzimuthDisplay = false;

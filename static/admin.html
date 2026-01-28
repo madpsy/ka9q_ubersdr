@@ -6342,6 +6342,14 @@
                     setupRotatorTimelineHover(timelineCanvas);
                 }, 0);
             }
+
+            // Always setup hover even if no positions (for sun position updates)
+            if (positions.length === 0) {
+                setTimeout(() => {
+                    setupRotatorTimelineHover(timelineCanvas);
+                }, 0);
+            }
+
             if (positions.length === 0) {
                 const noPositions = document.createElement('p');
                 noPositions.style.textAlign = 'center';

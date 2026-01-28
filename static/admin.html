@@ -9463,6 +9463,8 @@ const tooltipLine2 = timeStr;
                 const fftType = data.fft_type || 'N/A';
                 const blockTimeMs = data.block_time_ms ? data.block_time_ms.toFixed(1) : 'N/A';
                 const overlapPercent = data.overlap_percent ? data.overlap_percent.toFixed(1) : 'N/A';
+                // Calculate overlap fraction (e.g., 20% = 5)
+                const overlapFraction = data.overlap_percent ? (100 / data.overlap_percent).toFixed(0) : 'N/A';
 
                 frontendStatusDisplay.innerHTML = `
                     <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 15px; margin-bottom: 15px;">
@@ -9501,18 +9503,15 @@ const tooltipLine2 = timeStr;
                     <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
                         <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 12px; color: #666; margin-bottom: 5px;">FFT Size</div>
-                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${fftSize.toLocaleString()}</div>
-                            <div style="font-size: 11px; color: #999; margin-top: 3px;">${fftType}</div>
+                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${fftSize.toLocaleString()} <span style="font-size: 11px; color: #999;">${fftType}</span></div>
                         </div>
                         <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Block Time</div>
-                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${blockTimeMs}</div>
-                            <div style="font-size: 11px; color: #999; margin-top: 3px;">ms</div>
+                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${blockTimeMs} <span style="font-size: 11px; color: #999;">ms</span></div>
                         </div>
                         <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 12px; color: #666; margin-bottom: 5px;">FFT Overlap</div>
-                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${overlapPercent}</div>
-                            <div style="font-size: 11px; color: #999; margin-top: 3px;">%</div>
+                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${overlapPercent}% <span style="font-size: 11px; color: #999;">(${overlapFraction})</span></div>
                         </div>
                     </div>
                     <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">

@@ -6397,7 +6397,7 @@
                     row.addEventListener('mouseenter', function() {
                         const timelineCanvas = document.getElementById('rotatorTimeline');
                         if (timelineCanvas && pos.enabled !== false) {
-                            drawRotatorTimeline(positions, pos.time);
+                            drawRotatorTimeline(positions, pos.time, true);
                             // Lock and update rotator display to show this bearing
                             if (window.adminRotatorDisplay && pos.bearing !== undefined) {
                                 window.adminRotatorDisplay.lockAzimuthDisplay = true;
@@ -6413,7 +6413,7 @@
                     row.addEventListener('mouseleave', function() {
                         const timelineCanvas = document.getElementById('rotatorTimeline');
                         if (timelineCanvas) {
-                            drawRotatorTimeline(positions);
+                            drawRotatorTimeline(positions, null, true);
                             // Unlock and restore actual rotator position
                             if (window.adminRotatorDisplay) {
                                 window.adminRotatorDisplay.lockAzimuthDisplay = false;
@@ -7357,7 +7357,7 @@
         }
 
         // Draw rotator timeline visualization
-        function drawRotatorTimeline(positions, highlightTime = null) {
+        function drawRotatorTimeline(positions, highlightTime = null, skipSunPath = false) {
             const canvas = document.getElementById('rotatorTimeline');
             if (!canvas) return;
 
@@ -7664,8 +7664,8 @@
                 ctx.setLineDash([]);
             }
 
-            // Draw sun tracking path if enabled and data is cached
-            if (currentRotatorSchedulerConfig && currentRotatorSchedulerConfig.follow_sun && window.cachedSunPath) {
+            // Draw sun tracking path if enabled and data is cached (but not on hover redraws)
+            if (!skipSunPath && currentRotatorSchedulerConfig && currentRotatorSchedulerConfig.follow_sun && window.cachedSunPath) {
                 drawSunTrackingPathSync(ctx, marginLeft, marginTop, timelineY, timelineWidth);
             }
         }
@@ -7685,25 +7685,19 @@
                 // Check if we already have cached data for these settings
                 const settingsKey = `${step}-${daytimeOnly}-${overlap}`;
                 if (cachedSunPathSettings === settingsKey && cachedSunPathData) {
-                    console.log('Using cached sun path data');
                     return; // Already cached
                 }
-
-                console.log(`Fetching sun path: step=${step}, daytime_only=${daytimeOnly}, overlap=${overlap}`);
 
                 // Fetch sun path from API
                 const response = await fetch(`/api/suncalc/path?step=${step}&daytime_only=${daytimeOnly}&overlap=${overlap}`);
                 if (!response.ok) {
-                    console.error('Sun path API returned error:', response.status);
                     window.cachedSunPath = null;
                     return;
                 }
 
                 const data = await response.json();
-                console.log('Sun path data received:', data);
                 
                 if (!data.data_points || data.data_points.length === 0) {
-                    console.log('No data points in response');
                     window.cachedSunPath = null;
                     return;
                 }
@@ -7729,8 +7723,6 @@
                     }
                 });
 
-                console.log(`Extracted ${uniquePoints.length} unique sun positions`);
-
                 // Cache the data
                 window.cachedSunPath = uniquePoints;
                 cachedSunPathData = uniquePoints;
@@ -7745,11 +7737,8 @@
         // Draw sun tracking path synchronously using cached data
         function drawSunTrackingPathSync(ctx, marginLeft, marginTop, timelineY, timelineWidth) {
             if (!window.cachedSunPath || window.cachedSunPath.length === 0) {
-                console.log('No cached sun path data to draw');
                 return;
             }
-
-            console.log(`Drawing ${window.cachedSunPath.length} sun tracking markers`);
 
             // Draw yellow markers for each unique bearing
             ctx.fillStyle = 'rgba(255, 193, 7, 0.8)'; // Yellow/gold color
@@ -7771,8 +7760,16 @@
         function setupRotatorTimelineHover(canvas) {
             if (!canvas) return;
 
+            let lastHoverUpdate = 0;
+            const hoverThrottle = 100; // Only update every 100ms
+
             canvas.addEventListener('mousemove', function(e) {
-                if (!canvas.rotatorPositions) return;
+                // Throttle hover updates
+                const now = Date.now();
+                if (now - lastHoverUpdate < hoverThrottle) {
+                    return;
+                }
+                lastHoverUpdate = now;
 
                 const rect = canvas.getBoundingClientRect();
                 const mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
@@ -7786,35 +7783,51 @@
                 const timelineY = canvas.height - marginBottom - 10;
 
                 // Redraw timeline to clear previous tooltip
-                const originalPositions = canvas.rotatorPositions.map(p => ({
+                const originalPositions = canvas.rotatorPositions ? canvas.rotatorPositions.map(p => ({
                     time: p.time,
                     bearing: p.bearing,
                     enabled: true,
-                    resolved_time: p.resolved_time  // Preserve resolved_time for solar events
-                }));
-                drawRotatorTimeline(originalPositions);
+                    resolved_time: p.resolved_time
+                })) : [];
+                drawRotatorTimeline(originalPositions, null, true);
 
-                // Check if mouse is near any position marker
+                // Check if mouse is near any scheduled position marker
                 const hoverRadius = 15;
                 let hoveredPos = null;
+                let hoveredSunPos = null;
 
-                for (const pos of canvas.rotatorPositions) {
-                    const distance = Math.sqrt(Math.pow(mouseX - pos.x, 2) + Math.pow(mouseY - timelineY, 2));
-                    if (distance <= hoverRadius) {
-                        hoveredPos = pos;
-                        break;
+                if (canvas.rotatorPositions) {
+                    for (const pos of canvas.rotatorPositions) {
+                        const distance = Math.sqrt(Math.pow(mouseX - pos.x, 2) + Math.pow(mouseY - timelineY, 2));
+                        if (distance <= hoverRadius) {
+                            hoveredPos = pos;
+                            break;
+                        }
                     }
                 }
 
-                // Draw tooltip if hovering over a position
+                // Check if mouse is near any sun tracking marker
+                if (!hoveredPos && window.cachedSunPath) {
+                    const sunHoverRadius = 8;
+                    const timelineWidth = canvas.width - marginLeft - marginRight;
+                    
+                    for (const sunPoint of window.cachedSunPath) {
+                        const sunX = marginLeft + (sunPoint.timeInHours / 24) * timelineWidth;
+                        const distance = Math.sqrt(Math.pow(mouseX - sunX, 2) + Math.pow(mouseY - timelineY, 2));
+                        if (distance <= sunHoverRadius) {
+                            hoveredSunPos = sunPoint;
+                            break;
+                        }
+                    }
+                }
+
+                // Handle scheduled position hover
                 if (hoveredPos) {
                     canvas.style.cursor = 'pointer';
 
-                    // Lock and update rotator display to show this bearing
                     if (window.adminRotatorDisplay && hoveredPos.bearing !== undefined) {
                         window.adminRotatorDisplay.lockAzimuthDisplay = true;
                         window.adminRotatorDisplay.updateAzimuthDisplay(hoveredPos.bearing);
-                        // Update cone markers to show countries in this direction
                         if (window.adminRotatorDisplay.countriesData) {
                             window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, hoveredPos.bearing);
                         }
@@ -7826,36 +7839,66 @@
                     const tooltipWidth = textWidth + 16;
                     const tooltipHeight = 24;
 
-                    // Position tooltip above the marker
                     let tooltipX = hoveredPos.x - tooltipWidth / 2;
                     const tooltipY = timelineY - 35;
 
-                    // Keep tooltip within canvas bounds
                     if (tooltipX < 5) tooltipX = 5;
                     if (tooltipX + tooltipWidth > canvas.width - 5) tooltipX = canvas.width - tooltipWidth - 5;
 
-                    // Draw tooltip background
                     ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
                     ctx.fillRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
 
-                    // Draw tooltip border
                     ctx.strokeStyle = '#667eea';
                     ctx.lineWidth = 1;
                     ctx.strokeRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
 
-                    // Draw tooltip text
                     ctx.fillStyle = '#fff';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(tooltipText, tooltipX + tooltipWidth / 2, tooltipY + tooltipHeight / 2);
+                } else if (hoveredSunPos) {
+                    // Handle sun tracking marker hover
+                    canvas.style.cursor = 'pointer';
+
+                    if (window.adminRotatorDisplay && hoveredSunPos.bearing !== undefined) {
+                        window.adminRotatorDisplay.lockAzimuthDisplay = true;
+                        window.adminRotatorDisplay.updateAzimuthDisplay(hoveredSunPos.bearing);
+                        if (window.adminRotatorDisplay.countriesData) {
+                            window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, hoveredSunPos.bearing);
+                        }
+                    }
+
+                    const tooltipText = `☀️ Sun → ${hoveredSunPos.bearing}°`;
+                    ctx.font = '12px sans-serif';
+                    const textWidth = ctx.measureText(tooltipText).width;
+                    const tooltipWidth = textWidth + 16;
+                    const tooltipHeight = 24;
+
+                    const timelineWidth = canvas.width - marginLeft - marginRight;
+                    const sunX = marginLeft + (hoveredSunPos.timeInHours / 24) * timelineWidth;
+                    let tooltipX = sunX - tooltipWidth / 2;
+                    const tooltipY = timelineY - 35;
+
+                    if (tooltipX < 5) tooltipX = 5;
+                    if (tooltipX + tooltipWidth > canvas.width - 5) tooltipX = canvas.width - tooltipWidth - 5;
+
+                    ctx.fillStyle = 'rgba(255, 193, 7, 0.95)';
+                    ctx.fillRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+
+                    ctx.strokeStyle = 'rgba(255, 140, 0, 0.8)';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+
+                    ctx.fillStyle = '#000';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
                     ctx.fillText(tooltipText, tooltipX + tooltipWidth / 2, tooltipY + tooltipHeight / 2);
                 } else {
                     canvas.style.cursor = 'default';
-                    // Unlock and restore actual rotator position when not hovering
                     if (window.adminRotatorDisplay) {
                         window.adminRotatorDisplay.lockAzimuthDisplay = false;
                         if (window.lastRotatorAzimuth !== undefined) {
                             window.adminRotatorDisplay.updateAzimuthDisplay(window.lastRotatorAzimuth);
-                            // Restore cone markers to actual position
                             if (window.adminRotatorDisplay.countriesData) {
                                 window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, window.lastRotatorAzimuth);
                             }
@@ -7865,27 +7908,24 @@
             });
 
             canvas.addEventListener('mouseleave', function() {
-                if (!canvas.rotatorPositions) return;
                 canvas.style.cursor = 'default';
-                // Unlock and restore actual rotator position
                 if (window.adminRotatorDisplay) {
                     window.adminRotatorDisplay.lockAzimuthDisplay = false;
                     if (window.lastRotatorAzimuth !== undefined) {
                         window.adminRotatorDisplay.updateAzimuthDisplay(window.lastRotatorAzimuth);
-                        // Restore cone markers to actual position
                         if (window.adminRotatorDisplay.countriesData) {
                             window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, window.lastRotatorAzimuth);
                         }
                     }
                 }
                 // Redraw to clear tooltip
-                const originalPositions = canvas.rotatorPositions.map(p => ({
+                const originalPositions = canvas.rotatorPositions ? canvas.rotatorPositions.map(p => ({
                     time: p.time,
                     bearing: p.bearing,
                     enabled: true,
-                    resolved_time: p.resolved_time  // Preserve resolved_time for solar events
-                }));
-                drawRotatorTimeline(originalPositions);
+                    resolved_time: p.resolved_time
+                })) : [];
+                drawRotatorTimeline(originalPositions, null, true);
             });
         }
 

@@ -295,10 +295,10 @@ func handleSunPathAPI(w http.ResponseWriter, r *http.Request, config *Config) {
 	// Parse greyline parameter (default false)
 	greyline := r.URL.Query().Get("greyline") == "true"
 
-	// Parse custom solar event parameters
+	// Parse custom solar event parameters for two separate tracking windows
 	sunriseStart := r.URL.Query().Get("sunrise_start")
-	_ = r.URL.Query().Get("sunrise_end")  // Reserved for future use
-	_ = r.URL.Query().Get("sunset_start") // Reserved for future use
+	sunriseEnd := r.URL.Query().Get("sunrise_end")
+	sunsetStart := r.URL.Query().Get("sunset_start")
 	sunsetEnd := r.URL.Query().Get("sunset_end")
 
 	// Parse overlap parameter (default 0 minutes)
@@ -319,15 +319,21 @@ func handleSunPathAPI(w http.ResponseWriter, r *http.Request, config *Config) {
 	// Calculate sun times for today
 	sunTimes := GetTimes(now, lat, lon, float64(alt))
 
-	// Calculate tracking window with overlap or custom events if daytime_only is true
+	// Calculate tracking window(s) with overlap or custom events if daytime_only is true
 	var trackingStart, trackingEnd time.Time
+	var hasTwoWindows bool
+	var sunriseWindowStart, sunriseWindowEnd, sunsetWindowStart, sunsetWindowEnd time.Time
+
 	if daytimeOnly {
-		if sunriseStart != "" && sunsetEnd != "" {
-			// Use custom solar events for tracking window
-			trackingStart = getSolarEventTimeFromSunTimes(&sunTimes, sunriseStart)
-			trackingEnd = getSolarEventTimeFromSunTimes(&sunTimes, sunsetEnd)
+		if sunriseStart != "" && sunriseEnd != "" && sunsetStart != "" && sunsetEnd != "" {
+			// Use custom solar events for two separate tracking windows
+			hasTwoWindows = true
+			sunriseWindowStart = getSolarEventTimeFromSunTimes(&sunTimes, sunriseStart)
+			sunriseWindowEnd = getSolarEventTimeFromSunTimes(&sunTimes, sunriseEnd)
+			sunsetWindowStart = getSolarEventTimeFromSunTimes(&sunTimes, sunsetStart)
+			sunsetWindowEnd = getSolarEventTimeFromSunTimes(&sunTimes, sunsetEnd)
 		} else {
-			// Use default overlap-based tracking window
+			// Use default overlap-based tracking window (single continuous window)
 			overlapDuration := time.Duration(overlapMinutes) * time.Minute
 			trackingStart = sunTimes.Sunrise.Add(-overlapDuration)
 			trackingEnd = sunTimes.Sunset.Add(overlapDuration)
@@ -345,11 +351,18 @@ func handleSunPathAPI(w http.ResponseWriter, r *http.Request, config *Config) {
 		// Calculate sun position for this time
 		sunPos := GetPosition(currentTime, lat, lon)
 
-		// Determine if it's daytime (sun above horizon with overlap)
+		// Determine if it's daytime (sun above horizon with overlap or in custom windows)
 		var isDaytime bool
 		if daytimeOnly {
-			// Use tracking window with overlap
-			isDaytime = currentTime.After(trackingStart) && currentTime.Before(trackingEnd)
+			if hasTwoWindows {
+				// Check if we're in either the sunrise or sunset window
+				inSunriseWindow := currentTime.After(sunriseWindowStart) && currentTime.Before(sunriseWindowEnd)
+				inSunsetWindow := currentTime.After(sunsetWindowStart) && currentTime.Before(sunsetWindowEnd)
+				isDaytime = inSunriseWindow || inSunsetWindow
+			} else {
+				// Use single tracking window with overlap
+				isDaytime = currentTime.After(trackingStart) && currentTime.Before(trackingEnd)
+			}
 		} else {
 			// Use standard sunrise/sunset
 			isDaytime = currentTime.After(sunTimes.Sunrise) && currentTime.Before(sunTimes.Sunset)

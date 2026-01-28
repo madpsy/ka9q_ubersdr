@@ -6629,6 +6629,48 @@
             sunriseStartDiv.appendChild(sunriseStartSmall);
             customEventsDiv.appendChild(sunriseStartDiv);
 
+            // Sunrise End Event
+            const sunriseEndDiv = document.createElement('div');
+            sunriseEndDiv.className = 'config-field';
+            const sunriseEndLabel = document.createElement('label');
+            sunriseEndLabel.textContent = 'Sunrise End Event';
+            sunriseEndDiv.appendChild(sunriseEndLabel);
+            const sunriseEndSelect = document.createElement('select');
+            sunriseEndSelect.id = 'sunriseEndEvent';
+            solarEventOptions.forEach(opt => {
+                const option = document.createElement('option');
+                option.value = opt.value;
+                option.textContent = opt.label;
+                sunriseEndSelect.appendChild(option);
+            });
+            sunriseEndSelect.value = currentRotatorSchedulerConfig.sunrise_end || '';
+            sunriseEndDiv.appendChild(sunriseEndSelect);
+            const sunriseEndSmall = document.createElement('small');
+            sunriseEndSmall.textContent = 'Solar event to end morning tracking';
+            sunriseEndDiv.appendChild(sunriseEndSmall);
+            customEventsDiv.appendChild(sunriseEndDiv);
+
+            // Sunset Start Event
+            const sunsetStartDiv = document.createElement('div');
+            sunsetStartDiv.className = 'config-field';
+            const sunsetStartLabel = document.createElement('label');
+            sunsetStartLabel.textContent = 'Sunset Start Event';
+            sunsetStartDiv.appendChild(sunsetStartLabel);
+            const sunsetStartSelect = document.createElement('select');
+            sunsetStartSelect.id = 'sunsetStartEvent';
+            solarEventOptions.forEach(opt => {
+                const option = document.createElement('option');
+                option.value = opt.value;
+                option.textContent = opt.label;
+                sunsetStartSelect.appendChild(option);
+            });
+            sunsetStartSelect.value = currentRotatorSchedulerConfig.sunset_start || '';
+            sunsetStartDiv.appendChild(sunsetStartSelect);
+            const sunsetStartSmall = document.createElement('small');
+            sunsetStartSmall.textContent = 'Solar event to start evening tracking';
+            sunsetStartDiv.appendChild(sunsetStartSmall);
+            customEventsDiv.appendChild(sunsetStartDiv);
+
             // Sunset End Event
             const sunsetEndDiv = document.createElement('div');
             sunsetEndDiv.className = 'config-field';
@@ -6716,6 +6758,8 @@
             const daytimeOnly = document.getElementById('sunTrackingDaytimeOnly').value === 'true';
             const overlap = parseInt(document.getElementById('sunTrackingOverlap').value);
             const sunriseStart = document.getElementById('sunriseStartEvent').value;
+            const sunriseEnd = document.getElementById('sunriseEndEvent').value;
+            const sunsetStart = document.getElementById('sunsetStartEvent').value;
             const sunsetEnd = document.getElementById('sunsetEndEvent').value;
 
             // Validate inputs
@@ -6760,6 +6804,8 @@
             currentRotatorSchedulerConfig.daytime_only = daytimeOnly;
             currentRotatorSchedulerConfig.daytime_overlap = overlap;
             currentRotatorSchedulerConfig.sunrise_start = sunriseStart;
+            currentRotatorSchedulerConfig.sunrise_end = sunriseEnd;
+            currentRotatorSchedulerConfig.sunset_start = sunsetStart;
             currentRotatorSchedulerConfig.sunset_end = sunsetEnd;
 
             // Clear cached sun path so it will be refetched with new settings
@@ -7835,10 +7881,12 @@
                 const overlap = currentRotatorSchedulerConfig.daytime_overlap || 0;
                 const greyline = currentRotatorSchedulerConfig.follow_greyline === true;
                 const sunriseStart = currentRotatorSchedulerConfig.sunrise_start || '';
+                const sunriseEnd = currentRotatorSchedulerConfig.sunrise_end || '';
+                const sunsetStart = currentRotatorSchedulerConfig.sunset_start || '';
                 const sunsetEnd = currentRotatorSchedulerConfig.sunset_end || '';
 
                 // Check if we already have cached data for these settings
-                const settingsKey = `${step}-${daytimeOnly}-${overlap}-${greyline}-${sunriseStart}-${sunsetEnd}`;
+                const settingsKey = `${step}-${daytimeOnly}-${overlap}-${greyline}-${sunriseStart}-${sunriseEnd}-${sunsetStart}-${sunsetEnd}`;
                 if (cachedSunPathSettings === settingsKey && cachedSunPathData) {
                     return; // Already cached
                 }
@@ -7847,6 +7895,12 @@
                 let apiUrl = `/api/suncalc/path?step=${step}&daytime_only=${daytimeOnly}&overlap=${overlap}&greyline=${greyline}`;
                 if (sunriseStart) {
                     apiUrl += `&sunrise_start=${encodeURIComponent(sunriseStart)}`;
+                }
+                if (sunriseEnd) {
+                    apiUrl += `&sunrise_end=${encodeURIComponent(sunriseEnd)}`;
+                }
+                if (sunsetStart) {
+                    apiUrl += `&sunset_start=${encodeURIComponent(sunsetStart)}`;
                 }
                 if (sunsetEnd) {
                     apiUrl += `&sunset_end=${encodeURIComponent(sunsetEnd)}`;

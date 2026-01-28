@@ -8439,16 +8439,9 @@ const tooltipLine2 = timeStr;
                     ctx.fillText(tooltipLine1, tooltipX + tooltipWidth / 2, tooltipY + 8);
                     ctx.fillText(tooltipLine2, tooltipX + tooltipWidth / 2, tooltipY + 22);
                 } else {
+                    // Not hovering over a specific marker
+                    // The beam position is already set by updateRotatorBeamForTime()
                     canvas.style.cursor = 'default';
-                    if (window.adminRotatorDisplay) {
-                        window.adminRotatorDisplay.lockAzimuthDisplay = false;
-                        if (window.lastRotatorAzimuth !== undefined) {
-                            window.adminRotatorDisplay.updateAzimuthDisplay(window.lastRotatorAzimuth);
-                            if (window.adminRotatorDisplay.countriesData) {
-                                window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, window.lastRotatorAzimuth);
-                            }
-                        }
-                    }
                 }
             });
 

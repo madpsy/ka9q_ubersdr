@@ -6274,10 +6274,12 @@
                         console.error('Failed to fetch countries data:', error);
                     }
 
-                    // Fetch and display sun position
-                    updateSunPosition();
-                    // Update sun position every 60 seconds
-                    setInterval(updateSunPosition, 60000);
+                    // Fetch and display sun position after a short delay to ensure map is ready
+                    setTimeout(() => {
+                        updateSunPosition();
+                        // Update sun position every 60 seconds
+                        setInterval(updateSunPosition, 60000);
+                    }, 200);
                 } else {
                     mapContainer.innerHTML = '<div style="padding: 40px; text-align: center; color: #999;">Rotator display library not loaded</div>';
                 }

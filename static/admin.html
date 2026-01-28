@@ -6237,25 +6237,32 @@
             flexContainer.style.gap = '20px';
             flexContainer.style.alignItems = 'flex-start';
 
-            // Map container (left side)
+            // Map container (left side) - fixed width
             const mapContainer = document.createElement('div');
             mapContainer.id = 'admin-rotator-display-container';
-            mapContainer.style.flex = '1';
-            mapContainer.style.minWidth = '500px';
-            mapContainer.style.height = '500px';
+            mapContainer.style.width = '600px';
+            mapContainer.style.height = '600px';
+            mapContainer.style.flexShrink = '0';
             mapContainer.style.background = '#fff';
             mapContainer.style.borderRadius = '5px';
             mapContainer.style.border = '1px solid #dee2e6';
             mapContainer.style.position = 'relative';
             mapContainer.style.overflow = 'hidden';
 
-            // Stats panel (right side)
+            // Stats panel (right side) - flexible
             const statsPanel = document.createElement('div');
             statsPanel.id = 'rotator-stats-panel';
-            statsPanel.style.width = '300px';
+            statsPanel.style.flex = '1';
             statsPanel.style.display = 'flex';
             statsPanel.style.flexDirection = 'column';
             statsPanel.style.gap = '15px';
+            statsPanel.style.minWidth = '0';
+
+            // Top row: Sun and Rotator cards side by side
+            const topCardsRow = document.createElement('div');
+            topCardsRow.style.display = 'grid';
+            topCardsRow.style.gridTemplateColumns = '1fr 1fr';
+            topCardsRow.style.gap = '15px';
 
             // Sun Position Card
             const sunCard = document.createElement('div');
@@ -6276,7 +6283,7 @@
                     </div>
                 </div>
             `;
-            statsPanel.appendChild(sunCard);
+            topCardsRow.appendChild(sunCard);
 
             // Rotator Position Card
             const rotatorCard = document.createElement('div');
@@ -6301,9 +6308,11 @@
                     <div id="rotator-moving-stat" style="font-size: 14px; font-weight: bold; color: #28a745;">—</div>
                 </div>
             `;
-            statsPanel.appendChild(rotatorCard);
+            topCardsRow.appendChild(rotatorCard);
 
-            // Countries in Beam Card
+            statsPanel.appendChild(topCardsRow);
+
+            // Countries in Beam Card (full width below)
             const countriesCard = document.createElement('div');
             countriesCard.style.background = '#fff';
             countriesCard.style.padding = '15px';
@@ -6314,7 +6323,7 @@
             countriesCard.style.flexDirection = 'column';
             countriesCard.innerHTML = `
                 <h4 style="margin: 0 0 10px 0; color: #28a745; font-size: 14px;">📡 Countries in Beam</h4>
-                <div id="countries-in-beam-container" style="flex: 1; overflow-y: auto; max-height: 300px;">
+                <div id="countries-in-beam-container" style="flex: 1; overflow-y: auto; max-height: 400px;">
                     <div style="text-align: center; color: #999; padding: 20px; font-size: 12px;">
                         <em>Loading...</em>
                     </div>

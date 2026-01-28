@@ -843,9 +843,21 @@
                         </div>
                         <div class="config-field">
                             <label>Country (Optional)</label>
-                            <input type="text" id="newScheduledPositionCountry" list="scheduled-position-country-list" placeholder="Type a country..." autocomplete="off" oninput="handleScheduledPositionCountryInput()">
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <input type="text" id="newScheduledPositionCountry" list="scheduled-position-country-list" placeholder="Type a country..." autocomplete="off" oninput="handleScheduledPositionCountryInput()" style="flex: 1; max-width: 300px;">
+                                <div style="display: flex; gap: 15px; align-items: center;">
+                                    <label style="display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer;">
+                                        <input type="radio" name="pathType" id="pathTypeShort" value="short" checked style="cursor: pointer;">
+                                        <span>Short Path</span>
+                                    </label>
+                                    <label style="display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer;">
+                                        <input type="radio" name="pathType" id="pathTypeLong" value="long" style="cursor: pointer;">
+                                        <span>Long Path</span>
+                                    </label>
+                                </div>
+                            </div>
                             <datalist id="scheduled-position-country-list"></datalist>
-                            <small>Select a country to automatically set the bearing</small>
+                            <small>Select a country and choose short path (direct) or long path (opposite direction) bearing</small>
                         </div>
                         <div class="config-field">
                             <label>Bearing (degrees)</label>
@@ -7426,9 +7438,19 @@
             }
 
             if (matchedCountry) {
+                // Get selected path type (short or long)
+                const pathType = document.querySelector('input[name="pathType"]:checked').value;
+
+                // Calculate bearing based on path type
+                let bearing = matchedCountry.bearing;
+                if (pathType === 'long') {
+                    // Long path is opposite direction (add/subtract 180 degrees)
+                    bearing = (bearing + 180) % 360;
+                }
+
                 // Automatically populate the bearing field
                 const bearingInput = document.getElementById('newScheduledPositionBearing');
-                bearingInput.value = matchedCountry.bearing;
+                bearingInput.value = bearing;
 
                 // Trigger validation
                 validateScheduledPositionForm();

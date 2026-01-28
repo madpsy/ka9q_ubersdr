@@ -6850,6 +6850,50 @@
             }
         }
 
+        // Update rotator beam position for a specific time (based on last scheduled position)
+        function updateRotatorBeamForTime(timeInHours, positions) {
+            if (!window.adminRotatorDisplay || !positions || positions.length === 0) return;
+
+            // Convert timeInHours to minutes since midnight
+            const targetMinutes = Math.floor(timeInHours * 60);
+
+            // Convert all enabled positions to minutes and sort by time
+            const positionsWithMinutes = positions
+                .filter(pos => pos.enabled !== false && pos.resolved_time)
+                .map(pos => {
+                    const timeParts = pos.resolved_time.split(':');
+                    const hours = parseInt(timeParts[0]);
+                    const minutes = parseInt(timeParts[1]);
+                    const totalMinutes = hours * 60 + minutes;
+                    return { ...pos, totalMinutes };
+                })
+                .sort((a, b) => a.totalMinutes - b.totalMinutes);
+
+            if (positionsWithMinutes.length === 0) return;
+
+            // Find the last position that occurred before or at the target time
+            let lastPosition = null;
+            for (let i = positionsWithMinutes.length - 1; i >= 0; i--) {
+                if (positionsWithMinutes[i].totalMinutes <= targetMinutes) {
+                    lastPosition = positionsWithMinutes[i];
+                    break;
+                }
+            }
+
+            // If no position found before target time, use the last position of the day (from yesterday)
+            if (!lastPosition && positionsWithMinutes.length > 0) {
+                lastPosition = positionsWithMinutes[positionsWithMinutes.length - 1];
+            }
+
+            // Update rotator display to show this bearing
+            if (lastPosition && lastPosition.bearing !== undefined) {
+                window.adminRotatorDisplay.updateAzimuthDisplay(lastPosition.bearing);
+                if (window.adminRotatorDisplay.countriesData) {
+                    window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, lastPosition.bearing);
+                }
+            }
+        }
+
         // Validate sun tracking interval
         function validateSunTrackingInterval() {
             const input = document.getElementById('sunTrackingInterval');
@@ -8273,6 +8317,9 @@
                 // Update sun position based on hovered time (always, regardless of what's being hovered)
                 updateSunPositionForTime(timeInHours);
 
+                // Update rotator beam position based on last scheduled position before this time
+                updateRotatorBeamForTime(timeInHours, originalPositions);
+
                 // Check if mouse is near any scheduled position marker
                 const hoverRadius = 15;
                 let hoveredPos = null;
@@ -8313,6 +8360,7 @@
                         : hoveredPos.time;
                     drawRotatorTimeline(originalPositions, posIdentifier);
 
+                    // Lock the display and show this specific position's bearing
                     if (window.adminRotatorDisplay && hoveredPos.bearing !== undefined) {
                         window.adminRotatorDisplay.lockAzimuthDisplay = true;
                         window.adminRotatorDisplay.updateAzimuthDisplay(hoveredPos.bearing);

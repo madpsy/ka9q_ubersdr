@@ -6854,28 +6854,23 @@
         function updateRotatorBeamForTime(timeInHours, positions) {
             if (!window.adminRotatorDisplay) return;
 
-            // Check if sun tracking is enabled AND if we're within a tracking window at this time
+            // Check if sun tracking is enabled
             const followSun = currentRotatorSchedulerConfig && currentRotatorSchedulerConfig.follow_sun;
-            let inSunTrackingWindow = false;
 
+            // First, check if we're in a sun tracking window by looking for exact sun path data
             if (followSun && window.cachedSunPath && window.cachedSunPath.length > 0) {
-                // Check if this time is within the sun tracking window
-                // by seeing if there's a sun path point near this time
-                const closestPoint = window.cachedSunPath.reduce((closest, point) => {
+                // Find if there's a sun path point very close to this time (within 1 step interval)
+                const stepMinutes = (currentRotatorSchedulerConfig.follow_sun_step || 15) / 60; // Convert to hours
+                const sunPoint = window.cachedSunPath.find(point => {
                     const timeDiff = Math.abs(point.timeInHours - timeInHours);
-                    const closestDiff = Math.abs(closest.timeInHours - timeInHours);
-                    return timeDiff < closestDiff ? point : closest;
-                }, window.cachedSunPath[0]);
+                    return timeDiff < stepMinutes;
+                });
 
-                // If closest point is within 30 minutes, we're in the tracking window
-                const timeDiff = Math.abs(closestPoint.timeInHours - timeInHours);
-                inSunTrackingWindow = timeDiff < 0.5; // 0.5 hours = 30 minutes
-
-                if (inSunTrackingWindow && closestPoint.bearing !== undefined) {
-                    // Within sun tracking window - show sun's bearing
-                    window.adminRotatorDisplay.updateAzimuthDisplay(closestPoint.bearing);
+                if (sunPoint && sunPoint.bearing !== undefined) {
+                    // We're within the sun tracking window - show sun's bearing
+                    window.adminRotatorDisplay.updateAzimuthDisplay(sunPoint.bearing);
                     if (window.adminRotatorDisplay.countriesData) {
-                        window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, closestPoint.bearing);
+                        window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, sunPoint.bearing);
                     }
                     return; // Exit early, we've set the position
                 }

@@ -9465,6 +9465,14 @@ const tooltipLine2 = timeStr;
                 const overlapPercent = data.overlap_percent ? data.overlap_percent.toFixed(1) : 'N/A';
                 // Calculate overlap fraction (e.g., 20% = 5)
                 const overlapFraction = data.overlap_percent ? (100 / data.overlap_percent).toFixed(0) : 'N/A';
+                // Generate FFTW wisdom block name
+                let fftwBlock = 'N/A';
+                if (fftSize > 0 && fftType !== 'N/A') {
+                    // Determine prefix based on FFT type
+                    // real-to-complex forward = rof, complex-to-complex backward = cob
+                    const prefix = fftType === 'real-to-complex' ? 'rof' : 'cob';
+                    fftwBlock = prefix + fftSize;
+                }
 
                 frontendStatusDisplay.innerHTML = `
                     <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 15px; margin-bottom: 15px;">
@@ -9503,7 +9511,7 @@ const tooltipLine2 = timeStr;
                     <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
                         <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 12px; color: #666; margin-bottom: 5px;">FFT Size</div>
-                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${fftSize.toLocaleString()} <span style="font-size: 11px; color: #999;">${fftType}</span></div>
+                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${fftSize.toLocaleString()} <span style="font-size: 11px; color: #999;">${fftType} (${fftwBlock})</span></div>
                         </div>
                         <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Block Time</div>

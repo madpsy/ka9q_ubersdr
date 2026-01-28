@@ -815,7 +815,80 @@ class RotatorDisplay {
             addedCount++;
         });
     }
-    
+
+    /**
+     * Show sun position marker on the map
+     * @param {number} azimuthDeg - Sun's azimuth in degrees (0-360)
+     * @param {number} altitudeDeg - Sun's altitude in degrees (-90 to +90)
+     */
+    showSunMarker(azimuthDeg, altitudeDeg) {
+        if (!this.showMap || !this.markerGroup || !this.projection) return;
+
+        // Remove existing sun marker
+        this.markerGroup.selectAll('.sun-marker').remove();
+
+        // Only show if sun is above horizon (or slightly below for twilight)
+        if (altitudeDeg < -6) return; // Show during civil twilight
+
+        // Calculate position at a fixed distance (8000km for good visibility)
+        const distance = 8000;
+        const destPoint = this.calculateDestinationPoint(
+            this.receiverLat, this.receiverLon, azimuthDeg, distance
+        );
+        const projected = this.projection([destPoint[1], destPoint[0]]);
+
+        if (!projected) return;
+
+        const [x, y] = projected;
+
+        // Transform coordinates from map space to screen space
+        const screenCoords = this.currentTransform.apply([x, y]);
+
+        // Create sun marker group
+        const markerGroup = this.markerGroup.append('g')
+            .attr('class', 'sun-marker')
+            .attr('transform', `translate(${screenCoords[0]}, ${screenCoords[1]})`)
+            .datum({ mapX: x, mapY: y, azimuth: azimuthDeg, altitude: altitudeDeg });
+
+        // Sun icon - larger circle with glow effect
+        markerGroup.append('circle')
+            .attr('r', 12)
+            .attr('fill', '#FFD700')
+            .attr('stroke', '#FFA500')
+            .attr('stroke-width', 2)
+            .style('filter', 'drop-shadow(0 0 10px rgba(255, 215, 0, 0.9))');
+
+        // Add sun emoji and azimuth label
+        markerGroup.append('text')
+            .attr('x', 0)
+            .attr('y', -20)
+            .attr('text-anchor', 'middle')
+            .attr('fill', '#FFD700')
+            .attr('font-size', '14px')
+            .attr('font-weight', 'bold')
+            .style('text-shadow', '0 0 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.6)')
+            .text(`☀️ ${Math.round(azimuthDeg)}°`);
+
+        // Add altitude label below
+        markerGroup.append('text')
+            .attr('x', 0)
+            .attr('y', 28)
+            .attr('text-anchor', 'middle')
+            .attr('fill', '#FFA500')
+            .attr('font-size', '11px')
+            .style('text-shadow', '0 0 4px rgba(0,0,0,0.8)')
+            .text(`Alt: ${altitudeDeg.toFixed(1)}°`);
+    }
+
+    /**
+     * Clear the sun marker from the map
+     */
+    clearSunMarker() {
+        if (this.markerGroup) {
+            this.markerGroup.selectAll('.sun-marker').remove();
+        }
+    }
+
     /**
      * Update cone markers to show countries in current beam direction
      * @param {Array} allCountries - Array of all countries
@@ -862,6 +935,16 @@ class RotatorDisplay {
 
         // Update all cone markers
         this.markerGroup.selectAll('.cone-marker').each(function() {
+            const marker = d3.select(this);
+            const data = marker.datum();
+            if (data && data.mapX !== undefined && data.mapY !== undefined) {
+                const screenCoords = self.currentTransform.apply([data.mapX, data.mapY]);
+                marker.attr('transform', `translate(${screenCoords[0]}, ${screenCoords[1]})`);
+            }
+        });
+
+        // Update sun marker
+        this.markerGroup.selectAll('.sun-marker').each(function() {
             const marker = d3.select(this);
             const data = marker.datum();
             if (data && data.mapX !== undefined && data.mapY !== undefined) {

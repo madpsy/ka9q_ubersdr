@@ -6273,6 +6273,11 @@
                     } catch (error) {
                         console.error('Failed to fetch countries data:', error);
                     }
+
+                    // Fetch and display sun position
+                    updateSunPosition();
+                    // Update sun position every 60 seconds
+                    setInterval(updateSunPosition, 60000);
                 } else {
                     mapContainer.innerHTML = '<div style="padding: 40px; text-align: center; color: #999;">Rotator display library not loaded</div>';
                 }
@@ -6760,6 +6765,27 @@
 
             // Load logs after rendering
             loadRotatorSchedulerLogs();
+        }
+
+        // Update sun position on the rotator map
+        async function updateSunPosition() {
+            if (!window.adminRotatorDisplay) return;
+
+            try {
+                const response = await fetch('/api/suncalc');
+                if (!response.ok) return;
+
+                const data = await response.json();
+                if (data.sun && data.sun.position) {
+                    const azimuthDeg = data.sun.position.azimuth_deg;
+                    const altitudeDeg = data.sun.position.altitude_deg;
+
+                    // Show sun marker on the map
+                    window.adminRotatorDisplay.showSunMarker(azimuthDeg, altitudeDeg);
+                }
+            } catch (error) {
+                console.error('Failed to update sun position:', error);
+            }
         }
 
         // Validate sun tracking interval
@@ -7527,11 +7553,42 @@
             // Convert to YAML format
             let yamlContent = '# Rotator Scheduler Configuration\n';
             yamlContent += `enabled: ${currentRotatorSchedulerConfig.enabled || false}\n\n`;
+
+            // Add sun tracking configuration if enabled
+            if (currentRotatorSchedulerConfig.follow_sun) {
+                yamlContent += '# Sun Tracking Configuration\n';
+                yamlContent += `follow_sun: ${currentRotatorSchedulerConfig.follow_sun}\n`;
+                yamlContent += `follow_sun_step: ${currentRotatorSchedulerConfig.follow_sun_step || 15}\n`;
+                yamlContent += `daytime_only: ${currentRotatorSchedulerConfig.daytime_only !== false}\n`;
+                yamlContent += `daytime_overlap: ${currentRotatorSchedulerConfig.daytime_overlap || 60}\n`;
+                if (currentRotatorSchedulerConfig.follow_greyline) {
+                    yamlContent += `follow_greyline: ${currentRotatorSchedulerConfig.follow_greyline}\n`;
+                }
+                if (currentRotatorSchedulerConfig.sunrise_start) {
+                    yamlContent += `sunrise_start: ${currentRotatorSchedulerConfig.sunrise_start}\n`;
+                }
+                if (currentRotatorSchedulerConfig.sunrise_end) {
+                    yamlContent += `sunrise_end: ${currentRotatorSchedulerConfig.sunrise_end}\n`;
+                }
+                if (currentRotatorSchedulerConfig.sunset_start) {
+                    yamlContent += `sunset_start: ${currentRotatorSchedulerConfig.sunset_start}\n`;
+                }
+                if (currentRotatorSchedulerConfig.sunset_end) {
+                    yamlContent += `sunset_end: ${currentRotatorSchedulerConfig.sunset_end}\n`;
+                }
+                yamlContent += '\n';
+            }
+
+            yamlContent += '# Scheduled Positions\n';
             yamlContent += 'positions:\n';
             currentRotatorSchedulerConfig.positions.forEach(pos => {
                 yamlContent += `  - time: "${pos.time}"\n`;
                 yamlContent += `    bearing: ${pos.bearing}\n`;
                 yamlContent += `    enabled: ${pos.enabled !== false}\n`;
+                // Add offset for solar events
+                if (pos.offset !== undefined && pos.offset !== null && pos.offset !== 0) {
+                    yamlContent += `    offset: ${pos.offset}\n`;
+                }
             });
 
             const blob = new Blob([yamlContent], { type: 'text/yaml' });
@@ -7566,6 +7623,7 @@
                     const lines = text.split('\n');
                     importedConfig = { enabled: false, positions: [] };
                     let currentPosition = null;
+                    let inPositions = false;
 
                     for (const line of lines) {
                         const trimmed = line.trim();
@@ -7579,29 +7637,71 @@
                             importedConfig.enabled = value === 'true';
                         }
 
-                        // Parse positions - handle both "- time:" format and standalone "-" format
-                        if (trimmed.startsWith('- time:')) {
-                            // Save previous position if exists
-                            if (currentPosition) {
-                                importedConfig.positions.push(currentPosition);
-                            }
-                            // Start new position and parse time on same line
-                            currentPosition = { time: '', bearing: 0, enabled: true };
-                            currentPosition.time = trimmed.substring(7).trim().replace(/^["']|["']$/g, '');
-                        } else if (trimmed === '-') {
-                            // Standalone dash format
-                            if (currentPosition) {
-                                importedConfig.positions.push(currentPosition);
-                            }
-                            currentPosition = { time: '', bearing: 0, enabled: true };
-                        } else if (currentPosition) {
-                            if (trimmed.startsWith('time:')) {
-                                currentPosition.time = trimmed.substring(5).trim().replace(/^["']|["']$/g, '');
-                            } else if (trimmed.startsWith('bearing:')) {
-                                currentPosition.bearing = parseFloat(trimmed.substring(8).trim());
-                            } else if (trimmed.startsWith('enabled:')) {
-                                const value = trimmed.substring(8).trim();
-                                currentPosition.enabled = value === 'true';
+                        // Parse sun tracking fields
+                        if (trimmed.startsWith('follow_sun:')) {
+                            const value = trimmed.substring(11).trim();
+                            importedConfig.follow_sun = value === 'true';
+                        }
+                        if (trimmed.startsWith('follow_sun_step:')) {
+                            importedConfig.follow_sun_step = parseInt(trimmed.substring(16).trim());
+                        }
+                        if (trimmed.startsWith('daytime_only:')) {
+                            const value = trimmed.substring(13).trim();
+                            importedConfig.daytime_only = value === 'true';
+                        }
+                        if (trimmed.startsWith('daytime_overlap:')) {
+                            importedConfig.daytime_overlap = parseInt(trimmed.substring(16).trim());
+                        }
+                        if (trimmed.startsWith('follow_greyline:')) {
+                            const value = trimmed.substring(16).trim();
+                            importedConfig.follow_greyline = value === 'true';
+                        }
+                        if (trimmed.startsWith('sunrise_start:')) {
+                            importedConfig.sunrise_start = trimmed.substring(14).trim();
+                        }
+                        if (trimmed.startsWith('sunrise_end:')) {
+                            importedConfig.sunrise_end = trimmed.substring(12).trim();
+                        }
+                        if (trimmed.startsWith('sunset_start:')) {
+                            importedConfig.sunset_start = trimmed.substring(13).trim();
+                        }
+                        if (trimmed.startsWith('sunset_end:')) {
+                            importedConfig.sunset_end = trimmed.substring(11).trim();
+                        }
+
+                        // Parse positions section
+                        if (trimmed === 'positions:') {
+                            inPositions = true;
+                            continue;
+                        }
+
+                        if (inPositions) {
+                            // Parse positions - handle both "- time:" format and standalone "-" format
+                            if (trimmed.startsWith('- time:')) {
+                                // Save previous position if exists
+                                if (currentPosition) {
+                                    importedConfig.positions.push(currentPosition);
+                                }
+                                // Start new position and parse time on same line
+                                currentPosition = { time: '', bearing: 0, enabled: true };
+                                currentPosition.time = trimmed.substring(7).trim().replace(/^["']|["']$/g, '');
+                            } else if (trimmed === '-') {
+                                // Standalone dash format
+                                if (currentPosition) {
+                                    importedConfig.positions.push(currentPosition);
+                                }
+                                currentPosition = { time: '', bearing: 0, enabled: true };
+                            } else if (currentPosition) {
+                                if (trimmed.startsWith('time:')) {
+                                    currentPosition.time = trimmed.substring(5).trim().replace(/^["']|["']$/g, '');
+                                } else if (trimmed.startsWith('bearing:')) {
+                                    currentPosition.bearing = parseFloat(trimmed.substring(8).trim());
+                                } else if (trimmed.startsWith('enabled:')) {
+                                    const value = trimmed.substring(8).trim();
+                                    currentPosition.enabled = value === 'true';
+                                } else if (trimmed.startsWith('offset:')) {
+                                    currentPosition.offset = parseInt(trimmed.substring(7).trim());
+                                }
                             }
                         }
                     }

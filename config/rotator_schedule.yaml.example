@@ -41,9 +41,20 @@ follow_sun: false
 # propagation occurs during sunrise and sunset periods
 follow_greyline: false
 
+# Path mode: "short" or "long"
+# Default: "short"
+# - "short": Points directly at the sun (or along greyline if follow_greyline is true)
+# - "long": Adds 180° to point in the opposite direction (long path propagation)
+# This applies to both sun tracking and greyline tracking modes
+# Long path is useful for:
+# - Accessing regions on the opposite side of the Earth
+# - Taking advantage of long path propagation conditions
+# - Avoiding local interference by using the back lobe of the antenna
+follow_sun_path: "short"
+
 # Update interval in minutes (how often to update rotator position)
 # Default: 15 minutes
-# Range: 1-60 minutes
+# Range: 5-60 minutes
 # Note: Sun moves ~15° per hour, so 15-minute updates are usually sufficient
 follow_sun_step: 15
 
@@ -156,15 +167,39 @@ positions:
 # enabled: true
 # follow_sun: true
 # follow_greyline: true      # Track gray line (perpendicular to sun)
+# follow_sun_path: "short"   # Use short path (default)
 # follow_sun_step: 10        # Update every 10 minutes
 # daytime_only: true         # Only track during daytime
 # daytime_overlap: 90        # Start 90 minutes before sunrise, end 90 minutes after sunset
 # positions: []              # No scheduled positions, just gray line tracking
 
+# Example 6: Long path sun tracking
+# enabled: true
+# follow_sun: true
+# follow_greyline: false     # Track sun directly (not greyline)
+# follow_sun_path: "long"    # Use long path (adds 180° to point opposite direction)
+# follow_sun_step: 15
+# daytime_only: true
+# daytime_overlap: 60
+# positions: []
+# Note: Long path is useful for accessing regions on the opposite side of Earth
+
+# Example 7: Long path greyline tracking
+# enabled: true
+# follow_sun: true
+# follow_greyline: true      # Track gray line (perpendicular to sun)
+# follow_sun_path: "long"    # Use long path (adds 180° after greyline calculation)
+# follow_sun_step: 10
+# daytime_only: true
+# daytime_overlap: 90
+# positions: []
+# Note: This points along the greyline but in the opposite direction
+
 # Example 8: Two separate tracking windows (sunrise and sunset)
 # enabled: true
 # follow_sun: true
 # follow_greyline: true
+# follow_sun_path: "short"
 # follow_sun_step: 10
 # daytime_only: true
 # sunrise_start: "nightEnd"      # Morning window: astronomical twilight (sun at -18°)
@@ -174,9 +209,10 @@ positions:
 # positions: []
 # Note: This creates two separate tracking windows with a gap in between
 
-# Example 6: Sun tracking during day, fixed position at night
+# Example 9: Sun tracking during day, fixed position at night
 # enabled: true
 # follow_sun: true
+# follow_sun_path: "short"
 # follow_sun_step: 15
 # daytime_only: true
 # daytime_overlap: 60
@@ -185,10 +221,11 @@ positions:
 #     bearing: 0
 #     enabled: true
 
-# Example 7: Combine gray line tracking with scheduled overrides
+# Example 10: Combine gray line tracking with scheduled overrides
 # enabled: true
 # follow_sun: true           # Track gray line by default
 # follow_greyline: true      # Point along gray line (perpendicular to sun)
+# follow_sun_path: "short"
 # follow_sun_step: 15
 # daytime_only: true
 # daytime_overlap: 60

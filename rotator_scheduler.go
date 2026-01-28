@@ -32,6 +32,7 @@ type RotatorScheduleConfig struct {
 	Positions      []ScheduledPosition `yaml:"positions"`       // List of scheduled positions
 	FollowSun      bool                `yaml:"follow_sun"`      // Enable sun tracking mode
 	FollowSunStep  int                 `yaml:"follow_sun_step"` // Update interval in minutes (default: 15)
+	FollowSunPath  string              `yaml:"follow_sun_path"` // Path mode: "short" (default) or "long" (adds 180°)
 	DaytimeOnly    bool                `yaml:"daytime_only"`    // Only track sun during daytime (default: true)
 	DaytimeOverlap int                 `yaml:"daytime_overlap"` // Minutes before sunrise/after sunset to extend tracking (default: 60)
 	FollowGreyline bool                `yaml:"follow_greyline"` // Track gray line (perpendicular to sun) instead of sun directly (default: false)
@@ -222,6 +223,15 @@ func (rs *RotatorScheduler) LoadConfig() error {
 		log.Printf("Warning: follow_sun_step %d exceeds maximum, setting to 60 minutes", config.FollowSunStep)
 		config.FollowSunStep = 60
 	}
+	// Set default path to "short" if not specified
+	if config.FollowSunPath == "" {
+		config.FollowSunPath = "short"
+	}
+	// Validate path setting
+	if config.FollowSunPath != "short" && config.FollowSunPath != "long" {
+		log.Printf("Warning: invalid follow_sun_path '%s', setting to 'short' (valid options: 'short', 'long')", config.FollowSunPath)
+		config.FollowSunPath = "short"
+	}
 	if config.DaytimeOverlap == 0 {
 		config.DaytimeOverlap = 60
 	}
@@ -246,8 +256,8 @@ func (rs *RotatorScheduler) LoadConfig() error {
 		if config.FollowGreyline {
 			trackingMode = "greyline"
 		}
-		log.Printf("Loaded rotator scheduler config: enabled=%v, follow_sun=%v, mode=%s, step=%dm, daytime_only=%v, overlap=%dm, positions=%d",
-			config.Enabled, config.FollowSun, trackingMode, config.FollowSunStep, config.DaytimeOnly, config.DaytimeOverlap, len(config.Positions))
+		log.Printf("Loaded rotator scheduler config: enabled=%v, follow_sun=%v, mode=%s, path=%s, step=%dm, daytime_only=%v, overlap=%dm, positions=%d",
+			config.Enabled, config.FollowSun, trackingMode, config.FollowSunPath, config.FollowSunStep, config.DaytimeOnly, config.DaytimeOverlap, len(config.Positions))
 	} else {
 		log.Printf("Loaded rotator scheduler config: enabled=%v, positions=%d", config.Enabled, len(config.Positions))
 	}
@@ -597,6 +607,14 @@ func (rs *RotatorScheduler) updateSunTracking() {
 		}
 	}
 
+	// Apply long path if configured (adds 180° to point in opposite direction)
+	if rs.config.FollowSunPath == "long" {
+		azimuthDeg = azimuthDeg + 180.0
+		if azimuthDeg >= 360.0 {
+			azimuthDeg -= 360.0
+		}
+	}
+
 	// Check if azimuth has changed significantly (more than 1 degree)
 	azimuthChange := azimuthDeg - rs.lastSunAzimuth
 	if azimuthChange < 0 {
@@ -631,8 +649,9 @@ func (rs *RotatorScheduler) updateSunTracking() {
 		if rs.config.FollowGreyline {
 			trackingMode = "greyline"
 		}
-		log.Printf("Sun tracking: Started (mode: %s, step: %dm, daytime_only: %v, overlap: %dm)",
-			trackingMode, rs.config.FollowSunStep, rs.config.DaytimeOnly, rs.config.DaytimeOverlap)
+		pathMode := rs.config.FollowSunPath
+		log.Printf("Sun tracking: Started (mode: %s, path: %s, step: %dm, daytime_only: %v, overlap: %dm)",
+			trackingMode, pathMode, rs.config.FollowSunStep, rs.config.DaytimeOnly, rs.config.DaytimeOverlap)
 	}
 
 	altitudeDeg := sunPos.Altitude / rad
@@ -640,7 +659,8 @@ func (rs *RotatorScheduler) updateSunTracking() {
 	if rs.config.FollowGreyline {
 		trackingType = "greyline"
 	}
-	log.Printf("Sun tracking: Updated rotator to %.1f° (%s tracking, sun altitude: %.1f°)", azimuthDeg, trackingType, altitudeDeg)
+	pathDesc := rs.config.FollowSunPath + " path"
+	log.Printf("Sun tracking: Updated rotator to %.1f° (%s tracking, %s, sun altitude: %.1f°)", azimuthDeg, trackingType, pathDesc, altitudeDeg)
 
 	// Update tracking state
 	rs.lastSunAzimuth = azimuthDeg
@@ -754,6 +774,7 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 	rs.mu.RLock()
 	followSun := rs.config.FollowSun
 	followSunStep := rs.config.FollowSunStep
+	followSunPath := rs.config.FollowSunPath
 	daytimeOnly := rs.config.DaytimeOnly
 	daytimeOverlap := rs.config.DaytimeOverlap
 	sunTrackingActive := rs.sunTrackingActive
@@ -778,6 +799,7 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 		"solar_events":           solarEvents,
 		"follow_sun":             followSun,
 		"follow_sun_step":        followSunStep,
+		"follow_sun_path":        followSunPath,
 		"daytime_only":           daytimeOnly,
 		"daytime_overlap":        daytimeOverlap,
 		"follow_greyline":        followGreyline,

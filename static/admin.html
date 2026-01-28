@@ -6199,7 +6199,9 @@
             if (currentRotatorSchedulerConfig.follow_sun) {
                 const sunTrackingActive = currentRotatorSchedulerConfig.sun_tracking_active || false;
                 const sunStatus = sunTrackingActive ? '<span style="color: #28a745;">Active</span>' : '<span style="color: #999;">Inactive</span>';
-                statusHTML += `<strong>Sun Tracking:</strong> ${sunStatus}<br>`;
+                const trackingMode = currentRotatorSchedulerConfig.follow_greyline ? 'Greyline' : 'Sun';
+                const pathMode = currentRotatorSchedulerConfig.follow_sun_path || 'short';
+                statusHTML += `<strong>Sun Tracking:</strong> ${sunStatus} (${trackingMode}, ${pathMode} path)<br>`;
                 if (currentRotatorSchedulerConfig.sun_azimuth !== undefined) {
                     statusHTML += `<strong>Sun Azimuth:</strong> <span style="color: #ff9800;">${Math.round(currentRotatorSchedulerConfig.sun_azimuth)}°</span><br>`;
                 }
@@ -6545,6 +6547,22 @@
             followGreylineSmall.textContent = 'Point perpendicular to sun (along gray line) instead of at sun. Useful for enhanced propagation during sunrise/sunset.';
             followGreylineDiv.appendChild(followGreylineSmall);
             mainFieldsGrid.appendChild(followGreylineDiv);
+
+            // Path Mode (short/long)
+            const pathModeDiv = document.createElement('div');
+            pathModeDiv.className = 'config-field';
+            const pathModeLabel = document.createElement('label');
+            pathModeLabel.textContent = 'Path Mode';
+            pathModeDiv.appendChild(pathModeLabel);
+            const pathModeSelect = document.createElement('select');
+            pathModeSelect.id = 'followSunPath';
+            pathModeSelect.innerHTML = '<option value="short">Short Path</option><option value="long">Long Path</option>';
+            pathModeSelect.value = currentRotatorSchedulerConfig.follow_sun_path || 'short';
+            pathModeDiv.appendChild(pathModeSelect);
+            const pathModeSmall = document.createElement('small');
+            pathModeSmall.textContent = 'Short path points at sun/greyline directly. Long path adds 180° for opposite direction propagation.';
+            pathModeDiv.appendChild(pathModeSmall);
+            mainFieldsGrid.appendChild(pathModeDiv);
 
             // Update Interval (minutes)
             const updateIntervalDiv = document.createElement('div');
@@ -6965,6 +6983,7 @@
             const followSunEnabled = document.getElementById('sunTrackingEnabled').value === 'true';
             const oldFollowSunState = currentRotatorSchedulerConfig.follow_sun;
             const followGreyline = document.getElementById('followGreyline').value === 'true';
+            const followSunPath = document.getElementById('followSunPath').value;
             const interval = parseInt(document.getElementById('sunTrackingInterval').value);
             const daytimeOnly = document.getElementById('sunTrackingDaytimeOnly').value === 'true';
             const overlap = parseInt(document.getElementById('sunTrackingOverlap').value);
@@ -7011,6 +7030,7 @@
             // Update config object
             currentRotatorSchedulerConfig.follow_sun = followSunEnabled;
             currentRotatorSchedulerConfig.follow_greyline = followGreyline;
+            currentRotatorSchedulerConfig.follow_sun_path = followSunPath;
             currentRotatorSchedulerConfig.follow_sun_step = interval;
             currentRotatorSchedulerConfig.daytime_only = daytimeOnly;
             currentRotatorSchedulerConfig.daytime_overlap = overlap;
@@ -7734,6 +7754,7 @@
                 yamlContent += '# Sun Tracking Configuration\n';
                 yamlContent += `follow_sun: ${currentRotatorSchedulerConfig.follow_sun}\n`;
                 yamlContent += `follow_sun_step: ${currentRotatorSchedulerConfig.follow_sun_step || 15}\n`;
+                yamlContent += `follow_sun_path: "${currentRotatorSchedulerConfig.follow_sun_path || 'short'}"\n`;
                 yamlContent += `daytime_only: ${currentRotatorSchedulerConfig.daytime_only !== false}\n`;
                 yamlContent += `daytime_overlap: ${currentRotatorSchedulerConfig.daytime_overlap || 60}\n`;
                 if (currentRotatorSchedulerConfig.follow_greyline) {
@@ -7819,6 +7840,9 @@
                         }
                         if (trimmed.startsWith('follow_sun_step:')) {
                             importedConfig.follow_sun_step = parseInt(trimmed.substring(16).trim());
+                        }
+                        if (trimmed.startsWith('follow_sun_path:')) {
+                            importedConfig.follow_sun_path = trimmed.substring(16).trim().replace(/^["']|["']$/g, '');
                         }
                         if (trimmed.startsWith('daytime_only:')) {
                             const value = trimmed.substring(13).trim();

@@ -7685,18 +7685,25 @@
                 // Check if we already have cached data for these settings
                 const settingsKey = `${step}-${daytimeOnly}-${overlap}`;
                 if (cachedSunPathSettings === settingsKey && cachedSunPathData) {
+                    console.log('Using cached sun path data');
                     return; // Already cached
                 }
+
+                console.log(`Fetching sun path: step=${step}, daytime_only=${daytimeOnly}, overlap=${overlap}`);
 
                 // Fetch sun path from API
                 const response = await fetch(`/api/suncalc/path?step=${step}&daytime_only=${daytimeOnly}&overlap=${overlap}`);
                 if (!response.ok) {
+                    console.error('Sun path API returned error:', response.status);
                     window.cachedSunPath = null;
                     return;
                 }
 
                 const data = await response.json();
+                console.log('Sun path data received:', data);
+                
                 if (!data.path || data.path.length === 0) {
+                    console.log('No path data in response');
                     window.cachedSunPath = null;
                     return;
                 }
@@ -7722,6 +7729,8 @@
                     }
                 });
 
+                console.log(`Extracted ${uniquePoints.length} unique sun positions`);
+
                 // Cache the data
                 window.cachedSunPath = uniquePoints;
                 cachedSunPathData = uniquePoints;
@@ -7735,7 +7744,12 @@
 
         // Draw sun tracking path synchronously using cached data
         function drawSunTrackingPathSync(ctx, marginLeft, marginTop, timelineY, timelineWidth) {
-            if (!window.cachedSunPath || window.cachedSunPath.length === 0) return;
+            if (!window.cachedSunPath || window.cachedSunPath.length === 0) {
+                console.log('No cached sun path data to draw');
+                return;
+            }
+
+            console.log(`Drawing ${window.cachedSunPath.length} sun tracking markers`);
 
             // Draw yellow markers for each unique bearing
             ctx.fillStyle = 'rgba(255, 193, 7, 0.8)'; // Yellow/gold color
@@ -7744,7 +7758,7 @@
 
             window.cachedSunPath.forEach(point => {
                 const x = marginLeft + (point.timeInHours / 24) * timelineWidth;
-                
+
                 // Draw small circle on timeline
                 ctx.beginPath();
                 ctx.arc(x, timelineY, 3, 0, 2 * Math.PI);

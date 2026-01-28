@@ -541,8 +541,10 @@ func (rs *RotatorScheduler) updateSunTracking() {
 	// Determine if we're in a tracking window
 	var inTrackingWindow bool
 
+	// Check if custom events are specified (takes precedence over daytime_only)
 	if rs.config.SunriseStart != "" && rs.config.SunriseEnd != "" && rs.config.SunsetStart != "" && rs.config.SunsetEnd != "" {
 		// Use custom solar events for two separate tracking windows
+		// Custom windows apply regardless of daytime_only setting
 		sunriseWindowStart := rs.getSolarEventTime(sunTimes, rs.config.SunriseStart)
 		sunriseWindowEnd := rs.getSolarEventTime(sunTimes, rs.config.SunriseEnd)
 		sunsetWindowStart := rs.getSolarEventTime(sunTimes, rs.config.SunsetStart)
@@ -552,16 +554,14 @@ func (rs *RotatorScheduler) updateSunTracking() {
 		inSunriseWindow := now.After(sunriseWindowStart) && now.Before(sunriseWindowEnd)
 		inSunsetWindow := now.After(sunsetWindowStart) && now.Before(sunsetWindowEnd)
 		inTrackingWindow = inSunriseWindow || inSunsetWindow
-	} else {
+	} else if rs.config.DaytimeOnly {
 		// Use default overlap-based tracking window (single continuous window)
 		overlapDuration := time.Duration(rs.config.DaytimeOverlap) * time.Minute
 		trackingStart := sunTimes.Sunrise.Add(-overlapDuration)
 		trackingEnd := sunTimes.Sunset.Add(overlapDuration)
 		inTrackingWindow = now.After(trackingStart) && now.Before(trackingEnd)
-	}
-
-	// If daytime_only is false, always track
-	if !rs.config.DaytimeOnly {
+	} else {
+		// daytime_only is false and no custom windows - track 24/7
 		inTrackingWindow = true
 	}
 

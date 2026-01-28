@@ -9462,12 +9462,10 @@ const tooltipLine2 = timeStr;
                 const fftSize = data.fft_size || 0;
                 const fftType = data.fft_type || 'N/A';
                 const blockTimeMs = data.block_time_ms ? data.block_time_ms.toFixed(1) : 'N/A';
-                const blockRateHz = data.block_rate_hz ? data.block_rate_hz.toFixed(1) : 'N/A';
                 const overlapPercent = data.overlap_percent ? data.overlap_percent.toFixed(1) : 'N/A';
-                const binWidthHz = data.bin_width_hz ? data.bin_width_hz.toFixed(1) : 'N/A';
 
                 frontendStatusDisplay.innerHTML = `
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px;">
+                    <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 15px; margin-bottom: 15px;">
                         <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Sample Rate</div>
                             <div style="font-size: 20px; font-weight: bold; color: #667eea;">${sampleRateMSPS}</div>
@@ -9499,6 +9497,8 @@ const tooltipLine2 = timeStr;
                             <div style="font-size: 20px; font-weight: bold; color: #667eea;">${data.time_since_overrange || 'N/A'}</div>
                             <div style="font-size: 11px; color: #999; margin-top: 3px;">(since last overrange)</div>
                         </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
                         <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 12px; color: #666; margin-bottom: 5px;">FFT Size</div>
                             <div style="font-size: 20px; font-weight: bold; color: #667eea;">${fftSize.toLocaleString()}</div>
@@ -9510,19 +9510,9 @@ const tooltipLine2 = timeStr;
                             <div style="font-size: 11px; color: #999; margin-top: 3px;">ms</div>
                         </div>
                         <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Block Rate</div>
-                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${blockRateHz}</div>
-                            <div style="font-size: 11px; color: #999; margin-top: 3px;">Hz</div>
-                        </div>
-                        <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 12px; color: #666; margin-bottom: 5px;">FFT Overlap</div>
                             <div style="font-size: 20px; font-weight: bold; color: #667eea;">${overlapPercent}</div>
                             <div style="font-size: 11px; color: #999; margin-top: 3px;">%</div>
-                        </div>
-                        <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Bin Width</div>
-                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${binWidthHz}</div>
-                            <div style="font-size: 11px; color: #999; margin-top: 3px;">Hz</div>
                         </div>
                     </div>
                     <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">

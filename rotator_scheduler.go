@@ -35,6 +35,10 @@ type RotatorScheduleConfig struct {
 	DaytimeOnly    bool                `yaml:"daytime_only"`    // Only track sun during daytime (default: true)
 	DaytimeOverlap int                 `yaml:"daytime_overlap"` // Minutes before sunrise/after sunset to extend tracking (default: 60)
 	FollowGreyline bool                `yaml:"follow_greyline"` // Track gray line (perpendicular to sun) instead of sun directly (default: false)
+	SunriseStart   string              `yaml:"sunrise_start"`   // Solar event to start sunrise tracking (default: sunrise with overlap)
+	SunriseEnd     string              `yaml:"sunrise_end"`     // Solar event to end sunrise tracking (default: sunrise with overlap)
+	SunsetStart    string              `yaml:"sunset_start"`    // Solar event to start sunset tracking (default: sunset with overlap)
+	SunsetEnd      string              `yaml:"sunset_end"`      // Solar event to end sunset tracking (default: sunset with overlap)
 }
 
 // ScheduleTriggerLog represents a single schedule trigger event
@@ -369,6 +373,44 @@ func (rs *RotatorScheduler) resolvePositionTimeNoLock(pos *ScheduledPosition, su
 	return eventTime.Format("15:04"), nil
 }
 
+// getSolarEventTime returns the time for a given solar event name
+// Note: Caller must hold the lock
+func (rs *RotatorScheduler) getSolarEventTime(sunTimes *SunTimes, eventName string) time.Time {
+	switch eventName {
+	case "sunrise":
+		return sunTimes.Sunrise
+	case "sunset":
+		return sunTimes.Sunset
+	case "dawn":
+		return sunTimes.Dawn
+	case "dusk":
+		return sunTimes.Dusk
+	case "sunriseEnd":
+		return sunTimes.SunriseEnd
+	case "sunsetStart":
+		return sunTimes.SunsetStart
+	case "solarNoon":
+		return sunTimes.SolarNoon
+	case "nadir":
+		return sunTimes.Nadir
+	case "goldenHour":
+		return sunTimes.GoldenHour
+	case "goldenHourEnd":
+		return sunTimes.GoldenHourEnd
+	case "nauticalDawn":
+		return sunTimes.NauticalDawn
+	case "nauticalDusk":
+		return sunTimes.NauticalDusk
+	case "nightEnd":
+		return sunTimes.NightEnd
+	case "night":
+		return sunTimes.Night
+	default:
+		// Default to sunrise for unknown events
+		return sunTimes.Sunrise
+	}
+}
+
 // Start starts the scheduler background task
 func (rs *RotatorScheduler) Start() error {
 	rs.mu.Lock()
@@ -496,10 +538,19 @@ func (rs *RotatorScheduler) updateSunTracking() {
 	// Get sun times for today
 	sunTimes := rs.getSunTimesForTodayNoLock()
 
-	// Check if we're in the tracking window (with overlap)
-	overlapDuration := time.Duration(rs.config.DaytimeOverlap) * time.Minute
-	trackingStart := sunTimes.Sunrise.Add(-overlapDuration)
-	trackingEnd := sunTimes.Sunset.Add(overlapDuration)
+	// Determine tracking window based on custom events or default overlap
+	var trackingStart, trackingEnd time.Time
+
+	if rs.config.SunriseStart != "" && rs.config.SunsetEnd != "" {
+		// Use custom solar events for tracking window
+		trackingStart = rs.getSolarEventTime(sunTimes, rs.config.SunriseStart)
+		trackingEnd = rs.getSolarEventTime(sunTimes, rs.config.SunsetEnd)
+	} else {
+		// Use default overlap-based tracking window
+		overlapDuration := time.Duration(rs.config.DaytimeOverlap) * time.Minute
+		trackingStart = sunTimes.Sunrise.Add(-overlapDuration)
+		trackingEnd = sunTimes.Sunset.Add(overlapDuration)
+	}
 
 	inTrackingWindow := now.After(trackingStart) && now.Before(trackingEnd)
 
@@ -704,9 +755,13 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 	lastSunUpdate := rs.lastSunUpdate
 	rs.mu.RUnlock()
 
-	// Get greyline setting
+	// Get greyline and custom event settings
 	rs.mu.RLock()
 	followGreyline := rs.config.FollowGreyline
+	sunriseStart := rs.config.SunriseStart
+	sunriseEnd := rs.config.SunriseEnd
+	sunsetStart := rs.config.SunsetStart
+	sunsetEnd := rs.config.SunsetEnd
 	rs.mu.RUnlock()
 
 	status := map[string]interface{}{
@@ -720,6 +775,10 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 		"daytime_only":           daytimeOnly,
 		"daytime_overlap":        daytimeOverlap,
 		"follow_greyline":        followGreyline,
+		"sunrise_start":          sunriseStart,
+		"sunrise_end":            sunriseEnd,
+		"sunset_start":           sunsetStart,
+		"sunset_end":             sunsetEnd,
 		"sun_tracking_active":    sunTrackingActive,
 	}
 

@@ -255,6 +255,10 @@ type SunPathResponse struct {
 //   - daytime_only: if "true", only return positions where sun is above horizon (default: false)
 //   - overlap: minutes before sunrise/after sunset to extend daytime window (default: 0, only used if daytime_only=true)
 //   - greyline: if "true", calculate gray line bearing (perpendicular to sun) instead of sun azimuth (default: false)
+//   - sunrise_start: solar event name to start sunrise tracking (e.g., "nightEnd", "dawn")
+//   - sunrise_end: solar event name to end sunrise tracking (e.g., "goldenHourEnd", "sunriseEnd")
+//   - sunset_start: solar event name to start sunset tracking (e.g., "sunsetStart", "goldenHour")
+//   - sunset_end: solar event name to end sunset tracking (e.g., "dusk", "nauticalDusk")
 func handleSunPathAPI(w http.ResponseWriter, r *http.Request, config *Config) {
 	// Get current time
 	now := time.Now().UTC()
@@ -291,6 +295,12 @@ func handleSunPathAPI(w http.ResponseWriter, r *http.Request, config *Config) {
 	// Parse greyline parameter (default false)
 	greyline := r.URL.Query().Get("greyline") == "true"
 
+	// Parse custom solar event parameters
+	sunriseStart := r.URL.Query().Get("sunrise_start")
+	_ = r.URL.Query().Get("sunrise_end")  // Reserved for future use
+	_ = r.URL.Query().Get("sunset_start") // Reserved for future use
+	sunsetEnd := r.URL.Query().Get("sunset_end")
+
 	// Parse overlap parameter (default 0 minutes)
 	overlapMinutes := 0
 	if overlapParam := r.URL.Query().Get("overlap"); overlapParam != "" {
@@ -309,12 +319,19 @@ func handleSunPathAPI(w http.ResponseWriter, r *http.Request, config *Config) {
 	// Calculate sun times for today
 	sunTimes := GetTimes(now, lat, lon, float64(alt))
 
-	// Calculate tracking window with overlap if daytime_only is true
+	// Calculate tracking window with overlap or custom events if daytime_only is true
 	var trackingStart, trackingEnd time.Time
 	if daytimeOnly {
-		overlapDuration := time.Duration(overlapMinutes) * time.Minute
-		trackingStart = sunTimes.Sunrise.Add(-overlapDuration)
-		trackingEnd = sunTimes.Sunset.Add(overlapDuration)
+		if sunriseStart != "" && sunsetEnd != "" {
+			// Use custom solar events for tracking window
+			trackingStart = getSolarEventTimeFromSunTimes(&sunTimes, sunriseStart)
+			trackingEnd = getSolarEventTimeFromSunTimes(&sunTimes, sunsetEnd)
+		} else {
+			// Use default overlap-based tracking window
+			overlapDuration := time.Duration(overlapMinutes) * time.Minute
+			trackingStart = sunTimes.Sunrise.Add(-overlapDuration)
+			trackingEnd = sunTimes.Sunset.Add(overlapDuration)
+		}
 	}
 
 	// Start at midnight of the current day
@@ -420,5 +437,42 @@ func handleSunPathAPI(w http.ResponseWriter, r *http.Request, config *Config) {
 		log.Printf("Error encoding sun path response: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
+	}
+}
+
+// getSolarEventTimeFromSunTimes returns the time for a given solar event name
+func getSolarEventTimeFromSunTimes(sunTimes *SunTimes, eventName string) time.Time {
+	switch eventName {
+	case "sunrise":
+		return sunTimes.Sunrise
+	case "sunset":
+		return sunTimes.Sunset
+	case "dawn":
+		return sunTimes.Dawn
+	case "dusk":
+		return sunTimes.Dusk
+	case "sunriseEnd":
+		return sunTimes.SunriseEnd
+	case "sunsetStart":
+		return sunTimes.SunsetStart
+	case "solarNoon":
+		return sunTimes.SolarNoon
+	case "nadir":
+		return sunTimes.Nadir
+	case "goldenHour":
+		return sunTimes.GoldenHour
+	case "goldenHourEnd":
+		return sunTimes.GoldenHourEnd
+	case "nauticalDawn":
+		return sunTimes.NauticalDawn
+	case "nauticalDusk":
+		return sunTimes.NauticalDusk
+	case "nightEnd":
+		return sunTimes.NightEnd
+	case "night":
+		return sunTimes.Night
+	default:
+		// Default to sunrise for unknown events
+		return sunTimes.Sunrise
 	}
 }

@@ -4959,6 +4959,18 @@ func (ah *AdminHandler) handleUpdateRotatorSchedulerConfig(w http.ResponseWriter
 	if followGreyline, ok := config["follow_greyline"]; ok {
 		filteredConfig["follow_greyline"] = followGreyline
 	}
+	if sunriseStart, ok := config["sunrise_start"]; ok {
+		filteredConfig["sunrise_start"] = sunriseStart
+	}
+	if sunriseEnd, ok := config["sunrise_end"]; ok {
+		filteredConfig["sunrise_end"] = sunriseEnd
+	}
+	if sunsetStart, ok := config["sunset_start"]; ok {
+		filteredConfig["sunset_start"] = sunsetStart
+	}
+	if sunsetEnd, ok := config["sunset_end"]; ok {
+		filteredConfig["sunset_end"] = sunsetEnd
+	}
 
 	// Backup existing file with timestamp before replacing
 	schedulerPath := ah.rotatorScheduler.configPath

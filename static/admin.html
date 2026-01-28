@@ -6567,9 +6567,90 @@
             }
             overlapDiv.appendChild(overlapInput);
             const overlapSmall = document.createElement('small');
-            overlapSmall.textContent = 'Extend tracking before sunrise and after sunset (0-180 minutes).';
+            overlapSmall.textContent = 'Extend tracking before sunrise and after sunset (0-180 minutes). Leave at 0 to use custom solar events below.';
             overlapDiv.appendChild(overlapSmall);
             sunTrackingDiv.appendChild(overlapDiv);
+
+            // Custom Solar Events Section
+            const customEventsDiv = document.createElement('div');
+            customEventsDiv.style.marginTop = '15px';
+            customEventsDiv.style.paddingTop = '15px';
+            customEventsDiv.style.borderTop = '1px solid #dee2e6';
+            
+            const customEventsTitle = document.createElement('h4');
+            customEventsTitle.textContent = 'Custom Tracking Window (Optional)';
+            customEventsTitle.style.fontSize = '14px';
+            customEventsTitle.style.marginBottom = '10px';
+            customEventsDiv.appendChild(customEventsTitle);
+
+            const customEventsNote = document.createElement('small');
+            customEventsNote.textContent = 'Override overlap setting with specific solar events. Leave empty to use overlap setting above.';
+            customEventsNote.style.display = 'block';
+            customEventsNote.style.marginBottom = '10px';
+            customEventsNote.style.color = '#6c757d';
+            customEventsDiv.appendChild(customEventsNote);
+
+            // Solar event options
+            const solarEventOptions = [
+                { value: '', label: '(Use overlap setting)' },
+                { value: 'nightEnd', label: 'Night End (sun at -18°)' },
+                { value: 'nauticalDawn', label: 'Nautical Dawn (sun at -12°)' },
+                { value: 'dawn', label: 'Dawn (sun at -6°)' },
+                { value: 'sunrise', label: 'Sunrise (sun at horizon)' },
+                { value: 'sunriseEnd', label: 'Sunrise End' },
+                { value: 'goldenHourEnd', label: 'Golden Hour End' },
+                { value: 'solarNoon', label: 'Solar Noon' },
+                { value: 'goldenHour', label: 'Golden Hour' },
+                { value: 'sunsetStart', label: 'Sunset Start' },
+                { value: 'sunset', label: 'Sunset (sun at horizon)' },
+                { value: 'dusk', label: 'Dusk (sun at -6°)' },
+                { value: 'nauticalDusk', label: 'Nautical Dusk (sun at -12°)' },
+                { value: 'night', label: 'Night (sun at -18°)' }
+            ];
+
+            // Sunrise Start Event
+            const sunriseStartDiv = document.createElement('div');
+            sunriseStartDiv.className = 'config-field';
+            const sunriseStartLabel = document.createElement('label');
+            sunriseStartLabel.textContent = 'Sunrise Start Event';
+            sunriseStartDiv.appendChild(sunriseStartLabel);
+            const sunriseStartSelect = document.createElement('select');
+            sunriseStartSelect.id = 'sunriseStartEvent';
+            solarEventOptions.forEach(opt => {
+                const option = document.createElement('option');
+                option.value = opt.value;
+                option.textContent = opt.label;
+                sunriseStartSelect.appendChild(option);
+            });
+            sunriseStartSelect.value = currentRotatorSchedulerConfig.sunrise_start || '';
+            sunriseStartDiv.appendChild(sunriseStartSelect);
+            const sunriseStartSmall = document.createElement('small');
+            sunriseStartSmall.textContent = 'Solar event to start morning tracking';
+            sunriseStartDiv.appendChild(sunriseStartSmall);
+            customEventsDiv.appendChild(sunriseStartDiv);
+
+            // Sunset End Event
+            const sunsetEndDiv = document.createElement('div');
+            sunsetEndDiv.className = 'config-field';
+            const sunsetEndLabel = document.createElement('label');
+            sunsetEndLabel.textContent = 'Sunset End Event';
+            sunsetEndDiv.appendChild(sunsetEndLabel);
+            const sunsetEndSelect = document.createElement('select');
+            sunsetEndSelect.id = 'sunsetEndEvent';
+            solarEventOptions.forEach(opt => {
+                const option = document.createElement('option');
+                option.value = opt.value;
+                option.textContent = opt.label;
+                sunsetEndSelect.appendChild(option);
+            });
+            sunsetEndSelect.value = currentRotatorSchedulerConfig.sunset_end || '';
+            sunsetEndDiv.appendChild(sunsetEndSelect);
+            const sunsetEndSmall = document.createElement('small');
+            sunsetEndSmall.textContent = 'Solar event to end evening tracking';
+            sunsetEndDiv.appendChild(sunsetEndSmall);
+            customEventsDiv.appendChild(sunsetEndDiv);
+
+            sunTrackingDiv.appendChild(customEventsDiv);
 
             // Apply button
             const applyButtonDiv = document.createElement('div');
@@ -6634,6 +6715,8 @@
             const interval = parseInt(document.getElementById('sunTrackingInterval').value);
             const daytimeOnly = document.getElementById('sunTrackingDaytimeOnly').value === 'true';
             const overlap = parseInt(document.getElementById('sunTrackingOverlap').value);
+            const sunriseStart = document.getElementById('sunriseStartEvent').value;
+            const sunsetEnd = document.getElementById('sunsetEndEvent').value;
 
             // Validate inputs
             if (!validateSunTrackingInterval()) {
@@ -6676,6 +6759,8 @@
             currentRotatorSchedulerConfig.follow_sun_step = interval;
             currentRotatorSchedulerConfig.daytime_only = daytimeOnly;
             currentRotatorSchedulerConfig.daytime_overlap = overlap;
+            currentRotatorSchedulerConfig.sunrise_start = sunriseStart;
+            currentRotatorSchedulerConfig.sunset_end = sunsetEnd;
 
             // Clear cached sun path so it will be refetched with new settings
             window.cachedSunPath = null;
@@ -7749,15 +7834,26 @@
                 const daytimeOnly = currentRotatorSchedulerConfig.daytime_only !== false;
                 const overlap = currentRotatorSchedulerConfig.daytime_overlap || 0;
                 const greyline = currentRotatorSchedulerConfig.follow_greyline === true;
+                const sunriseStart = currentRotatorSchedulerConfig.sunrise_start || '';
+                const sunsetEnd = currentRotatorSchedulerConfig.sunset_end || '';
 
                 // Check if we already have cached data for these settings
-                const settingsKey = `${step}-${daytimeOnly}-${overlap}-${greyline}`;
+                const settingsKey = `${step}-${daytimeOnly}-${overlap}-${greyline}-${sunriseStart}-${sunsetEnd}`;
                 if (cachedSunPathSettings === settingsKey && cachedSunPathData) {
                     return; // Already cached
                 }
 
+                // Build API URL with parameters
+                let apiUrl = `/api/suncalc/path?step=${step}&daytime_only=${daytimeOnly}&overlap=${overlap}&greyline=${greyline}`;
+                if (sunriseStart) {
+                    apiUrl += `&sunrise_start=${encodeURIComponent(sunriseStart)}`;
+                }
+                if (sunsetEnd) {
+                    apiUrl += `&sunset_end=${encodeURIComponent(sunsetEnd)}`;
+                }
+
                 // Fetch sun path from API
-                const response = await fetch(`/api/suncalc/path?step=${step}&daytime_only=${daytimeOnly}&overlap=${overlap}&greyline=${greyline}`);
+                const response = await fetch(apiUrl);
                 if (!response.ok) {
                     window.cachedSunPath = null;
                     return;

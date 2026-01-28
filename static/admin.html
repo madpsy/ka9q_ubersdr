@@ -6797,7 +6797,7 @@
         }
 
         // Update sun position for a specific time (when hovering over timeline)
-        async function updateSunPositionForTime(timeInHours) {
+        function updateSunPositionForTime(timeInHours) {
             if (!window.adminRotatorDisplay) return;
 
             // Clamp time to 0-24 range
@@ -6818,14 +6818,15 @@
                 const sunPos = SunCalc.getPosition(targetTime, lat, lon);
 
                 // Convert azimuth from SunCalc format to 0-360 degrees
-                // SunCalc returns azimuth in radians, south = 0, east = -π/2, west = π/2
-                let azimuthDeg = sunPos.azimuth * 180 / Math.PI;
-                azimuthDeg = azimuthDeg + 180.0; // Shift to north = 0
-                if (azimuthDeg < 0) {
-                    azimuthDeg += 360.0;
-                } else if (azimuthDeg >= 360) {
-                    azimuthDeg -= 360.0;
-                }
+                // SunCalc library returns azimuth in radians where:
+                // - 0 radians = South
+                // - -π/2 = East
+                // - π/2 = West
+                // - ±π = North
+                // We need to convert to: 0° = North, 90° = East, 180° = South, 270° = West
+                let azimuthDeg = sunPos.azimuth * 180 / Math.PI; // Convert to degrees
+                azimuthDeg = (azimuthDeg + 180.0) % 360; // Rotate so North = 0
+                if (azimuthDeg < 0) azimuthDeg += 360;
 
                 const altitudeDeg = sunPos.altitude * 180 / Math.PI;
 

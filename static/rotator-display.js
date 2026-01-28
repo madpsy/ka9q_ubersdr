@@ -852,22 +852,23 @@ class RotatorDisplay {
 
         // Sun icon - larger circle with glow effect
         markerGroup.append('circle')
-            .attr('r', 12)
+            .attr('r', 18)
             .attr('fill', '#FFD700')
             .attr('stroke', '#FFA500')
             .attr('stroke-width', 2)
             .style('filter', 'drop-shadow(0 0 10px rgba(255, 215, 0, 0.9))');
 
-        // Add sun emoji and azimuth label
+        // Add azimuth label inside the sun marker (white text)
         markerGroup.append('text')
             .attr('x', 0)
-            .attr('y', -20)
+            .attr('y', 0)
             .attr('text-anchor', 'middle')
-            .attr('fill', '#FFD700')
-            .attr('font-size', '14px')
+            .attr('dominant-baseline', 'central')
+            .attr('fill', '#FFFFFF')
+            .attr('font-size', '12px')
             .attr('font-weight', 'bold')
-            .style('text-shadow', '0 0 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.6)')
-            .text(`☀️ ${Math.round(azimuthDeg)}°`);
+            .style('text-shadow', '0 0 3px rgba(0,0,0,0.5)')
+            .text(`${Math.round(azimuthDeg)}°`);
 
         // Add altitude label below
         markerGroup.append('text')

@@ -6767,7 +6767,7 @@
             loadRotatorSchedulerLogs();
         }
 
-        // Update sun position on the rotator map
+        // Update sun position on the rotator map (current time)
         async function updateSunPosition() {
             if (!window.adminRotatorDisplay) return;
 
@@ -6785,6 +6785,44 @@
                 }
             } catch (error) {
                 console.error('Failed to update sun position:', error);
+            }
+        }
+
+        // Update sun position for a specific time (when hovering over timeline)
+        async function updateSunPositionForTime(timeInHours) {
+            if (!window.adminRotatorDisplay) return;
+
+            // Clamp time to 0-24 range
+            if (timeInHours < 0 || timeInHours > 24) return;
+
+            // Calculate the time for today at the specified hour
+            const now = new Date();
+            const targetTime = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            targetTime.setHours(Math.floor(timeInHours));
+            targetTime.setMinutes(Math.round((timeInHours - Math.floor(timeInHours)) * 60));
+
+            // Use SunCalc library if available (already loaded in admin.html)
+            if (typeof SunCalc !== 'undefined' && window.suncalcData && window.suncalcData.location) {
+                const lat = window.suncalcData.location.latitude;
+                const lon = window.suncalcData.location.longitude;
+
+                // Calculate sun position for the target time
+                const sunPos = SunCalc.getPosition(targetTime, lat, lon);
+
+                // Convert azimuth from SunCalc format to 0-360 degrees
+                // SunCalc returns azimuth in radians, south = 0, east = -π/2, west = π/2
+                let azimuthDeg = sunPos.azimuth * 180 / Math.PI;
+                azimuthDeg = azimuthDeg + 180.0; // Shift to north = 0
+                if (azimuthDeg < 0) {
+                    azimuthDeg += 360.0;
+                } else if (azimuthDeg >= 360) {
+                    azimuthDeg -= 360.0;
+                }
+
+                const altitudeDeg = sunPos.altitude * 180 / Math.PI;
+
+                // Show sun marker on the map
+                window.adminRotatorDisplay.showSunMarker(azimuthDeg, altitudeDeg);
             }
         }
 
@@ -8188,6 +8226,11 @@
                 const marginTop = 20;
                 const marginBottom = 40;
                 const timelineY = canvas.height - marginBottom - 10;
+                const timelineWidth = canvas.width - marginLeft - marginRight;
+
+                // Calculate time from mouse X position
+                const relativeX = mouseX - marginLeft;
+                const timeInHours = (relativeX / timelineWidth) * 24;
 
                 // Redraw timeline to clear previous tooltip
                 const originalPositions = canvas.rotatorPositions ? canvas.rotatorPositions.map(p => ({
@@ -8197,6 +8240,9 @@
                     resolved_time: p.resolved_time
                 })) : [];
                 drawRotatorTimeline(originalPositions);
+
+                // Update sun position based on hovered time (always, regardless of what's being hovered)
+                updateSunPositionForTime(timeInHours);
 
                 // Check if mouse is near any scheduled position marker
                 const hoverRadius = 15;
@@ -8334,6 +8380,8 @@ const tooltipLine2 = timeStr;
                         }
                     }
                 }
+                // Restore current sun position when leaving timeline
+                updateSunPosition();
                 // Redraw to clear tooltip
                 const originalPositions = canvas.rotatorPositions ? canvas.rotatorPositions.map(p => ({
                     time: p.time,

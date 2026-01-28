@@ -827,8 +827,7 @@ class RotatorDisplay {
         // Remove existing sun marker
         this.markerGroup.selectAll('.sun-marker').remove();
 
-        // Only show if sun is above horizon (or slightly below for twilight)
-        if (altitudeDeg < -6) return; // Show during civil twilight
+        // Always show sun marker regardless of altitude (sun exists 24/7, just below horizon at night)
 
         // Calculate position at a fixed distance (8000km for good visibility)
         const distance = 8000;
@@ -844,27 +843,39 @@ class RotatorDisplay {
         // Transform coordinates from map space to screen space
         const screenCoords = this.currentTransform.apply([x, y]);
 
+        // Determine if sun is below horizon (nighttime)
+        const isNight = altitudeDeg < -6; // Civil twilight threshold
+
+        // Adjust colors and opacity based on day/night
+        const fillColor = isNight ? '#4A5568' : '#FFD700'; // Dark gray at night, gold during day
+        const strokeColor = isNight ? '#2D3748' : '#FFA500'; // Darker gray at night, orange during day
+        const fillOpacity = isNight ? 0.4 : 1.0; // Dimmer at night
+        const glowColor = isNight ? 'rgba(74, 85, 104, 0.3)' : 'rgba(255, 215, 0, 0.9)';
+        const textColor = isNight ? '#A0AEC0' : '#FFFFFF'; // Light gray at night, white during day
+        const labelColor = isNight ? '#718096' : '#FFA500'; // Gray at night, orange during day
+
         // Create sun marker group
         const markerGroup = this.markerGroup.append('g')
             .attr('class', 'sun-marker')
             .attr('transform', `translate(${screenCoords[0]}, ${screenCoords[1]})`)
             .datum({ mapX: x, mapY: y, azimuth: azimuthDeg, altitude: altitudeDeg });
 
-        // Sun icon - larger circle with glow effect
+        // Sun icon - larger circle with glow effect (dimmed at night)
         markerGroup.append('circle')
             .attr('r', 18)
-            .attr('fill', '#FFD700')
-            .attr('stroke', '#FFA500')
+            .attr('fill', fillColor)
+            .attr('fill-opacity', fillOpacity)
+            .attr('stroke', strokeColor)
             .attr('stroke-width', 2)
-            .style('filter', 'drop-shadow(0 0 10px rgba(255, 215, 0, 0.9))');
+            .style('filter', `drop-shadow(0 0 10px ${glowColor})`);
 
-        // Add azimuth label inside the sun marker (white text)
+        // Add azimuth label inside the sun marker
         markerGroup.append('text')
             .attr('x', 0)
             .attr('y', 0)
             .attr('text-anchor', 'middle')
             .attr('dominant-baseline', 'central')
-            .attr('fill', '#FFFFFF')
+            .attr('fill', textColor)
             .attr('font-size', '12px')
             .attr('font-weight', 'bold')
             .style('text-shadow', '0 0 3px rgba(0,0,0,0.5)')
@@ -875,7 +886,7 @@ class RotatorDisplay {
             .attr('x', 0)
             .attr('y', 28)
             .attr('text-anchor', 'middle')
-            .attr('fill', '#FFA500')
+            .attr('fill', labelColor)
             .attr('font-size', '11px')
             .style('text-shadow', '0 0 4px rgba(0,0,0,0.8)')
             .text(`Alt: ${altitudeDeg.toFixed(1)}°`);

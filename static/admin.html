@@ -7702,8 +7702,8 @@
                 const data = await response.json();
                 console.log('Sun path data received:', data);
                 
-                if (!data.path || data.path.length === 0) {
-                    console.log('No path data in response');
+                if (!data.data_points || data.data_points.length === 0) {
+                    console.log('No data points in response');
                     window.cachedSunPath = null;
                     return;
                 }
@@ -7712,7 +7712,7 @@
                 const uniquePoints = [];
                 const seenBearings = new Set();
 
-                data.path.forEach(point => {
+                data.data_points.forEach(point => {
                     const bearing = Math.round(point.azimuth_deg);
                     const timeParts = point.time_local.split(':');
                     const hours = parseInt(timeParts[0]);

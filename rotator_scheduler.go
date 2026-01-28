@@ -557,11 +557,11 @@ func (rs *RotatorScheduler) updateSunTracking() {
 	rs.lastSunUpdate = now
 	rs.sunTrackingActive = true
 
-	// Add to trigger logs
+	// Add to trigger logs (round bearing to nearest integer)
 	triggerLog := ScheduleTriggerLog{
 		Timestamp: now,
 		Time:      "sun_tracking",
-		Bearing:   azimuthDeg,
+		Bearing:   float64(int(azimuthDeg + 0.5)),
 		Success:   true,
 	}
 	rs.triggerLogs = append(rs.triggerLogs, triggerLog)

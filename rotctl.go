@@ -382,9 +382,13 @@ func (r *RotctlClient) GetPosition() (*Position, error) {
 
 // SetPosition sets the rotator to the specified position
 func (r *RotctlClient) SetPosition(azimuth, elevation float64) error {
-	log.Printf("Rotator: Setting position to azimuth=%.1f°, elevation=%.1f°", azimuth, elevation)
+	// Round to nearest integer for cleaner commands
+	azimuthRounded := float64(int(azimuth + 0.5))
+	elevationRounded := float64(int(elevation + 0.5))
 
-	cmd := fmt.Sprintf("P %.6f %.6f", azimuth, elevation)
+	log.Printf("Rotator: Setting position to azimuth=%.0f°, elevation=%.0f°", azimuthRounded, elevationRounded)
+
+	cmd := fmt.Sprintf("P %.0f %.0f", azimuthRounded, elevationRounded)
 	response, err := r.sendCommand(cmd)
 	if err != nil {
 		log.Printf("Rotator: Failed to set position: %v", err)
@@ -396,7 +400,7 @@ func (r *RotctlClient) SetPosition(azimuth, elevation float64) error {
 		return err
 	}
 
-	log.Printf("Rotator: Successfully set position to azimuth=%.1f°, elevation=%.1f°", azimuth, elevation)
+	log.Printf("Rotator: Successfully set position to azimuth=%.0f°, elevation=%.0f°", azimuthRounded, elevationRounded)
 	return nil
 }
 

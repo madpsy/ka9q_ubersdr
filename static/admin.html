@@ -6854,10 +6854,40 @@
         function updateRotatorBeamForTime(timeInHours, positions) {
             if (!window.adminRotatorDisplay) return;
 
-            // Check if sun tracking is enabled
+            // Priority 1: Check for scheduled positions at or near this exact time
+            // This ensures scheduled positions override sun tracking
+            if (positions && positions.length > 0) {
+                const targetMinutes = Math.floor(timeInHours * 60);
+
+                // Check if there's a scheduled position within 1 minute of this time
+                const positionsWithMinutes = positions
+                    .filter(pos => pos.enabled !== false && pos.resolved_time)
+                    .map(pos => {
+                        const timeParts = pos.resolved_time.split(':');
+                        const hours = parseInt(timeParts[0]);
+                        const minutes = parseInt(timeParts[1]);
+                        const totalMinutes = hours * 60 + minutes;
+                        return { ...pos, totalMinutes };
+                    });
+
+                // Check for exact match (within 1 minute)
+                const exactMatch = positionsWithMinutes.find(pos =>
+                    Math.abs(pos.totalMinutes - targetMinutes) <= 1
+                );
+
+                if (exactMatch) {
+                    // There's a scheduled position at this time - use it
+                    window.adminRotatorDisplay.updateAzimuthDisplay(exactMatch.bearing);
+                    if (window.adminRotatorDisplay.countriesData) {
+                        window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, exactMatch.bearing);
+                    }
+                    return;
+                }
+            }
+
+            // Priority 2: Check if sun tracking is active at this time
             const followSun = currentRotatorSchedulerConfig && currentRotatorSchedulerConfig.follow_sun;
 
-            // First, check if we're in a sun tracking window by looking for exact sun path data
             if (followSun && window.cachedSunPath && window.cachedSunPath.length > 0) {
                 // Find if there's a sun path point very close to this time (within 1 step interval)
                 const stepMinutes = (currentRotatorSchedulerConfig.follow_sun_step || 15) / 60; // Convert to hours
@@ -6876,7 +6906,7 @@
                 }
             }
 
-            // Not in sun tracking window (or sun tracking disabled) - use scheduled positions
+            // Priority 3: Not in sun tracking window - use last scheduled position before this time
             if (positions && positions.length > 0) {
                 // Sun tracking disabled - use scheduled positions
                 // Convert timeInHours to minutes since midnight

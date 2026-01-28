@@ -843,15 +843,15 @@
                         </div>
                         <div class="config-field">
                             <label>Country (Optional)</label>
-                            <div style="display: flex; gap: 10px; align-items: center;">
-                                <input type="text" id="newScheduledPositionCountry" list="scheduled-position-country-list" placeholder="Type a country..." autocomplete="off" oninput="handleScheduledPositionCountryInput()" style="flex: 1; max-width: 300px;">
-                                <div style="display: flex; gap: 15px; align-items: center;">
+                            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: nowrap;">
+                                <input type="text" id="newScheduledPositionCountry" list="scheduled-position-country-list" placeholder="Type a country..." autocomplete="off" oninput="handleScheduledPositionCountryInput()" style="width: 300px;">
+                                <div style="display: flex; gap: 15px; align-items: center; white-space: nowrap;">
                                     <label style="display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer;">
-                                        <input type="radio" name="pathType" id="pathTypeShort" value="short" checked style="cursor: pointer;">
+                                        <input type="radio" name="pathType" id="pathTypeShort" value="short" checked onchange="handleScheduledPositionCountryInput()" style="cursor: pointer;">
                                         <span>Short Path</span>
                                     </label>
                                     <label style="display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer;">
-                                        <input type="radio" name="pathType" id="pathTypeLong" value="long" style="cursor: pointer;">
+                                        <input type="radio" name="pathType" id="pathTypeLong" value="long" onchange="handleScheduledPositionCountryInput()" style="cursor: pointer;">
                                         <span>Long Path</span>
                                     </label>
                                 </div>

@@ -6211,9 +6211,6 @@
                 const trackingMode = currentRotatorSchedulerConfig.follow_greyline ? 'Greyline' : 'Sun';
                 const pathMode = currentRotatorSchedulerConfig.follow_sun_path || 'short';
                 statusHTML += `<strong>Sun Tracking:</strong> ${sunStatus} (${trackingMode}, ${pathMode} path)<br>`;
-                if (currentRotatorSchedulerConfig.sun_azimuth !== undefined) {
-                    statusHTML += `<strong>Sun Azimuth:</strong> <span style="color: #ff9800;">${Math.round(currentRotatorSchedulerConfig.sun_azimuth)}°</span><br>`;
-                }
             }
             
             if (positionCount > 0 && enabledCount !== positionCount) {
@@ -6317,8 +6314,8 @@
                     </div>
                 </div>
                 <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #dee2e6;">
-                    <div style="color: #666; font-size: 11px;">Status</div>
-                    <div id="rotator-moving-stat" style="font-size: 14px; font-weight: bold; color: #28a745;">—</div>
+                    <div style="color: #666; font-size: 11px;">Next Movement</div>
+                    <div id="rotator-next-movement-stat" style="font-size: 14px; font-weight: bold; color: #667eea;">—</div>
                 </div>
             `;
             topCardsRow.appendChild(rotatorCard);
@@ -6336,7 +6333,7 @@
             countriesCard.style.flexDirection = 'column';
             countriesCard.innerHTML = `
                 <h4 style="margin: 0 0 10px 0; color: #28a745; font-size: 14px;">📡 Countries in Beam</h4>
-                <div id="countries-in-beam-container" style="flex: 1; overflow-y: auto; max-height: 400px;">
+                <div id="countries-in-beam-container" style="flex: 1; overflow-y: auto; max-height: 340px;">
                     <div style="text-align: center; color: #999; padding: 20px; font-size: 12px;">
                         <em>Loading...</em>
                     </div>
@@ -6405,7 +6402,7 @@
                         updateSunPosition();
                         // Update sun position every 60 seconds
                         setInterval(updateSunPosition, 60000);
-                        
+
                         // Initial rotator stats update
                         fetch('/api/rotctl/status')
                             .then(response => response.json())
@@ -6416,6 +6413,9 @@
                                 }
                             })
                             .catch(error => console.error('Failed to fetch initial rotator status:', error));
+
+                        // Update next movement every 60 seconds
+                        setInterval(updateNextRotatorMovement, 60000);
                     }, 200);
                 } else {
                     mapContainer.innerHTML = '<div style="padding: 40px; text-align: center; color: #999;">Rotator display library not loaded</div>';
@@ -6949,12 +6949,73 @@
                 if (azimuthEl) azimuthEl.textContent = Math.round(statusData.position.azimuth) + '°';
                 if (elevationEl) elevationEl.textContent = Math.round(statusData.position.elevation) + '°';
             }
-            
-            // Update moving status
-            const movingEl = document.getElementById('rotator-moving-stat');
-            if (movingEl && statusData.moving !== undefined) {
-                movingEl.textContent = statusData.moving ? 'Moving' : 'Stationary';
-                movingEl.style.color = statusData.moving ? '#ffc107' : '#28a745';
+
+            // Update next movement from scheduler status
+            updateNextRotatorMovement();
+        }
+
+        // Update next rotator movement display
+        async function updateNextRotatorMovement() {
+            const nextMovementEl = document.getElementById('rotator-next-movement-stat');
+            if (!nextMovementEl) return;
+
+            try {
+                // Fetch scheduler status to get next position and sun tracking info
+                const response = await fetch('/admin/rotator-scheduler-config');
+                if (!response.ok) {
+                    nextMovementEl.textContent = '—';
+                    return;
+                }
+
+                const data = await response.json();
+                const now = new Date();
+
+                // Check if sun tracking is active
+                if (data.follow_sun && data.sun_tracking_active) {
+                    const step = data.follow_sun_step || 15;
+                    nextMovementEl.textContent = `Sun tracking (${step}m)`;
+                    nextMovementEl.style.color = '#ff9800';
+                    return;
+                }
+
+                // Check for next scheduled position
+                if (data.next_position) {
+                    const nextPos = data.next_position;
+                    const timeStr = nextPos.resolved_time || nextPos.time;
+                    
+                    // Parse time and calculate minutes until
+                    const timeParts = timeStr.split(':');
+                    const targetHours = parseInt(timeParts[0]);
+                    const targetMinutes = parseInt(timeParts[1]);
+                    const targetTime = new Date(now);
+                    targetTime.setHours(targetHours, targetMinutes, 0, 0);
+                    
+                    // If target time is in the past, it's tomorrow
+                    if (targetTime < now) {
+                        targetTime.setDate(targetTime.getDate() + 1);
+                    }
+                    
+                    const msUntil = targetTime - now;
+                    const minutesUntil = Math.floor(msUntil / 60000);
+                    const hoursUntil = Math.floor(minutesUntil / 60);
+                    
+                    let timeUntil;
+                    if (hoursUntil > 0) {
+                        const mins = minutesUntil % 60;
+                        timeUntil = `${hoursUntil}h ${mins}m`;
+                    } else {
+                        timeUntil = `${minutesUntil}m`;
+                    }
+                    
+                    nextMovementEl.textContent = `${nextPos.time} (${timeUntil})`;
+                    nextMovementEl.style.color = '#667eea';
+                } else {
+                    nextMovementEl.textContent = 'None scheduled';
+                    nextMovementEl.style.color = '#999';
+                }
+            } catch (error) {
+                console.error('Failed to fetch next movement:', error);
+                nextMovementEl.textContent = '—';
             }
         }
 

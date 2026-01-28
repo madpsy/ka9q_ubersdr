@@ -487,9 +487,9 @@ func (fst *FrontendStatusTracker) parseStatusPacket(data []byte) {
 		case tagSamplesSinceOver:
 			frontendStatus.SamplesSinceOver = decodeInt64(value)
 		case tagFilterBlocksize:
-			frontendStatus.FilterBlocksize = decodeInt(value)
+			frontendStatus.FilterBlocksize = int(decodeInt32(value))
 		case tagFilterFirLength:
-			frontendStatus.FilterFirLength = decodeInt(value)
+			frontendStatus.FilterFirLength = int(decodeInt32(value))
 		case tagFeIsReal:
 			frontendStatus.FeIsReal = decodeBool(value)
 

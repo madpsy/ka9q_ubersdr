@@ -6850,102 +6850,69 @@
             }
         }
 
-        // Update rotator beam position for a specific time (based on sun tracking or last scheduled position)
+        // Update rotator beam position for a specific time (based on combined schedule + sun tracking)
         function updateRotatorBeamForTime(timeInHours, positions) {
             if (!window.adminRotatorDisplay) return;
 
-            // Priority 1: Check for scheduled positions at or near this exact time
-            // This ensures scheduled positions override sun tracking
-            if (positions && positions.length > 0) {
-                const targetMinutes = Math.floor(timeInHours * 60);
+            const targetMinutes = Math.floor(timeInHours * 60);
 
-                // Check if there's a scheduled position within 1 minute of this time
-                const positionsWithMinutes = positions
+            // Build a combined chronological list of ALL events (scheduled positions + sun tracking points)
+            const allEvents = [];
+
+            // Add scheduled positions
+            if (positions && positions.length > 0) {
+                positions
                     .filter(pos => pos.enabled !== false && pos.resolved_time)
-                    .map(pos => {
+                    .forEach(pos => {
                         const timeParts = pos.resolved_time.split(':');
                         const hours = parseInt(timeParts[0]);
                         const minutes = parseInt(timeParts[1]);
                         const totalMinutes = hours * 60 + minutes;
-                        return { ...pos, totalMinutes };
+                        allEvents.push({
+                            totalMinutes: totalMinutes,
+                            bearing: pos.bearing,
+                            type: 'scheduled'
+                        });
                     });
-
-                // Check for exact match (within 1 minute)
-                const exactMatch = positionsWithMinutes.find(pos =>
-                    Math.abs(pos.totalMinutes - targetMinutes) <= 1
-                );
-
-                if (exactMatch) {
-                    // There's a scheduled position at this time - use it
-                    window.adminRotatorDisplay.updateAzimuthDisplay(exactMatch.bearing);
-                    if (window.adminRotatorDisplay.countriesData) {
-                        window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, exactMatch.bearing);
-                    }
-                    return;
-                }
             }
 
-            // Priority 2: Check if sun tracking is active at this time
+            // Add sun tracking points if enabled
             const followSun = currentRotatorSchedulerConfig && currentRotatorSchedulerConfig.follow_sun;
-
             if (followSun && window.cachedSunPath && window.cachedSunPath.length > 0) {
-                // Find if there's a sun path point very close to this time (within 1 step interval)
-                const stepMinutes = (currentRotatorSchedulerConfig.follow_sun_step || 15) / 60; // Convert to hours
-                const sunPoint = window.cachedSunPath.find(point => {
-                    const timeDiff = Math.abs(point.timeInHours - timeInHours);
-                    return timeDiff < stepMinutes;
+                window.cachedSunPath.forEach(sunPoint => {
+                    const totalMinutes = Math.floor(sunPoint.timeInHours * 60);
+                    allEvents.push({
+                        totalMinutes: totalMinutes,
+                        bearing: sunPoint.bearing,
+                        type: 'sun'
+                    });
                 });
+            }
 
-                if (sunPoint && sunPoint.bearing !== undefined) {
-                    // We're within the sun tracking window - show sun's bearing
-                    window.adminRotatorDisplay.updateAzimuthDisplay(sunPoint.bearing);
-                    if (window.adminRotatorDisplay.countriesData) {
-                        window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, sunPoint.bearing);
-                    }
-                    return; // Exit early, we've set the position
+            if (allEvents.length === 0) return;
+
+            // Sort all events chronologically
+            allEvents.sort((a, b) => a.totalMinutes - b.totalMinutes);
+
+            // Find the last event that occurred before or at the target time
+            let lastEvent = null;
+            for (let i = allEvents.length - 1; i >= 0; i--) {
+                if (allEvents[i].totalMinutes <= targetMinutes) {
+                    lastEvent = allEvents[i];
+                    break;
                 }
             }
 
-            // Priority 3: Not in sun tracking window - use last scheduled position before this time
-            if (positions && positions.length > 0) {
-                // Sun tracking disabled - use scheduled positions
-                // Convert timeInHours to minutes since midnight
-                const targetMinutes = Math.floor(timeInHours * 60);
+            // If no event found before target time, use the last event of the day (from yesterday)
+            if (!lastEvent && allEvents.length > 0) {
+                lastEvent = allEvents[allEvents.length - 1];
+            }
 
-                // Convert all enabled positions to minutes and sort by time
-                const positionsWithMinutes = positions
-                    .filter(pos => pos.enabled !== false && pos.resolved_time)
-                    .map(pos => {
-                        const timeParts = pos.resolved_time.split(':');
-                        const hours = parseInt(timeParts[0]);
-                        const minutes = parseInt(timeParts[1]);
-                        const totalMinutes = hours * 60 + minutes;
-                        return { ...pos, totalMinutes };
-                    })
-                    .sort((a, b) => a.totalMinutes - b.totalMinutes);
-
-                if (positionsWithMinutes.length === 0) return;
-
-                // Find the last position that occurred before or at the target time
-                let lastPosition = null;
-                for (let i = positionsWithMinutes.length - 1; i >= 0; i--) {
-                    if (positionsWithMinutes[i].totalMinutes <= targetMinutes) {
-                        lastPosition = positionsWithMinutes[i];
-                        break;
-                    }
-                }
-
-                // If no position found before target time, use the last position of the day (from yesterday)
-                if (!lastPosition && positionsWithMinutes.length > 0) {
-                    lastPosition = positionsWithMinutes[positionsWithMinutes.length - 1];
-                }
-
-                // Update rotator display to show this bearing
-                if (lastPosition && lastPosition.bearing !== undefined) {
-                    window.adminRotatorDisplay.updateAzimuthDisplay(lastPosition.bearing);
-                    if (window.adminRotatorDisplay.countriesData) {
-                        window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, lastPosition.bearing);
-                    }
+            // Update rotator display to show this bearing
+            if (lastEvent && lastEvent.bearing !== undefined) {
+                window.adminRotatorDisplay.updateAzimuthDisplay(lastEvent.bearing);
+                if (window.adminRotatorDisplay.countriesData) {
+                    window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, lastEvent.bearing);
                 }
             }
         }

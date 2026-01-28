@@ -8161,17 +8161,25 @@
                             window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, hoveredSunPos.bearing);
                         }
                     }
+// Calculate time string from timeInHours
+const hours = Math.floor(hoveredSunPos.timeInHours);
+const minutes = Math.round((hoveredSunPos.timeInHours - hours) * 60);
+const timeStr = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
 
-                    const tooltipText = `Sun → ${hoveredSunPos.bearing}°`;
+const tooltipLine1 = `Sun → ${hoveredSunPos.bearing}°`;
+const tooltipLine2 = timeStr;
+
+                    
                     ctx.font = '12px sans-serif';
-                    const textWidth = ctx.measureText(tooltipText).width;
-                    const tooltipWidth = textWidth + 16;
-                    const tooltipHeight = 24;
+                    const line1Width = ctx.measureText(tooltipLine1).width;
+                    const line2Width = ctx.measureText(tooltipLine2).width;
+                    const tooltipWidth = Math.max(line1Width, line2Width) + 16;
+                    const tooltipHeight = 40; // Increased for two lines
 
                     const timelineWidth = canvas.width - marginLeft - marginRight;
                     const sunX = marginLeft + (hoveredSunPos.timeInHours / 24) * timelineWidth;
                     let tooltipX = sunX - tooltipWidth / 2;
-                    const tooltipY = timelineY - 35;
+                    const tooltipY = timelineY - 50; // Adjusted for taller tooltip
 
                     if (tooltipX < 5) tooltipX = 5;
                     if (tooltipX + tooltipWidth > canvas.width - 5) tooltipX = canvas.width - tooltipWidth - 5;
@@ -8185,8 +8193,9 @@
 
                     ctx.fillStyle = '#000';
                     ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillText(tooltipText, tooltipX + tooltipWidth / 2, tooltipY + tooltipHeight / 2);
+                    ctx.textBaseline = 'top';
+                    ctx.fillText(tooltipLine1, tooltipX + tooltipWidth / 2, tooltipY + 8);
+                    ctx.fillText(tooltipLine2, tooltipX + tooltipWidth / 2, tooltipY + 22);
                 } else {
                     canvas.style.cursor = 'default';
                     if (window.adminRotatorDisplay) {

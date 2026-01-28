@@ -6468,21 +6468,21 @@
             const updateIntervalInput = document.createElement('input');
             updateIntervalInput.type = 'number';
             updateIntervalInput.id = 'sunTrackingInterval';
-            updateIntervalInput.min = '15';
+            updateIntervalInput.min = '5';
             updateIntervalInput.max = '60';
             updateIntervalInput.value = currentRotatorSchedulerConfig.follow_sun_step || 15;
-            updateIntervalInput.addEventListener('input', (e) => {
-                const value = parseInt(e.target.value);
-                if (value < 15) {
-                    e.target.value = 15;
-                } else if (value > 60) {
-                    e.target.value = 60;
-                }
+            updateIntervalInput.addEventListener('input', () => {
+                validateSunTrackingInterval();
             });
             updateIntervalDiv.appendChild(updateIntervalInput);
             const updateIntervalSmall = document.createElement('small');
-            updateIntervalSmall.textContent = 'How often to update the rotator position when tracking the sun (15-60 minutes)';
+            updateIntervalSmall.textContent = 'How often to update the rotator position when tracking the sun (5-60 minutes)';
             updateIntervalDiv.appendChild(updateIntervalSmall);
+            const updateIntervalError = document.createElement('small');
+            updateIntervalError.id = 'sunTrackingIntervalError';
+            updateIntervalError.style.color = '#dc3545';
+            updateIntervalError.style.display = 'none';
+            updateIntervalDiv.appendChild(updateIntervalError);
             sunTrackingDiv.appendChild(updateIntervalDiv);
 
             // Daytime Only Mode
@@ -6569,6 +6569,30 @@
             loadRotatorSchedulerLogs();
         }
 
+        // Validate sun tracking interval
+        function validateSunTrackingInterval() {
+            const input = document.getElementById('sunTrackingInterval');
+            const error = document.getElementById('sunTrackingIntervalError');
+            const value = parseInt(input.value);
+
+            if (!input.value || isNaN(value)) {
+                error.textContent = 'Interval is required';
+                error.style.display = 'block';
+                return false;
+            } else if (value < 5) {
+                error.textContent = 'Interval must be at least 5 minutes';
+                error.style.display = 'block';
+                return false;
+            } else if (value > 60) {
+                error.textContent = 'Interval must be 60 minutes or less';
+                error.style.display = 'block';
+                return false;
+            } else {
+                error.style.display = 'none';
+                return true;
+            }
+        }
+
         // Apply sun tracking settings
         async function applySunTrackingSettings() {
             const followSunEnabled = document.getElementById('sunTrackingEnabled').value === 'true';
@@ -6578,8 +6602,8 @@
             const overlap = parseInt(document.getElementById('sunTrackingOverlap').value);
 
             // Validate inputs
-            if (interval < 15 || interval > 60) {
-                showAlert('Update interval must be between 15 and 60 minutes', 'error');
+            if (!validateSunTrackingInterval()) {
+                showAlert('Please fix validation errors before applying', 'error');
                 return;
             }
             if (overlap < 0 || overlap > 180) {

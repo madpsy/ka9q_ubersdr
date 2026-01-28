@@ -207,6 +207,16 @@ func (rs *RotatorScheduler) LoadConfig() error {
 	if config.FollowSunStep == 0 {
 		config.FollowSunStep = 15
 	}
+	// Enforce minimum of 5 minutes
+	if config.FollowSunStep < 5 {
+		log.Printf("Warning: follow_sun_step %d is below minimum, setting to 5 minutes", config.FollowSunStep)
+		config.FollowSunStep = 5
+	}
+	// Enforce maximum of 60 minutes
+	if config.FollowSunStep > 60 {
+		log.Printf("Warning: follow_sun_step %d exceeds maximum, setting to 60 minutes", config.FollowSunStep)
+		config.FollowSunStep = 60
+	}
 	if config.DaytimeOverlap == 0 {
 		config.DaytimeOverlap = 60
 	}

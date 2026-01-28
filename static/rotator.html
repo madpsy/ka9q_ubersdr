@@ -225,6 +225,9 @@
             bottom: 20px;
             right: 20px;
             z-index: 100;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
 
         .country-overlay input {
@@ -235,6 +238,30 @@
             border-radius: 8px;
             background: rgba(255,255,255,0.1);
             color: #fff;
+        }
+
+        .path-selector {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .path-selector label {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            font-size: 11px;
+            cursor: pointer;
+            white-space: nowrap;
+            margin: 0;
+            padding: 0;
+        }
+
+        .path-selector input[type="radio"] {
+            cursor: pointer;
+            margin: 0;
+            width: 14px;
+            height: 14px;
         }
 
         .country-overlay input:focus {
@@ -474,10 +501,20 @@
                 font-size: 16px;
             }
 
+            .country-overlay {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
             .country-overlay input {
                 width: 100%;
                 max-width: 300px;
                 font-size: 16px;
+            }
+
+            .path-selector {
+                flex-direction: row;
+                justify-content: center;
             }
 
             button {
@@ -542,8 +579,18 @@
                 max-width: 250px;
             }
 
+            .country-overlay {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
             .country-overlay input {
                 max-width: 250px;
+            }
+
+            .path-selector {
+                flex-direction: row;
+                justify-content: center;
             }
         }
     </style>
@@ -623,6 +670,16 @@
             <div class="country-overlay">
                 <input type="text" id="country-input" list="country-list" placeholder="Type a country..." autocomplete="off">
                 <datalist id="country-list"></datalist>
+                <div class="path-selector">
+                    <label>
+                        <input type="radio" name="path" value="short" checked>
+                        Short
+                    </label>
+                    <label>
+                        <input type="radio" name="path" value="long">
+                        Long
+                    </label>
+                </div>
             </div>
         </div>
 
@@ -790,6 +847,17 @@
 
             // Fetch countries for dropdown
             await fetchCountries();
+
+            // Add listener for path selection changes
+            const pathRadios = document.querySelectorAll('input[name="path"]');
+            pathRadios.forEach(radio => {
+                radio.addEventListener('change', () => {
+                    // If a country is already selected, update the bearing
+                    if (selectedCountry) {
+                        pointToCountry(selectedCountry);
+                    }
+                });
+            });
         });
 
         function updateButtonStates() {
@@ -1145,53 +1213,66 @@
             }
             
             if (matchedCountry) {
-                const bearing = matchedCountry.bearing;
-                
-                // Store selected country for continuous updates
-                selectedCountry = matchedCountry;
-                
-                // Get current azimuth for cone calculation
-                let currentAzimuth = 0;
-                try {
-                    const response = await fetch('/api/rotctl/status');
-                    const data = await response.json();
-                    if (data.position && data.position.azimuth !== undefined) {
-                        currentAzimuth = data.position.azimuth;
-                    }
-                } catch (error) {
-                    console.error('Failed to get current azimuth:', error);
-                }
-                
-                // Show marker on map with cone markers
-                if (rotatorDisplay) {
-                    rotatorDisplay.showCountryMarker(
-                        matchedCountry.name,
-                        bearing,
-                        matchedCountry.distance_km,
-                        countriesData,
-                        currentAzimuth
-                    );
-                }
-                
-                // Set the azimuth input
-                document.getElementById('target-azimuth').value = bearing;
-                
-                // Check if password is entered
-                const password = document.getElementById('password').value;
-                if (password) {
-                    // Automatically send the command
-                    setAzimuth(bearing);
-                    showMessage(`Pointing at ${matchedCountry.name} (${matchedCountry.continent}) - Bearing: ${bearing}°, Distance: ${Math.round(matchedCountry.distance_km)} km`, 'success');
-                } else {
-                    // Show message to enter password
-                    showMessage(`Selected ${matchedCountry.name} (${matchedCountry.continent}) - Bearing: ${bearing}°. Enter password and click "Go" to move rotator.`, 'success');
-                }
+                await pointToCountry(matchedCountry);
             } else if (inputValue === '') {
                 // Clear marker and selected country if input is cleared
                 selectedCountry = null;
                 if (rotatorDisplay) {
                     rotatorDisplay.clearCountryMarker();
                 }
+            }
+        }
+
+        async function pointToCountry(matchedCountry) {
+            // Check if long path is selected
+            const isLongPath = document.querySelector('input[name="path"]:checked').value === 'long';
+
+            // Calculate bearing (short path or long path)
+            let bearing = matchedCountry.bearing;
+            if (isLongPath) {
+                // Long path is 180° opposite
+                bearing = (bearing + 180) % 360;
+            }
+
+            // Store selected country for continuous updates
+            selectedCountry = matchedCountry;
+
+            // Get current azimuth for cone calculation
+            let currentAzimuth = 0;
+            try {
+                const response = await fetch('/api/rotctl/status');
+                const data = await response.json();
+                if (data.position && data.position.azimuth !== undefined) {
+                    currentAzimuth = data.position.azimuth;
+                }
+            } catch (error) {
+                console.error('Failed to get current azimuth:', error);
+            }
+
+            // Show marker on map with cone markers
+            if (rotatorDisplay) {
+                rotatorDisplay.showCountryMarker(
+                    matchedCountry.name,
+                    bearing,
+                    matchedCountry.distance_km,
+                    countriesData,
+                    currentAzimuth
+                );
+            }
+
+            // Set the azimuth input
+            document.getElementById('target-azimuth').value = bearing;
+
+            // Check if password is entered
+            const password = document.getElementById('password').value;
+            const pathType = isLongPath ? 'Long path' : 'Short path';
+            if (password) {
+                // Automatically send the command
+                setAzimuth(bearing);
+                showMessage(`${pathType} to ${matchedCountry.name} (${matchedCountry.continent}) - Bearing: ${bearing}°, Distance: ${Math.round(matchedCountry.distance_km)} km`, 'success');
+            } else {
+                // Show message to enter password
+                showMessage(`Selected ${matchedCountry.name} (${matchedCountry.continent}) - ${pathType} bearing: ${bearing}°. Enter password and click "Go" to move rotator.`, 'success');
             }
         }
 

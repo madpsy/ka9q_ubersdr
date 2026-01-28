@@ -6195,6 +6195,241 @@
             statusSection.appendChild(statusDiv);
             container.appendChild(statusSection);
 
+            // Sun Tracking Configuration Section
+            const sunTrackingSection = document.createElement('div');
+            sunTrackingSection.className = 'config-section';
+            sunTrackingSection.innerHTML = '<h3>☀️ Sun Tracking Configuration</h3>';
+
+            const sunTrackingDiv = document.createElement('div');
+            sunTrackingDiv.style.padding = '15px';
+            sunTrackingDiv.style.background = '#f8f9fa';
+            sunTrackingDiv.style.borderRadius = '5px';
+            sunTrackingDiv.style.marginBottom = '20px';
+
+            // Follow Sun Enabled toggle
+            const followSunDiv = document.createElement('div');
+            followSunDiv.className = 'config-field';
+            const followSunLabel = document.createElement('label');
+            followSunLabel.textContent = 'Enable Sun Tracking';
+            followSunDiv.appendChild(followSunLabel);
+            const followSunSelect = document.createElement('select');
+            followSunSelect.dataset.key = 'follow_sun';
+            followSunSelect.innerHTML = '<option value="true">Yes</option><option value="false">No</option>';
+            followSunSelect.value = (currentRotatorSchedulerConfig.follow_sun === true || currentRotatorSchedulerConfig.follow_sun === 'true') ? 'true' : 'false';
+            followSunSelect.addEventListener('change', async (e) => {
+                const newFollowSunState = e.target.value === 'true';
+                const oldFollowSunState = currentRotatorSchedulerConfig.follow_sun;
+
+                // If enabling sun tracking and there are enabled scheduled positions, prompt user
+                if (newFollowSunState && !oldFollowSunState) {
+                    const positions = currentRotatorSchedulerConfig.positions || [];
+                    const enabledPositions = positions.filter(p => p.enabled !== false);
+                    
+                    if (enabledPositions.length > 0) {
+                        const disableScheduled = confirm(
+                            `⚠️ Sun tracking is being enabled.\n\n` +
+                            `You currently have ${enabledPositions.length} enabled scheduled position(s).\n\n` +
+                            `Sun tracking and scheduled positions can conflict with each other.\n\n` +
+                            `Would you like to disable all scheduled positions?\n\n` +
+                            `Click OK to disable scheduled positions.\n` +
+                            `Click Cancel to keep them enabled (not recommended).`
+                        );
+
+                        if (disableScheduled) {
+                            // Disable all scheduled positions
+                            positions.forEach(p => {
+                                p.enabled = false;
+                            });
+                            currentRotatorSchedulerConfig.positions = positions;
+                        }
+                    }
+                }
+
+                // Update the follow_sun state in the current config object
+                currentRotatorSchedulerConfig.follow_sun = newFollowSunState;
+
+                // Save the entire config
+                try {
+                    showAlert('Updating sun tracking configuration...', 'info');
+
+                    const response = await authenticatedFetch('/admin/rotator-scheduler-config', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(currentRotatorSchedulerConfig)
+                    });
+
+                    if (!response) return; // Auth failed
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(errorText || 'Failed to update sun tracking');
+                    }
+
+                    const result = await response.json();
+                    showAlert(result.message || 'Sun tracking configuration updated successfully', 'success');
+
+                    // Reload to get updated status
+                    await loadRotatorSchedulerConfig();
+                } catch (error) {
+                    showAlert('Error updating sun tracking configuration: ' + error.message, 'error');
+                    // Revert both the dropdown and the config object
+                    currentRotatorSchedulerConfig.follow_sun = oldFollowSunState;
+                    followSunSelect.value = oldFollowSunState ? 'true' : 'false';
+                }
+            });
+            followSunDiv.appendChild(followSunSelect);
+            const followSunSmall = document.createElement('small');
+            followSunSmall.textContent = 'Automatically track the sun\'s position throughout the day';
+            followSunDiv.appendChild(followSunSmall);
+            sunTrackingDiv.appendChild(followSunDiv);
+
+            // Update Interval (minutes)
+            const updateIntervalDiv = document.createElement('div');
+            updateIntervalDiv.className = 'config-field';
+            const updateIntervalLabel = document.createElement('label');
+            updateIntervalLabel.textContent = 'Update Interval (minutes)';
+            updateIntervalDiv.appendChild(updateIntervalLabel);
+            const updateIntervalInput = document.createElement('input');
+            updateIntervalInput.type = 'number';
+            updateIntervalInput.min = '1';
+            updateIntervalInput.max = '60';
+            updateIntervalInput.value = currentRotatorSchedulerConfig.follow_sun_step || 5;
+            updateIntervalInput.addEventListener('change', async (e) => {
+                const newValue = parseInt(e.target.value);
+                if (newValue < 1 || newValue > 60) {
+                    showAlert('Update interval must be between 1 and 60 minutes', 'error');
+                    e.target.value = currentRotatorSchedulerConfig.follow_sun_step || 5;
+                    return;
+                }
+
+                currentRotatorSchedulerConfig.follow_sun_step = newValue;
+
+                try {
+                    showAlert('Updating sun tracking interval...', 'info');
+
+                    const response = await authenticatedFetch('/admin/rotator-scheduler-config', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(currentRotatorSchedulerConfig)
+                    });
+
+                    if (!response) return;
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(errorText || 'Failed to update interval');
+                    }
+
+                    const result = await response.json();
+                    showAlert(result.message || 'Update interval changed successfully', 'success');
+                } catch (error) {
+                    showAlert('Error updating interval: ' + error.message, 'error');
+                    e.target.value = currentRotatorSchedulerConfig.follow_sun_step || 5;
+                }
+            });
+            updateIntervalDiv.appendChild(updateIntervalInput);
+            const updateIntervalSmall = document.createElement('small');
+            updateIntervalSmall.textContent = 'How often to update the rotator position when tracking the sun (1-60 minutes)';
+            updateIntervalDiv.appendChild(updateIntervalSmall);
+            sunTrackingDiv.appendChild(updateIntervalDiv);
+
+            // Daytime Only Mode
+            const daytimeOnlyDiv = document.createElement('div');
+            daytimeOnlyDiv.className = 'config-field';
+            const daytimeOnlyLabel = document.createElement('label');
+            daytimeOnlyLabel.textContent = 'Daytime Only Mode';
+            daytimeOnlyDiv.appendChild(daytimeOnlyLabel);
+            const daytimeOnlySelect = document.createElement('select');
+            daytimeOnlySelect.dataset.key = 'daytime_only';
+            daytimeOnlySelect.innerHTML = '<option value="true">Yes</option><option value="false">No</option>';
+            daytimeOnlySelect.value = (currentRotatorSchedulerConfig.daytime_only === true || currentRotatorSchedulerConfig.daytime_only === 'true') ? 'true' : 'false';
+            daytimeOnlySelect.addEventListener('change', async (e) => {
+                const newDaytimeOnlyState = e.target.value === 'true';
+
+                currentRotatorSchedulerConfig.daytime_only = newDaytimeOnlyState;
+
+                try {
+                    showAlert('Updating daytime only mode...', 'info');
+
+                    const response = await authenticatedFetch('/admin/rotator-scheduler-config', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(currentRotatorSchedulerConfig)
+                    });
+
+                    if (!response) return;
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(errorText || 'Failed to update daytime only mode');
+                    }
+
+                    const result = await response.json();
+                    showAlert(result.message || 'Daytime only mode updated successfully', 'success');
+
+                    // Reload to get updated status
+                    await loadRotatorSchedulerConfig();
+                } catch (error) {
+                    showAlert('Error updating daytime only mode: ' + error.message, 'error');
+                    currentRotatorSchedulerConfig.daytime_only = !newDaytimeOnlyState;
+                    daytimeOnlySelect.value = currentRotatorSchedulerConfig.daytime_only ? 'true' : 'false';
+                }
+            });
+            daytimeOnlyDiv.appendChild(daytimeOnlySelect);
+            const daytimeOnlySmall = document.createElement('small');
+            daytimeOnlySmall.textContent = 'Only track the sun during daylight hours (between sunrise and sunset)';
+            daytimeOnlyDiv.appendChild(daytimeOnlySmall);
+            sunTrackingDiv.appendChild(daytimeOnlyDiv);
+
+            // Gray-line Overlap (minutes)
+            const overlapDiv = document.createElement('div');
+            overlapDiv.className = 'config-field';
+            const overlapLabel = document.createElement('label');
+            overlapLabel.textContent = 'Gray-line Overlap (minutes)';
+            overlapDiv.appendChild(overlapLabel);
+            const overlapInput = document.createElement('input');
+            overlapInput.type = 'number';
+            overlapInput.min = '0';
+            overlapInput.max = '180';
+            overlapInput.value = currentRotatorSchedulerConfig.daytime_overlap || 0;
+            overlapInput.addEventListener('change', async (e) => {
+                const newValue = parseInt(e.target.value);
+                if (newValue < 0 || newValue > 180) {
+                    showAlert('Gray-line overlap must be between 0 and 180 minutes', 'error');
+                    e.target.value = currentRotatorSchedulerConfig.daytime_overlap || 0;
+                    return;
+                }
+
+                currentRotatorSchedulerConfig.daytime_overlap = newValue;
+
+                try {
+                    showAlert('Updating gray-line overlap...', 'info');
+
+                    const response = await authenticatedFetch('/admin/rotator-scheduler-config', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(currentRotatorSchedulerConfig)
+                    });
+
+                    if (!response) return;
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(errorText || 'Failed to update overlap');
+                    }
+
+                    const result = await response.json();
+                    showAlert(result.message || 'Gray-line overlap updated successfully', 'success');
+                } catch (error) {
+                    showAlert('Error updating overlap: ' + error.message, 'error');
+                    e.target.value = currentRotatorSchedulerConfig.daytime_overlap || 0;
+                }
+            });
+            overlapDiv.appendChild(overlapInput);
+            const overlapSmall = document.createElement('small');
+            overlapSmall.textContent = 'Extend tracking before sunrise and after sunset (0-180 minutes). Useful for gray-line propagation.';
+            overlapDiv.appendChild(overlapSmall);
+            sunTrackingDiv.appendChild(overlapDiv);
+
+            sunTrackingSection.appendChild(sunTrackingDiv);
+            container.appendChild(sunTrackingSection);
+
             // Rotator Map Section
             const mapSection = document.createElement('div');
             mapSection.className = 'config-section';

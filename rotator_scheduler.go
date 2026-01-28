@@ -28,8 +28,12 @@ type SolarEvent struct {
 
 // RotatorScheduleConfig represents the configuration for scheduled rotator positions
 type RotatorScheduleConfig struct {
-	Enabled   bool                `yaml:"enabled"`   // Enable/disable scheduled positioning
-	Positions []ScheduledPosition `yaml:"positions"` // List of scheduled positions
+	Enabled        bool                `yaml:"enabled"`         // Enable/disable scheduled positioning
+	Positions      []ScheduledPosition `yaml:"positions"`       // List of scheduled positions
+	FollowSun      bool                `yaml:"follow_sun"`      // Enable sun tracking mode
+	FollowSunStep  int                 `yaml:"follow_sun_step"` // Update interval in minutes (default: 15)
+	DaytimeOnly    bool                `yaml:"daytime_only"`    // Only track sun during daytime (default: true)
+	DaytimeOverlap int                 `yaml:"daytime_overlap"` // Minutes before sunrise/after sunset to extend tracking (default: 60)
 }
 
 // ScheduleTriggerLog represents a single schedule trigger event
@@ -43,17 +47,20 @@ type ScheduleTriggerLog struct {
 
 // RotatorScheduler manages scheduled rotator positioning
 type RotatorScheduler struct {
-	config         *RotatorScheduleConfig
-	controller     *RotatorController
-	mu             sync.RWMutex
-	stopChan       chan struct{}
-	running        bool
-	configPath     string
-	triggerLogs    []ScheduleTriggerLog // Circular buffer of up to 100 trigger events
-	gpsLat         float64              // GPS latitude for solar calculations
-	gpsLon         float64              // GPS longitude for solar calculations
-	cachedSunTimes *SunTimes            // Cached sun times for today
-	lastSunCalc    time.Time            // Last time sun times were calculated
+	config            *RotatorScheduleConfig
+	controller        *RotatorController
+	mu                sync.RWMutex
+	stopChan          chan struct{}
+	running           bool
+	configPath        string
+	triggerLogs       []ScheduleTriggerLog // Circular buffer of up to 100 trigger events
+	gpsLat            float64              // GPS latitude for solar calculations
+	gpsLon            float64              // GPS longitude for solar calculations
+	cachedSunTimes    *SunTimes            // Cached sun times for today
+	lastSunCalc       time.Time            // Last time sun times were calculated
+	lastSunAzimuth    float64              // Last sun azimuth (for tracking changes)
+	lastSunUpdate     time.Time            // Last time sun position was updated
+	sunTrackingActive bool                 // Whether sun tracking is currently active
 }
 
 // GetAvailableSolarEvents returns the list of available solar event triggers
@@ -177,8 +184,12 @@ func (rs *RotatorScheduler) LoadConfig() error {
 		if os.IsNotExist(err) {
 			// Config file doesn't exist - create default disabled config
 			rs.config = &RotatorScheduleConfig{
-				Enabled:   false,
-				Positions: []ScheduledPosition{},
+				Enabled:        false,
+				Positions:      []ScheduledPosition{},
+				FollowSun:      false,
+				FollowSunStep:  15,
+				DaytimeOnly:    true,
+				DaytimeOverlap: 60,
 			}
 			log.Printf("Rotator scheduler config not found at %s - scheduler disabled", rs.configPath)
 			return nil
@@ -192,6 +203,20 @@ func (rs *RotatorScheduler) LoadConfig() error {
 		return fmt.Errorf("failed to parse config YAML: %w", err)
 	}
 
+	// Set defaults for sun tracking if not specified
+	if config.FollowSunStep == 0 {
+		config.FollowSunStep = 15
+	}
+	if config.DaytimeOverlap == 0 {
+		config.DaytimeOverlap = 60
+	}
+	// DaytimeOnly defaults to true if follow_sun is enabled
+	if config.FollowSun && !config.DaytimeOnly {
+		// User explicitly set daytime_only to false, respect it
+	} else if config.FollowSun {
+		config.DaytimeOnly = true
+	}
+
 	// Validate positions
 	for i, pos := range config.Positions {
 		if err := rs.validatePosition(&pos); err != nil {
@@ -200,7 +225,13 @@ func (rs *RotatorScheduler) LoadConfig() error {
 	}
 
 	rs.config = &config
-	log.Printf("Loaded rotator scheduler config: enabled=%v, positions=%d", config.Enabled, len(config.Positions))
+
+	if config.FollowSun {
+		log.Printf("Loaded rotator scheduler config: enabled=%v, follow_sun=%v, step=%dm, daytime_only=%v, overlap=%dm, positions=%d",
+			config.Enabled, config.FollowSun, config.FollowSunStep, config.DaytimeOnly, config.DaytimeOverlap, len(config.Positions))
+	} else {
+		log.Printf("Loaded rotator scheduler config: enabled=%v, positions=%d", config.Enabled, len(config.Positions))
+	}
 
 	return nil
 }
@@ -385,7 +416,23 @@ func (rs *RotatorScheduler) schedulerLoop() {
 // checkScheduledPositions checks if any positions should be executed now
 func (rs *RotatorScheduler) checkScheduledPositions() {
 	rs.mu.RLock()
-	if !rs.config.Enabled || len(rs.config.Positions) == 0 {
+	if !rs.config.Enabled {
+		rs.mu.RUnlock()
+		return
+	}
+
+	// Check if sun tracking is enabled
+	followSun := rs.config.FollowSun
+	rs.mu.RUnlock()
+
+	// Handle sun tracking mode
+	if followSun {
+		rs.updateSunTracking()
+	}
+
+	// Handle scheduled positions
+	rs.mu.RLock()
+	if len(rs.config.Positions) == 0 {
 		rs.mu.RUnlock()
 		return
 	}
@@ -415,6 +462,111 @@ func (rs *RotatorScheduler) checkScheduledPositions() {
 		if resolvedTime == currentTime {
 			rs.executeScheduledPosition(&pos)
 		}
+	}
+}
+
+// updateSunTracking updates the rotator position to track the sun
+func (rs *RotatorScheduler) updateSunTracking() {
+	now := time.Now()
+
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+
+	// Check if it's time to update (based on step interval)
+	stepDuration := time.Duration(rs.config.FollowSunStep) * time.Minute
+	if !rs.lastSunUpdate.IsZero() && now.Sub(rs.lastSunUpdate) < stepDuration {
+		return // Not time to update yet
+	}
+
+	// Get sun times for today
+	sunTimes := rs.getSunTimesForTodayNoLock()
+
+	// Check if we're in the tracking window (with overlap)
+	overlapDuration := time.Duration(rs.config.DaytimeOverlap) * time.Minute
+	trackingStart := sunTimes.Sunrise.Add(-overlapDuration)
+	trackingEnd := sunTimes.Sunset.Add(overlapDuration)
+
+	inTrackingWindow := now.After(trackingStart) && now.Before(trackingEnd)
+
+	// If daytime_only is false, always track
+	if !rs.config.DaytimeOnly {
+		inTrackingWindow = true
+	}
+
+	if !inTrackingWindow {
+		// Outside tracking window
+		if rs.sunTrackingActive {
+			log.Printf("Sun tracking: Outside tracking window (sunrise: %s, sunset: %s, overlap: %dm)",
+				sunTimes.Sunrise.Format("15:04"), sunTimes.Sunset.Format("15:04"), rs.config.DaytimeOverlap)
+			rs.sunTrackingActive = false
+		}
+		return
+	}
+
+	// Calculate current sun position
+	sunPos := GetPosition(now, rs.gpsLat, rs.gpsLon)
+
+	// Normalize azimuth to 0-360 degrees
+	azimuthDeg := sunPos.Azimuth / rad
+	azimuthDeg = azimuthDeg + 180.0
+	if azimuthDeg < 0 {
+		azimuthDeg += 360.0
+	} else if azimuthDeg >= 360 {
+		azimuthDeg -= 360.0
+	}
+
+	// Check if azimuth has changed significantly (more than 1 degree)
+	azimuthChange := azimuthDeg - rs.lastSunAzimuth
+	if azimuthChange < 0 {
+		azimuthChange = -azimuthChange
+	}
+
+	// Update if this is first update, or azimuth changed significantly, or step interval elapsed
+	shouldUpdate := rs.lastSunUpdate.IsZero() || azimuthChange >= 1.0 || now.Sub(rs.lastSunUpdate) >= stepDuration
+
+	if !shouldUpdate {
+		return
+	}
+
+	// Check if rotator is connected
+	if !rs.controller.client.IsConnected() {
+		if rs.sunTrackingActive {
+			log.Printf("Sun tracking: Rotator not connected")
+			rs.sunTrackingActive = false
+		}
+		return
+	}
+
+	// Update rotator position
+	if err := rs.controller.SetAzimuth(azimuthDeg); err != nil {
+		log.Printf("Sun tracking: Failed to set azimuth to %.1f°: %v", azimuthDeg, err)
+		return
+	}
+
+	// Log the update
+	if !rs.sunTrackingActive {
+		log.Printf("Sun tracking: Started (step: %dm, daytime_only: %v, overlap: %dm)",
+			rs.config.FollowSunStep, rs.config.DaytimeOnly, rs.config.DaytimeOverlap)
+	}
+
+	altitudeDeg := sunPos.Altitude / rad
+	log.Printf("Sun tracking: Updated rotator to %.1f° (altitude: %.1f°)", azimuthDeg, altitudeDeg)
+
+	// Update tracking state
+	rs.lastSunAzimuth = azimuthDeg
+	rs.lastSunUpdate = now
+	rs.sunTrackingActive = true
+
+	// Add to trigger logs
+	triggerLog := ScheduleTriggerLog{
+		Timestamp: now,
+		Time:      "sun_tracking",
+		Bearing:   azimuthDeg,
+		Success:   true,
+	}
+	rs.triggerLogs = append(rs.triggerLogs, triggerLog)
+	if len(rs.triggerLogs) > 100 {
+		rs.triggerLogs = rs.triggerLogs[len(rs.triggerLogs)-100:]
 	}
 }
 
@@ -508,12 +660,34 @@ func (rs *RotatorScheduler) GetStatus() map[string]interface{} {
 	// Get solar events with times (pass sun times to avoid re-locking)
 	solarEvents := rs.getAvailableSolarEventsWithTimesNoLock(sunTimes)
 
+	// Get sun tracking info
+	rs.mu.RLock()
+	followSun := rs.config.FollowSun
+	followSunStep := rs.config.FollowSunStep
+	daytimeOnly := rs.config.DaytimeOnly
+	daytimeOverlap := rs.config.DaytimeOverlap
+	sunTrackingActive := rs.sunTrackingActive
+	lastSunAzimuth := rs.lastSunAzimuth
+	lastSunUpdate := rs.lastSunUpdate
+	rs.mu.RUnlock()
+
 	status := map[string]interface{}{
 		"enabled":                enabled,
 		"running":                running,
 		"position_count":         positionCount,
 		"enabled_position_count": enabledCount,
 		"solar_events":           solarEvents,
+		"follow_sun":             followSun,
+		"follow_sun_step":        followSunStep,
+		"daytime_only":           daytimeOnly,
+		"daytime_overlap":        daytimeOverlap,
+		"sun_tracking_active":    sunTrackingActive,
+	}
+
+	// Add current sun position if tracking is active
+	if sunTrackingActive && !lastSunUpdate.IsZero() {
+		status["sun_azimuth"] = lastSunAzimuth
+		status["sun_last_update"] = lastSunUpdate.Format(time.RFC3339)
 	}
 
 	// Process positions (no lock needed - using copy)

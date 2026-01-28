@@ -4935,13 +4935,26 @@ func (ah *AdminHandler) handleUpdateRotatorSchedulerConfig(w http.ResponseWriter
 		return
 	}
 
-	// Filter out status fields - only keep configuration fields (enabled and positions)
+	// Filter out status fields - only keep configuration fields
 	filteredConfig := map[string]interface{}{}
 	if enabled, ok := config["enabled"]; ok {
 		filteredConfig["enabled"] = enabled
 	}
 	if positions, ok := config["positions"]; ok {
 		filteredConfig["positions"] = positions
+	}
+	// Sun tracking configuration
+	if followSun, ok := config["follow_sun"]; ok {
+		filteredConfig["follow_sun"] = followSun
+	}
+	if followSunStep, ok := config["follow_sun_step"]; ok {
+		filteredConfig["follow_sun_step"] = followSunStep
+	}
+	if daytimeOnly, ok := config["daytime_only"]; ok {
+		filteredConfig["daytime_only"] = daytimeOnly
+	}
+	if daytimeOverlap, ok := config["daytime_overlap"]; ok {
+		filteredConfig["daytime_overlap"] = daytimeOverlap
 	}
 
 	// Backup existing file with timestamp before replacing

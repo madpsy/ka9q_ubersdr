@@ -6,8 +6,9 @@
 # - Pointing at different regions at different times of day
 # - Following propagation patterns
 # - Automated antenna positioning for scheduled operations
+# - Tracking the sun's position throughout the day
 #
-# IMPORTANT: 
+# IMPORTANT:
 # - The scheduler only runs if rotctl is enabled in the main config
 # - Commands are only sent when the rotator is connected
 # - Times are in 24-hour format (HH:MM)
@@ -16,6 +17,44 @@
 
 # Enable or disable the scheduler
 enabled: false
+
+# ============================================================================
+# SUN TRACKING MODE
+# ============================================================================
+# Automatically track the sun's azimuth throughout the day
+# This is useful for:
+# - Gray-line propagation (tracking sunrise/sunset)
+# - Solar observation
+# - Optimizing solar-powered equipment orientation
+#
+# When enabled, the rotator will automatically follow the sun's position
+# You can still use scheduled positions alongside sun tracking
+
+# Enable sun tracking mode
+follow_sun: false
+
+# Update interval in minutes (how often to update rotator position)
+# Default: 15 minutes
+# Range: 1-60 minutes
+# Note: Sun moves ~15° per hour, so 15-minute updates are usually sufficient
+follow_sun_step: 15
+
+# Only track sun during daytime hours (between sunrise and sunset)
+# Default: true
+# Set to false to track sun 24/7 (including when it's below horizon)
+daytime_only: true
+
+# Overlap period in minutes (extend tracking before sunrise and after sunset)
+# Default: 60 minutes
+# This allows tracking during twilight/gray-line periods
+# For example, with 60 minutes overlap:
+# - Tracking starts 60 minutes before sunrise
+# - Tracking continues 60 minutes after sunset
+daytime_overlap: 60
+
+# ============================================================================
+# SCHEDULED POSITIONS
+# ============================================================================
 
 # List of scheduled positions
 # Each entry specifies a time, bearing, and enabled state
@@ -90,3 +129,36 @@ positions:
 #     bearing: 285   # Point to USA East Coast
 #   - time: "23:00"
 #     bearing: 60    # Point to Australia
+
+# Example 5: Sun tracking with gray-line propagation
+# enabled: true
+# follow_sun: true
+# follow_sun_step: 10        # Update every 10 minutes
+# daytime_only: true         # Only track during daytime
+# daytime_overlap: 90        # Start 90 minutes before sunrise, end 90 minutes after sunset
+# positions: []              # No scheduled positions, just sun tracking
+
+# Example 6: Sun tracking during day, fixed position at night
+# enabled: true
+# follow_sun: true
+# follow_sun_step: 15
+# daytime_only: true
+# daytime_overlap: 60
+# positions:
+#   - time: "night"          # Point north during night
+#     bearing: 0
+#     enabled: true
+
+# Example 7: Combine sun tracking with scheduled overrides
+# enabled: true
+# follow_sun: true           # Track sun by default
+# follow_sun_step: 15
+# daytime_only: true
+# daytime_overlap: 60
+# positions:
+#   - time: "12:00"          # Override at noon to point at specific target
+#     bearing: 45
+#     enabled: true
+#   - time: "13:00"          # Resume sun tracking after 1 hour
+#     bearing: 180           # (sun tracking will take over)
+#     enabled: false         # Disabled, so sun tracking continues

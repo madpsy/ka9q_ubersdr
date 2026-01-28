@@ -251,6 +251,8 @@ type SunPathResponse struct {
 // Returns sun positions throughout the day at specified intervals
 // Query parameters:
 //   - step: time step in minutes (default: 15, min: 1, max: 60)
+//   - daytime_only: if "true", only return positions where sun is above horizon (default: false)
+//   - overlap: minutes before sunrise/after sunset to extend daytime window (default: 0, only used if daytime_only=true)
 func handleSunPathAPI(w http.ResponseWriter, r *http.Request, config *Config) {
 	// Get current time
 	now := time.Now().UTC()
@@ -281,8 +283,34 @@ func handleSunPathAPI(w http.ResponseWriter, r *http.Request, config *Config) {
 		}
 	}
 
+	// Parse daytime_only parameter (default false)
+	daytimeOnly := r.URL.Query().Get("daytime_only") == "true"
+
+	// Parse overlap parameter (default 0 minutes)
+	overlapMinutes := 0
+	if overlapParam := r.URL.Query().Get("overlap"); overlapParam != "" {
+		if overlap, err := strconv.Atoi(overlapParam); err == nil {
+			// Validate overlap range (0-180 minutes)
+			if overlap < 0 {
+				overlapMinutes = 0
+			} else if overlap > 180 {
+				overlapMinutes = 180
+			} else {
+				overlapMinutes = overlap
+			}
+		}
+	}
+
 	// Calculate sun times for today
 	sunTimes := GetTimes(now, lat, lon, float64(alt))
+
+	// Calculate tracking window with overlap if daytime_only is true
+	var trackingStart, trackingEnd time.Time
+	if daytimeOnly {
+		overlapDuration := time.Duration(overlapMinutes) * time.Minute
+		trackingStart = sunTimes.Sunrise.Add(-overlapDuration)
+		trackingEnd = sunTimes.Sunset.Add(overlapDuration)
+	}
 
 	// Start at midnight of the current day
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
@@ -295,14 +323,37 @@ func handleSunPathAPI(w http.ResponseWriter, r *http.Request, config *Config) {
 		// Calculate sun position for this time
 		sunPos := GetPosition(currentTime, lat, lon)
 
-		// Determine if it's daytime (sun above horizon)
-		isDaytime := currentTime.After(sunTimes.Sunrise) && currentTime.Before(sunTimes.Sunset)
+		// Determine if it's daytime (sun above horizon with overlap)
+		var isDaytime bool
+		if daytimeOnly {
+			// Use tracking window with overlap
+			isDaytime = currentTime.After(trackingStart) && currentTime.Before(trackingEnd)
+		} else {
+			// Use standard sunrise/sunset
+			isDaytime = currentTime.After(sunTimes.Sunrise) && currentTime.Before(sunTimes.Sunset)
+		}
+
+		// Normalize azimuth to 0-360 degrees range
+		// SunCalc returns azimuth in range -π to +π (south = 0, east = -π/2, west = π/2)
+		// We need to convert to 0-360 range (north = 0, east = 90, south = 180, west = 270)
+		azimuthDeg := sunPos.Azimuth / rad
+		azimuthDeg = azimuthDeg + 180.0 // Shift from [-180,180] to [0,360] with south at 180
+		if azimuthDeg < 0 {
+			azimuthDeg += 360.0
+		} else if azimuthDeg >= 360 {
+			azimuthDeg -= 360.0
+		}
+
+		// Skip nighttime positions if daytime_only is true
+		if daytimeOnly && !isDaytime {
+			continue
+		}
 
 		dataPoint := SunPathDataPoint{
 			Time:        currentTime.Format(time.RFC3339),
 			TimeLocal:   currentTime.Format("15:04"),
 			Azimuth:     sunPos.Azimuth,
-			AzimuthDeg:  sunPos.Azimuth / rad,
+			AzimuthDeg:  azimuthDeg,
 			Altitude:    sunPos.Altitude,
 			AltitudeDeg: sunPos.Altitude / rad,
 			IsDaytime:   isDaytime,

@@ -6936,6 +6936,10 @@
             }
         }
 
+        // Global variables for countries table sorting
+        let countriesBeamSortColumn = 'distance';
+        let countriesBeamSortDirection = 'asc';
+
         // Update countries in beam list
         function updateCountriesInBeam(countries, currentAzimuth) {
             const container = document.getElementById('countries-in-beam-container');
@@ -6943,17 +6947,18 @@
 
             // Find countries within the beam (±20° cone)
             const beamWidth = 20;
-            const countriesInBeam = countries.filter(country => {
+            let countriesInBeam = countries.filter(country => {
                 const diff = Math.abs(country.bearing - currentAzimuth);
                 const normalizedDiff = diff > 180 ? 360 - diff : diff;
                 return normalizedDiff <= beamWidth;
-            }).sort((a, b) => {
-                // Sort by distance from beam center
-                const diffA = Math.abs(a.bearing - currentAzimuth);
-                const diffB = Math.abs(b.bearing - currentAzimuth);
-                const normA = diffA > 180 ? 360 - diffA : diffA;
-                const normB = diffB > 180 ? 360 - diffB : diffB;
-                return normA - normB;
+            }).map(country => {
+                // Calculate distance from beam center for sorting
+                const diff = Math.abs(country.bearing - currentAzimuth);
+                const normalizedDiff = diff > 180 ? 360 - diff : diff;
+                return {
+                    ...country,
+                    beamOffset: normalizedDiff
+                };
             });
 
             if (countriesInBeam.length === 0) {
@@ -6961,23 +6966,55 @@
                 return;
             }
 
-            // Create table
+            // Sort countries based on current sort column and direction
+            countriesInBeam.sort((a, b) => {
+                let aVal, bVal;
+                switch(countriesBeamSortColumn) {
+                    case 'name':
+                        aVal = a.name.toLowerCase();
+                        bVal = b.name.toLowerCase();
+                        break;
+                    case 'bearing':
+                        aVal = a.bearing;
+                        bVal = b.bearing;
+                        break;
+                    case 'distance':
+                    default:
+                        aVal = a.distance_km;
+                        bVal = b.distance_km;
+                        break;
+                }
+                
+                if (countriesBeamSortDirection === 'asc') {
+                    return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
+                } else {
+                    return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
+                }
+            });
+
+            // Helper function for sort icons
+            const sortIcon = (column) => {
+                if (countriesBeamSortColumn === column) {
+                    return countriesBeamSortDirection === 'asc' ? ' ▲' : ' ▼';
+                }
+                return '';
+            };
+
+            // Create table with sortable headers
             let html = `
                 <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
                     <thead>
                         <tr style="border-bottom: 1px solid #dee2e6;">
-                            <th style="padding: 6px; text-align: left; color: #666; font-weight: 500;">Country</th>
-                            <th style="padding: 6px; text-align: right; color: #666; font-weight: 500;">Bearing</th>
-                            <th style="padding: 6px; text-align: right; color: #666; font-weight: 500;">Dist (km)</th>
+                            <th onclick="sortCountriesInBeam('name')" style="padding: 6px; text-align: left; color: #666; font-weight: 500; cursor: pointer; user-select: none;" title="Click to sort">Country${sortIcon('name')}</th>
+                            <th onclick="sortCountriesInBeam('bearing')" style="padding: 6px; text-align: right; color: #666; font-weight: 500; cursor: pointer; user-select: none;" title="Click to sort">Bearing${sortIcon('bearing')}</th>
+                            <th onclick="sortCountriesInBeam('distance')" style="padding: 6px; text-align: right; color: #666; font-weight: 500; cursor: pointer; user-select: none;" title="Click to sort">Dist (km)${sortIcon('distance')}</th>
                         </tr>
                     </thead>
                     <tbody>
             `;
 
             countriesInBeam.slice(0, 15).forEach(country => {
-                const diff = Math.abs(country.bearing - currentAzimuth);
-                const normalizedDiff = diff > 180 ? 360 - diff : diff;
-                const opacity = 1 - (normalizedDiff / beamWidth) * 0.5; // Fade based on distance from center
+                const opacity = 1 - (country.beamOffset / beamWidth) * 0.5; // Fade based on distance from center
                 
                 html += `
                     <tr style="border-bottom: 1px solid #f0f0f0; opacity: ${opacity};">
@@ -6995,6 +7032,34 @@
             }
 
             container.innerHTML = html;
+            
+            // Store countries data for re-sorting
+            container.countriesData = countriesInBeam;
+            container.currentAzimuth = currentAzimuth;
+        }
+
+        // Sort countries in beam table
+        function sortCountriesInBeam(column) {
+            // Toggle direction if clicking same column, otherwise default to ascending
+            if (countriesBeamSortColumn === column) {
+                countriesBeamSortDirection = countriesBeamSortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                countriesBeamSortColumn = column;
+                countriesBeamSortDirection = 'asc';
+            }
+
+            // Re-render the table with stored data
+            const container = document.getElementById('countries-in-beam-container');
+            if (container && container.countriesData && container.currentAzimuth !== undefined) {
+                // Reconstruct the full countries array from stored data
+                const fullCountries = container.countriesData.map(c => ({
+                    name: c.name,
+                    bearing: c.bearing,
+                    distance_km: c.distance_km,
+                    continent: c.continent
+                }));
+                updateCountriesInBeam(fullCountries, container.currentAzimuth);
+            }
         }
 
         // Update sun position on the rotator map (current time)

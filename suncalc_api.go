@@ -352,19 +352,18 @@ func handleSunPathAPI(w http.ResponseWriter, r *http.Request, config *Config) {
 
 		// Determine if it's daytime (sun above horizon with overlap or in custom windows)
 		var isDaytime bool
-		if daytimeOnly {
-			if hasTwoWindows {
-				// Check if we're in either the sunrise or sunset window
-				inSunriseWindow := currentTime.After(sunriseWindowStart) && currentTime.Before(sunriseWindowEnd)
-				inSunsetWindow := currentTime.After(sunsetWindowStart) && currentTime.Before(sunsetWindowEnd)
-				isDaytime = inSunriseWindow || inSunsetWindow
-			} else {
-				// Use single tracking window with overlap
-				isDaytime = currentTime.After(trackingStart) && currentTime.Before(trackingEnd)
-			}
+		if hasTwoWindows {
+			// Custom windows specified - check if we're in either window
+			// This takes precedence over daytime_only setting
+			inSunriseWindow := currentTime.After(sunriseWindowStart) && currentTime.Before(sunriseWindowEnd)
+			inSunsetWindow := currentTime.After(sunsetWindowStart) && currentTime.Before(sunsetWindowEnd)
+			isDaytime = inSunriseWindow || inSunsetWindow
+		} else if daytimeOnly {
+			// Use single tracking window with overlap
+			isDaytime = currentTime.After(trackingStart) && currentTime.Before(trackingEnd)
 		} else {
-			// Use standard sunrise/sunset
-			isDaytime = currentTime.After(sunTimes.Sunrise) && currentTime.Before(sunTimes.Sunset)
+			// daytime_only is false and no custom windows - include all times
+			isDaytime = true
 		}
 
 		// Normalize azimuth to 0-360 degrees range

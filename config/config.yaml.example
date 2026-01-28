@@ -390,13 +390,13 @@ spectrum:
       start_freq: 135700
       end_freq: 137800
       gain_db: 0.0
-      transition_hz: 20000      # 20 kHz smooth transition
+      transition_hz: 1000      # 1 kHz smooth transition
 
     630m:
       start_freq: 472000
       end_freq: 479000
       gain_db: 0.0
-      transition_hz: 30000      # 30 kHz smooth transition
+      transition_hz: 2000      # 2 kHz smooth transition
 
     160m:
       start_freq: 1800000

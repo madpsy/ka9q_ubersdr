@@ -1061,6 +1061,11 @@ func main() {
 		handleSunCalcAPI(w, r, config)
 	})
 
+	// SunCalc path endpoint (sun positions throughout the day)
+	http.HandleFunc("/api/suncalc/path", func(w http.ResponseWriter, r *http.Request) {
+		handleSunPathAPI(w, r, config)
+	})
+
 	// Noise floor endpoints (with gzip compression, IP ban checking, and rate limiting)
 	http.HandleFunc("/api/noisefloor/latest", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorLatest(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -220,6 +221,132 @@ func handleSunCalcAPI(w http.ResponseWriter, r *http.Request, config *Config) {
 	// Encode and send response
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding suncalc response: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+}
+
+// SunPathDataPoint represents a single point in the sun's path
+type SunPathDataPoint struct {
+	Time        string  `json:"time"`         // Time in RFC3339 format
+	TimeLocal   string  `json:"time_local"`   // Time in HH:MM format
+	Azimuth     float64 `json:"azimuth_rad"`  // Azimuth in radians
+	AzimuthDeg  float64 `json:"azimuth_deg"`  // Azimuth in degrees (0-360)
+	Altitude    float64 `json:"altitude_rad"` // Altitude in radians
+	AltitudeDeg float64 `json:"altitude_deg"` // Altitude in degrees
+	IsDaytime   bool    `json:"is_daytime"`   // Whether sun is above horizon
+}
+
+// SunPathResponse represents the API response for sun path data
+type SunPathResponse struct {
+	Location    LocationInfo       `json:"location"`
+	Date        string             `json:"date"`         // Date in YYYY-MM-DD format
+	StepMinutes int                `json:"step_minutes"` // Time step in minutes
+	DataPoints  []SunPathDataPoint `json:"data_points"`  // Array of sun positions
+	SunTimes    SunTimesInfo       `json:"sun_times"`    // Sun times for the day
+	Timestamp   string             `json:"timestamp"`    // When this data was generated
+}
+
+// handleSunPathAPI handles the /api/suncalc/path endpoint
+// Returns sun positions throughout the day at specified intervals
+// Query parameters:
+//   - step: time step in minutes (default: 15, min: 1, max: 60)
+func handleSunPathAPI(w http.ResponseWriter, r *http.Request, config *Config) {
+	// Get current time
+	now := time.Now().UTC()
+
+	// Get location from config
+	lat := config.Admin.GPS.Lat
+	lon := config.Admin.GPS.Lon
+	alt := config.Admin.ASL
+
+	// Check if coordinates are set
+	if lat == 0 && lon == 0 {
+		http.Error(w, "GPS coordinates not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Parse step parameter (default 15 minutes)
+	stepMinutes := 15
+	if stepParam := r.URL.Query().Get("step"); stepParam != "" {
+		if step, err := strconv.Atoi(stepParam); err == nil {
+			// Validate step range (1-60 minutes)
+			if step < 1 {
+				stepMinutes = 1
+			} else if step > 60 {
+				stepMinutes = 60
+			} else {
+				stepMinutes = step
+			}
+		}
+	}
+
+	// Calculate sun times for today
+	sunTimes := GetTimes(now, lat, lon, float64(alt))
+
+	// Start at midnight of the current day
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	// Generate data points for the entire day (24 hours)
+	dataPoints := []SunPathDataPoint{}
+	for minutes := 0; minutes < 24*60; minutes += stepMinutes {
+		currentTime := startOfDay.Add(time.Duration(minutes) * time.Minute)
+
+		// Calculate sun position for this time
+		sunPos := GetPosition(currentTime, lat, lon)
+
+		// Determine if it's daytime (sun above horizon)
+		isDaytime := currentTime.After(sunTimes.Sunrise) && currentTime.Before(sunTimes.Sunset)
+
+		dataPoint := SunPathDataPoint{
+			Time:        currentTime.Format(time.RFC3339),
+			TimeLocal:   currentTime.Format("15:04"),
+			Azimuth:     sunPos.Azimuth,
+			AzimuthDeg:  sunPos.Azimuth / rad,
+			Altitude:    sunPos.Altitude,
+			AltitudeDeg: sunPos.Altitude / rad,
+			IsDaytime:   isDaytime,
+		}
+
+		dataPoints = append(dataPoints, dataPoint)
+	}
+
+	// Build response
+	response := SunPathResponse{
+		Location: LocationInfo{
+			Latitude:  lat,
+			Longitude: lon,
+			Altitude:  alt,
+		},
+		Date:        now.Format("2006-01-02"),
+		StepMinutes: stepMinutes,
+		DataPoints:  dataPoints,
+		SunTimes: SunTimesInfo{
+			Sunrise:       sunTimes.Sunrise.Format(time.RFC3339),
+			SunriseEnd:    sunTimes.SunriseEnd.Format(time.RFC3339),
+			Sunset:        sunTimes.Sunset.Format(time.RFC3339),
+			SunsetStart:   sunTimes.SunsetStart.Format(time.RFC3339),
+			Dawn:          sunTimes.Dawn.Format(time.RFC3339),
+			Dusk:          sunTimes.Dusk.Format(time.RFC3339),
+			NauticalDawn:  sunTimes.NauticalDawn.Format(time.RFC3339),
+			NauticalDusk:  sunTimes.NauticalDusk.Format(time.RFC3339),
+			NightEnd:      sunTimes.NightEnd.Format(time.RFC3339),
+			Night:         sunTimes.Night.Format(time.RFC3339),
+			GoldenHourEnd: sunTimes.GoldenHourEnd.Format(time.RFC3339),
+			GoldenHour:    sunTimes.GoldenHour.Format(time.RFC3339),
+			SolarNoon:     sunTimes.SolarNoon.Format(time.RFC3339),
+			Nadir:         sunTimes.Nadir.Format(time.RFC3339),
+		},
+		Timestamp: now.Format(time.RFC3339),
+	}
+
+	// Set response headers
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=3600") // Cache for 1 hour since sun path doesn't change much
+
+	// Encode and send response
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding sun path response: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}

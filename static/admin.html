@@ -6472,6 +6472,8 @@
                     setTimeout(() => {
                         drawRotatorTimeline(positions);
                         setupRotatorTimelineHover(timelineCanvas);
+                        // Update next movement after timeline data is ready
+                        updateNextRotatorMovement();
                     }, 0);
                 });
             } else {
@@ -6479,6 +6481,8 @@
                 setTimeout(() => {
                     drawRotatorTimeline(positions);
                     setupRotatorTimelineHover(timelineCanvas);
+                    // Update next movement after timeline data is ready
+                    updateNextRotatorMovement();
                 }, 0);
             }
 
@@ -6954,69 +6958,95 @@
             updateNextRotatorMovement();
         }
 
-        // Update next rotator movement display
-        async function updateNextRotatorMovement() {
+        // Update next rotator movement display using timeline data
+        function updateNextRotatorMovement() {
             const nextMovementEl = document.getElementById('rotator-next-movement-stat');
             if (!nextMovementEl) return;
 
-            try {
-                // Fetch scheduler status to get next position and sun tracking info
-                const response = await fetch('/admin/rotator-scheduler-config');
-                if (!response.ok) {
-                    nextMovementEl.textContent = '—';
-                    return;
+            // Use the cached sun path and scheduled positions from the timeline
+            const now = new Date();
+            const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+            // Build combined list of all events (same logic as timeline)
+            const allEvents = [];
+
+            // Add scheduled positions
+            const positions = currentRotatorSchedulerConfig.positions || [];
+            positions.filter(pos => pos.enabled !== false && pos.resolved_time).forEach(pos => {
+                const timeParts = pos.resolved_time.split(':');
+                const hours = parseInt(timeParts[0]);
+                const minutes = parseInt(timeParts[1]);
+                const totalMinutes = hours * 60 + minutes;
+                allEvents.push({
+                    totalMinutes: totalMinutes,
+                    bearing: pos.bearing,
+                    type: 'scheduled',
+                    time: pos.time,
+                    displayTime: pos.resolved_time
+                });
+            });
+
+            // Add sun tracking points if enabled
+            if (currentRotatorSchedulerConfig.follow_sun && window.cachedSunPath) {
+                window.cachedSunPath.forEach(sunPoint => {
+                    const totalMinutes = Math.floor(sunPoint.timeInHours * 60);
+                    allEvents.push({
+                        totalMinutes: totalMinutes,
+                        bearing: sunPoint.bearing,
+                        type: 'sun'
+                    });
+                });
+            }
+
+            if (allEvents.length === 0) {
+                nextMovementEl.textContent = 'None scheduled';
+                nextMovementEl.style.color = '#999';
+                return;
+            }
+
+            // Sort chronologically
+            allEvents.sort((a, b) => a.totalMinutes - b.totalMinutes);
+
+            // Find next event after current time
+            let nextEvent = null;
+            for (const event of allEvents) {
+                if (event.totalMinutes > currentMinutes) {
+                    nextEvent = event;
+                    break;
                 }
+            }
 
-                const data = await response.json();
-                const now = new Date();
+            // If no event found after current time, use first event (tomorrow)
+            if (!nextEvent && allEvents.length > 0) {
+                nextEvent = allEvents[0];
+            }
 
-                // Check if sun tracking is active
-                if (data.follow_sun && data.sun_tracking_active) {
-                    const step = data.follow_sun_step || 15;
-                    const sunAzimuth = data.sun_azimuth !== undefined ? Math.round(data.sun_azimuth) : '?';
-                    nextMovementEl.textContent = `Sun → ${sunAzimuth}° (${step}m)`;
-                    nextMovementEl.style.color = '#ff9800';
-                    return;
-                }
+            if (nextEvent) {
+                const minutesUntil = nextEvent.totalMinutes > currentMinutes
+                    ? nextEvent.totalMinutes - currentMinutes
+                    : (1440 - currentMinutes) + nextEvent.totalMinutes; // Tomorrow
 
-                // Check for next scheduled position
-                if (data.next_position) {
-                    const nextPos = data.next_position;
-                    const timeStr = nextPos.resolved_time || nextPos.time;
-                    
-                    // Parse time and calculate minutes until
-                    const timeParts = timeStr.split(':');
-                    const targetHours = parseInt(timeParts[0]);
-                    const targetMinutes = parseInt(timeParts[1]);
-                    const targetTime = new Date(now);
-                    targetTime.setHours(targetHours, targetMinutes, 0, 0);
-                    
-                    // If target time is in the past, it's tomorrow
-                    if (targetTime < now) {
-                        targetTime.setDate(targetTime.getDate() + 1);
-                    }
-                    
-                    const msUntil = targetTime - now;
-                    const minutesUntil = Math.floor(msUntil / 60000);
-                    const hoursUntil = Math.floor(minutesUntil / 60);
-                    
-                    let timeUntil;
-                    if (hoursUntil > 0) {
-                        const mins = minutesUntil % 60;
-                        timeUntil = `${hoursUntil}h ${mins}m`;
-                    } else {
-                        timeUntil = `${minutesUntil}m`;
-                    }
-                    
-                    nextMovementEl.textContent = `${nextPos.time} → ${nextPos.bearing}° (${timeUntil})`;
-                    nextMovementEl.style.color = '#667eea';
+                const hoursUntil = Math.floor(minutesUntil / 60);
+                const mins = minutesUntil % 60;
+
+                let timeUntil;
+                if (hoursUntil > 0) {
+                    timeUntil = `${hoursUntil}h ${mins}m`;
                 } else {
-                    nextMovementEl.textContent = 'None scheduled';
-                    nextMovementEl.style.color = '#999';
+                    timeUntil = `${mins}m`;
                 }
-            } catch (error) {
-                console.error('Failed to fetch next movement:', error);
-                nextMovementEl.textContent = '—';
+
+                if (nextEvent.type === 'sun') {
+                    const step = currentRotatorSchedulerConfig.follow_sun_step || 15;
+                    nextMovementEl.textContent = `Sun → ${nextEvent.bearing}° (${step}m)`;
+                    nextMovementEl.style.color = '#ff9800';
+                } else {
+                    nextMovementEl.textContent = `${nextEvent.time} → ${nextEvent.bearing}° (${timeUntil})`;
+                    nextMovementEl.style.color = '#667eea';
+                }
+            } else {
+                nextMovementEl.textContent = 'None scheduled';
+                nextMovementEl.style.color = '#999';
             }
         }
 

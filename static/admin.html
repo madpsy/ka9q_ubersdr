@@ -6476,6 +6476,22 @@
             followSunDiv.appendChild(followSunSmall);
             sunTrackingDiv.appendChild(followSunDiv);
 
+            // Follow Greyline toggle
+            const followGreylineDiv = document.createElement('div');
+            followGreylineDiv.className = 'config-field';
+            const followGreylineLabel = document.createElement('label');
+            followGreylineLabel.textContent = 'Track Gray Line (Terminator)';
+            followGreylineDiv.appendChild(followGreylineLabel);
+            const followGreylineSelect = document.createElement('select');
+            followGreylineSelect.id = 'followGreyline';
+            followGreylineSelect.innerHTML = '<option value="true">Yes</option><option value="false">No</option>';
+            followGreylineSelect.value = (currentRotatorSchedulerConfig.follow_greyline === true || currentRotatorSchedulerConfig.follow_greyline === 'true') ? 'true' : 'false';
+            followGreylineDiv.appendChild(followGreylineSelect);
+            const followGreylineSmall = document.createElement('small');
+            followGreylineSmall.textContent = 'Point perpendicular to sun (along gray line) instead of at sun. Useful for enhanced propagation during sunrise/sunset.';
+            followGreylineDiv.appendChild(followGreylineSmall);
+            sunTrackingDiv.appendChild(followGreylineDiv);
+
             // Update Interval (minutes)
             const updateIntervalDiv = document.createElement('div');
             updateIntervalDiv.className = 'config-field';
@@ -6551,7 +6567,7 @@
             }
             overlapDiv.appendChild(overlapInput);
             const overlapSmall = document.createElement('small');
-            overlapSmall.textContent = 'Extend tracking before sunrise and after sunset (0-180 minutes). Useful for gray-line propagation.';
+            overlapSmall.textContent = 'Extend tracking before sunrise and after sunset (0-180 minutes).';
             overlapDiv.appendChild(overlapSmall);
             sunTrackingDiv.appendChild(overlapDiv);
 
@@ -6614,6 +6630,7 @@
         async function applySunTrackingSettings() {
             const followSunEnabled = document.getElementById('sunTrackingEnabled').value === 'true';
             const oldFollowSunState = currentRotatorSchedulerConfig.follow_sun;
+            const followGreyline = document.getElementById('followGreyline').value === 'true';
             const interval = parseInt(document.getElementById('sunTrackingInterval').value);
             const daytimeOnly = document.getElementById('sunTrackingDaytimeOnly').value === 'true';
             const overlap = parseInt(document.getElementById('sunTrackingOverlap').value);
@@ -6655,6 +6672,7 @@
 
             // Update config object
             currentRotatorSchedulerConfig.follow_sun = followSunEnabled;
+            currentRotatorSchedulerConfig.follow_greyline = followGreyline;
             currentRotatorSchedulerConfig.follow_sun_step = interval;
             currentRotatorSchedulerConfig.daytime_only = daytimeOnly;
             currentRotatorSchedulerConfig.daytime_overlap = overlap;
@@ -7730,15 +7748,16 @@
                 const step = currentRotatorSchedulerConfig.follow_sun_step || 5;
                 const daytimeOnly = currentRotatorSchedulerConfig.daytime_only !== false;
                 const overlap = currentRotatorSchedulerConfig.daytime_overlap || 0;
+                const greyline = currentRotatorSchedulerConfig.follow_greyline === true;
 
                 // Check if we already have cached data for these settings
-                const settingsKey = `${step}-${daytimeOnly}-${overlap}`;
+                const settingsKey = `${step}-${daytimeOnly}-${overlap}-${greyline}`;
                 if (cachedSunPathSettings === settingsKey && cachedSunPathData) {
                     return; // Already cached
                 }
 
                 // Fetch sun path from API
-                const response = await fetch(`/api/suncalc/path?step=${step}&daytime_only=${daytimeOnly}&overlap=${overlap}`);
+                const response = await fetch(`/api/suncalc/path?step=${step}&daytime_only=${daytimeOnly}&overlap=${overlap}&greyline=${greyline}`);
                 if (!response.ok) {
                     window.cachedSunPath = null;
                     return;

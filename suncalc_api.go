@@ -228,13 +228,14 @@ func handleSunCalcAPI(w http.ResponseWriter, r *http.Request, config *Config) {
 
 // SunPathDataPoint represents a single point in the sun's path
 type SunPathDataPoint struct {
-	Time        string  `json:"time"`         // Time in RFC3339 format
-	TimeLocal   string  `json:"time_local"`   // Time in HH:MM format
-	Azimuth     float64 `json:"azimuth_rad"`  // Azimuth in radians
-	AzimuthDeg  float64 `json:"azimuth_deg"`  // Azimuth in degrees (0-360)
-	Altitude    float64 `json:"altitude_rad"` // Altitude in radians
-	AltitudeDeg float64 `json:"altitude_deg"` // Altitude in degrees
-	IsDaytime   bool    `json:"is_daytime"`   // Whether sun is above horizon
+	Time            string  `json:"time"`             // Time in RFC3339 format
+	TimeLocal       string  `json:"time_local"`       // Time in HH:MM format
+	Azimuth         float64 `json:"azimuth_rad"`      // Azimuth in radians
+	AzimuthDeg      float64 `json:"azimuth_deg"`      // Azimuth in degrees (0-360)
+	Altitude        float64 `json:"altitude_rad"`     // Altitude in radians
+	AltitudeDeg     float64 `json:"altitude_deg"`     // Altitude in degrees
+	IsDaytime       bool    `json:"is_daytime"`       // Whether sun is above horizon
+	GreylineAzimuth float64 `json:"greyline_azimuth"` // Gray line bearing in degrees (perpendicular to sun)
 }
 
 // SunPathResponse represents the API response for sun path data
@@ -253,6 +254,7 @@ type SunPathResponse struct {
 //   - step: time step in minutes (default: 15, min: 1, max: 60)
 //   - daytime_only: if "true", only return positions where sun is above horizon (default: false)
 //   - overlap: minutes before sunrise/after sunset to extend daytime window (default: 0, only used if daytime_only=true)
+//   - greyline: if "true", calculate gray line bearing (perpendicular to sun) instead of sun azimuth (default: false)
 func handleSunPathAPI(w http.ResponseWriter, r *http.Request, config *Config) {
 	// Get current time
 	now := time.Now().UTC()
@@ -285,6 +287,9 @@ func handleSunPathAPI(w http.ResponseWriter, r *http.Request, config *Config) {
 
 	// Parse daytime_only parameter (default false)
 	daytimeOnly := r.URL.Query().Get("daytime_only") == "true"
+
+	// Parse greyline parameter (default false)
+	greyline := r.URL.Query().Get("greyline") == "true"
 
 	// Parse overlap parameter (default 0 minutes)
 	overlapMinutes := 0
@@ -344,19 +349,34 @@ func handleSunPathAPI(w http.ResponseWriter, r *http.Request, config *Config) {
 			azimuthDeg -= 360.0
 		}
 
+		// Calculate gray line bearing (perpendicular to sun direction)
+		// The gray line is the terminator between day and night, perpendicular to sun's bearing
+		// Add 90° to point along the gray line (toward the evening terminator)
+		greylineAzimuth := azimuthDeg + 90.0
+		if greylineAzimuth >= 360.0 {
+			greylineAzimuth -= 360.0
+		}
+
+		// If greyline mode is enabled, use gray line bearing as the primary azimuth
+		displayAzimuth := azimuthDeg
+		if greyline {
+			displayAzimuth = greylineAzimuth
+		}
+
 		// Skip nighttime positions if daytime_only is true
 		if daytimeOnly && !isDaytime {
 			continue
 		}
 
 		dataPoint := SunPathDataPoint{
-			Time:        currentTime.Format(time.RFC3339),
-			TimeLocal:   currentTime.Format("15:04"),
-			Azimuth:     sunPos.Azimuth,
-			AzimuthDeg:  azimuthDeg,
-			Altitude:    sunPos.Altitude,
-			AltitudeDeg: sunPos.Altitude / rad,
-			IsDaytime:   isDaytime,
+			Time:            currentTime.Format(time.RFC3339),
+			TimeLocal:       currentTime.Format("15:04"),
+			Azimuth:         sunPos.Azimuth,
+			AzimuthDeg:      displayAzimuth,
+			Altitude:        sunPos.Altitude,
+			AltitudeDeg:     sunPos.Altitude / rad,
+			IsDaytime:       isDaytime,
+			GreylineAzimuth: greylineAzimuth,
 		}
 
 		dataPoints = append(dataPoints, dataPoint)

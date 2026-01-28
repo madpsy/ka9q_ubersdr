@@ -33,6 +33,14 @@ enabled: false
 # Enable sun tracking mode
 follow_sun: false
 
+# Track gray line instead of sun directly
+# Default: false
+# When true, the rotator points perpendicular to the sun (along the gray line/terminator)
+# When false, the rotator points directly at the sun
+# The gray line is the boundary between day and night on Earth, where enhanced
+# propagation occurs during sunrise and sunset periods
+follow_greyline: false
+
 # Update interval in minutes (how often to update rotator position)
 # Default: 15 minutes
 # Range: 1-60 minutes
@@ -130,13 +138,14 @@ positions:
 #   - time: "23:00"
 #     bearing: 60    # Point to Australia
 
-# Example 5: Sun tracking with gray-line propagation
+# Example 5: Gray-line tracking for enhanced propagation
 # enabled: true
 # follow_sun: true
+# follow_greyline: true      # Track gray line (perpendicular to sun)
 # follow_sun_step: 10        # Update every 10 minutes
 # daytime_only: true         # Only track during daytime
 # daytime_overlap: 90        # Start 90 minutes before sunrise, end 90 minutes after sunset
-# positions: []              # No scheduled positions, just sun tracking
+# positions: []              # No scheduled positions, just gray line tracking
 
 # Example 6: Sun tracking during day, fixed position at night
 # enabled: true
@@ -149,9 +158,10 @@ positions:
 #     bearing: 0
 #     enabled: true
 
-# Example 7: Combine sun tracking with scheduled overrides
+# Example 7: Combine gray line tracking with scheduled overrides
 # enabled: true
-# follow_sun: true           # Track sun by default
+# follow_sun: true           # Track gray line by default
+# follow_greyline: true      # Point along gray line (perpendicular to sun)
 # follow_sun_step: 15
 # daytime_only: true
 # daytime_overlap: 60
@@ -159,6 +169,6 @@ positions:
 #   - time: "12:00"          # Override at noon to point at specific target
 #     bearing: 45
 #     enabled: true
-#   - time: "13:00"          # Resume sun tracking after 1 hour
-#     bearing: 180           # (sun tracking will take over)
-#     enabled: false         # Disabled, so sun tracking continues
+#   - time: "13:00"          # Resume gray line tracking after 1 hour
+#     bearing: 180           # (gray line tracking will take over)
+#     enabled: false         # Disabled, so gray line tracking continues

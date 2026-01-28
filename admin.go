@@ -4956,6 +4956,9 @@ func (ah *AdminHandler) handleUpdateRotatorSchedulerConfig(w http.ResponseWriter
 	if daytimeOverlap, ok := config["daytime_overlap"]; ok {
 		filteredConfig["daytime_overlap"] = daytimeOverlap
 	}
+	if followGreyline, ok := config["follow_greyline"]; ok {
+		filteredConfig["follow_greyline"] = followGreyline
+	}
 
 	// Backup existing file with timestamp before replacing
 	schedulerPath := ah.rotatorScheduler.configPath

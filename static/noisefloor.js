@@ -967,13 +967,11 @@ class NoiseFloorMonitor {
         container.appendChild(sparklineCard);
         container.appendChild(fftCard);
 
-        setTimeout(() => {
+        setTimeout(async () => {
             this.createSparkline(sparklineId, band);
-            this.createFFTSpectrum(fftId, band);
-            // Setup audio preview after a short delay to ensure chart is stored
-            setTimeout(() => {
-                this.setupAudioPreview(band, fftId);
-            }, 100);
+            await this.createFFTSpectrum(fftId, band);
+            // Setup audio preview after FFT chart is created
+            this.setupAudioPreview(band, fftId);
         }, 0);
 
         return container;
@@ -3500,10 +3498,6 @@ class NoiseFloorMonitor {
         const button = document.getElementById(`audio-preview-btn-${band}`);
         const canvas = document.getElementById(canvasId);
 
-        console.log('setupAudioPreview called for band:', band);
-        console.log('Button found:', button);
-        console.log('Canvas found:', canvas);
-
         if (!button || !canvas) {
             console.warn('Button or canvas not found for audio preview setup');
             return;
@@ -3512,12 +3506,10 @@ class NoiseFloorMonitor {
         // Get band frequency range from FFT data
         const chart = this.fftCharts[band];
         if (!chart) {
-            console.warn('FFT chart not found for band:', band);
+            console.error('FFT chart not found for band:', band);
+            console.error('Available charts:', Object.keys(this.fftCharts));
             return;
         }
-
-        console.log('FFT chart found:', chart);
-        console.log('Chart scales:', chart.options.scales);
 
         const startFreq = chart.options.scales.x.min * 1e6; // Convert MHz to Hz
         const endFreq = chart.options.scales.x.max * 1e6;

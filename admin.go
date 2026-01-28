@@ -4950,6 +4950,9 @@ func (ah *AdminHandler) handleUpdateRotatorSchedulerConfig(w http.ResponseWriter
 	if followSunStep, ok := config["follow_sun_step"]; ok {
 		filteredConfig["follow_sun_step"] = followSunStep
 	}
+	if followSunPath, ok := config["follow_sun_path"]; ok {
+		filteredConfig["follow_sun_path"] = followSunPath
+	}
 	if daytimeOnly, ok := config["daytime_only"]; ok {
 		filteredConfig["daytime_only"] = daytimeOnly
 	}

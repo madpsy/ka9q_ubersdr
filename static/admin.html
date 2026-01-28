@@ -7352,17 +7352,30 @@
                 bearingError.style.display = 'block';
                 isValid = false;
             } else {
-                // Check for duplicate time
+                // Check for duplicate time+offset combination
                 const positions = currentRotatorSchedulerConfig.positions || [];
+                const currentOffset = triggerType === 'solar' ? parseInt(offsetValue.replace(/^\+/, '')) || 0 : 0;
+
                 const isDuplicate = positions.some(pos => {
                     if (isEditing && pos.time === originalTime) {
                         return false;
                     }
+                    // For solar events, check both time AND offset
+                    if (triggerType === 'solar') {
+                        const posOffset = pos.offset || 0;
+                        return pos.time === time && posOffset === currentOffset;
+                    }
+                    // For fixed times, only check time
                     return pos.time === time;
                 });
 
                 if (isDuplicate) {
-                    bearingError.textContent = `A position at ${time} already exists`;
+                    if (triggerType === 'solar') {
+                        const offsetDisplay = currentOffset === 0 ? '' : ` with offset ${currentOffset >= 0 ? '+' : ''}${currentOffset}m`;
+                        bearingError.textContent = `A position at ${time}${offsetDisplay} already exists`;
+                    } else {
+                        bearingError.textContent = `A position at ${time} already exists`;
+                    }
                     bearingError.style.display = 'block';
                     isValid = false;
                 } else {

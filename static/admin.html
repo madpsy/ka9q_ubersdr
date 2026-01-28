@@ -7140,24 +7140,37 @@
         // Find the next solar event from sun times
         function findNextSolarEvent(sunTimes) {
             const now = new Date();
-            const events = [
-                { name: 'Night End', time: new Date(sunTimes.nightEnd) },
-                { name: 'Nautical Dawn', time: new Date(sunTimes.nauticalDawn) },
-                { name: 'Dawn', time: new Date(sunTimes.dawn) },
-                { name: 'Sunrise', time: new Date(sunTimes.sunrise) },
-                { name: 'Sunrise End', time: new Date(sunTimes.sunriseEnd) },
-                { name: 'Golden Hour End', time: new Date(sunTimes.goldenHourEnd) },
-                { name: 'Solar Noon', time: new Date(sunTimes.solarNoon) },
-                { name: 'Golden Hour', time: new Date(sunTimes.goldenHour) },
-                { name: 'Sunset Start', time: new Date(sunTimes.sunsetStart) },
-                { name: 'Sunset', time: new Date(sunTimes.sunset) },
-                { name: 'Dusk', time: new Date(sunTimes.dusk) },
-                { name: 'Nautical Dusk', time: new Date(sunTimes.nauticalDusk) },
-                { name: 'Night', time: new Date(sunTimes.night) },
-                { name: 'Nadir', time: new Date(sunTimes.nadir) }
+            
+            // Build events array with all available times, filtering out invalid dates
+            const events = [];
+            const eventMappings = [
+                { name: 'Night End', key: 'nightEnd' },
+                { name: 'Nautical Dawn', key: 'nauticalDawn' },
+                { name: 'Dawn', key: 'dawn' },
+                { name: 'Sunrise', key: 'sunrise' },
+                { name: 'Sunrise End', key: 'sunriseEnd' },
+                { name: 'Golden Hour End', key: 'goldenHourEnd' },
+                { name: 'Solar Noon', key: 'solarNoon' },
+                { name: 'Golden Hour', key: 'goldenHour' },
+                { name: 'Sunset Start', key: 'sunsetStart' },
+                { name: 'Sunset', key: 'sunset' },
+                { name: 'Dusk', key: 'dusk' },
+                { name: 'Nautical Dusk', key: 'nauticalDusk' },
+                { name: 'Night', key: 'night' },
+                { name: 'Nadir', key: 'nadir' }
             ];
 
-            // Find next event after current time
+            eventMappings.forEach(mapping => {
+                if (sunTimes[mapping.key]) {
+                    const eventTime = new Date(sunTimes[mapping.key]);
+                    // Only add if it's a valid date
+                    if (!isNaN(eventTime.getTime())) {
+                        events.push({ name: mapping.name, time: eventTime });
+                    }
+                }
+            });
+
+            // Sort all events by time and find next one after current time
             const futureEvents = events.filter(e => e.time > now).sort((a, b) => a.time - b.time);
 
             if (futureEvents.length > 0) {

@@ -6299,11 +6299,21 @@
 
             positionsSection.appendChild(timelineContainer);
 
-            // Draw the timeline and setup hover events after adding to DOM
-            setTimeout(() => {
-                drawRotatorTimeline(positions);
-                setupRotatorTimelineHover(timelineCanvas);
-            }, 0);
+            // Fetch sun path first if enabled, then draw timeline
+            if (currentRotatorSchedulerConfig.follow_sun) {
+                fetchSunTrackingPath().then(() => {
+                    setTimeout(() => {
+                        drawRotatorTimeline(positions);
+                        setupRotatorTimelineHover(timelineCanvas);
+                    }, 0);
+                });
+            } else {
+                // Draw timeline without sun path
+                setTimeout(() => {
+                    drawRotatorTimeline(positions);
+                    setupRotatorTimelineHover(timelineCanvas);
+                }, 0);
+            }
             if (positions.length === 0) {
                 const noPositions = document.createElement('p');
                 noPositions.style.textAlign = 'center';
@@ -6549,15 +6559,6 @@
 
             // Load logs after rendering
             loadRotatorSchedulerLogs();
-
-            // Fetch sun tracking path if enabled
-            if (currentRotatorSchedulerConfig.follow_sun) {
-                fetchSunTrackingPath().then(() => {
-                    // Redraw timeline with sun path
-                    const positions = currentRotatorSchedulerConfig.positions || [];
-                    drawRotatorTimeline(positions);
-                });
-            }
         }
 
         // Apply sun tracking settings

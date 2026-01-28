@@ -6425,9 +6425,9 @@
                         <td style="padding: 12px;">${resolvedTimeDisplay}</td>
                         <td style="padding: 12px;"><span style="color: #667eea; font-weight: bold;">${pos.bearing}°</span></td>
                         <td style="padding: 12px; text-align: center; white-space: nowrap;">
-                            <button class="btn ${toggleButtonClass}" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="togglePositionEnabled('${escapedTime}')">${toggleButtonText}</button>
-                            <button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="editScheduledPosition('${escapedTime}')">Edit</button>
-                            <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteScheduledPosition('${escapedTime}')">Delete</button>
+                            <button class="btn ${toggleButtonClass}" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="togglePositionEnabled('${escapedTime}', ${pos.offset || 0})">${toggleButtonText}</button>
+                            <button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="editScheduledPosition('${escapedTime}', ${pos.offset || 0})">Edit</button>
+                            <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteScheduledPosition('${escapedTime}', ${pos.offset || 0})">Delete</button>
                         </td>
                     `;
 
@@ -7311,11 +7311,16 @@
             validateScheduledPositionForm();
         }
 
-        async function editScheduledPosition(time) {
+        async function editScheduledPosition(time, offset) {
             const positions = currentRotatorSchedulerConfig.positions || [];
-            const position = positions.find(p => p.time === time);
+            // Match by both time AND offset to handle multiple triggers with same time but different offsets
+            const position = positions.find(p => {
+                const posOffset = p.offset || 0;
+                const targetOffset = offset || 0;
+                return p.time === time && posOffset === targetOffset;
+            });
             if (!position) {
-                showAlert('Position not found: ' + time, 'error');
+                showAlert('Position not found: ' + time + (offset ? ` with offset ${offset}` : ''), 'error');
                 return;
             }
             document.getElementById('scheduledPositionFormTitle').textContent = 'Edit Scheduled Position';
@@ -7352,11 +7357,16 @@
             document.getElementById('addScheduledPositionForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
-        async function togglePositionEnabled(time) {
+        async function togglePositionEnabled(time, offset) {
             const positions = currentRotatorSchedulerConfig.positions || [];
-            const position = positions.find(p => p.time === time);
+            // Match by both time AND offset to handle multiple triggers with same time but different offsets
+            const position = positions.find(p => {
+                const posOffset = p.offset || 0;
+                const targetOffset = offset || 0;
+                return p.time === time && posOffset === targetOffset;
+            });
             if (!position) {
-                showAlert('Position not found: ' + time, 'error');
+                showAlert('Position not found: ' + time + (offset ? ` with offset ${offset}` : ''), 'error');
                 return;
             }
 
@@ -7631,13 +7641,20 @@
             }
         }
 
-        async function deleteScheduledPosition(time) {
-            if (!confirm(`Are you sure you want to delete the scheduled position at ${time}?`)) {
+        async function deleteScheduledPosition(time, offset) {
+            // Build display text with offset if present
+            const displayText = offset ? `${time} (offset: ${offset >= 0 ? '+' : ''}${offset}m)` : time;
+            if (!confirm(`Are you sure you want to delete the scheduled position at ${displayText}?`)) {
                 return;
             }
 
             try {
-                const response = await fetch(`/admin/rotator-scheduler-position?time=${encodeURIComponent(time)}`, {
+                // Include offset in query parameters if present
+                let url = `/admin/rotator-scheduler-position?time=${encodeURIComponent(time)}`;
+                if (offset !== undefined && offset !== null && offset !== 0) {
+                    url += `&offset=${offset}`;
+                }
+                const response = await fetch(url, {
                     method: 'DELETE'
                 });
 

@@ -5091,12 +5091,26 @@ func (ah *AdminHandler) handleAddRotatorPosition(w http.ResponseWriter, r *http.
 	})
 }
 
-// handleUpdateRotatorPosition updates a position by time
+// handleUpdateRotatorPosition updates a position by time and optional offset
 func (ah *AdminHandler) handleUpdateRotatorPosition(w http.ResponseWriter, r *http.Request) {
 	timeParam := r.URL.Query().Get("time")
 	if timeParam == "" {
 		http.Error(w, "Time parameter required", http.StatusBadRequest)
 		return
+	}
+
+	// Get optional offset parameter for matching solar events with different offsets
+	offsetParam := r.URL.Query().Get("offset")
+	var targetOffset int
+	hasOffset := false
+	if offsetParam != "" {
+		var err error
+		targetOffset, err = strconv.Atoi(offsetParam)
+		if err != nil {
+			http.Error(w, "Invalid offset parameter", http.StatusBadRequest)
+			return
+		}
+		hasOffset = true
 	}
 
 	var updatedPos map[string]interface{}
@@ -5135,13 +5149,31 @@ func (ah *AdminHandler) handleUpdateRotatorPosition(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// Find position by time
+	// Find position by time AND offset (if offset is provided)
 	positionIndex := -1
 	for i, posInterface := range positions {
 		if posMap, ok := posInterface.(map[string]interface{}); ok {
 			if time, ok := posMap["time"].(string); ok && time == timeParam {
-				positionIndex = i
-				break
+				// If offset parameter was provided, also match on offset
+				if hasOffset {
+					posOffset := 0
+					if offset, ok := posMap["offset"]; ok {
+						switch v := offset.(type) {
+						case int:
+							posOffset = v
+						case float64:
+							posOffset = int(v)
+						}
+					}
+					if posOffset == targetOffset {
+						positionIndex = i
+						break
+					}
+				} else {
+					// No offset parameter - match first position with this time
+					positionIndex = i
+					break
+				}
 			}
 		}
 	}
@@ -5179,12 +5211,26 @@ func (ah *AdminHandler) handleUpdateRotatorPosition(w http.ResponseWriter, r *ht
 	})
 }
 
-// handleDeleteRotatorPosition deletes a position by time
+// handleDeleteRotatorPosition deletes a position by time and optional offset
 func (ah *AdminHandler) handleDeleteRotatorPosition(w http.ResponseWriter, r *http.Request) {
 	timeParam := r.URL.Query().Get("time")
 	if timeParam == "" {
 		http.Error(w, "Time parameter required", http.StatusBadRequest)
 		return
+	}
+
+	// Get optional offset parameter for matching solar events with different offsets
+	offsetParam := r.URL.Query().Get("offset")
+	var targetOffset int
+	hasOffset := false
+	if offsetParam != "" {
+		var err error
+		targetOffset, err = strconv.Atoi(offsetParam)
+		if err != nil {
+			http.Error(w, "Invalid offset parameter", http.StatusBadRequest)
+			return
+		}
+		hasOffset = true
 	}
 
 	// Read current config
@@ -5211,13 +5257,31 @@ func (ah *AdminHandler) handleDeleteRotatorPosition(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// Find position by time
+	// Find position by time AND offset (if offset is provided)
 	positionIndex := -1
 	for i, posInterface := range positions {
 		if posMap, ok := posInterface.(map[string]interface{}); ok {
 			if time, ok := posMap["time"].(string); ok && time == timeParam {
-				positionIndex = i
-				break
+				// If offset parameter was provided, also match on offset
+				if hasOffset {
+					posOffset := 0
+					if offset, ok := posMap["offset"]; ok {
+						switch v := offset.(type) {
+						case int:
+							posOffset = v
+						case float64:
+							posOffset = int(v)
+						}
+					}
+					if posOffset == targetOffset {
+						positionIndex = i
+						break
+					}
+				} else {
+					// No offset parameter - match first position with this time
+					positionIndex = i
+					break
+				}
 			}
 		}
 	}

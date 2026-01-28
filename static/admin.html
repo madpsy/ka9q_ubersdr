@@ -6477,6 +6477,19 @@
             daytimeOnlySelect.id = 'sunTrackingDaytimeOnly';
             daytimeOnlySelect.innerHTML = '<option value="true">Yes</option><option value="false">No</option>';
             daytimeOnlySelect.value = (currentRotatorSchedulerConfig.daytime_only === true || currentRotatorSchedulerConfig.daytime_only === 'true') ? 'true' : 'false';
+            daytimeOnlySelect.addEventListener('change', () => {
+                // Enable/disable overlap input based on daytime only mode
+                const overlapInput = document.getElementById('sunTrackingOverlap');
+                if (daytimeOnlySelect.value === 'false') {
+                    overlapInput.disabled = true;
+                    overlapInput.style.background = '#e9ecef';
+                    overlapInput.style.cursor = 'not-allowed';
+                } else {
+                    overlapInput.disabled = false;
+                    overlapInput.style.background = '';
+                    overlapInput.style.cursor = '';
+                }
+            });
             daytimeOnlyDiv.appendChild(daytimeOnlySelect);
             const daytimeOnlySmall = document.createElement('small');
             daytimeOnlySmall.textContent = 'Only track the sun during daylight hours (between sunrise and sunset)';
@@ -6495,6 +6508,12 @@
             overlapInput.min = '0';
             overlapInput.max = '180';
             overlapInput.value = currentRotatorSchedulerConfig.daytime_overlap || 0;
+            // Set initial disabled state based on daytime_only
+            if (daytimeOnlySelect.value === 'false') {
+                overlapInput.disabled = true;
+                overlapInput.style.background = '#e9ecef';
+                overlapInput.style.cursor = 'not-allowed';
+            }
             overlapDiv.appendChild(overlapInput);
             const overlapSmall = document.createElement('small');
             overlapSmall.textContent = 'Extend tracking before sunrise and after sunset (0-180 minutes). Useful for gray-line propagation.';

@@ -866,7 +866,6 @@
                     </div>
                 </div>
                 <div class="button-group" id="rotatorSchedulerButtons" style="display: none;">
-                    <button class="btn" onclick="showAddScheduledPositionForm()">Add Scheduled Position</button>
                     <button class="btn btn-secondary" onclick="loadRotatorSchedulerConfig()">Reload</button>
                     <button class="btn btn-secondary" onclick="exportRotatorSchedule()">Export Schedule</button>
                     <button class="btn btn-secondary" onclick="importRotatorSchedule()">Import Schedule</button>
@@ -6447,6 +6446,16 @@
                 positionsSection.appendChild(table);
             }
 
+            // Add "Add Scheduled Position" button below the table
+            const addPositionButtonDiv = document.createElement('div');
+            addPositionButtonDiv.style.marginTop = '15px';
+            const addPositionButton = document.createElement('button');
+            addPositionButton.className = 'btn';
+            addPositionButton.textContent = 'Add Scheduled Position';
+            addPositionButton.onclick = showAddScheduledPositionForm;
+            addPositionButtonDiv.appendChild(addPositionButton);
+            positionsSection.appendChild(addPositionButtonDiv);
+
             container.appendChild(positionsSection);
 
             // Sun Tracking Configuration Section
@@ -6459,6 +6468,13 @@
             sunTrackingDiv.style.background = '#f8f9fa';
             sunTrackingDiv.style.borderRadius = '5px';
             sunTrackingDiv.style.marginBottom = '20px';
+
+            // Create two-column grid for main sun tracking fields
+            const mainFieldsGrid = document.createElement('div');
+            mainFieldsGrid.style.display = 'grid';
+            mainFieldsGrid.style.gridTemplateColumns = '1fr 1fr';
+            mainFieldsGrid.style.gap = '15px';
+            mainFieldsGrid.style.marginBottom = '15px';
 
             // Follow Sun Enabled toggle
             const followSunDiv = document.createElement('div');
@@ -6474,7 +6490,7 @@
             const followSunSmall = document.createElement('small');
             followSunSmall.textContent = 'Automatically track the sun\'s position throughout the day';
             followSunDiv.appendChild(followSunSmall);
-            sunTrackingDiv.appendChild(followSunDiv);
+            mainFieldsGrid.appendChild(followSunDiv);
 
             // Follow Greyline toggle
             const followGreylineDiv = document.createElement('div');
@@ -6490,7 +6506,7 @@
             const followGreylineSmall = document.createElement('small');
             followGreylineSmall.textContent = 'Point perpendicular to sun (along gray line) instead of at sun. Useful for enhanced propagation during sunrise/sunset.';
             followGreylineDiv.appendChild(followGreylineSmall);
-            sunTrackingDiv.appendChild(followGreylineDiv);
+            mainFieldsGrid.appendChild(followGreylineDiv);
 
             // Update Interval (minutes)
             const updateIntervalDiv = document.createElement('div');
@@ -6516,7 +6532,7 @@
             updateIntervalError.style.color = '#dc3545';
             updateIntervalError.style.display = 'none';
             updateIntervalDiv.appendChild(updateIntervalError);
-            sunTrackingDiv.appendChild(updateIntervalDiv);
+            mainFieldsGrid.appendChild(updateIntervalDiv);
 
             // Daytime Only Mode
             const daytimeOnlyDiv = document.createElement('div');
@@ -6545,7 +6561,7 @@
             const daytimeOnlySmall = document.createElement('small');
             daytimeOnlySmall.textContent = 'Only track the sun during daylight hours (between sunrise and sunset)';
             daytimeOnlyDiv.appendChild(daytimeOnlySmall);
-            sunTrackingDiv.appendChild(daytimeOnlyDiv);
+            mainFieldsGrid.appendChild(daytimeOnlyDiv);
 
             // Gray-line Overlap (minutes)
             const overlapDiv = document.createElement('div');
@@ -6569,7 +6585,9 @@
             const overlapSmall = document.createElement('small');
             overlapSmall.textContent = 'Extend tracking before sunrise and after sunset (0-180 minutes). Leave at 0 to use custom solar events below.';
             overlapDiv.appendChild(overlapSmall);
-            sunTrackingDiv.appendChild(overlapDiv);
+            mainFieldsGrid.appendChild(overlapDiv);
+
+            sunTrackingDiv.appendChild(mainFieldsGrid);
 
             // Custom Solar Events Section
             const customEventsDiv = document.createElement('div');
@@ -6612,6 +6630,12 @@
                 { value: 'night', label: 'Night (sun at -18°)' }
             ];
 
+            // Create two-column grid for custom tracking window fields
+            const customEventsGrid = document.createElement('div');
+            customEventsGrid.style.display = 'grid';
+            customEventsGrid.style.gridTemplateColumns = '1fr 1fr';
+            customEventsGrid.style.gap = '15px';
+
             // Sunrise Start Event
             const sunriseStartDiv = document.createElement('div');
             sunriseStartDiv.className = 'config-field';
@@ -6631,7 +6655,7 @@
             const sunriseStartSmall = document.createElement('small');
             sunriseStartSmall.textContent = 'Solar event to start morning tracking window';
             sunriseStartDiv.appendChild(sunriseStartSmall);
-            customEventsDiv.appendChild(sunriseStartDiv);
+            customEventsGrid.appendChild(sunriseStartDiv);
 
             // Sunrise End Event
             const sunriseEndDiv = document.createElement('div');
@@ -6652,7 +6676,7 @@
             const sunriseEndSmall = document.createElement('small');
             sunriseEndSmall.textContent = 'Solar event to end morning tracking window';
             sunriseEndDiv.appendChild(sunriseEndSmall);
-            customEventsDiv.appendChild(sunriseEndDiv);
+            customEventsGrid.appendChild(sunriseEndDiv);
 
             // Sunset Start Event
             const sunsetStartDiv = document.createElement('div');
@@ -6673,7 +6697,7 @@
             const sunsetStartSmall = document.createElement('small');
             sunsetStartSmall.textContent = 'Solar event to start evening tracking window';
             sunsetStartDiv.appendChild(sunsetStartSmall);
-            customEventsDiv.appendChild(sunsetStartDiv);
+            customEventsGrid.appendChild(sunsetStartDiv);
 
             // Sunset End Event
             const sunsetEndDiv = document.createElement('div');
@@ -6694,7 +6718,9 @@
             const sunsetEndSmall = document.createElement('small');
             sunsetEndSmall.textContent = 'Solar event to end evening tracking window';
             sunsetEndDiv.appendChild(sunsetEndSmall);
-            customEventsDiv.appendChild(sunsetEndDiv);
+            customEventsGrid.appendChild(sunsetEndDiv);
+
+            customEventsDiv.appendChild(customEventsGrid);
 
             sunTrackingDiv.appendChild(customEventsDiv);
 

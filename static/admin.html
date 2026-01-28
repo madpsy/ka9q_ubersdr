@@ -6898,8 +6898,14 @@
 
             if (allEvents.length === 0) return;
 
-            // Sort all events chronologically
-            allEvents.sort((a, b) => a.totalMinutes - b.totalMinutes);
+            // Sort all events chronologically, with scheduled positions taking priority at the same time
+            allEvents.sort((a, b) => {
+                if (a.totalMinutes === b.totalMinutes) {
+                    // Same time - scheduled positions come after sun tracking (so they're selected as "last")
+                    return a.type === 'scheduled' ? 1 : -1;
+                }
+                return a.totalMinutes - b.totalMinutes;
+            });
 
             console.log(`[Timeline Hover] Total events: ${allEvents.length}, Target time: ${Math.floor(timeInHours)}:${Math.floor((timeInHours % 1) * 60).toString().padStart(2, '0')} (${targetMinutes} min)`);
 

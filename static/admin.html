@@ -7037,8 +7037,7 @@
                 }
 
                 if (nextEvent.type === 'sun') {
-                    const step = currentRotatorSchedulerConfig.follow_sun_step || 15;
-                    nextMovementEl.textContent = `Sun → ${nextEvent.bearing}° (${step}m)`;
+                    nextMovementEl.textContent = `Sun → ${nextEvent.bearing}° (${timeUntil})`;
                     nextMovementEl.style.color = '#ff9800';
                 } else {
                     nextMovementEl.textContent = `${nextEvent.time} → ${nextEvent.bearing}° (${timeUntil})`;

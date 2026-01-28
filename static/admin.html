@@ -8306,6 +8306,12 @@
                 if (hoveredPos) {
                     canvas.style.cursor = 'pointer';
 
+                    // Create unique identifier and redraw timeline with this position highlighted
+                    const posIdentifier = hoveredPos.offset !== undefined && hoveredPos.offset !== null && hoveredPos.offset !== 0
+                        ? `${hoveredPos.time}_${hoveredPos.offset}`
+                        : hoveredPos.time;
+                    drawRotatorTimeline(originalPositions, posIdentifier);
+
                     if (window.adminRotatorDisplay && hoveredPos.bearing !== undefined) {
                         window.adminRotatorDisplay.lockAzimuthDisplay = true;
                         window.adminRotatorDisplay.updateAzimuthDisplay(hoveredPos.bearing);

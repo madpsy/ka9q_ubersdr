@@ -6435,7 +6435,11 @@
                     row.addEventListener('mouseenter', function() {
                         const timelineCanvas = document.getElementById('rotatorTimeline');
                         if (timelineCanvas && pos.enabled !== false) {
-                            drawRotatorTimeline(positions, pos.time);
+                            // Create unique identifier for this position (time + offset for solar events)
+                            const posIdentifier = pos.offset !== undefined && pos.offset !== null && pos.offset !== 0
+                                ? `${pos.time}_${pos.offset}`
+                                : pos.time;
+                            drawRotatorTimeline(positions, posIdentifier);
                             // Lock and update rotator display to show this bearing
                             if (window.adminRotatorDisplay && pos.bearing !== undefined) {
                                 window.adminRotatorDisplay.lockAzimuthDisplay = true;
@@ -7968,7 +7972,11 @@
                 const level = pos.level;
 
                 // Check if this position should be highlighted
-                const isHighlighted = highlightTime && pos.time === highlightTime;
+                // Create unique identifier for this position (time + offset for solar events)
+                const posIdentifier = pos.offset !== undefined && pos.offset !== null && pos.offset !== 0
+                    ? `${pos.time}_${pos.offset}`
+                    : pos.time;
+                const isHighlighted = highlightTime && posIdentifier === highlightTime;
 
                 // Calculate Y positions based on level (no time label, just bearing)
                 const labelY = level === 0 ? marginTop + 10 : marginTop + 40;

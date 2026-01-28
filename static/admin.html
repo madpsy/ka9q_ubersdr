@@ -6176,6 +6176,17 @@
             const nextPosition = currentRotatorSchedulerConfig.next_position;
 
             let statusHTML = `<strong>Status:</strong> ${running ? '<span style="color: #28a745;">Running</span>' : '<span style="color: #999;">Stopped</span>'}<br>`;
+            
+            // Show sun tracking status if enabled
+            if (currentRotatorSchedulerConfig.follow_sun) {
+                const sunTrackingActive = currentRotatorSchedulerConfig.sun_tracking_active || false;
+                const sunStatus = sunTrackingActive ? '<span style="color: #28a745;">Active</span>' : '<span style="color: #999;">Inactive</span>';
+                statusHTML += `<strong>Sun Tracking:</strong> ${sunStatus}<br>`;
+                if (currentRotatorSchedulerConfig.sun_azimuth !== undefined) {
+                    statusHTML += `<strong>Sun Azimuth:</strong> <span style="color: #ff9800;">${Math.round(currentRotatorSchedulerConfig.sun_azimuth)}°</span><br>`;
+                }
+            }
+            
             if (positionCount > 0 && enabledCount !== positionCount) {
                 statusHTML += `<strong>Scheduled Positions:</strong> ${enabledCount} enabled (${positionCount} total)<br>`;
             } else {
@@ -6183,11 +6194,11 @@
             }
 
             if (nextPosition) {
-                statusHTML += `<strong>Next Position:</strong> ${nextPosition.time} → ${nextPosition.bearing}°`;
+                statusHTML += `<strong>Next Scheduled Position:</strong> ${nextPosition.time} → ${nextPosition.bearing}°`;
             } else if (positionCount > 0) {
-                statusHTML += `<strong>Next Position:</strong> <em style="color: #999;">None (all positions passed for today)</em>`;
-            } else {
-                statusHTML += `<strong>Next Position:</strong> <em style="color: #999;">No positions configured</em>`;
+                statusHTML += `<strong>Next Scheduled Position:</strong> <em style="color: #999;">None (all positions passed for today)</em>`;
+            } else if (!currentRotatorSchedulerConfig.follow_sun) {
+                statusHTML += `<strong>Next Scheduled Position:</strong> <em style="color: #999;">No positions configured</em>`;
             }
 
             statusInfoDiv.innerHTML = statusHTML;

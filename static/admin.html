@@ -6226,14 +6226,22 @@
             statusSection.appendChild(statusDiv);
             container.appendChild(statusSection);
 
-            // Rotator Map Section
+            // Rotator Map Section with Stats Panel
             const mapSection = document.createElement('div');
             mapSection.className = 'config-section';
             mapSection.innerHTML = '<h3>🗺️ Rotator Position</h3>';
 
+            // Create flex container for map and stats
+            const flexContainer = document.createElement('div');
+            flexContainer.style.display = 'flex';
+            flexContainer.style.gap = '20px';
+            flexContainer.style.alignItems = 'flex-start';
+
+            // Map container (left side)
             const mapContainer = document.createElement('div');
             mapContainer.id = 'admin-rotator-display-container';
-            mapContainer.style.width = '100%';
+            mapContainer.style.flex = '1';
+            mapContainer.style.minWidth = '500px';
             mapContainer.style.height = '500px';
             mapContainer.style.background = '#fff';
             mapContainer.style.borderRadius = '5px';
@@ -6241,7 +6249,82 @@
             mapContainer.style.position = 'relative';
             mapContainer.style.overflow = 'hidden';
 
-            mapSection.appendChild(mapContainer);
+            // Stats panel (right side)
+            const statsPanel = document.createElement('div');
+            statsPanel.id = 'rotator-stats-panel';
+            statsPanel.style.width = '300px';
+            statsPanel.style.display = 'flex';
+            statsPanel.style.flexDirection = 'column';
+            statsPanel.style.gap = '15px';
+
+            // Sun Position Card
+            const sunCard = document.createElement('div');
+            sunCard.style.background = '#fff';
+            sunCard.style.padding = '15px';
+            sunCard.style.borderRadius = '5px';
+            sunCard.style.border = '1px solid #dee2e6';
+            sunCard.innerHTML = `
+                <h4 style="margin: 0 0 10px 0; color: #ff9800; font-size: 14px;">☀️ Sun Position</h4>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 13px;">
+                    <div>
+                        <div style="color: #666; font-size: 11px;">Azimuth</div>
+                        <div id="sun-azimuth-stat" style="font-size: 20px; font-weight: bold; color: #ff9800;">—</div>
+                    </div>
+                    <div>
+                        <div style="color: #666; font-size: 11px;">Elevation</div>
+                        <div id="sun-elevation-stat" style="font-size: 20px; font-weight: bold; color: #ff9800;">—</div>
+                    </div>
+                </div>
+            `;
+            statsPanel.appendChild(sunCard);
+
+            // Rotator Position Card
+            const rotatorCard = document.createElement('div');
+            rotatorCard.style.background = '#fff';
+            rotatorCard.style.padding = '15px';
+            rotatorCard.style.borderRadius = '5px';
+            rotatorCard.style.border = '1px solid #dee2e6';
+            rotatorCard.innerHTML = `
+                <h4 style="margin: 0 0 10px 0; color: #667eea; font-size: 14px;">🧭 Rotator Position</h4>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 13px;">
+                    <div>
+                        <div style="color: #666; font-size: 11px;">Azimuth</div>
+                        <div id="rotator-azimuth-stat" style="font-size: 20px; font-weight: bold; color: #667eea;">—</div>
+                    </div>
+                    <div>
+                        <div style="color: #666; font-size: 11px;">Elevation</div>
+                        <div id="rotator-elevation-stat" style="font-size: 20px; font-weight: bold; color: #667eea;">—</div>
+                    </div>
+                </div>
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #dee2e6;">
+                    <div style="color: #666; font-size: 11px;">Status</div>
+                    <div id="rotator-moving-stat" style="font-size: 14px; font-weight: bold; color: #28a745;">—</div>
+                </div>
+            `;
+            statsPanel.appendChild(rotatorCard);
+
+            // Countries in Beam Card
+            const countriesCard = document.createElement('div');
+            countriesCard.style.background = '#fff';
+            countriesCard.style.padding = '15px';
+            countriesCard.style.borderRadius = '5px';
+            countriesCard.style.border = '1px solid #dee2e6';
+            countriesCard.style.flex = '1';
+            countriesCard.style.display = 'flex';
+            countriesCard.style.flexDirection = 'column';
+            countriesCard.innerHTML = `
+                <h4 style="margin: 0 0 10px 0; color: #28a745; font-size: 14px;">📡 Countries in Beam</h4>
+                <div id="countries-in-beam-container" style="flex: 1; overflow-y: auto; max-height: 300px;">
+                    <div style="text-align: center; color: #999; padding: 20px; font-size: 12px;">
+                        <em>Loading...</em>
+                    </div>
+                </div>
+            `;
+            statsPanel.appendChild(countriesCard);
+
+            flexContainer.appendChild(mapContainer);
+            flexContainer.appendChild(statsPanel);
+            mapSection.appendChild(flexContainer);
             container.appendChild(mapSection);
 
             // Initialize rotator display after DOM is ready
@@ -6271,15 +6354,22 @@
                         const data = await response.json();
                         if (data.success && data.countries) {
                             window.adminRotatorDisplay.setCountriesData(data.countries);
+                            window.rotatorCountriesData = data.countries;
 
-                            // Listen for status updates to update cone markers and save actual azimuth
+                            // Listen for status updates to update cone markers, stats, and save actual azimuth
                             document.addEventListener('rotator-status-update', (event) => {
                                 if (event.detail.position && event.detail.position.azimuth !== undefined) {
                                     // Save actual azimuth for restoring after hover
                                     window.lastRotatorAzimuth = event.detail.position.azimuth;
+                                    
+                                    // Update rotator stats
+                                    updateRotatorStats(event.detail);
+                                    
                                     // Only update cone markers if not locked by hover
                                     if (!window.adminRotatorDisplay.lockAzimuthDisplay) {
                                         window.adminRotatorDisplay.updateConeMarkers(data.countries, event.detail.position.azimuth);
+                                        // Update countries in beam list
+                                        updateCountriesInBeam(data.countries, event.detail.position.azimuth);
                                     }
                                 }
                             });
@@ -6293,6 +6383,17 @@
                         updateSunPosition();
                         // Update sun position every 60 seconds
                         setInterval(updateSunPosition, 60000);
+                        
+                        // Initial rotator stats update
+                        fetch('/api/rotctl/status')
+                            .then(response => response.json())
+                            .then(data => {
+                                updateRotatorStats(data);
+                                if (window.rotatorCountriesData && data.position) {
+                                    updateCountriesInBeam(window.rotatorCountriesData, data.position.azimuth);
+                                }
+                            })
+                            .catch(error => console.error('Failed to fetch initial rotator status:', error));
                     }, 200);
                 } else {
                     mapContainer.innerHTML = '<div style="padding: 40px; text-align: center; color: #999;">Rotator display library not loaded</div>';
@@ -6461,6 +6562,8 @@
                                 // Update cone markers to show countries in this direction
                                 if (window.adminRotatorDisplay.countriesData) {
                                     window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, pos.bearing);
+                                    // Update countries in beam list
+                                    updateCountriesInBeam(window.adminRotatorDisplay.countriesData, pos.bearing);
                                 }
                             }
                         }
@@ -6475,6 +6578,10 @@
                                 window.adminRotatorDisplay.lockAzimuthDisplay = false;
                                 if (window.lastRotatorAzimuth !== undefined) {
                                     window.adminRotatorDisplay.updateAzimuthDisplay(window.lastRotatorAzimuth);
+                                    // Restore countries list to current rotator position
+                                    if (window.rotatorCountriesData) {
+                                        updateCountriesInBeam(window.rotatorCountriesData, window.lastRotatorAzimuth);
+                                    }
                                 }
                             }
                         }
@@ -6811,6 +6918,85 @@
             loadRotatorSchedulerLogs();
         }
 
+        // Update rotator stats panel
+        function updateRotatorStats(statusData) {
+            // Update rotator position
+            if (statusData.position) {
+                const azimuthEl = document.getElementById('rotator-azimuth-stat');
+                const elevationEl = document.getElementById('rotator-elevation-stat');
+                if (azimuthEl) azimuthEl.textContent = Math.round(statusData.position.azimuth) + '°';
+                if (elevationEl) elevationEl.textContent = Math.round(statusData.position.elevation) + '°';
+            }
+            
+            // Update moving status
+            const movingEl = document.getElementById('rotator-moving-stat');
+            if (movingEl && statusData.moving !== undefined) {
+                movingEl.textContent = statusData.moving ? 'Moving' : 'Stationary';
+                movingEl.style.color = statusData.moving ? '#ffc107' : '#28a745';
+            }
+        }
+
+        // Update countries in beam list
+        function updateCountriesInBeam(countries, currentAzimuth) {
+            const container = document.getElementById('countries-in-beam-container');
+            if (!container || !countries) return;
+
+            // Find countries within the beam (±20° cone)
+            const beamWidth = 20;
+            const countriesInBeam = countries.filter(country => {
+                const diff = Math.abs(country.bearing - currentAzimuth);
+                const normalizedDiff = diff > 180 ? 360 - diff : diff;
+                return normalizedDiff <= beamWidth;
+            }).sort((a, b) => {
+                // Sort by distance from beam center
+                const diffA = Math.abs(a.bearing - currentAzimuth);
+                const diffB = Math.abs(b.bearing - currentAzimuth);
+                const normA = diffA > 180 ? 360 - diffA : diffA;
+                const normB = diffB > 180 ? 360 - diffB : diffB;
+                return normA - normB;
+            });
+
+            if (countriesInBeam.length === 0) {
+                container.innerHTML = '<div style="text-align: center; color: #999; padding: 20px; font-size: 12px;"><em>No countries in beam</em></div>';
+                return;
+            }
+
+            // Create table
+            let html = `
+                <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                    <thead>
+                        <tr style="border-bottom: 1px solid #dee2e6;">
+                            <th style="padding: 6px; text-align: left; color: #666; font-weight: 500;">Country</th>
+                            <th style="padding: 6px; text-align: right; color: #666; font-weight: 500;">Bearing</th>
+                            <th style="padding: 6px; text-align: right; color: #666; font-weight: 500;">Dist (km)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            countriesInBeam.slice(0, 15).forEach(country => {
+                const diff = Math.abs(country.bearing - currentAzimuth);
+                const normalizedDiff = diff > 180 ? 360 - diff : diff;
+                const opacity = 1 - (normalizedDiff / beamWidth) * 0.5; // Fade based on distance from center
+                
+                html += `
+                    <tr style="border-bottom: 1px solid #f0f0f0; opacity: ${opacity};">
+                        <td style="padding: 6px; font-weight: 500;">${country.name}</td>
+                        <td style="padding: 6px; text-align: right; font-family: monospace; color: #667eea;">${country.bearing}°</td>
+                        <td style="padding: 6px; text-align: right; font-family: monospace; color: #666;">${Math.round(country.distance_km).toLocaleString()}</td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            
+            if (countriesInBeam.length > 15) {
+                html += `<div style="text-align: center; color: #999; padding: 8px; font-size: 11px; border-top: 1px solid #dee2e6;">+${countriesInBeam.length - 15} more</div>`;
+            }
+
+            container.innerHTML = html;
+        }
+
         // Update sun position on the rotator map (current time)
         async function updateSunPosition() {
             if (!window.adminRotatorDisplay) return;
@@ -6832,6 +7018,16 @@
                     }
 
                     const altitudeDeg = data.sun.position.altitude_deg;
+
+                    // Update sun stats
+                    const sunAzimuthEl = document.getElementById('sun-azimuth-stat');
+                    const sunElevationEl = document.getElementById('sun-elevation-stat');
+                    if (sunAzimuthEl) sunAzimuthEl.textContent = Math.round(azimuthDeg) + '°';
+                    if (sunElevationEl) {
+                        sunElevationEl.textContent = altitudeDeg.toFixed(1) + '°';
+                        // Color code elevation: positive = above horizon (day), negative = below (night)
+                        sunElevationEl.style.color = altitudeDeg >= 0 ? '#ff9800' : '#999';
+                    }
 
                     // Show sun marker on the map
                     window.adminRotatorDisplay.showSunMarker(azimuthDeg, altitudeDeg);
@@ -8512,6 +8708,8 @@
                         window.adminRotatorDisplay.updateAzimuthDisplay(hoveredSunPos.bearing);
                         if (window.adminRotatorDisplay.countriesData) {
                             window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, hoveredSunPos.bearing);
+                            // Update countries in beam list
+                            updateCountriesInBeam(window.adminRotatorDisplay.countriesData, hoveredSunPos.bearing);
                         }
                     }
 // Calculate time string from timeInHours
@@ -8565,6 +8763,8 @@ const tooltipLine2 = timeStr;
                         window.adminRotatorDisplay.updateAzimuthDisplay(window.lastRotatorAzimuth);
                         if (window.adminRotatorDisplay.countriesData) {
                             window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, window.lastRotatorAzimuth);
+                            // Restore countries list to current rotator position
+                            updateCountriesInBeam(window.adminRotatorDisplay.countriesData, window.lastRotatorAzimuth);
                         }
                     }
                 }

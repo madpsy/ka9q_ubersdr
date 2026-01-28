@@ -7648,6 +7648,66 @@
 
                 ctx.setLineDash([]);
             }
+
+            // Draw sun tracking path if enabled
+            if (currentRotatorSchedulerConfig && currentRotatorSchedulerConfig.follow_sun) {
+                drawSunTrackingPath(ctx, marginLeft, marginTop, timelineY, timelineWidth);
+            }
+        }
+
+        // Draw sun tracking path on timeline
+        async function drawSunTrackingPath(ctx, marginLeft, marginTop, timelineY, timelineWidth) {
+            try {
+                // Get sun tracking settings
+                const step = currentRotatorSchedulerConfig.follow_sun_step || 5;
+                const daytimeOnly = currentRotatorSchedulerConfig.daytime_only !== false;
+                const overlap = currentRotatorSchedulerConfig.daytime_overlap || 0;
+
+                // Fetch sun path from API
+                const response = await fetch(`/api/suncalc/path?step=${step}&daytime_only=${daytimeOnly}&overlap=${overlap}`);
+                if (!response.ok) return;
+
+                const data = await response.json();
+                if (!data.path || data.path.length === 0) return;
+
+                // Extract unique bearings (rounded to integers) with their times
+                const uniquePoints = [];
+                const seenBearings = new Set();
+
+                data.path.forEach(point => {
+                    const bearing = Math.round(point.azimuth);
+                    const timeParts = point.time.split(':');
+                    const hours = parseInt(timeParts[0]);
+                    const minutes = parseInt(timeParts[1]);
+                    const timeInHours = hours + (minutes / 60);
+
+                    // Only add if we haven't seen this bearing yet
+                    if (!seenBearings.has(bearing)) {
+                        seenBearings.add(bearing);
+                        uniquePoints.push({
+                            bearing: bearing,
+                            timeInHours: timeInHours,
+                            x: marginLeft + (timeInHours / 24) * timelineWidth
+                        });
+                    }
+                });
+
+                // Draw yellow markers for each unique bearing
+                ctx.fillStyle = 'rgba(255, 193, 7, 0.8)'; // Yellow/gold color
+                ctx.strokeStyle = 'rgba(255, 193, 7, 0.6)';
+                ctx.lineWidth = 1;
+
+                uniquePoints.forEach(point => {
+                    // Draw small circle on timeline
+                    ctx.beginPath();
+                    ctx.arc(point.x, timelineY, 3, 0, 2 * Math.PI);
+                    ctx.fill();
+                    ctx.stroke();
+                });
+
+            } catch (error) {
+                console.error('Error drawing sun tracking path:', error);
+            }
         }
 
         // Setup hover tooltip for rotator timeline

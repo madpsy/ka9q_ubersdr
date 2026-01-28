@@ -1658,6 +1658,7 @@
             stopSessionsAutoRefresh();
             stopMonitorAutoRefresh();
             stopSystemAutoRefresh();
+            stopRotatorLogsAutoRefresh();
 
             try {
                 await fetch('/admin/logout', {
@@ -1694,6 +1695,11 @@
             document.getElementById('systemButtons').style.display = 'none';
             const rotatorSchedulerButtons = document.getElementById('rotatorSchedulerButtons');
             if (rotatorSchedulerButtons) rotatorSchedulerButtons.style.display = 'none';
+
+            // Stop rotator logs auto-refresh when leaving rotator tab
+            if (tab !== 'rotator') {
+                stopRotatorLogsAutoRefresh();
+            }
 
             // Stop sessions auto-refresh when leaving sessions tab
             if (tab !== 'sessions') {
@@ -1782,6 +1788,7 @@
                 const rotatorSchedulerButtons = document.getElementById('rotatorSchedulerButtons');
                 if (rotatorSchedulerButtons) rotatorSchedulerButtons.style.display = 'flex';
                 loadRotatorSchedulerConfig();
+                startRotatorLogsAutoRefresh();
             } else if (tab === 'chat') {
                 document.querySelector('.tab:nth-child(13)').classList.add('active');
                 document.getElementById('chatTab').classList.add('active');
@@ -6875,6 +6882,26 @@
         let currentRotatorLogs = [];
         let rotatorLogsCurrentPage = 1;
         const rotatorLogsPerPage = 10;
+        let rotatorLogsRefreshInterval = null;
+
+        function startRotatorLogsAutoRefresh() {
+            // Clear any existing interval
+            if (rotatorLogsRefreshInterval) {
+                clearInterval(rotatorLogsRefreshInterval);
+            }
+
+            // Start auto-refresh every 60 seconds (1 minute)
+            rotatorLogsRefreshInterval = setInterval(() => {
+                loadRotatorSchedulerLogs();
+            }, 60000);
+        }
+
+        function stopRotatorLogsAutoRefresh() {
+            if (rotatorLogsRefreshInterval) {
+                clearInterval(rotatorLogsRefreshInterval);
+                rotatorLogsRefreshInterval = null;
+            }
+        }
 
         async function loadRotatorSchedulerLogs() {
             try {
@@ -6898,11 +6925,25 @@
             const container = document.getElementById('rotatorSchedulerLogsContainer');
             if (!container) return;
 
-            container.innerHTML = '';
+            // Save current scroll position before updating
+            const scrollTop = container.scrollTop || 0;
+
+            // Only clear if this is the first render (loading state)
+            const isFirstRender = container.querySelector('.loading') !== null;
+            if (isFirstRender) {
+                container.innerHTML = '';
+            }
 
             if (currentRotatorLogs.length === 0) {
-                container.innerHTML = '<p style="text-align: center; color: #666; padding: 20px;"><em>No trigger logs yet</em></p>';
+                if (isFirstRender) {
+                    container.innerHTML = '<p style="text-align: center; color: #666; padding: 20px;"><em>No trigger logs yet</em></p>';
+                }
                 return;
+            }
+
+            // Clear container for re-render (but not on first render since we already cleared it)
+            if (!isFirstRender) {
+                container.innerHTML = '';
             }
 
             // Calculate pagination
@@ -7028,6 +7069,11 @@
                 paginationDiv.appendChild(nextBtn);
 
                 container.appendChild(paginationDiv);
+            }
+
+            // Restore scroll position after content update
+            if (scrollTop > 0) {
+                container.scrollTop = scrollTop;
             }
         }
 

@@ -7141,15 +7141,20 @@
         function findNextSolarEvent(sunTimes) {
             const now = new Date();
             const events = [
-                { name: 'Sunrise', time: new Date(sunTimes.sunrise) },
-                { name: 'Sunset', time: new Date(sunTimes.sunset) },
-                { name: 'Solar Noon', time: new Date(sunTimes.solarNoon) },
-                { name: 'Dawn', time: new Date(sunTimes.dawn) },
-                { name: 'Dusk', time: new Date(sunTimes.dusk) },
-                { name: 'Nautical Dawn', time: new Date(sunTimes.nauticalDawn) },
-                { name: 'Nautical Dusk', time: new Date(sunTimes.nauticalDusk) },
                 { name: 'Night End', time: new Date(sunTimes.nightEnd) },
-                { name: 'Night', time: new Date(sunTimes.night) }
+                { name: 'Nautical Dawn', time: new Date(sunTimes.nauticalDawn) },
+                { name: 'Dawn', time: new Date(sunTimes.dawn) },
+                { name: 'Sunrise', time: new Date(sunTimes.sunrise) },
+                { name: 'Sunrise End', time: new Date(sunTimes.sunriseEnd) },
+                { name: 'Golden Hour End', time: new Date(sunTimes.goldenHourEnd) },
+                { name: 'Solar Noon', time: new Date(sunTimes.solarNoon) },
+                { name: 'Golden Hour', time: new Date(sunTimes.goldenHour) },
+                { name: 'Sunset Start', time: new Date(sunTimes.sunsetStart) },
+                { name: 'Sunset', time: new Date(sunTimes.sunset) },
+                { name: 'Dusk', time: new Date(sunTimes.dusk) },
+                { name: 'Nautical Dusk', time: new Date(sunTimes.nauticalDusk) },
+                { name: 'Night', time: new Date(sunTimes.night) },
+                { name: 'Nadir', time: new Date(sunTimes.nadir) }
             ];
 
             // Find next event after current time

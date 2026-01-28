@@ -8265,7 +8265,8 @@
                     time: p.time,
                     bearing: p.bearing,
                     enabled: true,
-                    resolved_time: p.resolved_time
+                    resolved_time: p.resolved_time,
+                    offset: p.offset
                 })) : [];
                 drawRotatorTimeline(originalPositions);
 
@@ -8421,7 +8422,8 @@ const tooltipLine2 = timeStr;
                     time: p.time,
                     bearing: p.bearing,
                     enabled: true,
-                    resolved_time: p.resolved_time
+                    resolved_time: p.resolved_time,
+                    offset: p.offset
                 })) : [];
                 drawRotatorTimeline(originalPositions, null, true);
             });

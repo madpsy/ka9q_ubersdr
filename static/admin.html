@@ -6785,7 +6785,16 @@
 
                 const data = await response.json();
                 if (data.sun && data.sun.position) {
-                    const azimuthDeg = data.sun.position.azimuth_deg;
+                    // API returns azimuth in degrees but NOT normalized
+                    // Need to normalize to 0-360 range (same as rotator_scheduler.go lines 582-588)
+                    let azimuthDeg = data.sun.position.azimuth_deg;
+                    azimuthDeg = azimuthDeg + 180.0;
+                    if (azimuthDeg < 0) {
+                        azimuthDeg += 360.0;
+                    } else if (azimuthDeg >= 360) {
+                        azimuthDeg -= 360.0;
+                    }
+
                     const altitudeDeg = data.sun.position.altitude_deg;
 
                     // Show sun marker on the map

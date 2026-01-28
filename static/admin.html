@@ -440,6 +440,38 @@
             margin: 0 !important;
         }
 
+        /* Status indicator in bottom-right of admin rotator map */
+        #admin-rotator-status-indicator {
+            position: absolute;
+            bottom: 15px;
+            right: 15px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            z-index: 100;
+            transition: background 0.3s, box-shadow 0.3s;
+        }
+
+        #admin-rotator-status-indicator.connected {
+            background: #4CAF50;
+            box-shadow: 0 0 10px #4CAF50;
+        }
+
+        #admin-rotator-status-indicator.disconnected {
+            background: #f44336;
+            box-shadow: 0 0 10px #f44336;
+        }
+
+        /* Flashing animation for moving state */
+        @keyframes flash {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        #admin-rotator-status-indicator.moving {
+            animation: flash 1s infinite;
+        }
+
     </style>
     <script src="chart.umd.min.js"></script>
     <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -6367,6 +6399,16 @@
                         backgroundOpacity: 0.9  // More opaque for admin page (default is 0.6)
                     });
 
+                    // Add status indicator to the map container
+                    const statusIndicator = document.createElement('div');
+                    statusIndicator.id = 'admin-rotator-status-indicator';
+                    statusIndicator.className = 'disconnected';
+                    statusIndicator.title = 'Disconnected';
+                    const mapContainer = document.getElementById('admin-rotator-display-container');
+                    if (mapContainer) {
+                        mapContainer.appendChild(statusIndicator);
+                    }
+
                     // Fetch and set countries data for cone markers
                     try {
                         const response = await fetch('/api/rotctl/countries');
@@ -6375,7 +6417,7 @@
                             window.adminRotatorDisplay.setCountriesData(data.countries);
                             window.rotatorCountriesData = data.countries;
 
-                            // Listen for status updates to update cone markers, stats, and save actual azimuth
+                            // Listen for status updates to update cone markers, stats, status indicator, and save actual azimuth
                             document.addEventListener('rotator-status-update', (event) => {
                                 if (event.detail.position && event.detail.position.azimuth !== undefined) {
                                     // Save actual azimuth for restoring after hover
@@ -6383,6 +6425,9 @@
                                     
                                     // Update rotator stats
                                     updateRotatorStats(event.detail);
+                                    
+                                    // Update status indicator
+                                    updateAdminRotatorStatusIndicator(event.detail);
                                     
                                     // Only update cone markers if not locked by hover
                                     if (!window.adminRotatorDisplay.lockAzimuthDisplay) {
@@ -6956,6 +7001,29 @@
 
             // Update next movement from scheduler status
             updateNextRotatorMovement();
+        }
+
+        // Update admin rotator status indicator
+        function updateAdminRotatorStatusIndicator(statusData) {
+            const statusIndicator = document.getElementById('admin-rotator-status-indicator');
+            if (!statusIndicator) return;
+
+            let className = '';
+            if (statusData.connected) {
+                className = 'connected';
+                statusIndicator.title = 'Connected';
+            } else {
+                className = 'disconnected';
+                statusIndicator.title = 'Disconnected';
+            }
+
+            // Add moving class if rotator is moving
+            if (statusData.moving) {
+                className += ' moving';
+                statusIndicator.title += ' (Moving)';
+            }
+
+            statusIndicator.className = className;
         }
 
         // Update next rotator movement display using timeline data

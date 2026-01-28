@@ -6397,7 +6397,7 @@
                     row.addEventListener('mouseenter', function() {
                         const timelineCanvas = document.getElementById('rotatorTimeline');
                         if (timelineCanvas && pos.enabled !== false) {
-                            drawRotatorTimeline(positions, pos.time, true);
+                            drawRotatorTimeline(positions, pos.time);
                             // Lock and update rotator display to show this bearing
                             if (window.adminRotatorDisplay && pos.bearing !== undefined) {
                                 window.adminRotatorDisplay.lockAzimuthDisplay = true;
@@ -6413,7 +6413,7 @@
                     row.addEventListener('mouseleave', function() {
                         const timelineCanvas = document.getElementById('rotatorTimeline');
                         if (timelineCanvas) {
-                            drawRotatorTimeline(positions, null, true);
+                            drawRotatorTimeline(positions);
                             // Unlock and restore actual rotator position
                             if (window.adminRotatorDisplay) {
                                 window.adminRotatorDisplay.lockAzimuthDisplay = false;
@@ -7357,7 +7357,7 @@
         }
 
         // Draw rotator timeline visualization
-        function drawRotatorTimeline(positions, highlightTime = null, skipSunPath = false) {
+        function drawRotatorTimeline(positions, highlightTime = null) {
             const canvas = document.getElementById('rotatorTimeline');
             if (!canvas) return;
 
@@ -7664,8 +7664,8 @@
                 ctx.setLineDash([]);
             }
 
-            // Draw sun tracking path if enabled and data is cached (but not on hover redraws)
-            if (!skipSunPath && currentRotatorSchedulerConfig && currentRotatorSchedulerConfig.follow_sun && window.cachedSunPath) {
+            // Always draw sun tracking path if enabled and data is cached
+            if (currentRotatorSchedulerConfig && currentRotatorSchedulerConfig.follow_sun && window.cachedSunPath) {
                 drawSunTrackingPathSync(ctx, marginLeft, marginTop, timelineY, timelineWidth);
             }
         }
@@ -7789,7 +7789,7 @@
                     enabled: true,
                     resolved_time: p.resolved_time
                 })) : [];
-                drawRotatorTimeline(originalPositions, null, true);
+                drawRotatorTimeline(originalPositions);
 
                 // Check if mouse is near any scheduled position marker
                 const hoverRadius = 15;
@@ -7868,7 +7868,7 @@
                         }
                     }
 
-                    const tooltipText = `☀️ Sun → ${hoveredSunPos.bearing}°`;
+                    const tooltipText = `Sun → ${hoveredSunPos.bearing}°`;
                     ctx.font = '12px sans-serif';
                     const textWidth = ctx.measureText(tooltipText).width;
                     const tooltipWidth = textWidth + 16;

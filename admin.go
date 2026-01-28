@@ -1921,6 +1921,27 @@ func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Requ
 		issues = append(issues, fmt.Sprintf("Warning: %.1f A/D overranges per second (>1 threshold). Consider reducing RF gain or adding attenuation.", overrangesPerSecond))
 	}
 
+	// Calculate FFT parameters if we have the necessary data
+	var fftSize int
+	var fftType string
+	var blockTimeMs, blockRateHz, overlapPercent, binWidthHz float64
+	
+	if frontendStatus.FilterBlocksize > 0 && frontendStatus.FilterFirLength > 0 {
+		fftSize = frontendStatus.FilterBlocksize + frontendStatus.FilterFirLength - 1
+		if frontendStatus.FeIsReal {
+			fftType = "real-to-complex"
+		} else {
+			fftType = "complex-to-complex"
+		}
+		
+		if frontendStatus.InputSamprate > 0 {
+			blockTimeMs = 1000.0 * float64(frontendStatus.FilterBlocksize) / float64(frontendStatus.InputSamprate)
+			blockRateHz = 1000.0 / blockTimeMs
+			overlapPercent = 100.0 / (1.0 + float64(frontendStatus.FilterBlocksize) / float64(frontendStatus.FilterFirLength - 1))
+			binWidthHz = float64(frontendStatus.InputSamprate) / float64(fftSize)
+		}
+	}
+
 	response := map[string]interface{}{
 		"lna_gain":              frontendStatus.LNAGain,
 		"mixer_gain":            frontendStatus.MixerGain,
@@ -1934,6 +1955,15 @@ func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Requ
 		"samples_since_over":    frontendStatus.SamplesSinceOver,
 		"time_since_overrange":  timeSinceOverrange,
 		"input_samprate":        frontendStatus.InputSamprate,
+		"filter_blocksize":      frontendStatus.FilterBlocksize,
+		"filter_fir_length":     frontendStatus.FilterFirLength,
+		"fe_is_real":            frontendStatus.FeIsReal,
+		"fft_size":              fftSize,
+		"fft_type":              fftType,
+		"block_time_ms":         blockTimeMs,
+		"block_rate_hz":         blockRateHz,
+		"overlap_percent":       overlapPercent,
+		"bin_width_hz":          binWidthHz,
 		"last_update":           frontendStatus.LastUpdate.Format(time.RFC3339),
 		"healthy":               healthy,
 		"status":                status,

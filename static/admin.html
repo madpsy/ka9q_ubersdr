@@ -7675,8 +7675,8 @@
                 const seenBearings = new Set();
 
                 data.path.forEach(point => {
-                    const bearing = Math.round(point.azimuth);
-                    const timeParts = point.time.split(':');
+                    const bearing = Math.round(point.azimuth_deg);
+                    const timeParts = point.time_local.split(':');
                     const hours = parseInt(timeParts[0]);
                     const minutes = parseInt(timeParts[1]);
                     const timeInHours = hours + (minutes / 60);

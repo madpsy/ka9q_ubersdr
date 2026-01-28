@@ -6871,9 +6871,15 @@
                         allEvents.push({
                             totalMinutes: totalMinutes,
                             bearing: pos.bearing,
-                            type: 'scheduled'
+                            type: 'scheduled',
+                            time: pos.resolved_time
                         });
                     });
+            }
+
+            // Debug: log scheduled positions found
+            if (allEvents.length > 0) {
+                console.log(`[Timeline Hover] Found ${allEvents.length} scheduled positions`);
             }
 
             // Add sun tracking points if enabled

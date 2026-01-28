@@ -6549,6 +6549,15 @@
 
             // Load logs after rendering
             loadRotatorSchedulerLogs();
+
+            // Fetch sun tracking path if enabled
+            if (currentRotatorSchedulerConfig.follow_sun) {
+                fetchSunTrackingPath().then(() => {
+                    // Redraw timeline with sun path
+                    const positions = currentRotatorSchedulerConfig.positions || [];
+                    drawRotatorTimeline(positions);
+                });
+            }
         }
 
         // Apply sun tracking settings
@@ -6599,6 +6608,11 @@
             currentRotatorSchedulerConfig.follow_sun_step = interval;
             currentRotatorSchedulerConfig.daytime_only = daytimeOnly;
             currentRotatorSchedulerConfig.daytime_overlap = overlap;
+
+            // Clear cached sun path so it will be refetched with new settings
+            window.cachedSunPath = null;
+            cachedSunPathData = null;
+            cachedSunPathSettings = null;
 
             // Save the entire config
             try {
@@ -7649,26 +7663,42 @@
                 ctx.setLineDash([]);
             }
 
-            // Draw sun tracking path if enabled
-            if (currentRotatorSchedulerConfig && currentRotatorSchedulerConfig.follow_sun) {
-                drawSunTrackingPath(ctx, marginLeft, marginTop, timelineY, timelineWidth);
+            // Draw sun tracking path if enabled and data is cached
+            if (currentRotatorSchedulerConfig && currentRotatorSchedulerConfig.follow_sun && window.cachedSunPath) {
+                drawSunTrackingPathSync(ctx, marginLeft, marginTop, timelineY, timelineWidth);
             }
         }
 
-        // Draw sun tracking path on timeline
-        async function drawSunTrackingPath(ctx, marginLeft, marginTop, timelineY, timelineWidth) {
+        // Cache for sun path data
+        let cachedSunPathData = null;
+        let cachedSunPathSettings = null;
+
+        // Fetch and cache sun tracking path data
+        async function fetchSunTrackingPath() {
             try {
                 // Get sun tracking settings
                 const step = currentRotatorSchedulerConfig.follow_sun_step || 5;
                 const daytimeOnly = currentRotatorSchedulerConfig.daytime_only !== false;
                 const overlap = currentRotatorSchedulerConfig.daytime_overlap || 0;
 
+                // Check if we already have cached data for these settings
+                const settingsKey = `${step}-${daytimeOnly}-${overlap}`;
+                if (cachedSunPathSettings === settingsKey && cachedSunPathData) {
+                    return; // Already cached
+                }
+
                 // Fetch sun path from API
                 const response = await fetch(`/api/suncalc/path?step=${step}&daytime_only=${daytimeOnly}&overlap=${overlap}`);
-                if (!response.ok) return;
+                if (!response.ok) {
+                    window.cachedSunPath = null;
+                    return;
+                }
 
                 const data = await response.json();
-                if (!data.path || data.path.length === 0) return;
+                if (!data.path || data.path.length === 0) {
+                    window.cachedSunPath = null;
+                    return;
+                }
 
                 // Extract unique bearings (rounded to integers) with their times
                 const uniquePoints = [];
@@ -7686,28 +7716,40 @@
                         seenBearings.add(bearing);
                         uniquePoints.push({
                             bearing: bearing,
-                            timeInHours: timeInHours,
-                            x: marginLeft + (timeInHours / 24) * timelineWidth
+                            timeInHours: timeInHours
                         });
                     }
                 });
 
-                // Draw yellow markers for each unique bearing
-                ctx.fillStyle = 'rgba(255, 193, 7, 0.8)'; // Yellow/gold color
-                ctx.strokeStyle = 'rgba(255, 193, 7, 0.6)';
-                ctx.lineWidth = 1;
-
-                uniquePoints.forEach(point => {
-                    // Draw small circle on timeline
-                    ctx.beginPath();
-                    ctx.arc(point.x, timelineY, 3, 0, 2 * Math.PI);
-                    ctx.fill();
-                    ctx.stroke();
-                });
+                // Cache the data
+                window.cachedSunPath = uniquePoints;
+                cachedSunPathData = uniquePoints;
+                cachedSunPathSettings = settingsKey;
 
             } catch (error) {
-                console.error('Error drawing sun tracking path:', error);
+                console.error('Error fetching sun tracking path:', error);
+                window.cachedSunPath = null;
             }
+        }
+
+        // Draw sun tracking path synchronously using cached data
+        function drawSunTrackingPathSync(ctx, marginLeft, marginTop, timelineY, timelineWidth) {
+            if (!window.cachedSunPath || window.cachedSunPath.length === 0) return;
+
+            // Draw yellow markers for each unique bearing
+            ctx.fillStyle = 'rgba(255, 193, 7, 0.8)'; // Yellow/gold color
+            ctx.strokeStyle = 'rgba(255, 193, 7, 0.6)';
+            ctx.lineWidth = 1;
+
+            window.cachedSunPath.forEach(point => {
+                const x = marginLeft + (point.timeInHours / 24) * timelineWidth;
+                
+                // Draw small circle on timeline
+                ctx.beginPath();
+                ctx.arc(x, timelineY, 3, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.stroke();
+            });
         }
 
         // Setup hover tooltip for rotator timeline

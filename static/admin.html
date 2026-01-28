@@ -8317,7 +8317,16 @@
                 const seenBearings = new Set();
 
                 data.data_points.forEach(point => {
-                    const bearing = Math.round(point.azimuth_deg);
+                    let bearing = Math.round(point.azimuth_deg);
+                    
+                    // Apply long path offset if configured (add 180° client-side)
+                    // The API returns base azimuth (with greyline if enabled)
+                    // We need to add 180° here if long path is selected
+                    const pathMode = currentRotatorSchedulerConfig.follow_sun_path || 'short';
+                    if (pathMode === 'long') {
+                        bearing = (bearing + 180) % 360;
+                    }
+                    
                     const timeParts = point.time_local.split(':');
                     const hours = parseInt(timeParts[0]);
                     const minutes = parseInt(timeParts[1]);

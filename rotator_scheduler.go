@@ -314,6 +314,12 @@ func isSameDay(t1, t2 time.Time) bool {
 	return y1 == y2 && m1 == m2 && d1 == d2
 }
 
+// isSameMinute checks if two times are in the same minute
+func isSameMinute(t1, t2 time.Time) bool {
+	return t1.Year() == t2.Year() && t1.Month() == t2.Month() && t1.Day() == t2.Day() &&
+		t1.Hour() == t2.Hour() && t1.Minute() == t2.Minute()
+}
+
 // resolvePositionTime resolves a position's time to HH:MM format
 // Handles both fixed times (HH:MM) and solar events (sunrise, sunset, etc.)
 // Note: Caller must NOT hold any locks
@@ -539,10 +545,18 @@ func (rs *RotatorScheduler) updateSunTracking() {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 
-	// Check if it's time to update (based on step interval)
-	stepDuration := time.Duration(rs.config.FollowSunStep) * time.Minute
-	if !rs.lastSunUpdate.IsZero() && now.Sub(rs.lastSunUpdate) < stepDuration {
-		return // Not time to update yet
+	// Check if it's time to update (based on step interval aligned to standard clock intervals)
+	stepMinutes := rs.config.FollowSunStep
+	currentMinutes := now.Hour()*60 + now.Minute()
+
+	// Check if current time aligns with the step interval (e.g., 00:00, 00:30, 01:00 for 30-minute steps)
+	if currentMinutes%stepMinutes != 0 {
+		return // Not at a standard interval boundary
+	}
+
+	// Prevent duplicate updates within the same minute
+	if !rs.lastSunUpdate.IsZero() && isSameMinute(rs.lastSunUpdate, now) {
+		return // Already updated this minute
 	}
 
 	// Get sun times for today
@@ -615,18 +629,8 @@ func (rs *RotatorScheduler) updateSunTracking() {
 		}
 	}
 
-	// Check if azimuth has changed significantly (more than 1 degree)
-	azimuthChange := azimuthDeg - rs.lastSunAzimuth
-	if azimuthChange < 0 {
-		azimuthChange = -azimuthChange
-	}
-
-	// Update if this is first update, or azimuth changed significantly, or step interval elapsed
-	shouldUpdate := rs.lastSunUpdate.IsZero() || azimuthChange >= 1.0 || now.Sub(rs.lastSunUpdate) >= stepDuration
-
-	if !shouldUpdate {
-		return
-	}
+	// At this point, we're at a standard interval boundary and haven't updated this minute yet
+	// We can proceed with the update
 
 	// Check if rotator is connected
 	if !rs.controller.client.IsConnected() {

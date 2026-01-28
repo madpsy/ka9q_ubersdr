@@ -847,12 +847,12 @@ class RotatorDisplay {
         const isNight = altitudeDeg < -6; // Civil twilight threshold
 
         // Adjust colors and opacity based on day/night
-        const fillColor = isNight ? '#4A5568' : '#FFD700'; // Dark gray at night, gold during day
-        const strokeColor = isNight ? '#2D3748' : '#FFA500'; // Darker gray at night, orange during day
-        const fillOpacity = isNight ? 0.4 : 1.0; // Dimmer at night
-        const glowColor = isNight ? 'rgba(74, 85, 104, 0.3)' : 'rgba(255, 215, 0, 0.9)';
-        const textColor = isNight ? '#A0AEC0' : '#FFFFFF'; // Light gray at night, white during day
-        const labelColor = isNight ? '#718096' : '#FFA500'; // Gray at night, orange during day
+        const fillColor = isNight ? '#6B7280' : '#FFD700'; // Medium gray at night, gold during day
+        const strokeColor = isNight ? '#9CA3AF' : '#FFA500'; // Light gray at night, orange during day
+        const fillOpacity = isNight ? 0.6 : 1.0; // Somewhat dimmed at night but still visible
+        const glowColor = isNight ? 'rgba(156, 163, 175, 0.5)' : 'rgba(255, 215, 0, 0.9)';
+        const textColor = isNight ? '#E5E7EB' : '#FFFFFF'; // Very light gray at night, white during day
+        const labelColor = isNight ? '#D1D5DB' : '#FFA500'; // Light gray at night, orange during day
 
         // Create sun marker group
         const markerGroup = this.markerGroup.append('g')

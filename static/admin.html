@@ -6291,6 +6291,10 @@
                         <div id="sun-elevation-stat" style="font-size: 20px; font-weight: bold; color: #ff9800;">—</div>
                     </div>
                 </div>
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #dee2e6;">
+                    <div style="color: #666; font-size: 11px;">Next Event</div>
+                    <div id="next-solar-event-stat" style="font-size: 14px; font-weight: bold; color: #ff9800;">—</div>
+                </div>
             `;
             topCardsRow.appendChild(sunCard);
 
@@ -7112,12 +7116,69 @@
                         sunElevationEl.style.color = altitudeDeg >= 0 ? '#ff9800' : '#999';
                     }
 
+                    // Calculate and display next solar event
+                    if (data.sun && data.sun.times) {
+                        const nextEventEl = document.getElementById('next-solar-event-stat');
+                        if (nextEventEl) {
+                            const nextEvent = findNextSolarEvent(data.sun.times);
+                            if (nextEvent) {
+                                nextEventEl.textContent = `${nextEvent.name} in ${nextEvent.timeUntil}`;
+                            } else {
+                                nextEventEl.textContent = '—';
+                            }
+                        }
+                    }
+
                     // Show sun marker on the map
                     window.adminRotatorDisplay.showSunMarker(azimuthDeg, altitudeDeg);
                 }
             } catch (error) {
                 console.error('Failed to update sun position:', error);
             }
+        }
+
+        // Find the next solar event from sun times
+        function findNextSolarEvent(sunTimes) {
+            const now = new Date();
+            const events = [
+                { name: 'Sunrise', time: new Date(sunTimes.sunrise) },
+                { name: 'Sunset', time: new Date(sunTimes.sunset) },
+                { name: 'Solar Noon', time: new Date(sunTimes.solarNoon) },
+                { name: 'Dawn', time: new Date(sunTimes.dawn) },
+                { name: 'Dusk', time: new Date(sunTimes.dusk) },
+                { name: 'Nautical Dawn', time: new Date(sunTimes.nauticalDawn) },
+                { name: 'Nautical Dusk', time: new Date(sunTimes.nauticalDusk) },
+                { name: 'Night End', time: new Date(sunTimes.nightEnd) },
+                { name: 'Night', time: new Date(sunTimes.night) }
+            ];
+
+            // Find next event after current time
+            const futureEvents = events.filter(e => e.time > now).sort((a, b) => a.time - b.time);
+
+            if (futureEvents.length > 0) {
+                const nextEvent = futureEvents[0];
+                const msUntil = nextEvent.time - now;
+                const minutesUntil = Math.floor(msUntil / 60000);
+                const hoursUntil = Math.floor(minutesUntil / 60);
+
+                let timeUntil;
+                if (hoursUntil > 0) {
+                    const mins = minutesUntil % 60;
+                    timeUntil = `${hoursUntil}h ${mins}m`;
+                } else {
+                    timeUntil = `${minutesUntil}m`;
+                }
+
+                return { name: nextEvent.name, timeUntil: timeUntil };
+            }
+
+            // If no future events today, show first event tomorrow
+            if (events.length > 0) {
+                const firstEvent = events.sort((a, b) => a.time - b.time)[0];
+                return { name: firstEvent.name, timeUntil: 'tomorrow' };
+            }
+
+            return null;
         }
 
         // Update sun position for a specific time (when hovering over timeline)

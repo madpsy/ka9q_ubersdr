@@ -6893,12 +6893,15 @@
                         type: 'sun'
                     });
                 });
+                console.log(`[Timeline Hover] Found ${window.cachedSunPath.length} sun tracking points`);
             }
 
             if (allEvents.length === 0) return;
 
             // Sort all events chronologically
             allEvents.sort((a, b) => a.totalMinutes - b.totalMinutes);
+
+            console.log(`[Timeline Hover] Total events: ${allEvents.length}, Target time: ${Math.floor(timeInHours)}:${Math.floor((timeInHours % 1) * 60).toString().padStart(2, '0')} (${targetMinutes} min)`);
 
             // Find the last event that occurred before or at the target time
             let lastEvent = null;
@@ -6912,6 +6915,10 @@
             // If no event found before target time, use the last event of the day (from yesterday)
             if (!lastEvent && allEvents.length > 0) {
                 lastEvent = allEvents[allEvents.length - 1];
+            }
+
+            if (lastEvent) {
+                console.log(`[Timeline Hover] Using ${lastEvent.type} event at ${lastEvent.totalMinutes} min (${Math.floor(lastEvent.totalMinutes/60)}:${(lastEvent.totalMinutes%60).toString().padStart(2,'0')}) → ${Math.round(lastEvent.bearing)}°`);
             }
 
             // Update rotator display to show this bearing

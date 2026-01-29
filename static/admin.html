@@ -9497,7 +9497,7 @@ const tooltipLine2 = timeStr;
                         </div>
                         <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 11px; color: #666; margin-bottom: 5px;">A/D Overranges</div>
-                            <div style="font-size: 16px; font-weight: bold; color: #667eea;">${data.overrange_seconds ? data.overrange_seconds.toFixed(1) : 'N/A'}</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #667eea;">${data.overrange_seconds !== undefined && data.overrange_seconds !== null ? data.overrange_seconds.toFixed(1) : 'N/A'}</div>
                             <div style="font-size: 10px; color: #999; margin-top: 3px;">(${overranges.toLocaleString()} total)</div>
                         </div>
                         <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">

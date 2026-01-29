@@ -13297,8 +13297,12 @@ const tooltipLine2 = timeStr;
                     return `<strong>${(hz / 1e6).toFixed(6)} MHz</strong>`;
                 };
 
-                // Build categorized display
+                // Build categorized display with 2-column layout
                 let html = '<div style="max-height: 60vh; overflow-y: auto;">';
+                html += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">';
+
+                // Left Column
+                html += '<div>';
 
                 // Identity & Basic Info
                 html += '<h3 style="margin-top: 0; color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">📡 Identity & Basic Info</h3>';
@@ -13326,8 +13330,13 @@ const tooltipLine2 = timeStr;
                 html += `<tr><td style="padding: 6px;">Squelch Open Threshold</td><td style="padding: 6px; text-align: right;">${fmt(ch.squelch_open, 1, ' dB')}</td></tr>`;
                 html += '</table>';
 
+                html += '</div>'; // End left column
+
+                // Right Column
+                html += '<div>';
+
                 // Output Status
-                html += '<h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">🔊 Output Status</h3>';
+                html += '<h3 style="margin-top: 0; color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">🔊 Output Status</h3>';
                 html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">';
                 html += `<tr><td style="padding: 6px;">Output Sample Rate</td><td style="padding: 6px; text-align: right;">${ch.output_samprate ? (ch.output_samprate / 1000).toFixed(1) + ' kHz' : '<em style="color: #999;">N/A</em>'}</td></tr>`;
                 html += `<tr><td style="padding: 6px;">Output Level</td><td style="padding: 6px; text-align: right;">${fmt(ch.output_level, 1, ' dB')}</td></tr>`;
@@ -13368,6 +13377,9 @@ const tooltipLine2 = timeStr;
                     html += `<tr><td style="padding: 6px;">Threshold Extension</td><td style="padding: 6px; text-align: right;">${fmt(ch.thresh_extend)}</td></tr>`;
                     html += '</table>';
                 }
+
+                html += '</div>'; // End right column
+                html += '</div>'; // End grid
 
                 html += `<div style="text-align: right; font-size: 11px; color: #999; margin-top: 10px;">Last Update: ${ch.last_update ? new Date(ch.last_update).toLocaleString() : 'N/A'}</div>`;
                 html += '</div>';

@@ -10393,22 +10393,16 @@ const tooltipLine2 = timeStr;
                     const sign = calibrateValue >= 0 ? '+' : '';
                     calibrationEl.textContent = `${sign}${ppm} ppm`;
                     calibrationEl.title = `${calibrateValue.toExponential(6)} (raw value)`;
-                    // Color code based on magnitude
-                    if (Math.abs(calibrateValue) < 1e-7) {
-                        calibrationEl.style.color = '#28a745'; // Green - well calibrated
-                    } else if (Math.abs(calibrateValue) < 5e-7) {
-                        calibrationEl.style.color = '#ffc107'; // Yellow - some drift
-                    } else {
-                        calibrationEl.style.color = '#dc3545'; // Red - significant drift
-                    }
+                    // Always use blue color
+                    calibrationEl.style.color = '#667eea';
                 } else {
                     calibrationEl.textContent = '0.000 ppm';
-                    calibrationEl.style.color = '#28a745';
+                    calibrationEl.style.color = '#667eea';
                     calibrationEl.title = '0.000000e+0 (raw value)';
                 }
             }).catch(() => {
                 calibrationEl.textContent = '—';
-                calibrationEl.style.color = '#666';
+                calibrationEl.style.color = '#667eea';
             });
 
             // Update SNR (from backend) - calculate color first

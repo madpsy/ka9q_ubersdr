@@ -469,11 +469,22 @@ func (rs *RotatorScheduler) Stop() {
 
 // schedulerLoop is the main scheduler loop that runs in the background
 func (rs *RotatorScheduler) schedulerLoop() {
-	// Check every minute for scheduled positions
+	// Calculate delay until the next minute boundary to align with clock
+	now := time.Now()
+	nextMinute := now.Truncate(time.Minute).Add(time.Minute)
+	initialDelay := nextMinute.Sub(now)
+
+	log.Printf("Rotator scheduler: aligning to minute boundary (waiting %v until %s)",
+		initialDelay.Round(time.Second), nextMinute.Format("15:04:05"))
+
+	// Wait until the next minute boundary before starting ticker
+	time.Sleep(initialDelay)
+
+	// Now create ticker that fires every minute (already aligned to :00 seconds)
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	// Also check immediately on startup
+	// Check immediately (we're now at a minute boundary)
 	rs.checkScheduledPositions()
 
 	for {

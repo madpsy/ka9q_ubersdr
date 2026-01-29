@@ -7170,6 +7170,10 @@
                         aVal = a.name.toLowerCase();
                         bVal = b.name.toLowerCase();
                         break;
+                    case 'continent':
+                        aVal = (a.continent || '').toLowerCase();
+                        bVal = (b.continent || '').toLowerCase();
+                        break;
                     case 'bearing':
                         aVal = a.bearing;
                         bVal = b.bearing;
@@ -7180,7 +7184,7 @@
                         bVal = b.distance_km;
                         break;
                 }
-                
+
                 if (countriesBeamSortDirection === 'asc') {
                     return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
                 } else {
@@ -7203,6 +7207,7 @@
                     <thead>
                         <tr style="border-bottom: 1px solid #dee2e6;">
                             <th onclick="sortCountriesInBeam('name')" style="padding: 6px; text-align: left; color: #666; font-weight: 500; cursor: pointer; user-select: none;" title="Click to sort">Country${sortIcon('name')}</th>
+                            <th onclick="sortCountriesInBeam('continent')" style="padding: 6px; text-align: center; color: #666; font-weight: 500; cursor: pointer; user-select: none; width: 50px;" title="Click to sort">Cont${sortIcon('continent')}</th>
                             <th onclick="sortCountriesInBeam('bearing')" style="padding: 6px; text-align: right; color: #666; font-weight: 500; cursor: pointer; user-select: none;" title="Click to sort">Bearing${sortIcon('bearing')}</th>
                             <th onclick="sortCountriesInBeam('distance')" style="padding: 6px; text-align: right; color: #666; font-weight: 500; cursor: pointer; user-select: none;" title="Click to sort">Dist (km)${sortIcon('distance')}</th>
                         </tr>
@@ -7216,10 +7221,11 @@
                 const escapedCountryData = JSON.stringify(country).replace(/"/g, '&quot;');
 
                 html += `
-                    <tr style="border-bottom: 1px solid #f0f0f0; opacity: ${opacity}; cursor: pointer;"
-                        onmouseenter="showCountryHoverMarker(${country.bearing}, ${country.distance_km})"
-                        onmouseleave="clearCountryHoverMarker()">
+                    <tr style="border-bottom: 1px solid #f0f0f0; opacity: ${opacity}; cursor: pointer; transition: background-color 0.2s;"
+                        onmouseenter="this.style.backgroundColor='#d4edda'; showCountryHoverMarker(${country.bearing}, ${country.distance_km})"
+                        onmouseleave="this.style.backgroundColor=''; clearCountryHoverMarker()">
                         <td style="padding: 6px; font-weight: 500;">${country.name}</td>
+                        <td style="padding: 6px; text-align: center; font-size: 11px; color: #999;">${country.continent || '—'}</td>
                         <td style="padding: 6px; text-align: right; font-family: monospace; color: #667eea;">${country.bearing}°</td>
                         <td style="padding: 6px; text-align: right; font-family: monospace; color: #666;">${Math.round(country.distance_km).toLocaleString()}</td>
                     </tr>

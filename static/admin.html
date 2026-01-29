@@ -9475,51 +9475,51 @@ const tooltipLine2 = timeStr;
                 }
 
                 frontendStatusDisplay.innerHTML = `
-                    <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 15px; margin-bottom: 15px;">
-                        <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Sample Rate</div>
-                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${sampleRateMSPS}</div>
-                            <div style="font-size: 11px; color: #999; margin-top: 3px;">(max ${nyquistFreqMHz} MHz)</div>
+                    <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 12px; margin-bottom: 15px;">
+                        <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Sample Rate</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #667eea;">${sampleRateMSPS}</div>
+                            <div style="font-size: 10px; color: #999; margin-top: 3px;">(max ${nyquistFreqMHz} MHz)</div>
                         </div>
-                        <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">RF AGC</div>
-                            <div style="font-size: 20px; font-weight: bold; color: ${data.rf_agc ? '#28a745' : '#667eea'};">${data.rf_agc ? 'ON' : 'OFF'}</div>
+                        <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 5px;">RF AGC</div>
+                            <div style="font-size: 16px; font-weight: bold; color: ${data.rf_agc ? '#28a745' : '#667eea'};">${data.rf_agc ? 'ON' : 'OFF'}</div>
                         </div>
-                        <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">RF Gain</div>
-                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${formatValue(data.rf_gain, 1, '')}</div>
+                        <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 5px;">RF Gain</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #667eea;">${formatValue(data.rf_gain, 1, '')}</div>
                         </div>
-                        <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">RF Attenuation</div>
-                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${formatValue(data.rf_atten, 1, '')}</div>
+                        <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 5px;">RF Attenuation</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #667eea;">${formatValue(data.rf_atten, 1, '')}</div>
                         </div>
-                        <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">IF Power</div>
-                            <div style="font-size: 20px; font-weight: bold; color: ${ifPowerColor};">${formatValue(data.if_power, 1, ' dBFS')}</div>
+                        <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 5px;">IF Power</div>
+                            <div style="font-size: 16px; font-weight: bold; color: ${ifPowerColor};">${formatValue(data.if_power, 1, ' dBFS')}</div>
                         </div>
-                        <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">A/D Overranges</div>
-                            <div style="font-size: 20px; font-weight: bold; color: ${overrangeColor};">${overrangesPerSecond}</div>
-                            <div style="font-size: 11px; color: #999; margin-top: 3px;">(${overranges.toLocaleString()} total)</div>
+                        <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 5px;">A/D Overranges</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #667eea;">${data.overrange_seconds ? data.overrange_seconds.toFixed(1) : 'N/A'}</div>
+                            <div style="font-size: 10px; color: #999; margin-top: 3px;">(${overranges.toLocaleString()} total)</div>
                         </div>
-                        <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Stable For</div>
-                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${data.time_since_overrange || 'N/A'}</div>
-                            <div style="font-size: 11px; color: #999; margin-top: 3px;">(since last overrange)</div>
+                        <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Stable For</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #667eea;">${data.time_since_overrange || 'N/A'}</div>
+                            <div style="font-size: 10px; color: #999; margin-top: 3px;">(since last overrange)</div>
                         </div>
                     </div>
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
-                        <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">FFT Size</div>
-                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${fftSize.toLocaleString()} <span style="font-size: 11px; color: #999;">${fftType} (${fftwBlock})</span></div>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+                        <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 5px;">FFT Size</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #667eea;">${fftSize.toLocaleString()} <span style="font-size: 10px; color: #999;">${fftType} (${fftwBlock})</span></div>
                         </div>
-                        <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Block Time</div>
-                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${blockTimeMs} <span style="font-size: 11px; color: #999;">ms</span></div>
+                        <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Block Time</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #667eea;">${blockTimeMs} <span style="font-size: 10px; color: #999;">ms</span></div>
                         </div>
-                        <div style="padding: 15px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
-                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">FFT Overlap</div>
-                            <div style="font-size: 20px; font-weight: bold; color: #667eea;">${overlapPercent}% <span style="font-size: 11px; color: #999;">(${overlapFraction})</span></div>
+                        <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 5px;">FFT Overlap</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #667eea;">${overlapPercent}% <span style="font-size: 10px; color: #999;">(${overlapFraction})</span></div>
                         </div>
                     </div>
                     <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
@@ -12021,11 +12021,11 @@ const tooltipLine2 = timeStr;
             statusDiv.style.borderRadius = '5px';
             statusDiv.style.marginBottom = '20px';
 
-            const overrangesPerSec = data.overranges_per_second !== undefined ? data.overranges_per_second.toFixed(1) : 'N/A';
+            const overrangeSeconds = data.overrange_seconds !== undefined ? data.overrange_seconds.toFixed(1) : 'N/A';
 
             statusDiv.innerHTML = `
                 <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : (data.status === 'critical' ? 'Critical' : 'Warning')}</strong><br>
-                <span style="color: #666; font-size: 14px;">A/D Overranges: <strong>${overrangesPerSec}</strong> per second</span><br>
+                <span style="color: #666; font-size: 14px;">A/D Overrange Seconds: <strong>${overrangeSeconds}</strong></span><br>
                 <span style="color: #666; font-size: 14px;">Total Overranges: ${data.ad_overranges ? data.ad_overranges.toLocaleString() : 'N/A'}</span><br>
                 <span style="color: #666; font-size: 14px;">Stable For: ${data.time_since_overrange || 'N/A'}</span>
             `;
@@ -12038,23 +12038,13 @@ const tooltipLine2 = timeStr;
             statsDiv.style.gap = '15px';
             statsDiv.style.marginBottom = '20px';
 
-            // Determine color for overranges
-            let overrangeColor = '#28a745'; // Green
-            let overrangeIcon = '✅';
-            if (data.overranges_per_second > 100) {
-                overrangeColor = '#dc3545'; // Red
-                overrangeIcon = '🚨';
-            } else if (data.overranges_per_second > 1) {
-                overrangeColor = '#ffc107'; // Yellow
-                overrangeIcon = '⚠️';
-            }
-
+            // A/D overranges are informational only - always blue
             const stats = [
                 {
-                    label: 'Overranges/sec',
-                    value: overrangesPerSec,
-                    icon: overrangeIcon,
-                    color: overrangeColor
+                    label: 'Overrange Seconds',
+                    value: overrangeSeconds,
+                    icon: '📊',
+                    color: '#667eea'
                 },
                 {
                     label: 'IF Power',
@@ -12134,11 +12124,11 @@ const tooltipLine2 = timeStr;
             statusDiv.style.borderRadius = '5px';
             statusDiv.style.marginBottom = '20px';
 
-            const overrangesPerSec = data.overranges_per_second !== undefined ? data.overranges_per_second.toFixed(1) : 'N/A';
+            const overrangeSeconds = data.overrange_seconds !== undefined ? data.overrange_seconds.toFixed(1) : 'N/A';
 
             statusDiv.innerHTML = `
                 <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : (data.status === 'critical' ? 'Critical' : 'Warning')}</strong><br>
-                <span style="color: #666; font-size: 14px;">A/D Overranges: <strong>${overrangesPerSec}</strong> per second</span><br>
+                <span style="color: #666; font-size: 14px;">A/D Overrange Seconds: <strong>${overrangeSeconds}</strong></span><br>
                 <span style="color: #666; font-size: 14px;">Total Overranges: ${data.ad_overranges ? data.ad_overranges.toLocaleString() : 'N/A'}</span><br>
                 <span style="color: #666; font-size: 14px;">Stable For: ${data.time_since_overrange || 'N/A'}</span>
             `;
@@ -12151,23 +12141,13 @@ const tooltipLine2 = timeStr;
             statsDiv.style.gap = '15px';
             statsDiv.style.marginBottom = '20px';
 
-            // Determine color for overranges
-            let overrangeColor = '#28a745'; // Green
-            let overrangeIcon = '✅';
-            if (data.overranges_per_second > 100) {
-                overrangeColor = '#dc3545'; // Red
-                overrangeIcon = '🚨';
-            } else if (data.overranges_per_second > 1) {
-                overrangeColor = '#ffc107'; // Yellow
-                overrangeIcon = '⚠️';
-            }
-
+            // A/D overranges are informational only - always blue
             const stats = [
                 {
-                    label: 'Overranges/sec',
-                    value: overrangesPerSec,
-                    icon: overrangeIcon,
-                    color: overrangeColor
+                    label: 'Overrange Seconds',
+                    value: overrangeSeconds,
+                    icon: '📊',
+                    color: '#667eea'
                 },
                 {
                     label: 'IF Power',

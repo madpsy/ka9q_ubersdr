@@ -7352,7 +7352,22 @@
             // If no future events today, show first event tomorrow
             if (events.length > 0) {
                 const firstEvent = events.sort((a, b) => a.time - b.time)[0];
-                return { name: firstEvent.name, timeUntil: 'tomorrow' };
+                // Calculate actual time until tomorrow's event
+                const tomorrow = new Date(firstEvent.time);
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                const msUntil = tomorrow - now;
+                const minutesUntil = Math.floor(msUntil / 60000);
+                const hoursUntil = Math.floor(minutesUntil / 60);
+
+                let timeUntil;
+                if (hoursUntil > 0) {
+                    const mins = minutesUntil % 60;
+                    timeUntil = `${hoursUntil}h ${mins}m`;
+                } else {
+                    timeUntil = `${minutesUntil}m`;
+                }
+
+                return { name: firstEvent.name, timeUntil: timeUntil };
             }
 
             return null;

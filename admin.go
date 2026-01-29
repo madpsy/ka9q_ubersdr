@@ -1937,6 +1937,18 @@ func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Calculate input power in dBm (same logic as control.c line 1413-1414)
+	// Input dBm = IF Power (dBFS) - (RF Gain - RF Atten + RF Level Cal)
+	var inputPowerDBm interface{}
+	if frontendStatus.IFPower > -200 { // Valid IF power value
+		// Convert IF power from linear to dB
+		ifPowerDB := 10.0 * math.Log10(float64(frontendStatus.IFPower))
+		// Calculate net RF gain
+		netRFGain := float64(frontendStatus.RFGain - frontendStatus.RFAtten + frontendStatus.RFLevelCal)
+		// Calculate input power in dBm
+		inputPowerDBm = ifPowerDB - netRFGain
+	}
+
 	response := map[string]interface{}{
 		"lna_gain":             frontendStatus.LNAGain,
 		"mixer_gain":           frontendStatus.MixerGain,
@@ -1945,6 +1957,8 @@ func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Requ
 		"rf_atten":             sanitizeFloat(frontendStatus.RFAtten),
 		"rf_agc":               frontendStatus.RFAGC,
 		"if_power":             sanitizeFloat(frontendStatus.IFPower),
+		"rf_level_cal":         sanitizeFloat(frontendStatus.RFLevelCal),
+		"input_power_dbm":      inputPowerDBm,
 		"ad_overranges":        frontendStatus.ADOverranges,
 		"overrange_seconds":    overrangeSeconds,
 		"samples_since_over":   frontendStatus.SamplesSinceOver,

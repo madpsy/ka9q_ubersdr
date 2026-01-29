@@ -37,6 +37,7 @@ const (
 	tagRFAGC            = 99  // RF_AGC
 	tagADOver           = 104 // AD_OVER - A/D overrange count
 	tagSamplesSinceOver = 108 // SAMPLES_SINCE_OVER
+	tagRFLevelCal       = 110 // RF_LEVEL_CAL - RF level calibration (dBm to dBFS)
 
 	// Output/RTP tags
 	tagOutputDataSourceSocket = 16  // OUTPUT_DATA_SOURCE_SOCKET
@@ -155,6 +156,7 @@ type FrontendStatus struct {
 	FilterBlocksize  int       `json:"filter_blocksize"`  // L - input buffer length for FFT
 	FilterFirLength  int       `json:"filter_fir_length"` // M - FIR impulse length for FFT
 	FeIsReal         bool      `json:"fe_is_real"`        // Real vs complex sampling (true = real-to-complex FFT)
+	RFLevelCal       float32   `json:"rf_level_cal"`      // RF level calibration (dBm to dBFS adjustment)
 	LastUpdate       time.Time // When this status was last updated
 }
 
@@ -492,6 +494,8 @@ func (fst *FrontendStatusTracker) parseStatusPacket(data []byte) {
 			frontendStatus.FilterFirLength = int(decodeInt32(value))
 		case tagFeIsReal:
 			frontendStatus.FeIsReal = decodeBool(value)
+		case tagRFLevelCal:
+			frontendStatus.RFLevelCal = decodeFloat(value)
 
 		// Tuning/Frequency tags
 		case tagRadioFrequency:

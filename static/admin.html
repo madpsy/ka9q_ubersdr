@@ -13320,6 +13320,15 @@ const tooltipLine2 = timeStr;
                 html += `<tr><td style="padding: 6px;">Doppler Correction</td><td style="padding: 6px; text-align: right;">${fmt(ch.doppler_frequency, 1, ' Hz')}</td></tr>`;
                 html += '</table>';
 
+                // Output Status
+                html += '<h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">🔊 Output Status</h3>';
+                html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">';
+                html += `<tr><td style="padding: 6px;">Output Sample Rate</td><td style="padding: 6px; text-align: right;">${ch.output_samprate ? (ch.output_samprate / 1000).toFixed(1) + ' kHz' : '<em style="color: #999;">N/A</em>'}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">Output Level</td><td style="padding: 6px; text-align: right;">${fmt(ch.output_level, 1, ' dB')}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">Output Samples</td><td style="padding: 6px; text-align: right;">${ch.output_samples ? ch.output_samples.toLocaleString() : '<em style="color: #999;">N/A</em>'}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">RTP Packets Sent</td><td style="padding: 6px; text-align: right;">${ch.output_data_packets ? ch.output_data_packets.toLocaleString() : '<em style="color: #999;">N/A</em>'}</td></tr>`;
+                html += '</table>';
+
                 // Signal Quality
                 html += '<h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">📊 Signal Quality</h3>';
                 html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">';
@@ -13334,15 +13343,6 @@ const tooltipLine2 = timeStr;
 
                 // Right Column
                 html += '<div>';
-
-                // Output Status
-                html += '<h3 style="margin-top: 0; color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">🔊 Output Status</h3>';
-                html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">';
-                html += `<tr><td style="padding: 6px;">Output Sample Rate</td><td style="padding: 6px; text-align: right;">${ch.output_samprate ? (ch.output_samprate / 1000).toFixed(1) + ' kHz' : '<em style="color: #999;">N/A</em>'}</td></tr>`;
-                html += `<tr><td style="padding: 6px;">Output Level</td><td style="padding: 6px; text-align: right;">${fmt(ch.output_level, 1, ' dB')}</td></tr>`;
-                html += `<tr><td style="padding: 6px;">Output Samples</td><td style="padding: 6px; text-align: right;">${ch.output_samples ? ch.output_samples.toLocaleString() : '<em style="color: #999;">N/A</em>'}</td></tr>`;
-                html += `<tr><td style="padding: 6px;">RTP Packets Sent</td><td style="padding: 6px; text-align: right;">${ch.output_data_packets ? ch.output_data_packets.toLocaleString() : '<em style="color: #999;">N/A</em>'}</td></tr>`;
-                html += '</table>';
 
                 // Filter Settings
                 html += '<h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">🔧 Filter Settings</h3>';

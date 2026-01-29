@@ -1900,32 +1900,27 @@ func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Requ
 		timeSinceOverrange = "N/A"
 	}
 
-	// Calculate overranges per second
-	var overrangesPerSecond float64
+	// Calculate overrange ratio as "seconds worth of overranges"
+	// This represents how many seconds it would take to accumulate this many overranges
+	// if every sample overranged continuously. It's a cumulative metric, not a rate.
+	var overrangeSeconds float64
 	if frontendStatus.InputSamprate > 0 {
-		overrangesPerSecond = float64(frontendStatus.ADOverranges) / float64(frontendStatus.InputSamprate)
+		overrangeSeconds = float64(frontendStatus.ADOverranges) / float64(frontendStatus.InputSamprate)
 	}
 
-	// Determine health status based on overranges per second
+	// A/D overranges are informational only - they don't affect health status.
+	// The cumulative count (ad_overranges) increases over the lifetime of radiod
+	// and doesn't indicate current overload conditions without additional context.
+	// Use samples_since_over and time_since_overrange for recent overrange detection.
 	healthy := true
 	status := "ok"
 	issues := []string{}
-
-	if overrangesPerSecond > 100 {
-		healthy = false
-		status = "critical"
-		issues = append(issues, fmt.Sprintf("Critical: %.1f A/D overranges per second (>100 threshold). RF input may be too strong - reduce gain or add attenuation.", overrangesPerSecond))
-	} else if overrangesPerSecond > 1 {
-		healthy = false
-		status = "warning"
-		issues = append(issues, fmt.Sprintf("Warning: %.1f A/D overranges per second (>1 threshold). Consider reducing RF gain or adding attenuation.", overrangesPerSecond))
-	}
 
 	// Calculate FFT parameters if we have the necessary data
 	var fftSize int
 	var fftType string
 	var blockTimeMs, blockRateHz, overlapPercent, binWidthHz float64
-	
+
 	if frontendStatus.FilterBlocksize > 0 && frontendStatus.FilterFirLength > 0 {
 		fftSize = frontendStatus.FilterBlocksize + frontendStatus.FilterFirLength - 1
 		if frontendStatus.FeIsReal {
@@ -1933,41 +1928,41 @@ func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Requ
 		} else {
 			fftType = "complex-to-complex"
 		}
-		
+
 		if frontendStatus.InputSamprate > 0 {
 			blockTimeMs = 1000.0 * float64(frontendStatus.FilterBlocksize) / float64(frontendStatus.InputSamprate)
 			blockRateHz = 1000.0 / blockTimeMs
-			overlapPercent = 100.0 / (1.0 + float64(frontendStatus.FilterBlocksize) / float64(frontendStatus.FilterFirLength - 1))
+			overlapPercent = 100.0 / (1.0 + float64(frontendStatus.FilterBlocksize)/float64(frontendStatus.FilterFirLength-1))
 			binWidthHz = float64(frontendStatus.InputSamprate) / float64(fftSize)
 		}
 	}
 
 	response := map[string]interface{}{
-		"lna_gain":              frontendStatus.LNAGain,
-		"mixer_gain":            frontendStatus.MixerGain,
-		"if_gain":               frontendStatus.IFGain,
-		"rf_gain":               sanitizeFloat(frontendStatus.RFGain),
-		"rf_atten":              sanitizeFloat(frontendStatus.RFAtten),
-		"rf_agc":                frontendStatus.RFAGC,
-		"if_power":              sanitizeFloat(frontendStatus.IFPower),
-		"ad_overranges":         frontendStatus.ADOverranges,
-		"overranges_per_second": overrangesPerSecond,
-		"samples_since_over":    frontendStatus.SamplesSinceOver,
-		"time_since_overrange":  timeSinceOverrange,
-		"input_samprate":        frontendStatus.InputSamprate,
-		"filter_blocksize":      frontendStatus.FilterBlocksize,
-		"filter_fir_length":     frontendStatus.FilterFirLength,
-		"fe_is_real":            frontendStatus.FeIsReal,
-		"fft_size":              fftSize,
-		"fft_type":              fftType,
-		"block_time_ms":         blockTimeMs,
-		"block_rate_hz":         blockRateHz,
-		"overlap_percent":       overlapPercent,
-		"bin_width_hz":          binWidthHz,
-		"last_update":           frontendStatus.LastUpdate.Format(time.RFC3339),
-		"healthy":               healthy,
-		"status":                status,
-		"issues":                issues,
+		"lna_gain":             frontendStatus.LNAGain,
+		"mixer_gain":           frontendStatus.MixerGain,
+		"if_gain":              frontendStatus.IFGain,
+		"rf_gain":              sanitizeFloat(frontendStatus.RFGain),
+		"rf_atten":             sanitizeFloat(frontendStatus.RFAtten),
+		"rf_agc":               frontendStatus.RFAGC,
+		"if_power":             sanitizeFloat(frontendStatus.IFPower),
+		"ad_overranges":        frontendStatus.ADOverranges,
+		"overrange_seconds":    overrangeSeconds,
+		"samples_since_over":   frontendStatus.SamplesSinceOver,
+		"time_since_overrange": timeSinceOverrange,
+		"input_samprate":       frontendStatus.InputSamprate,
+		"filter_blocksize":     frontendStatus.FilterBlocksize,
+		"filter_fir_length":    frontendStatus.FilterFirLength,
+		"fe_is_real":           frontendStatus.FeIsReal,
+		"fft_size":             fftSize,
+		"fft_type":             fftType,
+		"block_time_ms":        blockTimeMs,
+		"block_rate_hz":        blockRateHz,
+		"overlap_percent":      overlapPercent,
+		"bin_width_hz":         binWidthHz,
+		"last_update":          frontendStatus.LastUpdate.Format(time.RFC3339),
+		"healthy":              healthy,
+		"status":               status,
+		"issues":               issues,
 	}
 
 	w.WriteHeader(http.StatusOK)

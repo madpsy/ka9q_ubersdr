@@ -9447,11 +9447,9 @@ const tooltipLine2 = timeStr;
                     }
                 }
 
-                // Determine overrange status
+                // Get overrange seconds from API (informational only - always blue)
                 const overranges = data.ad_overranges || 0;
-                const sampleRate = data.input_samprate || 1; // Avoid division by zero
-                const overrangesPerSecond = (overranges / sampleRate).toFixed(1);
-                const overrangeColor = overranges > 0 ? '#dc3545' : '#28a745';
+                const overrangeSeconds = data.overrange_seconds !== undefined && data.overrange_seconds !== null ? data.overrange_seconds.toFixed(1) : 'N/A';
 
                 // Format sample rate for display (MSPS = Mega Samples Per Second)
                 const sampleRateMSPS = data.input_samprate ? (data.input_samprate / 1e6).toFixed(2) + ' MSPS' : 'N/A';

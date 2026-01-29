@@ -1939,14 +1939,12 @@ func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Requ
 
 	// Calculate input power in dBm (same logic as control.c line 1413-1414)
 	// Input dBm = IF Power (dBFS) - (RF Gain - RF Atten + RF Level Cal)
+	// Note: IF Power is already in dBFS (dB), not linear, so we don't need power2dB conversion
 	var inputPowerDBm interface{}
-	if frontendStatus.IFPower > 0 && !math.IsNaN(float64(frontendStatus.IFPower)) && !math.IsInf(float64(frontendStatus.IFPower), 0) {
-		// Convert IF power from linear to dB (power2dB in C code)
-		ifPowerDB := 10.0 * math.Log10(float64(frontendStatus.IFPower))
-		// Calculate net RF gain
+	if frontendStatus.IFPower > -200 && !math.IsNaN(float64(frontendStatus.IFPower)) && !math.IsInf(float64(frontendStatus.IFPower), 0) {
+		// IF power is already in dBFS, just subtract the net RF gain
 		netRFGain := float64(frontendStatus.RFGain - frontendStatus.RFAtten + frontendStatus.RFLevelCal)
-		// Calculate input power in dBm
-		dbmValue := ifPowerDB - netRFGain
+		dbmValue := float64(frontendStatus.IFPower) - netRFGain
 		// Sanitize the result
 		if !math.IsNaN(dbmValue) && !math.IsInf(dbmValue, 0) {
 			inputPowerDBm = dbmValue

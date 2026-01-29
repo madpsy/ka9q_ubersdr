@@ -7482,6 +7482,8 @@
                 window.adminRotatorDisplay.updateAzimuthDisplay(lastEvent.bearing);
                 if (window.adminRotatorDisplay.countriesData) {
                     window.adminRotatorDisplay.updateConeMarkers(window.adminRotatorDisplay.countriesData, lastEvent.bearing);
+                    // Update countries in beam list
+                    updateCountriesInBeam(window.adminRotatorDisplay.countriesData, lastEvent.bearing);
                 }
             }
         }

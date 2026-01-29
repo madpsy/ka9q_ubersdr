@@ -9538,6 +9538,7 @@ const tooltipLine2 = timeStr;
                         <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 11px; color: #666; margin-bottom: 5px;">IF Power</div>
                             <div style="font-size: 16px; font-weight: bold; color: ${ifPowerColor};">${formatValue(data.if_power, 1, ' dBFS')}</div>
+                            <div style="font-size: 10px; color: #999; margin-top: 3px;">(${data.input_power_dbm !== null && data.input_power_dbm !== undefined ? data.input_power_dbm.toFixed(2) + ' dBm' : 'N/A'})</div>
                         </div>
                         <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 11px; color: #666; margin-bottom: 5px;">A/D Overranges</div>

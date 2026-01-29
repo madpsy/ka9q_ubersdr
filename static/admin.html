@@ -7181,8 +7181,9 @@
                 return '';
             };
 
-            // Create table with sortable headers
+            // Create table with sortable headers and count in heading
             let html = `
+                <div style="font-weight: 500; color: #666; margin-bottom: 8px; font-size: 12px;">Showing ${countriesInBeam.length} ${countriesInBeam.length === 1 ? 'country' : 'countries'}</div>
                 <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
                     <thead>
                         <tr style="border-bottom: 1px solid #dee2e6;">

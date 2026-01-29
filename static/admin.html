@@ -6364,7 +6364,7 @@
             countriesCard.style.display = 'flex';
             countriesCard.style.flexDirection = 'column';
             countriesCard.innerHTML = `
-                <h4 style="margin: 0 0 10px 0; color: #28a745; font-size: 14px;">📡 Countries in Beam</h4>
+                <h4 style="margin: 0 0 10px 0; color: #28a745; font-size: 14px;">📡 Countries in Beam <span id="countries-in-beam-count" style="font-weight: normal; color: #666;">(0)</span></h4>
                 <div id="countries-in-beam-container" style="flex: 1; overflow-y: auto; max-height: 340px;">
                     <div style="text-align: center; color: #999; padding: 20px; font-size: 12px;">
                         <em>Loading...</em>
@@ -7121,9 +7121,24 @@
         let countriesBeamSortColumn = 'distance';
         let countriesBeamSortDirection = 'asc';
 
+        // Show country hover marker on map
+        function showCountryHoverMarker(bearing, distance) {
+            if (!window.adminRotatorDisplay) return;
+            // Use the showCountryMarker method with a special marker style
+            // We'll pass null for name to avoid showing a label
+            window.adminRotatorDisplay.showCountryMarker('', bearing, distance, null, null);
+        }
+
+        // Clear country hover marker
+        function clearCountryHoverMarker() {
+            if (!window.adminRotatorDisplay) return;
+            window.adminRotatorDisplay.clearCountryMarker();
+        }
+
         // Update countries in beam list
         function updateCountriesInBeam(countries, currentAzimuth) {
             const container = document.getElementById('countries-in-beam-container');
+            const countSpan = document.getElementById('countries-in-beam-count');
             if (!container || !countries) return;
 
             // Find countries within the beam (±20° cone)
@@ -7197,9 +7212,13 @@
 
             countriesInBeam.forEach(country => {
                 const opacity = 1 - (country.beamOffset / beamWidth) * 0.5; // Fade based on distance from center
+                // Escape country data for use in onmouseover/onmouseleave attributes
+                const escapedCountryData = JSON.stringify(country).replace(/"/g, '&quot;');
 
                 html += `
-                    <tr style="border-bottom: 1px solid #f0f0f0; opacity: ${opacity};">
+                    <tr style="border-bottom: 1px solid #f0f0f0; opacity: ${opacity}; cursor: pointer;"
+                        onmouseenter="showCountryHoverMarker(${country.bearing}, ${country.distance_km})"
+                        onmouseleave="clearCountryHoverMarker()">
                         <td style="padding: 6px; font-weight: 500;">${country.name}</td>
                         <td style="padding: 6px; text-align: right; font-family: monospace; color: #667eea;">${country.bearing}°</td>
                         <td style="padding: 6px; text-align: right; font-family: monospace; color: #666;">${Math.round(country.distance_km).toLocaleString()}</td>
@@ -7210,7 +7229,12 @@
             html += '</tbody></table>';
 
             container.innerHTML = html;
-            
+
+            // Update count in heading
+            if (countSpan) {
+                countSpan.textContent = `(${countriesInBeam.length})`;
+            }
+
             // Store countries data for re-sorting
             container.countriesData = countriesInBeam;
             container.currentAzimuth = currentAzimuth;

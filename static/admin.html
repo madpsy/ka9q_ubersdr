@@ -7194,9 +7194,9 @@
                     <tbody>
             `;
 
-            countriesInBeam.slice(0, 15).forEach(country => {
+            countriesInBeam.forEach(country => {
                 const opacity = 1 - (country.beamOffset / beamWidth) * 0.5; // Fade based on distance from center
-                
+
                 html += `
                     <tr style="border-bottom: 1px solid #f0f0f0; opacity: ${opacity};">
                         <td style="padding: 6px; font-weight: 500;">${country.name}</td>
@@ -7207,10 +7207,6 @@
             });
 
             html += '</tbody></table>';
-            
-            if (countriesInBeam.length > 15) {
-                html += `<div style="text-align: center; color: #999; padding: 8px; font-size: 11px; border-top: 1px solid #dee2e6;">+${countriesInBeam.length - 15} more</div>`;
-            }
 
             container.innerHTML = html;
             

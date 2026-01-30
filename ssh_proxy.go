@@ -46,6 +46,38 @@ func NewSSHProxy(config *SSHProxyConfig) (*SSHProxy, error) {
 		}
 		req.Host = targetURL.Host
 
+		// Extract the real client IP using the same logic as getClientIP() in main.go
+		// This ensures consistency with the rest of the application
+		sourceIP := req.RemoteAddr
+		if host, _, err := net.SplitHostPort(sourceIP); err == nil {
+			sourceIP = host
+		}
+
+		clientIP := sourceIP
+
+		// Check if X-Forwarded-For already exists (from upstream proxy)
+		// If it does, preserve it and extract the first IP for X-Real-IP
+		if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
+			// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
+			// Extract the first IP (true client)
+			clientIP = strings.TrimSpace(xff)
+			if commaIdx := strings.Index(clientIP, ","); commaIdx != -1 {
+				clientIP = strings.TrimSpace(clientIP[:commaIdx])
+			}
+			// Strip port if present
+			if host, _, err := net.SplitHostPort(clientIP); err == nil {
+				clientIP = host
+			}
+			// Set X-Real-IP to the first IP in the chain (true client)
+			req.Header.Set("X-Real-IP", clientIP)
+			// X-Forwarded-For is already set, leave it as-is
+		} else {
+			// No X-Forwarded-For from upstream, so this is a direct connection
+			// Set both headers with the source IP
+			req.Header.Set("X-Forwarded-For", sourceIP)
+			req.Header.Set("X-Real-IP", sourceIP)
+		}
+
 		// Fix WebSocket origin for GoTTY's CheckOrigin validation
 		// Rewrite the Origin header to match the backend target URL
 		// This allows WebSocket upgrades to pass GoTTY's origin check

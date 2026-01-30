@@ -30,7 +30,7 @@ func NewSSHProxy(config *SSHProxyConfig) (*SSHProxy, error) {
 	// Create reverse proxy
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 
-	// Customize the director to handle path stripping
+	// Customize the director to handle path stripping and WebSocket origin
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
@@ -40,6 +40,15 @@ func NewSSHProxy(config *SSHProxyConfig) (*SSHProxy, error) {
 			req.URL.Path = "/"
 		}
 		req.Host = targetURL.Host
+
+		// Fix WebSocket origin for GoTTY's CheckOrigin validation
+		// Rewrite the Origin header to match the backend target URL
+		// This allows WebSocket upgrades to pass GoTTY's origin check
+		if req.Header.Get("Upgrade") == "websocket" {
+			// Set origin to match the target backend
+			req.Header.Set("Origin", fmt.Sprintf("http://%s:%d", config.Host, config.Port))
+			log.Printf("SSH proxy: Rewriting WebSocket origin for %s", req.URL.Path)
+		}
 	}
 
 	// Add error handler

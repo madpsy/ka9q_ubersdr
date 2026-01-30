@@ -506,14 +506,23 @@ func (ah *AdminHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 // AuthMiddleware checks for valid admin session or password header
 func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is an SSH proxy request for debug logging
+		isSSHProxy := strings.HasPrefix(r.URL.Path, ah.config.SSHProxy.Path)
+
 		// Check for password in X-Admin-Password header first
 		if password := r.Header.Get("X-Admin-Password"); password != "" {
 			if password == ah.config.Admin.Password {
 				// Valid password, proceed
+				if isSSHProxy {
+					log.Printf("[SSH Proxy Auth] Authenticated via X-Admin-Password header for %s", r.URL.Path)
+				}
 				next(w, r)
 				return
 			}
 			// Invalid password
+			if isSSHProxy {
+				log.Printf("[SSH Proxy Auth] Invalid X-Admin-Password header for %s", r.URL.Path)
+			}
 			http.Error(w, "Unauthorized - invalid password", http.StatusUnauthorized)
 			return
 		}
@@ -521,14 +530,40 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// Fall back to cookie-based authentication
 		cookie, err := r.Cookie("admin_session")
 		if err != nil {
+			if isSSHProxy {
+				log.Printf("[SSH Proxy Auth] No admin_session cookie found for %s: %v", r.URL.Path, err)
+			}
 			http.Error(w, "Unauthorized - no session or password", http.StatusUnauthorized)
 			return
 		}
 
+		if isSSHProxy {
+			log.Printf("[SSH Proxy Auth] Found admin_session cookie for %s: %s", r.URL.Path, cookie.Value)
+		}
+
 		// Validate session
 		if !ah.adminSessions.ValidateSession(cookie.Value) {
+			if isSSHProxy {
+				// Get more details about why validation failed
+				ah.adminSessions.mu.RLock()
+				session, exists := ah.adminSessions.sessions[cookie.Value]
+				totalSessions := len(ah.adminSessions.sessions)
+				ah.adminSessions.mu.RUnlock()
+
+				if !exists {
+					log.Printf("[SSH Proxy Auth] Session validation failed for %s: session token not found in store (total sessions: %d)", r.URL.Path, totalSessions)
+				} else {
+					expired := time.Now().After(session.ExpiresAt)
+					log.Printf("[SSH Proxy Auth] Session validation failed for %s: session exists but expired=%v (created: %s, expires: %s, now: %s)",
+						r.URL.Path, expired, session.CreatedAt.Format(time.RFC3339), session.ExpiresAt.Format(time.RFC3339), time.Now().Format(time.RFC3339))
+				}
+			}
 			http.Error(w, "Unauthorized - invalid or expired session", http.StatusUnauthorized)
 			return
+		}
+
+		if isSSHProxy {
+			log.Printf("[SSH Proxy Auth] Session validation successful for %s", r.URL.Path)
 		}
 
 		next(w, r)

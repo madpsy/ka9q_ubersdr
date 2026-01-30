@@ -103,7 +103,13 @@ echo
 tmux new-session -d -s "$SESSION_NAME" -n 'Generate Wisdom' "sudo fftwf-wisdom -v -T 1 -o '$WISDOM_FILE' \
     $FFT_SIZES && \
     echo && \
+    echo && \
+    echo && \
     echo '=== FFTW Wisdom generation completed successfully! ===' && \
+    echo && \
+    echo 'Please restart the application using the red \"Save & Restart Radiod\" button' && \
+    echo 'at the bottom of the \"Radiod\" tab in the admin interface.' && \
+    echo && \
     echo 'Press Enter to close this session...' && \
     read"
 

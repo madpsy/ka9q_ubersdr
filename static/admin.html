@@ -510,6 +510,7 @@
                     <button id="publicInstanceBtn" class="btn" onclick="window.location.href='/create_public.html'" style="display: none; background: #28a745;">
                         🔓 Enable Public Access
                     </button>
+                    <button class="btn" id="terminalButton" onclick="openTerminal()" style="display: none;">🖥️ Terminal</button>
                     <button class="btn btn-secondary" onclick="logout()">Logout</button>
                 </div>
             </div>
@@ -1184,7 +1185,6 @@
                     <button class="btn btn-secondary" onclick="loadChatLogs()">Refresh</button>
                 </div>
                 <div class="button-group" id="systemButtons" style="display: none;">
-                    <button class="btn" id="terminalButton" onclick="openTerminal()" style="display: none;">🖥️ Terminal</button>
                     <button class="btn btn-secondary" onclick="loadSystemStats()">Refresh</button>
                 </div>
                 <input type="file" id="configFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleConfigImport(event)">

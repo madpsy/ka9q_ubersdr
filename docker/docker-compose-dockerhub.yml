@@ -249,8 +249,7 @@ services:
     networks:
       - sdr-network
 
-    ports:
-      - "9980:9980"
+    # No ports exposed - accessed only via ubersdr reverse proxy
 
     extra_hosts:
       - "host.docker.internal:host-gateway"

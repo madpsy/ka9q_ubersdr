@@ -648,6 +648,7 @@
                         ⚠️ <strong>WARNING:</strong> Editing the radiod configuration is for advanced users only and may break UberSDR.
                         <div style="margin-top: 15px;">
                             <button class="btn" onclick="enableRadiodEditing()" style="background: #dc3545; font-weight: bold;">I Have No Fear</button>
+                            <button class="btn" id="generateWisdomBtn" onclick="openGenerateWisdom()" style="background: #805ad5; color: white; font-weight: bold; margin-left: 10px;">✨ Generate Wisdom</button>
                         </div>
                     </div>
                     <div id="radiodConfig" class="loading">
@@ -1914,6 +1915,21 @@
             const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
             // GoTTY serves the terminal interface at /sessions
             window.open(terminalPath + '/sessions', '_blank');
+        }
+
+        // Open Generate Wisdom script in popup window
+        function openGenerateWisdom() {
+            const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
+            const command = '~/ubersdr/generate_wisdom.sh';
+            const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
+            
+            // Open popup window with specific dimensions (similar to ubersdr-gotty direct command)
+            const width = 1000;
+            const height = 700;
+            const left = (screen.width - width) / 2;
+            const top = (screen.height - height) / 2;
+            window.open(url, 'generate_wisdom_' + Date.now(),
+                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
         }
 
         // Update callsign and name display in header

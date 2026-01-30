@@ -74,6 +74,9 @@ COPY --from=builder /build/config/rotator_schedule.yaml.example /etc/ka9q_ubersd
 # Copy CTY directory with cty.dat file
 COPY --from=builder /build/cty /etc/ka9q_ubersdr/cty
 
+# Copy GeoIP database
+COPY --from=builder /build/geoip ./geoip
+
 # Copy entrypoint script
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

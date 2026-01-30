@@ -1214,7 +1214,7 @@ geoip:
   #   Linux:   /var/lib/ubersdr/GeoLite2-Country.mmdb
   #   Docker:  /data/GeoLite2-Country.mmdb
   #   macOS:   /usr/local/var/ubersdr/GeoLite2-Country.mmdb
-  database_path: "/var/lib/ubersdr/GeoLite2-Country.mmdb"
+  database_path: "/app/geoip/GeoLite2-Country.mmdb"
 
   # Admin API Endpoints (require admin authentication):
   #   POST /admin/geoip/lookup

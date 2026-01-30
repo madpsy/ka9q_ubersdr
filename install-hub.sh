@@ -6,7 +6,7 @@ set -e
 # Parse command line arguments
 IGNORE_RX888=0
 IGNORE_PORTS=0
-FORCE_COMPOSE=0
+FORCE_COMPOSE=1
 GENERATE_WISDOM=0
 for arg in "$@"; do
     case $arg in
@@ -399,7 +399,7 @@ fi
 # Setup auto-update cron job
 echo
 echo "Setting up auto-update cron job..."
-CRON_JOB="* * * * * [ -f \$HOME/ubersdr/updater/latest ] && [ -s \$HOME/ubersdr/updater/latest ] && sudo rm -f \$HOME/ubersdr/updater/latest && curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/main/install-hub.sh | bash >> \$HOME/ubersdr/update.log 2>&1"
+CRON_JOB="* * * * * [ -f \$HOME/ubersdr/updater/latest ] && [ -s \$HOME/ubersdr/updater/latest ] && sudo rm -f \$HOME/ubersdr/updater/latest && curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/main/install-hub.sh | bash -s -- --force-compose >> \$HOME/ubersdr/update.log 2>&1"
 
 # Check if cron job already exists
 if crontab -l 2>/dev/null | grep -q "ubersdr/updater/latest"; then

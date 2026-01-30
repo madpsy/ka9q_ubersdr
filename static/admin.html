@@ -9427,6 +9427,32 @@ const tooltipLine2 = timeStr;
                 container.appendChild(sectionDiv);
             });
 
+            // Add network configuration section if available
+            if (stats.ip_addresses && stats.ip_addresses.trim()) {
+                const networkSection = document.createElement('div');
+                networkSection.className = 'config-section';
+
+                const title = document.createElement('h3');
+                title.textContent = '🌐 Network Configuration';
+                networkSection.appendChild(title);
+
+                const pre = document.createElement('pre');
+                pre.style.background = '#fff';
+                pre.style.padding = '15px';
+                pre.style.borderRadius = '5px';
+                pre.style.overflow = 'auto';
+                pre.style.maxHeight = '400px';
+                pre.style.fontFamily = 'monospace';
+                pre.style.fontSize = '13px';
+                pre.style.lineHeight = '1.5';
+                pre.style.whiteSpace = 'pre-wrap';
+                pre.style.wordWrap = 'break-word';
+                pre.textContent = stats.ip_addresses;
+                networkSection.appendChild(pre);
+
+                container.appendChild(networkSection);
+            }
+
             // Add data directories section if available
             if (stats.data_directories && Object.keys(stats.data_directories).length > 0) {
                 const dataDirSection = document.createElement('div');

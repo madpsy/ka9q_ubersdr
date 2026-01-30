@@ -311,7 +311,6 @@ type SSHProxyConfig struct {
 	Enabled bool   `yaml:"enabled"` // Enable/disable SSH terminal proxy
 	Host    string `yaml:"host"`    // GoTTY container hostname
 	Port    int    `yaml:"port"`    // GoTTY container port
-	Path    string `yaml:"path"`    // Proxy path prefix (e.g., /terminal)
 }
 
 // LoadConfig loads configuration from a YAML file
@@ -686,9 +685,6 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.SSHProxy.Port == 0 {
 		config.SSHProxy.Port = 9980 // Default GoTTY port
-	}
-	if config.SSHProxy.Path == "" {
-		config.SSHProxy.Path = "/terminal" // Default proxy path
 	}
 	// SSHProxy.Enabled defaults to true (enabled by default)
 	// Note: YAML booleans default to false, so we set it to true if not explicitly disabled

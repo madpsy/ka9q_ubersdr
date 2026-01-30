@@ -929,8 +929,8 @@ func main() {
 		if err != nil {
 			log.Printf("Warning: Failed to initialize SSH proxy: %v", err)
 		} else {
-			log.Printf("SSH terminal proxy initialized: %s -> http://%s:%d (rate limit: 100 req/min per IP)",
-				config.SSHProxy.Path, config.SSHProxy.Host, config.SSHProxy.Port)
+			log.Printf("SSH terminal proxy initialized: /terminal -> http://%s:%d (rate limit: 100 req/min per IP)",
+				config.SSHProxy.Host, config.SSHProxy.Port)
 		}
 	}
 
@@ -1286,11 +1286,11 @@ func main() {
 
 	// Register SSH proxy route (admin authentication required)
 	if sshProxy != nil {
-		http.HandleFunc(config.SSHProxy.Path+"/", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		http.HandleFunc("/terminal/", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 			sshProxy.ServeHTTP(w, r)
 		}))
-		log.Printf("SSH terminal proxy enabled at %s (proxying to http://%s:%d)",
-			config.SSHProxy.Path, config.SSHProxy.Host, config.SSHProxy.Port)
+		log.Printf("SSH terminal proxy enabled at /terminal (proxying to http://%s:%d)",
+			config.SSHProxy.Host, config.SSHProxy.Port)
 	}
 
 	// Open log file for HTTP request logging (if enabled)

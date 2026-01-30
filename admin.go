@@ -507,7 +507,7 @@ func (ah *AdminHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check if this is an SSH proxy request for debug logging
-		isSSHProxy := strings.HasPrefix(r.URL.Path, ah.config.SSHProxy.Path)
+		isSSHProxy := strings.HasPrefix(r.URL.Path, "/terminal")
 
 		// Check for password in X-Admin-Password header first
 		if password := r.Header.Get("X-Admin-Password"); password != "" {

@@ -1186,12 +1186,6 @@ ssh_proxy:
   # The port where GoTTY is listening inside the container
   port: 9980
 
-  # Proxy path prefix (default: /terminal)
-  # The URL path where the terminal will be accessible
-  # Example: http://ubersdr.local:8080/terminal/
-  # This path requires admin authentication
-  path: "/terminal"
-
 # ==============================================================================
 # GeoIP Configuration
 # ==============================================================================

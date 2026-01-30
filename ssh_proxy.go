@@ -40,7 +40,7 @@ func NewSSHProxy(config *SSHProxyConfig) (*SSHProxy, error) {
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
 		// Strip the proxy path prefix so GoTTY receives the correct paths
-		req.URL.Path = strings.TrimPrefix(req.URL.Path, config.Path)
+		req.URL.Path = strings.TrimPrefix(req.URL.Path, "/terminal")
 		if req.URL.Path == "" {
 			req.URL.Path = "/"
 		}
@@ -62,7 +62,7 @@ func NewSSHProxy(config *SSHProxyConfig) (*SSHProxy, error) {
 		http.Error(w, "SSH terminal service unavailable", http.StatusBadGateway)
 	}
 
-	log.Printf("SSH terminal proxy initialized: %s -> %s (rate limit: 100 req/min per IP)", config.Path, targetURL.String())
+	log.Printf("SSH terminal proxy initialized: /terminal -> %s (rate limit: 100 req/min per IP)", targetURL.String())
 
 	return &SSHProxy{
 		config:      config,

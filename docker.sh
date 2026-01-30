@@ -38,6 +38,18 @@ echo ""
 read -p "Press any key to continue..." -n1 -s
 echo ""
 
+# Check if GeoIP database exists
+if [ ! -f "geoip/GeoLite2-Country.mmdb" ]; then
+    echo "ERROR: geoip/GeoLite2-Country.mmdb not found!"
+    echo ""
+    echo "Please download the GeoLite2 Country database from MaxMind:"
+    echo "  1. Sign up for a free account at https://www.maxmind.com/en/geolite2/signup"
+    echo "  2. Download GeoLite2-Country.mmdb"
+    echo "  3. Place it in the geoip/ directory"
+    echo ""
+    exit 1
+fi
+
 # Build UberSDR image with version tag
 echo "Building UberSDR Docker image..."
 if ! docker build $NO_CACHE -t $IMAGE:$VERSION -f docker/Dockerfile .; then

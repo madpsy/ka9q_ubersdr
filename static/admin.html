@@ -3778,6 +3778,12 @@
                     ipDisplay += ` <span style="color: #666; font-size: 11px;">(via ${sourceIP})</span>`;
                 }
 
+                // Add country field underneath if it exists and isn't empty
+                const country = audioSession?.country || spectrumSession?.country || '';
+                if (country) {
+                    ipDisplay += `<br><span style="color: #888; font-size: 10px;">${country}</span>`;
+                }
+
                 let details = '';
                 if (audioSession) {
                     details += `<strong>A:</strong> ${(audioSession.frequency / 1e6).toFixed(3)} MHz, ${audioSession.mode.toUpperCase()}<br>`;

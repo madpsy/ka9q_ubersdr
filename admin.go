@@ -538,7 +538,12 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		if isSSHProxy {
-			log.Printf("[SSH Proxy Auth] Found admin_session cookie for %s: %s", r.URL.Path, cookie.Value)
+			// Only log first 8 characters of token for security
+			tokenPreview := cookie.Value
+			if len(tokenPreview) > 8 {
+				tokenPreview = tokenPreview[:8] + "..."
+			}
+			log.Printf("[SSH Proxy Auth] Found admin_session cookie for %s: %s", r.URL.Path, tokenPreview)
 		}
 
 		// Validate session

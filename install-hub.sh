@@ -140,7 +140,7 @@ fi
 echo "Installing dependencies..."
 sudo apt update
 sudo apt -y upgrade
-sudo apt install -y ntpsec libfftw3-bin
+sudo apt install -y ntpsec libfftw3-bin ssh tmux btop
 
 # Install Docker if not already installed
 if command -v docker &> /dev/null; then

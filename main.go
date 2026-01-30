@@ -393,8 +393,26 @@ func main() {
 	}
 	defer radiod.Close()
 
-	// Initialize session manager
-	sessions := NewSessionManager(config, radiod)
+	// Initialize GeoIP service (internal use only, admin API access)
+	// Must be initialized BEFORE SessionManager so it can be passed to it
+	var geoIPService *GeoIPService
+	if config.GeoIP.Enabled {
+		var err error
+		geoIPService, err = NewGeoIPService(config.GeoIP.DatabasePath)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize GeoIP service: %v", err)
+			log.Printf("GeoIP features will be disabled. To enable, configure geoip.database_path in config.yaml")
+			geoIPService = &GeoIPService{enabled: false}
+		} else {
+			defer geoIPService.Close()
+		}
+	} else {
+		log.Println("GeoIP service disabled in configuration")
+		geoIPService = &GeoIPService{enabled: false}
+	}
+
+	// Initialize session manager (with GeoIP service for automatic country lookups)
+	sessions := NewSessionManager(config, radiod, geoIPService)
 
 	// Make session activity log directory relative to config directory if it's a relative path
 	if config.Server.SessionActivityLogEnabled && !strings.HasPrefix(config.Server.SessionActivityLogDir, "/") {
@@ -992,7 +1010,7 @@ func main() {
 	}
 
 	// Initialize admin handler (pass all components for proper shutdown during restart)
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, frontendHistory, loadHistory)
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory)
 
 	// Setup HTTP routes
 	http.HandleFunc("/connection", func(w http.ResponseWriter, r *http.Request) {
@@ -1245,6 +1263,9 @@ func main() {
 	http.HandleFunc("/admin/chat/logs", adminHandler.AuthMiddleware(adminHandler.HandleChatLogs))
 	http.HandleFunc("/admin/force-update", adminHandler.AuthMiddleware(adminHandler.HandleForceUpdate))
 	http.HandleFunc("/admin/logs", adminHandler.AuthMiddleware(handleLogsAPI))
+	http.HandleFunc("/admin/geoip/lookup", adminHandler.AuthMiddleware(adminHandler.HandleGeoIPLookup))
+	http.HandleFunc("/admin/sessions/countries", adminHandler.AuthMiddleware(adminHandler.HandleSessionsWithCountries))
+	http.HandleFunc("/admin/geoip-health", adminHandler.AuthMiddleware(adminHandler.HandleGeoIPHealth))
 
 	// Open log file for HTTP request logging (if enabled)
 	var logFile *os.File
@@ -1677,6 +1698,8 @@ func handleStats(w http.ResponseWriter, r *http.Request, sessions *SessionManage
 				"bandwidth_high": session.BandwidthHigh,
 				"created_at":     session.CreatedAt,
 				"last_active":    session.LastActive,
+				"country":        session.Country,
+				"country_code":   session.CountryCode,
 			}
 			session.mu.RUnlock()
 

@@ -1165,3 +1165,67 @@ rotctl:
   #   - Unlimited retry attempts for resilience
   #   - Background state updates every 2 seconds
   #   - Thread-safe operations
+
+# ==============================================================================
+# GeoIP Configuration
+# ==============================================================================
+# IP geolocation service for internal use and admin API access only
+# Uses MaxMind GeoLite2 database for offline country-level lookups
+# NOT publicly accessible - admin authentication required
+geoip:
+  # Enable IP geolocation service (default: true)
+  # When enabled, provides country information for IP addresses
+  # When disabled, all GeoIP features are unavailable
+  enabled: true
+
+  # Path to MaxMind GeoLite2 Country database file (.mmdb format)
+  # Download from: https://www.maxmind.com/en/geolite2/signup (free account required)
+  #
+  # Installation:
+  #   1. Sign up for free MaxMind account
+  #   2. Download GeoLite2-Country.mmdb
+  #   3. Place in /var/lib/ubersdr/ or another accessible location
+  #   4. Update path below
+  #
+  # If file not found, service will disable gracefully with warning
+  # Application continues to run normally without GeoIP features
+  #
+  # Example paths:
+  #   Linux:   /var/lib/ubersdr/GeoLite2-Country.mmdb
+  #   Docker:  /data/GeoLite2-Country.mmdb
+  #   macOS:   /usr/local/var/ubersdr/GeoLite2-Country.mmdb
+  database_path: "/var/lib/ubersdr/GeoLite2-Country.mmdb"
+
+  # Admin API Endpoints (require admin authentication):
+  #   POST /admin/geoip/lookup
+  #     - Lookup country for specific IP address
+  #     - Request: {"ip": "8.8.8.8"}
+  #     - Response: {"ip":"8.8.8.8","country":"United States","country_code":"US"}
+  #
+  #   GET /admin/sessions/countries
+  #     - Get active sessions with country information
+  #     - Response includes country name and ISO code for each session
+  #
+  #   GET /admin/geoip-health
+  #     - Check GeoIP service health status
+  #     - Response: {"enabled":true,"status":"healthy"}
+  #
+  # Privacy & Security:
+  #   - No external API calls (all lookups are local)
+  #   - Admin-only access (not publicly accessible)
+  #   - Country-level data only (GDPR-friendly)
+  #   - No logging of lookups
+  #   - Internal use for session enrichment
+  #
+  # Performance:
+  #   - Lookup speed: <1ms per lookup
+  #   - Memory usage: ~10-20 MB
+  #   - Database size: ~6 MB compressed
+  #   - Thread-safe for concurrent use
+  #
+  # Automatic Updates:
+  #   MaxMind updates database weekly. Set up automatic updates:
+  #   - Install geoipupdate tool
+  #   - Configure with your license key
+  #   - Schedule weekly updates via cron or systemd timer
+  #   See GEOIP_SETUP.md for detailed instructions

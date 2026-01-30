@@ -258,6 +258,7 @@ type AdminHandler struct {
 	mqttPublisher       *MQTTPublisher
 	rotctlHandler       *RotctlAPIHandler
 	rotatorScheduler    *RotatorScheduler
+	geoIPService        *GeoIPService
 	loginAttempts       *LoginAttemptTracker
 	frontendHistory     *FrontendHistoryTracker
 	loadHistory         *LoadHistoryTracker
@@ -322,7 +323,7 @@ func (ah *AdminHandler) restartServer() {
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, geoIPService *GeoIPService, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker) *AdminHandler {
 	return &AdminHandler{
 		config:              config,
 		configFile:          configFile,
@@ -343,6 +344,7 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		mqttPublisher:       mqttPublisher,
 		rotctlHandler:       rotctlHandler,
 		rotatorScheduler:    rotatorScheduler,
+		geoIPService:        geoIPService,
 		loginAttempts:       NewLoginAttemptTracker(),
 		frontendHistory:     frontendHistory,
 		loadHistory:         loadHistory,
@@ -5489,5 +5491,146 @@ func (ah *AdminHandler) HandleLoadHourlyHistory(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding load hourly history: %v", err)
+	}
+}
+
+// HandleGeoIPLookup handles POST /admin/geoip/lookup - lookup IP address geolocation
+func (ah *AdminHandler) HandleGeoIPLookup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if GeoIP service is available
+	if ah.geoIPService == nil || !ah.geoIPService.IsEnabled() {
+		http.Error(w, "GeoIP service not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req struct {
+		IP string `json:"ip"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.IP == "" {
+		http.Error(w, "IP address is required", http.StatusBadRequest)
+		return
+	}
+
+	// Perform lookup
+	result, err := ah.geoIPService.Lookup(req.IP)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Lookup failed: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		log.Printf("Error encoding GeoIP lookup response: %v", err)
+	}
+}
+
+// HandleSessionsWithCountries handles GET /admin/sessions/countries - get active sessions with country information
+func (ah *AdminHandler) HandleSessionsWithCountries(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if GeoIP service is available
+	if ah.geoIPService == nil || !ah.geoIPService.IsEnabled() {
+		http.Error(w, "GeoIP service not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Get all sessions info
+	sessionsInfo := ah.sessions.GetAllSessionsInfo()
+
+	type SessionWithCountry struct {
+		UserSessionID string `json:"user_session_id"`
+		ClientIP      string `json:"client_ip"`
+		Country       string `json:"country"`
+		CountryCode   string `json:"country_code"`
+		Mode          string `json:"mode"`
+		Frequency     uint64 `json:"frequency"`
+		IsSpectrum    bool   `json:"is_spectrum"`
+	}
+
+	var enrichedSessions []SessionWithCountry
+
+	for _, sessionInfo := range sessionsInfo {
+		// Extract client IP from session info
+		clientIP, _ := sessionInfo["client_ip"].(string)
+
+		// Skip internal sessions (no client IP)
+		if clientIP == "" {
+			continue
+		}
+
+		country, countryCode := ah.geoIPService.LookupSafe(clientIP)
+
+		// Extract other fields with type assertions
+		userSessionID, _ := sessionInfo["user_session_id"].(string)
+		mode, _ := sessionInfo["mode"].(string)
+		frequency, _ := sessionInfo["frequency"].(uint64)
+		isSpectrum, _ := sessionInfo["is_spectrum"].(bool)
+
+		enrichedSessions = append(enrichedSessions, SessionWithCountry{
+			UserSessionID: userSessionID,
+			ClientIP:      clientIP,
+			Country:       country,
+			CountryCode:   countryCode,
+			Mode:          mode,
+			Frequency:     frequency,
+			IsSpectrum:    isSpectrum,
+		})
+	}
+
+	response := map[string]interface{}{
+		"sessions": enrichedSessions,
+		"count":    len(enrichedSessions),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding sessions with countries response: %v", err)
+	}
+}
+
+// HandleGeoIPHealth handles GET /admin/geoip-health - check GeoIP service health
+func (ah *AdminHandler) HandleGeoIPHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	health := map[string]interface{}{
+		"enabled": false,
+		"status":  "disabled",
+	}
+
+	if ah.geoIPService != nil && ah.geoIPService.IsEnabled() {
+		// Test with a known IP (Google DNS)
+		_, err := ah.geoIPService.Lookup("8.8.8.8")
+		if err != nil {
+			health["enabled"] = true
+			health["status"] = "error"
+			health["error"] = err.Error()
+		} else {
+			health["enabled"] = true
+			health["status"] = "healthy"
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(health); err != nil {
+		log.Printf("Error encoding GeoIP health response: %v", err)
 	}
 }

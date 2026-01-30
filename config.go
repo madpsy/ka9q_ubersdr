@@ -26,6 +26,7 @@ type Config struct {
 	InstanceReporting  InstanceReportingConfig  `yaml:"instance_reporting"`
 	FrequencyReference FrequencyReferenceConfig `yaml:"frequency_reference"`
 	Rotctl             RotctlConfig             `yaml:"rotctl"`
+	GeoIP              GeoIPConfig              `yaml:"geoip"`
 	Bookmarks          []Bookmark               `yaml:"bookmarks"`
 	Bands              []Band                   `yaml:"bands"`
 	Extensions         []string                 `yaml:"extensions"`
@@ -295,6 +296,13 @@ type MQTTTLSConfig struct {
 	CACert     string `yaml:"ca_cert"`     // Path to CA certificate file
 	ClientCert string `yaml:"client_cert"` // Path to client certificate file (optional)
 	ClientKey  string `yaml:"client_key"`  // Path to client key file (optional)
+}
+
+// GeoIPConfig contains IP geolocation settings
+// This service is for internal use only and admin API access
+type GeoIPConfig struct {
+	Enabled      bool   `yaml:"enabled"`       // Enable/disable GeoIP service
+	DatabasePath string `yaml:"database_path"` // Path to MaxMind GeoLite2 database file (.mmdb)
 }
 
 // LoadConfig loads configuration from a YAML file

@@ -42,6 +42,8 @@ type Session struct {
 	UserAgent      string // User-Agent string from the client
 	BypassPassword string // Password used for bypass authentication (if any)
 	AuthMethod     string // Authentication method: "password", "ip_bypass", or "" for normal
+	Country        string // Country name from GeoIP lookup (internal use only)
+	CountryCode    string // ISO country code from GeoIP lookup (internal use only)
 
 	// WebSocket connection (for closing when kicked)
 	WSConn interface{} // *wsConn, stored as interface{} to avoid import cycle
@@ -83,11 +85,12 @@ type SessionManager struct {
 	kickedUUIDTTL        time.Duration          // How long to remember kicked UUIDs (default 1 hour)
 	prometheusMetrics    *PrometheusMetrics     // Prometheus metrics for tracking
 	activityLogger       *SessionActivityLogger // Session activity logger for disk logging
+	geoIPService         *GeoIPService          // GeoIP service for country lookups (optional)
 	dxClusterWsHandler   interface{}            // DXClusterWebSocketHandler for throughput tracking (interface to avoid import cycle)
 }
 
 // NewSessionManager creates a new session manager
-func NewSessionManager(config *Config, radiod *RadiodController) *SessionManager {
+func NewSessionManager(config *Config, radiod *RadiodController, geoIPService *GeoIPService) *SessionManager {
 	sm := &SessionManager{
 		sessions:             make(map[string]*Session),
 		ssrcToSession:        make(map[uint32]*Session),
@@ -107,6 +110,7 @@ func NewSessionManager(config *Config, radiod *RadiodController) *SessionManager
 		maxSessionTime:       time.Duration(config.Server.MaxSessionTime) * time.Second,
 		kickedUUIDTTL:        1 * time.Hour, // Remember kicked UUIDs for 1 hour
 		prometheusMetrics:    nil,           // Will be set later if Prometheus is enabled
+		geoIPService:         geoIPService,  // GeoIP service for country lookups
 	}
 
 	// Start cleanup goroutine
@@ -297,6 +301,11 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 		ClientIP:       clientIP,
 		UserSessionID:  userSessionID,
 		BypassPassword: password, // Store the password in the session
+	}
+
+	// Perform GeoIP lookup if service is available and we have a client IP
+	if sm.geoIPService != nil && clientIP != "" {
+		session.Country, session.CountryCode = sm.geoIPService.LookupSafe(clientIP)
 	}
 
 	// Translate mode for radiod (e.g., "fm" -> "pm")
@@ -526,6 +535,11 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 		ClientIP:       clientIP,
 		UserSessionID:  userSessionID,
 		BypassPassword: password, // Store the password in the session
+	}
+
+	// Perform GeoIP lookup if service is available and we have a client IP
+	if sm.geoIPService != nil && clientIP != "" {
+		session.Country, session.CountryCode = sm.geoIPService.LookupSafe(clientIP)
 	}
 
 	// Create radiod spectrum channel
@@ -1554,6 +1568,8 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 			"is_bypassed":     isBypassed,
 			"is_internal":     isInternal,
 			"auth_method":     authMethod,
+			"country":         session.Country,
+			"country_code":    session.CountryCode,
 		}
 
 		// Add type-specific info

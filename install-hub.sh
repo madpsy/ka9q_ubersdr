@@ -271,6 +271,10 @@ echo "Fetching caddy-entrypoint.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/caddy-entrypoint.sh -o ~/ubersdr/caddy-entrypoint.sh
 chmod +x ~/ubersdr/caddy-entrypoint.sh
 
+echo "Fetching create_wisdom.sh script..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/create_wisdom.sh -o ~/ubersdr/create_wisdom.sh
+chmod +x ~/ubersdr/create_wisdom.sh
+
 # Migrate FFTW Wisdom file if it exists in the wrong location (before starting containers)
 #OLD_WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-config/_data/wisdom"
 #WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom"

@@ -921,6 +921,19 @@ func main() {
 	spaceWeatherRateLimiter := NewSpaceWeatherRateLimiter()
 	log.Printf("Space weather rate limiting: 1 req/sec (current), 1 req/2.5sec (history/dates/csv)")
 
+	// Initialize SSH proxy if enabled (declare before rate limiter cleanup goroutine)
+	var sshProxy *SSHProxy
+	if config.SSHProxy.Enabled {
+		var err error
+		sshProxy, err = NewSSHProxy(&config.SSHProxy)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize SSH proxy: %v", err)
+		} else {
+			log.Printf("SSH terminal proxy initialized: %s -> http://%s:%d (rate limit: 100 req/min per IP)",
+				config.SSHProxy.Path, config.SSHProxy.Host, config.SSHProxy.Port)
+		}
+	}
+
 	// Start periodic cleanup for rate limiters (every 5 minutes)
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
@@ -932,6 +945,10 @@ func main() {
 			fftRateLimiter.Cleanup()
 			spaceWeatherRateLimiter.Cleanup()
 			summaryRateLimiter.Cleanup()
+			// Cleanup SSH proxy rate limiter if enabled
+			if sshProxy != nil && sshProxy.rateLimiter != nil {
+				sshProxy.rateLimiter.Cleanup()
+			}
 		}
 	}()
 
@@ -1007,19 +1024,6 @@ func main() {
 	// This must be done after both are initialized
 	if instanceReporter != nil && freqRefMonitor != nil {
 		instanceReporter.SetFrequencyReferenceMonitor(freqRefMonitor)
-	}
-
-	// Initialize SSH proxy if enabled
-	var sshProxy *SSHProxy
-	if config.SSHProxy.Enabled {
-		var err error
-		sshProxy, err = NewSSHProxy(&config.SSHProxy)
-		if err != nil {
-			log.Printf("Warning: Failed to initialize SSH proxy: %v", err)
-		} else {
-			log.Printf("SSH terminal proxy initialized: %s -> http://%s:%d",
-				config.SSHProxy.Path, config.SSHProxy.Host, config.SSHProxy.Port)
-		}
 	}
 
 	// Initialize admin handler (pass all components for proper shutdown during restart)

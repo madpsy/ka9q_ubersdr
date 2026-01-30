@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -11,14 +12,18 @@ import (
 
 // SSHProxy handles proxying requests to the GoTTY container
 type SSHProxy struct {
-	config *SSHProxyConfig
-	proxy  *httputil.ReverseProxy
+	config      *SSHProxyConfig
+	proxy       *httputil.ReverseProxy
+	rateLimiter *SSHProxyRateLimiter
 }
 
 // NewSSHProxy creates a new SSH proxy instance
 func NewSSHProxy(config *SSHProxyConfig) (*SSHProxy, error) {
 	if !config.Enabled {
-		return &SSHProxy{config: config}, nil
+		return &SSHProxy{
+			config:      config,
+			rateLimiter: NewSSHProxyRateLimiter(),
+		}, nil
 	}
 
 	// Construct target URL
@@ -57,11 +62,12 @@ func NewSSHProxy(config *SSHProxyConfig) (*SSHProxy, error) {
 		http.Error(w, "SSH terminal service unavailable", http.StatusBadGateway)
 	}
 
-	log.Printf("SSH terminal proxy initialized: %s -> %s", config.Path, targetURL.String())
+	log.Printf("SSH terminal proxy initialized: %s -> %s (rate limit: 100 req/min per IP)", config.Path, targetURL.String())
 
 	return &SSHProxy{
-		config: config,
-		proxy:  proxy,
+		config:      config,
+		proxy:       proxy,
+		rateLimiter: NewSSHProxyRateLimiter(),
 	}, nil
 }
 
@@ -69,6 +75,30 @@ func NewSSHProxy(config *SSHProxyConfig) (*SSHProxy, error) {
 func (sp *SSHProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !sp.config.Enabled {
 		http.Error(w, "SSH terminal proxy is disabled", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Get client IP for rate limiting
+	clientIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(clientIP); err == nil {
+		clientIP = host
+	}
+
+	// Check X-Forwarded-For header for true source IP (first IP in the list)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		clientIP = strings.TrimSpace(xff)
+		if commaIdx := strings.Index(clientIP, ","); commaIdx != -1 {
+			clientIP = strings.TrimSpace(clientIP[:commaIdx])
+		}
+		if host, _, err := net.SplitHostPort(clientIP); err == nil {
+			clientIP = host
+		}
+	}
+
+	// Check rate limit (100 requests per minute per IP)
+	if !sp.rateLimiter.AllowRequest(clientIP) {
+		log.Printf("SSH proxy rate limit exceeded for IP: %s", clientIP)
+		http.Error(w, "Too Many Requests - SSH proxy rate limit exceeded (100 requests per minute)", http.StatusTooManyRequests)
 		return
 	}
 

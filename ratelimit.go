@@ -634,3 +634,62 @@ func (rrl *RotctlRateLimiter) GetStats() (int, int) {
 	}
 	return len(rrl.limiters), totalEndpoints
 }
+
+// SSHProxyRateLimiter manages rate limiters for SSH proxy requests per IP
+// Limits to 100 requests per minute per IP
+type SSHProxyRateLimiter struct {
+	limiters map[string]*RateLimiter
+	mu       sync.RWMutex
+}
+
+// NewSSHProxyRateLimiter creates a new SSH proxy rate limiter
+// Fixed at 100 requests per minute (1.667 requests per second)
+func NewSSHProxyRateLimiter() *SSHProxyRateLimiter {
+	return &SSHProxyRateLimiter{
+		limiters: make(map[string]*RateLimiter),
+	}
+}
+
+// AllowRequest checks if an SSH proxy request is allowed for the given IP
+// Returns true if allowed, false if rate limit exceeded
+func (sprl *SSHProxyRateLimiter) AllowRequest(ip string) bool {
+	sprl.mu.Lock()
+	limiter, exists := sprl.limiters[ip]
+	if !exists {
+		// Create a rate limiter with 100 tokens max, refilling at 100/60 tokens/sec
+		// 100 requests per minute = 100 tokens max, 1.667 tokens/sec refill rate
+		limiter = &RateLimiter{
+			tokens:     100.0,
+			maxTokens:  100.0,
+			refillRate: 100.0 / 60.0, // 100 requests per minute
+			lastRefill: time.Now(),
+		}
+		sprl.limiters[ip] = limiter
+	}
+	sprl.mu.Unlock()
+
+	return limiter.Allow()
+}
+
+// Cleanup removes rate limiters for IPs that haven't been used recently
+func (sprl *SSHProxyRateLimiter) Cleanup() {
+	sprl.mu.Lock()
+	defer sprl.mu.Unlock()
+
+	now := time.Now()
+	for ip, limiter := range sprl.limiters {
+		limiter.mu.Lock()
+		// Remove limiters that haven't been used in the last 10 minutes
+		if now.Sub(limiter.lastRefill) > 10*time.Minute {
+			delete(sprl.limiters, ip)
+		}
+		limiter.mu.Unlock()
+	}
+}
+
+// GetStats returns the current number of tracked IPs
+func (sprl *SSHProxyRateLimiter) GetStats() int {
+	sprl.mu.RLock()
+	defer sprl.mu.RUnlock()
+	return len(sprl.limiters)
+}

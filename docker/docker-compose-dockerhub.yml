@@ -240,6 +240,37 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # GoTTY terminal access - Web-based SSH terminal
+  ubersdr-gotty:
+    image: madpsy/ubersdr-gotty:latest
+    container_name: ubersdr-gotty
+    restart: unless-stopped
+
+    networks:
+      - sdr-network
+
+    ports:
+      - "9980:9980"
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    volumes:
+      - ${HOME}/.ssh/ubersdr_gotty_key:/root/.ssh/id_rsa:ro
+      - ${HOME}/.ssh/ubersdr_gotty_key.pub:/root/.ssh/id_rsa.pub:ro
+
+    environment:
+      - USER=${USER}
+      - REMOTE_HOST=${HOSTNAME}
+      - TZ=${TZ:-UTC}
+
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: "127.0.0.1:24224"
+        fluentd-async: "true"
+        tag: "ubersdr-gotty"
+
 # Shared network between ka9q-radio and ubersdr containers
 # Docker Compose will create this automatically with the specified subnet
 networks:

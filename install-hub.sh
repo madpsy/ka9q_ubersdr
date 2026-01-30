@@ -140,7 +140,7 @@ fi
 echo "Installing dependencies..."
 sudo apt update
 sudo apt -y upgrade
-sudo apt install -y ntpsec libfftw3-bin ssh tmux btop
+sudo apt install -y ntpsec libfftw3-bin ssh tmux btop htop
 
 # Install Docker if not already installed
 if command -v docker &> /dev/null; then
@@ -212,6 +212,48 @@ fi
 echo "Creating ~/ubersdr directory..."
 mkdir -p ~/ubersdr
 
+# Generate SSH key for GoTTY container if it doesn't exist
+SSH_KEY_PATH="$HOME/.ssh/ubersdr_gotty_key"
+if [ ! -f "$SSH_KEY_PATH" ]; then
+    echo "Generating SSH key for GoTTY container..."
+    mkdir -p "$HOME/.ssh"
+    chmod 700 "$HOME/.ssh"
+
+    # Generate SSH key without passphrase (fully automatic)
+    ssh-keygen -t ed25519 -f "$SSH_KEY_PATH" -N "" -C "ubersdr-gotty@$(hostname)"
+    chmod 600 "$SSH_KEY_PATH"
+    chmod 644 "$SSH_KEY_PATH.pub"
+
+    echo "SSH key generated successfully."
+else
+    echo "SSH key for GoTTY already exists, skipping generation."
+fi
+
+# Add public key to authorized_keys if not already present
+AUTHORIZED_KEYS="$HOME/.ssh/authorized_keys"
+PUBLIC_KEY=$(cat "$SSH_KEY_PATH.pub")
+
+if [ -f "$AUTHORIZED_KEYS" ]; then
+    # authorized_keys exists - check if key is already present
+    # grep -F treats the pattern as a fixed string (literal match of the entire public key)
+    if grep -qF "$PUBLIC_KEY" "$AUTHORIZED_KEYS"; then
+        echo "GoTTY public key already in authorized_keys."
+    else
+        echo "Adding GoTTY public key to authorized_keys..."
+        # Ensure file ends with newline, then append key with newline
+        [ -n "$(tail -c1 "$AUTHORIZED_KEYS")" ] && echo "" >> "$AUTHORIZED_KEYS"
+        printf "%s\n" "$PUBLIC_KEY" >> "$AUTHORIZED_KEYS"
+        chmod 600 "$AUTHORIZED_KEYS"
+        echo "Public key added successfully."
+    fi
+else
+    # authorized_keys doesn't exist - create it
+    echo "Creating authorized_keys and adding GoTTY public key..."
+    printf "%s\n" "$PUBLIC_KEY" > "$AUTHORIZED_KEYS"
+    chmod 600 "$AUTHORIZED_KEYS"
+    echo "authorized_keys created and public key added successfully."
+fi
+
 # Check if this is a fresh installation
 if [ -f "$INSTALLED_MARKER" ] && [ $FORCE_COMPOSE -eq 0 ]; then
     echo "Existing installation detected. Preserving docker-compose.yml file."
@@ -249,17 +291,21 @@ if [ -f "$INSTALLED_MARKER" ]; then
     echo
     echo "Pulling latest Docker images..."
     cd ~/ubersdr
-    if sudo docker compose -f docker-compose.yml pull; then
+    # Preserve USER, HOME, and HOSTNAME for docker compose (sudo resets these even with -E)
+    export ACTUAL_USER="$USER"
+    export ACTUAL_HOME="$HOME"
+    export ACTUAL_HOSTNAME="$(hostname)"
+    if sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml pull; then
         # Pull succeeded - proceed with restart
         echo "Pull successful. Restarting containers with new images..."
 
         # Clean up any existing containers and network (allow failures)
         echo "Stopping existing containers..."
-        sudo docker compose -f docker-compose.yml down 2>/dev/null || true
+        sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml down 2>/dev/null || true
 
         # Start Docker containers without setting password
         echo "Starting UberSDR containers..."
-        sudo docker compose -f docker-compose.yml up -d
+        sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml up -d
     else
         # Pull failed - keep existing containers running
         echo "Warning: Failed to pull new images. Keeping existing containers running."
@@ -273,24 +319,28 @@ else
     echo
     echo "Pulling latest Docker images..."
     cd ~/ubersdr
-    sudo docker compose -f docker-compose.yml pull
+    # Preserve USER, HOME, and HOSTNAME for docker compose (sudo resets these even with -E)
+    export ACTUAL_USER="$USER"
+    export ACTUAL_HOME="$HOME"
+    export ACTUAL_HOSTNAME="$(hostname)"
+    sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml pull
 
     # Clean up any existing containers and network (allow failures)
     echo "Stopping any existing containers..."
-    sudo docker compose -f docker-compose.yml down 2>/dev/null || true
+    sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml down 2>/dev/null || true
     
     # Start Docker containers with the generated password
     echo "Starting UberSDR containers..."
     export ADMIN_PASSWORD="$password"
-    sudo -E docker compose -f docker-compose.yml up -d
+    sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" ADMIN_PASSWORD="$password" docker compose -f docker-compose.yml up -d
     
     # Verify containers started successfully before creating marker
     echo "Verifying container startup..."
     sleep 5  # Give containers time to initialize
     
     # Check if all required containers are running
-    if sudo docker compose -f docker-compose.yml ps --status running | grep -q "ka9q-radio" && \
-       sudo docker compose -f docker-compose.yml ps --status running | grep -q "ka9q_ubersdr"; then
+    if sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml ps --status running | grep -q "ka9q-radio" && \
+       sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml ps --status running | grep -q "ka9q_ubersdr"; then
         echo "Containers started successfully."
         
         # Wait for ubersdr to become healthy (up to 60 seconds)

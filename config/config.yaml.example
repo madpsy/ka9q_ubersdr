@@ -1167,6 +1167,32 @@ rotctl:
   #   - Thread-safe operations
 
 # ==============================================================================
+# SSH Terminal Proxy Configuration
+# ==============================================================================
+# Web-based SSH terminal access via GoTTY container
+# Provides browser-based terminal access with admin authentication
+ssh_proxy:
+  # Enable SSH terminal proxy (default: true)
+  # When enabled, proxies requests to the GoTTY container for web-based terminal access
+  # Requires admin authentication for all access
+  enabled: true
+
+  # GoTTY container hostname (default: ubersdr-gotty)
+  # This is the Docker container name on the sdr-network
+  # Change only if you've customized the container name
+  host: "ubersdr-gotty"
+
+  # GoTTY container port (default: 9980)
+  # The port where GoTTY is listening inside the container
+  port: 9980
+
+  # Proxy path prefix (default: /terminal)
+  # The URL path where the terminal will be accessible
+  # Example: http://ubersdr.local:8080/terminal/
+  # This path requires admin authentication
+  path: "/terminal"
+
+# ==============================================================================
 # GeoIP Configuration
 # ==============================================================================
 # IP geolocation service for internal use and admin API access only

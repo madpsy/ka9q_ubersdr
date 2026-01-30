@@ -1009,6 +1009,19 @@ func main() {
 		instanceReporter.SetFrequencyReferenceMonitor(freqRefMonitor)
 	}
 
+	// Initialize SSH proxy if enabled
+	var sshProxy *SSHProxy
+	if config.SSHProxy.Enabled {
+		var err error
+		sshProxy, err = NewSSHProxy(&config.SSHProxy)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize SSH proxy: %v", err)
+		} else {
+			log.Printf("SSH terminal proxy initialized: %s -> http://%s:%d",
+				config.SSHProxy.Path, config.SSHProxy.Host, config.SSHProxy.Port)
+		}
+	}
+
 	// Initialize admin handler (pass all components for proper shutdown during restart)
 	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory)
 
@@ -1266,6 +1279,15 @@ func main() {
 	http.HandleFunc("/admin/geoip/lookup", adminHandler.AuthMiddleware(adminHandler.HandleGeoIPLookup))
 	http.HandleFunc("/admin/sessions/countries", adminHandler.AuthMiddleware(adminHandler.HandleSessionsWithCountries))
 	http.HandleFunc("/admin/geoip-health", adminHandler.AuthMiddleware(adminHandler.HandleGeoIPHealth))
+
+	// Register SSH proxy route (admin authentication required)
+	if sshProxy != nil {
+		http.HandleFunc(config.SSHProxy.Path+"/", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+			sshProxy.ServeHTTP(w, r)
+		}))
+		log.Printf("SSH terminal proxy enabled at %s (proxying to http://%s:%d)",
+			config.SSHProxy.Path, config.SSHProxy.Host, config.SSHProxy.Port)
+	}
 
 	// Open log file for HTTP request logging (if enabled)
 	var logFile *os.File

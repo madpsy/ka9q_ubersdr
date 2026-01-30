@@ -27,6 +27,7 @@ type Config struct {
 	FrequencyReference FrequencyReferenceConfig `yaml:"frequency_reference"`
 	Rotctl             RotctlConfig             `yaml:"rotctl"`
 	GeoIP              GeoIPConfig              `yaml:"geoip"`
+	SSHProxy           SSHProxyConfig           `yaml:"ssh_proxy"`
 	Bookmarks          []Bookmark               `yaml:"bookmarks"`
 	Bands              []Band                   `yaml:"bands"`
 	Extensions         []string                 `yaml:"extensions"`
@@ -303,6 +304,14 @@ type MQTTTLSConfig struct {
 type GeoIPConfig struct {
 	Enabled      bool   `yaml:"enabled"`       // Enable/disable GeoIP service
 	DatabasePath string `yaml:"database_path"` // Path to MaxMind GeoLite2 database file (.mmdb)
+}
+
+// SSHProxyConfig contains SSH terminal proxy settings
+type SSHProxyConfig struct {
+	Enabled bool   `yaml:"enabled"` // Enable/disable SSH terminal proxy
+	Host    string `yaml:"host"`    // GoTTY container hostname
+	Port    int    `yaml:"port"`    // GoTTY container port
+	Path    string `yaml:"path"`    // Proxy path prefix (e.g., /terminal)
 }
 
 // LoadConfig loads configuration from a YAML file
@@ -669,6 +678,22 @@ func LoadConfig(filename string) (*Config, error) {
 			bandwidth := float64(band.End - band.Start)
 			band.BinBandwidth = bandwidth / float64(band.BinCount)
 		}
+	}
+
+	// Set SSH proxy defaults if not specified
+	if config.SSHProxy.Host == "" {
+		config.SSHProxy.Host = "ubersdr-gotty" // Default Docker container name
+	}
+	if config.SSHProxy.Port == 0 {
+		config.SSHProxy.Port = 9980 // Default GoTTY port
+	}
+	if config.SSHProxy.Path == "" {
+		config.SSHProxy.Path = "/terminal" // Default proxy path
+	}
+	// SSHProxy.Enabled defaults to true (enabled by default)
+	// Note: YAML booleans default to false, so we set it to true if not explicitly disabled
+	if !config.SSHProxy.Enabled {
+		config.SSHProxy.Enabled = true
 	}
 
 	// Note: Decoder defaults are NOT set here because decoder.yaml is loaded separately

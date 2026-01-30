@@ -1912,7 +1912,8 @@
         // Open terminal in new tab using configured SSH proxy path
         function openTerminal() {
             const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
-            window.open(terminalPath, '_blank');
+            // GoTTY serves the terminal interface at /sessions
+            window.open(terminalPath + '/sessions', '_blank');
         }
 
         // Update callsign and name display in header

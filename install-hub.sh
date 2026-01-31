@@ -29,6 +29,47 @@ for arg in "$@"; do
     esac
 done
 
+# Extract port mappings from docker-compose.yml
+extract_ubersdr_ports() {
+    local compose_file="$1"
+
+    # Return defaults if file doesn't exist
+    if [ ! -f "$compose_file" ]; then
+        echo "8080 8073"
+        return
+    fi
+
+    # Extract both ports from the ubersdr service section
+    local ubersdr_port=$(grep -A 20 "^  ubersdr:" "$compose_file" | \
+        grep -E "^\s*-\s*[0-9]+:8080" | \
+        sed -E 's/.*- ([0-9]+):8080.*/\1/' | head -1)
+
+    local kiwi_port=$(grep -A 20 "^  ubersdr:" "$compose_file" | \
+        grep -E "^\s*-\s*[0-9]+:8073" | \
+        sed -E 's/.*- ([0-9]+):8073.*/\1/' | head -1)
+
+    # Use defaults if extraction failed
+    echo "${ubersdr_port:-8080} ${kiwi_port:-8073}"
+}
+
+# Restore custom port mappings in docker-compose.yml
+restore_ubersdr_ports() {
+    local compose_file="$1"
+    local ubersdr_port="$2"
+    local kiwi_port="$3"
+
+    # Only modify if ports differ from defaults
+    if [ "$ubersdr_port" != "8080" ]; then
+        sed -i "s/- 8080:8080/- ${ubersdr_port}:8080/" "$compose_file"
+        echo "  Restored UberSDR port: $ubersdr_port"
+    fi
+
+    if [ "$kiwi_port" != "8073" ]; then
+        sed -i "s/- 8073:8073/- ${kiwi_port}:8073/" "$compose_file"
+        echo "  Restored KiwiSDR port: $kiwi_port"
+    fi
+}
+
 echo "=== UberSDR Docker Hub Installation Script ==="
 echo
 
@@ -259,12 +300,37 @@ if [ -f "$INSTALLED_MARKER" ] && [ $FORCE_COMPOSE -eq 0 ]; then
     echo "Existing installation detected. Preserving docker-compose.yml file."
     echo "Hint: Use --force-compose to overwrite docker-compose.yml."
 else
-    if [ $FORCE_COMPOSE -eq 1 ]; then
-        echo "Forcing docker-compose.yml overwrite (--force-compose)..."
+    # Capture existing port configuration before overwriting
+    if [ -f ~/ubersdr/docker-compose.yml ]; then
+        read OLD_UBERSDR_PORT OLD_KIWI_PORT < <(extract_ubersdr_ports ~/ubersdr/docker-compose.yml)
+
+        if [ $FORCE_COMPOSE -eq 1 ]; then
+            echo "Forcing docker-compose.yml overwrite (--force-compose)..."
+            if [ "$OLD_UBERSDR_PORT" != "8080" ] || [ "$OLD_KIWI_PORT" != "8073" ]; then
+                echo "Detected custom port mappings - will preserve them:"
+                echo "  UberSDR port: $OLD_UBERSDR_PORT"
+                echo "  KiwiSDR port: $OLD_KIWI_PORT"
+            else
+                echo "No custom port mappings detected (using defaults: 8080, 8073)"
+            fi
+        else
+            echo "Fetching docker-compose configuration..."
+        fi
     else
+        # No existing file - use defaults
+        OLD_UBERSDR_PORT=8080
+        OLD_KIWI_PORT=8073
         echo "Fetching docker-compose configuration..."
     fi
+
+    # Download new docker-compose.yml
     curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/docker-compose-dockerhub.yml -o ~/ubersdr/docker-compose.yml
+
+    # Restore custom ports if they existed
+    if [ "$OLD_UBERSDR_PORT" != "8080" ] || [ "$OLD_KIWI_PORT" != "8073" ]; then
+        echo "Restoring custom port mappings..."
+        restore_ubersdr_ports ~/ubersdr/docker-compose.yml "$OLD_UBERSDR_PORT" "$OLD_KIWI_PORT"
+    fi
 fi
 
 echo "Fetching caddy-entrypoint.sh script..."
@@ -417,5 +483,13 @@ if [ -n "$password" ]; then
     echo "Your admin password is: $password"
     echo
 fi
-echo "Access the web interface at: http://ubersdr.local:8080/admin.html"
+
+# Get the actual port from the running container or compose file
+FINAL_PORT=$(docker port ka9q_ubersdr 8080 2>/dev/null | cut -d':' -f2)
+if [ -z "$FINAL_PORT" ]; then
+    # Fallback to reading from docker-compose.yml
+    read FINAL_PORT _ < <(extract_ubersdr_ports ~/ubersdr/docker-compose.yml)
+fi
+
+echo "Access the web interface at: http://ubersdr.local:${FINAL_PORT}/admin.html"
 echo

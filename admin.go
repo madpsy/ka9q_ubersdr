@@ -589,6 +589,19 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 						r.URL.Path, expired, session.CreatedAt.Format(time.RFC3339), session.ExpiresAt.Format(time.RFC3339), time.Now().Format(time.RFC3339))
 				}
 			}
+
+			// Check if this is a browser request (not SSH proxy or API)
+			if !isSSHProxy && isBrowserRequest(r) {
+				// Redirect browsers to login page with return URL
+				returnURL := r.URL.Path
+				if r.URL.RawQuery != "" {
+					returnURL += "?" + r.URL.RawQuery
+				}
+				redirectURL := "/admin.html?return=" + url.QueryEscape(returnURL)
+				http.Redirect(w, r, redirectURL, http.StatusSeeOther)
+				return
+			}
+
 			http.Error(w, "Unauthorized - invalid or expired session", http.StatusUnauthorized)
 			return
 		}

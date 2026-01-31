@@ -386,8 +386,8 @@
             padding: 0;
             border-radius: 10px;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-            width: 80%;
-            max-width: 1400px;
+            width: 90%;
+            max-width: 1600px;
             max-height: 90vh;
             display: flex;
             flex-direction: column;
@@ -1245,6 +1245,7 @@
                         <thead>
                             <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
                                 <th style="padding: 12px; text-align: left;">Client IP</th>
+                                <th style="padding: 12px; text-align: left;">Country</th>
                                 <th style="padding: 12px; text-align: left;">User Agent</th>
                                 <th style="padding: 12px; text-align: center;">Audio</th>
                                 <th style="padding: 12px; text-align: center;">Spectrum</th>
@@ -1256,7 +1257,7 @@
                             </tr>
                         </thead>
                         <tbody id="tunnelUsersTableBody">
-                            <tr><td colspan="9" style="text-align: center; padding: 40px; color: #666;">Loading...</td></tr>
+                            <tr><td colspan="10" style="text-align: center; padding: 40px; color: #666;">Loading...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -13164,7 +13165,7 @@ const tooltipLine2 = timeStr;
             tbody.innerHTML = '';
 
             if (currentTunnelUsers.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 40px; color: #666;">No users connected</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; padding: 40px; color: #666;">No users connected</td></tr>';
             } else {
                 currentTunnelUsers.forEach(user => {
                     const row = document.createElement('tr');
@@ -13213,8 +13214,15 @@ const tooltipLine2 = timeStr;
                         dxClusterDisplay = '✓';
                     }
 
+                    // Format country display
+                    let countryDisplay = '<em style="color: #999;">—</em>';
+                    if (user.country && user.country.trim()) {
+                        countryDisplay = user.country;
+                    }
+
                     row.innerHTML = `
                         <td style="padding: 12px; font-family: monospace; font-size: 12px;">${user.client_ip || 'N/A'}</td>
+                        <td style="padding: 12px; font-size: 12px;">${countryDisplay}</td>
                         <td style="padding: 12px; font-size: 11px; max-width: 200px; word-break: break-all;" title="${user.user_agent || 'N/A'}">${user.user_agent || 'N/A'}</td>
                         <td style="padding: 12px; text-align: center;">${user.audio ? '✓' : '—'}</td>
                         <td style="padding: 12px; text-align: center;">${user.spectrum ? '✓' : '—'}</td>

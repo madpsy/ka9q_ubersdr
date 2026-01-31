@@ -110,7 +110,7 @@ func (sp *SSHProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get client IP for rate limiting
+	// Get client IP for rate limiting and access control
 	clientIP := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(clientIP); err == nil {
 		clientIP = host
@@ -125,6 +125,13 @@ func (sp *SSHProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if host, _, err := net.SplitHostPort(clientIP); err == nil {
 			clientIP = host
 		}
+	}
+
+	// Check if client IP is allowed
+	if !sp.config.IsIPAllowed(clientIP) {
+		log.Printf("SSH proxy access denied for IP: %s (not in allowed_ips list)", clientIP)
+		http.Error(w, "Access Denied - Your IP address is not authorized to access the SSH terminal", http.StatusForbidden)
+		return
 	}
 
 	// Check rate limit (100 requests per minute per IP)

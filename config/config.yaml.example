@@ -1186,6 +1186,26 @@ ssh_proxy:
   # The port where GoTTY is listening inside the container
   port: 9980
 
+  # List of IP addresses or CIDR ranges allowed to access the SSH proxy
+  # Only these IPs can access the web-based terminal (in addition to admin auth)
+  # The proxy has a reliable way of determining the real client IP address
+  # Supports both IPv4 and IPv6 addresses with CIDR notation
+  # Examples:
+  #   - "127.0.0.1"           # Single IPv4 address (localhost)
+  #   - "192.168.1.0/24"      # IPv4 CIDR range (local network)
+  #   - "::1"                 # Single IPv6 address (localhost)
+  #   - "2001:db8::/32"       # IPv6 CIDR range
+  #   - "0.0.0.0/0"           # Allow all IPv4 addresses (default)
+  #   - "::/0"                # Allow all IPv6 addresses
+  # By default, all IPs are allowed (0.0.0.0/0)
+  # Restrict this list to trusted networks for better security
+  allowed_ips:
+    - "0.0.0.0/0"
+  # Additional examples (uncomment to use):
+  #   - "127.0.0.1"           # Localhost only
+  #   - "192.168.1.0/24"      # Local network only
+  #   - "10.0.0.0/8"          # Private network
+
 # ==============================================================================
 # GeoIP Configuration
 # ==============================================================================

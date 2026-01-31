@@ -308,9 +308,12 @@ type GeoIPConfig struct {
 
 // SSHProxyConfig contains SSH terminal proxy settings
 type SSHProxyConfig struct {
-	Enabled bool   `yaml:"enabled"` // Enable/disable SSH terminal proxy
-	Host    string `yaml:"host"`    // GoTTY container hostname
-	Port    int    `yaml:"port"`    // GoTTY container port
+	Enabled    bool     `yaml:"enabled"`     // Enable/disable SSH terminal proxy
+	Host       string   `yaml:"host"`        // GoTTY container hostname
+	Port       int      `yaml:"port"`        // GoTTY container port
+	AllowedIPs []string `yaml:"allowed_ips"` // List of IPs/CIDRs allowed to access SSH proxy
+
+	allowedNets []*net.IPNet // Parsed CIDR networks (internal use)
 }
 
 // LoadConfig loads configuration from a YAML file
@@ -339,6 +342,13 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.Prometheus.Enabled {
 		if err := config.Prometheus.parseAllowedHosts(); err != nil {
 			return nil, fmt.Errorf("failed to parse prometheus.allowed_hosts: %w", err)
+		}
+	}
+
+	// Parse SSH proxy allowed IPs/CIDRs
+	if config.SSHProxy.Enabled {
+		if err := config.SSHProxy.parseAllowedIPs(); err != nil {
+			return nil, fmt.Errorf("failed to parse ssh_proxy.allowed_ips: %w", err)
 		}
 	}
 
@@ -691,6 +701,10 @@ func LoadConfig(filename string) (*Config, error) {
 	if !config.SSHProxy.Enabled {
 		config.SSHProxy.Enabled = true
 	}
+	// Set default allowed IPs if not specified (allow all by default)
+	if len(config.SSHProxy.AllowedIPs) == 0 {
+		config.SSHProxy.AllowedIPs = []string{"0.0.0.0/0"} // Default: allow all IPv4
+	}
 
 	// Note: Decoder defaults are NOT set here because decoder.yaml is loaded separately
 	// and should be the source of truth for all decoder configuration
@@ -882,6 +896,55 @@ func (pc *PrometheusConfig) IsIPAllowed(ipStr string) bool {
 	}
 
 	for _, ipNet := range pc.allowedNets {
+		if ipNet.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// parseAllowedIPs parses the allowed_ips list into CIDR networks
+func (spc *SSHProxyConfig) parseAllowedIPs() error {
+	spc.allowedNets = make([]*net.IPNet, 0, len(spc.AllowedIPs))
+
+	for _, ipStr := range spc.AllowedIPs {
+		// Check if it's a CIDR notation
+		if _, ipNet, err := net.ParseCIDR(ipStr); err == nil {
+			spc.allowedNets = append(spc.allowedNets, ipNet)
+		} else {
+			// Try parsing as a single IP address
+			ip := net.ParseIP(ipStr)
+			if ip == nil {
+				return fmt.Errorf("invalid IP or CIDR: %s", ipStr)
+			}
+			// Convert single IP to CIDR (/32 for IPv4, /128 for IPv6)
+			var ipNet *net.IPNet
+			if ip.To4() != nil {
+				_, ipNet, _ = net.ParseCIDR(ipStr + "/32")
+			} else {
+				_, ipNet, _ = net.ParseCIDR(ipStr + "/128")
+			}
+			spc.allowedNets = append(spc.allowedNets, ipNet)
+		}
+	}
+
+	return nil
+}
+
+// IsIPAllowed checks if an IP address is in the allowed IPs list
+func (spc *SSHProxyConfig) IsIPAllowed(ipStr string) bool {
+	// If no allowed IPs configured, deny all access
+	if len(spc.allowedNets) == 0 {
+		return false
+	}
+
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+
+	for _, ipNet := range spc.allowedNets {
 		if ipNet.Contains(ip) {
 			return true
 		}

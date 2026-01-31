@@ -22,6 +22,8 @@ type SessionActivityEntry struct {
 	CreatedAt     time.Time `json:"created_at"`
 	FirstSeen     time.Time `json:"first_seen"` // From userSessionFirst map
 	UserAgent     string    `json:"user_agent,omitempty"`
+	Country       string    `json:"country,omitempty"`      // Country name from GeoIP lookup
+	CountryCode   string    `json:"country_code,omitempty"` // ISO country code from GeoIP lookup
 }
 
 // SessionActivityLog represents a snapshot of all active sessions at a point in time
@@ -254,6 +256,8 @@ func (sal *SessionActivityLogger) getActiveSessionEntries() []SessionActivityEnt
 		}
 
 		createdAt := session.CreatedAt
+		country := session.Country
+		countryCode := session.CountryCode
 		session.mu.RUnlock()
 
 		// Get or create entry for this user
@@ -280,6 +284,8 @@ func (sal *SessionActivityLogger) getActiveSessionEntries() []SessionActivityEnt
 				CreatedAt:     createdAt,
 				FirstSeen:     firstSeen,
 				UserAgent:     userAgent,
+				Country:       country,
+				CountryCode:   countryCode,
 			}
 			userSessions[userSessionID] = entry
 		}

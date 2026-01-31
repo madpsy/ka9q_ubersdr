@@ -387,7 +387,7 @@
             border-radius: 10px;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
             width: 80%;
-            max-width: 1000px;
+            max-width: 1400px;
             max-height: 90vh;
             display: flex;
             flex-direction: column;
@@ -13743,6 +13743,7 @@ const tooltipLine2 = timeStr;
                             <th style="padding: 10px; text-align: center;">Event</th>
                             <th style="padding: 10px; text-align: center;">Session</th>
                             <th style="padding: 10px; text-align: left;">IP Address</th>
+                            <th style="padding: 10px; text-align: left;">Country</th>
                             <th style="padding: 10px; text-align: left;">User Agent</th>
                             <th style="padding: 10px; text-align: center;">Auth</th>
                             <th style="padding: 10px; text-align: center;">Types</th>
@@ -13842,6 +13843,7 @@ const tooltipLine2 = timeStr;
                             </button>
                         </td>
                         <td style="padding: 10px; font-family: monospace; font-size: 12px;">${event.client_ip || 'N/A'}</td>
+                        <td style="padding: 10px; font-size: 12px;">${event.country || '—'}</td>
                         <td style="padding: 10px; font-size: 11px; max-width: 250px; overflow: hidden; text-overflow: ellipsis;" title="${userAgent}">${userAgentShort}</td>
                         <td style="padding: 10px; text-align: center;">${authBadge}</td>
                         <td style="padding: 10px; text-align: center; font-size: 12px;">${types}</td>
@@ -13914,13 +13916,15 @@ const tooltipLine2 = timeStr;
                 const data = await response.json();
 
                 // Create CSV content
-                let csv = 'Timestamp,Event Type,User Session ID,Client IP,Source IP,Auth Method,Session Types,Duration (seconds)\n';
+                let csv = 'Timestamp,Event Type,User Session ID,Client IP,Country,Country Code,Source IP,Auth Method,Session Types,Duration (seconds)\n';
 
                 (data.events || []).forEach(event => {
                     const timestamp = event.timestamp;
                     const eventType = event.event_type;
                     const userSessionID = event.user_session_id || '';
                     const clientIP = event.client_ip || '';
+                    const country = event.country || '';
+                    const countryCode = event.country_code || '';
                     const sourceIP = event.source_ip || '';
                     const authMethod = event.auth_method || '';
                     const sessionTypes = (event.session_types || []).join(';');
@@ -13934,7 +13938,7 @@ const tooltipLine2 = timeStr;
                         return field;
                     };
 
-                    csv += `${timestamp},${eventType},${escapeCsv(userSessionID)},${clientIP},${sourceIP},${authMethod},${escapeCsv(sessionTypes)},${duration}\n`;
+                    csv += `${timestamp},${eventType},${escapeCsv(userSessionID)},${clientIP},${escapeCsv(country)},${countryCode},${sourceIP},${authMethod},${escapeCsv(sessionTypes)},${duration}\n`;
                 });
 
                 // Create download

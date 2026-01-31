@@ -4415,6 +4415,8 @@ type SessionEvent struct {
 	AuthMethod    string    `json:"auth_method"`
 	SessionTypes  []string  `json:"session_types"`
 	UserAgent     string    `json:"user_agent,omitempty"`
+	Country       string    `json:"country,omitempty"`          // Country name from GeoIP lookup
+	CountryCode   string    `json:"country_code,omitempty"`     // ISO country code from GeoIP lookup
 	Duration      *float64  `json:"duration_seconds,omitempty"` // Only for session_end events
 }
 
@@ -4627,6 +4629,8 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					AuthMethod:    session.AuthMethod,
 					SessionTypes:  startTypesSlice, // Use all types from snapshot
 					UserAgent:     session.UserAgent,
+					Country:       session.Country,
+					CountryCode:   session.CountryCode,
 				})
 
 				activeSessions[session.UserSessionID] = &sessionInfo{
@@ -4664,6 +4668,8 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					AuthMethod:    info.entry.AuthMethod,
 					SessionTypes:  allTypesSlice, // Use accumulated types
 					UserAgent:     info.entry.UserAgent,
+					Country:       info.entry.Country,
+					CountryCode:   info.entry.CountryCode,
 					Duration:      &duration,
 				})
 

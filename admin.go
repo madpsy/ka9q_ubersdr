@@ -519,7 +519,8 @@ func isBrowserRequest(r *http.Request) bool {
 func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check if this is an SSH proxy request for debug logging
-		isSSHProxy := strings.HasPrefix(r.URL.Path, "/terminal")
+		// Exclude /terminal/sessions which is the management interface that browsers access
+		isSSHProxy := strings.HasPrefix(r.URL.Path, "/terminal") && r.URL.Path != "/terminal/sessions"
 
 		// Check for password in X-Admin-Password header first
 		if password := r.Header.Get("X-Admin-Password"); password != "" {

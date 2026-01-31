@@ -11,6 +11,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"reflect"
@@ -503,6 +504,17 @@ func (ah *AdminHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// isBrowserRequest detects if the request is from a web browser
+// by checking the Accept header for text/html preference
+func isBrowserRequest(r *http.Request) bool {
+	acceptHeader := r.Header.Get("Accept")
+
+	// Check if Accept header explicitly requests HTML
+	// Browsers typically send: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+	// API clients typically send: "application/json", "*/*", or nothing
+	return strings.Contains(acceptHeader, "text/html")
+}
+
 // AuthMiddleware checks for valid admin session or password header
 func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -533,6 +545,19 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			if isSSHProxy {
 				log.Printf("[SSH Proxy Auth] No admin_session cookie found for %s: %v", r.URL.Path, err)
 			}
+
+			// Check if this is a browser request (not SSH proxy or API)
+			if !isSSHProxy && isBrowserRequest(r) {
+				// Redirect browsers to login page with return URL
+				returnURL := r.URL.Path
+				if r.URL.RawQuery != "" {
+					returnURL += "?" + r.URL.RawQuery
+				}
+				redirectURL := "/admin.html?return=" + url.QueryEscape(returnURL)
+				http.Redirect(w, r, redirectURL, http.StatusSeeOther)
+				return
+			}
+
 			http.Error(w, "Unauthorized - no session or password", http.StatusUnauthorized)
 			return
 		}

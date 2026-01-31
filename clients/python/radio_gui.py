@@ -5709,8 +5709,10 @@ class RadioGUI:
             server = f"{hostname}:{port}" if ':' not in hostname else hostname
             use_tls = self.tls_var.get()
 
-            # Get session ID from client (use server-assigned session ID, not client-generated UUID)
-            session_id = self.client.server_session_id if self.client else None
+            # Create session ID callback (dynamically fetches current session ID)
+            def get_session_id():
+                """Get current server-assigned session ID."""
+                return self.client.server_session_id if self.client else None
 
             # Create tune callback
             def tune_to_channel(freq_hz, mode, bw_low, bw_high):
@@ -5758,7 +5760,7 @@ class RadioGUI:
 
             # Create users window
             self.users_window, self.users_display = create_users_window(
-                self.root, server, use_tls, session_id, tune_to_channel
+                self.root, server, use_tls, get_session_id, tune_to_channel
             )
 
             self.log_status("Users window opened")

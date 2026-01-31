@@ -16,20 +16,20 @@ from datetime import datetime
 class UsersDisplay:
     """Display window for active users/channels."""
     
-    def __init__(self, parent, server_url: str, use_tls: bool = False, session_id: str = None, tune_callback=None):
+    def __init__(self, parent, server_url: str, use_tls: bool = False, session_id_callback=None, tune_callback=None):
         """Initialize users display.
         
         Args:
             parent: Parent window
             server_url: Server URL (host:port format)
             use_tls: Whether to use TLS/SSL
-            session_id: Current session ID to highlight current user
+            session_id_callback: Callback function that returns current session ID
             tune_callback: Callback function to tune radio (freq_hz, mode, bw_low, bw_high)
         """
         self.parent = parent
         self.server_url = server_url
         self.use_tls = use_tls
-        self.session_id = session_id
+        self.session_id_callback = session_id_callback
         self.tune_callback = tune_callback
         
         # Build base URL
@@ -49,7 +49,7 @@ class UsersDisplay:
         # Create window
         self.window = tk.Toplevel(parent)
         self.window.title("Active Users")
-        self.window.geometry("800x400")
+        self.window.geometry("950x400")
         
         # Create UI
         self.create_widgets()
@@ -81,7 +81,7 @@ class UsersDisplay:
         main_frame.rowconfigure(1, weight=1)
         
         # Create Treeview with action column
-        columns = ('frequency', 'mode', 'bandwidth', 'active_time')
+        columns = ('frequency', 'mode', 'bandwidth', 'country', 'active_time')
         self.tree = ttk.Treeview(table_frame, columns=columns, show='tree headings', height=15)
         
         # Define column headings
@@ -89,6 +89,7 @@ class UsersDisplay:
         self.tree.heading('frequency', text='Frequency')
         self.tree.heading('mode', text='Mode')
         self.tree.heading('bandwidth', text='Bandwidth')
+        self.tree.heading('country', text='Country')
         self.tree.heading('active_time', text='Active Time')
         
         # Define column widths
@@ -96,6 +97,7 @@ class UsersDisplay:
         self.tree.column('frequency', width=150, anchor='center')
         self.tree.column('mode', width=80, anchor='center')
         self.tree.column('bandwidth', width=150, anchor='center')
+        self.tree.column('country', width=120, anchor='center')
         self.tree.column('active_time', width=120, anchor='center')
         
         # Add scrollbar
@@ -179,7 +181,7 @@ class UsersDisplay:
         
         if not self.channels_data:
             # Show "no users" message
-            self.tree.insert('', 'end', text='', values=('No active users', '', '', ''))
+            self.tree.insert('', 'end', text='', values=('No active users', '', '', '', ''))
             return
         
         # Add channels to table
@@ -188,6 +190,11 @@ class UsersDisplay:
             mode = channel.get('mode', 'Unknown').upper()
             bw_low = channel.get('bandwidth_low', 0)
             bw_high = channel.get('bandwidth_high', 0)
+            
+            # Get country if available
+            country = channel.get('country', '')
+            if not country:
+                country = ''
             
             # Calculate active time from created_at and last_active timestamps
             created_at = channel.get('created_at', '')
@@ -241,7 +248,7 @@ class UsersDisplay:
             item_id = self.tree.insert('', 'end',
                                       iid=str(i),  # Use index as item ID
                                       text=action_text,
-                                      values=(freq_str, mode, bw_str, time_str),
+                                      values=(freq_str, mode, bw_str, country, time_str),
                                       tags=tags)
     
     def on_tree_click(self, event):
@@ -315,10 +322,13 @@ class UsersDisplay:
     def _fetch_data_thread(self):
         """Fetch data from server (runs in background thread)."""
         try:
+            # Get current session ID from callback (dynamically fetched each time)
+            session_id = self.session_id_callback() if self.session_id_callback else None
+            
             # Build stats URL with session_id if available
             stats_url = f"{self.base_url}/stats"
-            if self.session_id:
-                stats_url += f"?session_id={self.session_id}"
+            if session_id:
+                stats_url += f"?session_id={session_id}"
             
             # Fetch stats
             response = requests.get(stats_url, timeout=5)
@@ -383,18 +393,18 @@ class UsersDisplay:
         self.window.destroy()
 
 
-def create_users_window(parent, server_url: str, use_tls: bool = False, session_id: str = None, tune_callback=None):
+def create_users_window(parent, server_url: str, use_tls: bool = False, session_id_callback=None, tune_callback=None):
     """Create and return a users display window.
     
     Args:
         parent: Parent window
         server_url: Server URL (host:port format)
         use_tls: Whether to use TLS/SSL
-        session_id: Current session ID to highlight current user
+        session_id_callback: Callback function that returns current session ID
         tune_callback: Callback function to tune radio (freq_hz, mode, bw_low, bw_high)
         
     Returns:
         Tuple of (window, UsersDisplay instance)
     """
-    display = UsersDisplay(parent, server_url, use_tls, session_id, tune_callback)
+    display = UsersDisplay(parent, server_url, use_tls, session_id_callback, tune_callback)
     return display.window, display

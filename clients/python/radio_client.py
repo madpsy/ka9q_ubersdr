@@ -1454,7 +1454,14 @@ class RadioClient:
             # Store session ID from server (like web UI does)
             session_id = message.get('sessionId', 'unknown')
             if session_id != 'unknown':
+                # Log first time we receive session ID
+                if self.server_session_id is None:
+                    print(f"[Session] Received server session ID: {session_id}", file=sys.stderr)
                 self.server_session_id = session_id
+            else:
+                # Log if server doesn't send sessionId
+                if self.server_session_id is None:
+                    print(f"[Session] WARNING: Status message missing sessionId field", file=sys.stderr)
             freq = message.get('frequency', 0)
             mode = message.get('mode', 'unknown')
             # print(f"Status: Session {session_id}, {freq} Hz, mode {mode}", file=sys.stderr)  # Removed: too verbose during rapid frequency changes
@@ -1699,6 +1706,13 @@ class RadioClient:
                                     break
 
                         radio_poll_task = asyncio.create_task(poll_radio())
+
+                # Small delay to ensure message loop is ready
+                await asyncio.sleep(0.1)
+
+                # Request initial status to get server-assigned session ID
+                print("[Session] Requesting initial status from server...", file=sys.stderr)
+                await websocket.send(json.dumps({'type': 'get_status'}))
 
                 # Receive and process messages
                 opus_packet_count = 0

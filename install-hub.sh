@@ -272,7 +272,7 @@ curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/
 chmod +x ~/ubersdr/caddy-entrypoint.sh
 
 echo "Fetching generate_wisdom.sh script..."
-curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/generate_wisdom.sh -o ~/ubersdr/create_wisdom.sh
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/generate_wisdom.sh -o ~/ubersdr/generate_wisdom.sh
 chmod +x ~/ubersdr/create_wisdom.sh
 
 # Migrate FFTW Wisdom file if it exists in the wrong location (before starting containers)

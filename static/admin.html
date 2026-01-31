@@ -4305,6 +4305,7 @@
                 <thead>
                     <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
                         <th style="padding: 12px; text-align: left;">IP Address</th>
+                        <th style="padding: 12px; text-align: left;">Country</th>
                         <th style="padding: 12px; text-align: left;">Reason</th>
                         <th style="padding: 12px; text-align: left;">Banned At</th>
                         <th style="padding: 12px; text-align: left;">Banned By</th>
@@ -4322,8 +4323,12 @@
 
                 const bannedDate = new Date(ban.banned_at).toLocaleString();
 
+                // Format country display
+                const countryDisplay = ban.country ? `${ban.country}${ban.country_code ? ' (' + ban.country_code + ')' : ''}` : '-';
+
                 row.innerHTML = `
                     <td style="padding: 12px; font-family: monospace;">${ban.ip}</td>
+                    <td style="padding: 12px; font-size: 12px;">${countryDisplay}</td>
                     <td style="padding: 12px;">${ban.reason || 'No reason provided'}</td>
                     <td style="padding: 12px;">${bannedDate}</td>
                     <td style="padding: 12px;">${ban.banned_by || 'Unknown'}</td>

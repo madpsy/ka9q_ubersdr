@@ -209,6 +209,8 @@ func readChatLogFile(filePath string, filter *ChatLogFilter) ([]ChatLogEntry, er
 	defer file.Close()
 
 	reader := csv.NewReader(file)
+	// Allow variable number of fields per record for backward compatibility
+	reader.FieldsPerRecord = -1
 
 	// Read header
 	header, err := reader.Read()

@@ -2450,10 +2450,33 @@ func (ah *AdminHandler) HandleBannedIPs(w http.ResponseWriter, r *http.Request) 
 
 	bannedIPs := ah.ipBanManager.GetBannedIPs()
 
+	// Enrich banned IPs with country information
+	type BannedIPWithCountry struct {
+		BannedIP
+		Country     string `json:"country,omitempty"`
+		CountryCode string `json:"country_code,omitempty"`
+	}
+
+	enrichedIPs := make([]BannedIPWithCountry, 0, len(bannedIPs))
+	for _, ban := range bannedIPs {
+		enriched := BannedIPWithCountry{
+			BannedIP: ban,
+		}
+
+		// Look up country information if GeoIP service is available
+		if ah.geoIPService != nil {
+			country, countryCode := ah.geoIPService.LookupSafe(ban.IP)
+			enriched.Country = country
+			enriched.CountryCode = countryCode
+		}
+
+		enrichedIPs = append(enrichedIPs, enriched)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"banned_ips": bannedIPs,
-		"count":      len(bannedIPs),
+		"banned_ips": enrichedIPs,
+		"count":      len(enrichedIPs),
 	}); err != nil {
 		log.Printf("Error encoding banned IPs: %v", err)
 	}

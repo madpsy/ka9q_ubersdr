@@ -45,7 +45,7 @@ func NewChatLogger(dataDir string, enabled bool) (*ChatLogger, error) {
 }
 
 // LogMessage writes a chat message to the appropriate CSV file (organized by date)
-func (cl *ChatLogger) LogMessage(timestamp time.Time, sourceIP, username, message string) error {
+func (cl *ChatLogger) LogMessage(timestamp time.Time, sourceIP, username, message, country, countryCode string) error {
 	if !cl.enabled {
 		return nil
 	}
@@ -65,6 +65,8 @@ func (cl *ChatLogger) LogMessage(timestamp time.Time, sourceIP, username, messag
 		sourceIP,
 		username,
 		message, // No manual escaping needed - csv.Writer handles it
+		country,
+		countryCode,
 	}
 
 	if err := writer.Write(record); err != nil {
@@ -124,7 +126,7 @@ func (cl *ChatLogger) getOrCreateWriter(timestamp time.Time) (*csv.Writer, error
 
 		// Write header if new file
 		if needsHeader {
-			header := []string{"timestamp", "source_ip", "username", "message"}
+			header := []string{"timestamp", "source_ip", "username", "message", "country", "country_code"}
 			if err := writer.Write(header); err != nil {
 				return nil, fmt.Errorf("failed to write CSV header: %w", err)
 			}

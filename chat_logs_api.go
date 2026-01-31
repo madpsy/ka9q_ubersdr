@@ -17,10 +17,12 @@ import (
 
 // ChatLogEntry represents a single chat message from logs
 type ChatLogEntry struct {
-	Timestamp time.Time `json:"timestamp"`
-	SourceIP  string    `json:"source_ip"`
-	Username  string    `json:"username"`
-	Message   string    `json:"message"`
+	Timestamp   time.Time `json:"timestamp"`
+	SourceIP    string    `json:"source_ip"`
+	Username    string    `json:"username"`
+	Message     string    `json:"message"`
+	Country     string    `json:"country,omitempty"`
+	CountryCode string    `json:"country_code,omitempty"`
 }
 
 // ChatLogFilter contains filter criteria for chat logs
@@ -214,10 +216,23 @@ func readChatLogFile(filePath string, filter *ChatLogFilter) ([]ChatLogEntry, er
 		return nil, fmt.Errorf("failed to read header: %w", err)
 	}
 
-	// Validate header
-	expectedHeader := []string{"timestamp", "source_ip", "username", "message"}
-	if len(header) != len(expectedHeader) {
-		return nil, fmt.Errorf("invalid header format")
+	// Validate header - support both old (4 columns) and new (6 columns) formats
+	if len(header) == 6 {
+		expectedHeader := []string{"timestamp", "source_ip", "username", "message", "country", "country_code"}
+		for i, h := range header {
+			if h != expectedHeader[i] {
+				return nil, fmt.Errorf("invalid header format")
+			}
+		}
+	} else if len(header) == 4 {
+		expectedHeader := []string{"timestamp", "source_ip", "username", "message"}
+		for i, h := range header {
+			if h != expectedHeader[i] {
+				return nil, fmt.Errorf("invalid header format")
+			}
+		}
+	} else {
+		return nil, fmt.Errorf("invalid header format: expected 4 or 6 columns, got %d", len(header))
 	}
 
 	var logs []ChatLogEntry
@@ -233,8 +248,9 @@ func readChatLogFile(filePath string, filter *ChatLogFilter) ([]ChatLogEntry, er
 			continue
 		}
 
-		if len(record) != 4 {
-			log.Printf("Warning: invalid record length: %d", len(record))
+		// Support both old (4 columns) and new (6 columns) formats
+		if len(record) != 4 && len(record) != 6 {
+			log.Printf("Warning: invalid record length: %d (expected 4 or 6)", len(record))
 			continue
 		}
 
@@ -250,6 +266,12 @@ func readChatLogFile(filePath string, filter *ChatLogFilter) ([]ChatLogEntry, er
 			SourceIP:  record[1],
 			Username:  record[2],
 			Message:   record[3],
+		}
+
+		// Add country fields if present (new format)
+		if len(record) == 6 {
+			entry.Country = record[4]
+			entry.CountryCode = record[5]
 		}
 
 		// Apply filters

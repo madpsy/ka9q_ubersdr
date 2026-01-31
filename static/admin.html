@@ -15127,6 +15127,7 @@ const tooltipLine2 = timeStr;
                     <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
                         <th style="padding: 12px; text-align: left; width: 180px; cursor: pointer; user-select: none;" onclick="sortChatLogs('timestamp')" title="Click to sort">Timestamp${sortIcon('timestamp')}</th>
                         <th style="padding: 12px; text-align: left; width: 140px; cursor: pointer; user-select: none;" onclick="sortChatLogs('ip')" title="Click to sort">IP Address${sortIcon('ip')}</th>
+                        <th style="padding: 12px; text-align: left; width: 100px; cursor: pointer; user-select: none;" onclick="sortChatLogs('country')" title="Click to sort">Country${sortIcon('country')}</th>
                         <th style="padding: 12px; text-align: left; width: 150px; cursor: pointer; user-select: none;" onclick="sortChatLogs('nickname')" title="Click to sort">Nickname${sortIcon('nickname')}</th>
                         <th style="padding: 12px; text-align: left;">Message</th>
                     </tr>
@@ -15154,9 +15155,13 @@ const tooltipLine2 = timeStr;
                 const escapedIP = log.source_ip.replace(/'/g, "\\'").replace(/"/g, '&quot;');
                 const escapedNickname = log.username.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
+                // Format country display
+                const countryDisplay = log.country ? `${log.country}${log.country_code ? ' (' + log.country_code + ')' : ''}` : '-';
+
                 row.innerHTML = `
                     <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${timestampStr}</td>
                     <td style="padding: 12px; font-family: monospace; font-size: 12px; cursor: pointer; color: #667eea;" onclick="filterChatByIP('${escapedIP}')" title="Click to filter by this IP">${escapeHtml(log.source_ip)}</td>
+                    <td style="padding: 12px; font-size: 12px;">${escapeHtml(countryDisplay)}</td>
                     <td style="padding: 12px; font-weight: bold; color: #667eea; cursor: pointer;" onclick="filterChatByNickname('${escapedNickname}')" title="Click to filter by this nickname">${escapeHtml(log.username)}</td>
                     <td style="padding: 12px; word-break: break-word;">${escapeHtml(log.message)}</td>
                 `;
@@ -15209,7 +15214,7 @@ const tooltipLine2 = timeStr;
                 const data = await response.json();
 
                 // Create CSV content
-                let csv = 'Timestamp,IP Address,Nickname,Message\n';
+                let csv = 'Timestamp,IP Address,Country,Country Code,Nickname,Message\n';
                 (data.logs || []).forEach(log => {
                     const timestamp = new Date(log.timestamp).toISOString();
                     // Escape CSV fields
@@ -15217,9 +15222,9 @@ const tooltipLine2 = timeStr;
                         if (typeof field === 'string' && (field.includes(',') || field.includes('"') || field.includes('\n'))) {
                             return `"${field.replace(/"/g, '""')}"`;
                         }
-                        return field;
+                        return field || '';
                     };
-                    csv += `${timestamp},${escapeCsv(log.source_ip)},${escapeCsv(log.username)},${escapeCsv(log.message)}\n`;
+                    csv += `${timestamp},${escapeCsv(log.source_ip)},${escapeCsv(log.country)},${escapeCsv(log.country_code)},${escapeCsv(log.username)},${escapeCsv(log.message)}\n`;
                 });
 
                 // Create download

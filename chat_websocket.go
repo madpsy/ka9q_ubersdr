@@ -115,6 +115,31 @@ func (cm *ChatManager) GetSessionIP(sessionID string) string {
 	return ""
 }
 
+// GetSessionCountry retrieves the country and country code for a session UUID from SessionManager
+func (cm *ChatManager) GetSessionCountry(sessionID string) (country, countryCode string) {
+	if cm.sessionManager == nil {
+		return "", ""
+	}
+
+	// Look up country from any active session with this UserSessionID
+	cm.sessionManager.mu.RLock()
+	defer cm.sessionManager.mu.RUnlock()
+
+	for _, session := range cm.sessionManager.sessions {
+		if session.UserSessionID == sessionID {
+			session.mu.RLock()
+			country = session.Country
+			countryCode = session.CountryCode
+			session.mu.RUnlock()
+			if country != "" || countryCode != "" {
+				return country, countryCode
+			}
+		}
+	}
+
+	return "", ""
+}
+
 // SetUsername associates a username with a session UUID
 func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 	// Validate username (alphanumeric only, max 15 characters)
@@ -545,12 +570,15 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 	// Update user's last seen time
 	cm.UpdateUserActivity(sessionID)
 
-	// Get source IP for logging and MQTT - capture it NOW before spawning goroutines
+	// Get source IP and country for logging and MQTT - capture it NOW before spawning goroutines
 	// to avoid race condition where IP might be removed from map during cleanup
 	sourceIP := cm.GetSessionIP(sessionID)
 	if sourceIP == "" {
 		sourceIP = "unknown"
 	}
+
+	// Get country information from session
+	country, countryCode := cm.GetSessionCountry(sessionID)
 
 	// Capture values in local variables before spawning goroutines
 	// This prevents race conditions if the session is cleaned up
@@ -558,12 +586,14 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 	logIP := sourceIP
 	logUsername := username
 	logMessage := messageText
+	logCountry := country
+	logCountryCode := countryCode
 
 	// Log to persistent storage (non-blocking)
 	if cm.chatLogger != nil {
 		// Use goroutine to avoid blocking message delivery on disk I/O
 		go func() {
-			if err := cm.chatLogger.LogMessage(logTimestamp, logIP, logUsername, logMessage); err != nil {
+			if err := cm.chatLogger.LogMessage(logTimestamp, logIP, logUsername, logMessage, logCountry, logCountryCode); err != nil {
 				log.Printf("Chat: Failed to log message: %v", err)
 			}
 		}()

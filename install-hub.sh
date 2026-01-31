@@ -3,6 +3,34 @@
 # Exit on error
 set -e
 
+# Determine the actual user (works in both interactive and cron contexts)
+if [ -n "$SUDO_USER" ]; then
+    # Script was called with sudo
+    ACTUAL_USER="$SUDO_USER"
+elif [ -n "$USER" ] && [ "$USER" != "root" ]; then
+    # USER is set and not root
+    ACTUAL_USER="$USER"
+else
+    # Fallback: get the user who owns the script's parent process
+    ACTUAL_USER=$(ps -o user= -p $PPID)
+fi
+
+# Get the actual home directory for this user
+ACTUAL_HOME=$(getent passwd "$ACTUAL_USER" | cut -d: -f6)
+ACTUAL_HOSTNAME="$(hostname)"
+
+# Export for use throughout the script
+export ACTUAL_USER
+export ACTUAL_HOME
+export ACTUAL_HOSTNAME
+
+# Print detected user context
+echo "=== Detected User Context ==="
+echo "User: $ACTUAL_USER"
+echo "Home: $ACTUAL_HOME"
+echo "Hostname: $ACTUAL_HOSTNAME"
+echo
+
 # Parse command line arguments
 IGNORE_RX888=0
 IGNORE_PORTS=0
@@ -73,7 +101,7 @@ restore_ubersdr_ports() {
 echo "=== UberSDR Docker Hub Installation Script ==="
 echo
 
-INSTALLED_MARKER="$HOME/ubersdr/installed"
+INSTALLED_MARKER="$ACTUAL_HOME/ubersdr/installed"
 FRESH_INSTALL=0
 
 # Check if this is a fresh installation
@@ -192,19 +220,19 @@ else
 fi
 
 # Add current user to docker and sudo groups
-if groups $USER | grep -q '\bdocker\b'; then
-    echo "User $USER is already in the docker group."
+if groups $ACTUAL_USER | grep -q '\bdocker\b'; then
+    echo "User $ACTUAL_USER is already in the docker group."
 else
-    echo "Adding user $USER to the docker group..."
-    sudo usermod -aG docker $USER
+    echo "Adding user $ACTUAL_USER to the docker group..."
+    sudo usermod -aG docker $ACTUAL_USER
     echo "User added to docker group."
 fi
 
-if groups $USER | grep -q '\bsudo\b'; then
-    echo "User $USER is already in the sudo group."
+if groups $ACTUAL_USER | grep -q '\bsudo\b'; then
+    echo "User $ACTUAL_USER is already in the sudo group."
 else
-    echo "Adding user $USER to the sudo group..."
-    sudo usermod -aG sudo $USER
+    echo "Adding user $ACTUAL_USER to the sudo group..."
+    sudo usermod -aG sudo $ACTUAL_USER
     echo "User added to sudo group."
 fi
 
@@ -251,19 +279,19 @@ fi
 
 # Create ubersdr directory in user's home
 echo "Creating ~/ubersdr directory..."
-mkdir -p ~/ubersdr
+sudo -u "$ACTUAL_USER" mkdir -p "$ACTUAL_HOME/ubersdr"
 
 # Generate SSH key for GoTTY container if it doesn't exist
-SSH_KEY_PATH="$HOME/.ssh/ubersdr_gotty_key"
+SSH_KEY_PATH="$ACTUAL_HOME/.ssh/ubersdr_gotty_key"
 if [ ! -f "$SSH_KEY_PATH" ]; then
     echo "Generating SSH key for GoTTY container..."
-    mkdir -p "$HOME/.ssh"
-    chmod 700 "$HOME/.ssh"
+    sudo -u "$ACTUAL_USER" mkdir -p "$ACTUAL_HOME/.ssh"
+    sudo -u "$ACTUAL_USER" chmod 700 "$ACTUAL_HOME/.ssh"
 
     # Generate SSH key without passphrase (fully automatic)
-    ssh-keygen -t ed25519 -f "$SSH_KEY_PATH" -N "" -C "ubersdr-gotty@$(hostname)"
-    chmod 600 "$SSH_KEY_PATH"
-    chmod 644 "$SSH_KEY_PATH.pub"
+    sudo -u "$ACTUAL_USER" ssh-keygen -t ed25519 -f "$SSH_KEY_PATH" -N "" -C "ubersdr-gotty@$(hostname)"
+    sudo -u "$ACTUAL_USER" chmod 600 "$SSH_KEY_PATH"
+    sudo -u "$ACTUAL_USER" chmod 644 "$SSH_KEY_PATH.pub"
 
     echo "SSH key generated successfully."
 else
@@ -271,7 +299,7 @@ else
 fi
 
 # Add public key to authorized_keys if not already present
-AUTHORIZED_KEYS="$HOME/.ssh/authorized_keys"
+AUTHORIZED_KEYS="$ACTUAL_HOME/.ssh/authorized_keys"
 PUBLIC_KEY=$(cat "$SSH_KEY_PATH.pub")
 
 if [ -f "$AUTHORIZED_KEYS" ]; then
@@ -282,16 +310,16 @@ if [ -f "$AUTHORIZED_KEYS" ]; then
     else
         echo "Adding GoTTY public key to authorized_keys..."
         # Ensure file ends with newline, then append key with newline
-        [ -n "$(tail -c1 "$AUTHORIZED_KEYS")" ] && echo "" >> "$AUTHORIZED_KEYS"
-        printf "%s\n" "$PUBLIC_KEY" >> "$AUTHORIZED_KEYS"
-        chmod 600 "$AUTHORIZED_KEYS"
+        [ -n "$(tail -c1 "$AUTHORIZED_KEYS")" ] && sudo -u "$ACTUAL_USER" bash -c "echo '' >> '$AUTHORIZED_KEYS'"
+        sudo -u "$ACTUAL_USER" bash -c "printf '%s\n' '$PUBLIC_KEY' >> '$AUTHORIZED_KEYS'"
+        sudo -u "$ACTUAL_USER" chmod 600 "$AUTHORIZED_KEYS"
         echo "Public key added successfully."
     fi
 else
     # authorized_keys doesn't exist - create it
     echo "Creating authorized_keys and adding GoTTY public key..."
-    printf "%s\n" "$PUBLIC_KEY" > "$AUTHORIZED_KEYS"
-    chmod 600 "$AUTHORIZED_KEYS"
+    sudo -u "$ACTUAL_USER" bash -c "printf '%s\n' '$PUBLIC_KEY' > '$AUTHORIZED_KEYS'"
+    sudo -u "$ACTUAL_USER" chmod 600 "$AUTHORIZED_KEYS"
     echo "authorized_keys created and public key added successfully."
 fi
 
@@ -301,8 +329,8 @@ if [ -f "$INSTALLED_MARKER" ] && [ $FORCE_COMPOSE -eq 0 ]; then
     echo "Hint: Use --force-compose to overwrite docker-compose.yml."
 else
     # Capture existing port configuration before overwriting
-    if [ -f ~/ubersdr/docker-compose.yml ]; then
-        read OLD_UBERSDR_PORT OLD_KIWI_PORT < <(extract_ubersdr_ports ~/ubersdr/docker-compose.yml)
+    if [ -f "$ACTUAL_HOME/ubersdr/docker-compose.yml" ]; then
+        read OLD_UBERSDR_PORT OLD_KIWI_PORT < <(extract_ubersdr_ports "$ACTUAL_HOME/ubersdr/docker-compose.yml")
 
         if [ $FORCE_COMPOSE -eq 1 ]; then
             echo "Forcing docker-compose.yml overwrite (--force-compose)..."
@@ -324,22 +352,22 @@ else
     fi
 
     # Download new docker-compose.yml
-    curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/docker-compose-dockerhub.yml -o ~/ubersdr/docker-compose.yml
+    curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/docker-compose-dockerhub.yml -o "$ACTUAL_HOME/ubersdr/docker-compose.yml"
 
     # Restore custom ports if they existed
     if [ "$OLD_UBERSDR_PORT" != "8080" ] || [ "$OLD_KIWI_PORT" != "8073" ]; then
         echo "Restoring custom port mappings..."
-        restore_ubersdr_ports ~/ubersdr/docker-compose.yml "$OLD_UBERSDR_PORT" "$OLD_KIWI_PORT"
+        restore_ubersdr_ports "$ACTUAL_HOME/ubersdr/docker-compose.yml" "$OLD_UBERSDR_PORT" "$OLD_KIWI_PORT"
     fi
 fi
 
 echo "Fetching caddy-entrypoint.sh script..."
-curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/caddy-entrypoint.sh -o ~/ubersdr/caddy-entrypoint.sh
-chmod +x ~/ubersdr/caddy-entrypoint.sh
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/caddy-entrypoint.sh -o "$ACTUAL_HOME/ubersdr/caddy-entrypoint.sh"
+chmod +x "$ACTUAL_HOME/ubersdr/caddy-entrypoint.sh"
 
 echo "Fetching generate_wisdom.sh script..."
-curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/generate_wisdom.sh -o ~/ubersdr/generate_wisdom.sh
-chmod +x ~/ubersdr/generate_wisdom.sh
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/generate_wisdom.sh -o "$ACTUAL_HOME/ubersdr/generate_wisdom.sh"
+chmod +x "$ACTUAL_HOME/ubersdr/generate_wisdom.sh"
 
 # Migrate FFTW Wisdom file if it exists in the wrong location (before starting containers)
 #OLD_WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-config/_data/wisdom"
@@ -360,11 +388,7 @@ if [ -f "$INSTALLED_MARKER" ]; then
     # Pull latest images first (while old containers still run)
     echo
     echo "Pulling latest Docker images..."
-    cd ~/ubersdr
-    # Preserve USER, HOME, and HOSTNAME for docker compose (sudo resets these even with -E)
-    export ACTUAL_USER="$USER"
-    export ACTUAL_HOME="$HOME"
-    export ACTUAL_HOSTNAME="$(hostname)"
+    cd "$ACTUAL_HOME/ubersdr"
     if sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml pull; then
         # Pull succeeded - proceed with restart
         echo "Pull successful. Restarting containers with new images..."
@@ -388,11 +412,7 @@ else
     # Pull latest images first
     echo
     echo "Pulling latest Docker images..."
-    cd ~/ubersdr
-    # Preserve USER, HOME, and HOSTNAME for docker compose (sudo resets these even with -E)
-    export ACTUAL_USER="$USER"
-    export ACTUAL_HOME="$HOME"
-    export ACTUAL_HOSTNAME="$(hostname)"
+    cd "$ACTUAL_HOME/ubersdr"
     sudo -E USER="$ACTUAL_USER" HOME="$ACTUAL_HOME" HOSTNAME="$ACTUAL_HOSTNAME" docker compose -f docker-compose.yml pull
 
     # Clean up any existing containers and network (allow failures)
@@ -419,7 +439,7 @@ else
             if sudo docker inspect --format='{{.State.Health.Status}}' ka9q_ubersdr 2>/dev/null | grep -q "healthy"; then
                 echo "UberSDR is healthy!"
                 # Create installed marker file only after successful verification
-                touch ~/ubersdr/installed
+                sudo -u "$ACTUAL_USER" touch "$ACTUAL_HOME/ubersdr/installed"
                 break
             fi
             if [ $i -eq 12 ]; then
@@ -468,11 +488,11 @@ echo "Setting up auto-update cron job..."
 CRON_JOB="* * * * * [ -f \$HOME/ubersdr/updater/latest ] && [ -s \$HOME/ubersdr/updater/latest ] && sudo rm -f \$HOME/ubersdr/updater/latest && curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/main/install-hub.sh | bash -s -- --force-compose >> \$HOME/ubersdr/update.log 2>&1"
 
 # Check if cron job already exists
-if crontab -l 2>/dev/null | grep -q "ubersdr/updater/latest"; then
+if sudo -u "$ACTUAL_USER" crontab -l 2>/dev/null | grep -q "ubersdr/updater/latest"; then
     echo "Auto-update cron job already exists."
 else
     # Add cron job to existing crontab (or create new one if none exists)
-    (crontab -l 2>/dev/null || true; echo "$CRON_JOB") | crontab -
+    (sudo -u "$ACTUAL_USER" crontab -l 2>/dev/null || true; echo "$CRON_JOB") | sudo -u "$ACTUAL_USER" crontab -
     echo "Auto-update cron job installed. Updates will be checked every minute."
 fi
 
@@ -488,7 +508,7 @@ fi
 FINAL_PORT=$(docker port ka9q_ubersdr 8080 2>/dev/null | cut -d':' -f2)
 if [ -z "$FINAL_PORT" ]; then
     # Fallback to reading from docker-compose.yml
-    read FINAL_PORT _ < <(extract_ubersdr_ports ~/ubersdr/docker-compose.yml)
+    read FINAL_PORT _ < <(extract_ubersdr_ports "$ACTUAL_HOME/ubersdr/docker-compose.yml")
 fi
 
 echo "Access the web interface at: http://ubersdr.local:${FINAL_PORT}/admin.html"

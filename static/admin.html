@@ -4971,6 +4971,9 @@
             const includeDeadTimeField = createConfigField('Include Dead Time in WAV', 'checkbox', currentDecoderConfig.include_dead_time || false, 'include_dead_time');
             globalSection.appendChild(includeDeadTimeField);
 
+            const clampExecutionTimeField = createConfigField('Clamp Execution Time', 'checkbox', currentDecoderConfig.clamp_execution_time || false, 'clamp_execution_time', 'Force decoder binaries to stop if they exceed the cycle time (SIGTERM 1s before cycle end, SIGKILL at cycle end). Timeout kills are tracked per band in decoder statistics.');
+            globalSection.appendChild(clampExecutionTimeField);
+
             container.appendChild(globalSection);
 
             // Station information section

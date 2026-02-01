@@ -31,6 +31,12 @@ class DigitalSpotsMap {
         this.bandConditionsAvailable = false; // Track if band conditions are available
         this.currentStatus = 'disconnected'; // Track current connection status to avoid unnecessary DOM updates
 
+        // Decode cycle tracking
+        this.decodeCycles = new Map(); // Track cycles per mode-band combination
+        this.cycleHistory = new Map(); // Historical cycle data
+        this.maxCycleHistory = 20; // Keep last 20 cycles per mode-band
+        this.cycleCheckInterval = null; // Interval for checking cycle boundaries
+
         // Track spots per minute
         this.spotTimestamps = []; // Array of timestamps for rate calculation
         this.lastSpotTime = null; // Timestamp of most recent spot
@@ -152,8 +158,15 @@ class DigitalSpotsMap {
         // Periodically re-apply filters to handle aging spots
         // This ensures markers are hidden as they age past the filter threshold
         setInterval(() => this.applyFilters(), 60000); // Every 60 seconds
+
         // Setup text zoom controls
         this.setupTextZoom();
+
+        // Setup decode cycles panel
+        this.setupDecodeCyclesPanel();
+
+        // Start cycle boundary checking
+        this.startCycleBoundaryChecking();
     }
 
     loadPreferences() {
@@ -1091,6 +1104,9 @@ class DigitalSpotsMap {
         // Store spot
         this.spots.set(key, spot);
 
+        // Track decode cycle
+        this.trackDecodeInCycle(spot);
+
         // Check for new continent or country
         this.checkNewEntities(spot);
 
@@ -1103,10 +1119,10 @@ class DigitalSpotsMap {
         // Update spot count and distance statistics
         this.updateSpotCount();
         this.updateDistanceStatistics();
-        
+
         // Update band legend
         this.updateBandLegend();
-        
+
         // Update filter dropdowns
         this.updateFilterDropdowns();
 
@@ -2454,6 +2470,296 @@ class DigitalSpotsMap {
             const remainingSeconds = seconds % 60;
             lastSpotEl.textContent = `${minutes}m ${remainingSeconds}s ago`;
         }
+    }
+
+    // Decode Cycle Tracking Methods
+
+    setupDecodeCyclesPanel() {
+        const header = document.getElementById('decode-cycles-header');
+        const toggle = document.getElementById('decode-cycles-toggle');
+        const content = document.getElementById('decode-cycles-content');
+
+        if (header && toggle && content) {
+            header.addEventListener('click', () => {
+                content.classList.toggle('collapsed');
+                toggle.classList.toggle('collapsed');
+
+                // Save collapsed state to localStorage
+                this.savePreference('decodeCyclesCollapsed', content.classList.contains('collapsed'));
+            });
+
+            // Load saved collapsed state
+            const collapsed = localStorage.getItem('decodeCyclesCollapsed');
+            if (collapsed === 'true') {
+                content.classList.add('collapsed');
+                toggle.classList.add('collapsed');
+            }
+        }
+    }
+
+    getCycleTimingForMode(mode) {
+        // Return cycle duration in milliseconds and alignment offset
+        const timings = {
+            'FT8': { duration: 15000, align: true },   // 15 seconds, aligned to :00, :15, :30, :45
+            'FT4': { duration: 7500, align: true },    // 7.5 seconds
+            'WSPR': { duration: 120000, align: true }, // 2 minutes, aligned to even minutes
+            'JS8': { duration: 30000, align: false }   // 30 seconds, rolling window
+        };
+        return timings[mode] || { duration: 30000, align: false };
+    }
+
+    getCurrentCycleStart(mode, timestamp) {
+        const timing = this.getCycleTimingForMode(mode);
+        const time = new Date(timestamp).getTime();
+
+        if (!timing.align) {
+            // For non-aligned modes like JS8, use rolling windows
+            return time - (time % timing.duration);
+        }
+
+        // For aligned modes, calculate the cycle start based on mode
+        if (mode === 'FT8') {
+            // FT8: align to :00, :15, :30, :45 seconds
+            const date = new Date(timestamp);
+            const seconds = date.getUTCSeconds();
+            const alignedSeconds = Math.floor(seconds / 15) * 15;
+            date.setUTCSeconds(alignedSeconds, 0);
+            return date.getTime();
+        } else if (mode === 'FT4') {
+            // FT4: align to 7.5 second boundaries
+            const date = new Date(timestamp);
+            const seconds = date.getUTCSeconds();
+            const ms = date.getUTCMilliseconds();
+            const totalMs = seconds * 1000 + ms;
+            const alignedMs = Math.floor(totalMs / 7500) * 7500;
+            date.setUTCSeconds(0, alignedMs);
+            return date.getTime();
+        } else if (mode === 'WSPR') {
+            // WSPR: align to even minutes
+            const date = new Date(timestamp);
+            const minutes = date.getUTCMinutes();
+            const alignedMinutes = Math.floor(minutes / 2) * 2;
+            date.setUTCMinutes(alignedMinutes, 0, 0);
+            return date.getTime();
+        }
+
+        return time - (time % timing.duration);
+    }
+
+    trackDecodeInCycle(spot) {
+        if (!spot.mode || !spot.band) return;
+
+        const cycleKey = `${spot.mode}-${spot.band}`;
+        const cycleStart = this.getCurrentCycleStart(spot.mode, spot.timestamp);
+
+        // Initialize cycle tracking for this mode-band if needed
+        if (!this.decodeCycles.has(cycleKey)) {
+            this.decodeCycles.set(cycleKey, {
+                mode: spot.mode,
+                band: spot.band,
+                currentCycleStart: cycleStart,
+                currentCount: 0,
+                lastUpdate: Date.now()
+            });
+        }
+
+        const cycleData = this.decodeCycles.get(cycleKey);
+
+        // Check if this is a new cycle
+        if (cycleStart !== cycleData.currentCycleStart) {
+            // Save the completed cycle to history
+            this.saveCycleToHistory(cycleKey, cycleData.currentCycleStart, cycleData.currentCount);
+
+            // Start new cycle
+            cycleData.currentCycleStart = cycleStart;
+            cycleData.currentCount = 1;
+        } else {
+            // Increment count for current cycle
+            cycleData.currentCount++;
+        }
+
+        cycleData.lastUpdate = Date.now();
+
+        // Update the display
+        this.updateDecodeCyclesDisplay();
+    }
+
+    saveCycleToHistory(cycleKey, cycleStart, count) {
+        if (!this.cycleHistory.has(cycleKey)) {
+            this.cycleHistory.set(cycleKey, []);
+        }
+
+        const history = this.cycleHistory.get(cycleKey);
+        history.push({
+            start: cycleStart,
+            count: count,
+            timestamp: Date.now()
+        });
+
+        // Keep only the last N cycles
+        if (history.length > this.maxCycleHistory) {
+            history.shift();
+        }
+    }
+
+    startCycleBoundaryChecking() {
+        // Check every second for cycle boundaries
+        this.cycleCheckInterval = setInterval(() => {
+            this.checkCycleBoundaries();
+        }, 1000);
+    }
+
+    checkCycleBoundaries() {
+        const now = Date.now();
+
+        this.decodeCycles.forEach((cycleData, cycleKey) => {
+            const timing = this.getCycleTimingForMode(cycleData.mode);
+            const cycleEnd = cycleData.currentCycleStart + timing.duration;
+
+            // If we've passed the cycle boundary and haven't received any decodes
+            // in the last few seconds, finalize the cycle
+            if (now > cycleEnd && (now - cycleData.lastUpdate) > 5000) {
+                // Save cycle to history if it has any decodes
+                if (cycleData.currentCount > 0) {
+                    this.saveCycleToHistory(cycleKey, cycleData.currentCycleStart, cycleData.currentCount);
+                }
+
+                // Start a new cycle
+                const newCycleStart = this.getCurrentCycleStart(cycleData.mode, new Date().toISOString());
+                cycleData.currentCycleStart = newCycleStart;
+                cycleData.currentCount = 0;
+
+                // Update display
+                this.updateDecodeCyclesDisplay();
+            }
+        });
+    }
+
+    updateDecodeCyclesDisplay() {
+        const content = document.getElementById('decode-cycles-content');
+        if (!content) return;
+
+        // Get all active cycles
+        const activeCycles = Array.from(this.decodeCycles.entries())
+            .filter(([key, data]) => {
+                // Apply mode and band filters
+                const modeMatch = this.modeFilter === 'all' || data.mode === this.modeFilter;
+                const bandMatch = this.bandFilter === 'all' || data.band === this.bandFilter;
+                return modeMatch && bandMatch;
+            })
+            .sort((a, b) => {
+                // Sort by mode first, then band
+                if (a[1].mode !== b[1].mode) {
+                    return a[1].mode.localeCompare(b[1].mode);
+                }
+                return a[1].band.localeCompare(b[1].band);
+            });
+
+        if (activeCycles.length === 0) {
+            content.innerHTML = '<div class="decode-cycles-empty">Waiting for decodes...</div>';
+            return;
+        }
+
+        let html = '';
+
+        activeCycles.forEach(([cycleKey, cycleData]) => {
+            const history = this.cycleHistory.get(cycleKey) || [];
+            const bandColor = this.bandColors[cycleData.band] || '#999';
+
+            // Calculate statistics
+            const recentHistory = history.slice(-10); // Last 10 cycles
+            const avg = recentHistory.length > 0
+                ? recentHistory.reduce((sum, c) => sum + c.count, 0) / recentHistory.length
+                : 0;
+            const max = recentHistory.length > 0
+                ? Math.max(...recentHistory.map(c => c.count))
+                : 0;
+
+            // Determine trend
+            let trend = '';
+            let trendClass = 'neutral';
+            if (recentHistory.length >= 2) {
+                const lastTwo = recentHistory.slice(-2);
+                if (lastTwo[1].count > lastTwo[0].count) {
+                    trend = '↑';
+                    trendClass = 'up';
+                } else if (lastTwo[1].count < lastTwo[0].count) {
+                    trend = '↓';
+                    trendClass = 'down';
+                } else {
+                    trend = '→';
+                }
+            }
+
+            // Check if this is a new cycle (within last 30 seconds)
+            const isNew = (Date.now() - cycleData.lastUpdate) < 30000;
+
+            html += `
+                <div class="cycle-item">
+                    <div class="cycle-item-header">
+                        <div class="cycle-mode-band">
+                            <span class="cycle-band-dot" style="background-color: ${bandColor};"></span>
+                            <span>${cycleData.mode} ${cycleData.band}</span>
+                            ${isNew ? '<span class="cycle-new-badge">NEW</span>' : ''}
+                        </div>
+                        <div class="cycle-current-count">
+                            ${cycleData.currentCount} decode${cycleData.currentCount !== 1 ? 's' : ''}
+                            ${trend ? `<span class="cycle-trend ${trendClass}">${trend}</span>` : ''}
+                        </div>
+                    </div>
+                    <div class="cycle-history">
+                        ${this.renderCycleHistory(recentHistory, max)}
+                    </div>
+                    <div class="cycle-stats">
+                        <div class="cycle-stat-item">
+                            <span class="cycle-stat-label">Avg:</span>
+                            <span class="cycle-stat-value">${avg.toFixed(1)}</span>
+                        </div>
+                        <div class="cycle-stat-item">
+                            <span class="cycle-stat-label">Max:</span>
+                            <span class="cycle-stat-value">${max}</span>
+                        </div>
+                        <div class="cycle-stat-item">
+                            <span class="cycle-stat-label">Cycles:</span>
+                            <span class="cycle-stat-value">${history.length}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        content.innerHTML = html;
+    }
+
+    renderCycleHistory(history, maxCount) {
+        if (history.length === 0) {
+            return '<div style="color: #666; font-size: 11px; text-align: center; width: 100%;">No history yet</div>';
+        }
+
+        const maxHeight = 40; // pixels
+        let html = '';
+
+        history.forEach((cycle, index) => {
+            const height = maxCount > 0 ? (cycle.count / maxCount) * maxHeight : 0;
+            const date = new Date(cycle.start);
+            const timeStr = date.toLocaleTimeString('en-US', {
+                hour12: false,
+                timeZone: 'UTC',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+
+            html += `
+                <div class="cycle-bar" style="height: ${height}px;">
+                    <div class="cycle-bar-tooltip">
+                        ${cycle.count} decode${cycle.count !== 1 ? 's' : ''}<br>
+                        ${timeStr} UTC
+                    </div>
+                </div>
+            `;
+        });
+
+        return html;
     }
 }
 

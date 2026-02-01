@@ -592,9 +592,7 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// Fall back to cookie-based authentication
 		cookie, err := r.Cookie("admin_session")
 		if err != nil {
-			if isSSHProxy {
-				log.Printf("[SSH Proxy Auth] No admin_session cookie found for %s: %v", r.URL.Path, err)
-			}
+			// No admin_session cookie - this is expected for SSH proxy requests using X-Admin-Password header
 
 			// Check if this is a browser request (not SSH proxy or API)
 			if !isSSHProxy && isBrowserRequest(r) {

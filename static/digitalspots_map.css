@@ -412,3 +412,209 @@
             padding: 20px;
             font-size: 12px;
         }
+
+        /* Decode Cycles Panel */
+        .decode-cycles-panel {
+            position: absolute;
+            top: 70px;
+            left: 10px;
+            width: 380px;
+            max-height: 600px;
+            background: rgba(26, 26, 26, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid #333;
+            border-radius: 8px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .decode-cycles-header {
+            padding: 12px 15px;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .decode-cycles-header:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .decode-cycles-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #4a9eff;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .decode-cycles-toggle {
+            font-size: 18px;
+            color: #aaa;
+            transition: transform 0.2s;
+        }
+
+        .decode-cycles-toggle.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .decode-cycles-content {
+            overflow-y: auto;
+            max-height: 550px;
+            padding: 10px;
+        }
+
+        .decode-cycles-content.collapsed {
+            display: none;
+        }
+
+        .decode-cycles-empty {
+            text-align: center;
+            color: #666;
+            padding: 20px;
+            font-size: 12px;
+        }
+
+        .cycle-item {
+            margin-bottom: 12px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            border-left: 3px solid #4a9eff;
+        }
+
+        .cycle-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .cycle-mode-band {
+            font-size: 13px;
+            font-weight: 600;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .cycle-band-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .cycle-current-count {
+            font-size: 12px;
+            color: #4a9eff;
+            font-weight: bold;
+        }
+
+        .cycle-history {
+            display: flex;
+            align-items: flex-end;
+            gap: 3px;
+            height: 40px;
+            margin-top: 8px;
+            padding: 4px 0;
+        }
+
+        .cycle-bar {
+            flex: 1;
+            background: linear-gradient(to top, #4a9eff, #2d7dd2);
+            border-radius: 2px 2px 0 0;
+            min-width: 4px;
+            position: relative;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .cycle-bar:hover {
+            background: linear-gradient(to top, #5aafff, #3d8de2);
+            transform: scaleY(1.05);
+        }
+
+        .cycle-bar-tooltip {
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: #fff;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            margin-bottom: 4px;
+            z-index: 10;
+        }
+
+        .cycle-bar:hover .cycle-bar-tooltip {
+            opacity: 1;
+        }
+
+        .cycle-stats {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 6px;
+            font-size: 10px;
+            color: #888;
+        }
+
+        .cycle-stat-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .cycle-stat-label {
+            color: #666;
+        }
+
+        .cycle-stat-value {
+            color: #aaa;
+            font-weight: 500;
+        }
+
+        .cycle-new-badge {
+            display: inline-block;
+            background: rgba(74, 158, 255, 0.3);
+            color: #4a9eff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 9px;
+            font-weight: bold;
+            margin-left: 6px;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .cycle-trend {
+            font-size: 11px;
+            margin-left: 4px;
+        }
+
+        .cycle-trend.up {
+            color: #22c55e;
+        }
+
+        .cycle-trend.down {
+            color: #ef4444;
+        }
+
+        .cycle-trend.neutral {
+            color: #888;
+        }

@@ -84,7 +84,7 @@ func NewSSHProxy(config *SSHProxyConfig) (*SSHProxy, error) {
 		if req.Header.Get("Upgrade") == "websocket" {
 			// Set origin to match the target backend
 			req.Header.Set("Origin", fmt.Sprintf("http://%s:%d", config.Host, config.Port))
-			log.Printf("SSH proxy: Rewriting WebSocket origin for %s", req.URL.Path)
+			// WebSocket origin rewritten - no logging needed for normal operation
 		}
 	}
 

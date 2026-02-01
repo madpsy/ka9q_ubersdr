@@ -742,11 +742,11 @@ class DigitalSpotsMap {
         if (legendCheckbox) {
             this.toggleLegendPanels(legendCheckbox.checked);
         }
-        if (cyclesCheckbox) {
-            this.toggleCyclesPanel(cyclesCheckbox.checked);
-        }
         if (liveCheckbox) {
             this.toggleLivePanel(liveCheckbox.checked);
+        }
+        if (cyclesCheckbox) {
+            this.toggleCyclesPanel(cyclesCheckbox.checked);
         }
     }
 
@@ -827,9 +827,21 @@ class DigitalSpotsMap {
 
     toggleLivePanel(show) {
         const livePanel = document.getElementById('live-messages-panel');
+        const cyclesPanel = document.getElementById('decode-cycles-panel');
 
         if (livePanel) {
             livePanel.style.display = show ? 'flex' : 'none';
+        }
+
+        // Adjust cycles panel position based on live panel visibility
+        if (cyclesPanel) {
+            if (show) {
+                // Live panel is visible, position cycles to the left of it
+                cyclesPanel.style.right = '370px';
+            } else {
+                // Live panel is hidden, move cycles to the right edge
+                cyclesPanel.style.right = '10px';
+            }
         }
     }
 

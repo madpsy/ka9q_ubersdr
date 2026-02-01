@@ -1594,6 +1594,8 @@ function displayActiveChannels(channels) {
         // Add country column with flag if country_code exists
         const country = channel.country || '';
         const countryCode = channel.country_code || '';
+        const latitude = channel.latitude;
+        const longitude = channel.longitude;
         let countryHtml = '';
         if (countryCode) {
             // Add flag image with onerror handler to hide if 404
@@ -1601,7 +1603,12 @@ function displayActiveChannels(channels) {
                 style="width: 20px; height: 15px; border: 1px solid #666; margin-right: 6px; vertical-align: middle;"
                 onerror="this.style.display='none'">`;
         }
-        countryHtml += country;
+        // If latitude and longitude are available, make country name a clickable link to Google Maps
+        if (latitude != null && longitude != null && country) {
+            countryHtml += `<a href="https://www.google.com/maps?q=${latitude},${longitude}" target="_blank" style="color: #4a9eff; text-decoration: none;">${country}</a>`;
+        } else {
+            countryHtml += country;
+        }
         html += `<td style="padding: 8px; border-bottom: 1px solid #333;">${countryHtml}</td>`;
 
         // Add chat username column if it exists and has a value

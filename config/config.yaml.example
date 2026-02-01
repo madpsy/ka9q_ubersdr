@@ -1122,9 +1122,9 @@ rotctl:
   # Higher values = less responsive but lower overhead
   # Recommended: 1000-5000ms depending on your needs
   #   1000ms = very responsive (1 second updates)
-  #   2000ms = balanced (2 second updates) - default
+  #   2000ms = balanced (2 second updates)
   #   5000ms = relaxed (5 second updates)
-  update_interval: 2000
+  update_interval: 1000
 
   # API password for control operations (optional)
   # This password is required for all POST requests (position changes, commands)

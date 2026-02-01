@@ -165,10 +165,14 @@ list_rotators() {
 
 delete_rotator() {
   local name="$1"
+  local from_interactive="${2:-0}"
   
   if [[ -z "$name" ]]; then
     echo "ERROR: No rotator name specified for deletion." >&2
-    exit 1
+    if [[ "$from_interactive" -eq 0 ]]; then
+      exit 1
+    fi
+    return 1
   fi
   
   sanitize_name "$name"
@@ -180,7 +184,10 @@ delete_rotator() {
   if [[ ! -f "$ENV_PATH" ]]; then
     echo "ERROR: Rotator '$name' not found." >&2
     echo "Use --list to see configured rotators." >&2
-    exit 1
+    if [[ "$from_interactive" -eq 0 ]]; then
+      exit 1
+    fi
+    return 1
   fi
   
   echo "Deleting rotator: $name"
@@ -209,7 +216,12 @@ delete_rotator() {
   
   echo ""
   echo "OK: Rotator '$name' has been deleted."
-  exit 0
+
+  # Only exit if not called from interactive mode
+  if [[ "$from_interactive" -eq 0 ]]; then
+    exit 0
+  fi
+  return 0
 }
 
 require_root() {
@@ -300,7 +312,10 @@ interactive_setup() {
             local to_delete="${existing_rotators[0]}"
             read -p "Delete rotator '$to_delete'? (y/n): " confirm
             if [[ "$confirm" =~ ^[Yy] ]]; then
-              delete_rotator "$to_delete"
+              delete_rotator "$to_delete" 1
+              echo ""
+              echo "Continuing to create a new rotator..."
+              echo ""
             fi
           else
             echo "Select rotator to delete:"
@@ -315,7 +330,10 @@ interactive_setup() {
                 local to_delete="${existing_rotators[$idx]}"
                 read -p "Delete rotator '$to_delete'? (y/n): " confirm
                 if [[ "$confirm" =~ ^[Yy] ]]; then
-                  delete_rotator "$to_delete"
+                  delete_rotator "$to_delete" 1
+                  echo ""
+                  echo "Continuing to create a new rotator..."
+                  echo ""
                 fi
               else
                 echo "Invalid selection."
@@ -324,6 +342,7 @@ interactive_setup() {
               echo "Invalid input."
             fi
           fi
+          break
           ;;
         [Qq]*)
           echo "Setup cancelled."
@@ -459,7 +478,14 @@ interactive_setup() {
   while true; do
     read -p "Enter rotator model number: " MODEL
     if [[ -z "$MODEL" ]]; then
-      echo "ERROR: Model number cannot be empty." >&2
+      echo ""
+      echo "Listing rotator models again..."
+      echo ""
+      "$BIN" -l 2>/dev/null || {
+        echo "ERROR: Failed to list rotator models. Is rotctld installed correctly?" >&2
+        exit 1
+      }
+      echo ""
       continue
     fi
     if [[ ! "$MODEL" =~ ^[0-9]+$ ]]; then
@@ -727,6 +753,24 @@ EOF
     echo "NOTE: --no-start set; not enabling/starting."
     echo "To enable+start: systemctl enable --now $SERVICE"
   fi
+
+  echo ""
+  echo ""
+  echo "========================================="
+  echo "  Next Steps: Configure in Admin UI"
+  echo "========================================="
+  echo ""
+  echo "To complete the rotator setup:"
+  echo ""
+  echo "1. Set 'Enabled' to true in the Rotctl config section"
+  echo "2. Verify the Port matches: $PORT"
+  echo "3. Set Host to: 172.20.0.1"
+  echo "   (This is the correct value for rotctld running on this instance)"
+  echo "4. Set a secure password if you want to control the rotator"
+  echo "5. Click 'Save & Restart'"
+  echo ""
+  echo "The rotator should now be active and controllable from the web interface."
+  echo ""
 }
 
 main "$@"

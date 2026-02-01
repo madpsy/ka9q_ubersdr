@@ -1,5 +1,3 @@
-# UberSDR Release Notes
-
 ## Version 0.1.5 - Latest Release
 
 ### New Features

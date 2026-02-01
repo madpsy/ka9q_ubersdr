@@ -408,7 +408,20 @@ interactive_setup() {
     echo "No USB serial devices found!"
     echo "Make sure your device is connected and you have the appropriate drivers installed."
     echo ""
-    read -p "Enter device path manually (or press Ctrl+C to exit): " DEVICE
+    local DEVICE=""
+    while true; do
+      read -p "Enter device path manually (or press Ctrl+C to exit): " DEVICE
+      if [[ -z "$DEVICE" ]]; then
+        echo "ERROR: Device path cannot be empty." >&2
+        continue
+      fi
+      if [[ ! -e "$DEVICE" ]]; then
+        echo "ERROR: Device does not exist: $DEVICE" >&2
+        echo "Please check the path and try again." >&2
+        continue
+      fi
+      break
+    done
   else
     # Display numbered list
     for i in "${!device_display[@]}"; do
@@ -770,6 +783,7 @@ EOF
   echo "5. Click 'Save & Restart'"
   echo ""
   echo "The rotator should now be active and controllable from the web interface."
+  echo "You can view the status of the rotator connection in the Monitor tab, near the bottom."
   echo ""
 }
 

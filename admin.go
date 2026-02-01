@@ -557,7 +557,12 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 		// Check if IP is allowed to access admin endpoints
 		if !ah.config.Admin.IsIPAllowed(clientIP) {
-			log.Printf("Admin access denied for IP %s (not in allowed list)", clientIP)
+			// Ensure we always show the IP in the log, even if empty
+			if clientIP == "" {
+				log.Printf("Admin access denied for IP <empty> (not in allowed list) - RemoteAddr was: %s", r.RemoteAddr)
+			} else {
+				log.Printf("Admin access denied for IP %s (not in allowed list)", clientIP)
+			}
 			http.Error(w, "Forbidden - IP address not allowed", http.StatusForbidden)
 			return
 		}

@@ -44,6 +44,10 @@
             </div>
             <div class="filter-group" style="flex-direction: column; gap: 2px; align-items: flex-start;">
                 <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer;">
+                    <input type="checkbox" id="show-live-checkbox" checked style="margin: 0; cursor: pointer;">
+                    <span>Live</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer;">
                     <input type="checkbox" id="show-cycles-checkbox" style="margin: 0; cursor: pointer;">
                     <span>Cycles</span>
                 </label>
@@ -201,7 +205,7 @@
         <div class="decode-cycles-header" id="decode-cycles-header">
             <div class="decode-cycles-title">
                 <span>📊</span>
-                <span>Decode Cycles</span>
+                <span>Decode Cycles (w/ Locators)</span>
             </div>
             <div class="decode-cycles-toggle" id="decode-cycles-toggle">▼</div>
         </div>

@@ -464,6 +464,7 @@
 
         .decode-cycles-content {
             overflow-y: auto;
+            overflow-x: hidden;
             max-height: 450px;
             padding: 10px;
         }

@@ -179,6 +179,7 @@ class DigitalSpotsMap {
         const showWeather = localStorage.getItem('showWeather');
         const showLegend = localStorage.getItem('showLegend');
         const showCycles = localStorage.getItem('showCycles');
+        const showLive = localStorage.getItem('showLive');
 
         // Load filter values
         const modeFilter = localStorage.getItem('modeFilter');
@@ -216,6 +217,10 @@ class DigitalSpotsMap {
         if (showCycles !== null) {
             const checkbox = document.getElementById('show-cycles-checkbox');
             if (checkbox) checkbox.checked = showCycles === 'true';
+        }
+        if (showLive !== null) {
+            const checkbox = document.getElementById('show-live-checkbox');
+            if (checkbox) checkbox.checked = showLive === 'true';
         }
 
         // Apply filter values
@@ -723,6 +728,7 @@ class DigitalSpotsMap {
         const weatherCheckbox = document.getElementById('show-weather-checkbox');
         const legendCheckbox = document.getElementById('show-legend-checkbox');
         const cyclesCheckbox = document.getElementById('show-cycles-checkbox');
+        const liveCheckbox = document.getElementById('show-live-checkbox');
 
         if (statsCheckbox) {
             this.toggleStatsPanel(statsCheckbox.checked);
@@ -738,6 +744,9 @@ class DigitalSpotsMap {
         }
         if (cyclesCheckbox) {
             this.toggleCyclesPanel(cyclesCheckbox.checked);
+        }
+        if (liveCheckbox) {
+            this.toggleLivePanel(liveCheckbox.checked);
         }
     }
 
@@ -816,6 +825,14 @@ class DigitalSpotsMap {
         }
     }
 
+    toggleLivePanel(show) {
+        const livePanel = document.getElementById('live-messages-panel');
+
+        if (livePanel) {
+            livePanel.style.display = show ? 'flex' : 'none';
+        }
+    }
+
     setupCyclesVisibilityToggle() {
         const cyclesCheckbox = document.getElementById('show-cycles-checkbox');
 
@@ -823,6 +840,15 @@ class DigitalSpotsMap {
             cyclesCheckbox.addEventListener('change', (e) => {
                 this.toggleCyclesPanel(e.target.checked);
                 this.savePreference('showCycles', e.target.checked);
+            });
+        }
+
+        const liveCheckbox = document.getElementById('show-live-checkbox');
+
+        if (liveCheckbox) {
+            liveCheckbox.addEventListener('change', (e) => {
+                this.toggleLivePanel(e.target.checked);
+                this.savePreference('showLive', e.target.checked);
             });
         }
     }
@@ -916,6 +942,7 @@ class DigitalSpotsMap {
         this.updateDistanceStatistics();
         this.updateLiveMessagesDisplay(); // Update live messages when filters change
         this.updateRarestEntities(); // Update rarest entities when filters change
+        this.updateDecodeCyclesDisplay(); // Update decode cycles when filters change
         this.updateSpaceWeatherPosition(); // Update space weather panel position
     }
 
@@ -2646,8 +2673,14 @@ class DigitalSpotsMap {
         const content = document.getElementById('decode-cycles-content');
         if (!content) return;
 
-        // Get all active cycles (show all modes and bands)
+        // Get all active cycles and filter by mode/band
         const activeCycles = Array.from(this.decodeCycles.entries())
+            .filter(([key, data]) => {
+                // Apply mode and band filters
+                const modeMatch = this.modeFilter === 'all' || data.mode === this.modeFilter;
+                const bandMatch = this.bandFilter === 'all' || data.band === this.bandFilter;
+                return modeMatch && bandMatch;
+            })
             .sort((a, b) => {
                 // Sort by mode first, then band
                 if (a[1].mode !== b[1].mode) {

@@ -543,9 +543,9 @@
                     <button id="publicInstanceBtn" class="btn" onclick="window.location.href='/create_public.html'" style="display: none; background: #28a745;">
                         🔓 Enable Public Access
                     </button>
-                    <div id="terminalButtonGroup" style="display: none; position: relative; align-items: center;">
+                    <div id="terminalButtonGroup" style="display: none; position: relative; align-items: stretch;">
                         <button class="btn" id="terminalButton" onclick="openTerminal()" style="border-radius: 5px 0 0 5px; border-right: none; margin: 0;">🖥️ Terminal</button>
-                        <button class="btn" id="terminalDropdownBtn" onclick="toggleTerminalDropdown()" style="border-radius: 0 5px 5px 0; padding: 8px 10px; min-width: auto; margin: 0;">▼</button>
+                        <button class="btn" id="terminalDropdownBtn" onclick="toggleTerminalDropdown()" style="border-radius: 0 5px 5px 0; padding: 8px 10px; min-width: auto; margin: 0; height: auto;">▼</button>
                         <div id="terminalDropdown" class="terminal-dropdown" style="display: none;">
                             <a href="#" onclick="openQuickTerminal(); return false;">Quick Terminal</a>
                         </div>
@@ -1978,7 +1978,16 @@
         // Open quick terminal (no arguments, just /terminal/)
         function openQuickTerminal() {
             const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
-            window.open(terminalPath + '/', '_blank');
+            const url = `${terminalPath}/`;
+
+            // Open popup window with specific dimensions
+            const width = 1000;
+            const height = 700;
+            const left = (screen.width - width) / 2;
+            const top = (screen.height - height) / 2;
+            window.open(url, 'quick_terminal_' + Date.now(),
+                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
+
             toggleTerminalDropdown(); // Close dropdown after selection
         }
 

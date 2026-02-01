@@ -167,6 +167,9 @@ class DigitalSpotsMap {
 
         // Start cycle boundary checking
         this.startCycleBoundaryChecking();
+
+        // Setup cycles visibility toggle
+        this.setupCyclesVisibilityToggle();
     }
 
     loadPreferences() {
@@ -175,6 +178,7 @@ class DigitalSpotsMap {
         const showSummary = localStorage.getItem('showSummary');
         const showWeather = localStorage.getItem('showWeather');
         const showLegend = localStorage.getItem('showLegend');
+        const showCycles = localStorage.getItem('showCycles');
 
         // Load filter values
         const modeFilter = localStorage.getItem('modeFilter');
@@ -192,7 +196,7 @@ class DigitalSpotsMap {
         const mapLon = localStorage.getItem('mapLon');
         const mapZoom = localStorage.getItem('mapZoom');
 
-        // Apply checkbox states (default to true/checked if not set, except weather which defaults to false)
+        // Apply checkbox states (default to true/checked if not set, except weather and cycles which default to false)
         if (showStats !== null) {
             const checkbox = document.getElementById('show-stats-checkbox');
             if (checkbox) checkbox.checked = showStats === 'true';
@@ -208,6 +212,10 @@ class DigitalSpotsMap {
         if (showLegend !== null) {
             const checkbox = document.getElementById('show-legend-checkbox');
             if (checkbox) checkbox.checked = showLegend === 'true';
+        }
+        if (showCycles !== null) {
+            const checkbox = document.getElementById('show-cycles-checkbox');
+            if (checkbox) checkbox.checked = showCycles === 'true';
         }
 
         // Apply filter values
@@ -608,9 +616,10 @@ class DigitalSpotsMap {
                 '.space-weather-legend',
                 '.distance-legend',
                 '.new-entities-legend',
-                '.live-messages-panel'
+                '.live-messages-panel',
+                '.decode-cycles-panel'
             ];
-            
+
             elementsToZoom.forEach(selector => {
                 const elements = document.querySelectorAll(selector);
                 elements.forEach(el => {
@@ -713,6 +722,7 @@ class DigitalSpotsMap {
         const summaryCheckbox = document.getElementById('show-summary-checkbox');
         const weatherCheckbox = document.getElementById('show-weather-checkbox');
         const legendCheckbox = document.getElementById('show-legend-checkbox');
+        const cyclesCheckbox = document.getElementById('show-cycles-checkbox');
 
         if (statsCheckbox) {
             this.toggleStatsPanel(statsCheckbox.checked);
@@ -725,6 +735,9 @@ class DigitalSpotsMap {
         }
         if (legendCheckbox) {
             this.toggleLegendPanels(legendCheckbox.checked);
+        }
+        if (cyclesCheckbox) {
+            this.toggleCyclesPanel(cyclesCheckbox.checked);
         }
     }
 
@@ -792,6 +805,25 @@ class DigitalSpotsMap {
 
         if (legend) {
             legend.style.display = show ? 'block' : 'none';
+        }
+    }
+
+    toggleCyclesPanel(show) {
+        const cyclesPanel = document.getElementById('decode-cycles-panel');
+
+        if (cyclesPanel) {
+            cyclesPanel.style.display = show ? 'flex' : 'none';
+        }
+    }
+
+    setupCyclesVisibilityToggle() {
+        const cyclesCheckbox = document.getElementById('show-cycles-checkbox');
+
+        if (cyclesCheckbox) {
+            cyclesCheckbox.addEventListener('change', (e) => {
+                this.toggleCyclesPanel(e.target.checked);
+                this.savePreference('showCycles', e.target.checked);
+            });
         }
     }
 
@@ -2547,110 +2579,86 @@ class DigitalSpotsMap {
     }
 
     trackDecodeInCycle(spot) {
-        if (!spot.mode || !spot.band) return;
+        if (!spot.mode || !spot.band || !spot.timestamp) return;
 
         const cycleKey = `${spot.mode}-${spot.band}`;
+
+        // Use the spot's timestamp to determine which cycle it belongs to
         const cycleStart = this.getCurrentCycleStart(spot.mode, spot.timestamp);
 
-        // Initialize cycle tracking for this mode-band if needed
-        if (!this.decodeCycles.has(cycleKey)) {
-            this.decodeCycles.set(cycleKey, {
-                mode: spot.mode,
-                band: spot.band,
-                currentCycleStart: cycleStart,
-                currentCount: 0,
-                lastUpdate: Date.now()
-            });
-        }
-
-        const cycleData = this.decodeCycles.get(cycleKey);
-
-        // Check if this is a new cycle
-        if (cycleStart !== cycleData.currentCycleStart) {
-            // Save the completed cycle to history
-            this.saveCycleToHistory(cycleKey, cycleData.currentCycleStart, cycleData.currentCount);
-
-            // Start new cycle
-            cycleData.currentCycleStart = cycleStart;
-            cycleData.currentCount = 1;
-        } else {
-            // Increment count for current cycle
-            cycleData.currentCount++;
-        }
-
-        cycleData.lastUpdate = Date.now();
-
-        // Update the display
-        this.updateDecodeCyclesDisplay();
-    }
-
-    saveCycleToHistory(cycleKey, cycleStart, count) {
+        // Get or create history for this mode-band
         if (!this.cycleHistory.has(cycleKey)) {
             this.cycleHistory.set(cycleKey, []);
         }
 
         const history = this.cycleHistory.get(cycleKey);
-        history.push({
-            start: cycleStart,
-            count: count,
-            timestamp: Date.now()
-        });
 
-        // Keep only the last N cycles
-        if (history.length > this.maxCycleHistory) {
-            history.shift();
+        // Find if we already have this cycle in history
+        let cycleEntry = history.find(c => c.start === cycleStart);
+
+        if (!cycleEntry) {
+            // Create new cycle entry
+            cycleEntry = {
+                start: cycleStart,
+                count: 1,
+                timestamp: Date.now()
+            };
+            history.push(cycleEntry);
+
+            // Keep only the last N cycles
+            if (history.length > this.maxCycleHistory) {
+                history.shift();
+            }
+        } else {
+            // Increment existing cycle
+            cycleEntry.count++;
+            cycleEntry.timestamp = Date.now(); // Update last seen time
         }
+
+        // Update or create the display tracking data
+        if (!this.decodeCycles.has(cycleKey)) {
+            this.decodeCycles.set(cycleKey, {
+                mode: spot.mode,
+                band: spot.band,
+                currentCycleStart: cycleStart,
+                currentCount: cycleEntry.count,
+                lastUpdate: Date.now()
+            });
+        } else {
+            const cycleData = this.decodeCycles.get(cycleKey);
+            cycleData.currentCycleStart = cycleStart;
+            cycleData.currentCount = cycleEntry.count;
+            cycleData.lastUpdate = Date.now();
+        }
+
+        // Update the display
+        this.updateDecodeCyclesDisplay();
     }
 
     startCycleBoundaryChecking() {
-        // Check every second for cycle boundaries
+        // Periodically update the display to refresh timing
         this.cycleCheckInterval = setInterval(() => {
-            this.checkCycleBoundaries();
-        }, 1000);
-    }
-
-    checkCycleBoundaries() {
-        const now = Date.now();
-
-        this.decodeCycles.forEach((cycleData, cycleKey) => {
-            const timing = this.getCycleTimingForMode(cycleData.mode);
-            const cycleEnd = cycleData.currentCycleStart + timing.duration;
-
-            // If we've passed the cycle boundary and haven't received any decodes
-            // in the last few seconds, finalize the cycle
-            if (now > cycleEnd && (now - cycleData.lastUpdate) > 5000) {
-                // Save cycle to history if it has any decodes
-                if (cycleData.currentCount > 0) {
-                    this.saveCycleToHistory(cycleKey, cycleData.currentCycleStart, cycleData.currentCount);
-                }
-
-                // Start a new cycle
-                const newCycleStart = this.getCurrentCycleStart(cycleData.mode, new Date().toISOString());
-                cycleData.currentCycleStart = newCycleStart;
-                cycleData.currentCount = 0;
-
-                // Update display
-                this.updateDecodeCyclesDisplay();
-            }
-        });
+            this.updateDecodeCyclesDisplay();
+        }, 5000); // Update every 5 seconds
     }
 
     updateDecodeCyclesDisplay() {
         const content = document.getElementById('decode-cycles-content');
         if (!content) return;
 
-        // Get all active cycles
+        // Get all active cycles (show all modes and bands)
         const activeCycles = Array.from(this.decodeCycles.entries())
-            .filter(([key, data]) => {
-                // Apply mode and band filters
-                const modeMatch = this.modeFilter === 'all' || data.mode === this.modeFilter;
-                const bandMatch = this.bandFilter === 'all' || data.band === this.bandFilter;
-                return modeMatch && bandMatch;
-            })
             .sort((a, b) => {
                 // Sort by mode first, then band
                 if (a[1].mode !== b[1].mode) {
                     return a[1].mode.localeCompare(b[1].mode);
+                }
+                // Sort bands in standard order
+                const bandOrder = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+                const aIndex = bandOrder.indexOf(a[1].band);
+                const bIndex = bandOrder.indexOf(b[1].band);
+                if (aIndex !== -1 && bIndex !== -1) {
+                    return aIndex - bIndex;
                 }
                 return a[1].band.localeCompare(b[1].band);
             });
@@ -2675,6 +2683,9 @@ class DigitalSpotsMap {
                 ? Math.max(...recentHistory.map(c => c.count))
                 : 0;
 
+            // Display the current cycle count from the tracking data
+            const displayCount = cycleData.currentCount;
+
             // Determine trend
             let trend = '';
             let trendClass = 'neutral';
@@ -2691,8 +2702,8 @@ class DigitalSpotsMap {
                 }
             }
 
-            // Check if this is a new cycle (within last 30 seconds)
-            const isNew = (Date.now() - cycleData.lastUpdate) < 30000;
+            // Check if this is a new cycle (within last 60 seconds)
+            const isNew = (Date.now() - cycleData.lastUpdate) < 60000;
 
             html += `
                 <div class="cycle-item">
@@ -2703,7 +2714,7 @@ class DigitalSpotsMap {
                             ${isNew ? '<span class="cycle-new-badge">NEW</span>' : ''}
                         </div>
                         <div class="cycle-current-count">
-                            ${cycleData.currentCount} decode${cycleData.currentCount !== 1 ? 's' : ''}
+                            ${displayCount} decode${displayCount !== 1 ? 's' : ''}
                             ${trend ? `<span class="cycle-trend ${trendClass}">${trend}</span>` : ''}
                         </div>
                     </div>

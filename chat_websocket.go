@@ -34,6 +34,8 @@ type ChatUser struct {
 	CAT               bool        // CAT control enabled (optional)
 	TX                bool        // Transmitting status (optional)
 	IsIdle            bool        // Whether user is currently marked as idle
+	Country           string      // User's country name (optional)
+	CountryCode       string      // User's ISO country code (optional)
 }
 
 // ChatManager manages chat functionality for the DX cluster websocket
@@ -186,6 +188,10 @@ func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 
 	// Update active users
 	now := time.Now()
+
+	// Get country information for this user
+	country, countryCode := cm.GetSessionCountry(sessionID)
+
 	cm.activeUsersMu.Lock()
 	cm.activeUsers[sessionID] = &ChatUser{
 		SessionID:         sessionID,
@@ -196,13 +202,15 @@ func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 		MessageTimestamps: make([]time.Time, 0, 25),
 		LastUpdateTime:    time.Time{}, // Zero time
 		IsIdle:            false,
+		Country:           country,
+		CountryCode:       countryCode,
 	}
 	cm.activeUsersMu.Unlock()
 
 	log.Printf("Chat: Username '%s' set for session %s", username, sessionID)
 
 	// Broadcast user join notification to all users
-	cm.broadcastUserJoined(username)
+	cm.broadcastUserJoined(username, country, countryCode)
 
 	// Send success confirmation to the user who just joined
 	cm.broadcastUsernameSetSuccess(sessionID, username)
@@ -682,10 +690,18 @@ func (cm *ChatManager) broadcastChatMessage(msg ChatMessage) {
 }
 
 // broadcastUserJoined broadcasts a user joined notification
-func (cm *ChatManager) broadcastUserJoined(username string) {
+func (cm *ChatManager) broadcastUserJoined(username string, country string, countryCode string) {
 	data := map[string]interface{}{
 		"username":  username,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}
+
+	// Include country information if available
+	if countryCode != "" {
+		data["country_code"] = countryCode
+	}
+	if country != "" {
+		data["country"] = country
 	}
 
 	message := map[string]interface{}{
@@ -747,6 +763,14 @@ func (cm *ChatManager) SendActiveUsers(conn *websocket.Conn) {
 			userData["idle_minutes"] = idleMinutes
 		}
 
+		// Include country information if available
+		if user.CountryCode != "" {
+			userData["country_code"] = user.CountryCode
+		}
+		if user.Country != "" {
+			userData["country"] = user.Country
+		}
+
 		// Check if mode is an IQ mode (starts with "iq")
 		isIQMode := false
 		if len(user.Mode) >= 2 && user.Mode[0:2] == "iq" {
@@ -805,6 +829,14 @@ func (cm *ChatManager) BroadcastActiveUsers() {
 		idleMinutes := int(time.Now().Sub(user.LastActivityTime).Minutes())
 		if idleMinutes > 0 {
 			userData["idle_minutes"] = idleMinutes
+		}
+
+		// Include country information if available
+		if user.CountryCode != "" {
+			userData["country_code"] = user.CountryCode
+		}
+		if user.Country != "" {
+			userData["country"] = user.Country
 		}
 
 		// Check if mode is an IQ mode (starts with "iq")

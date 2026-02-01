@@ -1838,13 +1838,18 @@ class ChatUI {
         const isOwnMessage = this.chat && this.chat.username === username;
         const usernameClass = isOwnMessage ? 'chat-message-username own-message' : 'chat-message-username';
 
+        // Get country flag if available
+        const user = this.chat.activeUsers.find(u => u.username === username);
+        const countryFlag = user && user.country_code ?
+            `<img src="flags/${user.country_code.toLowerCase()}.svg" style="width: 14px; height: 10px; margin-right: 3px; border: 1px solid #666; vertical-align: middle;" alt="${user.country_code}" title="${user.country || user.country_code}">` : '';
+
         // Clicking username tunes to their frequency (except for our own)
         let usernameHtml;
         if (isOwnMessage) {
-            usernameHtml = `<span class="${usernameClass}" style="cursor:default;">${this.escapeHtml(username)}:</span>`;
+            usernameHtml = `${countryFlag}<span class="${usernameClass}" style="cursor:default;">${this.escapeHtml(username)}:</span>`;
         } else {
             // Dynamic tooltip that updates on hover to show current frequency/mode
-            usernameHtml = `<span class="${usernameClass}" onclick="chatUI.tuneToUser('${this.escapeHtml(username)}')" onmouseover="chatUI.updateUsernameTooltip(this, '${this.escapeHtml(username)}')">${this.escapeHtml(username)}:</span>`;
+            usernameHtml = `${countryFlag}<span class="${usernameClass}" onclick="chatUI.tuneToUser('${this.escapeHtml(username)}')" onmouseover="chatUI.updateUsernameTooltip(this, '${this.escapeHtml(username)}')">${this.escapeHtml(username)}:</span>`;
         }
 
         // Process message: escape HTML, then linkify URLs, then highlight mentions
@@ -2053,7 +2058,7 @@ class ChatUI {
         });
 
         const userItems = sortedUsers.map(u => {
-            console.log('[ChatUI] User:', u.username, 'freq:', u.frequency, 'mode:', u.mode, 'cat:', u.cat, 'tx:', u.tx, 'idle_minutes:', u.idle_minutes);
+            console.log('[ChatUI] User:', u.username, 'freq:', u.frequency, 'mode:', u.mode, 'cat:', u.cat, 'tx:', u.tx, 'idle_minutes:', u.idle_minutes, 'country_code:', u.country_code);
 
             // Check if this is our own user
             const isOurUser = u.username === ourUsername;
@@ -2071,14 +2076,18 @@ class ChatUI {
                 statusIcons += ' 💤'; // Idle
             }
 
+            // Country flag if available
+            const countryFlag = u.country_code ?
+                `<img src="flags/${u.country_code.toLowerCase()}.svg" style="width: 16px; height: 12px; margin-right: 4px; border: 1px solid #666; vertical-align: middle;" alt="${u.country_code}" title="${u.country || u.country_code}">` : '';
+
             // Username - bold if it's us, clickable to mute/unmute if it's not us
             let usernameSpan;
             if (isOurUser) {
                 // Our own username - bold, not clickable
-                usernameSpan = `<span style="font-weight:bold; display:block; margin-bottom:2px;">${this.escapeHtml(u.username)}${statusIcons}</span>`;
+                usernameSpan = `<span style="font-weight:bold; display:block; margin-bottom:2px;">${countryFlag}${this.escapeHtml(u.username)}${statusIcons}</span>`;
             } else {
                 // Other user - clickable to mute/unmute
-                usernameSpan = `<span onclick="chatUI.toggleMute('${this.escapeHtml(u.username)}')" style="cursor:pointer; display:block; margin-bottom:2px;">${this.escapeHtml(u.username)}${statusIcons}</span>`;
+                usernameSpan = `<span onclick="chatUI.toggleMute('${this.escapeHtml(u.username)}')" style="cursor:pointer; display:block; margin-bottom:2px;">${countryFlag}${this.escapeHtml(u.username)}${statusIcons}</span>`;
             }
 
             // Add frequency - clickable to tune for others, just display for us

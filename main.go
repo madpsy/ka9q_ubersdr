@@ -1717,7 +1717,7 @@ func handleMyIP(w http.ResponseWriter, r *http.Request, geoIPService *GeoIPServi
 }
 
 // handleStats handles statistics requests
-func handleStats(w http.ResponseWriter, r *http.Request, sessions *SessionManager) {
+func handleStats(w http.ResponseWriter, r *http.Request, sessions *SessionManager, dxClusterWsHandler *DXClusterWebSocketHandler) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -1774,11 +1774,11 @@ func handleStats(w http.ResponseWriter, r *http.Request, sessions *SessionManage
 	}
 	sessionList = append(sessionList, otherSessions...)
 
-	// Enhance with GeoIP coordinates if GeoIP service is available
-	if sessions.geoIPService != nil && sessions.geoIPService.IsEnabled() {
+	// Enhance with GeoIP coordinates and chat username if available
+	if sessions.geoIPService != nil && sessions.geoIPService.IsEnabled() || (dxClusterWsHandler != nil && dxClusterWsHandler.chatManager != nil) {
 		for i := range sessionList {
-			// Get the client IP from the original session data
-			// We need to find the matching session to get the ClientIP
+			// Get the client IP and user_session_id from the original session data
+			// We need to find the matching session to get the ClientIP and UserSessionID
 			sessions.mu.RLock()
 			for _, session := range sessions.sessions {
 				if !session.IsSpectrum && session.ClientIP != "" {
@@ -1787,20 +1787,30 @@ func handleStats(w http.ResponseWriter, r *http.Request, sessions *SessionManage
 					if sessionList[i]["frequency"] == session.Frequency &&
 						sessionList[i]["created_at"] == session.CreatedAt {
 						clientIP := session.ClientIP
+						userSessionID := session.UserSessionID
 						session.mu.RUnlock()
 
-						// Perform GeoIP lookup
-						if result, err := sessions.geoIPService.Lookup(clientIP); err == nil {
-							// Add latitude and longitude if available
-							if result.Latitude != nil {
-								sessionList[i]["latitude"] = *result.Latitude
+						// Perform GeoIP lookup if service is available
+						if sessions.geoIPService != nil && sessions.geoIPService.IsEnabled() {
+							if result, err := sessions.geoIPService.Lookup(clientIP); err == nil {
+								// Add latitude and longitude if available
+								if result.Latitude != nil {
+									sessionList[i]["latitude"] = *result.Latitude
+								}
+								if result.Longitude != nil {
+									sessionList[i]["longitude"] = *result.Longitude
+								}
+								// Add accuracy radius if available
+								if result.AccuracyRadius != nil {
+									sessionList[i]["accuracy_radius_km"] = *result.AccuracyRadius
+								}
 							}
-							if result.Longitude != nil {
-								sessionList[i]["longitude"] = *result.Longitude
-							}
-							// Add accuracy radius if available
-							if result.AccuracyRadius != nil {
-								sessionList[i]["accuracy_radius_km"] = *result.AccuracyRadius
+						}
+
+						// Add chat username if available
+						if dxClusterWsHandler != nil && dxClusterWsHandler.chatManager != nil && userSessionID != "" {
+							if username, exists := dxClusterWsHandler.chatManager.GetUsername(userSessionID); exists {
+								sessionList[i]["chat_username"] = username
 							}
 						}
 						break

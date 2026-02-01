@@ -397,6 +397,13 @@ func (ah *AdminHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Check if IP is allowed to access admin endpoints
+	if !ah.config.Admin.IsIPAllowed(clientIP) {
+		log.Printf("Admin login denied for IP %s (not in allowed list)", clientIP)
+		http.Error(w, "Forbidden - IP address not allowed", http.StatusForbidden)
+		return
+	}
+
 	// Check if IP is already temporarily banned
 	if ah.ipBanManager.IsBanned(clientIP) {
 		http.Error(w, "Too many failed login attempts. Please try again later.", http.StatusTooManyRequests)

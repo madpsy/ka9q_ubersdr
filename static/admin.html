@@ -15755,8 +15755,10 @@ const tooltipLine2 = timeStr;
                 
                 // Coordinates
                 if (data.latitude !== null && data.latitude !== undefined && data.longitude !== null && data.longitude !== undefined) {
-                    html += `<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">`;
-                    html += `<strong style="color: #667eea;">Coordinates:</strong><br>`;
+                    html += `<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px; position: relative;">`;
+                    html += `<strong style="color: #667eea;">Coordinates:</strong>`;
+                    html += `<a href="https://www.google.com/maps?q=${data.latitude},${data.longitude}" target="_blank" rel="noopener noreferrer" style="position: absolute; right: 10px; top: 10px; font-size: 20px; text-decoration: none; cursor: pointer; transition: transform 0.2s;" title="View on Google Maps" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'">🗺️</a>`;
+                    html += `<br>`;
                     html += `<span style="margin-left: 20px;">Latitude: ${data.latitude.toFixed(4)}°</span><br>`;
                     html += `<span style="margin-left: 20px;">Longitude: ${data.longitude.toFixed(4)}°</span><br>`;
                     if (data.accuracy_radius_km) html += `<span style="margin-left: 20px;">Accuracy: ±${data.accuracy_radius_km} km</span><br>`;

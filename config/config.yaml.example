@@ -56,6 +56,25 @@ admin:
   # After this duration, the ban expires and the IP can try again
   login_ban_duration: 900
 
+  # List of IP addresses or CIDR ranges allowed to access admin endpoints
+  # Only these IPs can access the admin interface (password is still required)
+  # This provides an additional layer of security beyond password authentication
+  # Supports both IPv4 and IPv6 addresses with CIDR notation
+  # Examples:
+  #   - "127.0.0.1"           # Single IPv4 address (localhost)
+  #   - "192.168.1.0/24"      # IPv4 CIDR range (local network)
+  #   - "::1"                 # Single IPv6 address (localhost)
+  #   - "2001:db8::/32"       # IPv6 CIDR range
+  #   - "0.0.0.0/0"           # Allow all IPv4 addresses (default)
+  # By default, all IPs are allowed (0.0.0.0/0) for backward compatibility
+  # Restrict this list to trusted networks for better security
+  allowed_ips:
+    - "0.0.0.0/0"
+  # Additional examples (uncomment to use):
+  #   - "127.0.0.1"           # Localhost only
+  #   - "192.168.1.0/24"      # Local network only
+  #   - "10.0.0.0/8"          # Private network
+
 # Radiod connection settings
 radiod:
   # Multicast group for status/control messages

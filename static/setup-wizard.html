@@ -515,6 +515,27 @@
                 </div>
 
                 <div class="form-group" style="margin-top: 25px;">
+                    <label>Admin Restrictions</label>
+                    <div class="help-text" style="margin-bottom: 10px;">Control which IP addresses can access the admin interface</div>
+                    <div id="currentIPDisplay" style="padding: 10px; background: #e3f2fd; border: 1px solid #2196f3; border-radius: 6px; margin-bottom: 10px; display: none;">
+                        <strong>Your current IP:</strong> <span id="currentIPAddress">Loading...</span>
+                    </div>
+                    <div id="lanWarning" style="padding: 12px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; margin-bottom: 10px; color: #856404; display: none;">
+                        <strong>⚠️ Warning:</strong> Your IP address is not in the private LAN ranges. Selecting "Allow only LAN IP addresses" will lock you out of the admin interface!
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 10px; padding: 15px; background: #f8f9fa; border-radius: 6px;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin: 0;">
+                            <input type="radio" id="adminAllowAll" name="adminIPRestriction" value="all" checked>
+                            <span>Allow from all IP addresses (default)</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin: 0;">
+                            <input type="radio" id="adminAllowLAN" name="adminIPRestriction" value="lan">
+                            <span>Allow only LAN IP addresses (192.168.0.0/16, 172.16.0.0/12, 10.0.0.0/8)</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-top: 25px;">
                     <div class="checkbox-group">
                         <input type="checkbox" id="remoteLogging" name="remoteLogging" checked>
                         <label for="remoteLogging">Send debug logs to central logging system to aid application development</label>

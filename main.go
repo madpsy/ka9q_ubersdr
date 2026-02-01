@@ -1069,6 +1069,9 @@ func main() {
 		log.Printf("Rotctl API endpoints registered (disabled in configuration)")
 	}
 
+	http.HandleFunc("/api/myip", func(w http.ResponseWriter, r *http.Request) {
+		handleMyIP(w, r, geoIPService)
+	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
 		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor)
 	})
@@ -1686,6 +1689,31 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}
+
+// handleMyIP returns the client's IP address with optional GeoIP information
+func handleMyIP(w http.ResponseWriter, r *http.Request, geoIPService *GeoIPService) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	clientIP := getClientIP(r)
+
+	response := map[string]interface{}{
+		"ip": clientIP,
+	}
+
+	// Add GeoIP information if available
+	if geoIPService != nil {
+		country, countryCode := geoIPService.LookupSafe(clientIP)
+		if country != "" {
+			response["country"] = country
+			response["country_code"] = countryCode
+		}
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding myip response: %v", err)
+	}
 }
 
 // handleStats handles statistics requests

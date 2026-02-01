@@ -51,6 +51,9 @@ type AdminConfig struct {
 	MaxLoginAttempts     int       `yaml:"max_login_attempts"`     // Maximum failed login attempts before temporary ban (default: 5)
 	LoginAttemptWindow   int       `yaml:"login_attempt_window"`   // Time window for counting failed attempts in seconds (default: 900 = 15 minutes)
 	LoginBanDuration     int       `yaml:"login_ban_duration"`     // Duration of temporary ban after max attempts in seconds (default: 900 = 15 minutes)
+	AllowedIPs           []string  `yaml:"allowed_ips"`            // List of IPs/CIDRs allowed to access admin endpoints (empty = allow all)
+
+	allowedNets []*net.IPNet // Parsed CIDR networks (internal use)
 }
 
 // GPSConfig contains GPS coordinates and time synchronization settings
@@ -328,6 +331,11 @@ func LoadConfig(filename string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	// Parse admin allowed IPs/CIDRs
+	if err := config.Admin.parseAllowedIPs(); err != nil {
+		return nil, fmt.Errorf("failed to parse admin.allowed_ips: %w", err)
+	}
+
 	// Parse timeout bypass IPs/CIDRs
 	if err := config.Server.parseTimeoutBypassIPs(); err != nil {
 		return nil, fmt.Errorf("failed to parse timeout_bypass_ips: %w", err)
@@ -487,6 +495,11 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Admin.LoginBanDuration == 0 {
 		config.Admin.LoginBanDuration = 900 // Default 15 minutes
+	}
+
+	// Set default admin allowed IPs if not specified (allow all by default)
+	if len(config.Admin.AllowedIPs) == 0 {
+		config.Admin.AllowedIPs = []string{"0.0.0.0/0"} // Default: allow all IPv4
 	}
 
 	// Set spectrum defaults if not specified
@@ -945,6 +958,56 @@ func (spc *SSHProxyConfig) IsIPAllowed(ipStr string) bool {
 	}
 
 	for _, ipNet := range spc.allowedNets {
+		if ipNet.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// parseAllowedIPs parses the admin allowed_ips list into CIDR networks
+func (ac *AdminConfig) parseAllowedIPs() error {
+	ac.allowedNets = make([]*net.IPNet, 0, len(ac.AllowedIPs))
+
+	for _, ipStr := range ac.AllowedIPs {
+		// Check if it's a CIDR notation
+		if _, ipNet, err := net.ParseCIDR(ipStr); err == nil {
+			ac.allowedNets = append(ac.allowedNets, ipNet)
+		} else {
+			// Try parsing as a single IP address
+			ip := net.ParseIP(ipStr)
+			if ip == nil {
+				return fmt.Errorf("invalid IP or CIDR: %s", ipStr)
+			}
+			// Convert single IP to CIDR (/32 for IPv4, /128 for IPv6)
+			var ipNet *net.IPNet
+			if ip.To4() != nil {
+				_, ipNet, _ = net.ParseCIDR(ipStr + "/32")
+			} else {
+				_, ipNet, _ = net.ParseCIDR(ipStr + "/128")
+			}
+			ac.allowedNets = append(ac.allowedNets, ipNet)
+		}
+	}
+
+	return nil
+}
+
+// IsIPAllowed checks if an IP address is in the admin allowed IPs list
+// Returns true if the list is empty (allow all) or if the IP is in the list
+func (ac *AdminConfig) IsIPAllowed(ipStr string) bool {
+	// If no allowed IPs configured, allow all access
+	if len(ac.allowedNets) == 0 {
+		return true
+	}
+
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+
+	for _, ipNet := range ac.allowedNets {
 		if ipNet.Contains(ip) {
 			return true
 		}

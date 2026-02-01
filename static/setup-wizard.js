@@ -22,6 +22,7 @@
         updateUI();
         initializeMap();
         loadExistingConfig(); // Load config after map is initialized
+        fetchUserIP(); // Fetch user's IP address for admin restrictions
         
         // Auto-fill callsign fields when main callsign is entered
         document.getElementById('callsign').addEventListener('input', function(e) {
@@ -54,6 +55,10 @@
 
         // Password generator
         document.getElementById('generatePassword').addEventListener('click', generatePassword);
+
+        // Admin IP restriction radio buttons - check for lockout warning
+        document.getElementById('adminAllowLAN').addEventListener('change', checkAdminLockoutWarning);
+        document.getElementById('adminAllowAll').addEventListener('change', checkAdminLockoutWarning);
     }
 
     function setupEventListeners() {
@@ -236,6 +241,10 @@
         inputs.forEach(input => {
             if (input.type === 'checkbox') {
                 formData[input.name] = input.checked;
+            } else if (input.type === 'radio') {
+                if (input.checked) {
+                    formData[input.name] = input.value;
+                }
             } else {
                 formData[input.name] = input.value;
             }
@@ -283,6 +292,21 @@
                     setFieldValue('maxSessionTime', config.server.max_session_time);
                     setFieldValue('maxSessions', config.server.max_sessions);
                     setFieldValue('maxSessionsIP', config.server.max_sessions_ip);
+                }
+
+                // Pre-fill admin IP restriction
+                if (config.admin && config.admin.allowed_ips) {
+                    const allowedIPs = config.admin.allowed_ips;
+                    // Check if it's the LAN configuration (all three RFC 1918 ranges)
+                    const isLANConfig = allowedIPs.includes('192.168.0.0/16') &&
+                                       allowedIPs.includes('172.16.0.0/12') &&
+                                       allowedIPs.includes('10.0.0.0/8');
+
+                    if (isLANConfig) {
+                        document.getElementById('adminAllowLAN').checked = true;
+                    } else {
+                        document.getElementById('adminAllowAll').checked = true;
+                    }
                 }
 
                 // Pre-fill instance reporting fields
@@ -343,6 +367,13 @@
             }
             const existingConfig = await existingConfigResponse.json();
 
+            // Determine admin allowed IPs based on radio button selection
+            let adminAllowedIPs = ['0.0.0.0/0']; // Default: allow all
+            if (formData.adminIPRestriction === 'lan') {
+                // RFC 1918 private IP ranges
+                adminAllowedIPs = ['192.168.0.0/16', '172.16.0.0/12', '10.0.0.0/8'];
+            }
+
             // Merge wizard changes into existing config
             const mainConfig = {
                 ...existingConfig,
@@ -357,7 +388,8 @@
                         lat: parseFloat(formData.latitude),
                         lon: parseFloat(formData.longitude)
                     },
-                    asl: parseInt(formData.asl)
+                    asl: parseInt(formData.asl),
+                    allowed_ips: adminAllowedIPs
                 },
                 server: {
                     ...existingConfig.server,
@@ -720,6 +752,82 @@
                 window.location.href = '/';
             }
         }, 1000);
+    }
+
+    // Fetch user's IP address from /api/myip
+    let userIPAddress = null;
+    async function fetchUserIP() {
+        try {
+            const response = await fetch('/api/myip');
+            if (response.ok) {
+                const data = await response.json();
+                userIPAddress = data.ip;
+
+                // Display the IP address
+                const ipDisplay = document.getElementById('currentIPDisplay');
+                const ipAddressSpan = document.getElementById('currentIPAddress');
+                if (ipAddressSpan && userIPAddress) {
+                    let displayText = userIPAddress;
+                    if (data.country) {
+                        displayText += ` (${data.country})`;
+                    }
+                    ipAddressSpan.textContent = displayText;
+                    ipDisplay.style.display = 'block';
+                }
+
+                // Check if we should show the warning
+                checkAdminLockoutWarning();
+            }
+        } catch (error) {
+            console.log('Could not fetch user IP:', error);
+        }
+    }
+
+    // Check if user would lock themselves out with LAN-only restriction
+    function checkAdminLockoutWarning() {
+        const lanRadio = document.getElementById('adminAllowLAN');
+        const warningDiv = document.getElementById('lanWarning');
+
+        if (!lanRadio || !warningDiv || !userIPAddress) {
+            return;
+        }
+
+        // Check if LAN option is selected
+        if (lanRadio.checked) {
+            // Check if user's IP is in private ranges
+            const isPrivateIP = isIPInPrivateRange(userIPAddress);
+
+            // Show warning if NOT in private range
+            warningDiv.style.display = isPrivateIP ? 'none' : 'block';
+        } else {
+            // Hide warning if "Allow all" is selected
+            warningDiv.style.display = 'none';
+        }
+    }
+
+    // Check if an IP address is in RFC 1918 private ranges
+    function isIPInPrivateRange(ip) {
+        if (!ip) return false;
+
+        const parts = ip.split('.').map(Number);
+        if (parts.length !== 4) return false;
+
+        // 10.0.0.0/8
+        if (parts[0] === 10) {
+            return true;
+        }
+
+        // 172.16.0.0/12 (172.16.0.0 - 172.31.255.255)
+        if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) {
+            return true;
+        }
+
+        // 192.168.0.0/16
+        if (parts[0] === 192 && parts[1] === 168) {
+            return true;
+        }
+
+        return false;
     }
 
     // Initialize when DOM is ready

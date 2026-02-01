@@ -1991,14 +1991,73 @@
             toggleTerminalDropdown(); // Close dropdown after selection
         }
 
-        // Toggle terminal dropdown menu
-        function toggleTerminalDropdown() {
+        // Toggle terminal dropdown menu and fetch sessions
+        async function toggleTerminalDropdown() {
             const dropdown = document.getElementById('terminalDropdown');
             if (dropdown.style.display === 'none') {
+                await populateTerminalSessions();
                 dropdown.style.display = 'block';
             } else {
                 dropdown.style.display = 'none';
             }
+        }
+
+        // Fetch and populate terminal sessions in dropdown
+        async function populateTerminalSessions() {
+            const dropdown = document.getElementById('terminalDropdown');
+            const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
+
+            try {
+                const response = await fetch(`${terminalPath}/api/sessions`);
+                const data = await response.json();
+
+                // Clear existing content
+                dropdown.innerHTML = '';
+
+                // Always add "Quick Terminal" as first option
+                const quickTerminalLink = document.createElement('a');
+                quickTerminalLink.href = '#';
+                quickTerminalLink.textContent = 'Quick Terminal';
+                quickTerminalLink.onclick = function() {
+                    openQuickTerminal();
+                    return false;
+                };
+                dropdown.appendChild(quickTerminalLink);
+
+                // Add existing sessions if any
+                if (data.sessions && data.sessions.length > 0) {
+                    data.sessions.forEach(session => {
+                        const sessionLink = document.createElement('a');
+                        sessionLink.href = '#';
+                        sessionLink.textContent = session.window_name || session.name;
+                        sessionLink.onclick = function() {
+                            openTerminalSession(session.name, session.window_name);
+                            return false;
+                        };
+                        dropdown.appendChild(sessionLink);
+                    });
+                }
+            } catch (error) {
+                console.error('Error fetching terminal sessions:', error);
+                // On error, just show Quick Terminal option
+                dropdown.innerHTML = '<a href="#" onclick="openQuickTerminal(); return false;">Quick Terminal</a>';
+            }
+        }
+
+        // Open a specific terminal session
+        function openTerminalSession(sessionName, windowName) {
+            const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
+            const url = `${terminalPath}/?session=${encodeURIComponent(sessionName)}&name=${encodeURIComponent(windowName)}`;
+
+            // Open popup window with specific dimensions
+            const width = 1000;
+            const height = 700;
+            const left = (screen.width - width) / 2;
+            const top = (screen.height - height) / 2;
+            window.open(url, 'terminal_session_' + Date.now(),
+                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
+
+            toggleTerminalDropdown(); // Close dropdown after selection
         }
 
         // Close dropdown when clicking outside

@@ -1591,9 +1591,18 @@ function displayActiveChannels(channels) {
 
         html += `<td style="padding: 8px; border-bottom: 1px solid #333;">${activeText}</td>`;
 
-        // Add country column if it exists and has a value
+        // Add country column with flag if country_code exists
         const country = channel.country || '';
-        html += `<td style="padding: 8px; border-bottom: 1px solid #333;">${country}</td>`;
+        const countryCode = channel.country_code || '';
+        let countryHtml = '';
+        if (countryCode) {
+            // Add flag image with onerror handler to hide if 404
+            countryHtml = `<img src="flags/${countryCode.toLowerCase()}.svg"
+                style="width: 20px; height: 15px; border: 1px solid #666; margin-right: 6px; vertical-align: middle;"
+                onerror="this.style.display='none'">`;
+        }
+        countryHtml += country;
+        html += `<td style="padding: 8px; border-bottom: 1px solid #333;">${countryHtml}</td>`;
 
         // Add chat username column if it exists and has a value
         const chatUsername = channel.chat_username || '';

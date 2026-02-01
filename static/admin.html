@@ -472,6 +472,39 @@
             animation: flash 1s infinite;
         }
 
+        .terminal-dropdown {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 5px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            min-width: 160px;
+            z-index: 1000;
+        }
+
+        .terminal-dropdown a {
+            display: block;
+            padding: 10px 15px;
+            color: #333;
+            text-decoration: none;
+            transition: background-color 0.2s;
+        }
+
+        .terminal-dropdown a:hover {
+            background-color: #f8f9fa;
+        }
+
+        .terminal-dropdown a:first-child {
+            border-radius: 5px 5px 0 0;
+        }
+
+        .terminal-dropdown a:last-child {
+            border-radius: 0 0 5px 5px;
+        }
+
     </style>
     <script src="chart.umd.min.js"></script>
     <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -510,7 +543,13 @@
                     <button id="publicInstanceBtn" class="btn" onclick="window.location.href='/create_public.html'" style="display: none; background: #28a745;">
                         🔓 Enable Public Access
                     </button>
-                    <button class="btn" id="terminalButton" onclick="openTerminal()" style="display: none;">🖥️ Terminal</button>
+                    <div id="terminalButtonGroup" style="display: none; position: relative; align-items: center;">
+                        <button class="btn" id="terminalButton" onclick="openTerminal()" style="border-radius: 5px 0 0 5px; border-right: none; margin: 0;">🖥️ Terminal</button>
+                        <button class="btn" id="terminalDropdownBtn" onclick="toggleTerminalDropdown()" style="border-radius: 0 5px 5px 0; padding: 8px 10px; min-width: auto; margin: 0;">▼</button>
+                        <div id="terminalDropdown" class="terminal-dropdown" style="display: none;">
+                            <a href="#" onclick="openQuickTerminal(); return false;">Quick Terminal</a>
+                        </div>
+                    </div>
                     <button class="btn btn-secondary" onclick="logout()">Logout</button>
                 </div>
             </div>
@@ -1919,12 +1958,12 @@
 
         // Update terminal button visibility based on SSH proxy config
         function updateTerminalButtonVisibility() {
-            const terminalButton = document.getElementById('terminalButton');
-            if (terminalButton && currentConfig.ssh_proxy) {
+            const terminalButtonGroup = document.getElementById('terminalButtonGroup');
+            if (terminalButtonGroup && currentConfig.ssh_proxy) {
                 if (currentConfig.ssh_proxy.enabled === true) {
-                    terminalButton.style.display = 'inline-block';
+                    terminalButtonGroup.style.display = 'flex';
                 } else {
-                    terminalButton.style.display = 'none';
+                    terminalButtonGroup.style.display = 'none';
                 }
             }
         }
@@ -1935,6 +1974,36 @@
             // GoTTY serves the terminal interface at /sessions
             window.open(terminalPath + '/sessions', '_blank');
         }
+
+        // Open quick terminal (no arguments, just /terminal/)
+        function openQuickTerminal() {
+            const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
+            window.open(terminalPath + '/', '_blank');
+            toggleTerminalDropdown(); // Close dropdown after selection
+        }
+
+        // Toggle terminal dropdown menu
+        function toggleTerminalDropdown() {
+            const dropdown = document.getElementById('terminalDropdown');
+            if (dropdown.style.display === 'none') {
+                dropdown.style.display = 'block';
+            } else {
+                dropdown.style.display = 'none';
+            }
+        }
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(event) {
+            const dropdown = document.getElementById('terminalDropdown');
+            const dropdownBtn = document.getElementById('terminalDropdownBtn');
+            const buttonGroup = document.getElementById('terminalButtonGroup');
+
+            if (dropdown && dropdownBtn && buttonGroup) {
+                if (!buttonGroup.contains(event.target)) {
+                    dropdown.style.display = 'none';
+                }
+            }
+        });
 
         // Open Generate Wisdom script in popup window
         function openGenerateWisdom() {
@@ -1954,7 +2023,7 @@
         // Open Rotctld Setup script in popup window
         function openRotctldSetup() {
             const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
-            const command = '~/ubersdr/rotctld.sh --interactive';
+            const command = 'sudo ~/ubersdr/rotctld.sh --interactive';
             const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
 
             // Open popup window with specific dimensions

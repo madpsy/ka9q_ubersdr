@@ -35,12 +35,16 @@ Options:
   --extra        Extra args appended to rotctld (quoted string)
   --no-start     Don't start/enable (just write files)
   --list-devices List all available USB serial devices
+  --list         List all configured rotator services
+  --delete NAME  Delete a rotator service by name
   --interactive  Interactive setup wizard
   -h, --help     Show help
 
 Examples:
   sudo ./rotctld-systemd-setup.sh --interactive
   sudo ./rotctld-systemd-setup.sh --list-devices
+  sudo ./rotctld-systemd-setup.sh --list
+  sudo ./rotctld-systemd-setup.sh --delete azel
   sudo ./rotctld-systemd-setup.sh -n azel -d /dev/ttyUSB0 -m 603
   sudo ./rotctld-systemd-setup.sh -n yagi -d /dev/serial/by-id/usb-FTDI_... -m 603 -s 19200 -p 4534 --extra "-vv"
 
@@ -99,6 +103,115 @@ list_devices() {
   exit 0
 }
 
+list_rotators() {
+  echo "=== Configured Rotator Services ==="
+  echo ""
+  
+  local ENV_DIR="/etc/rotctld"
+  local found=0
+  
+  if [[ ! -d "$ENV_DIR" ]]; then
+    echo "No rotator services configured yet."
+    echo ""
+    echo "Use --interactive to set up your first rotator."
+    exit 0
+  fi
+  
+  for env_file in "$ENV_DIR"/rotctld-*.env; do
+    if [[ ! -e "$env_file" ]]; then
+      continue
+    fi
+    
+    found=1
+    local name=$(basename "$env_file" .env | sed 's/^rotctld-//')
+    local service="rotctld@${name}.service"
+    
+    echo "Rotator: $name"
+    echo "  Service: $service"
+    
+    # Get service status
+    if systemctl is-active --quiet "$service"; then
+      echo "  Status: ✓ Running"
+    elif systemctl is-enabled --quiet "$service" 2>/dev/null; then
+      echo "  Status: ✗ Stopped (enabled)"
+    else
+      echo "  Status: ✗ Stopped (disabled)"
+    fi
+    
+    # Parse and display configuration
+    if [[ -r "$env_file" ]]; then
+      local device=$(grep '^ROTCTLD_DEVICE=' "$env_file" | cut -d= -f2-)
+      local model=$(grep '^ROTCTLD_MODEL=' "$env_file" | cut -d= -f2-)
+      local port=$(grep '^ROTCTLD_PORT=' "$env_file" | cut -d= -f2-)
+      local bind=$(grep '^ROTCTLD_BIND=' "$env_file" | cut -d= -f2-)
+      
+      [[ -n "$device" ]] && echo "  Device: $device"
+      [[ -n "$model" ]] && echo "  Model: $model"
+      [[ -n "$port" ]] && echo "  Port: $port"
+      [[ -n "$bind" ]] && echo "  Bind: $bind"
+    fi
+    
+    echo ""
+  done
+  
+  if [[ $found -eq 0 ]]; then
+    echo "No rotator services configured yet."
+    echo ""
+    echo "Use --interactive to set up your first rotator."
+  fi
+  
+  exit 0
+}
+
+delete_rotator() {
+  local name="$1"
+  
+  if [[ -z "$name" ]]; then
+    echo "ERROR: No rotator name specified for deletion." >&2
+    exit 1
+  fi
+  
+  sanitize_name "$name"
+  
+  local ENV_DIR="/etc/rotctld"
+  local ENV_PATH="${ENV_DIR}/rotctld-${name}.env"
+  local SERVICE="rotctld@${name}.service"
+  
+  if [[ ! -f "$ENV_PATH" ]]; then
+    echo "ERROR: Rotator '$name' not found." >&2
+    echo "Use --list to see configured rotators." >&2
+    exit 1
+  fi
+  
+  echo "Deleting rotator: $name"
+  echo "  Service: $SERVICE"
+  echo ""
+  
+  # Stop the service if running
+  if systemctl is-active --quiet "$SERVICE"; then
+    echo "Stopping service..."
+    systemctl stop "$SERVICE"
+  fi
+  
+  # Disable the service if enabled
+  if systemctl is-enabled --quiet "$SERVICE" 2>/dev/null; then
+    echo "Disabling service..."
+    systemctl disable "$SERVICE" >/dev/null 2>&1
+  fi
+  
+  # Remove the environment file
+  echo "Removing configuration..."
+  rm -f "$ENV_PATH"
+  
+  # Reload systemd
+  echo "Reloading systemd..."
+  systemctl daemon-reload
+  
+  echo ""
+  echo "OK: Rotator '$name' has been deleted."
+  exit 0
+}
+
 require_root() {
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     echo "ERROR: This script must be run as root (use sudo)." >&2
@@ -147,6 +260,81 @@ interactive_setup() {
   echo "  Rotctld Interactive Setup Wizard"
   echo "========================================="
   echo ""
+
+  # Show existing rotators if any
+  local ENV_DIR="/etc/rotctld"
+  local existing_rotators=()
+
+  if [[ -d "$ENV_DIR" ]]; then
+    for env_file in "$ENV_DIR"/rotctld-*.env; do
+      if [[ -e "$env_file" ]]; then
+        local name=$(basename "$env_file" .env | sed 's/^rotctld-//')
+        existing_rotators+=("$name")
+      fi
+    done
+  fi
+
+  if [[ ${#existing_rotators[@]} -gt 0 ]]; then
+    echo "Existing Rotators:"
+    echo "-----------------"
+    for name in "${existing_rotators[@]}"; do
+      local service="rotctld@${name}.service"
+      local status="stopped"
+      if systemctl is-active --quiet "$service"; then
+        status="running"
+      fi
+      echo "  • $name ($status)"
+    done
+    echo ""
+
+    while true; do
+      read -p "Would you like to (c)reate new, (d)elete existing, or (q)uit? [c/d/q]: " action
+      case "$action" in
+        [Cc]*)
+          echo ""
+          break
+          ;;
+        [Dd]*)
+          echo ""
+          if [[ ${#existing_rotators[@]} -eq 1 ]]; then
+            local to_delete="${existing_rotators[0]}"
+            read -p "Delete rotator '$to_delete'? (y/n): " confirm
+            if [[ "$confirm" =~ ^[Yy] ]]; then
+              delete_rotator "$to_delete"
+            fi
+          else
+            echo "Select rotator to delete:"
+            for i in "${!existing_rotators[@]}"; do
+              echo "  $((i+1)). ${existing_rotators[$i]}"
+            done
+            echo ""
+            read -p "Enter number [1-${#existing_rotators[@]}]: " del_num
+            if [[ "$del_num" =~ ^[0-9]+$ ]]; then
+              local idx=$((del_num - 1))
+              if [[ $idx -ge 0 && $idx -lt ${#existing_rotators[@]} ]]; then
+                local to_delete="${existing_rotators[$idx]}"
+                read -p "Delete rotator '$to_delete'? (y/n): " confirm
+                if [[ "$confirm" =~ ^[Yy] ]]; then
+                  delete_rotator "$to_delete"
+                fi
+              else
+                echo "Invalid selection."
+              fi
+            else
+              echo "Invalid input."
+            fi
+          fi
+          ;;
+        [Qq]*)
+          echo "Setup cancelled."
+          exit 0
+          ;;
+        *)
+          echo "Invalid choice. Please enter 'c', 'd', or 'q'."
+          ;;
+      esac
+    done
+  fi
 
   # Step 1: Rotator name
   echo "Step 1: Rotator Name"
@@ -366,7 +554,7 @@ ensure_nobody_in_dialout() {
 main() {
   local INTERACTIVE_MODE="0"
 
-  # Check for --interactive or --list-devices before requiring root
+  # Check for --interactive, --list, or --list-devices before requiring root
   for arg in "$@"; do
     case "$arg" in
       --interactive)
@@ -374,6 +562,15 @@ main() {
         ;;
       --list-devices)
         list_devices
+        ;;
+      --list)
+        list_rotators
+        ;;
+      --delete)
+        # Need to get the name argument
+        shift
+        require_root
+        delete_rotator "$1"
         ;;
       -h|--help)
         usage
@@ -421,6 +618,8 @@ main() {
         --extra)         EXTRA="${2:-}"; shift 2;;
         --no-start)      NO_START="1"; shift 1;;
         --list-devices)  ;; # Already handled above
+        --list)          ;; # Already handled above
+        --delete)        ;; # Already handled above
         --interactive)   ;; # Already handled above
         -h|--help)       ;; # Already handled above
         *) echo "ERROR: Unknown argument: $1" >&2; usage; exit 1;;

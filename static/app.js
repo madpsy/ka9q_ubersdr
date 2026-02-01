@@ -1558,6 +1558,7 @@ function displayActiveChannels(channels) {
     html += '<th style="text-align: left; padding: 8px; border-bottom: 2px solid #444;">Bandwidth</th>';
     html += '<th style="text-align: left; padding: 8px; border-bottom: 2px solid #444;">Active</th>';
     html += '<th style="text-align: left; padding: 8px; border-bottom: 2px solid #444;">Country</th>';
+    html += '<th style="text-align: left; padding: 8px; border-bottom: 2px solid #444;">Chat</th>';
     html += '<th style="text-align: center; padding: 8px; border-bottom: 2px solid #444;">Action</th>';
     html += '</tr></thead><tbody>';
 
@@ -1593,6 +1594,10 @@ function displayActiveChannels(channels) {
         // Add country column if it exists and has a value
         const country = channel.country || '';
         html += `<td style="padding: 8px; border-bottom: 1px solid #333;">${country}</td>`;
+
+        // Add chat username column if it exists and has a value
+        const chatUsername = channel.chat_username || '';
+        html += `<td style="padding: 8px; border-bottom: 1px solid #333;">${chatUsername}</td>`;
 
         // Add "Go" button for other users' channels (not for current user)
         if (isCurrentUser) {

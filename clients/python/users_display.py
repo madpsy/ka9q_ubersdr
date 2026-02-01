@@ -9,6 +9,7 @@ from tkinter import ttk
 import requests
 import threading
 import time
+import webbrowser
 from typing import Optional, Dict, List
 from datetime import datetime
 
@@ -112,7 +113,7 @@ class UsersDisplay:
         table_frame.columnconfigure(0, weight=1)
         table_frame.rowconfigure(0, weight=1)
         
-        # Bind click to handle button clicks
+        # Bind click to handle button clicks and country links
         self.tree.bind('<Button-1>', self.on_tree_click)
         
         # Configure tag for current user (highlighted row)
@@ -193,10 +194,15 @@ class UsersDisplay:
             bw_low = channel.get('bandwidth_low', 0)
             bw_high = channel.get('bandwidth_high', 0)
 
-            # Get country if available
+            # Get country and location data if available
             country = channel.get('country', '')
-            if not country:
-                country = ''
+            latitude = channel.get('latitude')
+            longitude = channel.get('longitude')
+            
+            # Format country with indicator if clickable (has lat/lon)
+            country_display = country if country else ''
+            if country and latitude is not None and longitude is not None:
+                country_display = f"📍 {country}"  # Add location pin emoji to indicate clickable
 
             # Get chat username if available
             chat_username = channel.get('chat_username', '')
@@ -252,18 +258,18 @@ class UsersDisplay:
 
             # Insert row with iid=index for easy retrieval
             tags = ('current_user',) if is_current else ()
+            
             item_id = self.tree.insert('', 'end',
                                       iid=str(i),  # Use index as item ID
                                       text=action_text,
-                                      values=(freq_str, mode, bw_str, country, chat_username, time_str),
+                                      values=(freq_str, mode, bw_str, country_display, chat_username, time_str),
                                       tags=tags)
     
     def on_tree_click(self, event):
-        """Handle click on tree to detect button clicks in action column."""
-        # Identify the clicked region
+        """Handle click on tree to detect button clicks in action column and country links."""
+        # Identify the clicked region and column
         region = self.tree.identify_region(event.x, event.y)
-        if region != "tree":
-            return
+        column = self.tree.identify_column(event.x)
         
         # Get the clicked item
         item = self.tree.identify_row(event.y)
@@ -280,6 +286,22 @@ class UsersDisplay:
             return
         
         channel = self.channels_data[index]
+        
+        # Check if clicked on country column (#4 is the country column)
+        if column == '#4':
+            country = channel.get('country', '')
+            latitude = channel.get('latitude')
+            longitude = channel.get('longitude')
+            
+            # Open Google Maps if country has lat/lon
+            if country and latitude is not None and longitude is not None:
+                maps_url = f"https://www.google.com/maps?q={latitude},{longitude}"
+                webbrowser.open(maps_url)
+            return
+        
+        # Handle action column clicks (tune button)
+        if region != "tree":
+            return
         
         # Check if this is the current user (index 0 when session_id parameter is used)
         is_current = (index == 0)

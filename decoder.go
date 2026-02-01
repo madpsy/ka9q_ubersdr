@@ -81,13 +81,15 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 		return nil, fmt.Errorf("decoder availability check failed: %w", err)
 	}
 
+	stats := NewDecoderStats()
+	
 	md := &MultiDecoder{
 		config:            config,
 		radiod:            radiod,
 		sessions:          sessions,
 		decoderBands:      make(map[string]*DecoderBand),
-		spawner:           NewDecoderSpawner(config),
-		stats:             NewDecoderStats(),
+		spawner:           NewDecoderSpawner(config, stats),
+		stats:             stats,
 		prometheusMetrics: prometheusMetrics,
 		stopChan:          make(chan struct{}),
 	}

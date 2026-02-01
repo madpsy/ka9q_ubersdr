@@ -7,18 +7,21 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
 // DecoderSpawner handles spawning external decoder processes
 type DecoderSpawner struct {
 	config *DecoderConfig
+	stats  *DecoderStats
 }
 
 // NewDecoderSpawner creates a new decoder spawner
-func NewDecoderSpawner(config *DecoderConfig) *DecoderSpawner {
+func NewDecoderSpawner(config *DecoderConfig, stats *DecoderStats) *DecoderSpawner {
 	return &DecoderSpawner{
 		config: config,
+		stats:  stats,
 	}
 }
 
@@ -74,8 +77,61 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 		return "", "", 0, fmt.Errorf("failed to start decoder: %w", err)
 	}
 
-	// Wait for decoder to complete
-	err := cmd.Wait()
+	// Wait for decoder to complete (with optional timeout)
+	var err error
+	if ds.config.ClampExecutionTime {
+		// Use cycle time as timeout
+		cycleTime := modeInfo.CycleTime
+		
+		done := make(chan error, 1)
+		go func() {
+			done <- cmd.Wait()
+		}()
+		
+		// Wait until 1 second before cycle end
+		gracePeriod := cycleTime - time.Second
+		if gracePeriod < 0 {
+			gracePeriod = 0 // For very short cycles, skip graceful termination
+		}
+		
+		select {
+		case err = <-done:
+			// Decoder completed normally before timeout
+		case <-time.After(gracePeriod):
+			// Send SIGTERM 1 second before cycle end
+			log.Printf("Decoder for %s approaching cycle time limit (%v), sending SIGTERM", band.Config.Name, cycleTime)
+			if termErr := cmd.Process.Signal(syscall.SIGTERM); termErr != nil {
+				log.Printf("Failed to send SIGTERM to decoder for %s: %v", band.Config.Name, termErr)
+			}
+			
+			// Wait the remaining 1 second for graceful exit
+			select {
+			case err = <-done:
+				// Decoder exited gracefully after SIGTERM
+				log.Printf("Decoder for %s exited gracefully after SIGTERM", band.Config.Name)
+			case <-time.After(time.Second):
+				// Cycle time exceeded - force kill with SIGKILL
+				log.Printf("Decoder for %s exceeded cycle time (%v), sending SIGKILL", band.Config.Name, cycleTime)
+				if killErr := cmd.Process.Kill(); killErr != nil {
+					log.Printf("Failed to kill decoder for %s: %v", band.Config.Name, killErr)
+				}
+				// Wait for process to be reaped
+				err = <-done
+				
+				// Track the timeout kill
+				if ds.stats != nil {
+					ds.stats.IncrementTimeoutKills(band.Config.Name)
+				}
+				
+				if err == nil {
+					err = fmt.Errorf("decoder killed after exceeding cycle time")
+				}
+			}
+		}
+	} else {
+		// No timeout - wait indefinitely (current behavior)
+		err = cmd.Wait()
+	}
 	executionTime := time.Since(startTime)
 
 	if err != nil {

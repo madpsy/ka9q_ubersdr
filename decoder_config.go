@@ -160,7 +160,8 @@ type DecoderConfig struct {
 	JS8Path   string `yaml:"js8_path"`   // Path to js8 binary (for JS8)
 
 	// Recording options
-	IncludeDeadTime bool `yaml:"include_dead_time"` // Record entire cycle including dead time
+	IncludeDeadTime    bool `yaml:"include_dead_time"`    // Record entire cycle including dead time
+	ClampExecutionTime bool `yaml:"clamp_execution_time"` // Kill decoder if it exceeds cycle time (default: false)
 
 	// Receiver information
 	ReceiverCallsign string `yaml:"receiver_callsign"`

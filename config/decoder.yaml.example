@@ -21,7 +21,11 @@ decoder:
   keep_logs: false
 
   # Recording options
-  include_dead_time: false  # false = record only transmission time, true = record full cycle
+  include_dead_time: false     # false = record only transmission time, true = record full cycle
+  clamp_execution_time: false  # false = wait indefinitely for decoder, true = kill decoder if it exceeds cycle time
+                               # When true: sends SIGTERM 1 second before cycle end, then SIGKILL at cycle end
+                               # Prevents runaway decoder processes and ensures predictable timing
+                               # Timeout kills are tracked per band in decoder statistics
 
   # Receiver information (required for reporting)
   receiver_callsign: "N0CALL"

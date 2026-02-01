@@ -2044,6 +2044,9 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		// If no history yet, only return enabled: true (no tracking fields)
 	}
 
+	// Calculate Maidenhead grid locator from GPS coordinates
+	maidenhead := latLonToGridSquare(config.Admin.GPS.Lat, config.Admin.GPS.Lon)
+
 	// Build the response with description plus status information (without sdrs)
 	response := map[string]interface{}{
 		"description": config.Admin.Description,
@@ -2054,6 +2057,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 			"gps": map[string]interface{}{
 				"lat":          config.Admin.GPS.Lat,
 				"lon":          config.Admin.GPS.Lon,
+				"maidenhead":   maidenhead,
 				"gps_enabled":  config.Admin.GPS.GPSEnabled,
 				"tdoa_enabled": config.Admin.GPS.TDOAEnabled,
 			},

@@ -19,10 +19,42 @@ type GeoIPService struct {
 
 // GeoIPResult contains geolocation information for an IP address
 type GeoIPResult struct {
-	IP          string `json:"ip"`
-	Country     string `json:"country"`
-	CountryCode string `json:"country_code"`
-	Continent   string `json:"continent,omitempty"`
+	IP            string `json:"ip"`
+	Country       string `json:"country"`
+	CountryCode   string `json:"country_code"`
+	Continent     string `json:"continent,omitempty"`
+	ContinentCode string `json:"continent_code,omitempty"`
+
+	// City information (only available with City database)
+	City       string `json:"city,omitempty"`
+	PostalCode string `json:"postal_code,omitempty"`
+
+	// Subdivision/Region information (only available with City database)
+	Subdivisions []struct {
+		Name    string `json:"name,omitempty"`
+		IsoCode string `json:"iso_code,omitempty"`
+	} `json:"subdivisions,omitempty"`
+
+	// Geographic coordinates (only available with City database)
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
+
+	// Accuracy and time zone (only available with City database)
+	AccuracyRadius *uint16 `json:"accuracy_radius_km,omitempty"`
+	TimeZone       string  `json:"time_zone,omitempty"`
+
+	// Network information (only available with City database)
+	MetroCode *uint `json:"metro_code,omitempty"`
+
+	// Registered and represented country (may differ from country)
+	RegisteredCountry      string `json:"registered_country,omitempty"`
+	RegisteredCountryCode  string `json:"registered_country_code,omitempty"`
+	RepresentedCountry     string `json:"represented_country,omitempty"`
+	RepresentedCountryCode string `json:"represented_country_code,omitempty"`
+
+	// Traits
+	IsAnonymousProxy    bool `json:"is_anonymous_proxy,omitempty"`
+	IsSatelliteProvider bool `json:"is_satellite_provider,omitempty"`
 }
 
 // NewGeoIPService creates a new GeoIP service instance
@@ -113,22 +145,143 @@ func (g *GeoIPService) Lookup(ipStr string) (*GeoIPResult, error) {
 		return nil, fmt.Errorf("invalid IP address: %s", ipStr)
 	}
 
-	record, err := g.db.Country(ip)
-	if err != nil {
-		return nil, fmt.Errorf("country lookup failed for %s: %w", ipStr, err)
-	}
+	// Try City database first (has all fields), fall back to Country database
+	cityRecord, cityErr := g.db.City(ip)
 
 	result := &GeoIPResult{
-		IP:          ipStr,
-		CountryCode: record.Country.IsoCode,
-		Continent:   record.Continent.Code,
+		IP: ipStr,
 	}
 
-	// Get English country name if available
-	if name, ok := record.Country.Names["en"]; ok && name != "" {
-		result.Country = name
+	if cityErr == nil {
+		// City database available - populate all fields
+		result.CountryCode = cityRecord.Country.IsoCode
+		result.ContinentCode = cityRecord.Continent.Code
+
+		// Get English country name
+		if name, ok := cityRecord.Country.Names["en"]; ok && name != "" {
+			result.Country = name
+		} else {
+			result.Country = cityRecord.Country.IsoCode
+		}
+
+		// Get English continent name
+		if name, ok := cityRecord.Continent.Names["en"]; ok && name != "" {
+			result.Continent = name
+		} else {
+			result.Continent = cityRecord.Continent.Code
+		}
+
+		// City information
+		if cityName, ok := cityRecord.City.Names["en"]; ok && cityName != "" {
+			result.City = cityName
+		}
+		result.PostalCode = cityRecord.Postal.Code
+
+		// Subdivisions (states/provinces)
+		if len(cityRecord.Subdivisions) > 0 {
+			result.Subdivisions = make([]struct {
+				Name    string `json:"name,omitempty"`
+				IsoCode string `json:"iso_code,omitempty"`
+			}, len(cityRecord.Subdivisions))
+
+			for i, sub := range cityRecord.Subdivisions {
+				result.Subdivisions[i].IsoCode = sub.IsoCode
+				if name, ok := sub.Names["en"]; ok && name != "" {
+					result.Subdivisions[i].Name = name
+				}
+			}
+		}
+
+		// Geographic coordinates
+		if cityRecord.Location.Latitude != 0 || cityRecord.Location.Longitude != 0 {
+			lat := cityRecord.Location.Latitude
+			lon := cityRecord.Location.Longitude
+			result.Latitude = &lat
+			result.Longitude = &lon
+		}
+
+		// Accuracy and time zone
+		if cityRecord.Location.AccuracyRadius != 0 {
+			result.AccuracyRadius = &cityRecord.Location.AccuracyRadius
+		}
+		result.TimeZone = cityRecord.Location.TimeZone
+
+		// Metro code
+		if cityRecord.Location.MetroCode != 0 {
+			result.MetroCode = &cityRecord.Location.MetroCode
+		}
+
+		// Registered country
+		if cityRecord.RegisteredCountry.IsoCode != "" {
+			result.RegisteredCountryCode = cityRecord.RegisteredCountry.IsoCode
+			if name, ok := cityRecord.RegisteredCountry.Names["en"]; ok && name != "" {
+				result.RegisteredCountry = name
+			} else {
+				result.RegisteredCountry = cityRecord.RegisteredCountry.IsoCode
+			}
+		}
+
+		// Represented country
+		if cityRecord.RepresentedCountry.IsoCode != "" {
+			result.RepresentedCountryCode = cityRecord.RepresentedCountry.IsoCode
+			if name, ok := cityRecord.RepresentedCountry.Names["en"]; ok && name != "" {
+				result.RepresentedCountry = name
+			} else {
+				result.RepresentedCountry = cityRecord.RepresentedCountry.IsoCode
+			}
+		}
+
+		// Traits
+		result.IsAnonymousProxy = cityRecord.Traits.IsAnonymousProxy
+		result.IsSatelliteProvider = cityRecord.Traits.IsSatelliteProvider
+
 	} else {
-		result.Country = record.Country.IsoCode
+		// Fall back to Country database (limited fields)
+		countryRecord, err := g.db.Country(ip)
+		if err != nil {
+			return nil, fmt.Errorf("lookup failed for %s: %w", ipStr, err)
+		}
+
+		result.CountryCode = countryRecord.Country.IsoCode
+		result.ContinentCode = countryRecord.Continent.Code
+
+		// Get English country name
+		if name, ok := countryRecord.Country.Names["en"]; ok && name != "" {
+			result.Country = name
+		} else {
+			result.Country = countryRecord.Country.IsoCode
+		}
+
+		// Get English continent name
+		if name, ok := countryRecord.Continent.Names["en"]; ok && name != "" {
+			result.Continent = name
+		} else {
+			result.Continent = countryRecord.Continent.Code
+		}
+
+		// Registered country
+		if countryRecord.RegisteredCountry.IsoCode != "" {
+			result.RegisteredCountryCode = countryRecord.RegisteredCountry.IsoCode
+			if name, ok := countryRecord.RegisteredCountry.Names["en"]; ok && name != "" {
+				result.RegisteredCountry = name
+			} else {
+				result.RegisteredCountry = countryRecord.RegisteredCountry.IsoCode
+			}
+		}
+
+		// Represented country
+		if countryRecord.RepresentedCountry.IsoCode != "" {
+			result.RepresentedCountryCode = countryRecord.RepresentedCountry.IsoCode
+			if name, ok := countryRecord.RepresentedCountry.Names["en"]; ok && name != "" {
+				result.RepresentedCountry = name
+			} else {
+				result.RepresentedCountry = countryRecord.RepresentedCountry.IsoCode
+			}
+		}
+
+		// Traits
+		result.IsAnonymousProxy = countryRecord.Traits.IsAnonymousProxy
+		result.IsSatelliteProvider = countryRecord.Traits.IsSatelliteProvider
 	}
 
 	return result, nil

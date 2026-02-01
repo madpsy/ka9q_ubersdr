@@ -1466,7 +1466,25 @@
         </div>
     </div>
 
-    <script>
+    <!-- GeoIP Modal -->
+    <div id="geoipModal" class="modal">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <h2>🌍 GeoIP Information</h2>
+                <button class="modal-close" onclick="closeGeoIPModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="geoipContent" style="padding: 20px;">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading GeoIP information...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
         let currentConfig = {};
         let currentTab = 'sessions';
         let remoteLoggingModalShown = false;
@@ -3781,7 +3799,8 @@
 
                 // Combine IP display: show client IP, with source IP in parentheses if different
                 // Add bypass indicator if applicable - check auth_method to distinguish between password and IP bypass
-                let ipDisplay = clientIP;
+                // Make IP clickable to show GeoIP modal
+                let ipDisplay = `<a href="#" onclick="showGeoIPModal('${clientIP}'); return false;" style="color: #667eea; text-decoration: none; font-weight: bold; cursor: pointer;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${clientIP}</a>`;
                 if (sessions.isBypassed) {
                     // Check the auth_method from the first session to determine badge type
                     const authMethod = audioSession?.auth_method || spectrumSession?.auth_method || '';
@@ -15480,6 +15499,130 @@ const tooltipLine2 = timeStr;
                 showAlert('Error preparing auto-calibration: ' + error.message, 'error');
             }
         }
+
+        // GeoIP Modal Functions
+        function showGeoIPModal(ip) {
+            const modal = document.getElementById('geoipModal');
+            const content = document.getElementById('geoipContent');
+            
+            // Show modal with loading state
+            modal.style.display = 'block';
+            content.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Loading GeoIP information for ${ip}...</p>
+                </div>
+            `;
+            
+            // Fetch GeoIP data
+            fetch('/admin/geoip/lookup', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ ip: ip })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to fetch GeoIP data');
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Format and display the GeoIP data
+                let html = '<div style="font-family: monospace; font-size: 14px; line-height: 1.8;">';
+                
+                // IP Address (always present)
+                html += `<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">`;
+                html += `<strong style="color: #667eea;">IP Address:</strong> ${data.ip || 'N/A'}`;
+                html += `</div>`;
+                
+                // Location Information
+                if (data.country || data.city) {
+                    html += `<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">`;
+                    html += `<strong style="color: #667eea;">Location:</strong><br>`;
+                    if (data.city) html += `<span style="margin-left: 20px;">City: ${data.city}</span><br>`;
+                    if (data.subdivisions && data.subdivisions.length > 0) {
+                        data.subdivisions.forEach(sub => {
+                            if (sub.name) html += `<span style="margin-left: 20px;">Region: ${sub.name}${sub.iso_code ? ' (' + sub.iso_code + ')' : ''}</span><br>`;
+                        });
+                    }
+                    if (data.country) html += `<span style="margin-left: 20px;">Country: ${data.country}${data.country_code ? ' (' + data.country_code + ')' : ''}</span><br>`;
+                    if (data.continent) html += `<span style="margin-left: 20px;">Continent: ${data.continent}${data.continent_code ? ' (' + data.continent_code + ')' : ''}</span><br>`;
+                    if (data.postal_code) html += `<span style="margin-left: 20px;">Postal Code: ${data.postal_code}</span><br>`;
+                    html += `</div>`;
+                }
+                
+                // Coordinates
+                if (data.latitude !== null && data.latitude !== undefined && data.longitude !== null && data.longitude !== undefined) {
+                    html += `<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">`;
+                    html += `<strong style="color: #667eea;">Coordinates:</strong><br>`;
+                    html += `<span style="margin-left: 20px;">Latitude: ${data.latitude.toFixed(4)}°</span><br>`;
+                    html += `<span style="margin-left: 20px;">Longitude: ${data.longitude.toFixed(4)}°</span><br>`;
+                    if (data.accuracy_radius_km) html += `<span style="margin-left: 20px;">Accuracy: ±${data.accuracy_radius_km} km</span><br>`;
+                    html += `</div>`;
+                }
+                
+                // Time Zone
+                if (data.time_zone) {
+                    html += `<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">`;
+                    html += `<strong style="color: #667eea;">Time Zone:</strong> ${data.time_zone}`;
+                    html += `</div>`;
+                }
+                
+                // Network Information
+                if (data.metro_code) {
+                    html += `<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">`;
+                    html += `<strong style="color: #667eea;">Metro Code:</strong> ${data.metro_code}`;
+                    html += `</div>`;
+                }
+                
+                // Registered/Represented Country
+                if (data.registered_country || data.represented_country) {
+                    html += `<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">`;
+                    html += `<strong style="color: #667eea;">Additional Country Info:</strong><br>`;
+                    if (data.registered_country) {
+                        html += `<span style="margin-left: 20px;">Registered: ${data.registered_country}${data.registered_country_code ? ' (' + data.registered_country_code + ')' : ''}</span><br>`;
+                    }
+                    if (data.represented_country) {
+                        html += `<span style="margin-left: 20px;">Represented: ${data.represented_country}${data.represented_country_code ? ' (' + data.represented_country_code + ')' : ''}</span><br>`;
+                    }
+                    html += `</div>`;
+                }
+                
+                // Traits
+                if (data.is_anonymous_proxy || data.is_satellite_provider) {
+                    html += `<div style="margin-bottom: 15px; padding: 10px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px;">`;
+                    html += `<strong style="color: #856404;">⚠️ Traits:</strong><br>`;
+                    if (data.is_anonymous_proxy) html += `<span style="margin-left: 20px; color: #856404;">Anonymous Proxy: Yes</span><br>`;
+                    if (data.is_satellite_provider) html += `<span style="margin-left: 20px; color: #856404;">Satellite Provider: Yes</span><br>`;
+                    html += `</div>`;
+                }
+                
+                html += '</div>';
+                content.innerHTML = html;
+            })
+            .catch(error => {
+                content.innerHTML = `
+                    <div style="padding: 20px; text-align: center; color: #dc3545;">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                `;
+            });
+        }
+        
+        function closeGeoIPModal() {
+            const modal = document.getElementById('geoipModal');
+            modal.style.display = 'none';
+        }
+        
+        // Close modal when clicking outside
+        window.addEventListener('click', (event) => {
+            const modal = document.getElementById('geoipModal');
+            if (event.target === modal) {
+                closeGeoIPModal();
+            }
+        });
 
         function closeAutoCalibrationModal() {
             const modal = document.getElementById('autoCalibrationModal');

@@ -1946,6 +1946,28 @@ func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Enhance with GeoIP coordinates if GeoIP service is available
+	if ah.geoIPService != nil && ah.geoIPService.IsEnabled() {
+		for i := range sessions {
+			if clientIP, ok := sessions[i]["client_ip"].(string); ok && clientIP != "" {
+				// Perform GeoIP lookup
+				if result, err := ah.geoIPService.Lookup(clientIP); err == nil {
+					// Add latitude and longitude if available
+					if result.Latitude != nil {
+						sessions[i]["latitude"] = *result.Latitude
+					}
+					if result.Longitude != nil {
+						sessions[i]["longitude"] = *result.Longitude
+					}
+					// Add accuracy radius if available
+					if result.AccuracyRadius != nil {
+						sessions[i]["accuracy_radius_km"] = *result.AccuracyRadius
+					}
+				}
+			}
+		}
+	}
+
 	response := map[string]interface{}{
 		"sessions": sessions,
 		"count":    len(sessions),

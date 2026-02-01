@@ -1039,7 +1039,7 @@ func main() {
 	http.HandleFunc("/ws/dxcluster", dxClusterWsHandler.HandleWebSocket)                // DX cluster spots
 	http.HandleFunc("/health", handleHealth)
 	http.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
-		handleStats(w, r, sessions)
+		handleStats(w, r, sessions, dxClusterWsHandler)
 	})
 	http.HandleFunc("/test-spectrum", func(w http.ResponseWriter, r *http.Request) {
 		handleTestSpectrum(w, r, sessions)
@@ -1773,6 +1773,44 @@ func handleStats(w http.ResponseWriter, r *http.Request, sessions *SessionManage
 		sessionList = append(sessionList, currentUserSession)
 	}
 	sessionList = append(sessionList, otherSessions...)
+
+	// Enhance with GeoIP coordinates if GeoIP service is available
+	if sessions.geoIPService != nil && sessions.geoIPService.IsEnabled() {
+		for i := range sessionList {
+			// Get the client IP from the original session data
+			// We need to find the matching session to get the ClientIP
+			sessions.mu.RLock()
+			for _, session := range sessions.sessions {
+				if !session.IsSpectrum && session.ClientIP != "" {
+					session.mu.RLock()
+					// Match by checking if session info matches
+					if sessionList[i]["frequency"] == session.Frequency &&
+						sessionList[i]["created_at"] == session.CreatedAt {
+						clientIP := session.ClientIP
+						session.mu.RUnlock()
+
+						// Perform GeoIP lookup
+						if result, err := sessions.geoIPService.Lookup(clientIP); err == nil {
+							// Add latitude and longitude if available
+							if result.Latitude != nil {
+								sessionList[i]["latitude"] = *result.Latitude
+							}
+							if result.Longitude != nil {
+								sessionList[i]["longitude"] = *result.Longitude
+							}
+							// Add accuracy radius if available
+							if result.AccuracyRadius != nil {
+								sessionList[i]["accuracy_radius_km"] = *result.AccuracyRadius
+							}
+						}
+						break
+					}
+					session.mu.RUnlock()
+				}
+			}
+			sessions.mu.RUnlock()
+		}
+	}
 
 	// Add index numbers
 	for i := range sessionList {

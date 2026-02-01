@@ -530,10 +530,35 @@ interactive_setup() {
   fi
 
   local PORT="4533"
-  read -p "TCP port (default: 4533): " port_input
-  if [[ -n "$port_input" ]]; then
-    PORT="$port_input"
-  fi
+  while true; do
+    read -p "TCP port (default: 4533): " port_input
+    if [[ -n "$port_input" ]]; then
+      PORT="$port_input"
+    fi
+    
+    # Check if port is already in use by another rotator
+    local port_conflict=0
+    if [[ -d "$ENV_DIR" ]]; then
+      for env_file in "$ENV_DIR"/rotctld-*.env; do
+        if [[ -e "$env_file" ]]; then
+          local existing_name=$(basename "$env_file" .env | sed 's/^rotctld-//')
+          # Skip if this is the same rotator we're configuring (in case of reconfiguration)
+          if [[ "$existing_name" != "$NAME" ]]; then
+            local existing_port=$(grep '^ROTCTLD_PORT=' "$env_file" | cut -d= -f2-)
+            if [[ "$existing_port" == "$PORT" ]]; then
+              echo "ERROR: Port $PORT is already in use by rotator '$existing_name'." >&2
+              port_conflict=1
+              break
+            fi
+          fi
+        fi
+      done
+    fi
+    
+    if [[ $port_conflict -eq 0 ]]; then
+      break
+    fi
+  done
 
   local EXTRA=""
   read -p "Extra rotctld arguments (optional, e.g., -vv for verbose): " EXTRA

@@ -1941,13 +1941,28 @@
             const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
             const command = '~/ubersdr/generate_wisdom.sh';
             const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
-            
+
             // Open popup window with specific dimensions (similar to ubersdr-gotty direct command)
             const width = 1000;
             const height = 700;
             const left = (screen.width - width) / 2;
             const top = (screen.height - height) / 2;
             window.open(url, 'generate_wisdom_' + Date.now(),
+                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
+        }
+
+        // Open Rotctld Setup script in popup window
+        function openRotctldSetup() {
+            const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
+            const command = '~/ubersdr/rotctld.sh --interactive';
+            const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
+
+            // Open popup window with specific dimensions
+            const width = 1000;
+            const height = 700;
+            const left = (screen.width - width) / 2;
+            const top = (screen.height - height) / 2;
+            window.open(url, 'rotctld_setup_' + Date.now(),
                 `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
         }
 
@@ -2026,6 +2041,28 @@
                         infoDiv.style.marginBottom = '15px';
                         infoDiv.innerHTML = 'ℹ️ You can change these manually or use the <a href="/create_public.html" style="color: #0c5460; font-weight: bold; text-decoration: underline;">Create Public Instance Wizard</a>';
                         content.appendChild(infoDiv);
+                    }
+
+                    // Add "Setup Rotator" button for rotctl section
+                    if (section === 'rotctl') {
+                        const setupButtonDiv = document.createElement('div');
+                        setupButtonDiv.style.marginBottom = '15px';
+                        setupButtonDiv.style.padding = '15px';
+                        setupButtonDiv.style.background = '#e3f2fd';
+                        setupButtonDiv.style.borderRadius = '5px';
+                        setupButtonDiv.style.border = '1px solid #2196f3';
+                        setupButtonDiv.innerHTML = `
+                            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                                <div style="flex: 1;">
+                                    <strong style="color: #0d47a1;">🎯 Rotator Setup Wizard</strong>
+                                    <p style="margin: 5px 0 0 0; color: #0d47a1; font-size: 13px;">Use the interactive setup wizard to configure your rotator with step-by-step guidance.</p>
+                                </div>
+                                <button class="btn" onclick="openRotctldSetup()" style="background: #2196f3; color: white; font-weight: bold; white-space: nowrap;">
+                                    🔧 Setup Rotator
+                                </button>
+                            </div>
+                        `;
+                        content.appendChild(setupButtonDiv);
                     }
 
                     renderFields(content, values, section);

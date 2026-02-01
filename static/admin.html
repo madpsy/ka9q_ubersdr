@@ -1518,7 +1518,7 @@
                 <button class="modal-close" onclick="closeReleaseNotesModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <div id="releaseNotesContent" style="padding: 20px;">
+                <div id="releaseNotesContent">
                     <div class="loading">
                         <div class="spinner"></div>
                         <p>Loading release notes...</p>
@@ -16123,7 +16123,7 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 const html = convertMarkdownToHTML(markdown);
                 
                 // Display the formatted content
-                content.innerHTML = `<div style="line-height: 1.6;">${html}</div>`;
+                content.innerHTML = `<div style="line-height: 1.6; padding: 0;">${html}</div>`;
                 
             } catch (error) {
                 content.innerHTML = `
@@ -16149,7 +16149,7 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
             // Convert headers (### to h3, ## to h2, # to h1)
             html = html.replace(/^### (.*$)/gim, '<h3 style="color: #333; margin-top: 20px; margin-bottom: 10px; font-size: 18px;">$1</h3>');
             html = html.replace(/^## (.*$)/gim, '<h2 style="color: #333; margin-top: 25px; margin-bottom: 15px; font-size: 22px; border-bottom: 2px solid #667eea; padding-bottom: 5px;">$1</h2>');
-            html = html.replace(/^# (.*$)/gim, '<h1 style="color: #333; margin-top: 30px; margin-bottom: 20px; font-size: 28px;">$1</h1>');
+            html = html.replace(/^# (.*$)/gim, '<h1 style="color: #333; margin-top: 0; margin-bottom: 20px; font-size: 28px;">$1</h1>');
             
             // Convert bold (**text** or __text__)
             html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');

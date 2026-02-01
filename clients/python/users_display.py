@@ -81,7 +81,7 @@ class UsersDisplay:
         main_frame.rowconfigure(1, weight=1)
         
         # Create Treeview with action column
-        columns = ('frequency', 'mode', 'bandwidth', 'country', 'active_time')
+        columns = ('frequency', 'mode', 'bandwidth', 'country', 'chat', 'active_time')
         self.tree = ttk.Treeview(table_frame, columns=columns, show='tree headings', height=15)
         
         # Define column headings
@@ -90,6 +90,7 @@ class UsersDisplay:
         self.tree.heading('mode', text='Mode')
         self.tree.heading('bandwidth', text='Bandwidth')
         self.tree.heading('country', text='Country')
+        self.tree.heading('chat', text='Chat')
         self.tree.heading('active_time', text='Active Time')
         
         # Define column widths
@@ -98,6 +99,7 @@ class UsersDisplay:
         self.tree.column('mode', width=80, anchor='center')
         self.tree.column('bandwidth', width=150, anchor='center')
         self.tree.column('country', width=120, anchor='center')
+        self.tree.column('chat', width=120, anchor='center')
         self.tree.column('active_time', width=120, anchor='center')
         
         # Add scrollbar
@@ -181,20 +183,25 @@ class UsersDisplay:
         
         if not self.channels_data:
             # Show "no users" message
-            self.tree.insert('', 'end', text='', values=('No active users', '', '', '', ''))
+            self.tree.insert('', 'end', text='', values=('No active users', '', '', '', '', ''))
             return
-        
+
         # Add channels to table
         for i, channel in enumerate(self.channels_data):
             freq_hz = channel.get('frequency', 0)
             mode = channel.get('mode', 'Unknown').upper()
             bw_low = channel.get('bandwidth_low', 0)
             bw_high = channel.get('bandwidth_high', 0)
-            
+
             # Get country if available
             country = channel.get('country', '')
             if not country:
                 country = ''
+
+            # Get chat username if available
+            chat_username = channel.get('chat_username', '')
+            if not chat_username:
+                chat_username = ''
             
             # Calculate active time from created_at and last_active timestamps
             created_at = channel.get('created_at', '')
@@ -235,20 +242,20 @@ class UsersDisplay:
             freq_str = self.format_frequency(freq_hz)
             bw_str = self.format_bandwidth(bw_low, bw_high)
             time_str = self.format_active_time(active_time)
-            
+
             # Determine if this is the current user (index 0 when session_id is provided)
             # The server returns current user first when session_id parameter is used
             is_current = (i == 0)
-            
+
             # Action text
             action_text = "You" if is_current else "Tune ▶"
-            
+
             # Insert row with iid=index for easy retrieval
             tags = ('current_user',) if is_current else ()
             item_id = self.tree.insert('', 'end',
                                       iid=str(i),  # Use index as item ID
                                       text=action_text,
-                                      values=(freq_str, mode, bw_str, country, time_str),
+                                      values=(freq_str, mode, bw_str, country, chat_username, time_str),
                                       tags=tags)
     
     def on_tree_click(self, event):

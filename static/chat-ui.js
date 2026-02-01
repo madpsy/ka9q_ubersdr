@@ -1347,9 +1347,17 @@ class ChatUI {
             this.addSystemMessage(`${data.username} joined`);
             // Add new user to local list (they may not have radio data yet)
             if (!this.chat.activeUsers.find(u => u.username === data.username)) {
-                this.chat.activeUsers.push({
+                const newUser = {
                     username: data.username
-                });
+                };
+                // Include country data if available
+                if (data.country_code) {
+                    newUser.country_code = data.country_code;
+                }
+                if (data.country) {
+                    newUser.country = data.country;
+                }
+                this.chat.activeUsers.push(newUser);
                 this.updateActiveUsers({
                     users: this.chat.activeUsers,
                     count: this.chat.activeUsers.length

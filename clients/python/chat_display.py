@@ -824,14 +824,19 @@ class ChatDisplay:
         if time_str:
             self.messages_text.insert(tk.END, f"[{time_str}] ", 'timestamp')
 
+        # Get country code for this user if available
+        user = next((u for u in self.active_users if u.get('username') == username), None)
+        country_code = user.get('country_code', '') if user else ''
+        country_prefix = f"[{country_code}] " if country_code else ''
+
         # Add username (clickable if not our own message)
         is_own = username == self.username
         if is_own:
-            self.messages_text.insert(tk.END, f"{username}: ", 'own_username')
+            self.messages_text.insert(tk.END, f"{country_prefix}{username}: ", 'own_username')
         else:
             # Make username clickable to tune - use unique tag for this specific username instance
             unique_tag = f'username_clickable_{id(username)}_{time_str}'
-            self.messages_text.insert(tk.END, f"{username}: ", ('username_clickable', unique_tag))
+            self.messages_text.insert(tk.END, f"{country_prefix}{username}: ", ('username_clickable', unique_tag))
 
             # Bind events to this specific tag instance
             self.messages_text.tag_bind(unique_tag, '<Button-1>',
@@ -949,12 +954,13 @@ class ChatDisplay:
             tx = user.get('tx', False)
             is_idle = user.get('is_idle', False)
             idle_minutes = user.get('idle_minutes', 0)
+            country_code = user.get('country_code', '')
 
             # Store mapping from listbox index to user data
             self.listbox_to_user[listbox_index] = user
 
-            # Format display
-            display = username
+            # Format display - add country code prefix if available
+            display = f"[{country_code}] {username}" if country_code else username
 
             # Add idle indicator (after username, before other status icons)
             # Server determines idle threshold

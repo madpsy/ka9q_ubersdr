@@ -618,6 +618,11 @@ ensure_nobody_in_dialout() {
 main() {
   local INTERACTIVE_MODE="0"
 
+  # If no arguments provided, default to interactive mode
+  if [[ $# -eq 0 ]]; then
+    INTERACTIVE_MODE="1"
+  fi
+
   # Check for --interactive, --list, or --list-devices before requiring root
   for arg in "$@"; do
     case "$arg" in

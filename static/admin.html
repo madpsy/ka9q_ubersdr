@@ -1992,11 +1992,14 @@
         }
 
         // Toggle terminal dropdown menu and fetch sessions
-        async function toggleTerminalDropdown() {
+        function toggleTerminalDropdown() {
             const dropdown = document.getElementById('terminalDropdown');
             if (dropdown.style.display === 'none') {
-                await populateTerminalSessions();
+                // Show dropdown immediately with Quick Terminal and loading indicator
+                dropdown.innerHTML = '<a href="#" onclick="openQuickTerminal(); return false;">Quick Terminal</a><a style="color: #999; cursor: default; pointer-events: none;">Loading sessions...</a>';
                 dropdown.style.display = 'block';
+                // Fetch sessions asynchronously
+                populateTerminalSessions();
             } else {
                 dropdown.style.display = 'none';
             }

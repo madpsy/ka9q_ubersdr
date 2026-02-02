@@ -3932,7 +3932,7 @@
                 return;
             }
 
-            // Add filter dropdown with Events button on the right
+            // Add filter dropdown with Session Map and Events buttons on the right
             const filterDiv = document.createElement('div');
             filterDiv.style.marginBottom = '15px';
             filterDiv.style.padding = '10px';
@@ -3942,6 +3942,14 @@
             filterDiv.style.alignItems = 'center';
             filterDiv.style.gap = '10px';
             filterDiv.style.justifyContent = 'space-between';
+            
+            // Build buttons HTML - conditionally include Session Map button
+            let buttonsHTML = '';
+            if (currentConfig?.instance_reporting?.enabled === true) {
+                buttonsHTML += `<a href="/session_stats.html" target="_blank" class="btn" style="padding: 8px 16px; font-size: 14px; text-decoration: none; display: inline-block;">🗺️ Session Map</a>`;
+            }
+            buttonsHTML += `<button class="btn" onclick="showSessionEventsModal()" style="padding: 8px 16px; font-size: 14px;">📊 Events</button>`;
+            
             filterDiv.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <label style="font-weight: 500; color: #555;">Filter:</label>
@@ -3951,7 +3959,9 @@
                         <option value="bypassed" ${filterType === 'bypassed' ? 'selected' : ''}>Show Bypassed Users Only</option>
                     </select>
                 </div>
-                <button class="btn" onclick="showSessionEventsModal()" style="padding: 8px 16px; font-size: 14px;">📊 Events</button>
+                <div style="display: flex; gap: 10px;">
+                    ${buttonsHTML}
+                </div>
             `;
             container.appendChild(filterDiv);
 

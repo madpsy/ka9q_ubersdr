@@ -1479,7 +1479,8 @@ class ChatDisplay:
     def hide_mention_suggestions(self):
         """Hide @ mention suggestions listbox"""
         if self.mention_listbox:
-            self.mention_listbox.grid_remove()
+            self.mention_listbox.destroy()
+            self.mention_listbox = None
         self.mention_matches = []
         self.mention_index = 0
 

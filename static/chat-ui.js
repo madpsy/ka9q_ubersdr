@@ -1048,6 +1048,37 @@ class ChatUI {
             .chat-btn-secondary:hover {
                 background: #666;
             }
+
+            /* Custom scrollbar styling for chat messages and users list */
+            .chat-messages::-webkit-scrollbar,
+            .chat-users-list::-webkit-scrollbar {
+                width: 8px;
+            }
+
+            .chat-messages::-webkit-scrollbar-track,
+            .chat-users-list::-webkit-scrollbar-track {
+                background: rgba(20, 20, 20, 0.6);
+                border-radius: 4px;
+            }
+
+            .chat-messages::-webkit-scrollbar-thumb,
+            .chat-users-list::-webkit-scrollbar-thumb {
+                background: rgba(74, 158, 255, 0.5);
+                border-radius: 4px;
+                border: 1px solid rgba(74, 158, 255, 0.3);
+            }
+
+            .chat-messages::-webkit-scrollbar-thumb:hover,
+            .chat-users-list::-webkit-scrollbar-thumb:hover {
+                background: rgba(74, 158, 255, 0.7);
+            }
+
+            /* Firefox scrollbar styling */
+            .chat-messages,
+            .chat-users-list {
+                scrollbar-width: thin;
+                scrollbar-color: rgba(74, 158, 255, 0.5) rgba(20, 20, 20, 0.6);
+            }
         `;
         document.head.appendChild(style);
     }

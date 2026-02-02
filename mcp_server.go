@@ -19,13 +19,16 @@ type MCPServer struct {
 	multiDecoder        *MultiDecoder
 	config              *Config
 	ipBanManager        *IPBanManager
+	geoIPService        *GeoIPService
+	dxClusterWsHandler  *DXClusterWebSocketHandler
 	mcpServer           *server.MCPServer
 	httpServer          *server.StreamableHTTPServer
 }
 
 // NewMCPServer creates a new MCP server instance
 func NewMCPServer(sessions *SessionManager, swm *SpaceWeatherMonitor,
-	nfm *NoiseFloorMonitor, md *MultiDecoder, cfg *Config, ipBanManager *IPBanManager) *MCPServer {
+	nfm *NoiseFloorMonitor, md *MultiDecoder, cfg *Config, ipBanManager *IPBanManager,
+	geoIPService *GeoIPService, dxClusterWsHandler *DXClusterWebSocketHandler) *MCPServer {
 
 	m := &MCPServer{
 		sessions:            sessions,
@@ -34,6 +37,8 @@ func NewMCPServer(sessions *SessionManager, swm *SpaceWeatherMonitor,
 		multiDecoder:        md,
 		config:              cfg,
 		ipBanManager:        ipBanManager,
+		geoIPService:        geoIPService,
+		dxClusterWsHandler:  dxClusterWsHandler,
 	}
 
 	// Create MCP server with server info
@@ -491,6 +496,7 @@ func (m *MCPServer) handleGetActiveSessions(ctx context.Context, request mcp.Cal
 	defer m.sessions.mu.RUnlock()
 
 	sessions := make([]map[string]interface{}, 0)
+	index := 1
 	for _, session := range m.sessions.sessions {
 		if !session.IsSpectrum && session.ClientIP != "" {
 			session.mu.RLock()
@@ -498,6 +504,7 @@ func (m *MCPServer) handleGetActiveSessions(ctx context.Context, request mcp.Cal
 			isBypassed := m.sessions.config.Server.IsIPTimeoutBypassed(session.ClientIP)
 			if !isBypassed {
 				sessionInfo := map[string]interface{}{
+					"index":          index,
 					"frequency":      session.Frequency,
 					"mode":           session.Mode,
 					"bandwidth":      session.Bandwidth,
@@ -508,7 +515,31 @@ func (m *MCPServer) handleGetActiveSessions(ctx context.Context, request mcp.Cal
 					"country":        session.Country,
 					"country_code":   session.CountryCode,
 				}
+
+				// Add GeoIP coordinates if available
+				if m.geoIPService != nil && m.geoIPService.IsEnabled() {
+					if result, err := m.geoIPService.Lookup(session.ClientIP); err == nil {
+						if result.Latitude != nil {
+							sessionInfo["latitude"] = *result.Latitude
+						}
+						if result.Longitude != nil {
+							sessionInfo["longitude"] = *result.Longitude
+						}
+						if result.AccuracyRadius != nil {
+							sessionInfo["accuracy_radius_km"] = *result.AccuracyRadius
+						}
+					}
+				}
+
+				// Add chat username if available
+				if m.dxClusterWsHandler != nil && m.dxClusterWsHandler.chatManager != nil && session.UserSessionID != "" {
+					if username, exists := m.dxClusterWsHandler.chatManager.GetUsername(session.UserSessionID); exists {
+						sessionInfo["chat_username"] = username
+					}
+				}
+
 				sessions = append(sessions, sessionInfo)
+				index++
 			}
 			session.mu.RUnlock()
 		}
@@ -522,11 +553,21 @@ func (m *MCPServer) handleGetActiveSessions(ctx context.Context, request mcp.Cal
 	if format == "text" {
 		text := fmt.Sprintf("Active Radio Sessions: %d\n\n", len(sessions))
 		if len(sessions) > 0 {
-			for i, sess := range sessions {
+			for _, sess := range sessions {
+				idx, _ := sess["index"].(int)
 				freq, _ := sess["frequency"].(int)
 				mode, _ := sess["mode"].(string)
 				country, _ := sess["country"].(string)
-				text += fmt.Sprintf("%d. %.3f MHz | %s | %s\n", i+1, float64(freq)/1e3, mode, country)
+				text += fmt.Sprintf("%d. %.3f MHz | %s | %s", idx, float64(freq)/1e3, mode, country)
+				if username, ok := sess["chat_username"].(string); ok && username != "" {
+					text += fmt.Sprintf(" | User: %s", username)
+				}
+				if lat, ok := sess["latitude"].(float64); ok {
+					if lon, ok := sess["longitude"].(float64); ok {
+						text += fmt.Sprintf(" | Coords: %.4f, %.4f", lat, lon)
+					}
+				}
+				text += "\n"
 			}
 		} else {
 			text += "No active sessions at the moment.\n"

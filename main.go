@@ -867,7 +867,7 @@ func main() {
 	// Initialize MCP server if enabled
 	var mcpServer *MCPServer
 	if config.MCP.Enabled {
-		mcpServer = NewMCPServer(sessions, spaceWeatherMonitor, noiseFloorMonitor, multiDecoder, config, ipBanManager)
+		mcpServer = NewMCPServer(sessions, spaceWeatherMonitor, noiseFloorMonitor, multiDecoder, config, ipBanManager, geoIPService, nil)
 		log.Printf("MCP server initialized (endpoint: /api/mcp)")
 	}
 
@@ -900,6 +900,11 @@ func main() {
 
 	// Connect DX cluster websocket handler to session manager for throughput tracking
 	sessions.SetDXClusterWebSocketHandler(dxClusterWsHandler)
+
+	// Update MCP server with dxClusterWsHandler now that it's initialized
+	if mcpServer != nil {
+		mcpServer.dxClusterWsHandler = dxClusterWsHandler
+	}
 
 	// Register CW Skimmer spot handler to broadcast via websocket and MQTT
 	if cwSkimmer != nil {

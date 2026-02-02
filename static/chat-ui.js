@@ -1866,8 +1866,19 @@ class ChatUI {
      */
     addChatMessage(username, message, timestamp, isMention = false) {
         const container = document.getElementById('chat-messages');
+        
+        // Create a unique ID for this message to prevent duplicates
+        const messageId = `${username}-${timestamp}-${message.substring(0, 50)}`;
+        
+        // Check if this message already exists in the container
+        if (container.querySelector(`[data-message-id="${messageId}"]`)) {
+            console.log('[ChatUI] Skipping duplicate message:', messageId);
+            return;
+        }
+        
         const div = document.createElement('div');
         div.className = isMention ? 'chat-message chat-message-mention' : 'chat-message';
+        div.setAttribute('data-message-id', messageId);
 
         const time = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
 

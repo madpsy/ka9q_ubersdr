@@ -102,8 +102,13 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 	// Track unique IPs (for counting, not exposing)
 	uniqueIPs := make(map[string]bool)
 	
-	// Track session counts per IP per country for GeoIP lookups
-	countryIPSessions := make(map[string]map[string]int) // country -> IP -> session count
+	// Track session counts per IP with event info for GeoIP lookups
+	type IPSessionInfo struct {
+		SessionCount int
+		EventCountry string
+		EventCode    string
+	}
+	ipSessions := make(map[string]*IPSessionInfo) // IP -> session info
 
 	// Duration buckets (in minutes): 0-1, 1-5, 5-15, 15-30, 30-60, 60-120, 120+
 	durationBuckets := map[string]int{
@@ -132,29 +137,16 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 		// Track unique IPs (for counting only)
 		if event.ClientIP != "" {
 			uniqueIPs[event.ClientIP] = true
-		}
-
-		// Track country statistics
-		country := event.Country
-		if country == "" {
-			country = "Unknown"
-		}
-
-		if _, exists := countryStats[country]; !exists {
-			countryStats[country] = map[string]interface{}{
-				"country":      country,
-				"country_code": event.CountryCode,
-				"sessions":     0,
+			
+			// Track session counts per IP with country info from event
+			if _, exists := ipSessions[event.ClientIP]; !exists {
+				ipSessions[event.ClientIP] = &IPSessionInfo{
+					SessionCount: 0,
+					EventCountry: event.Country,
+					EventCode:    event.CountryCode,
+				}
 			}
-			countryIPSessions[country] = make(map[string]int)
-			countryLocations[country] = make(map[string]*LocationData)
-		}
-		stats := countryStats[country]
-		stats["sessions"] = stats["sessions"].(int) + 1
-		
-		// Track session counts per IP per country for location lookups
-		if event.ClientIP != "" {
-			countryIPSessions[country][event.ClientIP]++
+			ipSessions[event.ClientIP].SessionCount++
 		}
 
 		// Categorize duration into buckets
@@ -184,29 +176,86 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 		weekdayActivity[weekday]++
 	}
 
-	// Perform GeoIP lookups for all IPs per country to get unique locations
+	// Perform GeoIP lookups for all IPs to get country and location data
+	// This will use fresh GeoIP data which may be more accurate than stored event data
 	if geoIPService != nil && geoIPService.IsEnabled() {
-		for country, ipSessions := range countryIPSessions {
-			for ip, sessionCount := range ipSessions {
-				if geoResult, err := geoIPService.Lookup(ip); err == nil {
-					if geoResult.Latitude != nil && geoResult.Longitude != nil {
-						// Create a key from lat/lon (rounded to avoid tiny differences)
-						lat := *geoResult.Latitude
-						lon := *geoResult.Longitude
-						locKey := fmt.Sprintf("%.4f,%.4f", lat, lon)
-						
-						if _, exists := countryLocations[country][locKey]; !exists {
-							countryLocations[country][locKey] = &LocationData{
-								Lat:      lat,
-								Lon:      lon,
-								Sessions: 0,
-							}
-						}
-						// Add the session count for this IP to the location
-						countryLocations[country][locKey].Sessions += sessionCount
+		for ip, info := range ipSessions {
+			geoResult, err := geoIPService.Lookup(ip)
+			if err != nil {
+				// GeoIP lookup failed, fall back to event country if available
+				country := info.EventCountry
+				if country == "" {
+					country = "Unknown"
+				}
+				
+				// Initialize country stats if needed
+				if _, exists := countryStats[country]; !exists {
+					countryStats[country] = map[string]interface{}{
+						"country":      country,
+						"country_code": info.EventCode,
+						"sessions":     0,
+					}
+					countryLocations[country] = make(map[string]*LocationData)
+				}
+				countryStats[country]["sessions"] = countryStats[country]["sessions"].(int) + info.SessionCount
+				continue
+			}
+			
+			// Use GeoIP country if available, otherwise fall back to event country
+			country := geoResult.Country
+			countryCode := geoResult.CountryCode
+			if country == "" {
+				country = info.EventCountry
+				countryCode = info.EventCode
+			}
+			if country == "" {
+				country = "Unknown"
+			}
+			
+			// Initialize country stats if needed
+			if _, exists := countryStats[country]; !exists {
+				countryStats[country] = map[string]interface{}{
+					"country":      country,
+					"country_code": countryCode,
+					"sessions":     0,
+				}
+				countryLocations[country] = make(map[string]*LocationData)
+			}
+			countryStats[country]["sessions"] = countryStats[country]["sessions"].(int) + info.SessionCount
+			
+			// Add location data if available
+			if geoResult.Latitude != nil && geoResult.Longitude != nil {
+				lat := *geoResult.Latitude
+				lon := *geoResult.Longitude
+				locKey := fmt.Sprintf("%.4f,%.4f", lat, lon)
+				
+				if _, exists := countryLocations[country][locKey]; !exists {
+					countryLocations[country][locKey] = &LocationData{
+						Lat:      lat,
+						Lon:      lon,
+						Sessions: 0,
 					}
 				}
+				countryLocations[country][locKey].Sessions += info.SessionCount
 			}
+		}
+	} else {
+		// No GeoIP service available, use country from events
+		for _, info := range ipSessions {
+			country := info.EventCountry
+			if country == "" {
+				country = "Unknown"
+			}
+			
+			if _, exists := countryStats[country]; !exists {
+				countryStats[country] = map[string]interface{}{
+					"country":      country,
+					"country_code": info.EventCode,
+					"sessions":     0,
+				}
+				countryLocations[country] = make(map[string]*LocationData)
+			}
+			countryStats[country]["sessions"] = countryStats[country]["sessions"].(int) + info.SessionCount
 		}
 	}
 	

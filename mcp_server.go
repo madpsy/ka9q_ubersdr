@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
+
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 )
 
 // MCPServer handles Model Context Protocol requests
@@ -16,32 +19,15 @@ type MCPServer struct {
 	multiDecoder        *MultiDecoder
 	config              *Config
 	ipBanManager        *IPBanManager
-}
-
-// MCPRequest represents an incoming MCP request
-type MCPRequest struct {
-	Method string                 `json:"method"`
-	Params map[string]interface{} `json:"params"`
-	ID     interface{}            `json:"id,omitempty"`
-}
-
-// MCPResponse represents an MCP response
-type MCPResponse struct {
-	Result interface{} `json:"result,omitempty"`
-	Error  *MCPError   `json:"error,omitempty"`
-	ID     interface{} `json:"id,omitempty"`
-}
-
-// MCPError represents an error in MCP format
-type MCPError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
+	mcpServer           *server.MCPServer
+	httpServer          *server.StreamableHTTPServer
 }
 
 // NewMCPServer creates a new MCP server instance
 func NewMCPServer(sessions *SessionManager, swm *SpaceWeatherMonitor,
 	nfm *NoiseFloorMonitor, md *MultiDecoder, cfg *Config, ipBanManager *IPBanManager) *MCPServer {
-	return &MCPServer{
+
+	m := &MCPServer{
 		sessions:            sessions,
 		spaceWeatherMonitor: swm,
 		noiseFloorMonitor:   nfm,
@@ -49,6 +35,158 @@ func NewMCPServer(sessions *SessionManager, swm *SpaceWeatherMonitor,
 		config:              cfg,
 		ipBanManager:        ipBanManager,
 	}
+
+	// Create MCP server with server info
+	m.mcpServer = server.NewMCPServer(
+		"UberSDR",
+		"1.0.0",
+		server.WithToolCapabilities(true),
+	)
+
+	// Register all tools
+	m.registerTools()
+
+	// Create HTTP server wrapper
+	m.httpServer = server.NewStreamableHTTPServer(m.mcpServer)
+
+	return m
+}
+
+// registerTools registers all available MCP tools
+func (m *MCPServer) registerTools() {
+	// Tool: get_space_weather
+	m.mcpServer.AddTool(
+		mcp.NewTool("get_space_weather",
+			mcp.WithDescription("Get current space weather conditions including Solar Flux Index (SFI), A-index, and K-index which affect HF radio propagation"),
+			mcp.WithString("format",
+				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
+				mcp.DefaultString("json"),
+			),
+		),
+		m.handleGetSpaceWeather,
+	)
+
+	// Tool: get_noise_floor
+	m.mcpServer.AddTool(
+		mcp.NewTool("get_noise_floor",
+			mcp.WithDescription("Get noise floor measurements for amateur radio bands, including dynamic range, occupancy, and estimated FT8 SNR"),
+			mcp.WithString("band",
+				mcp.Description("Specific band name (e.g., '20m', '40m', '80m') or leave empty for all bands"),
+			),
+			mcp.WithString("format",
+				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
+				mcp.DefaultString("json"),
+			),
+		),
+		m.handleGetNoiseFloor,
+	)
+
+	// Tool: get_decoder_spots
+	m.mcpServer.AddTool(
+		mcp.NewTool("get_decoder_spots",
+			mcp.WithDescription("Get recent digital mode spots (FT8, FT4, WSPR) decoded from the radio"),
+			mcp.WithString("mode",
+				mcp.Description("Mode filter: 'FT8', 'FT4', 'WSPR', or empty for all modes"),
+			),
+			mcp.WithNumber("hours",
+				mcp.Description("Hours of history to retrieve (default: 1, max: 48)"),
+				mcp.DefaultNumber(1.0),
+			),
+			mcp.WithString("format",
+				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
+				mcp.DefaultString("json"),
+			),
+		),
+		m.handleGetDecoderSpots,
+	)
+
+	// Tool: get_decoder_analytics
+	m.mcpServer.AddTool(
+		mcp.NewTool("get_decoder_analytics",
+			mcp.WithDescription("Get aggregated analytics about decoder spots by country, continent, mode, and band"),
+			mcp.WithString("country",
+				mcp.Description("Country name filter (e.g., 'United States', 'Germany') or empty for all"),
+			),
+			mcp.WithString("continent",
+				mcp.Description("Continent code: 'AF' (Africa), 'AS' (Asia), 'EU' (Europe), 'NA' (North America), 'OC' (Oceania), 'SA' (South America), 'AN' (Antarctica), or empty for all"),
+			),
+			mcp.WithString("mode",
+				mcp.Description("Mode filter: 'FT8', 'FT4', 'WSPR', or empty for all modes"),
+			),
+			mcp.WithString("band",
+				mcp.Description("Band filter (e.g., '20m', '40m') or empty for all bands"),
+			),
+			mcp.WithNumber("min_snr",
+				mcp.Description("Minimum SNR in dB (default: -999 = no filter)"),
+				mcp.DefaultNumber(-999.0),
+			),
+			mcp.WithNumber("hours",
+				mcp.Description("Hours of history (default: 24, max: 48)"),
+				mcp.DefaultNumber(24.0),
+			),
+			mcp.WithString("format",
+				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
+				mcp.DefaultString("json"),
+			),
+		),
+		m.handleGetDecoderAnalytics,
+	)
+
+	// Tool: get_decoder_analytics_hourly
+	m.mcpServer.AddTool(
+		mcp.NewTool("get_decoder_analytics_hourly",
+			mcp.WithDescription("Get hourly aggregated analytics about decoder spots, broken down by hour for trend analysis"),
+			mcp.WithString("country",
+				mcp.Description("Country name filter or empty for all"),
+			),
+			mcp.WithString("continent",
+				mcp.Description("Continent code (AF, AS, EU, NA, OC, SA, AN) or empty for all"),
+			),
+			mcp.WithString("mode",
+				mcp.Description("Mode filter: 'FT8', 'FT4', 'WSPR', or empty for all modes"),
+			),
+			mcp.WithString("band",
+				mcp.Description("Band filter (e.g., '20m', '40m') or empty for all bands"),
+			),
+			mcp.WithNumber("min_snr",
+				mcp.Description("Minimum SNR in dB (default: -999 = no filter)"),
+				mcp.DefaultNumber(-999.0),
+			),
+			mcp.WithNumber("hours",
+				mcp.Description("Hours of history (default: 24, max: 48)"),
+				mcp.DefaultNumber(24.0),
+			),
+			mcp.WithString("format",
+				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
+				mcp.DefaultString("json"),
+			),
+		),
+		m.handleGetDecoderAnalyticsHourly,
+	)
+
+	// Tool: get_active_sessions
+	m.mcpServer.AddTool(
+		mcp.NewTool("get_active_sessions",
+			mcp.WithDescription("Get list of active radio listening sessions, showing what frequencies and modes are currently in use"),
+			mcp.WithString("format",
+				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
+				mcp.DefaultString("json"),
+			),
+		),
+		m.handleGetActiveSessions,
+	)
+
+	// Tool: get_band_conditions
+	m.mcpServer.AddTool(
+		mcp.NewTool("get_band_conditions",
+			mcp.WithDescription("Get comprehensive band conditions analysis combining space weather, noise floor measurements, and recent activity"),
+			mcp.WithString("format",
+				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
+				mcp.DefaultString("json"),
+			),
+		),
+		m.handleGetBandConditions,
+	)
 }
 
 // HandleMCP handles MCP protocol requests over HTTP
@@ -58,192 +196,278 @@ func (m *MCPServer) HandleMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-
-	// Only accept POST requests
-	if r.Method != http.MethodPost {
-		m.sendError(w, -32601, "Method not allowed, use POST", nil)
-		return
-	}
-
-	// Parse request
-	var req MCPRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		m.sendError(w, -32700, "Parse error: "+err.Error(), nil)
-		return
-	}
-
-	// Handle the tool call
-	result, err := m.handleToolCall(r, req.Method, req.Params)
-	if err != nil {
-		m.sendError(w, -32603, err.Error(), req.ID)
-		return
-	}
-
-	// Send success response
-	response := MCPResponse{
-		Result: result,
-		ID:     req.ID,
-	}
-
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Error encoding MCP response: %v", err)
-	}
+	// Let the StreamableHTTPServer handle the request
+	m.httpServer.ServeHTTP(w, r)
 }
 
-// handleToolCall executes the requested tool
-func (m *MCPServer) handleToolCall(r *http.Request, method string, params map[string]interface{}) (interface{}, error) {
-	switch method {
-	case "get_space_weather":
-		return m.getSpaceWeather()
+// Tool handlers
 
-	case "get_noise_floor":
-		band, _ := params["band"].(string)
-		return m.getNoiseFloor(band)
+func (m *MCPServer) handleGetSpaceWeather(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	format := request.GetString("format", "json")
 
-	case "get_decoder_spots":
-		mode, _ := params["mode"].(string)
-		hoursFloat, _ := params["hours"].(float64)
-		hours := int(hoursFloat)
-		if hours == 0 {
-			hours = 1 // Default to 1 hour
-		}
-		return m.getDecoderSpots(mode, hours)
-
-	case "get_decoder_analytics":
-		country, _ := params["country"].(string)
-		continent, _ := params["continent"].(string)
-		mode, _ := params["mode"].(string)
-		band, _ := params["band"].(string)
-		minSNRFloat, _ := params["min_snr"].(float64)
-		minSNR := int(minSNRFloat)
-		if minSNR == 0 {
-			minSNR = -999 // Default to no filter
-		}
-		hoursFloat, _ := params["hours"].(float64)
-		hours := int(hoursFloat)
-		if hours == 0 {
-			hours = 24 // Default to 24 hours
-		}
-		return m.getDecoderAnalytics(country, continent, mode, band, minSNR, hours)
-
-	case "get_decoder_analytics_hourly":
-		country, _ := params["country"].(string)
-		continent, _ := params["continent"].(string)
-		mode, _ := params["mode"].(string)
-		band, _ := params["band"].(string)
-		minSNRFloat, _ := params["min_snr"].(float64)
-		minSNR := int(minSNRFloat)
-		if minSNR == 0 {
-			minSNR = -999 // Default to no filter
-		}
-		hoursFloat, _ := params["hours"].(float64)
-		hours := int(hoursFloat)
-		if hours == 0 {
-			hours = 24 // Default to 24 hours
-		}
-		return m.getDecoderAnalyticsHourly(country, continent, mode, band, minSNR, hours)
-
-	case "get_active_sessions":
-		return m.getActiveSessions()
-
-	case "get_band_conditions":
-		return m.getBandConditions()
-
-	case "list_tools":
-		return m.listTools(), nil
-
-	default:
-		return nil, fmt.Errorf("unknown method: %s", method)
-	}
-}
-
-// getSpaceWeather returns current space weather data
-func (m *MCPServer) getSpaceWeather() (interface{}, error) {
 	if m.spaceWeatherMonitor == nil || !m.spaceWeatherMonitor.config.Enabled {
-		return nil, fmt.Errorf("space weather monitoring is not enabled")
+		return mcp.NewToolResultError("Space weather monitoring is not enabled"), nil
 	}
 
 	data := m.spaceWeatherMonitor.GetData()
 	if data.LastUpdate.IsZero() {
-		return nil, fmt.Errorf("space weather data not yet available")
+		return mcp.NewToolResultError("Space weather data not yet available"), nil
 	}
 
-	return data, nil
+	if format == "text" {
+		text := fmt.Sprintf("Space Weather Conditions:\n"+
+			"Solar Flux Index (SFI): %d\n"+
+			"A-index: %d\n"+
+			"K-index: %d\n"+
+			"Last Updated: %s\n\n"+
+			"Interpretation:\n"+
+			"- SFI > 150: Excellent HF conditions\n"+
+			"- SFI 100-150: Good HF conditions\n"+
+			"- SFI < 100: Fair to poor HF conditions\n"+
+			"- K-index < 3: Quiet conditions\n"+
+			"- K-index 3-5: Unsettled conditions\n"+
+			"- K-index > 5: Disturbed conditions (poor propagation)",
+			data.SolarFlux, data.AIndex, data.KIndex, data.LastUpdate.Format(time.RFC3339))
+		return mcp.NewToolResultText(text), nil
+	}
+
+	jsonData, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal data: %v", err)), nil
+	}
+	return mcp.NewToolResultText(string(jsonData)), nil
 }
 
-// getNoiseFloor returns noise floor measurements
-func (m *MCPServer) getNoiseFloor(band string) (interface{}, error) {
+func (m *MCPServer) handleGetNoiseFloor(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	band := request.GetString("band", "")
+	format := request.GetString("format", "json")
+
 	if m.noiseFloorMonitor == nil {
-		return nil, fmt.Errorf("noise floor monitoring is not enabled")
+		return mcp.NewToolResultError("Noise floor monitoring is not enabled"), nil
 	}
 
 	if band == "" {
 		// Return all bands
 		measurements := m.noiseFloorMonitor.GetLatestMeasurements()
 		if len(measurements) == 0 {
-			return nil, fmt.Errorf("no measurements available yet")
+			return mcp.NewToolResultError("No measurements available yet"), nil
 		}
-		return measurements, nil
+
+		if format == "text" {
+			text := "Noise Floor Measurements:\n\n"
+			for _, meas := range measurements {
+				text += fmt.Sprintf("Band %s:\n"+
+					"  Noise Floor: %.1f dB\n"+
+					"  Median: %.1f dB\n"+
+					"  Dynamic Range: %.1f dB\n"+
+					"  Occupancy: %.1f%%\n"+
+					"  Estimated FT8 SNR: %.1f dB\n\n",
+					meas.Band, meas.P5DB, meas.MedianDB, meas.DynamicRange, meas.OccupancyPct, meas.FT8SNR)
+			}
+			return mcp.NewToolResultText(text), nil
+		}
+
+		jsonData, err := json.MarshalIndent(measurements, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal data: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(jsonData)), nil
 	}
 
 	// Return specific band FFT
 	fft := m.noiseFloorMonitor.GetLatestFFT(band)
 	if fft == nil {
-		return nil, fmt.Errorf("no FFT data available for band %s", band)
+		return mcp.NewToolResultError(fmt.Sprintf("No FFT data available for band %s", band)), nil
 	}
-	return fft, nil
+
+	jsonData, err := json.MarshalIndent(fft, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal data: %v", err)), nil
+	}
+	return mcp.NewToolResultText(string(jsonData)), nil
 }
 
-// getDecoderSpots returns recent decoder spots
-func (m *MCPServer) getDecoderSpots(mode string, hours int) (interface{}, error) {
+func (m *MCPServer) handleGetDecoderSpots(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	mode := request.GetString("mode", "")
+	hoursFloat := request.GetFloat("hours", 1.0)
+	format := request.GetString("format", "json")
+
+	hours := int(hoursFloat)
+	if hours == 0 {
+		hours = 1
+	}
+	if hours > 48 {
+		hours = 48
+	}
+
 	if m.multiDecoder == nil || m.multiDecoder.spotsLogger == nil {
-		return nil, fmt.Errorf("decoder spots logging is not enabled")
+		return mcp.NewToolResultError("Decoder spots logging is not enabled"), nil
 	}
 
 	// Calculate time range
 	toTime := time.Now().UTC()
 	fromTime := toTime.Add(-time.Duration(hours) * time.Hour)
 
-	// Get spots from the last N hours
 	fromDate := fromTime.Format("2006-01-02")
 	toDate := toTime.Format("2006-01-02")
 	startTime := fromTime.Format("15:04")
 	endTime := toTime.Format("15:04")
 
 	spots, err := m.multiDecoder.spotsLogger.GetHistoricalSpots(
-		mode, "", "", "", "", "", "", // mode, band, name, callsign, locator, continent, direction
+		mode, "", "", "", "", "", "",
 		fromDate, toDate, startTime, endTime,
-		true,  // deduplicate
-		true,  // locatorsOnly
-		0,     // minDistanceKm
-		-999,  // minSNR
+		true, true, 0, -999,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get spots: %v", err)
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to get spots: %v", err)), nil
 	}
 
-	return map[string]interface{}{
+	result := map[string]interface{}{
 		"spots": spots,
 		"count": len(spots),
 		"hours": hours,
 		"mode":  mode,
-	}, nil
+	}
+
+	if format == "text" {
+		text := fmt.Sprintf("Decoder Spots (Last %d hour(s)):\n", hours)
+		if mode != "" {
+			text += fmt.Sprintf("Mode: %s\n", mode)
+		}
+		text += fmt.Sprintf("Total Spots: %d\n\n", len(spots))
+
+		if len(spots) > 0 {
+			text += "Recent spots:\n"
+			limit := 20
+			if len(spots) < limit {
+				limit = len(spots)
+			}
+			for i := 0; i < limit; i++ {
+				spot := spots[i]
+				text += fmt.Sprintf("  %s | %s | %s | %.1f MHz | SNR: %d dB | %s\n",
+					spot.Timestamp, spot.Mode, spot.Callsign, float64(spot.Frequency)/1e6, spot.SNR, spot.Locator)
+			}
+			if len(spots) > limit {
+				text += fmt.Sprintf("  ... and %d more spots\n", len(spots)-limit)
+			}
+		}
+		return mcp.NewToolResultText(text), nil
+	}
+
+	jsonData, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal data: %v", err)), nil
+	}
+	return mcp.NewToolResultText(string(jsonData)), nil
 }
 
-// getActiveSessions returns list of active sessions
-func (m *MCPServer) getActiveSessions() (interface{}, error) {
+func (m *MCPServer) handleGetDecoderAnalytics(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	country := request.GetString("country", "")
+	continent := request.GetString("continent", "")
+	mode := request.GetString("mode", "")
+	band := request.GetString("band", "")
+	minSNRFloat := request.GetFloat("min_snr", -999.0)
+	hoursFloat := request.GetFloat("hours", 24.0)
+	format := request.GetString("format", "json")
+
+	minSNR := int(minSNRFloat)
+	hours := int(hoursFloat)
+	if hours == 0 {
+		hours = 24
+	}
+	if hours > 48 {
+		hours = 48
+	}
+
+	if m.multiDecoder == nil || m.multiDecoder.spotsLogger == nil {
+		return mcp.NewToolResultError("Decoder spots logging is not enabled"), nil
+	}
+
+	analytics, err := m.multiDecoder.spotsLogger.GetSpotsAnalytics(country, continent, mode, band, minSNR, hours)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to get analytics: %v", err)), nil
+	}
+
+	if format == "text" {
+		text := fmt.Sprintf("Decoder Analytics (Last %d hours):\n\n", hours)
+		// Calculate total spots from analytics
+		totalSpots := 0
+		for _, countryData := range analytics.ByCountry {
+			totalSpots += countryData.TotalSpots
+		}
+		if totalSpots > 0 {
+			text += fmt.Sprintf("Total Spots: %d\n", totalSpots)
+		}
+		text += "\nFilters applied:\n"
+		if country != "" {
+			text += fmt.Sprintf("  Country: %s\n", country)
+		}
+		if continent != "" {
+			text += fmt.Sprintf("  Continent: %s\n", continent)
+		}
+		if mode != "" {
+			text += fmt.Sprintf("  Mode: %s\n", mode)
+		}
+		if band != "" {
+			text += fmt.Sprintf("  Band: %s\n", band)
+		}
+		if minSNR > -999 {
+			text += fmt.Sprintf("  Min SNR: %d dB\n", minSNR)
+		}
+		return mcp.NewToolResultText(text), nil
+	}
+
+	jsonData, err := json.MarshalIndent(analytics, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal data: %v", err)), nil
+	}
+	return mcp.NewToolResultText(string(jsonData)), nil
+}
+
+func (m *MCPServer) handleGetDecoderAnalyticsHourly(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	country := request.GetString("country", "")
+	continent := request.GetString("continent", "")
+	mode := request.GetString("mode", "")
+	band := request.GetString("band", "")
+	minSNRFloat := request.GetFloat("min_snr", -999.0)
+	hoursFloat := request.GetFloat("hours", 24.0)
+
+	minSNR := int(minSNRFloat)
+	hours := int(hoursFloat)
+	if hours == 0 {
+		hours = 24
+	}
+	if hours > 48 {
+		hours = 48
+	}
+
+	if m.multiDecoder == nil || m.multiDecoder.spotsLogger == nil {
+		return mcp.NewToolResultError("Decoder spots logging is not enabled"), nil
+	}
+
+	analytics, err := m.multiDecoder.spotsLogger.GetSpotsAnalyticsHourly(country, continent, mode, band, minSNR, hours)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to get hourly analytics: %v", err)), nil
+	}
+
+	jsonData, err := json.MarshalIndent(analytics, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal data: %v", err)), nil
+	}
+	return mcp.NewToolResultText(string(jsonData)), nil
+}
+
+func (m *MCPServer) handleGetActiveSessions(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	format := request.GetString("format", "json")
+
 	m.sessions.mu.RLock()
 	defer m.sessions.mu.RUnlock()
 
 	sessions := make([]map[string]interface{}, 0)
 	for _, session := range m.sessions.sessions {
-		// Skip spectrum sessions and sessions without IP
 		if !session.IsSpectrum && session.ClientIP != "" {
 			session.mu.RLock()
 
-			// Skip bypassed IPs
 			isBypassed := m.sessions.config.Server.IsIPTimeoutBypassed(session.ClientIP)
 			if !isBypassed {
 				sessionInfo := map[string]interface{}{
@@ -263,14 +487,36 @@ func (m *MCPServer) getActiveSessions() (interface{}, error) {
 		}
 	}
 
-	return map[string]interface{}{
+	result := map[string]interface{}{
 		"active_sessions": len(sessions),
 		"sessions":        sessions,
-	}, nil
+	}
+
+	if format == "text" {
+		text := fmt.Sprintf("Active Radio Sessions: %d\n\n", len(sessions))
+		if len(sessions) > 0 {
+			for i, sess := range sessions {
+				freq, _ := sess["frequency"].(int)
+				mode, _ := sess["mode"].(string)
+				country, _ := sess["country"].(string)
+				text += fmt.Sprintf("%d. %.3f MHz | %s | %s\n", i+1, float64(freq)/1e3, mode, country)
+			}
+		} else {
+			text += "No active sessions at the moment.\n"
+		}
+		return mcp.NewToolResultText(text), nil
+	}
+
+	jsonData, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal data: %v", err)), nil
+	}
+	return mcp.NewToolResultText(string(jsonData)), nil
 }
 
-// getBandConditions returns combined band conditions analysis
-func (m *MCPServer) getBandConditions() (interface{}, error) {
+func (m *MCPServer) handleGetBandConditions(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	format := request.GetString("format", "json")
+
 	result := make(map[string]interface{})
 
 	// Add space weather if available
@@ -306,7 +552,6 @@ func (m *MCPServer) getBandConditions() (interface{}, error) {
 
 	// Add decoder activity summary if available
 	if m.multiDecoder != nil && m.multiDecoder.spotsLogger != nil {
-		// Get last hour of activity
 		toTime := time.Now().UTC()
 		fromTime := toTime.Add(-1 * time.Hour)
 		fromDate := fromTime.Format("2006-01-02")
@@ -315,12 +560,11 @@ func (m *MCPServer) getBandConditions() (interface{}, error) {
 		endTime := toTime.Format("15:04")
 
 		spots, err := m.multiDecoder.spotsLogger.GetHistoricalSpots(
-			"", "", "", "", "", "", "", // all modes, all bands
+			"", "", "", "", "", "", "",
 			fromDate, toDate, startTime, endTime,
 			true, true, 0, -999,
 		)
 		if err == nil {
-			// Count by mode
 			modeCounts := make(map[string]int)
 			for _, spot := range spots {
 				modeCounts[spot.Mode]++
@@ -333,181 +577,57 @@ func (m *MCPServer) getBandConditions() (interface{}, error) {
 	}
 
 	if len(result) == 0 {
-		return nil, fmt.Errorf("no band condition data available")
+		return mcp.NewToolResultError("No band condition data available"), nil
 	}
 
-	return result, nil
-}
+	if format == "text" {
+		text := "Band Conditions Summary:\n\n"
 
-// getDecoderAnalytics returns aggregated analytics about decoder spots
-func (m *MCPServer) getDecoderAnalytics(country, continent, mode, band string, minSNR, hours int) (interface{}, error) {
-	if m.multiDecoder == nil || m.multiDecoder.spotsLogger == nil {
-		return nil, fmt.Errorf("decoder spots logging is not enabled")
+		if sw, ok := result["space_weather"].(map[string]interface{}); ok {
+			text += "Space Weather:\n"
+			if sfi, ok := sw["sfi"].(int); ok {
+				text += fmt.Sprintf("  Solar Flux Index: %d\n", sfi)
+			}
+			if aIndex, ok := sw["a_index"].(int); ok {
+				text += fmt.Sprintf("  A-index: %d\n", aIndex)
+			}
+			if kIndex, ok := sw["k_index"].(int); ok {
+				text += fmt.Sprintf("  K-index: %d\n", kIndex)
+			}
+			text += "\n"
+		}
+
+		if nf, ok := result["noise_floor"].(map[string]interface{}); ok {
+			text += "Noise Floor by Band:\n"
+			for band, data := range nf {
+				if bandData, ok := data.(map[string]interface{}); ok {
+					if noiseFloor, ok := bandData["noise_floor_db"].(float64); ok {
+						if ft8snr, ok := bandData["ft8_snr"].(float64); ok {
+							text += fmt.Sprintf("  %s: %.1f dB (Est. FT8 SNR: %.1f dB)\n", band, noiseFloor, ft8snr)
+						}
+					}
+				}
+			}
+			text += "\n"
+		}
+
+		if activity, ok := result["decoder_activity"].(map[string]interface{}); ok {
+			if spots, ok := activity["last_hour_spots"].(int); ok {
+				text += fmt.Sprintf("Recent Activity: %d spots in last hour\n", spots)
+			}
+			if byMode, ok := activity["by_mode"].(map[string]int); ok {
+				for mode, count := range byMode {
+					text += fmt.Sprintf("  %s: %d spots\n", mode, count)
+				}
+			}
+		}
+
+		return mcp.NewToolResultText(text), nil
 	}
 
-	// Get analytics from the spots logger
-	analytics, err := m.multiDecoder.spotsLogger.GetSpotsAnalytics(country, continent, mode, band, minSNR, hours)
+	jsonData, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		return nil, fmt.Errorf("failed to get analytics: %v", err)
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal data: %v", err)), nil
 	}
-
-	return analytics, nil
-}
-
-// getDecoderAnalyticsHourly returns hourly aggregated analytics about decoder spots
-func (m *MCPServer) getDecoderAnalyticsHourly(country, continent, mode, band string, minSNR, hours int) (interface{}, error) {
-	if m.multiDecoder == nil || m.multiDecoder.spotsLogger == nil {
-		return nil, fmt.Errorf("decoder spots logging is not enabled")
-	}
-
-	// Get hourly analytics from the spots logger
-	analytics, err := m.multiDecoder.spotsLogger.GetSpotsAnalyticsHourly(country, continent, mode, band, minSNR, hours)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get hourly analytics: %v", err)
-	}
-
-	return analytics, nil
-}
-
-// listTools returns available MCP tools
-func (m *MCPServer) listTools() interface{} {
-	return map[string]interface{}{
-		"tools": []map[string]interface{}{
-			{
-				"name":        "get_space_weather",
-				"description": "Get current space weather conditions (SFI, A-index, K-index)",
-				"parameters":  map[string]interface{}{},
-			},
-			{
-				"name":        "get_noise_floor",
-				"description": "Get noise floor measurements for amateur radio bands",
-				"parameters": map[string]interface{}{
-					"band": map[string]interface{}{
-						"type":        "string",
-						"description": "Band name (e.g., 20m, 40m, 80m) or empty for all bands",
-						"optional":    true,
-					},
-				},
-			},
-			{
-				"name":        "get_decoder_spots",
-				"description": "Get recent digital mode spots (FT8, FT4, WSPR)",
-				"parameters": map[string]interface{}{
-					"mode": map[string]interface{}{
-						"type":        "string",
-						"description": "Mode filter (FT8, FT4, WSPR) or empty for all modes",
-						"optional":    true,
-					},
-					"hours": map[string]interface{}{
-						"type":        "number",
-						"description": "Hours of history (default 1)",
-						"optional":    true,
-					},
-				},
-			},
-			{
-				"name":        "get_decoder_analytics",
-				"description": "Get aggregated analytics about decoder spots by country/continent",
-				"parameters": map[string]interface{}{
-					"country": map[string]interface{}{
-						"type":        "string",
-						"description": "Country name filter or empty for all",
-						"optional":    true,
-					},
-					"continent": map[string]interface{}{
-						"type":        "string",
-						"description": "Continent code (AF, AS, EU, NA, OC, SA, AN) or empty for all",
-						"optional":    true,
-					},
-					"mode": map[string]interface{}{
-						"type":        "string",
-						"description": "Mode filter (FT8, FT4, WSPR) or empty for all",
-						"optional":    true,
-					},
-					"band": map[string]interface{}{
-						"type":        "string",
-						"description": "Band filter (e.g., 20m, 40m) or empty for all",
-						"optional":    true,
-					},
-					"min_snr": map[string]interface{}{
-						"type":        "number",
-						"description": "Minimum SNR in dB (default -999 = no filter)",
-						"optional":    true,
-					},
-					"hours": map[string]interface{}{
-						"type":        "number",
-						"description": "Hours of history (default 24, max 48)",
-						"optional":    true,
-					},
-				},
-			},
-			{
-				"name":        "get_decoder_analytics_hourly",
-				"description": "Get hourly aggregated analytics about decoder spots broken down by hour",
-				"parameters": map[string]interface{}{
-					"country": map[string]interface{}{
-						"type":        "string",
-						"description": "Country name filter or empty for all",
-						"optional":    true,
-					},
-					"continent": map[string]interface{}{
-						"type":        "string",
-						"description": "Continent code (AF, AS, EU, NA, OC, SA, AN) or empty for all",
-						"optional":    true,
-					},
-					"mode": map[string]interface{}{
-						"type":        "string",
-						"description": "Mode filter (FT8, FT4, WSPR) or empty for all",
-						"optional":    true,
-					},
-					"band": map[string]interface{}{
-						"type":        "string",
-						"description": "Band filter (e.g., 20m, 40m) or empty for all",
-						"optional":    true,
-					},
-					"min_snr": map[string]interface{}{
-						"type":        "number",
-						"description": "Minimum SNR in dB (default -999 = no filter)",
-						"optional":    true,
-					},
-					"hours": map[string]interface{}{
-						"type":        "number",
-						"description": "Hours of history (default 24, max 48)",
-						"optional":    true,
-					},
-				},
-			},
-			{
-				"name":        "get_active_sessions",
-				"description": "Get list of active radio sessions and frequencies in use",
-				"parameters":  map[string]interface{}{},
-			},
-			{
-				"name":        "get_band_conditions",
-				"description": "Get combined band conditions analysis (space weather + noise floor + activity)",
-				"parameters":  map[string]interface{}{},
-			},
-			{
-				"name":        "list_tools",
-				"description": "List all available MCP tools",
-				"parameters":  map[string]interface{}{},
-			},
-		},
-	}
-}
-
-// sendError sends an error response
-func (m *MCPServer) sendError(w http.ResponseWriter, code int, message string, id interface{}) {
-	response := MCPResponse{
-		Error: &MCPError{
-			Code:    code,
-			Message: message,
-		},
-		ID: id,
-	}
-
-	w.WriteHeader(http.StatusOK) // MCP errors are sent with 200 OK
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Error encoding MCP error response: %v", err)
-	}
+	return mcp.NewToolResultText(string(jsonData)), nil
 }

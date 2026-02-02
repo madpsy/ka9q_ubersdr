@@ -190,6 +190,17 @@
                 </div>
             </div>
 
+            <!-- World Map -->
+            <div class="chart-container">
+                <h2>🗺️ Sessions by Country (World Map)</h2>
+                <div class="chart-wrapper tall">
+                    <svg id="worldMap"></svg>
+                </div>
+                <div style="margin-top: 15px; text-align: center; font-size: 0.9em; opacity: 0.8;">
+                    Hover over countries to see session counts
+                </div>
+            </div>
+
             <!-- Countries Chart -->
             <div class="chart-container">
                 <h2>🌍 Sessions by Country (Top 10)</h2>
@@ -230,6 +241,9 @@
     </footer>
 
     <script src="chart.umd.min.js"></script>
+    <script src="d3.v7.min.js"></script>
+    <script src="d3-geo.v3.min.js"></script>
+    <script src="topojson.v3.min.js"></script>
     <script src="session_stats.js"></script>
 </body>
 </html>

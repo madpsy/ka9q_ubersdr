@@ -75,7 +75,7 @@ class UberSDRChat {
      * @param {number} checkIntervalMs - How often to check in milliseconds
      * @returns {Promise<WebSocket|null>} - Returns WebSocket when ready, or null on timeout
      */
-    waitForWebSocket(maxWaitMs = 2000, checkIntervalMs = 100) {
+    waitForWebSocket(maxWaitMs = 5000, checkIntervalMs = 100) {
         return new Promise((resolve) => {
             const startTime = Date.now();
 
@@ -258,9 +258,9 @@ class UberSDRChat {
         // Try to get WebSocket immediately
         let ws = this.getWebSocket();
         if (!ws || ws.readyState !== WebSocket.OPEN) {
-            // Wait for WebSocket to be ready (up to 2 seconds)
+            // Wait for WebSocket to be ready (up to 5 seconds)
             console.log('[Chat] WebSocket not ready, waiting...');
-            ws = await this.waitForWebSocket(2000);
+            ws = await this.waitForWebSocket(5000);
         }
 
         if (ws && ws.readyState === WebSocket.OPEN) {

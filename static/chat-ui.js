@@ -56,7 +56,7 @@ class ChatUI {
         if (this.savedUsername) {
             setTimeout(() => {
                 this.autoLogin();
-            }, 1000); // Wait 1 second for WebSocket to be fully ready
+            }, 3000); // Wait 3 seconds for WebSocket to be fully ready
         }
     }
 
@@ -1427,6 +1427,20 @@ class ChatUI {
         this.chat.on('error', (error) => {
             // Show errors in the UI so users know what went wrong
             console.warn('[ChatUI] Chat error:', error);
+
+            // Always suppress "WebSocket not connected" errors - these happen during connection/reconnection
+            // and are handled automatically by the retry logic
+            if (error === 'WebSocket not connected') {
+                console.log('[ChatUI] WebSocket not connected, suppressing error message');
+                // If we have a saved username and aren't logged in, retry auto-login
+                if (this.savedUsername && this.chat && !this.chat.username) {
+                    console.log('[ChatUI] Retrying auto-login in 2 seconds...');
+                    setTimeout(() => {
+                        this.autoLogin();
+                    }, 2000);
+                }
+                return;
+            }
 
             // Suppress rate limit errors - just log them
             if (error.includes('rate limit exceeded')) {

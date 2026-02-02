@@ -637,45 +637,107 @@
 
                 <!-- Logs Tab -->
                 <div id="logsTab" class="tab-content">
-                    <div class="alert alert-info" style="margin-bottom: 20px;">
-                        ℹ️ These are system logs for troubleshooting. Some errors and failures are normal during operation. These logs are most useful for developers.
+                    <!-- Sub-tabs for Logs -->
+                    <div style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #ddd; padding-bottom: 0;">
+                        <button class="logs-subtab active" onclick="switchLogsSubTab('container')" id="containerLogsSubTab" style="padding: 10px 20px; border: none; background: none; cursor: pointer; font-weight: bold; border-bottom: 3px solid #007bff; color: #007bff;">
+                            Container Logs
+                        </button>
+                        <button class="logs-subtab" onclick="switchLogsSubTab('web')" id="webLogsSubTab" style="padding: 10px 20px; border: none; background: none; cursor: pointer; font-weight: bold; border-bottom: 3px solid transparent; color: #666;">
+                            Web Logs
+                        </button>
                     </div>
-                    <div class="config-section">
-                        <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                            <label style="font-weight: bold;">Container:</label>
-                            <select id="containerSelect" onchange="onContainerChange()" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; min-width: 200px;">
-                                <option value="">Select a container...</option>
-                            </select>
-                            <select id="sourceSelect" onchange="onSourceChange()" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; min-width: 120px;">
-                                <option value="">All sources</option>
-                            </select>
-                            <button onclick="loadLogs()" style="background: none; border: none; font-size: 24px; cursor: pointer; padding: 4px 8px; opacity: 1; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.6'" onmouseout="this.style.opacity='1'" title="Refresh Now">🔄</button>
-                            <button id="downloadLogsBtn" onclick="downloadLogs()" style="background: none; border: none; font-size: 24px; cursor: pointer; padding: 4px 8px; opacity: 1; transition: opacity 0.2s;" onmouseover="if(!this.disabled) this.style.opacity='0.6'" onmouseout="if(!this.disabled) this.style.opacity='1'" title="Download Logs">💾</button>
-                            <label style="display: flex; align-items: center; gap: 5px; margin: 0;">
-                                <input type="checkbox" id="logsAutoRefresh" onchange="onAutoRefreshChange()" checked>
-                                <span>Auto-refresh (5s)</span>
-                            </label>
-                            <label style="display: flex; align-items: center; gap: 5px; margin: 0;">
-                                <span>Filter:</span>
-                                <input type="text" id="logsFilter" oninput="onFilterChange()" placeholder="Search logs..." style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; min-width: 200px;">
-                            </label>
-                            <span id="logsCount" style="color: #666; margin-left: auto;"></span>
-                        </div>
-                        
-                        <div id="logsDisplay" style="background: #000; color: #0f0; padding: 15px; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 12px; max-height: 600px; overflow-y: auto; line-height: 1.4;">
-                            <div style="color: #888; padding: 20px; text-align: center;">Please select a container to view logs</div>
-                        </div>
 
-                        <!-- Remote Logging Section -->
-                        <div style="margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px; border: 1px solid #dee2e6;">
-                            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
-                                <label style="display: flex; align-items: center; gap: 8px; font-weight: bold; cursor: pointer;">
-                                    <input type="checkbox" id="remoteLoggingCheckbox" onchange="onRemoteLoggingChange()" style="width: 18px; height: 18px; cursor: pointer;">
-                                    <span>Enable Remote Logging</span>
+                    <!-- Container Logs Sub-tab -->
+                    <div id="containerLogsContent" class="logs-subtab-content">
+                        <div class="alert alert-info" style="margin-bottom: 20px;">
+                            ℹ️ These are system logs for troubleshooting. Some errors and failures are normal during operation. These logs are most useful for developers.
+                        </div>
+                        <div class="config-section">
+                            <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                <label style="font-weight: bold;">Container:</label>
+                                <select id="containerSelect" onchange="onContainerChange()" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; min-width: 200px;">
+                                    <option value="">Select a container...</option>
+                                </select>
+                                <select id="sourceSelect" onchange="onSourceChange()" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; min-width: 120px;">
+                                    <option value="">All sources</option>
+                                </select>
+                                <button onclick="loadLogs()" style="background: none; border: none; font-size: 24px; cursor: pointer; padding: 4px 8px; opacity: 1; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.6'" onmouseout="this.style.opacity='1'" title="Refresh Now">🔄</button>
+                                <button id="downloadLogsBtn" onclick="downloadLogs()" style="background: none; border: none; font-size: 24px; cursor: pointer; padding: 4px 8px; opacity: 1; transition: opacity 0.2s;" onmouseover="if(!this.disabled) this.style.opacity='0.6'" onmouseout="if(!this.disabled) this.style.opacity='1'" title="Download Logs">💾</button>
+                                <label style="display: flex; align-items: center; gap: 5px; margin: 0;">
+                                    <input type="checkbox" id="logsAutoRefresh" onchange="onAutoRefreshChange()" checked>
+                                    <span>Auto-refresh (5s)</span>
                                 </label>
+                                <label style="display: flex; align-items: center; gap: 5px; margin: 0;">
+                                    <span>Filter:</span>
+                                    <input type="text" id="logsFilter" oninput="onFilterChange()" placeholder="Search logs..." style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; min-width: 200px;">
+                                </label>
+                                <span id="logsCount" style="color: #666; margin-left: auto;"></span>
                             </div>
-                            <div class="alert alert-info" style="margin: 0; font-size: 13px;">
-                                ℹ️ <strong>Remote Logging:</strong> When enabled, system logs will be sent to a remote logging system. This is useful for the developer and for troubleshooting issues. Logs may include system diagnostics, error messages, and operational data. Changes require a server restart to take effect.
+                            
+                            <div id="logsDisplay" style="background: #000; color: #0f0; padding: 15px; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 12px; max-height: 600px; overflow-y: auto; line-height: 1.4;">
+                                <div style="color: #888; padding: 20px; text-align: center;">Please select a container to view logs</div>
+                            </div>
+
+                            <!-- Remote Logging Section -->
+                            <div style="margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px; border: 1px solid #dee2e6;">
+                                <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
+                                    <label style="display: flex; align-items: center; gap: 8px; font-weight: bold; cursor: pointer;">
+                                        <input type="checkbox" id="remoteLoggingCheckbox" onchange="onRemoteLoggingChange()" style="width: 18px; height: 18px; cursor: pointer;">
+                                        <span>Enable Remote Logging</span>
+                                    </label>
+                                </div>
+                                <div class="alert alert-info" style="margin: 0; font-size: 13px;">
+                                    ℹ️ <strong>Remote Logging:</strong> When enabled, system logs will be sent to a remote logging system. This is useful for the developer and for troubleshooting issues. Logs may include system diagnostics, error messages, and operational data. Changes require a server restart to take effect.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Web Logs Sub-tab -->
+                    <div id="webLogsContent" class="logs-subtab-content" style="display: none;">
+                        <div class="alert alert-info" style="margin-bottom: 20px;">
+                            ℹ️ These are HTTP request logs showing all web traffic to the server. Useful for monitoring access patterns and troubleshooting connection issues.
+                        </div>
+                        <div class="config-section">
+                            <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                <label style="font-weight: bold;">Limit:</label>
+                                <select id="webLogsLimit" onchange="loadWebLogs()" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
+                                    <option value="100">100</option>
+                                    <option value="250">250</option>
+                                    <option value="500">500</option>
+                                    <option value="1000">1000</option>
+                                </select>
+                                <label style="font-weight: bold;">Method:</label>
+                                <select id="webLogsMethod" onchange="loadWebLogs()" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
+                                    <option value="">All</option>
+                                    <option value="GET">GET</option>
+                                    <option value="POST">POST</option>
+                                    <option value="PUT">PUT</option>
+                                    <option value="DELETE">DELETE</option>
+                                </select>
+                                <label style="font-weight: bold;">Status:</label>
+                                <select id="webLogsStatus" onchange="loadWebLogs()" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
+                                    <option value="">All</option>
+                                    <option value="2xx">2xx Success</option>
+                                    <option value="3xx">3xx Redirect</option>
+                                    <option value="4xx">4xx Client Error</option>
+                                    <option value="5xx">5xx Server Error</option>
+                                </select>
+                                <button onclick="loadWebLogs()" style="background: none; border: none; font-size: 24px; cursor: pointer; padding: 4px 8px; opacity: 1; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.6'" onmouseout="this.style.opacity='1'" title="Refresh Now">🔄</button>
+                                <button onclick="downloadWebLogs()" style="background: none; border: none; font-size: 24px; cursor: pointer; padding: 4px 8px; opacity: 1; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.6'" onmouseout="this.style.opacity='1'" title="Download Logs">💾</button>
+                                <label style="display: flex; align-items: center; gap: 5px; margin: 0;">
+                                    <input type="checkbox" id="webLogsAutoRefresh" onchange="onWebLogsAutoRefreshChange()" checked>
+                                    <span>Auto-refresh (5s)</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 5px; margin: 0;">
+                                    <span>Filter:</span>
+                                    <input type="text" id="webLogsFilter" oninput="onWebLogsFilterChange()" placeholder="Filter by IP or path..." style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; min-width: 200px;">
+                                </label>
+                                <span id="webLogsCount" style="color: #666; margin-left: auto;"></span>
+                            </div>
+                            
+                            <div id="webLogsDisplay" style="background: #000; color: #0f0; padding: 15px; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 11px; max-height: 600px; overflow-y: auto; line-height: 1.4;">
+                                <div style="color: #888; padding: 20px; text-align: center;">Loading web logs...</div>
                             </div>
                         </div>
                     </div>
@@ -16201,6 +16263,231 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 closeReleaseNotesModal();
             }
         };
+
+        // ============================================
+        // Logs Sub-tabs Functions
+        // ============================================
+        
+        function switchLogsSubTab(tab) {
+            // Update sub-tab buttons
+            const containerBtn = document.getElementById('containerLogsSubTab');
+            const webBtn = document.getElementById('webLogsSubTab');
+            
+            if (tab === 'container') {
+                containerBtn.classList.add('active');
+                containerBtn.style.borderBottom = '3px solid #007bff';
+                containerBtn.style.color = '#007bff';
+                webBtn.classList.remove('active');
+                webBtn.style.borderBottom = '3px solid transparent';
+                webBtn.style.color = '#666';
+                
+                document.getElementById('containerLogsContent').style.display = 'block';
+                document.getElementById('webLogsContent').style.display = 'none';
+            } else if (tab === 'web') {
+                webBtn.classList.add('active');
+                webBtn.style.borderBottom = '3px solid #007bff';
+                webBtn.style.color = '#007bff';
+                containerBtn.classList.remove('active');
+                containerBtn.style.borderBottom = '3px solid transparent';
+                containerBtn.style.color = '#666';
+                
+                document.getElementById('containerLogsContent').style.display = 'none';
+                document.getElementById('webLogsContent').style.display = 'block';
+                
+                // Load web logs when switching to this tab
+                loadWebLogs();
+            }
+        }
+
+        // ============================================
+        // Web Logs Functions
+        // ============================================
+        
+        let webLogsAutoRefreshInterval = null;
+        let webLogsData = [];
+        
+        async function loadWebLogs() {
+            try {
+                const limit = document.getElementById('webLogsLimit').value;
+                const method = document.getElementById('webLogsMethod').value;
+                const status = document.getElementById('webLogsStatus').value;
+                const filter = document.getElementById('webLogsFilter').value.trim();
+                
+                // Build query parameters
+                const params = new URLSearchParams({ limit });
+                if (method) params.append('filter_method', method);
+                
+                // Handle status code ranges
+                if (status === '2xx') {
+                    params.append('min_status', '200');
+                    params.append('max_status', '299');
+                } else if (status === '3xx') {
+                    params.append('min_status', '300');
+                    params.append('max_status', '399');
+                } else if (status === '4xx') {
+                    params.append('min_status', '400');
+                    params.append('max_status', '499');
+                } else if (status === '5xx') {
+                    params.append('min_status', '500');
+                    params.append('max_status', '599');
+                }
+                
+                // Add IP or path filter if provided
+                if (filter) {
+                    // Check if it looks like an IP address
+                    if (filter.match(/^\d+\.\d+/)) {
+                        params.append('filter_ip', filter);
+                    } else {
+                        params.append('filter_path', filter);
+                    }
+                }
+                
+                const response = await fetch(`/admin/http-logs?${params}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                webLogsData = data.logs || [];
+                
+                renderWebLogs();
+                
+                // Update count
+                const countEl = document.getElementById('webLogsCount');
+                if (countEl) {
+                    countEl.textContent = `Showing ${data.count} of ${data.total} logs (max: ${data.max_size})`;
+                }
+                
+            } catch (error) {
+                console.error('Error loading web logs:', error);
+                const display = document.getElementById('webLogsDisplay');
+                if (display) {
+                    display.innerHTML = `<div style="color: #f00; padding: 20px; text-align: center;">Error loading web logs: ${error.message}</div>`;
+                }
+            }
+        }
+        
+        function renderWebLogs() {
+            const display = document.getElementById('webLogsDisplay');
+            if (!display) return;
+            
+            if (webLogsData.length === 0) {
+                display.innerHTML = '<div style="color: #888; padding: 20px; text-align: center;">No web logs found</div>';
+                return;
+            }
+            
+            // Render logs in reverse order (newest first)
+            const logsHTML = webLogsData.slice().reverse().map(log => {
+                const timestamp = new Date(log.timestamp).toLocaleString();
+                const statusColor = getStatusColor(log.status_code);
+                const methodColor = getMethodColor(log.method);
+                
+                return `<div style="margin-bottom: 8px; padding: 8px; background: #111; border-left: 3px solid ${statusColor}; border-radius: 3px;">
+                    <span style="color: #666;">${timestamp}</span>
+                    <span style="color: #0af; margin-left: 10px;">${log.client_ip}</span>
+                    <span style="color: ${methodColor}; margin-left: 10px; font-weight: bold;">${log.method}</span>
+                    <span style="color: #fff; margin-left: 10px;">${escapeHtml(log.uri)}</span>
+                    <span style="color: ${statusColor}; margin-left: 10px; font-weight: bold;">${log.status_code}</span>
+                    <span style="color: #888; margin-left: 10px;">${formatBytes(log.bytes_written)}</span>
+                    <span style="color: #888; margin-left: 10px;">${log.duration_ms.toFixed(2)}ms</span>
+                </div>`;
+            }).join('');
+            
+            display.innerHTML = logsHTML;
+            
+            // Auto-scroll to bottom
+            display.scrollTop = display.scrollHeight;
+        }
+        
+        function getStatusColor(status) {
+            if (status >= 200 && status < 300) return '#0f0';
+            if (status >= 300 && status < 400) return '#0af';
+            if (status >= 400 && status < 500) return '#fa0';
+            if (status >= 500) return '#f00';
+            return '#888';
+        }
+        
+        function getMethodColor(method) {
+            switch (method) {
+                case 'GET': return '#0f0';
+                case 'POST': return '#0af';
+                case 'PUT': return '#fa0';
+                case 'DELETE': return '#f00';
+                default: return '#888';
+            }
+        }
+        
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function onWebLogsAutoRefreshChange() {
+            const checkbox = document.getElementById('webLogsAutoRefresh');
+            if (checkbox.checked) {
+                // Start auto-refresh
+                webLogsAutoRefreshInterval = setInterval(loadWebLogs, 5000);
+            } else {
+                // Stop auto-refresh
+                if (webLogsAutoRefreshInterval) {
+                    clearInterval(webLogsAutoRefreshInterval);
+                    webLogsAutoRefreshInterval = null;
+                }
+            }
+        }
+        
+        function onWebLogsFilterChange() {
+            // Debounce the filter
+            clearTimeout(window.webLogsFilterTimeout);
+            window.webLogsFilterTimeout = setTimeout(loadWebLogs, 300);
+        }
+        
+        function downloadWebLogs() {
+            if (webLogsData.length === 0) {
+                alert('No logs to download');
+                return;
+            }
+            
+            // Create CSV content
+            const headers = ['Timestamp', 'Client IP', 'Method', 'URI', 'Protocol', 'Status', 'Bytes', 'Duration (ms)', 'User Agent', 'Referer'];
+            const rows = webLogsData.map(log => [
+                new Date(log.timestamp).toISOString(),
+                log.client_ip,
+                log.method,
+                log.uri,
+                log.protocol,
+                log.status_code,
+                log.bytes_written,
+                log.duration_ms.toFixed(3),
+                log.user_agent,
+                log.referer
+            ]);
+            
+            const csvContent = [
+                headers.join(','),
+                ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+            ].join('\n');
+            
+            // Download
+            const blob = new Blob([csvContent], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `web-logs-${new Date().toISOString().split('T')[0]}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
 
     </script>
 </body>

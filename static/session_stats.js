@@ -145,12 +145,23 @@ async function createWorldMap(countries) {
             .style('z-index', 1000);
         
         // Match countries to features for coloring
+        // Build a map of feature -> country name, ensuring each feature maps to only one country
         const featureCountryMap = new Map();
+        const countryFeatureMap = new Map(); // country name -> feature (reverse lookup)
+        
         allLocations.forEach(loc => {
+            // Skip if we already found a feature for this country
+            if (countryFeatureMap.has(loc.country)) {
+                return;
+            }
+            
             for (const feature of worldCountries.features) {
                 if (d3.geoContains(feature, [loc.lon, loc.lat])) {
+                    // Only set if this feature hasn't been claimed by another country
                     if (!featureCountryMap.has(feature)) {
                         featureCountryMap.set(feature, loc.country);
+                        countryFeatureMap.set(loc.country, feature);
+                        console.log(`Matched ${loc.country} to feature ${feature.properties.name}`);
                     }
                     break;
                 }
@@ -158,6 +169,7 @@ async function createWorldMap(countries) {
         });
         
         console.log('Matched country features:', featureCountryMap.size);
+        console.log('Feature-Country map:', featureCountryMap);
         
         // Draw countries (colored by total sessions)
         mapGroup.append('g')

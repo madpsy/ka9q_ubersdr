@@ -86,9 +86,27 @@ func httpLogger(logFile *os.File, next http.Handler) http.Handler {
 				userAgent,
 			)
 
-			// Write to log file
-			if _, err := logFile.WriteString(logLine); err != nil {
-				log.Printf("Error writing to access log: %v", err)
+			// Write to log file if enabled
+			if logFile != nil {
+				if _, err := logFile.WriteString(logLine); err != nil {
+					log.Printf("Error writing to access log: %v", err)
+				}
+			}
+
+			// Always write to in-memory buffer
+			if globalHTTPLogBuffer != nil {
+				globalHTTPLogBuffer.AddLog(HTTPLogEntry{
+					Timestamp:    start,
+					ClientIP:     clientIP,
+					Method:       r.Method,
+					URI:          r.RequestURI,
+					Protocol:     r.Proto,
+					StatusCode:   101,
+					BytesWritten: 0,
+					DurationMs:   0.0,
+					UserAgent:    userAgent,
+					Referer:      referer,
+				})
 			}
 
 			// Pass through to WebSocket handler
@@ -140,9 +158,27 @@ func httpLogger(logFile *os.File, next http.Handler) http.Handler {
 			float64(duration.Microseconds())/1000.0,
 		)
 
-		// Write to log file
-		if _, err := logFile.WriteString(logLine); err != nil {
-			log.Printf("Error writing to access log: %v", err)
+		// Write to log file if enabled
+		if logFile != nil {
+			if _, err := logFile.WriteString(logLine); err != nil {
+				log.Printf("Error writing to access log: %v", err)
+			}
+		}
+
+		// Always write to in-memory buffer
+		if globalHTTPLogBuffer != nil {
+			globalHTTPLogBuffer.AddLog(HTTPLogEntry{
+				Timestamp:    start,
+				ClientIP:     clientIP,
+				Method:       r.Method,
+				URI:          r.RequestURI,
+				Protocol:     r.Proto,
+				StatusCode:   wrapped.statusCode,
+				BytesWritten: wrapped.written,
+				DurationMs:   float64(duration.Microseconds()) / 1000.0,
+				UserAgent:    userAgent,
+				Referer:      referer,
+			})
 		}
 	})
 }
@@ -381,6 +417,10 @@ func main() {
 		log.Fatalf("Failed to initialize log receiver: %v", err)
 	}
 	log.Printf("Log receiver listening on port 6925 (max 1000 entries)")
+
+	// Initialize HTTP log buffer with 1000 entry rolling window (always enabled)
+	InitHTTPLogBuffer(1000)
+	log.Printf("HTTP request log buffer initialized (max 1000 entries in memory)")
 
 	// Initialize radiod controller
 	radiod, err := NewRadiodController(
@@ -1296,6 +1336,7 @@ func main() {
 	http.HandleFunc("/admin/chat/logs", adminHandler.AuthMiddleware(adminHandler.HandleChatLogs))
 	http.HandleFunc("/admin/force-update", adminHandler.AuthMiddleware(adminHandler.HandleForceUpdate))
 	http.HandleFunc("/admin/logs", adminHandler.AuthMiddleware(handleLogsAPI))
+	http.HandleFunc("/admin/http-logs", adminHandler.AuthMiddleware(handleHTTPLogsAPI))
 	http.HandleFunc("/admin/geoip/lookup", adminHandler.AuthMiddleware(adminHandler.HandleGeoIPLookup))
 	http.HandleFunc("/admin/sessions/countries", adminHandler.AuthMiddleware(adminHandler.HandleSessionsWithCountries))
 	http.HandleFunc("/admin/geoip-health", adminHandler.AuthMiddleware(adminHandler.HandleGeoIPHealth))
@@ -1332,12 +1373,11 @@ func main() {
 	fs := http.FileServer(http.Dir("static"))
 	http.Handle("/", fs)
 
-	// Wrap the default ServeMux with CORS middleware (if enabled), then logging middleware (if enabled)
+	// Wrap the default ServeMux with CORS middleware (if enabled), then logging middleware (always enabled for in-memory buffer)
 	var handler http.Handler = http.DefaultServeMux
 	handler = corsMiddleware(config, handler)
-	if config.Server.LogFileEnabled && logFile != nil {
-		handler = httpLogger(logFile, handler)
-	}
+	// Always wrap with httpLogger (it handles both file and in-memory logging)
+	handler = httpLogger(logFile, handler)
 
 	// Start HTTP server
 	server := &http.Server{

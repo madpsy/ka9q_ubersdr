@@ -13355,7 +13355,8 @@ const tooltipLine2 = timeStr;
                 // Add tunnel connection details if tunnel is up
                 if (data.tunnel_up && data.source_ip) {
                     statusHTML += `<br>
-                    <span style="color: #666; font-size: 14px;">Source IP: ${data.source_ip}</span><br>
+                    <span style="color: #666; font-size: 14px;">Source IP: ${data.source_ip}${data.organization ? ' (' + data.organization + ')' : ''}</span><br>
+                    <span style="color: #666; font-size: 14px;">Source Country: ${data.country || 'Unknown'}</span><br>
                     <span style="color: #667eea; font-size: 14px;">Throughput: ↑ ${(data.throughput_up_kbps || 0).toFixed(1)} kbps / ↓ ${(data.throughput_down_kbps || 0).toFixed(1)} kbps</span><br>`;
 
                     // Add latency if available

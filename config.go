@@ -28,6 +28,7 @@ type Config struct {
 	Rotctl             RotctlConfig             `yaml:"rotctl"`
 	GeoIP              GeoIPConfig              `yaml:"geoip"`
 	SSHProxy           SSHProxyConfig           `yaml:"ssh_proxy"`
+	MCP                MCPConfig                `yaml:"mcp"`
 	Bookmarks          []Bookmark               `yaml:"bookmarks"`
 	Bands              []Band                   `yaml:"bands"`
 	Extensions         []string                 `yaml:"extensions"`
@@ -317,6 +318,11 @@ type SSHProxyConfig struct {
 	AllowedIPs []string `yaml:"allowed_ips"` // List of IPs/CIDRs allowed to access SSH proxy
 
 	allowedNets []*net.IPNet // Parsed CIDR networks (internal use)
+}
+
+// MCPConfig contains Model Context Protocol server settings
+type MCPConfig struct {
+	Enabled bool `yaml:"enabled"` // Enable/disable MCP endpoint
 }
 
 // LoadConfig loads configuration from a YAML file

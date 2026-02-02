@@ -1288,3 +1288,43 @@ geoip:
   #   - Configure with your license key
   #   - Schedule weekly updates via cron or systemd timer
   #   See GEOIP_SETUP.md for detailed instructions
+
+# ==============================================================================
+# Model Context Protocol (MCP) Configuration
+# ==============================================================================
+# Provides a standardized API for AI assistants to interact with UberSDR
+# Enables programmatic access to SDR data, space weather, and band conditions
+mcp:
+  # Enable MCP endpoint (default: false)
+  # When enabled, exposes /mcp endpoint for AI assistant integration
+  # Provides tools for querying space weather, noise floor, decoder spots, etc.
+  enabled: false
+  
+  # MCP Endpoint:
+  #   POST /api/mcp
+  #     - JSON-RPC style requests for tool execution
+  #     - Available tools:
+  #       * get_space_weather - Current propagation conditions
+  #       * get_noise_floor - Band noise levels and FFT data
+  #       * get_decoder_spots - Recent digital mode activity
+  #       * get_decoder_analytics - Aggregated analytics by country/continent
+  #       * get_decoder_analytics_hourly - Hourly aggregated analytics
+  #       * get_active_sessions - Current users and frequencies
+  #       * get_band_conditions - Combined propagation analysis
+  #       * list_tools - List all available tools
+  #
+  # Example usage with curl:
+  #   curl -X POST http://localhost:8080/mcp \
+  #     -H "Content-Type: application/json" \
+  #     -d '{"method":"get_space_weather","params":{}}'
+  #
+  # Security:
+  #   - No authentication required (read-only access)
+  #   - Rate limiting applies (same as other API endpoints)
+  #   - IP ban checking applies
+  #
+  # Use cases:
+  #   - AI-powered propagation analysis
+  #   - Automated band condition monitoring
+  #   - Integration with Claude, ChatGPT, or other AI assistants
+  #   - Programmatic SDR data access

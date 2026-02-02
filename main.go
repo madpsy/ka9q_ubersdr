@@ -789,6 +789,13 @@ func main() {
 	}
 	defer spaceWeatherMonitor.Stop()
 
+	// Initialize MCP server if enabled
+	var mcpServer *MCPServer
+	if config.MCP.Enabled {
+		mcpServer = NewMCPServer(sessions, spaceWeatherMonitor, noiseFloorMonitor, multiDecoder, config, ipBanManager)
+		log.Printf("MCP server initialized (endpoint: /api/mcp)")
+	}
+
 	// Start MQTT publisher if enabled (after space weather monitor is initialized)
 	if prometheusMetrics != nil && config.MQTT.Enabled {
 		// Get the context from Prometheus initialization
@@ -1093,6 +1100,12 @@ func main() {
 	http.HandleFunc("/api/spaceweather/csv", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleSpaceWeatherCSV(w, r, spaceWeatherMonitor, ipBanManager, spaceWeatherRateLimiter)
 	}))
+
+	// MCP endpoint (Model Context Protocol for AI assistants)
+	if mcpServer != nil {
+		http.HandleFunc("/api/mcp", mcpServer.HandleMCP)
+		log.Printf("MCP endpoint enabled at /api/mcp")
+	}
 
 	// SunCalc endpoint (sun/moon position and times)
 	http.HandleFunc("/api/suncalc", func(w http.ResponseWriter, r *http.Request) {

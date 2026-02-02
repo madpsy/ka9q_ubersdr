@@ -16409,12 +16409,12 @@ Referer: ${log.referer}`;
                 // Format time as HH:MM:SS
                 const timeOnly = new Date(log.timestamp).toLocaleTimeString();
                 
-                return `<div style="margin-bottom: 0; padding: 4px 8px; background: #111; border-left: 3px solid ${statusColor}; border-radius: 0; cursor: help; font-family: 'Courier New', monospace; font-size: 11px;" title="${escapeHtml(tooltip)}">
+                return `<div style="margin-bottom: 0; padding: 4px 8px; background: #111; border-left: 3px solid ${statusColor}; border-radius: 0; font-family: 'Courier New', monospace; font-size: 11px;" title="${escapeHtml(tooltip)}">
                     <span style="color: #666; display: inline-block; width: 70px;">${timeOnly}</span>
-                    <span style="color: #0af; display: inline-block; width: 105px;">${log.client_ip}</span>
+                    <span style="color: #0af; display: inline-block; width: 105px; cursor: pointer; text-decoration: underline;" onclick="filterByIP('${log.client_ip}')">${log.client_ip}</span>
                     <span style="color: ${methodColor}; display: inline-block; width: 42px; font-weight: bold;">${log.method}</span>
                     <span style="color: ${statusColor}; display: inline-block; width: 32px; font-weight: bold;">${log.status_code}</span>
-                    <span style="color: #fff;">${escapeHtml(log.uri)}</span>
+                    <span style="color: #fff; cursor: pointer; text-decoration: underline;" onclick="filterByPath('${escapeHtml(log.uri)}')">${escapeHtml(log.uri)}</span>
                     <span style="color: #888; margin-left: 10px;">${formatBytes(log.bytes_written)}</span>
                     <span style="color: #888; margin-left: 10px;">${log.duration_ms.toFixed(2)}ms</span>
                 </div>`;
@@ -16476,6 +16476,22 @@ Referer: ${log.referer}`;
             // Debounce the filter
             clearTimeout(window.webLogsFilterTimeout);
             window.webLogsFilterTimeout = setTimeout(loadWebLogs, 300);
+        }
+        
+        function filterByIP(ip) {
+            const filterInput = document.getElementById('webLogsFilter');
+            if (filterInput) {
+                filterInput.value = ip;
+                loadWebLogs();
+            }
+        }
+        
+        function filterByPath(path) {
+            const filterInput = document.getElementById('webLogsFilter');
+            if (filterInput) {
+                filterInput.value = path;
+                loadWebLogs();
+            }
         }
         
         function downloadWebLogs() {

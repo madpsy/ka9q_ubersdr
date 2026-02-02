@@ -62,7 +62,7 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_space_weather
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_space_weather",
-			mcp.WithDescription("Get current space weather conditions including Solar Flux Index (SFI), A-index, and K-index which affect HF radio propagation"),
+			mcp.WithDescription("Get current space weather conditions including Solar Flux Index (SFI), A-index, and K-index which affect HF radio propagation. Use this to understand current ionospheric conditions. Higher SFI (>150) = better HF propagation. Higher K-index (>5) = disturbed conditions and poor propagation."),
 			mcp.WithString("format",
 				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
 				mcp.DefaultString("json"),
@@ -74,7 +74,7 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_noise_floor
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_noise_floor",
-			mcp.WithDescription("Get noise floor measurements for amateur radio bands, including dynamic range, occupancy, and estimated FT8 SNR"),
+			mcp.WithDescription("Get noise floor measurements for amateur radio bands, including dynamic range, occupancy, and estimated FT8 SNR. Use this to assess current band conditions and signal quality. Lower noise floor = better conditions. Higher estimated FT8 SNR = better decode capability."),
 			mcp.WithString("band",
 				mcp.Description("Specific band name (e.g., '20m', '40m', '80m') or leave empty for all bands"),
 			),
@@ -89,9 +89,9 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_decoder_spots
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_decoder_spots",
-			mcp.WithDescription("Get recent digital mode spots (FT8, FT4, WSPR) decoded from the radio"),
+			mcp.WithDescription("Get recent individual digital mode spots (FT8, FT4, WSPR, JS8) decoded from the radio. Use this for RAW spot data with callsigns, locators, SNR, frequencies, and messages. For questions about specific callsigns, locators, or individual decodes, use this tool. For aggregated statistics by country/band/time, use get_decoder_analytics or get_decoder_analytics_hourly instead."),
 			mcp.WithString("mode",
-				mcp.Description("Mode filter: 'FT8', 'FT4', 'WSPR', or empty for all modes"),
+				mcp.Description("Mode filter: 'FT8', 'FT4', 'WSPR', 'JS8', or empty for all modes"),
 			),
 			mcp.WithNumber("hours",
 				mcp.Description("Hours of history to retrieve (default: 1, max: 48)"),
@@ -108,9 +108,9 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_decoder_analytics
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_decoder_analytics",
-			mcp.WithDescription("Get aggregated analytics about decoder spots by country, continent, mode, and band"),
+			mcp.WithDescription("Get aggregated analytics about decoder spots by country, continent, mode, and band. Use this to answer questions about WHICH bands/countries have the most activity overall (e.g., 'which band is best for South Korea?'). Returns total spot counts, average SNR, and band distribution for each country."),
 			mcp.WithString("country",
-				mcp.Description("Country name filter (e.g., 'United States', 'Germany') or empty for all"),
+				mcp.Description("Country name filter (e.g., 'South Korea', 'Japan', 'United States', 'Germany') or empty for all countries"),
 			),
 			mcp.WithString("continent",
 				mcp.Description("Continent code: 'AF' (Africa), 'AS' (Asia), 'EU' (Europe), 'NA' (North America), 'OC' (Oceania), 'SA' (South America), 'AN' (Antarctica), or empty for all"),
@@ -140,9 +140,9 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_decoder_analytics_hourly
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_decoder_analytics_hourly",
-			mcp.WithDescription("Get hourly aggregated analytics about decoder spots, broken down by hour for trend analysis"),
+			mcp.WithDescription("Get hourly aggregated analytics about decoder spots, broken down by hour for trend analysis. Use this to answer questions about WHEN specific countries/bands are most active (e.g., 'what time is South Korea most active on 20m?'). Returns spot counts and SNR data for each hour of the day, allowing you to identify peak propagation times."),
 			mcp.WithString("country",
-				mcp.Description("Country name filter or empty for all"),
+				mcp.Description("Country name filter (e.g., 'South Korea', 'Japan', 'United States') or empty for all countries"),
 			),
 			mcp.WithString("continent",
 				mcp.Description("Continent code (AF, AS, EU, NA, OC, SA, AN) or empty for all"),
@@ -172,7 +172,7 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_active_sessions
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_active_sessions",
-			mcp.WithDescription("Get list of active radio listening sessions, showing what frequencies and modes are currently in use"),
+			mcp.WithDescription("Get list of active radio listening sessions showing what frequencies and modes are currently in use by other users. Includes geographic location (latitude/longitude), country, and chat usernames. Use this to see what other people are listening to right now."),
 			mcp.WithString("format",
 				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
 				mcp.DefaultString("json"),
@@ -184,7 +184,7 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_band_conditions
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_band_conditions",
-			mcp.WithDescription("Get comprehensive band conditions analysis combining space weather, noise floor measurements, and recent activity"),
+			mcp.WithDescription("Get comprehensive band conditions analysis combining space weather, noise floor measurements, and recent decoder activity. Use this for a quick overview of current HF propagation conditions across all bands. Perfect for answering 'what are conditions like right now?' or 'which bands are open?'"),
 			mcp.WithString("format",
 				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
 				mcp.DefaultString("json"),
@@ -196,7 +196,7 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_wideband_spectrum
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_wideband_spectrum",
-			mcp.WithDescription("Get full HF spectrum FFT data (0-30 MHz) showing the entire radio spectrum with noise floor and signal levels across all frequencies"),
+			mcp.WithDescription("Get full HF spectrum FFT data (0-30 MHz) showing the entire radio spectrum with noise floor and signal levels across all frequencies. Returns raw FFT bins with frequency and power data. Use this for detailed spectrum analysis or to identify signals across the entire HF spectrum."),
 			mcp.WithNumber("center_freq",
 				mcp.Description("Center frequency in MHz (default: 15.0, range: 0-30)"),
 				mcp.DefaultNumber(15.0),
@@ -212,7 +212,7 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_noise_floor_trends
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_noise_floor_trends",
-			mcp.WithDescription("Get 24-hour noise floor trend data for analyzing propagation patterns over time, includes measurements averaged in 10-minute intervals"),
+			mcp.WithDescription("Get 24-hour noise floor trend data for analyzing propagation patterns over time. Includes measurements averaged in 10-minute intervals showing how noise floor changes throughout the day. Use this to identify best times for specific bands or to analyze propagation trends."),
 			mcp.WithString("band",
 				mcp.Description("Specific band name (e.g., '20m', '40m') or empty for all bands"),
 			),

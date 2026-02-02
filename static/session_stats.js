@@ -64,6 +64,9 @@ async function createWorldMap(countries) {
             }
         });
         
+        console.log('Country data map:', countryDataMap);
+        console.log('Max sessions:', maxSessions);
+        
         // Set up SVG
         const svg = d3.select('#worldMap');
         const container = svg.node().parentElement;
@@ -109,8 +112,18 @@ async function createWorldMap(countries) {
             .attr('d', path)
             .attr('class', 'country')
             .style('fill', d => {
-                // Try to match by country code from properties
-                const code = d.properties.iso_a2 || d.properties.ISO_A2;
+                // Try multiple property names for country code
+                const code = d.properties.iso_a2 ||
+                            d.properties.ISO_A2 ||
+                            d.properties.iso_a2_eh ||
+                            d.properties.gu_a3 ||
+                            d.id;
+                
+                // Log first few countries for debugging
+                if (d.id < 5) {
+                    console.log('Country properties:', d.properties);
+                }
+                
                 const sessions = countryDataMap[code];
                 
                 if (sessions) {

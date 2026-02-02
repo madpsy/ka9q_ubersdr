@@ -46,15 +46,15 @@ admin:
   # After this many failed attempts within the time window, the IP is banned
   max_login_attempts: 5
 
-  # Time window for counting failed attempts in seconds (default: 900 = 15 minutes)
+  # Time window for counting failed attempts in seconds (default: 600 = 10 minutes)
   # Failed attempts are counted within this rolling time window
   # If attempts are spread out beyond this window, the counter resets
-  login_attempt_window: 900
+  login_attempt_window: 600
 
-  # Duration of temporary ban in seconds (default: 900 = 15 minutes)
+  # Duration of temporary ban in seconds (default: 600 = 10 minutes)
   # How long an IP is banned after exceeding max_login_attempts
   # After this duration, the ban expires and the IP can try again
-  login_ban_duration: 900
+  login_ban_duration: 600
 
   # List of IP addresses or CIDR ranges allowed to access admin endpoints
   # Only these IPs can access the admin interface (password is still required)

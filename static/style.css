@@ -326,6 +326,7 @@ body {
     margin-bottom: 30px;
     text-align: center;
     min-width: 400px;
+    max-width: 600px;
 }
 
 .site-description a {

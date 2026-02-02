@@ -573,7 +573,16 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 		// Check for password in X-Admin-Password header first
 		if password := r.Header.Get("X-Admin-Password"); password != "" {
+			// Check if IP is already temporarily banned (before validating password)
+			if ah.ipBanManager.IsBanned(clientIP) {
+				http.Error(w, "Too many failed authentication attempts. Please try again later.", http.StatusTooManyRequests)
+				return
+			}
+
 			if password == ah.config.Admin.Password {
+				// Valid password - reset failed attempts for this IP
+				ah.loginAttempts.ResetAttempts(clientIP)
+				
 				// Valid password, proceed
 				if isSSHProxy {
 					log.Printf("[SSH Proxy Auth] Authenticated via X-Admin-Password header for %s", r.URL.Path)
@@ -581,6 +590,29 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				next(w, r)
 				return
 			}
+			
+			// Invalid password - record failed attempt
+			attemptCount := ah.loginAttempts.RecordFailedAttempt(clientIP)
+			
+			// Check if we should apply temporary ban
+			if attemptCount >= ah.config.Admin.MaxLoginAttempts {
+				// Apply temporary ban
+				banDuration := time.Duration(ah.config.Admin.LoginBanDuration) * time.Second
+				reason := fmt.Sprintf("Too many failed X-Admin-Password attempts (%d)", attemptCount)
+				if err := ah.ipBanManager.BanIPWithDuration(clientIP, reason, "rate_limiter", banDuration); err != nil {
+					log.Printf("Failed to ban IP %s: %v", clientIP, err)
+				} else {
+					log.Printf("Temporarily banned IP %s for %v due to %d failed X-Admin-Password attempts", clientIP, banDuration, attemptCount)
+				}
+				http.Error(w, "Too many failed authentication attempts. Your IP has been temporarily banned.", http.StatusTooManyRequests)
+				return
+			}
+			
+			// Log the failed attempt
+			remainingAttempts := ah.config.Admin.MaxLoginAttempts - attemptCount
+			log.Printf("Failed X-Admin-Password attempt from %s (%d/%d attempts, %d remaining)",
+				clientIP, attemptCount, ah.config.Admin.MaxLoginAttempts, remainingAttempts)
+			
 			// Invalid password
 			if isSSHProxy {
 				log.Printf("[SSH Proxy Auth] Invalid X-Admin-Password header for %s", r.URL.Path)

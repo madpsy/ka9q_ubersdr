@@ -1,34 +1,15 @@
-## Version 0.1.5 - Latest Release
+## Version 0.1.38 - Latest Release
 
 ### New Features
-- Added **Release Notes** modal to admin interface
-- Improved session management with real-time updates
-- Enhanced decoder performance monitoring
+- Added **Release notes** in version footer of admin interface
+- Added **Host terminal access** with tmux sessions
+- Added **Admin IP address allow list** to restrict admin access
+- Implemented **Rotctld (Rotator Control) wizard** for easier rotator setup
+- Added **FFTW Wisdom generation wizard** for optimized FFT performance
+- Integrated **GeoIP lookups** for location-based features
+- Added **Decoder execution time clamping** for FT8/FT4/WSPR decoders
 
 ### Bug Fixes
-- Fixed issue with `spectrum` rendering on mobile devices
-- Resolved memory leak in audio streaming
-- Corrected timezone handling in [PSKReporter](https://pskreporter.info) uploads
-
-### Technical Details
-Some important technical notes:
-- Use the `config.yaml` file for configuration
-- The decoder now supports **FT8**, **FT4**, **WSPR**, and *JS8* modes
-- Links like [GitHub](https://github.com) open in new tabs
-
-### Feature List
-- Real-time spectrum display
-- Multi-user support
-- Decoder integration
-- Chat functionality
-- Session analytics
-
-## Version 0.1.4
-
-### Improvements
-- Better error handling
-- *Improved* performance
-- __Enhanced__ stability
-
-### Notes
-This is a **test** of the markdown parser with various formatting options including `inline code`, **bold text**, *italic text*, and [external links](https://ubersdr.org).
+- Fixed waterfall underlapping frequency notches
+- Corrected waterfall height inconsistency when spectrum is enabled
+- Set maximum wrapping width for start overlay description/map

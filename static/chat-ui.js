@@ -354,10 +354,18 @@ class ChatUI {
     /**
      * Auto-login with saved username
      */
-    autoLogin() {
+    async autoLogin() {
         if (this.savedUsername && this.chat) {
             console.log('Auto-logging in as:', this.savedUsername);
-            this.chat.setUsername(this.savedUsername);
+            const success = await this.chat.setUsername(this.savedUsername);
+            
+            // If failed (WebSocket not ready), retry after delay
+            if (!success && this.savedUsername) {
+                console.log('[ChatUI] Auto-login failed (WebSocket not ready), retrying in 2 seconds...');
+                setTimeout(() => {
+                    this.autoLogin();
+                }, 2000);
+            }
         }
     }
 

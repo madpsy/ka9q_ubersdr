@@ -281,7 +281,8 @@ class UberSDRChat {
             }));
             return true;
         } else {
-            this.emit('error', 'WebSocket not connected');
+            // Don't emit error - let the UI handle retry logic silently
+            console.log('[Chat] WebSocket not connected for setUsername, returning false');
             return false;
         }
     }

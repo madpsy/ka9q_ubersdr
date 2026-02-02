@@ -102,8 +102,8 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 	// Track unique IPs (for counting, not exposing)
 	uniqueIPs := make(map[string]bool)
 	
-	// Track unique IPs per country for GeoIP lookups
-	countryUniqueIPs := make(map[string]map[string]bool) // country -> set of IPs
+	// Track session counts per IP per country for GeoIP lookups
+	countryIPSessions := make(map[string]map[string]int) // country -> IP -> session count
 
 	// Duration buckets (in minutes): 0-1, 1-5, 5-15, 15-30, 30-60, 60-120, 120+
 	durationBuckets := map[string]int{
@@ -146,15 +146,15 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 				"country_code": event.CountryCode,
 				"sessions":     0,
 			}
-			countryUniqueIPs[country] = make(map[string]bool)
+			countryIPSessions[country] = make(map[string]int)
 			countryLocations[country] = make(map[string]*LocationData)
 		}
 		stats := countryStats[country]
 		stats["sessions"] = stats["sessions"].(int) + 1
 		
-		// Track unique IPs per country for location lookups
+		// Track session counts per IP per country for location lookups
 		if event.ClientIP != "" {
-			countryUniqueIPs[country][event.ClientIP] = true
+			countryIPSessions[country][event.ClientIP]++
 		}
 
 		// Categorize duration into buckets
@@ -184,10 +184,10 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 		weekdayActivity[weekday]++
 	}
 
-	// Perform GeoIP lookups for all unique IPs per country to get unique locations
+	// Perform GeoIP lookups for all IPs per country to get unique locations
 	if geoIPService != nil && geoIPService.IsEnabled() {
-		for country, ips := range countryUniqueIPs {
-			for ip := range ips {
+		for country, ipSessions := range countryIPSessions {
+			for ip, sessionCount := range ipSessions {
 				if geoResult, err := geoIPService.Lookup(ip); err == nil {
 					if geoResult.Latitude != nil && geoResult.Longitude != nil {
 						// Create a key from lat/lon (rounded to avoid tiny differences)
@@ -202,7 +202,8 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 								Sessions: 0,
 							}
 						}
-						countryLocations[country][locKey].Sessions++
+						// Add the session count for this IP to the location
+						countryLocations[country][locKey].Sessions += sessionCount
 					}
 				}
 			}

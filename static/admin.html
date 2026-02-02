@@ -732,6 +732,7 @@
                                 <label style="display: flex; align-items: center; gap: 5px; margin: 0;">
                                     <span>Filter:</span>
                                     <input type="text" id="webLogsFilter" oninput="onWebLogsFilterChange()" placeholder="Filter by IP or path..." style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; min-width: 200px;">
+                                    <button onclick="clearWebLogsFilters()" style="background: #dc3545; color: white; border: none; font-size: 18px; cursor: pointer; padding: 6px 10px; border-radius: 5px; line-height: 1;" title="Clear all filters">✕</button>
                                 </label>
                                 <span id="webLogsCount" style="color: #666; margin-left: auto;"></span>
                             </div>
@@ -16511,6 +16512,18 @@ Referer: ${log.referer}`;
                 statusSelect.value = statusSeries;
                 loadWebLogs();
             }
+        }
+        
+        function clearWebLogsFilters() {
+            const filterInput = document.getElementById('webLogsFilter');
+            const methodSelect = document.getElementById('webLogsMethod');
+            const statusSelect = document.getElementById('webLogsStatus');
+            
+            if (filterInput) filterInput.value = '';
+            if (methodSelect) methodSelect.value = '';
+            if (statusSelect) statusSelect.value = '';
+            
+            loadWebLogs();
         }
         
         function downloadWebLogs() {

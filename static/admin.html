@@ -16423,7 +16423,7 @@ Referer: ${log.referer}`;
                 return `<div style="margin-bottom: 0; padding: 4px 8px; background: #111; border-left: 3px solid ${statusColor}; border-radius: 0; font-family: 'Courier New', monospace; font-size: 11px;" title="${escapeHtml(tooltip)}">
                     <span style="color: #666; display: inline-block; width: 70px;">${timeOnly}</span>
                     <span style="color: #0af; display: inline-block; width: 105px; cursor: pointer;" onclick="filterByIP('${log.client_ip}')">${log.client_ip}</span>
-                    <span style="color: #9c9; display: inline-block; width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${log.country || ''}">${countryDisplay}</span>
+                    <span style="color: #9c9; display: inline-block; width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;" title="${log.country || ''}">${countryDisplay}</span>
                     <span style="color: ${methodColor}; display: inline-block; width: 42px; font-weight: bold; cursor: pointer;" onclick="filterByMethod('${log.method}')">${log.method}</span>
                     <span style="color: ${statusColor}; display: inline-block; width: 32px; font-weight: bold; cursor: pointer;" onclick="filterByStatus('${statusSeries}')">${log.status_code}</span>
                     <span style="color: #fff; cursor: pointer;" onclick="filterByPath('${escapeHtml(log.uri)}')">${escapeHtml(log.uri)}</span>

@@ -16394,7 +16394,19 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 const statusColor = getStatusColor(log.status_code);
                 const methodColor = getMethodColor(log.method);
                 
-                return `<div style="margin-bottom: 8px; padding: 8px; background: #111; border-left: 3px solid ${statusColor}; border-radius: 3px;">
+                // Create tooltip with all fields
+                const tooltip = `Timestamp: ${timestamp}
+Client IP: ${log.client_ip}
+Method: ${log.method}
+URI: ${log.uri}
+Protocol: ${log.protocol}
+Status: ${log.status_code}
+Bytes: ${log.bytes_written}
+Duration: ${log.duration_ms.toFixed(3)}ms
+User-Agent: ${log.user_agent}
+Referer: ${log.referer}`;
+                
+                return `<div style="margin-bottom: 8px; padding: 8px; background: #111; border-left: 3px solid ${statusColor}; border-radius: 3px; cursor: help;" title="${escapeHtml(tooltip)}">
                     <span style="color: #666;">${timestamp}</span>
                     <span style="color: #0af; margin-left: 10px;">${log.client_ip}</span>
                     <span style="color: ${methodColor}; margin-left: 10px; font-weight: bold;">${log.method}</span>

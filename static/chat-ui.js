@@ -1566,6 +1566,13 @@ class ChatUI {
             const needsSubscription = this.chat && !this.chat.isSubscribed;
             if (needsSubscription) {
                 console.log('[ChatUI] Re-subscribing to chat on panel open');
+                
+                // Clear message history to prevent duplicates when re-subscribing
+                const messagesContainer = document.getElementById('chat-messages');
+                if (messagesContainer) {
+                    messagesContainer.innerHTML = '';
+                }
+                
                 // Set flag to indicate we're receiving history to prevent duplicate messages
                 this.isReceivingHistory = true;
                 // Wait for subscription to complete before requesting users

@@ -144,9 +144,10 @@ async function createWorldMap(countries) {
             .style('opacity', 0)
             .style('z-index', 1000);
         
-        // Match countries to features for coloring
+        // Match countries to features and calculate per-feature session totals
         // Process in two passes: first match named countries, then "Unknown"
-        const featureCountryMap = new Map();
+        const featureCountryMap = new Map(); // feature -> backend country name
+        const featureSessionTotal = new Map(); // feature -> total sessions in that feature
         const countryFeatureMap = new Map(); // country name -> feature (reverse lookup)
         
         // First pass: Match all named countries (not "Unknown")
@@ -184,6 +185,19 @@ async function createWorldMap(countries) {
             }
         });
         
+        // Calculate actual session totals per feature by summing locations within each feature
+        worldCountries.features.forEach(feature => {
+            let total = 0;
+            allLocations.forEach(loc => {
+                if (d3.geoContains(feature, [loc.lon, loc.lat])) {
+                    total += loc.sessions;
+                }
+            });
+            if (total > 0) {
+                featureSessionTotal.set(feature, total);
+            }
+        });
+        
         console.log('Matched country features:', featureCountryMap.size);
         
         // Draw countries (colored by total sessions)
@@ -195,12 +209,9 @@ async function createWorldMap(countries) {
             .attr('d', path)
             .attr('class', 'country')
             .style('fill', d => {
-                const countryName = featureCountryMap.get(d);
-                if (countryName) {
-                    const sessions = countryTotals.get(countryName);
-                    if (sessions) {
-                        return countryColorScale(sessions);
-                    }
+                const sessions = featureSessionTotal.get(d);
+                if (sessions) {
+                    return countryColorScale(sessions);
                 }
                 return '#2d3748'; // Dark gray for countries with no data
             })
@@ -208,13 +219,13 @@ async function createWorldMap(countries) {
             .style('stroke-width', '0.5')
             .style('cursor', 'pointer')
             .on('mouseover', function(event, d) {
-                // Prefer D3's country name from map data, fallback to our backend data
+                // Prefer D3's country name from map data
                 const d3CountryName = d.properties.name;
                 const backendCountryName = featureCountryMap.get(d);
                 const displayName = d3CountryName || backendCountryName || 'Unknown';
                 
-                // Try to get sessions using backend country name first
-                const sessions = backendCountryName ? countryTotals.get(backendCountryName) : null;
+                // Get actual sessions within this feature
+                const sessions = featureSessionTotal.get(d);
                 
                 d3.select(this)
                     .style('stroke', '#fff')
@@ -225,7 +236,7 @@ async function createWorldMap(countries) {
                     .style('opacity', 1);
                     
                 if (sessions) {
-                    tooltip.html(`<strong>${displayName}</strong><br/>Total Sessions: ${sessions.toLocaleString()}`)
+                    tooltip.html(`<strong>${displayName}</strong><br/>Sessions: ${sessions.toLocaleString()}`)
                         .style('left', (event.pageX + 10) + 'px')
                         .style('top', (event.pageY - 28) + 'px');
                 } else {

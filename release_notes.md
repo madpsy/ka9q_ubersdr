@@ -2,6 +2,7 @@
 
 ### New Features
 - Added **Release notes** in version footer of admin interface
+- Added **Listener Map** showing sessions by location at /session_stats.html
 - Added **Host terminal access** with tmux sessions
 - Added **Admin IP address allow list** to restrict admin access
 - Implemented **Rotctld (Rotator Control) wizard** for easier rotator setup

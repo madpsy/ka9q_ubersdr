@@ -16398,6 +16398,10 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 // Create tooltip with all fields
                 const tooltip = `Timestamp: ${timestamp}
 Client IP: ${log.client_ip}
+Country: ${log.country || 'Unknown'}
+Country Code: ${log.country_code || 'Unknown'}
+Continent: ${log.continent || 'Unknown'}
+Continent Code: ${log.continent_code || 'Unknown'}
 Method: ${log.method}
 URI: ${log.uri}
 Protocol: ${log.protocol}
@@ -16413,9 +16417,13 @@ Referer: ${log.referer}`;
                 // Determine status series (2xx, 3xx, 4xx, 5xx)
                 const statusSeries = Math.floor(log.status_code / 100) + 'xx';
                 
+                // Format country display (show country code if available, otherwise empty)
+                const countryDisplay = log.country_code ? log.country_code : '';
+                
                 return `<div style="margin-bottom: 0; padding: 4px 8px; background: #111; border-left: 3px solid ${statusColor}; border-radius: 0; font-family: 'Courier New', monospace; font-size: 11px;" title="${escapeHtml(tooltip)}">
                     <span style="color: #666; display: inline-block; width: 70px;">${timeOnly}</span>
                     <span style="color: #0af; display: inline-block; width: 105px; cursor: pointer;" onclick="filterByIP('${log.client_ip}')">${log.client_ip}</span>
+                    <span style="color: #9c9; display: inline-block; width: 28px;">${countryDisplay}</span>
                     <span style="color: ${methodColor}; display: inline-block; width: 42px; font-weight: bold; cursor: pointer;" onclick="filterByMethod('${log.method}')">${log.method}</span>
                     <span style="color: ${statusColor}; display: inline-block; width: 32px; font-weight: bold; cursor: pointer;" onclick="filterByStatus('${statusSeries}')">${log.status_code}</span>
                     <span style="color: #fff; cursor: pointer;" onclick="filterByPath('${escapeHtml(log.uri)}')">${escapeHtml(log.uri)}</span>
@@ -16533,10 +16541,12 @@ Referer: ${log.referer}`;
             }
             
             // Create CSV content
-            const headers = ['Timestamp', 'Client IP', 'Method', 'URI', 'Protocol', 'Status', 'Bytes', 'Duration (ms)', 'User Agent', 'Referer'];
+            const headers = ['Timestamp', 'Client IP', 'Country', 'Country Code', 'Method', 'URI', 'Protocol', 'Status', 'Bytes', 'Duration (ms)', 'User Agent', 'Referer'];
             const rows = webLogsData.map(log => [
                 new Date(log.timestamp).toISOString(),
                 log.client_ip,
+                log.country || '',
+                log.country_code || '',
                 log.method,
                 log.uri,
                 log.protocol,

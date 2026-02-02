@@ -53,7 +53,7 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 }
 
 // httpLogger creates a logging middleware that logs requests in Apache combined log format
-func httpLogger(logFile *os.File, next http.Handler) http.Handler {
+func httpLogger(logFile *os.File, geoIPService *GeoIPService, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
@@ -75,8 +75,20 @@ func httpLogger(logFile *os.File, next http.Handler) http.Handler {
 				referer = "-"
 			}
 
+			// Perform GeoIP lookup if service is available
+			var country, countryCode, continent, continentCode string
+			if geoIPService != nil && geoIPService.IsEnabled() {
+				if result, err := geoIPService.Lookup(clientIP); err == nil {
+					country = result.Country
+					countryCode = result.CountryCode
+					continent = result.Continent
+					continentCode = result.ContinentCode
+				}
+			}
+
 			// Log WebSocket upgrade request (status 101 Switching Protocols is assumed)
-			logLine := fmt.Sprintf("%s - - [%s] \"%s %s %s\" 101 - \"%s\" \"%s\" 0.000ms\n",
+			// Format: IP - - [timestamp] "method URI protocol" status bytes "referer" "user-agent" duration country continent
+			logLine := fmt.Sprintf("%s - - [%s] \"%s %s %s\" 101 - \"%s\" \"%s\" 0.000ms %s %s\n",
 				clientIP,
 				start.Format("02/Jan/2006:15:04:05 -0700"),
 				r.Method,
@@ -84,6 +96,8 @@ func httpLogger(logFile *os.File, next http.Handler) http.Handler {
 				r.Proto,
 				referer,
 				userAgent,
+				countryCode,
+				continentCode,
 			)
 
 			// Write to log file if enabled
@@ -96,16 +110,20 @@ func httpLogger(logFile *os.File, next http.Handler) http.Handler {
 			// Always write to in-memory buffer
 			if globalHTTPLogBuffer != nil {
 				globalHTTPLogBuffer.AddLog(HTTPLogEntry{
-					Timestamp:    start,
-					ClientIP:     clientIP,
-					Method:       r.Method,
-					URI:          r.RequestURI,
-					Protocol:     r.Proto,
-					StatusCode:   101,
-					BytesWritten: 0,
-					DurationMs:   0.0,
-					UserAgent:    userAgent,
-					Referer:      referer,
+					Timestamp:     start,
+					ClientIP:      clientIP,
+					Method:        r.Method,
+					URI:           r.RequestURI,
+					Protocol:      r.Proto,
+					StatusCode:    101,
+					BytesWritten:  0,
+					DurationMs:    0.0,
+					UserAgent:     userAgent,
+					Referer:       referer,
+					Country:       country,
+					CountryCode:   countryCode,
+					Continent:     continent,
+					ContinentCode: continentCode,
 				})
 			}
 
@@ -142,10 +160,21 @@ func httpLogger(logFile *os.File, next http.Handler) http.Handler {
 			referer = "-"
 		}
 
-		// Apache Combined Log Format:
-		// %h %l %u %t "%r" %>s %b "%{Referer}i" "%{User-agent}i"
-		// Example: 127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET /apache_pb.gif HTTP/1.0" 200 2326 "http://www.example.com/start.html" "Mozilla/4.08 [en] (Win98; I ;Nav)"
-		logLine := fmt.Sprintf("%s - - [%s] \"%s %s %s\" %d %d \"%s\" \"%s\" %.3fms\n",
+		// Perform GeoIP lookup if service is available
+		var country, countryCode, continent, continentCode string
+		if geoIPService != nil && geoIPService.IsEnabled() {
+			if result, err := geoIPService.Lookup(clientIP); err == nil {
+				country = result.Country
+				countryCode = result.CountryCode
+				continent = result.Continent
+				continentCode = result.ContinentCode
+			}
+		}
+
+		// Apache Combined Log Format with GeoIP:
+		// %h %l %u %t "%r" %>s %b "%{Referer}i" "%{User-agent}i" duration country continent
+		// Example: 127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET /apache_pb.gif HTTP/1.0" 200 2326 "http://www.example.com/start.html" "Mozilla/4.08 [en] (Win98; I ;Nav)" 1.234ms US NA
+		logLine := fmt.Sprintf("%s - - [%s] \"%s %s %s\" %d %d \"%s\" \"%s\" %.3fms %s %s\n",
 			clientIP,
 			start.Format("02/Jan/2006:15:04:05 -0700"),
 			r.Method,
@@ -156,6 +185,8 @@ func httpLogger(logFile *os.File, next http.Handler) http.Handler {
 			referer,
 			userAgent,
 			float64(duration.Microseconds())/1000.0,
+			countryCode,
+			continentCode,
 		)
 
 		// Write to log file if enabled
@@ -168,16 +199,20 @@ func httpLogger(logFile *os.File, next http.Handler) http.Handler {
 		// Always write to in-memory buffer
 		if globalHTTPLogBuffer != nil {
 			globalHTTPLogBuffer.AddLog(HTTPLogEntry{
-				Timestamp:    start,
-				ClientIP:     clientIP,
-				Method:       r.Method,
-				URI:          r.RequestURI,
-				Protocol:     r.Proto,
-				StatusCode:   wrapped.statusCode,
-				BytesWritten: wrapped.written,
-				DurationMs:   float64(duration.Microseconds()) / 1000.0,
-				UserAgent:    userAgent,
-				Referer:      referer,
+				Timestamp:     start,
+				ClientIP:      clientIP,
+				Method:        r.Method,
+				URI:           r.RequestURI,
+				Protocol:      r.Proto,
+				StatusCode:    wrapped.statusCode,
+				BytesWritten:  wrapped.written,
+				DurationMs:    float64(duration.Microseconds()) / 1000.0,
+				UserAgent:     userAgent,
+				Referer:       referer,
+				Country:       country,
+				CountryCode:   countryCode,
+				Continent:     continent,
+				ContinentCode: continentCode,
 			})
 		}
 	})
@@ -1377,7 +1412,7 @@ func main() {
 	var handler http.Handler = http.DefaultServeMux
 	handler = corsMiddleware(config, handler)
 	// Always wrap with httpLogger (it handles both file and in-memory logging)
-	handler = httpLogger(logFile, handler)
+	handler = httpLogger(logFile, geoIPService, handler)
 
 	// Start HTTP server
 	server := &http.Server{

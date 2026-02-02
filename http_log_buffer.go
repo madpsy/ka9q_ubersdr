@@ -7,16 +7,20 @@ import (
 
 // HTTPLogEntry represents a single HTTP request log entry
 type HTTPLogEntry struct {
-	Timestamp  time.Time `json:"timestamp"`
-	ClientIP   string    `json:"client_ip"`
-	Method     string    `json:"method"`
-	URI        string    `json:"uri"`
-	Protocol   string    `json:"protocol"`
-	StatusCode int       `json:"status_code"`
-	BytesWritten int64   `json:"bytes_written"`
-	DurationMs float64   `json:"duration_ms"`
-	UserAgent  string    `json:"user_agent"`
-	Referer    string    `json:"referer"`
+	Timestamp     time.Time `json:"timestamp"`
+	ClientIP      string    `json:"client_ip"`
+	Method        string    `json:"method"`
+	URI           string    `json:"uri"`
+	Protocol      string    `json:"protocol"`
+	StatusCode    int       `json:"status_code"`
+	BytesWritten  int64     `json:"bytes_written"`
+	DurationMs    float64   `json:"duration_ms"`
+	UserAgent     string    `json:"user_agent"`
+	Referer       string    `json:"referer"`
+	Country       string    `json:"country,omitempty"`        // GeoIP country name
+	CountryCode   string    `json:"country_code,omitempty"`   // GeoIP country ISO code
+	Continent     string    `json:"continent,omitempty"`      // GeoIP continent name
+	ContinentCode string    `json:"continent_code,omitempty"` // GeoIP continent code
 }
 
 // HTTPLogBuffer manages in-memory HTTP request logs with a rolling window

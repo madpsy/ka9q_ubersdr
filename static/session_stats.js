@@ -154,9 +154,24 @@ async function createWorldMap(countries) {
                 
                 // Counter-scale markers so they maintain visual size
                 const scale = event.transform.k;
+                
+                // Scale listener location markers
                 mapGroup.selectAll('circle')
-                    .attr('r', d => markerSizeScale(d.sessions) / scale)
-                    .style('stroke-width', 1 / scale);
+                    .each(function(d) {
+                        const circle = d3.select(this);
+                        // Check if this is a receiver marker (has class receiver-marker parent)
+                        const isReceiverMarker = circle.node().parentElement.classList.contains('receiver-marker');
+                        
+                        if (isReceiverMarker) {
+                            // Receiver marker has fixed size
+                            circle.attr('r', 8 / scale)
+                                .style('stroke-width', 2 / scale);
+                        } else if (d && d.sessions !== undefined) {
+                            // Listener location markers scale based on sessions
+                            circle.attr('r', markerSizeScale(d.sessions) / scale)
+                                .style('stroke-width', 1 / scale);
+                        }
+                    });
             });
         
         svg.call(zoom);
@@ -297,57 +312,6 @@ async function createWorldMap(countries) {
                     .style('opacity', 0);
            });
        
-       // Add receiver marker if location is available
-       if (receiverLocation) {
-           const receiverGroup = mapGroup.append('g')
-               .attr('class', 'receiver-marker');
-           
-           // Draw receiver marker (blue circle with white border)
-           receiverGroup.append('circle')
-               .attr('cx', projection([receiverLocation.lon, receiverLocation.lat])[0])
-               .attr('cy', projection([receiverLocation.lon, receiverLocation.lat])[1])
-               .attr('r', 8)
-               .style('fill', '#4CAF50')
-               .style('stroke', '#fff')
-               .style('stroke-width', '2')
-               .style('cursor', 'pointer')
-               .on('mouseover', function(event) {
-                   d3.select(this)
-                       .style('fill', '#45a049')
-                       .style('stroke-width', '3');
-                   
-                   let tooltipContent = '<strong>Receiver Location</strong><br/>';
-                   if (receiverInfo) {
-                       if (receiverInfo.name) {
-                           tooltipContent += `Name: ${receiverInfo.name}<br/>`;
-                       }
-                       if (receiverInfo.location) {
-                           tooltipContent += `Location: ${receiverInfo.location}<br/>`;
-                       }
-                       if (receiverInfo.callsign) {
-                           tooltipContent += `Callsign: ${receiverInfo.callsign}<br/>`;
-                       }
-                   }
-                   tooltipContent += `Coordinates: ${receiverLocation.lat.toFixed(4)}, ${receiverLocation.lon.toFixed(4)}`;
-                   
-                   tooltip.transition()
-                       .duration(200)
-                       .style('opacity', 1);
-                   tooltip.html(tooltipContent)
-                       .style('left', (event.pageX + 10) + 'px')
-                       .style('top', (event.pageY - 28) + 'px');
-               })
-               .on('mouseout', function() {
-                   d3.select(this)
-                       .style('fill', '#4CAF50')
-                       .style('stroke-width', '2');
-                   
-                   tooltip.transition()
-                       .duration(500)
-                       .style('opacity', 0);
-               });
-       }
-       
        // Draw location markers (circles)
        mapGroup.append('g')
             .selectAll('circle')
@@ -382,6 +346,57 @@ async function createWorldMap(countries) {
                     .duration(500)
                     .style('opacity', 0);
             });
+        
+        // Add receiver marker if location is available (after listener markers so it's on top)
+        if (receiverLocation) {
+            const receiverGroup = mapGroup.append('g')
+                .attr('class', 'receiver-marker');
+            
+            // Draw receiver marker (green circle with white border)
+            receiverGroup.append('circle')
+                .attr('cx', projection([receiverLocation.lon, receiverLocation.lat])[0])
+                .attr('cy', projection([receiverLocation.lon, receiverLocation.lat])[1])
+                .attr('r', 8)
+                .style('fill', '#4CAF50')
+                .style('stroke', '#fff')
+                .style('stroke-width', '2')
+                .style('cursor', 'pointer')
+                .on('mouseover', function(event) {
+                    d3.select(this)
+                        .style('fill', '#45a049')
+                        .style('stroke-width', '3');
+                    
+                    let tooltipContent = '<strong>Receiver Location</strong><br/>';
+                    if (receiverInfo) {
+                        if (receiverInfo.name) {
+                            tooltipContent += `Name: ${receiverInfo.name}<br/>`;
+                        }
+                        if (receiverInfo.location) {
+                            tooltipContent += `Location: ${receiverInfo.location}<br/>`;
+                        }
+                        if (receiverInfo.callsign) {
+                            tooltipContent += `Callsign: ${receiverInfo.callsign}<br/>`;
+                        }
+                    }
+                    tooltipContent += `Coordinates: ${receiverLocation.lat.toFixed(4)}, ${receiverLocation.lon.toFixed(4)}`;
+                    
+                    tooltip.transition()
+                        .duration(200)
+                        .style('opacity', 1);
+                    tooltip.html(tooltipContent)
+                        .style('left', (event.pageX + 10) + 'px')
+                        .style('top', (event.pageY - 28) + 'px');
+                })
+                .on('mouseout', function() {
+                    d3.select(this)
+                        .style('fill', '#4CAF50')
+                        .style('stroke-width', '2');
+                    
+                    tooltip.transition()
+                        .duration(500)
+                        .style('opacity', 0);
+                });
+        }
         
         // Add reset zoom button
         svg.append('rect')

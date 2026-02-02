@@ -145,11 +145,12 @@ async function createWorldMap(countries) {
             .style('z-index', 1000);
         
         // Match countries to features for coloring
-        // Build a map of feature -> country name, ensuring each feature maps to only one country
+        // Process in two passes: first match named countries, then "Unknown"
         const featureCountryMap = new Map();
         const countryFeatureMap = new Map(); // country name -> feature (reverse lookup)
         
-        allLocations.forEach(loc => {
+        // First pass: Match all named countries (not "Unknown")
+        allLocations.filter(loc => loc.country !== "Unknown").forEach(loc => {
             // Skip if we already found a feature for this country
             if (countryFeatureMap.has(loc.country)) {
                 return;
@@ -168,8 +169,22 @@ async function createWorldMap(countries) {
             }
         });
         
+        // Second pass: Match "Unknown" locations to any remaining unclaimed features
+        allLocations.filter(loc => loc.country === "Unknown").forEach(loc => {
+            for (const feature of worldCountries.features) {
+                if (d3.geoContains(feature, [loc.lon, loc.lat])) {
+                    // Only set if this feature hasn't been claimed
+                    if (!featureCountryMap.has(feature)) {
+                        featureCountryMap.set(feature, loc.country);
+                        console.log(`Matched Unknown location to feature ${feature.properties.name}`);
+                        break; // Only match one Unknown location per feature
+                    }
+                    break;
+                }
+            }
+        });
+        
         console.log('Matched country features:', featureCountryMap.size);
-        console.log('Feature-Country map:', featureCountryMap);
         
         // Draw countries (colored by total sessions)
         mapGroup.append('g')

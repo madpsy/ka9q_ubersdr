@@ -23,13 +23,8 @@ func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Co
 		return
 	}
 
-	// Extract client IP for rate limiting
-	clientIP := r.RemoteAddr
-	if forwardedFor := r.Header.Get("X-Forwarded-For"); forwardedFor != "" {
-		clientIP = forwardedFor
-	}
-
-	// Check rate limit
+	// Check rate limit (1 request per 3 seconds per IP)
+	clientIP := getClientIP(r)
 	if !rateLimiter.AllowRequest(clientIP) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)

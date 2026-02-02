@@ -343,8 +343,8 @@ class UberSDRChat {
             }));
             return true;
         } else {
-            // Only emit error for user-initiated actions like sending messages
-            this.emit('error', 'WebSocket not connected');
+            // Don't emit error - WebSocket might be reconnecting
+            console.log('[Chat] WebSocket not connected for sendMessage, returning false');
             return false;
         }
     }

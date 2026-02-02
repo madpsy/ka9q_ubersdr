@@ -5,9 +5,49 @@ let countriesChart = null;
 let durationChart = null;
 let weekdayChart = null;
 let hourlyChart = null;
+let receiverLocation = null;
+let receiverInfo = null;
+
+// Load receiver information
+async function loadReceiverInfo() {
+    try {
+        const response = await fetch('/api/description');
+        if (!response.ok) {
+            console.warn('Failed to load receiver information');
+            return;
+        }
+        
+        const data = await response.json();
+        
+        // Update subtitle with receiver name
+        const subtitleEl = document.getElementById('receiver-name');
+        if (subtitleEl && data.receiver && data.receiver.name) {
+            subtitleEl.textContent = data.receiver.name;
+        }
+        
+        // Store receiver location for map marker
+        if (data.receiver && data.receiver.gps) {
+            receiverLocation = {
+                lat: data.receiver.gps.lat,
+                lon: data.receiver.gps.lon
+            };
+            
+            receiverInfo = {
+                name: data.receiver.name || null,
+                location: data.receiver.location || null,
+                callsign: data.receiver.callsign || null
+            };
+        }
+    } catch (error) {
+        console.error('Error loading receiver information:', error);
+    }
+}
 
 // Fetch and display statistics
 async function loadStatistics() {
+    // Load receiver info first
+    await loadReceiverInfo();
+    
     try {
         const response = await fetch('/api/session-stats');
         
@@ -255,10 +295,61 @@ async function createWorldMap(countries) {
                 tooltip.transition()
                     .duration(500)
                     .style('opacity', 0);
-            });
-        
-        // Draw location markers (circles)
-        mapGroup.append('g')
+           });
+       
+       // Add receiver marker if location is available
+       if (receiverLocation) {
+           const receiverGroup = mapGroup.append('g')
+               .attr('class', 'receiver-marker');
+           
+           // Draw receiver marker (blue circle with white border)
+           receiverGroup.append('circle')
+               .attr('cx', projection([receiverLocation.lon, receiverLocation.lat])[0])
+               .attr('cy', projection([receiverLocation.lon, receiverLocation.lat])[1])
+               .attr('r', 8)
+               .style('fill', '#4CAF50')
+               .style('stroke', '#fff')
+               .style('stroke-width', '2')
+               .style('cursor', 'pointer')
+               .on('mouseover', function(event) {
+                   d3.select(this)
+                       .style('fill', '#45a049')
+                       .style('stroke-width', '3');
+                   
+                   let tooltipContent = '<strong>Receiver Location</strong><br/>';
+                   if (receiverInfo) {
+                       if (receiverInfo.name) {
+                           tooltipContent += `Name: ${receiverInfo.name}<br/>`;
+                       }
+                       if (receiverInfo.location) {
+                           tooltipContent += `Location: ${receiverInfo.location}<br/>`;
+                       }
+                       if (receiverInfo.callsign) {
+                           tooltipContent += `Callsign: ${receiverInfo.callsign}<br/>`;
+                       }
+                   }
+                   tooltipContent += `Coordinates: ${receiverLocation.lat.toFixed(4)}, ${receiverLocation.lon.toFixed(4)}`;
+                   
+                   tooltip.transition()
+                       .duration(200)
+                       .style('opacity', 1);
+                   tooltip.html(tooltipContent)
+                       .style('left', (event.pageX + 10) + 'px')
+                       .style('top', (event.pageY - 28) + 'px');
+               })
+               .on('mouseout', function() {
+                   d3.select(this)
+                       .style('fill', '#4CAF50')
+                       .style('stroke-width', '2');
+                   
+                   tooltip.transition()
+                       .duration(500)
+                       .style('opacity', 0);
+               });
+       }
+       
+       // Draw location markers (circles)
+       mapGroup.append('g')
             .selectAll('circle')
             .data(allLocations)
             .enter()
@@ -384,9 +475,31 @@ async function createWorldMap(countries) {
             .style('fill', '#fff')
             .style('font-size', '12px')
             .style('font-weight', 'bold')
-            .text('Location Markers');
+            .text('Markers');
         
-        // Show 3 example marker sizes
+        let markerLegendYPos = 20;
+        
+        // Add receiver marker to legend if available
+        if (receiverLocation) {
+            markerLegend.append('circle')
+                .attr('cx', 10)
+                .attr('cy', markerLegendYPos)
+                .attr('r', 8)
+                .style('fill', '#4CAF50')
+                .style('stroke', '#fff')
+                .style('stroke-width', '2');
+            
+            markerLegend.append('text')
+                .attr('x', 25)
+                .attr('y', markerLegendYPos + 4)
+                .style('fill', '#fff')
+                .style('font-size', '11px')
+                .text('Receiver');
+            
+            markerLegendYPos += 25;
+        }
+        
+        // Show 3 example marker sizes for listener locations
         const exampleSizes = [
             { sessions: Math.ceil(maxLocationSessions * 0.2), label: 'Low' },
             { sessions: Math.ceil(maxLocationSessions * 0.6), label: 'Medium' },
@@ -394,7 +507,7 @@ async function createWorldMap(countries) {
         ];
         
         exampleSizes.forEach((example, i) => {
-            const y = 20 + i * 25;
+            const y = markerLegendYPos + i * 25;
             markerLegend.append('circle')
                 .attr('cx', 10)
                 .attr('cy', y)

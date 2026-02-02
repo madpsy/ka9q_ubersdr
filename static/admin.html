@@ -13512,7 +13512,7 @@ const tooltipLine2 = timeStr;
                     }
 
                     row.innerHTML = `
-                        <td style="padding: 12px; font-family: monospace; font-size: 12px;">${user.client_ip || 'N/A'}</td>
+                        <td style="padding: 12px; font-family: monospace; font-size: 12px;">${user.client_ip || 'N/A'}${user.organization ? ' (' + user.organization + ')' : ''}</td>
                         <td style="padding: 12px; font-size: 12px;">${countryDisplay}</td>
                         <td style="padding: 12px; font-size: 11px; max-width: 200px; word-break: break-all;" title="${user.user_agent || 'N/A'}">${user.user_agent || 'N/A'}</td>
                         <td style="padding: 12px; text-align: center;">${user.audio ? '✓' : '—'}</td>

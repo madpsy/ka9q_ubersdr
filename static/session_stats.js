@@ -111,6 +111,12 @@ async function createWorldMap(countries) {
             .scaleExtent([1, 8]) // Allow zoom from 1x to 8x
             .on('zoom', (event) => {
                 mapGroup.attr('transform', event.transform);
+                
+                // Counter-scale markers so they maintain visual size
+                const scale = event.transform.k;
+                mapGroup.selectAll('circle')
+                    .attr('r', d => markerSizeScale(d.sessions) / scale)
+                    .style('stroke-width', 1 / scale);
             });
         
         svg.call(zoom);

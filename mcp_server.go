@@ -187,6 +187,33 @@ func (m *MCPServer) registerTools() {
 		),
 		m.handleGetBandConditions,
 	)
+
+	// Tool: get_wideband_spectrum
+	m.mcpServer.AddTool(
+		mcp.NewTool("get_wideband_spectrum",
+			mcp.WithDescription("Get full HF spectrum FFT data (0-30 MHz) showing the entire radio spectrum with noise floor and signal levels across all frequencies"),
+			mcp.WithNumber("center_freq",
+				mcp.Description("Center frequency in MHz (default: 15.0, range: 0-30)"),
+				mcp.DefaultNumber(15.0),
+			),
+			mcp.WithNumber("span",
+				mcp.Description("Frequency span in kHz (default: 30000 = full spectrum, min: 3)"),
+				mcp.DefaultNumber(30000.0),
+			),
+		),
+		m.handleGetWidebandSpectrum,
+	)
+
+	// Tool: get_noise_floor_trends
+	m.mcpServer.AddTool(
+		mcp.NewTool("get_noise_floor_trends",
+			mcp.WithDescription("Get 24-hour noise floor trend data for analyzing propagation patterns over time, includes measurements averaged in 10-minute intervals"),
+			mcp.WithString("band",
+				mcp.Description("Specific band name (e.g., '20m', '40m') or empty for all bands"),
+			),
+		),
+		m.handleGetNoiseFloorTrends,
+	)
 }
 
 // HandleMCP handles MCP protocol requests over HTTP
@@ -626,6 +653,64 @@ func (m *MCPServer) handleGetBandConditions(ctx context.Context, request mcp.Cal
 	}
 
 	jsonData, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal data: %v", err)), nil
+	}
+	return mcp.NewToolResultText(string(jsonData)), nil
+}
+
+func (m *MCPServer) handleGetWidebandSpectrum(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// Note: center_freq and span parameters are accepted but not used by GetWideBandFFT()
+	// The method returns the full 0-30 MHz spectrum
+	// These parameters are kept for future enhancement possibilities
+
+	if m.noiseFloorMonitor == nil {
+		return mcp.NewToolResultError("Noise floor monitoring is not enabled"), nil
+	}
+
+	// Get wideband FFT data (full 0-30 MHz spectrum)
+	fft := m.noiseFloorMonitor.GetWideBandFFT()
+	if fft == nil {
+		return mcp.NewToolResultError("No wideband FFT data available"), nil
+	}
+
+	jsonData, err := json.MarshalIndent(fft, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal data: %v", err)), nil
+	}
+	return mcp.NewToolResultText(string(jsonData)), nil
+}
+
+func (m *MCPServer) handleGetNoiseFloorTrends(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	band := request.GetString("band", "")
+
+	if m.noiseFloorMonitor == nil {
+		return mcp.NewToolResultError("Noise floor monitoring is not enabled"), nil
+	}
+
+	var trends interface{}
+	var err error
+
+	if band == "" {
+		// Get trends for all bands
+		trends, err = m.noiseFloorMonitor.GetTrendDataAllBands()
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to get trend data: %v", err)), nil
+		}
+	} else {
+		// Get trends for specific band (last 24 hours from today)
+		today := time.Now().Format("2006-01-02")
+		trends, err = m.noiseFloorMonitor.GetTrendData(today, band)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to get trend data for band %s: %v", band, err)), nil
+		}
+	}
+
+	if trends == nil {
+		return mcp.NewToolResultError("No trend data available"), nil
+	}
+
+	jsonData, err := json.MarshalIndent(trends, "", "  ")
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal data: %v", err)), nil
 	}

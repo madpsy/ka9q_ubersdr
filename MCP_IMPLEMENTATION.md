@@ -2,7 +2,7 @@
 
 ## Overview
 
-The MCP (Model Context Protocol) endpoint has been completely rewritten to use the official `github.com/mark3labs/mcp-go` SDK, making it fully compatible with ChatGPT and other MCP clients.
+The MCP (Model Context Protocol) endpoint has been completely rewritten to use the official `github.com/mark3labs/mcp-go` SDK, making it fully compatible with ChatGPT and other MCP clients. It now exposes **9 comprehensive tools** covering all major features from the web interface.
 
 ## What Changed
 
@@ -50,7 +50,7 @@ The MCP (Model Context Protocol) endpoint has been completely rewritten to use t
 
 ## Available Tools
 
-The MCP server exposes 7 tools for radio monitoring and analysis:
+The MCP server exposes 9 tools for radio monitoring and analysis:
 
 ### 1. `get_space_weather`
 Get current space weather conditions (SFI, A-index, K-index) that affect HF radio propagation.
@@ -101,6 +101,23 @@ Get comprehensive band conditions analysis (space weather + noise floor + activi
 
 **Parameters:**
 - `format` (string, optional): "json" or "text" (default: "json")
+
+### 8. `get_wideband_spectrum`
+Get full HF spectrum FFT data (0-30 MHz) showing the entire radio spectrum.
+
+**Parameters:**
+- `center_freq` (number, optional): Center frequency in MHz (default: 15.0, range: 0-30)
+- `span` (number, optional): Frequency span in kHz (default: 30000, min: 3)
+
+**Note:** Currently returns the full 0-30 MHz spectrum regardless of parameters. Parameters are accepted for future enhancement.
+
+### 9. `get_noise_floor_trends`
+Get 24-hour noise floor trend data for analyzing propagation patterns.
+
+**Parameters:**
+- `band` (string, optional): Specific band name or empty for all bands
+
+**Returns:** Measurements averaged in 10-minute intervals over 24 hours, perfect for time-series analysis and charting.
 
 ## Key Implementation Details
 

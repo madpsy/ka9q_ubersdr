@@ -16283,6 +16283,12 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 
                 document.getElementById('containerLogsContent').style.display = 'block';
                 document.getElementById('webLogsContent').style.display = 'none';
+                
+                // Stop web logs auto-refresh when switching away
+                if (webLogsAutoRefreshInterval) {
+                    clearInterval(webLogsAutoRefreshInterval);
+                    webLogsAutoRefreshInterval = null;
+                }
             } else if (tab === 'web') {
                 webBtn.classList.add('active');
                 webBtn.style.borderBottom = '3px solid #007bff';
@@ -16296,6 +16302,12 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 
                 // Load web logs when switching to this tab
                 loadWebLogs();
+                
+                // Start auto-refresh if checkbox is checked
+                const autoRefreshCheckbox = document.getElementById('webLogsAutoRefresh');
+                if (autoRefreshCheckbox && autoRefreshCheckbox.checked && !webLogsAutoRefreshInterval) {
+                    webLogsAutoRefreshInterval = setInterval(loadWebLogs, 5000);
+                }
             }
         }
 

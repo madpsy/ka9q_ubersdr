@@ -21,6 +21,10 @@ type MCPServer struct {
 	ipBanManager        *IPBanManager
 	geoIPService        *GeoIPService
 	dxClusterWsHandler  *DXClusterWebSocketHandler
+	cwskimmerConfig     *CWSkimmerConfig
+	instanceReporter    *InstanceReporter
+	rotctlHandler       *RotctlAPIHandler
+	freqRefMonitor      *FrequencyReferenceMonitor
 	mcpServer           *server.MCPServer
 	httpServer          *server.StreamableHTTPServer
 }
@@ -28,7 +32,9 @@ type MCPServer struct {
 // NewMCPServer creates a new MCP server instance
 func NewMCPServer(sessions *SessionManager, swm *SpaceWeatherMonitor,
 	nfm *NoiseFloorMonitor, md *MultiDecoder, cfg *Config, ipBanManager *IPBanManager,
-	geoIPService *GeoIPService, dxClusterWsHandler *DXClusterWebSocketHandler) *MCPServer {
+	geoIPService *GeoIPService, dxClusterWsHandler *DXClusterWebSocketHandler,
+	cwskimmerConfig *CWSkimmerConfig, instanceReporter *InstanceReporter,
+	rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor) *MCPServer {
 
 	m := &MCPServer{
 		sessions:            sessions,
@@ -39,6 +45,10 @@ func NewMCPServer(sessions *SessionManager, swm *SpaceWeatherMonitor,
 		ipBanManager:        ipBanManager,
 		geoIPService:        geoIPService,
 		dxClusterWsHandler:  dxClusterWsHandler,
+		cwskimmerConfig:     cwskimmerConfig,
+		instanceReporter:    instanceReporter,
+		rotctlHandler:       rotctlHandler,
+		freqRefMonitor:      freqRefMonitor,
 	}
 
 	// Create MCP server with server info
@@ -218,6 +228,14 @@ func (m *MCPServer) registerTools() {
 			),
 		),
 		m.handleGetNoiseFloorTrends,
+	)
+
+	// Tool: get_receiver_info
+	m.mcpServer.AddTool(
+		mcp.NewTool("get_receiver_info",
+			mcp.WithDescription("Get comprehensive information about the SDR receiver including location (GPS coordinates, Maidenhead grid square), antenna details, receiver capabilities, enabled features (space weather, noise floor, digital decodes, CW skimmer, chat), available client slots, spectrum dynamic range (SNR measurements for 0-30 MHz and 1.8-30 MHz), rotator status, frequency reference tracking, and public access settings. Use this to understand the receiver's configuration, capabilities, and current status."),
+		),
+		m.handleGetReceiverInfo,
 	)
 }
 
@@ -752,6 +770,136 @@ func (m *MCPServer) handleGetNoiseFloorTrends(ctx context.Context, request mcp.C
 	}
 
 	jsonData, err := json.MarshalIndent(trends, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal data: %v", err)), nil
+	}
+	return mcp.NewToolResultText(string(jsonData)), nil
+}
+
+func (m *MCPServer) handleGetReceiverInfo(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// Calculate available client slots
+	currentNonBypassedUsers := m.sessions.GetNonBypassedUserCount()
+	availableClients := m.config.Server.MaxSessions - currentNonBypassedUsers
+	if availableClients < 0 {
+		availableClients = 0
+	}
+
+	// Construct public_url from instance connection info
+	var publicURL string
+	if m.instanceReporter != nil {
+		publicURL = m.config.InstanceReporting.ConstructPublicURL(m.instanceReporter.GetEffectiveHost())
+	} else {
+		publicURL = m.config.InstanceReporting.ConstructPublicURL()
+	}
+
+	// Build list of public IQ modes
+	publicIQModes := []string{}
+	wideIQModes := []string{"iq48", "iq96", "iq192", "iq384"}
+	for _, mode := range wideIQModes {
+		if m.config.Server.PublicIQModes[mode] {
+			publicIQModes = append(publicIQModes, mode)
+		}
+	}
+
+	// Get public_uuid from instance reporter if available
+	publicUUID := ""
+	if m.instanceReporter != nil {
+		status := m.instanceReporter.GetReportStatus()
+		if uuid, ok := status["public_uuid"].(string); ok {
+			publicUUID = uuid
+		}
+	}
+
+	// Get chat user count
+	chatUserCount := 0
+	if m.dxClusterWsHandler != nil {
+		chatUserCount = m.dxClusterWsHandler.GetChatUserCount()
+	}
+
+	// Get wideband SNR measurements if noise floor monitor is available
+	snr_0_30, snr_1_8_30 := float32(-1), float32(-1)
+	if m.noiseFloorMonitor != nil {
+		snr_0_30, snr_1_8_30 = m.noiseFloorMonitor.GetWidebandSNR()
+	}
+
+	// Get rotator information if available
+	rotatorInfo := map[string]interface{}{
+		"enabled":   false,
+		"connected": false,
+		"azimuth":   -1,
+	}
+	if m.rotctlHandler != nil && m.config.Rotctl.Enabled {
+		rotatorInfo["enabled"] = true
+		rotatorInfo["connected"] = m.rotctlHandler.controller.client.IsConnected()
+		state := m.rotctlHandler.controller.GetState()
+		rotatorInfo["azimuth"] = int(state.Position.Azimuth + 0.5)
+	}
+
+	// Get frequency reference information if available
+	freqRefInfo := map[string]interface{}{
+		"enabled": false,
+	}
+	if m.freqRefMonitor != nil {
+		freqRefStatus := m.freqRefMonitor.GetStatus()
+		freqRefInfo["enabled"] = freqRefStatus["enabled"]
+
+		// Only include additional fields if enabled AND we have averaged history data
+		if enabled, ok := freqRefStatus["enabled"].(bool); ok && enabled {
+			history := m.freqRefMonitor.GetHistory()
+			if len(history) > 0 {
+				latest := history[len(history)-1]
+				freqRefInfo["expected_frequency"] = freqRefStatus["expected_frequency"]
+				freqRefInfo["detected_frequency"] = latest.DetectedFreq
+				freqRefInfo["frequency_offset"] = latest.FrequencyOffset
+				freqRefInfo["signal_strength"] = latest.SignalStrength
+				freqRefInfo["snr"] = latest.SNR
+				freqRefInfo["noise_floor"] = latest.NoiseFloor
+			}
+		}
+	}
+
+	// Calculate Maidenhead grid locator from GPS coordinates
+	maidenhead := latLonToGridSquare(m.config.Admin.GPS.Lat, m.config.Admin.GPS.Lon)
+
+	// Build the response with all receiver information
+	response := map[string]interface{}{
+		"description": m.config.Admin.Description,
+		"receiver": map[string]interface{}{
+			"name":       m.config.Admin.Name,
+			"callsign":   m.config.Admin.Callsign,
+			"public_url": publicURL,
+			"gps": map[string]interface{}{
+				"lat":          m.config.Admin.GPS.Lat,
+				"lon":          m.config.Admin.GPS.Lon,
+				"maidenhead":   maidenhead,
+				"gps_enabled":  m.config.Admin.GPS.GPSEnabled,
+				"tdoa_enabled": m.config.Admin.GPS.TDOAEnabled,
+			},
+			"asl":            m.config.Admin.ASL,
+			"location":       m.config.Admin.Location,
+			"antenna":        m.config.Admin.Antenna,
+			"snr_0_30_mhz":   int(snr_0_30),
+			"snr_1_8_30_mhz": int(snr_1_8_30),
+		},
+		"max_clients":          m.config.Server.MaxSessions,
+		"available_clients":    availableClients,
+		"max_session_time":     m.config.Server.MaxSessionTime,
+		"version":              Version,
+		"space_weather":        m.config.SpaceWeather.Enabled,
+		"noise_floor":          m.config.NoiseFloor.Enabled,
+		"digital_decodes":      m.config.Decoder.Enabled,
+		"cw_skimmer":           m.cwskimmerConfig != nil && m.cwskimmerConfig.Enabled,
+		"chat_enabled":         m.config.Chat.Enabled,
+		"chat_users":           chatUserCount,
+		"public_iq_modes":      publicIQModes,
+		"spectrum_poll_period": m.config.Spectrum.PollPeriodMs,
+		"public_uuid":          publicUUID,
+		"cors_enabled":         m.config.Server.EnableCORS,
+		"rotator":              rotatorInfo,
+		"frequency_reference":  freqRefInfo,
+	}
+
+	jsonData, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal data: %v", err)), nil
 	}

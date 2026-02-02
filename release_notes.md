@@ -8,6 +8,7 @@
 - Added **FFTW Wisdom generation wizard** for optimised FFT performance
 - Integrated **GeoIP lookups** for location-based features
 - Added **Decoder execution time clamping** for FT8/FT4/WSPR decoders
+- Added **MCP Proof of Concept** optional MCP endpoint for AI agents
 
 ### Bug Fixes
 - Fixed waterfall underlapping frequency notches

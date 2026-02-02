@@ -867,7 +867,7 @@ func main() {
 	// Initialize MCP server if enabled
 	var mcpServer *MCPServer
 	if config.MCP.Enabled {
-		mcpServer = NewMCPServer(sessions, spaceWeatherMonitor, noiseFloorMonitor, multiDecoder, config, ipBanManager, geoIPService, nil)
+		mcpServer = NewMCPServer(sessions, spaceWeatherMonitor, noiseFloorMonitor, multiDecoder, config, ipBanManager, geoIPService, nil, cwskimmerConfig, nil, nil, freqRefMonitor)
 		log.Printf("MCP server initialized (endpoint: /api/mcp)")
 	}
 
@@ -901,7 +901,7 @@ func main() {
 	// Connect DX cluster websocket handler to session manager for throughput tracking
 	sessions.SetDXClusterWebSocketHandler(dxClusterWsHandler)
 
-	// Update MCP server with dxClusterWsHandler now that it's initialized
+	// Update MCP server with dxClusterWsHandler, instanceReporter, and rotctlHandler now that they're initialized
 	if mcpServer != nil {
 		mcpServer.dxClusterWsHandler = dxClusterWsHandler
 	}
@@ -1067,6 +1067,11 @@ func main() {
 		instanceReporter.SetNoiseFloorMonitor(noiseFloorMonitor)
 	}
 
+	// Update MCP server with instanceReporter now that it's initialized
+	if mcpServer != nil && instanceReporter != nil {
+		mcpServer.instanceReporter = instanceReporter
+	}
+
 	// Initialize rotctl API handler if enabled (must be before admin handler)
 	var rotctlHandler *RotctlAPIHandler
 	var rotatorScheduler *RotatorScheduler
@@ -1111,6 +1116,11 @@ func main() {
 	// This must be done after both are initialized
 	if instanceReporter != nil && freqRefMonitor != nil {
 		instanceReporter.SetFrequencyReferenceMonitor(freqRefMonitor)
+	}
+
+	// Update MCP server with rotctlHandler now that it's initialized
+	if mcpServer != nil && rotctlHandler != nil {
+		mcpServer.rotctlHandler = rotctlHandler
 	}
 
 	// Initialize admin handler (pass all components for proper shutdown during restart)

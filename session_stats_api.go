@@ -107,6 +107,9 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 	// Per-hour activity (00-23) - count of sessions that ended in each hour
 	hourlyActivity := make([]int, 24)
 
+	// Per-weekday activity (Sunday=0 to Saturday=6) - count of sessions that ended on each day
+	weekdayActivity := make([]int, 7)
+
 	// Process each session end event
 	for _, event := range endEvents {
 		// Skip events without duration
@@ -156,6 +159,10 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 		// Track hourly activity (hour when session ended)
 		hour := event.Timestamp.Hour()
 		hourlyActivity[hour]++
+
+		// Track weekday activity (day when session ended)
+		weekday := int(event.Timestamp.Weekday())
+		weekdayActivity[weekday]++
 	}
 
 	// Convert country stats to sorted slice
@@ -196,12 +203,20 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 		return durationBucketArray[i]["count"].(int) > durationBucketArray[j]["count"].(int)
 	})
 
+	// Calculate average weekday activity (sessions per weekday over the 4-week period)
+	// 4 weeks = 4 occurrences of each weekday
+	avgWeekdayActivity := make([]float64, 7)
+	for day := 0; day < 7; day++ {
+		avgWeekdayActivity[day] = float64(weekdayActivity[day]) / 4.0
+	}
+
 	return map[string]interface{}{
-		"unique_countries":    len(countries),
-		"countries":           countries,
-		"unique_users":        len(uniqueIPs),
-		"total_sessions":      len(endEvents),
-		"duration_buckets":    durationBucketArray,
-		"avg_hourly_activity": avgHourlyActivity,
+		"unique_countries":      len(countries),
+		"countries":             countries,
+		"unique_users":          len(uniqueIPs),
+		"total_sessions":        len(endEvents),
+		"duration_buckets":      durationBucketArray,
+		"avg_hourly_activity":   avgHourlyActivity,
+		"avg_weekday_activity":  avgWeekdayActivity,
 	}
 }

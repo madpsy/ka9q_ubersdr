@@ -3,6 +3,7 @@
 
 let countriesChart = null;
 let durationChart = null;
+let weekdayChart = null;
 let hourlyChart = null;
 
 // Fetch and display statistics
@@ -28,6 +29,7 @@ async function loadStatistics() {
         // Create charts
         createCountriesChart(data.stats.countries);
         createDurationChart(data.stats.duration_buckets);
+        createWeekdayChart(data.stats.avg_weekday_activity);
         createHourlyChart(data.stats.avg_hourly_activity);
         
     } catch (error) {
@@ -170,6 +172,94 @@ function createDurationChart(buckets) {
                             const percentage = ((value / total) * 100).toFixed(1);
                             return `${label}: ${value.toLocaleString()} (${percentage}%)`;
                         }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Create weekday activity bar chart
+function createWeekdayChart(weekdayData) {
+    const ctx = document.getElementById('weekdayChart').getContext('2d');
+    
+    // Weekday labels (Sunday=0 to Saturday=6)
+    const weekdayLabels = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    
+    if (weekdayChart) {
+        weekdayChart.destroy();
+    }
+    
+    weekdayChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: weekdayLabels,
+            datasets: [{
+                label: 'Avg Sessions per Day',
+                data: weekdayData,
+                backgroundColor: [
+                    'rgba(255, 99, 132, 0.7)',
+                    'rgba(54, 162, 235, 0.7)',
+                    'rgba(255, 206, 86, 0.7)',
+                    'rgba(75, 192, 192, 0.7)',
+                    'rgba(153, 102, 255, 0.7)',
+                    'rgba(255, 159, 64, 0.7)',
+                    'rgba(201, 203, 207, 0.7)'
+                ],
+                borderColor: [
+                    'rgba(255, 99, 132, 1)',
+                    'rgba(54, 162, 235, 1)',
+                    'rgba(255, 206, 86, 1)',
+                    'rgba(75, 192, 192, 1)',
+                    'rgba(153, 102, 255, 1)',
+                    'rgba(255, 159, 64, 1)',
+                    'rgba(201, 203, 207, 1)'
+                ],
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return `Avg: ${context.parsed.y.toFixed(2)} sessions`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        color: '#fff',
+                        callback: function(value) {
+                            return value.toFixed(1);
+                        }
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
+                    },
+                    title: {
+                        display: true,
+                        text: 'Average Sessions',
+                        color: '#fff',
+                        font: {
+                            size: 12
+                        }
+                    }
+                },
+                x: {
+                    ticks: {
+                        color: '#fff'
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
                     }
                 }
             }

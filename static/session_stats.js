@@ -103,6 +103,18 @@ async function createWorldMap(countries) {
         
         const path = d3.geoPath().projection(projection);
         
+        // Create a group for all map elements (for zooming)
+        const mapGroup = svg.append('g');
+        
+        // Add zoom behavior
+        const zoom = d3.zoom()
+            .scaleExtent([1, 8]) // Allow zoom from 1x to 8x
+            .on('zoom', (event) => {
+                mapGroup.attr('transform', event.transform);
+            });
+        
+        svg.call(zoom);
+        
         // Create color scale for countries (blue gradient)
         const countryColorScale = d3.scaleSequential()
             .domain([0, maxCountrySessions])
@@ -142,7 +154,7 @@ async function createWorldMap(countries) {
         console.log('Matched country features:', featureCountryMap.size);
         
         // Draw countries (colored by total sessions)
-        svg.append('g')
+        mapGroup.append('g')
             .selectAll('path')
             .data(worldCountries.features)
             .enter()
@@ -163,8 +175,13 @@ async function createWorldMap(countries) {
             .style('stroke-width', '0.5')
             .style('cursor', 'pointer')
             .on('mouseover', function(event, d) {
-                const countryName = featureCountryMap.get(d) || d.properties.name || 'Unknown';
-                const sessions = countryTotals.get(countryName);
+                // Prefer D3's country name from map data, fallback to our backend data
+                const d3CountryName = d.properties.name;
+                const backendCountryName = featureCountryMap.get(d);
+                const displayName = d3CountryName || backendCountryName || 'Unknown';
+                
+                // Try to get sessions using backend country name first
+                const sessions = backendCountryName ? countryTotals.get(backendCountryName) : null;
                 
                 d3.select(this)
                     .style('stroke', '#fff')
@@ -175,11 +192,11 @@ async function createWorldMap(countries) {
                     .style('opacity', 1);
                     
                 if (sessions) {
-                    tooltip.html(`<strong>${countryName}</strong><br/>Total Sessions: ${sessions.toLocaleString()}`)
+                    tooltip.html(`<strong>${displayName}</strong><br/>Total Sessions: ${sessions.toLocaleString()}`)
                         .style('left', (event.pageX + 10) + 'px')
                         .style('top', (event.pageY - 28) + 'px');
                 } else {
-                    tooltip.html(`<strong>${countryName}</strong><br/>No session data`)
+                    tooltip.html(`<strong>${displayName}</strong><br/>No session data`)
                         .style('left', (event.pageX + 10) + 'px')
                         .style('top', (event.pageY - 28) + 'px');
                 }
@@ -195,7 +212,7 @@ async function createWorldMap(countries) {
             });
         
         // Draw location markers (circles)
-        svg.append('g')
+        mapGroup.append('g')
             .selectAll('circle')
             .data(allLocations)
             .enter()
@@ -229,7 +246,33 @@ async function createWorldMap(countries) {
                     .style('opacity', 0);
             });
         
-        // Add legend for countries
+        // Add reset zoom button
+        svg.append('rect')
+            .attr('x', width - 80)
+            .attr('y', 10)
+            .attr('width', 70)
+            .attr('height', 30)
+            .attr('rx', 4)
+            .style('fill', 'rgba(255, 255, 255, 0.2)')
+            .style('stroke', '#fff')
+            .style('stroke-width', '1')
+            .style('cursor', 'pointer')
+            .on('click', function() {
+                svg.transition()
+                    .duration(750)
+                    .call(zoom.transform, d3.zoomIdentity);
+            });
+        
+        svg.append('text')
+            .attr('x', width - 45)
+            .attr('y', 30)
+            .attr('text-anchor', 'middle')
+            .style('fill', '#fff')
+            .style('font-size', '12px')
+            .style('pointer-events', 'none')
+            .text('Reset Zoom');
+        
+        // Add legend for countries (fixed position, not zoomed)
         const legendWidth = 250;
         const legendHeight = 10;
         const legendX = 20;

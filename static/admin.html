@@ -16409,11 +16409,11 @@ Referer: ${log.referer}`;
                 // Format time as HH:MM:SS
                 const timeOnly = new Date(log.timestamp).toLocaleTimeString();
                 
-                return `<div style="margin-bottom: 0; padding: 4px 8px; background: #111; border-left: 3px solid ${statusColor}; border-radius: 0; cursor: help; font-family: 'Courier New', monospace;" title="${escapeHtml(tooltip)}">
-                    <span style="color: #666; display: inline-block; width: 85px;">${timeOnly}</span>
-                    <span style="color: #0af; display: inline-block; width: 110px;">${log.client_ip}</span>
-                    <span style="color: ${methodColor}; display: inline-block; width: 55px; font-weight: bold;">${log.method}</span>
-                    <span style="color: ${statusColor}; display: inline-block; width: 35px; font-weight: bold;">${log.status_code}</span>
+                return `<div style="margin-bottom: 0; padding: 4px 8px; background: #111; border-left: 3px solid ${statusColor}; border-radius: 0; cursor: help; font-family: 'Courier New', monospace; font-size: 11px;" title="${escapeHtml(tooltip)}">
+                    <span style="color: #666; display: inline-block; width: 70px;">${timeOnly}</span>
+                    <span style="color: #0af; display: inline-block; width: 105px;">${log.client_ip}</span>
+                    <span style="color: ${methodColor}; display: inline-block; width: 42px; font-weight: bold;">${log.method}</span>
+                    <span style="color: ${statusColor}; display: inline-block; width: 32px; font-weight: bold;">${log.status_code}</span>
                     <span style="color: #fff;">${escapeHtml(log.uri)}</span>
                     <span style="color: #888; margin-left: 10px;">${formatBytes(log.bytes_written)}</span>
                     <span style="color: #888; margin-left: 10px;">${log.duration_ms.toFixed(2)}ms</span>

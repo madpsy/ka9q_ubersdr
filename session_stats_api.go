@@ -17,7 +17,7 @@ import (
 // - Unique user count (without exposing IPs)
 // - Only includes 'regular' auth users (not bypassed/password)
 // Rate limited to 1 request per 3 seconds per IP
-func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Config, rateLimiter *SessionStatsRateLimiter) {
+func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Config, rateLimiter *SessionStatsRateLimiter, geoIPService *GeoIPService) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -69,7 +69,7 @@ func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Co
 	endEvents := filterEventsByType(events, []string{"session_end"})
 
 	// Calculate public statistics
-	stats := calculatePublicSessionStats(endEvents, startTime, endTime)
+	stats := calculatePublicSessionStats(endEvents, startTime, endTime, geoIPService)
 
 	// Return statistics
 	response := map[string]interface{}{
@@ -86,9 +86,10 @@ func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Co
 }
 
 // calculatePublicSessionStats calculates privacy-conscious statistics from session end events
-func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime time.Time) map[string]interface{} {
-	// Track unique countries with session counts
+func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime time.Time, geoIPService *GeoIPService) map[string]interface{} {
+	// Track unique countries with session counts and one representative IP per country
 	countryStats := make(map[string]map[string]interface{})
+	countryRepresentativeIP := make(map[string]string) // One IP per country for GeoIP lookup
 
 	// Track unique IPs (for counting, not exposing)
 	uniqueIPs := make(map[string]bool)
@@ -134,6 +135,10 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 				"country_code": event.CountryCode,
 				"sessions":     0,
 			}
+			// Store one representative IP for this country for GeoIP lookup
+			if event.ClientIP != "" {
+				countryRepresentativeIP[country] = event.ClientIP
+			}
 		}
 		stats := countryStats[country]
 		stats["sessions"] = stats["sessions"].(int) + 1
@@ -165,9 +170,20 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 		weekdayActivity[weekday]++
 	}
 
-	// Convert country stats to sorted slice
+	// Convert country stats to sorted slice and add lat/lon from GeoIP
 	countries := make([]map[string]interface{}, 0, len(countryStats))
-	for _, stats := range countryStats {
+	for countryName, stats := range countryStats {
+		// Try to get lat/lon for this country
+		if geoIPService != nil && geoIPService.IsEnabled() {
+			if repIP, ok := countryRepresentativeIP[countryName]; ok {
+				if geoResult, err := geoIPService.Lookup(repIP); err == nil {
+					if geoResult.Latitude != nil && geoResult.Longitude != nil {
+						stats["latitude"] = *geoResult.Latitude
+						stats["longitude"] = *geoResult.Longitude
+					}
+				}
+			}
+		}
 		countries = append(countries, stats)
 	}
 

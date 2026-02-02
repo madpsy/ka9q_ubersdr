@@ -1181,7 +1181,7 @@ func main() {
 		handleInstanceStatus(w, r, config)
 	})
 	http.HandleFunc("/api/session-stats", func(w http.ResponseWriter, r *http.Request) {
-		handlePublicSessionStats(w, r, config, sessionStatsRateLimiter)
+		handlePublicSessionStats(w, r, config, sessionStatsRateLimiter, geoIPService)
 	})
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		handleStatus(w, r, config)

@@ -103,6 +103,22 @@ async function createWorldMap(countries) {
             .style('opacity', 0)
             .style('z-index', 1000);
         
+        // Create a map to store country data by feature for quick lookup
+        const featureDataMap = new Map();
+        
+        // Match each country data point to a map feature using lat/lon
+        countryDataArray.forEach(countryData => {
+            // Find which country polygon contains this point
+            for (const feature of worldCountries.features) {
+                if (d3.geoContains(feature, [countryData.lon, countryData.lat])) {
+                    featureDataMap.set(feature, countryData);
+                    break;
+                }
+            }
+        });
+        
+        console.log('Matched features:', featureDataMap.size);
+        
         // Draw countries
         svg.append('g')
             .selectAll('path')
@@ -112,22 +128,9 @@ async function createWorldMap(countries) {
             .attr('d', path)
             .attr('class', 'country')
             .style('fill', d => {
-                // Try multiple property names for country code
-                const code = d.properties.iso_a2 ||
-                            d.properties.ISO_A2 ||
-                            d.properties.iso_a2_eh ||
-                            d.properties.gu_a3 ||
-                            d.id;
-                
-                // Log first few countries for debugging
-                if (d.id < 5) {
-                    console.log('Country properties:', d.properties);
-                }
-                
-                const sessions = countryDataMap[code];
-                
-                if (sessions) {
-                    return colorScale(sessions);
+                const countryData = featureDataMap.get(d);
+                if (countryData) {
+                    return colorScale(countryData.sessions);
                 }
                 return '#2d3748'; // Dark gray for countries with no data
             })
@@ -135,19 +138,25 @@ async function createWorldMap(countries) {
             .style('stroke-width', '0.5')
             .style('cursor', 'pointer')
             .on('mouseover', function(event, d) {
-                const code = d.properties.iso_a2 || d.properties.ISO_A2;
-                const sessions = countryDataMap[code];
+                const countryData = featureDataMap.get(d);
                 const countryName = d.properties.name || 'Unknown';
                 
                 d3.select(this)
                     .style('stroke', '#fff')
                     .style('stroke-width', '2');
                 
-                if (sessions) {
+                if (countryData) {
                     tooltip.transition()
                         .duration(200)
                         .style('opacity', 1);
-                    tooltip.html(`<strong>${countryName}</strong><br/>Sessions: ${sessions.toLocaleString()}`)
+                    tooltip.html(`<strong>${countryData.country}</strong><br/>Sessions: ${countryData.sessions.toLocaleString()}`)
+                        .style('left', (event.pageX + 10) + 'px')
+                        .style('top', (event.pageY - 28) + 'px');
+                } else {
+                    tooltip.transition()
+                        .duration(200)
+                        .style('opacity', 1);
+                    tooltip.html(`<strong>${countryName}</strong><br/>No session data`)
                         .style('left', (event.pageX + 10) + 'px')
                         .style('top', (event.pageY - 28) + 'px');
                 }

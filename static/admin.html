@@ -16406,7 +16406,7 @@ Duration: ${log.duration_ms.toFixed(3)}ms
 User-Agent: ${log.user_agent}
 Referer: ${log.referer}`;
                 
-                return `<div style="margin-bottom: 8px; padding: 8px; background: #111; border-left: 3px solid ${statusColor}; border-radius: 3px; cursor: help;" title="${escapeHtml(tooltip)}">
+                return `<div style="margin-bottom: 0; padding: 8px; background: #111; border-left: 3px solid ${statusColor}; border-radius: 0; cursor: help;" title="${escapeHtml(tooltip)}">
                     <span style="color: #666;">${timestamp}</span>
                     <span style="color: #0af; margin-left: 10px;">${log.client_ip}</span>
                     <span style="color: ${methodColor}; margin-left: 10px; font-weight: bold;">${log.method}</span>

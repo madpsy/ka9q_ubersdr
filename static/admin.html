@@ -16346,8 +16346,8 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 
                 // Add IP or path filter if provided
                 if (filter) {
-                    // Check if it looks like an IP address
-                    if (filter.match(/^\d+\.\d+/)) {
+                    // Check if it looks like an IP address (contains dots and digits)
+                    if (filter.match(/\d+\.\d+/)) {
                         params.append('filter_ip', filter);
                     } else {
                         params.append('filter_path', filter);

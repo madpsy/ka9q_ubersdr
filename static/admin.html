@@ -16388,8 +16388,8 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 return;
             }
             
-            // Render logs in reverse order (newest first)
-            const logsHTML = webLogsData.slice().reverse().map(log => {
+            // Render logs in chronological order (oldest first, newest at bottom)
+            const logsHTML = webLogsData.map(log => {
                 const timestamp = new Date(log.timestamp).toLocaleString();
                 const statusColor = getStatusColor(log.status_code);
                 const methodColor = getMethodColor(log.method);

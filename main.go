@@ -1008,6 +1008,10 @@ func main() {
 	spaceWeatherRateLimiter := NewSpaceWeatherRateLimiter()
 	log.Printf("Space weather rate limiting: 1 req/sec (current), 1 req/2.5sec (history/dates/csv)")
 
+	// Initialize session stats endpoint rate limiter (1 request per 3 seconds per IP)
+	sessionStatsRateLimiter := NewSessionStatsRateLimiter()
+	log.Printf("Session stats endpoint rate limiting: 1 request per 3 seconds per IP")
+
 	// Initialize SSH proxy if enabled (declare before rate limiter cleanup goroutine)
 	var sshProxy *SSHProxy
 	if config.SSHProxy.Enabled {
@@ -1032,6 +1036,7 @@ func main() {
 			fftRateLimiter.Cleanup()
 			spaceWeatherRateLimiter.Cleanup()
 			summaryRateLimiter.Cleanup()
+			sessionStatsRateLimiter.Cleanup()
 			// Cleanup SSH proxy rate limiter if enabled
 			if sshProxy != nil && sshProxy.rateLimiter != nil {
 				sshProxy.rateLimiter.Cleanup()
@@ -1174,6 +1179,9 @@ func main() {
 	})
 	http.HandleFunc("/api/instance", func(w http.ResponseWriter, r *http.Request) {
 		handleInstanceStatus(w, r, config)
+	})
+	http.HandleFunc("/api/session-stats", func(w http.ResponseWriter, r *http.Request) {
+		handlePublicSessionStats(w, r, config, sessionStatsRateLimiter)
 	})
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		handleStatus(w, r, config)

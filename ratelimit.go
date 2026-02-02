@@ -693,3 +693,61 @@ func (sprl *SSHProxyRateLimiter) GetStats() int {
 	defer sprl.mu.RUnlock()
 	return len(sprl.limiters)
 }
+
+// SessionStatsRateLimiter manages rate limiters for session stats endpoint requests per IP
+// Limits to 1 request per 3 seconds per IP
+type SessionStatsRateLimiter struct {
+	limiters map[string]*RateLimiter
+	mu       sync.RWMutex
+}
+
+// NewSessionStatsRateLimiter creates a new session stats endpoint rate limiter
+// Fixed at 1 request per 3 seconds (0.333 requests per second)
+func NewSessionStatsRateLimiter() *SessionStatsRateLimiter {
+	return &SessionStatsRateLimiter{
+		limiters: make(map[string]*RateLimiter),
+	}
+}
+
+// AllowRequest checks if a session stats request is allowed for the given IP
+// Returns true if allowed, false if rate limit exceeded
+func (ssrl *SessionStatsRateLimiter) AllowRequest(ip string) bool {
+	ssrl.mu.Lock()
+	limiter, exists := ssrl.limiters[ip]
+	if !exists {
+		// Create a rate limiter with 1 token max, refilling at 0.333 tokens/sec (1 per 3 seconds)
+		limiter = &RateLimiter{
+			tokens:     1.0,
+			maxTokens:  1.0,
+			refillRate: 1.0 / 3.0, // 1 request per 3 seconds
+			lastRefill: time.Now(),
+		}
+		ssrl.limiters[ip] = limiter
+	}
+	ssrl.mu.Unlock()
+
+	return limiter.Allow()
+}
+
+// Cleanup removes rate limiters for IPs that haven't been used recently
+func (ssrl *SessionStatsRateLimiter) Cleanup() {
+	ssrl.mu.Lock()
+	defer ssrl.mu.Unlock()
+
+	now := time.Now()
+	for ip, limiter := range ssrl.limiters {
+		limiter.mu.Lock()
+		// Remove limiters that haven't been used in the last 10 minutes
+		if now.Sub(limiter.lastRefill) > 10*time.Minute {
+			delete(ssrl.limiters, ip)
+		}
+		limiter.mu.Unlock()
+	}
+}
+
+// GetStats returns the current number of tracked IPs
+func (ssrl *SessionStatsRateLimiter) GetStats() int {
+	ssrl.mu.RLock()
+	defer ssrl.mu.RUnlock()
+	return len(ssrl.limiters)
+}

@@ -50,22 +50,40 @@ async function createWorldMap(countries) {
         const world = await response.json();
         const worldCountries = topojson.feature(world, world.objects.countries);
         
-        // Create a map of country code to session count
-        const countryDataMap = {};
-        let maxSessions = 0;
+        // Create arrays for country totals and individual locations
+        const countryTotals = new Map(); // country name -> total sessions
+        const allLocations = []; // all individual location markers
+        let maxCountrySessions = 0;
+        let maxLocationSessions = 0;
         
         countries.forEach(c => {
-            if (c.country_code) {
-                const code = c.country_code.toUpperCase();
-                countryDataMap[code] = c.sessions;
-                if (c.sessions > maxSessions) {
-                    maxSessions = c.sessions;
-                }
+            // Track country totals for coloring polygons
+            countryTotals.set(c.country, c.sessions);
+            if (c.sessions > maxCountrySessions) {
+                maxCountrySessions = c.sessions;
+            }
+            
+            // Track individual locations for markers
+            if (c.locations && c.locations.length > 0) {
+                c.locations.forEach(loc => {
+                    allLocations.push({
+                        country: c.country,
+                        code: c.country_code,
+                        lat: loc.latitude,
+                        lon: loc.longitude,
+                        sessions: loc.sessions
+                    });
+                    if (loc.sessions > maxLocationSessions) {
+                        maxLocationSessions = loc.sessions;
+                    }
+                });
             }
         });
         
-        console.log('Country data map:', countryDataMap);
-        console.log('Max sessions:', maxSessions);
+        console.log('Country totals:', countryTotals);
+        console.log('All locations:', allLocations);
+        console.log('Max country sessions:', maxCountrySessions);
+        console.log('Max location sessions:', maxLocationSessions);
         
         // Set up SVG
         const svg = d3.select('#worldMap');
@@ -85,10 +103,15 @@ async function createWorldMap(countries) {
         
         const path = d3.geoPath().projection(projection);
         
-        // Create color scale (blue gradient)
-        const colorScale = d3.scaleSequential()
-            .domain([0, maxSessions])
+        // Create color scale for countries (blue gradient)
+        const countryColorScale = d3.scaleSequential()
+            .domain([0, maxCountrySessions])
             .interpolator(d3.interpolateBlues);
+        
+        // Create size scale for location markers
+        const markerSizeScale = d3.scaleSqrt()
+            .domain([0, maxLocationSessions])
+            .range([3, 15]); // radius in pixels
         
         // Create tooltip
         const tooltip = d3.select('body').append('div')
@@ -103,23 +126,22 @@ async function createWorldMap(countries) {
             .style('opacity', 0)
             .style('z-index', 1000);
         
-        // Create a map to store country data by feature for quick lookup
-        const featureDataMap = new Map();
-        
-        // Match each country data point to a map feature using lat/lon
-        countryDataArray.forEach(countryData => {
-            // Find which country polygon contains this point
+        // Match countries to features for coloring
+        const featureCountryMap = new Map();
+        allLocations.forEach(loc => {
             for (const feature of worldCountries.features) {
-                if (d3.geoContains(feature, [countryData.lon, countryData.lat])) {
-                    featureDataMap.set(feature, countryData);
+                if (d3.geoContains(feature, [loc.lon, loc.lat])) {
+                    if (!featureCountryMap.has(feature)) {
+                        featureCountryMap.set(feature, loc.country);
+                    }
                     break;
                 }
             }
         });
         
-        console.log('Matched features:', featureDataMap.size);
+        console.log('Matched country features:', featureCountryMap.size);
         
-        // Draw countries
+        // Draw countries (colored by total sessions)
         svg.append('g')
             .selectAll('path')
             .data(worldCountries.features)
@@ -128,9 +150,12 @@ async function createWorldMap(countries) {
             .attr('d', path)
             .attr('class', 'country')
             .style('fill', d => {
-                const countryData = featureDataMap.get(d);
-                if (countryData) {
-                    return colorScale(countryData.sessions);
+                const countryName = featureCountryMap.get(d);
+                if (countryName) {
+                    const sessions = countryTotals.get(countryName);
+                    if (sessions) {
+                        return countryColorScale(sessions);
+                    }
                 }
                 return '#2d3748'; // Dark gray for countries with no data
             })
@@ -138,24 +163,22 @@ async function createWorldMap(countries) {
             .style('stroke-width', '0.5')
             .style('cursor', 'pointer')
             .on('mouseover', function(event, d) {
-                const countryData = featureDataMap.get(d);
-                const countryName = d.properties.name || 'Unknown';
+                const countryName = featureCountryMap.get(d) || d.properties.name || 'Unknown';
+                const sessions = countryTotals.get(countryName);
                 
                 d3.select(this)
                     .style('stroke', '#fff')
                     .style('stroke-width', '2');
                 
-                if (countryData) {
-                    tooltip.transition()
-                        .duration(200)
-                        .style('opacity', 1);
-                    tooltip.html(`<strong>${countryData.country}</strong><br/>Sessions: ${countryData.sessions.toLocaleString()}`)
+                tooltip.transition()
+                    .duration(200)
+                    .style('opacity', 1);
+                    
+                if (sessions) {
+                    tooltip.html(`<strong>${countryName}</strong><br/>Total Sessions: ${sessions.toLocaleString()}`)
                         .style('left', (event.pageX + 10) + 'px')
                         .style('top', (event.pageY - 28) + 'px');
                 } else {
-                    tooltip.transition()
-                        .duration(200)
-                        .style('opacity', 1);
                     tooltip.html(`<strong>${countryName}</strong><br/>No session data`)
                         .style('left', (event.pageX + 10) + 'px')
                         .style('top', (event.pageY - 28) + 'px');
@@ -171,14 +194,49 @@ async function createWorldMap(countries) {
                     .style('opacity', 0);
             });
         
-        // Add legend
-        const legendWidth = 300;
+        // Draw location markers (circles)
+        svg.append('g')
+            .selectAll('circle')
+            .data(allLocations)
+            .enter()
+            .append('circle')
+            .attr('cx', d => projection([d.lon, d.lat])[0])
+            .attr('cy', d => projection([d.lon, d.lat])[1])
+            .attr('r', d => markerSizeScale(d.sessions))
+            .style('fill', 'rgba(255, 99, 132, 0.7)')
+            .style('stroke', '#fff')
+            .style('stroke-width', '1')
+            .style('cursor', 'pointer')
+            .on('mouseover', function(event, d) {
+                d3.select(this)
+                    .style('fill', 'rgba(255, 99, 132, 1)')
+                    .style('stroke-width', '2');
+                
+                tooltip.transition()
+                    .duration(200)
+                    .style('opacity', 1);
+                tooltip.html(`<strong>${d.country}</strong><br/>Location Sessions: ${d.sessions.toLocaleString()}<br/>Lat: ${d.lat.toFixed(2)}, Lon: ${d.lon.toFixed(2)}`)
+                    .style('left', (event.pageX + 10) + 'px')
+                    .style('top', (event.pageY - 28) + 'px');
+            })
+            .on('mouseout', function(event, d) {
+                d3.select(this)
+                    .style('fill', 'rgba(255, 99, 132, 0.7)')
+                    .style('stroke-width', '1');
+                
+                tooltip.transition()
+                    .duration(500)
+                    .style('opacity', 0);
+            });
+        
+        // Add legend for countries
+        const legendWidth = 250;
         const legendHeight = 10;
-        const legendX = width - legendWidth - 20;
+        const legendX = 20;
         const legendY = height - 40;
         
         const legendScale = d3.scaleLinear()
-            .domain([0, maxSessions])
+            .domain([0, maxCountrySessions])
             .range([0, legendWidth]);
         
         const legendAxis = d3.axisBottom(legendScale)
@@ -194,10 +252,10 @@ async function createWorldMap(countries) {
         for (let i = 0; i <= 10; i++) {
             gradient.append('stop')
                 .attr('offset', `${i * 10}%`)
-                .attr('stop-color', colorScale(maxSessions * i / 10));
+                .attr('stop-color', countryColorScale(maxCountrySessions * i / 10));
         }
         
-        // Draw legend
+        // Draw country legend
         const legend = svg.append('g')
             .attr('transform', `translate(${legendX}, ${legendY})`);
         
@@ -222,7 +280,47 @@ async function createWorldMap(countries) {
             .attr('text-anchor', 'middle')
             .style('fill', '#fff')
             .style('font-size', '12px')
-            .text('Sessions per Country');
+            .text('Total Sessions per Country');
+        
+        // Add marker legend
+        const markerLegendX = width - 180;
+        const markerLegendY = height - 80;
+        
+        const markerLegend = svg.append('g')
+            .attr('transform', `translate(${markerLegendX}, ${markerLegendY})`);
+        
+        markerLegend.append('text')
+            .attr('x', 0)
+            .attr('y', 0)
+            .style('fill', '#fff')
+            .style('font-size', '12px')
+            .style('font-weight', 'bold')
+            .text('Location Markers');
+        
+        // Show 3 example marker sizes
+        const exampleSizes = [
+            { sessions: Math.ceil(maxLocationSessions * 0.2), label: 'Low' },
+            { sessions: Math.ceil(maxLocationSessions * 0.6), label: 'Medium' },
+            { sessions: maxLocationSessions, label: 'High' }
+        ];
+        
+        exampleSizes.forEach((example, i) => {
+            const y = 20 + i * 25;
+            markerLegend.append('circle')
+                .attr('cx', 10)
+                .attr('cy', y)
+                .attr('r', markerSizeScale(example.sessions))
+                .style('fill', 'rgba(255, 99, 132, 0.7)')
+                .style('stroke', '#fff')
+                .style('stroke-width', '1');
+            
+            markerLegend.append('text')
+                .attr('x', 25)
+                .attr('y', y + 4)
+                .style('fill', '#fff')
+                .style('font-size', '11px')
+                .text(`${example.label}: ${example.sessions.toLocaleString()}`);
+        });
         
     } catch (error) {
         console.error('Error creating world map:', error);

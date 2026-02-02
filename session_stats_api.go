@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"sort"
@@ -87,12 +88,22 @@ func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Co
 
 // calculatePublicSessionStats calculates privacy-conscious statistics from session end events
 func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime time.Time, geoIPService *GeoIPService) map[string]interface{} {
-	// Track unique countries with session counts and one representative IP per country
+	// Track unique countries with session counts
 	countryStats := make(map[string]map[string]interface{})
-	countryRepresentativeIP := make(map[string]string) // One IP per country for GeoIP lookup
+	
+	// Track unique locations (lat/lon) per country with session counts
+	type LocationData struct {
+		Lat      float64
+		Lon      float64
+		Sessions int
+	}
+	countryLocations := make(map[string]map[string]*LocationData) // country -> "lat,lon" -> LocationData
 
 	// Track unique IPs (for counting, not exposing)
 	uniqueIPs := make(map[string]bool)
+	
+	// Track unique IPs per country for GeoIP lookups
+	countryUniqueIPs := make(map[string]map[string]bool) // country -> set of IPs
 
 	// Duration buckets (in minutes): 0-1, 1-5, 5-15, 15-30, 30-60, 60-120, 120+
 	durationBuckets := map[string]int{
@@ -135,13 +146,16 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 				"country_code": event.CountryCode,
 				"sessions":     0,
 			}
-			// Store one representative IP for this country for GeoIP lookup
-			if event.ClientIP != "" {
-				countryRepresentativeIP[country] = event.ClientIP
-			}
+			countryUniqueIPs[country] = make(map[string]bool)
+			countryLocations[country] = make(map[string]*LocationData)
 		}
 		stats := countryStats[country]
 		stats["sessions"] = stats["sessions"].(int) + 1
+		
+		// Track unique IPs per country for location lookups
+		if event.ClientIP != "" {
+			countryUniqueIPs[country][event.ClientIP] = true
+		}
 
 		// Categorize duration into buckets
 		durationMinutes := *event.Duration / 60.0
@@ -170,20 +184,46 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 		weekdayActivity[weekday]++
 	}
 
-	// Convert country stats to sorted slice and add lat/lon from GeoIP
-	countries := make([]map[string]interface{}, 0, len(countryStats))
-	for countryName, stats := range countryStats {
-		// Try to get lat/lon for this country
-		if geoIPService != nil && geoIPService.IsEnabled() {
-			if repIP, ok := countryRepresentativeIP[countryName]; ok {
-				if geoResult, err := geoIPService.Lookup(repIP); err == nil {
+	// Perform GeoIP lookups for all unique IPs per country to get unique locations
+	if geoIPService != nil && geoIPService.IsEnabled() {
+		for country, ips := range countryUniqueIPs {
+			for ip := range ips {
+				if geoResult, err := geoIPService.Lookup(ip); err == nil {
 					if geoResult.Latitude != nil && geoResult.Longitude != nil {
-						stats["latitude"] = *geoResult.Latitude
-						stats["longitude"] = *geoResult.Longitude
+						// Create a key from lat/lon (rounded to avoid tiny differences)
+						lat := *geoResult.Latitude
+						lon := *geoResult.Longitude
+						locKey := fmt.Sprintf("%.4f,%.4f", lat, lon)
+						
+						if _, exists := countryLocations[country][locKey]; !exists {
+							countryLocations[country][locKey] = &LocationData{
+								Lat:      lat,
+								Lon:      lon,
+								Sessions: 0,
+							}
+						}
+						countryLocations[country][locKey].Sessions++
 					}
 				}
 			}
 		}
+	}
+	
+	// Convert country stats to sorted slice and add locations array
+	countries := make([]map[string]interface{}, 0, len(countryStats))
+	for countryName, stats := range countryStats {
+		// Add locations array for this country
+		locations := make([]map[string]interface{}, 0)
+		if locs, ok := countryLocations[countryName]; ok {
+			for _, loc := range locs {
+				locations = append(locations, map[string]interface{}{
+					"latitude":  loc.Lat,
+					"longitude": loc.Lon,
+					"sessions":  loc.Sessions,
+				})
+			}
+		}
+		stats["locations"] = locations
 		countries = append(countries, stats)
 	}
 

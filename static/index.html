@@ -388,7 +388,7 @@
                     <button onclick="setMode('fm')" id="mode-fm" class="mode-btn">FM</button>
                     <button onclick="setMode('nfm')" id="mode-nfm" class="mode-btn">NFM</button>
                 </div>
-                <div class="bandwidth-controls">
+                <div class="bandwidth-controls" id="bandwidth-controls">
                     <div class="control-group">
                         <label for="bandwidth-low">Low: <span id="bandwidth-low-value">50</span> Hz</label>
                         <input type="range" id="bandwidth-low" min="-8000" max="500" value="50" step="10" oninput="updateBandwidthDisplay()" onchange="updateBandwidth()">
@@ -396,6 +396,12 @@
                     <div class="control-group">
                         <label for="bandwidth-high">High: <span id="bandwidth-high-value">3000</span> Hz</label>
                         <input type="range" id="bandwidth-high" min="500" max="6000" value="3000" step="100" oninput="updateBandwidthDisplay()" onchange="updateBandwidth()">
+                    </div>
+                </div>
+                <div class="squelch-controls" id="squelch-controls" style="display: none;">
+                    <div class="control-group">
+                        <label for="squelch">Squelch: <span id="squelch-value">Open</span></label>
+                        <input type="range" id="squelch" min="0" max="100" value="0" step="1" oninput="updateSquelchDisplay()" onchange="updateSquelch()">
                     </div>
                 </div>
             </div>

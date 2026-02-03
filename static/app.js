@@ -3149,6 +3149,20 @@ function setMode(mode, preserveBandwidth = false) {
         activeBtn.classList.add('active');
     }
 
+    // Show/hide bandwidth vs squelch controls based on mode
+    const bandwidthControls = document.getElementById('bandwidth-controls');
+    const squelchControls = document.getElementById('squelch-controls');
+    
+    if (mode === 'fm' || mode === 'nfm') {
+        // FM/NFM modes: hide bandwidth, show squelch
+        bandwidthControls.style.display = 'none';
+        squelchControls.style.display = 'block';
+    } else {
+        // Other modes: show bandwidth, hide squelch
+        bandwidthControls.style.display = 'block';
+        squelchControls.style.display = 'none';
+    }
+
     // Update bandwidth limits based on mode
     const bandwidthLowSlider = document.getElementById('bandwidth-low');
     const bandwidthHighSlider = document.getElementById('bandwidth-high');
@@ -3474,6 +3488,52 @@ function updateBandwidth() {
     updateURL();
 
     autoTune();
+}
+
+// Squelch control functions for FM/NFM modes
+let squelchUpdateTimeout = null;
+
+function updateSquelchDisplay() {
+    const squelchSlider = document.getElementById('squelch');
+    const squelchValue = parseInt(squelchSlider.value);
+    const squelchLabel = document.getElementById('squelch-value');
+    
+    // Map scale value (0-100) to squelch value
+    // 0 = "Open" (-999), 1-100 = -48 to +20 dB
+    if (squelchValue === 0) {
+        squelchLabel.textContent = 'Open';
+    } else {
+        const squelchDb = -48.0 + (squelchValue - 1) * (68.0 / 99.0);
+        squelchLabel.textContent = squelchDb.toFixed(1) + ' dB';
+    }
+}
+
+function updateSquelch() {
+    const squelchSlider = document.getElementById('squelch');
+    const squelchValue = parseInt(squelchSlider.value);
+    
+    // Map scale value (0-100) to squelch value
+    let squelchDb;
+    if (squelchValue === 0) {
+        squelchDb = -999.0;
+    } else {
+        squelchDb = -48.0 + (squelchValue - 1) * (68.0 / 99.0);
+    }
+    
+    // Send squelch update via WebSocket
+    if (wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
+        const msg = {
+            type: 'set_squelch',
+            squelchOpen: squelchDb
+        };
+        wsManager.send(msg);
+        
+        if (squelchDb === -999.0) {
+            log('Squelch: Open (no squelch)');
+        } else {
+            log(`Squelch: Closed at ${squelchDb.toFixed(1)} dB SNR`);
+        }
+    }
 }
 
 // Update current bandwidth display in status text

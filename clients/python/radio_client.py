@@ -982,6 +982,12 @@ class RadioClient:
         channels = binary_data[12]
         opus_data = binary_data[13:]
 
+        # Skip packets with no or minimal Opus data (e.g., during squelch)
+        # Opus packets need at least a few bytes to be valid
+        if len(opus_data) < 3:
+            # Silently return empty data - this is normal during squelch
+            return b''
+
         # Create decoder on first packet with correct sample rate and channels from server
         if self.opus_decoder is None or self.opus_sample_rate != sample_rate or self.opus_channels != channels:
             try:
@@ -1009,7 +1015,11 @@ class RadioClient:
             # Convert to bytes (already little-endian int16)
             return pcm_data
         except Exception as e:
-            print(f"Warning: Opus decode error: {e}", file=sys.stderr)
+            # Only log errors that aren't "buffer too small" (which is normal during squelch)
+            error_str = str(e)
+            if 'buffer too small' not in error_str.lower():
+                print(f"Warning: Opus decode error: {e}", file=sys.stderr)
+            # Return silence for any decode error
             return b''
 
     def decode_pcm_binary(self, binary_data: bytes, is_zstd: bool = False) -> bytes:

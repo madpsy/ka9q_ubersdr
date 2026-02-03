@@ -304,6 +304,7 @@ class RadioGUI:
         self.connection_start_time = None  # Time when connection was established
         self.session_timer_job = None  # Timer job for updating session countdown
         self.bandwidth_update_job = None  # Debounce timer for bandwidth updates
+        self.squelch_update_job = None  # Debounce timer for squelch updates
         self.last_mode = None  # Track last mode to detect actual mode changes
 
         # Radio control (rigctl or OmniRig)
@@ -1461,6 +1462,38 @@ class RadioGUI:
         # Create initial preset buttons (will be updated when mode changes)
         self.update_preset_buttons()
 
+        # Squelch control for FM/NFM modes (on same row as presets, initially hidden)
+        # Column 4 is after the 3 preset buttons (columns 1, 2, 3)
+        ttk.Label(self.preset_frame, text="Squelch:").grid(row=0, column=4, sticky=tk.W, padx=(15, 5))
+        
+        # Use a 0-100 scale internally, map to squelch values in the handler
+        # 0 = -999 (open), 1-100 = -50 to +20 dB
+        self.squelch_scale_var = tk.IntVar(value=0)  # Default to 0 (open)
+        self.squelch_scale = ttk.Scale(
+            self.preset_frame,
+            from_=0,
+            to=100,
+            orient=tk.HORIZONTAL,
+            variable=self.squelch_scale_var,
+            command=self.update_squelch_display,
+            length=150
+        )
+        self.squelch_scale.grid(row=0, column=5, padx=5)
+        
+        self.squelch_label = ttk.Label(self.preset_frame, text="Open", width=10)
+        self.squelch_label.grid(row=0, column=6, sticky=tk.W)
+        
+        # Store squelch widgets for show/hide
+        self.squelch_widgets = [
+            self.preset_frame.grid_slaves(row=0, column=4)[0],  # Label
+            self.squelch_scale,
+            self.squelch_label
+        ]
+        
+        # Hide squelch controls initially
+        for widget in self.squelch_widgets:
+            widget.grid_remove()
+
         bw_frame.columnconfigure(5, weight=1)
 
         # Audio control frame (includes NR2)
@@ -2076,6 +2109,70 @@ class RadioGUI:
 
         if self.connected:
             self.apply_bandwidth()
+
+    def update_squelch_display(self, value=None):
+        """Update squelch label display and schedule debounced squelch update."""
+        scale_value = self.squelch_scale_var.get()
+        
+        # Map scale value (0-100) to squelch value
+        # 0 = -999 (open)
+        # 1-100 = -48 to +20 dB (linear mapping)
+        # Note: Start at -48 instead of -50 to leave room for server's -2 dB hysteresis (squelchClose = squelchOpen - 2)
+        if scale_value == 0:
+            squelch_db = -999
+            self.squelch_label.config(text="Open")
+        else:
+            # Map 1-100 to -48 to +20 dB (68 dB range over 99 steps)
+            squelch_db = -48.0 + (scale_value - 1) * (68.0 / 99.0)
+            self.squelch_label.config(text=f"{squelch_db:.1f} dB")
+        
+        # Cancel any pending squelch update
+        if self.squelch_update_job:
+            self.root.after_cancel(self.squelch_update_job)
+        
+        # Schedule new squelch update after 200ms (debounce)
+        self.squelch_update_job = self.root.after(200, self._apply_squelch_update)
+
+    def _apply_squelch_update(self):
+        """Apply squelch update to server (called after debounce delay)."""
+        if not self.connected or not self.client or not self.client.ws:
+            self.squelch_update_job = None
+            return
+
+        try:
+            import json
+            
+            # Map scale value (0-100) to squelch value
+            scale_value = self.squelch_scale_var.get()
+            if scale_value == 0:
+                squelch_value = -999.0
+            else:
+                # Map 1-100 to -48 to +20 dB (68 dB range over 99 steps)
+                # Start at -48 to leave room for server's -2 dB hysteresis
+                squelch_value = -48.0 + (scale_value - 1) * (68.0 / 99.0)
+            
+            squelch_msg = {
+                'type': 'set_squelch',
+                'squelchOpen': float(squelch_value)
+            }
+
+            # Send the squelch message via WebSocket using the async event loop
+            if self.event_loop and self.event_loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self.client.ws.send(json.dumps(squelch_msg)),
+                    self.event_loop
+                )
+                # Log squelch status
+                if squelch_value == -999.0:
+                    self.log_status("Squelch: Open (no squelch)")
+                else:
+                    self.log_status(f"Squelch: Closed at {squelch_value:.1f} dB SNR")
+            else:
+                self.log_status("ERROR: Event loop not running")
+        except Exception as e:
+            self.log_status(f"ERROR: Failed to send squelch message: {e}")
+        
+        self.squelch_update_job = None
 
     def get_step_size_hz(self) -> int:
         """Get the current step size in Hz."""
@@ -3411,6 +3508,14 @@ class RadioGUI:
         # Always update bandwidth defaults and presets when mode changes
         self.adjust_bandwidth_for_mode(mode)
         self.update_preset_buttons()
+
+        # Show/hide squelch slider for FM/NFM modes
+        if mode in ['fm', 'nfm']:
+            for widget in self.squelch_widgets:
+                widget.grid()
+        else:
+            for widget in self.squelch_widgets:
+                widget.grid_remove()
 
         # Update audio filter slider ranges based on mode bandwidth
         self.update_audio_filter_ranges()

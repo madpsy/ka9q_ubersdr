@@ -854,6 +854,8 @@ body {
 
 .bandwidth-controls {
     display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
     gap: 20px;
     margin-top: 10px;
 }

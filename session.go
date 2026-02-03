@@ -556,12 +556,8 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 		VisitedModes:   make(map[string]bool),
 	}
 	
-	// Track initial band for spectrum session
-	band := frequencyToBand(float64(frequency))
-	if band != "" {
-		session.VisitedBands[band] = true
-	}
-	session.VisitedModes["spectrum"] = true
+	// Note: Spectrum sessions don't track bands/modes because they only show
+	// the waterfall center frequency, not actual tuned frequencies
 
 	// Perform GeoIP lookup if service is available and we have a client IP
 	if sm.geoIPService != nil && clientIP != "" {
@@ -631,7 +627,6 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 
 	// Update session state
 	session.mu.Lock()
-	oldFreq := session.Frequency
 
 	if frequency > 0 {
 		session.Frequency = frequency
@@ -646,15 +641,8 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 	session.LastActive = time.Now()
 	session.mu.Unlock()
 	
-	// Track band change if frequency changed
-	if frequency > 0 && frequency != oldFreq {
-		band := frequencyToBand(float64(frequency))
-		if band != "" {
-			session.bandsMu.Lock()
-			session.VisitedBands[band] = true
-			session.bandsMu.Unlock()
-		}
-	}
+	// Note: Spectrum sessions don't track bands because they only show
+	// the waterfall center frequency, not actual tuned frequencies
 
 	// Send update command to radiod
 	// The radiod controller will calculate appropriate filter edges based on the new bandwidth

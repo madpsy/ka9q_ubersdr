@@ -4672,8 +4672,10 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 		entry           SessionActivityEntry
 		lastSeen        time.Time
 		firstSeen       time.Time
-		allTypes        map[string]bool // Track all session types seen
-		startEventIndex int             // Index of start event in events slice (for updating types)
+		allTypes        map[string]bool   // Track all session types seen
+		allBands        map[string]bool   // Track all bands visited
+		allModes        map[string]bool   // Track all modes used
+		startEventIndex int               // Index of start event in events slice (for updating types)
 	}
 	activeSessions := make(map[string]*sessionInfo)
 	events := []SessionEvent{}
@@ -4686,8 +4688,9 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 			currentSessionIDs[session.UserSessionID] = true
 
 			if existing, exists := activeSessions[session.UserSessionID]; exists {
-				// Session already active, update last seen and merge session types
+				// Session already active, update last seen and merge session types, bands, and modes
 				existing.lastSeen = log.Timestamp
+				
 				// Merge session types from this snapshot
 				typesChanged := false
 				for _, t := range session.SessionTypes {
@@ -4696,6 +4699,21 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 						typesChanged = true
 					}
 				}
+				
+				// Merge bands from this snapshot
+				for _, band := range session.Bands {
+					if band != "" && !existing.allBands[band] {
+						existing.allBands[band] = true
+					}
+				}
+				
+				// Merge modes from this snapshot
+				for _, mode := range session.Modes {
+					if mode != "" && !existing.allModes[mode] {
+						existing.allModes[mode] = true
+					}
+				}
+				
 				// If types changed, update the start event with cumulative types
 				if typesChanged && existing.startEventIndex >= 0 && existing.startEventIndex < len(events) {
 					allTypesSlice := make([]string, 0, len(existing.allTypes))
@@ -4705,15 +4723,29 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					sort.Strings(allTypesSlice)
 					events[existing.startEventIndex].SessionTypes = allTypesSlice
 				}
-				// Keep the most complete session info (prefer entries with more types)
-				if len(session.SessionTypes) > len(existing.entry.SessionTypes) {
-					existing.entry = session
-				}
+				
+				// Always keep the most recent session entry (has most up-to-date bands/modes)
+				existing.entry = session
 			} else {
 				// New session detected - create start event
 				allTypes := make(map[string]bool)
 				for _, t := range session.SessionTypes {
 					allTypes[t] = true
+				}
+				
+				// Initialize bands and modes tracking
+				allBands := make(map[string]bool)
+				for _, band := range session.Bands {
+					if band != "" {
+						allBands[band] = true
+					}
+				}
+				
+				allModes := make(map[string]bool)
+				for _, mode := range session.Modes {
+					if mode != "" {
+						allModes[mode] = true
+					}
 				}
 
 				// Determine actual session start time using all available timestamps
@@ -4757,6 +4789,8 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					firstSeen:       startTime,
 					lastSeen:        log.Timestamp,
 					allTypes:        allTypes,
+					allBands:        allBands,
+					allModes:        allModes,
 					startEventIndex: startEventIndex,
 				}
 			}
@@ -4777,6 +4811,20 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					allTypesSlice = append(allTypesSlice, t)
 				}
 				sort.Strings(allTypesSlice) // Sort for consistent ordering
+				
+				// Convert allBands map to slice
+				allBandsSlice := make([]string, 0, len(info.allBands))
+				for band := range info.allBands {
+					allBandsSlice = append(allBandsSlice, band)
+				}
+				sort.Strings(allBandsSlice) // Sort for consistent ordering
+				
+				// Convert allModes map to slice
+				allModesSlice := make([]string, 0, len(info.allModes))
+				for mode := range info.allModes {
+					allModesSlice = append(allModesSlice, mode)
+				}
+				sort.Strings(allModesSlice) // Sort for consistent ordering
 
 				events = append(events, SessionEvent{
 					Timestamp:     endTime, // Use destruction event timestamp
@@ -4786,8 +4834,8 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					SourceIP:      info.entry.SourceIP,
 					AuthMethod:    info.entry.AuthMethod,
 					SessionTypes:  allTypesSlice,      // Use accumulated types
-					Bands:         info.entry.Bands,   // Cumulative bands visited
-					Modes:         info.entry.Modes,   // Cumulative modes used
+					Bands:         allBandsSlice,      // Use accumulated bands
+					Modes:         allModesSlice,      // Use accumulated modes
 					UserAgent:     info.entry.UserAgent,
 					Country:       info.entry.Country,
 					CountryCode:   info.entry.CountryCode,

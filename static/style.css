@@ -914,7 +914,7 @@ button:not(.primary-btn):not(:disabled):not(.band-conditions-button):not(.digita
     border-top: none;
     border-bottom: none;
     display: flex;
-    gap: 30px;
+    gap: 15px;
     align-items: center;
     justify-content: center;
     transform: scale(0.75);
@@ -934,7 +934,7 @@ button:not(.primary-btn):not(:disabled):not(.band-conditions-button):not(.digita
     flex: 1;
     display: flex;
     align-items: center;
-    max-width: 600px;
+    max-width: 450px;
 }
 
 .vu-meter-compact-container .vu-meter {

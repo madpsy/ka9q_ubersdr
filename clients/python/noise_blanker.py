@@ -1,7 +1,7 @@
 """
-Noise Blanker - Time-domain impulse noise suppression
+Noise Blanker - Frequency-domain impulse noise suppression
 Removes transient wideband noise (e.g., power line noise, ignition noise, electric fences)
-Uses windowing to prevent discontinuities
+Uses FFT to detect broadband clicks and distinguish from narrowband speech
 """
 
 import numpy as np
@@ -11,10 +11,11 @@ import time
 
 class NoiseBlanker:
     """
-    Time-domain noise blanker for removing impulse noise.
+    Frequency-domain noise blanker for removing impulse noise.
     
-    Uses a Hann window to smoothly mute detected pulses without creating
-    wideband artifacts from discontinuities.
+    Uses FFT-based spectral analysis to detect broadband clicks and distinguish
+    them from narrowband speech peaks. Uses a Hann window to smoothly mute 
+    detected pulses without creating wideband artifacts from discontinuities.
     """
     
     def __init__(self, sample_rate=12000):
@@ -30,6 +31,12 @@ class NoiseBlanker:
         self.blank_duration = 0.003    # 3ms blanking duration
         self.blank_samples = int(sample_rate * self.blank_duration)
         self.avg_window = int(sample_rate * 0.020)  # 20ms averaging window
+        
+        # FFT parameters for broadband detection
+        self.fft_size = 128  # Small FFT for quick spectral analysis
+        self.fft_buffer = np.zeros(self.fft_size, dtype=np.float32)
+        self.fft_buffer_pos = 0
+        self.spectral_flatness_threshold = 0.3  # 0-1, higher = more broadband required
         
         # Create a Hann-like window for smooth blanking
         # At detection (window_pos=0): maximum attenuation (multiply by ~0.0)
@@ -64,15 +71,64 @@ class NoiseBlanker:
         
         # Statistics
         self.pulses_detected = 0
+        self.false_positives_rejected = 0
         self.last_log_time = 0
         self.log_interval = 2.0  # Log every 2 seconds max
     
-    def set_parameters(self, threshold=None, avg_window_ms=None):
+    def calculate_spectral_flatness(self, spectrum):
+        """Calculate spectral flatness (geometric mean / arithmetic mean).
+        
+        Returns 0-1, where 1 = perfectly flat (broadband), 0 = single tone
+        
+        Args:
+            spectrum: Magnitude spectrum (positive frequencies)
+            
+        Returns:
+            Spectral flatness value between 0 and 1
+        """
+        epsilon = 1e-10  # Avoid log(0)
+        
+        # Add epsilon to avoid zeros
+        spectrum_safe = spectrum + epsilon
+        
+        # Geometric mean: exp(mean(log(x)))
+        geometric_mean = np.exp(np.mean(np.log(spectrum_safe)))
+        
+        # Arithmetic mean
+        arithmetic_mean = np.mean(spectrum_safe)
+        
+        if arithmetic_mean < epsilon:
+            return 0.0
+        
+        return geometric_mean / arithmetic_mean
+    
+    def is_broadband_click(self):
+        """Check if current signal is broadband (impulse noise characteristic).
+        
+        Returns:
+            True if signal is broadband, False if narrowband
+        """
+        # Apply Hann window to FFT buffer
+        hann_window = np.hanning(self.fft_size)
+        windowed = self.fft_buffer * hann_window
+        
+        # Compute FFT (only need positive frequencies)
+        fft_result = np.fft.rfft(windowed)
+        spectrum = np.abs(fft_result)
+        
+        # Calculate spectral flatness
+        flatness = self.calculate_spectral_flatness(spectrum)
+        
+        # Broadband clicks have high spectral flatness
+        return flatness > self.spectral_flatness_threshold
+    
+    def set_parameters(self, threshold=None, avg_window_ms=None, spectral_flatness_threshold=None):
         """Update noise blanker parameters.
         
         Args:
             threshold: Detection threshold (multiplier of average level)
             avg_window_ms: Averaging window in milliseconds
+            spectral_flatness_threshold: Threshold for broadband detection (0-1)
         """
         if threshold is not None:
             self.threshold = float(threshold)
@@ -86,6 +142,9 @@ class NoiseBlanker:
                 self.history_sum = 0.0
                 self.warmup_samples = self.avg_window * 2
                 self.warmup_counter = 0
+        
+        if spectral_flatness_threshold is not None:
+            self.spectral_flatness_threshold = float(spectral_flatness_threshold)
     
     def process(self, input_samples):
         """Process audio samples with noise blanking.
@@ -105,6 +164,10 @@ class NoiseBlanker:
             sample = input_samples[i]
             abs_sample = abs(sample)
             
+            # Update FFT buffer
+            self.fft_buffer[self.fft_buffer_pos] = sample
+            self.fft_buffer_pos = (self.fft_buffer_pos + 1) % self.fft_size
+            
             # Update running average
             self.history_sum -= self.history[self.history_pos]
             self.history[self.history_pos] = abs_sample
@@ -117,20 +180,32 @@ class NoiseBlanker:
                 self.warmup_counter += 1
                 continue
             
-            # Detect pulse
+            # Detect pulse - first check amplitude
             if abs_sample > self.avg_level * self.threshold:
-                if self.blank_counter == 0:
-                    self.pulses_detected += 1
-                    # Log detection (rate-limited)
-                    current_time = time.time()
-                    if current_time - self.last_log_time > self.log_interval:
-                        print(f"[NB] Pulse detected! Sample={abs_sample:.6f}, Avg={self.avg_level:.6f}, "
-                              f"Threshold={self.avg_level * self.threshold:.6f}, Ratio={abs_sample/self.avg_level:.1f}x",
-                              file=sys.stderr)
-                        self.last_log_time = current_time
-                # Start blanking from the MIDDLE of the window (maximum attenuation)
-                # so the detected pulse itself gets blanked
-                self.blank_counter = self.blank_samples
+                # Then check if it's broadband (impulse noise) or narrowband (speech)
+                if self.is_broadband_click():
+                    if self.blank_counter == 0:
+                        self.pulses_detected += 1
+                        # Log detection (rate-limited)
+                        current_time = time.time()
+                        if current_time - self.last_log_time > self.log_interval:
+                            print(f"[NB] Broadband pulse detected! Sample={abs_sample:.6f}, Avg={self.avg_level:.6f}, "
+                                  f"Threshold={self.avg_level * self.threshold:.6f}, Ratio={abs_sample/self.avg_level:.1f}x",
+                                  file=sys.stderr)
+                            self.last_log_time = current_time
+                    # Start blanking from the MIDDLE of the window (maximum attenuation)
+                    # so the detected pulse itself gets blanked
+                    self.blank_counter = self.blank_samples
+                else:
+                    # Narrowband peak (likely speech) - don't blank
+                    if self.blank_counter == 0:
+                        self.false_positives_rejected += 1
+                        current_time = time.time()
+                        if current_time - self.last_log_time > self.log_interval:
+                            print(f"[NB] Narrowband peak rejected (speech?) Sample={abs_sample:.6f}, "
+                                  f"Ratio={abs_sample/self.avg_level:.1f}x",
+                                  file=sys.stderr)
+                            self.last_log_time = current_time
             
             # Apply windowed blanking
             if self.blank_counter > 0:
@@ -160,30 +235,37 @@ class NoiseBlanker:
         self.blank_counter = 0
         self.warmup_counter = 0
         self.pulses_detected = 0
+        self.false_positives_rejected = 0
         self.last_log_time = 0
+        self.fft_buffer.fill(0)
+        self.fft_buffer_pos = 0
     
     def get_stats(self):
         """Get statistics about noise blanker operation."""
         return {
             'pulses_detected': self.pulses_detected,
+            'false_positives_rejected': self.false_positives_rejected,
             'avg_level': self.avg_level,
             'threshold_level': self.avg_level * self.threshold,
-            'blanking': self.blank_counter > 0
+            'blanking': self.blank_counter > 0,
+            'spectral_flatness_threshold': self.spectral_flatness_threshold
         }
 
 
-def create_noise_blanker(sample_rate=12000, threshold=5.0, avg_window_ms=20):
+def create_noise_blanker(sample_rate=12000, threshold=10.0, avg_window_ms=20, spectral_flatness_threshold=0.3):
     """Create and configure a noise blanker.
     
     Args:
         sample_rate: Audio sample rate in Hz
         threshold: Detection threshold (multiplier of average level)
         avg_window_ms: Averaging window in milliseconds
+        spectral_flatness_threshold: Threshold for broadband detection (0-1)
     
     Returns:
         Configured NoiseBlanker instance
     """
     nb = NoiseBlanker(sample_rate)
-    nb.set_parameters(threshold=threshold, avg_window_ms=avg_window_ms)
+    nb.set_parameters(threshold=threshold, avg_window_ms=avg_window_ms, 
+                     spectral_flatness_threshold=spectral_flatness_threshold)
     nb.enabled = True
     return nb

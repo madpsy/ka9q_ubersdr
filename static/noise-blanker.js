@@ -34,6 +34,12 @@ class NoiseBlanker {
     
     // Process a buffer of audio samples
     process(input, output) {
+        // TEMPORARY DEBUG: Bypass all blanking logic to test clean audio passthrough
+        // This will help isolate whether clicking is from blanking or audio chain
+        output.set(input);
+        return;
+        
+        /* DISABLED FOR TESTING
         if (!this.enabled) {
             // Pass through when disabled
             output.set(input);
@@ -84,6 +90,7 @@ class NoiseBlanker {
                 output[i] = sample;
             }
         }
+        */
     }
     
     // Reset state (useful when changing frequency or mode)

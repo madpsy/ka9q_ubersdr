@@ -1118,17 +1118,11 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 		}
 	}
 
-	if DebugMode {
-		log.Printf("DEBUG: Session removed from ssrcToSession map: SSRC 0x%08x", session.SSRC)
-		log.Printf("DEBUG: Remaining sessions: %d, Remaining SSRC mappings: %d, Unique users: %d",
-			len(sm.sessions), len(sm.ssrcToSession), len(sm.userSessionUUIDs))
-	}
 	sm.mu.Unlock()
 
 	// Close WebSocket connection if present (forces immediate disconnect)
 	if session.WSConn != nil {
 		if wsConn, ok := session.WSConn.(interface{ close() error }); ok {
-			log.Printf("DEBUG: Closing WebSocket connection for session %s", sessionID)
 			if err := wsConn.close(); err != nil {
 				log.Printf("Warning: failed to close WebSocket for session %s: %v", sessionID, err)
 			}

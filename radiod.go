@@ -567,9 +567,6 @@ func (rc *RadiodController) DisableChannel(name string, ssrc uint32) error {
 		"radio.frequency": uint64(0),
 	})
 
-	if DebugMode {
-		log.Printf("DEBUG: Sending DisableChannel command for SSRC 0x%08x", ssrc)
-	}
 
 	if err := rc.sendCommand(cmd); err != nil {
 		return fmt.Errorf("failed to send disable command: %w", err)

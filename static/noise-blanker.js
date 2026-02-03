@@ -44,16 +44,21 @@ class NoiseBlanker {
             const sample = input[i];
             const absSample = Math.abs(sample);
             
-            // Update running average using circular buffer
-            // This provides a fast-moving noise floor estimate
-            this.historySum -= this.history[this.historyPos];
-            this.history[this.historyPos] = absSample;
-            this.historySum += absSample;
-            this.historyPos = (this.historyPos + 1) % this.avgWindow;
-            this.avgLevel = Math.max(this.historySum / this.avgWindow, 0.0001);
-            
             // Detect impulse: sample significantly above average
-            if (absSample > this.avgLevel * this.threshold) {
+            const isImpulse = absSample > this.avgLevel * this.threshold;
+            
+            // Update running average using circular buffer
+            // CRITICAL: Only update average with non-impulse samples
+            // This prevents the threshold from adapting to the impulses themselves
+            if (!isImpulse) {
+                this.historySum -= this.history[this.historyPos];
+                this.history[this.historyPos] = absSample;
+                this.historySum += absSample;
+                this.historyPos = (this.historyPos + 1) % this.avgWindow;
+                this.avgLevel = Math.max(this.historySum / this.avgWindow, 0.0001);
+            }
+            
+            if (isImpulse) {
                 // Start blanking period
                 if (this.blankCounter === 0) {
                     // New pulse detected

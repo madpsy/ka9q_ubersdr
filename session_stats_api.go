@@ -160,24 +160,36 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 
 		// Parse user agent if available
 		if event.UserAgent != "" {
-			client := parser.Parse(event.UserAgent)
-			
-			// Track browser (family + major version)
-			if client.UserAgent.Family != "" {
-				browser := client.UserAgent.Family
-				if client.UserAgent.Major != "" {
-					browser += " " + client.UserAgent.Major
+			// Check for UberSDR user agents first (special handling)
+			if len(event.UserAgent) >= 7 && event.UserAgent[:7] == "UberSDR" {
+				// Extract UberSDR client type and version
+				// Examples: "UberSDR/1.0", "UberSDR Client 1.0 (go)", "UberSDR_HPSDR/1.0"
+				browserCounts["UberSDR Client"]++
+				
+				// For OS, try to parse the rest of the user agent if available
+				// But default to "UberSDR Client" for OS as well since it's a native client
+				osCounts["UberSDR Client"]++
+			} else {
+				// Parse regular user agents
+				client := parser.Parse(event.UserAgent)
+				
+				// Track browser (family + major version)
+				if client.UserAgent.Family != "" {
+					browser := client.UserAgent.Family
+					if client.UserAgent.Major != "" {
+						browser += " " + client.UserAgent.Major
+					}
+					browserCounts[browser]++
 				}
-				browserCounts[browser]++
-			}
-			
-			// Track OS (family + major version)
-			if client.Os.Family != "" {
-				os := client.Os.Family
-				if client.Os.Major != "" {
-					os += " " + client.Os.Major
+				
+				// Track OS (family + major version)
+				if client.Os.Family != "" {
+					os := client.Os.Family
+					if client.Os.Major != "" {
+						os += " " + client.Os.Major
+					}
+					osCounts[os]++
 				}
-				osCounts[os]++
 			}
 		}
 

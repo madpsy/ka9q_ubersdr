@@ -6848,6 +6848,7 @@ window.getCurrentDialFrequency = function() {
 // Audio controls
 window.toggleMute = toggleMute;
 window.toggleNR2Quick = toggleNR2Quick;
+window.toggleNBQuick = toggleNBQuick;
 window.updateChannelSelection = updateChannelSelection;
 
 // Expose core functions for bookmark-manager.js

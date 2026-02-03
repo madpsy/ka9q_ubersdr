@@ -981,6 +981,55 @@ class RadioClient:
         sample_rate = struct.unpack('<I', binary_data[8:12])[0]
         channels = binary_data[12]
         opus_data = binary_data[13:]
+        
+        # Update client sample rate if it changes (e.g., FM/NFM switching from 12kHz to 24kHz)
+        if self.sample_rate != sample_rate:
+            old_rate = self.sample_rate
+            self.sample_rate = sample_rate
+            # Reset resamplers when sample rate changes
+            self.resampler_left = None
+            self.resampler_right = None
+            # Reset debug flags when sample rate changes
+            if hasattr(self, '_fm_decode_success_logged'):
+                delattr(self, '_fm_decode_success_logged')
+            
+            # Recreate sounddevice stream with correct sample rate
+            # Mark stream as being recreated to prevent writes during recreation
+            if self.output_mode == 'sounddevice' and self.sounddevice_stream:
+                # Temporarily set stream to None to prevent writes during recreation
+                old_stream = self.sounddevice_stream
+                self.sounddevice_stream = None
+                
+                try:
+                    # Stop and close old stream (blocking, but quick)
+                    old_stream.stop()
+                    old_stream.close()
+                    
+                    # Recreate stream with new sample rate
+                    if self.needs_resampling:
+                        self.sounddevice_output_rate = 48000
+                    else:
+                        self.sounddevice_output_rate = self.sample_rate
+                    
+                    self.sounddevice_stream = sd.OutputStream(
+                        samplerate=self.sounddevice_output_rate,
+                        channels=self.output_channels,
+                        dtype='int16',
+                        device=self.sounddevice_device_index,
+                        blocksize=1024,
+                        latency='low'
+                    )
+                    self.sounddevice_stream.start()
+                    print(f"Sample rate changed: {old_rate} Hz -> {sample_rate} Hz (stream recreated)", file=sys.stderr, flush=True)
+                except Exception as e:
+                    print(f"Warning: Failed to recreate sounddevice stream: {e}", file=sys.stderr, flush=True)
+                    # Try to restore old stream if recreation failed
+                    if old_stream and not self.sounddevice_stream:
+                        try:
+                            old_stream.start()
+                            self.sounddevice_stream = old_stream
+                        except:
+                            pass
 
         # Skip packets with no or minimal Opus data (e.g., during squelch)
         # Opus packets need at least a few bytes to be valid
@@ -1005,16 +1054,28 @@ class RadioClient:
                 return b''
 
         try:
-            # Calculate frame size based on sample rate (20ms frame = sample_rate * 0.02)
-            # Opus typically uses 20ms frames
-            frame_size = int(sample_rate * 0.02)
+            # Opus frame_size parameter specifies the MAXIMUM output buffer size
+            # The decoder will output the actual decoded samples (may be less than frame_size)
+            # Use a larger buffer to accommodate variable Opus frame sizes
+            # Maximum Opus frame is 120ms at 48kHz = 5760 samples, but we're at 12-24kHz
+            # So use 2880 samples (120ms at 24kHz) to be safe
+            frame_size = 2880
 
             # Decode Opus to PCM (returns int16 samples as bytes)
             pcm_data = self.opus_decoder.decode(opus_data, frame_size=frame_size)
 
+            # DEBUG: Log for FM/NFM to see if decode is working
+            if self.mode in ('fm', 'nfm') and len(pcm_data) > 0:
+                if not hasattr(self, '_fm_decode_success_logged'):
+                    print(f"DEBUG [FM/NFM]: Opus decode SUCCESS - {len(pcm_data)} bytes, frame_size={frame_size}, sample_rate={sample_rate}", file=sys.stderr)
+                    self._fm_decode_success_logged = True
+
             # Convert to bytes (already little-endian int16)
             return pcm_data
         except Exception as e:
+            # Log ALL errors for FM/NFM to diagnose the issue
+            if self.mode in ('fm', 'nfm'):
+                print(f"ERROR [FM/NFM]: Opus decode failed - {e}, opus_data_len={len(opus_data)}, frame_size={frame_size}, sample_rate={sample_rate}", file=sys.stderr)
             # Only log errors that aren't "buffer too small" (which is normal during squelch)
             error_str = str(e)
             if 'buffer too small' not in error_str.lower():
@@ -1136,6 +1197,11 @@ class RadioClient:
 
     async def output_audio(self, pcm_data: bytes):
         """Output audio data based on selected mode."""
+        
+        # Yield control to event loop periodically to prevent audio processing
+        # from blocking WebSocket sends (critical for FM modes with high packet rates)
+        await asyncio.sleep(0)
+        
         # Send audio/IQ to TCI server if enabled (before any processing)
         if hasattr(self, 'tci_server') and self.tci_server:
             try:
@@ -1372,19 +1438,19 @@ class RadioClient:
             if self.sounddevice_output_rate != self.sample_rate:
                 if SAMPLERATE_AVAILABLE:
                     # Initialize resamplers on first use
-                    if self.resampler_left is None:
-                        # Use 'sinc_best' for highest quality, or 'sinc_medium' for lower CPU usage
-                        self.resampler_left = samplerate.Resampler('sinc_best', channels=1)
-                        self.resampler_right = samplerate.Resampler('sinc_best', channels=1)
+                   if self.resampler_left is None:
+                       # Use 'sinc_best' for highest quality, or 'sinc_medium' for lower CPU usage
+                       self.resampler_left = samplerate.Resampler('sinc_best', channels=1)
+                       self.resampler_right = samplerate.Resampler('sinc_best', channels=1)
 
-                    # Calculate resampling ratio
-                    ratio = self.sounddevice_output_rate / self.sample_rate
+                   # Calculate resampling ratio
+                   ratio = self.sounddevice_output_rate / self.sample_rate
 
-                    # Resample each channel with stateful resamplers
-                    # This maintains filter state across chunks, eliminating clicks
-                    left_resampled = self.resampler_left.process(audio_float[:, 0], ratio)
-                    right_resampled = self.resampler_right.process(audio_float[:, 1], ratio)
-                    audio_float = np.column_stack((left_resampled, right_resampled))
+                   # Resample each channel with stateful resamplers
+                   # This maintains filter state across chunks, eliminating clicks
+                   left_resampled = self.resampler_left.process(audio_float[:, 0], ratio)
+                   right_resampled = self.resampler_right.process(audio_float[:, 1], ratio)
+                   audio_float = np.column_stack((left_resampled, right_resampled))
 
         # Convert back to int16 and clip
         audio_array = np.clip(audio_float * 32768.0, -32768, 32767).astype(np.int16)
@@ -1398,10 +1464,16 @@ class RadioClient:
         elif self.output_mode == 'pipewire':
             # Write to PipeWire process (skip if in IQ mode)
             is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+            
             if not is_iq_mode and self.pipewire_process and self.pipewire_process.stdin:
                 try:
                     self.pipewire_process.stdin.write(pcm_data)
-                    await self.pipewire_process.stdin.drain()
+                    # Add timeout to prevent blocking the event loop if PipeWire buffer is slow
+                    try:
+                        await asyncio.wait_for(self.pipewire_process.stdin.drain(), timeout=0.1)
+                    except asyncio.TimeoutError:
+                        # PipeWire buffer is slow, but don't block - continue processing
+                        pass
                 except (BrokenPipeError, ConnectionResetError):
                     print("PipeWire connection lost", file=sys.stderr)
                     self.running = False
@@ -1409,6 +1481,7 @@ class RadioClient:
         elif self.output_mode == 'pyaudio':
             # Write to PyAudio stream (skip if in IQ mode)
             is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+            
             if not is_iq_mode and self.pyaudio_stream:
                 try:
                     self.pyaudio_stream.write(pcm_data)
@@ -1419,6 +1492,7 @@ class RadioClient:
         elif self.output_mode == 'sounddevice':
             # Write to sounddevice stream (skip if in IQ mode)
             is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+            
             if not is_iq_mode and self.sounddevice_stream:
                 try:
                     # sounddevice expects numpy array, not bytes
@@ -1750,13 +1824,10 @@ class RadioClient:
 
                         # Handle binary messages (Opus or PCM-zstd format)
                         if isinstance(message, bytes):
-                            # Log first binary message received
-                            if pcm_packet_count == 0 and opus_packet_count == 0:
-                                print(f"DEBUG: First binary message received (size: {len(message)} bytes, format: {'opus' if self.use_opus else 'pcm-zstd'})", file=sys.stderr)
-
                             if self.use_opus:
                                 # Decode binary Opus packet
                                 pcm_data = self.decode_opus_binary(message)
+                                
                                 if pcm_data:
                                     await self.output_audio(pcm_data)
                                     opus_packet_count += 1
@@ -1773,6 +1844,7 @@ class RadioClient:
                             else:
                                 # Decode binary PCM-zstd packet
                                 pcm_data = self.decode_pcm_binary(message, is_zstd=True)
+                                
                                 if pcm_data:
                                     await self.output_audio(pcm_data)
                                     pcm_packet_count += 1
@@ -1783,10 +1855,7 @@ class RadioClient:
                                         # Log if this is IQ mode for TCI
                                         is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
                                         if is_iq_mode and hasattr(self, 'tci_server') and self.tci_server:
-                                            print(f"DEBUG: IQ mode detected, TCI server active", file=sys.stderr)
-                                elif pcm_packet_count == 0:
-                                    # Log if first packet decode fails
-                                    print(f"DEBUG: First PCM packet decode failed (size: {len(message)} bytes)", file=sys.stderr)
+                                            print(f"IQ mode detected, TCI server active", file=sys.stderr)
 
                                 # Check duration limit
                                 if not self.check_duration():

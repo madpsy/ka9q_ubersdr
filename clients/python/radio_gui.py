@@ -305,7 +305,10 @@ class RadioGUI:
         self.session_timer_job = None  # Timer job for updating session countdown
         self.bandwidth_update_job = None  # Debounce timer for bandwidth updates
         self.squelch_update_job = None  # Debounce timer for squelch updates
+        self.squelch_last_send_time = 0  # Track last squelch send time for throttling
         self.last_mode = None  # Track last mode to detect actual mode changes
+        self.pending_tune_future = None  # Track pending tune message to avoid queue buildup
+        self.pending_squelch_future = None  # Track pending squelch message to avoid queue buildup
 
         # Radio control (rigctl or OmniRig)
         self.radio_control_type = 'none'  # 'none', 'rigctl', or 'omnirig'
@@ -2111,7 +2114,9 @@ class RadioGUI:
             self.apply_bandwidth()
 
     def update_squelch_display(self, value=None):
-        """Update squelch label display and schedule debounced squelch update."""
+        """Update squelch label display and schedule throttled squelch update."""
+        import time
+        
         scale_value = self.squelch_scale_var.get()
         
         # Map scale value (0-100) to squelch value
@@ -2130,11 +2135,22 @@ class RadioGUI:
         if self.squelch_update_job:
             self.root.after_cancel(self.squelch_update_job)
         
-        # Schedule new squelch update after 200ms (debounce)
-        self.squelch_update_job = self.root.after(200, self._apply_squelch_update)
+        # Throttle: limit to 10 updates per second (100ms minimum interval)
+        current_time = time.time()
+        elapsed_ms = (current_time - self.squelch_last_send_time) * 1000
+        
+        if elapsed_ms >= 100:
+            # Enough time has passed, send immediately
+            self._apply_squelch_update()
+        else:
+            # Schedule for 100ms after last send
+            delay_ms = int(100 - elapsed_ms)
+            self.squelch_update_job = self.root.after(delay_ms, self._apply_squelch_update)
 
     def _apply_squelch_update(self):
-        """Apply squelch update to server (called after debounce delay)."""
+        """Apply squelch update to server (called after throttle delay)."""
+        import time
+        
         if not self.connected or not self.client or not self.client.ws:
             self.squelch_update_job = None
             return
@@ -2158,10 +2174,18 @@ class RadioGUI:
 
             # Send the squelch message via WebSocket using the async event loop
             if self.event_loop and self.event_loop.is_running():
-                asyncio.run_coroutine_threadsafe(
+                # Cancel any pending squelch message to prevent queue buildup
+                if self.pending_squelch_future and not self.pending_squelch_future.done():
+                    self.pending_squelch_future.cancel()
+                
+                # Send new squelch message
+                self.pending_squelch_future = asyncio.run_coroutine_threadsafe(
                     self.client.ws.send(json.dumps(squelch_msg)),
                     self.event_loop
                 )
+                # Update last send time for throttling
+                self.squelch_last_send_time = time.time()
+                
                 # Log squelch status
                 if squelch_value == -999.0:
                     self.log_status("Squelch: Open (no squelch)")
@@ -6341,6 +6365,11 @@ class RadioGUI:
 
     def send_tune_message(self):
         """Send tune message to change frequency/mode/bandwidth without reconnecting."""
+        import time
+        import sys
+        
+        print(f"[DEBUG {time.time():.3f}] send_tune_message() CALLED - mode={self.client.mode if self.client else 'N/A'}", file=sys.stderr, flush=True)
+        
         if not self.client or not self.client.ws:
             self.log_status("ERROR: Not connected - cannot send tune message")
             return
@@ -6363,14 +6392,21 @@ class RadioGUI:
 
             # Send the tune message via WebSocket using the async event loop
             if self.event_loop and self.event_loop.is_running():
-                # Schedule the coroutine in the client's event loop (fire-and-forget)
-                asyncio.run_coroutine_threadsafe(
+                print(f"[DEBUG {time.time():.3f}] Event loop is running, scheduling tune message: {tune_msg}", file=sys.stderr, flush=True)
+                
+                # Cancel any pending tune message to prevent queue buildup
+                if self.pending_tune_future and not self.pending_tune_future.done():
+                    print(f"[DEBUG {time.time():.3f}] Canceling pending tune future", file=sys.stderr, flush=True)
+                    self.pending_tune_future.cancel()
+                
+                # Send new tune message
+                self.pending_tune_future = asyncio.run_coroutine_threadsafe(
                     self.client.ws.send(json.dumps(tune_msg)),
                     self.event_loop
                 )
-                # Don't wait for completion - this prevents GUI freezing
-                # self.log_status(f"Sent tune: {self.client.frequency/1e6:.3f} MHz {self.client.mode.upper()} ({self.client.bandwidth_low} to {self.client.bandwidth_high} Hz)")  # Removed: too verbose during rapid frequency changes
+                print(f"[DEBUG {time.time():.3f}] Tune message scheduled in event loop", file=sys.stderr, flush=True)
             else:
+                print(f"[DEBUG {time.time():.3f}] ERROR: Event loop not running!", file=sys.stderr, flush=True)
                 self.log_status("ERROR: Event loop not running")
         except Exception as e:
             self.log_status(f"ERROR: Failed to send tune message: {e}")

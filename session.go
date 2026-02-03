@@ -334,11 +334,9 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 		}
 		if band != "" {
 			sm.userSessionBands[userSessionID][band] = true
-			log.Printf("UUID %s: Initialized with band %s", userSessionID[:8], band)
 		}
 		if mode != "" {
 			sm.userSessionModes[userSessionID][mode] = true
-			log.Printf("UUID %s: Initialized with mode %s", userSessionID[:8], mode)
 		}
 	}
 
@@ -789,8 +787,6 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 			session.bandsMu.Lock()
 			if !session.VisitedBands[band] {
 				session.VisitedBands[band] = true
-				log.Printf("Session %s (user: %s): Added band %s to VisitedBands (freq: %d Hz)",
-					session.ID[:8], session.UserSessionID[:8], band, currentFreq)
 			}
 			session.bandsMu.Unlock()
 			
@@ -802,7 +798,6 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 				}
 				if !sm.userSessionBands[session.UserSessionID][band] {
 					sm.userSessionBands[session.UserSessionID][band] = true
-					log.Printf("UUID %s: Added band %s to userSessionBands", session.UserSessionID[:8], band)
 				}
 				sm.mu.Unlock()
 			}
@@ -815,8 +810,6 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 		session.modesMu.Lock()
 		if !session.VisitedModes[currentMode] {
 			session.VisitedModes[currentMode] = true
-			log.Printf("Session %s (user: %s): Added mode %s to VisitedModes",
-				session.ID[:8], session.UserSessionID[:8], currentMode)
 		}
 		session.modesMu.Unlock()
 		
@@ -828,7 +821,6 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 			}
 			if !sm.userSessionModes[session.UserSessionID][currentMode] {
 				sm.userSessionModes[session.UserSessionID][currentMode] = true
-				log.Printf("UUID %s: Added mode %s to userSessionModes", session.UserSessionID[:8], currentMode)
 			}
 			sm.mu.Unlock()
 		}
@@ -916,8 +908,6 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 			session.bandsMu.Lock()
 			if !session.VisitedBands[band] {
 				session.VisitedBands[band] = true
-				log.Printf("Session %s (user: %s): Added band %s to VisitedBands (freq: %d Hz)",
-					session.ID[:8], session.UserSessionID[:8], band, currentFreq)
 			}
 			session.bandsMu.Unlock()
 			
@@ -929,7 +919,6 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 				}
 				if !sm.userSessionBands[session.UserSessionID][band] {
 					sm.userSessionBands[session.UserSessionID][band] = true
-					log.Printf("UUID %s: Added band %s to userSessionBands", session.UserSessionID[:8], band)
 				}
 				sm.mu.Unlock()
 			}
@@ -942,8 +931,6 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 		session.modesMu.Lock()
 		if !session.VisitedModes[currentMode] {
 			session.VisitedModes[currentMode] = true
-			log.Printf("Session %s (user: %s): Added mode %s to VisitedModes",
-				session.ID[:8], session.UserSessionID[:8], currentMode)
 		}
 		session.modesMu.Unlock()
 		
@@ -955,7 +942,6 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 			}
 			if !sm.userSessionModes[session.UserSessionID][currentMode] {
 				sm.userSessionModes[session.UserSessionID][currentMode] = true
-				log.Printf("UUID %s: Added mode %s to userSessionModes", session.UserSessionID[:8], currentMode)
 			}
 			sm.mu.Unlock()
 		}
@@ -1044,8 +1030,6 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 	// Log session activity BEFORE removing from map and BEFORE cleanup
 	// Only log if the UUID is completely gone (all sessions for this UUID destroyed)
 	if sm.activityLogger != nil && uuidCompletelyGone {
-		log.Printf("Calling LogSessionDestroyedWithData for user %s (BEFORE session removal)", session.UserSessionID[:8])
-		
 		// Get copies of the UUID-level bands/modes maps BEFORE cleanup
 		// We must do this while holding the lock to ensure data consistency
 		var bandsCopy, modesCopy map[string]bool
@@ -1054,10 +1038,8 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 			for k, v := range bandsMap {
 				bandsCopy[k] = v
 			}
-			log.Printf("UUID %s: Captured %d bands for logging", session.UserSessionID[:8], len(bandsCopy))
 		} else {
 			bandsCopy = make(map[string]bool)
-			log.Printf("UUID %s: No bands found in userSessionBands", session.UserSessionID[:8])
 		}
 		
 		if modesMap, exists := sm.userSessionModes[session.UserSessionID]; exists {
@@ -1065,10 +1047,8 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 			for k, v := range modesMap {
 				modesCopy[k] = v
 			}
-			log.Printf("UUID %s: Captured %d modes for logging", session.UserSessionID[:8], len(modesCopy))
 		} else {
 			modesCopy = make(map[string]bool)
-			log.Printf("UUID %s: No modes found in userSessionModes", session.UserSessionID[:8])
 		}
 		
 		// Unlock before calling activity logger to avoid deadlock (it needs to read sessions)
@@ -1084,12 +1064,6 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 			sm.mu.Unlock()
 			return fmt.Errorf("session was removed while logging activity")
 		}
-	} else {
-		if sm.activityLogger == nil {
-			log.Printf("NOT calling LogSessionDestroyed: activityLogger is nil")
-		} else if !uuidCompletelyGone {
-			log.Printf("NOT calling LogSessionDestroyed: UUID %s still has other sessions", session.UserSessionID[:8])
-		}
 	}
 	
 	// Now remove the session from the map
@@ -1104,7 +1078,6 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 				// Clean up UUID-level bands/modes maps when UUID is completely gone
 				delete(sm.userSessionBands, session.UserSessionID)
 				delete(sm.userSessionModes, session.UserSessionID)
-				log.Printf("UUID %s: Cleaned up userSessionBands and userSessionModes (UUID completely gone)", session.UserSessionID[:8])
 			} else {
 				sm.userSessionUUIDs[session.UserSessionID]--
 			}

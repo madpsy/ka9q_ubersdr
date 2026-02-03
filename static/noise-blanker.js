@@ -7,41 +7,38 @@ class NoiseBlanker {
         this.audioContext = audioContext;
         this.sampleRate = sampleRate;
         
-        // Fixed parameters optimized for impulse noise (no UI adjustment needed)
-        this.threshold = 4.0;           // 4x average = ~12dB above noise floor
-        this.blankDuration = 0.003;     // 3ms blanking duration
+        // Optimized parameters for impulse noise suppression
+        this.threshold = 8.0;           // 8x average = ~18dB above noise floor (more conservative)
+        this.blankDuration = 0.002;     // 2ms blanking duration (shorter)
         this.blankSamples = Math.floor(sampleRate * this.blankDuration);
-        this.avgWindow = Math.floor(sampleRate * 0.010);  // 10ms averaging window
+        this.avgWindow = Math.floor(sampleRate * 0.050);  // 50ms averaging window (longer for stability)
         
-        // Soft blanking parameters
-        this.useSoftBlanking = true;    // Exponential decay instead of hard muting
-        this.decayRate = 5.0;           // Decay speed (higher = faster)
+        // Soft blanking with smooth transitions
+        this.useSoftBlanking = true;
+        this.fadeInSamples = Math.floor(sampleRate * 0.001);  // 1ms fade-in
         
         // State
-        this.avgLevel = 0.0001;         // Initialize to small value to avoid division by zero
+        this.avgLevel = 0.0001;
         this.blankCounter = 0;
         this.enabled = false;
         
-        // Circular buffer for running average (minimal memory footprint)
+        // Circular buffer for running average
         this.history = new Float32Array(this.avgWindow);
         this.historyPos = 0;
         this.historySum = 0.0;
         
-        // Statistics (for debugging/monitoring)
+        // Warmup period to establish baseline
+        this.warmupSamples = this.avgWindow * 2;
+        this.warmupCounter = 0;
+        
+        // Statistics
         this.pulsesDetected = 0;
         this.lastPulseTime = 0;
     }
     
     // Process a buffer of audio samples
     process(input, output) {
-        // TEMPORARY DEBUG: Bypass all blanking logic to test clean audio passthrough
-        // This will help isolate whether clicking is from blanking or audio chain
-        output.set(input);
-        return;
-        
-        /* DISABLED FOR TESTING
         if (!this.enabled) {
-            // Pass through when disabled
             output.set(input);
             return;
         }
@@ -50,38 +47,47 @@ class NoiseBlanker {
             const sample = input[i];
             const absSample = Math.abs(sample);
             
-            // Update running average using circular buffer (always update, like NR2)
-            // This prevents the average from getting stuck too low
+            // Update running average (always update for stable tracking)
             this.historySum -= this.history[this.historyPos];
             this.history[this.historyPos] = absSample;
             this.historySum += absSample;
             this.historyPos = (this.historyPos + 1) % this.avgWindow;
             this.avgLevel = Math.max(this.historySum / this.avgWindow, 0.0001);
             
-            // Detect impulse: sample significantly above average
-            const isImpulse = absSample > this.avgLevel * this.threshold;
-            
-            if (isImpulse) {
-                // Start blanking period
-                if (this.blankCounter === 0) {
-                    // New pulse detected
-                    this.pulsesDetected++;
-                    this.lastPulseTime = this.audioContext.currentTime;
-                }
-                this.blankCounter = this.blankSamples;
+            // Warmup period: pass through while establishing baseline
+            if (this.warmupCounter < this.warmupSamples) {
+                this.warmupCounter++;
+                output[i] = sample;
+                continue;
             }
             
-            // Apply blanking
+            // Detect impulse: sample significantly above running average
+            const isImpulse = absSample > this.avgLevel * this.threshold;
+            
+            if (isImpulse && this.blankCounter === 0) {
+                // New impulse detected - start blanking period
+                this.blankCounter = this.blankSamples;
+                this.pulsesDetected++;
+                this.lastPulseTime = this.audioContext.currentTime;
+            }
+            
+            // Apply blanking with smooth fade-in
             if (this.blankCounter > 0) {
                 if (this.useSoftBlanking) {
-                    // Soft blanking: exponential decay
-                    // Gain goes from 0 (at start) to 1 (at end of blanking period)
-                    // This creates a smooth fade-in after the pulse
-                    const progress = 1.0 - (this.blankCounter / this.blankSamples);
-                    const blankGain = 1.0 - Math.exp(-this.decayRate * progress);
-                    output[i] = sample * blankGain;
+                    // Calculate fade-in using raised cosine window
+                    const samplesFromStart = this.blankSamples - this.blankCounter;
+                    
+                    if (samplesFromStart < this.fadeInSamples) {
+                        // Smooth fade-in using raised cosine (Hann window)
+                        const fadeProgress = samplesFromStart / this.fadeInSamples;
+                        const fadeGain = 0.5 * (1.0 - Math.cos(Math.PI * fadeProgress));
+                        output[i] = sample * fadeGain;
+                    } else {
+                        // After fade-in, pass through normally
+                        output[i] = sample;
+                    }
                 } else {
-                    // Hard blanking: complete muting
+                    // Hard blanking: zero out the sample
                     output[i] = 0;
                 }
                 this.blankCounter--;
@@ -90,7 +96,6 @@ class NoiseBlanker {
                 output[i] = sample;
             }
         }
-        */
     }
     
     // Reset state (useful when changing frequency or mode)
@@ -100,6 +105,7 @@ class NoiseBlanker {
         this.historySum = 0.0;
         this.avgLevel = 0.0001;
         this.blankCounter = 0;
+        this.warmupCounter = 0;
         this.pulsesDetected = 0;
     }
     

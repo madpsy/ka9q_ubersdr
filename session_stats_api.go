@@ -170,9 +170,16 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 				// Examples: "UberSDR/1.0", "UberSDR Client 1.0 (go)", "UberSDR_HPSDR/1.0"
 				browserCounts["UberSDR Client"]++
 				
-				// For OS, try to parse the rest of the user agent if available
-				// But default to "UberSDR Client" for OS as well since it's a native client
-				osCounts["UberSDR Client"]++
+				// UberSDR is a browser/client, not an OS
+				// Try to parse the OS from the rest of the user agent string
+				client := parser.Parse(event.UserAgent)
+				if client.Os.Family != "" {
+					os := client.Os.Family
+					if client.Os.Major != "" {
+						os += " " + client.Os.Major
+					}
+					osCounts[os]++
+				}
 			} else {
 				// Parse regular user agents
 				client := parser.Parse(event.UserAgent)

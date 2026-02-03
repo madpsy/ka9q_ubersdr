@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"sort"
 	"time"
+
+	"github.com/ua-parser/uap-go/uaparser"
 )
 
 // handlePublicSessionStats returns public session statistics for the last month
@@ -127,6 +129,13 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 	// Per-weekday activity (Sunday=0 to Saturday=6) - count of sessions that ended on each day
 	weekdayActivity := make([]int, 7)
 
+	// User agent statistics
+	browserCounts := make(map[string]int)
+	osCounts := make(map[string]int)
+	
+	// Initialize user agent parser
+	parser := uaparser.NewFromSaved()
+
 	// Process each session end event
 	for _, event := range endEvents {
 		// Skip events without duration
@@ -147,6 +156,29 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 				}
 			}
 			ipSessions[event.ClientIP].SessionCount++
+		}
+
+		// Parse user agent if available
+		if event.UserAgent != "" {
+			client := parser.Parse(event.UserAgent)
+			
+			// Track browser (family + major version)
+			if client.UserAgent.Family != "" {
+				browser := client.UserAgent.Family
+				if client.UserAgent.Major != "" {
+					browser += " " + client.UserAgent.Major
+				}
+				browserCounts[browser]++
+			}
+			
+			// Track OS (family + major version)
+			if client.Os.Family != "" {
+				os := client.Os.Family
+				if client.Os.Major != "" {
+					os += " " + client.Os.Major
+				}
+				osCounts[os]++
+			}
 		}
 
 		// Categorize duration into buckets
@@ -316,6 +348,58 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 		avgWeekdayActivity[day] = float64(weekdayActivity[day]) / 4.0
 	}
 
+	// Prepare browser statistics (top 10)
+	type BrowserStat struct {
+		Name     string
+		Sessions int
+	}
+	browsers := make([]BrowserStat, 0, len(browserCounts))
+	for browser, count := range browserCounts {
+		browsers = append(browsers, BrowserStat{Name: browser, Sessions: count})
+	}
+	sort.Slice(browsers, func(i, j int) bool {
+		return browsers[i].Sessions > browsers[j].Sessions
+	})
+	// Take top 10
+	if len(browsers) > 10 {
+		browsers = browsers[:10]
+	}
+	
+	// Convert to map format for JSON
+	browserStats := make([]map[string]interface{}, len(browsers))
+	for i, b := range browsers {
+		browserStats[i] = map[string]interface{}{
+			"name":     b.Name,
+			"sessions": b.Sessions,
+		}
+	}
+
+	// Prepare OS statistics (top 10)
+	type OSStat struct {
+		Name     string
+		Sessions int
+	}
+	operatingSystems := make([]OSStat, 0, len(osCounts))
+	for os, count := range osCounts {
+		operatingSystems = append(operatingSystems, OSStat{Name: os, Sessions: count})
+	}
+	sort.Slice(operatingSystems, func(i, j int) bool {
+		return operatingSystems[i].Sessions > operatingSystems[j].Sessions
+	})
+	// Take top 10
+	if len(operatingSystems) > 10 {
+		operatingSystems = operatingSystems[:10]
+	}
+	
+	// Convert to map format for JSON
+	osStats := make([]map[string]interface{}, len(operatingSystems))
+	for i, os := range operatingSystems {
+		osStats[i] = map[string]interface{}{
+			"name":     os.Name,
+			"sessions": os.Sessions,
+		}
+	}
+
 	return map[string]interface{}{
 		"unique_countries":      len(countries),
 		"countries":             countries,
@@ -324,5 +408,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 		"duration_buckets":      durationBucketArray,
 		"avg_hourly_activity":   avgHourlyActivity,
 		"avg_weekday_activity":  avgWeekdayActivity,
+		"top_browsers":          browserStats,
+		"top_operating_systems": osStats,
 	}
 }

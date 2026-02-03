@@ -5,6 +5,8 @@ let countriesChart = null;
 let durationChart = null;
 let weekdayChart = null;
 let hourlyChart = null;
+let browsersChart = null;
+let osChart = null;
 let receiverLocation = null;
 let receiverInfo = null;
 
@@ -70,6 +72,8 @@ async function loadStatistics() {
         createWorldMap(data.stats.countries);
         createCountriesChart(data.stats.countries);
         createDurationChart(data.stats.duration_buckets);
+        createBrowsersChart(data.stats.top_browsers);
+        createOSChart(data.stats.top_operating_systems);
         createWeekdayChart(data.stats.avg_weekday_activity);
         createHourlyChart(data.stats.avg_hourly_activity);
         
@@ -675,6 +679,138 @@ function createDurationChart(buckets) {
                             const percentage = ((value / total) * 100).toFixed(1);
                             return `${label}: ${value.toLocaleString()} (${percentage}%)`;
                         }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Create browsers bar chart
+function createBrowsersChart(browsers) {
+    const ctx = document.getElementById('browsersChart').getContext('2d');
+    
+    if (browsersChart) {
+        browsersChart.destroy();
+    }
+    
+    // Generate colors for each browser
+    const colors = generateColors(browsers.length);
+    
+    browsersChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: browsers.map(b => b.name),
+            datasets: [{
+                label: 'Sessions',
+                data: browsers.map(b => b.sessions),
+                backgroundColor: colors,
+                borderColor: colors.map(c => c.replace('0.7', '1')),
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return `Sessions: ${context.parsed.y.toLocaleString()}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        color: '#fff',
+                        callback: function(value) {
+                            return value.toLocaleString();
+                        }
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
+                    }
+                },
+                x: {
+                    ticks: {
+                        color: '#fff',
+                        maxRotation: 45,
+                        minRotation: 45
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Create operating systems bar chart
+function createOSChart(operatingSystems) {
+    const ctx = document.getElementById('osChart').getContext('2d');
+    
+    if (osChart) {
+        osChart.destroy();
+    }
+    
+    // Generate colors for each OS
+    const colors = generateColors(operatingSystems.length);
+    
+    osChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: operatingSystems.map(os => os.name),
+            datasets: [{
+                label: 'Sessions',
+                data: operatingSystems.map(os => os.sessions),
+                backgroundColor: colors,
+                borderColor: colors.map(c => c.replace('0.7', '1')),
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return `Sessions: ${context.parsed.y.toLocaleString()}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        color: '#fff',
+                        callback: function(value) {
+                            return value.toLocaleString();
+                        }
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
+                    }
+                },
+                x: {
+                    ticks: {
+                        color: '#fff',
+                        maxRotation: 45,
+                        minRotation: 45
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
                     }
                 }
             }

@@ -151,6 +151,18 @@
             .chart-wrapper.tall {
                 height: 400px;
             }
+
+            /* Stack browser/OS charts on mobile */
+            .browser-os-grid {
+                grid-template-columns: 1fr !important;
+            }
+        }
+
+        .browser-os-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
         }
     </style>
 </head>
@@ -214,6 +226,22 @@
                 <h2>⏱️ Session Duration Distribution</h2>
                 <div class="chart-wrapper">
                     <canvas id="durationChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Browser and OS Charts (side by side) -->
+            <div class="browser-os-grid">
+                <div class="chart-container" style="margin-bottom: 0;">
+                    <h2>🌐 Top Browsers</h2>
+                    <div class="chart-wrapper">
+                        <canvas id="browsersChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-container" style="margin-bottom: 0;">
+                    <h2>💻 Top Operating Systems</h2>
+                    <div class="chart-wrapper">
+                        <canvas id="osChart"></canvas>
+                    </div>
                 </div>
             </div>
 

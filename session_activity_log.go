@@ -314,23 +314,38 @@ func (sal *SessionActivityLogger) getActiveSessionEntries() []SessionActivityEnt
 	}
 	
 	// Now populate bands and modes from UUID-level maps (after processing all sessions)
+	log.Printf("ActivityLogger: About to read UUID-level maps for %d users", len(userSessions))
 	for userSessionID, entry := range userSessions {
+		log.Printf("ActivityLogger: Checking UUID %s for bands/modes", userSessionID[:8])
+		
 		// Get bands from UUID-level map
-		if bandMap, exists := sal.sessionMgr.userSessionBands[userSessionID]; exists {
+		bandMap, bandExists := sal.sessionMgr.userSessionBands[userSessionID]
+		log.Printf("ActivityLogger: UUID %s - bandMap exists: %v, len: %d",
+			userSessionID[:8], bandExists, len(bandMap))
+		if bandExists {
 			for band := range bandMap {
 				entry.Bands = append(entry.Bands, band)
+				log.Printf("ActivityLogger: UUID %s - added band %s", userSessionID[:8], band)
 			}
 			log.Printf("ActivityLogger: UUID %s has %d bands in userSessionBands: %v",
 				userSessionID[:8], len(bandMap), entry.Bands)
+		} else {
+			log.Printf("ActivityLogger: UUID %s - NO bandMap found in userSessionBands!", userSessionID[:8])
 		}
 		
 		// Get modes from UUID-level map
-		if modeMap, exists := sal.sessionMgr.userSessionModes[userSessionID]; exists {
+		modeMap, modeExists := sal.sessionMgr.userSessionModes[userSessionID]
+		log.Printf("ActivityLogger: UUID %s - modeMap exists: %v, len: %d",
+			userSessionID[:8], modeExists, len(modeMap))
+		if modeExists {
 			for mode := range modeMap {
 				entry.Modes = append(entry.Modes, mode)
+				log.Printf("ActivityLogger: UUID %s - added mode %s", userSessionID[:8], mode)
 			}
 			log.Printf("ActivityLogger: UUID %s has %d modes in userSessionModes: %v",
 				userSessionID[:8], len(modeMap), entry.Modes)
+		} else {
+			log.Printf("ActivityLogger: UUID %s - NO modeMap found in userSessionModes!", userSessionID[:8])
 		}
 	}
 

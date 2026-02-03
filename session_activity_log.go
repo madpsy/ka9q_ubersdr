@@ -261,25 +261,6 @@ func (sal *SessionActivityLogger) getActiveSessionEntries() []SessionActivityEnt
 		country := session.Country
 		countryCode := session.CountryCode
 		
-		// Collect bands and modes from this session
-		session.bandsMu.RLock()
-		sessionBands := make([]string, 0, len(session.VisitedBands))
-		for band := range session.VisitedBands {
-			sessionBands = append(sessionBands, band)
-		}
-		log.Printf("ActivityLogger: Session %s (user: %s) has %d bands in VisitedBands: %v",
-			session.ID[:8], userSessionID[:8], len(session.VisitedBands), sessionBands)
-		session.bandsMu.RUnlock()
-		
-		session.modesMu.RLock()
-		sessionModes := make([]string, 0, len(session.VisitedModes))
-		for mode := range session.VisitedModes {
-			sessionModes = append(sessionModes, mode)
-		}
-		log.Printf("ActivityLogger: Session %s (user: %s) has %d modes in VisitedModes: %v",
-			session.ID[:8], userSessionID[:8], len(session.VisitedModes), sessionModes)
-		session.modesMu.RUnlock()
-		
 		session.mu.RUnlock()
 
 		// Get or create entry for this user
@@ -325,38 +306,31 @@ func (sal *SessionActivityLogger) getActiveSessionEntries() []SessionActivityEnt
 		if !hasType {
 			entry.SessionTypes = append(entry.SessionTypes, sessionType)
 		}
-		
-		// Aggregate bands from this session
-		for _, band := range sessionBands {
-			hasBand := false
-			for _, b := range entry.Bands {
-				if b == band {
-					hasBand = true
-					break
-				}
-			}
-			if !hasBand {
-				entry.Bands = append(entry.Bands, band)
-			}
-		}
-		
-		// Aggregate modes from this session
-		for _, mode := range sessionModes {
-			hasMode := false
-			for _, m := range entry.Modes {
-				if m == mode {
-					hasMode = true
-					break
-				}
-			}
-			if !hasMode {
-				entry.Modes = append(entry.Modes, mode)
-			}
-		}
 
 		// Use earliest created time
 		if createdAt.Before(entry.CreatedAt) {
 			entry.CreatedAt = createdAt
+		}
+	}
+	
+	// Now populate bands and modes from UUID-level maps (after processing all sessions)
+	for userSessionID, entry := range userSessions {
+		// Get bands from UUID-level map
+		if bandMap, exists := sal.sessionMgr.userSessionBands[userSessionID]; exists {
+			for band := range bandMap {
+				entry.Bands = append(entry.Bands, band)
+			}
+			log.Printf("ActivityLogger: UUID %s has %d bands in userSessionBands: %v",
+				userSessionID[:8], len(bandMap), entry.Bands)
+		}
+		
+		// Get modes from UUID-level map
+		if modeMap, exists := sal.sessionMgr.userSessionModes[userSessionID]; exists {
+			for mode := range modeMap {
+				entry.Modes = append(entry.Modes, mode)
+			}
+			log.Printf("ActivityLogger: UUID %s has %d modes in userSessionModes: %v",
+				userSessionID[:8], len(modeMap), entry.Modes)
 		}
 	}
 

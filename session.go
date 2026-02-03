@@ -82,6 +82,8 @@ type SessionManager struct {
 	uuidToIP             map[string]string          // Map of user_session_id to bound IP address (for security)
 	uuidAudioSessions    map[string]string          // Map of user_session_id to audio session ID (enforces 1 audio per UUID)
 	uuidSpectrumSessions map[string]string          // Map of user_session_id to spectrum session ID (enforces 1 spectrum per UUID)
+	userSessionBands     map[string]map[string]bool // Map of user_session_id to visited bands (cumulative across all sessions)
+	userSessionModes     map[string]map[string]bool // Map of user_session_id to visited modes (cumulative across all sessions)
 	mu                   sync.RWMutex
 	config               *Config
 	radiod               *RadiodController
@@ -109,6 +111,8 @@ func NewSessionManager(config *Config, radiod *RadiodController, geoIPService *G
 		uuidToIP:             make(map[string]string),
 		uuidAudioSessions:    make(map[string]string),
 		uuidSpectrumSessions: make(map[string]string),
+		userSessionBands:     make(map[string]map[string]bool),
+		userSessionModes:     make(map[string]map[string]bool),
 		config:               config,
 		radiod:               radiod,
 		maxSessions:          config.Server.MaxSessions,
@@ -311,13 +315,31 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 		VisitedModes:   make(map[string]bool),
 	}
 	
-	// Track initial band and mode
+	// Track initial band and mode in per-session maps
 	band := frequencyToBand(float64(frequency))
 	if band != "" {
 		session.VisitedBands[band] = true
 	}
 	if mode != "" {
 		session.VisitedModes[mode] = true
+	}
+	
+	// Also track in UUID-level maps (must be done while holding sm.mu lock, which we already have)
+	if userSessionID != "" {
+		if sm.userSessionBands[userSessionID] == nil {
+			sm.userSessionBands[userSessionID] = make(map[string]bool)
+		}
+		if sm.userSessionModes[userSessionID] == nil {
+			sm.userSessionModes[userSessionID] = make(map[string]bool)
+		}
+		if band != "" {
+			sm.userSessionBands[userSessionID][band] = true
+			log.Printf("UUID %s: Initialized with band %s", userSessionID[:8], band)
+		}
+		if mode != "" {
+			sm.userSessionModes[userSessionID][mode] = true
+			log.Printf("UUID %s: Initialized with mode %s", userSessionID[:8], mode)
+		}
 	}
 
 	// Perform GeoIP lookup if service is available and we have a client IP
@@ -763,6 +785,7 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 	if currentFreq != oldFreq {
 		band := frequencyToBand(float64(currentFreq))
 		if band != "" {
+			// Track in per-session map
 			session.bandsMu.Lock()
 			if !session.VisitedBands[band] {
 				session.VisitedBands[band] = true
@@ -770,11 +793,25 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 					session.ID[:8], session.UserSessionID[:8], band, currentFreq)
 			}
 			session.bandsMu.Unlock()
+			
+			// Also track in UUID-level map (persists across audio/spectrum sessions)
+			if session.UserSessionID != "" {
+				sm.mu.Lock()
+				if sm.userSessionBands[session.UserSessionID] == nil {
+					sm.userSessionBands[session.UserSessionID] = make(map[string]bool)
+				}
+				if !sm.userSessionBands[session.UserSessionID][band] {
+					sm.userSessionBands[session.UserSessionID][band] = true
+					log.Printf("UUID %s: Added band %s to userSessionBands", session.UserSessionID[:8], band)
+				}
+				sm.mu.Unlock()
+			}
 		}
 	}
 	
 	// Track mode change if mode actually changed (compare old vs current, not parameter)
 	if currentMode != oldMode {
+		// Track in per-session map
 		session.modesMu.Lock()
 		if !session.VisitedModes[currentMode] {
 			session.VisitedModes[currentMode] = true
@@ -782,6 +819,19 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 				session.ID[:8], session.UserSessionID[:8], currentMode)
 		}
 		session.modesMu.Unlock()
+		
+		// Also track in UUID-level map (persists across audio/spectrum sessions)
+		if session.UserSessionID != "" {
+			sm.mu.Lock()
+			if sm.userSessionModes[session.UserSessionID] == nil {
+				sm.userSessionModes[session.UserSessionID] = make(map[string]bool)
+			}
+			if !sm.userSessionModes[session.UserSessionID][currentMode] {
+				sm.userSessionModes[session.UserSessionID][currentMode] = true
+				log.Printf("UUID %s: Added mode %s to userSessionModes", session.UserSessionID[:8], currentMode)
+			}
+			sm.mu.Unlock()
+		}
 	}
 
 	// Send update command to radiod with existing SSRC
@@ -862,6 +912,7 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 	if currentFreq != oldFreq {
 		band := frequencyToBand(float64(currentFreq))
 		if band != "" {
+			// Track in per-session map
 			session.bandsMu.Lock()
 			if !session.VisitedBands[band] {
 				session.VisitedBands[band] = true
@@ -869,11 +920,25 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 					session.ID[:8], session.UserSessionID[:8], band, currentFreq)
 			}
 			session.bandsMu.Unlock()
+			
+			// Also track in UUID-level map (persists across audio/spectrum sessions)
+			if session.UserSessionID != "" {
+				sm.mu.Lock()
+				if sm.userSessionBands[session.UserSessionID] == nil {
+					sm.userSessionBands[session.UserSessionID] = make(map[string]bool)
+				}
+				if !sm.userSessionBands[session.UserSessionID][band] {
+					sm.userSessionBands[session.UserSessionID][band] = true
+					log.Printf("UUID %s: Added band %s to userSessionBands", session.UserSessionID[:8], band)
+				}
+				sm.mu.Unlock()
+			}
 		}
 	}
 	
 	// Track mode change if mode actually changed (compare old vs current, not parameter)
 	if currentMode != oldMode {
+		// Track in per-session map
 		session.modesMu.Lock()
 		if !session.VisitedModes[currentMode] {
 			session.VisitedModes[currentMode] = true
@@ -881,6 +946,19 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 				session.ID[:8], session.UserSessionID[:8], currentMode)
 		}
 		session.modesMu.Unlock()
+		
+		// Also track in UUID-level map (persists across audio/spectrum sessions)
+		if session.UserSessionID != "" {
+			sm.mu.Lock()
+			if sm.userSessionModes[session.UserSessionID] == nil {
+				sm.userSessionModes[session.UserSessionID] = make(map[string]bool)
+			}
+			if !sm.userSessionModes[session.UserSessionID][currentMode] {
+				sm.userSessionModes[session.UserSessionID][currentMode] = true
+				log.Printf("UUID %s: Added mode %s to userSessionModes", session.UserSessionID[:8], currentMode)
+			}
+			sm.mu.Unlock()
+		}
 	}
 
 	// Send update command to radiod with existing SSRC
@@ -997,6 +1075,10 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 		if count, exists := sm.userSessionUUIDs[session.UserSessionID]; exists {
 			if count <= 1 {
 				delete(sm.userSessionUUIDs, session.UserSessionID)
+				// Clean up UUID-level bands/modes maps when UUID is completely gone
+				delete(sm.userSessionBands, session.UserSessionID)
+				delete(sm.userSessionModes, session.UserSessionID)
+				log.Printf("UUID %s: Cleaned up userSessionBands and userSessionModes (UUID completely gone)", session.UserSessionID[:8])
 			} else {
 				sm.userSessionUUIDs[session.UserSessionID]--
 			}

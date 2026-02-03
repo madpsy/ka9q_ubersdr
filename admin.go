@@ -4681,6 +4681,12 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 	events := []SessionEvent{}
 
 	for _, log := range logs {
+		// Skip session_destroyed events - they're just markers for final state capture
+		// The actual end event will be created when the session disappears from snapshots
+		if log.EventType == "session_destroyed" {
+			continue
+		}
+		
 		currentSessionIDs := make(map[string]bool)
 
 		// Process all sessions in this snapshot

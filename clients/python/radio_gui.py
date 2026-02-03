@@ -148,6 +148,12 @@ try:
 except ImportError:
     NR2_AVAILABLE = False
 
+try:
+    from noise_blanker import create_noise_blanker
+    NB_AVAILABLE = True
+except ImportError:
+    NB_AVAILABLE = False
+
 # Check if scipy is available (for audio filter)
 try:
     from scipy import signal as scipy_signal
@@ -1648,9 +1654,51 @@ class RadioGUI:
         self.rec_status_label = ttk.Label(nr2_container, text="", foreground='red')
         self.rec_status_label.grid(row=0, column=8, sticky=tk.W)
 
-        # Audio bandpass filter (row 5) - use a frame to avoid column weight issues
+        # Noise Blanker (row 5) - use a frame to avoid column weight issues
+        nb_container = ttk.Frame(audio_frame)
+        nb_container.grid(row=5, column=0, columnspan=7, sticky=tk.W, pady=(5, 0))
+        
+        self.nb_enabled_var = tk.BooleanVar(value=False)
+        self.nb_check = ttk.Checkbutton(
+            nb_container,
+            text="Enable Noise Blanker",
+            variable=self.nb_enabled_var,
+            command=self.toggle_noise_blanker,
+            state='normal' if NB_AVAILABLE else 'disabled'
+        )
+        self.nb_check.grid(row=0, column=0, sticky=tk.W, padx=(0, 20))
+        
+        # Threshold parameter
+        ttk.Label(nb_container, text="Threshold:").grid(row=0, column=1, sticky=tk.W, padx=(0, 5))
+        self.nb_threshold_var = tk.StringVar(value="10.0")
+        nb_threshold_entry = ttk.Entry(
+            nb_container,
+            textvariable=self.nb_threshold_var,
+            width=8,
+            state='normal' if NB_AVAILABLE else 'disabled'
+        )
+        nb_threshold_entry.grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
+        ttk.Label(nb_container, text="x").grid(row=0, column=3, sticky=tk.W, padx=(0, 20))
+        
+        # Averaging window parameter
+        ttk.Label(nb_container, text="Avg Window:").grid(row=0, column=4, sticky=tk.W, padx=(0, 5))
+        self.nb_avg_window_var = tk.StringVar(value="20")
+        nb_avg_window_entry = ttk.Entry(
+            nb_container,
+            textvariable=self.nb_avg_window_var,
+            width=8,
+            state='normal' if NB_AVAILABLE else 'disabled'
+        )
+        nb_avg_window_entry.grid(row=0, column=5, sticky=tk.W, padx=(0, 5))
+        ttk.Label(nb_container, text="ms").grid(row=0, column=6, sticky=tk.W)
+        
+        # Add trace callbacks to update NB parameters when changed (while NB is enabled)
+        self.nb_threshold_var.trace_add('write', self.update_noise_blanker_parameters)
+        self.nb_avg_window_var.trace_add('write', self.update_noise_blanker_parameters)
+        
+        # Audio bandpass filter (row 6) - use a frame to avoid column weight issues
         filter_container = ttk.Frame(audio_frame)
-        filter_container.grid(row=5, column=0, columnspan=7, sticky=(tk.W, tk.E), pady=(5, 0))
+        filter_container.grid(row=6, column=0, columnspan=7, sticky=(tk.W, tk.E), pady=(5, 0))
 
         self.audio_filter_enabled_var = tk.BooleanVar(value=False)
         self.filter_check = ttk.Checkbutton(filter_container, text="Enable Audio Filter", variable=self.audio_filter_enabled_var,
@@ -4655,6 +4703,85 @@ class RadioGUI:
         except ValueError:
             messagebox.showerror("Error", "Invalid NR2 parameter values")
             self.nr2_enabled_var.set(not enabled)
+    
+    def toggle_noise_blanker(self):
+        """Toggle Noise Blanker on/off."""
+        if not self.connected or not self.client:
+            return
+
+        enabled = self.nb_enabled_var.get()
+
+        try:
+            threshold = float(self.nb_threshold_var.get())
+            avg_window_ms = float(self.nb_avg_window_var.get())
+
+            # Validate parameters
+            if threshold < 2 or threshold > 20:
+                messagebox.showerror("Error", "Noise Blanker threshold must be between 2 and 20")
+                self.nb_enabled_var.set(not enabled)
+                return
+            if avg_window_ms < 10 or avg_window_ms > 200:
+                messagebox.showerror("Error", "Noise Blanker averaging window must be between 10 and 200 ms")
+                self.nb_enabled_var.set(not enabled)
+                return
+
+            if enabled:
+                # Enable Noise Blanker
+                if not NB_AVAILABLE:
+                    messagebox.showerror("Error", "Noise Blanker module not available")
+                    self.nb_enabled_var.set(False)
+                    return
+
+                from noise_blanker import create_noise_blanker
+                self.client.nb_enabled = True
+                self.client.nb_processor = create_noise_blanker(
+                    sample_rate=self.client.sample_rate,
+                    threshold=threshold,
+                    avg_window_ms=avg_window_ms
+                )
+                self.log_status(f"Noise Blanker enabled (threshold={threshold}x, window={avg_window_ms}ms)")
+            else:
+                # Disable Noise Blanker
+                self.client.nb_enabled = False
+                self.client.nb_processor = None
+                self.log_status("Noise Blanker disabled")
+
+        except ValueError:
+            messagebox.showerror("Error", "Invalid Noise Blanker parameter values")
+            self.nb_enabled_var.set(not enabled)
+
+    def update_noise_blanker_parameters(self, *args):
+        """Update noise blanker parameters when changed (if NB is already enabled)."""
+        try:
+            # Only update if NB is enabled and client exists
+            if not self.nb_enabled_var.get() or not self.client or not hasattr(self.client, 'nb_processor'):
+                return
+            
+            # Get and validate threshold
+            try:
+                threshold = float(self.nb_threshold_var.get())
+                if threshold < 2.0 or threshold > 20.0:
+                    return  # Silently ignore invalid values during typing
+            except ValueError:
+                return  # Silently ignore invalid values during typing
+            
+            # Get and validate avg window
+            try:
+                avg_window = float(self.nb_avg_window_var.get())
+                if avg_window < 5.0 or avg_window > 100.0:
+                    return  # Silently ignore invalid values during typing
+            except ValueError:
+                return  # Silently ignore invalid values during typing
+            
+            # Update the processor parameters
+            self.client.nb_processor.set_parameters(
+                threshold=threshold,
+                avg_window_ms=avg_window
+            )
+            self.log_status(f"Updated NB: threshold={threshold}x, window={avg_window}ms")
+            
+        except Exception as e:
+            self.log_status(f"Error updating noise blanker parameters: {e}")
 
     def update_audio_filter_ranges(self):
         """Update audio filter slider ranges based on current mode bandwidth."""

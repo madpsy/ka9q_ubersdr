@@ -73,6 +73,14 @@ except ImportError:
     NR2_AVAILABLE = False
     print("Warning: scipy not available, NR2 noise reduction disabled", file=sys.stderr)
 
+# Import Noise Blanker (optional)
+try:
+    from noise_blanker import create_noise_blanker
+    NB_AVAILABLE = True
+except ImportError:
+    NB_AVAILABLE = False
+    print("Warning: Noise Blanker not available", file=sys.stderr)
+
 # Import scipy for audio filter (optional)
 try:
     from scipy import signal as scipy_signal
@@ -432,6 +440,10 @@ class RadioClient:
                 adapt_rate=nr2_adapt_rate
             )
             print(f"NR2 noise reduction enabled (strength={nr2_strength}%, floor={nr2_floor}%, adapt={nr2_adapt_rate}%)", file=sys.stderr)
+        
+        # Noise Blanker (time-domain impulse noise suppression)
+        self.nb_enabled = False
+        self.nb_processor = None
         
         # Audio controls
         self.volume = max(0.0, min(2.0, volume))  # Clamp between 0.0 and 2.0 (0-200%)
@@ -1258,6 +1270,11 @@ class RadioClient:
             # Apply -3dB makeup gain (matches UI default)
             # -3dB = 10^(-3/20) = 0.7079 gain factor
             audio_float = audio_float * 0.7079
+        
+        # Apply Noise Blanker if enabled (time-domain impulse noise suppression)
+        if self.nb_processor:
+            # Process through Noise Blanker (expects and returns normalized float32)
+            audio_float = self.nb_processor.process(audio_float)
 
         # Apply audio bandpass filter if enabled (BEFORE sending to recording callback)
         if self.audio_filter_enabled and self.audio_filter_taps is not None:

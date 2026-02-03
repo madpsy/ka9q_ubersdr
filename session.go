@@ -61,6 +61,12 @@ type Session struct {
 	// Sliding window for instantaneous throughput (1 second window)
 	audioSamples     []BytesSample // Samples for audio bytes
 	waterfallSamples []BytesSample // Samples for waterfall bytes
+
+	// Cumulative tracking for session activity logging
+	VisitedBands map[string]bool // Set of band names visited during this session
+	VisitedModes map[string]bool // Set of modes used during this session
+	bandsMu      sync.RWMutex    // Protect VisitedBands map
+	modesMu      sync.RWMutex    // Protect VisitedModes map
 }
 
 // SessionManager manages all active sessions
@@ -301,6 +307,17 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 		ClientIP:       clientIP,
 		UserSessionID:  userSessionID,
 		BypassPassword: password, // Store the password in the session
+		VisitedBands:   make(map[string]bool),
+		VisitedModes:   make(map[string]bool),
+	}
+	
+	// Track initial band and mode
+	band := frequencyToBand(float64(frequency))
+	if band != "" {
+		session.VisitedBands[band] = true
+	}
+	if mode != "" {
+		session.VisitedModes[mode] = true
 	}
 
 	// Perform GeoIP lookup if service is available and we have a client IP
@@ -535,7 +552,16 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 		ClientIP:       clientIP,
 		UserSessionID:  userSessionID,
 		BypassPassword: password, // Store the password in the session
+		VisitedBands:   make(map[string]bool),
+		VisitedModes:   make(map[string]bool),
 	}
+	
+	// Track initial band for spectrum session
+	band := frequencyToBand(float64(frequency))
+	if band != "" {
+		session.VisitedBands[band] = true
+	}
+	session.VisitedModes["spectrum"] = true
 
 	// Perform GeoIP lookup if service is available and we have a client IP
 	if sm.geoIPService != nil && clientIP != "" {
@@ -605,6 +631,7 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 
 	// Update session state
 	session.mu.Lock()
+	oldFreq := session.Frequency
 
 	if frequency > 0 {
 		session.Frequency = frequency
@@ -618,6 +645,16 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 	}
 	session.LastActive = time.Now()
 	session.mu.Unlock()
+	
+	// Track band change if frequency changed
+	if frequency > 0 && frequency != oldFreq {
+		band := frequencyToBand(float64(frequency))
+		if band != "" {
+			session.bandsMu.Lock()
+			session.VisitedBands[band] = true
+			session.bandsMu.Unlock()
+		}
+	}
 
 	// Send update command to radiod
 	// The radiod controller will calculate appropriate filter edges based on the new bandwidth
@@ -729,6 +766,23 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 		sendBandwidth = session.Bandwidth
 	}
 	session.mu.Unlock()
+	
+	// Track band change if frequency changed
+	if frequency > 0 && frequency != oldFreq {
+		band := frequencyToBand(float64(frequency))
+		if band != "" {
+			session.bandsMu.Lock()
+			session.VisitedBands[band] = true
+			session.bandsMu.Unlock()
+		}
+	}
+	
+	// Track mode change if mode changed
+	if mode != "" && mode != oldMode {
+		session.modesMu.Lock()
+		session.VisitedModes[mode] = true
+		session.modesMu.Unlock()
+	}
 
 	// Send update command to radiod with existing SSRC
 	// Convert single bandwidth to low/high edges (50 Hz to bandwidth Hz for SSB)
@@ -799,6 +853,23 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 		sendMode = translateModeForRadiod(sendMode)
 	}
 	session.mu.Unlock()
+	
+	// Track band change if frequency changed
+	if frequency > 0 && frequency != oldFreq {
+		band := frequencyToBand(float64(frequency))
+		if band != "" {
+			session.bandsMu.Lock()
+			session.VisitedBands[band] = true
+			session.bandsMu.Unlock()
+		}
+	}
+	
+	// Track mode change if mode changed
+	if mode != "" && mode != oldMode {
+		session.modesMu.Lock()
+		session.VisitedModes[mode] = true
+		session.modesMu.Unlock()
+	}
 
 	// Send update command to radiod with existing SSRC
 	// radiod.UpdateChannel will handle the bandwidth edges

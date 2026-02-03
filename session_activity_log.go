@@ -19,6 +19,8 @@ type SessionActivityEntry struct {
 	SourceIP      string    `json:"source_ip"`
 	AuthMethod    string    `json:"auth_method"`   // "", "password", "ip_bypass"
 	SessionTypes  []string  `json:"session_types"` // ["audio", "spectrum"]
+	Bands         []string  `json:"bands"`         // Cumulative list of bands visited (e.g., ["20m", "40m"])
+	Modes         []string  `json:"modes"`         // Cumulative list of modes used (e.g., ["usb", "ft8"])
 	CreatedAt     time.Time `json:"created_at"`
 	FirstSeen     time.Time `json:"first_seen"` // From userSessionFirst map
 	UserAgent     string    `json:"user_agent,omitempty"`
@@ -258,6 +260,22 @@ func (sal *SessionActivityLogger) getActiveSessionEntries() []SessionActivityEnt
 		createdAt := session.CreatedAt
 		country := session.Country
 		countryCode := session.CountryCode
+		
+		// Collect bands and modes from this session
+		session.bandsMu.RLock()
+		sessionBands := make([]string, 0, len(session.VisitedBands))
+		for band := range session.VisitedBands {
+			sessionBands = append(sessionBands, band)
+		}
+		session.bandsMu.RUnlock()
+		
+		session.modesMu.RLock()
+		sessionModes := make([]string, 0, len(session.VisitedModes))
+		for mode := range session.VisitedModes {
+			sessionModes = append(sessionModes, mode)
+		}
+		session.modesMu.RUnlock()
+		
 		session.mu.RUnlock()
 
 		// Get or create entry for this user
@@ -281,6 +299,8 @@ func (sal *SessionActivityLogger) getActiveSessionEntries() []SessionActivityEnt
 				SourceIP:      sourceIP,
 				AuthMethod:    authMethod,
 				SessionTypes:  []string{},
+				Bands:         []string{},
+				Modes:         []string{},
 				CreatedAt:     createdAt,
 				FirstSeen:     firstSeen,
 				UserAgent:     userAgent,
@@ -301,6 +321,34 @@ func (sal *SessionActivityLogger) getActiveSessionEntries() []SessionActivityEnt
 		if !hasType {
 			entry.SessionTypes = append(entry.SessionTypes, sessionType)
 		}
+		
+		// Aggregate bands from this session
+		for _, band := range sessionBands {
+			hasBand := false
+			for _, b := range entry.Bands {
+				if b == band {
+					hasBand = true
+					break
+				}
+			}
+			if !hasBand {
+				entry.Bands = append(entry.Bands, band)
+			}
+		}
+		
+		// Aggregate modes from this session
+		for _, mode := range sessionModes {
+			hasMode := false
+			for _, m := range entry.Modes {
+				if m == mode {
+					hasMode = true
+					break
+				}
+			}
+			if !hasMode {
+				entry.Modes = append(entry.Modes, mode)
+			}
+		}
 
 		// Use earliest created time
 		if createdAt.Before(entry.CreatedAt) {
@@ -308,13 +356,29 @@ func (sal *SessionActivityLogger) getActiveSessionEntries() []SessionActivityEnt
 		}
 	}
 
-	// Convert map to slice
+	// Convert map to slice and sort bands/modes for consistent output
 	entries := make([]SessionActivityEntry, 0, len(userSessions))
 	for _, entry := range userSessions {
+		// Sort bands and modes alphabetically
+		sortStrings(entry.Bands)
+		sortStrings(entry.Modes)
 		entries = append(entries, *entry)
 	}
 
 	return entries
+}
+
+// sortStrings sorts a string slice in place
+func sortStrings(s []string) {
+	// Simple bubble sort for small slices
+	n := len(s)
+	for i := 0; i < n-1; i++ {
+		for j := 0; j < n-i-1; j++ {
+			if s[j] > s[j+1] {
+				s[j], s[j+1] = s[j+1], s[j]
+			}
+		}
+	}
 }
 
 // getOrCreateFile gets or creates the log file for today

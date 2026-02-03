@@ -133,6 +133,10 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 	browserCounts := make(map[string]int)
 	osCounts := make(map[string]int)
 	
+	// Band and mode statistics
+	bandCounts := make(map[string]int)
+	modeCounts := make(map[string]int)
+	
 	// Initialize user agent parser
 	parser := uaparser.NewFromSaved()
 
@@ -190,6 +194,20 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 					}
 					osCounts[os]++
 				}
+			}
+		}
+		
+		// Track bands visited during this session
+		for _, band := range event.Bands {
+			if band != "" {
+				bandCounts[band]++
+			}
+		}
+		
+		// Track modes used during this session
+		for _, mode := range event.Modes {
+			if mode != "" {
+				modeCounts[mode]++
 			}
 		}
 
@@ -412,6 +430,50 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 		}
 	}
 
+	// Prepare band statistics (sorted by session count)
+	type BandStat struct {
+		Name     string
+		Sessions int
+	}
+	bands := make([]BandStat, 0, len(bandCounts))
+	for band, count := range bandCounts {
+		bands = append(bands, BandStat{Name: band, Sessions: count})
+	}
+	sort.Slice(bands, func(i, j int) bool {
+		return bands[i].Sessions > bands[j].Sessions
+	})
+	
+	// Convert to map format for JSON
+	bandStats := make([]map[string]interface{}, len(bands))
+	for i, b := range bands {
+		bandStats[i] = map[string]interface{}{
+			"name":     b.Name,
+			"sessions": b.Sessions,
+		}
+	}
+
+	// Prepare mode statistics (sorted by session count)
+	type ModeStat struct {
+		Name     string
+		Sessions int
+	}
+	modes := make([]ModeStat, 0, len(modeCounts))
+	for mode, count := range modeCounts {
+		modes = append(modes, ModeStat{Name: mode, Sessions: count})
+	}
+	sort.Slice(modes, func(i, j int) bool {
+		return modes[i].Sessions > modes[j].Sessions
+	})
+	
+	// Convert to map format for JSON
+	modeStats := make([]map[string]interface{}, len(modes))
+	for i, m := range modes {
+		modeStats[i] = map[string]interface{}{
+			"name":     m.Name,
+			"sessions": m.Sessions,
+		}
+	}
+
 	return map[string]interface{}{
 		"unique_countries":      len(countries),
 		"countries":             countries,
@@ -422,5 +484,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 		"avg_weekday_activity":  avgWeekdayActivity,
 		"top_browsers":          browserStats,
 		"top_operating_systems": osStats,
+		"top_bands":             bandStats,
+		"top_modes":             modeStats,
 	}
 }

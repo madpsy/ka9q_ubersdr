@@ -4529,6 +4529,8 @@ type SessionEvent struct {
 	SourceIP      string    `json:"source_ip"`
 	AuthMethod    string    `json:"auth_method"`
 	SessionTypes  []string  `json:"session_types"`
+	Bands         []string  `json:"bands,omitempty"`            // Cumulative list of bands visited during session
+	Modes         []string  `json:"modes,omitempty"`            // Cumulative list of modes used during session
 	UserAgent     string    `json:"user_agent,omitempty"`
 	Country       string    `json:"country,omitempty"`          // Country name from GeoIP lookup
 	CountryCode   string    `json:"country_code,omitempty"`     // ISO country code from GeoIP lookup
@@ -4743,6 +4745,8 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					SourceIP:      session.SourceIP,
 					AuthMethod:    session.AuthMethod,
 					SessionTypes:  startTypesSlice, // Use all types from snapshot
+					Bands:         session.Bands,    // Cumulative bands visited
+					Modes:         session.Modes,    // Cumulative modes used
 					UserAgent:     session.UserAgent,
 					Country:       session.Country,
 					CountryCode:   session.CountryCode,
@@ -4781,7 +4785,9 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					ClientIP:      info.entry.ClientIP,
 					SourceIP:      info.entry.SourceIP,
 					AuthMethod:    info.entry.AuthMethod,
-					SessionTypes:  allTypesSlice, // Use accumulated types
+					SessionTypes:  allTypesSlice,      // Use accumulated types
+					Bands:         info.entry.Bands,   // Cumulative bands visited
+					Modes:         info.entry.Modes,   // Cumulative modes used
 					UserAgent:     info.entry.UserAgent,
 					Country:       info.entry.Country,
 					CountryCode:   info.entry.CountryCode,

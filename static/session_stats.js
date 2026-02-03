@@ -7,6 +7,8 @@ let weekdayChart = null;
 let hourlyChart = null;
 let browsersChart = null;
 let osChart = null;
+let bandsChart = null;
+let modesChart = null;
 let receiverLocation = null;
 let receiverInfo = null;
 
@@ -76,6 +78,8 @@ async function loadStatistics() {
         createOSChart(data.stats.top_operating_systems);
         createWeekdayChart(data.stats.avg_weekday_activity);
         createHourlyChart(data.stats.avg_hourly_activity);
+        createBandsChart(data.stats.top_bands);
+        createModesChart(data.stats.top_modes);
         
     } catch (error) {
         console.error('Error loading statistics:', error);
@@ -996,6 +1000,124 @@ function createHourlyChart(hourlyData) {
                         font: {
                             size: 12
                         }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Create bands donut chart
+function createBandsChart(bands) {
+    const ctx = document.getElementById('bandsChart').getContext('2d');
+    
+    if (bandsChart) {
+        bandsChart.destroy();
+    }
+    
+    // Generate colors for each band
+    const colors = generateColors(bands.length);
+    
+    bandsChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: bands.map(b => b.name),
+            datasets: [{
+                label: 'Sessions',
+                data: bands.map(b => b.sessions),
+                backgroundColor: colors,
+                borderColor: colors.map(c => c.replace('0.7', '1')),
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: {
+                        color: '#fff',
+                        padding: 15,
+                        font: {
+                            size: 12
+                        }
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const label = context.label || '';
+                            const value = context.parsed || 0;
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            return `${label}: ${value.toLocaleString()} (${percentage}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Create modes horizontal bar chart
+function createModesChart(modes) {
+    const ctx = document.getElementById('modesChart').getContext('2d');
+    
+    if (modesChart) {
+        modesChart.destroy();
+    }
+    
+    // Generate colors for each mode
+    const colors = generateColors(modes.length);
+    
+    modesChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: modes.map(m => m.name.toUpperCase()),
+            datasets: [{
+                label: 'Sessions',
+                data: modes.map(m => m.sessions),
+                backgroundColor: colors,
+                borderColor: colors.map(c => c.replace('0.7', '1')),
+                borderWidth: 2
+            }]
+        },
+        options: {
+            indexAxis: 'y', // This makes it horizontal
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return `Sessions: ${context.parsed.x.toLocaleString()}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    ticks: {
+                        color: '#fff',
+                        callback: function(value) {
+                            return value.toLocaleString();
+                        }
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
+                    }
+                },
+                y: {
+                    ticks: {
+                        color: '#fff'
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
                     }
                 }
             }

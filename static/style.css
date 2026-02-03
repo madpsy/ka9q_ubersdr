@@ -670,6 +670,7 @@ body {
 .control-group {
     display: flex;
     flex-direction: column;
+    min-width: 0; /* Allow flex items to shrink below content size */
 }
 
 .control-group label {
@@ -859,6 +860,7 @@ body {
 
 .bandwidth-controls .control-group {
     flex: 1;
+    flex-direction: column;
 }
 
 .bandwidth-controls .control-group label {

@@ -766,7 +766,8 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 			session.bandsMu.Lock()
 			if !session.VisitedBands[band] {
 				session.VisitedBands[band] = true
-				log.Printf("Session %s: Added band %s to VisitedBands (freq: %d Hz)", session.ID[:8], band, currentFreq)
+				log.Printf("Session %s (user: %s): Added band %s to VisitedBands (freq: %d Hz)",
+					session.ID[:8], session.UserSessionID[:8], band, currentFreq)
 			}
 			session.bandsMu.Unlock()
 		}
@@ -777,7 +778,8 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 		session.modesMu.Lock()
 		if !session.VisitedModes[currentMode] {
 			session.VisitedModes[currentMode] = true
-			log.Printf("Session %s: Added mode %s to VisitedModes", session.ID[:8], currentMode)
+			log.Printf("Session %s (user: %s): Added mode %s to VisitedModes",
+				session.ID[:8], session.UserSessionID[:8], currentMode)
 		}
 		session.modesMu.Unlock()
 	}
@@ -863,7 +865,8 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 			session.bandsMu.Lock()
 			if !session.VisitedBands[band] {
 				session.VisitedBands[band] = true
-				log.Printf("Session %s: Added band %s to VisitedBands (freq: %d Hz)", session.ID[:8], band, currentFreq)
+				log.Printf("Session %s (user: %s): Added band %s to VisitedBands (freq: %d Hz)",
+					session.ID[:8], session.UserSessionID[:8], band, currentFreq)
 			}
 			session.bandsMu.Unlock()
 		}
@@ -874,7 +877,8 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 		session.modesMu.Lock()
 		if !session.VisitedModes[currentMode] {
 			session.VisitedModes[currentMode] = true
-			log.Printf("Session %s: Added mode %s to VisitedModes", session.ID[:8], currentMode)
+			log.Printf("Session %s (user: %s): Added mode %s to VisitedModes",
+				session.ID[:8], session.UserSessionID[:8], currentMode)
 		}
 		session.modesMu.Unlock()
 	}

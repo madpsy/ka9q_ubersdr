@@ -267,6 +267,8 @@ func (sal *SessionActivityLogger) getActiveSessionEntries() []SessionActivityEnt
 		for band := range session.VisitedBands {
 			sessionBands = append(sessionBands, band)
 		}
+		log.Printf("ActivityLogger: Session %s (user: %s) has %d bands in VisitedBands: %v",
+			session.ID[:8], userSessionID[:8], len(session.VisitedBands), sessionBands)
 		session.bandsMu.RUnlock()
 		
 		session.modesMu.RLock()
@@ -274,6 +276,8 @@ func (sal *SessionActivityLogger) getActiveSessionEntries() []SessionActivityEnt
 		for mode := range session.VisitedModes {
 			sessionModes = append(sessionModes, mode)
 		}
+		log.Printf("ActivityLogger: Session %s (user: %s) has %d modes in VisitedModes: %v",
+			session.ID[:8], userSessionID[:8], len(session.VisitedModes), sessionModes)
 		session.modesMu.RUnlock()
 		
 		session.mu.RUnlock()

@@ -629,8 +629,35 @@ function createCountriesChart(countries) {
 function createDurationChart(buckets) {
     const ctx = document.getElementById('durationChart').getContext('2d');
     
-    // Take top 5 buckets by count
-    const top5 = buckets.slice(0, 5);
+    // Helper function to parse duration range and get sort value
+    function getDurationSortValue(range) {
+        // Extract the first number from ranges like "0-30s", "30s-1m", "1-5m", "5-10m", "10m+"
+        const match = range.match(/^(\d+)/);
+        if (!match) return 0;
+        
+        const value = parseInt(match[1]);
+        
+        // Convert to seconds for consistent sorting
+        if (range.includes('m')) {
+            return value * 60; // minutes to seconds
+        } else if (range.includes('s')) {
+            return value; // already in seconds
+        }
+        return value;
+    }
+    
+    // Sort buckets by duration range (ascending order)
+    const sortedBuckets = [...buckets].sort((a, b) => {
+        return getDurationSortValue(a.range) - getDurationSortValue(b.range);
+    });
+    
+    // Take top 5 buckets by count for display
+    const top5ByCount = buckets.slice(0, 5);
+    
+    // Sort these top 5 by duration range
+    const top5Sorted = top5ByCount.sort((a, b) => {
+        return getDurationSortValue(a.range) - getDurationSortValue(b.range);
+    });
     
     if (durationChart) {
         durationChart.destroy();
@@ -639,10 +666,10 @@ function createDurationChart(buckets) {
     durationChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
-            labels: top5.map(b => b.range),
+            labels: top5Sorted.map(b => b.range),
             datasets: [{
                 label: 'Sessions',
-                data: top5.map(b => b.count),
+                data: top5Sorted.map(b => b.count),
                 backgroundColor: [
                     'rgba(255, 99, 132, 0.7)',
                     'rgba(54, 162, 235, 0.7)',

@@ -753,22 +753,32 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 	if sendBandwidth == 0 {
 		sendBandwidth = session.Bandwidth
 	}
+	
+	// Get current values after update for tracking
+	currentFreq := session.Frequency
+	currentMode := session.Mode
 	session.mu.Unlock()
 	
-	// Track band change if frequency changed
-	if frequency > 0 && frequency != oldFreq {
-		band := frequencyToBand(float64(frequency))
+	// Track band change if frequency actually changed (compare old vs current, not parameter)
+	if currentFreq != oldFreq {
+		band := frequencyToBand(float64(currentFreq))
 		if band != "" {
 			session.bandsMu.Lock()
-			session.VisitedBands[band] = true
+			if !session.VisitedBands[band] {
+				session.VisitedBands[band] = true
+				log.Printf("Session %s: Added band %s to VisitedBands (freq: %d Hz)", session.ID[:8], band, currentFreq)
+			}
 			session.bandsMu.Unlock()
 		}
 	}
 	
-	// Track mode change if mode changed
-	if mode != "" && mode != oldMode {
+	// Track mode change if mode actually changed (compare old vs current, not parameter)
+	if currentMode != oldMode {
 		session.modesMu.Lock()
-		session.VisitedModes[mode] = true
+		if !session.VisitedModes[currentMode] {
+			session.VisitedModes[currentMode] = true
+			log.Printf("Session %s: Added mode %s to VisitedModes", session.ID[:8], currentMode)
+		}
 		session.modesMu.Unlock()
 	}
 
@@ -840,22 +850,32 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 		// Translate mode for radiod (e.g., "fm" -> "pm")
 		sendMode = translateModeForRadiod(sendMode)
 	}
+	
+	// Get current values after update for tracking
+	currentFreq := session.Frequency
+	currentMode := session.Mode
 	session.mu.Unlock()
 	
-	// Track band change if frequency changed
-	if frequency > 0 && frequency != oldFreq {
-		band := frequencyToBand(float64(frequency))
+	// Track band change if frequency actually changed (compare old vs current, not parameter)
+	if currentFreq != oldFreq {
+		band := frequencyToBand(float64(currentFreq))
 		if band != "" {
 			session.bandsMu.Lock()
-			session.VisitedBands[band] = true
+			if !session.VisitedBands[band] {
+				session.VisitedBands[band] = true
+				log.Printf("Session %s: Added band %s to VisitedBands (freq: %d Hz)", session.ID[:8], band, currentFreq)
+			}
 			session.bandsMu.Unlock()
 		}
 	}
 	
-	// Track mode change if mode changed
-	if mode != "" && mode != oldMode {
+	// Track mode change if mode actually changed (compare old vs current, not parameter)
+	if currentMode != oldMode {
 		session.modesMu.Lock()
-		session.VisitedModes[mode] = true
+		if !session.VisitedModes[currentMode] {
+			session.VisitedModes[currentMode] = true
+			log.Printf("Session %s: Added mode %s to VisitedModes", session.ID[:8], currentMode)
+		}
 		session.modesMu.Unlock()
 	}
 

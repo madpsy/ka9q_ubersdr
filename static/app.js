@@ -6116,6 +6116,9 @@ function initNoiseBlanker() {
     }
 
     try {
+        // Get sample rate from audio context
+        const sampleRate = audioContext.sampleRate;
+        
         // Create Noise Blanker instance
         nb = new NoiseBlanker(audioContext, sampleRate);
         nb.enabled = noiseBlankerEnabled;

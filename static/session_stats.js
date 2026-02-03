@@ -483,7 +483,7 @@ async function createWorldMap(countries) {
         
         // Add marker legend
         const markerLegendX = width - 180;
-        const markerLegendY = height - 80;
+        const markerLegendY = height - 130; // Increased space for more items
         
         const markerLegend = svg.append('g')
             .attr('transform', `translate(${markerLegendX}, ${markerLegendY})`);

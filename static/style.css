@@ -853,11 +853,12 @@ body {
 }
 
 .bandwidth-controls {
-    display: flex;
+    display: flex !important;
     flex-direction: row !important;
-    flex-wrap: nowrap;
+    flex-wrap: nowrap !important;
     gap: 20px;
     margin-top: 10px;
+    width: 100%;
 }
 
 .bandwidth-controls .control-group {

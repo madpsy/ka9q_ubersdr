@@ -950,16 +950,52 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 		sm.mu.Unlock()
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
-	delete(sm.sessions, sessionID)
-	delete(sm.ssrcToSession, session.SSRC)
-
+	
 	// Track if this UUID is being completely removed (for activity logging)
+	// Check this BEFORE removing the session from the map
 	uuidCompletelyGone := false
 	if session.UserSessionID != "" {
 		if count, exists := sm.userSessionUUIDs[session.UserSessionID]; exists {
 			if count <= 1 {
 				// This is the last session for this UUID
 				uuidCompletelyGone = true
+			}
+		}
+	}
+	
+	// Log session activity BEFORE removing from map (so activity logger can still read it)
+	// Only log if the UUID is completely gone (all sessions for this UUID destroyed)
+	if sm.activityLogger != nil && uuidCompletelyGone {
+		log.Printf("Calling LogSessionDestroyed for user %s (BEFORE session removal)", session.UserSessionID[:8])
+		// Unlock before calling activity logger to avoid deadlock (it needs to read sessions)
+		sm.mu.Unlock()
+		if err := sm.activityLogger.LogSessionDestroyed(); err != nil {
+			log.Printf("Warning: failed to log session destruction: %v", err)
+		}
+		// Re-lock to continue with cleanup
+		sm.mu.Lock()
+		// Re-check that session still exists (in case something changed while unlocked)
+		session, ok = sm.sessions[sessionID]
+		if !ok {
+			sm.mu.Unlock()
+			return fmt.Errorf("session was removed while logging activity")
+		}
+	} else {
+		if sm.activityLogger == nil {
+			log.Printf("NOT calling LogSessionDestroyed: activityLogger is nil")
+		} else if !uuidCompletelyGone {
+			log.Printf("NOT calling LogSessionDestroyed: UUID %s still has other sessions", session.UserSessionID[:8])
+		}
+	}
+	
+	// Now remove the session from the map
+	delete(sm.sessions, sessionID)
+	delete(sm.ssrcToSession, session.SSRC)
+
+	// Update UUID tracking
+	if session.UserSessionID != "" {
+		if count, exists := sm.userSessionUUIDs[session.UserSessionID]; exists {
+			if count <= 1 {
 				delete(sm.userSessionUUIDs, session.UserSessionID)
 			} else {
 				sm.userSessionUUIDs[session.UserSessionID]--
@@ -1042,14 +1078,8 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 		}
 	}
 
-	log.Printf("Session destroyed: %s (channel: %s, SSRC: 0x%08x)", sessionID, session.ChannelName, session.SSRC)
-
-	// Log session activity only if the UUID is completely gone (all sessions for this UUID destroyed)
-	if sm.activityLogger != nil && uuidCompletelyGone {
-		if err := sm.activityLogger.LogSessionDestroyed(); err != nil {
-			log.Printf("Warning: failed to log session destruction: %v", err)
-		}
-	}
+	log.Printf("Session destroyed: %s (channel: %s, SSRC: 0x%08x, user: %s)",
+		sessionID, session.ChannelName, session.SSRC, session.UserSessionID[:8])
 
 	return nil
 }

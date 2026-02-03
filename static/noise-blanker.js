@@ -3,7 +3,7 @@
 // Uses FFT to detect broadband clicks and distinguish from narrowband speech
 
 class NoiseBlanker {
-    constructor(audioContext, sampleRate = 12000) {
+    constructor(audioContext, sampleRate = 12000, bandwidthLow = null, bandwidthHigh = null) {
         this.audioContext = audioContext;
         this.sampleRate = sampleRate;
         
@@ -58,6 +58,18 @@ class NoiseBlanker {
         this.lastLogTime = 0;
         this.logInterval = 2.0;  // Log every 2 seconds max
         this.falsePositivesRejected = 0;
+        
+        // Audio bandpass filter (dynamically configured based on mode bandwidth)
+        this.audioFilterEnabled = false;
+        this.bandwidthLow = bandwidthLow;    // Bandwidth low edge (can be negative for LSB)
+        this.bandwidthHigh = bandwidthHigh;  // Bandwidth high edge
+        this.audioFilterCoeffs = null;       // FIR filter coefficients
+        this.audioFilterState = null;        // Filter state for continuous filtering
+        
+        // Initialize audio filter if bandwidth is provided
+        if (bandwidthLow !== null && bandwidthHigh !== null) {
+            this.initAudioFilter();
+        }
     }
     
     // Setup FFT computation (simple DFT for small size)
@@ -158,6 +170,134 @@ class NoiseBlanker {
         }
     }
     
+    // Initialize audio bandpass filter using FIR design
+    // Dynamically configures the filter based on bandwidth settings:
+    // - For USB/CWU (positive bandwidth): lowpass filter at high edge
+    // - For LSB/CWL (negative bandwidth): lowpass filter at abs(low edge)
+    // - For AM/SAM (symmetric): lowpass filter at high edge
+    initAudioFilter() {
+        if (this.bandwidthLow === null || this.bandwidthHigh === null) {
+            console.warn('[NB] Warning: Bandwidth not set, audio filter disabled');
+            this.audioFilterEnabled = false;
+            return;
+        }
+        
+        // Determine the filter cutoff frequency based on bandwidth
+        // For USB/CWU: use high edge (e.g., +100 to +3000 -> cutoff at 3000 Hz)
+        // For LSB/CWL: use abs(low edge) (e.g., -3000 to -100 -> cutoff at 3000 Hz)
+        // For AM/SAM: use high edge (e.g., -5000 to +5000 -> cutoff at 5000 Hz)
+        let cutoffFreq;
+        if (this.bandwidthHigh > 0) {
+            // USB, CWU, AM, SAM - use high edge
+            cutoffFreq = Math.abs(this.bandwidthHigh);
+        } else {
+            // LSB, CWL - use abs(low edge)
+            cutoffFreq = Math.abs(this.bandwidthLow);
+        }
+        
+        // Validate filter parameters
+        const nyquist = this.sampleRate / 2.0;
+        if (cutoffFreq >= nyquist) {
+            console.warn(`[NB] Warning: Filter cutoff ${cutoffFreq} Hz exceeds Nyquist ${nyquist} Hz`);
+            this.audioFilterEnabled = false;
+            return;
+        }
+        
+        try {
+            // Design an FIR lowpass filter (0 Hz to cutoff)
+            // Use a reasonable number of taps based on sample rate
+            let numTaps = Math.min(Math.floor(this.sampleRate / 10), 1001);  // Cap at 1001 taps
+            if (numTaps % 2 === 0) {
+                numTaps += 1;  // Must be odd for best results
+            }
+            
+            // Design FIR lowpass filter using windowed sinc method
+            this.audioFilterCoeffs = this.designFIRLowpass(numTaps, cutoffFreq, this.sampleRate);
+            
+            // Initialize filter state for continuous filtering
+            this.audioFilterState = new Float32Array(numTaps - 1);
+            this.audioFilterState.fill(0);
+            
+            this.audioFilterEnabled = true;
+            console.log(`[NB] Audio filter initialized: 0-${cutoffFreq.toFixed(0)} Hz (bandwidth: ${this.bandwidthLow.toFixed(0)} to ${this.bandwidthHigh.toFixed(0)} Hz)`);
+        } catch (e) {
+            console.warn(`[NB] Warning: Failed to create audio filter: ${e}`);
+            this.audioFilterEnabled = false;
+        }
+    }
+    
+    // Design FIR lowpass filter using windowed sinc method
+    designFIRLowpass(numTaps, cutoffFreq, sampleRate) {
+        const coeffs = new Float32Array(numTaps);
+        const fc = cutoffFreq / sampleRate;  // Normalized cutoff frequency
+        const M = (numTaps - 1) / 2;  // Filter delay
+        
+        // Generate windowed sinc function
+        for (let n = 0; n < numTaps; n++) {
+            const x = n - M;
+            
+            // Sinc function
+            let h;
+            if (x === 0) {
+                h = 2 * fc;
+            } else {
+                h = Math.sin(2 * Math.PI * fc * x) / (Math.PI * x);
+            }
+            
+            // Apply Hamming window
+            const w = 0.54 - 0.46 * Math.cos(2 * Math.PI * n / (numTaps - 1));
+            coeffs[n] = h * w;
+        }
+        
+        // Normalize to unity gain at DC
+        let sum = 0;
+        for (let i = 0; i < numTaps; i++) {
+            sum += coeffs[i];
+        }
+        for (let i = 0; i < numTaps; i++) {
+            coeffs[i] /= sum;
+        }
+        
+        return coeffs;
+    }
+    
+    // Update bandwidth and reinitialize audio filter
+    updateBandwidth(bandwidthLow, bandwidthHigh) {
+        this.bandwidthLow = bandwidthLow;
+        this.bandwidthHigh = bandwidthHigh;
+        
+        // Reinitialize audio filter with new bandwidth
+        this.initAudioFilter();
+    }
+    
+    // Apply FIR filter with state preservation for continuous filtering
+    applyAudioFilter(samples) {
+        if (!this.audioFilterEnabled || this.audioFilterCoeffs === null) {
+            return;
+        }
+        
+        const numTaps = this.audioFilterCoeffs.length;
+        const numSamples = samples.length;
+        
+        // Process each sample
+        for (let i = 0; i < numSamples; i++) {
+            // Shift state buffer
+            for (let j = numTaps - 2; j > 0; j--) {
+                this.audioFilterState[j] = this.audioFilterState[j - 1];
+            }
+            this.audioFilterState[0] = samples[i];
+            
+            // Compute filter output
+            let output = 0;
+            output += this.audioFilterCoeffs[0] * samples[i];
+            for (let j = 1; j < numTaps; j++) {
+                output += this.audioFilterCoeffs[j] * this.audioFilterState[j - 1];
+            }
+            
+            samples[i] = output;
+        }
+    }
+    
     // Process a buffer of audio samples
     process(input, output) {
         if (!this.enabled) {
@@ -235,6 +375,18 @@ class NoiseBlanker {
                 output[i] = sample;
             }
         }
+        
+        // Apply audio bandpass filter if enabled (after blanking)
+        // This helps clean up the audio and remove high-frequency artifacts
+        if (this.audioFilterEnabled && this.audioFilterCoeffs !== null) {
+            try {
+                this.applyAudioFilter(output);
+            } catch (e) {
+                // Disable filter on error to avoid repeated failures
+                console.warn(`[NB] Warning: Audio filter error: ${e}`);
+                this.audioFilterEnabled = false;
+            }
+        }
     }
     
     // Reset noise blanker state
@@ -250,6 +402,11 @@ class NoiseBlanker {
         this.lastLogTime = 0;
         this.fftBuffer.fill(0);
         this.fftBufferPos = 0;
+        
+        // Reset audio filter state
+        if (this.audioFilterState !== null) {
+            this.audioFilterState.fill(0);
+        }
     }
     
     // Get statistics about noise blanker operation
@@ -262,14 +419,15 @@ class NoiseBlanker {
             thresholdLevel: this.avgLevel * this.threshold,
             blanking: this.blankCounter > 0,
             blankDurationMs: this.blankDuration * 1000,
-            spectralFlatnessThreshold: this.spectralFlatnessThreshold
+            spectralFlatnessThreshold: this.spectralFlatnessThreshold,
+            audioFilterEnabled: this.audioFilterEnabled
         };
     }
 }
 
 // Create and configure a noise blanker
-function createNoiseBlanker(audioContext, sampleRate = 12000, threshold = 10.0, avgWindowMs = 20, spectralFlatnessThreshold = 0.3) {
-    const nb = new NoiseBlanker(audioContext, sampleRate);
+function createNoiseBlanker(audioContext, sampleRate = 12000, threshold = 10.0, avgWindowMs = 20, spectralFlatnessThreshold = 0.3, bandwidthLow = null, bandwidthHigh = null) {
+    const nb = new NoiseBlanker(audioContext, sampleRate, bandwidthLow, bandwidthHigh);
     nb.setParameters(threshold, avgWindowMs, spectralFlatnessThreshold);
     nb.enabled = true;
     return nb;

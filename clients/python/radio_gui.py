@@ -2083,6 +2083,10 @@ class RadioGUI:
                 self.client.nr2_processor.reset_learning()
                 self.log_status("NR2 relearning noise profile (bandwidth changed)")
 
+            # Update noise blanker bandwidth if enabled
+            if self.client.nb_enabled and self.client.nb_processor:
+                self.client.nb_processor.update_bandwidth(low, high)
+
             self.send_tune_message()
 
             # Notify chat of bandwidth change
@@ -4866,7 +4870,9 @@ class RadioGUI:
                 self.client.nb_processor = create_noise_blanker(
                     sample_rate=self.client.sample_rate,
                     threshold=threshold,
-                    avg_window_ms=avg_window_ms
+                    avg_window_ms=avg_window_ms,
+                    bandwidth_low=self.client.bandwidth_low,
+                    bandwidth_high=self.client.bandwidth_high
                 )
                 self.log_status(f"Noise Blanker enabled (threshold={threshold}x, window={avg_window_ms}ms)")
             else:

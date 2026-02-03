@@ -8,6 +8,13 @@ import numpy as np
 import sys
 import time
 
+# Import scipy for audio filter (optional)
+try:
+    from scipy import signal as scipy_signal
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+
 
 class NoiseBlanker:
     """
@@ -18,11 +25,13 @@ class NoiseBlanker:
     detected pulses without creating wideband artifacts from discontinuities.
     """
     
-    def __init__(self, sample_rate=12000):
+    def __init__(self, sample_rate=12000, bandwidth_low=None, bandwidth_high=None):
         """Initialize noise blanker.
         
         Args:
             sample_rate: Audio sample rate in Hz
+            bandwidth_low: Low bandwidth edge in Hz (optional, for filter configuration)
+            bandwidth_high: High bandwidth edge in Hz (optional, for filter configuration)
         """
         self.sample_rate = sample_rate
         
@@ -74,6 +83,17 @@ class NoiseBlanker:
         self.false_positives_rejected = 0
         self.last_log_time = 0
         self.log_interval = 2.0  # Log every 2 seconds max
+        
+        # Audio bandpass filter (dynamically configured based on mode bandwidth)
+        self.audio_filter_enabled = False
+        self.bandwidth_low = bandwidth_low    # Bandwidth low edge (can be negative for LSB)
+        self.bandwidth_high = bandwidth_high  # Bandwidth high edge
+        self.audio_filter_taps = None         # FIR filter coefficients
+        self.audio_filter_zi = None           # Filter state for continuous filtering
+        
+        # Initialize audio filter if scipy is available and bandwidth is provided
+        if SCIPY_AVAILABLE and bandwidth_low is not None and bandwidth_high is not None:
+            self._init_audio_filter()
     
     def calculate_spectral_flatness(self, spectrum):
         """Calculate spectral flatness (geometric mean / arithmetic mean).
@@ -102,6 +122,64 @@ class NoiseBlanker:
         
         return geometric_mean / arithmetic_mean
     
+    def _init_audio_filter(self):
+        """Initialize audio bandpass filter using FIR design.
+        
+        Dynamically configures the filter based on bandwidth settings:
+        - For USB/CWU (positive bandwidth): lowpass filter at high edge
+        - For LSB/CWL (negative bandwidth): lowpass filter at abs(low edge)
+        - For AM/SAM (symmetric): lowpass filter at high edge
+        """
+        if not SCIPY_AVAILABLE:
+            return
+
+        if self.bandwidth_low is None or self.bandwidth_high is None:
+            print(f"[NB] Warning: Bandwidth not set, audio filter disabled", file=sys.stderr)
+            self.audio_filter_enabled = False
+            return
+
+        # Determine the filter cutoff frequency based on bandwidth
+        # For USB/CWU: use high edge (e.g., +100 to +3000 -> cutoff at 3000 Hz)
+        # For LSB/CWL: use abs(low edge) (e.g., -3000 to -100 -> cutoff at 3000 Hz)
+        # For AM/SAM: use high edge (e.g., -5000 to +5000 -> cutoff at 5000 Hz)
+        
+        if self.bandwidth_high > 0:
+            # USB, CWU, AM, SAM - use high edge
+            cutoff_freq = abs(self.bandwidth_high)
+        else:
+            # LSB, CWL - use abs(low edge)
+            cutoff_freq = abs(self.bandwidth_low)
+
+        # Validate filter parameters
+        nyquist = self.sample_rate / 2.0
+        if cutoff_freq >= nyquist:
+            print(f"[NB] Warning: Filter cutoff {cutoff_freq} Hz exceeds Nyquist {nyquist} Hz", file=sys.stderr)
+            self.audio_filter_enabled = False
+            return
+
+        try:
+            # Design an FIR lowpass filter (0 Hz to cutoff)
+            # FIR filters have linear phase and no overshoot/ringing issues
+            # Use a reasonable number of taps based on sample rate
+            numtaps = min(int(self.sample_rate / 10), 1001)  # Cap at 1001 taps
+            if numtaps % 2 == 0:
+                numtaps += 1  # Must be odd for best results
+
+            # For a lowpass filter starting at 0 Hz, we use pass_zero='lowpass'
+            self.audio_filter_taps = scipy_signal.firwin(
+                numtaps,
+                cutoff_freq,
+                pass_zero='lowpass',  # Lowpass filter (0 Hz to cutoff)
+                fs=self.sample_rate
+            )
+            # Initialize filter state for continuous filtering
+            self.audio_filter_zi = scipy_signal.lfilter_zi(self.audio_filter_taps, 1.0) * 0.0
+            self.audio_filter_enabled = True
+            print(f"[NB] Audio filter initialized: 0-{cutoff_freq:.0f} Hz (bandwidth: {self.bandwidth_low:.0f} to {self.bandwidth_high:.0f} Hz)", file=sys.stderr)
+        except Exception as e:
+            print(f"[NB] Warning: Failed to create audio filter: {e}", file=sys.stderr)
+            self.audio_filter_enabled = False
+
     def is_broadband_click(self):
         """Check if current signal is broadband (impulse noise characteristic).
         
@@ -145,6 +223,20 @@ class NoiseBlanker:
         
         if spectral_flatness_threshold is not None:
             self.spectral_flatness_threshold = float(spectral_flatness_threshold)
+    
+    def update_bandwidth(self, bandwidth_low, bandwidth_high):
+        """Update bandwidth and reinitialize audio filter.
+        
+        Args:
+            bandwidth_low: Low bandwidth edge in Hz
+            bandwidth_high: High bandwidth edge in Hz
+        """
+        self.bandwidth_low = bandwidth_low
+        self.bandwidth_high = bandwidth_high
+        
+        # Reinitialize audio filter with new bandwidth
+        if SCIPY_AVAILABLE:
+            self._init_audio_filter()
     
     def process(self, input_samples):
         """Process audio samples with noise blanking.
@@ -224,6 +316,22 @@ class NoiseBlanker:
             else:
                 output[i] = sample
         
+        # Apply audio bandpass filter if enabled (after blanking)
+        # This helps clean up the audio and remove high-frequency artifacts
+        if self.audio_filter_enabled and self.audio_filter_taps is not None and SCIPY_AVAILABLE:
+            try:
+                # Apply FIR filter with state for continuous filtering
+                if self.audio_filter_zi is not None:
+                    output, self.audio_filter_zi = scipy_signal.lfilter(
+                        self.audio_filter_taps, 1.0, output, zi=self.audio_filter_zi
+                    )
+                else:
+                    output = scipy_signal.lfilter(self.audio_filter_taps, 1.0, output)
+            except Exception as e:
+                # Disable filter on error to avoid repeated failures
+                print(f"[NB] Warning: Audio filter error: {e}", file=sys.stderr)
+                self.audio_filter_enabled = False
+        
         return output
     
     def reset(self):
@@ -239,6 +347,10 @@ class NoiseBlanker:
         self.last_log_time = 0
         self.fft_buffer.fill(0)
         self.fft_buffer_pos = 0
+        
+        # Reset audio filter state
+        if self.audio_filter_zi is not None and SCIPY_AVAILABLE:
+            self.audio_filter_zi = scipy_signal.lfilter_zi(self.audio_filter_taps, 1.0) * 0.0
     
     def get_stats(self):
         """Get statistics about noise blanker operation."""
@@ -248,11 +360,13 @@ class NoiseBlanker:
             'avg_level': self.avg_level,
             'threshold_level': self.avg_level * self.threshold,
             'blanking': self.blank_counter > 0,
-            'spectral_flatness_threshold': self.spectral_flatness_threshold
+            'spectral_flatness_threshold': self.spectral_flatness_threshold,
+            'audio_filter_enabled': self.audio_filter_enabled
         }
 
 
-def create_noise_blanker(sample_rate=12000, threshold=10.0, avg_window_ms=20, spectral_flatness_threshold=0.3):
+def create_noise_blanker(sample_rate=12000, threshold=10.0, avg_window_ms=20,
+                        spectral_flatness_threshold=0.3, bandwidth_low=None, bandwidth_high=None):
     """Create and configure a noise blanker.
     
     Args:
@@ -260,12 +374,14 @@ def create_noise_blanker(sample_rate=12000, threshold=10.0, avg_window_ms=20, sp
         threshold: Detection threshold (multiplier of average level)
         avg_window_ms: Averaging window in milliseconds
         spectral_flatness_threshold: Threshold for broadband detection (0-1)
+        bandwidth_low: Low bandwidth edge in Hz (optional, for audio filter)
+        bandwidth_high: High bandwidth edge in Hz (optional, for audio filter)
     
     Returns:
         Configured NoiseBlanker instance
     """
-    nb = NoiseBlanker(sample_rate)
-    nb.set_parameters(threshold=threshold, avg_window_ms=avg_window_ms, 
+    nb = NoiseBlanker(sample_rate, bandwidth_low=bandwidth_low, bandwidth_high=bandwidth_high)
+    nb.set_parameters(threshold=threshold, avg_window_ms=avg_window_ms,
                      spectral_flatness_threshold=spectral_flatness_threshold)
     nb.enabled = True
     return nb

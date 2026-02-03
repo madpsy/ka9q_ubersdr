@@ -36,6 +36,14 @@ type SessionActivityLog struct {
 }
 
 // SessionActivityLogger handles logging of session activity to disk
+// logEvent represents a logging event with optional band/mode data
+type logEvent struct {
+	eventType string
+	bands     map[string]bool // Optional: bands to log (for session_destroyed events)
+	modes     map[string]bool // Optional: modes to log (for session_destroyed events)
+	uuid      string          // Optional: UUID for session_destroyed events
+}
+
 type SessionActivityLogger struct {
 	enabled     bool
 	dataDir     string
@@ -45,7 +53,7 @@ type SessionActivityLogger struct {
 	currentFile *os.File
 	currentDate string
 	stopChan    chan struct{}
-	logChan     chan string // Channel for async logging
+	logChan     chan logEvent // Channel for async logging
 	wg          sync.WaitGroup
 }
 
@@ -69,7 +77,7 @@ func NewSessionActivityLogger(enabled bool, dataDir string, logIntervalSecs int,
 		logInterval: time.Duration(logIntervalSecs) * time.Second,
 		sessionMgr:  sessionMgr,
 		stopChan:    make(chan struct{}),
-		logChan:     make(chan string, 100), // Buffered channel for async logging
+		logChan:     make(chan logEvent, 100), // Buffered channel for async logging
 	}
 
 	// Start async logging goroutine
@@ -91,16 +99,16 @@ func (sal *SessionActivityLogger) asyncLogLoop() {
 
 	for {
 		select {
-		case eventType := <-sal.logChan:
-			if err := sal.logActivitySync(eventType); err != nil {
+		case event := <-sal.logChan:
+			if err := sal.logActivitySync(event); err != nil {
 				log.Printf("Error logging session activity: %v", err)
 			}
 		case <-sal.stopChan:
 			// Drain remaining events before stopping
 			for {
 				select {
-				case eventType := <-sal.logChan:
-					if err := sal.logActivitySync(eventType); err != nil {
+				case event := <-sal.logChan:
+					if err := sal.logActivitySync(event); err != nil {
 						log.Printf("Error logging session activity during shutdown: %v", err)
 					}
 				default:
@@ -138,7 +146,7 @@ func (sal *SessionActivityLogger) LogSnapshot() error {
 
 	// Send to async channel (non-blocking)
 	select {
-	case sal.logChan <- "snapshot":
+	case sal.logChan <- logEvent{eventType: "snapshot"}:
 	default:
 		log.Printf("Warning: session activity log channel full, dropping snapshot event")
 	}
@@ -153,7 +161,7 @@ func (sal *SessionActivityLogger) LogSessionCreated() error {
 
 	// Send to async channel (non-blocking)
 	select {
-	case sal.logChan <- "session_created":
+	case sal.logChan <- logEvent{eventType: "session_created"}:
 	default:
 		log.Printf("Warning: session activity log channel full, dropping session_created event")
 	}
@@ -161,6 +169,7 @@ func (sal *SessionActivityLogger) LogSessionCreated() error {
 }
 
 // LogSessionDestroyed logs when a session is destroyed
+// Deprecated: Use LogSessionDestroyedWithData instead
 func (sal *SessionActivityLogger) LogSessionDestroyed() error {
 	if !sal.enabled {
 		return nil
@@ -168,7 +177,39 @@ func (sal *SessionActivityLogger) LogSessionDestroyed() error {
 
 	// Send to async channel (non-blocking)
 	select {
-	case sal.logChan <- "session_destroyed":
+	case sal.logChan <- logEvent{eventType: "session_destroyed"}:
+	default:
+		log.Printf("Warning: session activity log channel full, dropping session_destroyed event")
+	}
+	return nil
+}
+
+// LogSessionDestroyedWithData logs when a session is destroyed with band/mode data
+// This captures the data at the moment of destruction, before cleanup
+func (sal *SessionActivityLogger) LogSessionDestroyedWithData(uuid string, bands, modes map[string]bool) error {
+	if !sal.enabled {
+		return nil
+	}
+
+	// Make copies of the maps to avoid race conditions
+	bandsCopy := make(map[string]bool, len(bands))
+	for k, v := range bands {
+		bandsCopy[k] = v
+	}
+	
+	modesCopy := make(map[string]bool, len(modes))
+	for k, v := range modes {
+		modesCopy[k] = v
+	}
+
+	// Send to async channel (non-blocking)
+	select {
+	case sal.logChan <- logEvent{
+		eventType: "session_destroyed",
+		uuid:      uuid,
+		bands:     bandsCopy,
+		modes:     modesCopy,
+	}:
 	default:
 		log.Printf("Warning: session activity log channel full, dropping session_destroyed event")
 	}
@@ -176,15 +217,15 @@ func (sal *SessionActivityLogger) LogSessionDestroyed() error {
 }
 
 // logActivitySync logs the current state of all active sessions (synchronous, called from async loop)
-func (sal *SessionActivityLogger) logActivitySync(eventType string) error {
+func (sal *SessionActivityLogger) logActivitySync(event logEvent) error {
 	// Get all active sessions from session manager FIRST (without holding our lock)
 	// This prevents deadlock since session manager may call us while holding its lock
-	activeSessions := sal.getActiveSessionEntries()
+	activeSessions := sal.getActiveSessionEntries(event)
 
 	// Create log entry
 	logEntry := SessionActivityLog{
 		Timestamp:      time.Now().UTC(),
-		EventType:      eventType,
+		EventType:      event.eventType,
 		ActiveSessions: activeSessions,
 	}
 
@@ -213,7 +254,8 @@ func (sal *SessionActivityLogger) logActivitySync(eventType string) error {
 }
 
 // getActiveSessionEntries extracts unique user sessions from the session manager
-func (sal *SessionActivityLogger) getActiveSessionEntries() []SessionActivityEntry {
+// For session_destroyed events with data, uses the provided bands/modes instead of reading from maps
+func (sal *SessionActivityLogger) getActiveSessionEntries(event logEvent) []SessionActivityEntry {
 	sal.sessionMgr.mu.RLock()
 	defer sal.sessionMgr.mu.RUnlock()
 
@@ -313,39 +355,51 @@ func (sal *SessionActivityLogger) getActiveSessionEntries() []SessionActivityEnt
 		}
 	}
 	
-	// Now populate bands and modes from UUID-level maps (after processing all sessions)
-	log.Printf("ActivityLogger: About to read UUID-level maps for %d users", len(userSessions))
-	for userSessionID, entry := range userSessions {
-		log.Printf("ActivityLogger: Checking UUID %s for bands/modes", userSessionID[:8])
-		
-		// Get bands from UUID-level map
-		bandMap, bandExists := sal.sessionMgr.userSessionBands[userSessionID]
-		log.Printf("ActivityLogger: UUID %s - bandMap exists: %v, len: %d",
-			userSessionID[:8], bandExists, len(bandMap))
-		if bandExists {
-			for band := range bandMap {
-				entry.Bands = append(entry.Bands, band)
-				log.Printf("ActivityLogger: UUID %s - added band %s", userSessionID[:8], band)
+	// Now populate bands and modes
+	// For session_destroyed events with data, use the provided data
+	// For other events, read from UUID-level maps
+	if event.eventType == "session_destroyed" && event.uuid != "" && (event.bands != nil || event.modes != nil) {
+		// Use provided data for the destroyed session
+		log.Printf("ActivityLogger: Using provided data for destroyed UUID %s", event.uuid[:8])
+		if entry, exists := userSessions[event.uuid]; exists {
+			if event.bands != nil {
+				for band := range event.bands {
+					entry.Bands = append(entry.Bands, band)
+				}
+				log.Printf("ActivityLogger: UUID %s has %d bands from provided data: %v",
+					event.uuid[:8], len(event.bands), entry.Bands)
 			}
-			log.Printf("ActivityLogger: UUID %s has %d bands in userSessionBands: %v",
-				userSessionID[:8], len(bandMap), entry.Bands)
-		} else {
-			log.Printf("ActivityLogger: UUID %s - NO bandMap found in userSessionBands!", userSessionID[:8])
+			if event.modes != nil {
+				for mode := range event.modes {
+					entry.Modes = append(entry.Modes, mode)
+				}
+				log.Printf("ActivityLogger: UUID %s has %d modes from provided data: %v",
+					event.uuid[:8], len(event.modes), entry.Modes)
+			}
 		}
-		
-		// Get modes from UUID-level map
-		modeMap, modeExists := sal.sessionMgr.userSessionModes[userSessionID]
-		log.Printf("ActivityLogger: UUID %s - modeMap exists: %v, len: %d",
-			userSessionID[:8], modeExists, len(modeMap))
-		if modeExists {
-			for mode := range modeMap {
-				entry.Modes = append(entry.Modes, mode)
-				log.Printf("ActivityLogger: UUID %s - added mode %s", userSessionID[:8], mode)
+	} else {
+		// Read from UUID-level maps for all sessions (snapshot or session_created events)
+		log.Printf("ActivityLogger: Reading UUID-level maps for %d users", len(userSessions))
+		for userSessionID, entry := range userSessions {
+			// Get bands from UUID-level map
+			bandMap, bandExists := sal.sessionMgr.userSessionBands[userSessionID]
+			if bandExists {
+				for band := range bandMap {
+					entry.Bands = append(entry.Bands, band)
+				}
+				log.Printf("ActivityLogger: UUID %s has %d bands from userSessionBands",
+					userSessionID[:8], len(bandMap))
 			}
-			log.Printf("ActivityLogger: UUID %s has %d modes in userSessionModes: %v",
-				userSessionID[:8], len(modeMap), entry.Modes)
-		} else {
-			log.Printf("ActivityLogger: UUID %s - NO modeMap found in userSessionModes!", userSessionID[:8])
+			
+			// Get modes from UUID-level map
+			modeMap, modeExists := sal.sessionMgr.userSessionModes[userSessionID]
+			if modeExists {
+				for mode := range modeMap {
+					entry.Modes = append(entry.Modes, mode)
+				}
+				log.Printf("ActivityLogger: UUID %s has %d modes from userSessionModes",
+					userSessionID[:8], len(modeMap))
+			}
 		}
 	}
 

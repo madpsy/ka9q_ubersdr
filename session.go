@@ -1041,13 +1041,39 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 		}
 	}
 	
-	// Log session activity BEFORE removing from map (so activity logger can still read it)
+	// Log session activity BEFORE removing from map and BEFORE cleanup
 	// Only log if the UUID is completely gone (all sessions for this UUID destroyed)
 	if sm.activityLogger != nil && uuidCompletelyGone {
-		log.Printf("Calling LogSessionDestroyed for user %s (BEFORE session removal)", session.UserSessionID[:8])
+		log.Printf("Calling LogSessionDestroyedWithData for user %s (BEFORE session removal)", session.UserSessionID[:8])
+		
+		// Get copies of the UUID-level bands/modes maps BEFORE cleanup
+		// We must do this while holding the lock to ensure data consistency
+		var bandsCopy, modesCopy map[string]bool
+		if bandsMap, exists := sm.userSessionBands[session.UserSessionID]; exists {
+			bandsCopy = make(map[string]bool, len(bandsMap))
+			for k, v := range bandsMap {
+				bandsCopy[k] = v
+			}
+			log.Printf("UUID %s: Captured %d bands for logging", session.UserSessionID[:8], len(bandsCopy))
+		} else {
+			bandsCopy = make(map[string]bool)
+			log.Printf("UUID %s: No bands found in userSessionBands", session.UserSessionID[:8])
+		}
+		
+		if modesMap, exists := sm.userSessionModes[session.UserSessionID]; exists {
+			modesCopy = make(map[string]bool, len(modesMap))
+			for k, v := range modesMap {
+				modesCopy[k] = v
+			}
+			log.Printf("UUID %s: Captured %d modes for logging", session.UserSessionID[:8], len(modesCopy))
+		} else {
+			modesCopy = make(map[string]bool)
+			log.Printf("UUID %s: No modes found in userSessionModes", session.UserSessionID[:8])
+		}
+		
 		// Unlock before calling activity logger to avoid deadlock (it needs to read sessions)
 		sm.mu.Unlock()
-		if err := sm.activityLogger.LogSessionDestroyed(); err != nil {
+		if err := sm.activityLogger.LogSessionDestroyedWithData(session.UserSessionID, bandsCopy, modesCopy); err != nil {
 			log.Printf("Warning: failed to log session destruction: %v", err)
 		}
 		// Re-lock to continue with cleanup

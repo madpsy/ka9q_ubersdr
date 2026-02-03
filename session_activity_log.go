@@ -254,8 +254,50 @@ func (sal *SessionActivityLogger) logActivitySync(event logEvent) error {
 }
 
 // getActiveSessionEntries extracts unique user sessions from the session manager
-// For session_destroyed events with data, uses the provided bands/modes instead of reading from maps
+// For session_destroyed events with data, creates entry from provided data since sessions are already destroyed
 func (sal *SessionActivityLogger) getActiveSessionEntries(event logEvent) []SessionActivityEntry {
+	// For session_destroyed events, the sessions are already removed from sm.sessions
+	// So we need to create the entry from the event data directly
+	if event.eventType == "session_destroyed" && event.uuid != "" {
+		log.Printf("ActivityLogger: Creating entry for destroyed UUID %s from event data", event.uuid[:8])
+		
+		// Create a single entry for the destroyed session
+		entries := make([]SessionActivityEntry, 0, 1)
+		
+		// We don't have session data anymore, so create a minimal entry
+		// The bands and modes will be populated below
+		entry := SessionActivityEntry{
+			UserSessionID: event.uuid,
+			Bands:         []string{},
+			Modes:         []string{},
+		}
+		
+		// Populate bands from event data
+		if event.bands != nil {
+			for band := range event.bands {
+				entry.Bands = append(entry.Bands, band)
+			}
+			log.Printf("ActivityLogger: Added %d bands to destroyed session entry", len(entry.Bands))
+		}
+		
+		// Populate modes from event data
+		if event.modes != nil {
+			for mode := range event.modes {
+				entry.Modes = append(entry.Modes, mode)
+			}
+			log.Printf("ActivityLogger: Added %d modes to destroyed session entry", len(entry.Modes))
+		}
+		
+		// Sort for consistent output
+		sortStrings(entry.Bands)
+		sortStrings(entry.Modes)
+		
+		entries = append(entries, entry)
+		log.Printf("ActivityLogger: Returning entry with %d bands, %d modes", len(entry.Bands), len(entry.Modes))
+		return entries
+	}
+	
+	// For other event types (snapshot, session_created), read from active sessions
 	sal.sessionMgr.mu.RLock()
 	defer sal.sessionMgr.mu.RUnlock()
 
@@ -355,49 +397,22 @@ func (sal *SessionActivityLogger) getActiveSessionEntries(event logEvent) []Sess
 		}
 	}
 	
-	// Now populate bands and modes
-	// For session_destroyed events with data, use the provided data
-	// For other events, read from UUID-level maps
-	if event.eventType == "session_destroyed" && event.uuid != "" && (event.bands != nil || event.modes != nil) {
-		// Use provided data for the destroyed session
-		log.Printf("ActivityLogger: Processing session_destroyed for UUID %s with %d bands, %d modes",
-			event.uuid[:8], len(event.bands), len(event.modes))
-		if entry, exists := userSessions[event.uuid]; exists {
-			log.Printf("ActivityLogger: Found entry for UUID %s in userSessions", event.uuid[:8])
-			if event.bands != nil {
-				for band := range event.bands {
-					entry.Bands = append(entry.Bands, band)
-					log.Printf("ActivityLogger: Added band %s to entry", band)
-				}
-				log.Printf("ActivityLogger: Entry now has %d bands: %v", len(entry.Bands), entry.Bands)
+	// Populate bands and modes from UUID-level maps for snapshot/session_created events
+	// (session_destroyed events already have their data populated above)
+	for userSessionID, entry := range userSessions {
+		// Get bands from UUID-level map
+		bandMap, bandExists := sal.sessionMgr.userSessionBands[userSessionID]
+		if bandExists {
+			for band := range bandMap {
+				entry.Bands = append(entry.Bands, band)
 			}
-			if event.modes != nil {
-				for mode := range event.modes {
-					entry.Modes = append(entry.Modes, mode)
-					log.Printf("ActivityLogger: Added mode %s to entry", mode)
-				}
-				log.Printf("ActivityLogger: Entry now has %d modes: %v", len(entry.Modes), entry.Modes)
-			}
-		} else {
-			log.Printf("ActivityLogger: WARNING - UUID %s NOT found in userSessions map!", event.uuid[:8])
 		}
-	} else {
-		// Read from UUID-level maps for all sessions (snapshot or session_created events)
-		for userSessionID, entry := range userSessions {
-			// Get bands from UUID-level map
-			bandMap, bandExists := sal.sessionMgr.userSessionBands[userSessionID]
-			if bandExists {
-				for band := range bandMap {
-					entry.Bands = append(entry.Bands, band)
-				}
-			}
-			
-			// Get modes from UUID-level map
-			modeMap, modeExists := sal.sessionMgr.userSessionModes[userSessionID]
-			if modeExists {
-				for mode := range modeMap {
-					entry.Modes = append(entry.Modes, mode)
-				}
+		
+		// Get modes from UUID-level map
+		modeMap, modeExists := sal.sessionMgr.userSessionModes[userSessionID]
+		if modeExists {
+			for mode := range modeMap {
+				entry.Modes = append(entry.Modes, mode)
 			}
 		}
 	}

@@ -854,7 +854,7 @@ body {
 
 .bandwidth-controls {
     display: flex;
-    flex-direction: row;
+    flex-direction: row !important;
     flex-wrap: nowrap;
     gap: 20px;
     margin-top: 10px;
@@ -862,6 +862,8 @@ body {
 
 .bandwidth-controls .control-group {
     flex: 1;
+    display: flex;
+    flex-direction: column;
 }
 
 .bandwidth-controls .control-group label {

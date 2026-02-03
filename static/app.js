@@ -6126,20 +6126,24 @@ function initNoiseBlanker() {
         // Create script processor: mono input, mono output (1 in, 1 out)
         // Small buffer for minimal latency (<5ms)
         const bufferSize = 512;
-        noiseBlankerProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
-
+        noiseBlankerProcessor = audioContext.createScriptProcessor(bufferSize, 2, 2);
+    
         noiseBlankerProcessor.onaudioprocess = (e) => {
-            const input = e.inputBuffer.getChannelData(0);
-            const output = e.outputBuffer.getChannelData(0);
-
+            const inputL = e.inputBuffer.getChannelData(0);
+            const inputR = e.inputBuffer.getChannelData(1);
+            const outputL = e.outputBuffer.getChannelData(0);
+            const outputR = e.outputBuffer.getChannelData(1);
+    
             if (!noiseBlankerEnabled || !nb) {
                 // Bypass: copy input to output
-                output.set(input);
+                outputL.set(inputL);
+                outputR.set(inputR);
                 return;
             }
-
-            // Process through Noise Blanker
-            nb.process(input, output);
+    
+            // Process both channels independently through Noise Blanker
+            nb.process(inputL, outputL);
+            nb.process(inputR, outputR);
         };
 
         log('✅ Noise Blanker initialized (impulse noise suppression, <5ms latency)');

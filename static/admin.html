@@ -14157,7 +14157,7 @@ const tooltipLine2 = timeStr;
                         <td style="padding: 10px; font-size: 12px;">${event.country || '—'}</td>
                         <td style="padding: 10px; font-size: 11px; max-width: 250px; overflow: hidden; text-overflow: ellipsis;" title="${userAgent}">${userAgentShort}</td>
                         <td style="padding: 10px; font-size: 11px;">${event.bands && event.bands.length > 0 ? event.bands.join(', ') : '—'}</td>
-                        <td style="padding: 10px; font-size: 11px;">${event.modes && event.modes.length > 0 ? event.modes.join(', ') : '—'}</td>
+                        <td style="padding: 10px; font-size: 11px;">${event.modes && event.modes.length > 0 ? event.modes.map(m => m.toUpperCase()).join(', ') : '—'}</td>
                         <td style="padding: 10px; text-align: center;">${authBadge}</td>
                         <td style="padding: 10px; text-align: center; font-size: 12px;">${types}</td>
                         <td style="padding: 10px; text-align: right; font-family: monospace; font-size: 12px;">${durationDisplay}</td>

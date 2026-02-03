@@ -289,6 +289,9 @@ let noiseReductionAnalyser = null; // Analyser to monitor NR2 output for clippin
 let noiseReductionClipping = false; // Track if NR2 output is clipping
 let noiseReductionClipIndicatorTimeout = null; // Timeout for hiding clip indicator
 let nr2 = null; // NR2 processor instance
+let noiseBlankerEnabled = false; // Track if noise blanker is enabled
+let noiseBlankerProcessor = null; // ScriptProcessor for noise blanker
+let nb = null; // Noise blanker instance
 
 // Amateur radio band ranges (in Hz) - UK RSGB allocations
 const bandRanges = {
@@ -471,6 +474,11 @@ document.addEventListener('DOMContentLoaded', () => {
         else if (e.key === 'm' || e.key === 'M') {
             e.preventDefault();
             toggleMute();
+        }
+        // B key: Toggle Noise Blanker
+        else if (e.key === 'b' || e.key === 'B') {
+            e.preventDefault();
+            toggleNBQuick();
         }
         // R key: Open recorder modal
         else if (e.key === 'r' || e.key === 'R') {
@@ -2345,7 +2353,28 @@ function playAudioBuffer(buffer) {
     // Build the audio processing chain step by step
     let nextNode = source;
 
-    // Step 0: Noise Reduction (FIRST - clean signal before squelch/other processing)
+    // Step 0a: Noise Blanker (FIRST - remove impulse noise before any other processing)
+    if (noiseBlankerEnabled && noiseBlankerProcessor) {
+        // Safety check: ensure processor belongs to current AudioContext
+        if (noiseBlankerProcessor.context !== audioContext) {
+            console.warn('Noise Blanker processor belongs to old AudioContext, skipping connection');
+            // Clear the old processor to trigger reinitialization
+            noiseBlankerProcessor = null;
+            nb = null;
+        } else {
+            try {
+                noiseBlankerProcessor.disconnect();
+            } catch (e) {
+                // Ignore if already disconnected
+            }
+
+            // Connect processor in signal chain
+            nextNode.connect(noiseBlankerProcessor);
+            nextNode = noiseBlankerProcessor;
+        }
+    }
+
+    // Step 0b: Noise Reduction (SECOND - clean signal before squelch/other processing)
     if (noiseReductionEnabled && noiseReductionProcessor) {
         // Safety check: ensure processor belongs to current AudioContext
         if (noiseReductionProcessor.context !== audioContext) {
@@ -3555,6 +3584,36 @@ function toggleNR2Quick() {
         btn.style.backgroundColor = '#fd7e14'; // Orange when disabled
         log('NR2 disabled via quick toggle');
     }
+}
+
+// Quick toggle for Noise Blanker
+function toggleNBQuick() {
+    noiseBlankerEnabled = !noiseBlankerEnabled;
+    
+    // Initialize NB if needed
+    if (noiseBlankerEnabled && !nb) {
+        initNoiseBlanker();
+    }
+    
+    // Enable/disable the processor
+    if (nb) {
+        nb.enabled = noiseBlankerEnabled;
+    }
+    
+    // Update button appearance
+    const button = document.getElementById('nb-quick-toggle');
+    if (button) {
+        button.style.backgroundColor = noiseBlankerEnabled ? '#28a745' : '#17a2b8';
+    }
+    
+    // Show notification
+    showNotification(
+        `Noise Blanker ${noiseBlankerEnabled ? 'enabled' : 'disabled'}`,
+        'info',
+        2000
+    );
+    
+    log(`Noise Blanker ${noiseBlankerEnabled ? 'enabled' : 'disabled'}`, 'info');
 }
 
 // Update connection status display (removed from UI, kept for compatibility)
@@ -6033,6 +6092,58 @@ function initNoiseReduction() {
     } catch (e) {
         console.error('Failed to initialize noise reduction:', e);
         log('Failed to initialize noise reduction: ' + e.message, 'error');
+        return false;
+    }
+}
+
+// Initialize noise blanker processor
+function initNoiseBlanker() {
+    if (!audioContext) {
+        log('Audio context not initialized', 'error');
+        return false;
+    }
+
+    if (noiseBlankerProcessor) {
+        log('Noise blanker already initialized');
+        return true;
+    }
+
+    // Check if NoiseBlanker class is available
+    if (typeof NoiseBlanker === 'undefined') {
+        log('Noise Blanker library not loaded', 'error');
+        log('Please ensure noise-blanker.js is loaded', 'error');
+        return false;
+    }
+
+    try {
+        // Create Noise Blanker instance
+        nb = new NoiseBlanker(audioContext, sampleRate);
+        nb.enabled = noiseBlankerEnabled;
+
+        // Create script processor: mono input, mono output (1 in, 1 out)
+        // Small buffer for minimal latency (<5ms)
+        const bufferSize = 512;
+        noiseBlankerProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+
+        noiseBlankerProcessor.onaudioprocess = (e) => {
+            const input = e.inputBuffer.getChannelData(0);
+            const output = e.outputBuffer.getChannelData(0);
+
+            if (!noiseBlankerEnabled || !nb) {
+                // Bypass: copy input to output
+                output.set(input);
+                return;
+            }
+
+            // Process through Noise Blanker
+            nb.process(input, output);
+        };
+
+        log('✅ Noise Blanker initialized (impulse noise suppression, <5ms latency)');
+        return true;
+    } catch (e) {
+        console.error('Failed to initialize noise blanker:', e);
+        log('Failed to initialize noise blanker: ' + e.message, 'error');
         return false;
     }
 }

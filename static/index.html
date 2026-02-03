@@ -15,6 +15,7 @@
     <!-- FFT and NR2 libraries for noise reduction -->
     <script src="fft.js"></script>
     <script src="nr2.js"></script>
+    <script src="noise-blanker.js"></script>
     <script src="filters.js"></script>
 </head>
 <body>
@@ -436,6 +437,7 @@
             <div class="control-group">
                 <button id="mute-btn" onclick="toggleMute()" title="Toggle Mute (M key)">🔊 Mute</button>
                 <button id="nr2-quick-toggle" onclick="toggleNR2Quick()" style="background-color: #fd7e14; margin-left: 10px;" title="Toggle Noise Reduction (N key)">NR2</button>
+                <button id="nb-quick-toggle" onclick="toggleNBQuick()" style="background-color: #17a2b8; margin-left: 5px;" title="Toggle Noise Blanker (B key)">NB</button>
                 <button id="rec-btn" onclick="openRecorderModal()" style="margin-left: 10px;" title="Open Recorder (R key)">⏺ Rec</button>
             </div>
             <div class="control-group vu-meter-compact-container" id="vu-meter-compact">

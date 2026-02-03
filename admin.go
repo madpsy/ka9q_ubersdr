@@ -4681,9 +4681,68 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 	events := []SessionEvent{}
 
 	for _, log := range logs {
-		// Skip session_destroyed events - they're just markers for final state capture
-		// The actual end event will be created when the session disappears from snapshots
+		// Handle session_destroyed events specially - they contain the final state
 		if log.EventType == "session_destroyed" {
+			// Process each session in the destroyed event as an end event
+			for _, session := range log.ActiveSessions {
+				if existing, exists := activeSessions[session.UserSessionID]; exists {
+					// Session was active, create end event with accumulated data
+					endTime := log.Timestamp
+					duration := endTime.Sub(existing.firstSeen).Seconds()
+					
+					// Merge final bands from destroyed event
+					for _, band := range session.Bands {
+						if band != "" {
+							existing.allBands[band] = true
+						}
+					}
+					
+					// Merge final modes from destroyed event
+					for _, mode := range session.Modes {
+						if mode != "" {
+							existing.allModes[mode] = true
+						}
+					}
+					
+					// Convert maps to slices
+					allBandsSlice := make([]string, 0, len(existing.allBands))
+					for band := range existing.allBands {
+						allBandsSlice = append(allBandsSlice, band)
+					}
+					sort.Strings(allBandsSlice)
+					
+					allModesSlice := make([]string, 0, len(existing.allModes))
+					for mode := range existing.allModes {
+						allModesSlice = append(allModesSlice, mode)
+					}
+					sort.Strings(allModesSlice)
+					
+					allTypesSlice := make([]string, 0, len(existing.allTypes))
+					for t := range existing.allTypes {
+						allTypesSlice = append(allTypesSlice, t)
+					}
+					sort.Strings(allTypesSlice)
+					
+					events = append(events, SessionEvent{
+						Timestamp:     endTime,
+						EventType:     "session_end",
+						UserSessionID: session.UserSessionID,
+						ClientIP:      existing.entry.ClientIP,
+						SourceIP:      existing.entry.SourceIP,
+						AuthMethod:    existing.entry.AuthMethod,
+						SessionTypes:  allTypesSlice,
+						Bands:         allBandsSlice,
+						Modes:         allModesSlice,
+						UserAgent:     existing.entry.UserAgent,
+						Country:       existing.entry.Country,
+						CountryCode:   existing.entry.CountryCode,
+						Duration:      &duration,
+					})
+					
+					// Remove from active sessions
+					delete(activeSessions, session.UserSessionID)
+				}
+			}
 			continue
 		}
 		

@@ -247,11 +247,13 @@ func NewWebSocketHandler(sessions *SessionManager, audioReceiver *AudioReceiver,
 
 // ClientMessage represents a message from the client
 type ClientMessage struct {
-	Type          string `json:"type"`
-	Frequency     uint64 `json:"frequency,omitempty"`
-	Mode          string `json:"mode,omitempty"`
-	BandwidthLow  *int   `json:"bandwidthLow,omitempty"`  // Pointer to distinguish between 0 and not-sent
-	BandwidthHigh *int   `json:"bandwidthHigh,omitempty"` // Pointer to distinguish between 0 and not-sent
+	Type          string   `json:"type"`
+	Frequency     uint64   `json:"frequency,omitempty"`
+	Mode          string   `json:"mode,omitempty"`
+	BandwidthLow  *int     `json:"bandwidthLow,omitempty"`  // Pointer to distinguish between 0 and not-sent
+	BandwidthHigh *int     `json:"bandwidthHigh,omitempty"` // Pointer to distinguish between 0 and not-sent
+	SquelchOpen   *float32 `json:"squelchOpen,omitempty"`   // Squelch open threshold in dB SNR (nil = no change, -999 = always open)
+	SquelchClose  *float32 `json:"squelchClose,omitempty"`  // Squelch close threshold in dB SNR (nil = no change)
 }
 
 // ServerMessage represents a message to the client
@@ -906,6 +908,59 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 
 		case "get_status":
 			wsh.sendStatus(conn, currentSession)
+
+		case "set_squelch":
+			// Update squelch thresholds
+			// Special value: squelchOpen=-999 sets "always open" mode
+			if msg.SquelchOpen == nil {
+				wsh.sendError(conn, "squelchOpen parameter is required")
+				continue
+			}
+
+			// Determine squelchClose value
+			// If -999 (always open), squelchClose is ignored (will be set to -999 by radiod.go)
+			// Otherwise, use provided value or default to squelchOpen - 2.0 for hysteresis
+			squelchClose := *msg.SquelchOpen - 2.0
+			if msg.SquelchClose != nil {
+				squelchClose = *msg.SquelchClose
+			}
+
+			// Validate squelch values (unless -999 for always open)
+			if *msg.SquelchOpen != -999 {
+				// Normal squelch validation
+				if *msg.SquelchOpen < -50 || *msg.SquelchOpen > 50 {
+					wsh.sendError(conn, fmt.Sprintf("squelchOpen %.1f dB is out of valid range (-50 to +50 dB)", *msg.SquelchOpen))
+					continue
+				}
+				if squelchClose < -50 || squelchClose > 50 {
+					wsh.sendError(conn, fmt.Sprintf("squelchClose %.1f dB is out of valid range (-50 to +50 dB)", squelchClose))
+					continue
+				}
+				if squelchClose >= *msg.SquelchOpen {
+					wsh.sendError(conn, fmt.Sprintf("squelchClose (%.1f dB) must be less than squelchOpen (%.1f dB) for hysteresis", squelchClose, *msg.SquelchOpen))
+					continue
+				}
+			}
+
+			// Update squelch via session manager
+			if err := wsh.sessions.UpdateSquelch(currentSession.ID, *msg.SquelchOpen, squelchClose); err != nil {
+				wsh.sendError(conn, "Failed to update squelch: "+err.Error())
+				continue
+			}
+
+			// Send success response
+			if *msg.SquelchOpen == -999 {
+				log.Printf("Squelch set to always open for session %s", currentSession.ID)
+				wsh.sendMessage(conn, ServerMessage{Type: "squelch_updated", Info: map[string]interface{}{
+					"mode": "always_open",
+				}})
+			} else {
+				log.Printf("Squelch updated for session %s: open=%.1f dB, close=%.1f dB", currentSession.ID, *msg.SquelchOpen, squelchClose)
+				wsh.sendMessage(conn, ServerMessage{Type: "squelch_updated", Info: map[string]interface{}{
+					"squelchOpen":  *msg.SquelchOpen,
+					"squelchClose": squelchClose,
+				}})
+			}
 
 		default:
 			log.Printf("Unknown message type: %s", msg.Type)

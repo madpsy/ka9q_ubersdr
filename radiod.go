@@ -284,6 +284,7 @@ func (rc *RadiodController) CreateChannelWithBandwidth(name string, frequency ui
 // CreateChannelWithSquelch creates a new radiod channel with optional squelch parameters
 // squelchOpen and squelchClose are pointers to allow nil (disabled) vs 0.0 (valid value)
 // Values are in dB SNR - typical: open=10.0, close=8.0 for hysteresis
+// Special value: squelchOpen=-999 sets "always open" mode (sends -999 for both thresholds)
 func (rc *RadiodController) CreateChannelWithSquelch(name string, frequency uint64, mode string, sampleRate int, ssrc uint32, bandwidth int, squelchOpen, squelchClose *float32) error {
 	// Build control command with SSRC - match ka9q-multidecoder order exactly
 	buf := make([]byte, 0, 1500)
@@ -301,13 +302,19 @@ func (rc *RadiodController) CreateChannelWithSquelch(name string, frequency uint
 	buf = encodeString(&buf, 0x55, mode)
 
 	// Add optional squelch parameters
-	if squelchOpen != nil && squelchClose != nil {
-		// Enable SNR squelch (tag 92 = 0x5C) - CRITICAL for squelch to work!
-		buf = encodeByte(&buf, 0x5C, 1) // SNR_SQUELCH = enabled
-
-		// Add squelch thresholds (tag 83 = 0x53 for SQUELCH_OPEN, 84 = 0x54 for SQUELCH_CLOSE)
-		buf = encodeFloat(&buf, 0x53, *squelchOpen)
-		buf = encodeFloat(&buf, 0x54, *squelchClose)
+	if squelchOpen != nil {
+		// Check for special "always open" value (-999)
+		if *squelchOpen == -999 {
+			// Always open mode - send -999 for both thresholds
+			buf = encodeByte(&buf, 0x5C, 1) // SNR_SQUELCH = enabled
+			buf = encodeFloat(&buf, 0x53, -999.0) // SQUELCH_OPEN = -999
+			buf = encodeFloat(&buf, 0x54, -999.0) // SQUELCH_CLOSE = -999
+		} else if squelchClose != nil {
+			// Normal squelch operation with both thresholds
+			buf = encodeByte(&buf, 0x5C, 1) // SNR_SQUELCH = enabled
+			buf = encodeFloat(&buf, 0x53, *squelchOpen)
+			buf = encodeFloat(&buf, 0x54, *squelchClose)
+		}
 	}
 
 	// Add COMMAND_TAG (tag 1 = 0x01)
@@ -330,8 +337,12 @@ func (rc *RadiodController) CreateChannelWithSquelch(name string, frequency uint
 	}
 
 	squelchInfo := ""
-	if squelchOpen != nil && squelchClose != nil {
-		squelchInfo = fmt.Sprintf(", squelch: %.1f/%.1f dB", *squelchOpen, *squelchClose)
+	if squelchOpen != nil {
+		if *squelchOpen == -999 {
+			squelchInfo = ", squelch: always open"
+		} else if squelchClose != nil {
+			squelchInfo = fmt.Sprintf(", squelch: %.1f/%.1f dB", *squelchOpen, *squelchClose)
+		}
 	}
 	log.Printf("Created channel: %s (SSRC: 0x%08x (%d), freq: %d Hz, mode: %s, rate: %d Hz%s)",
 		name, ssrc, ssrc, frequency, mode, sampleRate, squelchInfo)
@@ -464,6 +475,7 @@ func (rc *RadiodController) UpdateChannel(ssrc uint32, frequency uint64, mode st
 
 // UpdateChannelWithSquelch updates an existing channel including optional squelch parameters
 // squelchOpen and squelchClose are pointers to allow nil (no change) vs 0.0 (valid value)
+// Special value: squelchOpen=-999 sets "always open" mode (sends -999 for both thresholds)
 func (rc *RadiodController) UpdateChannelWithSquelch(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool, squelchOpen, squelchClose *float32) error {
 	// Build control command with SSRC to identify the channel
 	buf := make([]byte, 0, 1500)
@@ -494,13 +506,19 @@ func (rc *RadiodController) UpdateChannelWithSquelch(ssrc uint32, frequency uint
 	}
 
 	// Add optional squelch parameters
-	if squelchOpen != nil && squelchClose != nil {
-		// Enable SNR squelch (tag 92 = 0x5C) - CRITICAL for squelch to work!
-		buf = encodeByte(&buf, 0x5C, 1) // SNR_SQUELCH = enabled
-
-		// Add squelch thresholds (tag 83 = 0x53 for SQUELCH_OPEN, 84 = 0x54 for SQUELCH_CLOSE)
-		buf = encodeFloat(&buf, 0x53, *squelchOpen)
-		buf = encodeFloat(&buf, 0x54, *squelchClose)
+	if squelchOpen != nil {
+		// Check for special "always open" value (-999)
+		if *squelchOpen == -999 {
+			// Always open mode - send -999 for both thresholds
+			buf = encodeByte(&buf, 0x5C, 1) // SNR_SQUELCH = enabled
+			buf = encodeFloat(&buf, 0x53, -999.0) // SQUELCH_OPEN = -999
+			buf = encodeFloat(&buf, 0x54, -999.0) // SQUELCH_CLOSE = -999
+		} else if squelchClose != nil {
+			// Normal squelch operation with both thresholds
+			buf = encodeByte(&buf, 0x5C, 1) // SNR_SQUELCH = enabled
+			buf = encodeFloat(&buf, 0x53, *squelchOpen)
+			buf = encodeFloat(&buf, 0x54, *squelchClose)
+		}
 	}
 
 	// Add COMMAND_TAG (tag 1 = 0x01)
@@ -520,6 +538,7 @@ func (rc *RadiodController) UpdateChannelWithSquelch(ssrc uint32, frequency uint
 // UpdateSquelch updates only the squelch thresholds for an existing channel
 // This is useful for adjusting squelch without changing other parameters
 // squelchOpen and squelchClose are in dB SNR
+// Special value: squelchOpen=-999 sets "always open" mode (sends -999 for both thresholds)
 func (rc *RadiodController) UpdateSquelch(ssrc uint32, squelchOpen, squelchClose float32) error {
 	// Build control command with SSRC to identify the channel
 	buf := make([]byte, 0, 1500)
@@ -533,11 +552,16 @@ func (rc *RadiodController) UpdateSquelch(ssrc uint32, squelchOpen, squelchClose
 	// Enable SNR squelch (tag 92 = 0x5C) - CRITICAL for squelch to work!
 	buf = encodeByte(&buf, 0x5C, 1) // SNR_SQUELCH = enabled
 
-	// Add SQUELCH_OPEN (tag 83 = 0x53)
-	buf = encodeFloat(&buf, 0x53, squelchOpen)
-
-	// Add SQUELCH_CLOSE (tag 84 = 0x54)
-	buf = encodeFloat(&buf, 0x54, squelchClose)
+	// Check for special "always open" value (-999)
+	if squelchOpen == -999 {
+		// Always open mode - send -999 for both thresholds
+		buf = encodeFloat(&buf, 0x53, -999.0) // SQUELCH_OPEN = -999
+		buf = encodeFloat(&buf, 0x54, -999.0) // SQUELCH_CLOSE = -999
+	} else {
+		// Normal squelch operation
+		buf = encodeFloat(&buf, 0x53, squelchOpen)
+		buf = encodeFloat(&buf, 0x54, squelchClose)
+	}
 
 	// Add COMMAND_TAG (tag 1 = 0x01)
 	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
@@ -546,7 +570,11 @@ func (rc *RadiodController) UpdateSquelch(ssrc uint32, squelchOpen, squelchClose
 	buf = append(buf, 0)
 
 	// Always log squelch updates to verify they're being sent
-	log.Printf("Updating squelch for SSRC 0x%08x: open=%.1f dB, close=%.1f dB", ssrc, squelchOpen, squelchClose)
+	if squelchOpen == -999 {
+		log.Printf("Updating squelch for SSRC 0x%08x: always open", ssrc)
+	} else {
+		log.Printf("Updating squelch for SSRC 0x%08x: open=%.1f dB, close=%.1f dB", ssrc, squelchOpen, squelchClose)
+	}
 
 	if DebugMode {
 		log.Printf("DEBUG: Squelch command hex: % x", buf)

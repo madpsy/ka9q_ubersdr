@@ -1930,6 +1930,10 @@ function handleMessage(msg) {
         case 'pong':
             // Keepalive response
             break;
+        case 'squelch_updated':
+            // Squelch state update from server (informational only)
+            // The server sends this when squelch opens/closes
+            break;
         default:
             console.log('Unknown message type:', msg.type);
     }
@@ -3156,6 +3160,32 @@ function setMode(mode, preserveBandwidth = false) {
         // FM/NFM modes: hide bandwidth, show squelch
         bandwidthControls.style.display = 'none';
         squelchControls.style.display = 'block';
+        
+        // Send current squelch value to server when switching to FM mode
+        if (wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
+            const squelchSlider = document.getElementById('squelch');
+            if (squelchSlider) {
+                const squelchValue = parseInt(squelchSlider.value);
+                let squelchDb;
+                if (squelchValue === 0) {
+                    squelchDb = -999.0;
+                } else {
+                    squelchDb = -48.0 + (squelchValue - 1) * (68.0 / 99.0);
+                }
+                
+                const msg = {
+                    type: 'set_squelch',
+                    squelchOpen: squelchDb
+                };
+                wsManager.send(msg);
+                
+                if (squelchDb === -999.0) {
+                    log('Squelch: Open (no squelch)');
+                } else {
+                    log(`Squelch: Closed at ${squelchDb.toFixed(1)} dB SNR`);
+                }
+            }
+        }
     } else {
         // Other modes: show bandwidth, hide squelch
         bandwidthControls.style.display = 'block';

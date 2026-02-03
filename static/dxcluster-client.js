@@ -223,6 +223,7 @@ class DXClusterClient {
             case 'chat_user_left':
             case 'chat_active_users':
             case 'chat_user_update':
+            case 'chat_idle_updates':
             case 'chat_error':
                 // These are handled by the chat system (chat.js), ignore here
                 break;

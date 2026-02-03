@@ -870,6 +870,25 @@ body {
     width: 100%;
 }
 
+.squelch-controls {
+    display: flex;
+    gap: 20px;
+    margin-top: 10px;
+}
+
+.squelch-controls .control-group {
+    flex: 1;
+}
+
+.squelch-controls .control-group label {
+    font-size: 0.9em;
+    white-space: nowrap;
+}
+
+.squelch-controls .control-group input[type="range"] {
+    width: 100%;
+}
+
 button {
     padding: 12px 24px;
     border: none;

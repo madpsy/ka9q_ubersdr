@@ -1944,17 +1944,16 @@ let opusDecoderChannels = null;
 
 // Initialize Opus decoder
 async function initOpusDecoder(sampleRate, channels) {
-    console.log('initOpusDecoder called:', sampleRate, 'Hz,', channels, 'channels');
-
     if (opusDecoderFailed) {
-        console.log('Decoder previously failed, skipping');
         return false;
     }
 
     if (opusDecoderInitialized) {
-        console.log('Decoder already initialized');
+        // Silently return true if already initialized (normal during squelch)
         return true;
     }
+
+    console.log('Initializing Opus decoder:', sampleRate, 'Hz,', channels, 'channels');
 
     // Check if OpusDecoder library is available
     // The library exports to window["opus-decoder"].OpusDecoder
@@ -3535,6 +3534,10 @@ function updateSquelch() {
         }
     }
 }
+
+// Make squelch functions globally accessible for inline event handlers
+window.updateSquelchDisplay = updateSquelchDisplay;
+window.updateSquelch = updateSquelch;
 
 // Update current bandwidth display in status text
 function updateCurrentBandwidthDisplay(bandwidthLow, bandwidthHigh) {

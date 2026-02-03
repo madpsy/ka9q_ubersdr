@@ -860,7 +860,6 @@ body {
 
 .bandwidth-controls .control-group {
     flex: 1;
-    flex-direction: column;
 }
 
 .bandwidth-controls .control-group label {

@@ -17121,34 +17121,14 @@ Referer: ${log.referer}`;
                 return div.innerHTML;
             };
             
-            // Render logs in chronological order (newest first)
-            const logsHTML = mcpLogsData.map((log, index) => {
-                console.log('Processing log entry', index, ':', log);
-                
+            // Render logs as simple pre-formatted text for now
+            const logsText = mcpLogsData.map((log, index) => {
                 const timestamp = new Date(log.timestamp).toLocaleString();
-                const timeOnly = new Date(log.timestamp).toLocaleTimeString();
-                
-                // Color code by method
-                let methodColor = '#0af';
-                if (log.method === 'tools/call') methodColor = '#0f0';
-                else if (log.method === 'initialize') methodColor = '#fa0';
-                
-                // Format params as JSON
                 const paramsStr = log.params ? JSON.stringify(log.params) : '{}';
-                
-                // Create tooltip with full details
-                const tooltip = `Timestamp: ${timestamp}
-Method: ${log.method}
-ID: ${log.id !== null && log.id !== undefined ? log.id : 'N/A'}
-Params: ${paramsStr}`;
-                
-                return `<div style="margin-bottom: 2px; padding: 4px 8px; background: #111; border-left: 3px solid ${methodColor}; border-radius: 0; font-family: 'Courier New', monospace; font-size: 11px;" title="${escape(tooltip)}">
-                    <span style="color: #666; display: inline-block; width: 70px;">${timeOnly}</span>
-                    <span style="color: ${methodColor}; display: inline-block; width: 180px; font-weight: bold;">${log.method}</span>
-                    <span style="color: #0af; display: inline-block; width: 40px;">${log.id !== null && log.id !== undefined ? log.id : '—'}</span>
-                    <span style="color: #fff;">${escape(paramsStr)}</span>
-                </div>`;
-            }).join('');
+                return `${timestamp} | ${log.method} | ID:${log.id !== null && log.id !== undefined ? log.id : '—'} | ${paramsStr}`;
+            }).join('\n');
+            
+            display.innerHTML = `<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${logsText}</pre>`;
             
             console.log('Generated HTML length:', logsHTML.length);
             console.log('First 200 chars of HTML:', logsHTML.substring(0, 200));

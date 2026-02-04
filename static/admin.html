@@ -607,6 +607,7 @@
 
                 <!-- Banned IPs Tab -->
                 <div id="bannedTab" class="tab-content">
+                    <h2 style="color: #333; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">🚫 Banned IP Addresses</h2>
                     <div id="bannedIPsList" class="loading">
                         <div class="spinner"></div>
                         <p>Loading banned IPs...</p>
@@ -624,6 +625,12 @@
                         </div>
                         <button class="btn" onclick="addBannedIP()">Ban IP/Range</button>
                         <button class="btn btn-secondary" onclick="cancelBanForm()">Cancel</button>
+                    </div>
+                    
+                    <!-- Banned IPs Buttons -->
+                    <div class="button-group" style="margin-top: 20px;">
+                        <button class="btn" onclick="showAddBanForm()">Ban IP/Range</button>
+                        <button class="btn btn-secondary" onclick="loadBannedIPs()">Refresh Banned IPs</button>
                     </div>
 
                     <!-- Banned Countries Section -->

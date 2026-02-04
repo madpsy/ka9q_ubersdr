@@ -17098,8 +17098,6 @@ Referer: ${log.referer}`;
         
         function renderMCPLogs() {
             const display = document.getElementById('mcpLogsDisplay');
-            console.log('renderMCPLogs called, display element:', display);
-            console.log('mcpLogsData:', mcpLogsData);
             
             if (!display) {
                 console.error('MCP logs display element not found!');
@@ -17107,65 +17105,65 @@ Referer: ${log.referer}`;
             }
             
             if (mcpLogsData.length === 0) {
-                console.log('No MCP logs data, showing empty message');
                 display.innerHTML = '<div style="color: #888; padding: 20px; text-align: center;">No MCP logs found</div>';
                 return;
             }
             
-            console.log('Rendering', mcpLogsData.length, 'MCP log entries');
-            
-            // Helper to escape HTML (inline to avoid dependency issues)
+            // Helper to escape HTML
             const escape = (text) => {
                 const div = document.createElement('div');
                 div.textContent = String(text);
                 return div.innerHTML;
             };
             
-            // Render logs as simple pre-formatted text for now
-            const logsText = mcpLogsData.map((log, index) => {
-                const timestamp = new Date(log.timestamp).toLocaleString();
-                const paramsStr = log.params ? JSON.stringify(log.params) : '{}';
-                return `${timestamp} | ${log.method} | ID:${log.id !== null && log.id !== undefined ? log.id : '—'} | ${paramsStr}`;
-            }).join('\n');
-            
-            console.log('Generated text length:', logsText.length);
-            console.log('First 200 chars:', logsText.substring(0, 200));
-            
-            display.innerHTML = `<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; color: #0f0;">${logsText}</pre>`;
-            
-            // Force height via JavaScript
-            display.style.minHeight = '400px';
-            display.style.height = 'auto';
-            display.style.display = 'block';
-            
-            console.log('Display innerHTML set and height forced');
-            
-            // Force reflow
-            void display.offsetHeight;
-            
-            setTimeout(() => {
-                console.log('After timeout - Display offsetHeight:', display.offsetHeight);
-                console.log('After timeout - Display scrollHeight:', display.scrollHeight);
-                console.log('After timeout - Display computed minHeight:', window.getComputedStyle(display).minHeight);
-                console.log('After timeout - Display computed display:', window.getComputedStyle(display).display);
-                console.log('After timeout - Display computed visibility:', window.getComputedStyle(display).visibility);
-                console.log('After timeout - Display computed position:', window.getComputedStyle(display).position);
-                console.log('After timeout - Display computed opacity:', window.getComputedStyle(display).opacity);
+            // Helper to pretty-print JSON params
+            const formatParams = (params) => {
+                if (!params || Object.keys(params).length === 0) return '<span style="color: #666;">{}</span>';
                 
-                // Check all ancestors
-                let el = display;
-                let level = 0;
-                while (el && level < 10) {
-                    const computed = window.getComputedStyle(el);
-                    console.log(`Ancestor ${level} (${el.id || el.className}):`,
-                        'display=', computed.display,
-                        'visibility=', computed.visibility,
-                        'opacity=', computed.opacity,
-                        'height=', computed.height);
-                    el = el.parentElement;
-                    level++;
+                try {
+                    const formatted = JSON.stringify(params, null, 2);
+                    // Color-code the JSON
+                    return formatted
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"([^"]+)":/g, '<span style="color: #0af;">"$1"</span>:')
+                        .replace(/: "([^"]*)"/g, ': <span style="color: #fa0;">"$1"</span>')
+                        .replace(/: (\d+)/g, ': <span style="color: #f0f;">$1</span>')
+                        .replace(/: (true|false)/g, ': <span style="color: #0ff;">$1</span>');
+                } catch (e) {
+                    return escape(JSON.stringify(params));
                 }
-            }, 100);
+            };
+            
+            // Get method color
+            const getMethodColor = (method) => {
+                if (method.includes('tools/call')) return '#0f0';
+                if (method.includes('initialize')) return '#0af';
+                if (method.includes('notifications')) return '#fa0';
+                if (method.includes('resources')) return '#f0f';
+                return '#fff';
+            };
+            
+            // Render logs with better formatting
+            const logsHTML = mcpLogsData.map((log, index) => {
+                const timestamp = new Date(log.timestamp).toLocaleString();
+                const methodColor = getMethodColor(log.method);
+                const idDisplay = log.id !== null && log.id !== undefined ? log.id : '—';
+                
+                return `<div style="margin-bottom: 12px; padding: 8px; background: #1a1a1a; border-left: 3px solid ${methodColor}; border-radius: 3px;">
+                    <div style="margin-bottom: 4px;">
+                        <span style="color: #666;">${timestamp}</span>
+                        <span style="color: ${methodColor}; font-weight: bold; margin-left: 15px;">${escape(log.method)}</span>
+                        <span style="color: #999; margin-left: 15px;">ID: <span style="color: #0af;">${idDisplay}</span></span>
+                    </div>
+                    <div style="margin-left: 15px; font-size: 10px; font-family: 'Courier New', monospace;">
+                        ${formatParams(log.params)}
+                    </div>
+                </div>`;
+            }).join('');
+            
+            display.innerHTML = logsHTML;
             
             // Auto-scroll to bottom
             display.scrollTop = display.scrollHeight;

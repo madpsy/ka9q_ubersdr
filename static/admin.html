@@ -17238,8 +17238,8 @@ Referer: ${log.referer}`;
                 return '#d4d4d4';
             };
             
-            // Render logs with better formatting
-            const logsHTML = dataToRender.map((log, index) => {
+            // Render logs with better formatting (reverse order so newest is at bottom)
+            const logsHTML = dataToRender.slice().reverse().map((log, index) => {
                 const timestamp = new Date(log.timestamp).toLocaleString();
                 const methodColor = getMethodColor(log.method);
                 const idDisplay = log.id !== null && log.id !== undefined ? log.id : '—';

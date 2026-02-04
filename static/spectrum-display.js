@@ -2621,8 +2621,9 @@ class SpectrumDisplay {
             [xLow, xHigh] = [xHigh, xLow];
         }
 
-        // Draw frequency label at top
-        const freqLabel = this.formatFrequency(this.currentTunedFreq);
+        // Draw frequency label at top (without unit)
+        const mhz = this.currentTunedFreq / 1e6;
+        const freqLabel = mhz.toFixed(5);
         this.overlayCtx.font = 'bold 12px monospace';
         this.overlayCtx.textAlign = 'center';
         this.overlayCtx.textBaseline = 'top';

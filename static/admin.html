@@ -625,6 +625,19 @@
                         <button class="btn" onclick="addBannedIP()">Ban IP/Range</button>
                         <button class="btn btn-secondary" onclick="cancelBanForm()">Cancel</button>
                     </div>
+
+                    <!-- Banned Countries Section -->
+                    <div id="bannedCountriesSection" style="margin-top: 40px;">
+                        <h2 style="color: #333; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">🌍 Country Bans</h2>
+                        <div class="alert alert-info" style="margin-bottom: 20px;">
+                            ℹ️ <strong>Note:</strong> Country bans block all connections from the selected countries. Use with caution as this affects all users from those countries.
+                        </div>
+                        
+                        <div id="bannedCountriesList" class="loading">
+                            <div class="spinner"></div>
+                            <p>Loading countries...</p>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Visual Editor Tab -->
@@ -4575,6 +4588,9 @@
                 const data = await response.json();
                 currentBannedIPs = data.banned_ips || [];
                 renderBannedIPs();
+                
+                // Also load banned countries when loading banned IPs
+                await loadBannedCountries();
             } catch (error) {
                 showAlert('Error loading banned IPs: ' + error.message, 'error');
             }
@@ -4787,6 +4803,258 @@
                 loadBannedIPs(); // Refresh the banned IPs list
             } catch (error) {
                 showAlert('Error banning IP: ' + error.message, 'error');
+            }
+        }
+
+        // Banned Countries management
+        let allCountries = [];
+        let bannedCountries = [];
+        let countriesMap = {};
+
+        async function loadBannedCountries() {
+            try {
+                // Load countries.json first if not already loaded
+                if (allCountries.length === 0) {
+                    const countriesResponse = await fetch('/countries.json');
+                    if (!countriesResponse.ok) throw new Error('Failed to load countries.json');
+                    allCountries = await countriesResponse.json();
+                    
+                    // Create a map for quick lookup by alpha2 code
+                    countriesMap = {};
+                    allCountries.forEach(country => {
+                        countriesMap[country.alpha2] = country.name;
+                    });
+                }
+
+                // Load banned countries from API
+                const response = await authenticatedFetch('/admin/banned-countries');
+                if (!response) return; // Auth failed, already handled
+                if (!response.ok) throw new Error('Failed to load banned countries');
+
+                const data = await response.json();
+                bannedCountries = data.banned_countries || [];
+                
+                renderBannedCountries();
+            } catch (error) {
+                showAlert('Error loading banned countries: ' + error.message, 'error');
+            }
+        }
+
+        function renderBannedCountries() {
+            const container = document.getElementById('bannedCountriesList');
+            container.innerHTML = '';
+            container.classList.remove('loading');
+
+            // Create a set of banned country codes for quick lookup
+            const bannedCodes = new Set(bannedCountries.map(bc => bc.country_code));
+
+            // Split countries into allowed and banned
+            const allowedCountries = allCountries.filter(c => !bannedCodes.has(c.alpha2));
+            const bannedCountriesList = allCountries.filter(c => bannedCodes.has(c.alpha2));
+
+            // Create two-column layout
+            const layoutDiv = document.createElement('div');
+            layoutDiv.style.display = 'grid';
+            layoutDiv.style.gridTemplateColumns = '1fr 1fr';
+            layoutDiv.style.gap = '20px';
+
+            // Left column - Allowed Countries
+            const allowedDiv = document.createElement('div');
+            allowedDiv.innerHTML = `
+                <h3 style="color: #28a745; margin-bottom: 15px;">✅ Allowed Countries (${allowedCountries.length})</h3>
+                <div style="margin-bottom: 10px;">
+                    <input type="text" id="allowedCountriesSearch" placeholder="Search allowed countries..."
+                           oninput="filterCountriesTable('allowed')"
+                           style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
+                </div>
+                <div style="background: #fff; border: 1px solid #dee2e6; border-radius: 5px; max-height: 600px; overflow-y: auto;">
+                    <table id="allowedCountriesTable" style="width: 100%; border-collapse: collapse;">
+                        <thead style="position: sticky; top: 0; background: #f8f9fa; z-index: 1;">
+                            <tr style="border-bottom: 2px solid #dee2e6;">
+                                <th style="padding: 10px; text-align: left;">Country</th>
+                                <th style="padding: 10px; text-align: center; width: 80px;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="allowedCountriesBody"></tbody>
+                    </table>
+                </div>
+            `;
+            layoutDiv.appendChild(allowedDiv);
+
+            // Right column - Banned Countries
+            const bannedDiv = document.createElement('div');
+            bannedDiv.innerHTML = `
+                <h3 style="color: #dc3545; margin-bottom: 15px;">🚫 Banned Countries (${bannedCountriesList.length})</h3>
+                <div style="margin-bottom: 10px;">
+                    <input type="text" id="bannedCountriesSearch" placeholder="Search banned countries..."
+                           oninput="filterCountriesTable('banned')"
+                           style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
+                </div>
+                <div style="background: #fff; border: 1px solid #dee2e6; border-radius: 5px; max-height: 600px; overflow-y: auto;">
+                    <table id="bannedCountriesTable" style="width: 100%; border-collapse: collapse;">
+                        <thead style="position: sticky; top: 0; background: #f8f9fa; z-index: 1;">
+                            <tr style="border-bottom: 2px solid #dee2e6;">
+                                <th style="padding: 10px; text-align: left;">Country</th>
+                                <th style="padding: 10px; text-align: left;">Reason</th>
+                                <th style="padding: 10px; text-align: center; width: 80px;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bannedCountriesBody"></tbody>
+                    </table>
+                </div>
+            `;
+            layoutDiv.appendChild(bannedDiv);
+
+            container.appendChild(layoutDiv);
+
+            // Populate tables
+            populateAllowedCountriesTable(allowedCountries);
+            populateBannedCountriesTable(bannedCountriesList);
+        }
+
+        function populateAllowedCountriesTable(countries) {
+            const tbody = document.getElementById('allowedCountriesBody');
+            if (!tbody) return;
+            
+            tbody.innerHTML = '';
+            
+            countries.forEach(country => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #dee2e6';
+                row.className = 'allowed-country-row';
+                row.dataset.countryName = country.name.toLowerCase();
+                row.dataset.countryCode = country.alpha2.toLowerCase();
+                
+                row.innerHTML = `
+                    <td style="padding: 10px;">
+                        <strong>${country.name}</strong>
+                        <span style="color: #666; font-size: 12px; margin-left: 8px;">(${country.alpha2})</span>
+                    </td>
+                    <td style="padding: 10px; text-align: center;">
+                        <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;"
+                                onclick="banCountry('${country.alpha2}', '${country.name.replace(/'/g, "\\'")}')">
+                            Ban →
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function populateBannedCountriesTable(countries) {
+            const tbody = document.getElementById('bannedCountriesBody');
+            if (!tbody) return;
+            
+            tbody.innerHTML = '';
+            
+            if (countries.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" style="padding: 20px; text-align: center; color: #666;"><em>No countries banned</em></td></tr>';
+                return;
+            }
+            
+            countries.forEach(country => {
+                // Find the ban details
+                const banDetails = bannedCountries.find(bc => bc.country_code === country.alpha2);
+                const reason = banDetails ? banDetails.reason : 'No reason provided';
+                
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #dee2e6';
+                row.className = 'banned-country-row';
+                row.dataset.countryName = country.name.toLowerCase();
+                row.dataset.countryCode = country.alpha2.toLowerCase();
+                
+                row.innerHTML = `
+                    <td style="padding: 10px;">
+                        <strong>${country.name}</strong>
+                        <span style="color: #666; font-size: 12px; margin-left: 8px;">(${country.alpha2})</span>
+                    </td>
+                    <td style="padding: 10px; color: #666; font-size: 13px;">${reason}</td>
+                    <td style="padding: 10px; text-align: center;">
+                        <button class="btn" style="padding: 6px 12px; font-size: 12px; background: #28a745;"
+                                onclick="unbanCountry('${country.alpha2}', '${country.name.replace(/'/g, "\\'")}')">
+                            ← Unban
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function filterCountriesTable(tableType) {
+            const searchInput = tableType === 'allowed' ?
+                document.getElementById('allowedCountriesSearch') :
+                document.getElementById('bannedCountriesSearch');
+            
+            const searchTerm = searchInput.value.toLowerCase();
+            const rows = document.querySelectorAll(`.${tableType}-country-row`);
+            
+            rows.forEach(row => {
+                const countryName = row.dataset.countryName;
+                const countryCode = row.dataset.countryCode;
+                
+                if (countryName.includes(searchTerm) || countryCode.includes(searchTerm)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        }
+
+        async function banCountry(countryCode, countryName) {
+            const reason = prompt(`Ban ${countryName} (${countryCode})?\n\nEnter reason (optional):`) || 'Banned by admin';
+            
+            if (reason === null) return; // User cancelled
+            
+            if (!confirm(`Are you sure you want to ban all connections from ${countryName} (${countryCode})?\n\nThis will affect all users from this country.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/admin/ban-country', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        country_code: countryCode,
+                        country_name: countryName,
+                        reason: reason
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to ban country');
+                }
+
+                const result = await response.json();
+                showAlert(result.message || `${countryName} has been banned`, 'success');
+                await loadBannedCountries();
+            } catch (error) {
+                showAlert('Error banning country: ' + error.message, 'error');
+            }
+        }
+
+        async function unbanCountry(countryCode, countryName) {
+            if (!confirm(`Unban ${countryName} (${countryCode})?\n\nThis will allow connections from this country again.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/admin/unban-country', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ country_code: countryCode })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to unban country');
+                }
+
+                const result = await response.json();
+                showAlert(result.message || `${countryName} has been unbanned`, 'success');
+                await loadBannedCountries();
+            } catch (error) {
+                showAlert('Error unbanning country: ' + error.message, 'error');
             }
         }
 

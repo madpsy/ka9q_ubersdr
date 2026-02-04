@@ -5943,6 +5943,131 @@ func (ah *AdminHandler) HandleGeoIPHealth(w http.ResponseWriter, r *http.Request
 		"enabled": false,
 		"status":  "disabled",
 	}
+	
+	// HandleBanCountry bans a country by its alpha-2 code
+	func (ah *AdminHandler) HandleBanCountry(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	
+		var req struct {
+			CountryCode string `json:"country_code"`
+			CountryName string `json:"country_name"`
+			Reason      string `json:"reason"`
+			Temporary   bool   `json:"temporary"`
+			Duration    int    `json:"duration"` // Duration in seconds for temporary bans
+		}
+	
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+	
+		if req.CountryCode == "" {
+			http.Error(w, "Country code is required", http.StatusBadRequest)
+			return
+		}
+	
+		// Validate country code format (should be 2 uppercase letters)
+		if len(req.CountryCode) != 2 {
+			http.Error(w, "Country code must be 2 characters (ISO 3166-1 alpha-2)", http.StatusBadRequest)
+			return
+		}
+	
+		// Convert to uppercase
+		req.CountryCode = strings.ToUpper(req.CountryCode)
+	
+		if req.Reason == "" {
+			req.Reason = "Banned by admin"
+		}
+	
+		// Ban the country
+		var err error
+		if req.Temporary && req.Duration > 0 {
+			duration := time.Duration(req.Duration) * time.Second
+			err = ah.countryBanManager.BanCountryWithDuration(req.CountryCode, req.CountryName, req.Reason, "admin", duration)
+		} else {
+			err = ah.countryBanManager.BanCountry(req.CountryCode, req.CountryName, req.Reason, "admin")
+		}
+	
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to ban country: %v", err), http.StatusInternalServerError)
+			return
+		}
+	
+		// Kick all sessions from this country
+		count, err := ah.sessions.KickUsersByCountry(req.CountryCode, ah.geoIPService)
+		if err != nil {
+			log.Printf("Error kicking sessions for banned country %s: %v", req.CountryCode, err)
+		}
+	
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":           "success",
+			"message":          fmt.Sprintf("Banned country %s and kicked %d session(s)", req.CountryCode, count),
+			"sessions_removed": count,
+		}); err != nil {
+			log.Printf("Error encoding ban country response: %v", err)
+		}
+	}
+	
+	// HandleUnbanCountry unbans a country by its alpha-2 code
+	func (ah *AdminHandler) HandleUnbanCountry(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	
+		var req struct {
+			CountryCode string `json:"country_code"`
+		}
+	
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+	
+		if req.CountryCode == "" {
+			http.Error(w, "Country code is required", http.StatusBadRequest)
+			return
+		}
+	
+		// Convert to uppercase
+		req.CountryCode = strings.ToUpper(req.CountryCode)
+	
+		// Unban the country
+		if err := ah.countryBanManager.UnbanCountry(req.CountryCode); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to unban country: %v", err), http.StatusInternalServerError)
+			return
+		}
+	
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "success",
+			"message": fmt.Sprintf("Unbanned country %s", req.CountryCode),
+		}); err != nil {
+			log.Printf("Error encoding unban country response: %v", err)
+		}
+	}
+	
+	// HandleBannedCountries returns the list of banned countries
+	func (ah *AdminHandler) HandleBannedCountries(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	
+		bannedCountries := ah.countryBanManager.GetBannedCountries()
+	
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"banned_countries": bannedCountries,
+			"count":            len(bannedCountries),
+		}); err != nil {
+			log.Printf("Error encoding banned countries: %v", err)
+		}
+	}
 
 	if ah.geoIPService != nil && ah.geoIPService.IsEnabled() {
 		// Test with a known IP (Google DNS)
@@ -5961,129 +6086,5 @@ func (ah *AdminHandler) HandleGeoIPHealth(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(health); err != nil {
 		log.Printf("Error encoding GeoIP health response: %v", err)
-	}
-}
-
-// HandleBanCountry bans a country by its alpha-2 code
-func (ah *AdminHandler) HandleBanCountry(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		CountryCode string `json:"country_code"`
-		CountryName string `json:"country_name"`
-		Reason      string `json:"reason"`
-		Temporary   bool   `json:"temporary"`
-		Duration    int    `json:"duration"` // Duration in seconds for temporary bans
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	if req.CountryCode == "" {
-		http.Error(w, "Country code is required", http.StatusBadRequest)
-		return
-	}
-
-	// Validate country code format (should be 2 uppercase letters)
-	if len(req.CountryCode) != 2 {
-		http.Error(w, "Country code must be 2 characters (ISO 3166-1 alpha-2)", http.StatusBadRequest)
-		return
-	}
-
-	// Convert to uppercase
-	req.CountryCode = strings.ToUpper(req.CountryCode)
-
-	if req.Reason == "" {
-		req.Reason = "Banned by admin"
-	}
-
-	// Ban the country
-	var err error
-	if req.Temporary && req.Duration > 0 {
-		duration := time.Duration(req.Duration) * time.Second
-		err = ah.countryBanManager.BanCountryWithDuration(req.CountryCode, req.CountryName, req.Reason, "admin", duration)
-	} else {
-		err = ah.countryBanManager.BanCountry(req.CountryCode, req.CountryName, req.Reason, "admin")
-	}
-
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to ban country: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	// Kick all sessions from this country
-	count, err := ah.sessions.KickUsersByCountry(req.CountryCode, ah.geoIPService)
-	if err != nil {
-		log.Printf("Error kicking sessions for banned country %s: %v", req.CountryCode, err)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":           "success",
-		"message":          fmt.Sprintf("Banned country %s and kicked %d session(s)", req.CountryCode, count),
-		"sessions_removed": count,
-	}); err != nil {
-		log.Printf("Error encoding ban country response: %v", err)
-	}
-}
-
-// HandleUnbanCountry unbans a country by its alpha-2 code
-func (ah *AdminHandler) HandleUnbanCountry(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		CountryCode string `json:"country_code"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	if req.CountryCode == "" {
-		http.Error(w, "Country code is required", http.StatusBadRequest)
-		return
-	}
-
-	// Convert to uppercase
-	req.CountryCode = strings.ToUpper(req.CountryCode)
-
-	if err := ah.countryBanManager.UnbanCountry(req.CountryCode); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to unban country: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":  "success",
-		"message": fmt.Sprintf("Unbanned country %s", req.CountryCode),
-	}); err != nil {
-		log.Printf("Error encoding unban country response: %v", err)
-	}
-}
-
-// HandleBannedCountries returns the list of banned countries
-func (ah *AdminHandler) HandleBannedCountries(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	bannedCountries := ah.countryBanManager.GetBannedCountries()
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"banned_countries": bannedCountries,
-		"count":            len(bannedCountries),
-	}); err != nil {
-		log.Printf("Error encoding banned countries: %v", err)
 	}
 }

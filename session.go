@@ -5,6 +5,7 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -2000,5 +2001,49 @@ func (sm *SessionManager) KickUserByIP(ip string) (int, error) {
 	}
 
 	log.Printf("Kicked user from IP %s (%d session(s) destroyed)", ip, len(sessionsToKick))
+	return len(sessionsToKick), nil
+}
+
+// KickUsersByCountry destroys all sessions from the given country code
+func (sm *SessionManager) KickUsersByCountry(countryCode string, geoIPService *GeoIPService) (int, error) {
+	if countryCode == "" {
+		return 0, fmt.Errorf("country code cannot be empty")
+	}
+
+	if geoIPService == nil || !geoIPService.IsEnabled() {
+		return 0, fmt.Errorf("GeoIP service not available")
+	}
+
+	// Convert to uppercase for consistency
+	countryCode = strings.ToUpper(countryCode)
+
+	sm.mu.RLock()
+	var sessionsToKick []string
+	for _, session := range sm.sessions {
+		session.mu.RLock()
+		clientIP := session.ClientIP
+		session.mu.RUnlock()
+
+		// Skip sessions without a client IP
+		if clientIP == "" {
+			continue
+		}
+
+		// Look up the country for this IP
+		_, sessionCountryCode := geoIPService.LookupSafe(clientIP)
+		if sessionCountryCode == countryCode {
+			sessionsToKick = append(sessionsToKick, session.ID)
+		}
+	}
+	sm.mu.RUnlock()
+
+	// Destroy all matching sessions
+	for _, sessionID := range sessionsToKick {
+		if err := sm.DestroySession(sessionID); err != nil {
+			log.Printf("Error kicking session %s: %v", sessionID, err)
+		}
+	}
+
+	log.Printf("Kicked users from country %s (%d session(s) destroyed)", countryCode, len(sessionsToKick))
 	return len(sessionsToKick), nil
 }

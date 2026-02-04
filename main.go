@@ -515,6 +515,13 @@ func main() {
 	}
 	ipBanManager := NewIPBanManager(bannedIPsPath)
 
+	// Initialize country ban manager
+	bannedCountriesPath := "banned_countries.yaml"
+	if *configDir != "." {
+		bannedCountriesPath = *configDir + "/banned_countries.yaml"
+	}
+	countryBanManager := NewCountryBanManager(bannedCountriesPath, geoIPService)
+
 	// Initialize audio receiver
 	audioReceiver, err := NewAudioReceiver(
 		radiod.GetDataAddr(),
@@ -1129,7 +1136,7 @@ func main() {
 	}
 
 	// Initialize admin handler (pass all components for proper shutdown during restart)
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory)
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory)
 
 	// Setup HTTP routes
 	http.HandleFunc("/connection", func(w http.ResponseWriter, r *http.Request) {
@@ -1361,6 +1368,9 @@ func main() {
 	http.HandleFunc("/admin/ban", adminHandler.AuthMiddleware(adminHandler.HandleBanUser))
 	http.HandleFunc("/admin/unban", adminHandler.AuthMiddleware(adminHandler.HandleUnbanIP))
 	http.HandleFunc("/admin/banned-ips", adminHandler.AuthMiddleware(adminHandler.HandleBannedIPs))
+	http.HandleFunc("/admin/ban-country", adminHandler.AuthMiddleware(adminHandler.HandleBanCountry))
+	http.HandleFunc("/admin/unban-country", adminHandler.AuthMiddleware(adminHandler.HandleUnbanCountry))
+	http.HandleFunc("/admin/banned-countries", adminHandler.AuthMiddleware(adminHandler.HandleBannedCountries))
 	http.HandleFunc("/admin/decoder-config", adminHandler.AuthMiddleware(adminHandler.HandleDecoderConfig))
 	http.HandleFunc("/admin/decoder-bands", adminHandler.AuthMiddleware(adminHandler.HandleDecoderBands))
 	http.HandleFunc("/admin/cwskimmer-config", adminHandler.AuthMiddleware(adminHandler.HandleCWSkimmerConfig))
@@ -2348,6 +2358,7 @@ func getClientIP(r *http.Request) string {
 }
 
 // checkIPBan checks if the client IP is banned and returns appropriate error if so
+// Also checks if the IP's country is banned
 func checkIPBan(w http.ResponseWriter, r *http.Request, ipBanManager *IPBanManager) bool {
 	clientIP := getClientIP(r)
 	if ipBanManager.IsBanned(clientIP) {
@@ -2357,6 +2368,21 @@ func checkIPBan(w http.ResponseWriter, r *http.Request, ipBanManager *IPBanManag
 			"error": "Access denied",
 		})
 		log.Printf("Blocked request from banned IP: %s to %s", clientIP, r.URL.Path)
+		return true
+	}
+	return false
+}
+
+// checkCountryBan checks if the client IP's country is banned and returns appropriate error if so
+func checkCountryBan(w http.ResponseWriter, r *http.Request, countryBanManager *CountryBanManager) bool {
+	clientIP := getClientIP(r)
+	if countryBanManager.IsBannedByIP(clientIP) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Access denied",
+		})
+		log.Printf("Blocked request from banned country (IP: %s) to %s", clientIP, r.URL.Path)
 		return true
 	}
 	return false

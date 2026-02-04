@@ -1259,7 +1259,7 @@ static std::vector<std::map<std::string, std::string>> fetchPublicInstances()
     }
     
     std::string response;
-    std::string apiURL = "https://instances.ubersdr.org/api/instances";
+    std::string apiURL = "https://instances.ubersdr.org/api/instances?online_only=true";
     
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "User-Agent: UberSDR_Soapy/1.0");

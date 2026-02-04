@@ -55,6 +55,7 @@ type InstanceReport struct {
 	PublicURL                  string                 `json:"public_url"`
 	Version                    string                 `json:"version"`
 	Timestamp                  int64                  `json:"timestamp"`
+	Uptime                     int64                  `json:"uptime"`                       // Uptime in seconds since application start
 	Host                       string                 `json:"host,omitempty"`               // Optional: tells clients how to connect to this instance
 	Port                       int                    `json:"port,omitempty"`               // Optional: port for client connections
 	TLS                        bool                   `json:"tls,omitempty"`                // Optional: whether TLS is required for connections
@@ -500,6 +501,7 @@ func (ir *InstanceReporter) sendReport() error {
 		PublicURL:                  publicURL,
 		Version:                    Version,
 		Timestamp:                  time.Now().Unix(),
+		Uptime:                     int64(time.Since(StartTime).Seconds()),
 		Host:                       host, // Use the host variable (either configured or auto-detected)
 		Port:                       ir.config.InstanceReporting.Instance.Port,
 		TLS:                        ir.config.InstanceReporting.Instance.TLS,
@@ -846,6 +848,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		PublicURL:                  publicURL,
 		Version:                    Version,
 		Timestamp:                  time.Now().Unix(),
+		Uptime:                     int64(time.Since(StartTime).Seconds()),
 		Host:                       host,
 		Port:                       instancePort,
 		TLS:                        instanceTLS,
@@ -1183,6 +1186,7 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			PublicURL:                  publicURL,
 			Version:                    Version,
 			Timestamp:                  time.Now().Unix(),
+			Uptime:                     int64(time.Since(StartTime).Seconds()),
 			Host:                       config.InstanceReporting.Instance.Host,
 			Port:                       config.InstanceReporting.Instance.Port,
 			TLS:                        config.InstanceReporting.Instance.TLS,

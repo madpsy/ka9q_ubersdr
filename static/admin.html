@@ -16746,6 +16746,7 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                     mcpLogsAutoRefreshInterval = null;
                 }
             } else if (tab === 'mcp') {
+                console.log('Switching to MCP logs tab');
                 mcpBtn.classList.add('active');
                 mcpBtn.style.borderBottom = '3px solid #007bff';
                 mcpBtn.style.color = '#007bff';
@@ -16756,9 +16757,15 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 webBtn.style.borderBottom = '3px solid transparent';
                 webBtn.style.color = '#666';
                 
+                const mcpContent = document.getElementById('mcpLogsContent');
+                console.log('MCP content element:', mcpContent);
+                console.log('MCP content current display:', mcpContent ? mcpContent.style.display : 'not found');
+                
                 document.getElementById('containerLogsContent').style.display = 'none';
                 document.getElementById('webLogsContent').style.display = 'none';
-                document.getElementById('mcpLogsContent').style.display = 'block';
+                mcpContent.style.display = 'block';
+                
+                console.log('MCP content display set to:', mcpContent.style.display);
                 
                 // Load MCP logs when switching to this tab
                 loadMCPLogs();

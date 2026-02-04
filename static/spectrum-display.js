@@ -214,8 +214,8 @@ class SpectrumDisplay {
                         const freqStr = this.formatFrequency(pos.frequency);
                         const modeStr = pos.mode ? pos.mode.toUpperCase() : 'N/A';
                         let tooltipText = `${pos.username}: ${freqStr} ${modeStr}`;
-                        if (pos.country_name) {
-                            tooltipText += `<br>Country: ${pos.country_name}`;
+                        if (pos.country) {
+                            tooltipText += `<br>Country: ${pos.country}`;
                         }
                         this.tooltip.innerHTML = tooltipText;
 
@@ -2804,7 +2804,7 @@ class SpectrumDisplay {
                 mode: channel.mode,
                 bandwidthLow: channel.bandwidth_low,
                 bandwidthHigh: channel.bandwidth_high,
-                country_name: channel.country_name || channel.country_code
+                country: channel.country || channel.country_code
             });
         });
     }

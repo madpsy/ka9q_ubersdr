@@ -7751,6 +7751,7 @@ window.openBufferConfigModal = openBufferConfigModal;
 window.closeBufferConfigModal = closeBufferConfigModal;
 window.setBufferThreshold = setBufferThreshold;
 window.toggleSpectrumSync = toggleSpectrumSync;
+window.toggleChatMarkers = toggleChatMarkers;
 
 // Copy UUID to clipboard
 function copyUUIDToClipboard() {

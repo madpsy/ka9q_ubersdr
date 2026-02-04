@@ -235,6 +235,9 @@ let monoMerger = null; // Converts stereo to mono for recorder
 let statsUpdateInterval = null;
 let currentSessionId = null;
 
+// Initialize global storage for active channels (populated by displayActiveChannels)
+window.activeChannels = [];
+
 // Expose mode and bandwidth globally for recorder
 window.currentMode = currentMode;
 window.currentBandwidthLow = currentBandwidthLow;

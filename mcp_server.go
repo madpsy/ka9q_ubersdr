@@ -360,8 +360,10 @@ func (m *MCPServer) handleGetDecoderSpots(ctx context.Context, request mcp.CallT
 
 	fromDate := fromTime.Format("2006-01-02")
 	toDate := toTime.Format("2006-01-02")
-	startTime := fromTime.Format("15:04")
-	endTime := toTime.Format("15:04")
+	// Don't use time filters - query the full date range
+	// Using startTime/endTime with cross-day queries causes issues
+	startTime := ""
+	endTime := ""
 
 	spots, err := m.multiDecoder.spotsLogger.GetHistoricalSpots(
 		mode, "", "", "", "", "", "",

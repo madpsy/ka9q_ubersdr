@@ -4579,9 +4579,13 @@
 
         // Banned IPs management
         let currentBannedIPs = [];
+        let adminIPData = null; // Store admin's IP data for validation
 
         async function loadBannedIPs() {
             try {
+                // Fetch admin's IP info first
+                await fetchAdminIPInfo();
+                
                 const response = await authenticatedFetch('/admin/banned-ips');
                 if (!response) return; // Auth failed, already handled
                 if (!response.ok) throw new Error('Failed to load banned IPs');
@@ -4597,13 +4601,47 @@
             }
         }
 
+        async function fetchAdminIPInfo() {
+            try {
+                const response = await fetch('/api/myip');
+                if (response.ok) {
+                    adminIPData = await response.json();
+                }
+            } catch (error) {
+                console.error('Error fetching admin IP info:', error);
+                adminIPData = null;
+            }
+        }
+
         function renderBannedIPs() {
             const container = document.getElementById('bannedIPsList');
             container.innerHTML = '';
             container.classList.remove('loading');
 
+            // Add admin IP info box at the top
+            if (adminIPData && adminIPData.ip) {
+                const adminInfoBox = document.createElement('div');
+                adminInfoBox.style.marginBottom = '20px';
+                adminInfoBox.style.padding = '15px';
+                adminInfoBox.style.background = '#e3f2fd';
+                adminInfoBox.style.border = '2px solid #2196f3';
+                adminInfoBox.style.borderRadius = '5px';
+                
+                let infoHTML = `<strong style="color: #0d47a1;">ℹ️ Your IP Address:</strong> <span style="font-family: monospace; font-weight: bold; color: #0d47a1;">${adminIPData.ip}</span>`;
+                
+                if (adminIPData.country) {
+                    infoHTML += ` <span style="color: #0d47a1;">from <strong>${adminIPData.country}</strong></span>`;
+                    if (adminIPData.country_code) {
+                        infoHTML += ` <span style="color: #666;">(${adminIPData.country_code})</span>`;
+                    }
+                }
+                
+                adminInfoBox.innerHTML = infoHTML;
+                container.appendChild(adminInfoBox);
+            }
+
             if (currentBannedIPs.length === 0) {
-                container.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No banned IPs</p>';
+                container.innerHTML += '<p style="text-align: center; color: #666; padding: 40px;">No banned IPs</p>';
                 return;
             }
 
@@ -4771,6 +4809,30 @@
             return false;
         }
 
+        // Check if an IP is within a CIDR range
+        function ipInCIDR(ip, cidr) {
+            // Simple IPv4 CIDR check
+            if (!cidr.includes('/')) {
+                return ip === cidr;
+            }
+
+            const [rangeIP, bits] = cidr.split('/');
+            const mask = parseInt(bits, 10);
+
+            // Convert IP to 32-bit integer
+            const ipToInt = (ipStr) => {
+                const parts = ipStr.split('.');
+                return (parseInt(parts[0]) << 24) + (parseInt(parts[1]) << 16) +
+                       (parseInt(parts[2]) << 8) + parseInt(parts[3]);
+            };
+
+            const ipInt = ipToInt(ip);
+            const rangeInt = ipToInt(rangeIP);
+            const maskInt = -1 << (32 - mask);
+
+            return (ipInt & maskInt) === (rangeInt & maskInt);
+        }
+
         async function addBannedIP() {
             const ip = document.getElementById('newBanIP').value.trim();
             const reason = document.getElementById('newBanReason').value.trim() || 'Banned by admin';
@@ -4784,6 +4846,26 @@
             if (!validateIPorCIDR(ip)) {
                 showAlert('Invalid IP address or CIDR range format. Please enter a valid IPv4, IPv6, or CIDR notation.', 'error');
                 return;
+            }
+
+            // Check if admin is about to ban their own IP
+            if (adminIPData && adminIPData.ip) {
+                if (ipInCIDR(adminIPData.ip, ip)) {
+                    const warningMsg = `⚠️ WARNING: YOU ARE ABOUT TO BAN YOUR OWN IP ADDRESS!\n\n` +
+                                     `Your IP: ${adminIPData.ip}\n` +
+                                     `Ban target: ${ip}\n\n` +
+                                     `If you proceed, you will IMMEDIATELY LOSE ACCESS to the admin panel and will need physical access to the server to unban yourself.\n\n` +
+                                     `Are you ABSOLUTELY SURE you want to continue?`;
+                    
+                    if (!confirm(warningMsg)) {
+                        return;
+                    }
+                    
+                    // Double confirmation for safety
+                    if (!confirm('FINAL WARNING: This will lock you out!\n\nClick OK to proceed with banning your own IP, or Cancel to abort.')) {
+                        return;
+                    }
+                }
             }
 
             try {
@@ -5002,6 +5084,24 @@
         }
 
         async function banCountry(countryCode, countryName) {
+            // Check if admin is about to ban their own country
+            if (adminIPData && adminIPData.country_code && adminIPData.country_code === countryCode) {
+                const warningMsg = `⚠️ WARNING: YOU ARE ABOUT TO BAN YOUR OWN COUNTRY!\n\n` +
+                                 `Your country: ${adminIPData.country} (${adminIPData.country_code})\n` +
+                                 `Ban target: ${countryName} (${countryCode})\n\n` +
+                                 `If you proceed, you will IMMEDIATELY LOSE ACCESS to the admin panel and will need physical access to the server or a VPN from another country to unban.\n\n` +
+                                 `Are you ABSOLUTELY SURE you want to continue?`;
+                
+                if (!confirm(warningMsg)) {
+                    return;
+                }
+                
+                // Double confirmation for safety
+                if (!confirm('FINAL WARNING: This will lock you out!\n\nClick OK to proceed with banning your own country, or Cancel to abort.')) {
+                    return;
+                }
+            }
+            
             const reason = prompt(`Ban ${countryName} (${countryCode})?\n\nEnter reason (optional):`) || 'Banned by admin';
             
             if (reason === null) return; // User cancelled

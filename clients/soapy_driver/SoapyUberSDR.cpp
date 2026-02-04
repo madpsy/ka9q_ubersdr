@@ -219,6 +219,11 @@ private:
     std::queue<std::vector<std::complex<float>>> _iqBuffers;
     std::mutex _bufferMutex;
     std::condition_variable _bufferCV;
+    static const size_t MAX_BUFFER_QUEUE_SIZE = 50; // Limit queue depth to prevent memory bloat
+    
+    // Partial buffer state for handling arbitrary read sizes
+    std::vector<std::complex<float>> _partialBuffer;
+    size_t _partialBufferOffset;
     
     // Helper functions
     double modeToSampleRate(const std::string &mode) const;
@@ -245,6 +250,7 @@ SoapyUberSDR::SoapyUberSDR(const SoapySDR::Kwargs &args)
     _streaming = false;
     _connected = false;
     _userSessionID = generateUUID();
+    _partialBufferOffset = 0;
     
     // Detect if we should use TLS based on URL protocol
     _useTLS = (_serverURL.find("wss://") == 0);
@@ -365,6 +371,10 @@ int SoapyUberSDR::deactivateStream(SoapySDR::Stream *stream, const int flags, co
     while (!_iqBuffers.empty())
         _iqBuffers.pop();
     
+    // Clear partial buffer state
+    _partialBuffer.clear();
+    _partialBufferOffset = 0;
+    
     SoapySDR::log(SOAPY_SDR_INFO, "SoapyUberSDR: Stream deactivated");
     return 0;
 }
@@ -378,32 +388,77 @@ int SoapyUberSDR::readStream(
     const long timeoutUs)
 {
     std::unique_lock<std::mutex> lock(_bufferMutex);
+    std::complex<float> *outBuff = static_cast<std::complex<float>*>(buffs[0]);
+    size_t totalCopied = 0;
     
-    auto deadline = std::chrono::steady_clock::now() + 
+    auto deadline = std::chrono::steady_clock::now() +
                    std::chrono::microseconds(timeoutUs);
     
+    // First, try to consume from partial buffer if available
+    if (_partialBufferOffset < _partialBuffer.size()) {
+        size_t available = _partialBuffer.size() - _partialBufferOffset;
+        size_t toCopy = std::min(numElems, available);
+        
+        std::copy(_partialBuffer.begin() + _partialBufferOffset,
+                  _partialBuffer.begin() + _partialBufferOffset + toCopy,
+                  outBuff);
+        
+        _partialBufferOffset += toCopy;
+        totalCopied += toCopy;
+        
+        // If partial buffer is exhausted, clear it
+        if (_partialBufferOffset >= _partialBuffer.size()) {
+            _partialBuffer.clear();
+            _partialBufferOffset = 0;
+        }
+        
+        // If we've satisfied the request, return now
+        if (totalCopied >= numElems) {
+            flags = 0;
+            timeNs = 0;
+            return totalCopied;
+        }
+    }
+    
+    // Need more samples - wait for new buffer from queue
     while (_iqBuffers.empty() && _streaming) {
-        if (_bufferCV.wait_until(lock, deadline) == std::cv_status::timeout)
-            return SOAPY_SDR_TIMEOUT;
+        if (_bufferCV.wait_until(lock, deadline) == std::cv_status::timeout) {
+            // Return what we have so far, or timeout if nothing
+            return totalCopied > 0 ? totalCopied : SOAPY_SDR_TIMEOUT;
+        }
     }
     
     if (!_streaming)
-        return SOAPY_SDR_STREAM_ERROR;
+        return totalCopied > 0 ? totalCopied : SOAPY_SDR_STREAM_ERROR;
     
     if (_iqBuffers.empty())
-        return SOAPY_SDR_TIMEOUT;
+        return totalCopied > 0 ? totalCopied : SOAPY_SDR_TIMEOUT;
     
+    // Get next buffer from queue
     auto &iqData = _iqBuffers.front();
-    size_t samplesToRead = std::min(numElems, iqData.size());
+    size_t remaining = numElems - totalCopied;
+    size_t available = iqData.size();
     
-    std::complex<float> *outBuff = static_cast<std::complex<float>*>(buffs[0]);
-    std::copy(iqData.begin(), iqData.begin() + samplesToRead, outBuff);
+    if (remaining >= available) {
+        // Request can consume entire buffer
+        std::copy(iqData.begin(), iqData.end(), outBuff + totalCopied);
+        totalCopied += available;
+        _iqBuffers.pop();
+    } else {
+        // Request needs only part of buffer - save remainder
+        std::copy(iqData.begin(), iqData.begin() + remaining, outBuff + totalCopied);
+        totalCopied += remaining;
+        
+        // Move remaining samples to partial buffer
+        _partialBuffer = std::move(iqData);
+        _partialBufferOffset = remaining;
+        _iqBuffers.pop();
+    }
     
-    _iqBuffers.pop();
     flags = 0;
     timeNs = 0;
     
-    return samplesToRead;
+    return totalCopied;
 }
 
 // Antenna API
@@ -644,6 +699,15 @@ void SoapyUberSDR::handleTLSMessage(websocketpp::connection_hdl hdl, tls_message
             }
             
             std::lock_guard<std::mutex> lock(_bufferMutex);
+            
+            // Limit queue depth to prevent memory bloat and excessive latency
+            if (_iqBuffers.size() >= MAX_BUFFER_QUEUE_SIZE) {
+                SoapySDR::logf(SOAPY_SDR_WARNING,
+                    "SoapyUberSDR: Buffer queue full (%zu), dropping oldest buffer",
+                    _iqBuffers.size());
+                _iqBuffers.pop();
+            }
+            
             _iqBuffers.push(std::move(iqSamples));
             _bufferCV.notify_one();
         } else {
@@ -739,6 +803,15 @@ void SoapyUberSDR::handlePlainMessage(websocketpp::connection_hdl hdl, plain_mes
             }
             
             std::lock_guard<std::mutex> lock(_bufferMutex);
+            
+            // Limit queue depth to prevent memory bloat and excessive latency
+            if (_iqBuffers.size() >= MAX_BUFFER_QUEUE_SIZE) {
+                SoapySDR::logf(SOAPY_SDR_WARNING,
+                    "SoapyUberSDR: Buffer queue full (%zu), dropping oldest buffer",
+                    _iqBuffers.size());
+                _iqBuffers.pop();
+            }
+            
             _iqBuffers.push(std::move(iqSamples));
             _bufferCV.notify_one();
         } else {

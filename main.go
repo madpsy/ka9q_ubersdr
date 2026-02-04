@@ -1463,13 +1463,13 @@ func main() {
 	http.Handle("/", fs)
 
 	// Wrap the default ServeMux with middleware layers (applied in reverse order)
-	// Order: countryBan -> CORS -> logging
+	// Order: ban (IP + country) -> CORS -> logging
 	var handler http.Handler = http.DefaultServeMux
 	handler = corsMiddleware(config, handler)
 	// Always wrap with httpLogger (it handles both file and in-memory logging)
 	handler = httpLogger(logFile, geoIPService, handler)
-	// Country ban middleware runs first (before logging) to block banned countries early
-	handler = countryBanMiddleware(countryBanManager, handler)
+	// Ban middleware runs first (before logging) to block banned IPs and countries early
+	handler = banMiddleware(ipBanManager, countryBanManager, handler)
 
 	// Start HTTP server
 	server := &http.Server{

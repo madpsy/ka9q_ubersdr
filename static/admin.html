@@ -17083,6 +17083,13 @@ Referer: ${log.referer}`;
                 return;
             }
             
+            // Helper to escape HTML (inline to avoid dependency issues)
+            const escape = (text) => {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            };
+            
             // Render logs in chronological order (newest first)
             const logsHTML = mcpLogsData.map(log => {
                 const timestamp = new Date(log.timestamp).toLocaleString();
@@ -17102,11 +17109,11 @@ Method: ${log.method}
 ID: ${log.id !== null && log.id !== undefined ? log.id : 'N/A'}
 Params: ${paramsStr}`;
                 
-                return `<div style="margin-bottom: 2px; padding: 4px 8px; background: #111; border-left: 3px solid ${methodColor}; border-radius: 0; font-family: 'Courier New', monospace; font-size: 11px;" title="${escapeHtml(tooltip)}">
+                return `<div style="margin-bottom: 2px; padding: 4px 8px; background: #111; border-left: 3px solid ${methodColor}; border-radius: 0; font-family: 'Courier New', monospace; font-size: 11px;" title="${escape(tooltip)}">
                     <span style="color: #666; display: inline-block; width: 70px;">${timeOnly}</span>
                     <span style="color: ${methodColor}; display: inline-block; width: 180px; font-weight: bold;">${log.method}</span>
                     <span style="color: #0af; display: inline-block; width: 40px;">${log.id !== null && log.id !== undefined ? log.id : '—'}</span>
-                    <span style="color: #fff;">${escapeHtml(paramsStr)}</span>
+                    <span style="color: #fff;">${escape(paramsStr)}</span>
                 </div>`;
             }).join('');
             

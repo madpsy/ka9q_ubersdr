@@ -2402,11 +2402,32 @@ func getClientIP(r *http.Request) string {
 
 	if isTunnelServer || isTrustedProxy {
 		if xri := r.Header.Get("X-Real-IP"); xri != "" {
-			clientIP = strings.TrimSpace(xri)
+			trimmedXRI := strings.TrimSpace(xri)
+			
+			// Check if X-Real-IP is a valid IP address (without port)
+			if net.ParseIP(trimmedXRI) == nil {
+				// Not a valid IP - might contain port or be malformed
+				log.Printf("WARNING: X-Real-IP from %s is not a valid IP address: '%s' (may contain port or be malformed)", sourceIP, trimmedXRI)
+			}
+			
+			clientIP = trimmedXRI
 			// Strip port if present
 			if host, _, err := net.SplitHostPort(clientIP); err == nil {
-				clientIP = host
+				// Successfully parsed as host:port
+				log.Printf("WARNING: X-Real-IP from %s contained port: '%s' -> host='%s'", sourceIP, trimmedXRI, host)
+				if host != "" {
+					clientIP = host
+				} else {
+					log.Printf("ERROR: X-Real-IP from %s was port-only (no host): '%s'", sourceIP, trimmedXRI)
+				}
 			}
+			
+			// Log when final clientIP is empty after processing
+			if clientIP == "" {
+				log.Printf("ERROR: clientIP became empty after processing X-Real-IP from %s: X-Real-IP='%s', trimmed='%s'",
+					sourceIP, xri, trimmedXRI)
+			}
+			
 			if DebugMode {
 				if isTunnelServer {
 					log.Printf("DEBUG: Trusted X-Real-IP from tunnel server: sourceIP=%s, X-Real-IP=%s, clientIP=%s", sourceIP, xri, clientIP)

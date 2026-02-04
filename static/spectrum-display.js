@@ -4122,6 +4122,12 @@ class SpectrumDisplay {
             const oldTunedFreq = this.currentTunedFreq;
             this.currentTunedFreq = newConfig.tunedFreq;
 
+            // Invalidate marker cache when frequency changes to update chat marker visibility
+            // (chat markers are hidden when at same frequency as user)
+            if (oldTunedFreq !== this.currentTunedFreq) {
+                this.invalidateMarkerCache();
+            }
+
             // If we're zoomed in and frequency changed, pan to follow it
             // Only pan if we have a valid zoom level and the frequency actually changed
             // Skip panning if the frequency change came from clicking the waterfall

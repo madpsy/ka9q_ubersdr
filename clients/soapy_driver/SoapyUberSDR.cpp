@@ -1396,6 +1396,7 @@ static std::vector<std::map<std::string, std::string>> fetchPublicInstances()
 static SoapySDR::KwargsList findUberSDR(const SoapySDR::Kwargs &args)
 {
     SoapySDR::KwargsList results;
+    size_t localCount = 0;  // Track number of local instances for sorting
     
     if (args.count("driver") && args.at("driver") != "ubersdr")
         return results;
@@ -1473,6 +1474,15 @@ static SoapySDR::KwargsList findUberSDR(const SoapySDR::Kwargs &args)
                     dev["serial"] = serverURL + ":" + mode;
                     results.push_back(dev);
                 }
+            }
+            
+            // Sort local instances alphabetically by label
+            localCount = results.size();
+            if (localCount > 0) {
+                std::sort(results.begin(), results.end(),
+                    [](const SoapySDR::Kwargs& a, const SoapySDR::Kwargs& b) {
+                        return a.at("label") < b.at("label");
+                    });
             }
         }
 
@@ -1593,6 +1603,15 @@ static SoapySDR::KwargsList findUberSDR(const SoapySDR::Kwargs &args)
                 }
             }
         }
+    }
+    
+    // Sort public instances alphabetically by label (after local instances)
+    // Local instances were already sorted, so we only sort the newly added public instances
+    if (results.size() > localCount) {
+        std::sort(results.begin() + localCount, results.end(),
+            [](const SoapySDR::Kwargs& a, const SoapySDR::Kwargs& b) {
+                return a.at("label") < b.at("label");
+            });
     }
     
     return results;

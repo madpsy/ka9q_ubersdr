@@ -2377,11 +2377,62 @@ func checkIPBan(w http.ResponseWriter, r *http.Request, ipBanManager *IPBanManag
 func checkCountryBan(w http.ResponseWriter, r *http.Request, countryBanManager *CountryBanManager) bool {
 	clientIP := getClientIP(r)
 	if countryBanManager.IsBannedByIP(clientIP) {
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Access denied",
-		})
+		w.Write([]byte(`<!DOCTYPE html>
+<html lang="en">
+<head>
+	 <meta charset="UTF-8">
+	 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	 <title>Access Denied</title>
+	 <style>
+	     * {
+	         margin: 0;
+	         padding: 0;
+	         box-sizing: border-box;
+	     }
+	     body {
+	         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+	         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+	         min-height: 100vh;
+	         display: flex;
+	         align-items: center;
+	         justify-content: center;
+	         padding: 20px;
+	     }
+	     .container {
+	         background: white;
+	         border-radius: 12px;
+	         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+	         padding: 60px 40px;
+	         text-align: center;
+	         max-width: 500px;
+	         width: 100%;
+	     }
+	     .icon {
+	         font-size: 64px;
+	         margin-bottom: 20px;
+	     }
+	     h1 {
+	         color: #333;
+	         font-size: 28px;
+	         margin-bottom: 15px;
+	     }
+	     p {
+	         color: #666;
+	         font-size: 16px;
+	         line-height: 1.6;
+	     }
+	 </style>
+</head>
+<body>
+	 <div class="container">
+	     <div class="icon">🚫</div>
+	     <h1>Sorry - Access is currently denied</h1>
+	     <p>This service is not available in your region at this time.</p>
+	 </div>
+</body>
+</html>`))
 		log.Printf("Blocked request from banned country (IP: %s) to %s", clientIP, r.URL.Path)
 		return true
 	}

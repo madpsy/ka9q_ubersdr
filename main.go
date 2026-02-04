@@ -474,6 +474,10 @@ func main() {
 	}
 	log.Printf("Log receiver listening on port 6925 (max 1000 entries)")
 
+	// Initialize MCP request logger with 1000 entry rolling window
+	InitMCPRequestLogger(1000)
+	log.Printf("MCP request logger initialized (max 1000 entries)")
+
 	// Initialize HTTP log buffer with 1000 entry rolling window (always enabled)
 	InitHTTPLogBuffer(1000)
 	log.Printf("HTTP request log buffer initialized (max 1000 entries in memory)")
@@ -1426,6 +1430,7 @@ func main() {
 	http.HandleFunc("/admin/force-update", adminHandler.AuthMiddleware(adminHandler.HandleForceUpdate))
 	http.HandleFunc("/admin/logs", adminHandler.AuthMiddleware(handleLogsAPI))
 	http.HandleFunc("/admin/http-logs", adminHandler.AuthMiddleware(handleHTTPLogsAPI))
+	http.HandleFunc("/admin/mcp-logs", adminHandler.AuthMiddleware(handleMCPLogsAPI))
 	http.HandleFunc("/admin/geoip/lookup", adminHandler.AuthMiddleware(adminHandler.HandleGeoIPLookup))
 	http.HandleFunc("/admin/sessions/countries", adminHandler.AuthMiddleware(adminHandler.HandleSessionsWithCountries))
 	http.HandleFunc("/admin/geoip-health", adminHandler.AuthMiddleware(adminHandler.HandleGeoIPHealth))

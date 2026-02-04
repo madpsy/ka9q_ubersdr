@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -61,10 +63,19 @@ func NewMCPServer(sessions *SessionManager, swm *SpaceWeatherMonitor,
 	// Register all tools
 	m.registerTools()
 
+	// Wrap tool handlers with logging
+	m.wrapToolHandlersWithLogging()
+
 	// Create HTTP server wrapper
 	m.httpServer = server.NewStreamableHTTPServer(m.mcpServer)
 
 	return m
+}
+
+// wrapToolHandlersWithLogging wraps all tool handlers to log requests
+func (m *MCPServer) wrapToolHandlersWithLogging() {
+	// Note: The mcp-go library doesn't provide a way to intercept all tool calls
+	// So we'll add logging in the HandleMCP function instead
 }
 
 // registerTools registers all available MCP tools
@@ -244,6 +255,48 @@ func (m *MCPServer) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	// Check if IP is banned
 	if checkIPBan(w, r, m.ipBanManager) {
 		return
+	}
+
+	// Log MCP requests if it's a POST with JSON body
+	if r.Method == http.MethodPost && globalMCPRequestLogger != nil {
+		// Read and log the request body
+		body := make([]byte, r.ContentLength)
+		if r.ContentLength > 0 && r.ContentLength < 1024*1024 { // Max 1MB
+			n, err := r.Body.Read(body)
+			if err == nil || err.Error() == "EOF" {
+				body = body[:n]
+				
+				// Parse JSON to extract method and params
+				var reqData map[string]interface{}
+				if err := json.Unmarshal(body, &reqData); err == nil {
+					method, _ := reqData["method"].(string)
+					id := reqData["id"]
+					
+					// Extract params if present
+					params := make(map[string]interface{})
+					if paramsData, ok := reqData["params"].(map[string]interface{}); ok {
+						// For tools/call, extract the tool name and arguments
+						if method == "tools/call" {
+							if toolName, ok := paramsData["name"].(string); ok {
+								params["tool_name"] = toolName
+							}
+							if args, ok := paramsData["arguments"].(map[string]interface{}); ok {
+								for k, v := range args {
+									params[k] = v
+								}
+							}
+						} else {
+							params = paramsData
+						}
+					}
+					
+					globalMCPRequestLogger.LogRequest(method, params, id)
+				}
+				
+				// Restore body for the actual handler
+				r.Body = io.NopCloser(bytes.NewBuffer(body))
+			}
+		}
 	}
 
 	// Let the StreamableHTTPServer handle the request

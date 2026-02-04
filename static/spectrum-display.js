@@ -2684,12 +2684,10 @@ class SpectrumDisplay {
 
     drawChatUserMarkers() {
         // Draw purple markers for active chat users (excluding self)
-        if (!window.chatUI || !window.chatUI.chat || !window.chatUI.chat.activeUsers) {
+        // Get data from stats endpoint (stored in window.activeChannels by app.js)
+        if (!window.activeChannels || window.activeChannels.length === 0) {
             return;
         }
-
-        const activeUsers = window.chatUI.chat.activeUsers;
-        const currentUsername = window.chatUI.chat.username;
 
         // Clear previous chat user marker positions
         if (!window.chatUserMarkerPositions) {
@@ -2705,18 +2703,24 @@ class SpectrumDisplay {
         const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
         const endFreq = effectiveCenterFreq + this.totalBandwidth / 2;
 
-        activeUsers.forEach(user => {
-            // Skip the current user
-            if (user.username === currentUsername) {
+        // Iterate through channels (skip index 0 which is the current user)
+        window.activeChannels.forEach((channel, index) => {
+            // Skip the first channel (index 0) which is the current user
+            if (index === 0) {
                 return;
             }
 
-            // Skip users without frequency data
-            if (!user.frequency) {
+            // Skip channels without chat username
+            if (!channel.chat_username || channel.chat_username.trim() === '') {
                 return;
             }
 
-            const userFreq = user.frequency;
+            // Skip channels without frequency data
+            if (!channel.frequency) {
+                return;
+            }
+
+            const userFreq = channel.frequency;
 
             // Skip if user is at the same frequency as us (within 100 Hz tolerance)
             if (this.currentTunedFreq && Math.abs(userFreq - this.currentTunedFreq) < 100) {
@@ -2732,7 +2736,7 @@ class SpectrumDisplay {
             const x = ((userFreq - startFreq) / (endFreq - startFreq)) * this.overlayCanvas.width;
 
             // Draw chat username label at top
-            const chatLabel = user.username;
+            const chatLabel = channel.chat_username;
             this.overlayCtx.font = 'bold 12px monospace';
             this.overlayCtx.textAlign = 'center';
             this.overlayCtx.textBaseline = 'top';
@@ -2776,10 +2780,12 @@ class SpectrumDisplay {
                 y: labelY,
                 width: labelWidth,
                 height: labelHeight + arrowLength,
-                username: user.username,
-                frequency: user.frequency,
-                mode: user.mode,
-                country_code: user.country_code
+                username: channel.chat_username,
+                frequency: channel.frequency,
+                mode: channel.mode,
+                bandwidthLow: channel.bandwidth_low,
+                bandwidthHigh: channel.bandwidth_high,
+                country_code: channel.country_code
             });
         });
     }

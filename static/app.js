@@ -1551,6 +1551,9 @@ async function fetchAndDisplayStats() {
 function displayActiveChannels(channels) {
     const listEl = document.getElementById('active-channels-list');
     if (!listEl) return;
+    
+    // Store channels globally for spectrum display markers
+    window.activeChannels = channels || [];
 
     if (channels.length === 0) {
         listEl.innerHTML = '<p style="color: #888; font-style: italic;">No active channels</p>';

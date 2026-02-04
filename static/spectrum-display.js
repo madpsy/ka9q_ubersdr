@@ -2685,9 +2685,12 @@ class SpectrumDisplay {
     drawChatUserMarkers() {
         // Draw purple markers for active chat users (excluding self)
         // Get data from stats endpoint (stored in window.activeChannels by app.js)
+        console.log('[drawChatUserMarkers] window.activeChannels:', window.activeChannels);
         if (!window.activeChannels || window.activeChannels.length === 0) {
+            console.log('[drawChatUserMarkers] No active channels data');
             return;
         }
+        console.log('[drawChatUserMarkers] Processing', window.activeChannels.length, 'channels');
 
         // Clear previous chat user marker positions
         if (!window.chatUserMarkerPositions) {
@@ -2705,35 +2708,45 @@ class SpectrumDisplay {
 
         // Iterate through channels (skip index 0 which is the current user)
         window.activeChannels.forEach((channel, index) => {
+            console.log('[drawChatUserMarkers] Channel', index, ':', channel);
+            
             // Skip the first channel (index 0) which is the current user
             if (index === 0) {
+                console.log('[drawChatUserMarkers] Skipping index 0 (current user)');
                 return;
             }
 
             // Skip channels without chat username
             if (!channel.chat_username || channel.chat_username.trim() === '') {
+                console.log('[drawChatUserMarkers] Skipping - no chat username');
                 return;
             }
 
             // Skip channels without frequency data
             if (!channel.frequency) {
+                console.log('[drawChatUserMarkers] Skipping - no frequency');
                 return;
             }
 
             const userFreq = channel.frequency;
+            console.log('[drawChatUserMarkers] User frequency:', userFreq, 'Current tuned:', this.currentTunedFreq);
 
             // Skip if user is at the same frequency as us (within 100 Hz tolerance)
             if (this.currentTunedFreq && Math.abs(userFreq - this.currentTunedFreq) < 100) {
+                console.log('[drawChatUserMarkers] Skipping - same frequency as us');
                 return;
             }
 
             // Check if frequency is within visible range
+            console.log('[drawChatUserMarkers] Visible range:', startFreq, 'to', endFreq);
             if (userFreq < startFreq || userFreq > endFreq) {
+                console.log('[drawChatUserMarkers] Skipping - frequency outside visible range');
                 return;
             }
 
             // Calculate x position
             const x = ((userFreq - startFreq) / (endFreq - startFreq)) * this.overlayCanvas.width;
+            console.log('[drawChatUserMarkers] Drawing marker for', channel.chat_username, 'at x:', x);
 
             // Draw chat username label at top
             const chatLabel = channel.chat_username;

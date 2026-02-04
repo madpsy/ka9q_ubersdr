@@ -665,6 +665,9 @@
                         <button class="logs-subtab" onclick="switchLogsSubTab('web')" id="webLogsSubTab" style="padding: 10px 20px; border: none; background: none; cursor: pointer; font-weight: bold; border-bottom: 3px solid transparent; color: #666;">
                             Web Logs
                         </button>
+                        <button class="logs-subtab" onclick="switchLogsSubTab('mcp')" id="mcpLogsSubTab" style="padding: 10px 20px; border: none; background: none; cursor: pointer; font-weight: bold; border-bottom: 3px solid transparent; color: #666;">
+                            MCP Logs
+                        </button>
                     </div>
 
                     <!-- Container Logs Sub-tab -->
@@ -759,6 +762,36 @@
                             
                             <div id="webLogsDisplay" style="background: #000; color: #0f0; padding: 15px; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 11px; max-height: 600px; overflow-y: auto; line-height: 1.4;">
                                 <div style="color: #888; padding: 20px; text-align: center;">Loading web logs...</div>
+                            </div>
+                        </div>
+    
+                        <!-- MCP Logs Sub-tab -->
+                        <div id="mcpLogsContent" class="logs-subtab-content" style="display: none;">
+                            <div class="alert alert-info" style="margin-bottom: 20px;">
+                                ℹ️ These are Model Context Protocol (MCP) request logs showing all tool calls from AI assistants like ChatGPT. Useful for debugging MCP integrations.
+                            </div>
+                            <div class="config-section">
+                                <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                    <label style="font-weight: bold;">Limit:</label>
+                                    <select id="mcpLogsLimit" onchange="loadMCPLogs()" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
+                                        <option value="50">50</option>
+                                        <option value="100" selected>100</option>
+                                        <option value="250">250</option>
+                                        <option value="500">500</option>
+                                        <option value="1000">1000</option>
+                                    </select>
+                                    <button onclick="loadMCPLogs()" style="background: none; border: none; font-size: 24px; cursor: pointer; padding: 4px 8px; opacity: 1; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.6'" onmouseout="this.style.opacity='1'" title="Refresh Now">🔄</button>
+                                    <button onclick="downloadMCPLogs()" style="background: none; border: none; font-size: 24px; cursor: pointer; padding: 4px 8px; opacity: 1; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.6'" onmouseout="this.style.opacity='1'" title="Download Logs">💾</button>
+                                    <label style="display: flex; align-items: center; gap: 5px; margin: 0;">
+                                        <input type="checkbox" id="mcpLogsAutoRefresh" onchange="onMCPLogsAutoRefreshChange()" checked>
+                                        <span>Auto-refresh (5s)</span>
+                                    </label>
+                                    <span id="mcpLogsCount" style="color: #666; margin-left: auto;"></span>
+                                </div>
+                                
+                                <div id="mcpLogsDisplay" style="background: #000; color: #0f0; padding: 15px; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 11px; max-height: 600px; overflow-y: auto; line-height: 1.4;">
+                                    <div style="color: #888; padding: 20px; text-align: center;">Loading MCP logs...</div>
+                                </div>
                             </div>
                         </div>
                     </div>

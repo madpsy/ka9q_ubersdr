@@ -17147,6 +17147,24 @@ Referer: ${log.referer}`;
                 console.log('After timeout - Display offsetHeight:', display.offsetHeight);
                 console.log('After timeout - Display scrollHeight:', display.scrollHeight);
                 console.log('After timeout - Display computed minHeight:', window.getComputedStyle(display).minHeight);
+                console.log('After timeout - Display computed display:', window.getComputedStyle(display).display);
+                console.log('After timeout - Display computed visibility:', window.getComputedStyle(display).visibility);
+                console.log('After timeout - Display computed position:', window.getComputedStyle(display).position);
+                console.log('After timeout - Display computed opacity:', window.getComputedStyle(display).opacity);
+                
+                // Check all ancestors
+                let el = display;
+                let level = 0;
+                while (el && level < 10) {
+                    const computed = window.getComputedStyle(el);
+                    console.log(`Ancestor ${level} (${el.id || el.className}):`,
+                        'display=', computed.display,
+                        'visibility=', computed.visibility,
+                        'opacity=', computed.opacity,
+                        'height=', computed.height);
+                    el = el.parentElement;
+                    level++;
+                }
             }, 100);
             
             // Auto-scroll to bottom

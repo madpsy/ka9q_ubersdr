@@ -17133,19 +17133,21 @@ Referer: ${log.referer}`;
             
             display.innerHTML = `<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; color: #0f0;">${logsText}</pre>`;
             
-            console.log('Display innerHTML set');
+            // Force height via JavaScript
+            display.style.minHeight = '400px';
+            display.style.height = 'auto';
+            display.style.display = 'block';
+            
+            console.log('Display innerHTML set and height forced');
             
             // Force reflow
             void display.offsetHeight;
             
-            console.log('Display innerHTML length after set:', display.innerHTML.length);
-            console.log('Display children count:', display.children.length);
-            console.log('Display offsetHeight:', display.offsetHeight);
-            console.log('Display scrollHeight:', display.scrollHeight);
-            console.log('Display computed height:', window.getComputedStyle(display).height);
-            console.log('Display computed maxHeight:', window.getComputedStyle(display).maxHeight);
-            console.log('Display parent:', display.parentElement);
-            console.log('Display parent display:', display.parentElement ? window.getComputedStyle(display.parentElement).display : 'no parent');
+            setTimeout(() => {
+                console.log('After timeout - Display offsetHeight:', display.offsetHeight);
+                console.log('After timeout - Display scrollHeight:', display.scrollHeight);
+                console.log('After timeout - Display computed minHeight:', window.getComputedStyle(display).minHeight);
+            }, 100);
             
             // Auto-scroll to bottom
             display.scrollTop = display.scrollHeight;

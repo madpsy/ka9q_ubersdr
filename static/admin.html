@@ -787,6 +787,11 @@
                                     <input type="checkbox" id="mcpLogsAutoRefresh" onchange="onMCPLogsAutoRefreshChange()" checked>
                                     <span>Auto-refresh (5s)</span>
                                 </label>
+                                <label style="display: flex; align-items: center; gap: 5px; margin: 0;">
+                                    <span>Filter:</span>
+                                    <input type="text" id="mcpLogsFilter" oninput="onMCPLogsFilterChange()" placeholder="Search method or params..." style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; min-width: 200px;">
+                                    <button onclick="clearMCPLogsFilter()" style="background: #dc3545; color: white; border: none; font-size: 18px; cursor: pointer; padding: 6px 10px; border-radius: 5px; line-height: 1;" title="Clear filter">✕</button>
+                                </label>
                                 <span id="mcpLogsCount" style="color: #666; margin-left: auto;"></span>
                             </div>
                             
@@ -17059,12 +17064,11 @@ Referer: ${log.referer}`;
         
         let mcpLogsAutoRefreshInterval = null;
         let mcpLogsData = [];
+        let mcpLogsFilteredData = [];
         
         async function loadMCPLogs() {
             try {
                 const limit = document.getElementById('mcpLogsLimit').value;
-                
-                console.log('Loading MCP logs with limit:', limit);
                 
                 const response = await authenticatedFetch(`/admin/mcp-logs?limit=${limit}`);
                 if (!response || !response.ok) {
@@ -17072,19 +17076,20 @@ Referer: ${log.referer}`;
                 }
                 
                 const data = await response.json();
-                console.log('MCP logs data received:', data);
-                console.log('Number of logs:', data.logs ? data.logs.length : 0);
-                
                 mcpLogsData = data.logs || [];
                 
-                console.log('mcpLogsData set to:', mcpLogsData.length, 'entries');
-                
-                renderMCPLogs();
+                // Apply filter
+                applyMCPLogsFilter();
                 
                 // Update count
                 const countEl = document.getElementById('mcpLogsCount');
                 if (countEl) {
-                    countEl.textContent = `Showing ${data.count} of ${data.total_count} logs`;
+                    const filterActive = document.getElementById('mcpLogsFilter').value.trim() !== '';
+                    if (filterActive) {
+                        countEl.textContent = `Showing ${mcpLogsFilteredData.length} of ${data.count} logs (filtered)`;
+                    } else {
+                        countEl.textContent = `Showing ${data.count} of ${data.total_count} logs`;
+                    }
                 }
                 
             } catch (error) {
@@ -17092,6 +17097,74 @@ Referer: ${log.referer}`;
                 const display = document.getElementById('mcpLogsDisplay');
                 if (display) {
                     display.innerHTML = `<div style="color: #f00; padding: 20px; text-align: center;">Error loading MCP logs: ${error.message}</div>`;
+                }
+            }
+        }
+        
+        function applyMCPLogsFilter() {
+            const filterInput = document.getElementById('mcpLogsFilter');
+            const filterText = filterInput ? filterInput.value.trim().toLowerCase() : '';
+            
+            if (!filterText) {
+                mcpLogsFilteredData = mcpLogsData;
+            } else {
+                mcpLogsFilteredData = mcpLogsData.filter(log => {
+                    // Search in method name
+                    if (log.method && log.method.toLowerCase().includes(filterText)) {
+                        return true;
+                    }
+                    
+                    // Search in params (convert to string)
+                    if (log.params) {
+                        const paramsStr = JSON.stringify(log.params).toLowerCase();
+                        if (paramsStr.includes(filterText)) {
+                            return true;
+                        }
+                    }
+                    
+                    // Search in ID
+                    if (log.id !== null && log.id !== undefined) {
+                        if (String(log.id).toLowerCase().includes(filterText)) {
+                            return true;
+                        }
+                    }
+                    
+                    return false;
+                });
+            }
+            
+            renderMCPLogs();
+        }
+        
+        function onMCPLogsFilterChange() {
+            // Debounce the filter
+            clearTimeout(window.mcpLogsFilterTimeout);
+            window.mcpLogsFilterTimeout = setTimeout(() => {
+                applyMCPLogsFilter();
+                
+                // Update count
+                const countEl = document.getElementById('mcpLogsCount');
+                if (countEl) {
+                    const filterActive = document.getElementById('mcpLogsFilter').value.trim() !== '';
+                    if (filterActive) {
+                        countEl.textContent = `Showing ${mcpLogsFilteredData.length} of ${mcpLogsData.length} logs (filtered)`;
+                    } else {
+                        countEl.textContent = `Showing ${mcpLogsData.length} logs`;
+                    }
+                }
+            }, 300);
+        }
+        
+        function clearMCPLogsFilter() {
+            const filterInput = document.getElementById('mcpLogsFilter');
+            if (filterInput) {
+                filterInput.value = '';
+                applyMCPLogsFilter();
+                
+                // Update count
+                const countEl = document.getElementById('mcpLogsCount');
+                if (countEl) {
+                    countEl.textContent = `Showing ${mcpLogsData.length} logs`;
                 }
             }
         }
@@ -17104,8 +17177,13 @@ Referer: ${log.referer}`;
                 return;
             }
             
-            if (mcpLogsData.length === 0) {
-                display.innerHTML = '<div style="color: #888; padding: 20px; text-align: center;">No MCP logs found</div>';
+            // Use filtered data if available, otherwise use all data
+            const dataToRender = mcpLogsFilteredData.length > 0 || document.getElementById('mcpLogsFilter')?.value.trim() ? mcpLogsFilteredData : mcpLogsData;
+            
+            if (dataToRender.length === 0) {
+                const filterActive = document.getElementById('mcpLogsFilter')?.value.trim() !== '';
+                const message = filterActive ? 'No MCP logs match the filter' : 'No MCP logs found';
+                display.innerHTML = `<div style="color: #888; padding: 20px; text-align: center;">${message}</div>`;
                 return;
             }
             
@@ -17161,7 +17239,7 @@ Referer: ${log.referer}`;
             };
             
             // Render logs with better formatting
-            const logsHTML = mcpLogsData.map((log, index) => {
+            const logsHTML = dataToRender.map((log, index) => {
                 const timestamp = new Date(log.timestamp).toLocaleString();
                 const methodColor = getMethodColor(log.method);
                 const idDisplay = log.id !== null && log.id !== undefined ? log.id : '—';

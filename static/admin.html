@@ -16747,6 +16747,12 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 }
             } else if (tab === 'mcp') {
                 console.log('Switching to MCP logs tab');
+                
+                // Check if we're on the Logs main tab
+                const logsTab = document.getElementById('logsTab');
+                console.log('Logs tab element:', logsTab);
+                console.log('Logs tab display:', logsTab ? window.getComputedStyle(logsTab).display : 'not found');
+                
                 mcpBtn.classList.add('active');
                 mcpBtn.style.borderBottom = '3px solid #007bff';
                 mcpBtn.style.color = '#007bff';
@@ -16760,12 +16766,14 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 const mcpContent = document.getElementById('mcpLogsContent');
                 console.log('MCP content element:', mcpContent);
                 console.log('MCP content current display:', mcpContent ? mcpContent.style.display : 'not found');
+                console.log('MCP content computed display:', mcpContent ? window.getComputedStyle(mcpContent).display : 'not found');
                 
                 document.getElementById('containerLogsContent').style.display = 'none';
                 document.getElementById('webLogsContent').style.display = 'none';
                 mcpContent.style.display = 'block';
                 
                 console.log('MCP content display set to:', mcpContent.style.display);
+                console.log('MCP content computed display after set:', window.getComputedStyle(mcpContent).display);
                 
                 // Load MCP logs when switching to this tab
                 loadMCPLogs();

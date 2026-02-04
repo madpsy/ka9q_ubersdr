@@ -1559,6 +1559,12 @@ function displayActiveChannels(channels) {
     // Store channels globally for spectrum display markers
     window.activeChannels = channels || [];
     console.log('[displayActiveChannels] Stored window.activeChannels:', window.activeChannels);
+    
+    // Invalidate spectrum display marker cache to force redraw with new chat user markers
+    if (window.spectrumDisplay && window.spectrumDisplay.invalidateMarkerCache) {
+        window.spectrumDisplay.invalidateMarkerCache();
+        console.log('[displayActiveChannels] Invalidated spectrum marker cache');
+    }
 
     if (channels.length === 0) {
         listEl.innerHTML = '<p style="color: #888; font-style: italic;">No active channels</p>';

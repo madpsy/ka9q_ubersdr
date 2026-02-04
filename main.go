@@ -251,6 +251,27 @@ func gzipHandler(fn http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// banMiddleware checks if requests come from banned IPs or banned countries and blocks them
+// This runs early in the request pipeline to block banned traffic before any processing
+func banMiddleware(ipBanManager *IPBanManager, countryBanManager *CountryBanManager, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check if the client's IP is banned (direct IP ban)
+		if checkIPBan(w, r, ipBanManager) {
+			// Request was blocked, don't call next handler
+			return
+		}
+		
+		// Check if the client's country is banned
+		if checkCountryBan(w, r, countryBanManager) {
+			// Request was blocked, don't call next handler
+			return
+		}
+		
+		// Not banned, continue to next handler
+		next.ServeHTTP(w, r)
+	})
+}
+
 // corsMiddleware adds CORS headers to all responses if enabled in config
 func corsMiddleware(config *Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1441,11 +1462,14 @@ func main() {
 	fs := http.FileServer(http.Dir("static"))
 	http.Handle("/", fs)
 
-	// Wrap the default ServeMux with CORS middleware (if enabled), then logging middleware (always enabled for in-memory buffer)
+	// Wrap the default ServeMux with middleware layers (applied in reverse order)
+	// Order: countryBan -> CORS -> logging
 	var handler http.Handler = http.DefaultServeMux
 	handler = corsMiddleware(config, handler)
 	// Always wrap with httpLogger (it handles both file and in-memory logging)
 	handler = httpLogger(logFile, geoIPService, handler)
+	// Country ban middleware runs first (before logging) to block banned countries early
+	handler = countryBanMiddleware(countryBanManager, handler)
 
 	// Start HTTP server
 	server := &http.Server{

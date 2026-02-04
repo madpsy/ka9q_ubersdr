@@ -2513,10 +2513,15 @@ class SpectrumDisplay {
             // Draw frequency scale FIRST (includes grey background for bookmarks)
             this.drawFrequencyScaleOnOverlay(this.markerCacheCtx);
 
-            // Draw chat user markers AFTER frequency scale but BEFORE bookmarks
+            // Draw amateur band backgrounds and labels (band names like "160m", "80m")
+            if (typeof window.drawAmateurBandBackgrounds === 'function') {
+                window.drawAmateurBandBackgrounds(this);
+            }
+
+            // Draw chat user markers AFTER band labels but BEFORE bookmark markers
             this.drawChatUserMarkers();
 
-            // Draw bookmarks on top of chat markers
+            // Draw bookmark markers (but skip band backgrounds since we already drew them)
             if (typeof window.drawBookmarksOnSpectrum === 'function') {
                 window.drawBookmarksOnSpectrum(this, console.log);
             }
@@ -2763,7 +2768,7 @@ class SpectrumDisplay {
             // Background for label - purple
             const labelWidth = this.overlayCtx.measureText(chatLabel).width + 6;
             const labelHeight = 14;
-            const labelY = 17; // Position below band labels (which are at y=2)
+            const labelY = 1;
 
             this.overlayCtx.fillStyle = 'rgba(147, 51, 234, 0.95)'; // Purple background
             this.overlayCtx.fillRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);

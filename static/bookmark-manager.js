@@ -190,8 +190,9 @@ async function loadBookmarks() {
 
 // Draw bookmark flags on the spectrum display (expose on window for spectrum-display.js access)
 function drawBookmarksOnSpectrum(spectrumDisplay, log) {
-    // Draw amateur band backgrounds first (before bookmarks)
-    drawAmateurBandBackgrounds(spectrumDisplay);
+    // Note: Band backgrounds are now drawn separately in spectrum-display.js
+    // to control z-index ordering with chat markers
+    // drawAmateurBandBackgrounds(spectrumDisplay); // Commented out - drawn separately
 
     if (!spectrumDisplay || !bookmarks || bookmarks.length === 0) {
         bookmarkPositions = [];

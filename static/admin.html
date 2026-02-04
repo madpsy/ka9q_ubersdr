@@ -17049,13 +17049,20 @@ Referer: ${log.referer}`;
             try {
                 const limit = document.getElementById('mcpLogsLimit').value;
                 
+                console.log('Loading MCP logs with limit:', limit);
+                
                 const response = await authenticatedFetch(`/admin/mcp-logs?limit=${limit}`);
                 if (!response || !response.ok) {
                     throw new Error(`HTTP error! status: ${response ? response.status : 'unknown'}`);
                 }
                 
                 const data = await response.json();
+                console.log('MCP logs data received:', data);
+                console.log('Number of logs:', data.logs ? data.logs.length : 0);
+                
                 mcpLogsData = data.logs || [];
+                
+                console.log('mcpLogsData set to:', mcpLogsData.length, 'entries');
                 
                 renderMCPLogs();
                 
@@ -17076,22 +17083,33 @@ Referer: ${log.referer}`;
         
         function renderMCPLogs() {
             const display = document.getElementById('mcpLogsDisplay');
-            if (!display) return;
+            console.log('renderMCPLogs called, display element:', display);
+            console.log('mcpLogsData:', mcpLogsData);
+            
+            if (!display) {
+                console.error('MCP logs display element not found!');
+                return;
+            }
             
             if (mcpLogsData.length === 0) {
+                console.log('No MCP logs data, showing empty message');
                 display.innerHTML = '<div style="color: #888; padding: 20px; text-align: center;">No MCP logs found</div>';
                 return;
             }
             
+            console.log('Rendering', mcpLogsData.length, 'MCP log entries');
+            
             // Helper to escape HTML (inline to avoid dependency issues)
             const escape = (text) => {
                 const div = document.createElement('div');
-                div.textContent = text;
+                div.textContent = String(text);
                 return div.innerHTML;
             };
             
             // Render logs in chronological order (newest first)
-            const logsHTML = mcpLogsData.map(log => {
+            const logsHTML = mcpLogsData.map((log, index) => {
+                console.log('Processing log entry', index, ':', log);
+                
                 const timestamp = new Date(log.timestamp).toLocaleString();
                 const timeOnly = new Date(log.timestamp).toLocaleTimeString();
                 
@@ -17117,7 +17135,12 @@ Params: ${paramsStr}`;
                 </div>`;
             }).join('');
             
+            console.log('Generated HTML length:', logsHTML.length);
+            console.log('First 200 chars of HTML:', logsHTML.substring(0, 200));
+            
             display.innerHTML = logsHTML;
+            
+            console.log('Display innerHTML set, scrolling to bottom');
             
             // Auto-scroll to bottom
             display.scrollTop = display.scrollHeight;

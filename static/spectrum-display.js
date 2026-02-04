@@ -2513,13 +2513,13 @@ class SpectrumDisplay {
             // Draw frequency scale FIRST (includes grey background for bookmarks)
             this.drawFrequencyScaleOnOverlay(this.markerCacheCtx);
 
-            // Draw bookmarks on top of background
+            // Draw chat user markers AFTER frequency scale but BEFORE bookmarks
+            this.drawChatUserMarkers();
+
+            // Draw bookmarks on top of chat markers
             if (typeof window.drawBookmarksOnSpectrum === 'function') {
                 window.drawBookmarksOnSpectrum(this, console.log);
             }
-
-            // Draw chat user markers AFTER bookmarks (higher z-index than bookmarks, lower than orange marker)
-            this.drawChatUserMarkers();
 
             // Draw DX spots to cache
             if (typeof window.drawDXSpotsOnSpectrum === 'function') {

@@ -2763,7 +2763,7 @@ class SpectrumDisplay {
             // Background for label - purple
             const labelWidth = this.overlayCtx.measureText(chatLabel).width + 6;
             const labelHeight = 14;
-            const labelY = 1;
+            const labelY = 17; // Position below band labels (which are at y=2)
 
             this.overlayCtx.fillStyle = 'rgba(147, 51, 234, 0.95)'; // Purple background
             this.overlayCtx.fillRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);

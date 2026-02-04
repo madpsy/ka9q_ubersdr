@@ -17148,6 +17148,10 @@ Params: ${paramsStr}`;
             display.innerHTML = logsHTML;
             
             console.log('Display innerHTML set, scrolling to bottom');
+            console.log('Display innerHTML length after set:', display.innerHTML.length);
+            console.log('Display children count:', display.children.length);
+            console.log('Display offsetHeight:', display.offsetHeight);
+            console.log('Display scrollHeight:', display.scrollHeight);
             
             // Auto-scroll to bottom
             display.scrollTop = display.scrollHeight;

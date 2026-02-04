@@ -909,7 +909,13 @@
         <!-- Active Channels Display -->
         <div class="active-channels-panel">
             <div class="active-channels-container">
-                <h3>Active Channels</h3>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h3>Active Channels</h3>
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.9em; margin-right: 10px;">
+                        <input type="checkbox" id="show-chat-markers" checked onchange="toggleChatMarkers()">
+                        <span>Show Markers</span>
+                    </label>
+                </div>
                 <div id="active-channels-list" class="active-channels-list">
                     <p style="color: #888; font-style: italic;">Loading...</p>
                 </div>

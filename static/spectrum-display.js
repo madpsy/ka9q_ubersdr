@@ -214,8 +214,8 @@ class SpectrumDisplay {
                         const freqStr = this.formatFrequency(pos.frequency);
                         const modeStr = pos.mode ? pos.mode.toUpperCase() : 'N/A';
                         let tooltipText = `${pos.username}: ${freqStr} ${modeStr}`;
-                        if (pos.country_code) {
-                            tooltipText += `<br>Country: ${pos.country_code}`;
+                        if (pos.country_name) {
+                            tooltipText += `<br>Country: ${pos.country_name}`;
                         }
                         this.tooltip.innerHTML = tooltipText;
 
@@ -2513,13 +2513,13 @@ class SpectrumDisplay {
             // Draw frequency scale FIRST (includes grey background for bookmarks)
             this.drawFrequencyScaleOnOverlay(this.markerCacheCtx);
 
-            // Draw chat user markers BEFORE bookmarks (lower z-index than orange marker)
-            this.drawChatUserMarkers();
-
             // Draw bookmarks on top of background
             if (typeof window.drawBookmarksOnSpectrum === 'function') {
                 window.drawBookmarksOnSpectrum(this, console.log);
             }
+
+            // Draw chat user markers AFTER bookmarks (higher z-index than bookmarks, lower than orange marker)
+            this.drawChatUserMarkers();
 
             // Draw DX spots to cache
             if (typeof window.drawDXSpotsOnSpectrum === 'function') {
@@ -2683,6 +2683,12 @@ class SpectrumDisplay {
     }
 
     drawChatUserMarkers() {
+        // Check if chat markers are enabled
+        if (window.showChatMarkers === false) {
+            console.log('[drawChatUserMarkers] Chat markers disabled by user preference');
+            return;
+        }
+        
         // Draw purple markers for active chat users (excluding self)
         // Get data from stats endpoint (stored in window.activeChannels by app.js)
         console.log('[drawChatUserMarkers] window.activeChannels:', window.activeChannels);
@@ -2798,7 +2804,7 @@ class SpectrumDisplay {
                 mode: channel.mode,
                 bandwidthLow: channel.bandwidth_low,
                 bandwidthHigh: channel.bandwidth_high,
-                country_code: channel.country_code
+                country_name: channel.country_name || channel.country_code
             });
         });
     }

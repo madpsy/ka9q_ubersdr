@@ -1848,11 +1848,60 @@ func handleMyIP(w http.ResponseWriter, r *http.Request, geoIPService *GeoIPServi
 	}
 
 	// Add GeoIP information if available
-	if geoIPService != nil {
-		country, countryCode := geoIPService.LookupSafe(clientIP)
-		if country != "" {
-			response["country"] = country
-			response["country_code"] = countryCode
+	if geoIPService != nil && geoIPService.IsEnabled() {
+		if result, err := geoIPService.Lookup(clientIP); err == nil {
+			// Add all available GeoIP fields
+			response["country"] = result.Country
+			response["country_code"] = result.CountryCode
+			
+			if result.Continent != "" {
+				response["continent"] = result.Continent
+			}
+			if result.ContinentCode != "" {
+				response["continent_code"] = result.ContinentCode
+			}
+			if result.City != "" {
+				response["city"] = result.City
+			}
+			if result.PostalCode != "" {
+				response["postal_code"] = result.PostalCode
+			}
+			if len(result.Subdivisions) > 0 {
+				response["subdivisions"] = result.Subdivisions
+			}
+			if result.Latitude != nil {
+				response["latitude"] = *result.Latitude
+			}
+			if result.Longitude != nil {
+				response["longitude"] = *result.Longitude
+			}
+			if result.AccuracyRadius != nil {
+				response["accuracy_radius_km"] = *result.AccuracyRadius
+			}
+			if result.TimeZone != "" {
+				response["time_zone"] = result.TimeZone
+			}
+			if result.MetroCode != nil {
+				response["metro_code"] = *result.MetroCode
+			}
+			if result.RegisteredCountry != "" {
+				response["registered_country"] = result.RegisteredCountry
+			}
+			if result.RegisteredCountryCode != "" {
+				response["registered_country_code"] = result.RegisteredCountryCode
+			}
+			if result.RepresentedCountry != "" {
+				response["represented_country"] = result.RepresentedCountry
+			}
+			if result.RepresentedCountryCode != "" {
+				response["represented_country_code"] = result.RepresentedCountryCode
+			}
+			if result.IsAnonymousProxy {
+				response["is_anonymous_proxy"] = result.IsAnonymousProxy
+			}
+			if result.IsSatelliteProvider {
+				response["is_satellite_provider"] = result.IsSatelliteProvider
+			}
 		}
 	}
 

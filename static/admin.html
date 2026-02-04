@@ -17128,14 +17128,12 @@ Referer: ${log.referer}`;
                 return `${timestamp} | ${log.method} | ID:${log.id !== null && log.id !== undefined ? log.id : '—'} | ${paramsStr}`;
             }).join('\n');
             
+            console.log('Generated text length:', logsText.length);
+            console.log('First 200 chars:', logsText.substring(0, 200));
+            
             display.innerHTML = `<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${logsText}</pre>`;
             
-            console.log('Generated HTML length:', logsHTML.length);
-            console.log('First 200 chars of HTML:', logsHTML.substring(0, 200));
-            
-            display.innerHTML = logsHTML;
-            
-            console.log('Display innerHTML set, scrolling to bottom');
+            console.log('Display innerHTML set');
             console.log('Display innerHTML length after set:', display.innerHTML.length);
             console.log('Display children count:', display.children.length);
             console.log('Display offsetHeight:', display.offsetHeight);

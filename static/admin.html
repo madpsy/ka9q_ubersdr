@@ -623,7 +623,7 @@
                             <label>Reason</label>
                             <input type="text" id="newBanReason" placeholder="e.g., Abuse, spam, etc.">
                         </div>
-                        <button class="btn" onclick="addBannedIP()">Ban IP/Range</button>
+                        <button class="btn" onclick="addBannedIP()">Go</button>
                         <button class="btn btn-secondary" onclick="cancelBanForm()">Cancel</button>
                     </div>
                     
@@ -1254,10 +1254,6 @@
 
                 <div class="button-group" id="sessionButtons" style="display: flex;">
                     <button class="btn btn-secondary" onclick="loadSessions()">Refresh Sessions</button>
-                </div>
-                <div class="button-group" id="bannedButtons" style="display: none;">
-                    <button class="btn" onclick="showAddBanForm()">Ban IP/Range</button>
-                    <button class="btn btn-secondary" onclick="loadBannedIPs()">Refresh Banned IPs</button>
                 </div>
                 <div class="button-group" id="configButtons" style="display: none;">
                     <button class="btn" onclick="saveConfig()">Save Configuration</button>
@@ -1908,7 +1904,6 @@
             document.getElementById('decoderButtons').style.display = 'none';
             document.getElementById('cwskimmerButtons').style.display = 'none';
             document.getElementById('sessionButtons').style.display = 'none';
-            document.getElementById('bannedButtons').style.display = 'none';
             document.getElementById('chatButtons').style.display = 'none';
             document.getElementById('monitorButtons').style.display = 'none';
             document.getElementById('systemButtons').style.display = 'none';
@@ -1954,7 +1949,6 @@
             } else if (tab === 'banned') {
                 document.querySelector('.tab:nth-child(2)').classList.add('active');
                 document.getElementById('bannedTab').classList.add('active');
-                document.getElementById('bannedButtons').style.display = 'flex';
                 loadBannedIPs();
             } else if (tab === 'logs') {
                 document.querySelector('.tab:nth-child(3)').classList.add('active');

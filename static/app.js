@@ -1552,11 +1552,13 @@ async function fetchAndDisplayStats() {
 }
 
 function displayActiveChannels(channels) {
+    console.log('[displayActiveChannels] Called with channels:', channels);
     const listEl = document.getElementById('active-channels-list');
     if (!listEl) return;
     
     // Store channels globally for spectrum display markers
     window.activeChannels = channels || [];
+    console.log('[displayActiveChannels] Stored window.activeChannels:', window.activeChannels);
 
     if (channels.length === 0) {
         listEl.innerHTML = '<p style="color: #888; font-style: italic;">No active channels</p>';

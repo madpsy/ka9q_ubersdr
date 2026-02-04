@@ -384,9 +384,9 @@ class SpectrumDisplay {
                         y >= pos.y &&
                         y <= pos.y + pos.height) {
                         
-                        // Tune to the chat user's frequency and mode
-                        if (window.chatUI && window.chatUI.tuneToUser) {
-                            window.chatUI.tuneToUser(pos.username);
+                        // Tune to the chat user's frequency and mode using tuneToChannel from app.js
+                        if (window.tuneToChannel) {
+                            window.tuneToChannel(pos.frequency, pos.mode, pos.bandwidthLow, pos.bandwidthHigh);
                         }
                         return;
                     }

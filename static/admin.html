@@ -16690,6 +16690,7 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
             // Update sub-tab buttons
             const containerBtn = document.getElementById('containerLogsSubTab');
             const webBtn = document.getElementById('webLogsSubTab');
+            const mcpBtn = document.getElementById('mcpLogsSubTab');
             
             if (tab === 'container') {
                 containerBtn.classList.add('active');
@@ -16698,14 +16699,23 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 webBtn.classList.remove('active');
                 webBtn.style.borderBottom = '3px solid transparent';
                 webBtn.style.color = '#666';
+                mcpBtn.classList.remove('active');
+                mcpBtn.style.borderBottom = '3px solid transparent';
+                mcpBtn.style.color = '#666';
                 
                 document.getElementById('containerLogsContent').style.display = 'block';
                 document.getElementById('webLogsContent').style.display = 'none';
+                document.getElementById('mcpLogsContent').style.display = 'none';
                 
                 // Stop web logs auto-refresh when switching away
                 if (webLogsAutoRefreshInterval) {
                     clearInterval(webLogsAutoRefreshInterval);
                     webLogsAutoRefreshInterval = null;
+                }
+                // Stop MCP logs auto-refresh when switching away
+                if (mcpLogsAutoRefreshInterval) {
+                    clearInterval(mcpLogsAutoRefreshInterval);
+                    mcpLogsAutoRefreshInterval = null;
                 }
             } else if (tab === 'web') {
                 webBtn.classList.add('active');
@@ -16714,9 +16724,13 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 containerBtn.classList.remove('active');
                 containerBtn.style.borderBottom = '3px solid transparent';
                 containerBtn.style.color = '#666';
+                mcpBtn.classList.remove('active');
+                mcpBtn.style.borderBottom = '3px solid transparent';
+                mcpBtn.style.color = '#666';
                 
                 document.getElementById('containerLogsContent').style.display = 'none';
                 document.getElementById('webLogsContent').style.display = 'block';
+                document.getElementById('mcpLogsContent').style.display = 'none';
                 
                 // Load web logs when switching to this tab
                 loadWebLogs();
@@ -16725,6 +16739,39 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 const autoRefreshCheckbox = document.getElementById('webLogsAutoRefresh');
                 if (autoRefreshCheckbox && autoRefreshCheckbox.checked && !webLogsAutoRefreshInterval) {
                     webLogsAutoRefreshInterval = setInterval(loadWebLogs, 5000);
+                }
+                // Stop MCP logs auto-refresh when switching away
+                if (mcpLogsAutoRefreshInterval) {
+                    clearInterval(mcpLogsAutoRefreshInterval);
+                    mcpLogsAutoRefreshInterval = null;
+                }
+            } else if (tab === 'mcp') {
+                mcpBtn.classList.add('active');
+                mcpBtn.style.borderBottom = '3px solid #007bff';
+                mcpBtn.style.color = '#007bff';
+                containerBtn.classList.remove('active');
+                containerBtn.style.borderBottom = '3px solid transparent';
+                containerBtn.style.color = '#666';
+                webBtn.classList.remove('active');
+                webBtn.style.borderBottom = '3px solid transparent';
+                webBtn.style.color = '#666';
+                
+                document.getElementById('containerLogsContent').style.display = 'none';
+                document.getElementById('webLogsContent').style.display = 'none';
+                document.getElementById('mcpLogsContent').style.display = 'block';
+                
+                // Load MCP logs when switching to this tab
+                loadMCPLogs();
+                
+                // Start auto-refresh if checkbox is checked
+                const autoRefreshCheckbox = document.getElementById('mcpLogsAutoRefresh');
+                if (autoRefreshCheckbox && autoRefreshCheckbox.checked && !mcpLogsAutoRefreshInterval) {
+                    mcpLogsAutoRefreshInterval = setInterval(loadMCPLogs, 5000);
+                }
+                // Stop web logs auto-refresh when switching away
+                if (webLogsAutoRefreshInterval) {
+                    clearInterval(webLogsAutoRefreshInterval);
+                    webLogsAutoRefreshInterval = null;
                 }
             }
         }
@@ -16985,6 +17032,130 @@ Referer: ${log.referer}`;
             const a = document.createElement('a');
             a.href = url;
             a.download = `web-logs-${new Date().toISOString().split('T')[0]}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // ============================================
+        // MCP Logs Functions
+        // ============================================
+        
+        let mcpLogsAutoRefreshInterval = null;
+        let mcpLogsData = [];
+        
+        async function loadMCPLogs() {
+            try {
+                const limit = document.getElementById('mcpLogsLimit').value;
+                
+                const response = await authenticatedFetch(`/admin/mcp-logs?limit=${limit}`);
+                if (!response || !response.ok) {
+                    throw new Error(`HTTP error! status: ${response ? response.status : 'unknown'}`);
+                }
+                
+                const data = await response.json();
+                mcpLogsData = data.logs || [];
+                
+                renderMCPLogs();
+                
+                // Update count
+                const countEl = document.getElementById('mcpLogsCount');
+                if (countEl) {
+                    countEl.textContent = `Showing ${data.count} of ${data.total_count} logs`;
+                }
+                
+            } catch (error) {
+                console.error('Error loading MCP logs:', error);
+                const display = document.getElementById('mcpLogsDisplay');
+                if (display) {
+                    display.innerHTML = `<div style="color: #f00; padding: 20px; text-align: center;">Error loading MCP logs: ${error.message}</div>`;
+                }
+            }
+        }
+        
+        function renderMCPLogs() {
+            const display = document.getElementById('mcpLogsDisplay');
+            if (!display) return;
+            
+            if (mcpLogsData.length === 0) {
+                display.innerHTML = '<div style="color: #888; padding: 20px; text-align: center;">No MCP logs found</div>';
+                return;
+            }
+            
+            // Render logs in chronological order (newest first)
+            const logsHTML = mcpLogsData.map(log => {
+                const timestamp = new Date(log.timestamp).toLocaleString();
+                const timeOnly = new Date(log.timestamp).toLocaleTimeString();
+                
+                // Color code by method
+                let methodColor = '#0af';
+                if (log.method === 'tools/call') methodColor = '#0f0';
+                else if (log.method === 'initialize') methodColor = '#fa0';
+                
+                // Format params as JSON
+                const paramsStr = log.params ? JSON.stringify(log.params) : '{}';
+                
+                // Create tooltip with full details
+                const tooltip = `Timestamp: ${timestamp}
+Method: ${log.method}
+ID: ${log.id !== null && log.id !== undefined ? log.id : 'N/A'}
+Params: ${paramsStr}`;
+                
+                return `<div style="margin-bottom: 2px; padding: 4px 8px; background: #111; border-left: 3px solid ${methodColor}; border-radius: 0; font-family: 'Courier New', monospace; font-size: 11px;" title="${escapeHtml(tooltip)}">
+                    <span style="color: #666; display: inline-block; width: 70px;">${timeOnly}</span>
+                    <span style="color: ${methodColor}; display: inline-block; width: 180px; font-weight: bold;">${log.method}</span>
+                    <span style="color: #0af; display: inline-block; width: 40px;">${log.id !== null && log.id !== undefined ? log.id : '—'}</span>
+                    <span style="color: #fff;">${escapeHtml(paramsStr)}</span>
+                </div>`;
+            }).join('');
+            
+            display.innerHTML = logsHTML;
+            
+            // Auto-scroll to bottom
+            display.scrollTop = display.scrollHeight;
+        }
+        
+        function onMCPLogsAutoRefreshChange() {
+            const checkbox = document.getElementById('mcpLogsAutoRefresh');
+            if (checkbox.checked) {
+                // Start auto-refresh
+                mcpLogsAutoRefreshInterval = setInterval(loadMCPLogs, 5000);
+            } else {
+                // Stop auto-refresh
+                if (mcpLogsAutoRefreshInterval) {
+                    clearInterval(mcpLogsAutoRefreshInterval);
+                    mcpLogsAutoRefreshInterval = null;
+                }
+            }
+        }
+        
+        function downloadMCPLogs() {
+            if (mcpLogsData.length === 0) {
+                alert('No logs to download');
+                return;
+            }
+            
+            // Create CSV content
+            const headers = ['Timestamp', 'Method', 'ID', 'Params'];
+            const rows = mcpLogsData.map(log => [
+                new Date(log.timestamp).toISOString(),
+                log.method,
+                log.id !== null && log.id !== undefined ? log.id : '',
+                log.params ? JSON.stringify(log.params) : '{}'
+            ]);
+            
+            const csvContent = [
+                headers.join(','),
+                ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+            ].join('\n');
+            
+            // Download
+            const blob = new Blob([csvContent], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `mcp-logs-${new Date().toISOString().split('T')[0]}.csv`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);

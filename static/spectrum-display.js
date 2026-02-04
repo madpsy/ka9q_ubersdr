@@ -201,6 +201,36 @@ class SpectrumDisplay {
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
+            // Check if mouse is over a chat user marker
+            if (window.chatUserMarkerPositions && window.chatUserMarkerPositions.length > 0) {
+                for (let pos of window.chatUserMarkerPositions) {
+                    // Check if mouse is within chat user marker bounds
+                    if (x >= pos.x - pos.width / 2 &&
+                        x <= pos.x + pos.width / 2 &&
+                        y >= pos.y &&
+                        y <= pos.y + pos.height) {
+
+                        // Show chat user info
+                        const freqStr = this.formatFrequency(pos.frequency);
+                        const modeStr = pos.mode ? pos.mode.toUpperCase() : 'N/A';
+                        let tooltipText = `${pos.username}: ${freqStr} ${modeStr}`;
+                        if (pos.country_code) {
+                            tooltipText += `<br>Country: ${pos.country_code}`;
+                        }
+                        this.tooltip.innerHTML = tooltipText;
+
+                        // Position tooltip near cursor
+                        const tooltipX = e.clientX + 15;
+                        const tooltipY = e.clientY - 10;
+
+                        this.tooltip.style.left = tooltipX + 'px';
+                        this.tooltip.style.top = tooltipY + 'px';
+                        this.tooltip.style.display = 'block';
+                        return;
+                    }
+                }
+            }
+
             // Check if mouse is over a bookmark
             if (window.bookmarkPositions && window.bookmarkPositions.length > 0) {
                 for (let pos of window.bookmarkPositions) {
@@ -332,7 +362,7 @@ class SpectrumDisplay {
             this.hideTooltip();
         });
 
-        // Add click handler for bookmarks, DX spots, and CW spots on overlay canvas
+        // Add click handler for bookmarks, DX spots, CW spots, and chat user markers on overlay canvas
         this.overlayCanvas.addEventListener('click', (e) => {
             // Skip if we just finished a bandwidth drag
             if (this.bandwidthDragState && this.bandwidthDragState.wasDragging) {
@@ -344,7 +374,26 @@ class SpectrumDisplay {
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
-            // Check if click is on a DX spot first (iterate in reverse to prioritize most recent spot)
+            // Check if click is on a chat user marker first
+            if (window.chatUserMarkerPositions && window.chatUserMarkerPositions.length > 0) {
+                for (let i = window.chatUserMarkerPositions.length - 1; i >= 0; i--) {
+                    const pos = window.chatUserMarkerPositions[i];
+                    // Check if click is within chat user marker bounds
+                    if (x >= pos.x - pos.width / 2 &&
+                        x <= pos.x + pos.width / 2 &&
+                        y >= pos.y &&
+                        y <= pos.y + pos.height) {
+                        
+                        // Tune to the chat user's frequency and mode
+                        if (window.chatUI && window.chatUI.tuneToUser) {
+                            window.chatUI.tuneToUser(pos.username);
+                        }
+                        return;
+                    }
+                }
+            }
+
+            // Check if click is on a DX spot (iterate in reverse to prioritize most recent spot)
             if (window.dxSpotPositions && window.dxSpotPositions.length > 0) {
                 for (let i = window.dxSpotPositions.length - 1; i >= 0; i--) {
                     const pos = window.dxSpotPositions[i];
@@ -2464,6 +2513,9 @@ class SpectrumDisplay {
             // Draw frequency scale FIRST (includes grey background for bookmarks)
             this.drawFrequencyScaleOnOverlay(this.markerCacheCtx);
 
+            // Draw chat user markers BEFORE bookmarks (lower z-index than orange marker)
+            this.drawChatUserMarkers();
+
             // Draw bookmarks on top of background
             if (typeof window.drawBookmarksOnSpectrum === 'function') {
                 window.drawBookmarksOnSpectrum(this, console.log);
@@ -2628,6 +2680,108 @@ class SpectrumDisplay {
 
         // Draw vertical bandwidth lines extending down over waterfall/graph
         this.drawBandwidthLines(xLow, xHigh);
+    }
+
+    drawChatUserMarkers() {
+        // Draw purple markers for active chat users (excluding self)
+        if (!window.chatUI || !window.chatUI.chat || !window.chatUI.chat.activeUsers) {
+            return;
+        }
+
+        const activeUsers = window.chatUI.chat.activeUsers;
+        const currentUsername = window.chatUI.chat.username;
+
+        // Clear previous chat user marker positions
+        if (!window.chatUserMarkerPositions) {
+            window.chatUserMarkerPositions = [];
+        }
+        window.chatUserMarkerPositions = [];
+
+        // Apply client-side prediction offset during dragging
+        const effectiveCenterFreq = this.isDragging ?
+            this.centerFreq + this.predictedFreqOffset :
+            this.centerFreq;
+
+        const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
+        const endFreq = effectiveCenterFreq + this.totalBandwidth / 2;
+
+        activeUsers.forEach(user => {
+            // Skip the current user
+            if (user.username === currentUsername) {
+                return;
+            }
+
+            // Skip users without frequency data
+            if (!user.frequency) {
+                return;
+            }
+
+            const userFreq = user.frequency;
+
+            // Skip if user is at the same frequency as us (within 100 Hz tolerance)
+            if (this.currentTunedFreq && Math.abs(userFreq - this.currentTunedFreq) < 100) {
+                return;
+            }
+
+            // Check if frequency is within visible range
+            if (userFreq < startFreq || userFreq > endFreq) {
+                return;
+            }
+
+            // Calculate x position
+            const x = ((userFreq - startFreq) / (endFreq - startFreq)) * this.overlayCanvas.width;
+
+            // Draw chat username label at top
+            const chatLabel = user.username;
+            this.overlayCtx.font = 'bold 12px monospace';
+            this.overlayCtx.textAlign = 'center';
+            this.overlayCtx.textBaseline = 'top';
+
+            // Background for label - purple
+            const labelWidth = this.overlayCtx.measureText(chatLabel).width + 6;
+            const labelHeight = 14;
+            const labelY = 1;
+
+            this.overlayCtx.fillStyle = 'rgba(147, 51, 234, 0.95)'; // Purple background
+            this.overlayCtx.fillRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);
+
+            // Border for label
+            this.overlayCtx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+            this.overlayCtx.lineWidth = 1;
+            this.overlayCtx.strokeRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);
+
+            // Label text
+            this.overlayCtx.fillStyle = '#ffffff';
+            this.overlayCtx.fillText(chatLabel, x, labelY + 2);
+
+            // Draw longer downward arrow below label - extends to top of frequency scale (y=45)
+            const arrowY = labelY + labelHeight;
+            const arrowLength = 45 - arrowY;
+            this.overlayCtx.fillStyle = 'rgba(147, 51, 234, 0.95)'; // Purple arrow
+            this.overlayCtx.beginPath();
+            this.overlayCtx.moveTo(x, arrowY + arrowLength); // Arrow tip at y=45
+            this.overlayCtx.lineTo(x - 3, arrowY); // Left point
+            this.overlayCtx.lineTo(x + 3, arrowY); // Right point
+            this.overlayCtx.closePath();
+            this.overlayCtx.fill();
+
+            // Arrow border
+            this.overlayCtx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+            this.overlayCtx.lineWidth = 1;
+            this.overlayCtx.stroke();
+
+            // Store marker position for click detection
+            window.chatUserMarkerPositions.push({
+                x: x,
+                y: labelY,
+                width: labelWidth,
+                height: labelHeight + arrowLength,
+                username: user.username,
+                frequency: user.frequency,
+                mode: user.mode,
+                country_code: user.country_code
+            });
+        });
     }
 
     // Draw frequency scale on overlay canvas (always visible)

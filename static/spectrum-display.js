@@ -2513,13 +2513,13 @@ class SpectrumDisplay {
             // Draw frequency scale FIRST (includes grey background for bookmarks)
             this.drawFrequencyScaleOnOverlay(this.markerCacheCtx);
 
-            // Draw bookmarks on top of background
+            // Draw chat user markers BEFORE bookmarks (behind gold bookmarks, above band names)
+            this.drawChatUserMarkers();
+
+            // Draw bookmarks on top of chat markers
             if (typeof window.drawBookmarksOnSpectrum === 'function') {
                 window.drawBookmarksOnSpectrum(this, console.log);
             }
-
-            // Draw chat user markers AFTER bookmarks (higher z-index than bookmarks, lower than orange marker)
-            this.drawChatUserMarkers();
 
             // Draw DX spots to cache
             if (typeof window.drawDXSpotsOnSpectrum === 'function') {
@@ -2616,8 +2616,9 @@ class SpectrumDisplay {
             [xLow, xHigh] = [xHigh, xLow];
         }
 
-        // Draw frequency label at top
-        const freqLabel = this.formatFrequency(this.currentTunedFreq);
+        // Draw frequency label at top (without unit)
+        const mhz = this.currentTunedFreq / 1e6;
+        const freqLabel = mhz.toFixed(5);
         this.overlayCtx.font = 'bold 12px monospace';
         this.overlayCtx.textAlign = 'center';
         this.overlayCtx.textBaseline = 'top';

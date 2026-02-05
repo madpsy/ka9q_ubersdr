@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"time"
 )
 
 // VoiceActivity represents a detected voice signal block
@@ -241,8 +242,9 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 		return
 	}
 
-	// Get latest FFT data for the band
-	fft := nfm.GetLatestFFT(band)
+	// Get 5-second max-hold FFT data for the band
+	// This provides better detection by preserving peaks over a longer window
+	fft := nfm.GetAveragedFFT(band, 5*time.Second)
 	if fft == nil {
 		w.WriteHeader(http.StatusNoContent)
 		json.NewEncoder(w).Encode(map[string]string{

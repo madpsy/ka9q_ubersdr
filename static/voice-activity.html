@@ -170,8 +170,7 @@
     </div>
 
     <div id="error-container"></div>
-    <div id="loading" class="loading">Loading voice activity data...</div>
-    <div id="content" style="display: none;">
+    <div id="content">
         <div class="stats-grid" id="stats-grid"></div>
         <div class="activity-list">
             <div class="activity-header">Recent Voice Activity</div>
@@ -192,11 +191,8 @@
         let autoRefreshInterval = null;
 
         async function fetchData() {
-            const loadingEl = document.getElementById('loading');
-            const contentEl = document.getElementById('content');
             const errorEl = document.getElementById('error-container');
             
-            loadingEl.style.display = 'block';
             errorEl.innerHTML = '';
 
             try {
@@ -208,15 +204,11 @@
 
                 const data = await response.json();
                 
-                loadingEl.style.display = 'none';
-                contentEl.style.display = 'block';
-                
                 displayData(data);
                 updateLastUpdated();
                 
             } catch (error) {
                 console.error('Error fetching voice activity:', error);
-                loadingEl.style.display = 'none';
                 errorEl.innerHTML = `<div class="error">Error loading data: ${error.message}</div>`;
             }
         }

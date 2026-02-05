@@ -146,7 +146,7 @@ func calculateNoiseFloor(data []float32) float32 {
 // Assumes dial frequency is in 500 Hz increments
 // LSB for bands < 10 MHz (voice below dial)
 // USB for bands >= 10 MHz (voice above dial)
-// Accounts for typical voice low-frequency filter cutoff (0-200 Hz)
+// Accounts for typical voice low-frequency filter cutoff (~100 Hz)
 func estimateDialFrequency(startFreq, endFreq, bandStart, bandEnd uint64) (uint64, string) {
 	// Determine if this is LSB or USB based on band
 	// Bands below 10 MHz use LSB, above use USB
@@ -155,19 +155,24 @@ func estimateDialFrequency(startFreq, endFreq, bandStart, bandEnd uint64) (uint6
 	var dialFreq uint64
 	var mode string
 	
+	// Calculate bandwidth
+	bandwidth := endFreq - startFreq
+	
 	if isLSB {
 		// LSB: voice is below dial frequency
-		// Voice typically starts 200 Hz below dial due to low-frequency filter
-		// So dial frequency is approximately at the upper edge of voice activity
-		// Round UP to next 500 Hz boundary (dial is above the voice)
-		dialFreq = ((endFreq + 499) / 500) * 500
+		// The dial is at the top edge of the voice signal (plus ~100 Hz filter offset)
+		// Detection often overshoots by ~500 Hz due to FFT bin resolution and spillover
+		// Subtract 500 Hz then round to nearest 500 Hz
+		estimatedDial := startFreq + bandwidth - 500
+		dialFreq = ((estimatedDial + 250) / 500) * 500
 		mode = "LSB"
 	} else {
 		// USB: voice is above dial frequency
-		// Voice typically starts 200 Hz above dial due to low-frequency filter
-		// So dial frequency is approximately at the lower edge of voice activity
-		// Round DOWN to previous 500 Hz boundary (dial is below the voice)
-		dialFreq = (startFreq / 500) * 500
+		// The dial is at the bottom edge of the voice signal (minus ~100 Hz filter offset)
+		// Detection often undershoots by ~500 Hz due to FFT bin resolution
+		// Add 500 Hz then round to nearest 500 Hz
+		estimatedDial := startFreq + 500
+		dialFreq = ((estimatedDial + 250) / 500) * 500
 		mode = "USB"
 	}
 	

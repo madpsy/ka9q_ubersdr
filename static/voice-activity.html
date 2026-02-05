@@ -248,7 +248,8 @@
 
             activityList.innerHTML = data.activities.map(activity => {
                 const freq = formatFrequency(activity.estimated_dial_freq || activity.start_freq);
-                const mode = activity.mode || 'LSB';
+                const modeUpper = activity.mode || 'LSB';
+                const mode = modeUpper.toLowerCase(); // Convert to lowercase for tuneToChannel
                 const bandwidth = activity.bandwidth || 0;
                 const signalAboveNoise = activity.signal_above_noise ? activity.signal_above_noise.toFixed(1) + ' dB' : 'N/A';
                 
@@ -261,7 +262,7 @@
                     <div class="activity-item" onclick="tuneToFrequency(${dialFreq}, '${mode}', ${bwLow}, ${bwHigh})">
                         <div class="frequency">${freq}</div>
                         <div>
-                            <span class="mode">${mode}</span>
+                            <span class="mode">${modeUpper}</span>
                             <span style="font-size: 11px; color: #95a5a6; margin-left: 8px;">${bandwidth} Hz | SNR: ${signalAboveNoise}</span>
                         </div>
                         <div class="timestamp">${signalAboveNoise}</div>

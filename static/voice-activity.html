@@ -302,21 +302,42 @@
             }
             
             try {
-                // Use the proper function to set frequency value (handles Hz/kHz/MHz conversion)
-                if (window.opener.setFrequencyInputValue) {
-                    window.opener.setFrequencyInputValue(frequency);
+                // Match the bookmark click behavior exactly
+                const freqInput = window.opener.document.getElementById('frequency');
+                
+                // Set frequency (only if user is not currently editing it)
+                if (freqInput && window.opener.document.activeElement !== freqInput) {
+                    if (window.opener.setFrequencyInputValue) {
+                        window.opener.setFrequencyInputValue(frequency);
+                    } else {
+                        freqInput.value = frequency;
+                    }
                 }
                 
-                // Trigger the frequency change handler
-                if (window.opener.handleFrequencyChange) {
-                    window.opener.handleFrequencyChange();
+                // Update band buttons
+                if (window.opener.updateBandButtons) {
+                    window.opener.updateBandButtons(frequency);
                 }
                 
-                // Set the mode after a short delay to ensure frequency is set first
+                // Set mode
                 if (mode && window.opener.setMode) {
-                    setTimeout(() => {
-                        window.opener.setMode(mode, false);
-                    }, 200);
+                    window.opener.setMode(mode, false);
+                }
+                
+                // Update URL
+                if (window.opener.updateURL) {
+                    window.opener.updateURL();
+                }
+                
+                // Auto-connect and tune
+                if (!window.opener.wsManager || !window.opener.wsManager.isConnected()) {
+                    if (window.opener.connect) {
+                        window.opener.connect();
+                    }
+                } else {
+                    if (window.opener.autoTune) {
+                        window.opener.autoTune();
+                    }
                 }
                 
                 console.log(`Tuned to ${frequency} Hz, mode ${mode}`);

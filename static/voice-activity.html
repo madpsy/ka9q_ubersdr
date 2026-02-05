@@ -302,45 +302,17 @@
             }
             
             try {
-                // Match the bookmark click behavior exactly
-                const freqInput = window.opener.document.getElementById('frequency');
-                
-                // Set frequency (only if user is not currently editing it)
-                if (freqInput && window.opener.document.activeElement !== freqInput) {
-                    if (window.opener.setFrequencyInputValue) {
-                        window.opener.setFrequencyInputValue(frequency);
-                    } else {
-                        freqInput.value = frequency;
-                    }
-                }
-                
-                // Update band buttons
-                if (window.opener.updateBandButtons) {
-                    window.opener.updateBandButtons(frequency);
-                }
-                
-                // Set mode
-                if (mode && window.opener.setMode) {
-                    window.opener.setMode(mode, false);
-                }
-                
-                // Update URL
-                if (window.opener.updateURL) {
-                    window.opener.updateURL();
-                }
-                
-                // Auto-connect and tune
-                if (!window.opener.wsManager || !window.opener.wsManager.isConnected()) {
-                    if (window.opener.connect) {
-                        window.opener.connect();
-                    }
+                // Use the handleBookmarkClick function directly - it handles everything correctly
+                if (window.opener.handleBookmarkClick) {
+                    const bookmarkData = {
+                        frequency: frequency,
+                        mode: mode || 'LSB'
+                    };
+                    window.opener.handleBookmarkClick(bookmarkData, false, false);
+                    console.log(`Tuned to ${frequency} Hz, mode ${mode}`);
                 } else {
-                    if (window.opener.autoTune) {
-                        window.opener.autoTune();
-                    }
+                    console.error('handleBookmarkClick not available');
                 }
-                
-                console.log(`Tuned to ${frequency} Hz, mode ${mode}`);
             } catch (error) {
                 console.error('Error tuning to frequency:', error);
             }

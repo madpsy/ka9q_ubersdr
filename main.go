@@ -1281,6 +1281,12 @@ func main() {
 	http.HandleFunc("/api/noisefloor/aggregate", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorAggregate(w, r, noiseFloorMonitor, ipBanManager, aggregateRateLimiter, prometheusMetrics)
 	}))
+	http.HandleFunc("/api/noisefloor/voice-activity", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleVoiceActivity(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
+	}))
+	http.HandleFunc("/api/noisefloor/voice-activity/all", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleAllBandsVoiceActivity(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
+	}))
 
 	// Frequency reference endpoints
 	http.HandleFunc("/api/frequency-reference", func(w http.ResponseWriter, r *http.Request) {

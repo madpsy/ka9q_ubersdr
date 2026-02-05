@@ -8475,10 +8475,17 @@ window.addEventListener('message', (event) => {
         return;
     }
     
-    // Security Check 2: Verify source is our authorized popup
+    // Security Check 2: Verify source is our authorized popup (if we have one tracked)
+    // Allow messages if we don't have a tracked popup yet, or if it matches
     if (controlPopup && event.source !== controlPopup) {
         console.warn('[Popup Control] Rejected message from unauthorized window');
         return;
+    }
+    
+    // If we don't have a tracked popup but receive a valid message, track this source
+    if (!controlPopup && event.source) {
+        console.log('[Popup Control] Tracking new popup window');
+        controlPopup = event.source;
     }
     
     // Parse command

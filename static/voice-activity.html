@@ -327,12 +327,12 @@
             }
         }
 
-        // Auto-refresh every 30 seconds
+        // Auto-refresh every 2.5 seconds
         function startAutoRefresh() {
             if (autoRefreshInterval) {
                 clearInterval(autoRefreshInterval);
             }
-            autoRefreshInterval = setInterval(fetchData, 30000);
+            autoRefreshInterval = setInterval(fetchData, 2500);
         }
 
         // Initial load

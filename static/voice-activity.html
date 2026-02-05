@@ -224,22 +224,25 @@
         function displayData(data) {
             // Display statistics
             const statsGrid = document.getElementById('stats-grid');
+            const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : 'N/A';
+            const noiseFloor = data.noise_floor_db ? data.noise_floor_db.toFixed(1) + ' dB' : 'N/A';
+            
             statsGrid.innerHTML = `
                 <div class="stat-card">
                     <div class="stat-label">Band</div>
                     <div class="stat-value">${data.band || band}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Total Events</div>
-                    <div class="stat-value">${data.total_events || 0}</div>
+                    <div class="stat-label">Total Activities</div>
+                    <div class="stat-value">${data.total_activities || 0}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Active Now</div>
-                    <div class="stat-value">${data.active_count || 0}</div>
+                    <div class="stat-label">Noise Floor</div>
+                    <div class="stat-value">${noiseFloor}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Time Range</div>
-                    <div class="stat-value">${data.time_range || 'N/A'}</div>
+                    <div class="stat-label">Last Update</div>
+                    <div class="stat-value" style="font-size: 14px;">${timestamp}</div>
                 </div>
             `;
 
@@ -252,25 +255,27 @@
             }
 
             activityList.innerHTML = data.activities.map(activity => {
-                const freq = formatFrequency(activity.frequency);
-                const time = formatTimestamp(activity.timestamp);
-                const mode = activity.mode || 'VOICE';
+                const freq = formatFrequency(activity.estimated_dial_freq || activity.start_freq);
+                const mode = activity.mode || 'LSB';
+                const bandwidth = activity.bandwidth || 0;
+                const signalAboveNoise = activity.signal_above_noise ? activity.signal_above_noise.toFixed(1) + ' dB' : 'N/A';
                 
                 return `
-                    <div class="activity-item" onclick="tuneToFrequency(${activity.frequency}, '${mode}')">
+                    <div class="activity-item" onclick="tuneToFrequency(${activity.estimated_dial_freq || activity.start_freq}, '${mode}')">
                         <div class="frequency">${freq}</div>
-                        <div><span class="mode">${mode}</span></div>
-                        <div class="timestamp">${time}</div>
+                        <div>
+                            <span class="mode">${mode}</span>
+                            <span style="font-size: 11px; color: #95a5a6; margin-left: 8px;">${bandwidth} Hz | SNR: ${signalAboveNoise}</span>
+                        </div>
+                        <div class="timestamp">${signalAboveNoise}</div>
                     </div>
                 `;
             }).join('');
         }
 
         function formatFrequency(hz) {
-            if (hz >= 1000000) {
-                return (hz / 1000000).toFixed(3) + ' MHz';
-            } else if (hz >= 1000) {
-                return (hz / 1000).toFixed(1) + ' kHz';
+            if (hz >= 1000) {
+                return (hz / 1000).toFixed(0) + ' kHz';
             }
             return hz + ' Hz';
         }

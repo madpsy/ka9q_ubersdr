@@ -296,26 +296,16 @@
         }
 
         function tuneToFrequency(frequency, mode) {
-            if (window.opener) {
-                // Send command to main window
-                window.opener.postMessage({
-                    command: 'setFrequency',
-                    params: { frequency: frequency }
-                }, window.location.origin);
-                
-                // Optionally set mode too
-                if (mode) {
-                    setTimeout(() => {
-                        window.opener.postMessage({
-                            command: 'setMode',
-                            params: { mode: mode }
-                        }, window.location.origin);
-                    }, 100);
-                }
-                
+            if (window.opener && window.opener.handleBookmarkClick) {
+                // Use the bookmark click handler which properly handles tuning
+                const bookmarkData = {
+                    frequency: frequency,
+                    mode: mode || 'LSB'
+                };
+                window.opener.handleBookmarkClick(bookmarkData, false, false);
                 console.log(`Tuned to ${frequency} Hz, mode ${mode}`);
             } else {
-                console.warn('No opener window available');
+                console.warn('No opener window available or handleBookmarkClick not found');
             }
         }
 

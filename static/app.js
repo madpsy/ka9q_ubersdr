@@ -8416,3 +8416,225 @@ function updateSignalQualityDisplay() {
 // Expose signal quality update function globally
 window.updateSignalQualityDisplay = updateSignalQualityDisplay;
 
+
+// ============================================================================
+// Popup Window Control System
+// ============================================================================
+
+// Track authorized control popup window
+let controlPopup = null;
+
+/**
+ * Opens a control popup window that can send commands to this main window
+ * @param {string} url - URL to open in the popup (e.g., 'control.html')
+ * @param {number} width - Popup width in pixels (default: 400)
+ * @param {number} height - Popup height in pixels (default: 600)
+ * @returns {Window|null} Reference to the opened popup window
+ */
+function openControlPopup(url = 'control.html', width = 400, height = 600) {
+    // Calculate centered position
+    const left = (window.screen.width - width) / 2;
+    const top = (window.screen.height - height) / 2;
+    
+    const features = `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`;
+    
+    // Open popup and store reference
+    controlPopup = window.open(url, 'UberSDR_Control', features);
+    
+    if (controlPopup) {
+        console.log('[Popup Control] Opened control popup:', url);
+        
+        // Monitor popup close
+        const checkClosed = setInterval(() => {
+            if (controlPopup && controlPopup.closed) {
+                console.log('[Popup Control] Control popup closed');
+                controlPopup = null;
+                clearInterval(checkClosed);
+            }
+        }, 1000);
+    } else {
+        console.error('[Popup Control] Failed to open popup - check popup blocker');
+    }
+    
+    return controlPopup;
+}
+
+/**
+ * Secure message handler for popup control commands
+ * Verifies origin and source before executing commands
+ */
+window.addEventListener('message', (event) => {
+    // Security Check 1: Verify origin matches our domain
+    const allowedOrigins = [
+        window.location.origin,  // Same origin
+        // Add additional trusted origins here if needed
+    ];
+    
+    if (!allowedOrigins.includes(event.origin)) {
+        console.warn('[Popup Control] Rejected message from unauthorized origin:', event.origin);
+        return;
+    }
+    
+    // Security Check 2: Verify source is our authorized popup
+    if (controlPopup && event.source !== controlPopup) {
+        console.warn('[Popup Control] Rejected message from unauthorized window');
+        return;
+    }
+    
+    // Parse command
+    const { command, params } = event.data;
+    
+    if (!command) {
+        console.warn('[Popup Control] Received message without command:', event.data);
+        return;
+    }
+    
+    console.log('[Popup Control] Processing command:', command, params);
+    
+    // Execute command
+    try {
+        switch (command) {
+            case 'setFrequency':
+                if (typeof params.frequency === 'number') {
+                    setFrequency(params.frequency);
+                    // Send acknowledgment
+                    event.source.postMessage({
+                        command: 'ack',
+                        originalCommand: command,
+                        success: true
+                    }, event.origin);
+                } else {
+                    throw new Error('Invalid frequency parameter');
+                }
+                break;
+                
+            case 'setMode':
+                if (typeof params.mode === 'string') {
+                    const preserveBandwidth = params.preserveBandwidth !== undefined ? params.preserveBandwidth : false;
+                    setMode(params.mode, preserveBandwidth);
+                    event.source.postMessage({
+                        command: 'ack',
+                        originalCommand: command,
+                        success: true
+                    }, event.origin);
+                } else {
+                    throw new Error('Invalid mode parameter');
+                }
+                break;
+                
+            case 'setBandwidth':
+                if (typeof params.low === 'number' && typeof params.high === 'number') {
+                    currentBandwidthLow = params.low;
+                    currentBandwidthHigh = params.high;
+                    updateBandwidth();
+                    event.source.postMessage({
+                        command: 'ack',
+                        originalCommand: command,
+                        success: true
+                    }, event.origin);
+                } else {
+                    throw new Error('Invalid bandwidth parameters');
+                }
+                break;
+                
+            case 'adjustFrequency':
+                if (typeof params.deltaHz === 'number') {
+                    adjustFrequency(params.deltaHz);
+                    event.source.postMessage({
+                        command: 'ack',
+                        originalCommand: command,
+                        success: true
+                    }, event.origin);
+                } else {
+                    throw new Error('Invalid deltaHz parameter');
+                }
+                break;
+                
+            case 'getState':
+                // Return current state to popup
+                event.source.postMessage({
+                    command: 'state',
+                    state: {
+                        frequency: currentFrequency,
+                        mode: currentMode,
+                        bandwidthLow: currentBandwidthLow,
+                        bandwidthHigh: currentBandwidthHigh
+                    }
+                }, event.origin);
+                break;
+                
+            default:
+                console.warn('[Popup Control] Unknown command:', command);
+                event.source.postMessage({
+                    command: 'ack',
+                    originalCommand: command,
+                    success: false,
+                    error: 'Unknown command'
+                }, event.origin);
+        }
+    } catch (error) {
+        console.error('[Popup Control] Error executing command:', error);
+        event.source.postMessage({
+            command: 'ack',
+            originalCommand: command,
+            success: false,
+            error: error.message
+        }, event.origin);
+    }
+});
+
+// Expose openControlPopup globally for HTML onclick handlers
+window.openControlPopup = openControlPopup;
+
+console.log('[Popup Control] Secure popup control system initialized');
+
+// ============================================================================
+// Band Badge Right-Click Handler for Voice Activity Popup
+// ============================================================================
+
+/**
+ * Opens voice activity popup for a specific band
+ * @param {string} band - Band name (e.g., '40m', '20m')
+ */
+function openVoiceActivityPopup(band) {
+    const url = `voice-activity.html?band=${encodeURIComponent(band)}`;
+    return openControlPopup(url, 450, 650);
+}
+
+/**
+ * Initialize right-click handlers on band badges
+ */
+function initializeBandBadgeRightClick() {
+    const bandBadges = document.querySelectorAll('.band-status-badge');
+    
+    bandBadges.forEach(badge => {
+        // Prevent default context menu
+        badge.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const band = badge.getAttribute('data-band');
+            if (band) {
+                console.log(`[Band Badge] Opening voice activity popup for ${band}`);
+                openVoiceActivityPopup(band);
+            }
+            return false;
+        });
+        
+        // Add visual feedback on hover to indicate right-click is available
+        badge.style.cursor = 'context-menu';
+        badge.title = `Left-click to tune to ${badge.getAttribute('data-band')} | Right-click for voice activity`;
+    });
+    
+    console.log(`[Band Badge] Initialized right-click handlers for ${bandBadges.length} band badges`);
+}
+
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeBandBadgeRightClick);
+} else {
+    // DOM already loaded
+    initializeBandBadgeRightClick();
+}
+
+// Expose globally
+window.openVoiceActivityPopup = openVoiceActivityPopup;
+window.initializeBandBadgeRightClick = initializeBandBadgeRightClick;

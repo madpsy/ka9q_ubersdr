@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Activity - Band</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: #ecf0f1;
+            padding: 15px;
+            font-size: 14px;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            padding: 12px 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .refresh-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+
+        .refresh-btn:hover {
+            background: #2980b9;
+        }
+
+        .refresh-btn:active {
+            transform: scale(0.98);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #95a5a6;
+        }
+
+        .error {
+            background: #c0392b;
+            color: white;
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .stat-card {
+            background: #2c3e50;
+            padding: 12px;
+            border-radius: 6px;
+            border-left: 3px solid #3498db;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: #95a5a6;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: 600;
+            color: #ecf0f1;
+        }
+
+        .activity-list {
+            background: #2c3e50;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .activity-header {
+            background: #34495e;
+            padding: 10px 15px;
+            font-weight: 600;
+            font-size: 13px;
+            border-bottom: 1px solid #1a1a1a;
+        }
+
+        .activity-item {
+            padding: 10px 15px;
+            border-bottom: 1px solid #34495e;
+            display: grid;
+            grid-template-columns: 120px 1fr 80px;
+            gap: 10px;
+            align-items: center;
+            transition: background 0.2s;
+        }
+
+        .activity-item:hover {
+            background: #34495e;
+            cursor: pointer;
+        }
+
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+
+        .frequency {
+            font-weight: 600;
+            color: #3498db;
+            font-size: 13px;
+        }
+
+        .mode {
+            display: inline-block;
+            background: #27ae60;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .timestamp {
+            font-size: 11px;
+            color: #95a5a6;
+            text-align: right;
+        }
+
+        .no-data {
+            padding: 30px;
+            text-align: center;
+            color: #95a5a6;
+        }
+
+        .last-updated {
+            text-align: center;
+            font-size: 11px;
+            color: #7f8c8d;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1 id="band-title">Voice Activity</h1>
+        <button class="refresh-btn" onclick="fetchData()">↻ Refresh</button>
+    </div>
+
+    <div id="error-container"></div>
+    <div id="loading" class="loading">Loading voice activity data...</div>
+    <div id="content" style="display: none;">
+        <div class="stats-grid" id="stats-grid"></div>
+        <div class="activity-list">
+            <div class="activity-header">Recent Voice Activity</div>
+            <div id="activity-list"></div>
+        </div>
+        <div class="last-updated" id="last-updated"></div>
+    </div>
+
+    <script>
+        // Get band from URL parameter
+        const urlParams = new URLSearchParams(window.location.search);
+        const band = urlParams.get('band') || '40m';
+        
+        // Update title
+        document.getElementById('band-title').textContent = `Voice Activity - ${band}`;
+        document.title = `Voice Activity - ${band}`;
+
+        let autoRefreshInterval = null;
+
+        async function fetchData() {
+            const loadingEl = document.getElementById('loading');
+            const contentEl = document.getElementById('content');
+            const errorEl = document.getElementById('error-container');
+            
+            loadingEl.style.display = 'block';
+            errorEl.innerHTML = '';
+
+            try {
+                const response = await fetch(`/api/noisefloor/voice-activity?band=${encodeURIComponent(band)}`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                
+                loadingEl.style.display = 'none';
+                contentEl.style.display = 'block';
+                
+                displayData(data);
+                updateLastUpdated();
+                
+            } catch (error) {
+                console.error('Error fetching voice activity:', error);
+                loadingEl.style.display = 'none';
+                errorEl.innerHTML = `<div class="error">Error loading data: ${error.message}</div>`;
+            }
+        }
+
+        function displayData(data) {
+            // Display statistics
+            const statsGrid = document.getElementById('stats-grid');
+            statsGrid.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-label">Band</div>
+                    <div class="stat-value">${data.band || band}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Events</div>
+                    <div class="stat-value">${data.total_events || 0}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Active Now</div>
+                    <div class="stat-value">${data.active_count || 0}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Time Range</div>
+                    <div class="stat-value">${data.time_range || 'N/A'}</div>
+                </div>
+            `;
+
+            // Display activity list
+            const activityList = document.getElementById('activity-list');
+            
+            if (!data.activities || data.activities.length === 0) {
+                activityList.innerHTML = '<div class="no-data">No voice activity detected</div>';
+                return;
+            }
+
+            activityList.innerHTML = data.activities.map(activity => {
+                const freq = formatFrequency(activity.frequency);
+                const time = formatTimestamp(activity.timestamp);
+                const mode = activity.mode || 'VOICE';
+                
+                return `
+                    <div class="activity-item" onclick="tuneToFrequency(${activity.frequency}, '${mode}')">
+                        <div class="frequency">${freq}</div>
+                        <div><span class="mode">${mode}</span></div>
+                        <div class="timestamp">${time}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function formatFrequency(hz) {
+            if (hz >= 1000000) {
+                return (hz / 1000000).toFixed(3) + ' MHz';
+            } else if (hz >= 1000) {
+                return (hz / 1000).toFixed(1) + ' kHz';
+            }
+            return hz + ' Hz';
+        }
+
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return 'Unknown';
+            
+            const date = new Date(timestamp);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            
+            const diffHours = Math.floor(diffMins / 60);
+            if (diffHours < 24) return `${diffHours}h ago`;
+            
+            return date.toLocaleTimeString();
+        }
+
+        function updateLastUpdated() {
+            const lastUpdatedEl = document.getElementById('last-updated');
+            const now = new Date();
+            lastUpdatedEl.textContent = `Last updated: ${now.toLocaleTimeString()}`;
+        }
+
+        function tuneToFrequency(frequency, mode) {
+            if (window.opener) {
+                // Send command to main window
+                window.opener.postMessage({
+                    command: 'setFrequency',
+                    params: { frequency: frequency }
+                }, window.location.origin);
+                
+                // Optionally set mode too
+                if (mode) {
+                    setTimeout(() => {
+                        window.opener.postMessage({
+                            command: 'setMode',
+                            params: { mode: mode }
+                        }, window.location.origin);
+                    }, 100);
+                }
+                
+                console.log(`Tuned to ${frequency} Hz, mode ${mode}`);
+            } else {
+                console.warn('No opener window available');
+            }
+        }
+
+        // Auto-refresh every 30 seconds
+        function startAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+            autoRefreshInterval = setInterval(fetchData, 30000);
+        }
+
+        // Initial load
+        fetchData();
+        startAutoRefresh();
+
+        // Cleanup on close
+        window.addEventListener('beforeunload', () => {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+        });
+    </script>
+</body>
+</html>

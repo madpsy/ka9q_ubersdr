@@ -260,8 +260,21 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 	}
 
 	// Get 5-second max-hold FFT data for the band
-	// This provides better detection by preserving peaks over a longer window
-	fft := nfm.GetAveragedFFT(band, 5*time.Second)
+	// Max-hold preserves voice signals even if they're transient within the window
+	// Averaging would smooth them out and make them disappear into the noise floor
+	nfm.fftMu.RLock()
+	buffer, ok := nfm.fftBuffers[band]
+	nfm.fftMu.RUnlock()
+	
+	if !ok {
+		w.WriteHeader(http.StatusNoContent)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": fmt.Sprintf("No FFT buffer found for band %s", band),
+		})
+		return
+	}
+	
+	fft := buffer.GetMaxHoldFFT(5 * time.Second)
 	if fft == nil {
 		w.WriteHeader(http.StatusNoContent)
 		json.NewEncoder(w).Encode(map[string]string{

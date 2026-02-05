@@ -48,9 +48,12 @@ func detectVoiceActivity(fft *BandFFT, thresholdDB float32, minBandwidth, maxBan
 	// Find bins above threshold
 	threshold := noiseFloor + thresholdDB
 	
-	// Group contiguous bins above threshold
+	// Group contiguous bins above threshold, allowing small gaps (up to 3 bins)
+	// This is more realistic for voice signals which have varying frequency components
 	activities := []VoiceActivity{}
 	var currentActivity *VoiceActivity
+	gapCounter := 0
+	maxGap := 3 // Allow up to 3 consecutive bins below threshold within a signal
 	
 	for i, signalDB := range fft.Data {
 		freq := fft.StartFreq + uint64(float64(i)*fft.BinWidth)
@@ -68,7 +71,7 @@ func detectVoiceActivity(fft *BandFFT, thresholdDB float32, minBandwidth, maxBan
 				// Continue current activity
 				currentActivity.EndFreq = freq
 				currentActivity.EndBin = i
-				// Update running average
+				// Update running average (only count bins above threshold)
 				binCount := float32(currentActivity.EndBin - currentActivity.StartBin + 1)
 				currentActivity.AvgSignalDB = ((currentActivity.AvgSignalDB * (binCount - 1)) + signalDB) / binCount
 				// Update peak
@@ -76,27 +79,36 @@ func detectVoiceActivity(fft *BandFFT, thresholdDB float32, minBandwidth, maxBan
 					currentActivity.PeakSignalDB = signalDB
 				}
 			}
+			gapCounter = 0 // Reset gap counter
 		} else {
-			// End of activity
+			// Below threshold
 			if currentActivity != nil {
-				// Finalize activity
-				currentActivity.EndFreq = fft.StartFreq + uint64(float64(currentActivity.EndBin)*fft.BinWidth)
-				currentActivity.Bandwidth = currentActivity.EndFreq - currentActivity.StartFreq
-				currentActivity.SignalAboveNoise = currentActivity.AvgSignalDB - noiseFloor
-				
-				// Check if bandwidth is within voice range
-				if currentActivity.Bandwidth >= minBandwidth && currentActivity.Bandwidth <= maxBandwidth {
-					// Estimate dial frequency
-					currentActivity.EstimatedDialFreq, currentActivity.Mode = estimateDialFrequency(
-						currentActivity.StartFreq,
-						currentActivity.EndFreq,
-						fft.StartFreq,
-						fft.EndFreq,
-					)
-					activities = append(activities, *currentActivity)
+				gapCounter++
+				if gapCounter > maxGap {
+					// Gap too large, end current activity
+					currentActivity.EndFreq = fft.StartFreq + uint64(float64(currentActivity.EndBin)*fft.BinWidth)
+					currentActivity.Bandwidth = currentActivity.EndFreq - currentActivity.StartFreq
+					currentActivity.SignalAboveNoise = currentActivity.AvgSignalDB - noiseFloor
+					
+					// Check if bandwidth is within voice range
+					if currentActivity.Bandwidth >= minBandwidth && currentActivity.Bandwidth <= maxBandwidth {
+						// Estimate dial frequency
+						currentActivity.EstimatedDialFreq, currentActivity.Mode = estimateDialFrequency(
+							currentActivity.StartFreq,
+							currentActivity.EndFreq,
+							fft.StartFreq,
+							fft.EndFreq,
+						)
+						activities = append(activities, *currentActivity)
+					}
+					
+					currentActivity = nil
+					gapCounter = 0
+				} else {
+					// Small gap, continue activity but extend end frequency
+					currentActivity.EndFreq = freq
+					currentActivity.EndBin = i
 				}
-				
-				currentActivity = nil
 			}
 		}
 	}

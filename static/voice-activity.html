@@ -302,10 +302,9 @@
             }
             
             try {
-                // Set the frequency input value
-                const freqInput = window.opener.document.getElementById('frequency');
-                if (freqInput) {
-                    freqInput.value = frequency;
+                // Use the proper function to set frequency value (handles Hz/kHz/MHz conversion)
+                if (window.opener.setFrequencyInputValue) {
+                    window.opener.setFrequencyInputValue(frequency);
                 }
                 
                 // Trigger the frequency change handler

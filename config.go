@@ -102,6 +102,7 @@ type ServerConfig struct {
 	CmdRateLimit                  int             `yaml:"cmd_rate_limit"`      // Commands per second per UUID per channel (0 = unlimited)
 	ConnRateLimit                 int             `yaml:"conn_rate_limit"`     // WebSocket connections per second per IP (0 = unlimited)
 	SessionsPerMinute             int             `yaml:"sessions_per_minute"` // /connection endpoint requests per minute per IP (0 = unlimited)
+	EnforceSessionIPMatch         bool            `yaml:"enforce_session_ip_match"` // Enforce that WebSocket connections must come from same IP as /connection (default: false)
 	TimeoutBypassIPs              []string        `yaml:"timeout_bypass_ips"`  // List of IPs/CIDRs that bypass idle and max session time limits
 	TrustedProxyIPs               []string        `yaml:"trusted_proxy_ips"`   // List of IPs/CIDRs to trust X-Real-IP header from
 	BypassPassword                string          `yaml:"bypass_password"`     // Password that grants bypass privileges (empty = disabled)

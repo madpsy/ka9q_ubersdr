@@ -310,21 +310,6 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 		log.Printf("Error encoding voice activity response: %v", err)
 	}
 
-	if DebugMode && len(activities) > 0 {
-		log.Printf("DEBUG: Voice activity detected on %s: %d activities", band, len(activities))
-		for i, activity := range activities {
-			log.Printf("DEBUG:   Activity %d: %.3f-%.3f MHz (%.1f kHz), dial: %.3f MHz %s, signal: %.1f dB (%.1f dB above noise)",
-				i+1,
-				float64(activity.StartFreq)/1e6,
-				float64(activity.EndFreq)/1e6,
-				float64(activity.Bandwidth)/1e3,
-				float64(activity.EstimatedDialFreq)/1e6,
-				activity.Mode,
-				activity.AvgSignalDB,
-				activity.SignalAboveNoise,
-			)
-		}
-	}
 }
 
 // GetVoiceActivityForBand is a helper function to get voice activity programmatically

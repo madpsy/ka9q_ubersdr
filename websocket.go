@@ -498,15 +498,20 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Check if IP matches the bound IP (ensures UUID is used from same IP as /connection)
-	boundIP := wsh.sessions.GetUUIDIP(userSessionID)
-	if boundIP != "" && boundIP != clientIP {
-		log.Printf("Rejected Audio WebSocket: IP mismatch for user_session_id %s (bound: %s, actual: %s, source: %s)", userSessionID, boundIP, clientIP, sourceIP)
-		if err := wsh.sendError(conn, "Session IP mismatch. Please refresh the page and try again."); err != nil {
-			log.Printf("Failed to send error message: %v", err)
+	// Only enforce if configured to do so
+	if wsh.config.Server.EnforceSessionIPMatch {
+		boundIP := wsh.sessions.GetUUIDIP(userSessionID)
+		if boundIP != "" && boundIP != clientIP {
+			log.Printf("Rejected Audio WebSocket: IP mismatch for user_session_id %s (bound: %s, actual: %s, source: %s)", userSessionID, boundIP, clientIP, sourceIP)
+			if err := wsh.sendError(conn, "Session IP mismatch. Please refresh the page and try again."); err != nil {
+				log.Printf("Failed to send error message: %v", err)
+			}
+			return
 		}
-		return
+		log.Printf("Audio WebSocket: UUID %s IP binding validated (bound: %s, actual: %s) ✓", userSessionID, boundIP, clientIP)
+	} else {
+		log.Printf("Audio WebSocket: UUID %s IP binding check skipped (enforce_session_ip_match=false)", userSessionID)
 	}
-	log.Printf("Audio WebSocket: UUID %s IP binding validated (bound: %s, actual: %s) ✓", userSessionID, boundIP, clientIP)
 
 	// Get bandwidth parameters from query string (optional)
 	// Wide IQ modes should not have bandwidth parameters - they use preset values

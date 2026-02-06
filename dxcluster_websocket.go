@@ -214,13 +214,18 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 	}
 
 	// Check if IP matches the bound IP (ensures UUID is used from same IP as /connection)
-	boundIP := h.sessions.GetUUIDIP(userSessionID)
-	if boundIP != "" && boundIP != clientIP {
-		log.Printf("Rejected DX Cluster WebSocket: IP mismatch for user_session_id %s (bound: %s, actual: %s, source: %s)", userSessionID, boundIP, clientIP, sourceIP)
-		http.Error(w, "Session IP mismatch. Please refresh the page and try again.", http.StatusForbidden)
-		return
+	// Only enforce if configured to do so
+	if h.sessions.config.Server.EnforceSessionIPMatch {
+		boundIP := h.sessions.GetUUIDIP(userSessionID)
+		if boundIP != "" && boundIP != clientIP {
+			log.Printf("Rejected DX Cluster WebSocket: IP mismatch for user_session_id %s (bound: %s, actual: %s, source: %s)", userSessionID, boundIP, clientIP, sourceIP)
+			http.Error(w, "Session IP mismatch. Please refresh the page and try again.", http.StatusForbidden)
+			return
+		}
+		log.Printf("DX Cluster WebSocket: UUID %s IP binding validated (bound: %s, actual: %s) ✓", userSessionID, boundIP, clientIP)
+	} else {
+		log.Printf("DX Cluster WebSocket: UUID %s IP binding check skipped (enforce_session_ip_match=false)", userSessionID)
 	}
-	log.Printf("DX Cluster WebSocket: UUID %s IP binding validated (bound: %s, actual: %s) ✓", userSessionID, boundIP, clientIP)
 
 	// Upgrade HTTP connection to WebSocket
 	conn, err := h.upgrader.Upgrade(w, r, nil)

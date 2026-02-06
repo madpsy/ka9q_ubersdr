@@ -209,13 +209,18 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	}
 
 	// Check if IP matches the bound IP (ensures UUID is used from same IP as /connection)
-	boundIP := swsh.sessions.GetUUIDIP(userSessionID)
-	if boundIP != "" && boundIP != clientIP {
-		log.Printf("Rejected Spectrum WebSocket: IP mismatch for user_session_id %s (bound: %s, actual: %s, source: %s)", userSessionID, boundIP, clientIP, sourceIP)
-		http.Error(w, "Session IP mismatch. Please refresh the page and try again.", http.StatusForbidden)
-		return
+	// Only enforce if configured to do so
+	if swsh.sessions.config.Server.EnforceSessionIPMatch {
+		boundIP := swsh.sessions.GetUUIDIP(userSessionID)
+		if boundIP != "" && boundIP != clientIP {
+			log.Printf("Rejected Spectrum WebSocket: IP mismatch for user_session_id %s (bound: %s, actual: %s, source: %s)", userSessionID, boundIP, clientIP, sourceIP)
+			http.Error(w, "Session IP mismatch. Please refresh the page and try again.", http.StatusForbidden)
+			return
+		}
+		log.Printf("Spectrum WebSocket: UUID %s IP binding validated (bound: %s, actual: %s) ✓", userSessionID, boundIP, clientIP)
+	} else {
+		log.Printf("Spectrum WebSocket: UUID %s IP binding check skipped (enforce_session_ip_match=false)", userSessionID)
 	}
-	log.Printf("Spectrum WebSocket: UUID %s IP binding validated (bound: %s, actual: %s) ✓", userSessionID, boundIP, clientIP)
 
 	// Upgrade HTTP connection to WebSocket
 	rawConn, err := upgrader.Upgrade(w, r, nil)

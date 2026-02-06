@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -148,39 +147,16 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 
 // HandleWebSocket handles WebSocket connections for DX cluster spots
 func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Get source IP address and strip port
+	// Use centralized IP detection function (same as /connection endpoint)
+	clientIP := getClientIP(r)
+	
+	// Also get raw source IP for logging
 	sourceIP := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(sourceIP); err == nil {
 		sourceIP = host
 	}
-	clientIP := sourceIP
 
-	// Only trust X-Real-IP if request comes from tunnel server or trusted proxy
-	// This prevents clients from spoofing their IP via X-Real-IP header
-	isTunnelServer := globalConfig != nil && globalConfig.InstanceReporting.IsTunnelServer(sourceIP)
-	isTrustedProxy := globalConfig != nil && globalConfig.Server.IsTrustedProxy(sourceIP)
-
-	if isTunnelServer || isTrustedProxy {
-		if xri := r.Header.Get("X-Real-IP"); xri != "" {
-			clientIP = strings.TrimSpace(xri)
-			// Strip port if present
-			if host, _, err := net.SplitHostPort(clientIP); err == nil {
-				clientIP = host
-			}
-		}
-	} else {
-		// Check X-Forwarded-For header for true source IP (first IP in the list)
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			clientIP = strings.TrimSpace(xff)
-			if commaIdx := strings.Index(clientIP, ","); commaIdx != -1 {
-				clientIP = strings.TrimSpace(clientIP[:commaIdx])
-			}
-			// Strip port if present
-			if host, _, err := net.SplitHostPort(clientIP); err == nil {
-				clientIP = host
-			}
-		}
-	}
+	log.Printf("DX Cluster WebSocket: sourceIP=%s, clientIP=%s (via getClientIP)", sourceIP, clientIP)
 
 	// Check if IP is banned
 	if h.ipBanManager.IsBanned(clientIP) {

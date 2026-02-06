@@ -11,7 +11,6 @@ import (
 	"net"
 	"net/http"
 	"regexp"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -275,63 +274,16 @@ type ServerMessage struct {
 
 // HandleWebSocket handles WebSocket connections
 func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Get source IP address and strip port
+	// Use centralized IP detection function (same as /connection endpoint)
+	clientIP := getClientIP(r)
+	
+	// Also get raw source IP for logging
 	sourceIP := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(sourceIP); err == nil {
 		sourceIP = host
 	}
-	clientIP := sourceIP
 
-	// Only trust X-Real-IP if request comes from tunnel server or trusted proxy
-	// This prevents clients from spoofing their IP via X-Real-IP header
-	xRealIP := r.Header.Get("X-Real-IP")
-	xForwardedFor := r.Header.Get("X-Forwarded-For")
-	isTunnelServer := globalConfig != nil && globalConfig.InstanceReporting.IsTunnelServer(sourceIP)
-	isTrustedProxy := globalConfig != nil && globalConfig.Server.IsTrustedProxy(sourceIP)
-
-	log.Printf("WebSocket IP detection: sourceIP=%s, X-Real-IP=%s, X-Forwarded-For=%s, isTunnelServer=%v, isTrustedProxy=%v",
-		sourceIP, xRealIP, xForwardedFor, isTunnelServer, isTrustedProxy)
-
-	if isTunnelServer || isTrustedProxy {
-		if xri := xRealIP; xri != "" {
-			clientIP = strings.TrimSpace(xri)
-			// Strip port if present
-			if host, _, err := net.SplitHostPort(clientIP); err == nil {
-				clientIP = host
-			}
-			if isTunnelServer {
-				log.Printf("WebSocket: Trusted X-Real-IP from tunnel server: %s -> %s", sourceIP, clientIP)
-			} else {
-				log.Printf("WebSocket: Trusted X-Real-IP from trusted proxy: %s -> %s", sourceIP, clientIP)
-			}
-		}
-	} else {
-		// Check X-Forwarded-For header for true source IP (first IP in the list)
-		if xff := xForwardedFor; xff != "" {
-			// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
-			// We want the first one (the true client)
-			if idx := len(xff); idx > 0 {
-				// Find first comma or use entire string
-				for i, c := range xff {
-					if c == ',' {
-						clientIP = strings.TrimSpace(xff[:i])
-						break
-					}
-				}
-				if clientIP == sourceIP {
-					// No comma found, use entire xff
-					clientIP = strings.TrimSpace(xff)
-				}
-			}
-			// Strip port from X-Forwarded-For IP if present
-			if host, _, err := net.SplitHostPort(clientIP); err == nil {
-				clientIP = host
-			}
-			log.Printf("WebSocket: Used X-Forwarded-For: %s -> %s", sourceIP, clientIP)
-		}
-	}
-
-	log.Printf("WebSocket final IPs: sourceIP=%s, clientIP=%s", sourceIP, clientIP)
+	log.Printf("Audio WebSocket: sourceIP=%s, clientIP=%s (via getClientIP)", sourceIP, clientIP)
 
 	// Check if IP is banned
 	if wsh.ipBanManager.IsBanned(clientIP) {

@@ -114,6 +114,12 @@ multicast_relay:
   # Use "ip link show" or "ifconfig" to find your interface name
   # The container reads this setting from config.yaml
   host_interface: "eth0"
+  
+  # Attempt mDNS lookup before falling back to FNV-1 hash (default: false)
+  # When false, skips mDNS resolution and uses FNV-1 hash directly (faster startup)
+  # When true, attempts to resolve multicast addresses via mDNS/Avahi first
+  # Set to false if you don't have Avahi running or want faster startup
+  attempt_mdns_lookup: false
 
 # Web server settings
 server:

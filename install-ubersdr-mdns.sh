@@ -55,52 +55,98 @@ EOF
 
 fi
 
-# Configure mDNS publishing for multicast groups
+# Configure mDNS publishing for multicast groups using avahi-publish commands
+# This matches how ka9q-radio's radiod publishes multicast groups
 echo ""
 echo "=== Configuring mDNS publishing for multicast groups ==="
 
-# Create /etc/avahi/hosts file for hostname-to-IP mappings (A records)
-cat > /etc/avahi/hosts <<'EOF'
-# UberSDR multicast group addresses
-# Format: IP_ADDRESS HOSTNAME
-239.185.143.241 hf-status.local
-239.69.232.124 pcm.local
+# Remove old service file approach if it exists
+if [ -f "/etc/avahi/services/ubersdr-multicast.service" ]; then
+  echo "Removing old Avahi service file..."
+  rm -f /etc/avahi/services/ubersdr-multicast.service
+fi
+
+# Create systemd service for hf-status address publication
+cat > /etc/systemd/system/avahi-publish-hf-status-addr.service <<'EOF'
+[Unit]
+Description=Avahi mDNS publisher for hf-status.local multicast address
+After=avahi-daemon.service
+Requires=avahi-daemon.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/avahi-publish-address hf-status.local 239.185.143.241
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
 EOF
 
-# Create service file for multicast groups (service records)
-cat > /etc/avahi/services/ubersdr-multicast.service <<'EOF'
-<?xml version="1.0" standalone='no'?>
-<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
-<service-group>
-  <name replace-wildcards="yes">UberSDR Multicast Groups on %h</name>
-  
-  <!-- hf-status multicast group -->
-  <service>
-    <type>_rtp._udp</type>
-    <port>5006</port>
-    <host-name>hf-status.local</host-name>
-    <txt-record>group=hf-status</txt-record>
-    <txt-record>address=239.185.143.241</txt-record>
-    <txt-record>description=KA9Q radiod status multicast group</txt-record>
-  </service>
-  
-  <!-- pcm multicast group -->
-  <service>
-    <type>_rtp._udp</type>
-    <port>5004</port>
-    <host-name>pcm.local</host-name>
-    <txt-record>group=pcm</txt-record>
-    <txt-record>address=239.69.232.124</txt-record>
-    <txt-record>description=KA9Q radiod PCM audio multicast group</txt-record>
-  </service>
-</service-group>
+# Create systemd service for hf-status control service publication
+cat > /etc/systemd/system/avahi-publish-hf-status-ctl.service <<'EOF'
+[Unit]
+Description=Avahi mDNS publisher for hf-status _ka9q-ctl service
+After=avahi-daemon.service avahi-publish-hf-status-addr.service
+Requires=avahi-daemon.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/avahi-publish-service "hf-status" _ka9q-ctl._udp 5006 "group=hf-status" "address=239.185.143.241" "description=KA9Q radiod status/control multicast group"
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
 EOF
 
-echo "=== Restarting Avahi daemon to apply multicast group configuration ==="
-systemctl restart avahi-daemon
+# Create systemd service for pcm address publication
+cat > /etc/systemd/system/avahi-publish-pcm-addr.service <<'EOF'
+[Unit]
+Description=Avahi mDNS publisher for pcm.local multicast address
+After=avahi-daemon.service
+Requires=avahi-daemon.service
 
-echo "✓ Multicast group mDNS configured (A records + service records)"
-echo "  hf-status.local -> 239.185.143.241 (port 5006, _rtp._udp)"
+[Service]
+Type=simple
+ExecStart=/usr/bin/avahi-publish-address pcm.local 239.69.232.124
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Create systemd service for pcm RTP service publication
+cat > /etc/systemd/system/avahi-publish-pcm-rtp.service <<'EOF'
+[Unit]
+Description=Avahi mDNS publisher for pcm _rtp service
+After=avahi-daemon.service avahi-publish-pcm-addr.service
+Requires=avahi-daemon.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/avahi-publish-service "pcm" _rtp._udp 5004 "group=pcm" "address=239.69.232.124" "description=KA9Q radiod PCM audio multicast group"
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+echo "=== Enabling and starting Avahi publish services ==="
+systemctl daemon-reload
+systemctl enable avahi-publish-hf-status-addr.service
+systemctl enable avahi-publish-hf-status-ctl.service
+systemctl enable avahi-publish-pcm-addr.service
+systemctl enable avahi-publish-pcm-rtp.service
+systemctl start avahi-publish-hf-status-addr.service
+systemctl start avahi-publish-hf-status-ctl.service
+systemctl start avahi-publish-pcm-addr.service
+systemctl start avahi-publish-pcm-rtp.service
+
+echo "✓ Multicast group mDNS configured via avahi-publish systemd services"
+echo "  hf-status.local -> 239.185.143.241 (port 5006, _ka9q-ctl._udp)"
 echo "  pcm.local -> 239.69.232.124 (port 5004, _rtp._udp)"
 
 sleep 1

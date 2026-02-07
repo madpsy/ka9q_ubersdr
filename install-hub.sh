@@ -251,6 +251,34 @@ fi
 echo "Running UberSDR mDNS installation script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/install-ubersdr-mdns.sh | sudo bash
 
+# Configure D-Bus policy for Docker containers to access Avahi
+echo "Configuring D-Bus policy for multicast relay..."
+DBUS_POLICY_FILE="/etc/dbus-1/system.d/docker-avahi.conf"
+if [ ! -f "$DBUS_POLICY_FILE" ]; then
+    sudo tee "$DBUS_POLICY_FILE" > /dev/null << 'EOF'
+<!DOCTYPE busconfig PUBLIC
+ "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <!-- Allow root from Docker containers to use Avahi for mDNS publishing -->
+  <policy user="root">
+    <allow send_destination="org.freedesktop.Avahi"/>
+    <allow receive_sender="org.freedesktop.Avahi"/>
+  </policy>
+</busconfig>
+EOF
+    echo "D-Bus policy created successfully."
+    
+    # Reload D-Bus configuration
+    if sudo systemctl reload dbus 2>/dev/null; then
+        echo "D-Bus configuration reloaded."
+    else
+        echo "Warning: Could not reload D-Bus. You may need to restart the system."
+    fi
+else
+    echo "D-Bus policy already exists, skipping."
+fi
+
 # Install HPSDR bridge binary
 echo "Installing UberSDR HPSDR bridge..."
 if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-hpsdr-bridge -o /tmp/ubersdr-hpsdr-bridge 2>/dev/null; then

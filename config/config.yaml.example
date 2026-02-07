@@ -134,7 +134,7 @@ server:
   # When enabled, prevents session hijacking by binding UUIDs to client IP addresses
   # When disabled, allows WebSocket connections from different IPs (useful for proxies, VPNs, or mobile networks)
   # Default: false (not enforced)
-  enforce_session_ip_match: false
+  enforce_session_ip_match: true
 
   # List of IP addresses or CIDR ranges that bypass all session limits
   # Useful for trusted IPs like localhost, admin networks, or specific users

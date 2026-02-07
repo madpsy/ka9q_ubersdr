@@ -84,6 +84,37 @@ radiod:
   # Network interface to use (empty = auto-detect)
   interface: "lo"
 
+# Multicast Relay settings
+# Controls the multicast-relay Docker container that bridges multicast traffic
+# between the Docker network and the host network interface
+# The relay automatically discovers multicast groups from the radiod section above
+# These settings are read directly by the multicast-relay container from this config file
+multicast_relay:
+  # Enable or disable the multicast relay (default: true)
+  # When enabled, the relay container will bridge radiod multicast traffic
+  # When disabled, the relay container sleeps indefinitely (does nothing)
+  # The container reads this setting from config.yaml on startup and restart
+  enabled: true
+  
+  # Docker bridge interface name (default: "docker0")
+  # The Docker network interface to relay multicast traffic from
+  # This is typically "docker0" for the default Docker bridge network
+  # Change this if you're using a custom Docker network configuration
+  # The container reads this setting from config.yaml
+  docker_interface: "docker0"
+  
+  # Host network interface name (default: "eth0")
+  # The physical network interface on the host to relay multicast traffic to
+  # This should match your system's network interface name
+  # Common values:
+  #   - "eth0" - First Ethernet interface (typical for wired connections)
+  #   - "wlan0" - First WiFi interface (for wireless connections)
+  #   - "enp0s3" - Modern systemd naming for Ethernet interfaces
+  #   - "eno1" - Another common systemd naming pattern
+  # Use "ip link show" or "ifconfig" to find your interface name
+  # The container reads this setting from config.yaml
+  host_interface: "eth0"
+
 # Web server settings
 server:
   # Listen address and port

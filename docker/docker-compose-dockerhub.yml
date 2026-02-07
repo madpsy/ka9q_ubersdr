@@ -270,6 +270,51 @@ services:
         fluentd-async: "true"
         tag: "ubersdr-gotty"
 
+  # Multicast relay with Avahi mDNS bridge - Exposes multicast to host network
+  multicast-relay:
+    image: madpsy/ubersdr-multicast:latest
+    container_name: multicast-relay
+    restart: unless-stopped
+
+    # REQUIRED: Host network mode for mDNS bridging and multicast routing
+    network_mode: host
+
+    # REQUIRED: NET_ADMIN capability for multicast routing
+    cap_add:
+      - NET_ADMIN
+
+    # Wait for ka9q-radio to be healthy before starting
+    depends_on:
+      ka9q-radio:
+        condition: service_healthy
+
+    volumes:
+      # Read-only access to UberSDR config to discover multicast groups
+      - ubersdr-config:/config:ro
+      # Shared volume for restart trigger coordination
+      - restart-trigger:/var/run/restart-trigger
+
+    environment:
+      # Config file path - container reads all settings from config.yaml
+      - CONFIG_FILE=/config/config.yaml
+      # Timezone
+      - TZ=${TZ:-UTC}
+
+    # Healthcheck - verify smcroute is running
+    healthcheck:
+      test: [CMD, pgrep, -x, smcroute]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: "127.0.0.1:24224"
+        fluentd-async: "true"
+        tag: "multicast-relay"
+
 # Shared network between ka9q-radio and ubersdr containers
 # Docker Compose will create this automatically with the specified subnet
 networks:

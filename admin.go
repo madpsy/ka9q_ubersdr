@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"sort"
@@ -757,6 +758,21 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 	if err := os.WriteFile(ah.configFile, yamlData, 0644); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write config file: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	// Trigger multicast-relay restart by creating restart trigger file
+	// This ensures the multicast-relay picks up any changes to radiod multicast groups
+	restartTriggerPath := "/var/run/restart-trigger/restart-multicast-relay"
+	restartTriggerDir := filepath.Dir(restartTriggerPath)
+	
+	// Check if restart trigger directory exists (Docker environment)
+	if _, err := os.Stat(restartTriggerDir); err == nil {
+		// Create the restart trigger file
+		if err := os.WriteFile(restartTriggerPath, []byte{}, 0644); err != nil {
+			log.Printf("Warning: Failed to create multicast-relay restart trigger at %s: %v", restartTriggerPath, err)
+		} else {
+			log.Printf("Created multicast-relay restart trigger at %s", restartTriggerPath)
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)

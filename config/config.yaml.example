@@ -96,6 +96,14 @@ multicast_relay:
   # The container reads this setting from config.yaml on startup and restart
   enabled: false
   
+  # Host network interface for multicast relay (default: "auto")
+  # Specifies which host network interface to relay multicast traffic to
+  # When set to "auto", the relay will automatically discover the appropriate interface
+  # You can specify a specific interface name (e.g., "eth0", "wlan0", "enp0s3")
+  # Use "auto" for automatic discovery in most cases
+  # Default: "auto" (automatic interface discovery)
+  host_interface: "auto"
+  
   # Attempt mDNS lookup before falling back to FNV-1 hash (default: false)
   # When false, skips mDNS resolution and uses FNV-1 hash directly (faster startup)
   # When true, attempts to resolve multicast addresses via mDNS/Avahi first

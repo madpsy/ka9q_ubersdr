@@ -547,17 +547,17 @@ class CWSkimmerMap {
         // Initialize marker cluster group with zoom-dependent clustering
         this.markerClusterGroup = L.markerClusterGroup({
             maxClusterRadius: (zoom) => {
-                // Reduce clustering radius for less aggressive clustering
-                if (zoom >= 10) return 15;  // Very tight clustering when zoomed in
-                if (zoom >= 7) return 30;   // Medium clustering
-                if (zoom >= 5) return 40;   // Looser clustering at mid-zoom
-                if (zoom >= 3) return 50;   // Even looser at world view
-                return 60;                   // Minimal clustering when fully zoomed out
+                // Much less aggressive clustering - smaller radius values
+                if (zoom >= 10) return 10;  // Very tight clustering when zoomed in
+                if (zoom >= 7) return 20;   // Medium clustering
+                if (zoom >= 5) return 25;   // Looser clustering at mid-zoom
+                if (zoom >= 3) return 30;   // Even looser at world view
+                return 35;                   // Minimal clustering when fully zoomed out
             },
             spiderfyOnMaxZoom: true,
             showCoverageOnHover: true,
             zoomToBoundsOnClick: true,
-            disableClusteringAtZoom: 12, // Disable clustering when zoomed in close
+            disableClusteringAtZoom: 10, // Disable clustering earlier (zoom 10 instead of 12)
             iconCreateFunction: (cluster) => {
                 const count = cluster.getChildCount();
                 let size = 'small';

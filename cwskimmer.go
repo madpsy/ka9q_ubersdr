@@ -51,7 +51,6 @@ type CWSkimmerClient struct {
 	receiverLon       float64
 	prometheusMetrics *PrometheusMetrics
 	metrics           *CWSkimmerMetrics
-	debugCounter      int // For debug logging
 }
 
 // NewCWSkimmerClient creates a new CW Skimmer client
@@ -621,18 +620,11 @@ func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 		spot.Continent = info.Continent
 
 		// Set latitude and longitude from CTY database
-		// CTY.DAT uses NEGATIVE for East (backwards!), so negate to get standard coords (+ for East)
+		// CTY parser already converts to standard format (+ for East, - for West)
 		spot.Latitude = info.Latitude
-		spot.Longitude = -info.Longitude
-		
-		// DEBUG: Log first 5 coordinate conversions to verify negation is working
-		c.debugCounter++
-		if c.debugCounter <= 5 {
-			log.Printf("DEBUG %s: CTY lon=%f, negated lon=%f, country=%s", spot.DXCall, info.Longitude, spot.Longitude, info.Country)
-		}
-
+		spot.Longitude = info.Longitude
+	
 		// Calculate distance and bearing if receiver location is set
-		// Both receiver and spot coords are now in standard format (+ for East, - for West)
 		if c.receiverLat != 0 || c.receiverLon != 0 {
 			if info.Latitude != 0 || info.Longitude != 0 {
 				distance, bearing := CalculateDistanceAndBearing(c.receiverLat, c.receiverLon, spot.Latitude, spot.Longitude)

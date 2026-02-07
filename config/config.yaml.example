@@ -101,6 +101,13 @@ multicast_relay:
   # When true, attempts to resolve multicast addresses via mDNS/Avahi first
   # Set to false if you don't have Avahi running or want faster startup
   attempt_mdns_lookup: false
+  
+  # TTL increment value (default: 1)
+  # Increments the TTL (Time To Live) of multicast packets by this amount
+  # Used to extend the reach of multicast packets across network boundaries
+  # Range: 0-255 (0 = no increment, 1 = increment by 1, etc.)
+  # Default: 1 (increment TTL by 1 hop)
+  ttl_increment: 1
 
 # Web server settings
 server:

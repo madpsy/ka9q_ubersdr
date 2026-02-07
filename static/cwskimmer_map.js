@@ -969,6 +969,7 @@ class CWSkimmerMap {
             Continent: spot.continent,
             CQZone: spot.cq_zone,
             ITUZone: spot.itu_zone,
+            // Server sends coordinates in standard format (+ for East, - for West)
             latitude: spot.latitude,
             longitude: spot.longitude,
             distance_km: spot.distance_km,

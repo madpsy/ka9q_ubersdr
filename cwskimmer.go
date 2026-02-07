@@ -620,13 +620,12 @@ func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 		spot.Continent = info.Continent
 
 		// Set latitude and longitude from CTY database
-		// Note: CTY.DAT uses + for West longitude (opposite of standard geographic convention)
-		// Convert to standard coordinates (+ for East) by negating longitude
+		// CTY.DAT uses + for West, so negate longitude to convert to standard coords (+ for East)
 		spot.Latitude = info.Latitude
-		spot.Longitude = -info.Longitude // Negate to convert CTY convention (+ West) to standard (+ East)
+		spot.Longitude = -info.Longitude
 
 		// Calculate distance and bearing if receiver location is set
-		// Both receiver and spot coordinates are now in standard format (East positive)
+		// Both receiver and spot coords are now in standard format (+ for East)
 		if c.receiverLat != 0 || c.receiverLon != 0 {
 			if info.Latitude != 0 || info.Longitude != 0 {
 				distance, bearing := CalculateDistanceAndBearing(c.receiverLat, c.receiverLon, spot.Latitude, spot.Longitude)

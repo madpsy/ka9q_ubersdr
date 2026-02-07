@@ -59,8 +59,7 @@ fi
 echo ""
 echo "=== Configuring mDNS publishing for multicast groups ==="
 
-# Create /etc/avahi/hosts file for hostname-to-IP mappings
-# This publishes A records for the multicast group addresses
+# Create /etc/avahi/hosts file for hostname-to-IP mappings (A records)
 cat > /etc/avahi/hosts <<'EOF'
 # UberSDR multicast group addresses
 # Format: IP_ADDRESS HOSTNAME
@@ -68,12 +67,41 @@ cat > /etc/avahi/hosts <<'EOF'
 239.69.232.124 pcm.local
 EOF
 
+# Create service file for multicast groups (service records)
+cat > /etc/avahi/services/ubersdr-multicast.service <<'EOF'
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">UberSDR Multicast Groups on %h</name>
+  
+  <!-- hf-status multicast group -->
+  <service>
+    <type>_rtp._udp</type>
+    <port>5006</port>
+    <host-name>hf-status.local</host-name>
+    <txt-record>group=hf-status</txt-record>
+    <txt-record>address=239.185.143.241</txt-record>
+    <txt-record>description=KA9Q radiod status multicast group</txt-record>
+  </service>
+  
+  <!-- pcm multicast group -->
+  <service>
+    <type>_rtp._udp</type>
+    <port>5004</port>
+    <host-name>pcm.local</host-name>
+    <txt-record>group=pcm</txt-record>
+    <txt-record>address=239.69.232.124</txt-record>
+    <txt-record>description=KA9Q radiod PCM audio multicast group</txt-record>
+  </service>
+</service-group>
+EOF
+
 echo "=== Restarting Avahi daemon to apply multicast group configuration ==="
 systemctl restart avahi-daemon
 
-echo "✓ Multicast group mDNS names configured via /etc/avahi/hosts"
-echo "  hf-status.local -> 239.185.143.241"
-echo "  pcm.local -> 239.69.232.124"
+echo "✓ Multicast group mDNS configured (A records + service records)"
+echo "  hf-status.local -> 239.185.143.241 (port 5006, _rtp._udp)"
+echo "  pcm.local -> 239.69.232.124 (port 5004, _rtp._udp)"
 
 sleep 1
 

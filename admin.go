@@ -4020,6 +4020,14 @@ func (ah *AdminHandler) HandleInstanceReporterHealth(w http.ResponseWriter, r *h
 		}
 	}
 
+	// Check if email is verified
+	if emailVerified, ok := status["email_verified"].(bool); ok {
+		if !emailVerified {
+			healthy = false
+			issues = append(issues, "Email address is not verified")
+		}
+	}
+
 	// Check for errors
 	if lastError, ok := status["last_report_error"].(string); ok && lastError != "" {
 		healthy = false

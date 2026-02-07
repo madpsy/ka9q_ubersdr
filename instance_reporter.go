@@ -34,6 +34,7 @@ type InstanceReporter struct {
 	lastResponseStatus  string       // Last 'status' field from JSON response
 	lastResponseMessage string       // Last 'message' field from JSON response
 	lastPublicUUID      string       // Last 'public_uuid' field from JSON response
+	lastEmailVerified   bool         // Last 'email_verified' field from JSON response
 	lastReportTime      time.Time    // Time of last report attempt
 	lastReportError     string       // Last error message if any
 	detectedPublicIP    string       // Auto-detected public IP (when use_myip is true)
@@ -617,11 +618,12 @@ func (ir *InstanceReporter) sendReport() error {
 			return lastErr
 		}
 
-		// Parse the response to get the status, message, and public_uuid fields
+		// Parse the response to get the status, message, public_uuid, and email_verified fields
 		var responseData map[string]interface{}
 		responseStatus := ""
 		responseMessage := ""
 		publicUUID := ""
+		emailVerified := false
 		if err := json.NewDecoder(resp.Body).Decode(&responseData); err == nil {
 			if status, ok := responseData["status"].(string); ok {
 				responseStatus = status
@@ -632,6 +634,9 @@ func (ir *InstanceReporter) sendReport() error {
 			if pubUUID, ok := responseData["public_uuid"].(string); ok {
 				publicUUID = pubUUID
 			}
+			if verified, ok := responseData["email_verified"].(bool); ok {
+				emailVerified = verified
+			}
 		}
 
 		// Store successful response
@@ -640,6 +645,7 @@ func (ir *InstanceReporter) sendReport() error {
 		ir.lastResponseStatus = responseStatus
 		ir.lastResponseMessage = responseMessage
 		ir.lastPublicUUID = publicUUID
+		ir.lastEmailVerified = emailVerified
 		ir.lastReportError = ""
 		ir.mu.Unlock()
 
@@ -669,6 +675,7 @@ func (ir *InstanceReporter) GetReportStatus() map[string]interface{} {
 		"last_response_status":  ir.lastResponseStatus,
 		"last_response_message": ir.lastResponseMessage,
 		"public_uuid":           ir.lastPublicUUID,
+		"email_verified":        ir.lastEmailVerified,
 		"last_report_error":     ir.lastReportError,
 	}
 
@@ -978,11 +985,12 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		return lastErr
 	}
 
-	// Parse the response to get the status, message, and public_uuid fields
+	// Parse the response to get the status, message, public_uuid, and email_verified fields
 	var responseData map[string]interface{}
 	responseStatus := ""
 	responseMessage := ""
 	publicUUID := ""
+	emailVerified := false
 	if err := json.NewDecoder(resp.Body).Decode(&responseData); err == nil {
 		if status, ok := responseData["status"].(string); ok {
 			responseStatus = status
@@ -993,6 +1001,9 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		if pubUUID, ok := responseData["public_uuid"].(string); ok {
 			publicUUID = pubUUID
 		}
+		if verified, ok := responseData["email_verified"].(bool); ok {
+			emailVerified = verified
+		}
 	}
 
 	// Store successful response
@@ -1001,6 +1012,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 	ir.lastResponseStatus = responseStatus
 	ir.lastResponseMessage = responseMessage
 	ir.lastPublicUUID = publicUUID
+	ir.lastEmailVerified = emailVerified
 	ir.lastReportError = ""
 	ir.mu.Unlock()
 

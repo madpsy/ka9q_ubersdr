@@ -14808,6 +14808,16 @@ const tooltipLine2 = timeStr;
                 publicUUIDDisplay = data.public_uuid;
             }
 
+            // Format email verified display
+            let emailVerifiedDisplay = 'N/A';
+            let emailVerifiedColor = '#666';
+            let emailVerifiedIcon = '❓';
+            if (typeof data.email_verified === 'boolean') {
+                emailVerifiedDisplay = data.email_verified ? 'Yes' : 'No';
+                emailVerifiedColor = data.email_verified ? '#28a745' : '#dc3545';
+                emailVerifiedIcon = data.email_verified ? '✅' : '❌';
+            }
+
             statusDiv.innerHTML = `
                 <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
                 <span style="color: #666; font-size: 14px;">Enabled: Yes</span><br>
@@ -14819,7 +14829,8 @@ const tooltipLine2 = timeStr;
                 ${publicUUIDDisplay !== 'N/A' ? `
                     <button class="btn" style="padding: 4px 8px; font-size: 11px; margin-left: 10px;" onclick="copyUUID('${publicUUIDDisplay}')">Copy</button>
                     <button class="btn" style="padding: 4px 8px; font-size: 11px; margin-left: 5px;" onclick="viewInstance('${publicUUIDDisplay}')">View</button>
-                ` : ''}
+                ` : ''}<br>
+                <span style="color: ${emailVerifiedColor}; font-size: 14px; font-weight: bold;">${emailVerifiedIcon} Email Verified: ${emailVerifiedDisplay}</span>
             `;
 
             // Add error message if present

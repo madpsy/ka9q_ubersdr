@@ -303,8 +303,6 @@ services:
       - CONFIG_FILE=/config/config.yaml
       # Timezone
       - TZ=${TZ:-UTC}
-      # D-Bus system bus address for Avahi mDNS publishing
-      - DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/dbus/system_bus_socket
 
     # Healthcheck - verify smcroute is running
     healthcheck:

@@ -293,6 +293,8 @@ services:
       - ubersdr-config:/config:ro
       # Shared volume for restart trigger coordination
       - restart-trigger:/var/run/restart-trigger
+      # Docker socket for network discovery (read-only)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
     environment:
       # Config file path - container reads all settings from config.yaml

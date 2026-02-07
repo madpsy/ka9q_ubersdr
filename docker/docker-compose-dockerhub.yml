@@ -295,6 +295,8 @@ services:
       - restart-trigger:/var/run/restart-trigger
       # Docker socket for network discovery (read-only)
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Host's D-Bus socket for Avahi mDNS publishing
+      - /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
 
     environment:
       # Config file path - container reads all settings from config.yaml

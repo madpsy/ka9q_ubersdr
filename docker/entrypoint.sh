@@ -193,8 +193,8 @@ fix_docker_networking() {
     
     if [ -n "$bridge_iface" ]; then
         echo "Using bridge interface: $bridge_iface"
-        # Set the interface in config - match any existing interface value
-        sed -i "s/interface: \".*\"/interface: \"$bridge_iface\"/" /app/config/config.yaml
+        # Set the interface in config - only modify radiod.interface, not multicast_relay settings
+        yq eval -i '.radiod.interface = "'$bridge_iface'"' /app/config/config.yaml
         
         # Enable allmulticast on the interface
         echo "Enabling allmulticast on $bridge_iface..."
@@ -205,8 +205,8 @@ fix_docker_networking() {
         ip route add 239.0.0.0/8 dev $bridge_iface 2>/dev/null || echo "Multicast route already exists"
     else
         echo "Using all interfaces for multicast"
-        # Fix interface to listen on all interfaces
-        sed -i 's/interface: ".*"/interface: ""/' /app/config/config.yaml
+        # Fix interface to listen on all interfaces - only modify radiod.interface
+        yq eval -i '.radiod.interface = ""' /app/config/config.yaml
     fi
     
     echo "Docker bridge networking configuration applied"

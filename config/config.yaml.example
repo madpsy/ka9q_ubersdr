@@ -90,11 +90,11 @@ radiod:
 # The relay automatically discovers multicast groups from the radiod section above
 # These settings are read directly by the multicast-relay container from this config file
 multicast_relay:
-  # Enable or disable the multicast relay (default: true)
+  # Enable or disable the multicast relay (default: false)
   # When enabled, the relay container will bridge radiod multicast traffic
   # When disabled, the relay container sleeps indefinitely (does nothing)
   # The container reads this setting from config.yaml on startup and restart
-  enabled: true
+  enabled: false
   
   # Docker bridge interface name (default: "docker0")
   # The Docker network interface to relay multicast traffic from

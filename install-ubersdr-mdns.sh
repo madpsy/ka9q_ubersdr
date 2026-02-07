@@ -53,9 +53,45 @@ else
 </service-group>
 EOF
 
-  echo "=== Restarting Avahi daemon ==="
-  systemctl restart avahi-daemon
 fi
+
+# Configure mDNS publishing for multicast groups
+echo ""
+echo "=== Configuring mDNS publishing for multicast groups ==="
+
+# Create Avahi service file for multicast groups
+cat > /etc/avahi/services/ubersdr-multicast.service <<'EOF'
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">UberSDR Multicast Groups on %h</name>
+  
+  <!-- Publish hf-status.local -> 239.185.143.241 -->
+  <service>
+    <type>_ubersdr-multicast._udp</type>
+    <port>5006</port>
+    <host-name>hf-status.local</host-name>
+    <txt-record>group=hf-status</txt-record>
+    <txt-record>address=239.185.143.241</txt-record>
+  </service>
+  
+  <!-- Publish pcm.local -> 239.69.232.124 -->
+  <service>
+    <type>_ubersdr-multicast._udp</type>
+    <port>5004</port>
+    <host-name>pcm.local</host-name>
+    <txt-record>group=pcm</txt-record>
+    <txt-record>address=239.69.232.124</txt-record>
+  </service>
+</service-group>
+EOF
+
+echo "=== Restarting Avahi daemon to apply multicast group configuration ==="
+systemctl restart avahi-daemon
+
+echo "✓ Multicast group mDNS names configured"
+echo "  hf-status.local -> 239.185.143.241"
+echo "  pcm.local -> 239.69.232.124"
 
 sleep 1
 

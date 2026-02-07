@@ -96,25 +96,6 @@ multicast_relay:
   # The container reads this setting from config.yaml on startup and restart
   enabled: false
   
-  # Docker bridge interface name (default: "docker0")
-  # The Docker network interface to relay multicast traffic from
-  # This is typically "docker0" for the default Docker bridge network
-  # Change this if you're using a custom Docker network configuration
-  # The container reads this setting from config.yaml
-  docker_interface: "docker0"
-  
-  # Host network interface name (default: "eth0")
-  # The physical network interface on the host to relay multicast traffic to
-  # This should match your system's network interface name
-  # Common values:
-  #   - "eth0" - First Ethernet interface (typical for wired connections)
-  #   - "wlan0" - First WiFi interface (for wireless connections)
-  #   - "enp0s3" - Modern systemd naming for Ethernet interfaces
-  #   - "eno1" - Another common systemd naming pattern
-  # Use "ip link show" or "ifconfig" to find your interface name
-  # The container reads this setting from config.yaml
-  host_interface: "eth0"
-  
   # Attempt mDNS lookup before falling back to FNV-1 hash (default: false)
   # When false, skips mDNS resolution and uses FNV-1 hash directly (faster startup)
   # When true, attempts to resolve multicast addresses via mDNS/Avahi first

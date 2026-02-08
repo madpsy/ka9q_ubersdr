@@ -872,7 +872,7 @@ function createWeekdayChart(weekdayData) {
                     'rgba(54, 162, 235, 0.7)',
                     'rgba(255, 206, 86, 0.7)',
                     'rgba(75, 192, 192, 0.7)',
-                    'rgba(153, 102, 255, 0.7)',
+                    'rgba(0, 255, 255, 0.7)',  // Changed Thursday from purple to cyan for better visibility
                     'rgba(255, 159, 64, 0.7)',
                     'rgba(201, 203, 207, 0.7)'
                 ],
@@ -881,7 +881,7 @@ function createWeekdayChart(weekdayData) {
                     'rgba(54, 162, 235, 1)',
                     'rgba(255, 206, 86, 1)',
                     'rgba(75, 192, 192, 1)',
-                    'rgba(153, 102, 255, 1)',
+                    'rgba(0, 255, 255, 1)',  // Changed Thursday from purple to cyan for better visibility
                     'rgba(255, 159, 64, 1)',
                     'rgba(201, 203, 207, 1)'
                 ],

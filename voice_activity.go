@@ -50,6 +50,11 @@ func StartVoiceActivityBackgroundScanner(nfm *NoiseFloorMonitor) {
 		for range ticker.C {
 			// Scan all configured bands
 			for _, bandConfig := range nfm.config.NoiseFloor.Bands {
+				// Skip excluded bands (2200m, 630m, 30m)
+				if bandConfig.Name == "2200m" || bandConfig.Name == "630m" || bandConfig.Name == "30m" {
+					continue
+				}
+				
 				// Get FFT data for this band
 				nfm.fftMu.RLock()
 				buffer, ok := nfm.fftBuffers[bandConfig.Name]
@@ -73,7 +78,7 @@ func StartVoiceActivityBackgroundScanner(nfm *NoiseFloorMonitor) {
 		}
 	}()
 	
-	log.Printf("Voice activity background scanner started (scans all bands every 5 seconds)")
+	log.Printf("Voice activity background scanner started (scans all bands except 2200m, 630m, 30m every 5 seconds)")
 }
 
 // mergeWithCache merges new detections with cached results for stability
@@ -206,6 +211,45 @@ func DefaultDetectionParams() DetectionParams {
 		MinConfidence:    0.3,  // Minimum confidence
 		RoundingInterval: 100,  // Round to 100 Hz
 	}
+}
+
+// getBandSSBStartFreq returns the SSB start frequency for a given band
+// Returns 0 if no filtering is needed for that band
+func getBandSSBStartFreq(band string) uint64 {
+	ssbStarts := map[string]uint64{
+		"160m": 1843000,  // 1843 kHz
+		"80m":  3570000,  // 3570 kHz
+		"40m":  7100000,  // 7100 kHz
+		"20m":  14112000, // 14112 kHz
+		"17m":  18111000, // 18111 kHz
+		"15m":  21151000, // 21151 kHz
+		"12m":  24940000, // 24940 kHz
+		"10m":  28320000, // 28320 kHz
+	}
+	
+	if freq, ok := ssbStarts[band]; ok {
+		return freq
+	}
+	return 0
+}
+
+// filterActivitiesBySSBStart filters out activities below the SSB start frequency
+func filterActivitiesBySSBStart(activities []VoiceActivity, band string) []VoiceActivity {
+	ssbStart := getBandSSBStartFreq(band)
+	if ssbStart == 0 {
+		// No filtering needed for this band
+		return activities
+	}
+	
+	filtered := []VoiceActivity{}
+	for _, activity := range activities {
+		// Check if the estimated dial frequency is at or above the SSB start
+		if activity.EstimatedDialFreq >= ssbStart {
+			filtered = append(filtered, activity)
+		}
+	}
+	
+	return filtered
 }
 
 // ============================================================================
@@ -811,6 +855,27 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 		return
 	}
 
+	// Return empty results for 2200m, 630m, and 30m bands
+	if band == "2200m" || band == "630m" || band == "30m" {
+		params := DefaultDetectionParams()
+		response := VoiceActivityResponse{
+			Band:            band,
+			Timestamp:       time.Now().Format("2006-01-02T15:04:05Z07:00"),
+			NoiseFloorDB:    0,
+			ThresholdDB:     params.ThresholdDB,
+			MinBandwidth:    params.MinBandwidth,
+			MaxBandwidth:    params.MaxBandwidth,
+			Activities:      []VoiceActivity{},
+			TotalActivities: 0,
+			BandType:        "excluded",
+		}
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Error encoding voice activity response: %v", err)
+		}
+		return
+	}
+
 	// Get optional parameters
 	thresholdDBStr := r.URL.Query().Get("threshold_db")
 	minBandwidthStr := r.URL.Query().Get("min_bandwidth")
@@ -893,8 +958,14 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 	// Detect voice activity using SSB pipeline
 	newActivities := detectVoiceActivity(fft, params)
 
+	// Filter by SSB start frequency for applicable bands
+	newActivities = filterActivitiesBySSBStart(newActivities, band)
+
 	// Merge with cache for stability (keeps activities from last 30 seconds)
 	activities := voiceActivityCache.mergeWithCache(band, newActivities)
+	
+	// Apply SSB start filter to cached results as well
+	activities = filterActivitiesBySSBStart(activities, band)
 
 	// Calculate noise floor for response
 	noiseFloor := estimateNoiseFloorMedianFilter(fft.Data, 1000, 3000, fft.BinWidth, fft.StartFreq)
@@ -925,6 +996,11 @@ func GetVoiceActivityForBand(nfm *NoiseFloorMonitor, band string, params Detecti
 		return nil, fmt.Errorf("noise floor monitor not available")
 	}
 
+	// Return empty for excluded bands
+	if band == "2200m" || band == "630m" || band == "30m" {
+		return []VoiceActivity{}, nil
+	}
+
 	nfm.fftMu.RLock()
 	buffer, ok := nfm.fftBuffers[band]
 	nfm.fftMu.RUnlock()
@@ -939,6 +1015,10 @@ func GetVoiceActivityForBand(nfm *NoiseFloorMonitor, band string, params Detecti
 	}
 
 	activities := detectVoiceActivity(fft, params)
+	
+	// Filter by SSB start frequency for applicable bands
+	activities = filterActivitiesBySSBStart(activities, band)
+	
 	return activities, nil
 }
 
@@ -951,6 +1031,11 @@ func GetAllBandsVoiceActivity(nfm *NoiseFloorMonitor, params DetectionParams) ma
 	result := make(map[string][]VoiceActivity)
 
 	for _, bandConfig := range nfm.config.NoiseFloor.Bands {
+		// Skip excluded bands (2200m, 630m, 30m)
+		if bandConfig.Name == "2200m" || bandConfig.Name == "630m" || bandConfig.Name == "30m" {
+			continue
+		}
+		
 		activities, err := GetVoiceActivityForBand(nfm, bandConfig.Name, params)
 		if err == nil && len(activities) > 0 {
 			result[bandConfig.Name] = activities

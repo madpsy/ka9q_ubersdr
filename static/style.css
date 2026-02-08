@@ -3307,6 +3307,9 @@ input[type="range"]::-moz-range-thumb {
     pointer-events: none;
     width: 32px;
     text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .vfo-label-a {

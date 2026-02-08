@@ -483,6 +483,11 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             toggleNBQuick();
         }
+        // V key: Toggle EQ
+        else if (e.key === 'v' || e.key === 'V') {
+            e.preventDefault();
+            toggleEQQuick();
+        }
         // R key: Open recorder modal
         else if (e.key === 'r' || e.key === 'R') {
             e.preventDefault();

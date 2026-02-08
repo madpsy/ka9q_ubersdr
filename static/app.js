@@ -8503,6 +8503,10 @@ window.addEventListener('message', (event) => {
         switch (command) {
             case 'setFrequency':
                 if (typeof params.frequency === 'number') {
+                    // Disable edge detection BEFORE calling tuneToChannel
+                    if (window.spectrumDisplay) {
+                        window.spectrumDisplay.skipEdgeDetection = true;
+                    }
                     // Use tuneToChannel which has proper edge detection handling
                     tuneToChannel(params.frequency, currentMode, currentBandwidthLow, currentBandwidthHigh);
                     // Send acknowledgment
@@ -8518,6 +8522,10 @@ window.addEventListener('message', (event) => {
                 
             case 'setMode':
                 if (typeof params.mode === 'string') {
+                    // Disable edge detection BEFORE calling tuneToChannel
+                    if (window.spectrumDisplay) {
+                        window.spectrumDisplay.skipEdgeDetection = true;
+                    }
                     const preserveBandwidth = params.preserveBandwidth !== undefined ? params.preserveBandwidth : false;
                     // Use tuneToChannel which has proper edge detection handling
                     tuneToChannel(currentFrequency, params.mode, currentBandwidthLow, currentBandwidthHigh);

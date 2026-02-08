@@ -113,6 +113,29 @@ class WEFAXExtension extends DecoderExtension {
             return;
         }
 
+        // Check if canvas is in DOM
+        const inDOM = document.body.contains(this.canvas);
+        console.log('WEFAX: Canvas found, in DOM:', inDOM);
+        
+        // If canvas is not in DOM, it means the template was rendered but not attached
+        // This can happen if innerHTML was used. Let's ensure it's attached.
+        if (!inDOM) {
+            const container = document.getElementById('wefax-canvas-container');
+            if (container) {
+                console.log('WEFAX: Canvas not in DOM, re-attaching to container');
+                // Clear container and create new canvas
+                container.innerHTML = '';
+                this.canvas = document.createElement('canvas');
+                this.canvas.id = 'wefax-canvas';
+                this.canvas.className = 'wefax-canvas';
+                container.appendChild(this.canvas);
+                console.log('WEFAX: Canvas re-created and attached, in DOM:', document.body.contains(this.canvas));
+            } else {
+                console.error('WEFAX: Container not found, cannot attach canvas');
+                return;
+            }
+        }
+
         this.ctx = this.canvas.getContext('2d');
         
         // Initialize canvas with default size

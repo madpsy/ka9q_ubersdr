@@ -538,7 +538,14 @@ class WEFAXExtension extends DecoderExtension {
             
             // Log first few lines for debugging
             if (lineNumber < 5) {
-                console.log(`WEFAX: Rendered line ${lineNumber}, canvas size: ${this.canvas.width}x${this.canvas.height}, visible: ${this.canvas.offsetWidth}x${this.canvas.offsetHeight}`);
+                const container = document.getElementById('wefax-canvas-container');
+                const panel = document.querySelector('.decoder-extension-panel');
+                const content = document.querySelector('.decoder-extension-content');
+                console.log(`WEFAX: Rendered line ${lineNumber}`);
+                console.log(`  Canvas: ${this.canvas.width}x${this.canvas.height}, visible: ${this.canvas.offsetWidth}x${this.canvas.offsetHeight}`);
+                console.log(`  Container: ${container ? container.offsetWidth + 'x' + container.offsetHeight : 'not found'}`);
+                console.log(`  Content: ${content ? content.offsetWidth + 'x' + content.offsetHeight : 'not found'}`);
+                console.log(`  Panel: ${panel ? panel.offsetWidth + 'x' + panel.offsetHeight : 'not found'}`);
             }
         }
 

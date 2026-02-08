@@ -286,7 +286,8 @@ function loadVFOState(vfo) {
     updateBandButtons(state.frequency);
     updateBandSelector();
     
-    // Update mode
+    // Update mode and bandwidth slider ranges using setMode with preserveBandwidth=true
+    // This ensures slider min/max values are updated correctly for the mode
     currentMode = state.mode;
     window.currentMode = state.mode;
     
@@ -299,14 +300,63 @@ function loadVFOState(vfo) {
         activeBtn.classList.add('active');
     }
     
-    // Update bandwidth
+    // Update bandwidth slider ranges based on mode (from setMode function)
+    const bandwidthLowSlider = document.getElementById('bandwidth-low');
+    const bandwidthHighSlider = document.getElementById('bandwidth-high');
+    let minLow, maxLow, maxHigh;
+    
+    switch(state.mode) {
+        case 'usb':
+            minLow = 0;
+            maxLow = 500;
+            maxHigh = 4000;
+            break;
+        case 'lsb':
+            minLow = -4000;
+            maxLow = 0;
+            maxHigh = 0;
+            break;
+        case 'am':
+        case 'sam':
+            minLow = -6000;
+            maxLow = 0;
+            maxHigh = 6000;
+            break;
+        case 'cwu':
+        case 'cwl':
+            minLow = -500;
+            maxLow = 0;
+            maxHigh = 500;
+            break;
+        case 'fm':
+            minLow = -8000;
+            maxLow = 0;
+            maxHigh = 8000;
+            break;
+        case 'nfm':
+            minLow = -5000;
+            maxLow = 0;
+            maxHigh = 5000;
+            break;
+        default:
+            minLow = 0;
+            maxLow = 500;
+            maxHigh = 6000;
+    }
+    
+    // Update slider min/max ranges
+    bandwidthLowSlider.min = minLow;
+    bandwidthLowSlider.max = maxLow;
+    
+    // For LSB mode, high slider needs negative range; for other modes it starts at 0
+    bandwidthHighSlider.min = (state.mode === 'lsb') ? -4000 : 0;
+    bandwidthHighSlider.max = maxHigh;
+    
+    // Now set the bandwidth values
     currentBandwidthLow = state.bandwidthLow;
     currentBandwidthHigh = state.bandwidthHigh;
     window.currentBandwidthLow = state.bandwidthLow;
     window.currentBandwidthHigh = state.bandwidthHigh;
-    
-    const bandwidthLowSlider = document.getElementById('bandwidth-low');
-    const bandwidthHighSlider = document.getElementById('bandwidth-high');
     
     if (bandwidthLowSlider) {
         bandwidthLowSlider.value = state.bandwidthLow;
@@ -749,6 +799,11 @@ document.addEventListener('DOMContentLoaded', () => {
         else if (e.key === 'x' || e.key === 'X') {
             e.preventDefault();
             adjustBandwidth(1);
+        }
+        // T key: Toggle VFO A/B
+        else if (e.key === 't' || e.key === 'T') {
+            e.preventDefault();
+            toggleVFO();
         }
     });
 

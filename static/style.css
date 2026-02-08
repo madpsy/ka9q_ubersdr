@@ -3280,7 +3280,7 @@ input[type="range"]::-moz-range-thumb {
     position: absolute;
     width: 32px;
     height: 26px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
     border-radius: 13px;
     left: 2px;
     top: 2px;

@@ -214,6 +214,28 @@
             cursor: not-allowed;
         }
 
+        .nav-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.2s;
+            min-width: 40px;
+        }
+
+        .nav-btn:hover {
+            background: #2980b9;
+        }
+
+        .nav-btn:disabled {
+            background: #7f8c8d;
+            cursor: not-allowed;
+        }
+
         .interval-control {
             display: flex;
             align-items: center;
@@ -260,6 +282,8 @@
         <div class="scan-controls">
             <button class="scan-btn" id="scan-btn" onclick="startScan()">Scan</button>
             <button class="stop-btn" id="stop-btn" onclick="stopScan()" disabled>Stop</button>
+            <button class="nav-btn" id="prev-btn" onclick="navigatePrevious()" title="Previous frequency">◄</button>
+            <button class="nav-btn" id="next-btn" onclick="navigateNext()" title="Next frequency">►</button>
             <div class="interval-control">
                 <label for="interval-input">Interval:</label>
                 <input type="number" id="interval-input" min="2" max="30" value="5" step="1">
@@ -419,16 +443,15 @@
             }
         }
 
-        function startScan() {
+        function loadActivitiesForNavigation() {
             // Get current activities from the displayed data
             const activityItems = document.querySelectorAll('.activity-item');
             if (activityItems.length === 0) {
-                alert('No activities to scan');
-                return;
+                return [];
             }
 
             // Extract activity data
-            scanActivities = Array.from(activityItems).map(item => {
+            return Array.from(activityItems).map(item => {
                 const onclick = item.getAttribute('onclick');
                 // Parse tuneToFrequency(freq, mode, bwLow, bwHigh) from onclick
                 const match = onclick.match(/tuneToFrequency\(([\d.]+),\s*'(\w+)',\s*([-\d.]+),\s*([-\d.]+)\)/);
@@ -442,9 +465,13 @@
                 }
                 return null;
             }).filter(a => a !== null);
+        }
 
+        function startScan() {
+            scanActivities = loadActivitiesForNavigation();
+            
             if (scanActivities.length === 0) {
-                alert('No valid activities to scan');
+                alert('No activities to scan');
                 return;
             }
 
@@ -519,6 +546,52 @@
                 statusEl.textContent = `Scanning: ${freqKHz} kHz (${currentScanIndex + 1}/${scanActivities.length})`;
                 statusEl.classList.add('active');
             }
+        }
+
+        function navigatePrevious() {
+            const activities = loadActivitiesForNavigation();
+            if (activities.length === 0) {
+                alert('No activities available');
+                return;
+            }
+
+            // If not currently in a scan, initialize or move to previous
+            if (!scanInterval) {
+                if (scanActivities.length === 0 || scanActivities !== activities) {
+                    scanActivities = activities;
+                    currentScanIndex = scanActivities.length - 1; // Start at end for previous
+                } else {
+                    currentScanIndex = (currentScanIndex - 1 + scanActivities.length) % scanActivities.length;
+                }
+            } else {
+                // During scan, just move index backward
+                currentScanIndex = (currentScanIndex - 1 + scanActivities.length) % scanActivities.length;
+            }
+
+            tuneToCurrentScanFrequency();
+        }
+
+        function navigateNext() {
+            const activities = loadActivitiesForNavigation();
+            if (activities.length === 0) {
+                alert('No activities available');
+                return;
+            }
+
+            // If not currently in a scan, initialize or move to next
+            if (!scanInterval) {
+                if (scanActivities.length === 0 || scanActivities !== activities) {
+                    scanActivities = activities;
+                    currentScanIndex = 0; // Start at beginning for next
+                } else {
+                    currentScanIndex = (currentScanIndex + 1) % scanActivities.length;
+                }
+            } else {
+                // During scan, just move index forward
+                currentScanIndex = (currentScanIndex + 1) % scanActivities.length;
+            }
+
+            tuneToCurrentScanFrequency();
         }
 
         // Auto-refresh every 2.5 seconds

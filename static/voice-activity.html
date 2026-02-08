@@ -161,6 +161,90 @@
             color: #7f8c8d;
             margin-top: 10px;
         }
+
+        .scan-controls {
+            background: #2c3e50;
+            padding: 12px 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .scan-btn {
+            background: #27ae60;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        .scan-btn:hover {
+            background: #229954;
+        }
+
+        .scan-btn:disabled {
+            background: #7f8c8d;
+            cursor: not-allowed;
+        }
+
+        .stop-btn {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        .stop-btn:hover {
+            background: #c0392b;
+        }
+
+        .stop-btn:disabled {
+            background: #7f8c8d;
+            cursor: not-allowed;
+        }
+
+        .interval-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .interval-control label {
+            font-size: 12px;
+            color: #95a5a6;
+        }
+
+        .interval-control input {
+            background: #34495e;
+            color: #ecf0f1;
+            border: 1px solid #4a5f7f;
+            padding: 6px 10px;
+            border-radius: 4px;
+            width: 60px;
+            font-size: 12px;
+        }
+
+        .scan-status {
+            margin-left: auto;
+            font-size: 12px;
+            color: #95a5a6;
+        }
+
+        .scan-status.active {
+            color: #27ae60;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -172,6 +256,18 @@
     <div id="error-container"></div>
     <div id="content">
         <div class="stats-grid" id="stats-grid"></div>
+        
+        <div class="scan-controls">
+            <button class="scan-btn" id="scan-btn" onclick="startScan()">Scan</button>
+            <button class="stop-btn" id="stop-btn" onclick="stopScan()" disabled>Stop</button>
+            <div class="interval-control">
+                <label for="interval-input">Interval:</label>
+                <input type="number" id="interval-input" min="2" max="30" value="5" step="1">
+                <span style="font-size: 12px; color: #95a5a6;">sec</span>
+            </div>
+            <div class="scan-status" id="scan-status"></div>
+        </div>
+
         <div class="activity-list">
             <div class="activity-header">Recent Voice Activity</div>
             <div id="activity-list"></div>
@@ -189,6 +285,9 @@
         document.title = `Voice Activity - ${band}`;
 
         let autoRefreshInterval = null;
+        let scanInterval = null;
+        let currentScanIndex = 0;
+        let scanActivities = [];
 
         async function fetchData() {
             const errorEl = document.getElementById('error-container');
@@ -320,6 +419,108 @@
             }
         }
 
+        function startScan() {
+            // Get current activities from the displayed data
+            const activityItems = document.querySelectorAll('.activity-item');
+            if (activityItems.length === 0) {
+                alert('No activities to scan');
+                return;
+            }
+
+            // Extract activity data
+            scanActivities = Array.from(activityItems).map(item => {
+                const onclick = item.getAttribute('onclick');
+                // Parse tuneToFrequency(freq, mode, bwLow, bwHigh) from onclick
+                const match = onclick.match(/tuneToFrequency\(([\d.]+),\s*'(\w+)',\s*([-\d.]+),\s*([-\d.]+)\)/);
+                if (match) {
+                    return {
+                        frequency: parseFloat(match[1]),
+                        mode: match[2],
+                        bandwidthLow: parseFloat(match[3]),
+                        bandwidthHigh: parseFloat(match[4])
+                    };
+                }
+                return null;
+            }).filter(a => a !== null);
+
+            if (scanActivities.length === 0) {
+                alert('No valid activities to scan');
+                return;
+            }
+
+            // Get interval
+            const intervalSeconds = parseInt(document.getElementById('interval-input').value);
+            if (isNaN(intervalSeconds) || intervalSeconds < 2 || intervalSeconds > 30) {
+                alert('Interval must be between 2 and 30 seconds');
+                return;
+            }
+
+            // Start scanning
+            currentScanIndex = 0;
+            document.getElementById('scan-btn').disabled = true;
+            document.getElementById('stop-btn').disabled = false;
+            document.getElementById('interval-input').disabled = true;
+            
+            // Pause auto-refresh during scanning
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+            
+            // Tune to first frequency immediately
+            tuneToCurrentScanFrequency();
+
+            // Set up interval
+            scanInterval = setInterval(() => {
+                currentScanIndex = (currentScanIndex + 1) % scanActivities.length;
+                tuneToCurrentScanFrequency();
+                
+                // Check if we've completed a full cycle
+                if (currentScanIndex === 0) {
+                    // Completed full scan cycle, stop and resume refresh
+                    stopScan();
+                }
+            }, intervalSeconds * 1000);
+
+            updateScanStatus();
+        }
+
+        function stopScan() {
+            if (scanInterval) {
+                clearInterval(scanInterval);
+                scanInterval = null;
+            }
+            
+            document.getElementById('scan-btn').disabled = false;
+            document.getElementById('stop-btn').disabled = true;
+            document.getElementById('interval-input').disabled = false;
+            
+            const statusEl = document.getElementById('scan-status');
+            statusEl.textContent = '';
+            statusEl.classList.remove('active');
+            
+            // Resume auto-refresh
+            startAutoRefresh();
+        }
+
+        function tuneToCurrentScanFrequency() {
+            if (scanActivities.length === 0) return;
+            
+            const activity = scanActivities[currentScanIndex];
+            tuneToFrequency(activity.frequency, activity.mode, activity.bandwidthLow, activity.bandwidthHigh);
+            updateScanStatus();
+        }
+
+        function updateScanStatus() {
+            const statusEl = document.getElementById('scan-status');
+            if (scanInterval && scanActivities.length > 0) {
+                const activity = scanActivities[currentScanIndex];
+                const freqKHz = (activity.frequency / 1000).toFixed(0);
+                statusEl.textContent = `Scanning: ${freqKHz} kHz (${currentScanIndex + 1}/${scanActivities.length})`;
+                statusEl.classList.add('active');
+            }
+        }
+
         // Auto-refresh every 2.5 seconds
         function startAutoRefresh() {
             if (autoRefreshInterval) {
@@ -336,6 +537,9 @@
         window.addEventListener('beforeunload', () => {
             if (autoRefreshInterval) {
                 clearInterval(autoRefreshInterval);
+            }
+            if (scanInterval) {
+                clearInterval(scanInterval);
             }
         });
     </script>

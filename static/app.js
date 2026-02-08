@@ -228,6 +228,7 @@ let currentBandwidthHigh = 3000;
 
 // VFO state storage
 let currentVFO = 'A'; // Current active VFO ('A' or 'B')
+let vfoLoadInProgress = false; // Flag to prevent auto-save during VFO load
 let vfoStates = {
     A: {
         frequency: 14175000,
@@ -276,6 +277,8 @@ function loadVFOState(vfo) {
         return;
     }
     
+    // Set flag to prevent auto-save during load
+    vfoLoadInProgress = true;
     console.log(`[VFO] Loading VFO ${vfo} state:`, state);
     
     // Update frequency
@@ -392,6 +395,10 @@ function loadVFOState(vfo) {
     
     // Update page title
     updatePageTitle();
+    
+    // Clear the load-in-progress flag
+    vfoLoadInProgress = false;
+    console.log('[VFO] VFO load complete');
 }
 
 /**

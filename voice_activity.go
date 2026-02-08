@@ -651,9 +651,10 @@ func smartRoundTo500Hz(freq uint64, roundingInterval uint64) uint64 {
 		distance1000 = nearest1000 - freq
 	}
 	
-	// If within 300 Hz of a 1 kHz boundary (.000), snap to it
-	// This is the most common tuning point
-	if distance1000 <= 300 {
+	// If within 600 Hz of a 1 kHz boundary (.000), snap to it
+	// Increased from 300 Hz to 600 Hz to catch systematic offsets in LSB/USB detection
+	// This fixes the issue where detections appear on .500 boundaries when actually on .000
+	if distance1000 <= 600 {
 		return nearest1000
 	}
 	

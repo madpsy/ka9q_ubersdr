@@ -222,6 +222,184 @@ let currentMode = 'usb';
 let currentBandwidthLow = 50;
 let currentBandwidthHigh = 3000;
 
+// ============================================================================
+// VFO A/B Toggle System
+// ============================================================================
+
+// VFO state storage
+let currentVFO = 'A'; // Current active VFO ('A' or 'B')
+let vfoStates = {
+    A: {
+        frequency: 14175000,
+        mode: 'usb',
+        bandwidthLow: 50,
+        bandwidthHigh: 3000,
+        squelch: 71 // For FM/NFM modes
+    },
+    B: {
+        frequency: 7100000,
+        mode: 'lsb',
+        bandwidthLow: -2700,
+        bandwidthHigh: -50,
+        squelch: 71
+    }
+};
+
+/**
+ * Save current settings to the active VFO
+ */
+function saveCurrentVFOState() {
+    const freqInput = document.getElementById('frequency');
+    const frequency = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
+    
+    const squelchSlider = document.getElementById('squelch');
+    const squelchValue = squelchSlider ? parseInt(squelchSlider.value) : 71;
+    
+    vfoStates[currentVFO] = {
+        frequency: frequency,
+        mode: currentMode,
+        bandwidthLow: currentBandwidthLow,
+        bandwidthHigh: currentBandwidthHigh,
+        squelch: squelchValue
+    };
+    
+    console.log(`[VFO] Saved VFO ${currentVFO} state:`, vfoStates[currentVFO]);
+}
+
+/**
+ * Load settings from the target VFO
+ */
+function loadVFOState(vfo) {
+    const state = vfoStates[vfo];
+    if (!state) {
+        console.error(`[VFO] No state found for VFO ${vfo}`);
+        return;
+    }
+    
+    console.log(`[VFO] Loading VFO ${vfo} state:`, state);
+    
+    // Update frequency
+    const freqInput = document.getElementById('frequency');
+    if (freqInput && document.activeElement !== freqInput) {
+        setFrequencyInputValue(state.frequency);
+    }
+    updateBandButtons(state.frequency);
+    updateBandSelector();
+    
+    // Update mode
+    currentMode = state.mode;
+    window.currentMode = state.mode;
+    
+    // Update mode button states
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    const activeBtn = document.getElementById(`mode-${state.mode}`);
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+    }
+    
+    // Update bandwidth
+    currentBandwidthLow = state.bandwidthLow;
+    currentBandwidthHigh = state.bandwidthHigh;
+    window.currentBandwidthLow = state.bandwidthLow;
+    window.currentBandwidthHigh = state.bandwidthHigh;
+    
+    const bandwidthLowSlider = document.getElementById('bandwidth-low');
+    const bandwidthHighSlider = document.getElementById('bandwidth-high');
+    
+    if (bandwidthLowSlider) {
+        bandwidthLowSlider.value = state.bandwidthLow;
+        document.getElementById('bandwidth-low-value').textContent = state.bandwidthLow;
+    }
+    
+    if (bandwidthHighSlider) {
+        bandwidthHighSlider.value = state.bandwidthHigh;
+        document.getElementById('bandwidth-high-value').textContent = state.bandwidthHigh;
+    }
+    
+    // Update squelch (for FM/NFM modes)
+    const squelchSlider = document.getElementById('squelch');
+    if (squelchSlider) {
+        squelchSlider.value = state.squelch;
+        updateSquelchDisplay();
+    }
+    
+    // Update mode-specific controls visibility
+    const bandwidthControls = document.getElementById('bandwidth-controls');
+    const squelchControls = document.getElementById('squelch-controls');
+    
+    if (state.mode === 'fm' || state.mode === 'nfm') {
+        bandwidthControls.style.display = 'none';
+        squelchControls.style.display = 'block';
+    } else {
+        bandwidthControls.style.display = 'block';
+        squelchControls.style.display = 'none';
+    }
+    
+    // Update URL
+    updateURL();
+    
+    // Update page title
+    updatePageTitle();
+}
+
+/**
+ * Toggle between VFO A and VFO B
+ */
+function toggleVFO() {
+    // Save current VFO state before switching
+    saveCurrentVFOState();
+    
+    // Switch to the other VFO
+    const newVFO = currentVFO === 'A' ? 'B' : 'A';
+    currentVFO = newVFO;
+    
+    // Update toggle UI
+    const toggle = document.querySelector('.vfo-toggle');
+    const labelA = document.querySelector('.vfo-label-a');
+    const labelB = document.querySelector('.vfo-label-b');
+    
+    if (newVFO === 'B') {
+        toggle.classList.add('vfo-b');
+        labelA.classList.remove('active');
+        labelB.classList.add('active');
+    } else {
+        toggle.classList.remove('vfo-b');
+        labelA.classList.add('active');
+        labelB.classList.remove('active');
+    }
+    
+    // Load the new VFO state
+    loadVFOState(newVFO);
+    
+    // CRITICAL: Set skip edge detection flag to prevent spectrum from auto-adjusting
+    if (window.spectrumDisplay) {
+        window.spectrumDisplay.skipEdgeDetection = true;
+        setTimeout(() => {
+            if (window.spectrumDisplay) {
+                window.spectrumDisplay.skipEdgeDetection = false;
+            }
+        }, 2000);
+    }
+    
+    // Tune to the new VFO settings
+    if (wsManager.isConnected()) {
+        autoTune();
+        log(`Switched to VFO ${newVFO}: ${formatFrequency(vfoStates[newVFO].frequency)} ${vfoStates[newVFO].mode.toUpperCase()}`);
+    } else {
+        connect();
+        log(`Connecting to VFO ${newVFO}: ${formatFrequency(vfoStates[newVFO].frequency)} ${vfoStates[newVFO].mode.toUpperCase()}`);
+    }
+}
+
+// Expose VFO functions globally
+window.toggleVFO = toggleVFO;
+window.saveCurrentVFOState = saveCurrentVFOState;
+window.loadVFOState = loadVFOState;
+
+console.log('[VFO] VFO A/B toggle system initialized');
+
 // Stereo channel selection
 let channelLeftEnabled = true;
 let channelRightEnabled = true;
@@ -3569,6 +3747,11 @@ function updateSquelchDisplay() {
 function updateSquelch() {
     const squelchSlider = document.getElementById('squelch');
     const squelchValue = parseInt(squelchSlider.value);
+    
+    // Save VFO state after squelch change
+    if (typeof saveCurrentVFOState === 'function') {
+        setTimeout(() => saveCurrentVFOState(), 100);
+    }
     
     // Map scale value (0-100) to squelch value
     let squelchDb;

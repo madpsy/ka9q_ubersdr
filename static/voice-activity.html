@@ -376,13 +376,10 @@
                 const bandwidth = activity.bandwidth || 0;
                 const signalAboveNoise = activity.signal_above_noise ? activity.signal_above_noise.toFixed(1) + ' dB' : 'N/A';
                 
-                // Calculate bandwidth edges for tuneToChannel
                 const dialFreq = activity.estimated_dial_freq || activity.start_freq;
-                const bwLow = activity.start_freq - dialFreq;
-                const bwHigh = activity.end_freq - dialFreq;
                 
                 return `
-                    <div class="activity-item" onclick="tuneToFrequency(${dialFreq}, '${mode}', ${bwLow}, ${bwHigh})">
+                    <div class="activity-item" onclick="tuneToFrequency(${dialFreq}, '${mode}')">
                         <div class="frequency">${freq}</div>
                         <div>
                             <span class="mode">${modeUpper}</span>
@@ -424,19 +421,20 @@
             lastUpdatedEl.textContent = `Last updated: ${now.toLocaleTimeString()}`;
         }
 
-        function tuneToFrequency(frequency, mode, bandwidthLow, bandwidthHigh) {
+        function tuneToFrequency(frequency, mode) {
             if (!window.opener) {
                 console.warn('No opener window available');
                 return;
             }
             
             try {
-                // Use the tuneToChannel function - it's specifically designed for this
-                if (window.opener.tuneToChannel) {
-                    window.opener.tuneToChannel(frequency, mode, bandwidthLow, bandwidthHigh);
-                    console.log(`Tuned to ${frequency} Hz, mode ${mode}, BW: ${bandwidthLow} to ${bandwidthHigh}`);
+                // Set frequency and mode, let system decide bandwidth
+                if (window.opener.setFrequency && window.opener.setMode) {
+                    window.opener.setFrequency(frequency);
+                    window.opener.setMode(mode, false); // false = don't preserve bandwidth
+                    console.log(`Tuned to ${frequency} Hz, mode ${mode}`);
                 } else {
-                    console.error('tuneToChannel not available');
+                    console.error('setFrequency or setMode not available');
                 }
             } catch (error) {
                 console.error('Error tuning to frequency:', error);
@@ -453,14 +451,12 @@
             // Extract activity data
             return Array.from(activityItems).map(item => {
                 const onclick = item.getAttribute('onclick');
-                // Parse tuneToFrequency(freq, mode, bwLow, bwHigh) from onclick
-                const match = onclick.match(/tuneToFrequency\(([\d.]+),\s*'(\w+)',\s*([-\d.]+),\s*([-\d.]+)\)/);
+                // Parse tuneToFrequency(freq, mode) from onclick
+                const match = onclick.match(/tuneToFrequency\(([\d.]+),\s*'(\w+)'\)/);
                 if (match) {
                     return {
                         frequency: parseFloat(match[1]),
-                        mode: match[2],
-                        bandwidthLow: parseFloat(match[3]),
-                        bandwidthHigh: parseFloat(match[4])
+                        mode: match[2]
                     };
                 }
                 return null;
@@ -534,7 +530,7 @@
             if (scanActivities.length === 0) return;
             
             const activity = scanActivities[currentScanIndex];
-            tuneToFrequency(activity.frequency, activity.mode, activity.bandwidthLow, activity.bandwidthHigh);
+            tuneToFrequency(activity.frequency, activity.mode);
             updateScanStatus();
         }
 

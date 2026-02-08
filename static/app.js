@@ -8503,16 +8503,8 @@ window.addEventListener('message', (event) => {
         switch (command) {
             case 'setFrequency':
                 if (typeof params.frequency === 'number') {
-                    // Disable edge detection when setting frequency from popup
-                    if (window.spectrumDisplay) {
-                        window.spectrumDisplay.skipEdgeDetection = true;
-                        setTimeout(() => {
-                            if (window.spectrumDisplay) {
-                                window.spectrumDisplay.skipEdgeDetection = false;
-                            }
-                        }, 2000);
-                    }
-                    setFrequency(params.frequency);
+                    // Use tuneToChannel which has proper edge detection handling
+                    tuneToChannel(params.frequency, currentMode, currentBandwidthLow, currentBandwidthHigh);
                     // Send acknowledgment
                     event.source.postMessage({
                         command: 'ack',
@@ -8526,17 +8518,9 @@ window.addEventListener('message', (event) => {
                 
             case 'setMode':
                 if (typeof params.mode === 'string') {
-                    // Disable edge detection when setting mode from popup
-                    if (window.spectrumDisplay) {
-                        window.spectrumDisplay.skipEdgeDetection = true;
-                        setTimeout(() => {
-                            if (window.spectrumDisplay) {
-                                window.spectrumDisplay.skipEdgeDetection = false;
-                            }
-                        }, 2000);
-                    }
                     const preserveBandwidth = params.preserveBandwidth !== undefined ? params.preserveBandwidth : false;
-                    setMode(params.mode, preserveBandwidth);
+                    // Use tuneToChannel which has proper edge detection handling
+                    tuneToChannel(currentFrequency, params.mode, currentBandwidthLow, currentBandwidthHigh);
                     event.source.postMessage({
                         command: 'ack',
                         originalCommand: command,

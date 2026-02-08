@@ -551,6 +551,8 @@ class WEFAXExtension extends DecoderExtension {
                 console.log(`  Canvas: ${this.canvas.width}x${this.canvas.height}, visible: ${this.canvas.offsetWidth}x${this.canvas.offsetHeight}`);
                 console.log(`  Canvas computed: display=${computedStyle.display}, width=${computedStyle.width}, height=${computedStyle.height}`);
                 console.log(`  Canvas inline: display=${this.canvas.style.display}, width=${this.canvas.style.width}, height=${this.canvas.style.height}`);
+                console.log(`  Canvas parent: ${this.canvas.parentElement ? this.canvas.parentElement.tagName + '#' + this.canvas.parentElement.id : 'NO PARENT'}`);
+                console.log(`  Canvas in DOM: ${document.body.contains(this.canvas)}`);
                 console.log(`  Container: ${container ? container.offsetWidth + 'x' + container.offsetHeight : 'not found'}`);
                 console.log(`  Content: ${content ? content.offsetWidth + 'x' + content.offsetHeight : 'not found'}`);
                 console.log(`  Panel: ${panel ? panel.offsetWidth + 'x' + panel.offsetHeight : 'not found'}`);

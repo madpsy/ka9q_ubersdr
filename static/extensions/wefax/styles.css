@@ -201,10 +201,8 @@ input[type="checkbox"] {
     image-rendering: pixelated;
     image-rendering: crisp-edges;
     cursor: crosshair;
-    width: auto; /* Let canvas use its natural width */
-    height: auto; /* Let canvas use its natural height */
-    min-width: 100px; /* Ensure minimum visibility */
-    min-height: 100px; /* Ensure minimum visibility */
+    /* Don't set width/height in CSS - they're set via inline styles in JavaScript */
+    /* This allows the canvas to match its logical dimensions */
 }
 
 /* Help Text */

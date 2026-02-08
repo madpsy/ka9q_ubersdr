@@ -549,22 +549,21 @@
         }
 
         function navigatePrevious() {
-            const activities = loadActivitiesForNavigation();
-            if (activities.length === 0) {
-                alert('No activities available');
-                return;
-            }
-
-            // If not currently in a scan, initialize or move to previous
+            // Always reload activities when not scanning
             if (!scanInterval) {
-                if (scanActivities.length === 0 || scanActivities !== activities) {
-                    scanActivities = activities;
-                    currentScanIndex = scanActivities.length - 1; // Start at end for previous
-                } else {
-                    currentScanIndex = (currentScanIndex - 1 + scanActivities.length) % scanActivities.length;
+                scanActivities = loadActivitiesForNavigation();
+                if (scanActivities.length === 0) {
+                    alert('No activities available');
+                    return;
                 }
+                // Move to previous, wrapping around
+                currentScanIndex = (currentScanIndex - 1 + scanActivities.length) % scanActivities.length;
             } else {
                 // During scan, just move index backward
+                if (scanActivities.length === 0) {
+                    alert('No activities available');
+                    return;
+                }
                 currentScanIndex = (currentScanIndex - 1 + scanActivities.length) % scanActivities.length;
             }
 
@@ -572,22 +571,21 @@
         }
 
         function navigateNext() {
-            const activities = loadActivitiesForNavigation();
-            if (activities.length === 0) {
-                alert('No activities available');
-                return;
-            }
-
-            // If not currently in a scan, initialize or move to next
+            // Always reload activities when not scanning
             if (!scanInterval) {
-                if (scanActivities.length === 0 || scanActivities !== activities) {
-                    scanActivities = activities;
-                    currentScanIndex = 0; // Start at beginning for next
-                } else {
-                    currentScanIndex = (currentScanIndex + 1) % scanActivities.length;
+                scanActivities = loadActivitiesForNavigation();
+                if (scanActivities.length === 0) {
+                    alert('No activities available');
+                    return;
                 }
+                // Move to next, wrapping around
+                currentScanIndex = (currentScanIndex + 1) % scanActivities.length;
             } else {
                 // During scan, just move index forward
+                if (scanActivities.length === 0) {
+                    alert('No activities available');
+                    return;
+                }
                 currentScanIndex = (currentScanIndex + 1) % scanActivities.length;
             }
 

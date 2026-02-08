@@ -159,16 +159,21 @@ class WEFAXExtension extends DecoderExtension {
         const stationSelect = document.getElementById('wefax-station-select');
         const tuneBtn = document.getElementById('wefax-tune-btn');
         
-        if (stationSelect) {
+        if (stationSelect && tuneBtn) {
+            // Enable/disable tune button based on selection
             stationSelect.addEventListener('change', (e) => {
-                if (tuneBtn) {
-                    tuneBtn.disabled = !e.target.value;
-                }
+                tuneBtn.disabled = !e.target.value;
+                console.log('WEFAX: Station selected:', e.target.value, 'Tune button enabled:', !tuneBtn.disabled);
             });
-        }
-
-        if (tuneBtn) {
-            tuneBtn.addEventListener('click', () => this.tuneToStation());
+            
+            // Tune button click handler
+            tuneBtn.addEventListener('click', () => {
+                console.log('WEFAX: Tune button clicked');
+                this.tuneToStation();
+            });
+            
+            // Initialize tune button state
+            tuneBtn.disabled = !stationSelect.value;
         }
 
         // Configuration change handlers (only apply when stopped)
@@ -319,7 +324,8 @@ class WEFAXExtension extends DecoderExtension {
     }
 
     attachAudioExtension() {
-        if (!this.radio.dxWebSocket || this.radio.dxWebSocket.readyState !== WebSocket.OPEN) {
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws || dxClient.ws.readyState !== WebSocket.OPEN) {
             console.error('WEFAX: DX WebSocket not connected');
             this.updateStatus('error', 'WebSocket Error');
             return;
@@ -344,11 +350,12 @@ class WEFAXExtension extends DecoderExtension {
         };
 
         console.log('WEFAX: Sending attach message:', attachMsg);
-        this.radio.dxWebSocket.send(JSON.stringify(attachMsg));
+        dxClient.ws.send(JSON.stringify(attachMsg));
     }
 
     detachAudioExtension() {
-        if (!this.radio.dxWebSocket || this.radio.dxWebSocket.readyState !== WebSocket.OPEN) {
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws || dxClient.ws.readyState !== WebSocket.OPEN) {
             console.error('WEFAX: DX WebSocket not connected');
             return;
         }
@@ -362,19 +369,25 @@ class WEFAXExtension extends DecoderExtension {
         };
 
         console.log('WEFAX: Sending detach message');
-        this.radio.dxWebSocket.send(JSON.stringify(detachMsg));
+        dxClient.ws.send(JSON.stringify(detachMsg));
     }
 
     setupBinaryMessageHandler() {
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws) {
+            console.error('WEFAX: DX WebSocket not available');
+            return;
+        }
+
         // Store original onmessage handler if it exists
-        const originalHandler = this.radio.dxWebSocket.onmessage;
+        const originalHandler = dxClient.ws.onmessage;
 
         // Create new handler that processes both text and binary messages
         this.binaryMessageHandler = (event) => {
             if (typeof event.data === 'string') {
                 // Text message - pass to original handler
                 if (originalHandler) {
-                    originalHandler.call(this.radio.dxWebSocket, event);
+                    originalHandler.call(dxClient.ws, event);
                 }
             } else {
                 // Binary message - process as WEFAX data
@@ -382,7 +395,7 @@ class WEFAXExtension extends DecoderExtension {
             }
         };
 
-        this.radio.dxWebSocket.onmessage = this.binaryMessageHandler;
+        dxClient.ws.onmessage = this.binaryMessageHandler;
         console.log('WEFAX: Binary message handler installed');
     }
 

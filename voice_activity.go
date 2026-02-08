@@ -8,8 +8,94 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 )
+
+// ============================================================================
+// Result Caching for Stability
+// ============================================================================
+
+// CachedVoiceActivity stores a detected activity with timestamp and detection count
+type CachedVoiceActivity struct {
+	Activity       VoiceActivity
+	Timestamp      time.Time
+	DetectionCount int // Number of times detected
+}
+
+// VoiceActivityCache provides stable results by requiring multiple detections
+type VoiceActivityCache struct {
+	cache map[string]map[uint64]*CachedVoiceActivity // map[band]map[dialFreq500Hz]*activity
+	mu    sync.RWMutex
+}
+
+// Global cache instance
+var voiceActivityCache = &VoiceActivityCache{
+	cache: make(map[string]map[uint64]*CachedVoiceActivity),
+}
+
+// mergeWithCache merges new detections with cached results for stability
+// Requires an activity to be detected at least 2 times before it's returned
+// Returns activities seen in the last 30 seconds that have been confirmed
+func (vac *VoiceActivityCache) mergeWithCache(band string, newActivities []VoiceActivity) []VoiceActivity {
+	vac.mu.Lock()
+	defer vac.mu.Unlock()
+	
+	now := time.Now()
+	cacheExpiry := 30 * time.Second
+	
+	// Initialize band cache if needed
+	if vac.cache[band] == nil {
+		vac.cache[band] = make(map[uint64]*CachedVoiceActivity)
+	}
+	
+	bandCache := vac.cache[band]
+	
+	// Remove expired cache entries
+	for key, ca := range bandCache {
+		if now.Sub(ca.Timestamp) > cacheExpiry {
+			delete(bandCache, key)
+		}
+	}
+	
+	// Process new activities
+	for _, activity := range newActivities {
+		// Round dial freq to 500 Hz for grouping (same station)
+		key := (activity.EstimatedDialFreq / 500) * 500
+		
+		if existing, ok := bandCache[key]; ok {
+			// Already seen this frequency - increment count and update
+			existing.DetectionCount++
+			existing.Timestamp = now
+			// Update with newer/better data
+			if activity.Confidence > existing.Activity.Confidence {
+				existing.Activity = activity
+			}
+		} else {
+			// First time seeing this frequency
+			bandCache[key] = &CachedVoiceActivity{
+				Activity:       activity,
+				Timestamp:      now,
+				DetectionCount: 1,
+			}
+		}
+	}
+	
+	// Return only activities detected at least 2 times
+	result := []VoiceActivity{}
+	for _, ca := range bandCache {
+		if ca.DetectionCount >= 2 {
+			result = append(result, ca.Activity)
+		}
+	}
+	
+	// Sort by frequency
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].EstimatedDialFreq < result[j].EstimatedDialFreq
+	})
+	
+	return result
+}
 
 // ============================================================================
 // Data Structures (API Contract - DO NOT CHANGE)
@@ -407,6 +493,7 @@ func inferLowCutFromSpectralRamp(data []float32, startBin, endBin int, binWidth 
 }
 
 // calculateDialFrequency calculates dial frequency using inferred low-cut
+// Applies smart rounding to prefer 500 Hz boundaries (common amateur radio practice)
 func calculateDialFrequency(candidate CandidateRegion, bandStart, bandEnd uint64, params DetectionParams) (uint64, []uint64, string) {
 	// Determine mode based on band (LSB below 10 MHz, USB above)
 	mode := "USB"
@@ -417,19 +504,19 @@ func calculateDialFrequency(candidate CandidateRegion, bandStart, bandEnd uint64
 	// Use inferred low-cut (L_est)
 	lowCut := candidate.InferredLowCut
 	
-	// Calculate dial frequency:
+	// Calculate raw dial frequency:
 	// LSB: Fc = fU + L_est (upper edge + low-cut)
 	// USB: Fc = fL - L_est (lower edge - low-cut)
-	var dialFreq uint64
+	var rawDialFreq uint64
 	if mode == "LSB" {
-		dialFreq = candidate.EndFreq + lowCut
+		rawDialFreq = candidate.EndFreq + lowCut
 	} else {
-		dialFreq = candidate.StartFreq - lowCut
+		rawDialFreq = candidate.StartFreq - lowCut
 	}
 	
-	// Round to interval
-	halfInterval := params.RoundingInterval / 2
-	dialFreq = ((dialFreq + halfInterval) / params.RoundingInterval) * params.RoundingInterval
+	// Smart rounding: prefer 500 Hz boundaries, but only if close
+	// Most operators tune to x.x00, x.x50 kHz (500 Hz increments)
+	dialFreq := smartRoundTo500Hz(rawDialFreq, params.RoundingInterval)
 	
 	// Generate alternatives with different low-cut estimates
 	alternatives := []uint64{}
@@ -443,7 +530,7 @@ func calculateDialFrequency(candidate CandidateRegion, bandStart, bandEnd uint64
 			altFreq = candidate.StartFreq - lc
 		}
 		
-		altFreq = ((altFreq + halfInterval) / params.RoundingInterval) * params.RoundingInterval
+		altFreq = smartRoundTo500Hz(altFreq, params.RoundingInterval)
 		
 		// Avoid duplicates
 		isDuplicate := false
@@ -462,6 +549,32 @@ func calculateDialFrequency(candidate CandidateRegion, bandStart, bandEnd uint64
 	}
 	
 	return dialFreq, alternatives, mode
+}
+
+// smartRoundTo500Hz applies smart rounding that prefers 500 Hz boundaries
+// If the frequency is within 150 Hz of a 500 Hz boundary, snap to it
+// Otherwise, round to the specified interval (typically 100 Hz)
+func smartRoundTo500Hz(freq uint64, roundingInterval uint64) uint64 {
+	// Find nearest 500 Hz boundary
+	nearest500 := ((freq + 250) / 500) * 500
+	
+	// Calculate distance to nearest 500 Hz boundary
+	var distance uint64
+	if freq > nearest500 {
+		distance = freq - nearest500
+	} else {
+		distance = nearest500 - freq
+	}
+	
+	// If within 150 Hz of a 500 Hz boundary, snap to it
+	// This accounts for measurement uncertainty and operator tuning habits
+	if distance <= 150 {
+		return nearest500
+	}
+	
+	// Otherwise, round to the specified interval (100 Hz)
+	halfInterval := roundingInterval / 2
+	return ((freq + halfInterval) / roundingInterval) * roundingInterval
 }
 
 // calculateVoiceConfidence computes detection confidence score (0-1)
@@ -721,7 +834,10 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 	}
 
 	// Detect voice activity using SSB pipeline
-	activities := detectVoiceActivity(fft, params)
+	newActivities := detectVoiceActivity(fft, params)
+
+	// Merge with cache for stability (keeps activities from last 30 seconds)
+	activities := voiceActivityCache.mergeWithCache(band, newActivities)
 
 	// Calculate noise floor for response
 	noiseFloor := estimateNoiseFloorMedianFilter(fft.Data, 1000, 3000, fft.BinWidth, fft.StartFreq)

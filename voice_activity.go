@@ -552,7 +552,7 @@ func calculateDialFrequency(candidate CandidateRegion, bandStart, bandEnd uint64
 }
 
 // smartRoundTo500Hz applies smart rounding that prefers 500 Hz boundaries
-// If the frequency is within 150 Hz of a 500 Hz boundary, snap to it
+// If the frequency is within 250 Hz of a 500 Hz boundary, snap to it
 // Otherwise, round to the specified interval (typically 100 Hz)
 func smartRoundTo500Hz(freq uint64, roundingInterval uint64) uint64 {
 	// Find nearest 500 Hz boundary
@@ -566,9 +566,10 @@ func smartRoundTo500Hz(freq uint64, roundingInterval uint64) uint64 {
 		distance = nearest500 - freq
 	}
 	
-	// If within 150 Hz of a 500 Hz boundary, snap to it
-	// This accounts for measurement uncertainty and operator tuning habits
-	if distance <= 150 {
+	// If within 250 Hz of a 500 Hz boundary, snap to it
+	// This accounts for FFT bin width, low-cut estimation variance, and operator tuning habits
+	// Essentially: anything within ±250 Hz of x.x00 or x.x50 kHz gets snapped to that boundary
+	if distance <= 250 {
 		return nearest500
 	}
 	

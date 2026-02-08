@@ -393,7 +393,8 @@
 
         function formatFrequency(hz) {
             if (hz >= 1000) {
-                return (hz / 1000).toFixed(0) + ' kHz';
+                // Show 3 decimal places for kHz (e.g., 7.090 kHz instead of 7090 kHz)
+                return (hz / 1000).toFixed(3) + ' kHz';
             }
             return hz + ' Hz';
         }

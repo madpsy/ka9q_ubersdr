@@ -586,6 +586,10 @@ func main() {
 		if err := noiseFloorMonitor.Start(); err != nil {
 			log.Fatalf("Failed to start noise floor monitor: %v", err)
 		}
+		
+		// Start background voice activity scanner to keep cache populated
+		StartVoiceActivityBackgroundScanner(noiseFloorMonitor)
+		
 		defer noiseFloorMonitor.Stop()
 	}
 

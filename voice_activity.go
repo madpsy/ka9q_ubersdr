@@ -34,6 +34,48 @@ var voiceActivityCache = &VoiceActivityCache{
 	cache: make(map[string]map[uint64]*CachedVoiceActivity),
 }
 
+// StartVoiceActivityBackgroundScanner starts a background goroutine that continuously
+// scans all bands for voice activity to keep the cache populated
+func StartVoiceActivityBackgroundScanner(nfm *NoiseFloorMonitor) {
+	if nfm == nil {
+		return
+	}
+	
+	go func() {
+		ticker := time.NewTicker(5 * time.Second) // Scan every 5 seconds
+		defer ticker.Stop()
+		
+		params := DefaultDetectionParams()
+		
+		for range ticker.C {
+			// Scan all configured bands
+			for _, bandConfig := range nfm.config.NoiseFloor.Bands {
+				// Get FFT data for this band
+				nfm.fftMu.RLock()
+				buffer, ok := nfm.fftBuffers[bandConfig.Name]
+				nfm.fftMu.RUnlock()
+				
+				if !ok {
+					continue
+				}
+				
+				fft := buffer.GetAveragedFFT(5 * time.Second)
+				if fft == nil {
+					continue
+				}
+				
+				// Detect voice activity
+				newActivities := detectVoiceActivity(fft, params)
+				
+				// Update cache (this will increment detection counts)
+				voiceActivityCache.mergeWithCache(bandConfig.Name, newActivities)
+			}
+		}
+	}()
+	
+	log.Printf("Voice activity background scanner started (scans all bands every 5 seconds)")
+}
+
 // mergeWithCache merges new detections with cached results for stability
 // Requires an activity to be detected at least 2 times before it's returned
 // Returns activities seen in the last 30 seconds that have been confirmed

@@ -535,6 +535,11 @@ class WEFAXExtension extends DecoderExtension {
         if (lineNumber > this.currentLine) {
             this.currentLine = lineNumber;
             this.updateLineCount(this.currentLine);
+            
+            // Log first few lines for debugging
+            if (lineNumber < 5) {
+                console.log(`WEFAX: Rendered line ${lineNumber}, canvas size: ${this.canvas.width}x${this.canvas.height}, visible: ${this.canvas.offsetWidth}x${this.canvas.offsetHeight}`);
+            }
         }
 
         // Auto-scroll to bottom

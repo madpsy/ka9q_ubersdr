@@ -113,17 +113,36 @@ class UberSDRChat {
 
         // Create a message handler that will be reused
         this.messageHandler = (event) => {
-            const msg = JSON.parse(event.data);
-
-            // Handle chat messages
-            if (msg.type && msg.type.startsWith('chat_')) {
-                this.handleChatMessage(msg);
+            // Skip binary messages - they're not chat messages
+            // Binary messages are handled by audio extensions (e.g., WEFAX)
+            if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
+                // Pass binary messages to original handler if it exists
+                if (this.originalHandler && typeof this.originalHandler === 'function') {
+                    this.originalHandler(event);
+                }
+                return;
             }
 
-            // Call original handler for non-chat messages
-            // Always get the current handler in case websocket was recreated
-            if (this.originalHandler && typeof this.originalHandler === 'function') {
-                this.originalHandler(event);
+            // Only parse text messages as JSON
+            try {
+                const msg = JSON.parse(event.data);
+
+                // Handle chat messages
+                if (msg.type && msg.type.startsWith('chat_')) {
+                    this.handleChatMessage(msg);
+                }
+
+                // Call original handler for non-chat messages
+                // Always get the current handler in case websocket was recreated
+                if (this.originalHandler && typeof this.originalHandler === 'function') {
+                    this.originalHandler(event);
+                }
+            } catch (e) {
+                // If JSON parse fails, it might be a non-JSON text message
+                // Pass it to the original handler
+                if (this.originalHandler && typeof this.originalHandler === 'function') {
+                    this.originalHandler(event);
+                }
             }
         };
 

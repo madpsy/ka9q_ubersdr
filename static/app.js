@@ -8605,7 +8605,7 @@ console.log('[Popup Control] Secure popup control system initialized');
  */
 function openVoiceActivityPopup(band) {
     const url = `voice-activity.html?band=${encodeURIComponent(band)}`;
-    return openControlPopup(url, 600, 650);
+    return openControlPopup(url, 550, 650);
 }
 
 /**

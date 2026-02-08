@@ -405,6 +405,16 @@ function loadVFOState(vfo) {
  * Toggle between VFO A and VFO B
  */
 function toggleVFO() {
+    // CRITICAL: Set skip edge detection flag FIRST, before any changes
+    if (window.spectrumDisplay) {
+        window.spectrumDisplay.skipEdgeDetection = true;
+        setTimeout(() => {
+            if (window.spectrumDisplay) {
+                window.spectrumDisplay.skipEdgeDetection = false;
+            }
+        }, 2000);
+    }
+    
     // Save current VFO state before switching
     saveCurrentVFOState();
     
@@ -429,16 +439,6 @@ function toggleVFO() {
     
     // Load the new VFO state
     loadVFOState(newVFO);
-    
-    // CRITICAL: Set skip edge detection flag to prevent spectrum from auto-adjusting
-    if (window.spectrumDisplay) {
-        window.spectrumDisplay.skipEdgeDetection = true;
-        setTimeout(() => {
-            if (window.spectrumDisplay) {
-                window.spectrumDisplay.skipEdgeDetection = false;
-            }
-        }, 2000);
-    }
     
     // Tune to the new VFO settings
     if (wsManager.isConnected()) {

@@ -917,9 +917,6 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 		log.Printf("Error encoding voice activity response: %v", err)
 	}
 
-	if DebugMode && len(activities) > 0 {
-		log.Printf("DEBUG: Voice activity detected on %s: %d activities", band, len(activities))
-	}
 }
 
 // GetVoiceActivityForBand is a helper function to get voice activity programmatically
@@ -1058,7 +1055,4 @@ func handleAllBandsVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *No
 		log.Printf("Error encoding all bands voice activity response: %v", err)
 	}
 
-	if DebugMode && totalActivities > 0 {
-		log.Printf("DEBUG: Voice activity detected across %d bands: %d total activities", len(allActivities), totalActivities)
-	}
 }

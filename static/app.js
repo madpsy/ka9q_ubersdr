@@ -373,23 +373,6 @@ function loadVFOState(vfo) {
     if (squelchSlider) {
         squelchSlider.value = state.squelch;
         updateSquelchDisplay();
-        // Also send squelch to server for FM/NFM modes
-        if ((state.mode === 'fm' || state.mode === 'nfm') && wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
-            const squelchValue = parseInt(state.squelch);
-            let squelchDb;
-            if (squelchValue === 0) {
-                squelchDb = -999.0;
-            } else {
-                squelchDb = -48.0 + (squelchValue - 1) * (68.0 / 99.0);
-            }
-            
-            const msg = {
-                type: 'set_squelch',
-                squelchOpen: squelchDb
-            };
-            wsManager.send(msg);
-            console.log(`[VFO] Squelch set to ${squelchDb === -999.0 ? 'Open' : squelchDb.toFixed(1) + ' dB'}`);
-        }
     }
     
     // Update mode-specific controls visibility
@@ -455,6 +438,7 @@ function toggleVFO() {
         autoTune();
         
         // Send squelch after tune completes (for FM/NFM modes)
+        // Delay longer to ensure mode change is processed by server first
         const state = vfoStates[newVFO];
         if (state.mode === 'fm' || state.mode === 'nfm') {
             setTimeout(() => {
@@ -472,9 +456,14 @@ function toggleVFO() {
                         squelchOpen: squelchDb
                     };
                     wsManager.send(msg);
-                    console.log(`[VFO] Squelch set to ${squelchDb === -999.0 ? 'Open' : squelchDb.toFixed(1) + ' dB'}`);
+                    
+                    if (squelchDb === -999.0) {
+                        log('[VFO] Squelch: Open (no squelch)');
+                    } else {
+                        log(`[VFO] Squelch: Closed at ${squelchDb.toFixed(1)} dB SNR`);
+                    }
                 }
-            }, 100);
+            }, 500);
         }
         
         log(`Switched to VFO ${newVFO}: ${formatFrequency(vfoStates[newVFO].frequency)} ${vfoStates[newVFO].mode.toUpperCase()}`);

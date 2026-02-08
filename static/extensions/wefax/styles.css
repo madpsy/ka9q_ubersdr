@@ -193,13 +193,18 @@ input[type="checkbox"] {
     border-radius: 4px;
     position: relative;
     min-height: 400px;
+    width: 100%; /* Ensure container has width */
 }
 
 .wefax-canvas {
-    display: block;
+    display: block !important; /* Force display */
     image-rendering: pixelated;
     image-rendering: crisp-edges;
     cursor: crosshair;
+    width: auto; /* Let canvas use its natural width */
+    height: auto; /* Let canvas use its natural height */
+    min-width: 100px; /* Ensure minimum visibility */
+    min-height: 100px; /* Ensure minimum visibility */
 }
 
 /* Help Text */

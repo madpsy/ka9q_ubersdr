@@ -243,6 +243,12 @@ func findCandidateRegions(data []float32, threshold float32, binWidth float64, s
 func characterizeSignal(data []float32, candidate SignalCharacteristics,
 	noiseProfile NoiseProfile, binWidth float64, startFreq uint64) SignalCharacteristics {
 
+	// Validate bin indices
+	if candidate.StartBin < 0 || candidate.EndBin >= len(data) || candidate.StartBin > candidate.EndBin {
+		// Return candidate as-is if indices are invalid
+		return candidate
+	}
+
 	// Extract signal bins
 	signalBins := data[candidate.StartBin : candidate.EndBin+1]
 

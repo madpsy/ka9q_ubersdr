@@ -423,17 +423,20 @@ class WEFAXExtension extends DecoderExtension {
             console.log('WEFAX: Stored original DX handler');
         }
 
-        // Create new handler that processes both text and binary messages
+        // Create new handler that intercepts binary messages only
         this.binaryMessageHandler = (event) => {
-            if (typeof event.data === 'string') {
+            // Check if this is a binary message (ArrayBuffer or Blob)
+            if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
+                // Binary message - process as WEFAX data
+                console.log('WEFAX: Received binary message, length:', event.data.byteLength || event.data.size);
+                this.handleBinaryMessage(event.data);
+                // DO NOT pass binary messages to original handler (chat.js can't handle them)
+            } else {
                 // Text message - pass to original handler
-                // IMPORTANT: Check that originalDXHandler is not our own handler to prevent recursion
+                // IMPORTANT: Check that originalDXHandler exists and is not our own handler
                 if (this.originalDXHandler && this.originalDXHandler !== this.binaryMessageHandler) {
                     this.originalDXHandler.call(dxClient.ws, event);
                 }
-            } else {
-                // Binary message - process as WEFAX data
-                this.handleBinaryMessage(event.data);
             }
         };
 

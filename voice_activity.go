@@ -167,6 +167,10 @@ func estimateDialFrequency(startFreq, endFreq, bandStart, bandEnd uint64) (uint6
 	var dialFreq uint64
 	var mode string
 	
+	// Round signal edges to nearest 100 Hz first for cleaner calculation
+	roundedStart := ((startFreq + 50) / 100) * 100
+	roundedEnd := ((endFreq + 50) / 100) * 100
+	
 	// SSB filter low-cut offset (typical radios: 100-150 Hz from dial)
 	const filterOffset uint64 = 150
 	
@@ -174,7 +178,7 @@ func estimateDialFrequency(startFreq, endFreq, bandStart, bandEnd uint64) (uint6
 		// LSB: voice is below dial frequency
 		// The dial should be just above the highest detected frequency
 		// Typical SSB: dial at top edge + ~150 Hz filter offset
-		estimatedDial := endFreq + filterOffset
+		estimatedDial := roundedEnd + filterOffset
 		// Round to nearest 500 Hz (standard amateur radio tuning)
 		dialFreq = ((estimatedDial + 250) / 500) * 500
 		mode = "LSB"
@@ -182,9 +186,14 @@ func estimateDialFrequency(startFreq, endFreq, bandStart, bandEnd uint64) (uint6
 		// USB: voice is above dial frequency
 		// The dial should be just below the lowest detected frequency
 		// Typical SSB: dial at bottom edge - ~150 Hz filter offset
-		estimatedDial := startFreq - filterOffset
-		// Round to nearest 500 Hz (standard amateur radio tuning)
-		dialFreq = ((estimatedDial + 250) / 500) * 500
+		if roundedStart >= filterOffset {
+			estimatedDial := roundedStart - filterOffset
+			// Round to nearest 500 Hz (standard amateur radio tuning)
+			dialFreq = ((estimatedDial + 250) / 500) * 500
+		} else {
+			// Edge case: signal starts very low, just round to nearest 500 Hz
+			dialFreq = ((roundedStart + 250) / 500) * 500
+		}
 		mode = "USB"
 	}
 	
@@ -223,24 +232,24 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 	minBandwidthStr := r.URL.Query().Get("min_bandwidth")
 	maxBandwidthStr := r.URL.Query().Get("max_bandwidth")
 
-	// Parse threshold (default 12 dB - higher to reduce false positives)
-	thresholdDB := float32(12.0)
+	// Parse threshold (default 8 dB - sensitive enough to catch real signals)
+	thresholdDB := float32(8.0)
 	if thresholdDBStr != "" {
 		if val, err := strconv.ParseFloat(thresholdDBStr, 32); err == nil && val > 0 && val < 50 {
 			thresholdDB = float32(val)
 		}
 	}
 
-	// Parse min bandwidth (default 2000 Hz - typical SSB voice minimum)
-	minBandwidth := uint64(2000)
+	// Parse min bandwidth (default 2200 Hz - typical SSB voice minimum)
+	minBandwidth := uint64(2200)
 	if minBandwidthStr != "" {
 		if val, err := strconv.ParseUint(minBandwidthStr, 10, 64); err == nil && val > 0 {
 			minBandwidth = val
 		}
 	}
 
-	// Parse max bandwidth (default 3500 Hz - typical SSB voice maximum)
-	maxBandwidth := uint64(3500)
+	// Parse max bandwidth (default 3200 Hz - typical SSB voice maximum)
+	maxBandwidth := uint64(3200)
 	if maxBandwidthStr != "" {
 		if val, err := strconv.ParseUint(maxBandwidthStr, 10, 64); err == nil && val > minBandwidth {
 			maxBandwidth = val
@@ -259,10 +268,11 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 		return
 	}
 
-	// Get 15-second max-hold FFT data for the band
-	// Max-hold preserves voice signals even if they're transient within the window
-	// Averaging would smooth them out and make them disappear into the noise floor
-	// 15 seconds provides good persistence while reducing false positives from transients
+	// Get 20-second averaged FFT data for the band
+	// Averaging shows signals that are consistently present, accounting for natural pauses in conversations
+	// Voice conversations have pauses (listening, thinking) so we need longer persistence
+	// 20 seconds provides stability - conversations generally last much longer than this
+	// This prevents the activity list from changing dramatically on each refresh
 	nfm.fftMu.RLock()
 	buffer, ok := nfm.fftBuffers[band]
 	nfm.fftMu.RUnlock()
@@ -275,7 +285,7 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 		return
 	}
 	
-	fft := buffer.GetMaxHoldFFT(15 * time.Second)
+	fft := buffer.GetAveragedFFT(20 * time.Second)
 	if fft == nil {
 		w.WriteHeader(http.StatusNoContent)
 		json.NewEncoder(w).Encode(map[string]string{
@@ -368,24 +378,24 @@ func handleAllBandsVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *No
 	minBandwidthStr := r.URL.Query().Get("min_bandwidth")
 	maxBandwidthStr := r.URL.Query().Get("max_bandwidth")
 
-	// Parse threshold (default 12 dB - higher to reduce false positives)
-	thresholdDB := float32(12.0)
+	// Parse threshold (default 8 dB - sensitive enough to catch real signals)
+	thresholdDB := float32(8.0)
 	if thresholdDBStr != "" {
 		if val, err := strconv.ParseFloat(thresholdDBStr, 32); err == nil && val > 0 && val < 50 {
 			thresholdDB = float32(val)
 		}
 	}
 
-	// Parse min bandwidth (default 2000 Hz - typical SSB voice minimum)
-	minBandwidth := uint64(2000)
+	// Parse min bandwidth (default 2200 Hz - typical SSB voice minimum)
+	minBandwidth := uint64(2200)
 	if minBandwidthStr != "" {
 		if val, err := strconv.ParseUint(minBandwidthStr, 10, 64); err == nil && val > 0 {
 			minBandwidth = val
 		}
 	}
 
-	// Parse max bandwidth (default 3500 Hz - typical SSB voice maximum)
-	maxBandwidth := uint64(3500)
+	// Parse max bandwidth (default 3200 Hz - typical SSB voice maximum)
+	maxBandwidth := uint64(3200)
 	if maxBandwidthStr != "" {
 		if val, err := strconv.ParseUint(maxBandwidthStr, 10, 64); err == nil && val > minBandwidth {
 			maxBandwidth = val

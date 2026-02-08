@@ -80,6 +80,7 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 	// Extract extension name
 	extensionName, ok := msg["extension_name"].(string)
 	if !ok || extensionName == "" {
+		log.Printf("AudioExtension: Attach failed for session %s - extension_name is required", sessionID)
 		return aem.sendError(conn, "extension_name is required")
 	}
 
@@ -89,10 +90,13 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 		extensionParams = params
 	}
 
+	log.Printf("AudioExtension: Attach request - User: %s, Extension: %s, Params: %+v", sessionID, extensionName, extensionParams)
+
 	// Tear down existing extension if any (user can only have one at a time)
 	aem.activeExtensionsMu.Lock()
 	if existing, exists := aem.activeExtensions[sessionID]; exists {
-		log.Printf("AudioExtension: Tearing down existing extension '%s' for session %s", existing.ExtensionName, sessionID)
+		log.Printf("AudioExtension: Tearing down existing extension '%s' for user %s (replacing with '%s')",
+			existing.ExtensionName, sessionID, extensionName)
 		aem.activeExtensionsMu.Unlock()
 		aem.stopExtension(existing)
 		aem.activeExtensionsMu.Lock()
@@ -153,7 +157,11 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 	// Start result forwarding goroutine
 	go aem.forwardResults(activeExtension)
 
-	log.Printf("AudioExtension: Attached '%s' to session %s", extensionName, sessionID)
+	log.Printf("AudioExtension: ✅ Successfully attached '%s' to user %s", extensionName, sessionID)
+	log.Printf("AudioExtension: Extension parameters: %+v", extensionParams)
+	log.Printf("AudioExtension: Audio parameters: SampleRate=%d Hz, Channels=%d, BitsPerSample=%d",
+		audioParams.SampleRate, audioParams.Channels, audioParams.BitsPerSample)
+	log.Printf("AudioExtension: Active extensions count: %d", aem.GetActiveExtensionCount())
 
 	// Send success confirmation
 	return aem.sendTextMessage(conn, map[string]interface{}{

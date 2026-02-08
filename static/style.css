@@ -3280,17 +3280,18 @@ input[type="range"]::-moz-range-thumb {
     position: absolute;
     width: 32px;
     height: 26px;
-    background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
+    background: linear-gradient(135deg, #28a745 0%, #218838 100%);
     border-radius: 13px;
     left: 2px;
     top: 2px;
-    transition: transform 0.3s ease;
+    transition: transform 0.3s ease, background 0.3s ease;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
     z-index: 1;
 }
 
 .vfo-toggle.vfo-b .vfo-toggle-slider::before {
     transform: translateX(34px);
+    background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
 }
 
 .vfo-label {

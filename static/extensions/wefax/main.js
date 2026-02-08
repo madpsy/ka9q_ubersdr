@@ -4,12 +4,14 @@
 
 class WEFAXExtension extends DecoderExtension {
     constructor() {
+        console.log('WEFAX: Constructor called');
         super('wefax', {
             displayName: 'WEFAX Decoder',
             autoTune: false,
             requiresMode: 'usb',
             preferredBandwidth: 3000
         });
+        console.log('WEFAX: Super constructor completed');
 
         // Configuration
         this.config = {

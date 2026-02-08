@@ -122,6 +122,11 @@ class WEFAXExtension extends DecoderExtension {
         this.imageHeight = 0;
         this.currentLine = 0;
 
+        // Force canvas to be visible by setting style attributes
+        this.canvas.style.display = 'block';
+        this.canvas.style.width = this.imageWidth + 'px';
+        this.canvas.style.height = '100px';
+
         // Create image data buffer
         this.imageData = this.ctx.createImageData(this.imageWidth, 1);
 

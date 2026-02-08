@@ -373,6 +373,10 @@ function loadVFOState(vfo) {
     if (squelchSlider) {
         squelchSlider.value = state.squelch;
         updateSquelchDisplay();
+        // Also trigger updateSquelch to send the value to the server
+        if (state.mode === 'fm' || state.mode === 'nfm') {
+            updateSquelch();
+        }
     }
     
     // Update mode-specific controls visibility

@@ -321,10 +321,16 @@ class WEFAXExtension extends DecoderExtension {
         this.updateConfig();
         console.log('WEFAX: Config updated:', this.config);
 
-        // Reset canvas if width changed
+        // Reset canvas if width changed OR if canvas is not in DOM
         const newWidth = this.config.image_width;
-        if (newWidth !== this.imageWidth) {
-            console.log('WEFAX: Image width changed, resetting canvas');
+        const canvasInDOM = this.canvas && document.body.contains(this.canvas);
+        
+        if (newWidth !== this.imageWidth || !canvasInDOM) {
+            if (!canvasInDOM) {
+                console.log('WEFAX: Canvas not in DOM, reinitializing');
+            } else {
+                console.log('WEFAX: Image width changed, resetting canvas');
+            }
             this.imageWidth = newWidth;
             this.setupCanvas();
         }

@@ -105,12 +105,12 @@ type DetectionParams struct {
 // DefaultDetectionParams returns sensible defaults
 func DefaultDetectionParams() DetectionParams {
 	return DetectionParams{
-		ThresholdDB:      12.0,
-		MinBandwidth:     2000,
-		MaxBandwidth:     3500,
-		MinSNR:           10.0,
-		MinPowerVariance: 2.0,
-		MinConfidence:    0.6,
+		ThresholdDB:      8.0,   // More sensitive (was 12.0)
+		MinBandwidth:     1500,  // Allow narrower signals (was 2000)
+		MaxBandwidth:     4000,  // Allow wider signals (was 3500)
+		MinSNR:           6.0,   // Lower SNR threshold (was 10.0)
+		MinPowerVariance: 1.0,   // Less strict on variance (was 2.0)
+		MinConfidence:    0.3,   // Much lower confidence threshold (was 0.6)
 		FilterOffset:     350,
 		RoundingInterval: 100,
 	}
@@ -342,26 +342,30 @@ func determineSpectralShape(char SignalCharacteristics) string {
 
 // isValidVoiceSignal applies multiple validation filters
 func isValidVoiceSignal(char SignalCharacteristics, params DetectionParams) bool {
-	// Bandwidth check
+	// Bandwidth check - primary filter for SSB voice
 	if char.Bandwidth < params.MinBandwidth || char.Bandwidth > params.MaxBandwidth {
 		return false
 	}
 
-	// SNR check
+	// SNR check - ensure signal is above noise
 	if char.SNR < params.MinSNR {
 		return false
 	}
 
-	// Spectral shape check
-	if char.SpectralShape == "narrow" || char.SpectralShape == "irregular" {
+	// Spectral shape check - only reject very narrow signals (CW, carriers)
+	if char.SpectralShape == "narrow" {
 		return false
 	}
 
-	// Power variation check (voice varies, carriers don't)
-	// Typical voice has StdDev > 2 dB
-	if char.PowerStdDev < params.MinPowerVariance {
-		return false // Too steady, likely carrier
-	}
+	// NOTE: Power variance check removed for SSB detection
+	// Reason: When using averaged FFT data (5-20 seconds), SSB voice signals
+	// appear relatively steady in the frequency domain. The power variance
+	// across frequency bins does NOT indicate time-domain amplitude modulation.
+	// SSB voice characteristics:
+	// - Carrier is suppressed (not visible)
+	// - Single sideband with voice energy distributed across 2-3 kHz
+	// - Averaged spectrum shows stable spectral envelope, not AM variations
+	// - Power variance would only be meaningful in time-domain or non-averaged FFT
 
 	return true
 }

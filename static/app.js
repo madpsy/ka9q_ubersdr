@@ -453,6 +453,30 @@ function toggleVFO() {
     // Tune to the new VFO settings
     if (wsManager.isConnected()) {
         autoTune();
+        
+        // Send squelch after tune completes (for FM/NFM modes)
+        const state = vfoStates[newVFO];
+        if (state.mode === 'fm' || state.mode === 'nfm') {
+            setTimeout(() => {
+                if (wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
+                    const squelchValue = parseInt(state.squelch);
+                    let squelchDb;
+                    if (squelchValue === 0) {
+                        squelchDb = -999.0;
+                    } else {
+                        squelchDb = -48.0 + (squelchValue - 1) * (68.0 / 99.0);
+                    }
+                    
+                    const msg = {
+                        type: 'set_squelch',
+                        squelchOpen: squelchDb
+                    };
+                    wsManager.send(msg);
+                    console.log(`[VFO] Squelch set to ${squelchDb === -999.0 ? 'Open' : squelchDb.toFixed(1) + ' dB'}`);
+                }
+            }, 100);
+        }
+        
         log(`Switched to VFO ${newVFO}: ${formatFrequency(vfoStates[newVFO].frequency)} ${vfoStates[newVFO].mode.toUpperCase()}`);
     } else {
         connect();

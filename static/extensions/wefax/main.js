@@ -641,6 +641,36 @@ class WEFAXExtension extends DecoderExtension {
         // Copy old content back
         this.ctx.drawImage(tempCanvas, 0, 0);
 
+        // Also grow modal canvas if in modal mode
+        if (this.modalMode && this.modalBodyId) {
+            const modalBody = document.getElementById(this.modalBodyId);
+            if (modalBody) {
+                const modalCanvas = modalBody.querySelector('#wefax-canvas');
+                if (modalCanvas) {
+                    // Create temp canvas with modal's old content
+                    const modalTempCanvas = document.createElement('canvas');
+                    modalTempCanvas.width = modalCanvas.width;
+                    modalTempCanvas.height = modalCanvas.height;
+                    const modalTempCtx = modalTempCanvas.getContext('2d');
+                    modalTempCtx.drawImage(modalCanvas, 0, 0);
+
+                    // Resize modal canvas
+                    modalCanvas.height = newHeight;
+                    modalCanvas.style.height = newHeight + 'px';
+
+                    // Fill with black
+                    const modalCtx = modalCanvas.getContext('2d');
+                    modalCtx.fillStyle = '#000000';
+                    modalCtx.fillRect(0, 0, modalCanvas.width, modalCanvas.height);
+
+                    // Copy old content back
+                    modalCtx.drawImage(modalTempCanvas, 0, 0);
+                    
+                    console.log('WEFAX: Also grew modal canvas to', newHeight);
+                }
+            }
+        }
+
         this.imageHeight = newHeight;
         this.updateImageSize(this.imageWidth, this.imageHeight);
     }
@@ -745,6 +775,57 @@ class WEFAXExtension extends DecoderExtension {
     onProcessAudio(dataArray) {
         // WEFAX extension doesn't process audio directly
         // Audio is processed by the backend extension
+    }
+
+    // Called when extension enters modal mode
+    onEnterModal(modalBodyId) {
+        console.log('WEFAX: Entering modal mode, modalBodyId:', modalBodyId);
+        this.modalMode = true;
+        this.modalBodyId = modalBodyId;
+        
+        // Wait a bit for modal DOM to be ready, then sync canvas
+        setTimeout(() => {
+            this.syncModalCanvas();
+        }, 100);
+    }
+
+    // Called when extension exits modal mode
+    onExitModal() {
+        console.log('WEFAX: Exiting modal mode');
+        this.modalMode = false;
+        this.modalBodyId = null;
+    }
+
+    syncModalCanvas() {
+        // Copy the entire main canvas to the modal canvas
+        if (!this.modalMode || !this.modalBodyId || !this.canvas) {
+            return;
+        }
+
+        const modalBody = document.getElementById(this.modalBodyId);
+        if (!modalBody) {
+            console.log('WEFAX: Modal body not found');
+            return;
+        }
+
+        const modalCanvas = modalBody.querySelector('#wefax-canvas');
+        if (!modalCanvas) {
+            console.log('WEFAX: Modal canvas not found');
+            return;
+        }
+
+        // Set modal canvas to same size as main canvas
+        modalCanvas.width = this.canvas.width;
+        modalCanvas.height = this.canvas.height;
+        modalCanvas.style.display = 'block';
+        modalCanvas.style.width = this.canvas.width + 'px';
+        modalCanvas.style.height = this.canvas.height + 'px';
+
+        // Copy entire canvas content
+        const modalCtx = modalCanvas.getContext('2d');
+        modalCtx.drawImage(this.canvas, 0, 0);
+
+        console.log('WEFAX: Synced modal canvas with main canvas, size:', this.canvas.width, 'x', this.canvas.height);
     }
 }
 

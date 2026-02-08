@@ -426,10 +426,19 @@ class WEFAXExtension extends DecoderExtension {
         // Create new handler that intercepts binary messages only
         this.binaryMessageHandler = (event) => {
             // Check if this is a binary message (ArrayBuffer or Blob)
-            if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
+            if (event.data instanceof ArrayBuffer) {
                 // Binary message - process as WEFAX data
-                console.log('WEFAX: Received binary message, length:', event.data.byteLength || event.data.size);
+                console.log('WEFAX: Received binary message (ArrayBuffer), length:', event.data.byteLength);
                 this.handleBinaryMessage(event.data);
+                // DO NOT pass binary messages to original handler (chat.js can't handle them)
+            } else if (event.data instanceof Blob) {
+                // Binary message as Blob - convert to ArrayBuffer first
+                console.log('WEFAX: Received binary message (Blob), size:', event.data.size);
+                event.data.arrayBuffer().then(arrayBuffer => {
+                    this.handleBinaryMessage(arrayBuffer);
+                }).catch(err => {
+                    console.error('WEFAX: Failed to convert Blob to ArrayBuffer:', err);
+                });
                 // DO NOT pass binary messages to original handler (chat.js can't handle them)
             } else {
                 // Text message - pass to original handler

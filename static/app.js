@@ -373,9 +373,22 @@ function loadVFOState(vfo) {
     if (squelchSlider) {
         squelchSlider.value = state.squelch;
         updateSquelchDisplay();
-        // Also trigger updateSquelch to send the value to the server
-        if (state.mode === 'fm' || state.mode === 'nfm') {
-            updateSquelch();
+        // Also send squelch to server for FM/NFM modes
+        if ((state.mode === 'fm' || state.mode === 'nfm') && wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
+            const squelchValue = parseInt(state.squelch);
+            let squelchDb;
+            if (squelchValue === 0) {
+                squelchDb = -999.0;
+            } else {
+                squelchDb = -48.0 + (squelchValue - 1) * (68.0 / 99.0);
+            }
+            
+            const msg = {
+                type: 'set_squelch',
+                squelchOpen: squelchDb
+            };
+            wsManager.send(msg);
+            console.log(`[VFO] Squelch set to ${squelchDb === -999.0 ? 'Open' : squelchDb.toFixed(1) + ' dB'}`);
         }
     }
     

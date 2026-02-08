@@ -562,37 +562,54 @@ class WEFAXExtension extends DecoderExtension {
             imageData.data[offset + 3] = 255;        // A
         }
 
-        // Draw the line
+        // Draw the line to main canvas
         this.ctx.putImageData(imageData, 0, lineNumber);
+
+        // Also draw to modal canvas if in modal mode
+        if (this.modalMode && this.modalBodyId) {
+            const modalBody = document.getElementById(this.modalBodyId);
+            if (modalBody) {
+                const modalCanvas = modalBody.querySelector('#wefax-canvas');
+                if (modalCanvas) {
+                    const modalCtx = modalCanvas.getContext('2d');
+                    
+                    // Ensure modal canvas is same size
+                    if (modalCanvas.width !== this.canvas.width || modalCanvas.height !== this.canvas.height) {
+                        modalCanvas.width = this.canvas.width;
+                        modalCanvas.height = this.canvas.height;
+                        modalCanvas.style.display = 'block';
+                        modalCanvas.style.width = this.canvas.width + 'px';
+                        modalCanvas.style.height = this.canvas.height + 'px';
+                    }
+                    
+                    // Draw the line to modal canvas
+                    modalCtx.putImageData(imageData, 0, lineNumber);
+                }
+            }
+        }
 
         // Update line count
         if (lineNumber > this.currentLine) {
             this.currentLine = lineNumber;
             this.updateLineCount(this.currentLine);
-            
-            // Log first few lines for debugging
-            if (lineNumber < 5) {
-                const container = document.getElementById('wefax-canvas-container');
-                const panel = document.querySelector('.decoder-extension-panel');
-                const content = document.querySelector('.decoder-extension-content');
-                const computedStyle = window.getComputedStyle(this.canvas);
-                console.log(`WEFAX: Rendered line ${lineNumber}`);
-                console.log(`  Canvas: ${this.canvas.width}x${this.canvas.height}, visible: ${this.canvas.offsetWidth}x${this.canvas.offsetHeight}`);
-                console.log(`  Canvas computed: display=${computedStyle.display}, width=${computedStyle.width}, height=${computedStyle.height}`);
-                console.log(`  Canvas inline: display=${this.canvas.style.display}, width=${this.canvas.style.width}, height=${this.canvas.style.height}`);
-                console.log(`  Canvas parent: ${this.canvas.parentElement ? this.canvas.parentElement.tagName + '#' + this.canvas.parentElement.id : 'NO PARENT'}`);
-                console.log(`  Canvas in DOM: ${document.body.contains(this.canvas)}`);
-                console.log(`  Container: ${container ? container.offsetWidth + 'x' + container.offsetHeight : 'not found'}`);
-                console.log(`  Content: ${content ? content.offsetWidth + 'x' + content.offsetHeight : 'not found'}`);
-                console.log(`  Panel: ${panel ? panel.offsetWidth + 'x' + panel.offsetHeight : 'not found'}`);
-            }
         }
 
-        // Auto-scroll to bottom
+        // Auto-scroll to bottom (both panel and modal)
         if (this.autoScroll) {
             const container = document.getElementById('wefax-canvas-container');
             if (container) {
                 container.scrollTop = container.scrollHeight;
+            }
+            
+            // Also scroll modal if active
+            if (this.modalMode && this.modalBodyId) {
+                const modalBody = document.getElementById(this.modalBodyId);
+                if (modalBody) {
+                    const modalContainer = modalBody.querySelector('#wefax-canvas-container');
+                    if (modalContainer) {
+                        modalContainer.scrollTop = modalContainer.scrollHeight;
+                    }
+                }
             }
         }
     }
@@ -689,25 +706,25 @@ class WEFAXExtension extends DecoderExtension {
     }
 
     updateStatus(status, text) {
-        const badge = document.getElementById('wefax-status-badge');
-        if (badge) {
-            badge.textContent = text;
-            badge.className = `status-badge status-${status}`;
-        }
+        // Use the base class helper to update both panel and modal
+        this.updateElementById('wefax-status-badge', (el) => {
+            el.textContent = text;
+            el.className = `status-badge status-${status}`;
+        });
     }
 
     updateLineCount(count) {
-        const lineCountEl = document.getElementById('wefax-line-count');
-        if (lineCountEl) {
-            lineCountEl.textContent = `Lines: ${count}`;
-        }
+        // Use the base class helper to update both panel and modal
+        this.updateElementById('wefax-line-count', (el) => {
+            el.textContent = `Lines: ${count}`;
+        });
     }
 
     updateImageSize(width, height) {
-        const imageSizeEl = document.getElementById('wefax-image-size');
-        if (imageSizeEl) {
-            imageSizeEl.textContent = `Size: ${width}x${height}`;
-        }
+        // Use the base class helper to update both panel and modal
+        this.updateElementById('wefax-image-size', (el) => {
+            el.textContent = `Size: ${width}x${height}`;
+        });
     }
 
     onEnable() {

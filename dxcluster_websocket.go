@@ -68,6 +68,9 @@ type DXClusterWebSocketHandler struct {
 	// Chat manager for live chat functionality
 	chatManager *ChatManager
 
+	// Audio extension manager for streaming audio processors
+	audioExtensionManager *AudioExtensionManager
+
 	// Map websocket connections to session IDs for chat
 	connToSessionID   map[*websocket.Conn]string
 	connToSessionIDMu sync.RWMutex
@@ -254,6 +257,11 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessi
 		// Remove user from chat system
 		if h.chatManager != nil {
 			h.chatManager.RemoveUser(userSessionID)
+		}
+
+		// Remove audio extension for this session
+		if h.audioExtensionManager != nil {
+			h.audioExtensionManager.RemoveSession(userSessionID)
 		}
 
 		// Remove connection to session ID mapping
@@ -544,6 +552,21 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessi
 						h.sendMessage(conn, map[string]interface{}{
 							"type":  "chat_error",
 							"error": "chat is disabled on this server",
+						})
+					}
+
+				case "audio_extension_attach", "audio_extension_detach", "audio_extension_status", "audio_extension_list":
+					// Handle audio extension messages
+					if h.audioExtensionManager != nil {
+						if err := h.audioExtensionManager.HandleExtensionMessage(userSessionID, conn, msg); err != nil {
+							// Error already sent by manager
+							log.Printf("AudioExtension: Error handling message: %v", err)
+						}
+					} else {
+						// Audio extensions disabled on server
+						h.sendMessage(conn, map[string]interface{}{
+							"type":  "audio_extension_error",
+							"error": "audio extensions are disabled on this server",
 						})
 					}
 				}

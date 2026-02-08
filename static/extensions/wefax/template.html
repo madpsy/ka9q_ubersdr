@@ -1,0 +1,123 @@
+<div class="wefax-container">
+    <!-- Frequency Selector -->
+    <div class="wefax-frequency-selector">
+        <label for="wefax-station-select">Quick Tune:</label>
+        <select id="wefax-station-select" class="wefax-select-wide">
+            <option value="">-- Select WEFAX Station --</option>
+            <optgroup label="North America">
+                <option value="4317900,usb,120">NMG New Orleans - 4.318 MHz (120 LPM)</option>
+                <option value="8503900,usb,120">NMG New Orleans - 8.504 MHz (120 LPM)</option>
+                <option value="12789900,usb,120">NMG New Orleans - 12.790 MHz (120 LPM)</option>
+                <option value="17146400,usb,120">NMG New Orleans - 17.146 MHz (120 LPM)</option>
+                <option value="4235000,usb,120">NMF Boston - 4.235 MHz (120 LPM)</option>
+                <option value="6340500,usb,120">NMF Boston - 6.341 MHz (120 LPM)</option>
+                <option value="9110000,usb,120">NMF Boston - 9.110 MHz (120 LPM)</option>
+                <option value="12750000,usb,120">NMF Boston - 12.750 MHz (120 LPM)</option>
+            </optgroup>
+            <optgroup label="Europe">
+                <option value="3855000,usb,120">DDH47 Germany - 3.855 MHz (120 LPM)</option>
+                <option value="7880000,usb,120">DDH47 Germany - 7.880 MHz (120 LPM)</option>
+                <option value="13882500,usb,120">DDH47 Germany - 13.883 MHz (120 LPM)</option>
+                <option value="2618500,usb,120">GYA UK - 2.619 MHz (120 LPM)</option>
+                <option value="4610000,usb,120">GYA UK - 4.610 MHz (120 LPM)</option>
+                <option value="8040000,usb,120">GYA UK - 8.040 MHz (120 LPM)</option>
+                <option value="11086500,usb,120">GYA UK - 11.087 MHz (120 LPM)</option>
+            </optgroup>
+            <optgroup label="Asia/Pacific">
+                <option value="3622500,usb,120">JMH Japan - 3.623 MHz (120 LPM)</option>
+                <option value="7795000,usb,120">JMH Japan - 7.795 MHz (120 LPM)</option>
+                <option value="9970000,usb,120">JMH Japan - 9.970 MHz (120 LPM)</option>
+                <option value="13597500,usb,120">JMH Japan - 13.598 MHz (120 LPM)</option>
+                <option value="10865000,usb,120">NMO Hawaii - 10.865 MHz (120 LPM)</option>
+                <option value="13861500,usb,120">NMO Hawaii - 13.862 MHz (120 LPM)</option>
+            </optgroup>
+        </select>
+        <button id="wefax-tune-btn" class="wefax-btn wefax-btn-primary" disabled>Tune</button>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="wefax-status-bar">
+        <div class="wefax-status-left">
+            <span id="wefax-status-badge" class="status-badge status-disconnected">Stopped</span>
+            <span id="wefax-line-count" class="wefax-info">Lines: 0</span>
+            <span id="wefax-image-size" class="wefax-info">Size: 0x0</span>
+        </div>
+        <div class="wefax-status-right">
+            <button id="wefax-start-btn" class="wefax-btn wefax-btn-primary">Start</button>
+            <button id="wefax-stop-btn" class="wefax-btn wefax-btn-secondary" disabled>Stop</button>
+            <button id="wefax-clear-btn" class="wefax-btn wefax-btn-secondary">Clear</button>
+            <button id="wefax-save-btn" class="wefax-btn wefax-btn-secondary">Save Image</button>
+        </div>
+    </div>
+
+    <!-- Controls Panel -->
+    <div class="wefax-controls">
+        <div class="wefax-control-group">
+            <label for="wefax-lpm">LPM:</label>
+            <select id="wefax-lpm" class="wefax-select">
+                <option value="60">60</option>
+                <option value="90">90</option>
+                <option value="120" selected>120</option>
+                <option value="240">240</option>
+            </select>
+        </div>
+
+        <div class="wefax-control-group">
+            <label for="wefax-carrier">Carrier (Hz):</label>
+            <input type="number" id="wefax-carrier" class="wefax-input" value="1900" min="1000" max="3000" step="10">
+        </div>
+
+        <div class="wefax-control-group">
+            <label for="wefax-deviation">Deviation (Hz):</label>
+            <input type="number" id="wefax-deviation" class="wefax-input" value="400" min="100" max="800" step="10">
+        </div>
+
+        <div class="wefax-control-group">
+            <label for="wefax-image-width">Width (px):</label>
+            <input type="number" id="wefax-image-width" class="wefax-input" value="1809" min="800" max="4000" step="1">
+        </div>
+
+        <div class="wefax-control-group">
+            <label for="wefax-bandwidth">Bandwidth:</label>
+            <select id="wefax-bandwidth" class="wefax-select">
+                <option value="0">Narrow</option>
+                <option value="1" selected>Middle</option>
+                <option value="2">Wide</option>
+            </select>
+        </div>
+
+        <div class="wefax-control-group">
+            <label>
+                <input type="checkbox" id="wefax-use-phasing" checked>
+                Use Phasing
+            </label>
+        </div>
+
+        <div class="wefax-control-group">
+            <label>
+                <input type="checkbox" id="wefax-auto-stop">
+                Auto-Stop
+            </label>
+        </div>
+
+        <div class="wefax-control-group">
+            <label>
+                <input type="checkbox" id="wefax-auto-scroll" checked>
+                Auto-Scroll
+            </label>
+        </div>
+    </div>
+
+    <!-- Canvas Container -->
+    <div class="wefax-canvas-container" id="wefax-canvas-container">
+        <canvas id="wefax-canvas" class="wefax-canvas"></canvas>
+    </div>
+
+    <!-- Help Text -->
+    <div class="wefax-help">
+        <p><strong>WEFAX Decoder</strong> - Receives weather fax transmissions</p>
+        <p>Tune to a WEFAX frequency (e.g., 3.855 MHz, 7.880 MHz, 13.882.5 MHz) in USB mode.</p>
+        <p>Adjust carrier and deviation to match the signal. Common settings: 1900 Hz carrier, 400 Hz deviation.</p>
+        <p>The decoder will automatically detect phasing lines and align the image.</p>
+    </div>
+</div>

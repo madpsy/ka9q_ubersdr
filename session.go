@@ -68,6 +68,10 @@ type Session struct {
 	VisitedModes map[string]bool // Set of modes used during this session
 	bandsMu      sync.RWMutex    // Protect VisitedBands map
 	modesMu      sync.RWMutex    // Protect VisitedModes map
+
+	// Audio extension tap (for streaming audio to background processors)
+	audioExtensionChan chan []int16
+	audioExtensionMu   sync.RWMutex
 }
 
 // SessionManager manages all active sessions
@@ -2046,4 +2050,42 @@ func (sm *SessionManager) KickUsersByCountry(countryCode string, geoIPService *G
 
 	log.Printf("Kicked users from country %s (%d session(s) destroyed)", countryCode, len(sessionsToKick))
 	return len(sessionsToKick), nil
+}
+
+// GetSampleRate returns the session's sample rate
+func (s *Session) GetSampleRate() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.SampleRate
+}
+
+// AttachAudioExtensionTap attaches an audio extension tap to this session
+// The tap receives a copy of all PCM audio sent to the user
+func (s *Session) AttachAudioExtensionTap(audioChan chan []int16) {
+	s.audioExtensionMu.Lock()
+	s.audioExtensionChan = audioChan
+	s.audioExtensionMu.Unlock()
+}
+
+// DetachAudioExtensionTap removes the audio extension tap from this session
+func (s *Session) DetachAudioExtensionTap() {
+	s.audioExtensionMu.Lock()
+	s.audioExtensionChan = nil
+	s.audioExtensionMu.Unlock()
+}
+
+// SendAudioToExtension sends PCM audio to the attached extension (if any)
+// This should be called from the audio receiver when sending audio to the user
+func (s *Session) SendAudioToExtension(pcmData []int16) {
+	s.audioExtensionMu.RLock()
+	extensionChan := s.audioExtensionChan
+	s.audioExtensionMu.RUnlock()
+
+	if extensionChan != nil {
+		select {
+		case extensionChan <- pcmData:
+		default:
+			// Drop if extension can't keep up (non-blocking)
+		}
+	}
 }

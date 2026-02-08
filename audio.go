@@ -230,6 +230,26 @@ func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp ui
 	default:
 		// Channel full, skip this packet silently
 	}
+
+	// Also send to audio extension if attached
+	// Convert PCM bytes (big-endian int16) to int16 samples
+	if len(dataCopy) > 0 && len(dataCopy)%2 == 0 {
+		samples := bytesToInt16Samples(dataCopy)
+		session.SendAudioToExtension(samples)
+	}
+}
+
+// bytesToInt16Samples converts big-endian PCM bytes to int16 samples
+func bytesToInt16Samples(pcmBytes []byte) []int16 {
+	sampleCount := len(pcmBytes) / 2
+	samples := make([]int16, sampleCount)
+	
+	for i := 0; i < sampleCount; i++ {
+		// Big-endian int16
+		samples[i] = int16(pcmBytes[i*2])<<8 | int16(pcmBytes[i*2+1])
+	}
+	
+	return samples
 }
 
 // GetChannelAudio returns a channel for receiving audio for a specific session

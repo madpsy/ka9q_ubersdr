@@ -1,0 +1,64 @@
+{
+  "name": "wefax",
+  "displayName": "WEFAX Decoder",
+  "version": "1.0.0",
+  "description": "Weather Fax (WEFAX) decoder for receiving weather charts and satellite images",
+  "author": "UberSDR",
+  "type": "decoder",
+  "icon": "📠",
+  "category": "decoder",
+  "requiresAudio": true,
+  "defaultEnabled": false,
+  "files": {
+    "main": "main.js",
+    "styles": ["styles.css"],
+    "template": "template.html"
+  },
+  "settings": {
+    "lpm": {
+      "type": "number",
+      "default": 120,
+      "min": 60,
+      "max": 240,
+      "description": "Lines per minute (60, 90, 120, 240)"
+    },
+    "carrier": {
+      "type": "number",
+      "default": 1900,
+      "min": 1000,
+      "max": 3000,
+      "description": "Carrier frequency in Hz"
+    },
+    "deviation": {
+      "type": "number",
+      "default": 400,
+      "min": 100,
+      "max": 800,
+      "description": "Deviation in Hz"
+    },
+    "imageWidth": {
+      "type": "number",
+      "default": 1809,
+      "min": 800,
+      "max": 4000,
+      "description": "Image width in pixels"
+    },
+    "bandwidth": {
+      "type": "number",
+      "default": 1,
+      "min": 0,
+      "max": 2,
+      "description": "Filter bandwidth (0=narrow, 1=middle, 2=wide)"
+    },
+    "usePhasing": {
+      "type": "boolean",
+      "default": true,
+      "description": "Use phasing line detection for alignment"
+    },
+    "autoStop": {
+      "type": "boolean",
+      "default": false,
+      "description": "Auto-stop on stop signal detection"
+    }
+  }
+}

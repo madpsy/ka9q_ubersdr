@@ -325,6 +325,43 @@ function applyEQPreset(presetName) {
     console.log(`Applied ${presetName} EQ preset with ${makeupGainCompensation.toFixed(1)} dB makeup gain compensation`);
 }
 
+// EQ Quick Toggle - cycles through Off -> Voice -> CW -> Off
+let eqQuickState = 'off'; // 'off', 'voice', 'cw'
+
+function toggleEQQuick() {
+    const button = document.getElementById('eq-quick-toggle');
+    const checkbox = document.getElementById('equalizer-enable');
+    
+    if (!button || !checkbox) return;
+    
+    // Cycle through states: off -> voice -> cw -> off
+    if (eqQuickState === 'off') {
+        // Enable EQ and apply Voice preset
+        eqQuickState = 'voice';
+        applyEQPreset('voice');
+        button.textContent = 'Voice';
+        button.style.backgroundColor = '#28a745'; // Green
+        console.log('EQ Quick Toggle: Voice preset enabled');
+    } else if (eqQuickState === 'voice') {
+        // Apply CW preset
+        eqQuickState = 'cw';
+        applyEQPreset('cw');
+        button.textContent = 'CW';
+        button.style.backgroundColor = '#17a2b8'; // Cyan
+        console.log('EQ Quick Toggle: CW preset enabled');
+    } else {
+        // Disable EQ
+        eqQuickState = 'off';
+        if (checkbox.checked) {
+            checkbox.checked = false;
+            toggleEqualizer();
+        }
+        button.textContent = 'EQ';
+        button.style.backgroundColor = '#6c757d'; // Gray
+        console.log('EQ Quick Toggle: EQ disabled');
+    }
+}
+
 function showEqualizerClipIndicator() {
     const indicator = document.getElementById('equalizer-clip-indicator');
     if (!indicator) return;
@@ -1370,6 +1407,7 @@ window.toggleEqualizer = toggleEqualizer;
 window.updateEqualizer = updateEqualizer;
 window.resetEqualizer = resetEqualizer;
 window.applyEQPreset = applyEQPreset;
+window.toggleEQQuick = toggleEQQuick;
 window.showEqualizerClipIndicator = showEqualizerClipIndicator;
 
 window.bandpassFilters = bandpassFilters;

@@ -579,6 +579,9 @@ class WEFAXExtension extends DecoderExtension {
 
         // Resize main canvas
         this.canvas.height = newHeight;
+        
+        // Update inline style height to match
+        this.canvas.style.height = newHeight + 'px';
 
         // Fill with black
         this.ctx.fillStyle = '#000000';

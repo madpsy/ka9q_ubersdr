@@ -2873,6 +2873,16 @@ function setFrequency(freq) {
 
     const clampedFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, freq));
 
+    // Disable edge detection when setting frequency
+    if (window.spectrumDisplay) {
+        window.spectrumDisplay.skipEdgeDetection = true;
+        setTimeout(() => {
+            if (window.spectrumDisplay) {
+                window.spectrumDisplay.skipEdgeDetection = false;
+            }
+        }, 2000);
+    }
+
     setFrequencyInputValue(clampedFreq);
     updateBandButtons(clampedFreq);
     updateBandSelector();

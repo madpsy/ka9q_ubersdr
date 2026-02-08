@@ -117,7 +117,10 @@ class UberSDRChat {
             // Binary messages are handled by audio extensions (e.g., WEFAX)
             if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
                 // Pass binary messages to original handler if it exists
-                if (this.originalHandler && typeof this.originalHandler === 'function') {
+                // But ONLY if it's not our own handler (prevent recursion)
+                if (this.originalHandler &&
+                    typeof this.originalHandler === 'function' &&
+                    this.originalHandler !== this.messageHandler) {
                     this.originalHandler(event);
                 }
                 return;
@@ -127,20 +130,26 @@ class UberSDRChat {
             try {
                 const msg = JSON.parse(event.data);
 
-                // Handle chat messages
+                // Handle chat messages - these are consumed here, don't pass to original handler
                 if (msg.type && msg.type.startsWith('chat_')) {
                     this.handleChatMessage(msg);
+                    return; // Don't pass chat messages to original handler
                 }
 
-                // Call original handler for non-chat messages
-                // Always get the current handler in case websocket was recreated
-                if (this.originalHandler && typeof this.originalHandler === 'function') {
+                // Non-chat messages - pass to original handler
+                // But ONLY if it's not our own handler (prevent recursion)
+                if (this.originalHandler &&
+                    typeof this.originalHandler === 'function' &&
+                    this.originalHandler !== this.messageHandler) {
                     this.originalHandler(event);
                 }
             } catch (e) {
                 // If JSON parse fails, it might be a non-JSON text message
                 // Pass it to the original handler
-                if (this.originalHandler && typeof this.originalHandler === 'function') {
+                // But ONLY if it's not our own handler (prevent recursion)
+                if (this.originalHandler &&
+                    typeof this.originalHandler === 'function' &&
+                    this.originalHandler !== this.messageHandler) {
                     this.originalHandler(event);
                 }
             }

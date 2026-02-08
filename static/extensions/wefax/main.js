@@ -417,15 +417,17 @@ class WEFAXExtension extends DecoderExtension {
             return;
         }
 
-        // Store reference to original handler (NOT the current one, to avoid recursion)
+        // Store reference to original handler ONLY if we haven't already
         if (!this.originalDXHandler) {
             this.originalDXHandler = dxClient.ws.onmessage;
+            console.log('WEFAX: Stored original DX handler');
         }
 
         // Create new handler that processes both text and binary messages
         this.binaryMessageHandler = (event) => {
             if (typeof event.data === 'string') {
-                // Text message - pass to ORIGINAL handler (not current, to avoid recursion)
+                // Text message - pass to original handler
+                // IMPORTANT: Check that originalDXHandler is not our own handler to prevent recursion
                 if (this.originalDXHandler && this.originalDXHandler !== this.binaryMessageHandler) {
                     this.originalDXHandler.call(dxClient.ws, event);
                 }
@@ -448,20 +450,11 @@ class WEFAXExtension extends DecoderExtension {
         // Restore original handler
         if (this.originalDXHandler) {
             dxClient.ws.onmessage = this.originalDXHandler;
+            this.originalDXHandler = null;
             console.log('WEFAX: Original message handler restored');
         }
         
         this.binaryMessageHandler = null;
-    }
-
-    removeBinaryMessageHandler() {
-        if (this.binaryMessageHandler) {
-            // Restore original handler (if we stored it)
-            // For now, we'll just remove our handler
-            // The DX cluster client will reinstall its handler
-            this.binaryMessageHandler = null;
-            console.log('WEFAX: Binary message handler removed');
-        }
     }
 
     handleBinaryMessage(data) {

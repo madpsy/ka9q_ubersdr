@@ -168,17 +168,21 @@ class UberSDRChat {
      * Monitor for websocket reconnections and reinstall message handler
      */
     setupReconnectHandler() {
+        // DISABLED: This was causing issues with audio extensions (WEFAX)
+        // The constant reinstallation created handler chains and performance issues
+        // If reconnection handling is needed, it should be done differently
+        
         // Check every second if we need to reinstall the handler
-        setInterval(() => {
-            const ws = this.getWebSocket();
-            if (ws && ws.onmessage !== this.messageHandler) {
-                console.log('[Chat] Websocket reconnected, reinstalling message handler');
-                // Save the new original handler (from DX cluster)
-                this.originalHandler = ws.onmessage;
-                // Install our wrapper
-                ws.onmessage = this.messageHandler;
-            }
-        }, 1000);
+        // setInterval(() => {
+        //     const ws = this.getWebSocket();
+        //     if (ws && ws.onmessage !== this.messageHandler) {
+        //         console.log('[Chat] Websocket reconnected, reinstalling message handler');
+        //         // Save the new original handler (from DX cluster)
+        //         this.originalHandler = ws.onmessage;
+        //         // Install our wrapper
+        //         ws.onmessage = this.messageHandler;
+        //     }
+        // }, 1000);
     }
 
     /**

@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/cwsl/ka9q_ubersdr/audio_extensions/wefax"
 )
 
 // Global debug flag
@@ -933,6 +935,47 @@ func main() {
 		receiverLocator = config.Decoder.ReceiverLocator
 	}
 	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics, receiverLocator, config.Chat)
+
+	// Initialize audio extension manager
+	audioExtensionRegistry := NewAudioExtensionRegistry()
+	
+	// Register audio extensions
+	wefaxInfo := wefax.GetInfo()
+	
+	// Create wrapper factory that converts between main and wefax types
+	wefaxFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
+		// Convert main AudioExtensionParams to wefax AudioExtensionParams
+		wefaxParams := wefax.AudioExtensionParams{
+			SampleRate:    audioParams.SampleRate,
+			Channels:      audioParams.Channels,
+			BitsPerSample: audioParams.BitsPerSample,
+		}
+		
+		// Call wefax factory
+		wefaxExt, err := wefax.Factory(wefaxParams, extensionParams)
+		if err != nil {
+			return nil, err
+		}
+		
+		// Wrap the wefax extension to implement main AudioExtension interface
+		return &wefaxExtensionWrapper{ext: wefaxExt}, nil
+	}
+	
+	audioExtensionRegistry.Register(
+		"wefax",
+		wefaxFactoryWrapper,
+		AudioExtensionInfo{
+			Name:        wefaxInfo["name"].(string),
+			Description: wefaxInfo["description"].(string),
+			Version:     wefaxInfo["version"].(string),
+		},
+	)
+	log.Printf("Registered audio extension: wefax v%s", wefaxInfo["version"].(string))
+	
+	// Create audio extension manager
+	audioExtensionManager := NewAudioExtensionManager(dxClusterWsHandler, sessions, audioExtensionRegistry)
+	dxClusterWsHandler.audioExtensionManager = audioExtensionManager
+	log.Printf("Audio extension manager initialized (ready for extensions)")
 
 	// Connect DX cluster websocket handler to session manager for throughput tracking
 	sessions.SetDXClusterWebSocketHandler(dxClusterWsHandler)
@@ -4093,7 +4136,7 @@ func handleCWSpotsAnalyticsHourly(w http.ResponseWriter, r *http.Request, cwSkim
 			hours = h
 		}
 	}
-
+	
 	// Check rate limit (1 request per 2 seconds per IP)
 	clientIP := getClientIP(r)
 	rateLimitKey := fmt.Sprintf("cw-analytics-hourly-%s-%s-%s-%d-%d", country, continent, band, minSNR, hours)
@@ -4120,4 +4163,21 @@ func handleCWSpotsAnalyticsHourly(w http.ResponseWriter, r *http.Request, cwSkim
 	if err := json.NewEncoder(w).Encode(analytics); err != nil {
 		log.Printf("Error encoding CW spots hourly analytics: %v", err)
 	}
+}
+
+// wefaxExtensionWrapper wraps a wefax.AudioExtension to implement main.AudioExtension
+type wefaxExtensionWrapper struct {
+	ext wefax.AudioExtension
+}
+
+func (w *wefaxExtensionWrapper) Start(audioChan <-chan []int16, resultChan chan<- []byte) error {
+	return w.ext.Start(audioChan, resultChan)
+}
+
+func (w *wefaxExtensionWrapper) Stop() error {
+	return w.ext.Stop()
+}
+
+func (w *wefaxExtensionWrapper) GetName() string {
+	return w.ext.GetName()
 }

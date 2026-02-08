@@ -286,6 +286,13 @@ function loadVFOState(vfo) {
     updateBandButtons(state.frequency);
     updateBandSelector();
     
+    // First update squelch slider value BEFORE changing mode
+    const squelchSlider = document.getElementById('squelch');
+    if (squelchSlider) {
+        squelchSlider.value = state.squelch;
+        updateSquelchDisplay();
+    }
+    
     // Update mode and bandwidth slider ranges using setMode with preserveBandwidth=true
     // This ensures slider min/max values are updated correctly for the mode
     currentMode = state.mode;
@@ -368,13 +375,6 @@ function loadVFOState(vfo) {
         document.getElementById('bandwidth-high-value').textContent = state.bandwidthHigh;
     }
     
-    // Update squelch (for FM/NFM modes)
-    const squelchSlider = document.getElementById('squelch');
-    if (squelchSlider) {
-        squelchSlider.value = state.squelch;
-        updateSquelchDisplay();
-    }
-    
     // Update mode-specific controls visibility
     const bandwidthControls = document.getElementById('bandwidth-controls');
     const squelchControls = document.getElementById('squelch-controls');
@@ -437,31 +437,16 @@ function toggleVFO() {
     if (wsManager.isConnected()) {
         autoTune();
         
-        // Send squelch after tune completes (for FM/NFM modes)
-        // Delay longer to ensure mode change is processed by server first
+        // Trigger squelch update after tune completes (for FM/NFM modes)
+        // Use setTimeout to ensure mode change is processed first
         const state = vfoStates[newVFO];
         if (state.mode === 'fm' || state.mode === 'nfm') {
             setTimeout(() => {
-                if (wsManager && wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
-                    const squelchValue = parseInt(state.squelch);
-                    let squelchDb;
-                    if (squelchValue === 0) {
-                        squelchDb = -999.0;
-                    } else {
-                        squelchDb = -48.0 + (squelchValue - 1) * (68.0 / 99.0);
-                    }
-                    
-                    const msg = {
-                        type: 'set_squelch',
-                        squelchOpen: squelchDb
-                    };
-                    wsManager.send(msg);
-                    
-                    if (squelchDb === -999.0) {
-                        log('[VFO] Squelch: Open (no squelch)');
-                    } else {
-                        log(`[VFO] Squelch: Closed at ${squelchDb.toFixed(1)} dB SNR`);
-                    }
+                const squelchSlider = document.getElementById('squelch');
+                if (squelchSlider) {
+                    // Trigger the change event to call updateSquelch()
+                    squelchSlider.dispatchEvent(new Event('change'));
+                    console.log('[VFO] Triggered squelch change event');
                 }
             }, 500);
         }

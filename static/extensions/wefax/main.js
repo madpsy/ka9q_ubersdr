@@ -46,20 +46,36 @@ class WEFAXExtension extends DecoderExtension {
 
     waitForDOMAndSetupHandlers() {
         const trySetup = (attempts = 0) => {
-            const maxAttempts = 10;
+            const maxAttempts = 20;
 
             const canvas = document.getElementById('wefax-canvas');
             const startBtn = document.getElementById('wefax-start-btn');
+            const stationSelect = document.getElementById('wefax-station-select');
+            const tuneBtn = document.getElementById('wefax-tune-btn');
 
-            if (canvas && startBtn) {
+            console.log(`WEFAX: DOM check attempt ${attempts + 1}/${maxAttempts}:`, {
+                canvas: !!canvas,
+                startBtn: !!startBtn,
+                stationSelect: !!stationSelect,
+                tuneBtn: !!tuneBtn
+            });
+
+            if (canvas && startBtn && stationSelect && tuneBtn) {
+                console.log('WEFAX: All DOM elements found, setting up...');
                 this.setupCanvas();
                 this.setupEventHandlers();
-                console.log('WEFAX: Event handlers set up successfully');
+                console.log('WEFAX: Setup complete');
             } else if (attempts < maxAttempts) {
                 console.log(`WEFAX: Waiting for DOM elements (attempt ${attempts + 1}/${maxAttempts})`);
-                requestAnimationFrame(() => trySetup(attempts + 1));
+                setTimeout(() => trySetup(attempts + 1), 100);
             } else {
                 console.error('WEFAX: Failed to find DOM elements after', maxAttempts, 'attempts');
+                console.error('WEFAX: Missing elements:', {
+                    canvas: !canvas,
+                    startBtn: !startBtn,
+                    stationSelect: !stationSelect,
+                    tuneBtn: !tuneBtn
+                });
             }
         };
 
@@ -126,13 +142,25 @@ class WEFAXExtension extends DecoderExtension {
         // Start button
         const startBtn = document.getElementById('wefax-start-btn');
         if (startBtn) {
-            startBtn.addEventListener('click', () => this.startDecoder());
+            console.log('WEFAX: Start button found, adding click handler');
+            startBtn.addEventListener('click', () => {
+                console.log('WEFAX: Start button clicked!');
+                this.startDecoder();
+            });
+        } else {
+            console.error('WEFAX: Start button NOT found!');
         }
 
         // Stop button
         const stopBtn = document.getElementById('wefax-stop-btn');
         if (stopBtn) {
-            stopBtn.addEventListener('click', () => this.stopDecoder());
+            console.log('WEFAX: Stop button found, adding click handler');
+            stopBtn.addEventListener('click', () => {
+                console.log('WEFAX: Stop button clicked!');
+                this.stopDecoder();
+            });
+        } else {
+            console.error('WEFAX: Stop button NOT found!');
         }
 
         // Clear button
@@ -253,34 +281,45 @@ class WEFAXExtension extends DecoderExtension {
     }
 
     startDecoder() {
+        console.log('WEFAX: startDecoder() called, running=', this.running);
+        
         if (this.running) {
-            console.log('WEFAX: Already running');
+            console.log('WEFAX: Already running, returning');
             return;
         }
 
-        console.log('WEFAX: Starting decoder');
+        console.log('WEFAX: Starting decoder...');
 
         // Update configuration
         this.updateConfig();
+        console.log('WEFAX: Config updated:', this.config);
 
         // Reset canvas if width changed
         const newWidth = this.config.image_width;
         if (newWidth !== this.imageWidth) {
+            console.log('WEFAX: Image width changed, resetting canvas');
             this.imageWidth = newWidth;
             this.setupCanvas();
         }
 
         // Attach to audio extension via DX WebSocket
+        console.log('WEFAX: Calling attachAudioExtension()');
         this.attachAudioExtension();
 
         // Update UI
         this.running = true;
         this.updateStatus('running', 'Running');
-        document.getElementById('wefax-start-btn').disabled = true;
-        document.getElementById('wefax-stop-btn').disabled = false;
+        
+        const startBtn = document.getElementById('wefax-start-btn');
+        const stopBtn = document.getElementById('wefax-stop-btn');
+        
+        if (startBtn) startBtn.disabled = true;
+        if (stopBtn) stopBtn.disabled = false;
 
         // Disable config controls while running
         this.setConfigControlsEnabled(false);
+        
+        console.log('WEFAX: Decoder started successfully');
     }
 
     stopDecoder() {

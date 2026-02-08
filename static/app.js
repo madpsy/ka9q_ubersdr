@@ -8506,6 +8506,7 @@ window.addEventListener('message', (event) => {
                     // Disable edge detection BEFORE calling tuneToChannel
                     if (window.spectrumDisplay) {
                         window.spectrumDisplay.skipEdgeDetection = true;
+                        console.log('[Popup Control] Set skipEdgeDetection=true before tuneToChannel');
                     }
                     // Use tuneToChannel which has proper edge detection handling
                     tuneToChannel(params.frequency, currentMode, currentBandwidthLow, currentBandwidthHigh);

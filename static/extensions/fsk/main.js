@@ -313,15 +313,16 @@ class FSKExtension extends DecoderExtension {
 
         // Set callbacks using the proper setter methods
         this.decoder.set_output_char_cb((char) => {
+            console.log('FSK: Character decoded:', char, char.charCodeAt ? char.charCodeAt(0) : 'non-char');
             this.handleDecodedChar(char);
         });
 
         this.decoder.set_baud_error_cb((error) => {
             // Optional: display baud error in status bar
-            // console.log('Baud error:', error);
+            console.log('FSK: Baud error:', error);
         });
 
-        console.log('FSK: Decoder initialized');
+        console.log('FSK: Decoder initialized with sample rate:', sampleRate);
     }
 
     updateDecoder() {

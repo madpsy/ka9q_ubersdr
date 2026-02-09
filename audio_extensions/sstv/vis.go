@@ -206,6 +206,11 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 			for j := 0; j < 3 && !gotVIS; j++ {
 				leaderFreq := v.toneBuf[j]
 
+				// First check: leader frequency must be close to 1900 Hz
+				if leaderFreq < visLeaderFreq-visTolerance*2 || leaderFreq > visLeaderFreq+visTolerance*2 {
+					continue
+				}
+
 				// Check for 1900 Hz leader (4 consecutive 30ms periods)
 				if !v.checkTone(1*3+i, leaderFreq, visTolerance) ||
 					!v.checkTone(2*3+i, leaderFreq, visTolerance) ||
@@ -214,21 +219,20 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 					continue
 				}
 
-				// Found potential leader tone
+				// Found potential leader tone - only log first occurrence
 				patternAttempts++
 				if patternAttempts == 1 {
-					log.Printf("[SSTV VIS] Found potential leader tone at %.1f Hz (expected ~1900 Hz)", leaderFreq)
+					log.Printf("[SSTV VIS] Found potential leader tone at %.1f Hz, checking for start bit...", leaderFreq)
 				}
 
 				// Check for 1200 Hz start bit
 				if !v.checkTone(5*3+i, leaderFreq-700, 50) {
-					if patternAttempts <= 3 {
-						log.Printf("[SSTV VIS] Leader found but start bit missing (expected %.1f Hz)", leaderFreq-700)
-					}
+					// Don't log every failed start bit check - too spammy
 					continue
 				}
 
-				log.Printf("[SSTV VIS] Found leader + start bit, decoding data bits...")
+				// Only log when we actually find a valid start bit
+				log.Printf("[SSTV VIS] Found leader (%.1f Hz) + start bit (%.1f Hz), decoding data bits...", leaderFreq, leaderFreq-700)
 
 				// Try to read data bits
 				bits := make([]uint8, 16)

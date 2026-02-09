@@ -329,6 +329,10 @@ class FSKExtension extends DecoderExtension {
             }
         });
 
+        // CRITICAL FIX: Initialize next_event_count to sample at bit CENTER, not edge
+        // This ensures we sample in the middle of each bit for reliable detection
+        this.decoder.next_event_count = this.decoder.half_bit_sample_count;
+
         console.log('FSK: Decoder initialized', {
             sampleRate: sampleRate,
             centerFreq: this.config.centerFreq,
@@ -337,6 +341,9 @@ class FSKExtension extends DecoderExtension {
             framing: this.config.framing,
             encoding: this.config.encoding,
             inverted: this.config.inverted,
+            bitSampleCount: this.decoder.bit_sample_count,
+            halfBitSampleCount: this.decoder.half_bit_sample_count,
+            nextEventCount: this.decoder.next_event_count,
             encodingObject: this.decoder.encoding,
             hasCheckBits: this.decoder.encoding && typeof this.decoder.encoding.check_bits === 'function'
         });

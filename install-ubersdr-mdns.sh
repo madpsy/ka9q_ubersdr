@@ -149,8 +149,12 @@ echo "✓ Multicast group mDNS configured via avahi-publish systemd services"
 echo "  hf-status.local -> 239.185.143.241 (port 5006, _ka9q-ctl._udp)"
 echo "  pcm.local -> 239.69.232.124 (port 5004, _rtp._udp)"
 
-sleep 1
+echo ""
+echo "=== Restarting Avahi daemon to apply hostname configuration ==="
+systemctl restart avahi-daemon
+sleep 2
 
+echo "✓ Avahi daemon restarted"
 echo ""
 echo "UberSDR is now being advertised on your LAN via mDNS/DNS-SD"
 echo ""
@@ -167,5 +171,6 @@ echo "    http://ubersdr.local:${PORT}/"
 echo ""
 echo "You can verify discovery with:"
 echo "    avahi-browse -rt _ubersdr._tcp"
+echo "    ping ubersdr.local"
 echo ""
 echo "Done."

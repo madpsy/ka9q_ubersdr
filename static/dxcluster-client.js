@@ -228,6 +228,11 @@ class DXClusterClient {
                 // These are handled by the chat system (chat.js), ignore here
                 break;
 
+            // Audio extension message types - handled by extension system
+            case 'audio_extension_attached':
+                // This is handled by the audio extension system, ignore here
+                break;
+
             default:
                 console.warn('[DX Cluster] Unknown message type:', message.type);
         }

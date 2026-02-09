@@ -1,4 +1,34 @@
 <div class="sstv-container">
+    <!-- Frequency Selector -->
+    <div class="sstv-frequency-selector">
+        <label for="sstv-frequency-select">Quick Tune:</label>
+        <select id="sstv-frequency-select" class="sstv-select-wide">
+            <option value="">-- Select SSTV Frequency --</option>
+            <optgroup label="HF - Most Active">
+                <option value="14230000,usb">14.230 MHz USB (Primary SSTV)</option>
+                <option value="14233000,usb">14.233 MHz USB (Alternative)</option>
+            </optgroup>
+            <optgroup label="20m Band">
+                <option value="14227000,usb">14.227 MHz USB</option>
+                <option value="14230000,usb">14.230 MHz USB (Primary)</option>
+                <option value="14233000,usb">14.233 MHz USB</option>
+                <option value="14236000,usb">14.236 MHz USB</option>
+            </optgroup>
+            <optgroup label="15m Band">
+                <option value="21340000,usb">21.340 MHz USB</option>
+            </optgroup>
+            <optgroup label="10m Band">
+                <option value="28680000,usb">28.680 MHz USB</option>
+            </optgroup>
+            <optgroup label="40m Band">
+                <option value="7171000,lsb">7.171 MHz LSB</option>
+            </optgroup>
+            <optgroup label="80m Band">
+                <option value="3845000,lsb">3.845 MHz LSB (Evening)</option>
+            </optgroup>
+        </select>
+    </div>
+
     <!-- Status Bar -->
     <div class="sstv-status-bar">
         <div class="sstv-status-left">

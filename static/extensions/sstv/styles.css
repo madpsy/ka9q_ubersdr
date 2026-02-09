@@ -10,6 +10,41 @@
     color: #e0e0e0;
 }
 
+/* Frequency Selector */
+.sstv-frequency-selector {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 12px;
+    background: #2a2a2a;
+    border-radius: 4px;
+    border: 1px solid #3a3a3a;
+}
+
+.sstv-frequency-selector label {
+    font-size: 12px;
+    color: #ccc;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.sstv-select-wide {
+    flex: 1;
+    padding: 6px 10px;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 12px;
+    font-family: monospace;
+    min-width: 200px;
+}
+
+.sstv-select-wide:focus {
+    outline: none;
+    border-color: #4a9eff;
+}
+
 /* Status Bar */
 .sstv-status-bar {
     display: flex;

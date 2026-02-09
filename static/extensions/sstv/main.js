@@ -177,7 +177,12 @@ class SSTVExtension extends DecoderExtension {
 
         // Configuration changes
         container.addEventListener('change', (e) => {
-            if (e.target.id === 'sstv-auto-scroll') {
+            if (e.target.id === 'sstv-frequency-select') {
+                console.log('SSTV: Frequency selected:', e.target.value);
+                if (e.target.value) {
+                    this.tuneToFrequency();
+                }
+            } else if (e.target.id === 'sstv-auto-scroll') {
                 this.autoScroll = e.target.checked;
             } else if (e.target.id.startsWith('sstv-')) {
                 if (!this.running) {
@@ -185,6 +190,45 @@ class SSTVExtension extends DecoderExtension {
                 }
             }
         });
+    }
+
+    tuneToFrequency() {
+        const freqSelect = document.getElementById('sstv-frequency-select');
+        if (!freqSelect || !freqSelect.value) {
+            return;
+        }
+
+        // Parse frequency value: "frequency,mode"
+        const parts = freqSelect.value.split(',');
+        if (parts.length !== 2) {
+            console.error('SSTV: Invalid frequency format');
+            return;
+        }
+
+        const frequency = parseInt(parts[0]);
+        const mode = parts[1];
+
+        console.log('SSTV: Tuning to:', frequency, mode);
+
+        // Disable edge detection when tuning
+        if (window.spectrumDisplay) {
+            window.spectrumDisplay.skipEdgeDetection = true;
+        }
+
+        // Set frequency and mode
+        this.radio.setFrequency(frequency);
+        this.radio.setMode(mode, false);
+
+        // Re-enable edge detection after a delay
+        setTimeout(() => {
+            if (window.spectrumDisplay) {
+                window.spectrumDisplay.skipEdgeDetection = false;
+            }
+        }, 500);
+
+        // Log the action
+        const freqText = freqSelect.options[freqSelect.selectedIndex].text;
+        this.radio.log(`SSTV: Tuned to ${freqText}`);
     }
 
     updateConfig() {

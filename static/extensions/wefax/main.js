@@ -363,7 +363,10 @@ class WEFAXExtension extends DecoderExtension {
 
         // Disable config controls while running
         this.setConfigControlsEnabled(false);
-        
+
+        // Set LED to off/waiting initially
+        this.updateLED('off', 'Waiting');
+
         console.log('WEFAX: Decoder started successfully');
     }
 
@@ -383,6 +386,9 @@ class WEFAXExtension extends DecoderExtension {
         this.updateStatus('disconnected', 'Stopped');
         document.getElementById('wefax-start-btn').disabled = false;
         document.getElementById('wefax-stop-btn').disabled = true;
+
+        // Reset LED
+        this.updateLED('off', 'Waiting');
 
         // Enable config controls
         this.setConfigControlsEnabled(true);
@@ -516,39 +522,99 @@ class WEFAXExtension extends DecoderExtension {
     }
 
     handleBinaryMessage(data) {
-        // Binary protocol: [type:1][line_number:4][width:4][data:width]
-        // type: 0x01 = image line
+        // Binary protocol:
+        // type: 0x01 = image line: [type:1][line_number:4][width:4][data:width]
+        // type: 0x02 = START signal: [type:1]
+        // type: 0x03 = STOP signal: [type:1]
         const uint8Array = new Uint8Array(data);
 
-        if (uint8Array.length < 9) {
+        if (uint8Array.length < 1) {
             console.error('WEFAX: Invalid binary message length:', uint8Array.length);
             return;
         }
 
         const type = uint8Array[0];
-        if (type !== 0x01) {
+
+        if (type === 0x01) {
+            // Image line
+            if (uint8Array.length < 9) {
+                console.error('WEFAX: Invalid image line message length:', uint8Array.length);
+                return;
+            }
+
+            // Parse line number (big-endian uint32)
+            const lineNumber = (uint8Array[1] << 24) | (uint8Array[2] << 16) |
+                              (uint8Array[3] << 8) | uint8Array[4];
+
+            // Parse width (big-endian uint32)
+            const width = (uint8Array[5] << 24) | (uint8Array[6] << 16) |
+                         (uint8Array[7] << 8) | uint8Array[8];
+
+            // Extract pixel data
+            const pixelData = uint8Array.slice(9);
+
+            if (pixelData.length !== width) {
+                console.error('WEFAX: Width mismatch:', pixelData.length, 'vs', width);
+                return;
+            }
+
+            // Render the line
+            this.renderImageLine(lineNumber, pixelData);
+        } else if (type === 0x02) {
+            // START signal
+            console.log('WEFAX: START signal received');
+            this.handleStartSignal();
+        } else if (type === 0x03) {
+            // STOP signal
+            console.log('WEFAX: STOP signal received');
+            this.handleStopSignal();
+        } else {
             console.error('WEFAX: Unknown binary message type:', type);
-            return;
+        }
+    }
+
+    handleStartSignal() {
+        // Update LED to green (receiving)
+        this.updateLED('green', 'Receiving');
+        this.clearWaitingMessage();
+        this.radio.log('WEFAX: Transmission started');
+    }
+
+    handleStopSignal() {
+        // Update LED to orange (stopped)
+        this.updateLED('orange', 'Stopped');
+
+        // Auto-download if enabled and we have image data
+        if (this.autoDownload && this.currentLine > 50) {
+            console.log('WEFAX: Auto-downloading completed transmission');
+            this.saveImage();
+            this.radio.log('WEFAX: Transmission completed, image saved');
+        } else {
+            this.radio.log('WEFAX: Transmission stopped');
         }
 
-        // Parse line number (big-endian uint32)
-        const lineNumber = (uint8Array[1] << 24) | (uint8Array[2] << 16) | 
-                          (uint8Array[3] << 8) | uint8Array[4];
-
-        // Parse width (big-endian uint32)
-        const width = (uint8Array[5] << 24) | (uint8Array[6] << 16) | 
-                     (uint8Array[7] << 8) | uint8Array[8];
-
-        // Extract pixel data
-        const pixelData = uint8Array.slice(9);
-
-        if (pixelData.length !== width) {
-            console.error('WEFAX: Width mismatch:', pixelData.length, 'vs', width);
-            return;
+        // Show waiting message if auto-start is enabled
+        if (this.config.auto_start) {
+            this.showWaitingMessage();
         }
+    }
 
-        // Render the line
-        this.renderImageLine(lineNumber, pixelData);
+    updateLED(color, text) {
+        // Update both panel and modal
+        this.updateElementById('wefax-led', (el) => {
+            el.className = 'wefax-led';
+            if (color === 'green') {
+                el.classList.add('wefax-led-green');
+            } else if (color === 'orange') {
+                el.classList.add('wefax-led-orange');
+            } else {
+                el.classList.add('wefax-led-off');
+            }
+        });
+
+        this.updateElementById('wefax-led-text', (el) => {
+            el.textContent = text;
+        });
     }
 
     renderImageLine(lineNumber, pixelData) {
@@ -566,20 +632,8 @@ class WEFAXExtension extends DecoderExtension {
         // If line number jumps backwards significantly, it's a new transmission
         if (lineNumber < this.currentLine - 10) {
             console.log('WEFAX: New transmission detected (line reset from', this.currentLine, 'to', lineNumber, '), clearing canvas');
-
-            // Auto-download previous image before clearing
-            if (this.autoDownload && this.currentLine > 50) {
-                console.log('WEFAX: Auto-downloading completed image');
-                this.saveImage();
-            }
-
             this.clearImage();
             this.radio.log('WEFAX: New transmission detected, canvas cleared');
-
-            // Show waiting message again if auto-start is enabled
-            if (this.config.auto_start) {
-                this.showWaitingMessage();
-            }
         }
 
         // Grow canvas if needed

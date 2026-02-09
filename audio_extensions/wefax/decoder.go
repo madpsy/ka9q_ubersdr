@@ -382,6 +382,8 @@ func (d *WEFAXDecoder) decodeFaxLine(resultChan chan<- []byte) {
 					d.autoStarted = true
 					log.Printf("[WEFAX] Auto-start: START signal detected, beginning decode at line %d", d.imageLine)
 				}
+				// Send START signal to frontend
+				d.sendStartSignal(resultChan)
 			} else if lineType == HeaderStop {
 				if d.autoStop {
 					d.autoStopped = true
@@ -392,6 +394,8 @@ func (d *WEFAXDecoder) decodeFaxLine(resultChan chan<- []byte) {
 					d.autoStarted = false
 					log.Printf("[WEFAX] Auto-start: STOP signal detected, waiting for next START at line %d", d.imageLine)
 				}
+				// Send STOP signal to frontend
+				d.sendStopSignal(resultChan)
 			}
 		}
 	}
@@ -621,6 +625,36 @@ func (d *WEFAXDecoder) sendImageLine(resultChan chan<- []byte) {
 	case resultChan <- msg:
 	default:
 		// Channel full, skip this line
+	}
+}
+
+// sendStartSignal sends a START signal to the client
+func (d *WEFAXDecoder) sendStartSignal(resultChan chan<- []byte) {
+	// Binary protocol: [type:1]
+	// type: 0x02 = START signal
+	msg := make([]byte, 1)
+	msg[0] = 0x02
+
+	select {
+	case resultChan <- msg:
+		log.Printf("[WEFAX] Sent START signal to frontend")
+	default:
+		// Channel full
+	}
+}
+
+// sendStopSignal sends a STOP signal to the client
+func (d *WEFAXDecoder) sendStopSignal(resultChan chan<- []byte) {
+	// Binary protocol: [type:1]
+	// type: 0x03 = STOP signal
+	msg := make([]byte, 1)
+	msg[0] = 0x03
+
+	select {
+	case resultChan <- msg:
+		log.Printf("[WEFAX] Sent STOP signal to frontend")
+	default:
+		// Channel full
 	}
 }
 

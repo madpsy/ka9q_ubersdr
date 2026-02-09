@@ -97,6 +97,39 @@
     color: white;
 }
 
+/* LED Indicator */
+.wefax-led-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #aaa;
+}
+
+.wefax-led {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+    box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+    transition: all 0.3s ease;
+}
+
+.wefax-led-off {
+    background: #444;
+    box-shadow: inset 0 0 3px rgba(0, 0, 0, 0.5);
+}
+
+.wefax-led-green {
+    background: #28a745;
+    box-shadow: 0 0 8px #28a745, inset 0 0 3px rgba(255, 255, 255, 0.3);
+}
+
+.wefax-led-orange {
+    background: #fd7e14;
+    box-shadow: 0 0 8px #fd7e14, inset 0 0 3px rgba(255, 255, 255, 0.3);
+}
+
 /* Buttons */
 .wefax-btn {
     padding: 6px 12px;

@@ -195,7 +195,6 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 		// Pattern: 1900Hz leader (4x30ms) + 1200Hz start bit (30ms) + data bits
 		headerShift := 0
 		gotVIS := false
-		patternAttempts := 0
 
 		for i := 0; i < 3 && !gotVIS; i++ {
 			for j := 0; j < 3 && !gotVIS; j++ {
@@ -214,19 +213,13 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 					continue
 				}
 
-				// Found potential leader tone - only log first occurrence
-				patternAttempts++
-				if patternAttempts == 1 {
-					log.Printf("[SSTV VIS] Found potential leader tone at %.1f Hz, checking for start bit...", leaderFreq)
-				}
-
 				// Check for 1200 Hz start bit
 				if !v.checkTone(5*3+i, leaderFreq-700, 50) {
-					// Don't log every failed start bit check - too spammy
+					// Don't log - start bit missing is common
 					continue
 				}
 
-				// Only log when we actually find a valid start bit
+				// Only log when we actually find a valid start bit (rare event)
 				log.Printf("[SSTV VIS] Found leader (%.1f Hz) + start bit (%.1f Hz), decoding data bits...", leaderFreq, leaderFreq-700)
 
 				// Try to read data bits

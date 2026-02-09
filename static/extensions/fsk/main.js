@@ -317,22 +317,24 @@ class FSKExtension extends DecoderExtension {
     startAudioProcessing() {
         console.log('FSK: Starting audio processing');
 
-        const audioContext = window.audioContext;
-        const analyser = window.analyser || window.vuAnalyser;
-
+        // Use vuAnalyser which is dedicated to visualizations and won't interfere with spectrum
+        const analyser = window.vuAnalyser;
+        
         if (!analyser) {
-            console.error('FSK: No analyser available');
+            console.error('FSK: No VU analyser available');
+            this.appendOutput('Error: No audio analyser available. Please start audio first.\n', 'error');
             return;
         }
 
         // Store analyser reference
         this.analyserNode = analyser;
 
-        // Start periodic audio processing using requestAnimationFrame
-        const processAudio = () => {
+        // Start periodic audio processing at a reasonable rate (not 60fps)
+        // Use setInterval instead of requestAnimationFrame to avoid blocking rendering
+        this.audioProcessingInterval = setInterval(() => {
             if (!this.running || !this.decoder) return;
 
-            // Get time-domain data from analyser
+            // Get time-domain data from vuAnalyser
             const bufferLength = analyser.fftSize;
             const dataArray = new Float32Array(bufferLength);
             analyser.getFloatTimeDomainData(dataArray);
@@ -343,15 +345,9 @@ class FSKExtension extends DecoderExtension {
             // Convert Float32Array to regular array and process
             const samples = Array.from(dataArray);
             this.decoder.process_data(samples, samples.length);
+        }, 50); // 20fps - reasonable for FSK decoding without blocking UI
 
-            // Continue processing
-            this.audioProcessingFrame = requestAnimationFrame(processAudio);
-        };
-
-        // Start processing loop
-        processAudio();
-
-        console.log('FSK: Audio processing started');
+        console.log('FSK: Audio processing started (20fps from vuAnalyser)');
     }
 
     updateAudioLevel(samples) {
@@ -399,9 +395,9 @@ class FSKExtension extends DecoderExtension {
     }
 
     stopAudioProcessing() {
-        if (this.audioProcessingFrame) {
-            cancelAnimationFrame(this.audioProcessingFrame);
-            this.audioProcessingFrame = null;
+        if (this.audioProcessingInterval) {
+            clearInterval(this.audioProcessingInterval);
+            this.audioProcessingInterval = null;
         }
         this.analyserNode = null;
     }

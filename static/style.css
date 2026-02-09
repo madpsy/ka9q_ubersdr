@@ -3026,11 +3026,60 @@ input[type="range"]::-moz-range-thumb {
 .decoder-extension-content {
     color: #ecf0f1;
     background: #34495e;
-    border-radius: 6px;
+    border-radius: 6px 6px 0 0;
     padding: 15px;
     min-height: 200px;
     max-height: 400px;
     overflow-y: auto;
+    transition: max-height 0.1s ease-out;
+}
+
+/* Resize Handle for Extension Panel */
+.decoder-extension-resize-handle {
+    height: 12px;
+    background: #2c3e50;
+    border-radius: 0 0 6px 6px;
+    cursor: ns-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease;
+    user-select: none;
+    position: relative;
+}
+
+.decoder-extension-resize-handle:hover {
+    background: #34495e;
+}
+
+.decoder-extension-resize-handle:active {
+    background: #3d566e;
+}
+
+.resize-handle-bar {
+    width: 40px;
+    height: 3px;
+    background: #7f8c8d;
+    border-radius: 2px;
+    pointer-events: none;
+    transition: background 0.2s ease;
+}
+
+.decoder-extension-resize-handle:hover .resize-handle-bar {
+    background: #95a5a6;
+}
+
+.decoder-extension-resize-handle:active .resize-handle-bar {
+    background: #667eea;
+}
+
+/* When resizing, add a class to show visual feedback */
+.decoder-extension-container.resizing {
+    user-select: none;
+}
+
+.decoder-extension-container.resizing .decoder-extension-content {
+    transition: none;
 }
 
 /* Custom scrollbar for decoder extension content */

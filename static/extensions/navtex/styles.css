@@ -111,17 +111,37 @@
     color: #999;
 }
 
-.navtex-baud-canvas {
-    display: inline-block !important;
-    border: 2px solid #ff0000 !important; /* Bright red border for visibility */
+.navtex-baud-bar-container {
+    display: inline-block;
+    width: 40px;
+    height: 60px;
+    border: 1px solid #444;
     border-radius: 2px;
     background: #0a0a0a;
     vertical-align: middle;
-    /* Don't set CSS width/height - let canvas attributes control size */
-    min-width: 40px;
-    min-height: 60px;
-    image-rendering: pixelated;
-    image-rendering: crisp-edges;
+    position: relative;
+    overflow: hidden;
+}
+
+.navtex-baud-bar {
+    position: absolute;
+    width: 100%;
+    bottom: 50%;
+    left: 0;
+    background: #28a745;
+    transition: height 0.1s ease, bottom 0.1s ease, background-color 0.1s ease;
+}
+
+/* Center line */
+.navtex-baud-bar-container::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 1px;
+    background: #666;
+    z-index: 1;
 }
 
 .navtex-baud-value {

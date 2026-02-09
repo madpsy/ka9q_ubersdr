@@ -5,8 +5,8 @@
     'use strict';
 
     // Configuration
-    const MIN_HEIGHT = 200;  // Minimum panel height in pixels
-    const MAX_HEIGHT = 800;  // Maximum panel height in pixels
+    const MIN_HEIGHT = 200;   // Minimum panel height in pixels
+    const MAX_HEIGHT = 1200;  // Maximum panel height in pixels
     const STORAGE_KEY = 'extension-panel-height';
 
     // State

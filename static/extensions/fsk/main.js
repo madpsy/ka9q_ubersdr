@@ -311,6 +311,10 @@ class FSKExtension extends DecoderExtension {
             false  // show_errs
         );
 
+        // Enable debug mode to see what's happening in SYNC1
+        this.decoder.dbg = 1;
+        this.decoder.trace = 1;
+
         // Set callbacks using the proper setter methods
         this.decoder.set_output_char_cb((char) => {
             console.log('FSK: Character decoded:', char, char.charCodeAt ? char.charCodeAt(0) : 'non-char');

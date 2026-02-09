@@ -36,6 +36,12 @@ class FSKExtension extends DecoderExtension {
         // Audio processing
         this.scriptProcessor = null;
         this.analyserNode = null;
+        
+        // Status tracking
+        this.lastCharTime = 0;
+        this.charCount = 0;
+        this.signalDetected = false;
+        this.syncLocked = false;
     }
 
     onInitialize() {
@@ -319,6 +325,53 @@ class FSKExtension extends DecoderExtension {
         // Convert Float32Array to regular array and process
         const samples = Array.from(dataArray);
         this.decoder.process_data(samples, samples.length);
+
+        // Update status indicators based on decoder state
+        this.updateStatusIndicators();
+    }
+
+    updateStatusIndicators() {
+        if (!this.decoder) return;
+
+        // Signal indicator - based on audio level
+        const signalIndicator = document.getElementById('fsk-signal-indicator');
+        if (signalIndicator) {
+            const hasSignal = this.decoder.audio_average > this.decoder.audio_minimum;
+            if (hasSignal !== this.signalDetected) {
+                this.signalDetected = hasSignal;
+                if (hasSignal) {
+                    signalIndicator.classList.add('active');
+                } else {
+                    signalIndicator.classList.remove('active');
+                }
+            }
+        }
+
+        // Sync indicator - based on decoder state
+        const syncIndicator = document.getElementById('fsk-sync-indicator');
+        if (syncIndicator) {
+            const isSync = this.decoder.state === this.decoder.State_e.READ_DATA;
+            if (isSync !== this.syncLocked) {
+                this.syncLocked = isSync;
+                if (isSync) {
+                    syncIndicator.classList.add('active');
+                } else {
+                    syncIndicator.classList.remove('active');
+                }
+            }
+        }
+
+        // Decode indicator - based on recent character output
+        const decodeIndicator = document.getElementById('fsk-decode-indicator');
+        if (decodeIndicator) {
+            const now = Date.now();
+            const isDecoding = (now - this.lastCharTime) < 2000; // Active if char within last 2 seconds
+            if (isDecoding) {
+                decodeIndicator.classList.add('active');
+            } else {
+                decodeIndicator.classList.remove('active');
+            }
+        }
     }
 
     updateAudioLevel(samples) {
@@ -368,6 +421,9 @@ class FSKExtension extends DecoderExtension {
     handleDecodedChar(char) {
         if (typeof char === 'string') {
             this.appendOutput(char);
+            // Track character decoding for status indicator
+            this.lastCharTime = Date.now();
+            this.charCount++;
         }
     }
 

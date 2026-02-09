@@ -75,7 +75,20 @@
 
     <!-- Status Bar -->
     <div class="fsk-status-bar">
-        <span id="fsk-status-text" class="fsk-status-text">Ready</span>
+        <div class="fsk-status-left">
+            <span id="fsk-status-text" class="fsk-status-text">Ready</span>
+            <div class="fsk-status-indicators">
+                <span class="fsk-indicator" id="fsk-signal-indicator" title="Signal Detected">
+                    <span class="fsk-indicator-dot"></span> Signal
+                </span>
+                <span class="fsk-indicator" id="fsk-sync-indicator" title="Bit Sync Locked">
+                    <span class="fsk-indicator-dot"></span> Sync
+                </span>
+                <span class="fsk-indicator" id="fsk-decode-indicator" title="Decoding Characters">
+                    <span class="fsk-indicator-dot"></span> Decode
+                </span>
+            </div>
+        </div>
         <div class="fsk-audio-indicator">
             <span class="fsk-audio-label">Audio:</span>
             <div class="fsk-audio-meter">

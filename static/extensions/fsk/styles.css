@@ -189,8 +189,49 @@ input[type="checkbox"] {
     color: #888;
 }
 
+.fsk-status-left {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
 .fsk-status-text {
     font-family: 'Courier New', monospace;
+}
+
+/* Status Indicators */
+.fsk-status-indicators {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.fsk-indicator {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    color: #666;
+    transition: color 0.3s;
+}
+
+.fsk-indicator.active {
+    color: #4CAF50;
+}
+
+.fsk-indicator-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #333;
+    border: 1px solid #555;
+    transition: all 0.3s;
+}
+
+.fsk-indicator.active .fsk-indicator-dot {
+    background: #4CAF50;
+    border-color: #4CAF50;
+    box-shadow: 0 0 8px #4CAF50;
 }
 
 /* Audio Indicator */

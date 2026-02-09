@@ -526,15 +526,12 @@ class FSKExtension extends DecoderExtension {
 
     // This method is called automatically by the DecoderExtension framework with audio data
     // For backend-based decoder, we don't process audio here - it's handled by the backend
+    // But we still show FFT and audio levels regardless of decoder state
     onProcessAudio(dataArray) {
-        if (!this.running) {
-            return;
-        }
-
-        // Calculate and update audio level
+        // Calculate and update audio level (always, even when stopped)
         this.updateAudioLevel(dataArray);
 
-        // Draw spectrum visualization
+        // Draw spectrum visualization (always, even when stopped)
         this.drawSpectrum(dataArray);
     }
 

@@ -110,19 +110,22 @@ class SSTVExtension extends DecoderExtension {
             return;
         }
 
+        // Check if canvas is in DOM
         const inDOM = document.body.contains(this.canvas);
         console.log('SSTV: Canvas found, in DOM:', inDOM);
         
+        // If canvas is not in DOM, it means the template was rendered but not attached
         if (!inDOM) {
             const container = document.getElementById('sstv-canvas-container');
             if (container) {
                 console.log('SSTV: Canvas not in DOM, re-attaching to container');
+                // Clear container and create new canvas
                 container.innerHTML = '';
                 this.canvas = document.createElement('canvas');
                 this.canvas.id = 'sstv-canvas';
                 this.canvas.className = 'sstv-canvas';
                 container.appendChild(this.canvas);
-                console.log('SSTV: Canvas re-created and attached');
+                console.log('SSTV: Canvas re-created and attached, in DOM:', document.body.contains(this.canvas));
             } else {
                 console.error('SSTV: Container not found, cannot attach canvas');
                 return;
@@ -137,6 +140,11 @@ class SSTVExtension extends DecoderExtension {
         this.imageWidth = 320;
         this.imageHeight = 256;
         this.currentLine = 0;
+
+        // Force canvas to be visible by setting style attributes
+        this.canvas.style.display = 'block';
+        this.canvas.style.width = '320px';
+        this.canvas.style.height = '256px';
 
         // Fill with black
         this.ctx.fillStyle = '#000000';
@@ -564,35 +572,69 @@ class SSTVExtension extends DecoderExtension {
         this.radio.log(`SSTV: Callsign decoded - ${callsign}`);
     }
 
+    setupBinaryMessageHandler() {
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws) {
+            console.error('SSTV: DX WebSocket not available');
+            return;
+        }
+
+        // Store reference to original handler ONLY if we haven't already
+        if (!this.originalDXHandler) {
+            this.originalDXHandler = dxClient.ws.onmessage;
+            console.log('SSTV: Stored original DX handler');
+        }
+
+        // Create new handler that intercepts binary messages only
+        this.binaryMessageHandler = (event) => {
+            // Check if this is a binary message (ArrayBuffer or Blob)
+            if (event.data instanceof ArrayBuffer) {
+                // Binary message - process as SSTV data
+                if (this.running) {
+                    this.handleBinaryMessage(event.data);
+                }
+                // DO NOT pass binary messages to original handler
+            } else if (event.data instanceof Blob) {
+                // Binary message as Blob - convert to ArrayBuffer first
+                event.data.arrayBuffer().then(arrayBuffer => {
+                    if (this.running) {
+                        this.handleBinaryMessage(arrayBuffer);
+                    }
+                }).catch(err => {
+                    console.error('SSTV: Failed to convert Blob to ArrayBuffer:', err);
+                });
+                // DO NOT pass binary messages to original handler
+            } else {
+                // Text message - pass to original handler
+                if (this.originalDXHandler && this.originalDXHandler !== this.binaryMessageHandler) {
+                    this.originalDXHandler.call(dxClient.ws, event);
+                }
+            }
+        };
+
+        dxClient.ws.onmessage = this.binaryMessageHandler;
+        console.log('SSTV: Binary message handler installed');
+    }
+
+    removeBinaryMessageHandler() {
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws) {
+            return;
+        }
+
+        // Restore original handler
+        if (this.originalDXHandler) {
+            dxClient.ws.onmessage = this.originalDXHandler;
+            this.originalDXHandler = null;
+            console.log('SSTV: Original message handler restored');
+        }
+        
+        this.binaryMessageHandler = null;
+    }
+
     onEnable() {
         console.log('SSTV: Extension enabled');
-        
-        // Register binary message handler with DX WebSocket
-        const dxClient = window.dxClusterClient;
-        if (dxClient && dxClient.ws) {
-            // Store original onmessage handler
-            const originalHandler = dxClient.ws.onmessage;
-
-            dxClient.ws.onmessage = (event) => {
-                // Handle binary messages for SSTV
-                if (event.data instanceof Blob || event.data instanceof ArrayBuffer) {
-                    const handleBinary = (buffer) => {
-                        if (this.running) {
-                            this.handleBinaryMessage(buffer);
-                        }
-                    };
-
-                    if (event.data instanceof Blob) {
-                        event.data.arrayBuffer().then(handleBinary);
-                    } else {
-                        handleBinary(event.data);
-                    }
-                } else if (originalHandler) {
-                    // Pass text messages to original handler
-                    originalHandler.call(dxClient.ws, event);
-                }
-            };
-        }
+        this.setupBinaryMessageHandler();
     }
 
     onDisable() {
@@ -601,6 +643,8 @@ class SSTVExtension extends DecoderExtension {
         if (this.running) {
             this.stopDecoder();
         }
+        
+        this.removeBinaryMessageHandler();
     }
 }
 

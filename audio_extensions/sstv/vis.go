@@ -88,9 +88,12 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 	slidingWindow := make([]int16, samps20ms)
 	windowFilled := 0
 
-	// Don't log here - let caller log to avoid spam
+	// Rate limiting for leader detection logging
+	lastLeaderLog := 0
+	iterationCount := 0
 
 	for {
+		iterationCount++
 		// Read 10ms of audio
 		samples, err := pcmReader.Read(samps10ms)
 		if err != nil {
@@ -195,7 +198,6 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 		// Pattern: 1900Hz leader (4x30ms) + 1200Hz start bit (30ms) + data bits
 		headerShift := 0
 		gotVIS := false
-		foundLeader := false
 
 		for i := 0; i < 3 && !gotVIS; i++ {
 			for j := 0; j < 3 && !gotVIS; j++ {
@@ -214,10 +216,10 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 					continue
 				}
 
-				// Found leader - log once per detection cycle
-				if !foundLeader {
+				// Found leader - log with rate limiting (once per second max)
+				if iterationCount-lastLeaderLog > 100 {
 					log.Printf("[SSTV VIS] Detected leader tone at %.1f Hz, checking for start bit...", leaderFreq)
-					foundLeader = true
+					lastLeaderLog = iterationCount
 				}
 
 				// Check for 1200 Hz start bit
@@ -225,7 +227,7 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 					continue
 				}
 
-				// Found complete VIS header
+				// Found complete VIS header - always log this
 				log.Printf("[SSTV VIS] Found leader (%.1f Hz) + start bit (%.1f Hz), decoding data bits...", leaderFreq, leaderFreq-700)
 
 				// Try to read data bits

@@ -48,6 +48,9 @@ type SSTVDecoder struct {
 
 	// Configuration
 	config SSTVConfig
+
+	// State tracking
+	visLoggedOnce bool
 }
 
 // SSTVConfig contains decoder configuration
@@ -148,8 +151,10 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 					if err := d.detectVISFromBuffer(pcmBuffer, resultChan); err == nil {
 						// VIS detected, move to video decoding
 						d.state = StateDecodingVideo
+						d.visLoggedOnce = false // Reset for next image
 					}
 					// Keep accumulating if VIS not found yet
+					// Don't spam logs - VIS detection will log when it finds something
 				}
 
 			case StateDecodingVideo:
@@ -192,6 +197,12 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 
 // detectVISFromBuffer attempts to detect VIS from accumulated buffer
 func (d *SSTVDecoder) detectVISFromBuffer(pcmBuffer []int16, resultChan chan<- []byte) error {
+	// Log only once to avoid spam
+	if !d.visLoggedOnce {
+		log.Printf("[SSTV] Waiting for VIS code (have %d samples)...", len(pcmBuffer))
+		d.visLoggedOnce = true
+	}
+
 	// Create a simple buffer reader that returns the buffer
 	reader := &simpleBufferReader{buffer: pcmBuffer, pos: 0}
 

@@ -84,7 +84,7 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 	samps20ms := len(v.hannWindow)
 	toneWin := 45 // 450ms window for 8-bit VIS
 
-	log.Printf("[SSTV VIS] Waiting for VIS code...")
+	// Don't log here - let caller log to avoid spam
 
 	for {
 		// Read 10ms of audio

@@ -230,6 +230,10 @@ func NewWEFAXDecoder(sampleRate int, config WEFAXConfig) *WEFAXDecoder {
 	log.Printf("[WEFAX] Initialized: LPM=%d, Width=%d, Carrier=%.1f Hz, Deviation=%.1f Hz, SamplesPerLine=%d",
 		d.lpm, d.imageWidth, d.carrier, d.deviation, d.samplesPerLine)
 
+	if d.autoStart {
+		log.Printf("[WEFAX] Auto-start enabled - waiting for START signal before decoding")
+	}
+
 	return d
 }
 

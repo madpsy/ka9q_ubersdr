@@ -233,6 +233,10 @@ class WEFAXExtension extends DecoderExtension {
                 element.addEventListener('change', () => {
                     if (!this.running) {
                         this.updateConfig();
+                    } else {
+                        // Warn user that changes won't apply until restart
+                        console.log('WEFAX: Config change ignored - decoder is running. Stop and restart to apply changes.');
+                        this.radio.log('WEFAX: Configuration changes require stopping and restarting the decoder');
                     }
                 });
             }

@@ -406,7 +406,7 @@ class FSKExtension extends DecoderExtension {
 }
 
 // Register the extension
-if (window.DecoderExtension) {
-    window.FSKExtension = FSKExtension;
-    console.log('FSK: Extension class registered');
+if (window.decoderManager) {
+    window.decoderManager.register(new FSKExtension());
+    console.log('✅ FSK Extension registered');
 }

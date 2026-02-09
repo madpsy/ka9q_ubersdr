@@ -81,7 +81,7 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 	extensionName, ok := msg["extension_name"].(string)
 	if !ok || extensionName == "" {
 		log.Printf("AudioExtension: Attach failed for session %s - extension_name is required", sessionID)
-		return aem.sendError(conn, "extension_name is required")
+		return aem.sendErrorSafe(nil, conn, "extension_name is required")
 	}
 
 	// Extract optional extension-specific parameters
@@ -106,7 +106,7 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 	// Find user's audio session by UserSessionID
 	session := aem.findAudioSessionByUserID(sessionID)
 	if session == nil {
-		return aem.sendError(conn, "no active audio session found")
+		return aem.sendErrorSafe(nil, conn, "no active audio session found")
 	}
 
 	// Get audio parameters from session
@@ -119,7 +119,7 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 	// Create extension instance
 	extension, err := aem.registry.Create(extensionName, audioParams, extensionParams)
 	if err != nil {
-		return aem.sendError(conn, fmt.Sprintf("failed to create extension: %v", err))
+		return aem.sendErrorSafe(nil, conn, fmt.Sprintf("failed to create extension: %v", err))
 	}
 
 	// Create channels for audio and results
@@ -146,7 +146,7 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 	// Start extension
 	if err := extension.Start(audioChan, resultChan); err != nil {
 		session.DetachAudioExtensionTap()
-		return aem.sendError(conn, fmt.Sprintf("failed to start extension: %v", err))
+		return aem.sendErrorSafe(activeExtension, conn, fmt.Sprintf("failed to start extension: %v", err))
 	}
 
 	// Store active extension
@@ -177,7 +177,7 @@ func (aem *AudioExtensionManager) handleDetach(sessionID string, conn *websocket
 	activeExtension, exists := aem.activeExtensions[sessionID]
 	if !exists {
 		aem.activeExtensionsMu.Unlock()
-		return aem.sendError(conn, "no active audio extension")
+		return aem.sendErrorSafe(nil, conn, "no active audio extension")
 	}
 	delete(aem.activeExtensions, sessionID)
 	aem.activeExtensionsMu.Unlock()
@@ -187,8 +187,8 @@ func (aem *AudioExtensionManager) handleDetach(sessionID string, conn *websocket
 
 	log.Printf("AudioExtension: Detached '%s' from session %s", activeExtension.ExtensionName, sessionID)
 
-	// Send confirmation
-	return aem.sendTextMessage(conn, map[string]interface{}{
+	// Send confirmation using safe method
+	return aem.sendTextMessageSafe(activeExtension, map[string]interface{}{
 		"type": "audio_extension_detached",
 	})
 }
@@ -200,7 +200,7 @@ func (aem *AudioExtensionManager) handleStatus(sessionID string, conn *websocket
 	aem.activeExtensionsMu.RUnlock()
 
 	if !exists {
-		return aem.sendTextMessage(conn, map[string]interface{}{
+		return aem.sendTextMessageWithConn(conn, map[string]interface{}{
 			"type":   "audio_extension_status",
 			"active": false,
 		})
@@ -208,7 +208,7 @@ func (aem *AudioExtensionManager) handleStatus(sessionID string, conn *websocket
 
 	uptime := time.Since(activeExtension.StartedAt)
 
-	return aem.sendTextMessage(conn, map[string]interface{}{
+	return aem.sendTextMessageSafe(activeExtension, map[string]interface{}{
 		"type":           "audio_extension_status",
 		"active":         true,
 		"extension_name": activeExtension.ExtensionName,
@@ -221,7 +221,7 @@ func (aem *AudioExtensionManager) handleStatus(sessionID string, conn *websocket
 func (aem *AudioExtensionManager) handleList(sessionID string, conn *websocket.Conn) error {
 	extensions := aem.registry.List()
 
-	return aem.sendTextMessage(conn, map[string]interface{}{
+	return aem.sendTextMessageWithConn(conn, map[string]interface{}{
 		"type":       "audio_extension_list",
 		"extensions": extensions,
 	})
@@ -311,11 +311,10 @@ func (aem *AudioExtensionManager) findAudioSessionByUserID(userSessionID string)
 	return nil
 }
 
-// sendTextMessage sends a JSON text message to the client
-// Note: This function is called during attach/detach operations where we have the conn
-// but not the activeExtension yet, so we can't use ConnMu here.
-// The caller must ensure thread safety if needed.
-func (aem *AudioExtensionManager) sendTextMessage(conn *websocket.Conn, message map[string]interface{}) error {
+// sendTextMessageWithConn sends a JSON text message to the client using a raw connection
+// This is used when we don't have an activeExtension yet (e.g., during initial attach errors)
+// Note: This should only be used when the connection is not yet shared/stored in activeExtension
+func (aem *AudioExtensionManager) sendTextMessageWithConn(conn *websocket.Conn, message map[string]interface{}) error {
 	messageJSON, err := json.Marshal(message)
 	if err != nil {
 		return fmt.Errorf("failed to marshal message: %v", err)
@@ -343,12 +342,20 @@ func (aem *AudioExtensionManager) sendTextMessageSafe(activeExtension *ActiveAud
 	return activeExtension.Conn.WriteMessage(websocket.TextMessage, messageJSON)
 }
 
-// sendError sends an error message to the client
-func (aem *AudioExtensionManager) sendError(conn *websocket.Conn, errorMsg string) error {
-	return aem.sendTextMessage(conn, map[string]interface{}{
+// sendErrorSafe sends an error message to the client with proper mutex protection
+// If activeExtension is nil, falls back to using the raw connection (for early errors)
+func (aem *AudioExtensionManager) sendErrorSafe(activeExtension *ActiveAudioExtension, conn *websocket.Conn, errorMsg string) error {
+	message := map[string]interface{}{
 		"type":  "audio_extension_error",
 		"error": errorMsg,
-	})
+	}
+
+	if activeExtension != nil {
+		return aem.sendTextMessageSafe(activeExtension, message)
+	}
+
+	// Fallback for early errors before activeExtension is created
+	return aem.sendTextMessageWithConn(conn, message)
 }
 
 // GetActiveExtensionCount returns the number of active audio extensions

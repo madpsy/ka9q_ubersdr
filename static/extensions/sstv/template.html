@@ -103,7 +103,7 @@
         <canvas id="sstv-canvas" class="sstv-canvas"></canvas>
     </div>
 
-    <!-- Help Text with Tone Meter -->
+    <!-- Help Text with Tone Frequency -->
     <div class="sstv-help">
         <div class="sstv-help-text">
             <p><strong>SSTV Decoder</strong> - Receives Slow Scan Television images</p>
@@ -112,10 +112,9 @@
             <p>The decoder automatically detects the VIS code, corrects image slant, and can decode FSK callsigns.</p>
             <p><strong>Tip:</strong> Tune to 14.230 MHz USB and wait for a transmission. The decoder will automatically identify the mode.</p>
         </div>
-        <div class="sstv-tone-meter">
-            <div class="tone-meter-label">VIS Tone</div>
-            <canvas id="sstv-tone-meter-canvas" width="120" height="80"></canvas>
-            <div class="tone-meter-freq" id="sstv-tone-freq">--- Hz</div>
+        <div class="sstv-tone-display">
+            <div class="tone-display-label">VIS Detector</div>
+            <div class="tone-display-freq" id="sstv-tone-freq">--- Hz</div>
         </div>
     </div>
 </div>

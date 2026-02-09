@@ -60,6 +60,14 @@ class DXClusterClient {
             };
 
             this.ws.onmessage = (event) => {
+                // Handle binary messages (from audio extensions)
+                if (event.data instanceof Blob) {
+                    // Binary message - dispatch to audio extension handlers
+                    this.handleBinaryMessage(event.data);
+                    return;
+                }
+
+                // Handle text messages (JSON)
                 try {
                     const message = JSON.parse(event.data);
                     this.handleMessage(message);
@@ -230,12 +238,26 @@ class DXClusterClient {
 
             // Audio extension message types - handled by extension system
             case 'audio_extension_attached':
-                // This is handled by the audio extension system, ignore here
+            case 'audio_extension_detached':
+            case 'audio_extension_status':
+            case 'audio_extension_list':
+            case 'audio_extension_error':
+                // These are handled by the audio extension system, ignore here
                 break;
 
             default:
                 console.warn('[DX Cluster] Unknown message type:', message.type);
         }
+    }
+
+    // Handle binary messages (from audio extensions)
+    handleBinaryMessage(blob) {
+        // Binary messages are handled by the audio extension system
+        // Dispatch a custom event that audio extensions can listen to
+        const event = new CustomEvent('audioExtensionBinaryData', {
+            detail: { blob: blob }
+        });
+        window.dispatchEvent(event);
     }
 
     // Subscribe to DX spot notifications

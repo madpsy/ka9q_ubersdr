@@ -226,6 +226,9 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 		headerShift := 0
 		gotVIS := false
 
+		// Rate limit logging - only log once per second
+		shouldLog := iterationCount-lastLeaderLog > 100
+
 		for i := 0; i < 3 && !gotVIS; i++ {
 			for j := 0; j < 3 && !gotVIS; j++ {
 				// Use tone[0+j] as reference frequency (matches KiwiSDR exactly)
@@ -247,8 +250,12 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 					continue
 				}
 
-				// Found complete VIS header - log it
-				log.Printf("[SSTV VIS] Found leader (%.1f Hz) + start bit (%.1f Hz), decoding data bits...", refFreq, refFreq-700)
+				// Found complete VIS header - log it (rate limited)
+				if shouldLog {
+					log.Printf("[SSTV VIS] Found leader (%.1f Hz) + start bit (%.1f Hz), decoding data bits...", refFreq, refFreq-700)
+					lastLeaderLog = iterationCount
+					shouldLog = false // Only log once per outer iteration
+				}
 
 				// Try to read data bits
 				bits := make([]uint8, 16)

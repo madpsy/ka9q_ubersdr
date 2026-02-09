@@ -334,7 +334,11 @@ class FSKExtension extends DecoderExtension {
 
     // This method is called automatically by the DecoderExtension framework with audio data
     onProcessAudio(dataArray) {
-        if (!this.running || !this.decoder) return;
+        if (!this.running || !this.decoder) {
+            // Still draw spectrum even when not running
+            this.drawSpectrum(dataArray);
+            return;
+        }
 
         // Calculate audio level for indicator
         this.updateAudioLevel(dataArray);
@@ -344,6 +348,18 @@ class FSKExtension extends DecoderExtension {
 
         // Convert Float32Array to regular array and process
         const samples = Array.from(dataArray);
+        
+        // Debug: Log first time we process audio
+        if (!this.hasProcessedAudio) {
+            console.log('FSK: First audio processing', {
+                sampleCount: samples.length,
+                firstSample: samples[0],
+                decoderState: this.decoder.state,
+                audioAverage: this.decoder.audio_average
+            });
+            this.hasProcessedAudio = true;
+        }
+        
         this.decoder.process_data(samples, samples.length);
 
         // Update status indicators based on decoder state

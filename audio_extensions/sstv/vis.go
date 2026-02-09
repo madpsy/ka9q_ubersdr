@@ -84,6 +84,10 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 	samps20ms := len(v.hannWindow)
 	toneWin := 45 // 450ms window for 8-bit VIS
 
+	// Sliding window buffer for 20ms of samples
+	slidingWindow := make([]int16, samps20ms)
+	windowFilled := 0
+
 	// Don't log here - let caller log to avoid spam
 
 	for {
@@ -93,17 +97,34 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 			return 0, 0, false, false
 		}
 
-		// Apply Hann window to last 20ms
-		windowStart := len(samples) - samps20ms
-		if windowStart < 0 {
-			windowStart = 0
+		// Slide the window: shift old data left, append new data
+		if windowFilled >= samps20ms {
+			// Window is full, shift left by samps10ms
+			copy(slidingWindow, slidingWindow[samps10ms:])
+			copy(slidingWindow[samps20ms-samps10ms:], samples)
+		} else {
+			// Window is still filling up
+			copyLen := samps10ms
+			if windowFilled+copyLen > samps20ms {
+				copyLen = samps20ms - windowFilled
+			}
+			copy(slidingWindow[windowFilled:], samples[:copyLen])
+			windowFilled += copyLen
+
+			// Skip FFT until we have a full 20ms window
+			if windowFilled < samps20ms {
+				continue
+			}
 		}
 
-		for i := 0; i < samps20ms && i < len(samples); i++ {
-			idx := windowStart + i
-			if idx < len(samples) {
-				v.fftInput[i] = float64(samples[idx]) / 32768.0 * v.hannWindow[i]
-			}
+		// Clear FFT input buffer
+		for i := range v.fftInput {
+			v.fftInput[i] = 0
+		}
+
+		// Apply Hann window to the 20ms sliding window
+		for i := 0; i < samps20ms; i++ {
+			v.fftInput[i] = float64(slidingWindow[i]) / 32768.0 * v.hannWindow[i]
 		}
 
 		// Perform FFT
@@ -130,18 +151,44 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 		var peakFreq float64
 		if maxBin > 0 && maxBin < len(powers)-1 && powers[maxBin] > 0 &&
 			powers[maxBin-1] > 0 && powers[maxBin+1] > 0 {
-			delta := math.Log(powers[maxBin+1]/powers[maxBin-1]) /
-				(2.0 * math.Log(powers[maxBin]*powers[maxBin]/(powers[maxBin+1]*powers[maxBin-1])))
-			peakFreq = (float64(maxBin) + delta) / float64(v.fftSize) * v.sampleRate
+			// Safe Gaussian interpolation with bounds checking
+			numerator := powers[maxBin+1] / powers[maxBin-1]
+			denominator := powers[maxBin] * powers[maxBin] / (powers[maxBin+1] * powers[maxBin-1])
+
+			// Check for valid values before taking logarithm
+			if numerator > 0 && denominator > 0 && denominator != 1.0 {
+				delta := math.Log(numerator) / (2.0 * math.Log(denominator))
+
+				// Sanity check: delta should be between -0.5 and 0.5
+				if !math.IsNaN(delta) && !math.IsInf(delta, 0) && math.Abs(delta) < 1.0 {
+					peakFreq = (float64(maxBin) + delta) / float64(v.fftSize) * v.sampleRate
+				} else {
+					// Fallback to bin center frequency
+					peakFreq = float64(maxBin) / float64(v.fftSize) * v.sampleRate
+				}
+			} else {
+				// Fallback to bin center frequency
+				peakFreq = float64(maxBin) / float64(v.fftSize) * v.sampleRate
+			}
 		} else {
-			// Use previous value if interpolation fails
-			prevIdx := (v.headerPtr - 1 + len(v.headerBuf)) % len(v.headerBuf)
-			peakFreq = v.headerBuf[prevIdx]
+			// Use bin center frequency if we can't interpolate
+			if maxBin > 0 {
+				peakFreq = float64(maxBin) / float64(v.fftSize) * v.sampleRate
+			} else {
+				// Use previous value if we have no valid bin
+				prevIdx := (v.headerPtr - 1 + len(v.headerBuf)) % len(v.headerBuf)
+				peakFreq = v.headerBuf[prevIdx]
+			}
 		}
 
 		// Store in circular buffer
 		v.headerBuf[v.headerPtr] = peakFreq
 		v.headerPtr = (v.headerPtr + 1) % len(v.headerBuf)
+
+		// Debug logging every 100 iterations (~1 second)
+		if v.headerPtr%100 == 0 {
+			log.Printf("[SSTV VIS] Detected frequency: %.1f Hz (looking for ~1900 Hz leader)", peakFreq)
+		}
 
 		// Copy recent frequencies to tone buffer
 		for i := 0; i < toneWin && i < len(v.toneBuf); i++ {
@@ -153,6 +200,7 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 		// Pattern: 1900Hz leader (4x30ms) + 1200Hz start bit (30ms) + data bits
 		headerShift := 0
 		gotVIS := false
+		patternAttempts := 0
 
 		for i := 0; i < 3 && !gotVIS; i++ {
 			for j := 0; j < 3 && !gotVIS; j++ {
@@ -166,10 +214,21 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 					continue
 				}
 
+				// Found potential leader tone
+				patternAttempts++
+				if patternAttempts == 1 {
+					log.Printf("[SSTV VIS] Found potential leader tone at %.1f Hz (expected ~1900 Hz)", leaderFreq)
+				}
+
 				// Check for 1200 Hz start bit
 				if !v.checkTone(5*3+i, leaderFreq-700, 50) {
+					if patternAttempts <= 3 {
+						log.Printf("[SSTV VIS] Leader found but start bit missing (expected %.1f Hz)", leaderFreq-700)
+					}
 					continue
 				}
+
+				log.Printf("[SSTV VIS] Found leader + start bit, decoding data bits...")
 
 				// Try to read data bits
 				bits := make([]uint8, 16)
@@ -190,8 +249,15 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 						bits[k] = 1
 					} else {
 						// Invalid bit
+						if k > 0 {
+							log.Printf("[SSTV VIS] Invalid bit at position %d (freq=%.1f Hz, expected 1100 or 1300 Hz)", k, freq)
+						}
 						break
 					}
+				}
+
+				if k >= 8 {
+					log.Printf("[SSTV VIS] Successfully decoded %d data bits", k)
 				}
 
 				nbits := 0

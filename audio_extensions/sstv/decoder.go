@@ -652,13 +652,15 @@ func newBufferPCMReader(buffer []int16) *bufferPCMReader {
 }
 
 // Read reads numSamples and advances the window pointer
+// Returns only the requested window of samples, not the entire buffer
 func (r *bufferPCMReader) Read(numSamples int) ([]int16, error) {
 	if r.windowPtr+numSamples > r.bufLen {
-		return nil, fmt.Errorf("not enough samples in buffer")
+		return nil, fmt.Errorf("not enough samples in buffer (need %d, have %d remaining)",
+			numSamples, r.bufLen-r.windowPtr)
 	}
 
-	// Return full buffer up to current position for windowing
-	result := r.buffer[:r.windowPtr+numSamples]
+	// Return only the requested window of samples
+	result := r.buffer[r.windowPtr : r.windowPtr+numSamples]
 	r.windowPtr += numSamples
 
 	return result, nil

@@ -21,8 +21,8 @@ class WEFAXExtension extends DecoderExtension {
             image_width: 1809,
             bandwidth: 1,
             use_phasing: true,
-            auto_stop: false,
-            auto_start: false
+            auto_stop: true,
+            auto_start: true
         };
 
         // State
@@ -35,6 +35,7 @@ class WEFAXExtension extends DecoderExtension {
         this.imageHeight = 0;
         this.maxHeight = 4000;
         this.autoScroll = true;
+        this.autoDownload = true;
 
         // Binary message handler
         this.binaryMessageHandler = null;
@@ -207,6 +208,9 @@ class WEFAXExtension extends DecoderExtension {
             } else if (e.target.id === 'wefax-auto-scroll') {
                 this.autoScroll = e.target.checked;
                 console.log('WEFAX: Auto-scroll:', this.autoScroll);
+            } else if (e.target.id === 'wefax-auto-download') {
+                this.autoDownload = e.target.checked;
+                console.log('WEFAX: Auto-download:', this.autoDownload);
             } else if (e.target.id.startsWith('wefax-')) {
                 // Config change
                 if (!this.running) {
@@ -336,6 +340,11 @@ class WEFAXExtension extends DecoderExtension {
             }
             this.imageWidth = newWidth;
             this.setupCanvas();
+        }
+
+        // Show waiting message if auto-start is enabled
+        if (this.config.auto_start) {
+            this.showWaitingMessage();
         }
 
         // Attach to audio extension via DX WebSocket
@@ -546,6 +555,31 @@ class WEFAXExtension extends DecoderExtension {
         if (!this.canvas || !this.ctx) {
             console.error('WEFAX: Canvas not initialized');
             return;
+        }
+
+        // Clear waiting message on first line
+        if (this.currentLine === 0 && lineNumber === 0) {
+            this.clearWaitingMessage();
+        }
+
+        // Detect new transmission (line number reset)
+        // If line number jumps backwards significantly, it's a new transmission
+        if (lineNumber < this.currentLine - 10) {
+            console.log('WEFAX: New transmission detected (line reset from', this.currentLine, 'to', lineNumber, '), clearing canvas');
+
+            // Auto-download previous image before clearing
+            if (this.autoDownload && this.currentLine > 50) {
+                console.log('WEFAX: Auto-downloading completed image');
+                this.saveImage();
+            }
+
+            this.clearImage();
+            this.radio.log('WEFAX: New transmission detected, canvas cleared');
+
+            // Show waiting message again if auto-start is enabled
+            if (this.config.auto_start) {
+                this.showWaitingMessage();
+            }
         }
 
         // Grow canvas if needed
@@ -760,6 +794,33 @@ class WEFAXExtension extends DecoderExtension {
         this.updateElementById('wefax-image-size', (el) => {
             el.textContent = `Size: ${width}x${height}`;
         });
+    }
+
+    showWaitingMessage() {
+        if (!this.canvas || !this.ctx) {
+            return;
+        }
+
+        // Clear canvas
+        this.ctx.fillStyle = '#000000';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Draw waiting message
+        this.ctx.fillStyle = '#00ff00';
+        this.ctx.font = '20px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText('Waiting for start of a new transmission...', this.canvas.width / 2, this.canvas.height / 2);
+    }
+
+    clearWaitingMessage() {
+        if (!this.canvas || !this.ctx) {
+            return;
+        }
+
+        // Clear canvas
+        this.ctx.fillStyle = '#000000';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     }
 
     onEnable() {

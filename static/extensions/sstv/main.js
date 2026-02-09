@@ -257,24 +257,13 @@ class SSTVExtension extends DecoderExtension {
         // Clear previous image
         this.clearImage();
 
-        // Send start command via DX WebSocket
-        if (window.dxWebSocket && window.dxWebSocket.readyState === WebSocket.OPEN) {
-            const message = {
-                type: 'audio_extension_attach',
-                extension_name: 'sstv',
-                params: this.config
-            };
+        // Attach to audio extension via DX WebSocket
+        this.attachAudioExtension();
 
-            console.log('SSTV: Sending start command:', message);
-            window.dxWebSocket.send(JSON.stringify(message));
-
-            this.running = true;
-            this.updateButtonStates();
-            this.radio.log('SSTV decoder started - waiting for signal...');
-        } else {
-            console.error('SSTV: DX WebSocket not available');
-            this.radio.log('SSTV: WebSocket not connected');
-        }
+        // Update UI
+        this.running = true;
+        this.updateButtonStates();
+        this.radio.log('SSTV decoder started - waiting for signal...');
     }
 
     stopDecoder() {
@@ -285,17 +274,46 @@ class SSTVExtension extends DecoderExtension {
 
         console.log('SSTV: Stopping decoder');
 
-        if (window.dxWebSocket && window.dxWebSocket.readyState === WebSocket.OPEN) {
-            const message = {
-                type: 'audio_extension_detach'
-            };
+        // Detach from audio extension
+        this.detachAudioExtension();
 
-            window.dxWebSocket.send(JSON.stringify(message));
-        }
-
+        // Update UI
         this.running = false;
         this.updateButtonStates();
         this.radio.log('SSTV decoder stopped');
+    }
+
+    attachAudioExtension() {
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws || dxClient.ws.readyState !== WebSocket.OPEN) {
+            console.error('SSTV: DX WebSocket not connected');
+            this.radio.log('SSTV: WebSocket not connected');
+            return;
+        }
+
+        const message = {
+            type: 'audio_extension_attach',
+            extension_name: 'sstv',
+            params: this.config
+        };
+
+        console.log('SSTV: Sending attach command:', message);
+        dxClient.ws.send(JSON.stringify(message));
+    }
+
+    detachAudioExtension() {
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws || dxClient.ws.readyState !== WebSocket.OPEN) {
+            console.error('SSTV: DX WebSocket not connected');
+            return;
+        }
+
+        const message = {
+            type: 'audio_extension_detach'
+        };
+
+        console.log('SSTV: Sending detach command');
+        dxClient.ws.send(JSON.stringify(message));
     }
 
     updateButtonStates() {
@@ -550,11 +568,12 @@ class SSTVExtension extends DecoderExtension {
         console.log('SSTV: Extension enabled');
         
         // Register binary message handler with DX WebSocket
-        if (window.dxWebSocket) {
+        const dxClient = window.dxClusterClient;
+        if (dxClient && dxClient.ws) {
             // Store original onmessage handler
-            const originalHandler = window.dxWebSocket.onmessage;
+            const originalHandler = dxClient.ws.onmessage;
 
-            window.dxWebSocket.onmessage = (event) => {
+            dxClient.ws.onmessage = (event) => {
                 // Handle binary messages for SSTV
                 if (event.data instanceof Blob || event.data instanceof ArrayBuffer) {
                     const handleBinary = (buffer) => {
@@ -570,7 +589,7 @@ class SSTVExtension extends DecoderExtension {
                     }
                 } else if (originalHandler) {
                     // Pass text messages to original handler
-                    originalHandler.call(window.dxWebSocket, event);
+                    originalHandler.call(dxClient.ws, event);
                 }
             };
         }

@@ -212,9 +212,21 @@ class NAVTEXExtension extends DecoderExtension {
         // For USB mode, tune down by the center frequency from the dial frequency
         const dialFrequency = mode.toLowerCase() === 'usb' ? frequency - centerHz : frequency;
 
+        // Disable edge detection when tuning to station
+        if (window.spectrumDisplay) {
+            window.spectrumDisplay.skipEdgeDetection = true;
+        }
+
         // Set frequency and mode
         this.radio.setFrequency(dialFrequency);
         this.radio.setMode(mode, false);
+
+        // Re-enable edge detection after a delay
+        setTimeout(() => {
+            if (window.spectrumDisplay) {
+                window.spectrumDisplay.skipEdgeDetection = false;
+            }
+        }, 500);
 
         // Update settings
         const baudInput = document.getElementById('navtex-baud');

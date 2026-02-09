@@ -281,6 +281,15 @@ class FSKExtension extends DecoderExtension {
             startBtn.classList.remove('active');
         }
 
+        // Clear all status indicators when stopped (they come from backend)
+        const signalIndicator = document.getElementById('fsk-signal-indicator');
+        const syncIndicator = document.getElementById('fsk-sync-indicator');
+        const decodeIndicator = document.getElementById('fsk-decode-indicator');
+        
+        if (signalIndicator) signalIndicator.classList.remove('active');
+        if (syncIndicator) syncIndicator.classList.remove('active');
+        if (decodeIndicator) decodeIndicator.classList.remove('active');
+
         this.appendOutput('=== FSK Decoder Stopped ===\n', 'info');
     }
 

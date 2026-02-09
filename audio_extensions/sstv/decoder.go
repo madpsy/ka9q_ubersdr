@@ -121,83 +121,252 @@ func (d *SSTVDecoder) GetName() string {
 	return "sstv"
 }
 
-// decodeLoop is the main decoding loop
+// decodeLoop is the main decoding loop - now uses streaming architecture
 func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []byte) {
 	defer d.wg.Done()
 
-	// Create PCM buffer that accumulates audio samples
-	pcmBuffer := make([]int16, 0, 1000000) // 1M samples buffer
+	// Create circular PCM buffer (4096 samples like KiwiSDR)
+	const pcmBufSize = 4096
+	pcmBuffer := NewCircularPCMBuffer(pcmBufSize)
+
+	// Goroutine to feed buffer from audio channel
+	feedDone := make(chan struct{})
+	go func() {
+		defer close(feedDone)
+		for {
+			select {
+			case <-d.stopChan:
+				return
+			case samples, ok := <-audioChan:
+				if !ok {
+					return
+				}
+				pcmBuffer.Write(samples)
+			}
+		}
+	}()
 
 	// Send initial status
 	d.sendStatus(resultChan, "Waiting for signal...")
 
+	// Wait for buffer to fill initially (like KiwiSDR's initial fill)
+	log.Printf("[SSTV] Waiting for PCM buffer to fill...")
+	for pcmBuffer.Available() < pcmBufSize {
+		select {
+		case <-d.stopChan:
+			return
+		case <-time.After(10 * time.Millisecond):
+			// Keep waiting
+		}
+	}
+	log.Printf("[SSTV] PCM buffer filled, starting VIS detection")
+
+	// Main processing loop
 	for {
 		select {
 		case <-d.stopChan:
 			return
 
-		case samples, ok := <-audioChan:
-			if !ok {
-				return
-			}
-
-			// Accumulate samples
-			pcmBuffer = append(pcmBuffer, samples...)
-
-			// Process based on state
+		default:
 			switch d.state {
 			case StateInit, StateWaitingVIS:
-				// Try to detect VIS code if we have enough samples
-				// VIS detection needs ~1 second of audio
-				if len(pcmBuffer) >= int(d.sampleRate) {
-					if err := d.detectVISFromBuffer(pcmBuffer, resultChan); err == nil {
-						// VIS detected, move to video decoding
-						d.state = StateDecodingVideo
-						d.visLoggedOnce = false // Reset for next image
-					}
-					// Keep accumulating if VIS not found yet
-					// Don't spam logs - VIS detection will log when it finds something
+				// Try to detect VIS code using streaming buffer
+				if err := d.detectVISStreaming(pcmBuffer, resultChan); err == nil {
+					log.Printf("[SSTV] VIS detected, transitioning to video decoding")
+					d.state = StateDecodingVideo
+					d.visLoggedOnce = false
+				} else {
+					// VIS not found yet, keep trying
+					// Sleep briefly to avoid busy loop
+					time.Sleep(10 * time.Millisecond)
 				}
 
 			case StateDecodingVideo:
-				// Check if we have enough samples for the full image
-				m := d.mode
-				requiredSamples := int(m.LineTime * float64(m.NumLines) * d.sampleRate * 1.1) // 10% extra
+				// Decode video from streaming buffer
+				if err := d.decodeVideoStreaming(pcmBuffer, resultChan); err != nil {
+					log.Printf("[SSTV] Video decoding failed: %v", err)
+					d.state = StateWaitingVIS
+					pcmBuffer.Reset()
+				} else {
+					// Video decoded successfully
+					log.Printf("[SSTV] Video decoding complete")
 
-				if len(pcmBuffer) >= requiredSamples {
-					// Decode video
-					if err := d.decodeVideoFromBuffer(pcmBuffer, resultChan); err != nil {
-						log.Printf("[SSTV] Video decoding failed: %v", err)
-						d.state = StateWaitingVIS
-						pcmBuffer = pcmBuffer[:0] // Clear buffer
-						continue
-					}
-
-					// Optionally decode FSK ID (needs more samples)
+					// Optionally decode FSK ID
 					if d.config.DecodeFSKID {
-						// FSK ID needs additional ~2 seconds
-						fskSamples := int(d.sampleRate * 2)
-						if len(pcmBuffer) >= requiredSamples+fskSamples {
-							d.decodeFSKIDFromBuffer(pcmBuffer[requiredSamples:], resultChan)
-						}
+						d.decodeFSKIDStreaming(pcmBuffer, resultChan)
 					}
 
 					// Reset for next image
 					d.state = StateWaitingVIS
-					pcmBuffer = pcmBuffer[:0] // Clear buffer
+					pcmBuffer.Reset()
 				}
-			}
-
-			// Prevent buffer from growing too large
-			if len(pcmBuffer) > 2000000 { // 2M samples max
-				// Keep only last 1M samples
-				pcmBuffer = pcmBuffer[len(pcmBuffer)-1000000:]
 			}
 		}
 	}
 }
 
-// detectVISFromBuffer attempts to detect VIS from accumulated buffer
+// detectVISStreaming attempts to detect VIS using streaming circular buffer
+func (d *SSTVDecoder) detectVISStreaming(pcmBuffer *CircularPCMBuffer, resultChan chan<- []byte) error {
+	// Log only once to avoid spam
+	if !d.visLoggedOnce {
+		log.Printf("[SSTV] Starting VIS detection with streaming buffer...")
+		d.visLoggedOnce = true
+	}
+
+	// Create VIS detector if not exists
+	if d.visDetector == nil {
+		d.visDetector = NewVISDetector(d.sampleRate)
+
+		// Set tone frequency callback to send updates to frontend (with throttling)
+		d.visDetector.SetToneCallback(func(freq float64) {
+			now := time.Now().UnixMilli()
+			// Only send if at least 500ms has passed since last report
+			if now-d.lastToneFreqReport >= 500 {
+				d.sendToneFreq(resultChan, freq)
+				d.lastToneFreqReport = now
+			}
+		})
+	}
+
+	// Try to detect VIS using streaming approach
+	modeIdx, headerShift, isExtended, ok := d.visDetector.DetectVISStreaming(pcmBuffer)
+	if !ok {
+		return fmt.Errorf("VIS not found yet")
+	}
+
+	// Get mode specification
+	d.mode = GetModeByIndex(modeIdx)
+	if d.mode == nil {
+		return fmt.Errorf("invalid mode index: %d", modeIdx)
+	}
+
+	d.headerShift = headerShift
+
+	// Check if mode is supported
+	if d.mode.Unsupported {
+		d.sendStatus(resultChan, fmt.Sprintf("Mode not supported: %s", d.mode.Name))
+		return fmt.Errorf("mode not supported: %s", d.mode.Name)
+	}
+
+	// Check MMSSTV-only filter
+	if d.config.MMSSVOnly {
+		if modeIdx < ModeMR73 || modeIdx > ModeMP175 {
+			d.sendStatus(resultChan, fmt.Sprintf("Skipping non-MMSSTV mode: %s", d.mode.Name))
+			return fmt.Errorf("non-MMSSTV mode filtered")
+		}
+	}
+
+	log.Printf("[SSTV] Detected mode: %s (%dx%d)", d.mode.Name, d.mode.ImgWidth, d.mode.NumLines)
+
+	// Send mode detection message
+	d.sendModeDetected(resultChan, modeIdx, isExtended)
+
+	// Send image start message with dimensions
+	d.sendImageStart(resultChan)
+
+	return nil
+}
+
+// decodeVideoStreaming decodes video from streaming circular buffer
+func (d *SSTVDecoder) decodeVideoStreaming(pcmBuffer *CircularPCMBuffer, resultChan chan<- []byte) error {
+	log.Printf("[SSTV] Starting video demodulation from streaming buffer...")
+
+	d.sendStatus(resultChan, fmt.Sprintf("Decoding %s...", d.mode.Name))
+
+	// Calculate required samples for full image
+	m := d.mode
+	requiredSamples := int(m.LineTime * float64(m.NumLines) * d.sampleRate * 1.2) // 20% extra
+
+	// Wait for enough samples to accumulate
+	log.Printf("[SSTV] Waiting for %d samples for video decode...", requiredSamples)
+	for pcmBuffer.Available() < requiredSamples {
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Read samples into buffer for video demodulation
+	videoSamples, err := pcmBuffer.Read(requiredSamples)
+	if err != nil {
+		return fmt.Errorf("failed to read video samples: %w", err)
+	}
+
+	// Create video demodulator
+	d.videoDemod = NewVideoDemodulator(d.mode, d.sampleRate, d.headerShift)
+
+	// Initial decode without sync correction
+	skip := 0
+	pixels, err := d.videoDemod.DemodulateVideo(videoSamples, skip, false)
+	if err != nil {
+		return fmt.Errorf("video demodulation failed: %w", err)
+	}
+
+	// Send uncorrected image data line by line (real-time view)
+	log.Printf("[SSTV] Sending real-time uncorrected image...")
+	d.sendImageData(resultChan, pixels)
+
+	// Send initial completion (uncorrected image done)
+	d.sendComplete(resultChan)
+
+	// Perform sync detection and slant correction if enabled
+	if d.config.AutoSync {
+		log.Printf("[SSTV] Performing sync detection and slant correction...")
+		d.sendStatus(resultChan, "Correcting slant...")
+
+		// Create sync detector
+		d.syncDetector = NewSyncDetector(d.mode, d.sampleRate, d.videoDemod.hasSync)
+
+		// Find slant and adjust
+		adjustedRate, adjustedSkip := d.syncDetector.FindSlantAndAdjust()
+
+		// Re-create video demodulator with adjusted rate
+		d.videoDemod = NewVideoDemodulator(d.mode, adjustedRate, d.headerShift)
+
+		// Re-decode with corrected parameters
+		correctedPixels, err := d.videoDemod.DemodulateVideo(videoSamples, adjustedSkip, true)
+		if err != nil {
+			return fmt.Errorf("video re-demodulation failed: %w", err)
+		}
+
+		// Signal that corrected image is coming
+		d.sendRedrawStart(resultChan)
+
+		// Send corrected image data
+		log.Printf("[SSTV] Sending corrected image...")
+		d.sendImageData(resultChan, correctedPixels)
+
+		// Send final completion (corrected image done)
+		d.sendComplete(resultChan)
+	}
+
+	return nil
+}
+
+// decodeFSKIDStreaming decodes FSK ID from streaming buffer
+func (d *SSTVDecoder) decodeFSKIDStreaming(pcmBuffer *CircularPCMBuffer, resultChan chan<- []byte) {
+	log.Printf("[SSTV] Attempting FSK ID decode from streaming buffer...")
+
+	// Wait for ~2 seconds of samples for FSK ID
+	fskSamples := int(d.sampleRate * 2)
+	for pcmBuffer.Available() < fskSamples {
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Read FSK samples
+	samples, err := pcmBuffer.Read(fskSamples)
+	if err != nil {
+		log.Printf("[SSTV] Failed to read FSK samples: %v", err)
+		return
+	}
+
+	reader := &simpleBufferReader{buffer: samples, pos: 0}
+	d.fskDecoder = NewFSKDecoder(d.sampleRate, d.headerShift)
+	callsign := d.fskDecoder.DecodeFSKID(reader)
+
+	if callsign != "" {
+		d.sendFSKID(resultChan, callsign)
+	}
+}
+
+// detectVISFromBuffer attempts to detect VIS from accumulated buffer (LEGACY)
 func (d *SSTVDecoder) detectVISFromBuffer(pcmBuffer []int16, resultChan chan<- []byte) error {
 	// Log only once to avoid spam
 	if !d.visLoggedOnce {

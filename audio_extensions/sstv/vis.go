@@ -201,8 +201,8 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 		v.headerBuf[v.headerPtr] = peakFreq
 		v.headerPtr = (v.headerPtr + 1) % len(v.headerBuf)
 
-		// Report tone frequency every 200ms (20 iterations of 10ms each)
-		if v.toneCallback != nil && iterationCount-lastToneReport >= 20 {
+		// Report tone frequency every 500ms (50 iterations of 10ms each)
+		if v.toneCallback != nil && iterationCount-lastToneReport >= 50 {
 			v.toneCallback(peakFreq)
 			lastToneReport = iterationCount
 		}
@@ -226,8 +226,11 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 		headerShift := 0
 		gotVIS := false
 
-		// Rate limit logging - only log once per second
+		// Rate limit logging - only log once per second (100 iterations)
 		shouldLog := iterationCount-lastLeaderLog > 100
+		if shouldLog {
+			lastLeaderLog = iterationCount // Update BEFORE loops to prevent multiple logs
+		}
 
 		for i := 0; i < 3 && !gotVIS; i++ {
 			for j := 0; j < 3 && !gotVIS; j++ {
@@ -253,8 +256,6 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 				// Found complete VIS header - log it (rate limited)
 				if shouldLog {
 					log.Printf("[SSTV VIS] Found leader (%.1f Hz) + start bit (%.1f Hz), decoding data bits...", refFreq, refFreq-700)
-					lastLeaderLog = iterationCount
-					shouldLog = false // Only log once per outer iteration
 				}
 
 				// Try to read data bits

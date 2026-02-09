@@ -30,7 +30,7 @@ class NAVTEXExtension extends DecoderExtension {
         this.autoScroll = true;
         this.baudError = 0;
         this.needsTimestamp = true; // Track if we need to add timestamp at start of line
-        this.consoleLines = 50; // Default number of visible lines
+        this.consoleLines = 25; // Default number of visible lines
 
         // Binary message handler
         this.binaryMessageHandler = null;

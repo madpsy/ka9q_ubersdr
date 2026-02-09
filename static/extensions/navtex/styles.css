@@ -218,9 +218,9 @@ input[type="checkbox"] {
     border: 1px solid #3a3a3a;
     border-radius: 4px;
     position: relative;
-    height: 920px; /* Default: 50 lines * 18px + 20px padding */
-    min-height: 920px;
-    max-height: 920px;
+    height: 470px; /* Default: 25 lines * 18px + 20px padding */
+    min-height: 470px;
+    max-height: 470px;
 }
 
 .navtex-console {

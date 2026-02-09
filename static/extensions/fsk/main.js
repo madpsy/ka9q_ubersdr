@@ -1,0 +1,412 @@
+// FSK/RTTY Extension for ka9q UberSDR
+// Decodes FSK transmissions including RTTY, SITOR-B, and other modes
+// Based on KiwiSDR FSK extension by John Seamons, ZL4VO/KF6VO
+// Adapted for UberSDR by integrating with Web Audio API
+// Version: 1.0.0
+
+class FSKExtension extends DecoderExtension {
+    constructor() {
+        console.log('FSK: Constructor called');
+        super('fsk', {
+            displayName: 'FSK/RTTY Decoder',
+            autoTune: false,
+            requiresMode: 'usb',
+            preferredBandwidth: 2400
+        });
+        console.log('FSK: Super constructor completed');
+
+        // Configuration
+        this.config = {
+            shift: 170,
+            baud: 45.45,
+            framing: '5N1.5',
+            inverted: false,
+            encoding: 'ITA2',
+            centerFreq: 1000
+        };
+
+        // State
+        this.running = false;
+        this.decoder = null;
+        this.audioProcessor = null;
+        this.processingInterval = null;
+        this.textBuffer = [];
+        this.maxBufferLines = 1000;
+        
+        // Audio processing
+        this.scriptProcessor = null;
+        this.analyserNode = null;
+    }
+
+    onInitialize() {
+        console.log('FSK: onInitialize called');
+        this.renderTemplate();
+        this.waitForDOMAndSetupHandlers();
+        console.log('FSK: onInitialize complete');
+    }
+
+    waitForDOMAndSetupHandlers() {
+        const trySetup = (attempts = 0) => {
+            const maxAttempts = 20;
+
+            const outputDiv = document.getElementById('fsk-output');
+            const startBtn = document.getElementById('fsk-start-btn');
+            const clearBtn = document.getElementById('fsk-clear-btn');
+
+            console.log(`FSK: DOM check attempt ${attempts + 1}/${maxAttempts}:`, {
+                outputDiv: !!outputDiv,
+                startBtn: !!startBtn,
+                clearBtn: !!clearBtn
+            });
+
+            if (outputDiv && startBtn && clearBtn) {
+                console.log('FSK: All DOM elements found, setting up...');
+                this.setupEventHandlers();
+                console.log('FSK: Setup complete');
+            } else if (attempts < maxAttempts) {
+                console.log(`FSK: Waiting for DOM elements (attempt ${attempts + 1}/${maxAttempts})`);
+                setTimeout(() => trySetup(attempts + 1), 100);
+            } else {
+                console.error('FSK: Failed to find DOM elements after', maxAttempts, 'attempts');
+            }
+        };
+
+        trySetup();
+    }
+
+    renderTemplate() {
+        const template = window.fsk_template;
+
+        if (!template) {
+            console.error('FSK extension template not loaded');
+            return;
+        }
+
+        const container = this.getContentElement();
+        if (!container) return;
+
+        container.innerHTML = template;
+    }
+
+    getContentElement() {
+        const container = document.querySelector('.extension-content[data-extension="fsk"]');
+        if (!container) {
+            console.error('FSK: Extension content container not found');
+        }
+        return container;
+    }
+
+    setupEventHandlers() {
+        console.log('FSK: Setting up event handlers');
+
+        // Start/Stop button
+        const startBtn = document.getElementById('fsk-start-btn');
+        if (startBtn) {
+            startBtn.addEventListener('click', () => this.toggleDecoding());
+        }
+
+        // Clear button
+        const clearBtn = document.getElementById('fsk-clear-btn');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => this.clearOutput());
+        }
+
+        // Preset selection
+        const presetSelect = document.getElementById('fsk-preset-select');
+        if (presetSelect) {
+            presetSelect.addEventListener('change', (e) => this.applyPreset(e.target.value));
+        }
+
+        // Parameter controls
+        const shiftInput = document.getElementById('fsk-shift');
+        if (shiftInput) {
+            shiftInput.addEventListener('change', (e) => {
+                this.config.shift = parseFloat(e.target.value);
+                this.updateDecoder();
+            });
+        }
+
+        const baudInput = document.getElementById('fsk-baud');
+        if (baudInput) {
+            baudInput.addEventListener('change', (e) => {
+                this.config.baud = parseFloat(e.target.value);
+                this.updateDecoder();
+            });
+        }
+
+        const framingSelect = document.getElementById('fsk-framing');
+        if (framingSelect) {
+            framingSelect.addEventListener('change', (e) => {
+                this.config.framing = e.target.value;
+                this.updateDecoder();
+            });
+        }
+
+        const encodingSelect = document.getElementById('fsk-encoding');
+        if (encodingSelect) {
+            encodingSelect.addEventListener('change', (e) => {
+                this.config.encoding = e.target.value;
+                this.updateDecoder();
+            });
+        }
+
+        const invertedCheck = document.getElementById('fsk-inverted');
+        if (invertedCheck) {
+            invertedCheck.addEventListener('change', (e) => {
+                this.config.inverted = e.target.checked;
+                this.updateDecoder();
+            });
+        }
+
+        const centerFreqInput = document.getElementById('fsk-center-freq');
+        if (centerFreqInput) {
+            centerFreqInput.addEventListener('change', (e) => {
+                this.config.centerFreq = parseFloat(e.target.value);
+                this.updateDecoder();
+            });
+        }
+
+        console.log('FSK: Event handlers setup complete');
+    }
+
+    applyPreset(preset) {
+        console.log('FSK: Applying preset:', preset);
+        
+        switch(preset) {
+            case 'ham':
+                this.config.shift = 170;
+                this.config.baud = 45.45;
+                this.config.framing = '5N1.5';
+                this.config.inverted = false;
+                this.config.encoding = 'ITA2';
+                break;
+            case 'sitor-b':
+                this.config.shift = 170;
+                this.config.baud = 100;
+                this.config.framing = '4/7';
+                this.config.inverted = false;
+                this.config.encoding = 'CCIR476';
+                break;
+            case 'wx':
+                this.config.shift = 450;
+                this.config.baud = 50;
+                this.config.framing = '5N1.5';
+                this.config.inverted = true;
+                this.config.encoding = 'ITA2';
+                break;
+            case 'custom':
+                // Keep current settings
+                return;
+        }
+
+        // Update UI
+        this.updateUIFromConfig();
+        this.updateDecoder();
+    }
+
+    updateUIFromConfig() {
+        const shiftInput = document.getElementById('fsk-shift');
+        if (shiftInput) shiftInput.value = this.config.shift;
+
+        const baudInput = document.getElementById('fsk-baud');
+        if (baudInput) baudInput.value = this.config.baud;
+
+        const framingSelect = document.getElementById('fsk-framing');
+        if (framingSelect) framingSelect.value = this.config.framing;
+
+        const encodingSelect = document.getElementById('fsk-encoding');
+        if (encodingSelect) encodingSelect.value = this.config.encoding;
+
+        const invertedCheck = document.getElementById('fsk-inverted');
+        if (invertedCheck) invertedCheck.checked = this.config.inverted;
+
+        const centerFreqInput = document.getElementById('fsk-center-freq');
+        if (centerFreqInput) centerFreqInput.value = this.config.centerFreq;
+    }
+
+    toggleDecoding() {
+        if (this.running) {
+            this.stopDecoding();
+        } else {
+            this.startDecoding();
+        }
+    }
+
+    startDecoding() {
+        console.log('FSK: Starting decoding');
+
+        if (!window.audioContext) {
+            this.appendOutput('Error: Audio context not available. Please start audio first.\n', 'error');
+            return;
+        }
+
+        // Create decoder
+        this.initializeDecoder();
+
+        // Start audio processing
+        this.startAudioProcessing();
+
+        this.running = true;
+        const startBtn = document.getElementById('fsk-start-btn');
+        if (startBtn) {
+            startBtn.textContent = 'Stop';
+            startBtn.classList.add('active');
+        }
+
+        this.appendOutput('=== FSK Decoder Started ===\n', 'info');
+        this.appendOutput(`Mode: ${this.config.encoding}, Baud: ${this.config.baud}, Shift: ${this.config.shift} Hz\n`, 'info');
+    }
+
+    stopDecoding() {
+        console.log('FSK: Stopping decoding');
+
+        this.stopAudioProcessing();
+
+        this.running = false;
+        const startBtn = document.getElementById('fsk-start-btn');
+        if (startBtn) {
+            startBtn.textContent = 'Start';
+            startBtn.classList.remove('active');
+        }
+
+        this.appendOutput('=== FSK Decoder Stopped ===\n', 'info');
+    }
+
+    initializeDecoder() {
+        console.log('FSK: Initializing decoder');
+
+        const sampleRate = window.audioContext.sampleRate;
+
+        // Create JNX decoder instance
+        this.decoder = new JNX();
+        
+        // Setup decoder with current configuration
+        this.decoder.setup_values(
+            sampleRate,
+            this.config.centerFreq,
+            this.config.shift,
+            this.config.baud,
+            this.config.framing,
+            this.config.inverted,
+            this.config.encoding,
+            false, // show_raw
+            false  // show_errs
+        );
+
+        // Set callbacks using the proper setter methods
+        this.decoder.set_output_char_cb((char) => {
+            this.handleDecodedChar(char);
+        });
+
+        this.decoder.set_baud_error_cb((error) => {
+            // Optional: display baud error in status bar
+            // console.log('Baud error:', error);
+        });
+
+        console.log('FSK: Decoder initialized');
+    }
+
+    updateDecoder() {
+        if (this.running && this.decoder) {
+            console.log('FSK: Updating decoder configuration');
+            this.stopDecoding();
+            setTimeout(() => this.startDecoding(), 100);
+        }
+    }
+
+    startAudioProcessing() {
+        console.log('FSK: Starting audio processing');
+
+        const audioContext = window.audioContext;
+        const analyser = window.analyser || window.vuAnalyser;
+
+        if (!analyser) {
+            console.error('FSK: No analyser available');
+            return;
+        }
+
+        // Create script processor for audio processing
+        const bufferSize = 2048;
+        this.scriptProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+
+        // Connect analyser to script processor
+        analyser.connect(this.scriptProcessor);
+        this.scriptProcessor.connect(audioContext.destination);
+
+        // Process audio samples
+        this.scriptProcessor.onaudioprocess = (event) => {
+            if (!this.running || !this.decoder) return;
+
+            const inputData = event.inputBuffer.getChannelData(0);
+            
+            // Convert Float32Array to regular array and process
+            const samples = Array.from(inputData);
+            this.decoder.process_data(samples, samples.length);
+        };
+
+        console.log('FSK: Audio processing started');
+    }
+
+    stopAudioProcessing() {
+        if (this.scriptProcessor) {
+            this.scriptProcessor.disconnect();
+            this.scriptProcessor = null;
+        }
+    }
+
+    handleDecodedChar(char) {
+        if (typeof char === 'string') {
+            this.appendOutput(char);
+        }
+    }
+
+    appendOutput(text, className = '') {
+        const outputDiv = document.getElementById('fsk-output');
+        if (!outputDiv) return;
+
+        const span = document.createElement('span');
+        if (className) {
+            span.className = className;
+        }
+        span.textContent = text;
+        outputDiv.appendChild(span);
+
+        // Auto-scroll to bottom
+        outputDiv.scrollTop = outputDiv.scrollHeight;
+
+        // Limit buffer size
+        while (outputDiv.childNodes.length > this.maxBufferLines) {
+            outputDiv.removeChild(outputDiv.firstChild);
+        }
+    }
+
+    clearOutput() {
+        const outputDiv = document.getElementById('fsk-output');
+        if (outputDiv) {
+            outputDiv.innerHTML = '';
+        }
+        this.textBuffer = [];
+    }
+
+    onEnable() {
+        console.log('FSK: Extension enabled');
+    }
+
+    onDisable() {
+        console.log('FSK: Extension disabled');
+        if (this.running) {
+            this.stopDecoding();
+        }
+    }
+
+    onDestroy() {
+        console.log('FSK: Extension destroyed');
+        this.stopDecoding();
+    }
+}
+
+// Register the extension
+if (window.DecoderExtension) {
+    window.FSKExtension = FSKExtension;
+    console.log('FSK: Extension class registered');
+}

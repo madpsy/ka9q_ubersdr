@@ -1,0 +1,80 @@
+<div class="fsk-container">
+    <!-- Header -->
+    <div class="fsk-header">
+        <h3>FSK/RTTY Decoder</h3>
+        <div class="fsk-controls">
+            <button id="fsk-start-btn" class="btn btn-primary">Start</button>
+            <button id="fsk-clear-btn" class="btn btn-secondary">Clear</button>
+        </div>
+    </div>
+
+    <!-- Configuration Panel -->
+    <div class="fsk-config-panel">
+        <div class="fsk-config-row">
+            <div class="fsk-config-group">
+                <label for="fsk-preset-select">Preset:</label>
+                <select id="fsk-preset-select" class="fsk-select">
+                    <option value="ham">Ham RTTY (170/45.45)</option>
+                    <option value="sitor-b">SITOR-B (170/100)</option>
+                    <option value="wx">Weather (450/50)</option>
+                    <option value="custom">Custom</option>
+                </select>
+            </div>
+
+            <div class="fsk-config-group">
+                <label for="fsk-shift">Shift (Hz):</label>
+                <input type="number" id="fsk-shift" class="fsk-input" value="170" min="50" max="1000" step="10">
+            </div>
+
+            <div class="fsk-config-group">
+                <label for="fsk-baud">Baud:</label>
+                <input type="number" id="fsk-baud" class="fsk-input" value="45.45" min="36" max="300" step="0.01">
+            </div>
+        </div>
+
+        <div class="fsk-config-row">
+            <div class="fsk-config-group">
+                <label for="fsk-center-freq">Center Freq (Hz):</label>
+                <input type="number" id="fsk-center-freq" class="fsk-input" value="1000" min="500" max="3000" step="50">
+            </div>
+
+            <div class="fsk-config-group">
+                <label for="fsk-framing">Framing:</label>
+                <select id="fsk-framing" class="fsk-select">
+                    <option value="5N1">5N1</option>
+                    <option value="5N1.5" selected>5N1.5</option>
+                    <option value="5N2">5N2</option>
+                    <option value="7N1">7N1</option>
+                    <option value="8N1">8N1</option>
+                    <option value="4/7">4/7 (CCIR476)</option>
+                </select>
+            </div>
+
+            <div class="fsk-config-group">
+                <label for="fsk-encoding">Encoding:</label>
+                <select id="fsk-encoding" class="fsk-select">
+                    <option value="ITA2" selected>ITA2 (Baudot)</option>
+                    <option value="ASCII">ASCII</option>
+                    <option value="CCIR476">CCIR476</option>
+                </select>
+            </div>
+
+            <div class="fsk-config-group">
+                <label for="fsk-inverted">
+                    <input type="checkbox" id="fsk-inverted">
+                    Inverted
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Output Display -->
+    <div class="fsk-output-container">
+        <div id="fsk-output" class="fsk-output"></div>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="fsk-status-bar">
+        <span class="fsk-status-text">Ready</span>
+    </div>
+</div>

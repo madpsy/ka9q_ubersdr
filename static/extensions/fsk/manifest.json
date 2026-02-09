@@ -1,0 +1,98 @@
+{
+  "name": "fsk",
+  "displayName": "FSK/RTTY Decoder",
+  "version": "1.0.0",
+  "description": "FSK/RTTY decoder supporting ITA2 (Baudot), ASCII, and CCIR476 (SITOR-B) modes",
+  "author": "UberSDR (based on KiwiSDR FSK by John Seamons, ZL4VO/KF6VO)",
+  "type": "decoder",
+  "icon": "📟",
+  "category": "decoder",
+  "requiresAudio": true,
+  "defaultEnabled": false,
+  "files": {
+    "main": "main.js",
+    "styles": ["styles.css"],
+    "template": "template.html",
+    "scripts": [
+      "BiQuadraticFilter.js",
+      "FSK_async.js",
+      "CCIR476.js",
+      "JNX.js"
+    ]
+  },
+  "settings": {
+    "shift": {
+      "type": "number",
+      "default": 170,
+      "min": 50,
+      "max": 1000,
+      "description": "Frequency shift in Hz (50, 85, 170, 200, 425, 450, 850)"
+    },
+    "baud": {
+      "type": "number",
+      "default": 45.45,
+      "min": 36,
+      "max": 300,
+      "description": "Baud rate (36, 45.45, 50, 75, 100, 150, 200, 300)"
+    },
+    "centerFreq": {
+      "type": "number",
+      "default": 1000,
+      "min": 500,
+      "max": 3000,
+      "description": "Center frequency in Hz"
+    },
+    "framing": {
+      "type": "string",
+      "default": "5N1.5",
+      "options": ["5N1", "5N1.5", "5N2", "7N1", "8N1", "4/7"],
+      "description": "Framing format (start/data/stop bits)"
+    },
+    "encoding": {
+      "type": "string",
+      "default": "ITA2",
+      "options": ["ITA2", "ASCII", "CCIR476"],
+      "description": "Character encoding"
+    },
+    "inverted": {
+      "type": "boolean",
+      "default": false,
+      "description": "Invert mark/space"
+    }
+  },
+  "presets": {
+    "ham": {
+      "name": "Ham RTTY",
+      "description": "Amateur radio RTTY (170 Hz shift, 45.45 baud)",
+      "settings": {
+        "shift": 170,
+        "baud": 45.45,
+        "framing": "5N1.5",
+        "encoding": "ITA2",
+        "inverted": false
+      }
+    },
+    "sitor-b": {
+      "name": "SITOR-B",
+      "description": "SITOR-B mode (170 Hz shift, 100 baud, CCIR476)",
+      "settings": {
+        "shift": 170,
+        "baud": 100,
+        "framing": "4/7",
+        "encoding": "CCIR476",
+        "inverted": false
+      }
+    },
+    "wx": {
+      "name": "Weather",
+      "description": "Weather broadcasts (450 Hz shift, 50 baud)",
+      "settings": {
+        "shift": 450,
+        "baud": 50,
+        "framing": "5N1.5",
+        "encoding": "ITA2",
+        "inverted": true
+      }
+    }
+  }
+}

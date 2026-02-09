@@ -150,7 +150,6 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 	d.sendStatus(resultChan, "Waiting for signal...")
 
 	// Wait for buffer to fill initially (like KiwiSDR's initial fill)
-	log.Printf("[SSTV] Waiting for PCM buffer to fill...")
 	for pcmBuffer.Available() < pcmBufSize {
 		select {
 		case <-d.stopChan:
@@ -159,7 +158,6 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 			// Keep waiting
 		}
 	}
-	log.Printf("[SSTV] PCM buffer filled, starting VIS detection")
 
 	// Main processing loop
 	for {
@@ -172,7 +170,6 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 			case StateInit, StateWaitingVIS:
 				// Try to detect VIS code using streaming buffer
 				if err := d.detectVISStreaming(pcmBuffer, resultChan); err == nil {
-					log.Printf("[SSTV] VIS detected, transitioning to video decoding")
 					d.state = StateDecodingVideo
 					d.visLoggedOnce = false
 				} else {
@@ -207,12 +204,6 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 
 // detectVISStreaming attempts to detect VIS using streaming circular buffer
 func (d *SSTVDecoder) detectVISStreaming(pcmBuffer *CircularPCMBuffer, resultChan chan<- []byte) error {
-	// Log only once to avoid spam
-	if !d.visLoggedOnce {
-		log.Printf("[SSTV] Starting VIS detection with streaming buffer...")
-		d.visLoggedOnce = true
-	}
-
 	// Create VIS detector if not exists
 	if d.visDetector == nil {
 		d.visDetector = NewVISDetector(d.sampleRate)

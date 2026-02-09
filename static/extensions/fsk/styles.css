@@ -1,0 +1,223 @@
+/* FSK/RTTY Extension Styles */
+
+.fsk-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: #1a1a1a;
+    color: #e0e0e0;
+    font-family: 'Courier New', monospace;
+}
+
+.fsk-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    background: #2a2a2a;
+    border-bottom: 1px solid #3a3a3a;
+}
+
+.fsk-header h3 {
+    margin: 0;
+    font-size: 16px;
+    color: #4CAF50;
+}
+
+.fsk-controls {
+    display: flex;
+    gap: 10px;
+}
+
+.fsk-controls .btn {
+    padding: 6px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.fsk-controls .btn-primary {
+    background: #4CAF50;
+    color: white;
+}
+
+.fsk-controls .btn-primary:hover {
+    background: #45a049;
+}
+
+.fsk-controls .btn-primary.active {
+    background: #f44336;
+}
+
+.fsk-controls .btn-primary.active:hover {
+    background: #da190b;
+}
+
+.fsk-controls .btn-secondary {
+    background: #555;
+    color: white;
+}
+
+.fsk-controls .btn-secondary:hover {
+    background: #666;
+}
+
+/* Configuration Panel */
+.fsk-config-panel {
+    padding: 12px 15px;
+    background: #252525;
+    border-bottom: 1px solid #3a3a3a;
+}
+
+.fsk-config-row {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+.fsk-config-row:last-child {
+    margin-bottom: 0;
+}
+
+.fsk-config-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.fsk-config-group label {
+    font-size: 12px;
+    color: #aaa;
+    white-space: nowrap;
+}
+
+.fsk-select,
+.fsk-input {
+    padding: 4px 8px;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+}
+
+.fsk-select {
+    min-width: 120px;
+}
+
+.fsk-input {
+    width: 80px;
+}
+
+.fsk-select:focus,
+.fsk-input:focus {
+    outline: none;
+    border-color: #4CAF50;
+}
+
+input[type="checkbox"] {
+    cursor: pointer;
+}
+
+/* Output Display */
+.fsk-output-container {
+    flex: 1;
+    overflow: hidden;
+    background: #0a0a0a;
+    border-bottom: 1px solid #3a3a3a;
+}
+
+.fsk-output {
+    height: 100%;
+    padding: 10px;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.4;
+    color: #00ff00;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.fsk-output .error {
+    color: #ff4444;
+}
+
+.fsk-output .info {
+    color: #4CAF50;
+    font-weight: bold;
+}
+
+.fsk-output .warning {
+    color: #ffaa00;
+}
+
+/* Custom scrollbar for output */
+.fsk-output::-webkit-scrollbar {
+    width: 8px;
+}
+
+.fsk-output::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+
+.fsk-output::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 4px;
+}
+
+.fsk-output::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Status Bar */
+.fsk-status-bar {
+    padding: 6px 15px;
+    background: #2a2a2a;
+    border-top: 1px solid #3a3a3a;
+    font-size: 11px;
+    color: #888;
+}
+
+.fsk-status-text {
+    font-family: 'Courier New', monospace;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .fsk-config-row {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .fsk-config-group {
+        width: 100%;
+    }
+
+    .fsk-select {
+        flex: 1;
+    }
+
+    .fsk-input {
+        flex: 1;
+    }
+}
+
+/* Animation for active state */
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
+.fsk-controls .btn-primary.active {
+    animation: pulse 2s infinite;
+}

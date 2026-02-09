@@ -120,50 +120,194 @@ func (d *SSTVDecoder) GetName() string {
 func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []byte) {
 	defer d.wg.Done()
 
-	// Create PCM buffer reader
-	pcmReader := NewPCMBufferReader(audioChan, d.stopChan)
+	// Create PCM buffer that accumulates audio samples
+	pcmBuffer := make([]int16, 0, 1000000) // 1M samples buffer
+
+	// Send initial status
+	d.sendStatus(resultChan, "Waiting for signal...")
 
 	for {
 		select {
 		case <-d.stopChan:
 			return
-		default:
-		}
 
-		// State machine
-		switch d.state {
-		case StateInit, StateWaitingVIS:
-			// Detect VIS code
-			if err := d.detectVIS(pcmReader, resultChan); err != nil {
-				log.Printf("[SSTV] VIS detection failed: %v", err)
+		case samples, ok := <-audioChan:
+			if !ok {
 				return
 			}
 
-		case StateDecodingVideo:
-			// Decode video
-			if err := d.decodeVideo(pcmReader, resultChan); err != nil {
-				log.Printf("[SSTV] Video decoding failed: %v", err)
-				return
+			// Accumulate samples
+			pcmBuffer = append(pcmBuffer, samples...)
+
+			// Process based on state
+			switch d.state {
+			case StateInit, StateWaitingVIS:
+				// Try to detect VIS code if we have enough samples
+				// VIS detection needs ~1 second of audio
+				if len(pcmBuffer) >= int(d.sampleRate) {
+					if err := d.detectVISFromBuffer(pcmBuffer, resultChan); err == nil {
+						// VIS detected, move to video decoding
+						d.state = StateDecodingVideo
+					}
+					// Keep accumulating if VIS not found yet
+				}
+
+			case StateDecodingVideo:
+				// Check if we have enough samples for the full image
+				m := d.mode
+				requiredSamples := int(m.LineTime * float64(m.NumLines) * d.sampleRate * 1.1) // 10% extra
+
+				if len(pcmBuffer) >= requiredSamples {
+					// Decode video
+					if err := d.decodeVideoFromBuffer(pcmBuffer, resultChan); err != nil {
+						log.Printf("[SSTV] Video decoding failed: %v", err)
+						d.state = StateWaitingVIS
+						pcmBuffer = pcmBuffer[:0] // Clear buffer
+						continue
+					}
+
+					// Optionally decode FSK ID (needs more samples)
+					if d.config.DecodeFSKID {
+						// FSK ID needs additional ~2 seconds
+						fskSamples := int(d.sampleRate * 2)
+						if len(pcmBuffer) >= requiredSamples+fskSamples {
+							d.decodeFSKIDFromBuffer(pcmBuffer[requiredSamples:], resultChan)
+						}
+					}
+
+					// Reset for next image
+					d.state = StateWaitingVIS
+					pcmBuffer = pcmBuffer[:0] // Clear buffer
+				}
 			}
 
-			// Optionally decode FSK ID
-			if d.config.DecodeFSKID {
-				d.decodeFSKID(pcmReader, resultChan)
+			// Prevent buffer from growing too large
+			if len(pcmBuffer) > 2000000 { // 2M samples max
+				// Keep only last 1M samples
+				pcmBuffer = pcmBuffer[len(pcmBuffer)-1000000:]
 			}
-
-			// Send completion message
-			d.sendComplete(resultChan)
-
-			// Reset for next image
-			d.state = StateWaitingVIS
-
-		case StateComplete:
-			return
 		}
 	}
 }
 
-// detectVIS detects the VIS code
+// detectVISFromBuffer attempts to detect VIS from accumulated buffer
+func (d *SSTVDecoder) detectVISFromBuffer(pcmBuffer []int16, resultChan chan<- []byte) error {
+	// Create a simple buffer reader that returns the buffer
+	reader := &simpleBufferReader{buffer: pcmBuffer, pos: 0}
+
+	// Create VIS detector
+	d.visDetector = NewVISDetector(d.sampleRate)
+
+	// Try to detect VIS
+	modeIdx, headerShift, isExtended, ok := d.visDetector.DetectVIS(reader)
+	if !ok {
+		return fmt.Errorf("VIS not found yet")
+	}
+
+	// Get mode specification
+	d.mode = GetModeByIndex(modeIdx)
+	if d.mode == nil {
+		return fmt.Errorf("invalid mode index: %d", modeIdx)
+	}
+
+	d.headerShift = headerShift
+
+	// Check if mode is supported
+	if d.mode.Unsupported {
+		d.sendStatus(resultChan, fmt.Sprintf("Mode not supported: %s", d.mode.Name))
+		return fmt.Errorf("mode not supported: %s", d.mode.Name)
+	}
+
+	// Check MMSSTV-only filter
+	if d.config.MMSSVOnly {
+		if modeIdx < ModeMR73 || modeIdx > ModeMP175 {
+			d.sendStatus(resultChan, fmt.Sprintf("Skipping non-MMSSTV mode: %s", d.mode.Name))
+			return fmt.Errorf("non-MMSSTV mode filtered")
+		}
+	}
+
+	log.Printf("[SSTV] Detected mode: %s (%dx%d)", d.mode.Name, d.mode.ImgWidth, d.mode.NumLines)
+
+	// Send mode detection message
+	d.sendModeDetected(resultChan, modeIdx, isExtended)
+
+	// Send image start message with dimensions
+	d.sendImageStart(resultChan)
+
+	return nil
+}
+
+// decodeVideoFromBuffer decodes video from accumulated buffer
+func (d *SSTVDecoder) decodeVideoFromBuffer(pcmBuffer []int16, resultChan chan<- []byte) error {
+	log.Printf("[SSTV] Starting video demodulation from buffer...")
+
+	d.sendStatus(resultChan, fmt.Sprintf("Decoding %s...", d.mode.Name))
+
+	// Create video demodulator
+	d.videoDemod = NewVideoDemodulator(d.mode, d.sampleRate, d.headerShift)
+
+	// Initial decode without sync correction - SEND IN REAL-TIME
+	skip := 0
+	pixels, err := d.videoDemod.DemodulateVideo(pcmBuffer, skip, false)
+	if err != nil {
+		return fmt.Errorf("video demodulation failed: %w", err)
+	}
+
+	// Send uncorrected image data line by line (real-time view)
+	log.Printf("[SSTV] Sending real-time uncorrected image...")
+	d.sendImageData(resultChan, pixels)
+
+	// Send initial completion (uncorrected image done)
+	d.sendComplete(resultChan)
+
+	// Perform sync detection and slant correction if enabled
+	if d.config.AutoSync {
+		log.Printf("[SSTV] Performing sync detection and slant correction...")
+		d.sendStatus(resultChan, "Correcting slant...")
+
+		// Create sync detector
+		d.syncDetector = NewSyncDetector(d.mode, d.sampleRate, d.videoDemod.hasSync)
+
+		// Find slant and adjust
+		adjustedRate, adjustedSkip := d.syncDetector.FindSlantAndAdjust()
+
+		// Re-create video demodulator with adjusted rate
+		d.videoDemod = NewVideoDemodulator(d.mode, adjustedRate, d.headerShift)
+
+		// Re-decode with corrected parameters
+		correctedPixels, err := d.videoDemod.DemodulateVideo(pcmBuffer, adjustedSkip, true)
+		if err != nil {
+			return fmt.Errorf("video re-demodulation failed: %w", err)
+		}
+
+		// Signal that corrected image is coming
+		d.sendRedrawStart(resultChan)
+
+		// Send corrected image data
+		log.Printf("[SSTV] Sending corrected image...")
+		d.sendImageData(resultChan, correctedPixels)
+
+		// Send final completion (corrected image done)
+		d.sendComplete(resultChan)
+	}
+
+	return nil
+}
+
+// decodeFSKIDFromBuffer decodes FSK ID from buffer
+func (d *SSTVDecoder) decodeFSKIDFromBuffer(pcmBuffer []int16, resultChan chan<- []byte) {
+	log.Printf("[SSTV] Attempting FSK ID decode from buffer...")
+
+	reader := &simpleBufferReader{buffer: pcmBuffer, pos: 0}
+	d.fskDecoder = NewFSKDecoder(d.sampleRate, d.headerShift)
+	callsign := d.fskDecoder.DecodeFSKID(reader)
+
+	if callsign != "" {
+		d.sendFSKID(resultChan, callsign)
+	}
+}
+
+// detectVIS detects the VIS code (old method - kept for compatibility)
 func (d *SSTVDecoder) detectVIS(pcmReader *PCMBufferReader, resultChan chan<- []byte) error {
 	log.Printf("[SSTV] Waiting for VIS code...")
 
@@ -411,7 +555,24 @@ func (d *SSTVDecoder) sendComplete(resultChan chan<- []byte) {
 	}
 }
 
-// PCMBufferReader provides a buffered reader interface for PCM data
+// simpleBufferReader implements PCMReader for a static buffer
+type simpleBufferReader struct {
+	buffer []int16
+	pos    int
+}
+
+// Read reads from the buffer
+func (r *simpleBufferReader) Read(numSamples int) ([]int16, error) {
+	if r.pos+numSamples > len(r.buffer) {
+		return nil, fmt.Errorf("not enough samples in buffer")
+	}
+
+	result := r.buffer[r.pos : r.pos+numSamples]
+	r.pos += numSamples
+	return result, nil
+}
+
+// PCMBufferReader provides a buffered reader interface for PCM data (legacy)
 type PCMBufferReader struct {
 	audioChan <-chan []int16
 	stopChan  <-chan struct{}
@@ -419,7 +580,7 @@ type PCMBufferReader struct {
 	position  int
 }
 
-// NewPCMBufferReader creates a new PCM buffer reader
+// NewPCMBufferReader creates a new PCM buffer reader (legacy)
 func NewPCMBufferReader(audioChan <-chan []int16, stopChan <-chan struct{}) *PCMBufferReader {
 	return &PCMBufferReader{
 		audioChan: audioChan,
@@ -429,7 +590,7 @@ func NewPCMBufferReader(audioChan <-chan []int16, stopChan <-chan struct{}) *PCM
 	}
 }
 
-// Read reads the specified number of samples
+// Read reads the specified number of samples (legacy - blocking)
 func (r *PCMBufferReader) Read(numSamples int) ([]int16, error) {
 	// Ensure we have enough data in buffer
 	for len(r.buffer)-r.position < numSamples {
@@ -457,7 +618,7 @@ func (r *PCMBufferReader) Read(numSamples int) ([]int16, error) {
 	return result, nil
 }
 
-// GetBuffer returns the entire buffer
+// GetBuffer returns the entire buffer (legacy)
 func (r *PCMBufferReader) GetBuffer() []int16 {
 	return r.buffer
 }

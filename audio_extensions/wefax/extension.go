@@ -38,6 +38,9 @@ func NewWEFAXExtension(sampleRate int, extensionParams map[string]interface{}) (
 	if autoStop, ok := extensionParams["auto_stop"].(bool); ok {
 		config.AutoStop = autoStop
 	}
+	if autoStart, ok := extensionParams["auto_start"].(bool); ok {
+		config.AutoStart = autoStart
+	}
 	if includeHeaders, ok := extensionParams["include_headers_in_images"].(bool); ok {
 		config.IncludeHeadersInImages = includeHeaders
 	}

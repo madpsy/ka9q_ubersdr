@@ -75,15 +75,16 @@ type FSKDemodulator struct {
 	baudError            float64
 
 	// Bit synchronization
-	bitCount   int
-	codeBits   byte
-	nbits      int
-	msb        byte
-	syncSetup  bool
-	syncChars  []byte
-	validCount int
-	errorCount int
-	waiting    bool
+	bitCount     int
+	codeBits     byte
+	nbits        int
+	msb          byte
+	syncSetup    bool
+	syncChars    []byte
+	validCount   int
+	errorCount   int
+	waiting      bool
+	stopVariable bool // true for modes with variable stop bits (5N1.5, 5N2, etc.)
 
 	// Encoding
 	charEncoding CharacterEncoding
@@ -128,6 +129,11 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 	d.bitDurationSeconds = 1.0 / d.baudRate
 	d.bitSampleCount = int(d.sampleRate*d.bitDurationSeconds + 0.5)
 	d.halfBitSampleCount = d.bitSampleCount / 2
+
+	// Determine if framing has variable stop bits (needs start bit detection)
+	// Formats like 5N1.5, 5N2, 7N1, 8N1 have variable stop bits
+	// Formats like 4/7 (CCIR476) do not
+	d.stopVariable = (framing != "4/7" && framing != "7/3")
 
 	// Initialize encoding
 	switch encoding {
@@ -352,6 +358,13 @@ func (d *FSKDemodulator) processBit(bit bool) {
 		}
 
 	case StateSync2:
+		// Wait for start bit if there are variable stop bits
+		if d.stopVariable && d.waiting && bit {
+			// Still in stop bit (mark), wait for start bit (space)
+			break
+		}
+		d.waiting = false
+
 		// Sample and validate bits in groups of nbits
 		d.codeBits = (d.codeBits >> 1) | (bitVal * d.msb)
 		d.bitCount++
@@ -381,6 +394,13 @@ func (d *FSKDemodulator) processBit(bit bool) {
 		}
 
 	case StateReadData:
+		// Wait for start bit if there are variable stop bits
+		if d.stopVariable && d.waiting && bit {
+			// Still in stop bit (mark), wait for start bit (space)
+			break
+		}
+		d.waiting = false
+
 		// Read data bits
 		d.codeBits = (d.codeBits >> 1) | (bitVal * d.msb)
 		d.bitCount++

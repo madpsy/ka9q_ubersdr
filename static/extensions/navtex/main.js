@@ -106,35 +106,35 @@ class NAVTEXExtension extends DecoderExtension {
         // Check if canvas is in DOM
         const inDOM = document.body.contains(this.baudCanvas);
         console.log('NAVTEX: Baud canvas found, in DOM:', inDOM);
-        
-        // If canvas is not in DOM, recreate it
+
+        // If canvas is not in DOM, recreate it (like WEFAX does)
         if (!inDOM) {
             const indicator = document.getElementById('navtex-baud-error-indicator');
             if (indicator) {
                 console.log('NAVTEX: Baud canvas not in DOM, re-creating');
-                // Find or create canvas container within the indicator
-                let canvasSpot = indicator.querySelector('.navtex-baud-canvas-spot');
-                if (!canvasSpot) {
-                    // Create a span to hold the canvas if it doesn't exist
-                    canvasSpot = document.createElement('span');
-                    canvasSpot.className = 'navtex-baud-canvas-spot';
-                    // Insert after the label
-                    const label = indicator.querySelector('.navtex-baud-label');
-                    if (label && label.nextSibling) {
-                        indicator.insertBefore(canvasSpot, label.nextSibling);
-                    } else {
-                        indicator.appendChild(canvasSpot);
-                    }
+                
+                // Find the canvas in the template or create new one
+                let existingCanvas = indicator.querySelector('#navtex-baud-canvas');
+                if (existingCanvas) {
+                    existingCanvas.remove();
                 }
                 
-                // Clear and create new canvas
-                canvasSpot.innerHTML = '';
+                // Create new canvas
                 this.baudCanvas = document.createElement('canvas');
                 this.baudCanvas.id = 'navtex-baud-canvas';
                 this.baudCanvas.className = 'navtex-baud-canvas';
                 this.baudCanvas.width = 40;
                 this.baudCanvas.height = 60;
-                canvasSpot.appendChild(this.baudCanvas);
+                this.baudCanvas.style.display = 'inline-block';
+                
+                // Insert after the label
+                const label = indicator.querySelector('.navtex-baud-label');
+                if (label) {
+                    label.parentNode.insertBefore(this.baudCanvas, label.nextSibling);
+                } else {
+                    indicator.appendChild(this.baudCanvas);
+                }
+                
                 console.log('NAVTEX: Baud canvas re-created, in DOM:', document.body.contains(this.baudCanvas));
             } else {
                 console.error('NAVTEX: Baud indicator not found, cannot attach canvas');
@@ -142,14 +142,30 @@ class NAVTEXExtension extends DecoderExtension {
             }
         }
 
+        // IMPORTANT: Get context AFTER ensuring canvas is in DOM
         this.baudCtx = this.baudCanvas.getContext('2d');
         
+        if (!this.baudCtx) {
+            console.error('NAVTEX: Failed to get 2D context from canvas');
+            return;
+        }
+
         // Force canvas to be visible
         this.baudCanvas.style.display = 'inline-block';
-        
+
         // Initialize with a test draw
         console.log('NAVTEX: Baud canvas initialized, size:', this.baudCanvas.width, 'x', this.baudCanvas.height);
+        console.log('NAVTEX: Baud context:', this.baudCtx);
+        
+        // Draw initial state with visible test pattern
         this.drawBaudError(0);
+        
+        // Also draw a test bar to verify it's working
+        console.log('NAVTEX: Drawing test pattern');
+        this.baudCtx.fillStyle = '#ff0000';
+        this.baudCtx.fillRect(0, 0, 5, 60); // Red line on left edge
+        this.baudCtx.fillStyle = '#00ff00';
+        this.baudCtx.fillRect(35, 0, 5, 60); // Green line on right edge
     }
 
     setupEventHandlers() {

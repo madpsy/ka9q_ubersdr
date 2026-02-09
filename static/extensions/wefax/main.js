@@ -260,9 +260,21 @@ class WEFAXExtension extends DecoderExtension {
         // This centers the 1900 Hz carrier in the passband
         const dialFrequency = mode.toLowerCase() === 'usb' ? frequency - 1900 : frequency;
 
+        // Disable edge detection when tuning to station
+        if (window.spectrumDisplay) {
+            window.spectrumDisplay.skipEdgeDetection = true;
+        }
+
         // Set frequency and mode
         this.radio.setFrequency(dialFrequency);
         this.radio.setMode(mode, false);
+
+        // Re-enable edge detection after a delay
+        setTimeout(() => {
+            if (window.spectrumDisplay) {
+                window.spectrumDisplay.skipEdgeDetection = false;
+            }
+        }, 500);
 
         // Update LPM setting
         const lpmSelect = document.getElementById('wefax-lpm');
@@ -273,9 +285,6 @@ class WEFAXExtension extends DecoderExtension {
         // Log the action
         const stationText = stationSelect.options[stationSelect.selectedIndex].text;
         this.radio.log(`Tuned to WEFAX station: ${stationText}`);
-
-        // Reset selector
-        stationSelect.value = '';
     }
 
     updateConfig() {

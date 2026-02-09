@@ -346,20 +346,22 @@ class FSKExtension extends DecoderExtension {
         // Draw spectrum visualization
         this.drawSpectrum(dataArray);
 
-        // Convert Float32Array to regular array and process
-        const samples = Array.from(dataArray);
-        
+        // Convert Float32Array to regular array and SCALE to int16 range
+        // Web Audio API uses -1.0 to +1.0, but KiwiSDR decoder expects int16-like values
+        const samples = Array.from(dataArray).map(s => s * 32768);
+
         // Debug: Log first time we process audio
         if (!this.hasProcessedAudio) {
             console.log('FSK: First audio processing', {
                 sampleCount: samples.length,
                 firstSample: samples[0],
+                scaledSample: samples[0],
                 decoderState: this.decoder.state,
                 audioAverage: this.decoder.audio_average
             });
             this.hasProcessedAudio = true;
         }
-        
+
         this.decoder.process_data(samples, samples.length);
 
         // Update status indicators based on decoder state

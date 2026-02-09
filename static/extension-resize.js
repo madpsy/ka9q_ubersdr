@@ -16,14 +16,16 @@
     let resizeHandle = null;
     let extensionContent = null;
     let extensionContainer = null;
+    let extensionPanel = null;
 
     // Initialize resize functionality when DOM is ready
     function initializeResize() {
         resizeHandle = document.querySelector('.decoder-extension-resize-handle');
         extensionContent = document.getElementById('extension-panel-content');
         extensionContainer = document.querySelector('.decoder-extension-container');
+        extensionPanel = document.getElementById('extension-panel');
 
-        if (!resizeHandle || !extensionContent || !extensionContainer) {
+        if (!resizeHandle || !extensionContent || !extensionContainer || !extensionPanel) {
             console.warn('[Extension Resize] Required elements not found, retrying...');
             // Retry after a short delay in case elements aren't loaded yet
             setTimeout(initializeResize, 500);
@@ -71,10 +73,24 @@
         }
     }
 
-    // Set the content height
+    // Set the content height and adjust panel margin
     function setContentHeight(height) {
         if (extensionContent) {
             extensionContent.style.maxHeight = `${height}px`;
+        }
+
+        // Adjust the panel's bottom margin to compensate for the scaled height
+        // The panel is scaled to 0.75, so we need to account for the extra space
+        if (extensionPanel) {
+            // Calculate the actual rendered height after scaling
+            // Total container height = header (~60px) + content (height) + resize handle (~12px) + padding (~30px)
+            const totalHeight = 60 + height + 12 + 30;
+            // After 0.75 scale, the actual space taken is totalHeight * 0.75
+            const scaledHeight = totalHeight * 0.75;
+            // We want to pull up the next section, so use negative margin
+            // Base margin is 20px (margin-top), so we subtract the excess height
+            const marginBottom = -(totalHeight - scaledHeight) - 20;
+            extensionPanel.style.marginBottom = `${marginBottom}px`;
         }
     }
 

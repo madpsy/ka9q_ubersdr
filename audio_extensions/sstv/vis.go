@@ -88,12 +88,7 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 	slidingWindow := make([]int16, samps20ms)
 	windowFilled := 0
 
-	// Rate limiting for leader detection logging
-	lastLeaderLog := 0
-	iterationCount := 0
-
 	for {
-		iterationCount++
 		// Read 10ms of audio
 		samples, err := pcmReader.Read(samps10ms)
 		if err != nil {
@@ -151,37 +146,40 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 		}
 
 		// Gaussian interpolation for peak frequency
+		// KiwiSDR formula: MaxBin + log(P+/P-) / (2*log(P^2/(P+*P-)))
 		var peakFreq float64
-		if maxBin > 0 && maxBin < len(powers)-1 && powers[maxBin] > 0 &&
-			powers[maxBin-1] > 0 && powers[maxBin+1] > 0 {
-			// Safe Gaussian interpolation with bounds checking
-			numerator := powers[maxBin+1] / powers[maxBin-1]
-			denominator := powers[maxBin] * powers[maxBin] / (powers[maxBin+1] * powers[maxBin-1])
+		minBinFreq := v.getBin(500.0)
+		maxBinFreq := v.getBin(3300.0)
 
-			// Check for valid values before taking logarithm
-			if numerator > 0 && denominator > 0 && denominator != 1.0 {
+		if maxBin > minBinFreq && maxBin < maxBinFreq &&
+			powers[maxBin] > 0 && powers[maxBin-1] > 0 && powers[maxBin+1] > 0 {
+
+			// KiwiSDR's exact Gaussian interpolation formula
+			pwr_mb := powers[maxBin]
+			pwr_mo := powers[maxBin-1]
+			pwr_po := powers[maxBin+1]
+
+			// Calculate: log(P+/P-) / (2*log(P^2/(P+*P-)))
+			numerator := pwr_po / pwr_mo
+			denominator := (pwr_mb * pwr_mb) / (pwr_po * pwr_mo)
+
+			// Check for numerical stability
+			if numerator > 0 && denominator > 0 && math.Abs(math.Log(denominator)) > 1e-9 {
 				delta := math.Log(numerator) / (2.0 * math.Log(denominator))
 
-				// Sanity check: delta should be between -0.5 and 0.5
-				if !math.IsNaN(delta) && !math.IsInf(delta, 0) && math.Abs(delta) < 1.0 {
-					peakFreq = (float64(maxBin) + delta) / float64(v.fftSize) * v.sampleRate
-				} else {
-					// Fallback to bin center frequency
-					peakFreq = float64(maxBin) / float64(v.fftSize) * v.sampleRate
-				}
+				// Apply interpolation
+				peakFreq = (float64(maxBin) + delta) / float64(v.fftSize) * v.sampleRate
 			} else {
 				// Fallback to bin center frequency
 				peakFreq = float64(maxBin) / float64(v.fftSize) * v.sampleRate
 			}
 		} else {
-			// Use bin center frequency if we can't interpolate
-			if maxBin > 0 {
-				peakFreq = float64(maxBin) / float64(v.fftSize) * v.sampleRate
-			} else {
-				// Use previous value if we have no valid bin
-				prevIdx := (v.headerPtr - 1 + len(v.headerBuf)) % len(v.headerBuf)
-				peakFreq = v.headerBuf[prevIdx]
+			// Use previous value if we have no valid bin (matches KiwiSDR line 87)
+			prevIdx := (v.headerPtr - 1 + len(v.headerBuf)) % len(v.headerBuf)
+			if prevIdx < 0 {
+				prevIdx = len(v.headerBuf) - 1
 			}
+			peakFreq = v.headerBuf[prevIdx]
 		}
 
 		// Store in circular buffer
@@ -189,9 +187,17 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 		v.headerPtr = (v.headerPtr + 1) % len(v.headerBuf)
 
 		// Copy recent frequencies to tone buffer
-		for i := 0; i < toneWin && i < len(v.toneBuf); i++ {
-			idx := (v.headerPtr - 1 - i + len(v.headerBuf)) % len(v.headerBuf)
-			v.toneBuf[toneWin-1-i] = v.headerBuf[idx]
+		// KiwiSDR: for (i = tone_win-1, hp = HedrPtr-1; i >= 0; i--) { tone[i] = HeaderBuf[hp]; hp--; }
+		// This creates: tone[0] = oldest, tone[tone_win-1] = newest
+		hp := v.headerPtr - 1
+		for i := toneWin - 1; i >= 0; i-- {
+			if hp < 0 {
+				hp = len(v.headerBuf) - 1
+			}
+			if i < len(v.toneBuf) {
+				v.toneBuf[i] = v.headerBuf[hp]
+			}
+			hp--
 		}
 
 		// Look for VIS pattern
@@ -201,34 +207,27 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 
 		for i := 0; i < 3 && !gotVIS; i++ {
 			for j := 0; j < 3 && !gotVIS; j++ {
-				leaderFreq := v.toneBuf[j]
+				// Use tone[0+j] as reference frequency (matches KiwiSDR exactly)
+				// This allows detection of frequency-shifted signals
+				refFreq := v.toneBuf[0+j]
 
-				// First check: leader frequency must be close to 1900 Hz
-				if leaderFreq < visLeaderFreq-visTolerance*2 || leaderFreq > visLeaderFreq+visTolerance*2 {
+				// Check for leader pattern: 4 consecutive tones at same frequency (±25 Hz)
+				// KiwiSDR lines 115-119: all comparisons are relative to tone[0+j]
+				if !v.checkTone(1*3+i, refFreq, visTolerance) ||
+					!v.checkTone(2*3+i, refFreq, visTolerance) ||
+					!v.checkTone(3*3+i, refFreq, visTolerance) ||
+					!v.checkTone(4*3+i, refFreq, visTolerance) {
 					continue
 				}
 
-				// Check for 1900 Hz leader (4 consecutive 30ms periods)
-				if !v.checkTone(1*3+i, leaderFreq, visTolerance) ||
-					!v.checkTone(2*3+i, leaderFreq, visTolerance) ||
-					!v.checkTone(3*3+i, leaderFreq, visTolerance) ||
-					!v.checkTone(4*3+i, leaderFreq, visTolerance) {
+				// Check for start bit at 700 Hz below leader (1200 Hz if leader is 1900 Hz)
+				// KiwiSDR line 119: tone[5*3+i] > tone[0+j] - 725 && < tone[0+j] - 675
+				if !v.checkTone(5*3+i, refFreq-700, 25) {
 					continue
 				}
 
-				// Found leader - log with rate limiting (once per second max)
-				if iterationCount-lastLeaderLog > 100 {
-					log.Printf("[SSTV VIS] Detected leader tone at %.1f Hz, checking for start bit...", leaderFreq)
-					lastLeaderLog = iterationCount
-				}
-
-				// Check for 1200 Hz start bit
-				if !v.checkTone(5*3+i, leaderFreq-700, 50) {
-					continue
-				}
-
-				// Found complete VIS header - always log this
-				log.Printf("[SSTV VIS] Found leader (%.1f Hz) + start bit (%.1f Hz), decoding data bits...", leaderFreq, leaderFreq-700)
+				// Found complete VIS header - log it
+				log.Printf("[SSTV VIS] Found leader (%.1f Hz) + start bit (%.1f Hz), decoding data bits...", refFreq, refFreq-700)
 
 				// Try to read data bits
 				bits := make([]uint8, 16)
@@ -241,53 +240,50 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 
 					freq := v.toneBuf[toneIdx]
 
-					// Check for 1300 Hz (bit 0)
-					if freq > leaderFreq-625 && freq < leaderFreq-575 {
-						bits[k] = 0
-					} else if freq > leaderFreq-825 && freq < leaderFreq-775 {
-						// Check for 1100 Hz (bit 1)
-						bits[k] = 1
+					// KiwiSDR line 126: 1300 Hz = tone[0+j] - 600 (±25 Hz tolerance = -625 to -575)
+					// KiwiSDR line 130: 1100 Hz = tone[0+j] - 800 (±25 Hz tolerance = -825 to -775)
+					if freq > refFreq-625 && freq < refFreq-575 {
+						bits[k] = 0 // 1300 Hz
+					} else if freq > refFreq-825 && freq < refFreq-775 {
+						bits[k] = 1 // 1100 Hz
 					} else {
-						// Invalid bit
-						if k > 0 {
-							log.Printf("[SSTV VIS] Invalid bit at position %d (freq=%.1f Hz, expected 1100 or 1300 Hz)", k, freq)
-						}
+						// Invalid bit - break out of bit reading loop
 						break
 					}
-				}
-
-				if k >= 8 {
-					log.Printf("[SSTV VIS] Successfully decoded %d data bits", k)
 				}
 
 				nbits := 0
 
 				// Check for 8-bit VIS (stop bit at position 8)
 				if k == 8 {
+					// KiwiSDR line 143: check for 1200 Hz stop bit at position 14*3+i
 					stopIdx := 14*3 + i
 					if stopIdx < len(v.toneBuf) {
 						stopFreq := v.toneBuf[stopIdx]
-						if stopFreq > leaderFreq-725 && stopFreq < leaderFreq-675 {
-							log.Printf("[SSTV VIS] Detected VIS-8")
+						// 1200 Hz = refFreq - 700 (±25 Hz tolerance = -725 to -675)
+						if stopFreq > refFreq-725 && stopFreq < refFreq-675 {
+							log.Printf("[SSTV VIS] Detected VIS-8 (stop bit found)")
 							nbits = 8
 							gotVIS = true
 						}
 					}
 				}
 
-				// Check for extended 16-bit VIS
+				// Check for extended 16-bit VIS (KiwiSDR line 154)
 				if k == 9 {
-					log.Printf("[SSTV VIS] Possible VIS-16, extending window")
+					log.Printf("[SSTV VIS] Detected 9th data bit, extending window for VIS-16")
 					toneWin = 70 // Extend to 700ms for 16-bit VIS
 					break
 				}
 
 				if k == 16 {
+					// KiwiSDR line 164: check for 1200 Hz stop bit at position 22*3+i
 					stopIdx := 22*3 + i
 					if stopIdx < len(v.toneBuf) {
 						stopFreq := v.toneBuf[stopIdx]
-						if stopFreq > leaderFreq-725 && stopFreq < leaderFreq-675 {
-							log.Printf("[SSTV VIS] Detected VIS-16")
+						// 1200 Hz = refFreq - 700 (±25 Hz tolerance = -725 to -675)
+						if stopFreq > refFreq-725 && stopFreq < refFreq-675 {
+							log.Printf("[SSTV VIS] Detected VIS-16 (stop bit found)")
 							nbits = 16
 							gotVIS = true
 						}
@@ -295,7 +291,8 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 				}
 
 				if gotVIS {
-					headerShift = int(leaderFreq - visLeaderFreq)
+					// KiwiSDR line 172: HeaderShift = tone[0+j] - 1900
+					headerShift = int(refFreq - visLeaderFreq)
 
 					// Decode VIS code
 					vis := bits[0] | (bits[1] << 1) | (bits[2] << 2) | (bits[3] << 3) |

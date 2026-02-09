@@ -297,7 +297,7 @@ class FSKExtension extends DecoderExtension {
 
         // Create JNX decoder instance
         this.decoder = new JNX();
-        
+
         // Setup decoder with current configuration
         this.decoder.setup_values(
             sampleRate,
@@ -318,11 +318,24 @@ class FSKExtension extends DecoderExtension {
         });
 
         this.decoder.set_baud_error_cb((error) => {
-            // Optional: display baud error in status bar
-            console.log('FSK: Baud error:', error);
+            // Baud error callback - only log occasionally
+            if (!this.lastBaudErrorLog || Date.now() - this.lastBaudErrorLog > 5000) {
+                console.log('FSK: Baud error:', error);
+                this.lastBaudErrorLog = Date.now();
+            }
         });
 
-        console.log('FSK: Decoder initialized with sample rate:', sampleRate);
+        console.log('FSK: Decoder initialized', {
+            sampleRate: sampleRate,
+            centerFreq: this.config.centerFreq,
+            shift: this.config.shift,
+            baud: this.config.baud,
+            framing: this.config.framing,
+            encoding: this.config.encoding,
+            inverted: this.config.inverted,
+            encodingObject: this.decoder.encoding,
+            hasCheckBits: this.decoder.encoding && typeof this.decoder.encoding.check_bits === 'function'
+        });
     }
 
     updateDecoder() {

@@ -87,9 +87,9 @@
             const totalHeight = 60 + height + 12 + 30;
             // After 0.75 scale, the actual space taken is totalHeight * 0.75
             const scaledHeight = totalHeight * 0.75;
-            // We want to pull up the next section, so use negative margin
-            // Base margin is 20px (margin-top), so we subtract the excess height
-            const marginBottom = -(totalHeight - scaledHeight) - 20;
+            // We want to pull up the next section, leaving a small gap
+            // The unscaled space is (totalHeight - scaledHeight), we compensate for 75% of that
+            const marginBottom = -(totalHeight - scaledHeight) * 0.75;
             extensionPanel.style.marginBottom = `${marginBottom}px`;
         }
     }

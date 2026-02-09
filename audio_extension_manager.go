@@ -163,8 +163,8 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 		audioParams.SampleRate, audioParams.Channels, audioParams.BitsPerSample)
 	log.Printf("AudioExtension: Active extensions count: %d", aem.GetActiveExtensionCount())
 
-	// Send success confirmation
-	return aem.sendTextMessage(conn, map[string]interface{}{
+	// Send success confirmation using safe method (now that activeExtension is created)
+	return aem.sendTextMessageSafe(activeExtension, map[string]interface{}{
 		"type":           "audio_extension_attached",
 		"extension_name": extensionName,
 		"started_at":     activeExtension.StartedAt.Format(time.RFC3339),
@@ -312,6 +312,9 @@ func (aem *AudioExtensionManager) findAudioSessionByUserID(userSessionID string)
 }
 
 // sendTextMessage sends a JSON text message to the client
+// Note: This function is called during attach/detach operations where we have the conn
+// but not the activeExtension yet, so we can't use ConnMu here.
+// The caller must ensure thread safety if needed.
 func (aem *AudioExtensionManager) sendTextMessage(conn *websocket.Conn, message map[string]interface{}) error {
 	messageJSON, err := json.Marshal(message)
 	if err != nil {
@@ -320,6 +323,24 @@ func (aem *AudioExtensionManager) sendTextMessage(conn *websocket.Conn, message 
 
 	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	return conn.WriteMessage(websocket.TextMessage, messageJSON)
+}
+
+// sendTextMessageSafe sends a JSON text message to the client with mutex protection
+func (aem *AudioExtensionManager) sendTextMessageSafe(activeExtension *ActiveAudioExtension, message map[string]interface{}) error {
+	messageJSON, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("failed to marshal message: %v", err)
+	}
+
+	activeExtension.ConnMu.Lock()
+	defer activeExtension.ConnMu.Unlock()
+
+	if activeExtension.Conn == nil {
+		return fmt.Errorf("connection is nil")
+	}
+
+	activeExtension.Conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	return activeExtension.Conn.WriteMessage(websocket.TextMessage, messageJSON)
 }
 
 // sendError sends an error message to the client

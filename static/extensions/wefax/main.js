@@ -256,9 +256,13 @@ class WEFAXExtension extends DecoderExtension {
 
         console.log('WEFAX: Tuning to station:', frequency, mode, lpm);
 
-        // For USB mode, tune 1.9 kHz down from the dial frequency
-        // This centers the 1900 Hz carrier in the passband
-        const dialFrequency = mode.toLowerCase() === 'usb' ? frequency - 1900 : frequency;
+        // Get the carrier frequency from the input box
+        const carrierInput = document.getElementById('wefax-carrier');
+        const carrierHz = carrierInput ? parseFloat(carrierInput.value) : 1900;
+
+        // For USB mode, tune down by the carrier frequency from the dial frequency
+        // This centers the carrier in the passband
+        const dialFrequency = mode.toLowerCase() === 'usb' ? frequency - carrierHz : frequency;
 
         // Disable edge detection when tuning to station
         if (window.spectrumDisplay) {

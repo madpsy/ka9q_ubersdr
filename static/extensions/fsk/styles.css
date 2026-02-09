@@ -179,6 +179,9 @@ input[type="checkbox"] {
 
 /* Status Bar */
 .fsk-status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     padding: 6px 15px;
     background: #2a2a2a;
     border-top: 1px solid #3a3a3a;
@@ -188,6 +191,43 @@ input[type="checkbox"] {
 
 .fsk-status-text {
     font-family: 'Courier New', monospace;
+}
+
+/* Audio Indicator */
+.fsk-audio-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.fsk-audio-label {
+    font-size: 10px;
+    color: #888;
+}
+
+.fsk-audio-meter {
+    width: 100px;
+    height: 12px;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 2px;
+    overflow: hidden;
+    position: relative;
+}
+
+.fsk-audio-level {
+    height: 100%;
+    background: linear-gradient(to right, #4CAF50, #8BC34A, #CDDC39, #FFC107, #FF5722);
+    width: 0%;
+    transition: width 0.1s ease-out;
+}
+
+.fsk-audio-db {
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    color: #aaa;
+    min-width: 50px;
+    text-align: right;
 }
 
 /* Responsive adjustments */

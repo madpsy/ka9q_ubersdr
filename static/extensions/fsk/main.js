@@ -325,33 +325,85 @@ class FSKExtension extends DecoderExtension {
             return;
         }
 
-        // Create script processor for audio processing
-        const bufferSize = 2048;
-        this.scriptProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+        // Store analyser reference
+        this.analyserNode = analyser;
 
-        // Connect analyser to script processor
-        analyser.connect(this.scriptProcessor);
-        this.scriptProcessor.connect(audioContext.destination);
-
-        // Process audio samples
-        this.scriptProcessor.onaudioprocess = (event) => {
+        // Start periodic audio processing using requestAnimationFrame
+        const processAudio = () => {
             if (!this.running || !this.decoder) return;
 
-            const inputData = event.inputBuffer.getChannelData(0);
-            
+            // Get time-domain data from analyser
+            const bufferLength = analyser.fftSize;
+            const dataArray = new Float32Array(bufferLength);
+            analyser.getFloatTimeDomainData(dataArray);
+
+            // Calculate audio level for indicator
+            this.updateAudioLevel(dataArray);
+
             // Convert Float32Array to regular array and process
-            const samples = Array.from(inputData);
+            const samples = Array.from(dataArray);
             this.decoder.process_data(samples, samples.length);
+
+            // Continue processing
+            this.audioProcessingFrame = requestAnimationFrame(processAudio);
         };
+
+        // Start processing loop
+        processAudio();
 
         console.log('FSK: Audio processing started');
     }
 
-    stopAudioProcessing() {
-        if (this.scriptProcessor) {
-            this.scriptProcessor.disconnect();
-            this.scriptProcessor = null;
+    updateAudioLevel(samples) {
+        // Calculate RMS level
+        let sum = 0;
+        for (let i = 0; i < samples.length; i++) {
+            sum += samples[i] * samples[i];
         }
+        const rms = Math.sqrt(sum / samples.length);
+        
+        // Convert to dB
+        const db = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+        
+        // Update UI (throttled to avoid excessive updates)
+        if (!this.lastAudioUpdate || Date.now() - this.lastAudioUpdate > 100) {
+            this.lastAudioUpdate = Date.now();
+            
+            const levelBar = document.getElementById('fsk-audio-level');
+            const dbText = document.getElementById('fsk-audio-db');
+            const statusText = document.getElementById('fsk-status-text');
+            
+            if (levelBar && dbText) {
+                // Scale dB to percentage (assuming -60dB to 0dB range)
+                const percentage = Math.max(0, Math.min(100, ((db + 60) / 60) * 100));
+                levelBar.style.width = percentage + '%';
+                
+                if (isFinite(db)) {
+                    dbText.textContent = db.toFixed(1) + ' dB';
+                    if (statusText && db > -40) {
+                        statusText.textContent = 'Receiving audio';
+                        statusText.style.color = '#4CAF50';
+                    } else if (statusText) {
+                        statusText.textContent = 'Waiting for signal';
+                        statusText.style.color = '#888';
+                    }
+                } else {
+                    dbText.textContent = '-∞ dB';
+                    if (statusText) {
+                        statusText.textContent = 'No audio';
+                        statusText.style.color = '#888';
+                    }
+                }
+            }
+        }
+    }
+
+    stopAudioProcessing() {
+        if (this.audioProcessingFrame) {
+            cancelAnimationFrame(this.audioProcessingFrame);
+            this.audioProcessingFrame = null;
+        }
+        this.analyserNode = null;
     }
 
     handleDecodedChar(char) {

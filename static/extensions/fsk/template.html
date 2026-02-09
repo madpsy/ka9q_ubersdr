@@ -75,6 +75,13 @@
 
     <!-- Status Bar -->
     <div class="fsk-status-bar">
-        <span class="fsk-status-text">Ready</span>
+        <span id="fsk-status-text" class="fsk-status-text">Ready</span>
+        <div class="fsk-audio-indicator">
+            <span class="fsk-audio-label">Audio:</span>
+            <div class="fsk-audio-meter">
+                <div id="fsk-audio-level" class="fsk-audio-level"></div>
+            </div>
+            <span id="fsk-audio-db" class="fsk-audio-db">-∞ dB</span>
+        </div>
     </div>
 </div>

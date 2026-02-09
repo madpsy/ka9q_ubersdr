@@ -537,7 +537,7 @@ class NAVTEXExtension extends DecoderExtension {
 
     updateBaudError(error) {
         this.baudError = error;
-        this.drawBaudError(error);
+        this.updateBaudBar(error);
 
         // Update text value
         const baudValue = document.getElementById('navtex-baud-value');
@@ -546,63 +546,33 @@ class NAVTEXExtension extends DecoderExtension {
         }
     }
 
-    drawBaudError(error) {
-        if (!this.baudCtx) {
-            console.error('NAVTEX: drawBaudError called but baudCtx is null');
-            return;
-        }
-        
-        if (!this.baudCanvas) {
-            console.error('NAVTEX: drawBaudError called but baudCanvas is null');
+    updateBaudBar(error) {
+        const bar = document.getElementById('navtex-baud-bar');
+        if (!bar) {
+            console.error('NAVTEX: Baud bar element not found');
             return;
         }
 
-        const canvas = this.baudCanvas;
-        const ctx = this.baudCtx;
-        const width = canvas.width;
-        const height = canvas.height;
-        
-        console.log(`NAVTEX: drawBaudError(${error}) - canvas: ${width}x${height}, ctx:`, ctx);
-
-        if (width === 0 || height === 0) {
-            console.error('NAVTEX: Canvas has zero dimensions!');
-            return;
-        }
-
-        const centerY = height / 2;
-
-        // Clear canvas with a visible color first to test
-        ctx.fillStyle = '#ff00ff'; // Magenta - very visible for testing
-        ctx.fillRect(0, 0, width, height);
-        
-        // Then draw black background
-        ctx.fillStyle = '#0a0a0a';
-        ctx.fillRect(2, 2, width - 4, height - 4);
-
-        // Draw center line (make it thicker and more visible)
-        ctx.strokeStyle = '#ffff00'; // Yellow for visibility
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(0, centerY);
-        ctx.lineTo(width, centerY);
-        ctx.stroke();
-
-        // Draw error bar
         const maxError = 8;
         const clampedError = Math.max(-maxError, Math.min(maxError, error));
-        const barHeight = (clampedError / maxError) * (height / 2);
+        const percentage = Math.abs(clampedError) / maxError * 50; // 0-50%
 
-        console.log(`NAVTEX: barHeight = ${barHeight} (error: ${error}, clamped: ${clampedError})`);
-
-        if (barHeight > 0) {
-            ctx.fillStyle = '#28a745'; // Green for positive
-            ctx.fillRect(5, centerY - barHeight, width - 10, barHeight);
-            console.log(`NAVTEX: Drew green bar at y=${centerY - barHeight}, height=${barHeight}`);
-        } else if (barHeight < 0) {
-            ctx.fillStyle = '#dc3545'; // Red for negative
-            ctx.fillRect(5, centerY, width - 10, -barHeight);
-            console.log(`NAVTEX: Drew red bar at y=${centerY}, height=${-barHeight}`);
+        if (clampedError > 0) {
+            // Positive error - green bar extending upward from center
+            bar.style.bottom = '50%';
+            bar.style.height = percentage + '%';
+            bar.style.background = '#28a745';
+        } else if (clampedError < 0) {
+            // Negative error - red bar extending downward from center
+            bar.style.bottom = (50 - percentage) + '%';
+            bar.style.height = percentage + '%';
+            bar.style.background = '#dc3545';
+        } else {
+            // No error - hide bar
+            bar.style.height = '0%';
         }
+
+        console.log(`NAVTEX: Baud bar updated - error: ${error}, height: ${percentage}%`);
     }
 
     clearConsole() {

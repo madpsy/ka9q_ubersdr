@@ -103,7 +103,6 @@ class NAVTEXExtension extends DecoderExtension {
             return;
         }
 
-        console.log('NAVTEX: Baud bar initialized');
         this.updateBaudBar(0);
     }
 
@@ -548,10 +547,7 @@ class NAVTEXExtension extends DecoderExtension {
 
     updateBaudBar(error) {
         const bar = document.getElementById('navtex-baud-bar');
-        if (!bar) {
-            console.error('NAVTEX: Baud bar element not found');
-            return;
-        }
+        if (!bar) return;
 
         const maxError = 8;
         const clampedError = Math.max(-maxError, Math.min(maxError, error));
@@ -571,8 +567,6 @@ class NAVTEXExtension extends DecoderExtension {
             // No error - hide bar
             bar.style.height = '0%';
         }
-
-        console.log(`NAVTEX: Baud bar updated - error: ${error}, height: ${percentage}%`);
     }
 
     clearConsole() {
@@ -657,8 +651,6 @@ class NAVTEXExtension extends DecoderExtension {
         container.style.height = height + 'px';
         container.style.minHeight = height + 'px';
         container.style.maxHeight = height + 'px';
-
-        console.log(`NAVTEX: Console height set to ${this.consoleLines} lines (${height}px)`);
     }
 }
 

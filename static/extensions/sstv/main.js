@@ -41,9 +41,15 @@ class SSTVExtension extends DecoderExtension {
         this.MSG_FSK_ID = 0x06;
         this.MSG_IMAGE_START = 0x07;
         this.MSG_REDRAW_START = 0x08;
+        this.MSG_TONE_FREQ = 0x09;
         
         // Redraw state
         this.isRedrawing = false;
+        
+        // Tone meter
+        this.toneMeterCanvas = null;
+        this.toneMeterCtx = null;
+        this.currentToneFreq = 0;
     }
 
     onInitialize() {
@@ -151,6 +157,99 @@ class SSTVExtension extends DecoderExtension {
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
         console.log('SSTV: Canvas initialized:', this.imageWidth, 'x', this.imageHeight);
+        
+        // Setup tone meter canvas
+        this.setupToneMeter();
+    }
+    
+    setupToneMeter() {
+        this.toneMeterCanvas = document.getElementById('sstv-tone-meter-canvas');
+        if (!this.toneMeterCanvas) {
+            console.warn('SSTV: Tone meter canvas not found');
+            return;
+        }
+        
+        this.toneMeterCtx = this.toneMeterCanvas.getContext('2d');
+        this.drawToneMeter(0);
+        console.log('SSTV: Tone meter initialized');
+    }
+    
+    drawToneMeter(freq) {
+        if (!this.toneMeterCtx) return;
+        
+        const canvas = this.toneMeterCanvas;
+        const ctx = this.toneMeterCtx;
+        const width = canvas.width;
+        const height = canvas.height;
+        
+        // Clear
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(0, 0, width, height);
+        
+        // Draw arc background (0-3000 Hz range)
+        const centerX = width / 2;
+        const centerY = height - 10;
+        const radius = height - 20;
+        const startAngle = Math.PI * 0.75; // 135 degrees
+        const endAngle = Math.PI * 0.25;   // 45 degrees
+        
+        // Draw arc track
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius, startAngle, endAngle);
+        ctx.stroke();
+        
+        // Draw frequency markers
+        ctx.fillStyle = '#666';
+        ctx.font = '8px monospace';
+        ctx.textAlign = 'center';
+        
+        const markers = [0, 500, 1000, 1500, 1900, 2000, 2500, 3000];
+        markers.forEach(f => {
+            const angle = startAngle + (endAngle - startAngle) * (f / 3000);
+            const x = centerX + Math.cos(angle) * (radius + 12);
+            const y = centerY + Math.sin(angle) * (radius + 12);
+            
+            if (f === 1900) {
+                ctx.fillStyle = '#4a9eff';
+                ctx.fillText(f.toString(), x, y);
+                ctx.fillStyle = '#666';
+            } else {
+                ctx.fillText(f.toString(), x, y);
+            }
+        });
+        
+        // Draw needle
+        if (freq > 0 && freq <= 3000) {
+            const needleAngle = startAngle + (endAngle - startAngle) * (freq / 3000);
+            
+            ctx.strokeStyle = '#ff4444';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(centerX, centerY);
+            ctx.lineTo(
+                centerX + Math.cos(needleAngle) * (radius - 5),
+                centerY + Math.sin(needleAngle) * (radius - 5)
+            );
+            ctx.stroke();
+            
+            // Needle center dot
+            ctx.fillStyle = '#ff4444';
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        // Update frequency display
+        const freqDisplay = document.getElementById('sstv-tone-freq');
+        if (freqDisplay) {
+            if (freq > 0) {
+                freqDisplay.textContent = `${Math.round(freq)} Hz`;
+            } else {
+                freqDisplay.textContent = '--- Hz';
+            }
+        }
     }
 
     setupEventHandlers() {
@@ -416,6 +515,10 @@ class SSTVExtension extends DecoderExtension {
                 this.handleFSKID(view, data);
                 break;
 
+            case this.MSG_TONE_FREQ:
+                this.handleToneFreq(view);
+                break;
+
             default:
                 console.warn('SSTV: Unknown message type:', type);
         }
@@ -570,6 +673,15 @@ class SSTVExtension extends DecoderExtension {
         }
 
         this.radio.log(`SSTV: Callsign decoded - ${callsign}`);
+    }
+
+    handleToneFreq(view) {
+        // [type:1][freq:4] - frequency in Hz * 10 for 0.1 Hz precision
+        const freqTimes10 = view.getUint32(1);
+        const freq = freqTimes10 / 10.0;
+
+        this.currentToneFreq = freq;
+        this.drawToneMeter(freq);
     }
 
     setupBinaryMessageHandler() {

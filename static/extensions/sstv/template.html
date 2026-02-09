@@ -103,12 +103,19 @@
         <canvas id="sstv-canvas" class="sstv-canvas"></canvas>
     </div>
 
-    <!-- Help Text -->
+    <!-- Help Text with Tone Meter -->
     <div class="sstv-help">
-        <p><strong>SSTV Decoder</strong> - Receives Slow Scan Television images</p>
-        <p><strong>Common Frequencies:</strong> 14.230 MHz (USB), 14.233 MHz (USB), 21.340 MHz (USB), 28.680 MHz (USB)</p>
-        <p><strong>Supported Modes:</strong> 47 modes including Martin M1/M2, Scottie S1/S2, Robot 36, PD-120, and all MMSSTV modes</p>
-        <p>The decoder automatically detects the VIS code, corrects image slant, and can decode FSK callsigns.</p>
-        <p><strong>Tip:</strong> Tune to 14.230 MHz USB and wait for a transmission. The decoder will automatically identify the mode.</p>
+        <div class="sstv-help-text">
+            <p><strong>SSTV Decoder</strong> - Receives Slow Scan Television images</p>
+            <p><strong>Common Frequencies:</strong> 14.230 MHz (USB), 14.233 MHz (USB), 21.340 MHz (USB), 28.680 MHz (USB)</p>
+            <p><strong>Supported Modes:</strong> 47 modes including Martin M1/M2, Scottie S1/S2, Robot 36, PD-120, and all MMSSTV modes</p>
+            <p>The decoder automatically detects the VIS code, corrects image slant, and can decode FSK callsigns.</p>
+            <p><strong>Tip:</strong> Tune to 14.230 MHz USB and wait for a transmission. The decoder will automatically identify the mode.</p>
+        </div>
+        <div class="sstv-tone-meter">
+            <div class="tone-meter-label">VIS Tone</div>
+            <canvas id="sstv-tone-meter-canvas" width="120" height="80"></canvas>
+            <div class="tone-meter-freq" id="sstv-tone-freq">--- Hz</div>
+        </div>
     </div>
 </div>

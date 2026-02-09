@@ -210,6 +210,11 @@ func (d *SSTVDecoder) detectVISFromBuffer(pcmBuffer []int16, resultChan chan<- [
 	// Create VIS detector
 	d.visDetector = NewVISDetector(d.sampleRate)
 
+	// Set tone frequency callback to send updates to frontend
+	d.visDetector.SetToneCallback(func(freq float64) {
+		d.sendToneFreq(resultChan, freq)
+	})
+
 	// Try to detect VIS
 	modeIdx, headerShift, isExtended, ok := d.visDetector.DetectVIS(reader)
 	if !ok {
@@ -450,6 +455,7 @@ const (
 	MsgTypeFSKID        = 0x06
 	MsgTypeImageStart   = 0x07
 	MsgTypeRedrawStart  = 0x08 // Signals start of corrected image redraw
+	MsgTypeToneFreq     = 0x09 // Current detected tone frequency
 )
 
 // sendImageStart sends image start message with dimensions
@@ -560,6 +566,19 @@ func (d *SSTVDecoder) sendComplete(resultChan chan<- []byte) {
 	msg := make([]byte, 5)
 	msg[0] = MsgTypeComplete
 	binary.BigEndian.PutUint32(msg[1:5], uint32(d.mode.NumLines))
+
+	select {
+	case resultChan <- msg:
+	default:
+	}
+}
+
+// sendToneFreq sends current detected tone frequency
+func (d *SSTVDecoder) sendToneFreq(resultChan chan<- []byte, freq float64) {
+	msg := make([]byte, 5)
+	msg[0] = MsgTypeToneFreq
+	// Send frequency as uint32 (Hz * 10 for 0.1 Hz precision)
+	binary.BigEndian.PutUint32(msg[1:5], uint32(freq*10))
 
 	select {
 	case resultChan <- msg:

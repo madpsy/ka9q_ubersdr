@@ -52,6 +52,9 @@ type VISDetector struct {
 	// FFT plan (will be created externally)
 	fftInput  []float64
 	fftOutput []complex128
+
+	// Callback for tone frequency updates
+	toneCallback func(freq float64)
 }
 
 // NewVISDetector creates a new VIS code detector
@@ -77,6 +80,11 @@ func NewVISDetector(sampleRate float64) *VISDetector {
 	}
 }
 
+// SetToneCallback sets a callback function to receive tone frequency updates
+func (v *VISDetector) SetToneCallback(callback func(freq float64)) {
+	v.toneCallback = callback
+}
+
 // DetectVIS attempts to detect a VIS code from the audio stream
 // Returns: mode index, header shift (Hz), extended VIS flag, success
 func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
@@ -88,7 +96,14 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 	slidingWindow := make([]int16, samps20ms)
 	windowFilled := 0
 
+	// For tone frequency reporting (every 200ms = 20 iterations)
+	iterationCount := 0
+	lastToneReport := 0
+	lastLeaderLog := 0
+
 	for {
+		iterationCount++
+
 		// Read 10ms of audio
 		samples, err := pcmReader.Read(samps10ms)
 		if err != nil {
@@ -186,6 +201,12 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 		v.headerBuf[v.headerPtr] = peakFreq
 		v.headerPtr = (v.headerPtr + 1) % len(v.headerBuf)
 
+		// Report tone frequency every 200ms (20 iterations of 10ms each)
+		if v.toneCallback != nil && iterationCount-lastToneReport >= 20 {
+			v.toneCallback(peakFreq)
+			lastToneReport = iterationCount
+		}
+
 		// Copy recent frequencies to tone buffer
 		// KiwiSDR: for (i = tone_win-1, hp = HedrPtr-1; i >= 0; i--) { tone[i] = HeaderBuf[hp]; hp--; }
 		// This creates: tone[0] = oldest, tone[tone_win-1] = newest
@@ -247,7 +268,11 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 					} else if freq > refFreq-825 && freq < refFreq-775 {
 						bits[k] = 1 // 1100 Hz
 					} else {
-						// Invalid bit - break out of bit reading loop
+						// Invalid bit - log first failure only
+						if k == 0 && iterationCount-lastLeaderLog > 100 {
+							log.Printf("[SSTV VIS] First data bit invalid: freq=%.1f Hz (expected %.1f or %.1f Hz)",
+								freq, refFreq-600, refFreq-800)
+						}
 						break
 					}
 				}

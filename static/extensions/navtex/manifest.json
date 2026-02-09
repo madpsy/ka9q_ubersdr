@@ -1,0 +1,55 @@
+{
+  "name": "navtex",
+  "displayName": "NAVTEX Decoder",
+  "version": "1.0.0",
+  "description": "NAVTEX/DSC/Selcall FSK decoder for maritime communications",
+  "author": "UberSDR",
+  "type": "decoder",
+  "icon": "📡",
+  "category": "decoder",
+  "requiresAudio": true,
+  "defaultEnabled": false,
+  "files": {
+    "main": "main.js",
+    "styles": ["styles.css"],
+    "template": "template.html"
+  },
+  "settings": {
+    "centerFrequency": {
+      "type": "number",
+      "default": 500,
+      "min": 1,
+      "max": 10000,
+      "description": "Center frequency in Hz"
+    },
+    "shift": {
+      "type": "number",
+      "default": 170,
+      "min": 1,
+      "max": 1000,
+      "description": "FSK shift in Hz"
+    },
+    "baudRate": {
+      "type": "number",
+      "default": 100,
+      "min": 10,
+      "max": 1000,
+      "description": "Baud rate"
+    },
+    "inverted": {
+      "type": "boolean",
+      "default": false,
+      "description": "Invert mark/space"
+    },
+    "framing": {
+      "type": "string",
+      "default": "4/7",
+      "description": "Framing (4/7 for NAVTEX, 7/3 for DSC)"
+    },
+    "encoding": {
+      "type": "string",
+      "default": "CCIR476",
+      "description": "Character encoding (CCIR476 for NAVTEX)"
+    }
+  }
+}

@@ -1,0 +1,104 @@
+<div class="navtex-container">
+    <!-- Frequency Selector -->
+    <div class="navtex-frequency-selector">
+        <label for="navtex-station-select">Quick Tune:</label>
+        <select id="navtex-station-select" class="navtex-select-wide">
+            <option value="">-- Select Station --</option>
+            <optgroup label="NAVTEX - MF">
+                <option value="518000,usb,100,170">518 kHz - International (100 Bd, 170 Hz)</option>
+                <option value="490000,usb,100,170">490 kHz - National (100 Bd, 170 Hz)</option>
+                <option value="4209500,usb,100,170">4.210 MHz - Tropical (100 Bd, 170 Hz)</option>
+            </optgroup>
+            <optgroup label="NAVTEX - HF">
+                <option value="4210000,usb,100,170">4.210 MHz - HF NAVTEX (100 Bd, 170 Hz)</option>
+                <option value="6314000,usb,100,170">6.314 MHz - HF NAVTEX (100 Bd, 170 Hz)</option>
+                <option value="8416500,usb,100,170">8.417 MHz - HF NAVTEX (100 Bd, 170 Hz)</option>
+                <option value="12579000,usb,100,170">12.579 MHz - HF NAVTEX (100 Bd, 170 Hz)</option>
+                <option value="16806500,usb,100,170">16.807 MHz - HF NAVTEX (100 Bd, 170 Hz)</option>
+                <option value="19680500,usb,100,170">19.681 MHz - HF NAVTEX (100 Bd, 170 Hz)</option>
+                <option value="22376000,usb,100,170">22.376 MHz - HF NAVTEX (100 Bd, 170 Hz)</option>
+                <option value="26100500,usb,100,170">26.101 MHz - HF NAVTEX (100 Bd, 170 Hz)</option>
+            </optgroup>
+            <optgroup label="DSC - MF/HF">
+                <option value="2187500,usb,100,170">2.188 MHz - DSC MF (100 Bd, 170 Hz)</option>
+                <option value="4207500,usb,100,170">4.208 MHz - DSC 4 MHz (100 Bd, 170 Hz)</option>
+                <option value="6312000,usb,100,170">6.312 MHz - DSC 6 MHz (100 Bd, 170 Hz)</option>
+                <option value="8414500,usb,100,170">8.415 MHz - DSC 8 MHz (100 Bd, 170 Hz)</option>
+                <option value="12577000,usb,100,170">12.577 MHz - DSC 12 MHz (100 Bd, 170 Hz)</option>
+                <option value="16804500,usb,100,170">16.805 MHz - DSC 16 MHz (100 Bd, 170 Hz)</option>
+            </optgroup>
+        </select>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="navtex-status-bar">
+        <div class="navtex-status-left">
+            <span id="navtex-status-badge" class="status-badge status-disconnected">Stopped</span>
+            <span id="navtex-baud-error-indicator" class="navtex-baud-indicator">
+                <span class="navtex-baud-label">Baud Error:</span>
+                <canvas id="navtex-baud-canvas" width="40" height="60" class="navtex-baud-canvas"></canvas>
+                <span id="navtex-baud-value" class="navtex-baud-value">0.0</span>
+            </span>
+            <span id="navtex-char-count" class="navtex-info">Chars: 0</span>
+        </div>
+        <div class="navtex-status-right">
+            <button id="navtex-start-btn" class="navtex-btn navtex-btn-primary">Start</button>
+            <button id="navtex-stop-btn" class="navtex-btn navtex-btn-secondary" disabled>Stop</button>
+            <button id="navtex-clear-btn" class="navtex-btn navtex-btn-secondary">Clear</button>
+            <button id="navtex-save-btn" class="navtex-btn navtex-btn-secondary">Save Text</button>
+        </div>
+    </div>
+
+    <!-- Controls Panel -->
+    <div class="navtex-controls">
+        <div class="navtex-control-group">
+            <label for="navtex-center-freq">Center (Hz):</label>
+            <input type="number" id="navtex-center-freq" class="navtex-input" value="500" min="1" max="10000" step="10">
+        </div>
+
+        <div class="navtex-control-group">
+            <label for="navtex-shift">Shift (Hz):</label>
+            <input type="number" id="navtex-shift" class="navtex-input" value="170" min="1" max="1000" step="10">
+        </div>
+
+        <div class="navtex-control-group">
+            <label for="navtex-baud">Baud:</label>
+            <input type="number" id="navtex-baud" class="navtex-input" value="100" min="10" max="1000" step="10">
+        </div>
+
+        <div class="navtex-control-group">
+            <label for="navtex-encoding">Encoding:</label>
+            <select id="navtex-encoding" class="navtex-select">
+                <option value="CCIR476" selected>CCIR476 (NAVTEX)</option>
+            </select>
+        </div>
+
+        <div class="navtex-control-group">
+            <label>
+                <input type="checkbox" id="navtex-inverted">
+                Inverted
+            </label>
+        </div>
+
+        <div class="navtex-control-group">
+            <label>
+                <input type="checkbox" id="navtex-auto-scroll" checked>
+                Auto-Scroll
+            </label>
+        </div>
+    </div>
+
+    <!-- Text Console -->
+    <div class="navtex-console-container" id="navtex-console-container">
+        <pre id="navtex-console" class="navtex-console"></pre>
+    </div>
+
+    <!-- Help Text -->
+    <div class="navtex-help">
+        <p><strong>NAVTEX Decoder</strong> - Decodes maritime safety information broadcasts</p>
+        <p><strong>NAVTEX:</strong> Tune to 518 kHz (international) or 490 kHz (national) in USB mode. Use 500 Hz center, 170 Hz shift, 100 baud.</p>
+        <p><strong>DSC:</strong> Tune to 2.188 MHz or other DSC frequencies in USB mode. Same settings as NAVTEX.</p>
+        <p>The decoder uses CCIR476 forward error correction to recover text even with weak signals.</p>
+        <p><strong>Baud Error:</strong> Green bar shows positive error, red shows negative. Decoder automatically tracks and corrects timing.</p>
+    </div>
+</div>

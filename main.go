@@ -21,6 +21,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/cwsl/ka9q_ubersdr/audio_extensions/navtex"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/wefax"
 )
 
@@ -262,13 +263,13 @@ func banMiddleware(ipBanManager *IPBanManager, countryBanManager *CountryBanMana
 			// Request was blocked, don't call next handler
 			return
 		}
-		
+
 		// Check if the client's country is banned
 		if checkCountryBan(w, r, countryBanManager) {
 			// Request was blocked, don't call next handler
 			return
 		}
-		
+
 		// Not banned, continue to next handler
 		next.ServeHTTP(w, r)
 	})
@@ -588,10 +589,10 @@ func main() {
 		if err := noiseFloorMonitor.Start(); err != nil {
 			log.Fatalf("Failed to start noise floor monitor: %v", err)
 		}
-		
+
 		// Start background voice activity scanner to keep cache populated
 		StartVoiceActivityBackgroundScanner(noiseFloorMonitor)
-		
+
 		defer noiseFloorMonitor.Stop()
 	}
 
@@ -938,10 +939,10 @@ func main() {
 
 	// Initialize audio extension manager
 	audioExtensionRegistry := NewAudioExtensionRegistry()
-	
+
 	// Register audio extensions
 	wefaxInfo := wefax.GetInfo()
-	
+
 	// Create wrapper factory that converts between main and wefax types
 	wefaxFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
 		// Convert main AudioExtensionParams to wefax AudioExtensionParams
@@ -950,17 +951,17 @@ func main() {
 			Channels:      audioParams.Channels,
 			BitsPerSample: audioParams.BitsPerSample,
 		}
-		
+
 		// Call wefax factory
 		wefaxExt, err := wefax.Factory(wefaxParams, extensionParams)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		// Wrap the wefax extension to implement main AudioExtension interface
 		return &wefaxExtensionWrapper{ext: wefaxExt}, nil
 	}
-	
+
 	audioExtensionRegistry.Register(
 		"wefax",
 		wefaxFactoryWrapper,
@@ -971,7 +972,36 @@ func main() {
 		},
 	)
 	log.Printf("Registered audio extension: wefax v%s", wefaxInfo["version"].(string))
-	
+
+	// Register NAVTEX extension
+	navtexInfo := navtex.GetInfo()
+
+	navtexFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
+		navtexParams := navtex.AudioExtensionParams{
+			SampleRate:    audioParams.SampleRate,
+			Channels:      audioParams.Channels,
+			BitsPerSample: audioParams.BitsPerSample,
+		}
+
+		navtexExt, err := navtex.Factory(navtexParams, extensionParams)
+		if err != nil {
+			return nil, err
+		}
+
+		return &navtexExtensionWrapper{ext: navtexExt}, nil
+	}
+
+	audioExtensionRegistry.Register(
+		"navtex",
+		navtexFactoryWrapper,
+		AudioExtensionInfo{
+			Name:        navtexInfo["name"].(string),
+			Description: navtexInfo["description"].(string),
+			Version:     navtexInfo["version"].(string),
+		},
+	)
+	log.Printf("Registered audio extension: navtex v%s", navtexInfo["version"].(string))
+
 	// Create audio extension manager
 	audioExtensionManager := NewAudioExtensionManager(dxClusterWsHandler, sessions, audioExtensionRegistry)
 	dxClusterWsHandler.audioExtensionManager = audioExtensionManager
@@ -1911,7 +1941,7 @@ func handleMyIP(w http.ResponseWriter, r *http.Request, geoIPService *GeoIPServi
 			// Add all available GeoIP fields
 			response["country"] = result.Country
 			response["country_code"] = result.CountryCode
-			
+
 			if result.Continent != "" {
 				response["continent"] = result.Continent
 			}
@@ -2456,13 +2486,13 @@ func getClientIP(r *http.Request) string {
 	if isTunnelServer || isTrustedProxy {
 		if xri := r.Header.Get("X-Real-IP"); xri != "" {
 			trimmedXRI := strings.TrimSpace(xri)
-			
+
 			// Check if X-Real-IP is a valid IP address (without port)
 			if net.ParseIP(trimmedXRI) == nil {
 				// Not a valid IP - might contain port or be malformed
 				log.Printf("WARNING: X-Real-IP from %s is not a valid IP address: '%s' (may contain port or be malformed)", sourceIP, trimmedXRI)
 			}
-			
+
 			clientIP = trimmedXRI
 			// Strip port if present
 			if host, _, err := net.SplitHostPort(clientIP); err == nil {
@@ -2474,13 +2504,13 @@ func getClientIP(r *http.Request) string {
 					log.Printf("ERROR: X-Real-IP from %s was port-only (no host): '%s'", sourceIP, trimmedXRI)
 				}
 			}
-			
+
 			// Log when final clientIP is empty after processing
 			if clientIP == "" {
 				log.Printf("ERROR: clientIP became empty after processing X-Real-IP from %s: X-Real-IP='%s', trimmed='%s'",
 					sourceIP, xri, trimmedXRI)
 			}
-			
+
 			if DebugMode {
 				if isTunnelServer {
 					log.Printf("DEBUG: Trusted X-Real-IP from tunnel server: sourceIP=%s, X-Real-IP=%s, clientIP=%s", sourceIP, xri, clientIP)
@@ -4136,7 +4166,7 @@ func handleCWSpotsAnalyticsHourly(w http.ResponseWriter, r *http.Request, cwSkim
 			hours = h
 		}
 	}
-	
+
 	// Check rate limit (1 request per 2 seconds per IP)
 	clientIP := getClientIP(r)
 	rateLimitKey := fmt.Sprintf("cw-analytics-hourly-%s-%s-%s-%d-%d", country, continent, band, minSNR, hours)
@@ -4179,5 +4209,22 @@ func (w *wefaxExtensionWrapper) Stop() error {
 }
 
 func (w *wefaxExtensionWrapper) GetName() string {
+	return w.ext.GetName()
+}
+
+// navtexExtensionWrapper wraps a navtex.AudioExtension to implement main.AudioExtension
+type navtexExtensionWrapper struct {
+	ext navtex.AudioExtension
+}
+
+func (w *navtexExtensionWrapper) Start(audioChan <-chan []int16, resultChan chan<- []byte) error {
+	return w.ext.Start(audioChan, resultChan)
+}
+
+func (w *navtexExtensionWrapper) Stop() error {
+	return w.ext.Stop()
+}
+
+func (w *navtexExtensionWrapper) GetName() string {
 	return w.ext.GetName()
 }

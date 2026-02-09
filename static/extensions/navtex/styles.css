@@ -1,0 +1,296 @@
+/* NAVTEX Extension Styles */
+
+.navtex-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    gap: 10px;
+    padding: 10px;
+    background: #1a1a1a;
+    color: #e0e0e0;
+}
+
+/* Frequency Selector */
+.navtex-frequency-selector {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 12px;
+    background: #2a2a2a;
+    border-radius: 4px;
+    border: 1px solid #3a3a3a;
+}
+
+.navtex-frequency-selector label {
+    font-size: 12px;
+    color: #ccc;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.navtex-select-wide {
+    flex: 1;
+    padding: 6px 10px;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 12px;
+    font-family: monospace;
+    min-width: 200px;
+}
+
+.navtex-select-wide:focus {
+    outline: none;
+    border-color: #4a9eff;
+}
+
+/* Status Bar */
+.navtex-status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: #2a2a2a;
+    border-radius: 4px;
+    border: 1px solid #3a3a3a;
+}
+
+.navtex-status-left {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+}
+
+.navtex-status-right {
+    display: flex;
+    gap: 8px;
+}
+
+.navtex-info {
+    font-size: 12px;
+    color: #aaa;
+    font-family: monospace;
+}
+
+/* Status Badge */
+.status-badge {
+    padding: 4px 10px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.status-running {
+    background: #28a745;
+    color: white;
+}
+
+.status-disconnected {
+    background: #6c757d;
+    color: white;
+}
+
+.status-error {
+    background: #dc3545;
+    color: white;
+}
+
+/* Baud Error Indicator */
+.navtex-baud-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #aaa;
+}
+
+.navtex-baud-label {
+    font-size: 11px;
+    color: #999;
+}
+
+.navtex-baud-canvas {
+    border: 1px solid #444;
+    border-radius: 2px;
+    background: #0a0a0a;
+}
+
+.navtex-baud-value {
+    font-family: monospace;
+    font-size: 11px;
+    color: #aaa;
+    min-width: 40px;
+}
+
+/* Buttons */
+.navtex-btn {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.navtex-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.navtex-btn-primary {
+    background: #28a745;
+    color: white;
+}
+
+.navtex-btn-primary:hover:not(:disabled) {
+    background: #218838;
+}
+
+.navtex-btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.navtex-btn-secondary:hover:not(:disabled) {
+    background: #5a6268;
+}
+
+/* Controls Panel */
+.navtex-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    padding: 10px 12px;
+    background: #2a2a2a;
+    border-radius: 4px;
+    border: 1px solid #3a3a3a;
+    align-items: center;
+}
+
+.navtex-control-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.navtex-control-group label {
+    font-size: 12px;
+    color: #ccc;
+    white-space: nowrap;
+}
+
+.navtex-input,
+.navtex-select {
+    padding: 4px 8px;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 12px;
+    font-family: monospace;
+}
+
+.navtex-input {
+    width: 80px;
+}
+
+.navtex-select {
+    width: 140px;
+}
+
+.navtex-input:focus,
+.navtex-select:focus {
+    outline: none;
+    border-color: #4a9eff;
+}
+
+input[type="checkbox"] {
+    cursor: pointer;
+}
+
+/* Text Console Container */
+.navtex-console-container {
+    flex: 1;
+    overflow: auto;
+    background: #0a0a0a;
+    border: 1px solid #3a3a3a;
+    border-radius: 4px;
+    position: relative;
+    min-height: 400px;
+}
+
+.navtex-console {
+    margin: 0;
+    padding: 10px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 13px;
+    line-height: 1.4;
+    color: #00ff00;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    min-height: 100%;
+}
+
+/* Help Text */
+.navtex-help {
+    padding: 10px 12px;
+    background: #2a2a2a;
+    border-radius: 4px;
+    border: 1px solid #3a3a3a;
+    font-size: 11px;
+    color: #999;
+    line-height: 1.5;
+}
+
+.navtex-help p {
+    margin: 4px 0;
+}
+
+.navtex-help strong {
+    color: #ccc;
+}
+
+/* Scrollbar Styling */
+.navtex-console-container::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+
+.navtex-console-container::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+
+.navtex-console-container::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 6px;
+}
+
+.navtex-console-container::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .navtex-status-bar {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .navtex-status-left,
+    .navtex-status-right {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .navtex-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .navtex-control-group {
+        justify-content: space-between;
+    }
+}

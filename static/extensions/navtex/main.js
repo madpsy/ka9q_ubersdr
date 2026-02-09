@@ -608,21 +608,41 @@ class NAVTEXExtension extends DecoderExtension {
     }
 
     drawBaudError(error) {
-        if (!this.baudCtx) return;
+        if (!this.baudCtx) {
+            console.error('NAVTEX: drawBaudError called but baudCtx is null');
+            return;
+        }
+        
+        if (!this.baudCanvas) {
+            console.error('NAVTEX: drawBaudError called but baudCanvas is null');
+            return;
+        }
 
         const canvas = this.baudCanvas;
         const ctx = this.baudCtx;
         const width = canvas.width;
         const height = canvas.height;
+        
+        console.log(`NAVTEX: drawBaudError(${error}) - canvas: ${width}x${height}, ctx:`, ctx);
+
+        if (width === 0 || height === 0) {
+            console.error('NAVTEX: Canvas has zero dimensions!');
+            return;
+        }
+
         const centerY = height / 2;
 
-        // Clear canvas
-        ctx.fillStyle = '#0a0a0a';
+        // Clear canvas with a visible color first to test
+        ctx.fillStyle = '#ff00ff'; // Magenta - very visible for testing
         ctx.fillRect(0, 0, width, height);
+        
+        // Then draw black background
+        ctx.fillStyle = '#0a0a0a';
+        ctx.fillRect(2, 2, width - 4, height - 4);
 
-        // Draw center line
-        ctx.strokeStyle = '#444';
-        ctx.lineWidth = 1;
+        // Draw center line (make it thicker and more visible)
+        ctx.strokeStyle = '#ffff00'; // Yellow for visibility
+        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(0, centerY);
         ctx.lineTo(width, centerY);
@@ -633,12 +653,16 @@ class NAVTEXExtension extends DecoderExtension {
         const clampedError = Math.max(-maxError, Math.min(maxError, error));
         const barHeight = (clampedError / maxError) * (height / 2);
 
+        console.log(`NAVTEX: barHeight = ${barHeight} (error: ${error}, clamped: ${clampedError})`);
+
         if (barHeight > 0) {
             ctx.fillStyle = '#28a745'; // Green for positive
-            ctx.fillRect(0, centerY - barHeight, width, barHeight);
+            ctx.fillRect(5, centerY - barHeight, width - 10, barHeight);
+            console.log(`NAVTEX: Drew green bar at y=${centerY - barHeight}, height=${barHeight}`);
         } else if (barHeight < 0) {
             ctx.fillStyle = '#dc3545'; // Red for negative
-            ctx.fillRect(0, centerY, width, -barHeight);
+            ctx.fillRect(5, centerY, width - 10, -barHeight);
+            console.log(`NAVTEX: Drew red bar at y=${centerY}, height=${-barHeight}`);
         }
     }
 

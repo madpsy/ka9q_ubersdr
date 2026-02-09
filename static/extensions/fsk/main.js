@@ -1,8 +1,7 @@
 // FSK/RTTY Extension for ka9q UberSDR
 // Decodes FSK transmissions including RTTY, SITOR-B, and other modes
-// Based on KiwiSDR FSK extension by John Seamons, ZL4VO/KF6VO
-// Adapted for UberSDR by integrating with Web Audio API
-// Version: 1.0.0
+// Backend-based decoder using WebSocket communication
+// Version: 2.0.0
 
 class FSKExtension extends DecoderExtension {
     constructor() {
@@ -17,31 +16,26 @@ class FSKExtension extends DecoderExtension {
 
         // Configuration
         this.config = {
+            center_frequency: 1000,
             shift: 170,
-            baud: 45.45,
+            baud_rate: 45.45,
             framing: '5N1.5',
             inverted: false,
-            encoding: 'ITA2',
-            centerFreq: 1000
+            encoding: 'ITA2'
         };
 
         // State
         this.running = false;
-        this.decoder = null;
-        this.audioProcessor = null;
-        this.processingInterval = null;
-        this.textBuffer = [];
+        this.textBuffer = '';
+        this.charCount = 0;
+        this.autoScroll = true;
+        this.baudError = 0;
+        this.decoderState = 0; // 0=NoSignal, 1=Sync1, 2=Sync2, 3=ReadData
         this.maxBufferLines = 1000;
 
-        // Audio processing
-        this.scriptProcessor = null;
-        this.analyserNode = null;
-
-        // Status tracking
-        this.lastCharTime = 0;
-        this.charCount = 0;
-        this.signalDetected = false;
-        this.syncLocked = false;
+        // Binary message handler
+        this.binaryMessageHandler = null;
+        this.originalDXHandler = null;
 
         // Spectrum visualization
         this.spectrumCanvas = null;
@@ -145,15 +139,13 @@ class FSKExtension extends DecoderExtension {
         if (shiftInput) {
             shiftInput.addEventListener('change', (e) => {
                 this.config.shift = parseFloat(e.target.value);
-                this.updateDecoder();
             });
         }
 
         const baudInput = document.getElementById('fsk-baud');
         if (baudInput) {
             baudInput.addEventListener('change', (e) => {
-                this.config.baud = parseFloat(e.target.value);
-                this.updateDecoder();
+                this.config.baud_rate = parseFloat(e.target.value);
             });
         }
 
@@ -161,7 +153,6 @@ class FSKExtension extends DecoderExtension {
         if (framingSelect) {
             framingSelect.addEventListener('change', (e) => {
                 this.config.framing = e.target.value;
-                this.updateDecoder();
             });
         }
 
@@ -169,7 +160,6 @@ class FSKExtension extends DecoderExtension {
         if (encodingSelect) {
             encodingSelect.addEventListener('change', (e) => {
                 this.config.encoding = e.target.value;
-                this.updateDecoder();
             });
         }
 
@@ -177,15 +167,13 @@ class FSKExtension extends DecoderExtension {
         if (invertedCheck) {
             invertedCheck.addEventListener('change', (e) => {
                 this.config.inverted = e.target.checked;
-                this.updateDecoder();
             });
         }
 
         const centerFreqInput = document.getElementById('fsk-center-freq');
         if (centerFreqInput) {
             centerFreqInput.addEventListener('change', (e) => {
-                this.config.centerFreq = parseFloat(e.target.value);
-                this.updateDecoder();
+                this.config.center_frequency = parseFloat(e.target.value);
             });
         }
 
@@ -198,21 +186,21 @@ class FSKExtension extends DecoderExtension {
         switch(preset) {
             case 'ham':
                 this.config.shift = 170;
-                this.config.baud = 45.45;
+                this.config.baud_rate = 45.45;
                 this.config.framing = '5N1.5';
                 this.config.inverted = false;
                 this.config.encoding = 'ITA2';
                 break;
             case 'sitor-b':
                 this.config.shift = 170;
-                this.config.baud = 100;
+                this.config.baud_rate = 100;
                 this.config.framing = '4/7';
                 this.config.inverted = false;
                 this.config.encoding = 'CCIR476';
                 break;
             case 'wx':
                 this.config.shift = 450;
-                this.config.baud = 50;
+                this.config.baud_rate = 50;
                 this.config.framing = '5N1.5';
                 this.config.inverted = true;
                 this.config.encoding = 'ITA2';
@@ -224,7 +212,6 @@ class FSKExtension extends DecoderExtension {
 
         // Update UI
         this.updateUIFromConfig();
-        this.updateDecoder();
     }
 
     updateUIFromConfig() {
@@ -232,7 +219,7 @@ class FSKExtension extends DecoderExtension {
         if (shiftInput) shiftInput.value = this.config.shift;
 
         const baudInput = document.getElementById('fsk-baud');
-        if (baudInput) baudInput.value = this.config.baud;
+        if (baudInput) baudInput.value = this.config.baud_rate;
 
         const framingSelect = document.getElementById('fsk-framing');
         if (framingSelect) framingSelect.value = this.config.framing;
@@ -244,7 +231,7 @@ class FSKExtension extends DecoderExtension {
         if (invertedCheck) invertedCheck.checked = this.config.inverted;
 
         const centerFreqInput = document.getElementById('fsk-center-freq');
-        if (centerFreqInput) centerFreqInput.value = this.config.centerFreq;
+        if (centerFreqInput) centerFreqInput.value = this.config.center_frequency;
     }
 
     toggleDecoding() {
@@ -258,13 +245,13 @@ class FSKExtension extends DecoderExtension {
     startDecoding() {
         console.log('FSK: Starting decoding');
 
-        if (!window.audioContext) {
-            this.appendOutput('Error: Audio context not available. Please start audio first.\n', 'error');
+        if (this.running) {
+            console.log('FSK: Already running');
             return;
         }
 
-        // Create decoder
-        this.initializeDecoder();
+        // Attach to audio extension via DX WebSocket
+        this.attachAudioExtension();
 
         this.running = true;
         const startBtn = document.getElementById('fsk-start-btn');
@@ -274,11 +261,18 @@ class FSKExtension extends DecoderExtension {
         }
 
         this.appendOutput('=== FSK Decoder Started ===\n', 'info');
-        this.appendOutput(`Mode: ${this.config.encoding}, Baud: ${this.config.baud}, Shift: ${this.config.shift} Hz\n`, 'info');
+        this.appendOutput(`Mode: ${this.config.encoding}, Baud: ${this.config.baud_rate}, Shift: ${this.config.shift} Hz\n`, 'info');
     }
 
     stopDecoding() {
         console.log('FSK: Stopping decoding');
+
+        if (!this.running) {
+            return;
+        }
+
+        // Detach from audio extension
+        this.detachAudioExtension();
 
         this.running = false;
         const startBtn = document.getElementById('fsk-start-btn');
@@ -290,107 +284,255 @@ class FSKExtension extends DecoderExtension {
         this.appendOutput('=== FSK Decoder Stopped ===\n', 'info');
     }
 
-    initializeDecoder() {
-        console.log('FSK: Initializing decoder');
-
-        const sampleRate = window.audioContext.sampleRate;
-
-        // Create JNX decoder instance
-        this.decoder = new JNX();
-
-        // Setup decoder with current configuration
-        this.decoder.setup_values(
-            sampleRate,
-            this.config.centerFreq,
-            this.config.shift,
-            this.config.baud,
-            this.config.framing,
-            this.config.inverted,
-            this.config.encoding,
-            false, // show_raw
-            false  // show_errs
-        );
-
-        // Enable debug mode to see what's happening in SYNC1
-        this.decoder.dbg = 1;
-        this.decoder.trace = 1;
-
-        // Set callbacks using the proper setter methods
-        this.decoder.set_output_char_cb((char) => {
-            console.log('FSK: Character decoded:', char, char.charCodeAt ? char.charCodeAt(0) : 'non-char');
-            this.handleDecodedChar(char);
-        });
-
-        this.decoder.set_baud_error_cb((error) => {
-            // Baud error callback - only log occasionally
-            if (!this.lastBaudErrorLog || Date.now() - this.lastBaudErrorLog > 5000) {
-                console.log('FSK: Baud error:', error);
-                this.lastBaudErrorLog = Date.now();
-            }
-        });
-
-        // CRITICAL FIX: Initialize next_event_count to sample at bit CENTER, not edge
-        // This ensures we sample in the middle of each bit for reliable detection
-        this.decoder.next_event_count = this.decoder.half_bit_sample_count;
-
-        console.log('FSK: Decoder initialized', {
-            sampleRate: sampleRate,
-            centerFreq: this.config.centerFreq,
-            shift: this.config.shift,
-            baud: this.config.baud,
-            framing: this.config.framing,
-            encoding: this.config.encoding,
-            inverted: this.config.inverted,
-            bitSampleCount: this.decoder.bit_sample_count,
-            halfBitSampleCount: this.decoder.half_bit_sample_count,
-            nextEventCount: this.decoder.next_event_count,
-            encodingObject: this.decoder.encoding,
-            hasCheckBits: this.decoder.encoding && typeof this.decoder.encoding.check_bits === 'function'
-        });
-    }
-
-    updateDecoder() {
-        if (this.running && this.decoder) {
-            console.log('FSK: Updating decoder configuration');
-            this.stopDecoding();
-            setTimeout(() => this.startDecoding(), 100);
-        }
-    }
-
-    // This method is called automatically by the DecoderExtension framework with audio data
-    onProcessAudio(dataArray) {
-        if (!this.running || !this.decoder) {
-            // Still draw spectrum even when not running
-            this.drawSpectrum(dataArray);
+    attachAudioExtension() {
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws || dxClient.ws.readyState !== WebSocket.OPEN) {
+            console.error('FSK: DX WebSocket not connected');
+            this.appendOutput('Error: WebSocket not connected\n', 'error');
             return;
         }
 
-        // Calculate audio level for indicator
-        this.updateAudioLevel(dataArray);
+        // Setup binary message handler
+        this.setupBinaryMessageHandler();
+
+        // Send attach message
+        const attachMsg = {
+            type: 'audio_extension_attach',
+            extension_name: 'fsk',
+            params: {
+                center_frequency: this.config.center_frequency,
+                shift: this.config.shift,
+                baud_rate: this.config.baud_rate,
+                inverted: this.config.inverted,
+                framing: this.config.framing,
+                encoding: this.config.encoding
+            }
+        };
+
+        console.log('FSK: Sending attach message:', attachMsg);
+        dxClient.ws.send(JSON.stringify(attachMsg));
+    }
+
+    detachAudioExtension() {
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws || dxClient.ws.readyState !== WebSocket.OPEN) {
+            console.error('FSK: DX WebSocket not connected');
+            return;
+        }
+
+        // Remove binary message handler
+        this.removeBinaryMessageHandler();
+
+        // Send detach message
+        const detachMsg = {
+            type: 'audio_extension_detach'
+        };
+
+        console.log('FSK: Sending detach message');
+        dxClient.ws.send(JSON.stringify(detachMsg));
+    }
+
+    setupBinaryMessageHandler() {
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws) {
+            console.error('FSK: DX WebSocket not available');
+            return;
+        }
+
+        // Store reference to original handler ONLY if we haven't already
+        if (!this.originalDXHandler) {
+            this.originalDXHandler = dxClient.ws.onmessage;
+            console.log('FSK: Stored original DX handler');
+        }
+
+        // Create new handler that intercepts binary messages only
+        this.binaryMessageHandler = (event) => {
+            // Check if this is a binary message (ArrayBuffer or Blob)
+            if (event.data instanceof ArrayBuffer) {
+                // Binary message - process as FSK data
+                this.handleBinaryMessage(event.data);
+                // DO NOT pass binary messages to original handler
+            } else if (event.data instanceof Blob) {
+                // Binary message as Blob - convert to ArrayBuffer first
+                event.data.arrayBuffer().then(arrayBuffer => {
+                    this.handleBinaryMessage(arrayBuffer);
+                }).catch(err => {
+                    console.error('FSK: Failed to convert Blob to ArrayBuffer:', err);
+                });
+                // DO NOT pass binary messages to original handler
+            } else {
+                // Text message - pass to original handler
+                if (this.originalDXHandler && this.originalDXHandler !== this.binaryMessageHandler) {
+                    this.originalDXHandler.call(dxClient.ws, event);
+                }
+            }
+        };
+
+        dxClient.ws.onmessage = this.binaryMessageHandler;
+        console.log('FSK: Binary message handler installed');
+    }
+
+    removeBinaryMessageHandler() {
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws) {
+            return;
+        }
+
+        // Restore original handler
+        if (this.originalDXHandler) {
+            dxClient.ws.onmessage = this.originalDXHandler;
+            this.originalDXHandler = null;
+            console.log('FSK: Original message handler restored');
+        }
+        
+        this.binaryMessageHandler = null;
+    }
+
+    handleBinaryMessage(data) {
+        // Binary protocol:
+        // type: 0x01 = text message: [type:1][timestamp:8][text_length:4][text:length]
+        // type: 0x02 = baud error: [type:1][error:8]
+        // type: 0x03 = state update: [type:1][state:1]
+        const uint8Array = new Uint8Array(data);
+
+        if (uint8Array.length < 1) {
+            console.error('FSK: Invalid binary message length:', uint8Array.length);
+            return;
+        }
+
+        const type = uint8Array[0];
+
+        if (type === 0x01) {
+            // Text message
+            if (uint8Array.length < 13) {
+                console.error('FSK: Invalid text message length:', uint8Array.length);
+                return;
+            }
+
+            // Parse text length (big-endian uint32)
+            const textLength = (uint8Array[9] << 24) | (uint8Array[10] << 16) |
+                              (uint8Array[11] << 8) | uint8Array[12];
+
+            // Extract text data
+            const textData = uint8Array.slice(13, 13 + textLength);
+            const text = new TextDecoder('utf-8').decode(textData);
+
+            // Display the text
+            this.appendOutput(text);
+        } else if (type === 0x02) {
+            // Baud error
+            if (uint8Array.length < 9) {
+                console.error('FSK: Invalid baud error message length:', uint8Array.length);
+                return;
+            }
+
+            // Parse error value (float64, big-endian)
+            const dataView = new DataView(data);
+            const error = dataView.getFloat64(1, false); // false = big-endian
+
+            // Update baud error display
+            this.updateBaudError(error);
+        } else if (type === 0x03) {
+            // State update
+            if (uint8Array.length < 2) {
+                console.error('FSK: Invalid state message length:', uint8Array.length);
+                return;
+            }
+
+            const state = uint8Array[1];
+            this.updateDecoderState(state);
+        } else {
+            console.error('FSK: Unknown binary message type:', type);
+        }
+    }
+
+    updateBaudError(error) {
+        this.baudError = error;
+        
+        // Update baud error display if element exists
+        const baudErrorEl = document.getElementById('fsk-baud-error');
+        if (baudErrorEl) {
+            baudErrorEl.textContent = error.toFixed(1);
+        }
+    }
+
+    updateDecoderState(state) {
+        this.decoderState = state;
+        
+        // Update status indicators based on state
+        const signalIndicator = document.getElementById('fsk-signal-indicator');
+        const syncIndicator = document.getElementById('fsk-sync-indicator');
+        const decodeIndicator = document.getElementById('fsk-decode-indicator');
+
+        if (signalIndicator) {
+            // Signal detected if not in NoSignal state
+            if (state !== 0) {
+                signalIndicator.classList.add('active');
+            } else {
+                signalIndicator.classList.remove('active');
+            }
+        }
+
+        if (syncIndicator) {
+            // Synced if in Sync2 or ReadData state
+            if (state === 2 || state === 3) {
+                syncIndicator.classList.add('active');
+            } else {
+                syncIndicator.classList.remove('active');
+            }
+        }
+
+        if (decodeIndicator) {
+            // Decoding if in ReadData state
+            if (state === 3) {
+                decodeIndicator.classList.add('active');
+            } else {
+                decodeIndicator.classList.remove('active');
+            }
+        }
+    }
+
+    appendOutput(text, className = '') {
+        const outputDiv = document.getElementById('fsk-output');
+        if (!outputDiv) return;
+
+        const span = document.createElement('span');
+        if (className) {
+            span.className = className;
+        }
+        span.textContent = text;
+        outputDiv.appendChild(span);
+
+        // Update character count
+        this.charCount += text.length;
+
+        // Auto-scroll to bottom
+        outputDiv.scrollTop = outputDiv.scrollHeight;
+
+        // Limit buffer size
+        while (outputDiv.childNodes.length > this.maxBufferLines) {
+            outputDiv.removeChild(outputDiv.firstChild);
+        }
+    }
+
+    clearOutput() {
+        const outputDiv = document.getElementById('fsk-output');
+        if (outputDiv) {
+            outputDiv.innerHTML = '';
+        }
+        this.textBuffer = '';
+        this.charCount = 0;
+    }
+
+    // This method is called automatically by the DecoderExtension framework with audio data
+    // For backend-based decoder, we don't process audio here - it's handled by the backend
+    onProcessAudio(dataArray) {
+        if (!this.running) {
+            return;
+        }
 
         // Draw spectrum visualization
         this.drawSpectrum(dataArray);
-
-        // Convert Float32Array to regular array and SCALE to int16 range
-        // Web Audio API uses -1.0 to +1.0, but KiwiSDR decoder expects int16-like values
-        const samples = Array.from(dataArray).map(s => s * 32768);
-
-        // Debug: Log first time we process audio
-        if (!this.hasProcessedAudio) {
-            console.log('FSK: First audio processing', {
-                sampleCount: samples.length,
-                firstSample: samples[0],
-                scaledSample: samples[0],
-                decoderState: this.decoder.state,
-                audioAverage: this.decoder.audio_average
-            });
-            this.hasProcessedAudio = true;
-        }
-
-        this.decoder.process_data(samples, samples.length);
-
-        // Update status indicators based on decoder state
-        this.updateStatusIndicators();
     }
 
     drawSpectrum(dataArray) {
@@ -442,38 +584,36 @@ class FSKExtension extends DecoderExtension {
             ctx.fillRect(x, y, barWidth - 1, barHeight);
         }
 
-        // Draw mark and space frequency markers if decoder is initialized
-        if (this.decoder && this.decoder.mark_f && this.decoder.space_f) {
-            const markFreq = this.decoder.mark_f;
-            const spaceFreq = this.decoder.space_f;
+        // Draw mark and space frequency markers
+        const markFreq = this.config.center_frequency + (this.config.shift / 2);
+        const spaceFreq = this.config.center_frequency - (this.config.shift / 2);
 
-            // Draw mark frequency line (red)
-            const markX = (markFreq / maxDisplayFreq) * width;
-            ctx.strokeStyle = '#ff0000';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([5, 5]);
-            ctx.beginPath();
-            ctx.moveTo(markX, 0);
-            ctx.lineTo(markX, height);
-            ctx.stroke();
+        // Draw mark frequency line (red)
+        const markX = (markFreq / maxDisplayFreq) * width;
+        ctx.strokeStyle = '#ff0000';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(markX, 0);
+        ctx.lineTo(markX, height);
+        ctx.stroke();
 
-            // Draw space frequency line (blue)
-            const spaceX = (spaceFreq / maxDisplayFreq) * width;
-            ctx.strokeStyle = '#0000ff';
-            ctx.beginPath();
-            ctx.moveTo(spaceX, 0);
-            ctx.lineTo(spaceX, height);
-            ctx.stroke();
-            ctx.setLineDash([]);
+        // Draw space frequency line (blue)
+        const spaceX = (spaceFreq / maxDisplayFreq) * width;
+        ctx.strokeStyle = '#0000ff';
+        ctx.beginPath();
+        ctx.moveTo(spaceX, 0);
+        ctx.lineTo(spaceX, height);
+        ctx.stroke();
+        ctx.setLineDash([]);
 
-            // Draw labels
-            ctx.fillStyle = '#ff0000';
-            ctx.font = '10px monospace';
-            ctx.fillText(`Mark: ${markFreq.toFixed(0)} Hz`, markX + 5, 15);
+        // Draw labels
+        ctx.fillStyle = '#ff0000';
+        ctx.font = '10px monospace';
+        ctx.fillText(`Mark: ${markFreq.toFixed(0)} Hz`, markX + 5, 15);
 
-            ctx.fillStyle = '#0000ff';
-            ctx.fillText(`Space: ${spaceFreq.toFixed(0)} Hz`, spaceX + 5, 30);
-        }
+        ctx.fillStyle = '#0000ff';
+        ctx.fillText(`Space: ${spaceFreq.toFixed(0)} Hz`, spaceX + 5, 30);
 
         // Draw frequency scale
         ctx.fillStyle = '#666';
@@ -482,147 +622,6 @@ class FSKExtension extends DecoderExtension {
             const x = (freq / maxDisplayFreq) * width;
             ctx.fillText(freq + 'Hz', x + 2, height - 5);
         }
-    }
-
-    updateStatusIndicators() {
-        if (!this.decoder) return;
-
-        // Signal indicator - based on audio level
-        const signalIndicator = document.getElementById('fsk-signal-indicator');
-        if (signalIndicator) {
-            const hasSignal = this.decoder.audio_average > this.decoder.audio_minimum;
-            if (hasSignal !== this.signalDetected) {
-                this.signalDetected = hasSignal;
-                if (hasSignal) {
-                    signalIndicator.classList.add('active');
-                    console.log('FSK: Signal detected! audio_average:', this.decoder.audio_average);
-                } else {
-                    signalIndicator.classList.remove('active');
-                }
-            }
-        }
-
-        // Sync indicator - based on decoder state
-        const syncIndicator = document.getElementById('fsk-sync-indicator');
-        if (syncIndicator) {
-            const isSync = this.decoder.state === this.decoder.State_e.READ_DATA;
-
-            // Debug: Log state periodically
-            if (!this.lastStateLog || Date.now() - this.lastStateLog > 1000) {
-                console.log('FSK: Decoder state:', {
-                    state: this.decoder.state,
-                    stateName: this.decoder.states ? this.decoder.states[this.decoder.state] : 'unknown',
-                    READ_DATA_value: this.decoder.State_e ? this.decoder.State_e.READ_DATA : 'undefined',
-                    audioAverage: this.decoder.audio_average,
-                    validCount: this.decoder.valid_count,
-                    errorCount: this.decoder.error_count
-                });
-                this.lastStateLog = Date.now();
-            }
-
-            if (isSync !== this.syncLocked) {
-                this.syncLocked = isSync;
-                if (isSync) {
-                    syncIndicator.classList.add('active');
-                    console.log('FSK: Sync locked!');
-                } else {
-                    syncIndicator.classList.remove('active');
-                }
-            }
-        }
-
-        // Decode indicator - based on recent character output
-        const decodeIndicator = document.getElementById('fsk-decode-indicator');
-        if (decodeIndicator) {
-            const now = Date.now();
-            const isDecoding = (now - this.lastCharTime) < 2000; // Active if char within last 2 seconds
-            if (isDecoding) {
-                decodeIndicator.classList.add('active');
-            } else {
-                decodeIndicator.classList.remove('active');
-            }
-        }
-    }
-
-    updateAudioLevel(samples) {
-        // Calculate RMS level
-        let sum = 0;
-        for (let i = 0; i < samples.length; i++) {
-            sum += samples[i] * samples[i];
-        }
-        const rms = Math.sqrt(sum / samples.length);
-        
-        // Convert to dB
-        const db = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
-        
-        // Update UI (throttled to avoid excessive updates)
-        if (!this.lastAudioUpdate || Date.now() - this.lastAudioUpdate > 100) {
-            this.lastAudioUpdate = Date.now();
-            
-            const levelBar = document.getElementById('fsk-audio-level');
-            const dbText = document.getElementById('fsk-audio-db');
-            const statusText = document.getElementById('fsk-status-text');
-            
-            if (levelBar && dbText) {
-                // Scale dB to percentage (assuming -60dB to 0dB range)
-                const percentage = Math.max(0, Math.min(100, ((db + 60) / 60) * 100));
-                levelBar.style.width = percentage + '%';
-                
-                if (isFinite(db)) {
-                    dbText.textContent = db.toFixed(1) + ' dB';
-                    if (statusText && db > -40) {
-                        statusText.textContent = 'Receiving audio';
-                        statusText.style.color = '#4CAF50';
-                    } else if (statusText) {
-                        statusText.textContent = 'Waiting for signal';
-                        statusText.style.color = '#888';
-                    }
-                } else {
-                    dbText.textContent = '-∞ dB';
-                    if (statusText) {
-                        statusText.textContent = 'No audio';
-                        statusText.style.color = '#888';
-                    }
-                }
-            }
-        }
-    }
-
-    handleDecodedChar(char) {
-        if (typeof char === 'string') {
-            this.appendOutput(char);
-            // Track character decoding for status indicator
-            this.lastCharTime = Date.now();
-            this.charCount++;
-        }
-    }
-
-    appendOutput(text, className = '') {
-        const outputDiv = document.getElementById('fsk-output');
-        if (!outputDiv) return;
-
-        const span = document.createElement('span');
-        if (className) {
-            span.className = className;
-        }
-        span.textContent = text;
-        outputDiv.appendChild(span);
-
-        // Auto-scroll to bottom
-        outputDiv.scrollTop = outputDiv.scrollHeight;
-
-        // Limit buffer size
-        while (outputDiv.childNodes.length > this.maxBufferLines) {
-            outputDiv.removeChild(outputDiv.firstChild);
-        }
-    }
-
-    clearOutput() {
-        const outputDiv = document.getElementById('fsk-output');
-        if (outputDiv) {
-            outputDiv.innerHTML = '';
-        }
-        this.textBuffer = [];
     }
 
     onEnable() {

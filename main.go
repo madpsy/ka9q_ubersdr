@@ -21,6 +21,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/cwsl/ka9q_ubersdr/audio_extensions/fsk"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/navtex"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/sstv"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/wefax"
@@ -1002,6 +1003,35 @@ func main() {
 		},
 	)
 	log.Printf("Registered audio extension: navtex v%s", navtexInfo["version"].(string))
+
+	// Register FSK extension
+	fskInfo := fsk.GetInfo()
+
+	fskFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
+		fskParams := fsk.AudioExtensionParams{
+			SampleRate:    audioParams.SampleRate,
+			Channels:      audioParams.Channels,
+			BitsPerSample: audioParams.BitsPerSample,
+		}
+
+		fskExt, err := fsk.Factory(fskParams, extensionParams)
+		if err != nil {
+			return nil, err
+		}
+
+		return &fskExtensionWrapper{ext: fskExt}, nil
+	}
+
+	audioExtensionRegistry.Register(
+		"fsk",
+		fskFactoryWrapper,
+		AudioExtensionInfo{
+			Name:        fskInfo["name"].(string),
+			Description: fskInfo["description"].(string),
+			Version:     fskInfo["version"].(string),
+		},
+	)
+	log.Printf("Registered audio extension: fsk v%s", fskInfo["version"].(string))
 
 	// Register SSTV extension
 	sstvInfo := sstv.GetInfo()
@@ -4256,6 +4286,23 @@ func (w *navtexExtensionWrapper) Stop() error {
 }
 
 func (w *navtexExtensionWrapper) GetName() string {
+	return w.ext.GetName()
+}
+
+// fskExtensionWrapper wraps a fsk.AudioExtension to implement main.AudioExtension
+type fskExtensionWrapper struct {
+	ext fsk.AudioExtension
+}
+
+func (w *fskExtensionWrapper) Start(audioChan <-chan []int16, resultChan chan<- []byte) error {
+	return w.ext.Start(audioChan, resultChan)
+}
+
+func (w *fskExtensionWrapper) Stop() error {
+	return w.ext.Stop()
+}
+
+func (w *fskExtensionWrapper) GetName() string {
 	return w.ext.GetName()
 }
 

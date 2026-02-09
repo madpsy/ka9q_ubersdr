@@ -30,6 +30,7 @@ class NAVTEXExtension extends DecoderExtension {
         this.autoScroll = true;
         this.baudError = 0;
         this.needsTimestamp = true; // Track if we need to add timestamp at start of line
+        this.consoleLines = 50; // Default number of visible lines
 
         // Binary message handler
         this.binaryMessageHandler = null;
@@ -60,6 +61,7 @@ class NAVTEXExtension extends DecoderExtension {
                 console.log('NAVTEX: All DOM elements found, setting up...');
                 this.setupBaudCanvas();
                 this.setupEventHandlers();
+                this.updateConsoleHeight(); // Set initial console height
                 console.log('NAVTEX: Setup complete');
             } else if (attempts < maxAttempts) {
                 console.log(`NAVTEX: Waiting for DOM elements (attempt ${attempts + 1}/${maxAttempts})`);
@@ -101,7 +103,52 @@ class NAVTEXExtension extends DecoderExtension {
             return;
         }
 
+        // Check if canvas is in DOM
+        const inDOM = document.body.contains(this.baudCanvas);
+        console.log('NAVTEX: Baud canvas found, in DOM:', inDOM);
+        
+        // If canvas is not in DOM, recreate it
+        if (!inDOM) {
+            const indicator = document.getElementById('navtex-baud-error-indicator');
+            if (indicator) {
+                console.log('NAVTEX: Baud canvas not in DOM, re-creating');
+                // Find or create canvas container within the indicator
+                let canvasSpot = indicator.querySelector('.navtex-baud-canvas-spot');
+                if (!canvasSpot) {
+                    // Create a span to hold the canvas if it doesn't exist
+                    canvasSpot = document.createElement('span');
+                    canvasSpot.className = 'navtex-baud-canvas-spot';
+                    // Insert after the label
+                    const label = indicator.querySelector('.navtex-baud-label');
+                    if (label && label.nextSibling) {
+                        indicator.insertBefore(canvasSpot, label.nextSibling);
+                    } else {
+                        indicator.appendChild(canvasSpot);
+                    }
+                }
+                
+                // Clear and create new canvas
+                canvasSpot.innerHTML = '';
+                this.baudCanvas = document.createElement('canvas');
+                this.baudCanvas.id = 'navtex-baud-canvas';
+                this.baudCanvas.className = 'navtex-baud-canvas';
+                this.baudCanvas.width = 40;
+                this.baudCanvas.height = 60;
+                canvasSpot.appendChild(this.baudCanvas);
+                console.log('NAVTEX: Baud canvas re-created, in DOM:', document.body.contains(this.baudCanvas));
+            } else {
+                console.error('NAVTEX: Baud indicator not found, cannot attach canvas');
+                return;
+            }
+        }
+
         this.baudCtx = this.baudCanvas.getContext('2d');
+        
+        // Force canvas to be visible
+        this.baudCanvas.style.display = 'inline-block';
+        
+        // Initialize with a test draw
+        console.log('NAVTEX: Baud canvas initialized, size:', this.baudCanvas.width, 'x', this.baudCanvas.height);
         this.drawBaudError(0);
     }
 
@@ -153,6 +200,10 @@ class NAVTEXExtension extends DecoderExtension {
             } else if (e.target.id === 'navtex-auto-scroll') {
                 this.autoScroll = e.target.checked;
                 console.log('NAVTEX: Auto-scroll:', this.autoScroll);
+            } else if (e.target.id === 'navtex-console-lines') {
+                this.consoleLines = parseInt(e.target.value);
+                this.updateConsoleHeight();
+                console.log('NAVTEX: Console lines:', this.consoleLines);
             } else if (e.target.id.startsWith('navtex-')) {
                 // Config change
                 if (!this.running) {
@@ -642,6 +693,23 @@ class NAVTEXExtension extends DecoderExtension {
     onProcessAudio(dataArray) {
         // NAVTEX extension doesn't process audio directly
         // Audio is processed by the backend extension
+    }
+
+    updateConsoleHeight() {
+        const container = document.getElementById('navtex-console-container');
+        if (!container) return;
+
+        // Calculate height based on number of lines
+        // Assuming ~18px per line (13px font + 1.4 line-height = ~18px)
+        const lineHeight = 18;
+        const padding = 20; // 10px top + 10px bottom
+        const height = (this.consoleLines * lineHeight) + padding;
+
+        container.style.height = height + 'px';
+        container.style.minHeight = height + 'px';
+        container.style.maxHeight = height + 'px';
+
+        console.log(`NAVTEX: Console height set to ${this.consoleLines} lines (${height}px)`);
     }
 }
 

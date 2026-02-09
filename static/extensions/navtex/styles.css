@@ -213,13 +213,14 @@ input[type="checkbox"] {
 
 /* Text Console Container */
 .navtex-console-container {
-    flex: 1;
     overflow: auto;
     background: #0a0a0a;
     border: 1px solid #3a3a3a;
     border-radius: 4px;
     position: relative;
-    min-height: 400px;
+    height: 920px; /* Default: 50 lines * 18px + 20px padding */
+    min-height: 920px;
+    max-height: 920px;
 }
 
 .navtex-console {

@@ -251,7 +251,7 @@ class FSKExtension extends DecoderExtension {
         }
 
         this.appendOutput('=== FSK Decoder Started ===\n', 'info');
-        this.appendOutput(`Mode: ${this.config.encoding}, Baud: ${this.config.baud}, Shift: ${this.config.shift} Hz\n', 'info');
+        this.appendOutput(`Mode: ${this.config.encoding}, Baud: ${this.config.baud}, Shift: ${this.config.shift} Hz\n`, 'info');
     }
 
     stopDecoding() {

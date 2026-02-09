@@ -1,9 +1,9 @@
 {
   "name": "fsk",
   "displayName": "FSK/RTTY Decoder",
-  "version": "1.0.0",
-  "description": "FSK/RTTY decoder supporting ITA2 (Baudot), ASCII, and CCIR476 (SITOR-B) modes",
-  "author": "UberSDR (based on KiwiSDR FSK by John Seamons, ZL4VO/KF6VO)",
+  "version": "2.0.0",
+  "description": "FSK/RTTY decoder supporting ITA2 (Baudot), ASCII, and CCIR476 (SITOR-B) modes - Backend-based decoder",
+  "author": "UberSDR",
   "type": "decoder",
   "icon": "📟",
   "category": "decoder",
@@ -13,12 +13,7 @@
     "main": "main.js",
     "styles": ["styles.css"],
     "template": "template.html",
-    "scripts": [
-      "BiQuadraticFilter.js",
-      "FSK_async.js",
-      "CCIR476.js",
-      "JNX.js"
-    ]
+    "scripts": []
   },
   "settings": {
     "shift": {

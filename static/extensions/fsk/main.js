@@ -470,6 +470,7 @@ class FSKExtension extends DecoderExtension {
                 this.signalDetected = hasSignal;
                 if (hasSignal) {
                     signalIndicator.classList.add('active');
+                    console.log('FSK: Signal detected! audio_average:', this.decoder.audio_average);
                 } else {
                     signalIndicator.classList.remove('active');
                 }
@@ -480,10 +481,25 @@ class FSKExtension extends DecoderExtension {
         const syncIndicator = document.getElementById('fsk-sync-indicator');
         if (syncIndicator) {
             const isSync = this.decoder.state === this.decoder.State_e.READ_DATA;
+
+            // Debug: Log state periodically
+            if (!this.lastStateLog || Date.now() - this.lastStateLog > 1000) {
+                console.log('FSK: Decoder state:', {
+                    state: this.decoder.state,
+                    stateName: this.decoder.states ? this.decoder.states[this.decoder.state] : 'unknown',
+                    READ_DATA_value: this.decoder.State_e ? this.decoder.State_e.READ_DATA : 'undefined',
+                    audioAverage: this.decoder.audio_average,
+                    validCount: this.decoder.valid_count,
+                    errorCount: this.decoder.error_count
+                });
+                this.lastStateLog = Date.now();
+            }
+
             if (isSync !== this.syncLocked) {
                 this.syncLocked = isSync;
                 if (isSync) {
                     syncIndicator.classList.add('active');
+                    console.log('FSK: Sync locked!');
                 } else {
                     syncIndicator.classList.remove('active');
                 }

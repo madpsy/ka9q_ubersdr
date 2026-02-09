@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 )
 
 /*
@@ -50,7 +51,8 @@ type SSTVDecoder struct {
 	config SSTVConfig
 
 	// State tracking
-	visLoggedOnce bool
+	visLoggedOnce      bool
+	lastToneFreqReport int64 // Unix timestamp in milliseconds
 }
 
 // SSTVConfig contains decoder configuration
@@ -210,9 +212,14 @@ func (d *SSTVDecoder) detectVISFromBuffer(pcmBuffer []int16, resultChan chan<- [
 	// Create VIS detector
 	d.visDetector = NewVISDetector(d.sampleRate)
 
-	// Set tone frequency callback to send updates to frontend
+	// Set tone frequency callback to send updates to frontend (with throttling)
 	d.visDetector.SetToneCallback(func(freq float64) {
-		d.sendToneFreq(resultChan, freq)
+		now := time.Now().UnixMilli()
+		// Only send if at least 500ms has passed since last report
+		if now-d.lastToneFreqReport >= 500 {
+			d.sendToneFreq(resultChan, freq)
+			d.lastToneFreqReport = now
+		}
 	})
 
 	// Try to detect VIS

@@ -16,7 +16,7 @@ type AudioExtensionManager struct {
 	activeExtensions   map[string]*ActiveAudioExtension
 	activeExtensionsMu sync.RWMutex
 
-	// Reference to websocket handler for sending messages
+	// Reference to websocket handler for sending messages (uses its mutex system)
 	wsHandler *DXClusterWebSocketHandler
 
 	// Reference to session manager for audio tap
@@ -35,7 +35,6 @@ type ActiveAudioExtension struct {
 	ResultChan    chan []byte
 	StopChan      chan struct{}
 	Conn          *websocket.Conn
-	ConnMu        sync.Mutex
 	Running       bool
 	StartedAt     time.Time
 }
@@ -237,17 +236,11 @@ func (aem *AudioExtensionManager) forwardResults(activeExtension *ActiveAudioExt
 				return
 			}
 
-			// Send binary message to client
-			activeExtension.ConnMu.Lock()
-			if activeExtension.Conn != nil {
-				activeExtension.Conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-				if err := activeExtension.Conn.WriteMessage(websocket.BinaryMessage, binaryData); err != nil {
-					log.Printf("AudioExtension: Failed to send result to session %s: %v", activeExtension.SessionID, err)
-					activeExtension.ConnMu.Unlock()
-					return
-				}
+			// Send binary message to client using the websocket handler's mutex system
+			if err := aem.sendBinaryMessage(activeExtension.Conn, binaryData); err != nil {
+				log.Printf("AudioExtension: Failed to send result to session %s: %v", activeExtension.SessionID, err)
+				return
 			}
-			activeExtension.ConnMu.Unlock()
 
 		case <-activeExtension.StopChan:
 			return
@@ -324,22 +317,37 @@ func (aem *AudioExtensionManager) sendTextMessageWithConn(conn *websocket.Conn, 
 	return conn.WriteMessage(websocket.TextMessage, messageJSON)
 }
 
-// sendTextMessageSafe sends a JSON text message to the client with mutex protection
+// sendTextMessageSafe sends a JSON text message to the client using the DXCluster handler's mutex
 func (aem *AudioExtensionManager) sendTextMessageSafe(activeExtension *ActiveAudioExtension, message map[string]interface{}) error {
-	messageJSON, err := json.Marshal(message)
-	if err != nil {
-		return fmt.Errorf("failed to marshal message: %v", err)
-	}
-
-	activeExtension.ConnMu.Lock()
-	defer activeExtension.ConnMu.Unlock()
-
 	if activeExtension.Conn == nil {
 		return fmt.Errorf("connection is nil")
 	}
 
-	activeExtension.Conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	return activeExtension.Conn.WriteMessage(websocket.TextMessage, messageJSON)
+	// Use the DXCluster handler's sendMessage which has proper mutex coordination
+	return aem.wsHandler.sendMessage(activeExtension.Conn, message)
+}
+
+// sendBinaryMessage sends a binary message to the client using the DXCluster handler's mutex system
+func (aem *AudioExtensionManager) sendBinaryMessage(conn *websocket.Conn, data []byte) error {
+	if conn == nil {
+		return fmt.Errorf("connection is nil")
+	}
+
+	// Get the write mutex for this connection from the DXCluster handler
+	aem.wsHandler.clientsMu.RLock()
+	writeMu, exists := aem.wsHandler.clients[conn]
+	aem.wsHandler.clientsMu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("connection not found in handler")
+	}
+
+	// Lock before writing (using the same mutex as the DXCluster handler)
+	writeMu.Lock()
+	defer writeMu.Unlock()
+
+	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	return conn.WriteMessage(websocket.BinaryMessage, data)
 }
 
 // sendErrorSafe sends an error message to the client with proper mutex protection

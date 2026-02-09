@@ -185,11 +185,6 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 		v.headerBuf[v.headerPtr] = peakFreq
 		v.headerPtr = (v.headerPtr + 1) % len(v.headerBuf)
 
-		// Debug logging every 100 iterations (~1 second)
-		if v.headerPtr%100 == 0 {
-			log.Printf("[SSTV VIS] Detected frequency: %.1f Hz (looking for ~1900 Hz leader)", peakFreq)
-		}
-
 		// Copy recent frequencies to tone buffer
 		for i := 0; i < toneWin && i < len(v.toneBuf); i++ {
 			idx := (v.headerPtr - 1 - i + len(v.headerBuf)) % len(v.headerBuf)

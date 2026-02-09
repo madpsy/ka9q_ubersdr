@@ -135,6 +135,27 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 	// Formats like 4/7 (CCIR476) do not
 	d.stopVariable = (framing != "4/7" && framing != "7/3")
 
+	// Determine bit count from framing string
+	// Framing format: <data_bits>N<stop_bits> or <data_bits>/<check_bits>
+	// Examples: 5N1.5, 7N1, 8N1, 4/7
+	var dataBits int
+	if len(framing) > 0 {
+		switch framing[0] {
+		case '5':
+			dataBits = 5
+		case '7':
+			dataBits = 7
+		case '8':
+			dataBits = 8
+		case '4':
+			dataBits = 7 // 4/7 CCIR476 uses 7 bits
+		default:
+			dataBits = 5 // Default to 5-bit
+		}
+	} else {
+		dataBits = 5
+	}
+
 	// Initialize encoding
 	switch encoding {
 	case "CCIR476":
@@ -148,12 +169,11 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 		d.nbits = ita2.GetNBits()
 		d.msb = ita2.GetMSB()
 	case "ASCII":
-		// ASCII would be 7 or 8 bits - not implemented yet
-		log.Printf("[FSK] ASCII encoding not yet implemented, using ITA2")
-		ita2 := NewITA2()
-		d.charEncoding = ita2
-		d.nbits = ita2.GetNBits()
-		d.msb = ita2.GetMSB()
+		// ASCII uses 7 or 8 bits based on framing
+		ascii := NewASCII(dataBits)
+		d.charEncoding = ascii
+		d.nbits = ascii.GetNBits()
+		d.msb = ascii.GetMSB()
 	default:
 		log.Printf("[FSK] Unsupported encoding: %s, using ITA2", encoding)
 		ita2 := NewITA2()

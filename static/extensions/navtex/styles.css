@@ -117,10 +117,11 @@
     border-radius: 2px;
     background: #0a0a0a;
     vertical-align: middle;
-    width: 40px !important;
-    height: 60px !important;
+    /* Don't set CSS width/height - let canvas attributes control size */
     min-width: 40px;
     min-height: 60px;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
 }
 
 .navtex-baud-value {

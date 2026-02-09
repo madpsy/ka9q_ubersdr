@@ -32,16 +32,20 @@ class FSKExtension extends DecoderExtension {
         this.processingInterval = null;
         this.textBuffer = [];
         this.maxBufferLines = 1000;
-        
+
         // Audio processing
         this.scriptProcessor = null;
         this.analyserNode = null;
-        
+
         // Status tracking
         this.lastCharTime = 0;
         this.charCount = 0;
         this.signalDetected = false;
         this.syncLocked = false;
+
+        // Spectrum visualization
+        this.spectrumCanvas = null;
+        this.spectrumCtx = null;
     }
 
     onInitialize() {
@@ -67,6 +71,7 @@ class FSKExtension extends DecoderExtension {
 
             if (outputDiv && startBtn && clearBtn) {
                 console.log('FSK: All DOM elements found, setting up...');
+                this.setupCanvas();
                 this.setupEventHandlers();
                 console.log('FSK: Setup complete');
             } else if (attempts < maxAttempts) {
@@ -100,6 +105,18 @@ class FSKExtension extends DecoderExtension {
             console.error('FSK: Extension content container not found');
         }
         return container;
+    }
+
+    setupCanvas() {
+        this.spectrumCanvas = document.getElementById('fsk-spectrum-canvas');
+        if (this.spectrumCanvas) {
+            this.spectrumCtx = this.spectrumCanvas.getContext('2d');
+            // Set canvas size to match display size
+            const rect = this.spectrumCanvas.getBoundingClientRect();
+            this.spectrumCanvas.width = rect.width;
+            this.spectrumCanvas.height = rect.height;
+            console.log('FSK: Spectrum canvas initialized');
+        }
     }
 
     setupEventHandlers() {
@@ -322,12 +339,106 @@ class FSKExtension extends DecoderExtension {
         // Calculate audio level for indicator
         this.updateAudioLevel(dataArray);
 
+        // Draw spectrum visualization
+        this.drawSpectrum(dataArray);
+
         // Convert Float32Array to regular array and process
         const samples = Array.from(dataArray);
         this.decoder.process_data(samples, samples.length);
 
         // Update status indicators based on decoder state
         this.updateStatusIndicators();
+    }
+
+    drawSpectrum(dataArray) {
+        if (!this.spectrumCanvas || !this.spectrumCtx) return;
+
+        const ctx = this.spectrumCtx;
+        const canvas = this.spectrumCanvas;
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // Clear canvas
+        ctx.fillStyle = '#0a0a0a';
+        ctx.fillRect(0, 0, width, height);
+
+        // Get frequency data
+        const analyser = this.radio.getAnalyser();
+        if (!analyser) return;
+
+        const bufferLength = analyser.frequencyBinCount;
+        const freqData = new Uint8Array(bufferLength);
+        analyser.getByteFrequencyData(freqData);
+
+        // Calculate frequency range to display (0-3000 Hz)
+        const sampleRate = window.audioContext ? window.audioContext.sampleRate : 48000;
+        const nyquist = sampleRate / 2;
+        const maxDisplayFreq = 3000;
+        const binWidth = nyquist / bufferLength;
+        const maxBin = Math.min(bufferLength, Math.floor(maxDisplayFreq / binWidth));
+
+        // Draw spectrum bars
+        const barWidth = width / maxBin;
+        ctx.fillStyle = '#4CAF50';
+
+        for (let i = 0; i < maxBin; i++) {
+            const barHeight = (freqData[i] / 255) * height;
+            const x = i * barWidth;
+            const y = height - barHeight;
+
+            // Color based on intensity
+            const intensity = freqData[i] / 255;
+            if (intensity > 0.7) {
+                ctx.fillStyle = '#FF5722';
+            } else if (intensity > 0.4) {
+                ctx.fillStyle = '#FFC107';
+            } else {
+                ctx.fillStyle = '#4CAF50';
+            }
+
+            ctx.fillRect(x, y, barWidth - 1, barHeight);
+        }
+
+        // Draw mark and space frequency markers if decoder is initialized
+        if (this.decoder && this.decoder.mark_f && this.decoder.space_f) {
+            const markFreq = this.decoder.mark_f;
+            const spaceFreq = this.decoder.space_f;
+
+            // Draw mark frequency line (red)
+            const markX = (markFreq / maxDisplayFreq) * width;
+            ctx.strokeStyle = '#ff0000';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(markX, 0);
+            ctx.lineTo(markX, height);
+            ctx.stroke();
+
+            // Draw space frequency line (blue)
+            const spaceX = (spaceFreq / maxDisplayFreq) * width;
+            ctx.strokeStyle = '#0000ff';
+            ctx.beginPath();
+            ctx.moveTo(spaceX, 0);
+            ctx.lineTo(spaceX, height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Draw labels
+            ctx.fillStyle = '#ff0000';
+            ctx.font = '10px monospace';
+            ctx.fillText(`Mark: ${markFreq.toFixed(0)} Hz`, markX + 5, 15);
+
+            ctx.fillStyle = '#0000ff';
+            ctx.fillText(`Space: ${spaceFreq.toFixed(0)} Hz`, spaceX + 5, 30);
+        }
+
+        // Draw frequency scale
+        ctx.fillStyle = '#666';
+        ctx.font = '9px monospace';
+        for (let freq = 0; freq <= maxDisplayFreq; freq += 500) {
+            const x = (freq / maxDisplayFreq) * width;
+            ctx.fillText(freq + 'Hz', x + 2, height - 5);
+        }
     }
 
     updateStatusIndicators() {

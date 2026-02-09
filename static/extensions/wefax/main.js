@@ -21,7 +21,8 @@ class WEFAXExtension extends DecoderExtension {
             image_width: 1809,
             bandwidth: 1,
             use_phasing: true,
-            auto_stop: false
+            auto_stop: false,
+            auto_start: false
         };
 
         // State
@@ -222,7 +223,8 @@ class WEFAXExtension extends DecoderExtension {
             'wefax-image-width',
             'wefax-bandwidth',
             'wefax-use-phasing',
-            'wefax-auto-stop'
+            'wefax-auto-stop',
+            'wefax-auto-start'
         ];
 
         configInputs.forEach(id => {
@@ -299,6 +301,7 @@ class WEFAXExtension extends DecoderExtension {
         this.config.bandwidth = parseInt(document.getElementById('wefax-bandwidth').value);
         this.config.use_phasing = document.getElementById('wefax-use-phasing').checked;
         this.config.auto_stop = document.getElementById('wefax-auto-stop').checked;
+        this.config.auto_start = document.getElementById('wefax-auto-start').checked;
 
         console.log('WEFAX: Config updated:', this.config);
     }
@@ -380,7 +383,8 @@ class WEFAXExtension extends DecoderExtension {
             'wefax-image-width',
             'wefax-bandwidth',
             'wefax-use-phasing',
-            'wefax-auto-stop'
+            'wefax-auto-stop',
+            'wefax-auto-start'
         ];
 
         configInputs.forEach(id => {
@@ -413,7 +417,8 @@ class WEFAXExtension extends DecoderExtension {
                 image_width: this.config.image_width,
                 bandwidth: this.config.bandwidth,
                 use_phasing: this.config.use_phasing,
-                auto_stop: this.config.auto_stop
+                auto_stop: this.config.auto_stop,
+                auto_start: this.config.auto_start
             }
         };
 

@@ -45,9 +45,9 @@ func NewFIRFilter(bandwidth Bandwidth) *FIRFilter {
 func (f *FIRFilter) Apply(sample float64) float64 {
 	// Low pass filter coefficients from ACfax
 	lpfCoeff := [3][17]float64{
-		{-7, -18, -15, 11, 56, 116, 177, 223, 240, 223, 177, 116, 56, 11, -15, -18, -7},   // Narrow
-		{0, -18, -38, -39, 0, 83, 191, 284, 320, 284, 191, 83, 0, -39, -38, -18, 0},       // Middle
-		{6, 20, 7, -42, -74, -12, 159, 353, 440, 353, 159, -12, -74, -42, 7, 20, 6},       // Wide
+		{-7, -18, -15, 11, 56, 116, 177, 223, 240, 223, 177, 116, 56, 11, -15, -18, -7}, // Narrow
+		{0, -18, -38, -39, 0, 83, 191, 284, 320, 284, 191, 83, 0, -39, -38, -18, 0},     // Middle
+		{6, 20, 7, -42, -74, -12, 159, 353, 440, 353, 159, -12, -74, -42, 7, 20, 6},     // Wide
 	}
 
 	coeff := lpfCoeff[f.bandwidth]
@@ -87,6 +87,7 @@ type WEFAXDecoder struct {
 	includeHeadersInImages   bool    // Include start/stop headers in image
 	usePhasing               bool    // Use phasing line detection
 	autoStop                 bool    // Auto-stop on stop signal
+	autoStart                bool    // Auto-start on start signal (don't decode until START detected)
 	skipHeaderDetection      bool    // Skip header detection
 
 	// Sample rate
@@ -102,11 +103,11 @@ type WEFAXDecoder struct {
 	qPrev      float64
 
 	// Sample buffering
-	samples    []int16
-	sampIdx    int
-	fi         float64
-	demodData  []uint8
-	skip       int
+	samples   []int16
+	sampIdx   int
+	fi        float64
+	demodData []uint8
+	skip      int
 
 	// Image state
 	imgData      []uint8
@@ -136,6 +137,7 @@ type WEFAXDecoder struct {
 
 	// Control
 	autoStopped bool
+	autoStarted bool // Track if START signal has been detected (for auto_start mode)
 	running     bool
 	mu          sync.Mutex
 	stopChan    chan struct{}
@@ -154,6 +156,7 @@ type WEFAXConfig struct {
 	IncludeHeadersInImages   bool      `json:"include_headers_in_images"`  // Include headers in output
 	UsePhasing               bool      `json:"use_phasing"`                // Use phasing line detection
 	AutoStop                 bool      `json:"auto_stop"`                  // Auto-stop on stop signal
+	AutoStart                bool      `json:"auto_start"`                 // Auto-start on start signal (wait for START before decoding)
 }
 
 // DefaultWEFAXConfig returns default configuration
@@ -169,6 +172,7 @@ func DefaultWEFAXConfig() WEFAXConfig {
 		IncludeHeadersInImages:   false,
 		UsePhasing:               true,
 		AutoStop:                 false,
+		AutoStart:                false,
 	}
 }
 
@@ -184,6 +188,7 @@ func NewWEFAXDecoder(sampleRate int, config WEFAXConfig) *WEFAXDecoder {
 		includeHeadersInImages:   config.IncludeHeadersInImages,
 		usePhasing:               config.UsePhasing,
 		autoStop:                 config.AutoStop,
+		autoStart:                config.AutoStart,
 		samplesPerSecNom:         float64(sampleRate),
 		samplesPerSecFrac:        float64(sampleRate),
 		samplesPerSecFracPrev:    float64(sampleRate),
@@ -201,8 +206,8 @@ func NewWEFAXDecoder(sampleRate int, config WEFAXConfig) *WEFAXDecoder {
 	d.firFilters[0] = NewFIRFilter(config.Bandwidth)
 	d.firFilters[1] = NewFIRFilter(config.Bandwidth)
 
-	// Skip header detection if not using phasing or autostop
-	d.skipHeaderDetection = !d.usePhasing && !d.autoStop
+	// Skip header detection if not using phasing, autostop, or autostart
+	d.skipHeaderDetection = !d.usePhasing && !d.autoStop && !d.autoStart
 
 	// Calculate samples per line
 	samplesPerMin := d.samplesPerSecNom * 60.0
@@ -368,10 +373,20 @@ func (d *WEFAXDecoder) decodeFaxLine(resultChan chan<- []byte) {
 					d.autoStopped = false
 					log.Printf("[WEFAX] Auto-stop cleared at line %d", d.imageLine)
 				}
+				// Handle auto-start
+				if d.autoStart && !d.autoStarted {
+					d.autoStarted = true
+					log.Printf("[WEFAX] Auto-start: START signal detected, beginning decode at line %d", d.imageLine)
+				}
 			} else if lineType == HeaderStop {
 				if d.autoStop {
 					d.autoStopped = true
 					log.Printf("[WEFAX] Auto-stopped at line %d", d.imageLine)
+				}
+				// Reset auto-start flag on STOP signal
+				if d.autoStart && d.autoStarted {
+					d.autoStarted = false
+					log.Printf("[WEFAX] Auto-start: STOP signal detected, waiting for next START at line %d", d.imageLine)
 				}
 			}
 		}
@@ -411,8 +426,12 @@ func (d *WEFAXDecoder) decodeFaxLine(resultChan chan<- []byte) {
 			d.imgData = newData
 		}
 
-		// Decode the line
-		if !d.autoStopped {
+		// Decode the line only if:
+		// - Not auto-stopped (if auto-stop is enabled)
+		// - Auto-started (if auto-start is enabled), or auto-start is disabled
+		shouldDecode := !d.autoStopped && (!d.autoStart || d.autoStarted)
+
+		if shouldDecode {
 			d.decodeImageLine(d.demodData, resultChan)
 		}
 

@@ -59,6 +59,11 @@
       "type": "boolean",
       "default": false,
       "description": "Auto-stop on stop signal detection"
+    },
+    "autoStart": {
+      "type": "boolean",
+      "default": false,
+      "description": "Auto-start on start signal detection (wait for START before decoding)"
     }
   }
 }

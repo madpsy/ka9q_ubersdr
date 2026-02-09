@@ -2,6 +2,7 @@ package fsk
 
 // ITA2 implements the ITA2 (Baudot) character encoding used by RTTY
 // Also known as CCITT-2 or Baudot code
+// This handles the character encoding only - framing is handled by AsyncFraming
 type ITA2 struct {
 	// Character tables
 	ltrs [32]rune
@@ -13,13 +14,22 @@ type ITA2 struct {
 	// Special codes
 	letters byte
 	figures byte
+
+	// Async framing handler
+	framing *AsyncFraming
 }
 
-// NewITA2 creates a new ITA2 decoder
-func NewITA2() *ITA2 {
+// NewITA2 creates a new ITA2 decoder with async framing
+func NewITA2(framingStr string) (*ITA2, error) {
+	framing, err := NewAsyncFraming(framingStr)
+	if err != nil {
+		return nil, err
+	}
+
 	i := &ITA2{
 		letters: 0x1F,
 		figures: 0x1B,
+		framing: framing,
 	}
 
 	// Initialize letter table (5-bit codes)
@@ -94,7 +104,7 @@ func NewITA2() *ITA2 {
 		0x1F: 0, // LTRS
 	}
 
-	return i
+	return i, nil
 }
 
 // Reset resets the decoder state
@@ -102,26 +112,33 @@ func (i *ITA2) Reset() {
 	i.shift = false
 }
 
-// GetNBits returns the number of bits per character (5)
+// GetNBits returns the total number of bits per character (including framing)
 func (i *ITA2) GetNBits() int {
-	return 5
+	return i.framing.GetNBits()
 }
 
-// GetMSB returns the MSB mask for 5-bit characters
+// GetMSB returns the MSB mask for the total bit count
 func (i *ITA2) GetMSB() byte {
-	return 0x10
+	return i.framing.GetMSB()
 }
 
-// CheckBits checks if a code is valid (always true for ITA2)
+// CheckBits checks if a code is valid and extracts data bits
 func (i *ITA2) CheckBits(code byte) bool {
-	return true // ITA2 has no error detection
+	_, valid := i.framing.CheckBitsAndExtract(uint32(code))
+	return valid
 }
 
-// ProcessChar processes a received character code
+// ProcessChar processes a received character code with framing
 // Returns the decoded character (if any) and whether it was successful
 func (i *ITA2) ProcessChar(code byte) (rune, bool) {
-	// Mask to 5 bits
-	code &= 0x1F
+	// Extract data bits from framed code
+	dataCode, valid := i.framing.CheckBitsAndExtract(uint32(code))
+	if !valid {
+		return 0, false
+	}
+
+	// Mask to 5 bits (data bits)
+	code = dataCode & 0x1F
 
 	// Check for shift codes
 	if code == i.letters {

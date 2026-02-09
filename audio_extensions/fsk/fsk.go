@@ -76,11 +76,11 @@ type FSKDemodulator struct {
 
 	// Bit synchronization
 	bitCount     int
-	codeBits     byte
+	codeBits     uint32 // Changed from byte to uint32 to handle up to 15 bits for 5N1.5
 	nbits        int
 	msb          byte
 	syncSetup    bool
-	syncChars    []byte
+	syncChars    []uint32 // Changed from []byte to []uint32
 	validCount   int
 	errorCount   int
 	waiting      bool
@@ -131,29 +131,15 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 	d.halfBitSampleCount = d.bitSampleCount / 2
 
 	// Determine if framing has variable stop bits (needs start bit detection)
-	// Formats like 5N1.5, 5N2, 7N1, 8N1 have variable stop bits
-	// Formats like 4/7 (CCIR476) do not
-	d.stopVariable = (framing != "4/7" && framing != "7/3")
-
-	// Determine bit count from framing string
-	// Framing format: <data_bits>N<stop_bits> or <data_bits>/<check_bits>
-	// Examples: 5N1.5, 7N1, 8N1, 4/7
-	var dataBits int
+	// In KiwiSDR, stop_variable is set for framings ending with 'V' or containing 'EFR'
+	// Standard framings like 5N1.5, 5N2, 7N1, 8N1 do NOT have variable stop bits
+	// Only special modes like EFR (Enhanced Frequency Response) use variable stop bits
+	d.stopVariable = false
 	if len(framing) > 0 {
-		switch framing[0] {
-		case '5':
-			dataBits = 5
-		case '7':
-			dataBits = 7
-		case '8':
-			dataBits = 8
-		case '4':
-			dataBits = 7 // 4/7 CCIR476 uses 7 bits
-		default:
-			dataBits = 5 // Default to 5-bit
+		// Check if framing ends with 'V' or contains 'EFR'
+		if framing[len(framing)-1] == 'V' || len(framing) >= 3 && framing[len(framing)-3:] == "EFR" {
+			d.stopVariable = true
 		}
-	} else {
-		dataBits = 5
 	}
 
 	// Initialize encoding
@@ -164,19 +150,31 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 		d.nbits = ccir.GetNBits()
 		d.msb = ccir.GetMSB()
 	case "ITA2":
-		ita2 := NewITA2()
+		ita2, err := NewITA2(framing)
+		if err != nil {
+			log.Printf("[FSK] Failed to create ITA2 decoder: %v, using default", err)
+			ita2, _ = NewITA2("5N1.5")
+		}
 		d.charEncoding = ita2
 		d.nbits = ita2.GetNBits()
 		d.msb = ita2.GetMSB()
 	case "ASCII":
 		// ASCII uses 7 or 8 bits based on framing
-		ascii := NewASCII(dataBits)
+		ascii, err := NewASCII(framing)
+		if err != nil {
+			log.Printf("[FSK] Failed to create ASCII decoder: %v, using default", err)
+			ascii, _ = NewASCII("7N1")
+		}
 		d.charEncoding = ascii
 		d.nbits = ascii.GetNBits()
 		d.msb = ascii.GetMSB()
 	default:
 		log.Printf("[FSK] Unsupported encoding: %s, using ITA2", encoding)
-		ita2 := NewITA2()
+		ita2, err := NewITA2(framing)
+		if err != nil {
+			log.Printf("[FSK] Failed to create ITA2 decoder: %v, using default", err)
+			ita2, _ = NewITA2("5N1.5")
+		}
 		d.charEncoding = ita2
 		d.nbits = ita2.GetNBits()
 		d.msb = ita2.GetMSB()
@@ -343,10 +341,11 @@ func (d *FSKDemodulator) ProcessSamples(samples []int16) {
 
 // processBit processes a single decoded bit
 func (d *FSKDemodulator) processBit(bit bool) {
-	bitVal := byte(0)
+	bitVal := uint32(0)
 	if bit {
 		bitVal = 1
 	}
+	msbVal := uint32(d.msb)
 
 	if d.syncSetup {
 		d.bitCount = 0
@@ -367,8 +366,8 @@ func (d *FSKDemodulator) processBit(bit bool) {
 
 	case StateSync1:
 		// Scan indefinitely for valid bit pattern
-		d.codeBits = (d.codeBits >> 1) | (bitVal * d.msb)
-		if d.charEncoding != nil && d.charEncoding.CheckBits(d.codeBits) {
+		d.codeBits = (d.codeBits >> 1) | (bitVal * msbVal)
+		if d.charEncoding != nil && d.charEncoding.CheckBits(byte(d.codeBits)) {
 			d.syncChars = append(d.syncChars, d.codeBits)
 			d.validCount++
 			d.bitCount = 0
@@ -386,11 +385,11 @@ func (d *FSKDemodulator) processBit(bit bool) {
 		d.waiting = false
 
 		// Sample and validate bits in groups of nbits
-		d.codeBits = (d.codeBits >> 1) | (bitVal * d.msb)
+		d.codeBits = (d.codeBits >> 1) | (bitVal * msbVal)
 		d.bitCount++
 
 		if d.bitCount == d.nbits {
-			if d.charEncoding != nil && d.charEncoding.CheckBits(d.codeBits) {
+			if d.charEncoding != nil && d.charEncoding.CheckBits(byte(d.codeBits)) {
 				d.syncChars = append(d.syncChars, d.codeBits)
 				d.codeBits = 0
 				d.bitCount = 0
@@ -400,7 +399,7 @@ func (d *FSKDemodulator) processBit(bit bool) {
 				if d.validCount == 4 {
 					// Process sync characters
 					for _, code := range d.syncChars {
-						d.processCharacter(code)
+						d.processCharacter(byte(code))
 					}
 					d.setState(StateReadData)
 				}
@@ -422,11 +421,11 @@ func (d *FSKDemodulator) processBit(bit bool) {
 		d.waiting = false
 
 		// Read data bits
-		d.codeBits = (d.codeBits >> 1) | (bitVal * d.msb)
+		d.codeBits = (d.codeBits >> 1) | (bitVal * msbVal)
 		d.bitCount++
 
 		if d.bitCount == d.nbits {
-			d.processCharacter(d.codeBits)
+			d.processCharacter(byte(d.codeBits))
 			d.codeBits = 0
 			d.bitCount = 0
 			d.waiting = true

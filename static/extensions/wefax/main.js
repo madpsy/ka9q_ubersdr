@@ -53,16 +53,14 @@ class WEFAXExtension extends DecoderExtension {
             const canvas = document.getElementById('wefax-canvas');
             const startBtn = document.getElementById('wefax-start-btn');
             const stationSelect = document.getElementById('wefax-station-select');
-            const tuneBtn = document.getElementById('wefax-tune-btn');
 
             console.log(`WEFAX: DOM check attempt ${attempts + 1}/${maxAttempts}:`, {
                 canvas: !!canvas,
                 startBtn: !!startBtn,
-                stationSelect: !!stationSelect,
-                tuneBtn: !!tuneBtn
+                stationSelect: !!stationSelect
             });
 
-            if (canvas && startBtn && stationSelect && tuneBtn) {
+            if (canvas && startBtn && stationSelect) {
                 console.log('WEFAX: All DOM elements found, setting up...');
                 this.setupCanvas();
                 this.setupEventHandlers();
@@ -75,8 +73,7 @@ class WEFAXExtension extends DecoderExtension {
                 console.error('WEFAX: Missing elements:', {
                     canvas: !canvas,
                     startBtn: !startBtn,
-                    stationSelect: !stationSelect,
-                    tuneBtn: !tuneBtn
+                    stationSelect: !stationSelect
                 });
             }
         };
@@ -193,11 +190,6 @@ class WEFAXExtension extends DecoderExtension {
                 e.preventDefault();
                 e.stopPropagation();
                 this.saveImage();
-            } else if (e.target.id === 'wefax-tune-btn') {
-                console.log('WEFAX: Tune button clicked via delegation!');
-                e.preventDefault();
-                e.stopPropagation();
-                this.tuneToStation();
             }
         });
 
@@ -207,10 +199,9 @@ class WEFAXExtension extends DecoderExtension {
             
             if (e.target.id === 'wefax-station-select') {
                 console.log('WEFAX: Station selected:', e.target.value);
-                const tuneBtn = document.getElementById('wefax-tune-btn');
-                if (tuneBtn) {
-                    tuneBtn.disabled = !e.target.value;
-                    console.log('WEFAX: Tune button enabled:', !tuneBtn.disabled);
+                // Automatically tune when a station is selected
+                if (e.target.value) {
+                    this.tuneToStation();
                 }
             } else if (e.target.id === 'wefax-auto-scroll') {
                 this.autoScroll = e.target.checked;
@@ -222,14 +213,6 @@ class WEFAXExtension extends DecoderExtension {
                 }
             }
         });
-
-        // Initialize tune button state
-        const stationSelect = document.getElementById('wefax-station-select');
-        const tuneBtn = document.getElementById('wefax-tune-btn');
-        if (stationSelect && tuneBtn) {
-            tuneBtn.disabled = !stationSelect.value;
-            console.log('WEFAX: Initial tune button state:', tuneBtn.disabled);
-        }
 
         // Configuration change handlers (only apply when stopped)
         const configInputs = [
@@ -293,10 +276,6 @@ class WEFAXExtension extends DecoderExtension {
 
         // Reset selector
         stationSelect.value = '';
-        const tuneBtn = document.getElementById('wefax-tune-btn');
-        if (tuneBtn) {
-            tuneBtn.disabled = true;
-        }
     }
 
     updateConfig() {

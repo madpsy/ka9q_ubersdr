@@ -199,12 +199,13 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 func (d *SSTVDecoder) detectVISFromBuffer(pcmBuffer []int16, resultChan chan<- []byte) error {
 	// Log only once to avoid spam
 	if !d.visLoggedOnce {
-		log.Printf("[SSTV] Waiting for VIS code (have %d samples)...", len(pcmBuffer))
+		log.Printf("[SSTV] Waiting for VIS code (have %d samples, need ~%d)...",
+			len(pcmBuffer), int(d.sampleRate))
 		d.visLoggedOnce = true
 	}
 
-	// Create a simple buffer reader that returns the buffer
-	reader := &simpleBufferReader{buffer: pcmBuffer, pos: 0}
+	// Create a proper buffer reader with windowing support
+	reader := newBufferPCMReader(pcmBuffer)
 
 	// Create VIS detector
 	d.visDetector = NewVISDetector(d.sampleRate)
@@ -632,4 +633,33 @@ func (r *PCMBufferReader) Read(numSamples int) ([]int16, error) {
 // GetBuffer returns the entire buffer (legacy)
 func (r *PCMBufferReader) GetBuffer() []int16 {
 	return r.buffer
+}
+
+// bufferPCMReader implements PCMReader for a static buffer with proper windowing
+type bufferPCMReader struct {
+	buffer    []int16
+	windowPtr int
+	bufLen    int
+}
+
+// newBufferPCMReader creates a new buffer-based PCM reader
+func newBufferPCMReader(buffer []int16) *bufferPCMReader {
+	return &bufferPCMReader{
+		buffer:    buffer,
+		windowPtr: 0,
+		bufLen:    len(buffer),
+	}
+}
+
+// Read reads numSamples and advances the window pointer
+func (r *bufferPCMReader) Read(numSamples int) ([]int16, error) {
+	if r.windowPtr+numSamples > r.bufLen {
+		return nil, fmt.Errorf("not enough samples in buffer")
+	}
+
+	// Return full buffer up to current position for windowing
+	result := r.buffer[:r.windowPtr+numSamples]
+	r.windowPtr += numSamples
+
+	return result, nil
 }

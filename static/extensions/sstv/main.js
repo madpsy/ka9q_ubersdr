@@ -586,9 +586,15 @@ class SSTVExtension extends DecoderExtension {
 }
 
 // Register the extension
-if (typeof window.registerDecoderExtension === 'function') {
-    window.registerDecoderExtension(SSTVExtension);
-    console.log('SSTV: Extension registered');
+let sstvExtensionInstance = null;
+
+if (window.decoderManager) {
+    sstvExtensionInstance = new SSTVExtension();
+    window.decoderManager.register(sstvExtensionInstance);
+    console.log('SSTV extension registered:', sstvExtensionInstance);
 } else {
-    console.error('SSTV: registerDecoderExtension not available');
+    console.error('decoderManager not available for SSTV extension');
 }
+
+// Expose instance globally for debugging
+window.sstvExtensionInstance = sstvExtensionInstance;

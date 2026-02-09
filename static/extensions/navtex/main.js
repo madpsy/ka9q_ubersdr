@@ -46,17 +46,17 @@ class NAVTEXExtension extends DecoderExtension {
         const trySetup = (attempts = 0) => {
             const maxAttempts = 20;
 
-            const console = document.getElementById('navtex-console');
+            const consoleEl = document.getElementById('navtex-console');
             const startBtn = document.getElementById('navtex-start-btn');
             const stationSelect = document.getElementById('navtex-station-select');
 
             console.log(`NAVTEX: DOM check attempt ${attempts + 1}/${maxAttempts}:`, {
-                console: !!console,
+                consoleEl: !!consoleEl,
                 startBtn: !!startBtn,
                 stationSelect: !!stationSelect
             });
 
-            if (console && startBtn && stationSelect) {
+            if (consoleEl && startBtn && stationSelect) {
                 console.log('NAVTEX: All DOM elements found, setting up...');
                 this.setupBaudCanvas();
                 this.setupEventHandlers();

@@ -88,8 +88,8 @@
             // After 0.75 scale, the actual space taken is totalHeight * 0.75
             const scaledHeight = totalHeight * 0.75;
             // We want to pull up the next section, leaving a small gap
-            // The unscaled space is (totalHeight - scaledHeight), we compensate for 75% of that
-            const marginBottom = -(totalHeight - scaledHeight) * 0.75;
+            // Compensate for 87.5% of the unscaled space (halfway between 75% and 100%)
+            const marginBottom = -(totalHeight - scaledHeight) * 0.875;
             extensionPanel.style.marginBottom = `${marginBottom}px`;
         }
     }

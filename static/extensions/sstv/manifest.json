@@ -1,0 +1,39 @@
+{
+  "name": "sstv",
+  "displayName": "SSTV Decoder",
+  "version": "1.0.0",
+  "description": "Slow Scan Television (SSTV) decoder supporting 47 modes including Martin, Scottie, Robot, PD, and MMSSTV",
+  "author": "UberSDR (ported from slowrx by OH2EIQ)",
+  "type": "decoder",
+  "icon": "📺",
+  "category": "decoder",
+  "requiresAudio": true,
+  "defaultEnabled": false,
+  "files": {
+    "main": "main.js",
+    "styles": ["styles.css"],
+    "template": "template.html"
+  },
+  "settings": {
+    "auto_sync": {
+      "type": "boolean",
+      "default": true,
+      "description": "Automatically detect sync pulses and correct image slant"
+    },
+    "decode_fsk_id": {
+      "type": "boolean",
+      "default": true,
+      "description": "Decode FSK callsign transmission after image"
+    },
+    "mmsstv_only": {
+      "type": "boolean",
+      "default": false,
+      "description": "Only decode MMSSTV modes (MR/MP/ML series)"
+    },
+    "auto_save": {
+      "type": "boolean",
+      "default": false,
+      "description": "Automatically save images when complete"
+    }
+  }
+}

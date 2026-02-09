@@ -1,0 +1,84 @@
+<div class="sstv-container">
+    <!-- Status Bar -->
+    <div class="sstv-status-bar">
+        <div class="sstv-status-left">
+            <span id="sstv-status-badge" class="status-badge status-disconnected">Stopped</span>
+            <span id="sstv-mode-display" class="sstv-mode">Waiting for signal...</span>
+            <span id="sstv-callsign-display" class="sstv-callsign"></span>
+        </div>
+        <div class="sstv-status-right">
+            <button id="sstv-start-btn" class="sstv-btn sstv-btn-primary">Start</button>
+            <button id="sstv-stop-btn" class="sstv-btn sstv-btn-secondary" disabled>Stop</button>
+            <button id="sstv-clear-btn" class="sstv-btn sstv-btn-secondary">Clear</button>
+            <button id="sstv-save-btn" class="sstv-btn sstv-btn-secondary">Save Image</button>
+        </div>
+    </div>
+
+    <!-- Info Display -->
+    <div class="sstv-info-bar">
+        <div class="sstv-info-item">
+            <span class="sstv-info-label">Status:</span>
+            <span id="sstv-status" class="sstv-info-value">Ready</span>
+        </div>
+        <div class="sstv-info-item">
+            <span class="sstv-info-label">Image:</span>
+            <span id="sstv-image-size" class="sstv-info-value">0x0</span>
+        </div>
+        <div class="sstv-info-item">
+            <span class="sstv-info-label">Line:</span>
+            <span id="sstv-line-count" class="sstv-info-value">0/0</span>
+        </div>
+    </div>
+
+    <!-- Controls Panel -->
+    <div class="sstv-controls">
+        <div class="sstv-control-group">
+            <label>
+                <input type="checkbox" id="sstv-auto-sync" checked>
+                Auto Sync Correction
+            </label>
+        </div>
+
+        <div class="sstv-control-group">
+            <label>
+                <input type="checkbox" id="sstv-decode-fsk" checked>
+                Decode FSK Callsign
+            </label>
+        </div>
+
+        <div class="sstv-control-group">
+            <label>
+                <input type="checkbox" id="sstv-mmsstv-only">
+                MMSSTV Modes Only
+            </label>
+        </div>
+
+        <div class="sstv-control-group">
+            <label>
+                <input type="checkbox" id="sstv-auto-save">
+                Auto-Save Images
+            </label>
+        </div>
+
+        <div class="sstv-control-group">
+            <label>
+                <input type="checkbox" id="sstv-auto-scroll" checked>
+                Auto-Scroll
+            </label>
+        </div>
+    </div>
+
+    <!-- Canvas Container -->
+    <div class="sstv-canvas-container" id="sstv-canvas-container">
+        <canvas id="sstv-canvas" class="sstv-canvas"></canvas>
+    </div>
+
+    <!-- Help Text -->
+    <div class="sstv-help">
+        <p><strong>SSTV Decoder</strong> - Receives Slow Scan Television images</p>
+        <p><strong>Common Frequencies:</strong> 14.230 MHz (USB), 14.233 MHz (USB), 21.340 MHz (USB), 28.680 MHz (USB)</p>
+        <p><strong>Supported Modes:</strong> 47 modes including Martin M1/M2, Scottie S1/S2, Robot 36, PD-120, and all MMSSTV modes</p>
+        <p>The decoder automatically detects the VIS code, corrects image slant, and can decode FSK callsigns.</p>
+        <p><strong>Tip:</strong> Tune to 14.230 MHz USB and wait for a transmission. The decoder will automatically identify the mode.</p>
+    </div>
+</div>

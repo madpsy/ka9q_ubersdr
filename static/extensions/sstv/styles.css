@@ -1,0 +1,264 @@
+/* SSTV Extension Styles */
+
+.sstv-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    gap: 10px;
+    padding: 10px;
+    background: #1a1a1a;
+    color: #e0e0e0;
+}
+
+/* Status Bar */
+.sstv-status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: #2a2a2a;
+    border-radius: 4px;
+    border: 1px solid #3a3a3a;
+}
+
+.sstv-status-left {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.sstv-status-right {
+    display: flex;
+    gap: 8px;
+}
+
+/* Mode and Callsign Display */
+.sstv-mode {
+    font-size: 13px;
+    font-weight: 600;
+    color: #4a9eff;
+    font-family: monospace;
+}
+
+.sstv-callsign {
+    font-size: 13px;
+    font-weight: 600;
+    color: #ffc107;
+    font-family: monospace;
+}
+
+.sstv-callsign:empty::before {
+    content: '';
+}
+
+.sstv-callsign:not(:empty)::before {
+    content: '📻 ';
+}
+
+/* Info Bar */
+.sstv-info-bar {
+    display: flex;
+    gap: 20px;
+    padding: 8px 12px;
+    background: #2a2a2a;
+    border-radius: 4px;
+    border: 1px solid #3a3a3a;
+    flex-wrap: wrap;
+}
+
+.sstv-info-item {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.sstv-info-label {
+    font-size: 11px;
+    color: #888;
+    text-transform: uppercase;
+    font-weight: 500;
+}
+
+.sstv-info-value {
+    font-size: 12px;
+    color: #e0e0e0;
+    font-family: monospace;
+    font-weight: 600;
+}
+
+/* Status Badge */
+.status-badge {
+    padding: 4px 10px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.status-running {
+    background: #28a745;
+    color: white;
+}
+
+.status-disconnected {
+    background: #6c757d;
+    color: white;
+}
+
+.status-error {
+    background: #dc3545;
+    color: white;
+}
+
+/* Buttons */
+.sstv-btn {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.sstv-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.sstv-btn-primary {
+    background: #28a745;
+    color: white;
+}
+
+.sstv-btn-primary:hover:not(:disabled) {
+    background: #218838;
+}
+
+.sstv-btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.sstv-btn-secondary:hover:not(:disabled) {
+    background: #5a6268;
+}
+
+/* Controls Panel */
+.sstv-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    padding: 10px 12px;
+    background: #2a2a2a;
+    border-radius: 4px;
+    border: 1px solid #3a3a3a;
+    align-items: center;
+}
+
+.sstv-control-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.sstv-control-group label {
+    font-size: 12px;
+    color: #ccc;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+}
+
+input[type="checkbox"] {
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+}
+
+/* Canvas Container */
+.sstv-canvas-container {
+    flex: 1;
+    overflow: auto;
+    background: #0a0a0a;
+    border: 1px solid #3a3a3a;
+    border-radius: 4px;
+    position: relative;
+    min-height: 400px;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 10px;
+}
+
+.sstv-canvas {
+    display: block !important;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    cursor: crosshair;
+    max-width: 100%;
+    height: auto;
+    border: 1px solid #444;
+}
+
+/* Help Text */
+.sstv-help {
+    padding: 10px 12px;
+    background: #2a2a2a;
+    border-radius: 4px;
+    border: 1px solid #3a3a3a;
+    font-size: 11px;
+    color: #999;
+    line-height: 1.6;
+}
+
+.sstv-help p {
+    margin: 4px 0;
+}
+
+.sstv-help strong {
+    color: #ccc;
+}
+
+/* Scrollbar Styling */
+.sstv-canvas-container::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+
+.sstv-canvas-container::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+
+.sstv-canvas-container::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 6px;
+}
+
+.sstv-canvas-container::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .sstv-status-bar {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .sstv-status-left,
+    .sstv-status-right {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .sstv-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .sstv-control-group {
+        justify-content: space-between;
+    }
+}

@@ -22,6 +22,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/navtex"
+	"github.com/cwsl/ka9q_ubersdr/audio_extensions/sstv"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/wefax"
 )
 
@@ -1001,6 +1002,35 @@ func main() {
 		},
 	)
 	log.Printf("Registered audio extension: navtex v%s", navtexInfo["version"].(string))
+
+	// Register SSTV extension
+	sstvInfo := sstv.GetInfo()
+
+	sstvFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
+		sstvParams := sstv.AudioExtensionParams{
+			SampleRate:    audioParams.SampleRate,
+			Channels:      audioParams.Channels,
+			BitsPerSample: audioParams.BitsPerSample,
+		}
+
+		sstvExt, err := sstv.Factory(sstvParams, extensionParams)
+		if err != nil {
+			return nil, err
+		}
+
+		return &sstvExtensionWrapper{ext: sstvExt}, nil
+	}
+
+	audioExtensionRegistry.Register(
+		"sstv",
+		sstvFactoryWrapper,
+		AudioExtensionInfo{
+			Name:        sstvInfo["name"].(string),
+			Description: sstvInfo["description"].(string),
+			Version:     sstvInfo["version"].(string),
+		},
+	)
+	log.Printf("Registered audio extension: sstv v%s", sstvInfo["version"].(string))
 
 	// Create audio extension manager
 	audioExtensionManager := NewAudioExtensionManager(dxClusterWsHandler, sessions, audioExtensionRegistry)
@@ -4226,5 +4256,22 @@ func (w *navtexExtensionWrapper) Stop() error {
 }
 
 func (w *navtexExtensionWrapper) GetName() string {
+	return w.ext.GetName()
+}
+
+// sstvExtensionWrapper wraps a sstv.AudioExtension to implement main.AudioExtension
+type sstvExtensionWrapper struct {
+	ext sstv.AudioExtension
+}
+
+func (w *sstvExtensionWrapper) Start(audioChan <-chan []int16, resultChan chan<- []byte) error {
+	return w.ext.Start(audioChan, resultChan)
+}
+
+func (w *sstvExtensionWrapper) Stop() error {
+	return w.ext.Stop()
+}
+
+func (w *sstvExtensionWrapper) GetName() string {
 	return w.ext.GetName()
 }

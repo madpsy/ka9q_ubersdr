@@ -50,6 +50,11 @@ func (a *ASCII) GetMSB() byte {
 	return a.framing.GetMSB()
 }
 
+// GetMSB32 returns the full 32-bit MSB mask
+func (a *ASCII) GetMSB32() uint32 {
+	return a.framing.GetMSB32()
+}
+
 // CheckBits checks if a code is valid and extracts data bits
 func (a *ASCII) CheckBits(code byte) bool {
 	_, valid := a.framing.CheckBitsAndExtract(uint32(code))

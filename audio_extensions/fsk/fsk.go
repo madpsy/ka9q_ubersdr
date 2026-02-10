@@ -21,6 +21,7 @@ type CharacterEncoding interface {
 	CheckBits(code byte) bool
 	GetNBits() int
 	GetMSB() byte
+	GetMSB32() uint32 // Full 32-bit MSB for modes with >8 bits
 	Reset()
 }
 

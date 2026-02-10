@@ -122,6 +122,11 @@ func (i *ITA2) GetMSB() byte {
 	return i.framing.GetMSB()
 }
 
+// GetMSB32 returns the full 32-bit MSB mask
+func (i *ITA2) GetMSB32() uint32 {
+	return i.framing.GetMSB32()
+}
+
 // CheckBits checks if a code is valid and extracts data bits
 func (i *ITA2) CheckBits(code byte) bool {
 	_, valid := i.framing.CheckBitsAndExtract(uint32(code))

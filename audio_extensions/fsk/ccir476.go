@@ -124,6 +124,11 @@ func (c *CCIR476) GetMSB() byte {
 	return 0x40
 }
 
+// GetMSB32 returns the full 32-bit MSB mask
+func (c *CCIR476) GetMSB32() uint32 {
+	return 0x40
+}
+
 // CheckBits checks if a code is valid (has 4 mark bits)
 func (c *CCIR476) CheckBits(code byte) bool {
 	return c.validCodes[code]

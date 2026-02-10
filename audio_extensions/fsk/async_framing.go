@@ -88,8 +88,18 @@ func (a *AsyncFraming) GetNBits() int {
 }
 
 // GetMSB returns the MSB mask for the total bit count
+// Returns byte for compatibility, but only works correctly for nbits <= 8
+// For nbits > 8, use GetMSB32() instead
 func (a *AsyncFraming) GetMSB() byte {
+	if a.nbits <= 8 {
+		return byte(a.msb)
+	}
 	return byte(a.msb >> (a.nbits - 8))
+}
+
+// GetMSB32 returns the full 32-bit MSB mask
+func (a *AsyncFraming) GetMSB32() uint32 {
+	return a.msb
 }
 
 // CheckBitsAndExtract validates the bit pattern and extracts the data bits

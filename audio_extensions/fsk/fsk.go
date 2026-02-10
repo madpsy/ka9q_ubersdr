@@ -87,6 +87,10 @@ type FSKDemodulator struct {
 	waiting      bool
 	stopVariable bool // true for modes with variable stop bits (EFR modes only)
 
+	// Debug counters (rate limited)
+	debugSyncAttempts int
+	debugFirstSync    bool
+
 	// Encoding
 	charEncoding CharacterEncoding
 
@@ -360,6 +364,9 @@ func (d *FSKDemodulator) processBit(bit bool) {
 		d.syncChars = nil
 		d.setState(StateSync1)
 		d.syncSetup = false
+		d.debugFirstSync = false
+		d.debugSyncAttempts = 0
+		log.Printf("[FSK] Sync setup: entering StateSync1")
 	}
 
 	switch d.state {
@@ -369,6 +376,13 @@ func (d *FSKDemodulator) processBit(bit bool) {
 	case StateSync1:
 		// Scan indefinitely for valid bit pattern
 		d.codeBits = (d.codeBits >> 1) | (bitVal * msbVal)
+
+		// Debug: Log first sync attempt only
+		if !d.debugFirstSync {
+			d.debugFirstSync = true
+			log.Printf("[FSK] StateSync1: Starting sync search, nbits=%d, msb=0x%X", d.nbits, d.msb)
+		}
+
 		if d.charEncoding != nil && d.charEncoding.CheckBits(d.codeBits) {
 			d.syncChars = append(d.syncChars, d.codeBits)
 			d.validCount++
@@ -376,6 +390,14 @@ func (d *FSKDemodulator) processBit(bit bool) {
 			d.codeBits = 0
 			d.setState(StateSync2)
 			d.waiting = true
+			log.Printf("[FSK] StateSync1: Found valid character 0x%X, moving to StateSync2", d.syncChars[len(d.syncChars)-1])
+		} else {
+			// Rate limit: only log every 10000 attempts
+			d.debugSyncAttempts++
+			if d.debugSyncAttempts == 10000 {
+				log.Printf("[FSK] StateSync1: 10000 sync attempts, last codeBits=0x%X", d.codeBits)
+				d.debugSyncAttempts = 0
+			}
 		}
 
 	case StateSync2:

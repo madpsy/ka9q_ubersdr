@@ -414,6 +414,11 @@ func (d *FSKDemodulator) processBit(bit bool) {
 		d.codeBits = (d.codeBits >> 1) | (bitVal * msbVal)
 		d.bitCount++
 
+		// Debug: log bit accumulation for first character only
+		if d.validCount == 1 && d.bitCount <= 3 {
+			log.Printf("[FSK] StateSync2: bit %d, bitVal=%d, codeBits=0x%X", d.bitCount, bitVal, d.codeBits)
+		}
+
 		if d.bitCount == d.nbits {
 			if d.charEncoding != nil && d.charEncoding.CheckBits(d.codeBits) {
 				d.syncChars = append(d.syncChars, d.codeBits)
@@ -433,7 +438,7 @@ func (d *FSKDemodulator) processBit(bit bool) {
 				}
 			} else {
 				// Failed subsequent bit test - restart sync
-				log.Printf("[FSK] StateSync2: Invalid character 0x%X after %d valid, restarting sync", d.codeBits, d.validCount)
+				log.Printf("[FSK] StateSync2: Invalid character 0x%X (binary: %015b) after %d valid, restarting sync", d.codeBits, d.codeBits, d.validCount)
 				d.codeBits = 0
 				d.bitCount = 0
 				d.syncSetup = true

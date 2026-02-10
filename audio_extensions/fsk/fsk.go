@@ -418,6 +418,7 @@ func (d *FSKDemodulator) processBit(bit bool) {
 				d.codeBits = 0
 				d.bitCount = 0
 				d.validCount++
+				log.Printf("[FSK] StateSync2: Valid character %d/4: 0x%X", d.validCount, d.syncChars[len(d.syncChars)-1])
 
 				// Successfully read 4 characters?
 				if d.validCount == 4 {
@@ -426,9 +427,11 @@ func (d *FSKDemodulator) processBit(bit bool) {
 						d.processCharacter(code)
 					}
 					d.setState(StateReadData)
+					log.Printf("[FSK] StateSync2: Got 4 valid characters, moving to StateReadData")
 				}
 			} else {
 				// Failed subsequent bit test - restart sync
+				log.Printf("[FSK] StateSync2: Invalid character 0x%X after %d valid, restarting sync", d.codeBits, d.validCount)
 				d.codeBits = 0
 				d.bitCount = 0
 				d.syncSetup = true

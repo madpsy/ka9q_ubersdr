@@ -79,7 +79,7 @@ type FSKDemodulator struct {
 	bitCount     int
 	codeBits     uint32 // Changed from byte to uint32 to handle up to 15 bits for 5N1.5
 	nbits        int
-	msb          byte
+	msb          uint32 // Changed from byte to uint32 to handle modes with >8 bits
 	syncSetup    bool
 	syncChars    []uint32 // Changed from []byte to []uint32
 	validCount   int
@@ -150,7 +150,7 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 		ccir := NewCCIR476()
 		d.charEncoding = ccir
 		d.nbits = ccir.GetNBits()
-		d.msb = ccir.GetMSB()
+		d.msb = ccir.GetMSB32()
 	case "ITA2":
 		ita2, err := NewITA2(framing)
 		if err != nil {
@@ -159,7 +159,7 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 		}
 		d.charEncoding = ita2
 		d.nbits = ita2.GetNBits()
-		d.msb = ita2.GetMSB()
+		d.msb = ita2.GetMSB32()
 	case "ASCII":
 		// ASCII uses 7 or 8 bits based on framing
 		ascii, err := NewASCII(framing)
@@ -169,7 +169,7 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 		}
 		d.charEncoding = ascii
 		d.nbits = ascii.GetNBits()
-		d.msb = ascii.GetMSB()
+		d.msb = ascii.GetMSB32()
 	default:
 		log.Printf("[FSK] Unsupported encoding: %s, using ITA2", encoding)
 		ita2, err := NewITA2(framing)
@@ -179,7 +179,7 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 		}
 		d.charEncoding = ita2
 		d.nbits = ita2.GetNBits()
-		d.msb = ita2.GetMSB()
+		d.msb = ita2.GetMSB32()
 	}
 
 	// Initialize zero crossing array

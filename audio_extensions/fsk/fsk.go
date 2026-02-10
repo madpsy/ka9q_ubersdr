@@ -17,8 +17,8 @@ const (
 
 // CharacterEncoding interface for different character encodings
 type CharacterEncoding interface {
-	ProcessChar(code byte) (rune, bool)
-	CheckBits(code byte) bool
+	ProcessChar(code uint32) (rune, bool) // Changed to uint32 to support >8 bit codes
+	CheckBits(code uint32) bool           // Changed to uint32 to support >8 bit codes
 	GetNBits() int
 	GetMSB() byte
 	GetMSB32() uint32 // Full 32-bit MSB for modes with >8 bits
@@ -369,7 +369,7 @@ func (d *FSKDemodulator) processBit(bit bool) {
 	case StateSync1:
 		// Scan indefinitely for valid bit pattern
 		d.codeBits = (d.codeBits >> 1) | (bitVal * msbVal)
-		if d.charEncoding != nil && d.charEncoding.CheckBits(byte(d.codeBits)) {
+		if d.charEncoding != nil && d.charEncoding.CheckBits(d.codeBits) {
 			d.syncChars = append(d.syncChars, d.codeBits)
 			d.validCount++
 			d.bitCount = 0
@@ -391,7 +391,7 @@ func (d *FSKDemodulator) processBit(bit bool) {
 		d.bitCount++
 
 		if d.bitCount == d.nbits {
-			if d.charEncoding != nil && d.charEncoding.CheckBits(byte(d.codeBits)) {
+			if d.charEncoding != nil && d.charEncoding.CheckBits(d.codeBits) {
 				d.syncChars = append(d.syncChars, d.codeBits)
 				d.codeBits = 0
 				d.bitCount = 0
@@ -401,7 +401,7 @@ func (d *FSKDemodulator) processBit(bit bool) {
 				if d.validCount == 4 {
 					// Process sync characters
 					for _, code := range d.syncChars {
-						d.processCharacter(byte(code))
+						d.processCharacter(code)
 					}
 					d.setState(StateReadData)
 				}
@@ -427,7 +427,7 @@ func (d *FSKDemodulator) processBit(bit bool) {
 		d.bitCount++
 
 		if d.bitCount == d.nbits {
-			d.processCharacter(byte(d.codeBits))
+			d.processCharacter(d.codeBits)
 			d.codeBits = 0
 			d.bitCount = 0
 			d.waiting = true
@@ -436,7 +436,7 @@ func (d *FSKDemodulator) processBit(bit bool) {
 }
 
 // processCharacter processes a decoded character code
-func (d *FSKDemodulator) processCharacter(code byte) {
+func (d *FSKDemodulator) processCharacter(code uint32) {
 	if d.charEncoding == nil {
 		return
 	}

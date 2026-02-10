@@ -130,8 +130,8 @@ func (c *CCIR476) GetMSB32() uint32 {
 }
 
 // CheckBits checks if a code is valid (has 4 mark bits)
-func (c *CCIR476) CheckBits(code byte) bool {
-	return c.validCodes[code]
+func (c *CCIR476) CheckBits(code uint32) bool {
+	return c.validCodes[byte(code)]
 }
 
 // codeToChar converts a code to a character based on shift state
@@ -153,13 +153,14 @@ func (c *CCIR476) codeToChar(code byte, shift bool) (rune, error) {
 // ProcessChar processes a received character code
 // Returns the decoded character (if any) and whether it was successful
 // Implements the alpha/rep phase error correction scheme
-func (c *CCIR476) ProcessChar(code byte) (rune, bool) {
-	success := c.checkBits(code)
+func (c *CCIR476) ProcessChar(code uint32) (rune, bool) {
+	codeByte := byte(code) // CCIR476 only uses 7 bits, safe to cast
+	success := c.checkBits(codeByte)
 
 	// Force phasing with the two phasing characters
-	if code == c.codeRep {
+	if codeByte == c.codeRep {
 		c.alphaPhase = false
-	} else if code == c.codeAlpha {
+	} else if codeByte == c.codeAlpha {
 		c.alphaPhase = true
 	}
 
@@ -167,18 +168,18 @@ func (c *CCIR476) ProcessChar(code byte) (rune, bool) {
 		// Rep phase: store characters for later comparison
 		c.c1 = c.c2
 		c.c2 = c.c3
-		c.c3 = code
+		c.c3 = codeByte
 	} else {
 		// Alpha phase: compare with rep phase character
 		var chr byte = 0xff
 
 		// Try to recover the character using forward error correction
-		if success && c.c1 == code {
+		if success && c.c1 == codeByte {
 			// Both alpha and rep match - perfect
-			chr = code
+			chr = codeByte
 		} else if success {
 			// Alpha is valid, use it
-			chr = code
+			chr = codeByte
 		} else if c.checkBits(c.c1) {
 			// Alpha is invalid, but rep is valid - use rep
 			chr = c.c1

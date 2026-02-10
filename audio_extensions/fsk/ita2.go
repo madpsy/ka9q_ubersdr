@@ -128,29 +128,29 @@ func (i *ITA2) GetMSB32() uint32 {
 }
 
 // CheckBits checks if a code is valid and extracts data bits
-func (i *ITA2) CheckBits(code byte) bool {
-	_, valid := i.framing.CheckBitsAndExtract(uint32(code))
+func (i *ITA2) CheckBits(code uint32) bool {
+	_, valid := i.framing.CheckBitsAndExtract(code)
 	return valid
 }
 
 // ProcessChar processes a received character code with framing
 // Returns the decoded character (if any) and whether it was successful
-func (i *ITA2) ProcessChar(code byte) (rune, bool) {
+func (i *ITA2) ProcessChar(code uint32) (rune, bool) {
 	// Extract data bits from framed code
-	dataCode, valid := i.framing.CheckBitsAndExtract(uint32(code))
+	dataCode, valid := i.framing.CheckBitsAndExtract(code)
 	if !valid {
 		return 0, false
 	}
 
 	// Mask to 5 bits (data bits)
-	code = dataCode & 0x1F
+	dataByte := dataCode & 0x1F
 
 	// Check for shift codes
-	if code == i.letters {
+	if dataByte == i.letters {
 		i.shift = false
 		return 0, true
 	}
-	if code == i.figures {
+	if dataByte == i.figures {
 		i.shift = true
 		return 0, true
 	}
@@ -158,9 +158,9 @@ func (i *ITA2) ProcessChar(code byte) (rune, bool) {
 	// Get character from appropriate table
 	var ch rune
 	if i.shift {
-		ch = i.figs[code]
+		ch = i.figs[dataByte]
 	} else {
-		ch = i.ltrs[code]
+		ch = i.ltrs[dataByte]
 	}
 
 	// Return character if valid

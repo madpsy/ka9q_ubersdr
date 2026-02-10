@@ -56,16 +56,16 @@ func (a *ASCII) GetMSB32() uint32 {
 }
 
 // CheckBits checks if a code is valid and extracts data bits
-func (a *ASCII) CheckBits(code byte) bool {
-	_, valid := a.framing.CheckBitsAndExtract(uint32(code))
+func (a *ASCII) CheckBits(code uint32) bool {
+	_, valid := a.framing.CheckBitsAndExtract(code)
 	return valid
 }
 
 // ProcessChar processes a received character code with framing
 // Returns the decoded character (if any) and whether it was successful
-func (a *ASCII) ProcessChar(code byte) (rune, bool) {
+func (a *ASCII) ProcessChar(code uint32) (rune, bool) {
 	// Extract data bits from framed code
-	dataCode, valid := a.framing.CheckBitsAndExtract(uint32(code))
+	dataCode, valid := a.framing.CheckBitsAndExtract(code)
 	if !valid {
 		return 0, false
 	}

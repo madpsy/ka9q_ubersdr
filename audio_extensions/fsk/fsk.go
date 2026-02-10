@@ -5,14 +5,15 @@ import (
 	"math"
 )
 
-// FSKState represents the decoder state machine
-type FSKState int
+// RTTYRxState represents the RTTY decoder state machine
+// Based on fldigi's edge-detection approach
+type RTTYRxState int
 
 const (
-	StateNoSignal FSKState = iota
-	StateSync1
-	StateSync2
-	StateReadData
+	StateIdle RTTYRxState = iota
+	StateStart
+	StateData
+	StateStop
 )
 
 // CharacterEncoding interface for different character encodings
@@ -26,7 +27,7 @@ type CharacterEncoding interface {
 }
 
 // FSKDemodulator implements an FSK (Frequency Shift Keying) demodulator
-// Ported from KiwiSDR JNX.js and navtex FSK decoder
+// Using fldigi's edge-detection based state machine approach
 type FSKDemodulator struct {
 	// Configuration
 	sampleRate      float64
@@ -48,56 +49,35 @@ type FSKDemodulator struct {
 
 	// Bit timing
 	bitDurationSeconds float64
-	bitSampleCount     int
-	halfBitSampleCount int
+	symbollen          int // samples per symbol (bit)
+	halfSymbollen      int // half symbol length for sampling
 
 	// Filters
 	biquadMark    *BiQuadFilter
 	biquadSpace   *BiQuadFilter
 	biquadLowpass *BiQuadFilter
 
-	// State
-	state             FSKState
-	audioAverage      float64
-	signalAccumulator int
-	bitDuration       int
-	sampleCount       int
-	nextEventCount    int
-	averagedMarkState bool
-	oldMarkState      bool
-	pulseEdgeEvent    bool
+	// Bit buffer for edge detection (fldigi approach)
+	bitBuf []bool
 
-	// Zero crossing detection for baud rate tracking
-	zeroCrossingSamples  int
-	zeroCrossingsDivisor int
-	zeroCrossingCount    int
-	zeroCrossings        []int
-	syncDelta            float64
-	baudError            float64
+	// State machine (fldigi approach)
+	rxstate RTTYRxState
+	counter int    // countdown timer for state machine
+	bitcntr int    // bit counter for data collection
+	rxdata  uint32 // received data bits
 
-	// Bit synchronization
-	bitCount     int
-	codeBits     uint32 // Changed from byte to uint32 to handle up to 15 bits for 5N1.5
-	nbits        int
-	msb          uint32 // Changed from byte to uint32 to handle modes with >8 bits
-	syncSetup    bool
-	syncChars    []uint32 // Changed from []byte to []uint32
-	validCount   int
-	errorCount   int
-	waiting      bool
-	stopVariable bool // true for modes with variable stop bits (EFR modes only)
+	// Audio level tracking
+	audioAverage float64
 
-	// Debug counters (rate limited)
-	debugSyncAttempts int
-	debugFirstSync    bool
-
-	// Encoding
+	// Character encoding parameters
+	nbits        int    // number of data bits
+	msb          uint32 // MSB mask for bit shifting
 	charEncoding CharacterEncoding
 
 	// Callbacks
 	baudErrorCB func(float64)
 	outputCB    func(rune)
-	stateCB     func(FSKState)
+	stateCB     func(RTTYRxState)
 
 	// Statistics
 	succeedTally int
@@ -107,20 +87,18 @@ type FSKDemodulator struct {
 // NewFSKDemodulator creates a new FSK demodulator
 func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, framing, encoding string, inverted bool) *FSKDemodulator {
 	d := &FSKDemodulator{
-		sampleRate:           float64(sampleRate),
-		centerFrequency:      centerFreq,
-		shiftHz:              shiftHz,
-		baudRate:             baudRate,
-		framing:              framing,
-		encoding:             encoding,
-		inverted:             inverted,
-		lowpassFilterF:       140.0,
-		audioMinimum:         256.0,
-		zeroCrossingSamples:  16,
-		zeroCrossingsDivisor: 4,
-		biquadMark:           NewBiQuadFilter(),
-		biquadSpace:          NewBiQuadFilter(),
-		biquadLowpass:        NewBiQuadFilter(),
+		sampleRate:      float64(sampleRate),
+		centerFrequency: centerFreq,
+		shiftHz:         shiftHz,
+		baudRate:        baudRate,
+		framing:         framing,
+		encoding:        encoding,
+		inverted:        inverted,
+		lowpassFilterF:  140.0,
+		audioMinimum:    256.0,
+		biquadMark:      NewBiQuadFilter(),
+		biquadSpace:     NewBiQuadFilter(),
+		biquadLowpass:   NewBiQuadFilter(),
 	}
 
 	d.deviationF = d.shiftHz / 2.0
@@ -132,21 +110,11 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 	}
 
 	d.bitDurationSeconds = 1.0 / d.baudRate
-	d.bitSampleCount = int(d.sampleRate*d.bitDurationSeconds + 0.5)
-	d.halfBitSampleCount = d.bitSampleCount / 2
+	d.symbollen = int(d.sampleRate*d.bitDurationSeconds + 0.5)
+	d.halfSymbollen = d.symbollen / 2
 
-	// Determine if framing has variable stop bits (needs start bit detection)
-	// Only enable for special EFR modes, NOT for standard async serial framings
-	// Standard framings like 5N1.5, 5N2, 7N1, 8N1, 4/7 do NOT need this
-	d.stopVariable = false
-	if len(framing) > 0 {
-		// Only enable for framings that explicitly contain 'EFR' or end with 'V'
-		// This is very restrictive to avoid breaking normal modes
-		if len(framing) >= 3 && (framing[:3] == "EFR" || framing[len(framing)-1] == 'V') {
-			d.stopVariable = true
-			log.Printf("[FSK] Variable stop bit mode enabled for framing: %s", framing)
-		}
-	}
+	// Initialize bit buffer for edge detection (fldigi approach)
+	d.bitBuf = make([]bool, d.symbollen)
 
 	// Initialize encoding
 	switch encoding {
@@ -186,15 +154,12 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 		d.msb = ita2.GetMSB32()
 	}
 
-	// Initialize zero crossing array
-	d.zeroCrossings = make([]int, d.bitSampleCount/d.zeroCrossingsDivisor)
-
 	d.updateFilters()
-	d.state = StateNoSignal
+	d.rxstate = StateIdle
 	d.audioAverage = 0.1
 
-	log.Printf("[FSK] Initialized: SR=%d, CF=%.1f Hz, Shift=%.1f Hz, Baud=%.1f, Framing=%s, Encoding=%s",
-		sampleRate, centerFreq, shiftHz, baudRate, framing, encoding)
+	log.Printf("[FSK] Initialized: SR=%d, CF=%.1f Hz, Shift=%.1f Hz, Baud=%.1f, Framing=%s, Encoding=%s, SymbolLen=%d",
+		sampleRate, centerFreq, shiftHz, baudRate, framing, encoding, d.symbollen)
 
 	return d
 }
@@ -210,7 +175,7 @@ func (d *FSKDemodulator) SetOutputCallback(cb func(rune)) {
 }
 
 // SetStateCallback sets the callback for state changes
-func (d *FSKDemodulator) SetStateCallback(cb func(FSKState)) {
+func (d *FSKDemodulator) SetStateCallback(cb func(RTTYRxState)) {
 	d.stateCB = cb
 }
 
@@ -232,13 +197,50 @@ func (d *FSKDemodulator) updateFilters() {
 }
 
 // setState changes the decoder state
-func (d *FSKDemodulator) setState(s FSKState) {
-	if s != d.state {
-		d.state = s
+func (d *FSKDemodulator) setState(s RTTYRxState) {
+	if s != d.rxstate {
+		d.rxstate = s
 		if d.stateCB != nil {
 			d.stateCB(s)
 		}
 	}
+}
+
+// isMarkSpace detects mark-to-space transition (start bit edge)
+// Returns true if edge detected, and correction value for timing adjustment
+// Based on fldigi's is_mark_space() function
+func (d *FSKDemodulator) isMarkSpace() (bool, int) {
+	correction := 0
+
+	// Test for rough bit position: mark at start, space at end
+	if d.bitBuf[0] && !d.bitBuf[d.symbollen-1] {
+		// Test for mark/space straddle point
+		// Count how many marks in the buffer
+		for i := 0; i < d.symbollen; i++ {
+			if d.bitBuf[i] {
+				correction++
+			}
+		}
+		// If transition is near middle of buffer (within 6 samples), it's valid
+		if absInt(d.symbollen/2-correction) < 6 {
+			return true, correction
+		}
+	}
+	return false, 0
+}
+
+// isMark samples the bit value at the middle of the symbol period
+// Based on fldigi's is_mark() function
+func (d *FSKDemodulator) isMark() bool {
+	return d.bitBuf[d.symbollen/2]
+}
+
+// absInt returns absolute value of an integer
+func absInt(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // ProcessSamples processes incoming audio samples
@@ -264,238 +266,114 @@ func (d *FSKDemodulator) ProcessSamples(samples []int16) {
 		// Low-pass filter the difference
 		logicLevel := d.biquadLowpass.Filter(diffAbs)
 
-		// Determine mark state
-		markState := logicLevel > 0
-		if markState {
-			d.signalAccumulator++
-		} else {
-			d.signalAccumulator--
+		// Determine mark state (apply inversion here)
+		bit := (logicLevel > 0) != d.inverted
+
+		// Shift bit buffer and add new bit (fldigi approach)
+		for i := 1; i < d.symbollen; i++ {
+			d.bitBuf[i-1] = d.bitBuf[i]
 		}
-		d.bitDuration++
+		d.bitBuf[d.symbollen-1] = bit
 
-		// Zero crossing detection for baud rate tracking
-		if markState != d.oldMarkState {
-			// Valid bit duration must be longer than half bit duration
-			if (d.bitDuration % d.bitSampleCount) > d.halfBitSampleCount {
-				// Create a relative index for this zero crossing
-				index := (d.sampleCount - d.nextEventCount + d.bitSampleCount*8) % d.bitSampleCount
-				d.zeroCrossings[index/d.zeroCrossingsDivisor]++
-			}
-			d.bitDuration = 0
-		}
-		d.oldMarkState = markState
-
-		// Periodic zero crossing analysis
-		if d.sampleCount%d.bitSampleCount == 0 {
-			d.zeroCrossingCount++
-			if d.zeroCrossingCount >= d.zeroCrossingSamples {
-				// Find max zero crossing
-				best := 0
-				bestIndex := 0
-				for j := 0; j < len(d.zeroCrossings); j++ {
-					if d.zeroCrossings[j] > best {
-						best = d.zeroCrossings[j]
-						bestIndex = j
-					}
-					d.zeroCrossings[j] = 0
-				}
-
-				if best > 0 {
-					// Create a signed correction value
-					bestIndex *= d.zeroCrossingsDivisor
-					bestIndex = ((bestIndex + d.halfBitSampleCount) % d.bitSampleCount) - d.halfBitSampleCount
-					// Limit loop gain
-					bestIndex /= 8
-					d.syncDelta = float64(bestIndex)
-					d.baudError = float64(bestIndex)
-
-					if d.baudErrorCB != nil {
-						d.baudErrorCB(d.baudError)
-					}
-				}
-				d.zeroCrossingCount = 0
-			}
-		}
-
-		// Flag the center of signal pulses
-		d.pulseEdgeEvent = (d.sampleCount >= d.nextEventCount)
-		if d.pulseEdgeEvent {
-			d.averagedMarkState = (d.signalAccumulator > 0) != d.inverted
-			d.signalAccumulator = 0
-			// Set new timeout value, include zero crossing correction
-			d.nextEventCount = d.sampleCount + d.bitSampleCount + int(d.syncDelta+0.5)
-			d.syncDelta = 0
-		}
-
-		// Check for signal loss
-		if d.audioAverage < d.audioMinimum && d.state != StateNoSignal {
-			d.setState(StateNoSignal)
-		} else if d.state == StateNoSignal {
-			d.syncSetup = true
-		}
-
-		if !d.pulseEdgeEvent {
-			d.sampleCount++
-			continue
-		}
-
-		// Process bit at pulse edge
-		d.processBit(d.averagedMarkState)
-		d.sampleCount++
+		// Process state machine
+		d.rx(bit)
 	}
 }
 
-// processBit processes a single decoded bit
-func (d *FSKDemodulator) processBit(bit bool) {
-	bitVal := uint32(0)
-	if bit {
-		bitVal = 1
-	}
-	msbVal := uint32(d.msb)
+// rx processes a single bit through the state machine
+// Based on fldigi's rx() function with edge detection
+func (d *FSKDemodulator) rx(bit bool) bool {
+	flag := false
+	var c rune
+	var correction int
 
-	if d.syncSetup {
-		d.bitCount = 0
-		d.codeBits = 0
-		d.errorCount = 0
-		d.validCount = 0
-		if d.charEncoding != nil {
-			d.charEncoding.Reset()
-		}
-		d.syncChars = nil
-		d.setState(StateSync1)
-		d.syncSetup = false
-		d.debugFirstSync = false
-		d.debugSyncAttempts = 0
-		log.Printf("[FSK] Sync setup: entering StateSync1")
-	}
-
-	switch d.state {
-	case StateNoSignal:
-		// Do nothing
-
-	case StateSync1:
-		// Scan indefinitely for valid bit pattern
-		d.codeBits = (d.codeBits >> 1) | (bitVal * msbVal)
-
-		// Debug: Log first sync attempt only
-		if !d.debugFirstSync {
-			d.debugFirstSync = true
-			log.Printf("[FSK] StateSync1: Starting sync search, nbits=%d, msb=0x%X", d.nbits, d.msb)
+	switch d.rxstate {
+	case StateIdle:
+		// Wait for mark-to-space transition (start bit edge)
+		if isEdge, corr := d.isMarkSpace(); isEdge {
+			d.setState(StateStart)
+			d.counter = corr
 		}
 
-		if d.charEncoding != nil && d.charEncoding.CheckBits(d.codeBits) {
-			d.syncChars = append(d.syncChars, d.codeBits)
-			d.validCount++
-			d.bitCount = 0
-			d.codeBits = 0
-			d.setState(StateSync2)
-			d.waiting = true
-			log.Printf("[FSK] StateSync1: Found valid character 0x%X, moving to StateSync2", d.syncChars[len(d.syncChars)-1])
-		} else {
-			// Rate limit: only log every 10000 attempts
-			d.debugSyncAttempts++
-			if d.debugSyncAttempts == 10000 {
-				log.Printf("[FSK] StateSync1: 10000 sync attempts, last codeBits=0x%X", d.codeBits)
-				d.debugSyncAttempts = 0
-			}
-		}
-
-	case StateSync2:
-		// Wait for start bit if there are variable stop bits (EFR modes only)
-		if d.stopVariable {
-			if d.waiting && bit {
-				// Still in stop bit (mark), wait for start bit (space)
-				break
-			}
-			d.waiting = false
-		}
-
-		// Sample and validate bits in groups of nbits
-		d.codeBits = (d.codeBits >> 1) | (bitVal * msbVal)
-		d.bitCount++
-
-		// Debug: log bit accumulation for first character only
-		if d.validCount == 1 && d.bitCount <= 3 {
-			log.Printf("[FSK] StateSync2: bit %d, bitVal=%d, codeBits=0x%X", d.bitCount, bitVal, d.codeBits)
-		}
-
-		if d.bitCount == d.nbits {
-			if d.charEncoding != nil && d.charEncoding.CheckBits(d.codeBits) {
-				d.syncChars = append(d.syncChars, d.codeBits)
-				d.codeBits = 0
-				d.bitCount = 0
-				d.validCount++
-				log.Printf("[FSK] StateSync2: Valid character %d/4: 0x%X", d.validCount, d.syncChars[len(d.syncChars)-1])
-
-				// Successfully read 4 characters?
-				if d.validCount == 4 {
-					// Process sync characters
-					for _, code := range d.syncChars {
-						d.processCharacter(code)
-					}
-					d.setState(StateReadData)
-					log.Printf("[FSK] StateSync2: Got 4 valid characters, moving to StateReadData")
-				}
+	case StateStart:
+		// Validate start bit at middle of symbol period
+		if d.counter--; d.counter == 0 {
+			if !d.isMark() {
+				// Valid start bit (space), move to data state
+				d.setState(StateData)
+				d.counter = d.symbollen
+				d.bitcntr = 0
+				d.rxdata = 0
 			} else {
-				// Failed subsequent bit test - restart sync
-				log.Printf("[FSK] StateSync2: Invalid character 0x%X (binary: %015b) after %d valid, restarting sync", d.codeBits, d.codeBits, d.validCount)
-				d.codeBits = 0
-				d.bitCount = 0
-				d.syncSetup = true
+				// False start, back to idle
+				d.setState(StateIdle)
 			}
-			d.waiting = true
 		}
 
-	case StateReadData:
-		// Wait for start bit if there are variable stop bits (EFR modes only)
-		if d.stopVariable {
-			if d.waiting && bit {
-				// Still in stop bit (mark), wait for start bit (space)
-				break
+	case StateData:
+		// Sample data bits at middle of each symbol period
+		if d.counter--; d.counter == 0 {
+			// Sample bit and shift into rxdata
+			if d.isMark() {
+				d.rxdata |= (1 << uint(d.bitcntr))
 			}
-			d.waiting = false
+			d.bitcntr++
+			d.counter = d.symbollen
+		}
+		// Check if we've collected all data bits
+		if d.bitcntr == d.nbits {
+			d.setState(StateStop)
 		}
 
-		// Read data bits
-		d.codeBits = (d.codeBits >> 1) | (bitVal * msbVal)
-		d.bitCount++
-
-		if d.bitCount == d.nbits {
-			d.processCharacter(d.codeBits)
-			d.codeBits = 0
-			d.bitCount = 0
-			d.waiting = true
+	case StateStop:
+		// Validate stop bit at middle of symbol period
+		if d.counter--; d.counter == 0 {
+			if d.isMark() {
+				// Valid stop bit (mark), decode character
+				c = d.decodeChar(d.rxdata)
+				if c != 0 && d.outputCB != nil {
+					d.outputCB(c)
+				}
+				flag = true
+			}
+			// Return to idle regardless of stop bit validity
+			d.setState(StateIdle)
 		}
 	}
+
+	// Suppress unused variable warning
+	_ = correction
+
+	return flag
 }
 
-// processCharacter processes a decoded character code
-func (d *FSKDemodulator) processCharacter(code uint32) {
+// decodeChar decodes a character using the configured encoding
+func (d *FSKDemodulator) decodeChar(code uint32) rune {
 	if d.charEncoding == nil {
-		return
+		return 0
 	}
 
 	ch, success := d.charEncoding.ProcessChar(code)
 	if success {
-		if ch != 0 && d.outputCB != nil {
-			d.outputCB(ch)
-		}
 		d.succeedTally++
-	} else {
-		d.failTally++
+		return ch
 	}
+	d.failTally++
+	return 0
 }
 
 // Reset resets the decoder state
 func (d *FSKDemodulator) Reset() {
-	d.state = StateNoSignal
-	d.syncSetup = true
-	d.bitCount = 0
-	d.codeBits = 0
-	d.sampleCount = 0
-	d.nextEventCount = 0
-	d.signalAccumulator = 0
+	d.rxstate = StateIdle
+	d.counter = 0
+	d.bitcntr = 0
+	d.rxdata = 0
 	d.audioAverage = 0.1
+
+	// Clear bit buffer
+	for i := range d.bitBuf {
+		d.bitBuf[i] = false
+	}
 
 	if d.charEncoding != nil {
 		d.charEncoding.Reset()

@@ -35,7 +35,7 @@ type FSKDecoder struct {
 
 	// Statistics
 	baudError float64
-	lastState FSKState
+	lastState RTTYRxState
 }
 
 // FSKConfig contains configuration parameters
@@ -95,7 +95,7 @@ func NewFSKDecoder(sampleRate int, config FSKConfig) *FSKDecoder {
 		d.bufferMu.Unlock()
 	})
 
-	d.fsk.SetStateCallback(func(state FSKState) {
+	d.fsk.SetStateCallback(func(state RTTYRxState) {
 		d.lastState = state
 	})
 
@@ -161,7 +161,7 @@ func (d *FSKDecoder) processLoop(audioChan <-chan []int16, resultChan chan<- []b
 	stateTicker := time.NewTicker(250 * time.Millisecond)
 	defer stateTicker.Stop()
 
-	lastState := FSKState(-1)
+	lastState := RTTYRxState(-1)
 
 	for {
 		select {
@@ -249,7 +249,7 @@ func (d *FSKDecoder) sendBaudError(resultChan chan<- []byte) {
 // sendStateUpdate sends decoder state update to the client
 // Binary protocol: [type:1][state:1]
 // type: 0x03 = state update
-func (d *FSKDecoder) sendStateUpdate(resultChan chan<- []byte, state FSKState) {
+func (d *FSKDecoder) sendStateUpdate(resultChan chan<- []byte, state RTTYRxState) {
 	msg := make([]byte, 2)
 	msg[0] = 0x03        // State update type
 	msg[1] = byte(state) // State value

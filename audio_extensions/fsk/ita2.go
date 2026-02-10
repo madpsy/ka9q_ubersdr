@@ -127,6 +127,16 @@ func (i *ITA2) GetMSB32() uint32 {
 	return i.framing.GetMSB32()
 }
 
+// GetDataBits returns the number of data bits (5 for ITA2)
+func (i *ITA2) GetDataBits() int {
+	return i.framing.GetDataBits()
+}
+
+// GetParityBits returns the number of parity bits
+func (i *ITA2) GetParityBits() int {
+	return i.framing.GetParityBits()
+}
+
 // CheckBits checks if a code is valid and extracts data bits
 func (i *ITA2) CheckBits(code uint32) bool {
 	_, valid := i.framing.CheckBitsAndExtract(code)

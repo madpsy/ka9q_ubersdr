@@ -102,6 +102,16 @@ func (a *AsyncFraming) GetMSB32() uint32 {
 	return a.msb
 }
 
+// GetDataBits returns the number of data bits (not including start/stop/parity)
+func (a *AsyncFraming) GetDataBits() int {
+	return a.dataBits
+}
+
+// GetParityBits returns the number of parity bits (0 or 1)
+func (a *AsyncFraming) GetParityBits() int {
+	return a.parityBits
+}
+
 // CheckBitsAndExtract validates the bit pattern and extracts the data bits
 // Returns the data code and whether it's valid
 func (a *AsyncFraming) CheckBitsAndExtract(v uint32) (byte, bool) {

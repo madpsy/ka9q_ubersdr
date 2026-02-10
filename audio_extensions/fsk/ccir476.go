@@ -129,6 +129,16 @@ func (c *CCIR476) GetMSB32() uint32 {
 	return 0x40
 }
 
+// GetDataBits returns the number of data bits (7 for CCIR476)
+func (c *CCIR476) GetDataBits() int {
+	return 7
+}
+
+// GetParityBits returns the number of parity bits (0 for CCIR476, uses 4-of-7 instead)
+func (c *CCIR476) GetParityBits() int {
+	return 0
+}
+
 // CheckBits checks if a code is valid (has 4 mark bits)
 func (c *CCIR476) CheckBits(code uint32) bool {
 	return c.validCodes[byte(code)]

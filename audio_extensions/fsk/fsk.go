@@ -22,7 +22,9 @@ type CharacterEncoding interface {
 	CheckBits(code uint32) bool           // Changed to uint32 to support >8 bit codes
 	GetNBits() int
 	GetMSB() byte
-	GetMSB32() uint32 // Full 32-bit MSB for modes with >8 bits
+	GetMSB32() uint32   // Full 32-bit MSB for modes with >8 bits
+	GetDataBits() int   // Number of data bits (not including start/stop/parity)
+	GetParityBits() int // Number of parity bits (0 or 1)
 	Reset()
 }
 
@@ -70,7 +72,9 @@ type FSKDemodulator struct {
 	audioAverage float64
 
 	// Character encoding parameters
-	nbits        int    // number of data bits
+	dataBits     int    // number of data bits (e.g., 5 for ITA2)
+	parityBits   int    // number of parity bits (0 or 1)
+	nbits        int    // total data+parity bits to collect in state machine
 	msb          uint32 // MSB mask for bit shifting
 	charEncoding CharacterEncoding
 
@@ -121,7 +125,9 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 	case "CCIR476":
 		ccir := NewCCIR476()
 		d.charEncoding = ccir
-		d.nbits = ccir.GetNBits()
+		d.dataBits = ccir.GetDataBits()
+		d.parityBits = ccir.GetParityBits()
+		d.nbits = d.dataBits + d.parityBits
 		d.msb = ccir.GetMSB32()
 	case "ITA2":
 		ita2, err := NewITA2(framing)
@@ -130,7 +136,9 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 			ita2, _ = NewITA2("5N1.5")
 		}
 		d.charEncoding = ita2
-		d.nbits = ita2.GetNBits()
+		d.dataBits = ita2.GetDataBits()
+		d.parityBits = ita2.GetParityBits()
+		d.nbits = d.dataBits + d.parityBits
 		d.msb = ita2.GetMSB32()
 	case "ASCII":
 		// ASCII uses 7 or 8 bits based on framing
@@ -140,7 +148,9 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 			ascii, _ = NewASCII("7N1")
 		}
 		d.charEncoding = ascii
-		d.nbits = ascii.GetNBits()
+		d.dataBits = ascii.GetDataBits()
+		d.parityBits = ascii.GetParityBits()
+		d.nbits = d.dataBits + d.parityBits
 		d.msb = ascii.GetMSB32()
 	default:
 		log.Printf("[FSK] Unsupported encoding: %s, using ITA2", encoding)
@@ -150,7 +160,9 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 			ita2, _ = NewITA2("5N1.5")
 		}
 		d.charEncoding = ita2
-		d.nbits = ita2.GetNBits()
+		d.dataBits = ita2.GetDataBits()
+		d.parityBits = ita2.GetParityBits()
+		d.nbits = d.dataBits + d.parityBits
 		d.msb = ita2.GetMSB32()
 	}
 

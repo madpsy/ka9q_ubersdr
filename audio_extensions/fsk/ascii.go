@@ -55,6 +55,16 @@ func (a *ASCII) GetMSB32() uint32 {
 	return a.framing.GetMSB32()
 }
 
+// GetDataBits returns the number of data bits (7 or 8 for ASCII)
+func (a *ASCII) GetDataBits() int {
+	return a.framing.GetDataBits()
+}
+
+// GetParityBits returns the number of parity bits
+func (a *ASCII) GetParityBits() int {
+	return a.framing.GetParityBits()
+}
+
 // CheckBits checks if a code is valid and extracts data bits
 func (a *ASCII) CheckBits(code uint32) bool {
 	_, valid := a.framing.CheckBitsAndExtract(code)

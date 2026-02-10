@@ -84,7 +84,7 @@ type FSKDemodulator struct {
 	validCount   int
 	errorCount   int
 	waiting      bool
-	stopVariable bool // true for modes with variable stop bits (5N1.5, 5N2, etc.)
+	stopVariable bool // true for modes with variable stop bits (EFR modes only)
 
 	// Encoding
 	charEncoding CharacterEncoding
@@ -131,14 +131,15 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 	d.halfBitSampleCount = d.bitSampleCount / 2
 
 	// Determine if framing has variable stop bits (needs start bit detection)
-	// In KiwiSDR, stop_variable is set for framings ending with 'V' or containing 'EFR'
-	// Standard framings like 5N1.5, 5N2, 7N1, 8N1 do NOT have variable stop bits
-	// Only special modes like EFR (Enhanced Frequency Response) use variable stop bits
+	// Only enable for special EFR modes, NOT for standard async serial framings
+	// Standard framings like 5N1.5, 5N2, 7N1, 8N1, 4/7 do NOT need this
 	d.stopVariable = false
 	if len(framing) > 0 {
-		// Check if framing ends with 'V' or contains 'EFR'
-		if framing[len(framing)-1] == 'V' || len(framing) >= 3 && framing[len(framing)-3:] == "EFR" {
+		// Only enable for framings that explicitly contain 'EFR' or end with 'V'
+		// This is very restrictive to avoid breaking normal modes
+		if len(framing) >= 3 && (framing[:3] == "EFR" || framing[len(framing)-1] == 'V') {
 			d.stopVariable = true
+			log.Printf("[FSK] Variable stop bit mode enabled for framing: %s", framing)
 		}
 	}
 
@@ -377,7 +378,7 @@ func (d *FSKDemodulator) processBit(bit bool) {
 		}
 
 	case StateSync2:
-		// Wait for start bit if there are variable stop bits
+		// Wait for start bit if there are variable stop bits (EFR modes only)
 		if d.stopVariable && d.waiting && bit {
 			// Still in stop bit (mark), wait for start bit (space)
 			break
@@ -413,7 +414,7 @@ func (d *FSKDemodulator) processBit(bit bool) {
 		}
 
 	case StateReadData:
-		// Wait for start bit if there are variable stop bits
+		// Wait for start bit if there are variable stop bits (EFR modes only)
 		if d.stopVariable && d.waiting && bit {
 			// Still in stop bit (mark), wait for start bit (space)
 			break

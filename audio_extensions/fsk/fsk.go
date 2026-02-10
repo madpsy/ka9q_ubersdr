@@ -402,11 +402,13 @@ func (d *FSKDemodulator) processBit(bit bool) {
 
 	case StateSync2:
 		// Wait for start bit if there are variable stop bits (EFR modes only)
-		if d.stopVariable && d.waiting && bit {
-			// Still in stop bit (mark), wait for start bit (space)
-			break
+		if d.stopVariable {
+			if d.waiting && bit {
+				// Still in stop bit (mark), wait for start bit (space)
+				break
+			}
+			d.waiting = false
 		}
-		d.waiting = false
 
 		// Sample and validate bits in groups of nbits
 		d.codeBits = (d.codeBits >> 1) | (bitVal * msbVal)
@@ -441,11 +443,13 @@ func (d *FSKDemodulator) processBit(bit bool) {
 
 	case StateReadData:
 		// Wait for start bit if there are variable stop bits (EFR modes only)
-		if d.stopVariable && d.waiting && bit {
-			// Still in stop bit (mark), wait for start bit (space)
-			break
+		if d.stopVariable {
+			if d.waiting && bit {
+				// Still in stop bit (mark), wait for start bit (space)
+				break
+			}
+			d.waiting = false
 		}
-		d.waiting = false
 
 		// Read data bits
 		d.codeBits = (d.codeBits >> 1) | (bitVal * msbVal)

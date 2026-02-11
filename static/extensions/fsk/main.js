@@ -323,6 +323,15 @@ class FSKExtension extends DecoderExtension {
                 this.config.inverted = true;
                 this.config.encoding = 'ITA2';
                 break;
+            case 'ham':
+                // Ham RTTY - ITA2/Baudot, 45.45 baud, 170 Hz shift, 1000 Hz center, not inverted
+                this.config.center_frequency = 1000;
+                this.config.shift = 170;
+                this.config.baud_rate = 45.45;
+                this.config.framing = '5N1.5';
+                this.config.inverted = false;
+                this.config.encoding = 'ITA2';
+                break;
             case 'custom':
                 // Keep current settings
                 return;

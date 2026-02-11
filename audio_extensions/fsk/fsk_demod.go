@@ -125,6 +125,7 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 		d.msb = d.ccir476.GetMSB()
 	case "ITA2":
 		d.ita2 = NewITA2(framing)
+		d.ita2.asciiMode = false // ITA2 mode
 		d.nbits = d.ita2.GetNBits()
 		d.msb = d.ita2.GetMSB()
 		// For async framing with 1.5 stop bits, double the baud rate for oversampling
@@ -134,6 +135,12 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 			d.stopVariable = true
 			log.Printf("[FSK] 5N1.5 framing: doubled baud rate to %.1f for oversampling", d.baudRate)
 		}
+	case "ASCII":
+		d.ita2 = NewITA2(framing)
+		d.ita2.asciiMode = true // ASCII mode (direct byte-to-char)
+		d.nbits = d.ita2.GetNBits()
+		d.msb = d.ita2.GetMSB()
+		log.Printf("[FSK] ASCII mode enabled with %s framing", framing)
 	default:
 		log.Printf("[FSK] Unsupported encoding: %s, defaulting to CCIR476", encoding)
 		d.ccir476 = NewCCIR476()

@@ -75,6 +75,18 @@ func WeatherConfig() FSKConfig {
 	}
 }
 
+// HamConfig returns Ham RTTY configuration
+func HamConfig() FSKConfig {
+	return FSKConfig{
+		CenterFrequency: 1000.0,  // Typical audio center frequency
+		Shift:           170.0,   // Standard amateur RTTY shift
+		BaudRate:        45.45,   // Standard amateur RTTY baud rate
+		Inverted:        false,   // Not inverted
+		Framing:         "5N1.5", // 5 data bits, no parity, 1.5 stop bits
+		Encoding:        "ITA2",  // Baudot/ITA2 encoding
+	}
+}
+
 // NewFSKDecoder creates a new FSK decoder
 func NewFSKDecoder(sampleRate int, config FSKConfig) *FSKDecoder {
 	d := &FSKDecoder{

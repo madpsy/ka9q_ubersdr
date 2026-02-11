@@ -2,6 +2,7 @@ package fsk
 
 // ITA2 implements the ITA2/Baudot code used by RTTY (Radio Teletype)
 // This is a 5-bit character encoding with letters and figures shift states
+// Also supports ASCII mode for 7/8-bit direct character encoding
 type ITA2 struct {
 	// Character tables
 	ltrs     [32]rune
@@ -21,37 +22,58 @@ type ITA2 struct {
 	figures byte
 
 	// Framing
-	framing  string // e.g., "5N1.5"
+	framing  string // e.g., "5N1.5", "7N1", "8N1"
 	nbits    int    // Total bits including framing
-	dataBits int    // Data bits only (5 for ITA2)
+	dataBits int    // Data bits only (5 for ITA2, 7 or 8 for ASCII)
+
+	// Mode
+	asciiMode bool // true = ASCII mode (direct byte-to-char), false = ITA2 mode
 }
 
-// NewITA2 creates a new ITA2 decoder
+// NewITA2 creates a new ITA2 decoder (also handles ASCII mode)
 func NewITA2(framing string) *ITA2 {
 	i := &ITA2{
 		letters:   0x1f,
 		figures:   0x1b,
 		firstChar: true, // Start with first character flag
 		framing:   framing,
-		dataBits:  5,
+		dataBits:  5, // Default to 5 bits
 		codeLtrs:  make(map[byte]rune),
 		codeFigs:  make(map[byte]rune),
 		ltrsCode:  make(map[rune]byte),
 		figsCode:  make(map[rune]byte),
 	}
 
-	// Calculate total bits based on framing
-	// Format: <data>N<stop> where N means no parity
-	// For 5N1.5: 1 start + 5 data + 0 parity + 1.5 stop = 7.5 bits
-	// KiwiSDR doubles this for 1.5 stop bits: 15 bits total
-	startBits := 1
-	stopBits := 1.5 // For 5N1.5
+	// Parse framing format: <data>N<stop>
+	// Examples: 5N1, 5N1.5, 5N2, 7N1, 8N1
+	// Format: <data bits>N<stop bits>
+	if len(framing) >= 3 && framing[1] == 'N' {
+		// Extract data bits (first character)
+		i.dataBits = int(framing[0] - '0')
 
-	if framing == "5N1.5" {
-		// Total: 1 + 5 + 1.5 = 7.5, doubled = 15
-		i.nbits = int((float64(startBits) + float64(i.dataBits) + stopBits) * 2)
+		// Extract stop bits (after 'N')
+		stopBits := 1.0
+		stopStr := framing[2:]
+		if stopStr == "1.5" {
+			stopBits = 1.5
+		} else if stopStr == "2" {
+			stopBits = 2.0
+		} else if stopStr == "1" {
+			stopBits = 1.0
+		}
+
+		// Calculate total bits: start + data + stop
+		startBits := 1
+		totalBits := float64(startBits) + float64(i.dataBits) + stopBits
+
+		// KiwiSDR doubles bit count for 1.5 stop bits (oversampling)
+		if stopBits == 1.5 {
+			i.nbits = int(totalBits * 2)
+		} else {
+			i.nbits = int(totalBits)
+		}
 	} else {
-		// Default to just data bits for other framings
+		// Fallback for unknown framing
 		i.nbits = i.dataBits
 	}
 
@@ -124,44 +146,61 @@ func (i *ITA2) GetDataBits() int {
 }
 
 // CheckBits validates the frame structure for async framing
-// For 5N1.5 framing, this validates that:
-// - Start bits are 00 (2 bits)
-// - Each data bit pair is either 00 or 11 (10 bits total for 5 data bits)
-// - Stop bits are 111 (3 bits)
+// For doubled framings (5N1.5), validates bit pairs
+// For non-doubled framings (5N1, 5N2, 7N1, 8N1), validates start/stop bits
 func (i *ITA2) CheckBits(code uint16) bool {
-	if i.nbits != 15 {
-		// For non-doubled framings, accept all codes
-		return true
-	}
-
-	// For 5N1.5 (15-bit doubled frame), validate structure
-	// KiwiSDR comment: "ttt d4 d3 d2 d1 d0 ss" (MSB to LSB)
-	// Frame: [start:2][data0-4:10][stop:3] (LSB to MSB in our uint16)
 	v := uint16(code)
 
-	// Check start bits (LSB, should be 00)
-	if (v & 3) != 0 {
-		return false
-	}
-	v >>= 2
+	// Check if this is a doubled framing (only 5N1.5 uses 15 bits)
+	if i.nbits == 15 {
+		// For 5N1.5 (15-bit doubled frame), validate structure
+		// Frame: [start:2][data0-4:10][stop:3] (LSB to MSB)
 
-	// Check data bits (each 2-bit pair should be 00 or 11)
-	for bit := 0; bit < i.dataBits; bit++ {
-		d := v & 3
-		if d != 0 && d != 3 {
+		// Check start bits (LSB, should be 00)
+		if (v & 3) != 0 {
 			return false
 		}
 		v >>= 2
+
+		// Check data bits (each 2-bit pair should be 00 or 11)
+		for bit := 0; bit < i.dataBits; bit++ {
+			d := v & 3
+			if d != 0 && d != 3 {
+				return false
+			}
+			v >>= 2
+		}
+
+		// Check stop bits (MSB, should be 111)
+		if (v & 7) != 7 {
+			return false
+		}
+		v >>= 3
+
+		// Should have consumed all bits
+		if v != 0 {
+			return false
+		}
+
+		return true
 	}
 
-	// Check stop bits (MSB, should be 111)
-	if (v & 7) != 7 {
+	// For non-doubled framings (5N1, 5N2, 7N1, 8N1), validate start/stop bits
+	// Frame structure: [start:1][data:N][stop:1 or 2]
+
+	// Check start bit (LSB, should be 0)
+	if (v & 1) != 0 {
 		return false
 	}
-	v >>= 3
+	v >>= 1
 
-	// Should have consumed all bits
-	if v != 0 {
+	// Skip data bits (don't validate content)
+	v >>= uint(i.dataBits)
+
+	// Check stop bits (should be all 1s)
+	stopBits := i.nbits - 1 - i.dataBits // Total - start - data = stop bits
+	stopMask := uint16((1 << uint(stopBits)) - 1)
+	if (v & stopMask) != stopMask {
 		return false
 	}
 
@@ -193,10 +232,33 @@ type ITA2CharResult struct {
 
 // ProcessChar processes a received character code
 // ITA2 uses a simple shift mechanism (no error correction like CCIR476)
+// ASCII mode does direct byte-to-character conversion
 // IMPORTANT: ITA2 processes the PREVIOUS character, because shift codes
 // affect the NEXT character, not themselves
 func (i *ITA2) ProcessChar(code uint16) ITA2CharResult {
-	// Extract data bits from the frame
+	// ASCII mode: direct conversion, no shift states
+	if i.asciiMode {
+		// Extract data bits (skip start bit, mask to data bits)
+		dataByte := byte((code >> 1) & uint16((1<<i.dataBits)-1))
+
+		// Skip non-printable characters (matching KiwiSDR logic)
+		// Skip: 0x00-0x09, 0x0B-0x0C, 0x0E-0x1F, 0x7F+
+		if (dataByte >= 0x00 && dataByte <= 0x09) ||
+			(dataByte >= 0x0B && dataByte <= 0x0C) ||
+			(dataByte >= 0x0E && dataByte <= 0x1F) ||
+			(dataByte >= 0x7F) {
+			return ITA2CharResult{BitSuccess: true, Tally: 0} // Skip non-printable
+		}
+
+		// Convert byte directly to character
+		return ITA2CharResult{
+			Char:       rune(dataByte),
+			BitSuccess: true,
+			Tally:      1,
+		}
+	}
+
+	// ITA2 mode: extract data bits from the frame
 	// For 5N1.5 with 15 total bits, each bit is doubled
 	// Frame: [start:2][data0-4:10][stop:3] (LSB to MSB)
 

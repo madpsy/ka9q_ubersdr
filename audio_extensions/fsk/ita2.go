@@ -114,8 +114,8 @@ func (i *ITA2) GetNBits() int {
 }
 
 // GetMSB returns the MSB mask for the total bit count
-func (i *ITA2) GetMSB() byte {
-	return byte(1 << (i.nbits - 1))
+func (i *ITA2) GetMSB() uint16 {
+	return uint16(1 << (i.nbits - 1))
 }
 
 // GetDataBits returns the number of data bits (5 for ITA2)
@@ -128,7 +128,7 @@ func (i *ITA2) GetDataBits() int {
 // - Start bits are 00 (2 bits)
 // - Each data bit pair is either 00 or 11 (10 bits total for 5 data bits)
 // - Stop bits are 111 (3 bits)
-func (i *ITA2) CheckBits(code byte) bool {
+func (i *ITA2) CheckBits(code uint16) bool {
 	if i.nbits != 15 {
 		// For non-doubled framings, accept all codes
 		return true
@@ -193,7 +193,7 @@ type ITA2CharResult struct {
 // ITA2 uses a simple shift mechanism (no error correction like CCIR476)
 // IMPORTANT: ITA2 processes the PREVIOUS character, because shift codes
 // affect the NEXT character, not themselves
-func (i *ITA2) ProcessChar(code byte) ITA2CharResult {
+func (i *ITA2) ProcessChar(code uint16) ITA2CharResult {
 	// Extract data bits from the frame
 	// For 5N1.5 with 15 total bits, each bit is doubled
 	// Frame structure: [start:2][data0:2][data1:2][data2:2][data3:2][data4:2][stop:3]
@@ -228,7 +228,7 @@ func (i *ITA2) ProcessChar(code byte) ITA2CharResult {
 		}
 	} else {
 		// For other framings, just mask to data bits
-		dataBits = code & byte((1<<i.dataBits)-1)
+		dataBits = byte(code & uint16((1<<i.dataBits)-1))
 	}
 
 	// Always return success for ITA2 (no error correction)

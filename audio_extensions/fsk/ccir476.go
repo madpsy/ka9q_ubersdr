@@ -122,13 +122,16 @@ func (c *CCIR476) GetNBits() int {
 }
 
 // GetMSB returns the MSB mask for 7-bit characters
-func (c *CCIR476) GetMSB() byte {
+func (c *CCIR476) GetMSB() uint16 {
 	return 0x40
 }
 
 // CheckBits checks if a code is valid (has 4 mark bits)
-func (c *CCIR476) CheckBits(code byte) bool {
-	return c.validCodes[code]
+func (c *CCIR476) CheckBits(code uint16) bool {
+	if code > 0xFF {
+		return false // CCIR476 is only 7-bit, so reject codes > 8 bits
+	}
+	return c.validCodes[byte(code)]
 }
 
 // codeToChar converts a code to a character based on shift state
@@ -156,16 +159,18 @@ type CharResult struct {
 
 // ProcessChar processes a received character code
 // Implements the alpha/rep phase error correction scheme
-func (c *CCIR476) ProcessChar(code byte) CharResult {
+func (c *CCIR476) ProcessChar(code uint16) CharResult {
+	// CCIR476 is 7-bit, so mask to byte
+	code7 := byte(code & 0x7F)
 	// Check bit validity - this NEVER changes throughout the function
-	bitSuccess := c.checkBits(code)
+	bitSuccess := c.checkBits(code7)
 	tally := 0
 	var chr byte = 0xff
 
 	// Force phasing with the two phasing characters
-	if code == c.codeRep {
+	if code7 == c.codeRep {
 		c.alphaPhase = false
-	} else if code == c.codeAlpha {
+	} else if code7 == c.codeAlpha {
 		c.alphaPhase = true
 	}
 
@@ -173,16 +178,16 @@ func (c *CCIR476) ProcessChar(code byte) CharResult {
 		// Rep phase: store characters for later comparison
 		c.c1 = c.c2
 		c.c2 = c.c3
-		c.c3 = code
+		c.c3 = code7
 	} else {
 		// Alpha phase: compare with rep phase character
 		// Try to recover the character using forward error correction
-		if bitSuccess && c.c1 == code {
+		if bitSuccess && c.c1 == code7 {
 			// Both alpha and rep match - perfect
-			chr = code
+			chr = code7
 		} else if bitSuccess {
 			// Alpha is valid, use it
-			chr = code
+			chr = code7
 		} else if c.checkBits(c.c1) {
 			// Alpha is invalid, but rep is valid - use rep
 			chr = c.c1

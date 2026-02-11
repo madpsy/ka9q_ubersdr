@@ -66,11 +66,11 @@ type FSKDemodulator struct {
 
 	// Bit synchronization
 	bitCount   int
-	codeBits   byte
+	codeBits   uint16 // Changed from byte to support 15-bit codes (5N1.5)
 	nbits      int
-	msb        byte
+	msb        uint16 // Changed from byte to support 15-bit codes
 	syncSetup  bool
-	syncChars  []byte
+	syncChars  []uint16 // Changed from []byte to support 15-bit codes
 	validCount int
 	errorCount int
 	waiting    bool
@@ -300,7 +300,7 @@ func (d *FSKDemodulator) ProcessSamples(samples []int16) {
 
 // processBit processes a single decoded bit
 func (d *FSKDemodulator) processBit(bit bool) {
-	bitVal := byte(0)
+	bitVal := uint16(0)
 	if bit {
 		bitVal = 1
 	}
@@ -423,7 +423,7 @@ func (d *FSKDemodulator) processBit(bit bool) {
 
 // processCharacter processes a decoded character code
 // Returns true if the character was successfully decoded
-func (d *FSKDemodulator) processCharacter(code byte) bool {
+func (d *FSKDemodulator) processCharacter(code uint16) bool {
 	if d.ccir476 != nil {
 		result := d.ccir476.ProcessChar(code)
 

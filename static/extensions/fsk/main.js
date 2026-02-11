@@ -57,15 +57,17 @@ class FSKExtension extends DecoderExtension {
 
             const consoleEl = document.getElementById('fsk-console');
             const startBtn = document.getElementById('fsk-start-btn');
+            const copyBtn = document.getElementById('fsk-copy-btn');
             const clearBtn = document.getElementById('fsk-clear-btn');
 
             console.log(`FSK: DOM check attempt ${attempts + 1}/${maxAttempts}:`, {
                 consoleEl: !!consoleEl,
                 startBtn: !!startBtn,
+                copyBtn: !!copyBtn,
                 clearBtn: !!clearBtn
             });
 
-            if (consoleEl && startBtn && clearBtn) {
+            if (consoleEl && startBtn && copyBtn && clearBtn) {
                 console.log('FSK: All DOM elements found, setting up...');
                 this.setupCanvas();
                 this.setupBaudBar();
@@ -163,6 +165,12 @@ class FSKExtension extends DecoderExtension {
         const startBtn = document.getElementById('fsk-start-btn');
         if (startBtn) {
             startBtn.addEventListener('click', () => this.toggleDecoding());
+        }
+
+        // Copy button
+        const copyBtn = document.getElementById('fsk-copy-btn');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', () => this.copyToClipboard());
         }
 
         // Clear button
@@ -608,6 +616,49 @@ class FSKExtension extends DecoderExtension {
         this.needsTimestamp = true;
     }
 
+    copyToClipboard() {
+        const consoleEl = document.getElementById('fsk-console');
+        if (!consoleEl) return;
+
+        const text = consoleEl.textContent;
+        if (!text) {
+            console.log('FSK: No text to copy');
+            return;
+        }
+
+        // Use the Clipboard API
+        navigator.clipboard.writeText(text).then(() => {
+            console.log('FSK: Text copied to clipboard');
+            // Provide visual feedback
+            const copyBtn = document.getElementById('fsk-copy-btn');
+            if (copyBtn) {
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = 'Copied!';
+                copyBtn.style.background = '#4CAF50';
+                setTimeout(() => {
+                    copyBtn.textContent = originalText;
+                    copyBtn.style.background = '';
+                }, 1500);
+            }
+        }).catch(err => {
+            console.error('FSK: Failed to copy text:', err);
+            // Fallback for older browsers
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-999999px';
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                console.log('FSK: Text copied to clipboard (fallback)');
+            } catch (err) {
+                console.error('FSK: Fallback copy failed:', err);
+            }
+            document.body.removeChild(textArea);
+        });
+    }
+
     updateConsoleHeight() {
         const container = document.getElementById('fsk-console-container');
         if (!container) return;
@@ -751,10 +802,12 @@ class FSKExtension extends DecoderExtension {
         // Draw labels
         ctx.fillStyle = '#ff0000';
         ctx.font = '10px monospace';
-        ctx.fillText(`Mark: ${markFreq.toFixed(0)} Hz`, markX + 5, 15);
+        ctx.fillText('Mark', markX + 5, 12);
+        ctx.fillText(`${markFreq.toFixed(0)} Hz`, markX + 5, 24);
 
         ctx.fillStyle = '#0000ff';
-        ctx.fillText(`Space: ${spaceFreq.toFixed(0)} Hz`, spaceX + 5, 30);
+        ctx.fillText('Space', spaceX + 5, 12);
+        ctx.fillText(`${spaceFreq.toFixed(0)} Hz`, spaceX + 5, 24);
 
         // Draw frequency scale
         ctx.fillStyle = '#666';

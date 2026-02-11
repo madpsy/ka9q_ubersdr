@@ -42,6 +42,8 @@ type FSKConfig struct {
 	Shift           float64 `json:"shift"`            // Hz (e.g., 170 for NAVTEX)
 	BaudRate        float64 `json:"baud_rate"`        // Baud (e.g., 100 for NAVTEX)
 	Inverted        bool    `json:"inverted"`         // Invert mark/space (false for NAVTEX)
+	Framing         string  `json:"framing"`          // Framing (e.g., "4/7" for CCIR476)
+	Encoding        string  `json:"encoding"`         // Encoding (e.g., "CCIR476")
 }
 
 // DefaultFSKConfig returns default NAVTEX configuration
@@ -51,6 +53,8 @@ func DefaultFSKConfig() FSKConfig {
 		Shift:           170.0,
 		BaudRate:        100.0,
 		Inverted:        false,
+		Framing:         "4/7",
+		Encoding:        "CCIR476",
 	}
 }
 
@@ -67,10 +71,12 @@ func NewFSKDecoder(sampleRate int, config FSKConfig) *FSKDecoder {
 
 	// Create FSK demodulator using NAVTEX implementation
 	d.fsk = NewFSKDemodulator(
-		float64(sampleRate),
+		sampleRate,
 		config.CenterFrequency,
 		config.Shift,
 		config.BaudRate,
+		config.Framing,
+		config.Encoding,
 		config.Inverted,
 	)
 

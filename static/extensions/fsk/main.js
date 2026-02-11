@@ -16,12 +16,12 @@ class FSKExtension extends DecoderExtension {
 
         // Configuration
         this.config = {
-            center_frequency: 1000,
+            center_frequency: 500,  // Default to NAVTEX center frequency
             shift: 170,
-            baud_rate: 45.45,
-            framing: '5N1.5',
+            baud_rate: 100,         // Default to NAVTEX baud rate
+            framing: '4/7',         // CCIR476 framing
             inverted: false,
-            encoding: 'ITA2'
+            encoding: 'CCIR476'     // Note: Backend currently only supports CCIR476
         };
 
         // State
@@ -184,26 +184,23 @@ class FSKExtension extends DecoderExtension {
         console.log('FSK: Applying preset:', preset);
         
         switch(preset) {
-            case 'ham':
-                this.config.shift = 170;
-                this.config.baud_rate = 45.45;
-                this.config.framing = '5N1.5';
-                this.config.inverted = false;
-                this.config.encoding = 'ITA2';
-                break;
-            case 'sitor-b':
+            case 'navtex':
+                // NAVTEX International (518 kHz) - CCIR476, 100 baud, 170 Hz shift, 500 Hz center
+                this.config.center_frequency = 500;
                 this.config.shift = 170;
                 this.config.baud_rate = 100;
                 this.config.framing = '4/7';
                 this.config.inverted = false;
                 this.config.encoding = 'CCIR476';
                 break;
-            case 'wx':
-                this.config.shift = 450;
-                this.config.baud_rate = 50;
-                this.config.framing = '5N1.5';
-                this.config.inverted = true;
-                this.config.encoding = 'ITA2';
+            case 'sitor-b':
+                // SITOR-B (same as NAVTEX but different center freq)
+                this.config.center_frequency = 1000;
+                this.config.shift = 170;
+                this.config.baud_rate = 100;
+                this.config.framing = '4/7';
+                this.config.inverted = false;
+                this.config.encoding = 'CCIR476';
                 break;
             case 'custom':
                 // Keep current settings
@@ -215,17 +212,14 @@ class FSKExtension extends DecoderExtension {
     }
 
     updateUIFromConfig() {
+        const centerFreqInput = document.getElementById('fsk-center-freq');
+        if (centerFreqInput) centerFreqInput.value = this.config.center_frequency;
+
         const shiftInput = document.getElementById('fsk-shift');
         if (shiftInput) shiftInput.value = this.config.shift;
 
         const baudInput = document.getElementById('fsk-baud');
         if (baudInput) baudInput.value = this.config.baud_rate;
-
-        const framingSelect = document.getElementById('fsk-framing');
-        if (framingSelect) framingSelect.value = this.config.framing;
-
-        const encodingSelect = document.getElementById('fsk-encoding');
-        if (encodingSelect) encodingSelect.value = this.config.encoding;
 
         const invertedCheck = document.getElementById('fsk-inverted');
         if (invertedCheck) invertedCheck.checked = this.config.inverted;

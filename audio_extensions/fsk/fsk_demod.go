@@ -87,14 +87,15 @@ type FSKDemodulator struct {
 	failTally    int
 }
 
-// NewFSKDecoder creates a new FSK decoder
-// NewFSKDemodulator creates a new FSK demodulator for NAVTEX (CCIR476 only)
-func NewFSKDemodulator(sampleRate float64, centerFreq, shiftHz, baudRate float64, inverted bool) *FSKDemodulator {
+// NewFSKDemodulator creates a new FSK demodulator
+func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, framing, encoding string, inverted bool) *FSKDemodulator {
 	d := &FSKDemodulator{
-		sampleRate:           sampleRate,
+		sampleRate:           float64(sampleRate),
 		centerFrequency:      centerFreq,
 		shiftHz:              shiftHz,
 		baudRate:             baudRate,
+		framing:              framing,
+		encoding:             encoding,
 		inverted:             inverted,
 		lowpassFilterF:       140.0,
 		audioMinimum:         256.0,
@@ -117,10 +118,17 @@ func NewFSKDemodulator(sampleRate float64, centerFreq, shiftHz, baudRate float64
 	d.bitSampleCount = int(d.sampleRate*d.bitDurationSeconds + 0.5)
 	d.halfBitSampleCount = d.bitSampleCount / 2
 
-	// Initialize CCIR476 encoding (NAVTEX only)
-	d.ccir476 = NewCCIR476()
-	d.nbits = d.ccir476.GetNBits()
-	d.msb = d.ccir476.GetMSB()
+	// Initialize encoding
+	switch encoding {
+	case "CCIR476":
+		d.ccir476 = NewCCIR476()
+		d.nbits = d.ccir476.GetNBits()
+		d.msb = d.ccir476.GetMSB()
+	default:
+		log.Printf("[FSK] Unsupported encoding: %s", encoding)
+		d.nbits = 7
+		d.msb = 0x40
+	}
 
 	// Initialize zero crossing array
 	d.zeroCrossings = make([]int, d.bitSampleCount/d.zeroCrossingsDivisor)
@@ -129,8 +137,8 @@ func NewFSKDemodulator(sampleRate float64, centerFreq, shiftHz, baudRate float64
 	d.state = StateNoSignal
 	d.audioAverage = 0.1
 
-	log.Printf("[FSK] Initialized: SR=%.0f, CF=%.1f Hz, Shift=%.1f Hz, Baud=%.1f, Encoding=CCIR476",
-		sampleRate, centerFreq, shiftHz, baudRate)
+	log.Printf("[FSK] Initialized: SR=%d, CF=%.1f Hz, Shift=%.1f Hz, Baud=%.1f, Framing=%s, Encoding=%s",
+		sampleRate, centerFreq, shiftHz, baudRate, framing, encoding)
 
 	return d
 }

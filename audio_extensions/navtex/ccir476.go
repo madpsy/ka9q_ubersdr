@@ -43,7 +43,7 @@ func NewCCIR476() *CCIR476 {
 		figsCode:   make(map[rune]byte),
 	}
 
-	// Initialize letter table
+	// Initialise letter table
 	// Note: Control codes (ALF, BET, FGS, LTR, REP, C32) are kept as '_' placeholders
 	// They are handled specially in ProcessChar and should not be in the lookup maps
 	ltrs := []rune{
@@ -58,7 +58,7 @@ func NewCCIR476() *CCIR476 {
 		'_', 'O', 'B', '_', 'T', '_', '_', '_', '\r', '_', '_', '_', '_', '_', '_', '_', // 7x
 	}
 
-	// Initialize figures table
+	// Initialise figures table
 	// Note: Control codes are kept as '_' placeholders, same as letters table
 	figs := []rune{
 		//  x0   x1   x2   x3   x4   x5   x6   x7   x8   x9   xa   xb   xc   xd   xe   xf

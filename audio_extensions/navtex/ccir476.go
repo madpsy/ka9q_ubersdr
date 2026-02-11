@@ -3,7 +3,6 @@ package navtex
 import "fmt"
 
 // CCIR476 implements the CCIR476 error-correcting code used by NAVTEX
-// Ported from KiwiSDR CCIR476.js
 // Each character has exactly 4 mark bits (1) and 3 space bits (0) for error detection
 type CCIR476 struct {
 	// Character tables

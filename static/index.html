@@ -1283,7 +1283,7 @@
                 if (data && data.chat_enabled === true) {
                     console.log('[Chat] Chat is enabled, loading chat scripts');
                     // Load chat scripts dynamically
-                    const scripts = ['chat.js', 'chat-ui.js', 'chat-radio-tracker.js'];
+                    const scripts = ['chat.js', 'chat-ui.js'];
                     for (const src of scripts) {
                         const script = document.createElement('script');
                         script.src = src;

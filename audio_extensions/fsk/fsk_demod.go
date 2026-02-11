@@ -127,7 +127,7 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 		d.nbits = d.ccir476.GetNBits()
 		d.msb = d.ccir476.GetMSB()
 	case "ITA2":
-		d.ita2 = NewITA2()
+		d.ita2 = NewITA2(framing)
 		d.nbits = d.ita2.GetNBits()
 		d.msb = d.ita2.GetMSB()
 	default:
@@ -334,9 +334,8 @@ func (d *FSKDemodulator) processBit(bit bool) {
 		if d.ccir476 != nil {
 			valid = d.ccir476.CheckBits(d.codeBits)
 		} else if d.ita2 != nil {
-			// ITA2 has no error correction, so we need a different sync strategy
-			// For ITA2, we just start reading immediately after signal detection
-			valid = true
+			// For ITA2 with async framing, validate frame structure
+			valid = d.ita2.CheckBits(d.codeBits)
 		}
 
 		if valid {
@@ -358,8 +357,8 @@ func (d *FSKDemodulator) processBit(bit bool) {
 			if d.ccir476 != nil {
 				valid = d.ccir476.CheckBits(d.codeBits)
 			} else if d.ita2 != nil {
-				// ITA2 has no bit validation, all codes are valid
-				valid = true
+				// For ITA2 with async framing, validate frame structure
+				valid = d.ita2.CheckBits(d.codeBits)
 			}
 
 			if valid {

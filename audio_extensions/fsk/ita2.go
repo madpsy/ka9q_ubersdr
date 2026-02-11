@@ -19,18 +19,40 @@ type ITA2 struct {
 	// Special codes
 	letters byte
 	figures byte
+
+	// Framing
+	framing  string // e.g., "5N1.5"
+	nbits    int    // Total bits including framing
+	dataBits int    // Data bits only (5 for ITA2)
 }
 
 // NewITA2 creates a new ITA2 decoder
-func NewITA2() *ITA2 {
+func NewITA2(framing string) *ITA2 {
 	i := &ITA2{
 		letters:   0x1f,
 		figures:   0x1b,
 		firstChar: true, // Start with first character flag
+		framing:   framing,
+		dataBits:  5,
 		codeLtrs:  make(map[byte]rune),
 		codeFigs:  make(map[byte]rune),
 		ltrsCode:  make(map[rune]byte),
 		figsCode:  make(map[rune]byte),
+	}
+
+	// Calculate total bits based on framing
+	// Format: <data>N<stop> where N means no parity
+	// For 5N1.5: 1 start + 5 data + 0 parity + 1.5 stop = 7.5 bits
+	// KiwiSDR doubles this for 1.5 stop bits: 15 bits total
+	startBits := 1
+	stopBits := 1.5 // For 5N1.5
+
+	if framing == "5N1.5" {
+		// Total: 1 + 5 + 1.5 = 7.5, doubled = 15
+		i.nbits = int((float64(startBits) + float64(i.dataBits) + stopBits) * 2)
+	} else {
+		// Default to just data bits for other framings
+		i.nbits = i.dataBits
 	}
 
 	var NUL rune = '\x00'
@@ -86,19 +108,61 @@ func (i *ITA2) Reset() {
 	i.firstChar = true
 }
 
-// GetNBits returns the number of bits per character (5)
+// GetNBits returns the total number of bits including framing
 func (i *ITA2) GetNBits() int {
-	return 5
+	return i.nbits
 }
 
-// GetMSB returns the MSB mask for 5-bit characters
+// GetMSB returns the MSB mask for the total bit count
 func (i *ITA2) GetMSB() byte {
-	return 0x10
+	return byte(1 << (i.nbits - 1))
 }
 
-// CheckBits checks if a code is valid (always true for ITA2 - no error correction)
+// GetDataBits returns the number of data bits (5 for ITA2)
+func (i *ITA2) GetDataBits() int {
+	return i.dataBits
+}
+
+// CheckBits validates the frame structure for async framing
+// For 5N1.5 framing, this validates that:
+// - Start bits are 00 (2 bits)
+// - Each data bit pair is either 00 or 11 (10 bits total for 5 data bits)
+// - Stop bits are 111 (3 bits)
 func (i *ITA2) CheckBits(code byte) bool {
-	// ITA2 has no error correction, all 5-bit codes are valid
+	if i.nbits != 15 {
+		// For non-doubled framings, accept all codes
+		return true
+	}
+
+	// For 5N1.5 (15-bit doubled frame), validate structure
+	v := uint16(code)
+
+	// Check start bits (should be 00)
+	if (v & 3) != 0 {
+		return false
+	}
+	v >>= 2
+
+	// Check data bits (each 2-bit pair should be 00 or 11)
+	for bit := 0; bit < i.dataBits; bit++ {
+		d := v & 3
+		if d != 0 && d != 3 {
+			return false
+		}
+		v >>= 2
+	}
+
+	// Check stop bits (should be 111)
+	if (v & 7) != 7 {
+		return false
+	}
+	v >>= 3
+
+	// Should have consumed all bits
+	if v != 0 {
+		return false
+	}
+
 	return true
 }
 
@@ -130,15 +194,49 @@ type ITA2CharResult struct {
 // IMPORTANT: ITA2 processes the PREVIOUS character, because shift codes
 // affect the NEXT character, not themselves
 func (i *ITA2) ProcessChar(code byte) ITA2CharResult {
-	// Mask to 5 bits
-	code &= 0x1f
+	// Extract data bits from the frame
+	// For 5N1.5 with 15 total bits, each bit is doubled
+	// Frame structure: [start:2][data0:2][data1:2][data2:2][data3:2][data4:2][stop:3]
+	// Total: 2 + 10 + 3 = 15 bits
+
+	var dataBits byte
+	if i.nbits == 15 {
+		// For 15-bit frame (5N1.5 doubled):
+		// Following KiwiSDR's check_bits logic:
+		// 1. Skip start bits (2 bits)
+		// 2. Extract 5 data bits, each represented by 2 bits
+		// 3. Each 2-bit pair should be 00 or 11 (both bits same)
+
+		v := uint16(code)
+
+		// Skip start bits (should be 00)
+		v >>= 2
+
+		// Extract 5 data bits (each doubled)
+		dataBits = 0
+		dataMSB := byte(1 << (i.dataBits - 1))
+		for bit := 0; bit < i.dataBits; bit++ {
+			d := v & 3 // Get 2-bit pair
+			// If d is non-zero (11 = 3), set the bit
+			dataBits = (dataBits >> 1) | (func() byte {
+				if d != 0 {
+					return dataMSB
+				}
+				return 0
+			}())
+			v >>= 2 // Move to next 2-bit pair
+		}
+	} else {
+		// For other framings, just mask to data bits
+		dataBits = code & byte((1<<i.dataBits)-1)
+	}
 
 	// Always return success for ITA2 (no error correction)
 	result := ITA2CharResult{Char: 0, BitSuccess: true, Tally: 0}
 
 	// Skip the first character - just store it
 	if i.firstChar {
-		i.lastCode = code
+		i.lastCode = dataBits
 		i.firstChar = false
 		return result
 	}
@@ -167,8 +265,8 @@ func (i *ITA2) ProcessChar(code byte) ITA2CharResult {
 		}
 	}
 
-	// Store current code for next iteration
-	i.lastCode = code
+	// Store current data bits for next iteration
+	i.lastCode = dataBits
 
 	return result
 }

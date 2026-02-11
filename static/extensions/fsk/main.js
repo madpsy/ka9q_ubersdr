@@ -117,7 +117,39 @@ class FSKExtension extends DecoderExtension {
             const rect = this.spectrumCanvas.getBoundingClientRect();
             this.spectrumCanvas.width = rect.width;
             this.spectrumCanvas.height = rect.height;
-            console.log('FSK: Spectrum canvas initialized');
+            
+            // Add click handler for tuning
+            this.spectrumCanvas.addEventListener('click', (e) => {
+                const rect = this.spectrumCanvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const width = rect.width;
+                
+                // Calculate frequency from click position (0-3000 Hz range)
+                const maxDisplayFreq = 3000;
+                const clickedFreq = (x / width) * maxDisplayFreq;
+                
+                // Update center frequency
+                this.config.center_frequency = Math.round(clickedFreq);
+                
+                // Update UI
+                const centerFreqInput = document.getElementById('fsk-center-freq');
+                if (centerFreqInput) {
+                    centerFreqInput.value = this.config.center_frequency;
+                }
+                
+                // Restart decoding with new frequency
+                if (this.isDecoding) {
+                    this.stopDecoding();
+                    setTimeout(() => this.startDecoding(), 100);
+                }
+                
+                console.log(`FSK: Tuned to ${this.config.center_frequency} Hz`);
+            });
+            
+            // Add visual feedback on hover
+            this.spectrumCanvas.style.cursor = 'crosshair';
+            
+            console.log('FSK: Spectrum canvas initialized with click-to-tune');
         }
     }
 

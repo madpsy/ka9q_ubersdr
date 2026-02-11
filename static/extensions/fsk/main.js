@@ -66,6 +66,7 @@ class FSKExtension extends DecoderExtension {
             if (outputDiv && startBtn && clearBtn) {
                 console.log('FSK: All DOM elements found, setting up...');
                 this.setupCanvas();
+                this.setupBaudBar();
                 this.setupEventHandlers();
                 console.log('FSK: Setup complete');
             } else if (attempts < maxAttempts) {
@@ -110,6 +111,45 @@ class FSKExtension extends DecoderExtension {
             this.spectrumCanvas.width = rect.width;
             this.spectrumCanvas.height = rect.height;
             console.log('FSK: Spectrum canvas initialized');
+        }
+    }
+
+    setupBaudBar() {
+        this.baudBar = document.getElementById('fsk-baud-bar');
+        this.baudValue = document.getElementById('fsk-baud-value');
+
+        // Initialize to 0
+        this.updateBaudBar(0);
+    }
+
+    updateBaudBar(error) {
+        const bar = document.getElementById('fsk-baud-bar');
+        const value = document.getElementById('fsk-baud-value');
+
+        if (!bar) return;
+
+        const maxError = 8;
+        const clampedError = Math.max(-maxError, Math.min(maxError, error));
+        const percentage = Math.abs(clampedError) / maxError * 50; // 0-50%
+
+        if (clampedError > 0) {
+            // Positive error - green bar extending upward from center
+            bar.style.bottom = '50%';
+            bar.style.height = percentage + '%';
+            bar.style.background = '#28a745';
+        } else if (clampedError < 0) {
+            // Negative error - red bar extending downward from center
+            bar.style.bottom = (50 - percentage) + '%';
+            bar.style.height = percentage + '%';
+            bar.style.background = '#dc3545';
+        } else {
+            // No error - hide bar
+            bar.style.height = '0%';
+        }
+
+        // Update numeric value
+        if (value) {
+            value.textContent = error.toFixed(1);
         }
     }
 
@@ -454,12 +494,7 @@ class FSKExtension extends DecoderExtension {
 
     updateBaudError(error) {
         this.baudError = error;
-        
-        // Update baud error display if element exists
-        const baudErrorEl = document.getElementById('fsk-baud-error');
-        if (baudErrorEl) {
-            baudErrorEl.textContent = error.toFixed(1);
-        }
+        this.updateBaudBar(error);
     }
 
     updateDecoderState(state) {

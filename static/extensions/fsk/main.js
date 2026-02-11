@@ -282,6 +282,15 @@ class FSKExtension extends DecoderExtension {
                 this.config.inverted = false;
                 this.config.encoding = 'CCIR476';
                 break;
+            case 'weather':
+                // Weather RTTY - ITA2/Baudot, 50 baud, 450 Hz shift, 1000 Hz center, inverted
+                this.config.center_frequency = 1000;
+                this.config.shift = 450;
+                this.config.baud_rate = 50;
+                this.config.framing = '5N1.5';
+                this.config.inverted = true;
+                this.config.encoding = 'ITA2';
+                break;
             case 'custom':
                 // Keep current settings
                 return;

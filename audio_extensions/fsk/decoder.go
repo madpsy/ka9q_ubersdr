@@ -48,6 +48,11 @@ type FSKConfig struct {
 
 // DefaultFSKConfig returns default NAVTEX configuration
 func DefaultFSKConfig() FSKConfig {
+	return NavtexConfig()
+}
+
+// NavtexConfig returns NAVTEX configuration (SITOR-B)
+func NavtexConfig() FSKConfig {
 	return FSKConfig{
 		CenterFrequency: 500.0,
 		Shift:           170.0,
@@ -55,6 +60,18 @@ func DefaultFSKConfig() FSKConfig {
 		Inverted:        false,
 		Framing:         "4/7",
 		Encoding:        "CCIR476",
+	}
+}
+
+// WeatherConfig returns Weather RTTY configuration
+func WeatherConfig() FSKConfig {
+	return FSKConfig{
+		CenterFrequency: 1000.0,  // Typical audio center frequency
+		Shift:           450.0,   // Weather RTTY uses 450 Hz shift
+		BaudRate:        50.0,    // 50 baud
+		Inverted:        true,    // Inverted
+		Framing:         "5N1.5", // 5 data bits, no parity, 1.5 stop bits
+		Encoding:        "ITA2",  // Baudot/ITA2 encoding
 	}
 }
 

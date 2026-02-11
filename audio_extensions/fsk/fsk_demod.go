@@ -75,8 +75,9 @@ type FSKDemodulator struct {
 	errorCount int
 	waiting    bool
 
-	// Encoding
+	// Encoding (only one will be non-nil)
 	ccir476 *CCIR476
+	ita2    *ITA2
 
 	// Callbacks
 	baudErrorCB func(float64)
@@ -124,10 +125,15 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 		d.ccir476 = NewCCIR476()
 		d.nbits = d.ccir476.GetNBits()
 		d.msb = d.ccir476.GetMSB()
+	case "ITA2":
+		d.ita2 = NewITA2()
+		d.nbits = d.ita2.GetNBits()
+		d.msb = d.ita2.GetMSB()
 	default:
-		log.Printf("[FSK] Unsupported encoding: %s", encoding)
-		d.nbits = 7
-		d.msb = 0x40
+		log.Printf("[FSK] Unsupported encoding: %s, defaulting to CCIR476", encoding)
+		d.ccir476 = NewCCIR476()
+		d.nbits = d.ccir476.GetNBits()
+		d.msb = d.ccir476.GetMSB()
 	}
 
 	// Initialize zero crossing array
@@ -297,6 +303,9 @@ func (d *FSKDemodulator) processBit(bit bool) {
 		if d.ccir476 != nil {
 			d.ccir476.Reset()
 		}
+		if d.ita2 != nil {
+			d.ita2.Reset()
+		}
 		d.syncChars = nil
 		d.setState(StateSync1)
 		d.syncSetup = false
@@ -309,7 +318,18 @@ func (d *FSKDemodulator) processBit(bit bool) {
 	case StateSync1:
 		// Scan indefinitely for valid bit pattern
 		d.codeBits = (d.codeBits >> 1) | (bitVal * d.msb)
-		if d.ccir476 != nil && d.ccir476.CheckBits(d.codeBits) {
+
+		// Check validity based on encoding
+		valid := false
+		if d.ccir476 != nil {
+			valid = d.ccir476.CheckBits(d.codeBits)
+		} else if d.ita2 != nil {
+			// ITA2 has no error correction, so we need a different sync strategy
+			// For ITA2, we just start reading immediately after signal detection
+			valid = true
+		}
+
+		if valid {
 			d.syncChars = append(d.syncChars, d.codeBits)
 			d.validCount++
 			d.bitCount = 0
@@ -324,14 +344,27 @@ func (d *FSKDemodulator) processBit(bit bool) {
 		d.bitCount++
 
 		if d.bitCount == d.nbits {
-			if d.ccir476 != nil && d.ccir476.CheckBits(d.codeBits) {
+			valid := false
+			if d.ccir476 != nil {
+				valid = d.ccir476.CheckBits(d.codeBits)
+			} else if d.ita2 != nil {
+				// ITA2 has no bit validation, all codes are valid
+				valid = true
+			}
+
+			if valid {
 				d.syncChars = append(d.syncChars, d.codeBits)
 				d.codeBits = 0
 				d.bitCount = 0
 				d.validCount++
 
-				// Successfully read 4 characters?
-				if d.validCount == 4 {
+				// For CCIR476, wait for 4 characters; for ITA2, start immediately
+				requiredChars := 4
+				if d.ita2 != nil {
+					requiredChars = 1
+				}
+
+				if d.validCount >= requiredChars {
 					// Process sync characters
 					for _, code := range d.syncChars {
 						d.processCharacter(code)
@@ -339,7 +372,7 @@ func (d *FSKDemodulator) processBit(bit bool) {
 					d.setState(StateReadData)
 				}
 			} else {
-				// Failed subsequent bit test - restart sync
+				// Failed subsequent bit test - restart sync (CCIR476 only)
 				d.codeBits = 0
 				d.bitCount = 0
 				d.syncSetup = true
@@ -382,26 +415,41 @@ func (d *FSKDemodulator) processBit(bit bool) {
 // processCharacter processes a decoded character code
 // Returns true if the character was successfully decoded
 func (d *FSKDemodulator) processCharacter(code byte) bool {
-	if d.ccir476 == nil {
-		return false
+	if d.ccir476 != nil {
+		result := d.ccir476.ProcessChar(code)
+
+		// Output character if present
+		if result.Char != 0 && d.outputCB != nil {
+			d.outputCB(result.Char)
+		}
+
+		// Update tallies based on character decode result
+		if result.Tally == 1 {
+			d.succeedTally++
+		} else if result.Tally == -1 {
+			d.failTally++
+		}
+
+		// Return bit validity for error counting
+		return result.BitSuccess
+	} else if d.ita2 != nil {
+		result := d.ita2.ProcessChar(code)
+
+		// Output character if present
+		if result.Char != 0 && d.outputCB != nil {
+			d.outputCB(result.Char)
+		}
+
+		// Update tallies based on character decode result
+		if result.Tally == 1 {
+			d.succeedTally++
+		}
+
+		// ITA2 has no error correction, so always return true
+		return result.BitSuccess
 	}
 
-	result := d.ccir476.ProcessChar(code)
-
-	// Output character if present
-	if result.Char != 0 && d.outputCB != nil {
-		d.outputCB(result.Char)
-	}
-
-	// Update tallies based on character decode result
-	if result.Tally == 1 {
-		d.succeedTally++
-	} else if result.Tally == -1 {
-		d.failTally++
-	}
-
-	// Return bit validity for error counting
-	return result.BitSuccess
+	return false
 }
 
 // Reset resets the decoder state
@@ -417,6 +465,9 @@ func (d *FSKDemodulator) Reset() {
 
 	if d.ccir476 != nil {
 		d.ccir476.Reset()
+	}
+	if d.ita2 != nil {
+		d.ita2.Reset()
 	}
 
 	d.biquadMark.Reset()

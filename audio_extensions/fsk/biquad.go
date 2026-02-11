@@ -16,7 +16,6 @@ const (
 )
 
 // BiQuadFilter implements a biquadratic IIR filter
-// Ported from KiwiSDR BiQuadraticFilter.js
 type BiQuadFilter struct {
 	a0, a1, a2 float64
 	b0, b1, b2 float64

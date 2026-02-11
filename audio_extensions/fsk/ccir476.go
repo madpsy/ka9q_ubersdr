@@ -3,7 +3,6 @@ package fsk
 import "fmt"
 
 // CCIR476 implements the CCIR476 error-correcting code used by NAVTEX
-// Ported from KiwiSDR CCIR476.js
 // Each character has exactly 4 mark bits (1) and 3 space bits (0) for error detection
 type CCIR476 struct {
 	// Character tables
@@ -44,29 +43,32 @@ func NewCCIR476() *CCIR476 {
 		figsCode:   make(map[rune]byte),
 	}
 
-	// Initialize letter table
+	// Initialise letter table
+	// Note: Control codes (ALF, BET, FGS, LTR, REP, C32) are kept as '_' placeholders
+	// They are handled specially in ProcessChar and should not be in the lookup maps
 	ltrs := []rune{
 		//  x0   x1   x2   x3   x4   x5   x6   x7   x8   x9   xa   xb   xc   xd   xe   xf
-		'_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', // 0x
+		'_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', // 0x (0x0f=ALF)
 		'_', '_', '_', '_', '_', '_', '_', 'J', '_', '_', '_', 'F', '_', 'C', 'K', '_', // 1x
 		'_', '_', '_', '_', '_', '_', '_', 'W', '_', '_', '_', 'Y', '_', 'P', 'Q', '_', // 2x
-		'_', '_', '_', '_', '_', 'G', '_', '_', '_', 'M', 'X', '_', 'V', '_', '_', '_', // 3x
+		'_', '_', '_', '_', '_', 'G', '_', '_', '_', 'M', 'X', '_', 'V', '_', '_', '_', // 3x (0x33=BET, 0x36=FGS)
 		'_', '_', '_', '_', '_', '_', '_', 'A', '_', '_', '_', 'S', '_', 'I', 'U', '_', // 4x
-		'_', '_', '_', 'D', '_', 'R', 'E', '_', '_', 'N', '_', '_', ' ', '_', '_', '_', // 5x
-		'_', '_', '_', 'Z', '_', 'L', '_', '_', '_', 'H', '_', '_', '\n', '_', '_', '_', // 6x
+		'_', '_', '_', 'D', '_', 'R', 'E', '_', '_', 'N', '_', '_', ' ', '_', '_', '_', // 5x (0x5a=LTR)
+		'_', '_', '_', 'Z', '_', 'L', '_', '_', '_', 'H', '_', '_', '\n', '_', '_', '_', // 6x (0x66=REP, 0x6a=C32)
 		'_', 'O', 'B', '_', 'T', '_', '_', '_', '\r', '_', '_', '_', '_', '_', '_', '_', // 7x
 	}
 
-	// Initialize figures table
+	// Initialise figures table
+	// Note: Control codes are kept as '_' placeholders, same as letters table
 	figs := []rune{
 		//  x0   x1   x2   x3   x4   x5   x6   x7   x8   x9   xa   xb   xc   xd   xe   xf
-		'_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', // 0x
+		'_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', '_', // 0x (0x0f=ALF)
 		'_', '_', '_', '_', '_', '_', '_', '\'', '_', '_', '_', '!', '_', ':', '(', '_', // 1x
 		'_', '_', '_', '_', '_', '_', '_', '2', '_', '_', '_', '6', '_', '0', '1', '_', // 2x
-		'_', '_', '_', '_', '_', '&', '_', '_', '_', '.', '/', '_', ';', '_', '_', '_', // 3x
+		'_', '_', '_', '_', '_', '&', '_', '_', '_', '.', '/', '_', ';', '_', '_', '_', // 3x (0x33=BET, 0x36=FGS)
 		'_', '_', '_', '_', '_', '_', '_', '-', '_', '_', '_', '\a', '_', '8', '7', '_', // 4x (BEL = \a)
-		'_', '_', '_', '$', '_', '4', '3', '_', '_', ',', '_', '_', ' ', '_', '_', '_', // 5x
-		'_', '_', '_', '"', '_', ')', '_', '_', '_', '#', '_', '_', '\n', '_', '_', '_', // 6x
+		'_', '_', '_', '$', '_', '4', '3', '_', '_', ',', '_', '_', ' ', '_', '_', '_', // 5x (0x5a=LTR)
+		'_', '_', '_', '"', '_', ')', '_', '_', '_', '#', '_', '_', '\n', '_', '_', '_', // 6x (0x66=REP, 0x6a=C32)
 		'_', '9', '?', '_', '5', '_', '_', '_', '\r', '_', '_', '_', '_', '_', '_', '_', // 7x
 	}
 
@@ -124,24 +126,9 @@ func (c *CCIR476) GetMSB() byte {
 	return 0x40
 }
 
-// GetMSB32 returns the full 32-bit MSB mask
-func (c *CCIR476) GetMSB32() uint32 {
-	return 0x40
-}
-
-// GetDataBits returns the number of data bits (7 for CCIR476)
-func (c *CCIR476) GetDataBits() int {
-	return 7
-}
-
-// GetParityBits returns the number of parity bits (0 for CCIR476, uses 4-of-7 instead)
-func (c *CCIR476) GetParityBits() int {
-	return 0
-}
-
 // CheckBits checks if a code is valid (has 4 mark bits)
-func (c *CCIR476) CheckBits(code uint32) bool {
-	return c.validCodes[byte(code)]
+func (c *CCIR476) CheckBits(code byte) bool {
+	return c.validCodes[code]
 }
 
 // codeToChar converts a code to a character based on shift state
@@ -160,17 +147,25 @@ func (c *CCIR476) codeToChar(code byte, shift bool) (rune, error) {
 	return ch, nil
 }
 
+// CharResult holds the result of processing a character
+type CharResult struct {
+	Char       rune // The decoded character (0 if no output)
+	BitSuccess bool // Whether the bits were valid (for error counting)
+	Tally      int  // Character decode result: 1=success, -1=fail, 0=control/no-output
+}
+
 // ProcessChar processes a received character code
-// Returns the decoded character (if any) and whether it was successful
 // Implements the alpha/rep phase error correction scheme
-func (c *CCIR476) ProcessChar(code uint32) (rune, bool) {
-	codeByte := byte(code) // CCIR476 only uses 7 bits, safe to cast
-	success := c.checkBits(codeByte)
+func (c *CCIR476) ProcessChar(code byte) CharResult {
+	// Check bit validity - this NEVER changes throughout the function
+	bitSuccess := c.checkBits(code)
+	tally := 0
+	var chr byte = 0xff
 
 	// Force phasing with the two phasing characters
-	if codeByte == c.codeRep {
+	if code == c.codeRep {
 		c.alphaPhase = false
-	} else if codeByte == c.codeAlpha {
+	} else if code == c.codeAlpha {
 		c.alphaPhase = true
 	}
 
@@ -178,18 +173,16 @@ func (c *CCIR476) ProcessChar(code uint32) (rune, bool) {
 		// Rep phase: store characters for later comparison
 		c.c1 = c.c2
 		c.c2 = c.c3
-		c.c3 = codeByte
+		c.c3 = code
 	} else {
 		// Alpha phase: compare with rep phase character
-		var chr byte = 0xff
-
 		// Try to recover the character using forward error correction
-		if success && c.c1 == codeByte {
+		if bitSuccess && c.c1 == code {
 			// Both alpha and rep match - perfect
-			chr = codeByte
-		} else if success {
+			chr = code
+		} else if bitSuccess {
 			// Alpha is valid, use it
-			chr = codeByte
+			chr = code
 		} else if c.checkBits(c.c1) {
 			// Alpha is invalid, but rep is valid - use rep
 			chr = c.c1
@@ -197,39 +190,43 @@ func (c *CCIR476) ProcessChar(code uint32) (rune, bool) {
 
 		if chr == 0xff {
 			// Failed to decode
-			c.alphaPhase = !c.alphaPhase
-			return 0, false
-		}
+			tally = -1
+		} else {
+			// Successfully decoded a character
+			tally = 1
 
-		// Process special control codes
-		switch chr {
-		case c.codeRep, c.codeAlpha, c.codeBeta, c.codeChar32:
-			// Control codes - don't output
-			c.alphaPhase = !c.alphaPhase
-			return 0, true
+			// Process special control codes
+			switch chr {
+			case c.codeRep, c.codeAlpha, c.codeBeta, c.codeChar32:
+				// Control codes - don't output
+				c.alphaPhase = !c.alphaPhase
+				return CharResult{Char: 0, BitSuccess: bitSuccess, Tally: tally}
 
-		case c.letters:
-			c.shift = false
-			c.alphaPhase = !c.alphaPhase
-			return 0, true
+			case c.letters:
+				c.shift = false
+				c.alphaPhase = !c.alphaPhase
+				return CharResult{Char: 0, BitSuccess: bitSuccess, Tally: tally}
 
-		case c.figures:
-			c.shift = true
-			c.alphaPhase = !c.alphaPhase
-			return 0, true
+			case c.figures:
+				c.shift = true
+				c.alphaPhase = !c.alphaPhase
+				return CharResult{Char: 0, BitSuccess: bitSuccess, Tally: tally}
 
-		default:
-			// Regular character
-			ch, err := c.codeToChar(chr, c.shift)
-			c.alphaPhase = !c.alphaPhase
-			if err != nil {
-				return 0, false
+			default:
+				// Regular character
+				ch, err := c.codeToChar(chr, c.shift)
+				if err != nil {
+					// Invalid character code - don't output
+					c.alphaPhase = !c.alphaPhase
+					return CharResult{Char: 0, BitSuccess: bitSuccess, Tally: tally}
+				}
+				c.alphaPhase = !c.alphaPhase
+				return CharResult{Char: ch, BitSuccess: bitSuccess, Tally: tally}
 			}
-			return ch, true
 		}
 	}
 
-	// Alpha/rep phasing
+	// Alpha/rep phasing - return bit validity and tally
 	c.alphaPhase = !c.alphaPhase
-	return 0, true
+	return CharResult{Char: 0, BitSuccess: bitSuccess, Tally: tally}
 }

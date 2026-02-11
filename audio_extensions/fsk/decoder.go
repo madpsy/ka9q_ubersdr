@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// FSKDecoder implements the FSK decoder
+// FSKDecoder implements the FSK decoder using NAVTEX's working implementation
 type FSKDecoder struct {
 	// Configuration
 	sampleRate      int
@@ -17,10 +17,8 @@ type FSKDecoder struct {
 	shift           float64
 	baudRate        float64
 	inverted        bool
-	framing         string
-	encoding        string
 
-	// FSK decoder
+	// FSK demodulator (from NAVTEX)
 	fsk *FSKDemodulator
 
 	// Control
@@ -35,28 +33,24 @@ type FSKDecoder struct {
 
 	// Statistics
 	baudError float64
-	lastState RTTYRxState
+	lastState FSKState
 }
 
 // FSKConfig contains configuration parameters
 type FSKConfig struct {
-	CenterFrequency float64 `json:"center_frequency"` // Hz (e.g., 1000)
-	Shift           float64 `json:"shift"`            // Hz (e.g., 170)
-	BaudRate        float64 `json:"baud_rate"`        // Baud (e.g., 45.45)
-	Inverted        bool    `json:"inverted"`         // Invert mark/space
-	Framing         string  `json:"framing"`          // "5N1.5" for RTTY, "4/7" for NAVTEX
-	Encoding        string  `json:"encoding"`         // "ITA2", "CCIR476", "ASCII"
+	CenterFrequency float64 `json:"center_frequency"` // Hz (e.g., 500 for NAVTEX)
+	Shift           float64 `json:"shift"`            // Hz (e.g., 170 for NAVTEX)
+	BaudRate        float64 `json:"baud_rate"`        // Baud (e.g., 100 for NAVTEX)
+	Inverted        bool    `json:"inverted"`         // Invert mark/space (false for NAVTEX)
 }
 
-// DefaultFSKConfig returns default FSK/RTTY configuration
+// DefaultFSKConfig returns default NAVTEX configuration
 func DefaultFSKConfig() FSKConfig {
 	return FSKConfig{
-		CenterFrequency: 1000.0,
+		CenterFrequency: 500.0,
 		Shift:           170.0,
-		BaudRate:        45.45,
+		BaudRate:        100.0,
 		Inverted:        false,
-		Framing:         "5N1.5",
-		Encoding:        "ITA2",
 	}
 }
 
@@ -68,19 +62,15 @@ func NewFSKDecoder(sampleRate int, config FSKConfig) *FSKDecoder {
 		shift:           config.Shift,
 		baudRate:        config.BaudRate,
 		inverted:        config.Inverted,
-		framing:         config.Framing,
-		encoding:        config.Encoding,
 		stopChan:        make(chan struct{}),
 	}
 
-	// Create FSK demodulator
+	// Create FSK demodulator using NAVTEX implementation
 	d.fsk = NewFSKDemodulator(
-		sampleRate,
+		float64(sampleRate),
 		config.CenterFrequency,
 		config.Shift,
 		config.BaudRate,
-		config.Framing,
-		config.Encoding,
 		config.Inverted,
 	)
 
@@ -95,12 +85,11 @@ func NewFSKDecoder(sampleRate int, config FSKConfig) *FSKDecoder {
 		d.bufferMu.Unlock()
 	})
 
-	d.fsk.SetStateCallback(func(state RTTYRxState) {
-		d.lastState = state
-	})
+	// Note: State tracking is done internally by FSKDemodulator
+	// We track it via the state field which is updated in ProcessSamples
 
-	log.Printf("[FSK] Initialized: SR=%d, CF=%.1f Hz, Shift=%.1f Hz, Baud=%.1f, Framing=%s, Encoding=%s",
-		sampleRate, config.CenterFrequency, config.Shift, config.BaudRate, config.Framing, config.Encoding)
+	log.Printf("[FSK] Initialized: SR=%d, CF=%.1f Hz, Shift=%.1f Hz, Baud=%.1f, Inverted=%v",
+		sampleRate, config.CenterFrequency, config.Shift, config.BaudRate, config.Inverted)
 
 	return d
 }
@@ -153,15 +142,15 @@ func (d *FSKDecoder) processLoop(audioChan <-chan []int16, resultChan chan<- []b
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
-	// Periodic baud error ticker (every 500ms)
-	baudTicker := time.NewTicker(500 * time.Millisecond)
+	// Periodic baud error ticker (every 200ms to match NAVTEX)
+	baudTicker := time.NewTicker(200 * time.Millisecond)
 	defer baudTicker.Stop()
 
 	// Periodic state update ticker (every 250ms)
 	stateTicker := time.NewTicker(250 * time.Millisecond)
 	defer stateTicker.Stop()
 
-	lastState := RTTYRxState(-1)
+	lastState := FSKState(-1)
 
 	for {
 		select {
@@ -249,7 +238,8 @@ func (d *FSKDecoder) sendBaudError(resultChan chan<- []byte) {
 // sendStateUpdate sends decoder state update to the client
 // Binary protocol: [type:1][state:1]
 // type: 0x03 = state update
-func (d *FSKDecoder) sendStateUpdate(resultChan chan<- []byte, state RTTYRxState) {
+// state: 0=NoSignal, 1=Sync1, 2=Sync2, 3=ReadData
+func (d *FSKDecoder) sendStateUpdate(resultChan chan<- []byte, state FSKState) {
 	msg := make([]byte, 2)
 	msg[0] = 0x03        // State update type
 	msg[1] = byte(state) // State value

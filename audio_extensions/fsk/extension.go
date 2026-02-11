@@ -29,12 +29,6 @@ func NewFSKExtension(sampleRate int, extensionParams map[string]interface{}) (*F
 	if inv, ok := extensionParams["inverted"].(bool); ok {
 		config.Inverted = inv
 	}
-	if framing, ok := extensionParams["framing"].(string); ok {
-		config.Framing = framing
-	}
-	if encoding, ok := extensionParams["encoding"].(string); ok {
-		config.Encoding = encoding
-	}
 
 	// Validate configuration
 	if config.CenterFrequency <= 0 || config.CenterFrequency > 10000 {
@@ -47,18 +41,12 @@ func NewFSKExtension(sampleRate int, extensionParams map[string]interface{}) (*F
 		return nil, fmt.Errorf("invalid baud rate: %.1f (must be 10-1000)", config.BaudRate)
 	}
 
-	// Validate encoding
-	switch config.Encoding {
-	case "ITA2", "CCIR476", "ASCII":
-		// Valid encodings
-	default:
-		return nil, fmt.Errorf("unsupported encoding: %s (supported: ITA2, CCIR476, ASCII)", config.Encoding)
-	}
+	// Note: Only CCIR476 encoding is supported (NAVTEX mode)
 
 	decoder := NewFSKDecoder(sampleRate, config)
 
-	log.Printf("[FSK Extension] Created with config: CF=%.1f Hz, Shift=%.1f Hz, Baud=%.1f, Framing=%s, Encoding=%s, Inverted=%v",
-		config.CenterFrequency, config.Shift, config.BaudRate, config.Framing, config.Encoding, config.Inverted)
+	log.Printf("[FSK Extension] Created with config: CF=%.1f Hz, Shift=%.1f Hz, Baud=%.1f, Encoding=CCIR476, Inverted=%v",
+		config.CenterFrequency, config.Shift, config.BaudRate, config.Inverted)
 
 	return &FSKExtension{
 		decoder: decoder,

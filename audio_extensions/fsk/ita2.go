@@ -146,8 +146,8 @@ func (i *ITA2) CheckBits(code uint16) bool {
 	}
 
 	// For 5N1.5 (15-bit doubled frame), validate structure
-	// Bits come in LSB-first from the demodulator, so frame is:
-	// [stop:3][data4:2][data3:2][data2:2][data1:2][data0:2][start:2]
+	// KiwiSDR comment: "ttt d4 d3 d2 d1 d0 ss" (MSB to LSB)
+	// Frame: [start:2][data0-4:10][stop:3] (LSB to MSB in our uint16)
 	v := uint16(code)
 
 	// Rate-limited debug logging (max once per second)
@@ -163,19 +163,18 @@ func (i *ITA2) CheckBits(code uint16) bool {
 		log.Printf("[ITA2] CheckBits sample: code=0x%04x (%015b)", code, code)
 	}
 
-	// Check stop bits first (LSB, should be 111)
-	stopBits := v & 7
-	if stopBits != 7 {
+	// Check start bits (LSB, should be 00)
+	startBits := v & 3
+	if startBits != 0 {
 		if shouldLog {
-			log.Printf("[ITA2] CheckBits FAIL: stop bits = %03b (expected 111)", stopBits)
+			log.Printf("[ITA2] CheckBits FAIL: start bits = %02b (expected 00)", startBits)
 		}
 		return false
 	}
-	v >>= 3
+	v >>= 2
 
 	// Check data bits (each 2-bit pair should be 00 or 11)
-	// Process from data4 down to data0 (LSB order)
-	for bit := i.dataBits - 1; bit >= 0; bit-- {
+	for bit := 0; bit < i.dataBits; bit++ {
 		d := v & 3
 		if d != 0 && d != 3 {
 			if shouldLog {
@@ -186,15 +185,15 @@ func (i *ITA2) CheckBits(code uint16) bool {
 		v >>= 2
 	}
 
-	// Check start bits last (MSB, should be 00)
-	startBits := v & 3
-	if startBits != 0 {
+	// Check stop bits (MSB, should be 111)
+	stopBits := v & 7
+	if stopBits != 7 {
 		if shouldLog {
-			log.Printf("[ITA2] CheckBits FAIL: start bits = %02b (expected 00)", startBits)
+			log.Printf("[ITA2] CheckBits FAIL: stop bits = %03b (expected 111)", stopBits)
 		}
 		return false
 	}
-	v >>= 2
+	v >>= 3
 
 	// Should have consumed all bits
 	if v != 0 {
@@ -240,22 +239,22 @@ type ITA2CharResult struct {
 func (i *ITA2) ProcessChar(code uint16) ITA2CharResult {
 	// Extract data bits from the frame
 	// For 5N1.5 with 15 total bits, each bit is doubled
-	// Bits come in LSB-first: [stop:3][data4:2][data3:2][data2:2][data1:2][data0:2][start:2]
+	// Frame: [start:2][data0-4:10][stop:3] (LSB to MSB)
 
 	var dataBits byte
 	if i.nbits == 15 {
 		// For 15-bit frame (5N1.5 doubled):
-		// Following KiwiSDR's check_bits logic but accounting for LSB-first order
+		// Following KiwiSDR's check_bits logic
 
 		v := uint16(code)
 
-		// Skip stop bits (3 bits, LSB)
-		v >>= 3
+		// Skip start bits (2 bits, LSB)
+		v >>= 2
 
-		// Extract 5 data bits (each doubled), from data4 down to data0
+		// Extract 5 data bits (each doubled), from data0 to data4
 		dataBits = 0
 		dataMSB := byte(1 << (i.dataBits - 1))
-		for bit := i.dataBits - 1; bit >= 0; bit-- {
+		for bit := 0; bit < i.dataBits; bit++ {
 			d := v & 3 // Get 2-bit pair
 			// If d is non-zero (11 = 3), set the bit
 			dataBits = (dataBits >> 1) | (func() byte {

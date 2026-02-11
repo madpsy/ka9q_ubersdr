@@ -65,15 +65,16 @@ type FSKDemodulator struct {
 	baudError            float64
 
 	// Bit synchronization
-	bitCount   int
-	codeBits   uint16 // Changed from byte to support 15-bit codes (5N1.5)
-	nbits      int
-	msb        uint16 // Changed from byte to support 15-bit codes
-	syncSetup  bool
-	syncChars  []uint16 // Changed from []byte to support 15-bit codes
-	validCount int
-	errorCount int
-	waiting    bool
+	bitCount     int
+	codeBits     uint16 // Changed from byte to support 15-bit codes (5N1.5)
+	nbits        int
+	msb          uint16 // Changed from byte to support 15-bit codes
+	syncSetup    bool
+	syncChars    []uint16 // Changed from []byte to support 15-bit codes
+	validCount   int
+	errorCount   int
+	waiting      bool
+	stopVariable bool // For async framing with variable stop bits (e.g., 1.5 stop bits)
 
 	// Encoding (only one will be non-nil)
 	ccir476 *CCIR476
@@ -130,6 +131,10 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 		d.ita2 = NewITA2(framing)
 		d.nbits = d.ita2.GetNBits()
 		d.msb = d.ita2.GetMSB()
+		// For async framing with 1.5 stop bits, enable variable stop bit handling
+		if framing == "5N1.5" {
+			d.stopVariable = true
+		}
 	default:
 		log.Printf("[FSK] Unsupported encoding: %s, defaulting to CCIR476", encoding)
 		d.ccir476 = NewCCIR476()
@@ -348,6 +353,13 @@ func (d *FSKDemodulator) processBit(bit bool) {
 		}
 
 	case StateSync2:
+		// Wait for start bit if there are variable stop bits (async framing)
+		if d.stopVariable && d.waiting && bit {
+			// Still in stop bits (mark state), keep waiting
+			return
+		}
+		d.waiting = false
+
 		// Sample and validate bits in groups of nbits
 		d.codeBits = (d.codeBits >> 1) | (bitVal * d.msb)
 		d.bitCount++
@@ -390,6 +402,13 @@ func (d *FSKDemodulator) processBit(bit bool) {
 		}
 
 	case StateReadData:
+		// Wait for start bit if there are variable stop bits (async framing)
+		if d.stopVariable && d.waiting && bit {
+			// Still in stop bits (mark state), keep waiting
+			return
+		}
+		d.waiting = false
+
 		// Read data bits
 		d.codeBits = (d.codeBits >> 1) | (bitVal * d.msb)
 		d.bitCount++

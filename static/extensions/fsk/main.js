@@ -55,17 +55,17 @@ class FSKExtension extends DecoderExtension {
         const trySetup = (attempts = 0) => {
             const maxAttempts = 20;
 
-            const outputDiv = document.getElementById('fsk-output');
+            const consoleEl = document.getElementById('fsk-console');
             const startBtn = document.getElementById('fsk-start-btn');
             const clearBtn = document.getElementById('fsk-clear-btn');
 
             console.log(`FSK: DOM check attempt ${attempts + 1}/${maxAttempts}:`, {
-                outputDiv: !!outputDiv,
+                consoleEl: !!consoleEl,
                 startBtn: !!startBtn,
                 clearBtn: !!clearBtn
             });
 
-            if (outputDiv && startBtn && clearBtn) {
+            if (consoleEl && startBtn && clearBtn) {
                 console.log('FSK: All DOM elements found, setting up...');
                 this.setupCanvas();
                 this.setupBaudBar();

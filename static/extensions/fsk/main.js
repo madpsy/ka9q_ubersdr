@@ -32,6 +32,8 @@ class FSKExtension extends DecoderExtension {
         this.baudError = 0;
         this.decoderState = 0; // 0=NoSignal, 1=Sync1, 2=Sync2, 3=ReadData
         this.maxBufferLines = 1000;
+        this.consoleLines = 25; // Default number of visible lines
+        this.needsTimestamp = true; // Track if we need to add timestamp at start of line
 
         // Binary message handler
         this.binaryMessageHandler = null;
@@ -68,6 +70,7 @@ class FSKExtension extends DecoderExtension {
                 this.setupCanvas();
                 this.setupBaudBar();
                 this.setupEventHandlers();
+                this.updateConsoleHeight(); // Set initial console height
                 console.log('FSK: Setup complete');
             } else if (attempts < maxAttempts) {
                 console.log(`FSK: Waiting for DOM elements (attempt ${attempts + 1}/${maxAttempts})`);
@@ -214,6 +217,24 @@ class FSKExtension extends DecoderExtension {
         if (centerFreqInput) {
             centerFreqInput.addEventListener('change', (e) => {
                 this.config.center_frequency = parseFloat(e.target.value);
+            });
+        }
+
+        // Console controls
+        const autoScrollCheck = document.getElementById('fsk-auto-scroll');
+        if (autoScrollCheck) {
+            autoScrollCheck.addEventListener('change', (e) => {
+                this.autoScroll = e.target.checked;
+                console.log('FSK: Auto-scroll:', this.autoScroll);
+            });
+        }
+
+        const consoleLinesSelect = document.getElementById('fsk-console-lines');
+        if (consoleLinesSelect) {
+            consoleLinesSelect.addEventListener('change', (e) => {
+                this.consoleLines = parseInt(e.target.value);
+                this.updateConsoleHeight();
+                console.log('FSK: Console lines:', this.consoleLines);
             });
         }
 
@@ -534,35 +555,67 @@ class FSKExtension extends DecoderExtension {
     }
 
     appendOutput(text, className = '') {
-        const outputDiv = document.getElementById('fsk-output');
-        if (!outputDiv) return;
+        const consoleEl = document.getElementById('fsk-console');
+        if (!consoleEl) return;
 
-        const span = document.createElement('span');
-        if (className) {
-            span.className = className;
+        // Process text character by character to add timestamps at line feeds
+        let processedText = '';
+
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+
+            // Add timestamp at the start of a new line
+            if (this.needsTimestamp && char !== '\r') {
+                const now = new Date();
+                const timestamp = now.toISOString().substring(11, 19); // HH:MM:SS format
+                processedText += `[${timestamp}] `;
+                this.needsTimestamp = false;
+            }
+
+            // Add the character
+            processedText += char;
+
+            // Mark that we need a timestamp after a line feed
+            if (char === '\n') {
+                this.needsTimestamp = true;
+            }
         }
-        span.textContent = text;
-        outputDiv.appendChild(span);
 
-        // Update character count
+        // Append text to buffer and console
+        this.textBuffer += processedText;
+        consoleEl.textContent += processedText;
         this.charCount += text.length;
 
         // Auto-scroll to bottom
-        outputDiv.scrollTop = outputDiv.scrollHeight;
-
-        // Limit buffer size
-        while (outputDiv.childNodes.length > this.maxBufferLines) {
-            outputDiv.removeChild(outputDiv.firstChild);
+        if (this.autoScroll) {
+            const container = document.getElementById('fsk-console-container');
+            if (container) {
+                container.scrollTop = container.scrollHeight;
+            }
         }
     }
 
     clearOutput() {
-        const outputDiv = document.getElementById('fsk-output');
-        if (outputDiv) {
-            outputDiv.innerHTML = '';
+        const consoleEl = document.getElementById('fsk-console');
+        if (consoleEl) {
+            consoleEl.textContent = '';
         }
         this.textBuffer = '';
         this.charCount = 0;
+        this.needsTimestamp = true;
+    }
+
+    updateConsoleHeight() {
+        const container = document.getElementById('fsk-console-container');
+        if (!container) return;
+
+        // Calculate height based on line count
+        // Approximate 20px per line plus some padding
+        const lineHeight = 20;
+        const padding = 10;
+        const height = (this.consoleLines * lineHeight) + padding;
+
+        container.style.height = `${height}px`;
     }
 
     // This method is called automatically by the DecoderExtension framework with audio data

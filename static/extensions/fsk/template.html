@@ -2,7 +2,7 @@
     <!-- Header -->
     <div class="fsk-header">
         <h3>FSK/RTTY Decoder</h3>
-        <div class="fsk-controls">
+        <div class="fsk-header-controls">
             <button id="fsk-start-btn" class="btn btn-primary">Start</button>
             <button id="fsk-clear-btn" class="btn btn-secondary">Clear</button>
         </div>
@@ -10,6 +10,15 @@
 
     <!-- Configuration Panel -->
     <div class="fsk-config-panel">
+        <!-- Baud Error Indicator - positioned absolutely in upper right -->
+        <div class="fsk-baud-error-indicator">
+            <span id="fsk-baud-value" class="fsk-baud-value">0.0</span>
+            <span class="fsk-baud-label">Baud Error:</span>
+            <div class="fsk-baud-bar-container">
+                <div id="fsk-baud-bar" class="fsk-baud-bar"></div>
+            </div>
+        </div>
+
         <div class="fsk-config-row">
             <div class="fsk-config-group">
                 <label for="fsk-preset-select">Preset:</label>
@@ -64,25 +73,32 @@
                     Inverted
                 </label>
             </div>
-
-            <div class="fsk-config-group fsk-baud-error-group">
-                <span id="fsk-baud-value" class="fsk-baud-value">0.0</span>
-                <span class="fsk-baud-label">Baud Error:</span>
-                <div class="fsk-baud-bar-container">
-                    <div id="fsk-baud-bar" class="fsk-baud-bar"></div>
-                </div>
-            </div>
         </div>
     </div>
 
-    <!-- Spectrum Visualization -->
-    <div class="fsk-spectrum-container">
-        <canvas id="fsk-spectrum-canvas" class="fsk-spectrum-canvas"></canvas>
+    <!-- Console Controls -->
+    <div class="fsk-console-controls">
+        <div class="fsk-control-group">
+            <label>
+                <input type="checkbox" id="fsk-auto-scroll" checked>
+                Auto-Scroll
+            </label>
+        </div>
+
+        <div class="fsk-control-group">
+            <label for="fsk-console-lines">Console Lines:</label>
+            <select id="fsk-console-lines" class="fsk-select">
+                <option value="10">10</option>
+                <option value="25" selected>25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+            </select>
+        </div>
     </div>
 
-    <!-- Output Display -->
-    <div class="fsk-output-container">
-        <div id="fsk-output" class="fsk-output"></div>
+    <!-- Text Console -->
+    <div class="fsk-console-container" id="fsk-console-container">
+        <pre id="fsk-console" class="fsk-console"></pre>
     </div>
 
     <!-- Status Bar -->

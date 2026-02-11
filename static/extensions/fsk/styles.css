@@ -72,6 +72,7 @@
     padding: 12px 15px;
     background: #252525;
     border-bottom: 1px solid #3a3a3a;
+    position: relative; /* For absolute positioning of baud error indicator */
 }
 
 .fsk-config-row {
@@ -127,11 +128,14 @@ input[type="checkbox"] {
 }
 
 /* Baud Error Indicator */
-.fsk-baud-error-group {
-    margin-left: auto; /* Push to the right */
+.fsk-baud-error-indicator {
+    position: absolute;
+    top: 12px;
+    right: 15px;
     display: flex;
     align-items: center;
     gap: 6px;
+    z-index: 10;
 }
 
 .fsk-baud-value {
@@ -180,68 +184,66 @@ input[type="checkbox"] {
     z-index: 1;
 }
 
-/* Spectrum Visualization */
-.fsk-spectrum-container {
-    height: 150px;
-    background: #0a0a0a;
+/* Console Controls */
+.fsk-console-controls {
+    display: flex;
+    gap: 15px;
+    padding: 8px 15px;
+    background: #252525;
     border-bottom: 1px solid #3a3a3a;
-    padding: 5px;
+    align-items: center;
 }
 
-.fsk-spectrum-canvas {
-    width: 100%;
-    height: 100%;
-    display: block;
+.fsk-console-controls .fsk-control-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
-/* Output Display */
-.fsk-output-container {
+.fsk-console-controls label {
+    font-size: 12px;
+    color: #aaa;
+    white-space: nowrap;
+}
+
+/* Text Console Container */
+.fsk-console-container {
     flex: 1;
-    overflow: hidden;
+    overflow: auto;
     background: #0a0a0a;
     border-bottom: 1px solid #3a3a3a;
+    position: relative;
+    min-height: 300px;
 }
 
-.fsk-output {
-    height: 100%;
+.fsk-console {
+    margin: 0;
     padding: 10px;
-    overflow-y: auto;
-    font-family: 'Courier New', monospace;
-    font-size: 14px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 13px;
     line-height: 1.4;
     color: #00ff00;
     white-space: pre-wrap;
     word-wrap: break-word;
+    min-height: 100%;
 }
 
-.fsk-output .error {
-    color: #ff4444;
+/* Scrollbar Styling */
+.fsk-console-container::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
 }
 
-.fsk-output .info {
-    color: #4CAF50;
-    font-weight: bold;
-}
-
-.fsk-output .warning {
-    color: #ffaa00;
-}
-
-/* Custom scrollbar for output */
-.fsk-output::-webkit-scrollbar {
-    width: 8px;
-}
-
-.fsk-output::-webkit-scrollbar-track {
+.fsk-console-container::-webkit-scrollbar-track {
     background: #1a1a1a;
 }
 
-.fsk-output::-webkit-scrollbar-thumb {
+.fsk-console-container::-webkit-scrollbar-thumb {
     background: #444;
-    border-radius: 4px;
+    border-radius: 6px;
 }
 
-.fsk-output::-webkit-scrollbar-thumb:hover {
+.fsk-console-container::-webkit-scrollbar-thumb:hover {
     background: #555;
 }
 

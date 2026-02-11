@@ -708,7 +708,10 @@ class FSKExtension extends DecoderExtension {
 
     updateConsoleHeight() {
         const container = document.getElementById('fsk-console-container');
-        if (!container) return;
+        if (!container) {
+            console.warn('FSK: Console container not found');
+            return;
+        }
 
         // Calculate height based on line count
         // Approximate 20px per line plus some padding
@@ -717,6 +720,7 @@ class FSKExtension extends DecoderExtension {
         const height = (this.consoleLines * lineHeight) + padding;
 
         container.style.height = `${height}px`;
+        console.log(`FSK: Console height updated to ${height}px (${this.consoleLines} lines)`);
     }
 
     // This method is called automatically by the DecoderExtension framework with audio data

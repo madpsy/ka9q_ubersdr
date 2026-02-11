@@ -669,10 +669,8 @@ class FSKExtension extends DecoderExtension {
     }
 
     copyToClipboard() {
-        const consoleEl = document.getElementById('fsk-console');
-        if (!consoleEl) return;
-
-        const text = consoleEl.textContent;
+        // Use textBuffer and remove carriage returns to avoid extra blank lines
+        const text = this.textBuffer.replace(/\r/g, '');
         if (!text) {
             console.log('FSK: No text to copy');
             return;
@@ -712,10 +710,8 @@ class FSKExtension extends DecoderExtension {
     }
 
     saveText() {
-        const consoleEl = document.getElementById('fsk-console');
-        if (!consoleEl) return;
-
-        const text = consoleEl.textContent;
+        // Use textBuffer and remove carriage returns to avoid extra blank lines
+        const text = this.textBuffer.replace(/\r/g, '');
         if (!text) {
             console.log('FSK: No text to save');
             return;

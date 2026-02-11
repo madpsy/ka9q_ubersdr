@@ -354,7 +354,25 @@ func (d *FSKDecoder) processBit(bit bool) {
 		d.bitCount++
 
 		if d.bitCount == d.nbits {
-			d.processCharacter(d.codeBits)
+			// Process character and track errors for automatic resync
+			success := d.processCharacter(d.codeBits)
+
+			// Error recovery logic (matches KiwiSDR JNX.js:501-511)
+			if success {
+				// Decrement error count on successful decode
+				if d.errorCount > 0 {
+					d.errorCount--
+				}
+			} else {
+				// Increment error count on failed decode
+				d.errorCount++
+				// If too many consecutive errors, return to sync mode
+				if d.errorCount > 2 {
+					log.Printf("[FSK] Too many errors (%d), returning to sync mode", d.errorCount)
+					d.syncSetup = true
+				}
+			}
+
 			d.codeBits = 0
 			d.bitCount = 0
 			d.waiting = true
@@ -363,9 +381,10 @@ func (d *FSKDecoder) processBit(bit bool) {
 }
 
 // processCharacter processes a decoded character code
-func (d *FSKDecoder) processCharacter(code byte) {
+// Returns true if the character was successfully decoded
+func (d *FSKDecoder) processCharacter(code byte) bool {
 	if d.ccir476 == nil {
-		return
+		return false
 	}
 
 	ch, success := d.ccir476.ProcessChar(code)
@@ -374,8 +393,10 @@ func (d *FSKDecoder) processCharacter(code byte) {
 			d.outputCB(ch)
 		}
 		d.succeedTally++
+		return true
 	} else {
 		d.failTally++
+		return false
 	}
 }
 

@@ -239,6 +239,9 @@ class FSKExtension extends DecoderExtension {
         }
 
         console.log('FSK: Event handlers setup complete');
+
+        // Apply default preset (NAVTEX) to initialize UI
+        this.applyPreset('navtex');
     }
 
     applyPreset(preset) {

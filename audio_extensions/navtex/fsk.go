@@ -388,10 +388,6 @@ func (d *FSKDecoder) processCharacter(code byte) bool {
 
 	result := d.ccir476.ProcessChar(code)
 
-	// Log for debugging
-	log.Printf("[FSK] ProcessChar: code=0x%02X, bitSuccess=%v, tally=%d, ch=%c (0x%04X), errorCount=%d",
-		code, result.BitSuccess, result.Tally, result.Char, result.Char, d.errorCount)
-
 	// Output character if present
 	if result.Char != 0 && d.outputCB != nil {
 		d.outputCB(result.Char)

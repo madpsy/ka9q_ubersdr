@@ -117,11 +117,7 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 		d.baudRate = 10
 	}
 
-	d.bitDurationSeconds = 1.0 / d.baudRate
-	d.bitSampleCount = int(d.sampleRate*d.bitDurationSeconds + 0.5)
-	d.halfBitSampleCount = d.bitSampleCount / 2
-
-	// Initialize encoding
+	// Initialize encoding first to determine if we need to double the baud rate
 	switch encoding {
 	case "CCIR476":
 		d.ccir476 = NewCCIR476()
@@ -131,9 +127,12 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 		d.ita2 = NewITA2(framing)
 		d.nbits = d.ita2.GetNBits()
 		d.msb = d.ita2.GetMSB()
-		// For async framing with 1.5 stop bits, enable variable stop bit handling
+		// For async framing with 1.5 stop bits, double the baud rate for oversampling
+		// This allows us to sample each bit twice for validation
 		if framing == "5N1.5" {
+			d.baudRate *= 2
 			d.stopVariable = true
+			log.Printf("[FSK] 5N1.5 framing: doubled baud rate to %.1f for oversampling", d.baudRate)
 		}
 	default:
 		log.Printf("[FSK] Unsupported encoding: %s, defaulting to CCIR476", encoding)
@@ -141,6 +140,11 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 		d.nbits = d.ccir476.GetNBits()
 		d.msb = d.ccir476.GetMSB()
 	}
+
+	// Calculate bit timing AFTER potentially doubling baud rate
+	d.bitDurationSeconds = 1.0 / d.baudRate
+	d.bitSampleCount = int(d.sampleRate*d.bitDurationSeconds + 0.5)
+	d.halfBitSampleCount = d.bitSampleCount / 2
 
 	// Initialize zero crossing array
 	d.zeroCrossings = make([]int, d.bitSampleCount/d.zeroCrossingsDivisor)

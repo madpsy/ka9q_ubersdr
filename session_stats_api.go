@@ -42,7 +42,7 @@ func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Co
 
 	// Check if session activity logging is enabled
 	if !config.Server.SessionActivityLogEnabled {
-		http.Error(w, "Session activity logging is not enabled", http.StatusServiceUnavailable)
+		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]string{
 			"error":   "not_enabled",
 			"message": "Session activity logging is not enabled in configuration",
@@ -92,7 +92,7 @@ func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Co
 func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime time.Time, geoIPService *GeoIPService) map[string]interface{} {
 	// Track unique countries with session counts
 	countryStats := make(map[string]map[string]interface{})
-	
+
 	// Track unique locations (lat/lon) per country with session counts
 	type LocationData struct {
 		Lat      float64
@@ -103,7 +103,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 
 	// Track unique IPs (for counting, not exposing)
 	uniqueIPs := make(map[string]bool)
-	
+
 	// Track session counts per IP with event info for GeoIP lookups
 	type IPSessionInfo struct {
 		SessionCount int
@@ -132,11 +132,11 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 	// User agent statistics
 	browserCounts := make(map[string]int)
 	osCounts := make(map[string]int)
-	
+
 	// Band and mode statistics
 	bandCounts := make(map[string]int)
 	modeCounts := make(map[string]int)
-	
+
 	// Initialize user agent parser
 	parser := uaparser.NewFromSaved()
 
@@ -150,7 +150,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 		// Track unique IPs (for counting only)
 		if event.ClientIP != "" {
 			uniqueIPs[event.ClientIP] = true
-			
+
 			// Track session counts per IP with country info from event
 			if _, exists := ipSessions[event.ClientIP]; !exists {
 				ipSessions[event.ClientIP] = &IPSessionInfo{
@@ -169,7 +169,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 				// Extract UberSDR client type and version
 				// Examples: "UberSDR/1.0", "UberSDR Client 1.0 (go)", "UberSDR_HPSDR/1.0"
 				browserCounts["UberSDR Client"]++
-				
+
 				// UberSDR is a browser/client, not an OS
 				// Try to parse the OS from the rest of the user agent string
 				client := parser.Parse(event.UserAgent)
@@ -183,7 +183,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 			} else {
 				// Parse regular user agents
 				client := parser.Parse(event.UserAgent)
-				
+
 				// Track browser (family + major version)
 				if client.UserAgent.Family != "" {
 					browser := client.UserAgent.Family
@@ -192,7 +192,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 					}
 					browserCounts[browser]++
 				}
-				
+
 				// Track OS (family + major version)
 				if client.Os.Family != "" {
 					os := client.Os.Family
@@ -203,14 +203,14 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 				}
 			}
 		}
-		
+
 		// Track bands visited during this session
 		for _, band := range event.Bands {
 			if band != "" {
 				bandCounts[band]++
 			}
 		}
-		
+
 		// Track modes used during this session
 		for _, mode := range event.Modes {
 			if mode != "" {
@@ -256,7 +256,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 				if country == "" {
 					country = "Unknown"
 				}
-				
+
 				// Initialize country stats if needed
 				if _, exists := countryStats[country]; !exists {
 					countryStats[country] = map[string]interface{}{
@@ -269,7 +269,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 				countryStats[country]["sessions"] = countryStats[country]["sessions"].(int) + info.SessionCount
 				continue
 			}
-			
+
 			// Use GeoIP country if available, otherwise fall back to event country
 			country := geoResult.Country
 			countryCode := geoResult.CountryCode
@@ -280,7 +280,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 			if country == "" {
 				country = "Unknown"
 			}
-			
+
 			// Initialize country stats if needed
 			if _, exists := countryStats[country]; !exists {
 				countryStats[country] = map[string]interface{}{
@@ -291,13 +291,13 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 				countryLocations[country] = make(map[string]*LocationData)
 			}
 			countryStats[country]["sessions"] = countryStats[country]["sessions"].(int) + info.SessionCount
-			
+
 			// Add location data if available
 			if geoResult.Latitude != nil && geoResult.Longitude != nil {
 				lat := *geoResult.Latitude
 				lon := *geoResult.Longitude
 				locKey := fmt.Sprintf("%.4f,%.4f", lat, lon)
-				
+
 				if _, exists := countryLocations[country][locKey]; !exists {
 					countryLocations[country][locKey] = &LocationData{
 						Lat:      lat,
@@ -315,7 +315,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 			if country == "" {
 				country = "Unknown"
 			}
-			
+
 			if _, exists := countryStats[country]; !exists {
 				countryStats[country] = map[string]interface{}{
 					"country":      country,
@@ -327,7 +327,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 			countryStats[country]["sessions"] = countryStats[country]["sessions"].(int) + info.SessionCount
 		}
 	}
-	
+
 	// Convert country stats to sorted slice and add locations array
 	countries := make([]map[string]interface{}, 0, len(countryStats))
 	for countryName, stats := range countryStats {
@@ -401,7 +401,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 	if len(browsers) > 10 {
 		browsers = browsers[:10]
 	}
-	
+
 	// Convert to map format for JSON
 	browserStats := make([]map[string]interface{}, len(browsers))
 	for i, b := range browsers {
@@ -427,7 +427,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 	if len(operatingSystems) > 10 {
 		operatingSystems = operatingSystems[:10]
 	}
-	
+
 	// Convert to map format for JSON
 	osStats := make([]map[string]interface{}, len(operatingSystems))
 	for i, os := range operatingSystems {
@@ -449,7 +449,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 	sort.Slice(bands, func(i, j int) bool {
 		return bands[i].Sessions > bands[j].Sessions
 	})
-	
+
 	// Convert to map format for JSON
 	bandStats := make([]map[string]interface{}, len(bands))
 	for i, b := range bands {
@@ -471,7 +471,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 	sort.Slice(modes, func(i, j int) bool {
 		return modes[i].Sessions > modes[j].Sessions
 	})
-	
+
 	// Convert to map format for JSON
 	modeStats := make([]map[string]interface{}, len(modes))
 	for i, m := range modes {

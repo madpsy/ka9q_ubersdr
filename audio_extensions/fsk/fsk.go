@@ -3,6 +3,7 @@ package fsk
 import (
 	"log"
 	"math"
+	"time"
 )
 
 // RTTYRxState represents the RTTY decoder state machine
@@ -86,6 +87,9 @@ type FSKDemodulator struct {
 	// Statistics
 	succeedTally int
 	failTally    int
+
+	// Debug logging rate limiting
+	lastLogTime time.Time
 }
 
 // NewFSKDemodulator creates a new FSK demodulator
@@ -299,10 +303,18 @@ func (d *FSKDemodulator) rx(bit bool) bool {
 	var c rune
 	var correction int
 
+	// Rate limit debug logging to once per second
+	now := time.Now()
+	shouldLog := now.Sub(d.lastLogTime) >= time.Second
+
 	switch d.rxstate {
 	case StateIdle:
 		// Wait for mark-to-space transition (start bit edge)
 		if isEdge, corr := d.isMarkSpace(); isEdge {
+			if shouldLog {
+				log.Printf("[FSK] Edge detected! correction=%d", corr)
+				d.lastLogTime = now
+			}
 			d.setState(StateStart)
 			d.counter = corr
 		}
@@ -310,7 +322,12 @@ func (d *FSKDemodulator) rx(bit bool) bool {
 	case StateStart:
 		// Validate start bit at middle of symbol period
 		if d.counter--; d.counter == 0 {
-			if !d.isMark() {
+			isMark := d.isMark()
+			if shouldLog {
+				log.Printf("[FSK] Start bit check: isMark=%v (expecting false)", isMark)
+				d.lastLogTime = now
+			}
+			if !isMark {
 				// Valid start bit (space), move to data state
 				d.setState(StateData)
 				d.counter = d.symbollen
@@ -318,6 +335,9 @@ func (d *FSKDemodulator) rx(bit bool) bool {
 				d.rxdata = 0
 			} else {
 				// False start, back to idle
+				if shouldLog {
+					log.Printf("[FSK] False start - back to idle")
+				}
 				d.setState(StateIdle)
 			}
 		}
@@ -331,22 +351,41 @@ func (d *FSKDemodulator) rx(bit bool) bool {
 			}
 			d.bitcntr++
 			d.counter = d.symbollen
+			if shouldLog {
+				log.Printf("[FSK] Data bit %d: rxdata=0x%X", d.bitcntr, d.rxdata)
+				d.lastLogTime = now
+			}
 		}
 		// Check if we've collected all data bits
 		if d.bitcntr == d.nbits {
+			if shouldLog {
+				log.Printf("[FSK] All %d data bits collected, moving to stop", d.nbits)
+			}
 			d.setState(StateStop)
 		}
 
 	case StateStop:
 		// Validate stop bit at middle of symbol period
 		if d.counter--; d.counter == 0 {
-			if d.isMark() {
+			isMark := d.isMark()
+			if shouldLog {
+				log.Printf("[FSK] Stop bit check: isMark=%v, rxdata=0x%X", isMark, d.rxdata)
+				d.lastLogTime = now
+			}
+			if isMark {
 				// Valid stop bit (mark), decode character
 				c = d.decodeChar(d.rxdata)
+				if shouldLog {
+					log.Printf("[FSK] Decoded character: 0x%X -> '%c' (valid=%v)", d.rxdata, c, c != 0)
+				}
 				if c != 0 && d.outputCB != nil {
 					d.outputCB(c)
 				}
 				flag = true
+			} else {
+				if shouldLog {
+					log.Printf("[FSK] Invalid stop bit (not mark)")
+				}
 			}
 			// Return to idle regardless of stop bit validity
 			d.setState(StateIdle)

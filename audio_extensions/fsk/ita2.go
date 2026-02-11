@@ -12,8 +12,9 @@ type ITA2 struct {
 	figsCode map[rune]byte
 
 	// State
-	shift    bool // false = letters, true = figures
-	lastCode byte // Previous code (ITA2 processes previous character)
+	shift     bool // false = letters, true = figures
+	lastCode  byte // Previous code (ITA2 processes previous character)
+	firstChar bool // Track if this is the first character
 
 	// Special codes
 	letters byte
@@ -23,12 +24,13 @@ type ITA2 struct {
 // NewITA2 creates a new ITA2 decoder
 func NewITA2() *ITA2 {
 	i := &ITA2{
-		letters:  0x1f,
-		figures:  0x1b,
-		codeLtrs: make(map[byte]rune),
-		codeFigs: make(map[byte]rune),
-		ltrsCode: make(map[rune]byte),
-		figsCode: make(map[rune]byte),
+		letters:   0x1f,
+		figures:   0x1b,
+		firstChar: true, // Start with first character flag
+		codeLtrs:  make(map[byte]rune),
+		codeFigs:  make(map[byte]rune),
+		ltrsCode:  make(map[rune]byte),
+		figsCode:  make(map[rune]byte),
 	}
 
 	var NUL rune = '\x00'
@@ -81,6 +83,7 @@ func NewITA2() *ITA2 {
 func (i *ITA2) Reset() {
 	i.shift = false
 	i.lastCode = 0
+	i.firstChar = true
 }
 
 // GetNBits returns the number of bits per character (5)
@@ -131,7 +134,14 @@ func (i *ITA2) ProcessChar(code byte) ITA2CharResult {
 	code &= 0x1f
 
 	// Always return success for ITA2 (no error correction)
-	result := ITA2CharResult{Char: 0, BitSuccess: true, Tally: 1}
+	result := ITA2CharResult{Char: 0, BitSuccess: true, Tally: 0}
+
+	// Skip the first character - just store it
+	if i.firstChar {
+		i.lastCode = code
+		i.firstChar = false
+		return result
+	}
 
 	// Process the PREVIOUS character based on current shift state
 	switch i.lastCode {

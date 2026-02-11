@@ -82,6 +82,7 @@ type FSKDemodulator struct {
 	// Callbacks
 	baudErrorCB func(float64)
 	outputCB    func(rune)
+	stateCB     func(FSKState)
 
 	// Statistics
 	succeedTally int
@@ -159,6 +160,11 @@ func (d *FSKDemodulator) SetOutputCallback(cb func(rune)) {
 	d.outputCB = cb
 }
 
+// SetStateCallback sets the callback for state changes
+func (d *FSKDemodulator) SetStateCallback(cb func(FSKState)) {
+	d.stateCB = cb
+}
+
 // updateFilters configures the biquad filters
 func (d *FSKDemodulator) updateFilters() {
 	// Q must change with frequency
@@ -180,6 +186,10 @@ func (d *FSKDemodulator) updateFilters() {
 func (d *FSKDemodulator) setState(s FSKState) {
 	if s != d.state {
 		d.state = s
+		// Notify callback of state change
+		if d.stateCB != nil {
+			d.stateCB(s)
+		}
 		// log.Printf("[FSK] State: %v", s)
 	}
 }

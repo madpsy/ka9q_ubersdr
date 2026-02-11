@@ -108,8 +108,9 @@ func NewFSKDecoder(sampleRate int, config FSKConfig) *FSKDecoder {
 		d.bufferMu.Unlock()
 	})
 
-	// Note: State tracking is done internally by FSKDemodulator
-	// We track it via the state field which is updated in ProcessSamples
+	d.fsk.SetStateCallback(func(state FSKState) {
+		d.lastState = state
+	})
 
 	log.Printf("[FSK] Initialized: SR=%d, CF=%.1f Hz, Shift=%.1f Hz, Baud=%.1f, Inverted=%v",
 		sampleRate, config.CenterFrequency, config.Shift, config.BaudRate, config.Inverted)

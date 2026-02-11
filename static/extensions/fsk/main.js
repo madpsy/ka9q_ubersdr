@@ -719,7 +719,10 @@ class FSKExtension extends DecoderExtension {
         const padding = 10;
         const height = (this.consoleLines * lineHeight) + padding;
 
+        // Override flex with specific height and disable flex-grow
+        container.style.flex = 'none';
         container.style.height = `${height}px`;
+        container.style.minHeight = `${height}px`;
         console.log(`FSK: Console height updated to ${height}px (${this.consoleLines} lines)`);
     }
 

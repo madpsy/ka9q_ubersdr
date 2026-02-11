@@ -2,7 +2,7 @@
   "name": "navtex",
   "displayName": "NAVTEX Decoder",
   "version": "1.0.0",
-  "description": "NAVTEX/DSC/Selcall FSK decoder for maritime communications",
+  "description": "NAVTEX FSK decoder for maritime communications",
   "author": "UberSDR",
   "type": "decoder",
   "icon": "📡",

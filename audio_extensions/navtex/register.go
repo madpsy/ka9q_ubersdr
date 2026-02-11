@@ -37,7 +37,7 @@ func Factory(audioParams AudioExtensionParams, extensionParams map[string]interf
 func GetInfo() map[string]interface{} {
 	return map[string]interface{}{
 		"name":        "navtex",
-		"description": "NAVTEX/DSC/Selcall FSK decoder for maritime communications",
+		"description": "NAVTEX FSK decoder for maritime communications",
 		"version":     "1.0.0",
 		"parameters": map[string]interface{}{
 			"center_frequency": map[string]interface{}{

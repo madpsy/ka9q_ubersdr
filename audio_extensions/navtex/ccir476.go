@@ -147,14 +147,22 @@ func (c *CCIR476) codeToChar(code byte, shift bool) (rune, error) {
 	return ch, nil
 }
 
+// CharResult holds the result of processing a character
+type CharResult struct {
+	Char       rune // The decoded character (0 if no output)
+	BitSuccess bool // Whether the bits were valid (for error counting)
+	Tally      int  // Character decode result: 1=success, -1=fail, 0=control/no-output
+}
+
 // ProcessChar processes a received character code
-// Returns the decoded character (if any) and whether the bits were valid
-// The success return value indicates bit validity (for error tracking), not character output
+// Returns the decoded character result matching KiwiSDR CCIR476.js behavior
 // Implements the alpha/rep phase error correction scheme
-func (c *CCIR476) ProcessChar(code byte) (rune, bool) {
-	// Check bit validity - this is what we return as "success"
+func (c *CCIR476) ProcessChar(code byte) CharResult {
+	// Check bit validity - this NEVER changes throughout the function
 	// Matches KiwiSDR CCIR476.js line 155, 220
 	bitSuccess := c.checkBits(code)
+	tally := 0
+	var chr byte = 0xff
 
 	// Force phasing with the two phasing characters
 	if code == c.codeRep {
@@ -170,8 +178,6 @@ func (c *CCIR476) ProcessChar(code byte) (rune, bool) {
 		c.c3 = code
 	} else {
 		// Alpha phase: compare with rep phase character
-		var chr byte = 0xff
-
 		// Try to recover the character using forward error correction
 		if bitSuccess && c.c1 == code {
 			// Both alpha and rep match - perfect
@@ -185,43 +191,44 @@ func (c *CCIR476) ProcessChar(code byte) (rune, bool) {
 		}
 
 		if chr == 0xff {
-			// Failed to decode - return bit validity status
-			c.alphaPhase = !c.alphaPhase
-			return 0, bitSuccess
-		}
+			// Failed to decode
+			tally = -1
+		} else {
+			// Successfully decoded a character
+			tally = 1
 
-		// Process special control codes
-		switch chr {
-		case c.codeRep, c.codeAlpha, c.codeBeta, c.codeChar32:
-			// Control codes - don't output, but return bit validity
-			c.alphaPhase = !c.alphaPhase
-			return 0, bitSuccess
-
-		case c.letters:
-			c.shift = false
-			c.alphaPhase = !c.alphaPhase
-			return 0, bitSuccess
-
-		case c.figures:
-			c.shift = true
-			c.alphaPhase = !c.alphaPhase
-			return 0, bitSuccess
-
-		default:
-			// Regular character
-			ch, err := c.codeToChar(chr, c.shift)
-			if err != nil {
-				// Invalid character code - don't output
-				// Return bit validity status (not character decode status)
+			// Process special control codes
+			switch chr {
+			case c.codeRep, c.codeAlpha, c.codeBeta, c.codeChar32:
+				// Control codes - don't output
 				c.alphaPhase = !c.alphaPhase
-				return 0, bitSuccess
+				return CharResult{Char: 0, BitSuccess: bitSuccess, Tally: tally}
+
+			case c.letters:
+				c.shift = false
+				c.alphaPhase = !c.alphaPhase
+				return CharResult{Char: 0, BitSuccess: bitSuccess, Tally: tally}
+
+			case c.figures:
+				c.shift = true
+				c.alphaPhase = !c.alphaPhase
+				return CharResult{Char: 0, BitSuccess: bitSuccess, Tally: tally}
+
+			default:
+				// Regular character
+				ch, err := c.codeToChar(chr, c.shift)
+				if err != nil {
+					// Invalid character code - don't output
+					c.alphaPhase = !c.alphaPhase
+					return CharResult{Char: 0, BitSuccess: bitSuccess, Tally: tally}
+				}
+				c.alphaPhase = !c.alphaPhase
+				return CharResult{Char: ch, BitSuccess: bitSuccess, Tally: tally}
 			}
-			c.alphaPhase = !c.alphaPhase
-			return ch, bitSuccess
 		}
 	}
 
-	// Alpha/rep phasing - return bit validity
+	// Alpha/rep phasing - return bit validity and tally
 	c.alphaPhase = !c.alphaPhase
-	return 0, bitSuccess
+	return CharResult{Char: 0, BitSuccess: bitSuccess, Tally: tally}
 }

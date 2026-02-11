@@ -148,8 +148,8 @@ func (d *NAVTEXDecoder) processLoop(audioChan <-chan []int16, resultChan chan<- 
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
-	// Periodic baud error ticker (every 500ms)
-	baudTicker := time.NewTicker(500 * time.Millisecond)
+	// Periodic baud error ticker (every 200ms)
+	baudTicker := time.NewTicker(200 * time.Millisecond)
 	defer baudTicker.Stop()
 
 	for {

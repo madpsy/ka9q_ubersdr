@@ -1,16 +1,5 @@
 package fsk
 
-import (
-	"log"
-	"sync"
-	"time"
-)
-
-var (
-	lastCheckBitsLog time.Time
-	checkBitsLogMu   sync.Mutex
-)
-
 // ITA2 implements the ITA2/Baudot code used by RTTY (Radio Teletype)
 // This is a 5-bit character encoding with letters and figures shift states
 type ITA2 struct {
@@ -150,21 +139,8 @@ func (i *ITA2) CheckBits(code uint16) bool {
 	// Frame: [start:2][data0-4:10][stop:3] (LSB to MSB in our uint16)
 	v := uint16(code)
 
-	// Rate-limited debug logging (max once per second)
-	shouldLog := false
-	checkBitsLogMu.Lock()
-	if time.Since(lastCheckBitsLog) > time.Second {
-		shouldLog = true
-		lastCheckBitsLog = time.Now()
-	}
-	checkBitsLogMu.Unlock()
-
 	// Check start bits (LSB, should be 00)
-	startBits := v & 3
-	if startBits != 0 {
-		if shouldLog {
-			log.Printf("[ITA2] CheckBits FAIL: code=0x%04x start=%02b (expected 00)", code, startBits)
-		}
+	if (v & 3) != 0 {
 		return false
 	}
 	v >>= 2
@@ -173,35 +149,22 @@ func (i *ITA2) CheckBits(code uint16) bool {
 	for bit := 0; bit < i.dataBits; bit++ {
 		d := v & 3
 		if d != 0 && d != 3 {
-			if shouldLog {
-				log.Printf("[ITA2] CheckBits FAIL: code=0x%04x data bit %d = %02b (expected 00 or 11)", code, bit, d)
-			}
 			return false
 		}
 		v >>= 2
 	}
 
 	// Check stop bits (MSB, should be 111)
-	stopBits := v & 7
-	if stopBits != 7 {
-		if shouldLog {
-			log.Printf("[ITA2] CheckBits FAIL: code=0x%04x stop=%03b (expected 111)", code, stopBits)
-		}
+	if (v & 7) != 7 {
 		return false
 	}
 	v >>= 3
 
 	// Should have consumed all bits
 	if v != 0 {
-		if shouldLog {
-			log.Printf("[ITA2] CheckBits FAIL: code=0x%04x remaining=0x%x (expected 0)", code, v)
-		}
 		return false
 	}
 
-	if shouldLog {
-		log.Printf("[ITA2] CheckBits SUCCESS")
-	}
 	return true
 }
 

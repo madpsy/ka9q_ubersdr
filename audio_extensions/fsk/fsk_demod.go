@@ -338,11 +338,6 @@ func (d *FSKDemodulator) processBit(bit bool) {
 		// Scan indefinitely for valid bit pattern
 		d.codeBits = (d.codeBits >> 1) | (bitVal * d.msb)
 
-		// Debug: log bit collection every second
-		if d.ita2 != nil && d.bitCount%50 == 0 {
-			log.Printf("[FSK] SYNC1: bit=%d, codeBits=0x%04x (%015b)", bitVal, d.codeBits, d.codeBits)
-		}
-
 		// Check validity based on encoding
 		valid := false
 		if d.ccir476 != nil {

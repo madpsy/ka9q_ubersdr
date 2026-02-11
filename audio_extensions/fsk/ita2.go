@@ -159,15 +159,11 @@ func (i *ITA2) CheckBits(code uint16) bool {
 	}
 	checkBitsLogMu.Unlock()
 
-	if shouldLog {
-		log.Printf("[ITA2] CheckBits sample: code=0x%04x (%015b)", code, code)
-	}
-
 	// Check start bits (LSB, should be 00)
 	startBits := v & 3
 	if startBits != 0 {
 		if shouldLog {
-			log.Printf("[ITA2] CheckBits FAIL: start bits = %02b (expected 00)", startBits)
+			log.Printf("[ITA2] CheckBits FAIL: code=0x%04x start=%02b (expected 00)", code, startBits)
 		}
 		return false
 	}
@@ -178,7 +174,7 @@ func (i *ITA2) CheckBits(code uint16) bool {
 		d := v & 3
 		if d != 0 && d != 3 {
 			if shouldLog {
-				log.Printf("[ITA2] CheckBits FAIL: data bit %d = %02b (expected 00 or 11)", bit, d)
+				log.Printf("[ITA2] CheckBits FAIL: code=0x%04x data bit %d = %02b (expected 00 or 11)", code, bit, d)
 			}
 			return false
 		}
@@ -189,7 +185,7 @@ func (i *ITA2) CheckBits(code uint16) bool {
 	stopBits := v & 7
 	if stopBits != 7 {
 		if shouldLog {
-			log.Printf("[ITA2] CheckBits FAIL: stop bits = %03b (expected 111)", stopBits)
+			log.Printf("[ITA2] CheckBits FAIL: code=0x%04x stop=%03b (expected 111)", code, stopBits)
 		}
 		return false
 	}
@@ -198,7 +194,7 @@ func (i *ITA2) CheckBits(code uint16) bool {
 	// Should have consumed all bits
 	if v != 0 {
 		if shouldLog {
-			log.Printf("[ITA2] CheckBits FAIL: remaining bits = 0x%x (expected 0)", v)
+			log.Printf("[ITA2] CheckBits FAIL: code=0x%04x remaining=0x%x (expected 0)", code, v)
 		}
 		return false
 	}

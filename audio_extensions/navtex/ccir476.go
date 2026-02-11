@@ -155,11 +155,9 @@ type CharResult struct {
 }
 
 // ProcessChar processes a received character code
-// Returns the decoded character result matching KiwiSDR CCIR476.js behavior
 // Implements the alpha/rep phase error correction scheme
 func (c *CCIR476) ProcessChar(code byte) CharResult {
 	// Check bit validity - this NEVER changes throughout the function
-	// Matches KiwiSDR CCIR476.js line 155, 220
 	bitSuccess := c.checkBits(code)
 	tally := 0
 	var chr byte = 0xff

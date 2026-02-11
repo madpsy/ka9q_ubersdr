@@ -16,7 +16,6 @@ const (
 )
 
 // FSKDecoder implements an FSK (Frequency Shift Keying) demodulator
-// Ported from KiwiSDR JNX.js
 type FSKDecoder struct {
 	// Configuration
 	sampleRate      float64
@@ -357,7 +356,7 @@ func (d *FSKDecoder) processBit(bit bool) {
 			// Process character and track errors for automatic resync
 			success := d.processCharacter(d.codeBits)
 
-			// Error recovery logic (matches KiwiSDR JNX.js:501-511)
+			// Error recovery logic
 			if success {
 				// Decrement error count on successful decode
 				if d.errorCount > 0 {
@@ -405,7 +404,7 @@ func (d *FSKDecoder) processCharacter(code byte) bool {
 		d.failTally++
 	}
 
-	// Return bit validity for error counting (matches KiwiSDR JNX.js:501)
+	// Return bit validity for error counting
 	return result.BitSuccess
 }
 

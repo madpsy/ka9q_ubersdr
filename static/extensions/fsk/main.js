@@ -618,14 +618,17 @@ class FSKExtension extends DecoderExtension {
         const consoleEl = document.getElementById('fsk-console');
         if (!consoleEl) return;
 
+        // Check if timestamps are enabled
+        const showTimestamp = document.getElementById('fsk-show-timestamp')?.checked ?? true;
+
         // Process text character by character to add timestamps at line feeds
         let processedText = '';
 
         for (let i = 0; i < text.length; i++) {
             const char = text[i];
 
-            // Add timestamp at the start of a new line
-            if (this.needsTimestamp && char !== '\r') {
+            // Add timestamp at the start of a new line (if enabled)
+            if (showTimestamp && this.needsTimestamp && char !== '\r') {
                 const now = new Date();
                 const timestamp = now.toISOString().substring(11, 19); // HH:MM:SS format
                 processedText += `[${timestamp}] `;

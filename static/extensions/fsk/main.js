@@ -223,9 +223,6 @@ class FSKExtension extends DecoderExtension {
 
         const invertedCheck = document.getElementById('fsk-inverted');
         if (invertedCheck) invertedCheck.checked = this.config.inverted;
-
-        const centerFreqInput = document.getElementById('fsk-center-freq');
-        if (centerFreqInput) centerFreqInput.value = this.config.center_frequency;
     }
 
     toggleDecoding() {

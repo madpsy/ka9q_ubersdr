@@ -722,7 +722,7 @@ class FSKExtension extends DecoderExtension {
                 ctx.fillStyle = '#4CAF50';
             }
 
-            ctx.fillRect(x, y, barWidth - 1, barHeight);
+            ctx.fillRect(x, y, barWidth, barHeight);
         }
 
         // Draw mark and space frequency markers

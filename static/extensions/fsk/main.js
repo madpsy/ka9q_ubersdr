@@ -58,16 +58,18 @@ class FSKExtension extends DecoderExtension {
             const consoleEl = document.getElementById('fsk-console');
             const startBtn = document.getElementById('fsk-start-btn');
             const copyBtn = document.getElementById('fsk-copy-btn');
+            const saveBtn = document.getElementById('fsk-save-btn');
             const clearBtn = document.getElementById('fsk-clear-btn');
 
             console.log(`FSK: DOM check attempt ${attempts + 1}/${maxAttempts}:`, {
                 consoleEl: !!consoleEl,
                 startBtn: !!startBtn,
                 copyBtn: !!copyBtn,
+                saveBtn: !!saveBtn,
                 clearBtn: !!clearBtn
             });
 
-            if (consoleEl && startBtn && copyBtn && clearBtn) {
+            if (consoleEl && startBtn && copyBtn && saveBtn && clearBtn) {
                 console.log('FSK: All DOM elements found, setting up...');
                 this.setupCanvas();
                 this.setupBaudBar();
@@ -171,6 +173,12 @@ class FSKExtension extends DecoderExtension {
         const copyBtn = document.getElementById('fsk-copy-btn');
         if (copyBtn) {
             copyBtn.addEventListener('click', () => this.copyToClipboard());
+        }
+
+        // Save button
+        const saveBtn = document.getElementById('fsk-save-btn');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', () => this.saveText());
         }
 
         // Clear button
@@ -657,6 +665,36 @@ class FSKExtension extends DecoderExtension {
             }
             document.body.removeChild(textArea);
         });
+    }
+
+    saveText() {
+        const consoleEl = document.getElementById('fsk-console');
+        if (!consoleEl) return;
+
+        const text = consoleEl.textContent;
+        if (!text) {
+            console.log('FSK: No text to save');
+            return;
+        }
+
+        console.log('FSK: Saving text');
+
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+
+        // Generate filename with timestamp
+        const now = new Date();
+        const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, -5);
+        a.download = `fsk_${timestamp}.txt`;
+
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        console.log('FSK: Text saved:', a.download);
     }
 
     updateConsoleHeight() {

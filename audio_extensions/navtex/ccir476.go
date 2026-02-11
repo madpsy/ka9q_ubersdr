@@ -148,10 +148,13 @@ func (c *CCIR476) codeToChar(code byte, shift bool) (rune, error) {
 }
 
 // ProcessChar processes a received character code
-// Returns the decoded character (if any) and whether it was successful
+// Returns the decoded character (if any) and whether the bits were valid
+// The success return value indicates bit validity (for error tracking), not character output
 // Implements the alpha/rep phase error correction scheme
 func (c *CCIR476) ProcessChar(code byte) (rune, bool) {
-	success := c.checkBits(code)
+	// Check bit validity - this is what we return as "success"
+	// Matches KiwiSDR CCIR476.js line 155, 220
+	bitSuccess := c.checkBits(code)
 
 	// Force phasing with the two phasing characters
 	if code == c.codeRep {
@@ -170,10 +173,10 @@ func (c *CCIR476) ProcessChar(code byte) (rune, bool) {
 		var chr byte = 0xff
 
 		// Try to recover the character using forward error correction
-		if success && c.c1 == code {
+		if bitSuccess && c.c1 == code {
 			// Both alpha and rep match - perfect
 			chr = code
-		} else if success {
+		} else if bitSuccess {
 			// Alpha is valid, use it
 			chr = code
 		} else if c.checkBits(c.c1) {
@@ -182,43 +185,43 @@ func (c *CCIR476) ProcessChar(code byte) (rune, bool) {
 		}
 
 		if chr == 0xff {
-			// Failed to decode
+			// Failed to decode - return bit validity status
 			c.alphaPhase = !c.alphaPhase
-			return 0, false
+			return 0, bitSuccess
 		}
 
 		// Process special control codes
 		switch chr {
 		case c.codeRep, c.codeAlpha, c.codeBeta, c.codeChar32:
-			// Control codes - don't output
+			// Control codes - don't output, but return bit validity
 			c.alphaPhase = !c.alphaPhase
-			return 0, true
+			return 0, bitSuccess
 
 		case c.letters:
 			c.shift = false
 			c.alphaPhase = !c.alphaPhase
-			return 0, true
+			return 0, bitSuccess
 
 		case c.figures:
 			c.shift = true
 			c.alphaPhase = !c.alphaPhase
-			return 0, true
+			return 0, bitSuccess
 
 		default:
 			// Regular character
 			ch, err := c.codeToChar(chr, c.shift)
 			if err != nil {
-				// Invalid character code - log but don't output
-				// Still toggle phase to maintain synchronization
+				// Invalid character code - don't output
+				// Return bit validity status (not character decode status)
 				c.alphaPhase = !c.alphaPhase
-				return 0, true // Return true to maintain sync, but no character output
+				return 0, bitSuccess
 			}
 			c.alphaPhase = !c.alphaPhase
-			return ch, true
+			return ch, bitSuccess
 		}
 	}
 
-	// Alpha/rep phasing
+	// Alpha/rep phasing - return bit validity
 	c.alphaPhase = !c.alphaPhase
-	return 0, true
+	return 0, bitSuccess
 }

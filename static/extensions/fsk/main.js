@@ -221,6 +221,12 @@ class FSKExtension extends DecoderExtension {
         const baudInput = document.getElementById('fsk-baud');
         if (baudInput) baudInput.value = this.config.baud_rate;
 
+        const framingSelect = document.getElementById('fsk-framing');
+        if (framingSelect) framingSelect.value = this.config.framing;
+
+        const encodingSelect = document.getElementById('fsk-encoding');
+        if (encodingSelect) encodingSelect.value = this.config.encoding;
+
         const invertedCheck = document.getElementById('fsk-inverted');
         if (invertedCheck) invertedCheck.checked = this.config.inverted;
     }

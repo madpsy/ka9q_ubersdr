@@ -125,8 +125,9 @@ func (d *SSTVDecoder) GetName() string {
 func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []byte) {
 	defer d.wg.Done()
 
-	// Create circular PCM buffer (4096 samples like KiwiSDR)
-	const pcmBufSize = 4096
+	// Create circular PCM buffer - need at least 500ms for VIS detection
+	// At 12kHz, 500ms = 6000 samples, so use 8192 to have headroom
+	const pcmBufSize = 8192
 	pcmBuffer := NewCircularPCMBuffer(pcmBufSize)
 
 	// Goroutine to feed buffer from audio channel

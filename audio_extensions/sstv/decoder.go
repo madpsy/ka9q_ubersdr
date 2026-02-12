@@ -206,7 +206,7 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 }
 
 // detectVIS attempts to detect VIS code
-func (d *SSTVDecoder) detectVIS(pcmBuffer *CircularPCMBuffer, resultChan chan<- []byte) error {
+func (d *SSTVDecoder) detectVIS(pcmBuffer *SlidingPCMBuffer, resultChan chan<- []byte) error {
 	// Create VIS detector if not exists
 	if d.visDetector == nil {
 		log.Printf("[SSTV] Creating VIS detector with sample rate %.1f Hz", d.sampleRate)
@@ -245,7 +245,7 @@ func (d *SSTVDecoder) detectVIS(pcmBuffer *CircularPCMBuffer, resultChan chan<- 
 }
 
 // decodeVideo decodes the video signal
-func (d *SSTVDecoder) decodeVideo(pcmBuffer *CircularPCMBuffer, resultChan chan<- []byte) error {
+func (d *SSTVDecoder) decodeVideo(pcmBuffer *SlidingPCMBuffer, resultChan chan<- []byte) error {
 	log.Printf("[SSTV] Starting video demodulation...")
 
 	d.sendStatus(resultChan, fmt.Sprintf("Decoding %s...", d.mode.Name))
@@ -300,7 +300,7 @@ func (d *SSTVDecoder) decodeVideo(pcmBuffer *CircularPCMBuffer, resultChan chan<
 }
 
 // decodeFSKID decodes FSK ID
-func (d *SSTVDecoder) decodeFSKID(pcmBuffer *CircularPCMBuffer, resultChan chan<- []byte) {
+func (d *SSTVDecoder) decodeFSKID(pcmBuffer *SlidingPCMBuffer, resultChan chan<- []byte) {
 	log.Printf("[SSTV] Attempting FSK ID decode...")
 
 	d.fskDecoder = NewFSKDecoder(d.sampleRate, d.headerShift)

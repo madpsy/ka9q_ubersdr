@@ -205,7 +205,7 @@ func (v *VideoDemodulator) GetPixelGrid(rate float64, skip int) []PixelInfo {
 }
 
 // Demodulate performs FM demodulation of the video signal
-func (v *VideoDemodulator) Demodulate(pcmBuffer *CircularPCMBuffer, rate float64, skip int) ([]uint8, error) {
+func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64, skip int) ([]uint8, error) {
 	m := v.mode
 	pixelGrid := v.GetPixelGrid(rate, skip)
 
@@ -240,8 +240,9 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *CircularPCMBuffer, rate float64
 
 	// Process signal
 	for sampleNum := 0; sampleNum < length; sampleNum++ {
-		// Check if we have enough samples
+		// Check if we have enough samples ahead of WindowPtr
 		if pcmBuffer.Available() < 1024 {
+			log.Printf("[SSTV Video] Not enough samples at sampleNum=%d (available=%d)", sampleNum, pcmBuffer.Available())
 			break
 		}
 
@@ -284,8 +285,8 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *CircularPCMBuffer, rate float64
 			pixelIdx++
 		}
 
-		// Consume one sample
-		_, _ = pcmBuffer.Read(1)
+		// Advance window by one sample (like slowrx: pcm.WindowPtr++)
+		pcmBuffer.AdvanceWindow(1)
 	}
 
 	// Convert image to RGB byte array
@@ -329,14 +330,10 @@ func (v *VideoDemodulator) RedrawFromLuminance(rate float64, skip int) []uint8 {
 }
 
 // detectSync detects sync pulses for slant correction
-func (v *VideoDemodulator) detectSync(pcmBuffer *CircularPCMBuffer, syncTargetBin int, syncSampleNum int) {
-	// Get 64-sample window
-	if pcmBuffer.Available() < 64 {
-		return
-	}
-
-	windowOffset := pcmBuffer.Available() - 64
-	samples, err := pcmBuffer.GetWindowAbsolute(windowOffset, 64)
+func (v *VideoDemodulator) detectSync(pcmBuffer *SlidingPCMBuffer, syncTargetBin int, syncSampleNum int) {
+	// Get 64-sample window centered at WindowPtr
+	// slowrx: pcm.Buffer[pcm.WindowPtr+i-32]
+	samples, err := pcmBuffer.GetWindow(-32, 64)
 	if err != nil {
 		return
 	}
@@ -380,14 +377,10 @@ func (v *VideoDemodulator) detectSync(pcmBuffer *CircularPCMBuffer, syncTargetBi
 }
 
 // estimateSNR estimates the signal-to-noise ratio
-func (v *VideoDemodulator) estimateSNR(pcmBuffer *CircularPCMBuffer) float64 {
-	// Get 1024-sample window
-	if pcmBuffer.Available() < 1024 {
-		return 0
-	}
-
-	windowOffset := pcmBuffer.Available() - 1024
-	samples, err := pcmBuffer.GetWindowAbsolute(windowOffset, 1024)
+func (v *VideoDemodulator) estimateSNR(pcmBuffer *SlidingPCMBuffer) float64 {
+	// Get 1024-sample window centered at WindowPtr
+	// slowrx: pcm.Buffer[pcm.WindowPtr + i - FFTLen/2]
+	samples, err := pcmBuffer.GetWindow(-512, 1024)
 	if err != nil {
 		return 0
 	}
@@ -434,7 +427,7 @@ func (v *VideoDemodulator) estimateSNR(pcmBuffer *CircularPCMBuffer) float64 {
 }
 
 // demodulateFrequency performs FM demodulation to extract frequency
-func (v *VideoDemodulator) demodulateFrequency(pcmBuffer *CircularPCMBuffer, snr float64) float64 {
+func (v *VideoDemodulator) demodulateFrequency(pcmBuffer *SlidingPCMBuffer, snr float64) float64 {
 	// Select window size based on SNR (adaptive windowing)
 	winIdx := 0
 	if v.adaptive {
@@ -463,13 +456,9 @@ func (v *VideoDemodulator) demodulateFrequency(pcmBuffer *CircularPCMBuffer, snr
 
 	winLength := v.hannLens[winIdx]
 
-	// Get window
-	if pcmBuffer.Available() < winLength {
-		return 1500.0 + float64(v.headerShift)
-	}
-
-	windowOffset := pcmBuffer.Available() - winLength
-	samples, err := pcmBuffer.GetWindowAbsolute(windowOffset, winLength)
+	// Get window centered at WindowPtr
+	// slowrx: pcm.Buffer[pcm.WindowPtr + i - WinLength/2]
+	samples, err := pcmBuffer.GetWindow(-winLength/2, winLength)
 	if err != nil {
 		return 1500.0 + float64(v.headerShift)
 	}

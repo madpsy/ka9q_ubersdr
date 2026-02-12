@@ -47,7 +47,7 @@ func NewFSKDecoder(sampleRate float64, headerShift int) *FSKDecoder {
 
 // DecodeFSKID attempts to decode an FSK callsign transmission
 // Returns the decoded callsign string
-func (f *FSKDecoder) DecodeFSKID(pcmBuffer *CircularPCMBuffer) string {
+func (f *FSKDecoder) DecodeFSKID(pcmBuffer *SlidingPCMBuffer) string {
 	// Bit duration: 22ms (45.45 baud)
 	samps22ms := int(f.sampleRate * 22e-3)
 	samps11ms := samps22ms / 2 // Half for initial sync search
@@ -86,13 +86,13 @@ func (f *FSKDecoder) DecodeFSKID(pcmBuffer *CircularPCMBuffer) string {
 		}
 
 		// Check if we have enough samples
-		if pcmBuffer.Available() < samps22ms {
+		if pcmBuffer.Available() < samps11ms {
 			break
 		}
 
-		// Get window for FFT
-		windowOffset := pcmBuffer.Available() - samps22ms
-		samples, err := pcmBuffer.GetWindowAbsolute(windowOffset, samps22ms)
+		// Get window for FFT centered at WindowPtr
+		// slowrx: pcm.Buffer[pcm.WindowPtr+i-485]
+		samples, err := pcmBuffer.GetWindow(-samps11ms, samps22ms)
 		if err != nil {
 			break
 		}
@@ -130,8 +130,8 @@ func (f *FSKDecoder) DecodeFSKID(pcmBuffer *CircularPCMBuffer) string {
 			bit = 0
 		}
 
-		// Consume samples
-		_, _ = pcmBuffer.Read(samplesNeeded)
+		// Advance window (like slowrx: pcm.WindowPtr += samplesNeeded)
+		pcmBuffer.AdvanceWindow(samplesNeeded)
 
 		if !inSync {
 			// Wait for sync pattern: 0x20 0x2A

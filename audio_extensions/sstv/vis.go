@@ -73,7 +73,7 @@ func (v *VISDetector) SetToneCallback(callback func(freq float64)) {
 
 // ProcessIteration processes one 10ms iteration of VIS detection
 // Returns: mode index, header shift (Hz), extended VIS flag, success
-func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int, bool, bool) {
+func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int, bool, bool) {
 	samps10ms := int(v.sampleRate * 10e-3)
 	samps20ms := len(v.hannWindow)
 
@@ -355,7 +355,7 @@ func (v *VISDetector) getBin(freq float64) int {
 }
 
 // DetectVISStreaming is kept for compatibility
-func (v *VISDetector) DetectVISStreaming(pcmBuffer *CircularPCMBuffer) (uint8, int, bool, bool) {
+func (v *VISDetector) DetectVISStreaming(pcmBuffer *SlidingPCMBuffer) (uint8, int, bool, bool) {
 	return v.ProcessIteration(pcmBuffer)
 }
 

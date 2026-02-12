@@ -51,11 +51,11 @@
 }
 
 .fsk-header-controls .btn-primary.active {
-    background: #f44336;
+    background: #f44336 !important;
 }
 
 .fsk-header-controls .btn-primary.active:hover {
-    background: #da190b;
+    background: #da190b !important;
 }
 
 .fsk-header-controls .btn-secondary {

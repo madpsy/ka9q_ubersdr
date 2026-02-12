@@ -119,9 +119,11 @@ func (d *SSTVDecoder) GetName() string {
 func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []byte) {
 	defer d.wg.Done()
 
-	// Create circular PCM buffer (8192 samples for 500ms+ at 12kHz)
-	const pcmBufSize = 8192
-	pcmBuffer := NewCircularPCMBuffer(pcmBufSize)
+	// Create sliding window PCM buffer
+	// Need large buffer for video decoding (Scottie S2 = ~71 seconds @ 12kHz = 852000 samples)
+	// Use 1 million samples (~83 seconds @ 12kHz) to handle longest modes
+	const pcmBufSize = 1000000
+	pcmBuffer := NewSlidingPCMBuffer(pcmBufSize)
 
 	// Goroutine to feed buffer from audio channel
 	feedDone := make(chan struct{})

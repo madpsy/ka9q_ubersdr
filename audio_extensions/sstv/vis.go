@@ -205,7 +205,7 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 	// Only start looking for VIS after we have enough history (450ms)
 	if v.iterationCount < 45 {
 		// Consume 10ms and continue
-		pcmBuffer.AdvanceWindow(samps10ms)
+		_, _ = pcmBuffer.Read(samps10ms)
 		return 0, 0, false, false
 	}
 

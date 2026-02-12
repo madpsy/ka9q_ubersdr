@@ -121,15 +121,34 @@ func (b *CircularPCMBuffer) GetWindowAbsolute(startOffset, length int) ([]int16,
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Calculate position: readPtr + startOffset
-	pos := (b.readPtr + startOffset) % b.size
-	if pos < 0 {
-		pos += b.size
+	// For negative offsets, we need to ensure we have enough historical data
+	// For positive offsets, we need to ensure we have enough future data
+	var requiredSamples int
+	if startOffset < 0 {
+		// Looking back: need abs(startOffset) + length samples
+		requiredSamples = -startOffset + length
+	} else {
+		// Looking forward: need startOffset + length samples
+		requiredSamples = startOffset + length
 	}
 
-	// Check bounds
-	if b.filled < length+startOffset {
-		return nil, fmt.Errorf("not enough samples for window")
+	if b.filled < requiredSamples {
+		return nil, fmt.Errorf("not enough samples for window: have %d, need %d (offset=%d, length=%d)",
+			b.filled, requiredSamples, startOffset, length)
+	}
+
+	// Calculate starting position with proper negative offset handling
+	// readPtr points to the oldest sample in the buffer
+	// For negative offset, we go back from readPtr
+	// For positive offset, we go forward from readPtr
+	pos := b.readPtr + startOffset
+
+	// Handle negative positions properly
+	if pos < 0 {
+		// Go back from the end of the buffer
+		pos = ((pos % b.size) + b.size) % b.size
+	} else {
+		pos = pos % b.size
 	}
 
 	result := make([]int16, length)

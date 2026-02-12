@@ -102,15 +102,30 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 
 	v.iterationCount++
 
-	// Check if we have enough samples
-	if pcmBuffer.Available() < samps20ms {
+	// We need enough samples to:
+	// 1. Have a 20ms window for FFT analysis
+	// 2. Have accumulated enough history for VIS pattern detection (at least 450ms for 8-bit VIS)
+	minRequired := samps20ms
+	if v.iterationCount > 1 {
+		// After first iteration, we need more history for pattern matching
+		minRequired = int(v.sampleRate * 0.5) // 500ms buffer
+	}
+
+	if pcmBuffer.Available() < minRequired {
 		return 0, 0, false, false
 	}
 
-	// Get 20ms window for FFT without consuming samples
-	// We need to look at the most recent 20ms of audio
-	window, err := pcmBuffer.GetWindowAbsolute(-samps20ms, samps20ms)
+	// Get 20ms window for FFT - get the LATEST 20ms of audio
+	// We want samples from (current position - 20ms) to (current position)
+	// Since readPtr points to oldest available sample, and we have 'filled' samples,
+	// the newest sample is at readPtr + filled - 1
+	// So we want: [readPtr + filled - samps20ms] to [readPtr + filled]
+	// Which is offset = filled - samps20ms, length = samps20ms
+	windowOffset := pcmBuffer.Available() - samps20ms
+	window, err := pcmBuffer.GetWindowAbsolute(windowOffset, samps20ms)
 	if err != nil {
+		log.Printf("[SSTV VIS] Failed to get FFT window: %v (available=%d, need=%d)",
+			err, pcmBuffer.Available(), samps20ms)
 		return 0, 0, false, false
 	}
 
@@ -181,6 +196,12 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 		v.lastToneReport = v.iterationCount
 	}
 
+	// Debug logging every 100 iterations (1 second)
+	if v.iterationCount%100 == 0 {
+		log.Printf("[SSTV VIS] Iteration %d: freq=%.1f Hz, headerPtr=%d, toneWin=%d",
+			v.iterationCount, peakFreq, v.headerPtr, v.toneWin)
+	}
+
 	// Copy recent frequencies to tone buffer
 	hp := v.headerPtr - 1
 	for i := v.toneWin - 1; i >= 0; i-- {
@@ -197,11 +218,19 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 	headerShift := 0
 	gotVIS := false
 
+	// Only start looking for VIS after we have enough history
+	if v.iterationCount < 45 {
+		// Need at least 450ms of history for 8-bit VIS
+		// Consume 10ms and continue
+		_, _ = pcmBuffer.Read(samps10ms)
+		return 0, 0, false, false
+	}
+
 	for i := 0; i < 3 && !gotVIS; i++ {
 		for j := 0; j < 3 && !gotVIS; j++ {
 			refFreq := v.toneBuf[0+j]
 
-			// Check for leader pattern
+			// Check for leader pattern (1900 Hz for ~300ms = 30 iterations)
 			if !v.checkTone(1*3+i, refFreq, visTolerance) ||
 				!v.checkTone(2*3+i, refFreq, visTolerance) ||
 				!v.checkTone(3*3+i, refFreq, visTolerance) ||
@@ -209,9 +238,14 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 				continue
 			}
 
-			// Check for start bit
+			// Check for start bit (1200 Hz = refFreq - 700)
 			if !v.checkTone(5*3+i, refFreq-700, 25) {
 				continue
+			}
+
+			// Log potential VIS detection
+			if v.iterationCount%10 == 0 {
+				log.Printf("[SSTV VIS] Potential leader at i=%d, j=%d, refFreq=%.1f Hz", i, j, refFreq)
 			}
 
 			// Try to read data bits
@@ -336,10 +370,10 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 
 				// Log only when VIS is detected
 				if nbits == 8 {
-					log.Printf("[SSTV] VIS detected: %s (VIS=%d, 0x%02x) @ %+d Hz",
+					log.Printf("[SSTV VIS] ✓ Detected mode: %s (VIS=%d, 0x%02x) @ %+d Hz",
 						modeSpec.Name, vis, vis, headerShift)
 				} else {
-					log.Printf("[SSTV] VIS detected: %s (VISX=%d|%d, 0x%02x|0x%02x) @ %+d Hz",
+					log.Printf("[SSTV VIS] ✓ Detected mode: %s (VISX=%d|%d, 0x%02x|0x%02x) @ %+d Hz",
 						modeSpec.Name, vis, vis2, vis, vis2, headerShift)
 				}
 
@@ -367,11 +401,19 @@ func (v *VISDetector) DetectVIS(pcmReader PCMReader) (uint8, int, bool, bool) {
 
 // checkTone checks if the tone at the given index matches the expected frequency
 func (v *VISDetector) checkTone(idx int, expectedFreq, tolerance float64) bool {
-	if idx >= len(v.toneBuf) {
+	if idx < 0 || idx >= len(v.toneBuf) {
 		return false
 	}
 	freq := v.toneBuf[idx]
-	return freq > expectedFreq-tolerance && freq < expectedFreq+tolerance
+	match := freq > expectedFreq-tolerance && freq < expectedFreq+tolerance
+
+	// Debug logging for tone checks (only occasionally to avoid spam)
+	if v.iterationCount%200 == 0 && idx < 10 {
+		log.Printf("[SSTV VIS] checkTone[%d]: freq=%.1f Hz, expected=%.1f±%.1f Hz, match=%v",
+			idx, freq, expectedFreq, tolerance, match)
+	}
+
+	return match
 }
 
 // getBin converts a frequency to an FFT bin index

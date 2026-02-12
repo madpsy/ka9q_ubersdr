@@ -149,15 +149,30 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 	// Send initial status
 	d.sendStatus(resultChan, "Waiting for signal...")
 
-	// Wait for buffer to fill initially (like KiwiSDR's initial fill)
-	for pcmBuffer.Available() < pcmBufSize {
+	// Wait for buffer to fill initially - need at least 500ms for VIS detection
+	minBufferSize := int(d.sampleRate * 0.5) // 500ms
+	if minBufferSize > pcmBufSize {
+		minBufferSize = pcmBufSize
+	}
+
+	log.Printf("[SSTV] Waiting for initial buffer fill (%d samples, %.1f ms)...",
+		minBufferSize, float64(minBufferSize)*1000.0/d.sampleRate)
+
+	for pcmBuffer.Available() < minBufferSize {
 		select {
 		case <-d.stopChan:
 			return
-		case <-time.After(10 * time.Millisecond):
+		case <-time.After(50 * time.Millisecond):
 			// Keep waiting
+			if pcmBuffer.Available()%int(d.sampleRate*0.1) == 0 {
+				log.Printf("[SSTV] Buffer filling: %d/%d samples (%.1f%%)",
+					pcmBuffer.Available(), minBufferSize,
+					float64(pcmBuffer.Available())*100.0/float64(minBufferSize))
+			}
 		}
 	}
+
+	log.Printf("[SSTV] Buffer filled, starting VIS detection")
 
 	// Main processing loop
 	for {

@@ -241,8 +241,10 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 	// Process signal
 	for sampleNum := 0; sampleNum < length; sampleNum++ {
 		// Check if we have enough samples ahead of WindowPtr
-		if pcmBuffer.Available() < 1024 {
-			log.Printf("[SSTV Video] Not enough samples at sampleNum=%d (available=%d)", sampleNum, pcmBuffer.Available())
+		// If not enough, just continue with reduced window (like slowrx does)
+		if pcmBuffer.Available() < 128 {
+			log.Printf("[SSTV Video] Insufficient samples at sampleNum=%d (available=%d), ending decode",
+				sampleNum, pcmBuffer.Available())
 			break
 		}
 

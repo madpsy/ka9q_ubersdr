@@ -120,9 +120,9 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 	defer d.wg.Done()
 
 	// Create sliding window PCM buffer
-	// Need large buffer for video decoding (Scottie S2 = ~71 seconds @ 12kHz = 852000 samples)
-	// Use 1 million samples (~83 seconds @ 12kHz) to handle longest modes
-	const pcmBufSize = 1000000
+	// Use 8192 samples (~682ms at 12kHz), similar scale to slowrx's 4096 sample buffer
+	// This is enough for VIS detection and video demodulation works incrementally
+	const pcmBufSize = 8192
 	pcmBuffer := NewSlidingPCMBuffer(pcmBufSize)
 
 	// Goroutine to feed buffer from audio channel

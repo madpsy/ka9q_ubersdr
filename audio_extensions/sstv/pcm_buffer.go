@@ -47,18 +47,16 @@ func (b *SlidingPCMBuffer) Write(samples []int16) {
 	numSamples := len(samples)
 
 	if b.windowPtr == 0 {
-		// First fill - accumulate samples until we have enough for VIS detection
-		// VIS detection needs to read backwards ~240 samples (20ms at 12kHz) from windowPtr
+		// First fill - accumulate samples until buffer is full
+		// This matches slowrx behavior: fill entire buffer, then set WindowPtr to middle
 		for i := 0; i < numSamples && b.fillPos < b.size; i++ {
 			b.buffer[b.fillPos] = samples[i]
 			b.fillPos++
 		}
 
-		// Set windowPtr once we have at least 2048 samples (~170ms at 12kHz)
-		// This ensures we have enough data before windowPtr for backwards FFT reads
-		// and enough after for forward reads, similar to slowrx's 4096 sample buffer
-		if b.fillPos >= 2048 {
-			b.windowPtr = 1024 // Set to middle of filled region
+		// Set windowPtr to middle once buffer is full (like slowrx)
+		if b.fillPos >= b.size {
+			b.windowPtr = b.size / 2
 		}
 	} else {
 		// Shift buffer left by numSamples
@@ -72,8 +70,10 @@ func (b *SlidingPCMBuffer) Write(samples []int16) {
 
 		// Move WindowPtr back (like slowrx line 61)
 		b.windowPtr -= numSamples
-		if b.windowPtr < 0 {
-			b.windowPtr = 0
+		// Keep windowPtr at a safe minimum to allow backwards reads
+		// VIS detection needs to read back ~240 samples from windowPtr
+		if b.windowPtr < 512 {
+			b.windowPtr = 512
 		}
 	}
 }

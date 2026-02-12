@@ -128,22 +128,16 @@ class FSKExtension extends DecoderExtension {
                 const maxDisplayFreq = 3000;
                 const clickedFreq = (x / width) * maxDisplayFreq;
                 
-                // Update center frequency
-                this.config.center_frequency = Math.round(clickedFreq);
+                // Calculate offset needed to move clicked frequency to current center frequency
+                // This adjusts the dial frequency so the clicked frequency stays at the center
+                const currentCenterFreq = this.config.center_frequency;
+                const offset = currentCenterFreq - clickedFreq;
                 
-                // Update UI
-                const centerFreqInput = document.getElementById('fsk-center-freq');
-                if (centerFreqInput) {
-                    centerFreqInput.value = this.config.center_frequency;
+                // Adjust the dial frequency
+                if (this.radio) {
+                    this.radio.adjustFrequency(offset);
+                    console.log(`FSK: Adjusted dial frequency by ${offset.toFixed(0)} Hz to center on ${clickedFreq.toFixed(0)} Hz`);
                 }
-                
-                // Restart decoding with new frequency
-                if (this.isDecoding) {
-                    this.stopDecoding();
-                    setTimeout(() => this.startDecoding(), 100);
-                }
-                
-                console.log(`FSK: Tuned to ${this.config.center_frequency} Hz`);
             });
             
             // Add visual feedback on hover
@@ -387,6 +381,9 @@ class FSKExtension extends DecoderExtension {
             startBtn.classList.add('active');
         }
 
+        // Disable configuration controls when running
+        this.setConfigControlsEnabled(false);
+
         this.appendOutput('=== FSK Decoder Started ===\n', 'info');
         this.appendOutput(`Mode: ${this.config.encoding}, Baud: ${this.config.baud_rate}, Shift: ${this.config.shift} Hz\n`, 'info');
     }
@@ -408,6 +405,9 @@ class FSKExtension extends DecoderExtension {
             startBtn.classList.remove('active');
         }
 
+        // Re-enable configuration controls when stopped
+        this.setConfigControlsEnabled(true);
+
         // Clear all status indicators when stopped (they come from backend)
         const signalIndicator = document.getElementById('fsk-signal-indicator');
         const syncIndicator = document.getElementById('fsk-sync-indicator');
@@ -418,6 +418,29 @@ class FSKExtension extends DecoderExtension {
         if (decodeIndicator) decodeIndicator.classList.remove('active');
 
         this.appendOutput('=== FSK Decoder Stopped ===\n', 'info');
+    }
+
+    setConfigControlsEnabled(enabled) {
+        // Configuration controls that should be disabled when running
+        const configControls = [
+            'fsk-preset-select',
+            'fsk-shift',
+            'fsk-baud',
+            'fsk-center-freq',
+            'fsk-framing',
+            'fsk-encoding',
+            'fsk-inverted'
+        ];
+
+        configControls.forEach(id => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.disabled = !enabled;
+            }
+        });
+
+        // Console controls (timestamp, auto-scroll, console lines) remain enabled
+        console.log(`FSK: Configuration controls ${enabled ? 'enabled' : 'disabled'}`);
     }
 
     attachAudioExtension() {

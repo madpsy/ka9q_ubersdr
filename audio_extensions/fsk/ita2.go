@@ -66,7 +66,7 @@ func NewITA2(framing string) *ITA2 {
 		startBits := 1
 		totalBits := float64(startBits) + float64(i.dataBits) + stopBits
 
-		// KiwiSDR doubles bit count for 1.5 stop bits (oversampling)
+		// doubles bit count for 1.5 stop bits (oversampling)
 		if stopBits == 1.5 {
 			i.nbits = int(totalBits * 2)
 		} else {
@@ -241,7 +241,6 @@ func (i *ITA2) ProcessChar(code uint16) ITA2CharResult {
 		// Extract data bits (skip start bit, mask to data bits)
 		dataByte := byte((code >> 1) & uint16((1<<i.dataBits)-1))
 
-		// Skip non-printable characters (matching KiwiSDR logic)
 		// Skip: 0x00-0x09, 0x0B-0x0C, 0x0E-0x1F, 0x7F+
 		if (dataByte >= 0x00 && dataByte <= 0x09) ||
 			(dataByte >= 0x0B && dataByte <= 0x0C) ||
@@ -265,7 +264,6 @@ func (i *ITA2) ProcessChar(code uint16) ITA2CharResult {
 	var dataBits byte
 	if i.nbits == 15 {
 		// For 15-bit frame (5N1.5 doubled):
-		// Following KiwiSDR's check_bits logic
 
 		v := uint16(code)
 

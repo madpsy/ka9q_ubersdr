@@ -47,15 +47,18 @@ func (b *SlidingPCMBuffer) Write(samples []int16) {
 	numSamples := len(samples)
 
 	if b.windowPtr == 0 {
-		// First fill - fill entire buffer before setting windowPtr
+		// First fill - accumulate samples
 		for i := 0; i < numSamples && b.fillPos < b.size; i++ {
 			b.buffer[b.fillPos] = samples[i]
 			b.fillPos++
 		}
 
-		// Only set windowPtr once buffer is full
-		if b.fillPos >= b.size {
-			b.windowPtr = b.size / 2 // Set to middle like slowrx line 54
+		// Set windowPtr once we have enough samples for VIS detection
+		// VIS needs to read back samps10ms (120 samples at 12kHz) from windowPtr
+		// So we need at least that much data before setting windowPtr
+		minSamples := int(12000 * 20e-3) // 20ms worth of samples (240 at 12kHz)
+		if b.fillPos >= minSamples {
+			b.windowPtr = b.fillPos // Set to current fill position
 		}
 	} else {
 		// Shift buffer left by numSamples

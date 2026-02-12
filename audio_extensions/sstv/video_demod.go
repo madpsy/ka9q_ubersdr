@@ -3,7 +3,6 @@ package sstv
 import (
 	"log"
 	"math"
-	"time"
 )
 
 /*
@@ -242,17 +241,11 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 	// Process signal
 	for sampleNum := 0; sampleNum < length; sampleNum++ {
 		// Check if we have enough samples ahead of WindowPtr
-		// Need at least 1024 samples for largest FFT window
-		if pcmBuffer.Available() < 1024 {
-			// Wait a bit for buffer to fill
-			time.Sleep(50 * time.Millisecond)
-
-			// Check again
-			if pcmBuffer.Available() < 128 {
-				log.Printf("[SSTV Video] Insufficient samples at sampleNum=%d (available=%d), ending decode",
-					sampleNum, pcmBuffer.Available())
-				break
-			}
+		// If not enough, just continue with reduced window (like slowrx does)
+		if pcmBuffer.Available() < 128 {
+			log.Printf("[SSTV Video] Insufficient samples at sampleNum=%d (available=%d), ending decode",
+				sampleNum, pcmBuffer.Available())
+			break
 		}
 
 		// Sync detection

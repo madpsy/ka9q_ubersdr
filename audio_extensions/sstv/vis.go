@@ -329,18 +329,6 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 			log.Printf("[SSTV VIS] ✓ Detected mode: %s (VIS=%d, 0x%02x) @ %+d Hz",
 				modeSpec.Name, vis, vis, headerShift)
 
-			// Advance window past the VIS code to position at start of video data
-			// VIS structure: 300ms leader + 10ms break + 300ms leader + 30ms start + 8*30ms data + 30ms stop
-			// Total: ~450ms from start of pattern to end of VIS
-			// We're currently at the beginning of the pattern, so advance to end
-			// The pattern starts at position 0+j in toneBuf, each entry is 10ms
-			// VIS ends at position 14*3+i (stop bit) + 3 (to get past stop bit)
-			// So we need to advance by (14*3+i+3-j)*10ms from current position
-			visEndOffset := (14*3 + i + 3 - j) * samps10ms
-			log.Printf("[SSTV VIS] Advancing window by %d samples (%d ms) to skip VIS code",
-				visEndOffset, visEndOffset*10/samps10ms)
-			pcmBuffer.AdvanceWindow(visEndOffset)
-
 			return mode, headerShift, false, true
 		}
 	}

@@ -253,9 +253,12 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 			bits := make([]uint8, 8)
 			validBits := true
 
+			log.Printf("[SSTV VIS] Decoding data bits for potential VIS at i=%d, j=%d, refFreq=%.1f Hz", i, j, refFreq)
+
 			for k := 0; k < 8; k++ {
 				toneIdx := 6*3 + i + 3*k
 				if toneIdx >= len(v.toneBuf) {
+					log.Printf("[SSTV VIS] Bit %d: toneIdx=%d out of range (len=%d)", k, toneIdx, len(v.toneBuf))
 					validBits = false
 					break
 				}
@@ -266,17 +269,24 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 				// Bit 1: 1100 Hz (refFreq - 800)
 				if freq > refFreq-625 && freq < refFreq-575 {
 					bits[k] = 0 // 1300 Hz
+					log.Printf("[SSTV VIS] Bit %d: freq=%.1f Hz -> 0 (expected 1300 Hz = refFreq-600)", k, freq)
 				} else if freq > refFreq-825 && freq < refFreq-775 {
 					bits[k] = 1 // 1100 Hz
+					log.Printf("[SSTV VIS] Bit %d: freq=%.1f Hz -> 1 (expected 1100 Hz = refFreq-800)", k, freq)
 				} else {
+					log.Printf("[SSTV VIS] Bit %d: freq=%.1f Hz INVALID (need %.1f-%.1f for 0, or %.1f-%.1f for 1)",
+						k, freq, refFreq-625, refFreq-575, refFreq-825, refFreq-775)
 					validBits = false
 					break
 				}
 			}
 
 			if !validBits {
+				log.Printf("[SSTV VIS] Data bits invalid, continuing search")
 				continue
 			}
+
+			log.Printf("[SSTV VIS] All 8 data bits decoded successfully!")
 
 			// Decode VIS code
 			vis := bits[0] | (bits[1] << 1) | (bits[2] << 2) | (bits[3] << 3) |

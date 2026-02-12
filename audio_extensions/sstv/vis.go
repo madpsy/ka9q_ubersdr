@@ -100,8 +100,25 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 			v.iterationCount, pcmBuffer.Available())
 	}
 
-	// Get 20ms window for FFT - get the LATEST 20ms of audio
-	windowOffset := pcmBuffer.Available() - samps20ms
+	// Get 20ms window for FFT
+	// slowrx: fft.in[i] = pcm.Buffer[pcm.WindowPtr + i - 441]
+	// This means the window is CENTERED at WindowPtr, going back samps10ms
+	// We need: [current_position - samps10ms - samps20ms] for length samps20ms
+	// But since we consume samps10ms each iteration, current position advances
+	// So we want the window centered at (Available - samps10ms)
+
+	// Check we have enough for centered window
+	if pcmBuffer.Available() < samps10ms+samps20ms {
+		if v.iterationCount <= 5 || v.iterationCount%50 == 0 {
+			log.Printf("[SSTV VIS] Iteration %d: Need %d samples for centered window (have %d)",
+				v.iterationCount, samps10ms+samps20ms, pcmBuffer.Available())
+		}
+		return 0, 0, false, false
+	}
+
+	// Get window centered at (Available - samps10ms)
+	// Window goes from (Available - samps10ms - samps20ms) to (Available - samps10ms)
+	windowOffset := pcmBuffer.Available() - samps10ms - samps20ms
 	window, err := pcmBuffer.GetWindowAbsolute(windowOffset, samps20ms)
 	if err != nil {
 		log.Printf("[SSTV VIS] Failed to get FFT window: %v", err)
@@ -121,6 +138,16 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 	// Perform FFT
 	fft(v.fftInput, v.fftOutput)
 
+	// Debug: Check FFT output on first iteration
+	if v.iterationCount == 1 {
+		totalPower := 0.0
+		for i := 0; i < v.fftSize/2; i++ {
+			totalPower += real(v.fftOutput[i])*real(v.fftOutput[i]) + imag(v.fftOutput[i])*imag(v.fftOutput[i])
+		}
+		log.Printf("[SSTV VIS] FFT check: total power=%.2e, fftSize=%d, output len=%d",
+			totalPower, v.fftSize, len(v.fftOutput))
+	}
+
 	// Find bin with most power in 500-3300 Hz range
 	maxBin := 0
 	minBin := v.getBin(500.0)
@@ -134,6 +161,13 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 		if i >= minBin && i < maxBinLimit && (maxBin == 0 || powers[i] > powers[maxBin]) {
 			maxBin = i
 		}
+	}
+
+	// Debug: Log max bin info every 100 iterations
+	if v.iterationCount%100 == 0 {
+		maxBinFreq := float64(maxBin) / float64(v.fftSize) * v.sampleRate
+		log.Printf("[SSTV VIS] FFT: maxBin=%d (%.1f Hz), power=%.2e, minBin=%d, maxBinLimit=%d",
+			maxBin, maxBinFreq, powers[maxBin], minBin, maxBinLimit)
 	}
 
 	// Gaussian interpolation for peak frequency
@@ -169,6 +203,12 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 		v.toneCallback(peakFreq)
 	}
 
+	// Debug: Log detected frequency every 100 iterations
+	if v.iterationCount%100 == 0 {
+		log.Printf("[SSTV VIS] Iteration %d: Detected freq=%.1f Hz (expecting ~1900 Hz for leader)",
+			v.iterationCount, peakFreq)
+	}
+
 	// Copy frequencies from last 450ms to tone buffer (in chronological order)
 	for i := 0; i < len(v.toneBuf); i++ {
 		v.toneBuf[i] = v.headerBuf[(v.headerPtr+i)%len(v.headerBuf)]
@@ -187,6 +227,12 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 		for j := 0; j < 3; j++ {
 			refFreq := v.toneBuf[0+j]
 
+			// Debug: Log pattern check attempts every 200 iterations
+			if v.iterationCount%200 == 0 && i == 0 && j == 0 {
+				log.Printf("[SSTV VIS] Pattern check: refFreq=%.1f Hz, tone[3]=%.1f, tone[6]=%.1f, tone[9]=%.1f, tone[12]=%.1f, tone[15]=%.1f",
+					refFreq, v.toneBuf[3], v.toneBuf[6], v.toneBuf[9], v.toneBuf[12], v.toneBuf[15])
+			}
+
 			// Check for complete VIS pattern:
 			// - 4 leader tones at refFreq (1900 Hz nominal)
 			// - start bit at refFreq-700 (1200 Hz nominal)
@@ -199,6 +245,9 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 				!v.checkToneRange(14*3+i, refFreq-725, refFreq-675) { // stop bit
 				continue
 			}
+
+			// If we get here, we found a potential VIS!
+			log.Printf("[SSTV VIS] *** POTENTIAL VIS FOUND *** at i=%d, j=%d, refFreq=%.1f Hz", i, j, refFreq)
 
 			// Found potential VIS - try to decode the 8 data bits
 			bits := make([]uint8, 8)

@@ -269,16 +269,24 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 				// Bit 1: 1100 Hz (refFreq - 800)
 				if freq > refFreq-625 && freq < refFreq-575 {
 					bits[k] = 0 // 1300 Hz
-					log.Printf("[SSTV VIS] Bit %d: freq=%.1f Hz -> 0 (expected 1300 Hz = refFreq-600)", k, freq)
+					log.Printf("[SSTV VIS] Bit %d [idx=%d]: freq=%.1f Hz -> 0 (1300 Hz nominal)", k, toneIdx, freq)
 				} else if freq > refFreq-825 && freq < refFreq-775 {
 					bits[k] = 1 // 1100 Hz
-					log.Printf("[SSTV VIS] Bit %d: freq=%.1f Hz -> 1 (expected 1100 Hz = refFreq-800)", k, freq)
+					log.Printf("[SSTV VIS] Bit %d [idx=%d]: freq=%.1f Hz -> 1 (1100 Hz nominal)", k, toneIdx, freq)
 				} else {
-					log.Printf("[SSTV VIS] Bit %d: freq=%.1f Hz INVALID (need %.1f-%.1f for 0, or %.1f-%.1f for 1)",
-						k, freq, refFreq-625, refFreq-575, refFreq-825, refFreq-775)
+					log.Printf("[SSTV VIS] Bit %d [idx=%d]: freq=%.1f Hz INVALID (need %.1f-%.1f for 0, or %.1f-%.1f for 1)",
+						k, toneIdx, freq, refFreq-625, refFreq-575, refFreq-825, refFreq-775)
 					validBits = false
 					break
 				}
+			}
+
+			// Log the complete bit pattern
+			if validBits {
+				visValue := bits[0] | (bits[1] << 1) | (bits[2] << 2) | (bits[3] << 3) |
+					(bits[4] << 4) | (bits[5] << 5) | (bits[6] << 6)
+				log.Printf("[SSTV VIS] Decoded VIS=%d (0x%02x), bits=%d%d%d%d%d%d%d%d, parity bit=%d",
+					visValue, visValue, bits[0], bits[1], bits[2], bits[3], bits[4], bits[5], bits[6], bits[7])
 			}
 
 			if !validBits {
@@ -297,11 +305,13 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 			// Special case: R12BW has inverted parity
 			if VISMap[vis] == ModeR12BW {
 				parity = 1 - parity
+				log.Printf("[SSTV VIS] R12BW detected, inverting parity")
 			}
 
 			// Check parity
 			if parity != parityBit {
-				log.Printf("[SSTV VIS] Parity fail for VIS=%d", vis)
+				log.Printf("[SSTV VIS] Parity fail for VIS=%d (0x%02x): calculated=%d, received=%d, mode=%d",
+					vis, vis, parity, parityBit, VISMap[vis])
 				continue
 			}
 

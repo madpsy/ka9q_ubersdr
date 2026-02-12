@@ -26,12 +26,12 @@
     color: #4CAF50;
 }
 
-.fsk-controls {
+.fsk-header-controls {
     display: flex;
     gap: 10px;
 }
 
-.fsk-controls .btn {
+.fsk-header-controls .btn {
     padding: 6px 16px;
     border: none;
     border-radius: 4px;
@@ -41,29 +41,29 @@
     transition: all 0.2s;
 }
 
-.fsk-controls .btn-primary {
+.fsk-header-controls .btn-primary {
     background: #4CAF50;
     color: white;
 }
 
-.fsk-controls .btn-primary:hover {
+.fsk-header-controls .btn-primary:hover {
     background: #45a049;
 }
 
-.fsk-controls .btn-primary.active {
+.fsk-header-controls .btn-primary.active {
     background: #f44336;
 }
 
-.fsk-controls .btn-primary.active:hover {
+.fsk-header-controls .btn-primary.active:hover {
     background: #da190b;
 }
 
-.fsk-controls .btn-secondary {
+.fsk-header-controls .btn-secondary {
     background: #555;
     color: white;
 }
 
-.fsk-controls .btn-secondary:hover {
+.fsk-header-controls .btn-secondary:hover {
     background: #666;
 }
 
@@ -389,6 +389,6 @@ input[type="checkbox"] {
     }
 }
 
-.fsk-controls .btn-primary.active {
+.fsk-header-controls .btn-primary.active {
     animation: pulse 2s infinite;
 }

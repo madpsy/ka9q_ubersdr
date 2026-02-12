@@ -927,7 +927,7 @@ class FSKExtension extends DecoderExtension {
         ctx.fillText(`${spaceFreq.toFixed(0)} Hz`, spaceX + 5, 24);
 
         // Draw frequency scale
-        ctx.fillStyle = '#666';
+        ctx.fillStyle = '#000000';
         ctx.font = '9px monospace';
         for (let freq = 0; freq <= maxDisplayFreq; freq += 500) {
             const x = (freq / maxDisplayFreq) * width;

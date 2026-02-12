@@ -24,6 +24,7 @@ type SlidingPCMBuffer struct {
 	buffer    []int16
 	size      int
 	windowPtr int // Stable position in middle of buffer (like slowrx)
+	fillPos   int // Current fill position during initial fill
 	mu        sync.Mutex
 }
 
@@ -46,11 +47,16 @@ func (b *SlidingPCMBuffer) Write(samples []int16) {
 	numSamples := len(samples)
 
 	if b.windowPtr == 0 {
-		// First fill - fill entire buffer
-		for i := 0; i < numSamples && i < b.size; i++ {
-			b.buffer[i] = samples[i]
+		// First fill - fill entire buffer before setting windowPtr
+		for i := 0; i < numSamples && b.fillPos < b.size; i++ {
+			b.buffer[b.fillPos] = samples[i]
+			b.fillPos++
 		}
-		b.windowPtr = b.size / 2 // Set to middle like slowrx line 54
+
+		// Only set windowPtr once buffer is full
+		if b.fillPos >= b.size {
+			b.windowPtr = b.size / 2 // Set to middle like slowrx line 54
+		}
 	} else {
 		// Shift buffer left by numSamples
 		copy(b.buffer, b.buffer[numSamples:])
@@ -121,6 +127,7 @@ func (b *SlidingPCMBuffer) Reset() {
 		b.buffer[i] = 0
 	}
 	b.windowPtr = 0
+	b.fillPos = 0
 }
 
 // CircularPCMBuffer is kept for backward compatibility but deprecated

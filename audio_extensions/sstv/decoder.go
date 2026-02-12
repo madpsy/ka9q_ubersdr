@@ -143,25 +143,20 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 	// Send initial status
 	d.sendStatus(resultChan, "Waiting for signal...")
 
-	// Wait for buffer to fill initially - need at least 500ms for VIS detection
-	minBufferSize := int(d.sampleRate * 0.5) // 500ms
-	if minBufferSize > pcmBufSize {
-		minBufferSize = pcmBufSize
-	}
+	// Wait for initial buffer fill
+	// slowrx fills entire buffer first, then sets WindowPtr to middle
+	log.Printf("[SSTV] Waiting for initial buffer fill...")
 
-	log.Printf("[SSTV] Waiting for initial buffer fill (%d samples, %.1f ms)...",
-		minBufferSize, float64(minBufferSize)*1000.0/d.sampleRate)
-
-	for pcmBuffer.Available() < minBufferSize {
+	for pcmBuffer.GetWindowPtr() == 0 {
 		select {
 		case <-d.stopChan:
 			return
 		case <-time.After(50 * time.Millisecond):
-			// Keep waiting
+			// Keep waiting for first fill
 		}
 	}
 
-	log.Printf("[SSTV] Buffer filled, starting VIS detection")
+	log.Printf("[SSTV] Buffer filled, WindowPtr=%d, starting VIS detection", pcmBuffer.GetWindowPtr())
 
 	// Main processing loop
 	for {

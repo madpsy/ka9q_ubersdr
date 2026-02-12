@@ -102,26 +102,14 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 
 	// Get 20ms window for FFT
 	// slowrx: fft.in[i] = pcm.Buffer[pcm.WindowPtr + i - 441]
-	// This means the window is CENTERED at WindowPtr, going back samps10ms
-	// We need: [current_position - samps10ms - samps20ms] for length samps20ms
-	// But since we consume samps10ms each iteration, current position advances
-	// So we want the window centered at (Available - samps10ms)
-
-	// Check we have enough for centered window
-	if pcmBuffer.Available() < samps10ms+samps20ms {
-		if v.iterationCount <= 5 || v.iterationCount%50 == 0 {
-			log.Printf("[SSTV VIS] Iteration %d: Need %d samples for centered window (have %d)",
-				v.iterationCount, samps10ms+samps20ms, pcmBuffer.Available())
-		}
-		return 0, 0, false, false
-	}
-
-	// Get window centered at (Available - samps10ms)
-	// Window goes from (Available - samps10ms - samps20ms) to (Available - samps10ms)
-	windowOffset := pcmBuffer.Available() - samps10ms - samps20ms
-	window, err := pcmBuffer.GetWindowAbsolute(windowOffset, samps20ms)
+	// Window is centered at WindowPtr, going back samps10ms
+	// offset = -samps10ms, length = samps20ms
+	window, err := pcmBuffer.GetWindow(-samps10ms, samps20ms)
 	if err != nil {
-		log.Printf("[SSTV VIS] Failed to get FFT window: %v", err)
+		if v.iterationCount <= 5 || v.iterationCount%50 == 0 {
+			log.Printf("[SSTV VIS] Failed to get FFT window: %v (windowPtr=%d)",
+				err, pcmBuffer.GetWindowPtr())
+		}
 		return 0, 0, false, false
 	}
 
@@ -229,8 +217,13 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 
 			// Debug: Log pattern check attempts every 200 iterations
 			if v.iterationCount%200 == 0 && i == 0 && j == 0 {
-				log.Printf("[SSTV VIS] Pattern check: refFreq=%.1f Hz, tone[3]=%.1f, tone[6]=%.1f, tone[9]=%.1f, tone[12]=%.1f, tone[15]=%.1f",
-					refFreq, v.toneBuf[3], v.toneBuf[6], v.toneBuf[9], v.toneBuf[12], v.toneBuf[15])
+				log.Printf("[SSTV VIS] Pattern check: refFreq=%.1f Hz", refFreq)
+				log.Printf("[SSTV VIS]   Leaders: tone[3]=%.1f, tone[6]=%.1f, tone[9]=%.1f, tone[12]=%.1f (expect ~refFreq±25)",
+					v.toneBuf[3], v.toneBuf[6], v.toneBuf[9], v.toneBuf[12])
+				log.Printf("[SSTV VIS]   Start bit: tone[15]=%.1f (expect ~%.1f = refFreq-700)",
+					v.toneBuf[15], refFreq-700)
+				log.Printf("[SSTV VIS]   Stop bit: tone[42]=%.1f (expect ~%.1f = refFreq-700)",
+					v.toneBuf[42], refFreq-700)
 			}
 
 			// Check for complete VIS pattern:
@@ -285,7 +278,7 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 			if validBits {
 				visValue := bits[0] | (bits[1] << 1) | (bits[2] << 2) | (bits[3] << 3) |
 					(bits[4] << 4) | (bits[5] << 5) | (bits[6] << 6)
-				log.Printf("[SSTV VIS] Decoded VIS=%d (0x%02x), bits=%d%d%d%d%d%d%d%d, parity bit=%d",
+				log.Printf("[SSTV VIS] Decoded VIS=%d (0x%02x), bits=%d%d%d%d%d%d%d, parity bit=%d",
 					visValue, visValue, bits[0], bits[1], bits[2], bits[3], bits[4], bits[5], bits[6], bits[7])
 			}
 
@@ -338,8 +331,11 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 		}
 	}
 
-	// No VIS found, consume 10ms and continue
-	_, _ = pcmBuffer.Read(samps10ms)
+	// No VIS found, advance window by 10ms and continue
+	// slowrx: pcm.WindowPtr += 441 (after readPcm which shifts buffer)
+	// Our Write() already shifts buffer and moves WindowPtr back
+	// So we need to advance WindowPtr forward to compensate
+	pcmBuffer.AdvanceWindow(samps10ms)
 
 	return 0, 0, false, false
 }

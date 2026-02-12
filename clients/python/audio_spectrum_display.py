@@ -17,11 +17,11 @@ import threading
 
 class AudioSpectrumDisplay:
     """Audio spectrum display showing FFT of demodulated audio output.
-    
+
     This display performs FFT on the mono audio signal (before stereo conversion)
     to show the spectrum of what you're actually hearing.
     """
-    
+
     def __init__(self, parent: tk.Widget, width: int = 800, height: int = 400, toggle_filter_callback: Optional[Callable] = None, mute_var=None, nr2_var=None, toggle_mute_callback: Optional[Callable] = None, toggle_nr2_callback: Optional[Callable] = None):
         """Initialize audio spectrum display widget.
 
@@ -43,31 +43,31 @@ class AudioSpectrumDisplay:
         self.nr2_var = nr2_var
         self.toggle_mute_callback = toggle_mute_callback
         self.toggle_nr2_callback = toggle_nr2_callback
-        
+
         # Create canvas for display
         self.canvas = Canvas(parent, width=width, height=height, bg='#000000', highlightthickness=1)
         self.canvas.pack(fill=tk.BOTH, expand=True)
-        
+
         # Audio parameters
         self.sample_rate = 12000  # Will be updated from client
         self.base_fft_size = 2048
         self.fft_size = 2048  # Will be dynamically adjusted based on bandwidth
         self.audio_queue = queue.Queue(maxsize=100)
-        
+
         # Spectrum data
         self.spectrum_data: Optional[np.ndarray] = None
         self.bandwidth_low: int = 50
         self.bandwidth_high: int = 2700
-        
+
         # Audio filter parameters (for displaying filter bandwidth)
         self.audio_filter_enabled: bool = False
         self.audio_filter_low: int = 300
         self.audio_filter_high: int = 2700
-        
+
         # Frequency range for display (dynamically adjusted based on bandwidth)
         self.display_freq_min = 0
         self.display_freq_max = 3000
-        
+
         # Drawing parameters
         self.margin_top = 60
         self.margin_bottom = 30
@@ -76,27 +76,27 @@ class AudioSpectrumDisplay:
         self.spectrum_height = 150
         self.waterfall_height = height - self.margin_top - self.margin_bottom - self.spectrum_height - 10
         self.graph_width = width - self.margin_left - self.margin_right
-        
+
         # Waterfall history
         self.max_history = self.waterfall_height
         self.history = deque(maxlen=self.max_history)
         self.history_timestamps = deque(maxlen=self.max_history)
         self.auto_level_window_seconds = 2.0
-        
+
         # Peak tracking with averaging
         self.peak_history = deque(maxlen=10)  # Store last 10 peaks (500ms at 50ms update rate)
         self.peak_timestamps = deque(maxlen=10)
         self.peak_average_window = 0.5  # 500ms averaging window
-        
+
         # Color mapping for dB values
         self.min_db = -80
         self.max_db = -20
-        
+
         # Waterfall image
         self.waterfall_array = np.zeros((self.waterfall_height, self.graph_width, 3), dtype=np.uint8)
         self.waterfall_image = None
         self.waterfall_photo = None
-        
+
         # Mouse interaction
         self.canvas.bind('<Motion>', self.on_motion)
         self.canvas.bind('<Button-1>', self.on_click)  # Left click to toggle filter
@@ -107,22 +107,22 @@ class AudioSpectrumDisplay:
         self.cursor_line_id = None
         self.last_mouse_x = -1
         self.last_mouse_y = -1
-        
+
         # Processing thread
         self.running = True
         self.process_thread = threading.Thread(target=self._process_audio_loop, daemon=True)
         self.process_thread.start()
-        
+
         # Start update loop
         self.update_display()
-    
+
     def set_sample_rate(self, sample_rate: int):
         """Update sample rate."""
         self.sample_rate = sample_rate
-    
+
     def update_bandwidth(self, low: int, high: int, mode: str = ''):
         """Update filter bandwidth and adjust display range and FFT size.
-        
+
         Args:
             low: Low frequency offset in Hz
             high: High frequency offset in Hz
@@ -196,10 +196,10 @@ class AudioSpectrumDisplay:
         self.audio_filter_enabled = enabled
         self.audio_filter_low = low
         self.audio_filter_high = high
-    
+
     def add_audio_data(self, audio_float: np.ndarray):
         """Add audio data for FFT processing.
-        
+
         Args:
             audio_float: Mono audio data as float32 numpy array (normalized -1.0 to 1.0)
         """
@@ -212,33 +212,33 @@ class AudioSpectrumDisplay:
                 self.audio_queue.put_nowait(audio_float.copy())
             except:
                 pass
-    
+
     def _process_audio_loop(self):
         """Process audio data in background thread."""
         audio_buffer = np.array([], dtype=np.float32)
-        
+
         while self.running:
             try:
                 # Get audio data from queue
                 audio_data = self.audio_queue.get(timeout=0.1)
-                
+
                 # Append to buffer
                 audio_buffer = np.concatenate([audio_buffer, audio_data])
-                
+
                 # Process when we have enough data
                 while len(audio_buffer) >= self.fft_size:
                     # Take FFT-sized chunk
                     chunk = audio_buffer[:self.fft_size]
                     # Use 50% overlap for smooth updates
                     audio_buffer = audio_buffer[self.fft_size // 2:]
-                    
+
                     # Apply window function
                     window = np.hanning(self.fft_size)
                     windowed = chunk * window
-                    
+
                     # Perform FFT
                     fft_result = np.fft.rfft(windowed)
-                    
+
                     # Convert to magnitude in dB with proper scaling
                     magnitude = np.abs(fft_result)
                     # Normalize by FFT size for proper amplitude scaling
@@ -247,33 +247,33 @@ class AudioSpectrumDisplay:
                     magnitude = np.maximum(magnitude, 1e-10)
                     # Convert to dB relative to full scale (0 dBFS)
                     db = 20 * np.log10(magnitude)
-                    
+
                     # Store spectrum data
                     self.spectrum_data = db
-                    
+
                     # Add to history with timestamp
                     import time
                     current_time = time.time()
                     self.history.append(db.copy())
                     self.history_timestamps.append(current_time)
-                    
+
             except queue.Empty:
                 continue
             except Exception as e:
                 print(f"Audio processing error: {e}")
-    
+
     def disconnect(self):
         """Stop processing."""
         self.running = False
-    
+
     def update_display(self):
         """Update display (called periodically)."""
         if self.spectrum_data is not None:
             self._draw_display()
-        
+
         # Check for updates frequently
         self.parent.after(50, self.update_display)
-    
+
     def _db_to_rgb(self, db: float) -> tuple:
         """Convert dB value to RGB color tuple."""
         db_range = self.max_db - self.min_db
@@ -282,7 +282,7 @@ class AudioSpectrumDisplay:
         else:
             normalized = (db - self.min_db) / db_range
             normalized = max(0, min(1, normalized))
-        
+
         # Color gradient: blue (low) -> cyan -> green -> yellow -> red (high)
         if normalized < 0.25:
             t = normalized / 0.25
@@ -304,27 +304,27 @@ class AudioSpectrumDisplay:
             r = 255
             g = int((1 - t) * 255)
             b = 0
-        
+
         return (r, g, b)
-    
+
     def _draw_display(self):
         """Draw spectrum and waterfall on canvas."""
         if self.spectrum_data is None or len(self.spectrum_data) == 0:
             return
-        
+
         # Find peak frequency and level within filter bandwidth
         peak_freq, peak_db = self._find_peak_in_bandwidth()
-        
+
         # Auto-range dB scale using recent data ONLY within filter bandwidth
         import time
         current_time = time.time()
         cutoff_time = current_time - self.auto_level_window_seconds
-        
+
         recent_data = []
         for i, timestamp in enumerate(self.history_timestamps):
             if timestamp >= cutoff_time:
                 recent_data.append(self.history[i])
-        
+
         if len(recent_data) > 0:
             # Only analyze FFT bins within the filter bandwidth
             nyquist = self.sample_rate / 2
@@ -362,25 +362,25 @@ class AudioSpectrumDisplay:
             # Ensure valid range
             low_bin = max(0, min(low_bin, len(recent_data[0]) - 1))
             high_bin = max(low_bin + 1, min(high_bin, len(recent_data[0])))
-            
+
             # Extract only the data within filter bandwidth
             filtered_data = []
             for spectrum in recent_data:
                 filtered_data.append(spectrum[low_bin:high_bin])
-            
+
             all_data = np.concatenate(filtered_data)
             valid_data = all_data[np.isfinite(all_data)]
-            
+
             if len(valid_data) > 0:
                 # Use more aggressive percentiles to separate noise from signals
                 # 5th percentile captures noise floor better than 1st
                 p5 = np.percentile(valid_data, 5)   # Noise floor
                 p95 = np.percentile(valid_data, 95)  # Signal peaks (ignore extreme outliers)
-                
+
                 # Set min_db well below noise floor to show it properly
                 self.min_db = p5 - 10  # 10 dB below noise floor
                 self.max_db = p95 + 10  # 10 dB above typical peaks
-                
+
                 # Ensure reasonable range (at least 40 dB, max 80 dB)
                 db_range = self.max_db - self.min_db
                 if db_range < 40:
@@ -391,13 +391,13 @@ class AudioSpectrumDisplay:
                 elif db_range > 80:
                     # Limit range to avoid too much compression
                     self.min_db = self.max_db - 80
-        
+
         # Clear canvas
         self.canvas.delete('all')
         self.tooltip_id = None
         self.tooltip_bg_id = None
         self.cursor_line_id = None
-        
+
         # Draw Mute and NR2 checkbox labels on canvas (left side)
         if self.mute_var is not None:
             mute_text = "☑ Mute" if self.mute_var.get() else "☐ Mute"
@@ -433,7 +433,7 @@ class AudioSpectrumDisplay:
             text=bw_text,
             fill='yellow', font=('monospace', 9)
         )
-        
+
         # Draw peak info (top right, yellow text)
         if peak_freq is not None and peak_db is not None:
             peak_text = f"Peak: {peak_freq:.0f} Hz"
@@ -450,145 +450,145 @@ class AudioSpectrumDisplay:
                 fill='yellow', font=('monospace', 10, 'bold'),
                 anchor=tk.E
             )
-        
+
         # Draw spectrum line chart
         self._draw_spectrum()
-        
+
         # Draw waterfall
         self._draw_waterfall()
-        
+
         # Draw frequency scale
         self._draw_frequency_scale()
-        
+
         # Redraw cursor if visible
         if self.last_mouse_x >= 0:
             self._update_tooltip_at_position(self.last_mouse_x, self.last_mouse_y)
-    
+
     def _draw_spectrum(self):
         """Draw spectrum line chart."""
         spectrum_top = self.margin_top
         spectrum_bottom = spectrum_top + self.spectrum_height
-        
+
         # Draw background
         self.canvas.create_rectangle(
             self.margin_left, spectrum_top,
             self.margin_left + self.graph_width, spectrum_bottom,
             fill='#1a1a1a', outline='white'
         )
-        
+
         # Draw dB scale
         db_range = self.max_db - self.min_db
         for i in range(5):
             db = self.min_db + (i / 4) * db_range
             y = spectrum_bottom - (i / 4) * self.spectrum_height
-            
+
             self.canvas.create_line(
                 self.margin_left - 5, y,
                 self.margin_left, y,
                 fill='white'
             )
-            
+
             label = f"{db:.0f}"
             self.canvas.create_text(
                 self.margin_left - 10, y,
                 text=label, fill='white', anchor=tk.E,
                 font=('monospace', 8)
             )
-        
+
         # Draw spectrum line (only within display frequency range)
         if len(self.spectrum_data) > 0:
             points = []
             nyquist = self.sample_rate / 2
             freq_range = self.display_freq_max - self.display_freq_min
-            
+
             for i, db in enumerate(self.spectrum_data):
                 if not np.isfinite(db):
                     continue
-                
+
                 # Calculate actual frequency for this bin
                 bin_freq = (i / len(self.spectrum_data)) * nyquist
-                
+
                 # Only draw if within display range
                 if self.display_freq_min <= bin_freq <= self.display_freq_max:
                     # Map to display coordinates
                     x_normalized = (bin_freq - self.display_freq_min) / freq_range
                     x = self.margin_left + x_normalized * self.graph_width
-                    
+
                     # Calculate y with clamping to keep within box
                     normalized = (db - self.min_db) / db_range
                     # Clamp normalized value to 0-1 range
                     normalized = max(0.0, min(1.0, normalized))
                     y = spectrum_bottom - (normalized * self.spectrum_height)
                     points.extend([x, y])
-            
+
             if len(points) >= 4:
                 # Draw filled area
                 fill_points = [self.margin_left, spectrum_bottom] + points + \
                              [self.margin_left + self.graph_width, spectrum_bottom]
                 self.canvas.create_polygon(fill_points, fill='#1e90ff', outline='', stipple='gray50')
-                
+
                 # Draw line
                 self.canvas.create_line(points, fill='#00ff00', width=1)
-    
+
     def _draw_waterfall(self):
         """Draw waterfall display."""
         waterfall_top = self.margin_top + self.spectrum_height + 10
-        
+
         if len(self.history) == 0:
             return
-        
+
         # Scroll waterfall down
         self.waterfall_array[1:] = self.waterfall_array[:-1]
-        
+
         # Add newest spectrum line at top (mapped to display frequency range)
         spectrum = self.history[-1]
         nyquist = self.sample_rate / 2
         freq_range = self.display_freq_max - self.display_freq_min
-        
+
         for x_idx in range(self.graph_width):
             # Calculate frequency for this x position
             x_normalized = x_idx / self.graph_width
             display_freq = self.display_freq_min + x_normalized * freq_range
-            
+
             # Map to FFT bin
             bin_idx = int((display_freq / nyquist) * len(spectrum))
             if bin_idx >= len(spectrum):
                 bin_idx = len(spectrum) - 1
-            
+
             db = spectrum[bin_idx]
             if np.isfinite(db):
                 r, g, b = self._db_to_rgb(db)
                 self.waterfall_array[0, x_idx] = [r, g, b]
-        
+
         # Convert to PIL Image
         self.waterfall_image = Image.fromarray(self.waterfall_array, mode='RGB')
         self.waterfall_photo = ImageTk.PhotoImage(self.waterfall_image)
-        
+
         # Draw waterfall image
         self.canvas.create_image(
             self.margin_left, waterfall_top,
             image=self.waterfall_photo, anchor=tk.NW
         )
-    
+
     def _draw_frequency_scale(self):
         """Draw frequency scale at bottom (dynamically adjusted to bandwidth)."""
         scale_y = self.height - self.margin_bottom + 10
-        
+
         # Use display range based on bandwidth
         freq_range = self.display_freq_max - self.display_freq_min
-        
+
         # Draw 5 frequency markers
         for i in range(5):
             freq = self.display_freq_min + (i / 4) * freq_range
             x = self.margin_left + (i / 4) * self.graph_width
-            
+
             # Draw tick
             self.canvas.create_line(
                 x, scale_y - 5,
                 x, scale_y,
                 fill='white'
             )
-            
+
             # Draw label
             if freq >= 1000:
                 label = f"{freq/1000:.1f}k"
@@ -598,19 +598,19 @@ class AudioSpectrumDisplay:
                 x, scale_y + 10,
                 text=label, fill='white', font=('monospace', 9)
             )
-        
+
         # Draw "Hz" label
         self.canvas.create_text(
             self.margin_left + self.graph_width + 10, scale_y + 10,
             text="Hz", fill='white', font=('monospace', 9)
         )
-        
+
         # Draw bandwidth markers (demodulator bandwidth - yellow dashed)
         self._draw_bandwidth_markers(scale_y)
-        
+
         # Draw audio filter markers (red solid lines - only when enabled)
         self._draw_audio_filter_markers(scale_y)
-    
+
     def _draw_bandwidth_markers(self, scale_y: int):
         """Draw vertical lines showing the actual bandwidth edges."""
         if self.bandwidth_low == 0 and self.bandwidth_high == 0:
@@ -734,7 +734,7 @@ class AudioSpectrumDisplay:
         """Handle mouse motion for tooltip."""
         self.last_mouse_x = event.x
         self.last_mouse_y = event.y
-        
+
         x = event.x - self.margin_left
         if x < 0 or x > self.graph_width:
             self.last_mouse_x = -1
@@ -795,9 +795,9 @@ class AudioSpectrumDisplay:
         if self.spectrum_data is not None:
             self._draw_display()
 
-        
+
         self._update_tooltip_at_position(event.x, event.y)
-    
+
     def on_click(self, event):
         """Handle mouse click to toggle audio filter or checkboxes."""
         # Check if click is on Mute checkbox (left side, top)
@@ -819,44 +819,44 @@ class AudioSpectrumDisplay:
         if 0 <= x <= self.graph_width:
             if self.toggle_filter_callback:
                 self.toggle_filter_callback()
-    
+
     def _update_tooltip_at_position(self, x: int, y: int):
         """Update tooltip at position."""
         if self.spectrum_data is None:
             return
-        
+
         graph_x = x - self.margin_left
         if graph_x < 0 or graph_x > self.graph_width:
             return
-        
+
         # Calculate frequency at cursor (using display range)
         freq_range = self.display_freq_max - self.display_freq_min
         freq = self.display_freq_min + (graph_x / self.graph_width) * freq_range
-        
+
         # Map to FFT bin
         nyquist = self.sample_rate / 2
         bin_index = int((freq / nyquist) * len(self.spectrum_data))
         if 0 <= bin_index < len(self.spectrum_data):
             db = self.spectrum_data[bin_index]
-            
+
             # Draw cursor line
             self._draw_cursor_line(x)
-            
+
             # Draw tooltip
             tooltip_text = f"{freq:.0f} Hz\n{db:.1f} dB"
             self._draw_tooltip(x, y, tooltip_text)
-    
+
     def _draw_cursor_line(self, x: int):
         """Draw vertical cursor line."""
         if self.cursor_line_id:
             self.canvas.delete(self.cursor_line_id)
-        
+
         self.cursor_line_id = self.canvas.create_line(
             x, self.margin_top,
             x, self.height - self.margin_bottom,
             fill='white', width=1, dash=(3, 3)
         )
-    
+
     def _draw_tooltip(self, x: int, y: int, text: str):
         """Draw tooltip at position with white background and black text."""
         # Delete previous tooltip (both background and text)
@@ -864,7 +864,7 @@ class AudioSpectrumDisplay:
             self.canvas.delete(self.tooltip_bg_id)
         if self.tooltip_id:
             self.canvas.delete(self.tooltip_id)
-        
+
         # Position tooltip
         if x > self.width / 2:
             tooltip_x = x - 10
@@ -872,7 +872,7 @@ class AudioSpectrumDisplay:
         else:
             tooltip_x = x + 10
             anchor = tk.W
-        
+
         # Estimate text size (rough approximation for multi-line text)
         lines = text.split('\n')
         text_width = max(len(line) for line in lines) * 7
@@ -904,7 +904,7 @@ class AudioSpectrumDisplay:
             font=('monospace', 9, 'bold'),
             anchor=anchor
         )
-    
+
     def _find_peak_in_bandwidth(self):
         """Find the peak frequency and level within the filter bandwidth with 500ms averaging.
 
@@ -965,38 +965,38 @@ class AudioSpectrumDisplay:
         # Convert bin index to frequency
         actual_bin = low_bin + peak_idx
         peak_freq = (actual_bin / len(self.spectrum_data)) * nyquist
-        
+
         # Add to history with timestamp
         import time
         current_time = time.time()
         self.peak_history.append((peak_freq, peak_db))
         self.peak_timestamps.append(current_time)
-        
+
         # Average peaks over last 500ms
         cutoff_time = current_time - self.peak_average_window
         recent_peaks = []
         for i, timestamp in enumerate(self.peak_timestamps):
             if timestamp >= cutoff_time:
                 recent_peaks.append(self.peak_history[i])
-        
+
         if len(recent_peaks) == 0:
             return peak_freq, peak_db
-        
+
         # Calculate weighted average (more recent = higher weight)
         total_weight = 0
         weighted_freq = 0
         weighted_db = 0
-        
+
         for i, (freq, db) in enumerate(recent_peaks):
             # Linear weight: newer samples get higher weight
             weight = i + 1
             weighted_freq += freq * weight
             weighted_db += db * weight
             total_weight += weight
-        
+
         avg_freq = weighted_freq / total_weight
         avg_db = weighted_db / total_weight
-        
+
         return avg_freq, avg_db
 
 
@@ -1096,10 +1096,11 @@ def create_audio_spectrum_window(parent_gui):
 
     # Handle window close
     def on_close():
-        audio_spectrum.disconnect()
+        # Don't disconnect the audio spectrum display - keep it running for FSK extension
+        # Just destroy the window
         window.destroy()
         parent_gui.audio_spectrum_window = None
-        parent_gui.audio_spectrum_display = None
+        # Keep audio_spectrum_display running so FSK extension can use it
 
     window.protocol("WM_DELETE_WINDOW", on_close)
 

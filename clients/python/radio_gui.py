@@ -416,6 +416,15 @@ class RadioGUI:
         self.chat_window = None
         self.chat_display = None
 
+        # Extensions window
+        self.extensions_window = None
+
+        # NAVTEX extension window
+        self.navtex_window = None
+
+        # FSK extension window
+        self.fsk_window = None
+
         # Create UI
         self.create_widgets()
 
@@ -1468,7 +1477,7 @@ class RadioGUI:
         # Squelch control for FM/NFM modes (on same row as presets, initially hidden)
         # Column 4 is after the 3 preset buttons (columns 1, 2, 3)
         ttk.Label(self.preset_frame, text="Squelch:").grid(row=0, column=4, sticky=tk.W, padx=(15, 5))
-        
+
         # Use a 0-100 scale internally, map to squelch values in the handler
         # 0 = -999 (open), 1-100 = -50 to +20 dB
         self.squelch_scale_var = tk.IntVar(value=0)  # Default to 0 (open)
@@ -1482,17 +1491,17 @@ class RadioGUI:
             length=150
         )
         self.squelch_scale.grid(row=0, column=5, padx=5)
-        
+
         self.squelch_label = ttk.Label(self.preset_frame, text="Open", width=10)
         self.squelch_label.grid(row=0, column=6, sticky=tk.W)
-        
+
         # Store squelch widgets for show/hide
         self.squelch_widgets = [
             self.preset_frame.grid_slaves(row=0, column=4)[0],  # Label
             self.squelch_scale,
             self.squelch_label
         ]
-        
+
         # Hide squelch controls initially
         for widget in self.squelch_widgets:
             widget.grid_remove()
@@ -1693,7 +1702,7 @@ class RadioGUI:
         # Noise Blanker (row 5) - use a frame to avoid column weight issues
         nb_container = ttk.Frame(audio_frame)
         nb_container.grid(row=5, column=0, columnspan=7, sticky=tk.W, pady=(5, 0))
-        
+
         self.nb_enabled_var = tk.BooleanVar(value=False)
         self.nb_check = ttk.Checkbutton(
             nb_container,
@@ -1703,7 +1712,7 @@ class RadioGUI:
             state='normal' if NB_AVAILABLE else 'disabled'
         )
         self.nb_check.grid(row=0, column=0, sticky=tk.W, padx=(0, 20))
-        
+
         # Threshold parameter
         ttk.Label(nb_container, text="Threshold:").grid(row=0, column=1, sticky=tk.W, padx=(0, 5))
         self.nb_threshold_var = tk.StringVar(value="10.0")
@@ -1715,7 +1724,7 @@ class RadioGUI:
         )
         nb_threshold_entry.grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
         ttk.Label(nb_container, text="x").grid(row=0, column=3, sticky=tk.W, padx=(0, 20))
-        
+
         # Averaging window parameter
         ttk.Label(nb_container, text="Avg Window:").grid(row=0, column=4, sticky=tk.W, padx=(0, 5))
         self.nb_avg_window_var = tk.StringVar(value="20")
@@ -1727,11 +1736,11 @@ class RadioGUI:
         )
         nb_avg_window_entry.grid(row=0, column=5, sticky=tk.W, padx=(0, 5))
         ttk.Label(nb_container, text="ms").grid(row=0, column=6, sticky=tk.W)
-        
+
         # Add trace callbacks to update NB parameters when changed (while NB is enabled)
         self.nb_threshold_var.trace_add('write', self.update_noise_blanker_parameters)
         self.nb_avg_window_var.trace_add('write', self.update_noise_blanker_parameters)
-        
+
         # Audio bandpass filter (row 6) - use a frame to avoid column weight issues
         filter_container = ttk.Frame(audio_frame)
         filter_container.grid(row=6, column=0, columnspan=7, sticky=(tk.W, tk.E), pady=(5, 0))
@@ -1794,17 +1803,26 @@ class RadioGUI:
             except ValueError:
                 pass  # Use defaults if values are invalid
 
-            # Add buttons for opening windows
-            button_frame = ttk.Frame(controls_frame)
-            button_frame.pack(side=tk.TOP, pady=(5, 5))
+            # Add buttons for opening windows - split into two rows (8 buttons per row max)
+            button_container = ttk.Frame(controls_frame)
+            button_container.pack(side=tk.TOP, pady=(5, 5))
 
+            # First row of buttons
+            button_frame_row1 = ttk.Frame(button_container)
+            button_frame_row1.pack(side=tk.TOP, pady=(0, 5))
+
+            # Second row of buttons
+            button_frame_row2 = ttk.Frame(button_container)
+            button_frame_row2.pack(side=tk.TOP)
+
+            # Row 1: RF Spec, Audio Spec, Digital Spots, CW Spots, Conditions, Noise, Weather, Rotator
             if WATERFALL_AVAILABLE:
-                waterfall_btn = ttk.Button(button_frame, text="RF Spec",
+                waterfall_btn = ttk.Button(button_frame_row1, text="RF Spec",
                                           command=self.open_waterfall_window)
                 waterfall_btn.pack(side=tk.LEFT, padx=(0, 5))
 
             if AUDIO_SPECTRUM_AVAILABLE:
-                self.audio_spectrum_btn = ttk.Button(button_frame, text="Audio Spec",
+                self.audio_spectrum_btn = ttk.Button(button_frame_row1, text="Audio Spec",
                                       command=self.open_audio_spectrum_window)
                 self.audio_spectrum_btn.pack(side=tk.LEFT, padx=(0, 5))
             else:
@@ -1812,7 +1830,7 @@ class RadioGUI:
 
             # Digital spots button (conditionally shown based on server capability)
             if DIGITAL_SPOTS_AVAILABLE:
-                self.digital_spots_btn = ttk.Button(button_frame, text="Digital Spots",
+                self.digital_spots_btn = ttk.Button(button_frame_row1, text="Digital Spots",
                                       command=self.open_digital_spots_window)
                 # Don't pack yet - will be shown after connection if server supports it
             else:
@@ -1820,7 +1838,7 @@ class RadioGUI:
 
             # CW spots button (conditionally shown based on server capability)
             if CW_SPOTS_AVAILABLE:
-                self.cw_spots_btn = ttk.Button(button_frame, text="CW Spots",
+                self.cw_spots_btn = ttk.Button(button_frame_row1, text="CW Spots",
                                          command=self.open_cw_spots_window)
                 # Don't pack yet - will be shown after connection if server supports it
             else:
@@ -1828,7 +1846,7 @@ class RadioGUI:
 
             # Band conditions button (always available)
             if BAND_CONDITIONS_AVAILABLE:
-                self.band_conditions_btn = ttk.Button(button_frame, text="Conditions",
+                self.band_conditions_btn = ttk.Button(button_frame_row1, text="Conditions",
                                                      command=self.open_band_conditions_window)
                 self.band_conditions_btn.pack(side=tk.LEFT, padx=(0, 5))
             else:
@@ -1836,7 +1854,7 @@ class RadioGUI:
 
             # Noise floor button (always available)
             if NOISE_FLOOR_AVAILABLE:
-                self.noise_floor_btn = ttk.Button(button_frame, text="Noise", width=6,
+                self.noise_floor_btn = ttk.Button(button_frame_row1, text="Noise", width=6,
                                                  command=self.open_noise_floor_window)
                 self.noise_floor_btn.pack(side=tk.LEFT, padx=(0, 5))
             else:
@@ -1844,7 +1862,7 @@ class RadioGUI:
 
             # Space weather button (always available)
             if SPACE_WEATHER_AVAILABLE:
-                self.space_weather_btn = ttk.Button(button_frame, text="Weather",
+                self.space_weather_btn = ttk.Button(button_frame_row1, text="Weather",
                                                    command=self.open_space_weather_window)
                 self.space_weather_btn.pack(side=tk.LEFT, padx=(0, 5))
             else:
@@ -1852,20 +1870,21 @@ class RadioGUI:
 
             # Rotator button (conditionally shown based on server capability)
             if ROTATOR_STATUS_AVAILABLE:
-                self.rotator_btn = ttk.Button(button_frame, text="Rotator",
+                self.rotator_btn = ttk.Button(button_frame_row1, text="Rotator",
                                               command=self.open_rotator_status_window)
                 # Don't pack yet - will be shown after connection if server supports it
             else:
                 self.rotator_btn = None
 
+            # Row 2: MIDI, Users, Chat, Ext
             # MIDI controller button
-            self.midi_btn = ttk.Button(button_frame, text="MIDI", width=6,
+            self.midi_btn = ttk.Button(button_frame_row2, text="MIDI", width=6,
                                        command=self.open_midi_window)
             self.midi_btn.pack(side=tk.LEFT, padx=(0, 5))
 
             # Users button (always available)
             if USERS_AVAILABLE:
-                self.users_btn = ttk.Button(button_frame, text="Users", width=6,
+                self.users_btn = ttk.Button(button_frame_row2, text="Users", width=6,
                                            command=self.open_users_window)
                 self.users_btn.pack(side=tk.LEFT, padx=(0, 5))
             else:
@@ -1873,11 +1892,16 @@ class RadioGUI:
 
             # Chat button (conditionally shown based on server capability)
             if CHAT_AVAILABLE:
-                self.chat_btn = ttk.Button(button_frame, text="Chat", width=6,
+                self.chat_btn = ttk.Button(button_frame_row2, text="Chat", width=6,
                                           command=self.open_chat_window)
                 # Don't pack yet - will be shown after connection if server supports it
             else:
                 self.chat_btn = None
+
+            # Extensions button (always available)
+            self.ext_btn = ttk.Button(button_frame_row2, text="Ext", width=6,
+                                      command=self.open_extensions_window)
+            self.ext_btn.pack(side=tk.LEFT, padx=(0, 5))
 
             # Scroll mode selector removed from here - now in waterfall window title section
             self.scroll_mode_var = tk.StringVar(value="zoom")
@@ -2120,9 +2144,9 @@ class RadioGUI:
     def update_squelch_display(self, value=None):
         """Update squelch label display and schedule throttled squelch update."""
         import time
-        
+
         scale_value = self.squelch_scale_var.get()
-        
+
         # Map scale value (0-100) to squelch value
         # 0 = -999 (open)
         # 1-100 = -48 to +20 dB (linear mapping)
@@ -2134,15 +2158,15 @@ class RadioGUI:
             # Map 1-100 to -48 to +20 dB (68 dB range over 99 steps)
             squelch_db = -48.0 + (scale_value - 1) * (68.0 / 99.0)
             self.squelch_label.config(text=f"{squelch_db:.1f} dB")
-        
+
         # Cancel any pending squelch update
         if self.squelch_update_job:
             self.root.after_cancel(self.squelch_update_job)
-        
+
         # Throttle: limit to 10 updates per second (100ms minimum interval)
         current_time = time.time()
         elapsed_ms = (current_time - self.squelch_last_send_time) * 1000
-        
+
         if elapsed_ms >= 100:
             # Enough time has passed, send immediately
             self._apply_squelch_update()
@@ -2154,14 +2178,14 @@ class RadioGUI:
     def _apply_squelch_update(self):
         """Apply squelch update to server (called after throttle delay)."""
         import time
-        
+
         if not self.connected or not self.client or not self.client.ws:
             self.squelch_update_job = None
             return
 
         try:
             import json
-            
+
             # Map scale value (0-100) to squelch value
             scale_value = self.squelch_scale_var.get()
             if scale_value == 0:
@@ -2170,7 +2194,7 @@ class RadioGUI:
                 # Map 1-100 to -48 to +20 dB (68 dB range over 99 steps)
                 # Start at -48 to leave room for server's -2 dB hysteresis
                 squelch_value = -48.0 + (scale_value - 1) * (68.0 / 99.0)
-            
+
             squelch_msg = {
                 'type': 'set_squelch',
                 'squelchOpen': float(squelch_value)
@@ -2181,7 +2205,7 @@ class RadioGUI:
                 # Cancel any pending squelch message to prevent queue buildup
                 if self.pending_squelch_future and not self.pending_squelch_future.done():
                     self.pending_squelch_future.cancel()
-                
+
                 # Send new squelch message
                 self.pending_squelch_future = asyncio.run_coroutine_threadsafe(
                     self.client.ws.send(json.dumps(squelch_msg)),
@@ -2189,7 +2213,7 @@ class RadioGUI:
                 )
                 # Update last send time for throttling
                 self.squelch_last_send_time = time.time()
-                
+
                 # Log squelch status
                 if squelch_value == -999.0:
                     self.log_status("Squelch: Open (no squelch)")
@@ -2199,7 +2223,7 @@ class RadioGUI:
                 self.log_status("ERROR: Event loop not running")
         except Exception as e:
             self.log_status(f"ERROR: Failed to send squelch message: {e}")
-        
+
         self.squelch_update_job = None
 
     def get_step_size_hz(self) -> int:
@@ -2280,30 +2304,6 @@ class RadioGUI:
         except ValueError:
             pass
 
-    def set_frequency_hz(self, freq_hz: int):
-        """Set the frequency display to the given Hz value."""
-        # Check if frequency is locked FIRST, before any UI updates
-        if self.freq_lock_var.get():
-            self.log_status("Frequency is locked - change blocked")
-            return
-
-        # Convert to current unit
-        unit = self.freq_unit_var.get()
-        if unit == "Hz":
-            self.freq_var.set(f"{freq_hz}")
-        elif unit == "kHz":
-            self.freq_var.set(f"{freq_hz / 1000:.3f}")
-        else:  # MHz
-            self.freq_var.set(f"{freq_hz / 1e6:.6f}")
-
-        # Update band button highlighting
-        self.update_band_buttons(freq_hz)
-
-        # Update band dropdown selection
-        self.update_band_selector(freq_hz)
-
-        # Update bookmark dropdown selection
-        self.update_bookmark_selector(freq_hz)
 
     def get_frequency_hz(self) -> int:
         """Convert frequency from current unit to Hz."""
@@ -4836,7 +4836,7 @@ class RadioGUI:
         except ValueError:
             messagebox.showerror("Error", "Invalid NR2 parameter values")
             self.nr2_enabled_var.set(not enabled)
-    
+
     def toggle_noise_blanker(self):
         """Toggle Noise Blanker on/off."""
         if not self.connected or not self.client:
@@ -4891,7 +4891,7 @@ class RadioGUI:
             # Only update if NB is enabled and client exists
             if not self.nb_enabled_var.get() or not self.client or not hasattr(self.client, 'nb_processor'):
                 return
-            
+
             # Get and validate threshold
             try:
                 threshold = float(self.nb_threshold_var.get())
@@ -4899,7 +4899,7 @@ class RadioGUI:
                     return  # Silently ignore invalid values during typing
             except ValueError:
                 return  # Silently ignore invalid values during typing
-            
+
             # Get and validate avg window
             try:
                 avg_window = float(self.nb_avg_window_var.get())
@@ -4907,14 +4907,14 @@ class RadioGUI:
                     return  # Silently ignore invalid values during typing
             except ValueError:
                 return  # Silently ignore invalid values during typing
-            
+
             # Update the processor parameters
             self.client.nb_processor.set_parameters(
                 threshold=threshold,
                 avg_window_ms=avg_window
             )
             self.log_status(f"Updated NB: threshold={threshold}x, window={avg_window}ms")
-            
+
         except Exception as e:
             self.log_status(f"Error updating noise blanker parameters: {e}")
 
@@ -6371,11 +6371,6 @@ class RadioGUI:
 
     def send_tune_message(self):
         """Send tune message to change frequency/mode/bandwidth without reconnecting."""
-        import time
-        import sys
-        
-        print(f"[DEBUG {time.time():.3f}] send_tune_message() CALLED - mode={self.client.mode if self.client else 'N/A'}", file=sys.stderr, flush=True)
-        
         if not self.client or not self.client.ws:
             self.log_status("ERROR: Not connected - cannot send tune message")
             return
@@ -6398,21 +6393,16 @@ class RadioGUI:
 
             # Send the tune message via WebSocket using the async event loop
             if self.event_loop and self.event_loop.is_running():
-                print(f"[DEBUG {time.time():.3f}] Event loop is running, scheduling tune message: {tune_msg}", file=sys.stderr, flush=True)
-                
                 # Cancel any pending tune message to prevent queue buildup
                 if self.pending_tune_future and not self.pending_tune_future.done():
-                    print(f"[DEBUG {time.time():.3f}] Canceling pending tune future", file=sys.stderr, flush=True)
                     self.pending_tune_future.cancel()
-                
+
                 # Send new tune message
                 self.pending_tune_future = asyncio.run_coroutine_threadsafe(
                     self.client.ws.send(json.dumps(tune_msg)),
                     self.event_loop
                 )
-                print(f"[DEBUG {time.time():.3f}] Tune message scheduled in event loop", file=sys.stderr, flush=True)
             else:
-                print(f"[DEBUG {time.time():.3f}] ERROR: Event loop not running!", file=sys.stderr, flush=True)
                 self.log_status("ERROR: Event loop not running")
         except Exception as e:
             self.log_status(f"ERROR: Failed to send tune message: {e}")
@@ -7256,6 +7246,8 @@ class RadioGUI:
         if self.audio_spectrum_display:
             self.audio_spectrum_display.add_audio_data(audio_float)
 
+        # FSK extension reads from audio_spectrum_display, no need to send audio data
+
     def format_time(self, seconds: int) -> str:
         """Format seconds as MM:SS."""
         minutes = seconds // 60
@@ -7368,6 +7360,173 @@ class RadioGUI:
             messagebox.showerror("Error", f"Failed to open map: {e}")
             self.log_status(f"ERROR: Failed to open map - {e}")
 
+    def open_extensions_window(self):
+        """Open the extensions window."""
+        # Don't open multiple windows
+        if hasattr(self, 'extensions_window') and self.extensions_window and self.extensions_window.window.winfo_exists():
+            self.extensions_window.window.lift()  # Bring to front
+            return
+
+        # Check if connected
+        if not self.connected:
+            messagebox.showinfo("Info", "Please connect to a server first")
+            return
+
+        # Import extensions window
+        try:
+            from extensions_window import create_extensions_window
+        except ImportError:
+            messagebox.showerror("Error", "Extensions window not available")
+            return
+
+        # Get base URL
+        protocol = "https" if self.tls_var.get() else "http"
+        host = self.server_var.get()
+        port = self.port_var.get()
+        base_url = f"{protocol}://{host}:{port}"
+
+        # Create extensions window
+        self.extensions_window = create_extensions_window(
+            self.root,
+            base_url,
+            self.on_extension_open
+        )
+
+    def on_extension_open(self, ext_name: str, ext_info: dict):
+        """Handle extension open request."""
+        self.log_status(f"Opening extension: {ext_info['displayName']}")
+
+        if ext_name == 'navtex':
+            self.open_navtex_window()
+        elif ext_name == 'fsk':
+            self.open_fsk_window()
+        elif ext_name == 'wefax':
+            self.open_wefax_window()
+        else:
+            messagebox.showinfo("Info", f"Extension '{ext_info['displayName']}' is not yet supported in the Python client")
+
+    def get_open_extension(self):
+        """Check if any extension window is currently open and return its name."""
+        if hasattr(self, 'navtex_window') and self.navtex_window and self.navtex_window.window.winfo_exists():
+            return 'NAVTEX'
+        if hasattr(self, 'fsk_window') and self.fsk_window and self.fsk_window.window.winfo_exists():
+            return 'FSK/RTTY'
+        if hasattr(self, 'wefax_window') and self.wefax_window and self.wefax_window.window.winfo_exists():
+            return 'WEFAX'
+        return None
+
+    def open_navtex_window(self):
+        """Open the NAVTEX extension window."""
+        # Don't open multiple windows
+        if hasattr(self, 'navtex_window') and self.navtex_window and self.navtex_window.window.winfo_exists():
+            self.navtex_window.window.lift()  # Bring to front
+            return
+
+        # Check if another extension is open
+        open_ext = self.get_open_extension()
+        if open_ext:
+            messagebox.showwarning(
+                "Extension Already Open",
+                f"The {open_ext} extension is currently open.\n\n"
+                f"Please close it before opening another extension."
+            )
+            return
+
+        # Check if connected
+        if not self.connected:
+            messagebox.showinfo("Info", "Please connect to a server first")
+            return
+
+        # Import NAVTEX extension
+        try:
+            from navtex_extension import create_navtex_window
+        except ImportError:
+            messagebox.showerror("Error", "NAVTEX extension not available")
+            return
+
+        # Create NAVTEX window
+        self.navtex_window = create_navtex_window(
+            self.root,
+            self.dxcluster_ws,
+            self
+        )
+
+    def open_fsk_window(self):
+        """Open the FSK extension window."""
+        # Don't open multiple windows
+        if hasattr(self, 'fsk_window') and self.fsk_window and self.fsk_window.window.winfo_exists():
+            self.fsk_window.window.lift()  # Bring to front
+            return
+
+        # Check if another extension is open
+        open_ext = self.get_open_extension()
+        if open_ext:
+            messagebox.showwarning(
+                "Extension Already Open",
+                f"The {open_ext} extension is currently open.\n\n"
+                f"Please close it before opening another extension."
+            )
+            return
+
+        # Check if connected
+        if not self.connected:
+            messagebox.showinfo("Info", "Please connect to a server first")
+            return
+
+        # Import FSK extension
+        try:
+            from fsk_extension import create_fsk_window
+        except ImportError:
+            messagebox.showerror("Error", "FSK extension not available")
+            return
+
+        # Create FSK window
+        self.fsk_window = create_fsk_window(
+            self.root,
+            self.dxcluster_ws,
+            self
+        )
+
+        # Set sample rate if client is available
+        if self.client and hasattr(self.client, 'samprate'):
+            self.fsk_window.set_sample_rate(self.client.samprate)
+
+    def open_wefax_window(self):
+        """Open the WEFAX extension window."""
+        # Don't open multiple windows
+        if hasattr(self, 'wefax_window') and self.wefax_window and self.wefax_window.window.winfo_exists():
+            self.wefax_window.window.lift()  # Bring to front
+            return
+
+        # Check if another extension is open
+        open_ext = self.get_open_extension()
+        if open_ext:
+            messagebox.showwarning(
+                "Extension Already Open",
+                f"The {open_ext} extension is currently open.\n\n"
+                f"Please close it before opening another extension."
+            )
+            return
+
+        # Check if connected
+        if not self.connected:
+            messagebox.showinfo("Info", "Please connect to a server first")
+            return
+
+        # Import WEFAX extension
+        try:
+            from wefax_extension import create_wefax_window
+        except ImportError:
+            messagebox.showerror("Error", "WEFAX extension not available")
+            return
+
+        # Create WEFAX window
+        self.wefax_window = create_wefax_window(
+            self.root,
+            self.dxcluster_ws,
+            self
+        )
+
     def on_closing(self):
         """Handle window close event."""
         if self.connected:
@@ -7432,6 +7591,14 @@ class RadioGUI:
         # Close EQ window if open
         if self.eq_window and self.eq_window.winfo_exists():
             self.eq_window.destroy()
+
+        # Close extensions window if open
+        if hasattr(self, 'extensions_window') and self.extensions_window and self.extensions_window.window.winfo_exists():
+            self.extensions_window.window.destroy()
+
+        # Close NAVTEX window if open
+        if hasattr(self, 'navtex_window') and self.navtex_window and self.navtex_window.window.winfo_exists():
+            self.navtex_window.window.destroy()
 
         # Disconnect MIDI controller if active
         if self.midi_controller:

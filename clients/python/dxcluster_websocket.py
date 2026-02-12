@@ -118,6 +118,12 @@ class DXClusterWebSocket:
 
     def _on_message(self, ws, message):
         """Handle incoming WebSocket message."""
+        # Check if message is binary (bytes) - these are handled by extension binary handlers
+        if isinstance(message, bytes):
+            # Binary messages are handled by the custom binary handler set by extensions
+            # Don't try to process them here
+            return
+        
         try:
             data = json.loads(message)
             msg_type = data.get('type')

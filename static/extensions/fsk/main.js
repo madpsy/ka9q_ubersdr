@@ -129,9 +129,10 @@ class FSKExtension extends DecoderExtension {
                 const clickedFreq = (x / width) * maxDisplayFreq;
                 
                 // Calculate offset needed to move clicked frequency to current center frequency
-                // This adjusts the dial frequency so the clicked frequency stays at the center
+                // If clicked freq is lower than center, we need to tune UP (positive offset)
+                // If clicked freq is higher than center, we need to tune DOWN (negative offset)
                 const currentCenterFreq = this.config.center_frequency;
-                const offset = currentCenterFreq - clickedFreq;
+                const offset = clickedFreq - currentCenterFreq;
                 
                 // Adjust the dial frequency
                 if (this.radio) {

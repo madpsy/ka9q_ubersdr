@@ -86,6 +86,7 @@ class WEFAXExtension:
         # Image data
         self.image_array = None
         self.photo_image = None
+        self.display_scale = 1.0  # Current display scale factor
         
         # Create window
         self.window = tk.Toplevel(parent)
@@ -236,7 +237,10 @@ class WEFAXExtension:
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         self.scrollbar.config(command=self.canvas.yview)
-        
+
+        # Bind canvas resize event to update display
+        self.canvas.bind('<Configure>', self.on_canvas_resize)
+
         # Help text
         help_frame = ttk.Frame(main_frame)
         help_frame.grid(row=4, column=0, sticky=(tk.W, tk.E))
@@ -553,25 +557,57 @@ class WEFAXExtension:
         print(f"WEFAX: Grew image to {self.image_width}x{self.image_height}")
     
     def update_canvas(self):
-        """Update canvas with current image."""
+        """Update canvas with current image, scaled to fit window."""
         if self.image_array is None:
             return
-        
+
         # Create PIL image from array (only up to current line)
         display_height = max(self.current_line, 1)
         img_data = self.image_array[:display_height]
-        
+
         pil_image = Image.fromarray(img_data, mode='RGB')
+
+        # Get canvas dimensions
+        canvas_width = self.canvas.winfo_width()
+        canvas_height = self.canvas.winfo_height()
+
+        # Calculate scale to fit canvas width while maintaining aspect ratio
+        if canvas_width > 1 and self.image_width > 0:
+            scale_x = canvas_width / self.image_width
+            scale_y = scale_x  # Maintain aspect ratio
+
+            # Calculate scaled dimensions
+            scaled_width = int(self.image_width * scale_x)
+            scaled_height = int(display_height * scale_y)
+
+            # Resize image to fit canvas width
+            if scaled_width > 0 and scaled_height > 0:
+                pil_image = pil_image.resize((scaled_width, scaled_height), Image.Resampling.LANCZOS)
+                self.display_scale = scale_x
+            else:
+                self.display_scale = 1.0
+        else:
+            self.display_scale = 1.0
+
         self.photo_image = ImageTk.PhotoImage(pil_image)
-        
+
         # Update canvas
         self.canvas.delete('all')
         self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo_image)
-        self.canvas.config(scrollregion=(0, 0, self.image_width, display_height))
-        
+
+        # Set scroll region to scaled image size
+        scaled_width = int(self.image_width * self.display_scale)
+        scaled_height = int(display_height * self.display_scale)
+        self.canvas.config(scrollregion=(0, 0, scaled_width, scaled_height))
+
         # Auto-scroll to bottom
         if self.auto_scroll:
             self.canvas.yview_moveto(1.0)
+
+    def on_canvas_resize(self, event):
+        """Handle canvas resize event to rescale image."""
+        # Redraw the image at the new scale
+        self.update_canvas()
     
     def update_status(self):
         """Update status labels."""

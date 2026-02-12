@@ -635,21 +635,32 @@ class FSKExtension:
         """Draw spectrum visualization with mark/space frequency markers (exact copy of audio spectrum style)."""
         if self.spectrum_data is None:
             return
-        
+
         canvas = self.spectrum_canvas
         width = canvas.winfo_width()
         height = canvas.winfo_height()
-        
+
         if width <= 1 or height <= 1:
             return
-        
+
         # Clear canvas
         canvas.delete('all')
-        
+
         # Frequency range to display (0-3000 Hz)
         display_freq_min = 0
         display_freq_max = 3000
         nyquist = self.sample_rate / 2
+
+        # Calculate and update audio level (peak in the spectrum)
+        valid_spectrum = self.spectrum_data[np.isfinite(self.spectrum_data)]
+        if len(valid_spectrum) > 0:
+            peak_db = np.max(valid_spectrum)
+            if np.isfinite(peak_db):
+                self.audio_db_label.config(text=f"{peak_db:.1f} dB")
+            else:
+                self.audio_db_label.config(text="-∞ dB")
+        else:
+            self.audio_db_label.config(text="-∞ dB")
         
         # Use percentile-based auto-ranging with history (exact copy from audio spectrum)
         current_time = time.time()
@@ -669,12 +680,12 @@ class FSKExtension:
             if len(valid_data) > 0:
                 # Use percentiles to determine dynamic range
                 p5 = np.percentile(valid_data, 5)   # Noise floor
-                p95 = np.percentile(valid_data, 95)  # Signal peaks
-                
-                # Set range with headroom
+                p99 = np.percentile(valid_data, 99)  # Signal peaks (use 99th to capture strong signals)
+
+                # Set range with more headroom to prevent clipping
                 min_db = p5 - 10  # 10 dB below noise floor
-                max_db = p95 + 10  # 10 dB above typical peaks
-                
+                max_db = p99 + 15  # 15 dB above typical peaks to prevent clipping
+
                 # Ensure reasonable range (at least 40 dB, max 80 dB)
                 db_range = max_db - min_db
                 if db_range < 40:
@@ -772,32 +783,40 @@ class FSKExtension:
     
     def on_spectrum_click(self, event):
         """Handle click on spectrum to tune to frequency.
-        
+
         Args:
             event: Tkinter event object
         """
         if not self.radio_control:
             return
-        
+
         # Calculate clicked frequency
         width = self.spectrum_canvas.winfo_width()
         max_display_freq = 3000
-        
+
         clicked_freq = (event.x / width) * max_display_freq
-        
+
         # Get current radio frequency
         try:
             current_freq_hz = self.radio_control.get_frequency_hz()
-            
-            # Calculate new frequency (current + audio offset)
-            # Audio frequency is relative to the passband
-            new_freq_hz = current_freq_hz + int(clicked_freq)
-            
+
+            # Calculate new frequency to center the clicked audio frequency
+            # The clicked frequency is what we're currently hearing in the audio passband.
+            # To move it to the center frequency of the FSK decoder:
+            # - If clicked_freq < center_freq: signal is too low, tune radio UP (add)
+            # - If clicked_freq > center_freq: signal is too high, tune radio DOWN (subtract)
+            center_freq = self.config['center_frequency']
+            offset = clicked_freq - center_freq
+
+            # Add the offset to radio frequency to move the signal to center
+            # (opposite of what you might expect - we're moving the radio, not the signal)
+            new_freq_hz = current_freq_hz + int(offset)
+
             # Tune to new frequency
             self.radio_control.set_frequency_hz(new_freq_hz)
-            
-            print(f"FSK: Tuned to {new_freq_hz} Hz (audio offset: {clicked_freq:.0f} Hz)")
-            
+
+            print(f"FSK: Tuned from {current_freq_hz} Hz to {new_freq_hz} Hz (moved audio {clicked_freq:.0f} Hz to center {center_freq} Hz)")
+
         except Exception as e:
             print(f"Error tuning from spectrum click: {e}")
     

@@ -52,18 +52,15 @@ func NewSSTVExtension(audioParams AudioExtensionParams, extensionParams map[stri
 	if decodeFSKID, ok := extensionParams["decode_fsk_id"].(bool); ok {
 		config.DecodeFSKID = decodeFSKID
 	}
-	if mmsstvOnly, ok := extensionParams["mmsstv_only"].(bool); ok {
-		config.MMSSVOnly = mmsstvOnly
+	if adaptive, ok := extensionParams["adaptive"].(bool); ok {
+		config.Adaptive = adaptive
 	}
-
-	// Initialize modes
-	InitializeModes()
 
 	// Create decoder
 	decoder := NewSSTVDecoder(float64(audioParams.SampleRate), config)
 
-	log.Printf("[SSTV Extension] Created with sample rate: %d Hz, auto_sync: %v, decode_fsk_id: %v",
-		audioParams.SampleRate, config.AutoSync, config.DecodeFSKID)
+	log.Printf("[SSTV Extension] Created with sample rate: %d Hz, auto_sync: %v, decode_fsk_id: %v, adaptive: %v",
+		audioParams.SampleRate, config.AutoSync, config.DecodeFSKID, config.Adaptive)
 
 	return &SSTVExtension{
 		decoder: decoder,

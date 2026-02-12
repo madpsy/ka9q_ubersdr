@@ -7,10 +7,7 @@ import (
 
 /*
  * FSK ID Decoder
- * Ported from KiwiSDR/extensions/SSTV/sstv_fsk_id.cpp
- *
- * Original copyright (c) 2007-2013, Oona Räisänen (OH2EIQ [at] sral.fi)
- * Go port (c) 2026, UberSDR project
+ * Ported from slowrx by Oona Räisänen (OH2EIQ)
  *
  * FSK ID Format:
  * - 6-bit bytes, LSB first
@@ -50,10 +47,10 @@ func NewFSKDecoder(sampleRate float64, headerShift int) *FSKDecoder {
 
 // DecodeFSKID attempts to decode an FSK callsign transmission
 // Returns the decoded callsign string
-func (f *FSKDecoder) DecodeFSKID(pcmReader PCMReader) string {
+func (f *FSKDecoder) DecodeFSKID(pcmBuffer *CircularPCMBuffer) string {
 	// Bit duration: 22ms (45.45 baud)
 	samps22ms := int(f.sampleRate * 22e-3)
-	halfSamps22ms := samps22ms / 2
+	samps11ms := samps22ms / 2 // Half for initial sync search
 
 	// Create 22ms Hann window
 	hannWindow := make([]float64, samps22ms)
@@ -68,7 +65,7 @@ func (f *FSKDecoder) DecodeFSKID(pcmReader PCMReader) string {
 	// State
 	inSync := false
 	testBits := make([]uint8, 24)
-	testPtr := 24 // Not zero due to reverse bit addressing
+	testPtr := 0
 	asciiByte := uint8(0)
 	bitPtr := 0
 	bytePtr := 0
@@ -82,18 +79,21 @@ func (f *FSKDecoder) DecodeFSKID(pcmReader PCMReader) string {
 	log.Printf("[SSTV FSK] Starting FSK ID detection")
 
 	for {
-		// Read samples
+		// Determine how many samples to read
 		samplesNeeded := samps22ms
 		if !inSync {
-			samplesNeeded = halfSamps22ms
+			samplesNeeded = samps11ms
 		}
 
-		samples, err := pcmReader.Read(samplesNeeded)
-		if err != nil {
+		// Check if we have enough samples
+		if pcmBuffer.Available() < samps22ms {
 			break
 		}
 
-		if len(samples) < samps22ms {
+		// Get window for FFT
+		windowOffset := pcmBuffer.Available() - samps22ms
+		samples, err := pcmBuffer.GetWindowAbsolute(windowOffset, samps22ms)
+		if err != nil {
 			break
 		}
 
@@ -102,13 +102,8 @@ func (f *FSKDecoder) DecodeFSKID(pcmReader PCMReader) string {
 			fftInput[i] = 0
 		}
 
-		startIdx := len(samples) - samps22ms
-		if startIdx < 0 {
-			startIdx = 0
-		}
-
-		for i := 0; i < samps22ms && i < len(samples)-startIdx; i++ {
-			fftInput[i] = float64(samples[startIdx+i]) / 32768.0 * hannWindow[i]
+		for i := 0; i < samps22ms && i < len(fftInput); i++ {
+			fftInput[i] = float64(samples[i]) / 32768.0 * hannWindow[i]
 		}
 
 		// Perform FFT
@@ -135,6 +130,9 @@ func (f *FSKDecoder) DecodeFSKID(pcmReader PCMReader) string {
 			bit = 0
 		}
 
+		// Consume samples
+		_, _ = pcmBuffer.Read(samplesNeeded)
+
 		if !inSync {
 			// Wait for sync pattern: 0x20 0x2A
 			testBits[testPtr%24] = bit
@@ -143,6 +141,9 @@ func (f *FSKDecoder) DecodeFSKID(pcmReader PCMReader) string {
 			testNum := 0
 			for i := 0; i < 12; i++ {
 				tp := (testPtr - (23 - i*2)) % 24
+				if tp < 0 {
+					tp += 24
+				}
 				if tp >= 0 && tp < 24 {
 					testNum |= int(testBits[tp]) << (11 - i)
 				}

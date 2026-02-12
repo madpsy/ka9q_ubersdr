@@ -421,12 +421,27 @@ class SSTVExtension extends DecoderExtension {
                 this.handleFSKID(view, data);
                 break;
 
+            case this.MSG_REDRAW_START:
+                this.handleRedrawStart();
+                break;
+
             case this.MSG_TONE_FREQ:
                 this.handleToneFreq(view);
                 break;
 
             default:
                 console.warn('SSTV: Unknown message type:', type);
+        }
+    }
+
+    handleRedrawStart() {
+        console.log('SSTV: Redraw start - corrected image incoming');
+        this.isRedrawing = true;
+        this.currentLine = 0;
+        
+        const statusEl = document.getElementById('sstv-status');
+        if (statusEl) {
+            statusEl.textContent = 'Redrawing with slant correction...';
         }
     }
 

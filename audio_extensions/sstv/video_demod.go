@@ -1,270 +1,519 @@
 package sstv
 
 import (
+	"log"
 	"math"
 )
 
 /*
- * Video Demodulation - FM Demodulation and SNR Estimation
- * Ported from KiwiSDR/extensions/SSTV/sstv_video.cpp
+ * Video Demodulation
+ * Ported from slowrx by Oona Räisänen (OH2EIQ)
  *
- * Original copyright (c) 2007-2013, Oona Räisänen (OH2EIQ [at] sral.fi)
- * Go port (c) 2026, UberSDR project
+ * Demodulates the video signal using FM demodulation with adaptive windowing
  */
 
-// DemodulateVideo performs FM demodulation on the audio signal
-// Returns the decoded image data as RGB pixels
-func (v *VideoDemodulator) DemodulateVideo(pcmBuffer []int16, skip int, redraw bool) ([]uint8, error) {
+// VideoDemodulator handles SSTV video signal demodulation
+type VideoDemodulator struct {
+	mode        *ModeSpec
+	sampleRate  float64
+	headerShift int
+
+	// Adaptive windowing
+	adaptive    bool
+	hannWindows [][]float64 // Pre-computed Hann windows of different lengths
+	hannLens    []int       // Window lengths
+
+	// FFT
+	fftSize   int
+	fftInput  []float64
+	fftOutput []complex128
+
+	// Sync detection
+	hasSync []bool
+
+	// Stored luminance for redrawing
+	storedLum []uint8
+}
+
+// NewVideoDemodulator creates a new video demodulator
+func NewVideoDemodulator(mode *ModeSpec, sampleRate float64, headerShift int, adaptive bool) *VideoDemodulator {
+	// Initialize Hann windows of different lengths (for adaptive windowing)
+	hannLens := []int{48, 64, 96, 128, 256, 512, 1024}
+	hannWindows := make([][]float64, len(hannLens))
+
+	for j, length := range hannLens {
+		hannWindows[j] = make([]float64, length)
+		for i := 0; i < length; i++ {
+			hannWindows[j][i] = 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(length-1)))
+		}
+	}
+
+	// Calculate maximum signal length
+	var maxLength int
+	if mode.ColorEnc == ColorYUV && mode.ImgWidth >= 512 { // PD modes
+		maxLength = int(mode.LineTime * float64(mode.NumLines) / 2 * sampleRate)
+	} else {
+		maxLength = int(mode.LineTime * float64(mode.NumLines) * sampleRate)
+	}
+
+	return &VideoDemodulator{
+		mode:        mode,
+		sampleRate:  sampleRate,
+		headerShift: headerShift,
+		adaptive:    adaptive,
+		hannWindows: hannWindows,
+		hannLens:    hannLens,
+		fftSize:     1024,
+		fftInput:    make([]float64, 1024),
+		fftOutput:   make([]complex128, 1024),
+		hasSync:     make([]bool, maxLength/13+1),
+		storedLum:   make([]uint8, maxLength),
+	}
+}
+
+// PixelInfo describes when and where to place a pixel
+type PixelInfo struct {
+	Time    int   // Sample number when this pixel should be read
+	X       int   // X coordinate
+	Y       int   // Y coordinate
+	Channel uint8 // Color channel (0=R/Y, 1=G/U, 2=B/V, 3=Y for PD)
+	Last    bool  // Is this the last pixel?
+}
+
+// GetPixelGrid calculates the pixel grid for the mode
+func (v *VideoDemodulator) GetPixelGrid(rate float64, skip int) []PixelInfo {
 	m := v.mode
 
-	// Build pixel grid with skip offset
-	v.buildPixelGrid(skip)
+	// Calculate channel start times and lengths
+	chanStart := make([]float64, 4)
+	chanLen := make([]float64, 4)
+	numChans := 3
 
-	// Total length in samples
-	length := int(m.LineTime * float64(m.NumLines) * v.sampleRate)
+	switch {
+	case m.Name == "Robot 36" || m.Name == "Robot 24":
+		// Robot modes: Y channel is double width, U/V alternate
+		chanLen[0] = m.PixelTime * float64(m.ImgWidth) * 2
+		chanLen[1] = m.PixelTime * float64(m.ImgWidth)
+		chanLen[2] = m.PixelTime * float64(m.ImgWidth)
+		chanStart[0] = m.SyncTime + m.PorchTime
+		chanStart[1] = chanStart[0] + chanLen[0] + m.SeptrTime
+		chanStart[2] = chanStart[1]
+		numChans = 2
 
-	// Sync detection parameters
-	syncTargetBin := v.getBin(1200.0 + float64(v.headerShift))
-	syncSampleNum := 0
-	nextSyncTime := 0
-	nextSNRTime := 0
+	case m.Name == "Scottie S1" || m.Name == "Scottie S2" || m.Name == "Scottie DX":
+		// Scottie modes: pGpBSpR format
+		chanLen[0] = m.PixelTime * float64(m.ImgWidth)
+		chanLen[1] = m.PixelTime * float64(m.ImgWidth)
+		chanLen[2] = m.PixelTime * float64(m.ImgWidth)
+		chanStart[0] = m.SeptrTime
+		chanStart[1] = chanStart[0] + chanLen[0] + m.SeptrTime
+		chanStart[2] = chanStart[1] + chanLen[1] + m.SyncTime + m.PorchTime
 
-	// FFT buffers
-	fftInput := make([]float64, v.fftSize)
-	fftOutput := make([]complex128, v.fftSize)
-	power := make([]float64, v.fftSize)
+	case m.ColorEnc == ColorYUV && m.ImgWidth >= 512:
+		// PD modes: 4 channels per radio frame, 2 image lines per frame
+		chanLen[0] = m.PixelTime * float64(m.ImgWidth)
+		chanLen[1] = m.PixelTime * float64(m.ImgWidth)
+		chanLen[2] = m.PixelTime * float64(m.ImgWidth)
+		chanLen[3] = m.PixelTime * float64(m.ImgWidth)
+		chanStart[0] = m.SyncTime + m.PorchTime
+		chanStart[1] = chanStart[0] + chanLen[0] + m.SeptrTime
+		chanStart[2] = chanStart[1] + chanLen[1] + m.SeptrTime
+		chanStart[3] = chanStart[2] + chanLen[2] + m.SeptrTime
+		numChans = 4
 
-	// Current frequency
-	var freq float64
+	case m.ColorEnc == ColorBW:
+		// B/W modes: single channel
+		chanLen[0] = m.PixelTime * float64(m.ImgWidth)
+		chanStart[0] = m.SyncTime + m.PorchTime
+		numChans = 1
 
-	// Pixel grid index
-	pixelIdx := 0
+	default:
+		// Standard RGB/GBR modes
+		chanLen[0] = m.PixelTime * float64(m.ImgWidth)
+		chanLen[1] = m.PixelTime * float64(m.ImgWidth)
+		chanLen[2] = m.PixelTime * float64(m.ImgWidth)
+		chanStart[0] = m.SyncTime + m.PorchTime
+		chanStart[1] = chanStart[0] + chanLen[0] + m.SeptrTime
+		chanStart[2] = chanStart[1] + chanLen[1] + m.SeptrTime
+	}
 
-	// Output pixel buffer
-	pixels := make([]uint8, m.ImgWidth*m.NumLines*3)
+	// Build pixel grid
+	var pixels []PixelInfo
 
-	// Process each sample
-	for sampleNum := 0; sampleNum < length; sampleNum++ {
+	if numChans == 4 { // PD modes
+		// Each radio frame encodes two image lines
+		for y := 0; y < m.NumLines; y += 2 {
+			for channel := 0; channel < numChans; channel++ {
+				for x := 0; x < m.ImgWidth; x++ {
+					t := float64(y)/2*m.LineTime + chanStart[channel] + m.PixelTime*(float64(x)+0.5)
+					sampleNum := int(math.Round(rate*t)) + skip
 
-		if !redraw {
-			// Store sync band for later adjustments
-			if sampleNum == nextSyncTime {
-				pRaw, pSync := v.detectSync(pcmBuffer, sampleNum, fftInput, fftOutput, syncTargetBin)
-
-				// If sync power is more than 2x video power, we have sync
-				if syncSampleNum < len(v.hasSync) {
-					v.hasSync[syncSampleNum] = pSync > 2*pRaw
+					if channel == 0 {
+						pixels = append(pixels, PixelInfo{Time: sampleNum, X: x, Y: y, Channel: 0})
+					} else if channel == 1 || channel == 2 {
+						pixels = append(pixels, PixelInfo{Time: sampleNum, X: x, Y: y, Channel: uint8(channel)})
+						pixels = append(pixels, PixelInfo{Time: sampleNum, X: x, Y: y + 1, Channel: uint8(channel)})
+					} else if channel == 3 {
+						pixels = append(pixels, PixelInfo{Time: sampleNum, X: x, Y: y + 1, Channel: 0})
+					}
 				}
-
-				nextSyncTime += 13
-				syncSampleNum++
-			}
-
-			// Estimate SNR periodically
-			if sampleNum == nextSNRTime {
-				v.estimateSNR(pcmBuffer, sampleNum, fftInput, fftOutput)
-				nextSNRTime += 256
-			}
-
-			// FM demodulation - take FFT every fm_sample_interval samples
-			if sampleNum%v.fmSampleInterval == 0 {
-				freq = v.demodulateFrequency(pcmBuffer, sampleNum, fftInput, fftOutput, power)
-			}
-
-			// Convert frequency to luminance and store
-			if sampleNum < len(v.storedLum) {
-				v.storedLum[sampleNum] = clip((freq - (1500.0 + float64(v.headerShift))) / 3.1372549)
 			}
 		}
+	} else {
+		// Standard modes
+		for y := 0; y < m.NumLines; y++ {
+			for channel := 0; channel < numChans; channel++ {
+				for x := 0; x < m.ImgWidth; x++ {
+					var ch uint8
+					if m.Name == "Robot 36" || m.Name == "Robot 24" {
+						if channel == 1 {
+							if y%2 == 0 {
+								ch = 1
+							} else {
+								ch = 2
+							}
+						} else {
+							ch = 0
+						}
+					} else {
+						ch = uint8(channel)
+					}
 
-		// Extract pixel at the right time
-		if pixelIdx < len(v.pixelGrid) && sampleNum == v.pixelGrid[pixelIdx].Time {
-			pg := v.pixelGrid[pixelIdx]
+					t := float64(y)*m.LineTime + chanStart[channel] + (float64(x)-0.5)/float64(m.ImgWidth)*chanLen[ch]
+					sampleNum := int(math.Round(rate*t)) + skip
 
-			// Store pixel in image buffer
-			if sampleNum < len(v.storedLum) {
-				v.image[pg.X][pg.Y][pg.Channel] = v.storedLum[sampleNum]
-
-				// Some modes have R-Y & B-Y channels that are twice the height
-				if pg.Channel > 0 && m.Format == Format420 && pg.Y+1 < m.NumLines {
-					v.image[pg.X][pg.Y+1][pg.Channel] = v.storedLum[sampleNum]
+					pixels = append(pixels, PixelInfo{Time: sampleNum, X: x, Y: y, Channel: ch})
 				}
 			}
+		}
+	}
 
-			// Convert and output line when complete
-			if pg.X == m.ImgWidth-1 || pg.Last {
-				v.convertAndOutputLine(pg.Y, pixels)
+	// Mark last pixel
+	if len(pixels) > 0 {
+		pixels[len(pixels)-1].Last = true
+	}
+
+	// Filter out negative time pixels
+	var filtered []PixelInfo
+	for _, p := range pixels {
+		if p.Time >= 0 {
+			filtered = append(filtered, p)
+		}
+	}
+
+	return filtered
+}
+
+// Demodulate performs FM demodulation of the video signal
+func (v *VideoDemodulator) Demodulate(pcmBuffer *CircularPCMBuffer, rate float64, skip int) ([]uint8, error) {
+	m := v.mode
+	pixelGrid := v.GetPixelGrid(rate, skip)
+
+	log.Printf("[SSTV Video] Demodulating %s: %dx%d, %d pixels",
+		m.Name, m.ImgWidth, m.NumLines, len(pixelGrid))
+
+	// Calculate signal length
+	var length int
+	if m.ColorEnc == ColorYUV && m.ImgWidth >= 512 { // PD modes
+		length = int(m.LineTime * float64(m.NumLines) / 2 * v.sampleRate)
+	} else {
+		length = int(m.LineTime * float64(m.NumLines) * v.sampleRate)
+	}
+
+	syncTargetBin := v.getBin(1200.0 + float64(v.headerShift))
+
+	// Initialize image buffer
+	image := make([][][]uint8, m.ImgWidth)
+	for x := range image {
+		image[x] = make([][]uint8, m.NumLines)
+		for y := range image[x] {
+			image[x][y] = make([]uint8, 3)
+		}
+	}
+
+	pixelIdx := 0
+	nextSyncTime := 0
+	nextSNRTime := 0
+	syncSampleNum := 0
+	snr := 0.0
+	freq := 0.0
+
+	// Process signal
+	for sampleNum := 0; sampleNum < length; sampleNum++ {
+		// Check if we have enough samples
+		if pcmBuffer.Available() < 1024 {
+			break
+		}
+
+		// Sync detection
+		if sampleNum == nextSyncTime {
+			v.detectSync(pcmBuffer, syncTargetBin, syncSampleNum)
+			nextSyncTime += 13
+			syncSampleNum++
+		}
+
+		// SNR estimation
+		if sampleNum == nextSNRTime {
+			snr = v.estimateSNR(pcmBuffer)
+			nextSNRTime += 256
+		}
+
+		// FM demodulation (every 6 samples)
+		if sampleNum%6 == 0 {
+			freq = v.demodulateFrequency(pcmBuffer, snr)
+		}
+
+		// Store luminance
+		lum := clip((freq - (1500.0 + float64(v.headerShift))) / 3.1372549)
+		if sampleNum < len(v.storedLum) {
+			v.storedLum[sampleNum] = lum
+		}
+
+		// Place pixels
+		for pixelIdx < len(pixelGrid) && pixelGrid[pixelIdx].Time == sampleNum {
+			p := pixelGrid[pixelIdx]
+			image[p.X][p.Y][p.Channel] = lum
+
+			// Some modes have R-Y & B-Y channels that are twice the height
+			if p.Channel > 0 && (m.Name == "Robot 36" || m.Name == "Robot 24") {
+				if p.Y+1 < m.NumLines {
+					image[p.X][p.Y+1][p.Channel] = lum
+				}
 			}
 
 			pixelIdx++
 		}
+
+		// Consume one sample
+		_, _ = pcmBuffer.Read(1)
 	}
 
-	return pixels, nil
+	// Convert image to RGB byte array
+	return v.convertToRGB(image), nil
 }
 
-// detectSync detects sync pulses at 1200 Hz
-func (v *VideoDemodulator) detectSync(pcmBuffer []int16, sampleNum int, fftInput []float64, fftOutput []complex128, syncTargetBin int) (float64, float64) {
-	// Clear FFT input
-	for i := range fftInput {
-		fftInput[i] = 0
-	}
+// RedrawFromLuminance redraws the image from stored luminance with corrected parameters
+// This matches slowrx's GetVideo(..., TRUE) - redraw from cached luminance
+func (v *VideoDemodulator) RedrawFromLuminance(rate float64, skip int) []uint8 {
+	m := v.mode
+	pixelGrid := v.GetPixelGrid(rate, skip)
 
-	// Apply 64-sample Hann window
-	windowSize := 64
-	hannWindow := v.hannWindows[1] // 64-sample window
+	log.Printf("[SSTV Video] Redrawing from stored luminance with rate=%.1f Hz, skip=%d", rate, skip)
 
-	for i := 0; i < windowSize; i++ {
-		idx := sampleNum + i - 32
-		if idx >= 0 && idx < len(pcmBuffer) {
-			fftInput[i] = float64(pcmBuffer[idx]) / 32768.0 * hannWindow[i]
+	// Initialize image buffer
+	image := make([][][]uint8, m.ImgWidth)
+	for x := range image {
+		image[x] = make([][]uint8, m.NumLines)
+		for y := range image[x] {
+			image[x][y] = make([]uint8, 3)
 		}
 	}
 
-	// Perform FFT
-	fft(fftInput, fftOutput)
+	// Place pixels from stored luminance
+	for _, p := range pixelGrid {
+		if p.Time >= 0 && p.Time < len(v.storedLum) {
+			lum := v.storedLum[p.Time]
+			image[p.X][p.Y][p.Channel] = lum
 
-	// Calculate power in video band (1500-2300 Hz)
+			// Some modes have R-Y & B-Y channels that are twice the height
+			if p.Channel > 0 && (m.Name == "Robot 36" || m.Name == "Robot 24") {
+				if p.Y+1 < m.NumLines {
+					image[p.X][p.Y+1][p.Channel] = lum
+				}
+			}
+		}
+	}
+
+	// Convert image to RGB byte array
+	return v.convertToRGB(image)
+}
+
+// detectSync detects sync pulses for slant correction
+func (v *VideoDemodulator) detectSync(pcmBuffer *CircularPCMBuffer, syncTargetBin int, syncSampleNum int) {
+	// Get 64-sample window
+	if pcmBuffer.Available() < 64 {
+		return
+	}
+
+	windowOffset := pcmBuffer.Available() - 64
+	samples, err := pcmBuffer.GetWindowAbsolute(windowOffset, 64)
+	if err != nil {
+		return
+	}
+
+	// Apply Hann window (64 samples)
+	for i := 0; i < 64 && i < len(v.fftInput); i++ {
+		if i < len(v.hannWindows[1]) {
+			v.fftInput[i] = float64(samples[i]) / 32768.0 * v.hannWindows[1][i]
+		}
+	}
+	for i := 64; i < len(v.fftInput); i++ {
+		v.fftInput[i] = 0
+	}
+
+	// FFT
+	fft(v.fftInput, v.fftOutput)
+
+	// Calculate power in sync and video bands
 	pRaw := 0.0
+	pSync := 0.0
+
 	minBin := v.getBin(1500.0 + float64(v.headerShift))
 	maxBin := v.getBin(2300.0 + float64(v.headerShift))
 
-	for i := minBin; i <= maxBin && i < len(fftOutput); i++ {
-		pRaw += real(fftOutput[i])*real(fftOutput[i]) + imag(fftOutput[i])*imag(fftOutput[i])
+	for i := minBin; i <= maxBin && i < len(v.fftOutput); i++ {
+		pRaw += v.power(v.fftOutput[i])
 	}
-	pRaw /= float64(maxBin - minBin + 1)
 
-	// Calculate power in sync band (1200 Hz ± 1 bin)
-	pSync := 0.0
-	for i := syncTargetBin - 1; i <= syncTargetBin+1 && i >= 0 && i < len(fftOutput); i++ {
+	for i := syncTargetBin - 1; i <= syncTargetBin+1 && i < len(v.fftOutput); i++ {
 		weight := 1.0 - 0.5*math.Abs(float64(syncTargetBin-i))
-		pSync += (real(fftOutput[i])*real(fftOutput[i]) + imag(fftOutput[i])*imag(fftOutput[i])) * weight
+		pSync += v.power(v.fftOutput[i]) * weight
 	}
+
+	pRaw /= float64(maxBin - minBin)
 	pSync /= 2.0
 
-	return pRaw, pSync
+	// Sync detected if more than 2x power in sync band
+	if syncSampleNum < len(v.hasSync) {
+		v.hasSync[syncSampleNum] = (pSync > 2*pRaw)
+	}
 }
 
 // estimateSNR estimates the signal-to-noise ratio
-func (v *VideoDemodulator) estimateSNR(pcmBuffer []int16, sampleNum int, fftInput []float64, fftOutput []complex128) {
-	// Clear FFT input
-	for i := range fftInput {
-		fftInput[i] = 0
+func (v *VideoDemodulator) estimateSNR(pcmBuffer *CircularPCMBuffer) float64 {
+	// Get 1024-sample window
+	if pcmBuffer.Available() < 1024 {
+		return 0
 	}
 
-	// Apply 1024-sample Hann window
-	hannWindow := v.hannWindows[6] // 1024-sample window
+	windowOffset := pcmBuffer.Available() - 1024
+	samples, err := pcmBuffer.GetWindowAbsolute(windowOffset, 1024)
+	if err != nil {
+		return 0
+	}
 
-	for i := 0; i < v.fftSize; i++ {
-		idx := sampleNum + i - v.fftSize/2
-		if idx >= 0 && idx < len(pcmBuffer) {
-			fftInput[i] = float64(pcmBuffer[idx]) / 32768.0 * hannWindow[i]
+	// Apply Hann window
+	for i := 0; i < 1024 && i < len(v.fftInput); i++ {
+		if i < len(v.hannWindows[6]) {
+			v.fftInput[i] = float64(samples[i]) / 32768.0 * v.hannWindows[6][i]
 		}
 	}
 
-	// Perform FFT
-	fft(fftInput, fftOutput)
+	// FFT
+	fft(v.fftInput, v.fftOutput)
 
-	// Calculate video-plus-noise power (1500-2300 Hz)
-	pVideoPlusNoise := 0.0
+	// Calculate video+noise power (1500-2300 Hz)
+	pVideoNoise := 0.0
 	minBin := v.getBin(1500.0 + float64(v.headerShift))
 	maxBin := v.getBin(2300.0 + float64(v.headerShift))
-
-	for i := minBin; i <= maxBin && i < len(fftOutput); i++ {
-		pVideoPlusNoise += real(fftOutput[i])*real(fftOutput[i]) + imag(fftOutput[i])*imag(fftOutput[i])
+	for i := minBin; i <= maxBin && i < len(v.fftOutput); i++ {
+		pVideoNoise += v.power(v.fftOutput[i])
 	}
 
 	// Calculate noise-only power (400-800 Hz + 2700-3400 Hz)
 	pNoiseOnly := 0.0
-
-	minBin1 := v.getBin(400.0 + float64(v.headerShift))
-	maxBin1 := v.getBin(800.0 + float64(v.headerShift))
-	for i := minBin1; i <= maxBin1 && i < len(fftOutput); i++ {
-		pNoiseOnly += real(fftOutput[i])*real(fftOutput[i]) + imag(fftOutput[i])*imag(fftOutput[i])
+	for i := v.getBin(400.0 + float64(v.headerShift)); i <= v.getBin(800.0+float64(v.headerShift)) && i < len(v.fftOutput); i++ {
+		pNoiseOnly += v.power(v.fftOutput[i])
+	}
+	for i := v.getBin(2700.0 + float64(v.headerShift)); i <= v.getBin(3400.0+float64(v.headerShift)) && i < len(v.fftOutput); i++ {
+		pNoiseOnly += v.power(v.fftOutput[i])
 	}
 
-	minBin2 := v.getBin(2700.0 + float64(v.headerShift))
-	maxBin2 := v.getBin(3400.0 + float64(v.headerShift))
-	for i := minBin2; i <= maxBin2 && i < len(fftOutput); i++ {
-		pNoiseOnly += real(fftOutput[i])*real(fftOutput[i]) + imag(fftOutput[i])*imag(fftOutput[i])
-	}
-
-	// Calculate bandwidths
-	videoPlusNoiseBins := v.getBin(2300.0) - v.getBin(1500.0) + 1
-	noiseOnlyBins := (v.getBin(800.0) - v.getBin(400.0) + 1) +
-		(v.getBin(3400.0) - v.getBin(2700.0) + 1)
+	// Calculate SNR
+	videoBins := maxBin - minBin + 1
+	noiseBins := (v.getBin(800.0) - v.getBin(400.0) + 1) + (v.getBin(3400.0) - v.getBin(2700.0) + 1)
 	receiverBins := v.getBin(3400.0) - v.getBin(400.0)
 
-	// Estimate noise and signal power
-	pNoise := pNoiseOnly * float64(receiverBins) / float64(noiseOnlyBins)
-	pSignal := pVideoPlusNoise - pNoiseOnly*float64(videoPlusNoiseBins)/float64(noiseOnlyBins)
+	pNoise := pNoiseOnly * float64(receiverBins) / float64(noiseBins)
+	pSignal := pVideoNoise - pNoiseOnly*float64(videoBins)/float64(noiseBins)
 
-	// Calculate SNR in dB (lower bound -20 dB)
-	ratio := pSignal / pNoise
-	if ratio < 0.01 {
-		v.snr = -20.0
-	} else {
-		v.snr = 10.0 * math.Log10(ratio)
+	if pSignal/pNoise < 0.01 {
+		return -20.0
 	}
+	return 10.0 * math.Log10(pSignal/pNoise)
 }
 
 // demodulateFrequency performs FM demodulation to extract frequency
-func (v *VideoDemodulator) demodulateFrequency(pcmBuffer []int16, sampleNum int, fftInput []float64, fftOutput []complex128, power []float64) float64 {
-	// Select window size based on SNR
-	winIdx := v.selectWindowIndex()
+func (v *VideoDemodulator) demodulateFrequency(pcmBuffer *CircularPCMBuffer, snr float64) float64 {
+	// Select window size based on SNR (adaptive windowing)
+	winIdx := 0
+	if v.adaptive {
+		switch {
+		case snr >= 20:
+			winIdx = 0
+		case snr >= 10:
+			winIdx = 1
+		case snr >= 9:
+			winIdx = 2
+		case snr >= 3:
+			winIdx = 3
+		case snr >= -5:
+			winIdx = 4
+		case snr >= -10:
+			winIdx = 5
+		default:
+			winIdx = 6
+		}
 
-	// Special case for Scottie DX - use larger window
-	if v.mode.VIS == ModeSDX && winIdx < 6 {
-		winIdx++
-	}
-
-	winLength := v.hannLengths[winIdx]
-	hannWindow := v.hannWindows[winIdx]
-
-	// Clear buffers
-	for i := range fftInput {
-		fftInput[i] = 0
-	}
-	for i := range power {
-		power[i] = 0
-	}
-
-	// Apply Hann window
-	for i := 0; i < winLength; i++ {
-		idx := sampleNum + i - winLength/2
-		if idx >= 0 && idx < len(pcmBuffer) {
-			fftInput[i] = float64(pcmBuffer[idx]) / 32768.0 * hannWindow[i]
+		// Minimum window length can be doubled for Scottie DX
+		if v.mode.Name == "Scottie DX" && winIdx < 6 {
+			winIdx++
 		}
 	}
 
-	// Perform FFT
-	fft(fftInput, fftOutput)
+	winLength := v.hannLens[winIdx]
 
-	// Find bin with most power in video band (1500-2300 Hz)
+	// Get window
+	if pcmBuffer.Available() < winLength {
+		return 1500.0 + float64(v.headerShift)
+	}
+
+	windowOffset := pcmBuffer.Available() - winLength
+	samples, err := pcmBuffer.GetWindowAbsolute(windowOffset, winLength)
+	if err != nil {
+		return 1500.0 + float64(v.headerShift)
+	}
+
+	// Apply Hann window
+	for i := 0; i < len(v.fftInput); i++ {
+		v.fftInput[i] = 0
+	}
+	for i := 0; i < winLength && i < len(v.fftInput); i++ {
+		if i < len(v.hannWindows[winIdx]) {
+			v.fftInput[i] = float64(samples[i]) / 32768.0 * v.hannWindows[winIdx][i]
+		}
+	}
+
+	// FFT
+	fft(v.fftInput, v.fftOutput)
+
+	// Find peak frequency
 	maxBin := 0
 	maxPower := 0.0
-
 	minBin := v.getBin(1500.0+float64(v.headerShift)) - 1
 	maxBinLimit := v.getBin(2300.0+float64(v.headerShift)) + 1
 
-	for i := minBin; i <= maxBinLimit && i >= 0 && i < len(fftOutput); i++ {
-		power[i] = real(fftOutput[i])*real(fftOutput[i]) + imag(fftOutput[i])*imag(fftOutput[i])
-		if power[i] > maxPower {
-			maxPower = power[i]
+	powers := make([]float64, v.fftSize)
+	for i := minBin; i <= maxBinLimit && i < len(v.fftOutput); i++ {
+		powers[i] = v.power(v.fftOutput[i])
+		if powers[i] > maxPower {
+			maxPower = powers[i]
 			maxBin = i
 		}
 	}
 
-	// Gaussian interpolation for peak frequency
+	// Gaussian interpolation
 	var freq float64
+	if maxBin > minBin && maxBin < maxBinLimit && powers[maxBin] > 0 && powers[maxBin-1] > 0 && powers[maxBin+1] > 0 {
+		numerator := powers[maxBin+1] / powers[maxBin-1]
+		denominator := (powers[maxBin] * powers[maxBin]) / (powers[maxBin+1] * powers[maxBin-1])
 
-	if maxBin > minBin && maxBin < maxBinLimit &&
-		power[maxBin] > 0 && power[maxBin-1] > 0 && power[maxBin+1] > 0 {
-
-		delta := math.Log(power[maxBin+1]/power[maxBin-1]) /
-			(2.0 * math.Log(power[maxBin]*power[maxBin]/(power[maxBin+1]*power[maxBin-1])))
-
-		freq = (float64(maxBin) + delta) / float64(v.fftSize) * v.sampleRate
+		if numerator > 0 && denominator > 0 {
+			delta := math.Log(numerator) / (2.0 * math.Log(denominator))
+			freq = (float64(maxBin) + delta) / float64(v.fftSize) * v.sampleRate
+		} else {
+			freq = float64(maxBin) / float64(v.fftSize) * v.sampleRate
+		}
 	} else {
 		// Clip if out of bounds
 		if maxBin > v.getBin(1900.0+float64(v.headerShift)) {
@@ -277,50 +526,61 @@ func (v *VideoDemodulator) demodulateFrequency(pcmBuffer []int16, sampleNum int,
 	return freq
 }
 
-// convertAndOutputLine converts a line from YUV/GBR to RGB and stores in output buffer
-func (v *VideoDemodulator) convertAndOutputLine(y int, pixels []uint8) {
+// convertToRGB converts the image array to RGB byte array
+func (v *VideoDemodulator) convertToRGB(image [][][]uint8) []uint8 {
 	m := v.mode
+	rgb := make([]uint8, m.ImgWidth*m.NumLines*3)
 
-	// Calculate line offset in output buffer
-	lineOffset := y * m.ImgWidth * 3
+	for y := 0; y < m.NumLines; y++ {
+		for x := 0; x < m.ImgWidth; x++ {
+			offset := (y*m.ImgWidth + x) * 3
 
-	for x := 0; x < m.ImgWidth; x++ {
-		pixelOffset := lineOffset + x*3
+			switch m.ColorEnc {
+			case ColorRGB:
+				rgb[offset] = image[x][y][0]
+				rgb[offset+1] = image[x][y][1]
+				rgb[offset+2] = image[x][y][2]
 
-		switch m.ColorEnc {
-		case ColorRGB:
-			// Direct RGB
-			pixels[pixelOffset+0] = v.image[x][y][0]
-			pixels[pixelOffset+1] = v.image[x][y][1]
-			pixels[pixelOffset+2] = v.image[x][y][2]
+			case ColorGBR:
+				rgb[offset] = image[x][y][2]
+				rgb[offset+1] = image[x][y][0]
+				rgb[offset+2] = image[x][y][1]
 
-		case ColorGBR:
-			// GBR to RGB
-			pixels[pixelOffset+0] = v.image[x][y][2] // R from B channel
-			pixels[pixelOffset+1] = v.image[x][y][0] // G from G channel
-			pixels[pixelOffset+2] = v.image[x][y][1] // B from R channel
+			case ColorYUV:
+				r := clip((100*float64(image[x][y][0]) + 140*float64(image[x][y][1]) - 17850) / 100.0)
+				g := clip((100*float64(image[x][y][0]) - 71*float64(image[x][y][1]) - 33*float64(image[x][y][2]) + 13260) / 100.0)
+				b := clip((100*float64(image[x][y][0]) + 178*float64(image[x][y][2]) - 22695) / 100.0)
+				rgb[offset] = r
+				rgb[offset+1] = g
+				rgb[offset+2] = b
 
-		case ColorYUV, ColorYUVY:
-			// YUV to RGB conversion
-			Y := float64(v.image[x][y][0])
-			U := float64(v.image[x][y][1]) // R-Y
-			V := float64(v.image[x][y][2]) // B-Y
-
-			// Convert using standard YUV formulas
-			// R = Y + 1.140 * V
-			// G = Y - 0.395 * U - 0.581 * V
-			// B = Y + 2.032 * U
-			// But the original uses different coefficients:
-			pixels[pixelOffset+0] = clip((100*Y + 140*U - 17850) / 100.0)
-			pixels[pixelOffset+1] = clip((100*Y - 71*U - 33*V + 13260) / 100.0)
-			pixels[pixelOffset+2] = clip((100*Y + 178*V - 22695) / 100.0)
-
-		case ColorBW:
-			// Black and white
-			lum := v.image[x][y][0]
-			pixels[pixelOffset+0] = lum
-			pixels[pixelOffset+1] = lum
-			pixels[pixelOffset+2] = lum
+			case ColorBW:
+				rgb[offset] = image[x][y][0]
+				rgb[offset+1] = image[x][y][0]
+				rgb[offset+2] = image[x][y][0]
+			}
 		}
 	}
+
+	return rgb
+}
+
+// Helper functions
+
+func (v *VideoDemodulator) getBin(freq float64) int {
+	return int(freq / v.sampleRate * float64(v.fftSize))
+}
+
+func (v *VideoDemodulator) power(c complex128) float64 {
+	return real(c)*real(c) + imag(c)*imag(c)
+}
+
+func clip(value float64) uint8 {
+	if value < 0 {
+		return 0
+	}
+	if value > 255 {
+		return 255
+	}
+	return uint8(value)
 }

@@ -260,15 +260,17 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 
 				// Bit 0: 1300 Hz (refFreq - 600)
 				// Bit 1: 1100 Hz (refFreq - 800)
-				if freq > refFreq-625 && freq < refFreq-575 {
+				// Use wider tolerance (±50 Hz) for better reliability at 12kHz
+				// slowrx uses ±25 Hz at 44.1kHz, but we have better frequency resolution
+				if freq > refFreq-650 && freq < refFreq-550 {
 					bits[k] = 0 // 1300 Hz
 					log.Printf("[SSTV VIS] Bit %d [idx=%d]: freq=%.1f Hz -> 0 (1300 Hz nominal)", k, toneIdx, freq)
-				} else if freq > refFreq-825 && freq < refFreq-775 {
+				} else if freq > refFreq-850 && freq < refFreq-750 {
 					bits[k] = 1 // 1100 Hz
 					log.Printf("[SSTV VIS] Bit %d [idx=%d]: freq=%.1f Hz -> 1 (1100 Hz nominal)", k, toneIdx, freq)
 				} else {
 					log.Printf("[SSTV VIS] Bit %d [idx=%d]: freq=%.1f Hz INVALID (need %.1f-%.1f for 0, or %.1f-%.1f for 1)",
-						k, toneIdx, freq, refFreq-625, refFreq-575, refFreq-825, refFreq-775)
+						k, toneIdx, freq, refFreq-650, refFreq-550, refFreq-850, refFreq-750)
 					validBits = false
 					break
 				}

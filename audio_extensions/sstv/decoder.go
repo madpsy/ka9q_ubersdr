@@ -174,9 +174,15 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 			case StateInit, StateWaitingVIS:
 				// Try to detect VIS code
 				if err := d.detectVIS(pcmBuffer, resultChan); err == nil {
+					log.Printf("[SSTV] VIS detected, transitioning to video decoding")
 					d.state = StateDecodingVideo
 				} else {
 					// VIS not found yet, keep trying
+					// Log occasionally to show we're still running
+					if d.visDetector != nil && d.visDetector.iterationCount%500 == 0 {
+						log.Printf("[SSTV] Main loop: Still waiting for VIS (iteration %d, buffer=%d)",
+							d.visDetector.iterationCount, pcmBuffer.Available())
+					}
 					time.Sleep(10 * time.Millisecond)
 				}
 

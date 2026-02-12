@@ -87,11 +87,17 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 
 	// Need enough samples for 20ms FFT window
 	if pcmBuffer.Available() < samps20ms {
-		if v.iterationCount%50 == 0 {
-			log.Printf("[SSTV VIS] Waiting for samples (have %d, need %d)",
-				pcmBuffer.Available(), samps20ms)
+		if v.iterationCount <= 5 || v.iterationCount%50 == 0 {
+			log.Printf("[SSTV VIS] Iteration %d: Waiting for samples (have %d, need %d)",
+				v.iterationCount, pcmBuffer.Available(), samps20ms)
 		}
 		return 0, 0, false, false
+	}
+
+	// Log progress every 100 iterations
+	if v.iterationCount%100 == 0 {
+		log.Printf("[SSTV VIS] Iteration %d: Processing (buffer=%d samples, freq detection active)",
+			v.iterationCount, pcmBuffer.Available())
 	}
 
 	// Get 20ms window for FFT - get the LATEST 20ms of audio

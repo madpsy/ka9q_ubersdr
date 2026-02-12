@@ -221,6 +221,7 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 func (d *SSTVDecoder) detectVISStreaming(pcmBuffer *CircularPCMBuffer, resultChan chan<- []byte) error {
 	// Create VIS detector if not exists
 	if d.visDetector == nil {
+		log.Printf("[SSTV] Creating VIS detector with sample rate %.1f Hz", d.sampleRate)
 		d.visDetector = NewVISDetector(d.sampleRate)
 
 		// Set tone frequency callback to send updates to frontend (with throttling)
@@ -232,11 +233,18 @@ func (d *SSTVDecoder) detectVISStreaming(pcmBuffer *CircularPCMBuffer, resultCha
 				d.lastToneFreqReport = now
 			}
 		})
+
+		log.Printf("[SSTV] VIS detector created, starting detection loop")
 	}
 
 	// Try to detect VIS using streaming approach
 	modeIdx, headerShift, isExtended, ok := d.visDetector.DetectVISStreaming(pcmBuffer)
 	if !ok {
+		// Log occasionally to show we're still trying
+		if d.visDetector.iterationCount%100 == 0 {
+			log.Printf("[SSTV] VIS detection iteration %d, buffer has %d samples",
+				d.visDetector.iterationCount, pcmBuffer.Available())
+		}
 		return fmt.Errorf("VIS not found yet")
 	}
 

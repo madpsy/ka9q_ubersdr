@@ -102,6 +102,12 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 
 	v.iterationCount++
 
+	// Log first iteration
+	if v.iterationCount == 1 {
+		log.Printf("[SSTV VIS] Starting VIS detection: samps10ms=%d, samps20ms=%d, buffer=%d",
+			samps10ms, samps20ms, pcmBuffer.Available())
+	}
+
 	// We need enough samples to:
 	// 1. Have a 20ms window for FFT analysis
 	// 2. Have accumulated enough history for VIS pattern detection (at least 450ms for 8-bit VIS)
@@ -112,6 +118,10 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 	}
 
 	if pcmBuffer.Available() < minRequired {
+		if v.iterationCount%50 == 0 {
+			log.Printf("[SSTV VIS] Iteration %d: waiting for samples (have %d, need %d)",
+				v.iterationCount, pcmBuffer.Available(), minRequired)
+		}
 		return 0, 0, false, false
 	}
 
@@ -124,8 +134,8 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *CircularPCMBuffer) (uint8, int
 	windowOffset := pcmBuffer.Available() - samps20ms
 	window, err := pcmBuffer.GetWindowAbsolute(windowOffset, samps20ms)
 	if err != nil {
-		log.Printf("[SSTV VIS] Failed to get FFT window: %v (available=%d, need=%d)",
-			err, pcmBuffer.Available(), samps20ms)
+		log.Printf("[SSTV VIS] Failed to get FFT window: %v (available=%d, offset=%d, need=%d)",
+			err, pcmBuffer.Available(), windowOffset, samps20ms)
 		return 0, 0, false, false
 	}
 

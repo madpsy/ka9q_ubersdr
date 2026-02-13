@@ -699,7 +699,7 @@ class SSTVExtension extends DecoderExtension {
         const progress = Math.round((line / this.imageHeight) * 100);
         const statusEl = document.getElementById('sstv-status');
         if (statusEl) {
-            statusEl.textContent = `Decoding: ${progress}% (line ${line}/${this.imageHeight})`;
+            statusEl.textContent = `Decoding: ${progress}%`;
         }
 
         // Update line count display

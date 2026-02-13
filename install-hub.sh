@@ -369,6 +369,10 @@ echo "Fetching generate_wisdom.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/generate_wisdom.sh -o "$ACTUAL_HOME/ubersdr/generate_wisdom.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/generate_wisdom.sh"
 
+echo "Fetching get-password.sh script..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/get-password.sh -o "$ACTUAL_HOME/ubersdr/get-password.sh"
+chmod +x "$ACTUAL_HOME/ubersdr/get-password.sh"
+
 echo "Fetching rotctld.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/rotctld.sh -o "$ACTUAL_HOME/ubersdr/rotctld.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/rotctld.sh"

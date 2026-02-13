@@ -167,7 +167,8 @@ func (v *VideoDemodulator) GetPixelGrid(rate float64, skip int) []PixelInfo {
 			for channel := 0; channel < numChans; channel++ {
 				for x := 0; x < m.ImgWidth; x++ {
 					t := float64(y)/2*m.LineTime + chanStart[channel] + m.PixelTime*(float64(x)+0.5)
-					sampleNum := int(math.Round(rate*t)) + skip
+					// Pixel times are relative to video start, skip not added here
+					sampleNum := int(math.Round(rate * t))
 
 					if channel == 0 {
 						pixels = append(pixels, PixelInfo{Time: sampleNum, X: x, Y: y, Channel: 0})
@@ -202,7 +203,9 @@ func (v *VideoDemodulator) GetPixelGrid(rate float64, skip int) []PixelInfo {
 
 					// slowrx video.c:196-197 - use the determined channel for ChanLen lookup
 					t := float64(y)*m.LineTime + chanStart[channel] + (float64(x)-0.5)/float64(m.ImgWidth)*chanLen[ch]
-					sampleNum := int(math.Round(rate*t)) + skip
+					// Pixel times are relative to video start (sampleNum=0 in demodulation loop)
+					// skip is used separately to position buffer, not added to pixel times
+					sampleNum := int(math.Round(rate * t))
 
 					pixels = append(pixels, PixelInfo{Time: sampleNum, X: x, Y: y, Channel: ch})
 				}

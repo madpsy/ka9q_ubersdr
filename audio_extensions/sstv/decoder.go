@@ -192,8 +192,8 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 					}
 
 				case StateDecodingVideo:
-					// Decode video
-					if err := d.decodeVideo(pcmBuffer, resultChan); err != nil {
+					// Decode video - pass audioChan so it can refill buffer
+					if err := d.decodeVideo(pcmBuffer, audioChan, resultChan); err != nil {
 						log.Printf("[SSTV] Video decoding failed: %v", err)
 						d.state = StateWaitingVIS
 						pcmBuffer.Reset()
@@ -255,8 +255,24 @@ func (d *SSTVDecoder) detectVIS(pcmBuffer *SlidingPCMBuffer, resultChan chan<- [
 	return nil
 }
 
+// ensureBufferFilled reads from audio channel to keep buffer filled
+// This is called by video decoder when it needs more samples
+func (d *SSTVDecoder) ensureBufferFilled(pcmBuffer *SlidingPCMBuffer, audioChan <-chan []int16, minSamples int) {
+	for pcmBuffer.Available() < minSamples {
+		select {
+		case samples, ok := <-audioChan:
+			if !ok {
+				return
+			}
+			pcmBuffer.Write(samples)
+		case <-d.stopChan:
+			return
+		}
+	}
+}
+
 // decodeVideo decodes the video signal
-func (d *SSTVDecoder) decodeVideo(pcmBuffer *SlidingPCMBuffer, resultChan chan<- []byte) error {
+func (d *SSTVDecoder) decodeVideo(pcmBuffer *SlidingPCMBuffer, audioChan <-chan []int16, resultChan chan<- []byte) error {
 	log.Printf("[SSTV] Starting video demodulation...")
 
 	d.sendStatus(resultChan, fmt.Sprintf("Decoding %s...", d.mode.Name))
@@ -264,11 +280,44 @@ func (d *SSTVDecoder) decodeVideo(pcmBuffer *SlidingPCMBuffer, resultChan chan<-
 	// Create video demodulator
 	d.videoDemod = NewVideoDemodulator(d.mode, d.sampleRate, d.headerShift, d.config.Adaptive)
 
+	// Ensure we have enough samples for video decoding
+	// Video needs much more data than VIS detection
+	d.ensureBufferFilled(pcmBuffer, audioChan, 8192)
+
 	// Initial decode without sync correction
 	rate := d.sampleRate
 	skip := 0
 
+	// Start a goroutine to keep buffer filled during video decoding
+	stopFeeding := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stopFeeding:
+				return
+			case <-d.stopChan:
+				return
+			default:
+				// Keep buffer filled (like slowrx readPcm in video loop)
+				if pcmBuffer.Available() < 2048 {
+					select {
+					case samples, ok := <-audioChan:
+						if !ok {
+							return
+						}
+						pcmBuffer.Write(samples)
+					case <-stopFeeding:
+						return
+					case <-d.stopChan:
+						return
+					}
+				}
+			}
+		}
+	}()
+
 	pixels, err := d.videoDemod.Demodulate(pcmBuffer, rate, skip)
+	close(stopFeeding) // Stop the feeding goroutine
 	if err != nil {
 		return fmt.Errorf("video demodulation failed: %w", err)
 	}

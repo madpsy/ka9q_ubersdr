@@ -243,6 +243,11 @@ func (d *SSTVDecoder) detectVIS(pcmBuffer *SlidingPCMBuffer, resultChan chan<- [
 	if d.visDetector == nil {
 		log.Printf("[SSTV] Creating VIS detector with sample rate %.1f Hz", d.sampleRate)
 		d.visDetector = NewVISDetector(d.sampleRate)
+
+		// Set up tone frequency callback
+		d.visDetector.SetToneCallback(func(freq float64) {
+			d.sendToneFreq(resultChan, freq)
+		})
 	}
 
 	// Try to detect VIS
@@ -492,4 +497,23 @@ func (d *SSTVDecoder) sendRedrawStart(resultChan chan<- []byte) {
 	}
 
 	log.Printf("[SSTV] Sent redraw start signal")
+}
+
+// sendToneFreq sends the current detected tone frequency
+func (d *SSTVDecoder) sendToneFreq(resultChan chan<- []byte, freq float64) {
+	// [type:1][freq:4] - frequency in Hz * 10 for 0.1 Hz precision
+	msg := make([]byte, 5)
+	msg[0] = MsgTypeToneFreq
+
+	// Convert frequency to uint32 (freq * 10 for 0.1 Hz precision)
+	freqTimes10 := uint32(freq * 10.0)
+	msg[1] = byte(freqTimes10 >> 24)
+	msg[2] = byte(freqTimes10 >> 16)
+	msg[3] = byte(freqTimes10 >> 8)
+	msg[4] = byte(freqTimes10)
+
+	select {
+	case resultChan <- msg:
+	default:
+	}
 }

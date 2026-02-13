@@ -359,20 +359,63 @@ func (r *RotctlClient) GetPosition() (*Position, error) {
 		return nil, err
 	}
 
-	lines := strings.Split(strings.TrimSpace(response), "\n")
+	// Parse response format: "AZ=xxx  EL=yyy" or two lines with numbers
+	responseStr := strings.TrimSpace(response)
+
+	// Check if response contains "AZ=" and "EL=" (GS-232B format)
+	if strings.Contains(responseStr, "AZ=") && strings.Contains(responseStr, "EL=") {
+		var azimuth, elevation float64
+
+		// Extract azimuth value after "AZ="
+		azStart := strings.Index(responseStr, "AZ=")
+		if azStart != -1 {
+			azStr := responseStr[azStart+3:]
+			// Find the end of the azimuth number (space or EL=)
+			azEnd := strings.IndexAny(azStr, " E")
+			if azEnd != -1 {
+				azStr = azStr[:azEnd]
+			}
+			azimuth, err = strconv.ParseFloat(strings.TrimSpace(azStr), 64)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse azimuth from '%s': %w", azStr, err)
+			}
+		}
+
+		// Extract elevation value after "EL="
+		elStart := strings.Index(responseStr, "EL=")
+		if elStart != -1 {
+			elStr := responseStr[elStart+3:]
+			// Find the end of the elevation number (newline or end of string)
+			elEnd := strings.IndexAny(elStr, "\r\n")
+			if elEnd != -1 {
+				elStr = elStr[:elEnd]
+			}
+			elevation, err = strconv.ParseFloat(strings.TrimSpace(elStr), 64)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse elevation from '%s': %w", elStr, err)
+			}
+		}
+
+		return &Position{
+			Azimuth:   azimuth,
+			Elevation: elevation,
+		}, nil
+	}
+
+	// Fallback: try parsing as two lines with numbers (standard rotctld format)
+	lines := strings.Split(responseStr, "\n")
 	if len(lines) < 2 {
-		return nil, fmt.Errorf("invalid position response: expected 2 lines, got %d", len(lines))
+		return nil, fmt.Errorf("invalid position response: expected 'AZ=xxx EL=yyy' or 2 lines, got: %s", responseStr)
 	}
 
-	// Note: rotctld returns elevation first, then azimuth
-	elevation, err := strconv.ParseFloat(strings.TrimSpace(lines[0]), 64)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse elevation: %w", err)
-	}
-
-	azimuth, err := strconv.ParseFloat(strings.TrimSpace(lines[1]), 64)
+	azimuth, err := strconv.ParseFloat(strings.TrimSpace(lines[0]), 64)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse azimuth: %w", err)
+	}
+
+	elevation, err := strconv.ParseFloat(strings.TrimSpace(lines[1]), 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse elevation: %w", err)
 	}
 
 	return &Position{

@@ -38,7 +38,28 @@ type VideoDemodulator struct {
 // NewVideoDemodulator creates a new video demodulator
 func NewVideoDemodulator(mode *ModeSpec, sampleRate float64, headerShift int, adaptive bool) *VideoDemodulator {
 	// Initialize Hann windows of different lengths (for adaptive windowing)
-	hannLens := []int{48, 64, 96, 128, 256, 512, 1024}
+	// slowrx uses fixed lengths [48, 64, 96, 128, 256, 512, 1024] at 44.1kHz
+	// We must scale these by sample rate to maintain the same TIME duration
+	// At 12kHz: [13, 17, 26, 35, 70, 139, 279]
+	// At 44.1kHz: [48, 64, 96, 128, 256, 512, 1024] (original)
+	scaleFactor := sampleRate / 44100.0
+	hannLens := []int{
+		int(math.Round(48 * scaleFactor)),
+		int(math.Round(64 * scaleFactor)),
+		int(math.Round(96 * scaleFactor)),
+		int(math.Round(128 * scaleFactor)),
+		int(math.Round(256 * scaleFactor)),
+		int(math.Round(512 * scaleFactor)),
+		int(math.Round(1024 * scaleFactor)),
+	}
+
+	// Ensure minimum window size of at least 8 samples
+	for i := range hannLens {
+		if hannLens[i] < 8 {
+			hannLens[i] = 8
+		}
+	}
+
 	hannWindows := make([][]float64, len(hannLens))
 
 	for j, length := range hannLens {

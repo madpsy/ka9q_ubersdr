@@ -71,11 +71,8 @@ func (b *SlidingPCMBuffer) Write(samples []int16) {
 
 		// Move WindowPtr back (like slowrx line 61)
 		b.windowPtr -= numSamples
-		// Keep windowPtr at a safe minimum to allow backwards reads
-		// VIS detection needs to read back ~240 samples from windowPtr
-		if b.windowPtr < 512 {
-			b.windowPtr = 512
-		}
+		// Note: No clamp needed - VIS detection completes before windowPtr gets too low,
+		// and video demodulation can handle windowPtr decreasing naturally
 	}
 }
 

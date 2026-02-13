@@ -180,18 +180,41 @@ class SSTVExtension extends DecoderExtension {
         return imageData;
     }
     
+    updateCurrentImageDisplay() {
+        // Update only the current image's display canvas without rebuilding the grid
+        // This prevents the CSS animation from restarting on every update
+        if (this.currentImageIndex === null || !this.images[this.currentImageIndex]) {
+            return;
+        }
+
+        const grid = document.getElementById('sstv-image-grid');
+        if (!grid) return;
+
+        // Find the current image item in the grid (it's the first child since current is at index 0)
+        const currentItem = grid.children[this.currentImageIndex];
+        if (!currentItem) return;
+
+        // Find the canvas within this item
+        const displayCanvas = currentItem.querySelector('canvas');
+        if (!displayCanvas) return;
+
+        // Update the canvas content
+        const displayCtx = displayCanvas.getContext('2d');
+        displayCtx.drawImage(this.currentCanvas, 0, 0);
+
+        // Also update the line count display in the info bar
+        const lineCountEl = document.getElementById('sstv-line-count');
+        if (lineCountEl) {
+            lineCountEl.textContent = `${this.currentLine}/${this.imageHeight}`;
+        }
+    }
+
     renderGrid() {
         const grid = document.getElementById('sstv-image-grid');
         if (!grid) return;
 
         // Clear grid
         grid.innerHTML = '';
-
-        // Debug: log all image modes and object identities before rendering
-        console.log('SSTV: renderGrid() - Image count:', this.images.length);
-        this.images.forEach((img, i) => {
-            console.log(`SSTV: Image[${i}] mode="${img.mode}" timestamp=${img.timestamp.toISOString()}`);
-        });
 
         // Render all images
         this.images.forEach((imageData, index) => {
@@ -218,7 +241,6 @@ class SSTVExtension extends DecoderExtension {
                 const modeSpan = document.createElement('div');
                 modeSpan.className = 'sstv-image-mode';
                 modeSpan.textContent = imageData.mode;
-                console.log(`SSTV: Rendering image ${index} with mode: ${imageData.mode}`);
                 info.appendChild(modeSpan);
             }
 
@@ -711,10 +733,9 @@ class SSTVExtension extends DecoderExtension {
 
         this.currentLine = line + 1;
 
-        // Update grid display periodically (every 10 lines to avoid too many redraws)
-        if (line % 10 === 0) {
-            this.renderGrid();
-        }
+        // Update the current image's display canvas on every line
+        // Since we're not rebuilding the grid, this is efficient
+        this.updateCurrentImageDisplay();
 
         // Update progress
         const progress = Math.round((line / this.imageHeight) * 100);

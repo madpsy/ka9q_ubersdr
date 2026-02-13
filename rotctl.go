@@ -364,14 +364,15 @@ func (r *RotctlClient) GetPosition() (*Position, error) {
 		return nil, fmt.Errorf("invalid position response: expected 2 lines, got %d", len(lines))
 	}
 
-	azimuth, err := strconv.ParseFloat(strings.TrimSpace(lines[0]), 64)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse azimuth: %w", err)
-	}
-
-	elevation, err := strconv.ParseFloat(strings.TrimSpace(lines[1]), 64)
+	// Note: rotctld returns elevation first, then azimuth
+	elevation, err := strconv.ParseFloat(strings.TrimSpace(lines[0]), 64)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse elevation: %w", err)
+	}
+
+	azimuth, err := strconv.ParseFloat(strings.TrimSpace(lines[1]), 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse azimuth: %w", err)
 	}
 
 	return &Position{

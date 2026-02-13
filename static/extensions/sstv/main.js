@@ -162,11 +162,17 @@ class SSTVExtension extends DecoderExtension {
             complete: false
         };
 
+        console.log('SSTV: Creating new image with mode:', imageData.mode, 'from this.detectedMode:', this.detectedMode);
+        console.log('SSTV: Before unshift, images array length:', this.images.length);
+
         // Insert at beginning of array (top-left position)
         this.images.unshift(imageData);
         this.currentImageIndex = 0;
         this.currentCanvas = canvas;
         this.currentCtx = ctx;
+
+        console.log('SSTV: After unshift, images array length:', this.images.length);
+        console.log('SSTV: All image modes after unshift:', this.images.map((img, i) => `[${i}]: ${img.mode}`));
 
         this.renderGrid();
 
@@ -177,10 +183,16 @@ class SSTVExtension extends DecoderExtension {
     renderGrid() {
         const grid = document.getElementById('sstv-image-grid');
         if (!grid) return;
-        
+
         // Clear grid
         grid.innerHTML = '';
-        
+
+        // Debug: log all image modes and object identities before rendering
+        console.log('SSTV: renderGrid() - Image count:', this.images.length);
+        this.images.forEach((img, i) => {
+            console.log(`SSTV: Image[${i}] mode="${img.mode}" timestamp=${img.timestamp.toISOString()}`);
+        });
+
         // Render all images
         this.images.forEach((imageData, index) => {
             const item = document.createElement('div');
@@ -188,44 +200,45 @@ class SSTVExtension extends DecoderExtension {
             if (index === this.currentImageIndex && !imageData.complete) {
                 item.classList.add('decoding');
             }
-            
+
             // Clone canvas for display
             const displayCanvas = document.createElement('canvas');
             displayCanvas.width = imageData.canvas.width;
             displayCanvas.height = imageData.canvas.height;
             const displayCtx = displayCanvas.getContext('2d');
             displayCtx.drawImage(imageData.canvas, 0, 0);
-            
+
             item.appendChild(displayCanvas);
-            
+
             // Add info overlay
             const info = document.createElement('div');
             info.className = 'sstv-image-info';
-            
+
             if (imageData.mode) {
                 const modeSpan = document.createElement('div');
                 modeSpan.className = 'sstv-image-mode';
                 modeSpan.textContent = imageData.mode;
+                console.log(`SSTV: Rendering image ${index} with mode: ${imageData.mode}`);
                 info.appendChild(modeSpan);
             }
-            
+
             if (imageData.callsign) {
                 const callsignSpan = document.createElement('div');
                 callsignSpan.className = 'sstv-image-callsign';
                 callsignSpan.textContent = imageData.callsign;
                 info.appendChild(callsignSpan);
             }
-            
+
             const timeSpan = document.createElement('div');
             timeSpan.className = 'sstv-image-time';
             timeSpan.textContent = imageData.timestamp.toLocaleTimeString();
             info.appendChild(timeSpan);
-            
+
             item.appendChild(info);
-            
+
             // Click handler to show enlarged view
             item.onclick = () => this.showEnlargedImage(imageData);
-            
+
             grid.appendChild(item);
         });
     }
@@ -626,19 +639,20 @@ class SSTVExtension extends DecoderExtension {
         console.log('SSTV: Current image index:', this.currentImageIndex);
         console.log('SSTV: Images array length:', this.images.length);
 
+        // Store mode for when image is created (VIS code comes before IMAGE_START)
         this.detectedMode = modeName;
 
-        // Update current image mode
+        // Update current image mode ONLY if an image already exists
+        // (This handles the case where mode is detected after image creation)
         if (this.currentImageIndex !== null && this.images[this.currentImageIndex]) {
-            console.log('SSTV: Updating image mode to:', modeName);
-            this.images[this.currentImageIndex].mode = modeName;
-            console.log('SSTV: Image mode after update:', this.images[this.currentImageIndex].mode);
+            console.log('SSTV: Updating existing image mode to:', modeName);
+            // Create a copy of the image object to avoid reference issues
+            const currentImage = this.images[this.currentImageIndex];
+            currentImage.mode = modeName;
+            console.log('SSTV: Image mode after update:', currentImage.mode);
             this.renderGrid();
         } else {
-            console.warn('SSTV: Cannot update mode - no current image', {
-                currentImageIndex: this.currentImageIndex,
-                imagesLength: this.images.length
-            });
+            console.log('SSTV: Mode stored for next image creation');
         }
 
         // Update mode display

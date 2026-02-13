@@ -148,29 +148,29 @@ class SSTVExtension extends DecoderExtension {
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
-        
+
         // Fill with black
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, width, height);
-        
+
         const imageData = {
             canvas: canvas,
             ctx: ctx,
-            mode: null,
-            callsign: null,
+            mode: this.detectedMode || null,  // Use already-detected mode if available
+            callsign: this.fskCallsign || null,  // Use already-detected callsign if available
             timestamp: new Date(),
             complete: false
         };
-        
+
         // Insert at beginning of array (top-left position)
         this.images.unshift(imageData);
         this.currentImageIndex = 0;
         this.currentCanvas = canvas;
         this.currentCtx = ctx;
-        
+
         this.renderGrid();
-        
-        console.log('SSTV: Created new image in grid:', width, 'x', height);
+
+        console.log('SSTV: Created new image in grid:', width, 'x', height, 'mode:', imageData.mode);
         return imageData;
     }
     

@@ -197,6 +197,15 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 			v.iterationCount, peakFreq)
 	}
 
+	// Extra logging when we detect frequencies near 1900 Hz (leader tone)
+	if peakFreq > 1850 && peakFreq < 1950 && v.iterationCount > 45 {
+		if v.iterationCount%10 == 0 { // Log every 10 iterations when near leader freq
+			log.Printf("[SSTV VIS] *** Near leader freq at iteration %d: %.1f Hz", v.iterationCount, peakFreq)
+			log.Printf("[SSTV VIS]     Recent tones: [0]=%.1f [3]=%.1f [6]=%.1f [9]=%.1f [12]=%.1f [15]=%.1f [42]=%.1f",
+				v.toneBuf[0], v.toneBuf[3], v.toneBuf[6], v.toneBuf[9], v.toneBuf[12], v.toneBuf[15], v.toneBuf[42])
+		}
+	}
+
 	// Copy frequencies from last 450ms to tone buffer (in chronological order)
 	for i := 0; i < len(v.toneBuf); i++ {
 		v.toneBuf[i] = v.headerBuf[(v.headerPtr+i)%len(v.headerBuf)]

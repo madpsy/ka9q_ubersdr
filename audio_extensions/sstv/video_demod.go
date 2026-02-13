@@ -251,7 +251,20 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 
 	// Like slowrx, we advance WindowPtr by 1 each sample during decode
 	// The buffer management keeps pace by shifting/refilling as needed
-	log.Printf("[SSTV Video] Starting decode at windowPtr=%d", pcmBuffer.GetWindowPtr())
+	windowPtr := pcmBuffer.GetWindowPtr()
+	available := pcmBuffer.Available()
+
+	log.Printf("[DEBUG] ========== VIDEO DECODE STARTING ==========")
+	log.Printf("[DEBUG] windowPtr=%d", windowPtr)
+	log.Printf("[DEBUG] available=%d samples", available)
+	log.Printf("[DEBUG] skip=%d", skip)
+	log.Printf("[DEBUG] rate=%.1f Hz", rate)
+	log.Printf("[DEBUG] First 10 pixel times:")
+	for i := 0; i < 10 && i < len(pixelGrid); i++ {
+		log.Printf("[DEBUG]   Pixel %d: Time=%d, X=%d, Y=%d, Channel=%d",
+			i, pixelGrid[i].Time, pixelGrid[i].X, pixelGrid[i].Y, pixelGrid[i].Channel)
+	}
+	log.Printf("[DEBUG] ============================================")
 
 	// Initialize image buffer
 	image := make([][][]uint8, m.ImgWidth)
@@ -323,6 +336,14 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 		// Place pixels
 		for pixelIdx < len(pixelGrid) && pixelGrid[pixelIdx].Time == sampleNum {
 			p := pixelGrid[pixelIdx]
+
+			// Debug first 10 pixel placements
+			if pixelIdx < 10 {
+				currentWindowPtr := pcmBuffer.GetWindowPtr()
+				log.Printf("[DEBUG] Placing pixel %d: sampleNum=%d, pixelTime=%d, windowPtr=%d, X=%d, Y=%d, Ch=%d",
+					pixelIdx, sampleNum, p.Time, currentWindowPtr, p.X, p.Y, p.Channel)
+			}
+
 			image[p.X][p.Y][p.Channel] = lum
 
 			// Some modes have R-Y & B-Y channels that are twice the height

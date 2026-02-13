@@ -595,6 +595,11 @@ class SSTVExtension extends DecoderExtension {
 
         this.createNewImage(width, height);
 
+        // Reset mode and callsign for next image
+        // (they will be set again when the next VIS code is detected)
+        this.detectedMode = null;
+        this.fskCallsign = null;
+
         // Update info display
         const imageSizeEl = document.getElementById('sstv-image-size');
         if (imageSizeEl) {

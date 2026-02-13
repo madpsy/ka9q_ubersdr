@@ -15,10 +15,10 @@ class SSTVExtension extends DecoderExtension {
 
         // Configuration
         this.config = {
-            auto_sync: true,
-            decode_fsk_id: true,
-            mmsstv_only: false,
-            auto_save: false
+            auto_sync: true,      // Always enabled - automatic slant correction
+            decode_fsk_id: true,  // Always enabled - decode FSK callsigns
+            mmsstv_only: false,   // Always disabled - support all 47 modes
+            auto_save: false      // User configurable
         };
 
         // State
@@ -388,16 +388,12 @@ class SSTVExtension extends DecoderExtension {
     }
 
     updateConfig() {
-        const autoSyncEl = document.getElementById('sstv-auto-sync');
-        const decodeFSKEl = document.getElementById('sstv-decode-fsk');
-        const mmsstvOnlyEl = document.getElementById('sstv-mmsstv-only');
         const autoSaveEl = document.getElementById('sstv-auto-save');
 
-        if (autoSyncEl) this.config.auto_sync = autoSyncEl.checked;
-        if (decodeFSKEl) this.config.decode_fsk_id = decodeFSKEl.checked;
-        if (mmsstvOnlyEl) this.config.mmsstv_only = mmsstvOnlyEl.checked;
+        // Only update user-configurable settings
         if (autoSaveEl) this.config.auto_save = autoSaveEl.checked;
 
+        // auto_sync, decode_fsk_id, and mmsstv_only are always set to their default values
         console.log('SSTV: Config updated:', this.config);
     }
 

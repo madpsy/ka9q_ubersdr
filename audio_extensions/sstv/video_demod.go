@@ -3,6 +3,7 @@ package sstv
 import (
 	"log"
 	"math"
+	"time"
 )
 
 /*
@@ -240,12 +241,34 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 
 	// Process signal
 	for sampleNum := 0; sampleNum < length; sampleNum++ {
-		// Check if we have enough samples ahead of WindowPtr
-		// If not enough, just continue with reduced window (like slowrx does)
-		if pcmBuffer.Available() < 128 {
-			log.Printf("[SSTV Video] Insufficient samples at sampleNum=%d (available=%d), ending decode",
-				sampleNum, pcmBuffer.Available())
+		// Wait for buffer to have enough samples (like slowrx readPcm blocking)
+		// This allows the main loop to continue feeding while we wait
+		waitCount := 0
+		for pcmBuffer.Available() < 128 {
+			if waitCount == 0 {
+				log.Printf("[SSTV Video] Buffer low at sample %d (available=%d), waiting for refill...",
+					sampleNum, pcmBuffer.Available())
+			}
+			time.Sleep(10 * time.Millisecond)
+			waitCount++
+
+			// Safety: if we've waited too long (>5 seconds), the audio stream might have ended
+			if waitCount > 500 {
+				log.Printf("[SSTV Video] Timeout waiting for samples at sampleNum=%d (waited %d ms), ending decode",
+					sampleNum, waitCount*10)
+				break
+			}
+		}
+
+		// If we timed out, break out of main loop
+		if waitCount > 500 {
 			break
+		}
+
+		// Log when buffer refills after waiting
+		if waitCount > 0 {
+			log.Printf("[SSTV Video] Buffer refilled after %d ms, continuing decode (now have %d samples)",
+				waitCount*10, pcmBuffer.Available())
 		}
 
 		// Sync detection

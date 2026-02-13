@@ -61,16 +61,23 @@ func (b *SlidingPCMBuffer) Write(samples []int16) {
 	numSamples := len(samples)
 
 	if b.windowPtr == 0 {
-		// First fill - fill entire buffer like slowrx (pcm.c:50-54)
-		for i := 0; i < numSamples && b.fillPos < b.size; i++ {
+		// First fill - fill enough for initial processing
+		// slowrx uses BUFLEN=4096, we use 8M but only need to fill a small portion initially
+		// Fill at least 16KB (enough for VIS detection and initial video decode)
+		minInitialFill := 16384
+		if minInitialFill > b.size {
+			minInitialFill = b.size
+		}
+
+		for i := 0; i < numSamples && b.fillPos < minInitialFill; i++ {
 			b.buffer[b.fillPos] = samples[i]
 			b.fillPos++
 		}
 
-		// Set windowPtr to middle once buffer is filled (pcm.c:54)
-		if b.fillPos >= b.size {
-			b.windowPtr = b.size / 2
-			b.writePos = b.size
+		// Set windowPtr to middle of filled region once we have enough (pcm.c:54)
+		if b.fillPos >= minInitialFill {
+			b.windowPtr = b.fillPos / 2
+			b.writePos = b.fillPos
 		}
 	} else {
 		// Normal operation: shift buffer backward and add new samples at end

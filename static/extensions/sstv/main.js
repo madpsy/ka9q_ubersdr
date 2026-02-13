@@ -737,6 +737,12 @@ class SSTVExtension extends DecoderExtension {
             modeEl.textContent = modeName;
         }
 
+        // Clear callsign display when new VIS detected
+        const callsignEl = document.getElementById('sstv-callsign-display');
+        if (callsignEl) {
+            callsignEl.textContent = '';
+        }
+
         this.radio.log(`SSTV: Mode detected - ${modeName}`);
     }
 

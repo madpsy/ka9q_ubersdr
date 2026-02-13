@@ -258,28 +258,40 @@ class SSTVExtension extends DecoderExtension {
 
             item.appendChild(displayCanvas);
 
-            // Add info overlay
+            // Add info overlay with left and right sections
             const info = document.createElement('div');
             info.className = 'sstv-image-info';
 
-            if (imageData.mode) {
-                const modeSpan = document.createElement('div');
-                modeSpan.className = 'sstv-image-mode';
-                modeSpan.textContent = imageData.mode;
-                info.appendChild(modeSpan);
-            }
+            // Left section: callsign and time
+            const infoLeft = document.createElement('div');
+            infoLeft.className = 'sstv-image-info-left';
 
             if (imageData.callsign) {
                 const callsignSpan = document.createElement('div');
                 callsignSpan.className = 'sstv-image-callsign';
                 callsignSpan.textContent = imageData.callsign;
-                info.appendChild(callsignSpan);
+                infoLeft.appendChild(callsignSpan);
             }
 
             const timeSpan = document.createElement('div');
             timeSpan.className = 'sstv-image-time';
             timeSpan.textContent = imageData.timestamp.toLocaleTimeString();
-            info.appendChild(timeSpan);
+            infoLeft.appendChild(timeSpan);
+
+            info.appendChild(infoLeft);
+
+            // Right section: mode
+            if (imageData.mode) {
+                const infoRight = document.createElement('div');
+                infoRight.className = 'sstv-image-info-right';
+
+                const modeSpan = document.createElement('div');
+                modeSpan.className = 'sstv-image-mode';
+                modeSpan.textContent = imageData.mode;
+                infoRight.appendChild(modeSpan);
+
+                info.appendChild(infoRight);
+            }
 
             item.appendChild(info);
 

@@ -273,18 +273,36 @@ input[type="checkbox"] {
     font-size: 10px;
     color: #ccc;
     display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 6px;
+}
+
+.sstv-image-info-left {
+    display: flex;
     flex-direction: column;
     gap: 2px;
+    flex: 1;
+}
+
+.sstv-image-info-right {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-end;
+    text-align: right;
 }
 
 .sstv-image-mode {
     font-weight: bold;
-    color: #4aff4a;
+    color: #4a9eff;
     font-size: 11px;
 }
 
 .sstv-image-callsign {
-    color: #4a9eff;
+    color: #4aff4a;
+    font-weight: bold;
 }
 
 .sstv-image-time {

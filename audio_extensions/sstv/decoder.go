@@ -152,6 +152,7 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 	// We need to process exactly 120 samples (10ms at 12kHz) per iteration
 	samps10ms := int(d.sampleRate * 10e-3)
 	accumulator := make([]int16, 0, samps10ms*2)
+	feedCount := 0
 
 	log.Printf("[SSTV] Processing in %d sample chunks (10ms at %.0f Hz)", samps10ms, d.sampleRate)
 
@@ -195,6 +196,7 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 				case StateDecodingVideo:
 					// Start video decoding in background, then immediately switch to feeding state
 					// This allows main loop to continue feeding buffer while video decodes
+					log.Printf("[SSTV Main] Launching video decoder goroutine, buffer has %d samples", pcmBuffer.Available())
 					go func() {
 						if err := d.decodeVideo(pcmBuffer, resultChan); err != nil {
 							log.Printf("[SSTV] Video decoding failed: %v", err)
@@ -208,17 +210,24 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 						}
 
 						// Signal completion and reset for next image
+						log.Printf("[SSTV Main] Video decode goroutine finished, resetting state")
 						d.state = StateWaitingVIS
 						pcmBuffer.Reset()
 					}()
 
 					// Switch to feeding state so main loop continues
 					d.state = StateFeedingVideo
+					log.Printf("[SSTV Main] Switched to StateFeedingVideo, main loop will continue feeding")
 
 				case StateFeedingVideo:
 					// Just keep feeding buffer while video decoding happens in background
-					// Video decoder will signal when done by changing state back to StateWaitingVIS
-					// No action needed here - just continue the loop to feed more samples
+					// Log every 100 chunks to show we're still feeding
+					if len(accumulator) == 0 { // Only log when we just processed a chunk
+						feedCount++
+						if feedCount%100 == 0 {
+							log.Printf("[SSTV Main] StateFeedingVideo: fed %d chunks, buffer now has %d samples", feedCount, pcmBuffer.Available())
+						}
+					}
 				}
 			}
 		}
@@ -267,7 +276,7 @@ func (d *SSTVDecoder) detectVIS(pcmBuffer *SlidingPCMBuffer, resultChan chan<- [
 // decodeVideo decodes the video signal
 // Note: This function is called from a goroutine, and the main loop continues feeding the buffer
 func (d *SSTVDecoder) decodeVideo(pcmBuffer *SlidingPCMBuffer, resultChan chan<- []byte) error {
-	log.Printf("[SSTV] Starting video demodulation...")
+	log.Printf("[SSTV Video Goroutine] Starting video demodulation, buffer has %d samples", pcmBuffer.Available())
 
 	d.sendStatus(resultChan, fmt.Sprintf("Decoding %s...", d.mode.Name))
 
@@ -280,7 +289,9 @@ func (d *SSTVDecoder) decodeVideo(pcmBuffer *SlidingPCMBuffer, resultChan chan<-
 
 	// Demodulate video from buffer
 	// The main loop continues to feed the buffer while we consume from it
+	log.Printf("[SSTV Video Goroutine] Calling Demodulate(), buffer has %d samples", pcmBuffer.Available())
 	pixels, err := d.videoDemod.Demodulate(pcmBuffer, rate, skip)
+	log.Printf("[SSTV Video Goroutine] Demodulate() returned, err=%v", err)
 	if err != nil {
 		return fmt.Errorf("video demodulation failed: %w", err)
 	}

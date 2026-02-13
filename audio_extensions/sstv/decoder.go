@@ -20,6 +20,7 @@ const (
 	StateInit DecoderState = iota
 	StateWaitingVIS
 	StateDecodingVideo
+	StateFeedingVideo
 	StateComplete
 )
 
@@ -192,24 +193,32 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 					}
 
 				case StateDecodingVideo:
-					// Decode video - pass audioChan so it can refill buffer
-					if err := d.decodeVideo(pcmBuffer, audioChan, resultChan); err != nil {
-						log.Printf("[SSTV] Video decoding failed: %v", err)
-						d.state = StateWaitingVIS
-						pcmBuffer.Reset()
-					} else {
-						// Video decoded successfully
-						log.Printf("[SSTV] Video decoding complete")
+					// Start video decoding in background, then immediately switch to feeding state
+					// This allows main loop to continue feeding buffer while video decodes
+					go func() {
+						if err := d.decodeVideo(pcmBuffer, resultChan); err != nil {
+							log.Printf("[SSTV] Video decoding failed: %v", err)
+						} else {
+							log.Printf("[SSTV] Video decoding complete")
 
-						// Optionally decode FSK ID
-						if d.config.DecodeFSKID {
-							d.decodeFSKID(pcmBuffer, resultChan)
+							// Optionally decode FSK ID
+							if d.config.DecodeFSKID {
+								d.decodeFSKID(pcmBuffer, resultChan)
+							}
 						}
 
-						// Reset for next image
+						// Signal completion and reset for next image
 						d.state = StateWaitingVIS
 						pcmBuffer.Reset()
-					}
+					}()
+
+					// Switch to feeding state so main loop continues
+					d.state = StateFeedingVideo
+
+				case StateFeedingVideo:
+					// Just keep feeding buffer while video decoding happens in background
+					// Video decoder will signal when done by changing state back to StateWaitingVIS
+					// No action needed here - just continue the loop to feed more samples
 				}
 			}
 		}
@@ -255,24 +264,9 @@ func (d *SSTVDecoder) detectVIS(pcmBuffer *SlidingPCMBuffer, resultChan chan<- [
 	return nil
 }
 
-// ensureBufferFilled reads from audio channel to keep buffer filled
-// This is called by video decoder when it needs more samples
-func (d *SSTVDecoder) ensureBufferFilled(pcmBuffer *SlidingPCMBuffer, audioChan <-chan []int16, minSamples int) {
-	for pcmBuffer.Available() < minSamples {
-		select {
-		case samples, ok := <-audioChan:
-			if !ok {
-				return
-			}
-			pcmBuffer.Write(samples)
-		case <-d.stopChan:
-			return
-		}
-	}
-}
-
 // decodeVideo decodes the video signal
-func (d *SSTVDecoder) decodeVideo(pcmBuffer *SlidingPCMBuffer, audioChan <-chan []int16, resultChan chan<- []byte) error {
+// Note: This function is called from a goroutine, and the main loop continues feeding the buffer
+func (d *SSTVDecoder) decodeVideo(pcmBuffer *SlidingPCMBuffer, resultChan chan<- []byte) error {
 	log.Printf("[SSTV] Starting video demodulation...")
 
 	d.sendStatus(resultChan, fmt.Sprintf("Decoding %s...", d.mode.Name))
@@ -280,45 +274,13 @@ func (d *SSTVDecoder) decodeVideo(pcmBuffer *SlidingPCMBuffer, audioChan <-chan 
 	// Create video demodulator
 	d.videoDemod = NewVideoDemodulator(d.mode, d.sampleRate, d.headerShift, d.config.Adaptive)
 
-	// Ensure we have enough samples for video decoding
-	// Video needs much more data than VIS detection
-	d.ensureBufferFilled(pcmBuffer, audioChan, 8192)
-
 	// Initial decode without sync correction
 	rate := d.sampleRate
 	skip := 0
 
-	// Start a goroutine to keep buffer filled during video decoding
-	// This continuously reads from audioChan and writes to buffer (like slowrx readPcm)
-	stopFeeding := make(chan struct{})
-	feedCount := 0
-	go func() {
-		log.Printf("[SSTV Video Feed] Starting background feeding goroutine")
-		for {
-			select {
-			case <-stopFeeding:
-				log.Printf("[SSTV Video Feed] Stopped by stopFeeding signal after %d feeds", feedCount)
-				return
-			case <-d.stopChan:
-				log.Printf("[SSTV Video Feed] Stopped by stopChan after %d feeds", feedCount)
-				return
-			case samples, ok := <-audioChan:
-				if !ok {
-					log.Printf("[SSTV Video Feed] audioChan closed after %d feeds", feedCount)
-					return
-				}
-				// Continuously feed buffer as samples arrive
-				pcmBuffer.Write(samples)
-				feedCount++
-				if feedCount%100 == 0 {
-					log.Printf("[SSTV Video Feed] Fed %d chunks, buffer now has %d samples", feedCount, pcmBuffer.Available())
-				}
-			}
-		}
-	}()
-
+	// Demodulate video from buffer
+	// The main loop continues to feed the buffer while we consume from it
 	pixels, err := d.videoDemod.Demodulate(pcmBuffer, rate, skip)
-	close(stopFeeding) // Stop the feeding goroutine
 	if err != nil {
 		return fmt.Errorf("video demodulation failed: %w", err)
 	}

@@ -146,8 +146,14 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 
 	log.Printf("[SSTV] Buffer filled, WindowPtr=%d, starting VIS detection", pcmBuffer.GetWindowPtr())
 
-	// Main processing loop - synchronized with audio arrival like slowrx
-	// Process samples as they arrive, not on a timer
+	// Main processing loop - accumulate samples to 10ms chunks like slowrx
+	// slowrx processes exactly 441 samples (10ms at 44.1kHz) per iteration
+	// We need to process exactly 120 samples (10ms at 12kHz) per iteration
+	samps10ms := int(d.sampleRate * 10e-3)
+	accumulator := make([]int16, 0, samps10ms*2)
+
+	log.Printf("[SSTV] Processing in %d sample chunks (10ms at %.0f Hz)", samps10ms, d.sampleRate)
+
 	for {
 		select {
 		case <-d.stopChan:
@@ -158,42 +164,52 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 				return
 			}
 
-			// Write new samples to buffer (like slowrx readPcm)
-			pcmBuffer.Write(samples)
+			// Accumulate samples
+			accumulator = append(accumulator, samples...)
 
-			// Process based on current state
-			switch d.state {
-			case StateInit, StateWaitingVIS:
-				// Try to detect VIS code
-				if err := d.detectVIS(pcmBuffer, resultChan); err == nil {
-					log.Printf("[SSTV] VIS detected, transitioning to video decoding")
-					d.state = StateDecodingVideo
-				}
-				// VIS not found yet, will try again on next audio chunk
-				// Log occasionally to show we're still running
-				if d.visDetector != nil && d.visDetector.iterationCount%500 == 0 {
-					log.Printf("[SSTV] Main loop: Still waiting for VIS (iteration %d, buffer=%d)",
-						d.visDetector.iterationCount, pcmBuffer.Available())
-				}
+			// Process in 10ms chunks
+			for len(accumulator) >= samps10ms {
+				// Take exactly 10ms worth of samples
+				chunk := accumulator[:samps10ms]
+				accumulator = accumulator[samps10ms:]
 
-			case StateDecodingVideo:
-				// Decode video
-				if err := d.decodeVideo(pcmBuffer, resultChan); err != nil {
-					log.Printf("[SSTV] Video decoding failed: %v", err)
-					d.state = StateWaitingVIS
-					pcmBuffer.Reset()
-				} else {
-					// Video decoded successfully
-					log.Printf("[SSTV] Video decoding complete")
+				// Write to buffer (like slowrx readPcm)
+				pcmBuffer.Write(chunk)
 
-					// Optionally decode FSK ID
-					if d.config.DecodeFSKID {
-						d.decodeFSKID(pcmBuffer, resultChan)
+				// Process based on current state
+				switch d.state {
+				case StateInit, StateWaitingVIS:
+					// Try to detect VIS code
+					if err := d.detectVIS(pcmBuffer, resultChan); err == nil {
+						log.Printf("[SSTV] VIS detected, transitioning to video decoding")
+						d.state = StateDecodingVideo
+					}
+					// VIS not found yet, will try again on next 10ms chunk
+					// Log occasionally to show we're still running
+					if d.visDetector != nil && d.visDetector.iterationCount%500 == 0 {
+						log.Printf("[SSTV] Main loop: Still waiting for VIS (iteration %d, buffer=%d)",
+							d.visDetector.iterationCount, pcmBuffer.Available())
 					}
 
-					// Reset for next image
-					d.state = StateWaitingVIS
-					pcmBuffer.Reset()
+				case StateDecodingVideo:
+					// Decode video
+					if err := d.decodeVideo(pcmBuffer, resultChan); err != nil {
+						log.Printf("[SSTV] Video decoding failed: %v", err)
+						d.state = StateWaitingVIS
+						pcmBuffer.Reset()
+					} else {
+						// Video decoded successfully
+						log.Printf("[SSTV] Video decoding complete")
+
+						// Optionally decode FSK ID
+						if d.config.DecodeFSKID {
+							d.decodeFSKID(pcmBuffer, resultChan)
+						}
+
+						// Reset for next image
+						d.state = StateWaitingVIS
+						pcmBuffer.Reset()
+					}
 				}
 			}
 		}

@@ -220,10 +220,11 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 
 	// Look for VIS pattern (based on slowrx algorithm)
 	// Try different phase alignments (i) and reference positions (j)
-	// slowrx uses i=0..2 and j=0..2, but we'll try more j positions
-	// to account for timing variations at different sample rates
+	// slowrx uses i=0..2 and j=0..2, but at 12kHz we need to search more positions
+	// The VIS pattern might start anywhere in the first ~200ms of the buffer
+	// Try up to j=20 (200ms) to find where the pattern actually starts
 	for i := 0; i < 3; i++ {
-		for j := 0; j < 6; j++ {
+		for j := 0; j < 20; j++ {
 			// Use tone[0+j] as reference frequency (exactly like slowrx line 85)
 			refFreq := v.toneBuf[0+j]
 

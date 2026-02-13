@@ -213,30 +213,50 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 	// Try different phase alignments (i) and reference positions (j)
 	for i := 0; i < 3; i++ {
 		for j := 0; j < 3; j++ {
+			// Use tone[0+j] as reference frequency (exactly like slowrx line 85)
 			refFreq := v.toneBuf[0+j]
 
-			// Debug: Log pattern check attempts every 200 iterations
-			if v.iterationCount%200 == 0 && i == 0 && j == 0 {
-				log.Printf("[SSTV VIS] Pattern check: refFreq=%.1f Hz", refFreq)
-				log.Printf("[SSTV VIS]   Leaders: tone[3]=%.1f, tone[6]=%.1f, tone[9]=%.1f, tone[12]=%.1f (expect ~refFreq±25)",
-					v.toneBuf[3], v.toneBuf[6], v.toneBuf[9], v.toneBuf[12])
-				log.Printf("[SSTV VIS]   Start bit: tone[15]=%.1f (expect ~%.1f = refFreq-700)",
-					v.toneBuf[15], refFreq-700)
-				log.Printf("[SSTV VIS]   Stop bit: tone[42]=%.1f (expect ~%.1f = refFreq-700)",
-					v.toneBuf[42], refFreq-700)
+			// Debug: Log all attempts every 200 iterations to see what's being tried
+			if v.iterationCount%200 == 0 {
+				if i == 0 && j == 0 {
+					log.Printf("[SSTV VIS] === Pattern check iteration %d ===", v.iterationCount)
+					log.Printf("[SSTV VIS] Tone buffer (first 15): [0]=%.1f [1]=%.1f [2]=%.1f [3]=%.1f [6]=%.1f [9]=%.1f [12]=%.1f [15]=%.1f",
+						v.toneBuf[0], v.toneBuf[1], v.toneBuf[2], v.toneBuf[3], v.toneBuf[6], v.toneBuf[9], v.toneBuf[12], v.toneBuf[15])
+				}
+				log.Printf("[SSTV VIS] Try i=%d, j=%d: refFreq=%.1f (tone[%d])", i, j, refFreq, 0+j)
+				log.Printf("[SSTV VIS]   Check leaders: [%d]=%.1f, [%d]=%.1f, [%d]=%.1f, [%d]=%.1f (need %.1f-%.1f)",
+					1*3+i, v.toneBuf[1*3+i], 2*3+i, v.toneBuf[2*3+i],
+					3*3+i, v.toneBuf[3*3+i], 4*3+i, v.toneBuf[4*3+i],
+					refFreq-25, refFreq+25)
+				log.Printf("[SSTV VIS]   Check start: [%d]=%.1f (need %.1f-%.1f)",
+					5*3+i, v.toneBuf[5*3+i], refFreq-725, refFreq-675)
+				log.Printf("[SSTV VIS]   Check stop: [%d]=%.1f (need %.1f-%.1f)",
+					14*3+i, v.toneBuf[14*3+i], refFreq-725, refFreq-675)
 			}
 
-			// Check for complete VIS pattern:
-			// - 4 leader tones at refFreq (1900 Hz nominal)
-			// - start bit at refFreq-700 (1200 Hz nominal)
-			// - stop bit at refFreq-700 (1200 Hz nominal)
-			if !v.checkToneRange(1*3+i, refFreq-25, refFreq+25) ||
-				!v.checkToneRange(2*3+i, refFreq-25, refFreq+25) ||
-				!v.checkToneRange(3*3+i, refFreq-25, refFreq+25) ||
-				!v.checkToneRange(4*3+i, refFreq-25, refFreq+25) ||
-				!v.checkToneRange(5*3+i, refFreq-725, refFreq-675) || // start bit
-				!v.checkToneRange(14*3+i, refFreq-725, refFreq-675) { // stop bit
+			// Check for complete VIS pattern
+			// slowrx uses ±25 Hz at 44.1 kHz, but at 12 kHz we need wider tolerance
+			// due to transmitter drift and receiver offset
+			// Use ±50 Hz tolerance for 12 kHz sample rate
+			tolerance := 50.0
+			if v.sampleRate > 40000 {
+				tolerance = 25.0 // Use tighter tolerance at higher sample rates
+			}
+
+			if !v.checkToneRange(1*3+i, refFreq-tolerance, refFreq+tolerance) ||
+				!v.checkToneRange(2*3+i, refFreq-tolerance, refFreq+tolerance) ||
+				!v.checkToneRange(3*3+i, refFreq-tolerance, refFreq+tolerance) ||
+				!v.checkToneRange(4*3+i, refFreq-tolerance, refFreq+tolerance) ||
+				!v.checkToneRange(5*3+i, refFreq-700-tolerance, refFreq-700+tolerance) || // start bit
+				!v.checkToneRange(14*3+i, refFreq-700-tolerance, refFreq-700+tolerance) { // stop bit
+				if v.iterationCount%200 == 0 {
+					log.Printf("[SSTV VIS]   -> Pattern check FAILED")
+				}
 				continue
+			}
+
+			if v.iterationCount%200 == 0 {
+				log.Printf("[SSTV VIS]   -> Pattern check PASSED! Attempting bit decode...")
 			}
 
 			// If we get here, we found a potential VIS!
@@ -260,17 +280,26 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 
 				// Bit 0: 1300 Hz (refFreq - 600)
 				// Bit 1: 1100 Hz (refFreq - 800)
-				// Use wider tolerance (±50 Hz) for better reliability at 12kHz
-				// slowrx uses ±25 Hz at 44.1kHz, but we have better frequency resolution
-				if freq > refFreq-650 && freq < refFreq-550 {
+				// slowrx uses ±25 Hz tolerance at 44.1 kHz (lines 98-99)
+				// At 12 kHz we need wider tolerance due to frequency drift
+				bitTolerance := 50.0
+				if v.sampleRate > 40000 {
+					bitTolerance = 25.0
+				}
+
+				bit0Center := refFreq - 600 // 1300 Hz nominal
+				bit1Center := refFreq - 800 // 1100 Hz nominal
+
+				if freq > bit0Center-bitTolerance && freq < bit0Center+bitTolerance {
 					bits[k] = 0 // 1300 Hz
 					log.Printf("[SSTV VIS] Bit %d [idx=%d]: freq=%.1f Hz -> 0 (1300 Hz nominal)", k, toneIdx, freq)
-				} else if freq > refFreq-850 && freq < refFreq-750 {
+				} else if freq > bit1Center-bitTolerance && freq < bit1Center+bitTolerance {
 					bits[k] = 1 // 1100 Hz
 					log.Printf("[SSTV VIS] Bit %d [idx=%d]: freq=%.1f Hz -> 1 (1100 Hz nominal)", k, toneIdx, freq)
 				} else {
 					log.Printf("[SSTV VIS] Bit %d [idx=%d]: freq=%.1f Hz INVALID (need %.1f-%.1f for 0, or %.1f-%.1f for 1)",
-						k, toneIdx, freq, refFreq-650, refFreq-550, refFreq-850, refFreq-750)
+						k, toneIdx, freq, bit0Center-bitTolerance, bit0Center+bitTolerance,
+						bit1Center-bitTolerance, bit1Center+bitTolerance)
 					validBits = false
 					break
 				}

@@ -120,9 +120,9 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 	defer d.wg.Done()
 
 	// Create sliding window PCM buffer
-	// Use 8192 samples (~682ms at 12kHz), similar scale to slowrx's 4096 sample buffer
-	// This is enough for VIS detection and video demodulation works incrementally
-	const pcmBufSize = 8192
+	// VIS pattern is ~450ms, need buffer large enough to hold it plus margin
+	// Use 16384 samples (~1.37 seconds at 12kHz) to ensure VIS pattern fits comfortably
+	const pcmBufSize = 16384
 	pcmBuffer := NewSlidingPCMBuffer(pcmBufSize)
 
 	// Goroutine to feed buffer from audio channel

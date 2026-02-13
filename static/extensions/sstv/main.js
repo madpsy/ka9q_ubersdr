@@ -119,23 +119,30 @@ class SSTVExtension extends DecoderExtension {
             console.error('SSTV: Image grid not found');
             return;
         }
-        
+
         console.log('SSTV: Image grid initialized');
-        
+
         // Setup modal close handler
         const modal = document.getElementById('sstv-modal');
         const closeBtn = document.getElementById('sstv-modal-close');
-        
+
         if (modal && closeBtn) {
-            closeBtn.onclick = () => {
+            console.log('SSTV: Setting up modal close handlers');
+
+            closeBtn.addEventListener('click', (e) => {
+                console.log('SSTV: Close button clicked');
+                e.stopPropagation();
                 modal.style.display = 'none';
-            };
-            
-            modal.onclick = (e) => {
+            });
+
+            modal.addEventListener('click', (e) => {
                 if (e.target === modal) {
+                    console.log('SSTV: Modal background clicked');
                     modal.style.display = 'none';
                 }
-            };
+            });
+        } else {
+            console.error('SSTV: Modal or close button not found', {modal: !!modal, closeBtn: !!closeBtn});
         }
     }
     
@@ -232,20 +239,32 @@ class SSTVExtension extends DecoderExtension {
         const modalMode = document.getElementById('sstv-modal-mode');
         const modalCallsign = document.getElementById('sstv-modal-callsign');
         const modalTime = document.getElementById('sstv-modal-time');
-        
+
         if (!modal || !modalCanvas) return;
-        
+
+        console.log('SSTV: Showing enlarged image:', {
+            mode: imageData.mode,
+            callsign: imageData.callsign,
+            timestamp: imageData.timestamp
+        });
+
         // Copy image to modal canvas
         modalCanvas.width = imageData.canvas.width;
         modalCanvas.height = imageData.canvas.height;
         const modalCtx = modalCanvas.getContext('2d');
         modalCtx.drawImage(imageData.canvas, 0, 0);
-        
-        // Update info
-        if (modalMode) modalMode.textContent = imageData.mode || 'Unknown Mode';
-        if (modalCallsign) modalCallsign.textContent = imageData.callsign || 'No Callsign';
-        if (modalTime) modalTime.textContent = imageData.timestamp.toLocaleString();
-        
+
+        // Update info - show mode if available
+        if (modalMode) {
+            modalMode.textContent = imageData.mode || 'Mode: Unknown';
+        }
+        if (modalCallsign) {
+            modalCallsign.textContent = imageData.callsign ? `Callsign: ${imageData.callsign}` : 'Callsign: None';
+        }
+        if (modalTime) {
+            modalTime.textContent = `Time: ${imageData.timestamp.toLocaleString()}`;
+        }
+
         // Show modal
         modal.style.display = 'flex';
     }

@@ -122,28 +122,25 @@ class SSTVExtension extends DecoderExtension {
 
         console.log('SSTV: Image grid initialized');
 
-        // Setup modal close handler
-        const modal = document.getElementById('sstv-modal');
-        const closeBtn = document.getElementById('sstv-modal-close');
-
-        if (modal && closeBtn) {
-            console.log('SSTV: Setting up modal close handlers');
-
-            closeBtn.addEventListener('click', (e) => {
-                console.log('SSTV: Close button clicked');
-                e.stopPropagation();
-                modal.style.display = 'none';
-            });
-
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) {
-                    console.log('SSTV: Modal background clicked');
+        // Setup modal close handler using event delegation on document
+        // This ensures it works even if modal is recreated
+        document.addEventListener('click', (e) => {
+            // Check if click is on close button
+            if (e.target && e.target.id === 'sstv-modal-close') {
+                console.log('SSTV: Close button clicked via delegation');
+                const modal = document.getElementById('sstv-modal');
+                if (modal) {
                     modal.style.display = 'none';
                 }
-            });
-        } else {
-            console.error('SSTV: Modal or close button not found', {modal: !!modal, closeBtn: !!closeBtn});
-        }
+            }
+            // Check if click is on modal background
+            else if (e.target && e.target.id === 'sstv-modal') {
+                console.log('SSTV: Modal background clicked via delegation');
+                e.target.style.display = 'none';
+            }
+        });
+
+        console.log('SSTV: Modal close handlers set up via delegation');
     }
     
     createNewImage(width, height) {

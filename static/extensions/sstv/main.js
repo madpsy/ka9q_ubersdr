@@ -591,13 +591,22 @@ class SSTVExtension extends DecoderExtension {
         const modeName = new TextDecoder().decode(nameBytes);
 
         console.log('SSTV: Mode detected:', modeName, isExtended ? '(extended VIS)' : '');
+        console.log('SSTV: Current image index:', this.currentImageIndex);
+        console.log('SSTV: Images array length:', this.images.length);
 
         this.detectedMode = modeName;
-        
+
         // Update current image mode
         if (this.currentImageIndex !== null && this.images[this.currentImageIndex]) {
+            console.log('SSTV: Updating image mode to:', modeName);
             this.images[this.currentImageIndex].mode = modeName;
+            console.log('SSTV: Image mode after update:', this.images[this.currentImageIndex].mode);
             this.renderGrid();
+        } else {
+            console.warn('SSTV: Cannot update mode - no current image', {
+                currentImageIndex: this.currentImageIndex,
+                imagesLength: this.images.length
+            });
         }
 
         // Update mode display

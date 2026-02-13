@@ -23,14 +23,18 @@ class SSTVExtension extends DecoderExtension {
 
         // State
         this.running = false;
-        this.canvas = null;
-        this.ctx = null;
+        this.currentCanvas = null;
+        this.currentCtx = null;
         this.currentLine = 0;
         this.imageWidth = 320;
         this.imageHeight = 256;
         this.detectedMode = null;
         this.fskCallsign = null;
         this.autoScroll = true;
+        
+        // Image gallery
+        this.images = []; // Array of {canvas, mode, callsign, timestamp, complete}
+        this.currentImageIndex = null;
 
         // Binary message types
         this.MSG_IMAGE_LINE = 0x01;
@@ -109,48 +113,141 @@ class SSTVExtension extends DecoderExtension {
     }
 
     setupCanvas() {
-        this.canvas = document.getElementById('sstv-canvas');
-        if (!this.canvas) {
-            console.error('SSTV: Canvas element not found');
+        // Grid-based setup - no single canvas needed
+        const grid = document.getElementById('sstv-image-grid');
+        if (!grid) {
+            console.error('SSTV: Image grid not found');
             return;
         }
-
-        // Check if canvas is in DOM
-        const inDOM = document.body.contains(this.canvas);
-        console.log('SSTV: Canvas found, in DOM:', inDOM);
         
-        // If canvas is not in DOM, it means the template was rendered but not attached
-        if (!inDOM) {
-            const container = document.getElementById('sstv-canvas-container');
-            if (container) {
-                console.log('SSTV: Canvas not in DOM, re-attaching to container');
-                // Clear container and create new canvas
-                container.innerHTML = '';
-                this.canvas = document.createElement('canvas');
-                this.canvas.id = 'sstv-canvas';
-                this.canvas.className = 'sstv-canvas';
-                container.appendChild(this.canvas);
-                console.log('SSTV: Canvas re-created and attached, in DOM:', document.body.contains(this.canvas));
-            } else {
-                console.error('SSTV: Container not found, cannot attach canvas');
-                return;
-            }
+        console.log('SSTV: Image grid initialized');
+        
+        // Setup modal close handler
+        const modal = document.getElementById('sstv-modal');
+        const closeBtn = document.getElementById('sstv-modal-close');
+        
+        if (modal && closeBtn) {
+            closeBtn.onclick = () => {
+                modal.style.display = 'none';
+            };
+            
+            modal.onclick = (e) => {
+                if (e.target === modal) {
+                    modal.style.display = 'none';
+                }
+            };
         }
-
-        this.ctx = this.canvas.getContext('2d');
+    }
+    
+    createNewImage(width, height) {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
         
-        // Initialize with default size (will be updated when mode is detected)
-        this.canvas.width = 320;
-        this.canvas.height = 256;
-        this.imageWidth = 320;
-        this.imageHeight = 256;
-        this.currentLine = 0;
-
         // Fill with black
-        this.ctx.fillStyle = '#000000';
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-
-        console.log('SSTV: Canvas initialized:', this.imageWidth, 'x', this.imageHeight);
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, width, height);
+        
+        const imageData = {
+            canvas: canvas,
+            ctx: ctx,
+            mode: null,
+            callsign: null,
+            timestamp: new Date(),
+            complete: false
+        };
+        
+        // Insert at beginning of array (top-left position)
+        this.images.unshift(imageData);
+        this.currentImageIndex = 0;
+        this.currentCanvas = canvas;
+        this.currentCtx = ctx;
+        
+        this.renderGrid();
+        
+        console.log('SSTV: Created new image in grid:', width, 'x', height);
+        return imageData;
+    }
+    
+    renderGrid() {
+        const grid = document.getElementById('sstv-image-grid');
+        if (!grid) return;
+        
+        // Clear grid
+        grid.innerHTML = '';
+        
+        // Render all images
+        this.images.forEach((imageData, index) => {
+            const item = document.createElement('div');
+            item.className = 'sstv-image-item';
+            if (index === this.currentImageIndex && !imageData.complete) {
+                item.classList.add('decoding');
+            }
+            
+            // Clone canvas for display
+            const displayCanvas = document.createElement('canvas');
+            displayCanvas.width = imageData.canvas.width;
+            displayCanvas.height = imageData.canvas.height;
+            const displayCtx = displayCanvas.getContext('2d');
+            displayCtx.drawImage(imageData.canvas, 0, 0);
+            
+            item.appendChild(displayCanvas);
+            
+            // Add info overlay
+            const info = document.createElement('div');
+            info.className = 'sstv-image-info';
+            
+            if (imageData.mode) {
+                const modeSpan = document.createElement('div');
+                modeSpan.className = 'sstv-image-mode';
+                modeSpan.textContent = imageData.mode;
+                info.appendChild(modeSpan);
+            }
+            
+            if (imageData.callsign) {
+                const callsignSpan = document.createElement('div');
+                callsignSpan.className = 'sstv-image-callsign';
+                callsignSpan.textContent = imageData.callsign;
+                info.appendChild(callsignSpan);
+            }
+            
+            const timeSpan = document.createElement('div');
+            timeSpan.className = 'sstv-image-time';
+            timeSpan.textContent = imageData.timestamp.toLocaleTimeString();
+            info.appendChild(timeSpan);
+            
+            item.appendChild(info);
+            
+            // Click handler to show enlarged view
+            item.onclick = () => this.showEnlargedImage(imageData);
+            
+            grid.appendChild(item);
+        });
+    }
+    
+    showEnlargedImage(imageData) {
+        const modal = document.getElementById('sstv-modal');
+        const modalCanvas = document.getElementById('sstv-modal-canvas');
+        const modalMode = document.getElementById('sstv-modal-mode');
+        const modalCallsign = document.getElementById('sstv-modal-callsign');
+        const modalTime = document.getElementById('sstv-modal-time');
+        
+        if (!modal || !modalCanvas) return;
+        
+        // Copy image to modal canvas
+        modalCanvas.width = imageData.canvas.width;
+        modalCanvas.height = imageData.canvas.height;
+        const modalCtx = modalCanvas.getContext('2d');
+        modalCtx.drawImage(imageData.canvas, 0, 0);
+        
+        // Update info
+        if (modalMode) modalMode.textContent = imageData.mode || 'Unknown Mode';
+        if (modalCallsign) modalCallsign.textContent = imageData.callsign || 'No Callsign';
+        if (modalTime) modalTime.textContent = imageData.timestamp.toLocaleString();
+        
+        // Show modal
+        modal.style.display = 'flex';
     }
 
     setupEventHandlers() {
@@ -339,13 +436,13 @@ class SSTVExtension extends DecoderExtension {
     }
 
     clearImage() {
-        console.log('SSTV: Clearing image');
-        
-        if (this.ctx) {
-            this.ctx.fillStyle = '#000000';
-            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-        }
+        console.log('SSTV: Clearing all images');
 
+        // Clear all images from grid
+        this.images = [];
+        this.currentCanvas = null;
+        this.currentCtx = null;
+        this.currentImageIndex = null;
         this.currentLine = 0;
         this.detectedMode = null;
         this.fskCallsign = null;
@@ -358,22 +455,28 @@ class SSTVExtension extends DecoderExtension {
         if (modeEl) modeEl.textContent = 'Waiting for signal...';
         if (callsignEl) callsignEl.textContent = '';
         if (statusEl) statusEl.textContent = 'Ready';
+
+        // Re-render empty grid
+        this.renderGrid();
     }
 
     saveImage() {
-        if (!this.canvas) {
-            console.error('SSTV: No canvas to save');
+        // Save the current (most recent) image
+        if (this.images.length === 0 || !this.currentCanvas) {
+            console.error('SSTV: No image to save');
             return;
         }
 
+        const imageData = this.images[this.currentImageIndex || 0];
+
         // Generate filename with timestamp and mode
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-        const modeName = this.detectedMode || 'unknown';
-        const callsign = this.fskCallsign ? `_${this.fskCallsign}` : '';
+        const timestamp = imageData.timestamp.toISOString().replace(/[:.]/g, '-').slice(0, -5);
+        const modeName = imageData.mode || 'unknown';
+        const callsign = imageData.callsign ? `_${imageData.callsign}` : '';
         const filename = `sstv_${modeName}${callsign}_${timestamp}.png`;
 
         // Convert canvas to blob and download
-        this.canvas.toBlob((blob) => {
+        imageData.canvas.toBlob((blob) => {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -452,37 +555,13 @@ class SSTVExtension extends DecoderExtension {
         const height = view.getUint32(5);
 
         console.log('SSTV: Image start:', width, 'x', height);
-        console.log('SSTV: Canvas before resize:', this.canvas ? `${this.canvas.width}x${this.canvas.height}` : 'null');
-        console.log('SSTV: Canvas element exists:', !!this.canvas);
-        console.log('SSTV: Canvas in DOM:', this.canvas ? document.body.contains(this.canvas) : false);
 
-        // If canvas is not in DOM, re-attach it
-        if (this.canvas && !document.body.contains(this.canvas)) {
-            console.log('SSTV: Canvas not in DOM, re-attaching...');
-            const container = document.getElementById('sstv-canvas-container');
-            if (container) {
-                // Clear any existing canvases first to avoid duplicates
-                container.innerHTML = '';
-                container.appendChild(this.canvas);
-                console.log('SSTV: Canvas re-attached to container');
-            } else {
-                console.error('SSTV: Container not found, cannot re-attach canvas');
-            }
-        }
-
-        // Resize canvas
+        // Create new image in grid
         this.imageWidth = width;
         this.imageHeight = height;
-        this.canvas.width = width;
-        this.canvas.height = height;
         this.currentLine = 0;
-
-        console.log('SSTV: Canvas after resize:', `${this.canvas.width}x${this.canvas.height}`);
-        console.log('SSTV: Canvas in DOM after resize:', document.body.contains(this.canvas));
-
-        // Clear canvas
-        this.ctx.fillStyle = '#000000';
-        this.ctx.fillRect(0, 0, width, height);
+        
+        this.createNewImage(width, height);
 
         this.radio.log(`SSTV: New image ${width}x${height}`);
     }
@@ -498,6 +577,12 @@ class SSTVExtension extends DecoderExtension {
         console.log('SSTV: Mode detected:', modeName, isExtended ? '(extended VIS)' : '');
 
         this.detectedMode = modeName;
+        
+        // Update current image mode
+        if (this.currentImageIndex !== null && this.images[this.currentImageIndex]) {
+            this.images[this.currentImageIndex].mode = modeName;
+            this.renderGrid();
+        }
 
         // Update mode display
         const modeEl = document.getElementById('sstv-mode-display');
@@ -514,8 +599,13 @@ class SSTVExtension extends DecoderExtension {
         const width = view.getUint32(5);
         const rgbData = new Uint8Array(data, 9);
 
+        if (!this.currentCtx || !this.currentCanvas) {
+            console.warn('SSTV: No current canvas for line data');
+            return;
+        }
+
         if (line === 0) {
-            console.log('SSTV: First line received, canvas size:', `${this.canvas.width}x${this.canvas.height}`);
+            console.log('SSTV: First line received, canvas size:', `${this.currentCanvas.width}x${this.currentCanvas.height}`);
             console.log('SSTV: Image dimensions:', `${this.imageWidth}x${this.imageHeight}`);
         }
 
@@ -525,7 +615,7 @@ class SSTVExtension extends DecoderExtension {
         }
 
         // Create image data for this line
-        const imageData = this.ctx.createImageData(width, 1);
+        const imageData = this.currentCtx.createImageData(width, 1);
 
         // Convert RGB data to RGBA
         for (let x = 0; x < width; x++) {
@@ -539,16 +629,13 @@ class SSTVExtension extends DecoderExtension {
         }
 
         // Draw line to canvas
-        this.ctx.putImageData(imageData, 0, line);
+        this.currentCtx.putImageData(imageData, 0, line);
 
         this.currentLine = line + 1;
 
-        // Auto-scroll if enabled
-        if (this.autoScroll) {
-            const container = document.getElementById('sstv-canvas-container');
-            if (container) {
-                container.scrollTop = container.scrollHeight;
-            }
+        // Update grid display periodically (every 10 lines to avoid too many redraws)
+        if (line % 10 === 0) {
+            this.renderGrid();
         }
 
         // Update progress
@@ -590,6 +677,12 @@ class SSTVExtension extends DecoderExtension {
 
         console.log('SSTV: Image complete, total lines:', totalLines);
 
+        // Mark current image as complete
+        if (this.currentImageIndex !== null && this.images[this.currentImageIndex]) {
+            this.images[this.currentImageIndex].complete = true;
+            this.renderGrid();
+        }
+
         const statusEl = document.getElementById('sstv-status');
         if (statusEl) {
             statusEl.textContent = `Complete: ${totalLines} lines decoded`;
@@ -612,6 +705,12 @@ class SSTVExtension extends DecoderExtension {
         console.log('SSTV: FSK callsign:', callsign);
 
         this.fskCallsign = callsign;
+        
+        // Update current image callsign
+        if (this.currentImageIndex !== null && this.images[this.currentImageIndex]) {
+            this.images[this.currentImageIndex].callsign = callsign;
+            this.renderGrid();
+        }
 
         // Update callsign display
         const callsignEl = document.getElementById('sstv-callsign-display');

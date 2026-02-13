@@ -256,6 +256,11 @@ func (d *SSTVDecoder) detectVIS(pcmBuffer *SlidingPCMBuffer, resultChan chan<- [
 		return fmt.Errorf("VIS not found yet")
 	}
 
+	// VIS detected - send the actual detected reference frequency (1900 Hz + shift)
+	// This is the most useful value showing the actual carrier frequency
+	detectedFreq := 1900.0 + float64(headerShift)
+	d.sendToneFreq(resultChan, detectedFreq)
+
 	// Get mode specification
 	d.mode = GetModeByIndex(modeIdx)
 	if d.mode == nil {

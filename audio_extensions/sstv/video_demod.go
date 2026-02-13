@@ -381,6 +381,11 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 		// This keeps windowPtr stable and prevents buffer discontinuities
 	}
 
+	// After decode completes, advance windowPtr to end of signal for FSK decode
+	// FSK expects to read from after the video signal
+	pcmBuffer.AdvanceWindow(length)
+	log.Printf("[SSTV Video] Decode complete, advanced windowPtr by %d samples for FSK", length)
+
 	// Convert image to RGB byte array
 	return v.convertToRGB(image), nil
 }

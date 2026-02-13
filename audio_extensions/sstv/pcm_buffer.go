@@ -95,13 +95,11 @@ func (b *SlidingPCMBuffer) GetWindow(offset, length int) ([]int16, error) {
 	result := make([]int16, length)
 	for i := 0; i < length; i++ {
 		// Calculate position with circular wrapping
-		pos := b.windowPtr + offset + i
-		// Handle negative offsets
-		for pos < 0 {
+		// Use proper modulo arithmetic that handles negative numbers correctly
+		pos := (b.windowPtr + offset + i) % b.size
+		if pos < 0 {
 			pos += b.size
 		}
-		// Wrap at buffer end
-		pos = pos % b.size
 		result[i] = b.buffer[pos]
 	}
 

@@ -304,6 +304,9 @@ class SSTVExtension extends DecoderExtension {
             return;
         }
 
+        // Setup binary message handler before attaching
+        this.setupBinaryMessageHandler();
+
         const message = {
             type: 'audio_extension_attach',
             extension_name: 'sstv',
@@ -320,6 +323,9 @@ class SSTVExtension extends DecoderExtension {
             console.error('SSTV: DX WebSocket not connected');
             return;
         }
+
+        // Remove binary message handler before detaching
+        this.removeBinaryMessageHandler();
 
         const message = {
             type: 'audio_extension_detach'

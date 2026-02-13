@@ -3,6 +3,7 @@ package sstv
 import (
 	"fmt"
 	"sync"
+	"time"
 )
 
 /*
@@ -114,11 +115,30 @@ func (b *SlidingPCMBuffer) GetWindowPtr() int {
 	return b.windowPtr
 }
 
-// Available returns how many samples are available after WindowPtr
+// Available returns how many samples are available after WindowPtr (non-blocking)
 func (b *SlidingPCMBuffer) Available() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.size - b.windowPtr
+}
+
+// EnsureAvailable blocks until at least minSamples are available or timeout occurs
+// This matches KiwiSDR's pcm_copy() blocking behavior (sstv_pcm.cpp:51-54)
+// Returns true if samples available, false if timeout
+func (b *SlidingPCMBuffer) EnsureAvailable(minSamples int) bool {
+	waitCount := 0
+	maxWait := 500 // 5 seconds timeout (500 * 10ms)
+
+	for b.Available() < minSamples {
+		time.Sleep(10 * time.Millisecond)
+		waitCount++
+
+		if waitCount >= maxWait {
+			return false // Timeout - audio stream likely ended
+		}
+	}
+
+	return true
 }
 
 // Reset clears the buffer

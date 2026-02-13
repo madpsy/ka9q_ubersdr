@@ -3,7 +3,6 @@ package sstv
 import (
 	"log"
 	"math"
-	"time"
 )
 
 /*
@@ -240,10 +239,6 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 	snr := 0.0
 	freq := 0.0
 
-	// Track which lines have been sent (for progressive output)
-	linesSent := make([]bool, m.NumLines)
-	lastSentLine := -1
-
 	// Process signal
 	lastLogSample := 0
 	for sampleNum := 0; sampleNum < length; sampleNum++ {
@@ -255,23 +250,11 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 			lastLogSample = sampleNum
 		}
 
-		// Wait for buffer to have enough samples (like slowrx readPcm blocking)
+		// Ensure buffer has enough samples (blocks like KiwiSDR's pcm_copy)
 		// This allows the main loop to continue feeding while we wait
-		waitCount := 0
-		for pcmBuffer.Available() < 128 {
-			time.Sleep(10 * time.Millisecond)
-			waitCount++
-
-			// Safety: if we've waited too long (>5 seconds), the audio stream might have ended
-			if waitCount > 500 {
-				log.Printf("[SSTV Video] Timeout waiting for samples at sampleNum=%d/%d (%.1f%% complete, waited %d ms), ending decode",
-					sampleNum, length, float64(sampleNum)/float64(length)*100, waitCount*10)
-				break
-			}
-		}
-
-		// If we timed out, break out of main loop
-		if waitCount > 500 {
+		if !pcmBuffer.EnsureAvailable(128) {
+			log.Printf("[SSTV Video] Timeout waiting for samples at sampleNum=%d/%d (%.1f%% complete), ending decode",
+				sampleNum, length, float64(sampleNum)/float64(length)*100)
 			break
 		}
 
@@ -311,38 +294,19 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 				}
 			}
 
-			pixelIdx++
-		}
-
-		// Check if we've completed any new lines and send them progressively
-		if lineSender != nil {
-			for y := lastSentLine + 1; y < m.NumLines; y++ {
-				// Check if all pixels in this line have all 3 channels filled
-				lineComplete := true
+			// Send line progressively when last pixel of line is placed (like slowrx line 428)
+			if lineSender != nil && p.X == m.ImgWidth-1 {
+				// Extract line data
+				lineData := make([]uint8, m.ImgWidth*3)
 				for x := 0; x < m.ImgWidth; x++ {
-					// Check if any channel is still 0 (uninitialized)
-					if image[x][y][0] == 0 && image[x][y][1] == 0 && image[x][y][2] == 0 {
-						lineComplete = false
-						break
-					}
+					lineData[x*3] = image[x][p.Y][0]
+					lineData[x*3+1] = image[x][p.Y][1]
+					lineData[x*3+2] = image[x][p.Y][2]
 				}
-
-				if lineComplete && !linesSent[y] {
-					// Extract line data
-					lineData := make([]uint8, m.ImgWidth*3)
-					for x := 0; x < m.ImgWidth; x++ {
-						lineData[x*3] = image[x][y][0]
-						lineData[x*3+1] = image[x][y][1]
-						lineData[x*3+2] = image[x][y][2]
-					}
-					lineSender(y, lineData)
-					linesSent[y] = true
-					lastSentLine = y
-				} else {
-					// Lines are filled sequentially, so if this one isn't complete, stop checking
-					break
-				}
+				lineSender(p.Y, lineData)
 			}
+
+			pixelIdx++
 		}
 
 		// Advance window by one sample (like slowrx: pcm.WindowPtr++)

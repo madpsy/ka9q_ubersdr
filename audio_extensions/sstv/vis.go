@@ -255,9 +255,11 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 				continue
 			}
 
-			if v.iterationCount%200 == 0 {
-				log.Printf("[SSTV VIS]   -> Pattern check PASSED! Attempting bit decode...")
-			}
+			// Log the actual start and stop bit frequencies when pattern passes
+			startBitIdx := 5*3 + i
+			stopBitIdx := 14*3 + i
+			log.Printf("[SSTV VIS]   -> Pattern check PASSED! start[%d]=%.1f, stop[%d]=%.1f, attempting bit decode...",
+				startBitIdx, v.toneBuf[startBitIdx], stopBitIdx, v.toneBuf[stopBitIdx])
 
 			// If we get here, we found a potential VIS!
 			log.Printf("[SSTV VIS] *** POTENTIAL VIS FOUND *** at i=%d, j=%d, refFreq=%.1f Hz", i, j, refFreq)
@@ -269,6 +271,8 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 			log.Printf("[SSTV VIS] Decoding data bits for potential VIS at i=%d, j=%d, refFreq=%.1f Hz", i, j, refFreq)
 
 			for k := 0; k < 8; k++ {
+				// slowrx line 98: tone[6*3+i+3*k]
+				// This gives us the data bit positions after the start bit
 				toneIdx := 6*3 + i + 3*k
 				if toneIdx >= len(v.toneBuf) {
 					log.Printf("[SSTV VIS] Bit %d: toneIdx=%d out of range (len=%d)", k, toneIdx, len(v.toneBuf))
@@ -277,6 +281,9 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 				}
 
 				freq := v.toneBuf[toneIdx]
+
+				// Debug: log what we're looking at
+				log.Printf("[SSTV VIS] Bit %d: checking tone[%d]=%.1f Hz (refFreq=%.1f)", k, toneIdx, freq, refFreq)
 
 				// Bit 0: 1300 Hz (refFreq - 600)
 				// Bit 1: 1100 Hz (refFreq - 800)

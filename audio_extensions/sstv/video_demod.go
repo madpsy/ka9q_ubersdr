@@ -179,6 +179,7 @@ func (v *VideoDemodulator) GetPixelGrid(rate float64, skip int) []PixelInfo {
 						ch = uint8(channel)
 					}
 
+					// slowrx video.c:196-197 - use the determined channel for ChanLen lookup
 					t := float64(y)*m.LineTime + chanStart[channel] + (float64(x)-0.5)/float64(m.ImgWidth)*chanLen[ch]
 					sampleNum := int(math.Round(rate*t)) + skip
 

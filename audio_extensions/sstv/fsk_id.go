@@ -3,6 +3,7 @@ package sstv
 import (
 	"log"
 	"math"
+	"time"
 )
 
 /*
@@ -48,11 +49,12 @@ func NewFSKDecoder(sampleRate float64, headerShift int) *FSKDecoder {
 // DecodeFSKID attempts to decode an FSK callsign transmission
 // Returns the decoded callsign string
 func (f *FSKDecoder) DecodeFSKID(pcmBuffer *SlidingPCMBuffer) string {
-	// Bit duration: 22ms (45.45 baud)
+	// Bit duration: 22ms (45.45 baud) - slowrx fsk.c:40-41
+	// At 44.1kHz: 970 samples, at 12kHz: ~264 samples
 	samps22ms := int(f.sampleRate * 22e-3)
-	samps11ms := samps22ms / 2 // Half for initial sync search
+	samps11ms := samps22ms / 2 // Half for initial sync search (485 samples at 44.1kHz)
 
-	// Create 22ms Hann window
+	// Create 22ms Hann window (slowrx fsk.c:41)
 	hannWindow := make([]float64, samps22ms)
 	for i := 0; i < samps22ms; i++ {
 		hannWindow[i] = 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(samps22ms-1)))
@@ -71,7 +73,7 @@ func (f *FSKDecoder) DecodeFSKID(pcmBuffer *SlidingPCMBuffer) string {
 	bytePtr := 0
 	fskID := make([]byte, 10)
 
-	// Bin indices for FSK detection
+	// Bin indices for FSK detection (slowrx fsk.c:61-63)
 	loBin := f.getBin(1900.0 + float64(f.headerShift) - 1)
 	midBin := f.getBin(2000.0 + float64(f.headerShift))
 	hiBin := f.getBin(2100.0 + float64(f.headerShift) + 1)
@@ -79,21 +81,32 @@ func (f *FSKDecoder) DecodeFSKID(pcmBuffer *SlidingPCMBuffer) string {
 	log.Printf("[SSTV FSK] Starting FSK ID detection")
 
 	for {
-		// Determine how many samples to read
+		// Determine how many samples to advance (slowrx fsk.c:46, 56)
 		samplesNeeded := samps22ms
 		if !inSync {
 			samplesNeeded = samps11ms
 		}
 
-		// Check if we have enough samples
-		if pcmBuffer.Available() < samps11ms {
+		// Wait for enough samples with timeout (slowrx blocks on readPcm)
+		// We need to wait since audio is still streaming in the main loop
+		maxWaits := 50 // 50 * 100ms = 5 seconds max wait
+		for i := 0; i < maxWaits && pcmBuffer.Available() < samps22ms; i++ {
+			time.Sleep(100 * time.Millisecond)
+		}
+
+		if pcmBuffer.Available() < samps22ms {
+			log.Printf("[SSTV FSK] Timeout waiting for samples (available: %d, needed: %d)",
+				pcmBuffer.Available(), samps22ms)
 			break
 		}
 
 		// Get window for FFT centered at WindowPtr
-		// slowrx: pcm.Buffer[pcm.WindowPtr+i-485]
+		// slowrx fsk.c:54: pcm.Buffer[pcm.WindowPtr+i-485]
+		// This means window goes from [WindowPtr-485] to [WindowPtr-485+970]
+		// Which is centered at WindowPtr-485+485 = WindowPtr
 		samples, err := pcmBuffer.GetWindow(-samps11ms, samps22ms)
 		if err != nil {
+			log.Printf("[SSTV FSK] Error getting window: %v", err)
 			break
 		}
 
@@ -122,7 +135,7 @@ func (f *FSKDecoder) DecodeFSKID(pcmBuffer *SlidingPCMBuffer) string {
 			}
 		}
 
-		// Decode bit: 1900 Hz = 1, 2100 Hz = 0
+		// Decode bit: 1900 Hz = 1, 2100 Hz = 0 (slowrx fsk.c:73)
 		var bit uint8
 		if loPow > hiPow {
 			bit = 1
@@ -130,14 +143,14 @@ func (f *FSKDecoder) DecodeFSKID(pcmBuffer *SlidingPCMBuffer) string {
 			bit = 0
 		}
 
-		// Advance window (like slowrx: pcm.WindowPtr += samplesNeeded)
+		// Advance window (slowrx fsk.c:56: pcm.WindowPtr += (InSync ? 970 : 485))
 		pcmBuffer.AdvanceWindow(samplesNeeded)
 
 		if !inSync {
-			// Wait for sync pattern: 0x20 0x2A
+			// Wait for sync pattern: 0x20 0x2A (slowrx fsk.c:77-89)
 			testBits[testPtr%24] = bit
 
-			// Check for sync pattern
+			// Check for sync pattern (slowrx fsk.c:81-82)
 			testNum := 0
 			for i := 0; i < 12; i++ {
 				tp := (testPtr - (23 - i*2)) % 24
@@ -149,7 +162,7 @@ func (f *FSKDecoder) DecodeFSKID(pcmBuffer *SlidingPCMBuffer) string {
 				}
 			}
 
-			// Check if we have the sync pattern
+			// Check if we have the sync pattern (slowrx fsk.c:84)
 			byte1 := bitRev[(testNum>>6)&0x3f]
 			byte2 := bitRev[testNum&0x3f]
 
@@ -162,16 +175,19 @@ func (f *FSKDecoder) DecodeFSKID(pcmBuffer *SlidingPCMBuffer) string {
 			}
 
 			testPtr++
-			if testPtr > 200 {
+			// slowrx fsk.c:91 - timeout after 200 iterations (~2.2 seconds)
+			// Increase slightly to account for slower sample arrival in streaming mode
+			if testPtr > 300 {
+				log.Printf("[SSTV FSK] Timeout searching for sync pattern")
 				break
 			}
 		} else {
-			// Decode data bits
+			// Decode data bits (slowrx fsk.c:95-103)
 			asciiByte |= bit << bitPtr
 			bitPtr++
 
 			if bitPtr == 6 {
-				// Complete byte received
+				// Complete byte received (slowrx fsk.c:98-102)
 				if asciiByte < 0x0d || bytePtr > 9 {
 					break
 				}

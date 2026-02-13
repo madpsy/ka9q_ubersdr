@@ -152,7 +152,6 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 	// We need to process exactly 120 samples (10ms at 12kHz) per iteration
 	samps10ms := int(d.sampleRate * 10e-3)
 	accumulator := make([]int16, 0, samps10ms*2)
-	feedCount := 0
 
 	log.Printf("[SSTV] Processing in %d sample chunks (10ms at %.0f Hz)", samps10ms, d.sampleRate)
 
@@ -169,11 +168,6 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 
 			// Accumulate samples
 			accumulator = append(accumulator, samples...)
-
-			// Log sample reception during video feeding
-			if d.state == StateFeedingVideo && feedCount%50 == 0 && feedCount > 0 {
-				log.Printf("[SSTV Main] Received %d samples from audioChan (total accumulated: %d)", len(samples), len(accumulator))
-			}
 
 			// Process in 10ms chunks
 			for len(accumulator) >= samps10ms {
@@ -232,11 +226,8 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 					log.Printf("[SSTV Main] Switched to StateFeedingVideo, main loop will continue feeding")
 
 				case StateFeedingVideo:
-					// Buffer is already written at line 179, just log progress
-					feedCount++
-					if feedCount%100 == 0 {
-						log.Printf("[SSTV Main] StateFeedingVideo: fed %d chunks, buffer now has %d samples", feedCount, pcmBuffer.Available())
-					}
+					// Buffer is already written at line 179
+					// Just continue feeding silently
 				}
 			}
 		}
@@ -296,18 +287,34 @@ func (d *SSTVDecoder) decodeVideo(pcmBuffer *SlidingPCMBuffer, resultChan chan<-
 	rate := d.sampleRate
 	skip := 0
 
-	// Demodulate video from buffer
+	// Demodulate video from buffer with progressive line sending
 	// The main loop continues to feed the buffer while we consume from it
 	log.Printf("[SSTV Video Goroutine] Calling Demodulate(), buffer has %d samples", pcmBuffer.Available())
-	pixels, err := d.videoDemod.Demodulate(pcmBuffer, rate, skip)
+
+	// Create line sender callback to send lines as they're completed
+	lineSender := func(lineNum int, lineData []uint8) {
+		// Create message: [type:1][line:4][width:4][rgb_data:width*3]
+		msg := make([]byte, 1+4+4+len(lineData))
+		msg[0] = MsgTypeImageLine
+		binary.BigEndian.PutUint32(msg[1:5], uint32(lineNum))
+		binary.BigEndian.PutUint32(msg[5:9], uint32(d.mode.ImgWidth))
+		copy(msg[9:], lineData)
+
+		select {
+		case resultChan <- msg:
+		default:
+			// Channel full or closed, skip this line
+		}
+	}
+
+	_, err := d.videoDemod.Demodulate(pcmBuffer, rate, skip, lineSender)
 	log.Printf("[SSTV Video Goroutine] Demodulate() returned, err=%v", err)
 	if err != nil {
 		return fmt.Errorf("video demodulation failed: %w", err)
 	}
 
-	// Send uncorrected image data
-	log.Printf("[SSTV] Sending uncorrected image...")
-	d.sendImageData(resultChan, pixels)
+	// All lines have been sent progressively, no need to send again
+	log.Printf("[SSTV] Video demodulation complete, all lines sent progressively")
 
 	// Send initial completion
 	d.sendComplete(resultChan)

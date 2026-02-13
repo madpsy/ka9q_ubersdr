@@ -206,7 +206,8 @@ func (v *VideoDemodulator) GetPixelGrid(rate float64, skip int) []PixelInfo {
 }
 
 // Demodulate performs FM demodulation of the video signal
-func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64, skip int) ([]uint8, error) {
+// lineSender is an optional callback to send completed lines progressively
+func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64, skip int, lineSender func(lineNum int, lineData []uint8)) ([]uint8, error) {
 	m := v.mode
 	pixelGrid := v.GetPixelGrid(rate, skip)
 
@@ -238,6 +239,10 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 	syncSampleNum := 0
 	snr := 0.0
 	freq := 0.0
+
+	// Track which lines have been sent (for progressive output)
+	linesSent := make([]bool, m.NumLines)
+	lastSentLine := -1
 
 	// Process signal
 	lastLogSample := 0
@@ -307,6 +312,37 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 			}
 
 			pixelIdx++
+		}
+
+		// Check if we've completed any new lines and send them progressively
+		if lineSender != nil {
+			for y := lastSentLine + 1; y < m.NumLines; y++ {
+				// Check if all pixels in this line have all 3 channels filled
+				lineComplete := true
+				for x := 0; x < m.ImgWidth; x++ {
+					// Check if any channel is still 0 (uninitialized)
+					if image[x][y][0] == 0 && image[x][y][1] == 0 && image[x][y][2] == 0 {
+						lineComplete = false
+						break
+					}
+				}
+
+				if lineComplete && !linesSent[y] {
+					// Extract line data
+					lineData := make([]uint8, m.ImgWidth*3)
+					for x := 0; x < m.ImgWidth; x++ {
+						lineData[x*3] = image[x][y][0]
+						lineData[x*3+1] = image[x][y][1]
+						lineData[x*3+2] = image[x][y][2]
+					}
+					lineSender(y, lineData)
+					linesSent[y] = true
+					lastSentLine = y
+				} else {
+					// Lines are filled sequentially, so if this one isn't complete, stop checking
+					break
+				}
+			}
 		}
 
 		// Advance window by one sample (like slowrx: pcm.WindowPtr++)

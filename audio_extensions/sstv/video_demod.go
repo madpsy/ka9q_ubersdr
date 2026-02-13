@@ -295,14 +295,42 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 				}
 			}
 
-			// Send line progressively when last pixel of line is placed (like slowrx line 428)
+			// Send line progressively when last pixel of line is placed (like slowrx line 428-457)
 			if lineSender != nil && p.X == m.ImgWidth-1 {
-				// Extract line data
+				// Extract line data with proper color conversion (slowrx video.c:432-456)
 				lineData := make([]uint8, m.ImgWidth*3)
 				for x := 0; x < m.ImgWidth; x++ {
-					lineData[x*3] = image[x][p.Y][0]
-					lineData[x*3+1] = image[x][p.Y][1]
-					lineData[x*3+2] = image[x][p.Y][2]
+					offset := x * 3
+
+					// Apply color conversion based on mode encoding
+					switch m.ColorEnc {
+					case ColorRGB:
+						// slowrx video.c:434-438
+						lineData[offset] = image[x][p.Y][0]
+						lineData[offset+1] = image[x][p.Y][1]
+						lineData[offset+2] = image[x][p.Y][2]
+
+					case ColorGBR:
+						// slowrx video.c:440-444
+						lineData[offset] = image[x][p.Y][2]   // R from channel 2
+						lineData[offset+1] = image[x][p.Y][0] // G from channel 0
+						lineData[offset+2] = image[x][p.Y][1] // B from channel 1
+
+					case ColorYUV:
+						// slowrx video.c:446-450
+						r := clip((100*float64(image[x][p.Y][0]) + 140*float64(image[x][p.Y][1]) - 17850) / 100.0)
+						g := clip((100*float64(image[x][p.Y][0]) - 71*float64(image[x][p.Y][1]) - 33*float64(image[x][p.Y][2]) + 13260) / 100.0)
+						b := clip((100*float64(image[x][p.Y][0]) + 178*float64(image[x][p.Y][2]) - 22695) / 100.0)
+						lineData[offset] = r
+						lineData[offset+1] = g
+						lineData[offset+2] = b
+
+					case ColorBW:
+						// slowrx video.c:453-455
+						lineData[offset] = image[x][p.Y][0]
+						lineData[offset+1] = image[x][p.Y][0]
+						lineData[offset+2] = image[x][p.Y][0]
+					}
 				}
 				lineSender(p.Y, lineData)
 			}

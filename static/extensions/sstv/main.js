@@ -638,21 +638,28 @@ class SSTVExtension extends DecoderExtension {
         console.log('SSTV: Mode detected:', modeName, isExtended ? '(extended VIS)' : '');
         console.log('SSTV: Current image index:', this.currentImageIndex);
         console.log('SSTV: Images array length:', this.images.length);
+        console.log('SSTV: Is redrawing:', this.isRedrawing);
 
         // Store mode for when image is created (VIS code comes before IMAGE_START)
         this.detectedMode = modeName;
 
-        // Update current image mode ONLY if an image already exists
-        // (This handles the case where mode is detected after image creation)
-        if (this.currentImageIndex !== null && this.images[this.currentImageIndex]) {
+        // Update current image mode ONLY if:
+        // 1. An image already exists
+        // 2. We're NOT in the middle of a redraw (which means this is a NEW image's VIS code)
+        if (this.currentImageIndex !== null &&
+            this.images[this.currentImageIndex] &&
+            !this.isRedrawing) {
             console.log('SSTV: Updating existing image mode to:', modeName);
-            // Create a copy of the image object to avoid reference issues
             const currentImage = this.images[this.currentImageIndex];
             currentImage.mode = modeName;
             console.log('SSTV: Image mode after update:', currentImage.mode);
             this.renderGrid();
         } else {
-            console.log('SSTV: Mode stored for next image creation');
+            if (this.isRedrawing) {
+                console.log('SSTV: Mode stored for next image (redraw in progress, not updating current image)');
+            } else {
+                console.log('SSTV: Mode stored for next image creation');
+            }
         }
 
         // Update mode display

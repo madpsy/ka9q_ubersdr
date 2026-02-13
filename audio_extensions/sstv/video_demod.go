@@ -240,22 +240,27 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 	freq := 0.0
 
 	// Process signal
+	lastLogSample := 0
 	for sampleNum := 0; sampleNum < length; sampleNum++ {
+		// Log progress every 50k samples (~4 seconds at 12kHz)
+		if sampleNum-lastLogSample >= 50000 {
+			progress := float64(sampleNum) / float64(length) * 100
+			log.Printf("[SSTV Video] Progress: %d/%d samples (%.1f%%), buffer has %d samples",
+				sampleNum, length, progress, pcmBuffer.Available())
+			lastLogSample = sampleNum
+		}
+
 		// Wait for buffer to have enough samples (like slowrx readPcm blocking)
 		// This allows the main loop to continue feeding while we wait
 		waitCount := 0
 		for pcmBuffer.Available() < 128 {
-			if waitCount == 0 {
-				log.Printf("[SSTV Video] Buffer low at sample %d (available=%d), waiting for refill...",
-					sampleNum, pcmBuffer.Available())
-			}
 			time.Sleep(10 * time.Millisecond)
 			waitCount++
 
 			// Safety: if we've waited too long (>5 seconds), the audio stream might have ended
 			if waitCount > 500 {
-				log.Printf("[SSTV Video] Timeout waiting for samples at sampleNum=%d (waited %d ms), ending decode",
-					sampleNum, waitCount*10)
+				log.Printf("[SSTV Video] Timeout waiting for samples at sampleNum=%d/%d (%.1f%% complete, waited %d ms), ending decode",
+					sampleNum, length, float64(sampleNum)/float64(length)*100, waitCount*10)
 				break
 			}
 		}
@@ -263,12 +268,6 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 		// If we timed out, break out of main loop
 		if waitCount > 500 {
 			break
-		}
-
-		// Log when buffer refills after waiting
-		if waitCount > 0 {
-			log.Printf("[SSTV Video] Buffer refilled after %d ms, continuing decode (now have %d samples)",
-				waitCount*10, pcmBuffer.Available())
 		}
 
 		// Sync detection

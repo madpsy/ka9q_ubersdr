@@ -720,7 +720,11 @@ class SSTVExtension extends DecoderExtension {
         const progress = Math.round((line / this.imageHeight) * 100);
         const statusEl = document.getElementById('sstv-status');
         if (statusEl) {
-            statusEl.textContent = `Decoding: ${progress}%`;
+            if (this.isRedrawing) {
+                statusEl.textContent = `Redrawing: ${progress}%`;
+            } else {
+                statusEl.textContent = `Decoding: ${progress}%`;
+            }
         }
 
         // Update line count display
@@ -760,6 +764,9 @@ class SSTVExtension extends DecoderExtension {
         const totalLines = view.getUint32(1);
 
         console.log('SSTV: Image complete, total lines:', totalLines);
+
+        // Reset redraw flag
+        this.isRedrawing = false;
 
         // Mark current image as complete
         if (this.currentImageIndex !== null && this.images[this.currentImageIndex]) {

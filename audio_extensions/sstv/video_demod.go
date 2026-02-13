@@ -250,9 +250,9 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 			lastLogSample = sampleNum
 		}
 
-		// Ensure buffer has enough samples (blocks like KiwiSDR's pcm_copy)
-		// This allows the main loop to continue feeding while we wait
-		if !pcmBuffer.EnsureAvailable(128) {
+		// Ensure window has enough samples ahead (blocks like KiwiSDR's pcm_copy)
+		// This locks during check to prevent buffer shifts causing timing desync
+		if !pcmBuffer.EnsureWindowAvailable(128) {
 			log.Printf("[SSTV Video] Timeout waiting for samples at sampleNum=%d/%d (%.1f%% complete), ending decode",
 				sampleNum, length, float64(sampleNum)/float64(length)*100)
 			break

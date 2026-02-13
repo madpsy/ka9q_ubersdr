@@ -125,6 +125,7 @@ func (b *SlidingPCMBuffer) Available() int {
 // EnsureAvailable blocks until at least minSamples are available or timeout occurs
 // This matches KiwiSDR's pcm_copy() blocking behavior (sstv_pcm.cpp:51-54)
 // Returns true if samples available, false if timeout
+// NOTE: This is a helper for EnsureWindowAvailable, not used directly by video decoder
 func (b *SlidingPCMBuffer) EnsureAvailable(minSamples int) bool {
 	waitCount := 0
 	maxWait := 500 // 5 seconds timeout (500 * 10ms)
@@ -135,6 +136,31 @@ func (b *SlidingPCMBuffer) EnsureAvailable(minSamples int) bool {
 
 		if waitCount >= maxWait {
 			return false // Timeout - audio stream likely ended
+		}
+	}
+
+	return true
+}
+
+// EnsureWindowAvailable blocks until the window has enough samples ahead
+// This is used by video decoder to wait for samples without causing timing desync
+// The lock is held during the wait to prevent buffer shifts
+func (b *SlidingPCMBuffer) EnsureWindowAvailable(minSamples int) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	waitCount := 0
+	maxWait := 500 // 5 seconds timeout
+
+	for (b.size - b.windowPtr) < minSamples {
+		// Release lock during sleep to allow main loop to feed
+		b.mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+		waitCount++
+		b.mu.Lock()
+
+		if waitCount >= maxWait {
+			return false
 		}
 	}
 

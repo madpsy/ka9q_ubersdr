@@ -207,6 +207,8 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 							log.Printf("[SSTV Main] Video decode goroutine finished, resetting state")
 							d.state = StateWaitingVIS
 							pcmBuffer.Reset()
+							// Reset VIS detector to clear internal state and prevent false detections
+							d.visDetector = nil
 						}()
 
 						if err := d.decodeVideo(pcmBuffer, resultChan); err != nil {

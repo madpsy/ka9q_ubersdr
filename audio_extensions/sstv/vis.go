@@ -228,22 +228,9 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 			// Use tone[0+j] as reference frequency (exactly like slowrx line 85)
 			refFreq := v.toneBuf[0+j]
 
-			// Debug: Log all attempts every 200 iterations to see what's being tried
-			if v.iterationCount%200 == 0 {
-				if i == 0 && j == 0 {
-					log.Printf("[SSTV VIS] === Pattern check iteration %d ===", v.iterationCount)
-					log.Printf("[SSTV VIS] Tone buffer (first 15): [0]=%.1f [1]=%.1f [2]=%.1f [3]=%.1f [6]=%.1f [9]=%.1f [12]=%.1f [15]=%.1f",
-						v.toneBuf[0], v.toneBuf[1], v.toneBuf[2], v.toneBuf[3], v.toneBuf[6], v.toneBuf[9], v.toneBuf[12], v.toneBuf[15])
-				}
-				log.Printf("[SSTV VIS] Try i=%d, j=%d: refFreq=%.1f (tone[%d])", i, j, refFreq, 0+j)
-				log.Printf("[SSTV VIS]   Check leaders: [%d]=%.1f, [%d]=%.1f, [%d]=%.1f, [%d]=%.1f (need %.1f-%.1f)",
-					1*3+i, v.toneBuf[1*3+i], 2*3+i, v.toneBuf[2*3+i],
-					3*3+i, v.toneBuf[3*3+i], 4*3+i, v.toneBuf[4*3+i],
-					refFreq-25, refFreq+25)
-				log.Printf("[SSTV VIS]   Check start: [%d]=%.1f (need %.1f-%.1f)",
-					5*3+i, v.toneBuf[5*3+i], refFreq-725, refFreq-675)
-				log.Printf("[SSTV VIS]   Check stop: [%d]=%.1f (need %.1f-%.1f)",
-					14*3+i, v.toneBuf[14*3+i], refFreq-725, refFreq-675)
+			// Log summary every 200 iterations (only once per iteration boundary)
+			if v.iterationCount%200 == 0 && i == 0 && j == 0 {
+				log.Printf("[SSTV VIS] Pattern check iteration %d - searching for VIS code", v.iterationCount)
 			}
 
 			// Check for complete VIS pattern
@@ -261,9 +248,6 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 				!v.checkToneRange(4*3+i, refFreq-tolerance, refFreq+tolerance) ||
 				!v.checkToneRange(5*3+i, refFreq-700-tolerance, refFreq-700+tolerance) || // start bit
 				!v.checkToneRange(14*3+i, refFreq-700-tolerance, refFreq-700+tolerance) { // stop bit
-				if v.iterationCount%200 == 0 {
-					log.Printf("[SSTV VIS]   -> Pattern check FAILED")
-				}
 				continue
 			}
 

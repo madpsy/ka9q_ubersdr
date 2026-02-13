@@ -289,6 +289,7 @@ func (d *SSTVDecoder) decodeVideo(pcmBuffer *SlidingPCMBuffer, audioChan <-chan 
 	skip := 0
 
 	// Start a goroutine to keep buffer filled during video decoding
+	// This continuously reads from audioChan and writes to buffer (like slowrx readPcm)
 	stopFeeding := make(chan struct{})
 	go func() {
 		for {
@@ -297,21 +298,12 @@ func (d *SSTVDecoder) decodeVideo(pcmBuffer *SlidingPCMBuffer, audioChan <-chan 
 				return
 			case <-d.stopChan:
 				return
-			default:
-				// Keep buffer filled (like slowrx readPcm in video loop)
-				if pcmBuffer.Available() < 2048 {
-					select {
-					case samples, ok := <-audioChan:
-						if !ok {
-							return
-						}
-						pcmBuffer.Write(samples)
-					case <-stopFeeding:
-						return
-					case <-d.stopChan:
-						return
-					}
+			case samples, ok := <-audioChan:
+				if !ok {
+					return
 				}
+				// Continuously feed buffer as samples arrive
+				pcmBuffer.Write(samples)
 			}
 		}
 	}()

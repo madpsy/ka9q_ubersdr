@@ -163,11 +163,17 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 
 		case samples, ok := <-audioChan:
 			if !ok {
+				log.Printf("[SSTV Main] audioChan closed, exiting decode loop")
 				return
 			}
 
 			// Accumulate samples
 			accumulator = append(accumulator, samples...)
+
+			// Log sample reception during video feeding
+			if d.state == StateFeedingVideo && feedCount%50 == 0 && feedCount > 0 {
+				log.Printf("[SSTV Main] Received %d samples from audioChan (total accumulated: %d)", len(samples), len(accumulator))
+			}
 
 			// Process in 10ms chunks
 			for len(accumulator) >= samps10ms {
@@ -198,6 +204,17 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 					// This allows main loop to continue feeding buffer while video decodes
 					log.Printf("[SSTV Main] Launching video decoder goroutine, buffer has %d samples", pcmBuffer.Available())
 					go func() {
+						// Recover from panics (e.g., send on closed channel if user detaches)
+						defer func() {
+							if r := recover(); r != nil {
+								log.Printf("[SSTV Video Goroutine] Recovered from panic: %v", r)
+							}
+							// Always reset state
+							log.Printf("[SSTV Main] Video decode goroutine finished, resetting state")
+							d.state = StateWaitingVIS
+							pcmBuffer.Reset()
+						}()
+
 						if err := d.decodeVideo(pcmBuffer, resultChan); err != nil {
 							log.Printf("[SSTV] Video decoding failed: %v", err)
 						} else {
@@ -208,11 +225,6 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 								d.decodeFSKID(pcmBuffer, resultChan)
 							}
 						}
-
-						// Signal completion and reset for next image
-						log.Printf("[SSTV Main] Video decode goroutine finished, resetting state")
-						d.state = StateWaitingVIS
-						pcmBuffer.Reset()
 					}()
 
 					// Switch to feeding state so main loop continues

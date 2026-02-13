@@ -143,6 +143,13 @@ class SSTVExtension extends DecoderExtension {
                 e.target.style.display = 'none';
                 this.modalImageIndex = null; // Stop updating modal
             }
+            // Check if click is on modal save button
+            else if (e.target && e.target.id === 'sstv-modal-save-btn') {
+                console.log('SSTV: Modal save button clicked');
+                if (this.modalImageIndex !== null) {
+                    this.saveSpecificImage(this.modalImageIndex);
+                }
+            }
         });
 
         console.log('SSTV: Modal close handlers set up via delegation');
@@ -579,6 +586,17 @@ class SSTVExtension extends DecoderExtension {
         }
 
         const imageData = this.images[this.currentImageIndex || 0];
+        this.saveSpecificImage(this.currentImageIndex || 0);
+    }
+
+    saveSpecificImage(imageIndex) {
+        // Save a specific image by index
+        if (imageIndex < 0 || imageIndex >= this.images.length) {
+            console.error('SSTV: Invalid image index:', imageIndex);
+            return;
+        }
+
+        const imageData = this.images[imageIndex];
 
         // Generate filename with timestamp and mode
         const timestamp = imageData.timestamp.toISOString().replace(/[:.]/g, '-').slice(0, -5);

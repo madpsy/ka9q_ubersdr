@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 )
 
 /*
@@ -338,13 +339,18 @@ func (d *SSTVDecoder) decodeVideo(pcmBuffer *SlidingPCMBuffer, resultChan chan<-
 		correctedPixels := d.videoDemod.RedrawFromLuminance(adjustedRate, adjustedSkip)
 
 		// Signal that corrected image is coming
+		log.Printf("[SSTV] Sending redraw start message to frontend")
 		d.sendRedrawStart(resultChan)
 
 		// Send corrected image data
-		log.Printf("[SSTV] Sending corrected image...")
+		log.Printf("[SSTV] Sending %d corrected image lines...", d.mode.NumLines)
+		startTime := time.Now()
 		d.sendImageData(resultChan, correctedPixels)
+		elapsed := time.Since(startTime)
+		log.Printf("[SSTV] Corrected image sent in %v", elapsed)
 
 		// Send final completion
+		log.Printf("[SSTV] Sending final completion message")
 		d.sendComplete(resultChan)
 	}
 

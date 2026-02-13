@@ -98,9 +98,22 @@
         </div>
     </div>
 
-    <!-- Canvas Container -->
-    <div class="sstv-canvas-container" id="sstv-canvas-container">
-        <canvas id="sstv-canvas" class="sstv-canvas"></canvas>
+    <!-- Image Grid Container -->
+    <div class="sstv-image-grid" id="sstv-image-grid">
+        <!-- Images will be dynamically added here -->
+    </div>
+
+    <!-- Enlarged Image Modal -->
+    <div class="sstv-modal" id="sstv-modal" style="display: none;">
+        <div class="sstv-modal-content">
+            <span class="sstv-modal-close" id="sstv-modal-close">&times;</span>
+            <canvas id="sstv-modal-canvas" class="sstv-modal-canvas"></canvas>
+            <div class="sstv-modal-info">
+                <span id="sstv-modal-mode"></span>
+                <span id="sstv-modal-callsign"></span>
+                <span id="sstv-modal-time"></span>
+            </div>
+        </div>
     </div>
 
     <!-- Help Text with Tone Frequency -->

@@ -672,12 +672,11 @@ class SSTVExtension extends DecoderExtension {
         this.imageHeight = height;
         this.currentLine = 0;
 
+        // Create new image (uses current detectedMode and fskCallsign)
         this.createNewImage(width, height);
 
-        // Reset mode and callsign for next image
-        // (they will be set again when the next VIS code is detected)
-        this.detectedMode = null;
-        this.fskCallsign = null;
+        // Don't reset mode and callsign here - they belong to the image we just created
+        // They will be reset when a new VIS code is detected for the next image
 
         // Update info display
         const imageSizeEl = document.getElementById('sstv-image-size');
@@ -708,6 +707,10 @@ class SSTVExtension extends DecoderExtension {
 
         // Store mode for when image is created (VIS code comes before IMAGE_START)
         this.detectedMode = modeName;
+
+        // Reset callsign when new VIS detected - this is a new image
+        // The callsign will be set again if FSK ID is decoded for this new image
+        this.fskCallsign = null;
 
         // Update current image mode ONLY if:
         // 1. An image already exists

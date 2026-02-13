@@ -304,20 +304,20 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 
 		// Sync detection
 		if sampleNum == nextSyncTime {
-			v.detectSync(pcmBuffer, syncTargetBin, syncSampleNum)
+			v.detectSyncAtOffset(pcmBuffer, syncTargetBin, syncSampleNum, sampleNum)
 			nextSyncTime += 13
 			syncSampleNum++
 		}
 
 		// SNR estimation
 		if sampleNum == nextSNRTime {
-			snr = v.estimateSNR(pcmBuffer)
+			snr = v.estimateSNRAtOffset(pcmBuffer, sampleNum)
 			nextSNRTime += 256
 		}
 
 		// FM demodulation (every 6 samples)
 		if sampleNum%6 == 0 {
-			freq = v.demodulateFrequency(pcmBuffer, snr)
+			freq = v.demodulateFrequencyAtOffset(pcmBuffer, snr, sampleNum)
 		}
 
 		// Store luminance
@@ -389,8 +389,8 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 			pixelIdx++
 		}
 
-		// Advance window by one sample (like slowrx: pcm.WindowPtr++)
-		pcmBuffer.AdvanceWindow(1)
+		// NOTE: We don't advance windowPtr here because we're reading at offsets
+		// The demodulation functions read at windowPtr + sampleNum offset
 	}
 
 	// Convert image to RGB byte array
@@ -563,6 +563,189 @@ func (v *VideoDemodulator) demodulateFrequency(pcmBuffer *SlidingPCMBuffer, snr 
 	// Get window centered at WindowPtr
 	// slowrx: pcm.Buffer[pcm.WindowPtr + i - WinLength/2]
 	samples, err := pcmBuffer.GetWindow(-winLength/2, winLength)
+	if err != nil {
+		return 1500.0 + float64(v.headerShift)
+	}
+
+	// Apply Hann window
+	for i := 0; i < len(v.fftInput); i++ {
+		v.fftInput[i] = 0
+	}
+	for i := 0; i < winLength && i < len(v.fftInput); i++ {
+		if i < len(v.hannWindows[winIdx]) {
+			v.fftInput[i] = float64(samples[i]) / 32768.0 * v.hannWindows[winIdx][i]
+		}
+	}
+
+	// FFT
+	fft(v.fftInput, v.fftOutput)
+
+	// Find peak frequency
+	maxBin := 0
+	maxPower := 0.0
+	minBin := v.getBin(1500.0+float64(v.headerShift)) - 1
+	maxBinLimit := v.getBin(2300.0+float64(v.headerShift)) + 1
+
+	powers := make([]float64, v.fftSize)
+	for i := minBin; i <= maxBinLimit && i < len(v.fftOutput); i++ {
+		powers[i] = v.power(v.fftOutput[i])
+		if powers[i] > maxPower {
+			maxPower = powers[i]
+			maxBin = i
+		}
+	}
+
+	// Gaussian interpolation
+	var freq float64
+	if maxBin > minBin && maxBin < maxBinLimit && powers[maxBin] > 0 && powers[maxBin-1] > 0 && powers[maxBin+1] > 0 {
+		numerator := powers[maxBin+1] / powers[maxBin-1]
+		denominator := (powers[maxBin] * powers[maxBin]) / (powers[maxBin+1] * powers[maxBin-1])
+
+		if numerator > 0 && denominator > 0 {
+			delta := math.Log(numerator) / (2.0 * math.Log(denominator))
+			freq = (float64(maxBin) + delta) / float64(v.fftSize) * v.sampleRate
+		} else {
+			freq = float64(maxBin) / float64(v.fftSize) * v.sampleRate
+		}
+	} else {
+		// Clip if out of bounds
+		if maxBin > v.getBin(1900.0+float64(v.headerShift)) {
+			freq = 2300.0 + float64(v.headerShift)
+		} else {
+			freq = 1500.0 + float64(v.headerShift)
+		}
+	}
+
+	return freq
+}
+
+// detectSyncAtOffset detects sync pulses at a specific sample offset
+func (v *VideoDemodulator) detectSyncAtOffset(pcmBuffer *SlidingPCMBuffer, syncTargetBin int, syncSampleNum int, offset int) {
+	// Get 64-sample window centered at offset position
+	samples, err := pcmBuffer.GetWindow(offset-32, 64)
+	if err != nil {
+		return
+	}
+
+	// Apply Hann window (64 samples)
+	for i := 0; i < 64 && i < len(v.fftInput); i++ {
+		if i < len(v.hannWindows[1]) {
+			v.fftInput[i] = float64(samples[i]) / 32768.0 * v.hannWindows[1][i]
+		}
+	}
+	for i := 64; i < len(v.fftInput); i++ {
+		v.fftInput[i] = 0
+	}
+
+	// FFT
+	fft(v.fftInput, v.fftOutput)
+
+	// Calculate power in sync and video bands
+	pRaw := 0.0
+	pSync := 0.0
+
+	minBin := v.getBin(1500.0 + float64(v.headerShift))
+	maxBin := v.getBin(2300.0 + float64(v.headerShift))
+
+	for i := minBin; i <= maxBin && i < len(v.fftOutput); i++ {
+		pRaw += v.power(v.fftOutput[i])
+	}
+
+	for i := syncTargetBin - 1; i <= syncTargetBin+1 && i < len(v.fftOutput); i++ {
+		weight := 1.0 - 0.5*math.Abs(float64(syncTargetBin-i))
+		pSync += v.power(v.fftOutput[i]) * weight
+	}
+
+	pRaw /= float64(maxBin - minBin)
+	pSync /= 2.0
+
+	// Sync detected if more than 2x power in sync band
+	if syncSampleNum < len(v.hasSync) {
+		v.hasSync[syncSampleNum] = (pSync > 2*pRaw)
+	}
+}
+
+// estimateSNRAtOffset estimates SNR at a specific sample offset
+func (v *VideoDemodulator) estimateSNRAtOffset(pcmBuffer *SlidingPCMBuffer, offset int) float64 {
+	// Get 1024-sample window centered at offset position
+	samples, err := pcmBuffer.GetWindow(offset-512, 1024)
+	if err != nil {
+		return 0
+	}
+
+	// Apply Hann window
+	for i := 0; i < 1024 && i < len(v.fftInput); i++ {
+		if i < len(v.hannWindows[6]) {
+			v.fftInput[i] = float64(samples[i]) / 32768.0 * v.hannWindows[6][i]
+		}
+	}
+
+	// FFT
+	fft(v.fftInput, v.fftOutput)
+
+	// Calculate video+noise power (1500-2300 Hz)
+	pVideoNoise := 0.0
+	minBin := v.getBin(1500.0 + float64(v.headerShift))
+	maxBin := v.getBin(2300.0 + float64(v.headerShift))
+	for i := minBin; i <= maxBin && i < len(v.fftOutput); i++ {
+		pVideoNoise += v.power(v.fftOutput[i])
+	}
+
+	// Calculate noise-only power (400-800 Hz + 2700-3400 Hz)
+	pNoiseOnly := 0.0
+	for i := v.getBin(400.0 + float64(v.headerShift)); i <= v.getBin(800.0+float64(v.headerShift)) && i < len(v.fftOutput); i++ {
+		pNoiseOnly += v.power(v.fftOutput[i])
+	}
+	for i := v.getBin(2700.0 + float64(v.headerShift)); i <= v.getBin(3400.0+float64(v.headerShift)) && i < len(v.fftOutput); i++ {
+		pNoiseOnly += v.power(v.fftOutput[i])
+	}
+
+	// Calculate SNR
+	videoBins := maxBin - minBin + 1
+	noiseBins := (v.getBin(800.0) - v.getBin(400.0) + 1) + (v.getBin(3400.0) - v.getBin(2700.0) + 1)
+	receiverBins := v.getBin(3400.0) - v.getBin(400.0)
+
+	pNoise := pNoiseOnly * float64(receiverBins) / float64(noiseBins)
+	pSignal := pVideoNoise - pNoiseOnly*float64(videoBins)/float64(noiseBins)
+
+	if pSignal/pNoise < 0.01 {
+		return -20.0
+	}
+	return 10.0 * math.Log10(pSignal/pNoise)
+}
+
+// demodulateFrequencyAtOffset performs FM demodulation at a specific sample offset
+func (v *VideoDemodulator) demodulateFrequencyAtOffset(pcmBuffer *SlidingPCMBuffer, snr float64, offset int) float64 {
+	// Select window size based on SNR (adaptive windowing)
+	winIdx := 0
+	if v.adaptive {
+		switch {
+		case snr >= 20:
+			winIdx = 0
+		case snr >= 10:
+			winIdx = 1
+		case snr >= 9:
+			winIdx = 2
+		case snr >= 3:
+			winIdx = 3
+		case snr >= -5:
+			winIdx = 4
+		case snr >= -10:
+			winIdx = 5
+		default:
+			winIdx = 6
+		}
+
+		// Minimum window length can be doubled for Scottie DX
+		if v.mode.Name == "Scottie DX" && winIdx < 6 {
+			winIdx++
+		}
+	}
+
+	winLength := v.hannLens[winIdx]
+
+	// Get window centered at offset position
+	samples, err := pcmBuffer.GetWindow(offset-winLength/2, winLength)
 	if err != nil {
 		return 1500.0 + float64(v.headerShift)
 	}

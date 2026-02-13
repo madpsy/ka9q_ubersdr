@@ -269,6 +269,14 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 			log.Printf("[SSTV VIS] ✓ Detected mode: %s (VIS=%d, 0x%02x) @ %+d Hz",
 				modeSpec.Name, vis, vis, headerShift)
 
+			// Skip the rest of the stop bit to position at video signal start
+			// slowrx vis.c:169-170: readPcm(20e-3 * 44100); pcm.WindowPtr += 20e-3 * 44100;
+			// This positions windowPtr at the START of the video signal (after VIS stop bit)
+			stopBitSkip := int(20e-3 * v.sampleRate) // 240 samples at 12kHz, 882 at 44.1kHz
+			pcmBuffer.AdvanceWindow(stopBitSkip)
+
+			log.Printf("[SSTV VIS] Advanced windowPtr by %d samples past stop bit to video signal start", stopBitSkip)
+
 			return mode, headerShift, false, true
 		}
 	}

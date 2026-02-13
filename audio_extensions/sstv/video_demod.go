@@ -233,20 +233,7 @@ func (v *VideoDemodulator) GetPixelGrid(rate float64, skip int) []PixelInfo {
 // lineSender is an optional callback to send completed lines progressively
 func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64, skip int, lineSender func(lineNum int, lineData []uint8)) ([]uint8, error) {
 	m := v.mode
-
-	// DEBUG: Log buffer state at start
-	initialWindowPtr := pcmBuffer.GetWindowPtr()
-	log.Printf("[SSTV Video DEBUG] Starting decode - windowPtr=%d, skip=%d, rate=%.1f",
-		initialWindowPtr, skip, rate)
-
 	pixelGrid := v.GetPixelGrid(rate, skip)
-
-	// DEBUG: Log first few pixel times
-	log.Printf("[SSTV Video DEBUG] First 10 pixel times:")
-	for i := 0; i < 10 && i < len(pixelGrid); i++ {
-		log.Printf("  Pixel %d: time=%d, x=%d, y=%d, ch=%d",
-			i, pixelGrid[i].Time, pixelGrid[i].X, pixelGrid[i].Y, pixelGrid[i].Channel)
-	}
 
 	log.Printf("[SSTV Video] Demodulating %s: %dx%d, %d pixels",
 		m.Name, m.ImgWidth, m.NumLines, len(pixelGrid))
@@ -279,12 +266,6 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 
 	// Process signal
 	lastLogSample := 0
-
-	// DEBUG: Log loop start
-	startWindowPtr := pcmBuffer.GetWindowPtr()
-	log.Printf("[SSTV Video DEBUG] Starting demodulation loop - windowPtr=%d, length=%d",
-		startWindowPtr, length)
-
 	for sampleNum := 0; sampleNum < length; sampleNum++ {
 		// Log progress every 50k samples (~4 seconds at 12kHz)
 		if sampleNum-lastLogSample >= 50000 {
@@ -329,14 +310,6 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 		// Place pixels
 		for pixelIdx < len(pixelGrid) && pixelGrid[pixelIdx].Time == sampleNum {
 			p := pixelGrid[pixelIdx]
-
-			// DEBUG: Log first few pixel placements
-			if pixelIdx < 10 {
-				currentWindowPtr := pcmBuffer.GetWindowPtr()
-				log.Printf("[SSTV Video DEBUG] Placing pixel %d at sampleNum=%d, windowPtr=%d, x=%d, y=%d, ch=%d, lum=%d",
-					pixelIdx, sampleNum, currentWindowPtr, p.X, p.Y, p.Channel, lum)
-			}
-
 			image[p.X][p.Y][p.Channel] = lum
 
 			// Some modes have R-Y & B-Y channels that are twice the height

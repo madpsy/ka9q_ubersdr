@@ -461,6 +461,8 @@ class SSTVExtension extends DecoderExtension {
             console.log('SSTV: Canvas not in DOM, re-attaching...');
             const container = document.getElementById('sstv-canvas-container');
             if (container) {
+                // Clear any existing canvases first to avoid duplicates
+                container.innerHTML = '';
                 container.appendChild(this.canvas);
                 console.log('SSTV: Canvas re-attached to container');
             } else {

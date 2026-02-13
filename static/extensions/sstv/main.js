@@ -146,11 +146,6 @@ class SSTVExtension extends DecoderExtension {
         this.imageHeight = 256;
         this.currentLine = 0;
 
-        // Force canvas to be visible by setting style attributes
-        this.canvas.style.display = 'block';
-        this.canvas.style.width = '320px';
-        this.canvas.style.height = '256px';
-
         // Fill with black
         this.ctx.fillStyle = '#000000';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);

@@ -232,8 +232,9 @@ input[type="checkbox"] {
     image-rendering: pixelated;
     image-rendering: crisp-edges;
     cursor: crosshair;
+    width: 100% !important;
+    height: auto !important;
     max-width: 100%;
-    height: auto;
     border: 1px solid #444;
 }
 

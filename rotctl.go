@@ -405,18 +405,12 @@ func (r *RotctlClient) SetPosition(azimuth, elevation float64) error {
 	return nil
 }
 
-// SetAzimuth sets only the azimuth, keeping elevation unchanged
+// SetAzimuth sets only the azimuth, keeping elevation at 0
 func (r *RotctlClient) SetAzimuth(azimuth float64) error {
 	log.Printf("Rotator: Setting azimuth to %.1f°", azimuth)
 
-	// Get current position first
-	pos, err := r.GetPosition()
-	if err != nil {
-		log.Printf("Rotator: Failed to get current position: %v", err)
-		return fmt.Errorf("failed to get current position: %w", err)
-	}
-
-	return r.SetPosition(azimuth, pos.Elevation)
+	// Always set elevation to 0 for azimuth-only rotators
+	return r.SetPosition(azimuth, 0)
 }
 
 // SetElevation sets only the elevation, keeping azimuth unchanged

@@ -456,6 +456,18 @@ class SSTVExtension extends DecoderExtension {
         console.log('SSTV: Canvas element exists:', !!this.canvas);
         console.log('SSTV: Canvas in DOM:', this.canvas ? document.body.contains(this.canvas) : false);
 
+        // If canvas is not in DOM, re-attach it
+        if (this.canvas && !document.body.contains(this.canvas)) {
+            console.log('SSTV: Canvas not in DOM, re-attaching...');
+            const container = document.getElementById('sstv-canvas-container');
+            if (container) {
+                container.appendChild(this.canvas);
+                console.log('SSTV: Canvas re-attached to container');
+            } else {
+                console.error('SSTV: Container not found, cannot re-attach canvas');
+            }
+        }
+
         // Resize canvas
         this.imageWidth = width;
         this.imageHeight = height;
@@ -464,6 +476,7 @@ class SSTVExtension extends DecoderExtension {
         this.currentLine = 0;
 
         console.log('SSTV: Canvas after resize:', `${this.canvas.width}x${this.canvas.height}`);
+        console.log('SSTV: Canvas in DOM after resize:', document.body.contains(this.canvas));
 
         // Clear canvas
         this.ctx.fillStyle = '#000000';

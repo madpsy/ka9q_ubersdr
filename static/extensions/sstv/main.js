@@ -36,6 +36,9 @@ class SSTVExtension extends DecoderExtension {
         this.images = []; // Array of {canvas, mode, callsign, timestamp, complete}
         this.currentImageIndex = null;
 
+        // Modal state
+        this.modalImageIndex = null; // Index of image currently shown in modal
+
         // Binary message types
         this.MSG_IMAGE_LINE = 0x01;
         this.MSG_MODE_DETECTED = 0x02;
@@ -131,12 +134,14 @@ class SSTVExtension extends DecoderExtension {
                 const modal = document.getElementById('sstv-modal');
                 if (modal) {
                     modal.style.display = 'none';
+                    this.modalImageIndex = null; // Stop updating modal
                 }
             }
             // Check if click is on modal background
             else if (e.target && e.target.id === 'sstv-modal') {
                 console.log('SSTV: Modal background clicked via delegation');
                 e.target.style.display = 'none';
+                this.modalImageIndex = null; // Stop updating modal
             }
         });
 
@@ -207,6 +212,26 @@ class SSTVExtension extends DecoderExtension {
         if (lineCountEl) {
             lineCountEl.textContent = `${this.currentLine}/${this.imageHeight}`;
         }
+
+        // If modal is open and showing the current image, update it too
+        if (this.modalImageIndex === this.currentImageIndex) {
+            this.updateModalImage();
+        }
+    }
+
+    updateModalImage() {
+        // Update the modal canvas with the current image
+        const modal = document.getElementById('sstv-modal');
+        const modalCanvas = document.getElementById('sstv-modal-canvas');
+
+        if (!modal || !modalCanvas || this.modalImageIndex === null) return;
+
+        const imageData = this.images[this.modalImageIndex];
+        if (!imageData) return;
+
+        const modalCtx = modalCanvas.getContext('2d');
+        modalCtx.imageSmoothingEnabled = false;
+        modalCtx.drawImage(imageData.canvas, 0, 0, modalCanvas.width, modalCanvas.height);
     }
 
     renderGrid() {
@@ -274,17 +299,28 @@ class SSTVExtension extends DecoderExtension {
 
         if (!modal || !modalCanvas) return;
 
+        // Find the index of this image in the array
+        const imageIndex = this.images.indexOf(imageData);
+        this.modalImageIndex = imageIndex;
+
         console.log('SSTV: Showing enlarged image:', {
             mode: imageData.mode,
             callsign: imageData.callsign,
-            timestamp: imageData.timestamp
+            timestamp: imageData.timestamp,
+            index: imageIndex,
+            complete: imageData.complete
         });
 
-        // Copy image to modal canvas
-        modalCanvas.width = imageData.canvas.width;
-        modalCanvas.height = imageData.canvas.height;
+        // Copy image to modal canvas at 2x size for better visibility
+        modalCanvas.width = imageData.canvas.width * 2;
+        modalCanvas.height = imageData.canvas.height * 2;
         const modalCtx = modalCanvas.getContext('2d');
-        modalCtx.drawImage(imageData.canvas, 0, 0);
+
+        // Disable image smoothing for crisp pixel art scaling
+        modalCtx.imageSmoothingEnabled = false;
+
+        // Draw the image scaled 2x
+        modalCtx.drawImage(imageData.canvas, 0, 0, modalCanvas.width, modalCanvas.height);
 
         // Update info - show mode if available
         if (modalMode) {

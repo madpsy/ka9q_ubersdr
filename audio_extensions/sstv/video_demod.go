@@ -167,9 +167,10 @@ func (v *VideoDemodulator) GetPixelGrid(rate float64, skip int) []PixelInfo {
 		for y := 0; y < m.NumLines; y += 2 {
 			for channel := 0; channel < numChans; channel++ {
 				for x := 0; x < m.ImgWidth; x++ {
+					// slowrx video.c:140-142 - PD modes pixel time calculation
+					// IMPORTANT: Add skip to pixel times like slowrx does
 					t := float64(y)/2*m.LineTime + chanStart[channel] + m.PixelTime*(float64(x)+0.5)
-					// Pixel times are relative to video start, skip not added here
-					sampleNum := int(math.Round(rate * t))
+					sampleNum := int(math.Round(rate*t)) + skip
 
 					if channel == 0 {
 						pixels = append(pixels, PixelInfo{Time: sampleNum, X: x, Y: y, Channel: 0})
@@ -202,11 +203,10 @@ func (v *VideoDemodulator) GetPixelGrid(rate float64, skip int) []PixelInfo {
 						ch = uint8(channel)
 					}
 
-					// slowrx video.c:196-197 - use the determined channel for ChanLen lookup
+					// slowrx video.c:196-198 - use the determined channel for ChanLen lookup
+					// IMPORTANT: Add skip to pixel times like slowrx does
 					t := float64(y)*m.LineTime + chanStart[channel] + (float64(x)-0.5)/float64(m.ImgWidth)*chanLen[ch]
-					// Pixel times are relative to video start (sampleNum=0 in demodulation loop)
-					// skip is used separately to position buffer, not added to pixel times
-					sampleNum := int(math.Round(rate * t))
+					sampleNum := int(math.Round(rate*t)) + skip
 
 					pixels = append(pixels, PixelInfo{Time: sampleNum, X: x, Y: y, Channel: ch})
 				}
@@ -249,10 +249,9 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 
 	syncTargetBin := v.getBin(1200.0 + float64(v.headerShift))
 
-	// Record initial windowPtr position - this is where the video signal starts
-	// We'll read at offsets from this position instead of advancing windowPtr
-	baseWindowPtr := pcmBuffer.GetWindowPtr()
-	log.Printf("[SSTV Video] Base windowPtr=%d, will read at offsets from this position", baseWindowPtr)
+	// Like slowrx, we advance WindowPtr by 1 each sample during decode
+	// The buffer management keeps pace by shifting/refilling as needed
+	log.Printf("[SSTV Video] Starting decode at windowPtr=%d", pcmBuffer.GetWindowPtr())
 
 	// Initialize image buffer
 	image := make([][][]uint8, m.ImgWidth)
@@ -281,39 +280,38 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 			lastLogSample = sampleNum
 		}
 
-		// Ensure we have enough samples available ahead for reading at offset
-		// We need at least sampleNum + 1024 samples from baseWindowPtr
-		requiredSamples := sampleNum + 1024
+		// Like slowrx video.c:266, ensure we have enough samples ahead
+		// We need at least 1024 samples available for FFT operations
 		available := pcmBuffer.Available()
-		if available < requiredSamples {
+		if available < 1024 {
 			// Wait for more samples to arrive
 			maxWaits := 500 // 5 seconds
-			for i := 0; i < maxWaits && pcmBuffer.Available() < requiredSamples; i++ {
+			for i := 0; i < maxWaits && pcmBuffer.Available() < 1024; i++ {
 				time.Sleep(10 * time.Millisecond)
 			}
-			if pcmBuffer.Available() < requiredSamples {
+			if pcmBuffer.Available() < 1024 {
 				log.Printf("[SSTV Video] Timeout waiting for samples at sampleNum=%d/%d (%.1f%% complete), ending decode",
 					sampleNum, length, float64(sampleNum)/float64(length)*100)
 				break
 			}
 		}
 
-		// Sync detection at offset
+		// Sync detection (like slowrx video.c:271-297)
 		if sampleNum == nextSyncTime {
-			v.detectSyncAtOffset(pcmBuffer, syncTargetBin, syncSampleNum, sampleNum)
+			v.detectSync(pcmBuffer, syncTargetBin, syncSampleNum)
 			nextSyncTime += 13
 			syncSampleNum++
 		}
 
-		// SNR estimation at offset
+		// SNR estimation (like slowrx video.c:304-344)
 		if sampleNum == nextSNRTime {
-			snr = v.estimateSNRAtOffset(pcmBuffer, sampleNum)
+			snr = v.estimateSNR(pcmBuffer)
 			nextSNRTime += 256
 		}
 
-		// FM demodulation at offset (every 6 samples)
+		// FM demodulation (like slowrx video.c:350-400, every 6 samples)
 		if sampleNum%6 == 0 {
-			freq = v.demodulateFrequencyAtOffset(pcmBuffer, snr, sampleNum)
+			freq = v.demodulateFrequency(pcmBuffer, snr)
 		}
 
 		// Store luminance
@@ -377,14 +375,12 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 			pixelIdx++
 		}
 
-		// NOTE: We don't advance windowPtr - we read at offsets from baseWindowPtr
-		// This keeps windowPtr stable and prevents buffer discontinuities
+		// CRITICAL: Advance WindowPtr by 1 each sample, like slowrx video.c:484
+		// This keeps WindowPtr tracking through the signal and prevents wraparound issues
+		pcmBuffer.AdvanceWindow(1)
 	}
 
-	// After decode completes, advance windowPtr to end of signal for FSK decode
-	// FSK expects to read from after the video signal
-	pcmBuffer.AdvanceWindow(length)
-	log.Printf("[SSTV Video] Decode complete, advanced windowPtr by %d samples for FSK", length)
+	log.Printf("[SSTV Video] Decode complete, windowPtr advanced through entire signal")
 
 	// Convert image to RGB byte array
 	return v.convertToRGB(image), nil
@@ -649,189 +645,6 @@ func (v *VideoDemodulator) convertToRGB(image [][][]uint8) []uint8 {
 	}
 
 	return rgb
-}
-
-// detectSyncAtOffset detects sync pulses at a specific sample offset from baseWindowPtr
-func (v *VideoDemodulator) detectSyncAtOffset(pcmBuffer *SlidingPCMBuffer, syncTargetBin int, syncSampleNum int, offset int) {
-	// Get 64-sample window centered at offset position
-	samples, err := pcmBuffer.GetWindow(offset-32, 64)
-	if err != nil {
-		return
-	}
-
-	// Apply Hann window (64 samples)
-	for i := 0; i < 64 && i < len(v.fftInput); i++ {
-		if i < len(v.hannWindows[1]) {
-			v.fftInput[i] = float64(samples[i]) / 32768.0 * v.hannWindows[1][i]
-		}
-	}
-	for i := 64; i < len(v.fftInput); i++ {
-		v.fftInput[i] = 0
-	}
-
-	// FFT
-	fft(v.fftInput, v.fftOutput)
-
-	// Calculate power in sync and video bands
-	pRaw := 0.0
-	pSync := 0.0
-
-	minBin := v.getBin(1500.0 + float64(v.headerShift))
-	maxBin := v.getBin(2300.0 + float64(v.headerShift))
-
-	for i := minBin; i <= maxBin && i < len(v.fftOutput); i++ {
-		pRaw += v.power(v.fftOutput[i])
-	}
-
-	for i := syncTargetBin - 1; i <= syncTargetBin+1 && i < len(v.fftOutput); i++ {
-		weight := 1.0 - 0.5*math.Abs(float64(syncTargetBin-i))
-		pSync += v.power(v.fftOutput[i]) * weight
-	}
-
-	pRaw /= float64(maxBin - minBin)
-	pSync /= 2.0
-
-	// Sync detected if more than 2x power in sync band
-	if syncSampleNum < len(v.hasSync) {
-		v.hasSync[syncSampleNum] = (pSync > 2*pRaw)
-	}
-}
-
-// estimateSNRAtOffset estimates SNR at a specific sample offset from baseWindowPtr
-func (v *VideoDemodulator) estimateSNRAtOffset(pcmBuffer *SlidingPCMBuffer, offset int) float64 {
-	// Get 1024-sample window centered at offset position
-	samples, err := pcmBuffer.GetWindow(offset-512, 1024)
-	if err != nil {
-		return 0
-	}
-
-	// Apply Hann window
-	for i := 0; i < 1024 && i < len(v.fftInput); i++ {
-		if i < len(v.hannWindows[6]) {
-			v.fftInput[i] = float64(samples[i]) / 32768.0 * v.hannWindows[6][i]
-		}
-	}
-
-	// FFT
-	fft(v.fftInput, v.fftOutput)
-
-	// Calculate video+noise power (1500-2300 Hz)
-	pVideoNoise := 0.0
-	minBin := v.getBin(1500.0 + float64(v.headerShift))
-	maxBin := v.getBin(2300.0 + float64(v.headerShift))
-	for i := minBin; i <= maxBin && i < len(v.fftOutput); i++ {
-		pVideoNoise += v.power(v.fftOutput[i])
-	}
-
-	// Calculate noise-only power (400-800 Hz + 2700-3400 Hz)
-	pNoiseOnly := 0.0
-	for i := v.getBin(400.0 + float64(v.headerShift)); i <= v.getBin(800.0+float64(v.headerShift)) && i < len(v.fftOutput); i++ {
-		pNoiseOnly += v.power(v.fftOutput[i])
-	}
-	for i := v.getBin(2700.0 + float64(v.headerShift)); i <= v.getBin(3400.0+float64(v.headerShift)) && i < len(v.fftOutput); i++ {
-		pNoiseOnly += v.power(v.fftOutput[i])
-	}
-
-	// Calculate SNR
-	videoBins := maxBin - minBin + 1
-	noiseBins := (v.getBin(800.0) - v.getBin(400.0) + 1) + (v.getBin(3400.0) - v.getBin(2700.0) + 1)
-	receiverBins := v.getBin(3400.0) - v.getBin(400.0)
-
-	pNoise := pNoiseOnly * float64(receiverBins) / float64(noiseBins)
-	pSignal := pVideoNoise - pNoiseOnly*float64(videoBins)/float64(noiseBins)
-
-	if pSignal/pNoise < 0.01 {
-		return -20.0
-	}
-	return 10.0 * math.Log10(pSignal/pNoise)
-}
-
-// demodulateFrequencyAtOffset performs FM demodulation at a specific sample offset from baseWindowPtr
-func (v *VideoDemodulator) demodulateFrequencyAtOffset(pcmBuffer *SlidingPCMBuffer, snr float64, offset int) float64 {
-	// Select window size based on SNR (adaptive windowing)
-	winIdx := 0
-	if v.adaptive {
-		switch {
-		case snr >= 20:
-			winIdx = 0
-		case snr >= 10:
-			winIdx = 1
-		case snr >= 9:
-			winIdx = 2
-		case snr >= 3:
-			winIdx = 3
-		case snr >= -5:
-			winIdx = 4
-		case snr >= -10:
-			winIdx = 5
-		default:
-			winIdx = 6
-		}
-
-		// Minimum window length can be doubled for Scottie DX
-		if v.mode.Name == "Scottie DX" && winIdx < 6 {
-			winIdx++
-		}
-	}
-
-	winLength := v.hannLens[winIdx]
-
-	// Get window centered at offset position
-	samples, err := pcmBuffer.GetWindow(offset-winLength/2, winLength)
-	if err != nil {
-		return 1500.0 + float64(v.headerShift)
-	}
-
-	// Apply Hann window
-	for i := 0; i < len(v.fftInput); i++ {
-		v.fftInput[i] = 0
-	}
-	for i := 0; i < winLength && i < len(v.fftInput); i++ {
-		if i < len(v.hannWindows[winIdx]) {
-			v.fftInput[i] = float64(samples[i]) / 32768.0 * v.hannWindows[winIdx][i]
-		}
-	}
-
-	// FFT
-	fft(v.fftInput, v.fftOutput)
-
-	// Find peak frequency
-	maxBin := 0
-	maxPower := 0.0
-	minBin := v.getBin(1500.0+float64(v.headerShift)) - 1
-	maxBinLimit := v.getBin(2300.0+float64(v.headerShift)) + 1
-
-	powers := make([]float64, v.fftSize)
-	for i := minBin; i <= maxBinLimit && i < len(v.fftOutput); i++ {
-		powers[i] = v.power(v.fftOutput[i])
-		if powers[i] > maxPower {
-			maxPower = powers[i]
-			maxBin = i
-		}
-	}
-
-	// Gaussian interpolation
-	var freq float64
-	if maxBin > minBin && maxBin < maxBinLimit && powers[maxBin] > 0 && powers[maxBin-1] > 0 && powers[maxBin+1] > 0 {
-		numerator := powers[maxBin+1] / powers[maxBin-1]
-		denominator := (powers[maxBin] * powers[maxBin]) / (powers[maxBin+1] * powers[maxBin-1])
-
-		if numerator > 0 && denominator > 0 {
-			delta := math.Log(numerator) / (2.0 * math.Log(denominator))
-			freq = (float64(maxBin) + delta) / float64(v.fftSize) * v.sampleRate
-		} else {
-			freq = float64(maxBin) / float64(v.fftSize) * v.sampleRate
-		}
-	} else {
-		// Clip if out of bounds
-		if maxBin > v.getBin(1900.0+float64(v.headerShift)) {
-			freq = 2300.0 + float64(v.headerShift)
-		} else {
-			freq = 1500.0 + float64(v.headerShift)
-		}
-	}
-
-	return freq
 }
 
 // Helper functions

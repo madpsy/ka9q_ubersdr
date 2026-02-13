@@ -8,12 +8,12 @@ import (
 
 /*
  * PCM Buffer Management
- * True circular buffer implementation matching slowrx's approach
+ * Sliding buffer implementation matching slowrx's approach exactly
  *
- * Key differences from previous sliding buffer:
- * - Fixed-size circular buffer (no shifting)
- * - WindowPtr wraps around at buffer end
- * - WritePos tracks where new samples are written
+ * Key characteristics:
+ * - Fixed-size buffer with backward shifting (like slowrx pcm.c)
+ * - WindowPtr stays in stable range (never wraps)
+ * - When buffer fills, contents shift backward and WindowPtr moves back
  * - Maintains stable position tracking for video demodulation
  *
  * Buffer size calculation at 12kHz:
@@ -22,18 +22,18 @@ import (
  * - Use 8M samples (16MB) to be safe with margin for all modes
  */
 
-// SlidingPCMBuffer implements a true circular buffer for SSTV decoding
-// Despite the name "Sliding", this is now a circular buffer for compatibility
+// SlidingPCMBuffer implements slowrx's sliding buffer for SSTV decoding
+// Buffer contents shift backward as new samples arrive, keeping WindowPtr stable
 type SlidingPCMBuffer struct {
 	buffer    []int16
 	size      int
-	windowPtr int // Current read position (wraps at size)
-	writePos  int // Current write position (wraps at size)
+	windowPtr int // Current read position (stays in stable range)
+	writePos  int // Always at buffer end (size) after initial fill
 	fillPos   int // Used during initial fill only
 	mu        sync.Mutex
 }
 
-// NewSlidingPCMBuffer creates a new circular PCM buffer
+// NewSlidingPCMBuffer creates a new sliding PCM buffer
 // Size is automatically set large enough for any SSTV mode at 12kHz
 func NewSlidingPCMBuffer(requestedSize int) *SlidingPCMBuffer {
 	// Use 8M samples (16MB) to handle longest modes at 12kHz
@@ -52,8 +52,8 @@ func NewSlidingPCMBuffer(requestedSize int) *SlidingPCMBuffer {
 	return buf
 }
 
-// Write adds samples to the buffer at writePos (circular)
-// This matches slowrx's readPcm() behavior but with circular wrapping
+// Write adds samples to the buffer using slowrx's sliding buffer approach
+// This matches slowrx's readPcm() behavior exactly (pcm.c:19-64)
 func (b *SlidingPCMBuffer) Write(samples []int16) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -61,25 +61,33 @@ func (b *SlidingPCMBuffer) Write(samples []int16) {
 	numSamples := len(samples)
 
 	if b.windowPtr == 0 {
-		// First fill - accumulate minimal samples before starting
-		// Only need 1024 samples (not size/2) to start processing
-		// This allows quick startup while still having enough buffer
-		for i := 0; i < numSamples && b.fillPos < 1024; i++ {
+		// First fill - fill entire buffer like slowrx (pcm.c:50-54)
+		for i := 0; i < numSamples && b.fillPos < b.size; i++ {
 			b.buffer[b.fillPos] = samples[i]
 			b.fillPos++
 		}
 
-		// Set windowPtr once we have minimal data (like slowrx sets to middle)
-		// We set to a safe position that allows backwards reads for VIS
-		if b.fillPos >= 1024 {
-			b.windowPtr = 512 // Safe position allowing 512 samples backwards read
-			b.writePos = b.fillPos
+		// Set windowPtr to middle once buffer is filled (pcm.c:54)
+		if b.fillPos >= b.size {
+			b.windowPtr = b.size / 2
+			b.writePos = b.size
 		}
 	} else {
-		// Normal operation: write samples circularly
-		for _, sample := range samples {
-			b.buffer[b.writePos] = sample
-			b.writePos = (b.writePos + 1) % b.size // Wrap at end
+		// Normal operation: shift buffer backward and add new samples at end
+		// This matches slowrx pcm.c:57-61 exactly
+
+		// Shift buffer contents backward (pcm.c:58)
+		copy(b.buffer[0:b.size-numSamples], b.buffer[numSamples:b.size])
+
+		// Add new samples at end (pcm.c:59)
+		copy(b.buffer[b.size-numSamples:b.size], samples[0:numSamples])
+
+		// Move WindowPtr back to compensate for shift (pcm.c:61)
+		b.windowPtr -= numSamples
+
+		// Prevent WindowPtr from going negative or too low
+		if b.windowPtr < 512 {
+			b.windowPtr = 512
 		}
 	}
 }
@@ -87,21 +95,22 @@ func (b *SlidingPCMBuffer) Write(samples []int16) {
 // GetWindow returns samples centered at WindowPtr
 // offset: relative to WindowPtr (e.g., -441 to start 441 samples before WindowPtr)
 // length: number of samples to return
-// This matches slowrx: Buffer[WindowPtr + i + offset] with circular wrapping
+// This matches slowrx: Buffer[WindowPtr + i + offset] (no wrapping in sliding buffer)
 func (b *SlidingPCMBuffer) GetWindow(offset, length int) ([]int16, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	result := make([]int16, length)
 	for i := 0; i < length; i++ {
-		// Calculate position with circular wrapping
+		// Calculate position (no wrapping in sliding buffer)
 		pos := b.windowPtr + offset + i
-		// Handle negative offsets
-		for pos < 0 {
-			pos += b.size
+
+		// Bounds check
+		if pos < 0 || pos >= b.size {
+			// Return error if out of bounds
+			return nil, fmt.Errorf("window read out of bounds: pos=%d, size=%d", pos, b.size)
 		}
-		// Wrap at buffer end
-		pos = pos % b.size
+
 		result[i] = b.buffer[pos]
 	}
 
@@ -110,12 +119,20 @@ func (b *SlidingPCMBuffer) GetWindow(offset, length int) ([]int16, error) {
 
 // AdvanceWindow moves the WindowPtr forward (after consuming samples)
 // This is called after reading samples to advance the window
-// WindowPtr wraps circularly at buffer end
+// In sliding buffer, WindowPtr just advances (no wrapping needed)
 func (b *SlidingPCMBuffer) AdvanceWindow(numSamples int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	b.windowPtr = (b.windowPtr + numSamples) % b.size
+	b.windowPtr += numSamples
+
+	// WindowPtr should never exceed buffer size due to Write() shifting
+	// But add safety check
+	if b.windowPtr > b.size-1024 {
+		// This shouldn't happen if Write() is called frequently enough
+		// But if it does, clamp to safe position
+		b.windowPtr = b.size - 1024
+	}
 }
 
 // GetWindowPtr returns the current window pointer position
@@ -126,16 +143,14 @@ func (b *SlidingPCMBuffer) GetWindowPtr() int {
 }
 
 // Available returns how many samples are available after WindowPtr (non-blocking)
-// In a circular buffer, this is the distance from windowPtr to writePos
+// In a sliding buffer, this is simply writePos - windowPtr
 func (b *SlidingPCMBuffer) Available() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.writePos >= b.windowPtr {
-		return b.writePos - b.windowPtr
-	}
-	// Wrapped case
-	return (b.size - b.windowPtr) + b.writePos
+	// In sliding buffer, writePos is always at buffer end (size)
+	// Available samples = size - windowPtr
+	return b.size - b.windowPtr
 }
 
 // EnsureAvailable blocks until at least minSamples are available or timeout occurs
@@ -160,39 +175,26 @@ func (b *SlidingPCMBuffer) EnsureAvailable(minSamples int) bool {
 
 // EnsureWindowAvailable blocks until the window has enough samples ahead
 // This is used by video decoder to wait for samples without causing timing desync
-// The lock is held during the wait to prevent buffer shifts
 func (b *SlidingPCMBuffer) EnsureWindowAvailable(minSamples int) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	waitCount := 0
 	maxWait := 500 // 5 seconds timeout
 
 	for {
-		// Calculate available samples (inline to avoid recursive lock)
-		available := 0
-		if b.writePos >= b.windowPtr {
-			available = b.writePos - b.windowPtr
-		} else {
-			available = (b.size - b.windowPtr) + b.writePos
-		}
+		// Check available samples (size - windowPtr in sliding buffer)
+		available := b.Available()
 
 		if available >= minSamples {
-			break
+			return true
 		}
 
-		// Release lock during sleep to allow main loop to feed
-		b.mu.Unlock()
+		// Sleep to allow main loop to feed more samples
 		time.Sleep(10 * time.Millisecond)
 		waitCount++
-		b.mu.Lock()
 
 		if waitCount >= maxWait {
 			return false
 		}
 	}
-
-	return true
 }
 
 // Reset clears the buffer
@@ -211,7 +213,7 @@ func (b *SlidingPCMBuffer) Reset() {
 // CircularPCMBuffer is kept for backward compatibility but deprecated
 type CircularPCMBuffer = SlidingPCMBuffer
 
-// NewCircularPCMBuffer creates a new buffer (now uses circular buffer approach)
+// NewCircularPCMBuffer creates a new buffer (now uses sliding buffer approach)
 func NewCircularPCMBuffer(size int) *CircularPCMBuffer {
 	return NewSlidingPCMBuffer(size)
 }
@@ -221,13 +223,8 @@ func (b *SlidingPCMBuffer) Read(numSamples int) ([]int16, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Calculate available samples (inline to avoid recursive lock)
-	available := 0
-	if b.writePos >= b.windowPtr {
-		available = b.writePos - b.windowPtr
-	} else {
-		available = (b.size - b.windowPtr) + b.writePos
-	}
+	// Calculate available samples (size - windowPtr in sliding buffer)
+	available := b.size - b.windowPtr
 
 	if available < numSamples {
 		return nil, fmt.Errorf("not enough samples: available=%d, need=%d",
@@ -237,7 +234,7 @@ func (b *SlidingPCMBuffer) Read(numSamples int) ([]int16, error) {
 	result := make([]int16, numSamples)
 	for i := 0; i < numSamples; i++ {
 		result[i] = b.buffer[b.windowPtr]
-		b.windowPtr = (b.windowPtr + 1) % b.size
+		b.windowPtr++
 	}
 
 	return result, nil

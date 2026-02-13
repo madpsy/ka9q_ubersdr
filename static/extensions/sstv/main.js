@@ -785,15 +785,6 @@ class SSTVExtension extends DecoderExtension {
 
         console.log('SSTV: Image complete, total lines:', totalLines, 'isRedrawing:', this.isRedrawing);
 
-        // Update status immediately before resetting redraw flag
-        const statusEl = document.getElementById('sstv-status');
-        if (statusEl) {
-            statusEl.textContent = `Complete: ${totalLines} lines decoded`;
-        }
-
-        // Reset redraw flag
-        this.isRedrawing = false;
-
         // Mark current image as complete
         if (this.currentImageIndex !== null && this.images[this.currentImageIndex]) {
             this.images[this.currentImageIndex].complete = true;
@@ -806,6 +797,35 @@ class SSTVExtension extends DecoderExtension {
         if (this.config.auto_save) {
             this.saveImage();
         }
+
+        // Update status after a brief delay to show completion, then reset to waiting
+        const statusEl = document.getElementById('sstv-status');
+        if (statusEl) {
+            statusEl.textContent = `Complete: ${totalLines} lines decoded`;
+
+            // After 2 seconds, reset to waiting for next signal
+            setTimeout(() => {
+                if (this.running) {
+                    if (statusEl) {
+                        statusEl.textContent = 'Waiting for signal...';
+                    }
+
+                    // Reset image info displays
+                    const imageSizeEl = document.getElementById('sstv-image-size');
+                    const lineCountEl = document.getElementById('sstv-line-count');
+
+                    if (imageSizeEl) {
+                        imageSizeEl.textContent = '--';
+                    }
+                    if (lineCountEl) {
+                        lineCountEl.textContent = '--';
+                    }
+                }
+            }, 2000);
+        }
+
+        // Reset redraw flag
+        this.isRedrawing = false;
     }
 
     handleFSKID(view, data) {

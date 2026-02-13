@@ -220,13 +220,10 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 					log.Printf("[SSTV Main] Switched to StateFeedingVideo, main loop will continue feeding")
 
 				case StateFeedingVideo:
-					// Just keep feeding buffer while video decoding happens in background
-					// Log every 100 chunks to show we're still feeding
-					if len(accumulator) == 0 { // Only log when we just processed a chunk
-						feedCount++
-						if feedCount%100 == 0 {
-							log.Printf("[SSTV Main] StateFeedingVideo: fed %d chunks, buffer now has %d samples", feedCount, pcmBuffer.Available())
-						}
+					// Buffer is already written at line 179, just log progress
+					feedCount++
+					if feedCount%100 == 0 {
+						log.Printf("[SSTV Main] StateFeedingVideo: fed %d chunks, buffer now has %d samples", feedCount, pcmBuffer.Available())
 					}
 				}
 			}

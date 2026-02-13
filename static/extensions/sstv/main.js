@@ -384,6 +384,14 @@ class SSTVExtension extends DecoderExtension {
         // Update UI
         this.running = true;
         this.updateButtonStates();
+
+        // Update status badge
+        const statusBadge = document.getElementById('sstv-status-badge');
+        if (statusBadge) {
+            statusBadge.textContent = 'Running';
+            statusBadge.className = 'status-badge status-running';
+        }
+
         this.radio.log('SSTV decoder started - waiting for signal...');
     }
 
@@ -401,6 +409,14 @@ class SSTVExtension extends DecoderExtension {
         // Update UI
         this.running = false;
         this.updateButtonStates();
+
+        // Update status badge
+        const statusBadge = document.getElementById('sstv-status-badge');
+        if (statusBadge) {
+            statusBadge.textContent = 'Stopped';
+            statusBadge.className = 'status-badge status-disconnected';
+        }
+
         this.radio.log('SSTV decoder stopped');
     }
 
@@ -576,8 +592,19 @@ class SSTVExtension extends DecoderExtension {
         this.imageWidth = width;
         this.imageHeight = height;
         this.currentLine = 0;
-        
+
         this.createNewImage(width, height);
+
+        // Update info display
+        const imageSizeEl = document.getElementById('sstv-image-size');
+        if (imageSizeEl) {
+            imageSizeEl.textContent = `${width}x${height}`;
+        }
+
+        const lineCountEl = document.getElementById('sstv-line-count');
+        if (lineCountEl) {
+            lineCountEl.textContent = `0/${height}`;
+        }
 
         this.radio.log(`SSTV: New image ${width}x${height}`);
     }
@@ -668,6 +695,12 @@ class SSTVExtension extends DecoderExtension {
         const statusEl = document.getElementById('sstv-status');
         if (statusEl) {
             statusEl.textContent = `Decoding: ${progress}% (line ${line}/${this.imageHeight})`;
+        }
+
+        // Update line count display
+        const lineCountEl = document.getElementById('sstv-line-count');
+        if (lineCountEl) {
+            lineCountEl.textContent = `${line}/${this.imageHeight}`;
         }
     }
 

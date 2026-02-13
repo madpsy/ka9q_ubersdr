@@ -37,7 +37,7 @@ if [ "$PASSWORD" = "mypassword" ]; then
     echo "     wizard: false" >&2
     echo "     password: \"your-new-password-here\"" >&2
     echo "" >&2
-    echo "3. Run the install script again to apply the changes" >&2
+    echo "3. Run ~/ubersdr/restart-ubersdr.sh to apply the changes" >&2
     echo "" >&2
     exit 1
 fi

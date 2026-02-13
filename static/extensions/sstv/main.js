@@ -66,15 +66,15 @@ class SSTVExtension extends DecoderExtension {
         const trySetup = (attempts = 0) => {
             const maxAttempts = 20;
 
-            const canvas = document.getElementById('sstv-canvas');
+            const grid = document.getElementById('sstv-image-grid');
             const startBtn = document.getElementById('sstv-start-btn');
 
             console.log(`SSTV: DOM check attempt ${attempts + 1}/${maxAttempts}:`, {
-                canvas: !!canvas,
+                grid: !!grid,
                 startBtn: !!startBtn
             });
 
-            if (canvas && startBtn) {
+            if (grid && startBtn) {
                 console.log('SSTV: All DOM elements found, setting up...');
                 this.setupCanvas();
                 this.setupEventHandlers();

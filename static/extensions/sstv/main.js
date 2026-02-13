@@ -737,13 +737,12 @@ class SSTVExtension extends DecoderExtension {
         // Since we're not rebuilding the grid, this is efficient
         this.updateCurrentImageDisplay();
 
-        // Update progress
-        const progress = Math.round((line / this.imageHeight) * 100);
-        const statusEl = document.getElementById('sstv-status');
-        if (statusEl) {
-            if (this.isRedrawing) {
-                statusEl.textContent = `Redrawing: ${progress}%`;
-            } else {
+        // Update progress - but don't update status during redraw
+        // (let it stay as "Redrawing with slant correction..." until complete)
+        if (!this.isRedrawing) {
+            const progress = Math.round((line / this.imageHeight) * 100);
+            const statusEl = document.getElementById('sstv-status');
+            if (statusEl) {
                 statusEl.textContent = `Decoding: ${progress}%`;
             }
         }
@@ -784,7 +783,13 @@ class SSTVExtension extends DecoderExtension {
         // [type:1][total_lines:4]
         const totalLines = view.getUint32(1);
 
-        console.log('SSTV: Image complete, total lines:', totalLines);
+        console.log('SSTV: Image complete, total lines:', totalLines, 'isRedrawing:', this.isRedrawing);
+
+        // Update status immediately before resetting redraw flag
+        const statusEl = document.getElementById('sstv-status');
+        if (statusEl) {
+            statusEl.textContent = `Complete: ${totalLines} lines decoded`;
+        }
 
         // Reset redraw flag
         this.isRedrawing = false;
@@ -793,11 +798,6 @@ class SSTVExtension extends DecoderExtension {
         if (this.currentImageIndex !== null && this.images[this.currentImageIndex]) {
             this.images[this.currentImageIndex].complete = true;
             this.renderGrid();
-        }
-
-        const statusEl = document.getElementById('sstv-status');
-        if (statusEl) {
-            statusEl.textContent = `Complete: ${totalLines} lines decoded`;
         }
 
         this.radio.log(`SSTV: Image complete (${totalLines} lines)`);

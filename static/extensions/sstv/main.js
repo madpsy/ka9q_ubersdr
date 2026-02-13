@@ -452,6 +452,9 @@ class SSTVExtension extends DecoderExtension {
         const height = view.getUint32(5);
 
         console.log('SSTV: Image start:', width, 'x', height);
+        console.log('SSTV: Canvas before resize:', this.canvas ? `${this.canvas.width}x${this.canvas.height}` : 'null');
+        console.log('SSTV: Canvas element exists:', !!this.canvas);
+        console.log('SSTV: Canvas in DOM:', this.canvas ? document.body.contains(this.canvas) : false);
 
         // Resize canvas
         this.imageWidth = width;
@@ -459,6 +462,8 @@ class SSTVExtension extends DecoderExtension {
         this.canvas.width = width;
         this.canvas.height = height;
         this.currentLine = 0;
+
+        console.log('SSTV: Canvas after resize:', `${this.canvas.width}x${this.canvas.height}`);
 
         // Clear canvas
         this.ctx.fillStyle = '#000000';
@@ -493,6 +498,11 @@ class SSTVExtension extends DecoderExtension {
         const line = view.getUint32(1);
         const width = view.getUint32(5);
         const rgbData = new Uint8Array(data, 9);
+
+        if (line === 0) {
+            console.log('SSTV: First line received, canvas size:', `${this.canvas.width}x${this.canvas.height}`);
+            console.log('SSTV: Image dimensions:', `${this.imageWidth}x${this.imageHeight}`);
+        }
 
         if (line >= this.imageHeight) {
             console.warn('SSTV: Line number exceeds image height:', line, '>=', this.imageHeight);

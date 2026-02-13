@@ -291,19 +291,28 @@ func (d *SSTVDecoder) decodeVideo(pcmBuffer *SlidingPCMBuffer, audioChan <-chan 
 	// Start a goroutine to keep buffer filled during video decoding
 	// This continuously reads from audioChan and writes to buffer (like slowrx readPcm)
 	stopFeeding := make(chan struct{})
+	feedCount := 0
 	go func() {
+		log.Printf("[SSTV Video Feed] Starting background feeding goroutine")
 		for {
 			select {
 			case <-stopFeeding:
+				log.Printf("[SSTV Video Feed] Stopped by stopFeeding signal after %d feeds", feedCount)
 				return
 			case <-d.stopChan:
+				log.Printf("[SSTV Video Feed] Stopped by stopChan after %d feeds", feedCount)
 				return
 			case samples, ok := <-audioChan:
 				if !ok {
+					log.Printf("[SSTV Video Feed] audioChan closed after %d feeds", feedCount)
 					return
 				}
 				// Continuously feed buffer as samples arrive
 				pcmBuffer.Write(samples)
+				feedCount++
+				if feedCount%100 == 0 {
+					log.Printf("[SSTV Video Feed] Fed %d chunks, buffer now has %d samples", feedCount, pcmBuffer.Available())
+				}
 			}
 		}
 	}()

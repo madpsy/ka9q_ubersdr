@@ -79,25 +79,9 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 
 	v.iterationCount++
 
-	// Log first iteration
-	if v.iterationCount == 1 {
-		log.Printf("[SSTV VIS] Starting VIS detection: samps10ms=%d, samps20ms=%d",
-			samps10ms, samps20ms)
-	}
-
 	// Need enough samples for 20ms FFT window
 	if pcmBuffer.Available() < samps20ms {
-		if v.iterationCount <= 5 || v.iterationCount%50 == 0 {
-			log.Printf("[SSTV VIS] Iteration %d: Waiting for samples (have %d, need %d)",
-				v.iterationCount, pcmBuffer.Available(), samps20ms)
-		}
 		return 0, 0, false, false
-	}
-
-	// Log progress every 100 iterations
-	if v.iterationCount%100 == 0 {
-		log.Printf("[SSTV VIS] Iteration %d: Processing (buffer=%d samples, freq detection active)",
-			v.iterationCount, pcmBuffer.Available())
 	}
 
 	// Get 20ms window for FFT
@@ -106,10 +90,6 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 	// offset = -samps10ms, length = samps20ms
 	window, err := pcmBuffer.GetWindow(-samps10ms, samps20ms)
 	if err != nil {
-		if v.iterationCount <= 5 || v.iterationCount%50 == 0 {
-			log.Printf("[SSTV VIS] Failed to get FFT window: %v (windowPtr=%d)",
-				err, pcmBuffer.GetWindowPtr())
-		}
 		return 0, 0, false, false
 	}
 
@@ -126,16 +106,6 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 	// Perform FFT
 	fft(v.fftInput, v.fftOutput)
 
-	// Debug: Check FFT output on first iteration
-	if v.iterationCount == 1 {
-		totalPower := 0.0
-		for i := 0; i < v.fftSize/2; i++ {
-			totalPower += real(v.fftOutput[i])*real(v.fftOutput[i]) + imag(v.fftOutput[i])*imag(v.fftOutput[i])
-		}
-		log.Printf("[SSTV VIS] FFT check: total power=%.2e, fftSize=%d, output len=%d",
-			totalPower, v.fftSize, len(v.fftOutput))
-	}
-
 	// Find bin with most power in 500-3300 Hz range
 	maxBin := 0
 	minBin := v.getBin(500.0)
@@ -149,13 +119,6 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 		if i >= minBin && i < maxBinLimit && (maxBin == 0 || powers[i] > powers[maxBin]) {
 			maxBin = i
 		}
-	}
-
-	// Debug: Log max bin info every 100 iterations
-	if v.iterationCount%100 == 0 {
-		maxBinFreq := float64(maxBin) / float64(v.fftSize) * v.sampleRate
-		log.Printf("[SSTV VIS] FFT: maxBin=%d (%.1f Hz), power=%.2e, minBin=%d, maxBinLimit=%d",
-			maxBin, maxBinFreq, powers[maxBin], minBin, maxBinLimit)
 	}
 
 	// Gaussian interpolation for peak frequency
@@ -191,21 +154,6 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 		v.toneCallback(peakFreq)
 	}
 
-	// Debug: Log detected frequency every 100 iterations
-	if v.iterationCount%100 == 0 {
-		log.Printf("[SSTV VIS] Iteration %d: Detected freq=%.1f Hz (expecting ~1900 Hz for leader)",
-			v.iterationCount, peakFreq)
-	}
-
-	// Extra logging when we detect frequencies near 1900 Hz (leader tone)
-	if peakFreq > 1850 && peakFreq < 1950 && v.iterationCount > 45 {
-		if v.iterationCount%10 == 0 { // Log every 10 iterations when near leader freq
-			log.Printf("[SSTV VIS] *** Near leader freq at iteration %d: %.1f Hz", v.iterationCount, peakFreq)
-			log.Printf("[SSTV VIS]     Recent tones: [0]=%.1f [3]=%.1f [6]=%.1f [9]=%.1f [12]=%.1f [15]=%.1f [42]=%.1f",
-				v.toneBuf[0], v.toneBuf[3], v.toneBuf[6], v.toneBuf[9], v.toneBuf[12], v.toneBuf[15], v.toneBuf[42])
-		}
-	}
-
 	// Copy frequencies from last 450ms to tone buffer (in chronological order)
 	for i := 0; i < len(v.toneBuf); i++ {
 		v.toneBuf[i] = v.headerBuf[(v.headerPtr+i)%len(v.headerBuf)]
@@ -228,11 +176,6 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 			// Use tone[0+j] as reference frequency (exactly like slowrx line 85)
 			refFreq := v.toneBuf[0+j]
 
-			// Log summary every 200 iterations (only once per iteration boundary)
-			if v.iterationCount%200 == 0 && i == 0 && j == 0 {
-				log.Printf("[SSTV VIS] Pattern check iteration %d - searching for VIS code", v.iterationCount)
-			}
-
 			// Check for complete VIS pattern
 			// slowrx uses ±25 Hz at 44.1 kHz, but at 12 kHz we need wider tolerance
 			// due to transmitter drift and receiver offset
@@ -251,35 +194,20 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 				continue
 			}
 
-			// Log the actual start and stop bit frequencies when pattern passes
-			startBitIdx := 5*3 + i
-			stopBitIdx := 14*3 + i
-			log.Printf("[SSTV VIS]   -> Pattern check PASSED! start[%d]=%.1f, stop[%d]=%.1f, attempting bit decode...",
-				startBitIdx, v.toneBuf[startBitIdx], stopBitIdx, v.toneBuf[stopBitIdx])
-
-			// If we get here, we found a potential VIS!
-			log.Printf("[SSTV VIS] *** POTENTIAL VIS FOUND *** at i=%d, j=%d, refFreq=%.1f Hz", i, j, refFreq)
-
 			// Found potential VIS - try to decode the 8 data bits
 			bits := make([]uint8, 8)
 			validBits := true
-
-			log.Printf("[SSTV VIS] Decoding data bits for potential VIS at i=%d, j=%d, refFreq=%.1f Hz", i, j, refFreq)
 
 			for k := 0; k < 8; k++ {
 				// slowrx line 98: tone[6*3+i+3*k]
 				// This gives us the data bit positions after the start bit
 				toneIdx := 6*3 + i + 3*k
 				if toneIdx >= len(v.toneBuf) {
-					log.Printf("[SSTV VIS] Bit %d: toneIdx=%d out of range (len=%d)", k, toneIdx, len(v.toneBuf))
 					validBits = false
 					break
 				}
 
 				freq := v.toneBuf[toneIdx]
-
-				// Debug: log what we're looking at
-				log.Printf("[SSTV VIS] Bit %d: checking tone[%d]=%.1f Hz (refFreq=%.1f)", k, toneIdx, freq, refFreq)
 
 				// Bit 0: 1300 Hz (refFreq - 600)
 				// Bit 1: 1100 Hz (refFreq - 800)
@@ -295,33 +223,17 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 
 				if freq > bit0Center-bitTolerance && freq < bit0Center+bitTolerance {
 					bits[k] = 0 // 1300 Hz
-					log.Printf("[SSTV VIS] Bit %d [idx=%d]: freq=%.1f Hz -> 0 (1300 Hz nominal)", k, toneIdx, freq)
 				} else if freq > bit1Center-bitTolerance && freq < bit1Center+bitTolerance {
 					bits[k] = 1 // 1100 Hz
-					log.Printf("[SSTV VIS] Bit %d [idx=%d]: freq=%.1f Hz -> 1 (1100 Hz nominal)", k, toneIdx, freq)
 				} else {
-					log.Printf("[SSTV VIS] Bit %d [idx=%d]: freq=%.1f Hz INVALID (need %.1f-%.1f for 0, or %.1f-%.1f for 1)",
-						k, toneIdx, freq, bit0Center-bitTolerance, bit0Center+bitTolerance,
-						bit1Center-bitTolerance, bit1Center+bitTolerance)
 					validBits = false
 					break
 				}
 			}
 
-			// Log the complete bit pattern
-			if validBits {
-				visValue := bits[0] | (bits[1] << 1) | (bits[2] << 2) | (bits[3] << 3) |
-					(bits[4] << 4) | (bits[5] << 5) | (bits[6] << 6)
-				log.Printf("[SSTV VIS] Decoded VIS=%d (0x%02x), bits=%d%d%d%d%d%d%d, parity bit=%d",
-					visValue, visValue, bits[0], bits[1], bits[2], bits[3], bits[4], bits[5], bits[6], bits[7])
-			}
-
 			if !validBits {
-				log.Printf("[SSTV VIS] Data bits invalid, continuing search")
 				continue
 			}
-
-			log.Printf("[SSTV VIS] All 8 data bits decoded successfully!")
 
 			// Decode VIS code
 			vis := bits[0] | (bits[1] << 1) | (bits[2] << 2) | (bits[3] << 3) |
@@ -332,19 +244,15 @@ func (v *VISDetector) ProcessIteration(pcmBuffer *SlidingPCMBuffer) (uint8, int,
 			// Special case: R12BW has inverted parity
 			if VISMap[vis] == ModeR12BW {
 				parity = 1 - parity
-				log.Printf("[SSTV VIS] R12BW detected, inverting parity")
 			}
 
 			// Check parity
 			if parity != parityBit {
-				log.Printf("[SSTV VIS] Parity fail for VIS=%d (0x%02x): calculated=%d, received=%d, mode=%d",
-					vis, vis, parity, parityBit, VISMap[vis])
 				continue
 			}
 
 			// Check if mode is known
 			if VISMap[vis] == ModeUnknown {
-				log.Printf("[SSTV VIS] Unknown VIS code: %d (0x%02x)", vis, vis)
 				continue
 			}
 

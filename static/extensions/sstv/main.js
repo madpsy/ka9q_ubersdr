@@ -860,6 +860,15 @@ class SSTVExtension extends DecoderExtension {
         if (this.currentImageIndex !== null && this.images[this.currentImageIndex]) {
             this.images[this.currentImageIndex].complete = true;
             this.renderGrid();
+
+            // If modal is open and showing this image, update the modal to show final callsign
+            if (this.modalImageIndex === this.currentImageIndex) {
+                const imageData = this.images[this.currentImageIndex];
+                const modalCallsign = document.getElementById('sstv-modal-callsign');
+                if (modalCallsign && imageData) {
+                    modalCallsign.textContent = imageData.callsign ? `Callsign: ${imageData.callsign}` : 'Callsign: None';
+                }
+            }
         }
 
         this.radio.log(`SSTV: Image complete (${totalLines} lines)`);

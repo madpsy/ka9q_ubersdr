@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"reflect"
 	"sync"
 	"time"
 )
@@ -48,29 +49,13 @@ type FT8Decoder struct {
 
 	// Location and enrichment
 	receiverLocator string
-	ctyDatabase     CTYDatabase
+	ctyDatabase     interface{}
 
 	// Control
 	running  bool
 	stopChan chan struct{}
 	mu       sync.Mutex
 	wg       sync.WaitGroup
-}
-
-// CTYDatabase interface for callsign lookup
-type CTYDatabase interface {
-	LookupCallsignFull(callsign string) *CTYLookupResult
-}
-
-// CTYLookupResult contains CTY information for a callsign
-type CTYLookupResult struct {
-	Country    string
-	CQZone     int
-	ITUZone    int
-	Continent  string
-	TimeOffset float64
-	Latitude   *float64
-	Longitude  *float64
 }
 
 // DecodeResult represents a decoded FT8/FT4 message
@@ -96,7 +81,7 @@ type DecodeResult struct {
 }
 
 // NewFT8Decoder creates a new FT8/FT4 decoder
-func NewFT8Decoder(sampleRate int, config FT8Config, receiverLocator string, ctyDatabase CTYDatabase) *FT8Decoder {
+func NewFT8Decoder(sampleRate int, config FT8Config, receiverLocator string, ctyDatabase interface{}) *FT8Decoder {
 	slotTime := config.Protocol.GetSlotTime()
 	samplesPerSlot := int(float64(sampleRate) * slotTime)
 
@@ -347,14 +332,35 @@ func (d *FT8Decoder) enrichResult(result *DecodeResult) {
 	}
 
 	// Try to get CTY information if database is available
-	var ctyLat, ctyLon *float64
+	var ctyLat, ctyLon float64
+	var hasCTY bool
 	if d.ctyDatabase != nil {
-		info := d.ctyDatabase.LookupCallsignFull(result.Callsign)
-		if info != nil {
-			result.Country = info.Country
-			result.Continent = info.Continent
-			ctyLat = info.Latitude
-			ctyLon = info.Longitude
+		// Use reflection to call LookupCallsignFull method
+		dbValue := reflect.ValueOf(d.ctyDatabase)
+		method := dbValue.MethodByName("LookupCallsignFull")
+		if method.IsValid() {
+			results := method.Call([]reflect.Value{reflect.ValueOf(result.Callsign)})
+			if len(results) > 0 && !results[0].IsNil() {
+				infoValue := results[0]
+				if infoValue.Kind() == reflect.Ptr {
+					infoValue = infoValue.Elem()
+				}
+				if infoValue.Kind() == reflect.Struct {
+					if country := infoValue.FieldByName("Country"); country.IsValid() && country.Kind() == reflect.String {
+						result.Country = country.String()
+					}
+					if continent := infoValue.FieldByName("Continent"); continent.IsValid() && continent.Kind() == reflect.String {
+						result.Continent = continent.String()
+					}
+					if lat := infoValue.FieldByName("Latitude"); lat.IsValid() && lat.Kind() == reflect.Float64 {
+						ctyLat = lat.Float()
+					}
+					if lon := infoValue.FieldByName("Longitude"); lon.IsValid() && lon.Kind() == reflect.Float64 {
+						ctyLon = lon.Float()
+					}
+					hasCTY = result.Country != "" || result.Continent != ""
+				}
+			}
 		}
 	}
 
@@ -372,11 +378,11 @@ func (d *FT8Decoder) enrichResult(result *DecodeResult) {
 			result.DistanceKm = &dist
 			result.BearingDeg = &bearing
 		}
-	} else if ctyLat != nil && ctyLon != nil {
+	} else if hasCTY && (ctyLat != 0 || ctyLon != 0) {
 		// Priority 2: Fall back to CTY country lat/lon if no grid square
 		receiverLat, receiverLon, err := MaidenheadToLatLon(d.receiverLocator)
 		if err == nil {
-			dist, bearing := CalculateDistanceAndBearing(receiverLat, receiverLon, *ctyLat, *ctyLon)
+			dist, bearing := CalculateDistanceAndBearing(receiverLat, receiverLon, ctyLat, ctyLon)
 			result.DistanceKm = &dist
 			result.BearingDeg = &bearing
 		}

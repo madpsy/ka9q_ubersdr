@@ -283,12 +283,32 @@
 
 .ft8-messages-table th:nth-child(5),
 .ft8-messages-table td:nth-child(5) {
-    width: auto; /* Message - takes remaining space */
-    min-width: 200px;
+    width: 55px; /* Dist */
 }
 
 .ft8-messages-table th:nth-child(6),
 .ft8-messages-table td:nth-child(6) {
+    width: 55px; /* Brg */
+}
+
+.ft8-messages-table th:nth-child(7),
+.ft8-messages-table td:nth-child(7) {
+    width: 120px; /* Country */
+}
+
+.ft8-messages-table th:nth-child(8),
+.ft8-messages-table td:nth-child(8) {
+    width: 50px; /* Cont */
+}
+
+.ft8-messages-table th:nth-child(9),
+.ft8-messages-table td:nth-child(9) {
+    width: auto; /* Message - takes remaining space */
+    min-width: 200px;
+}
+
+.ft8-messages-table th:nth-child(10),
+.ft8-messages-table td:nth-child(10) {
     width: 50px; /* Slot */
 }
 
@@ -311,7 +331,7 @@
 .ft8-cell-snr {
     font-family: 'Courier New', monospace;
     font-weight: 600;
-    text-align: right;
+    text-align: left;
     white-space: nowrap;
 }
 
@@ -330,14 +350,44 @@
 .ft8-cell-dt {
     font-family: 'Courier New', monospace;
     color: #999;
-    text-align: right;
+    text-align: left;
     white-space: nowrap;
 }
 
 .ft8-cell-freq {
     font-family: 'Courier New', monospace;
     color: #4a9eff;
-    text-align: right;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.ft8-cell-distance {
+    font-family: 'Courier New', monospace;
+    color: #9c27b0;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.ft8-cell-bearing {
+    font-family: 'Courier New', monospace;
+    color: #ff9800;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.ft8-cell-country {
+    font-family: 'Courier New', monospace;
+    color: #4caf50;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ft8-cell-continent {
+    font-family: 'Courier New', monospace;
+    color: #00bcd4;
+    text-align: left;
     white-space: nowrap;
 }
 

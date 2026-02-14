@@ -79,8 +79,8 @@ func NewFT8Extension(audioParams AudioExtensionParams, extensionParams map[strin
 	}
 
 	// Extract CTY database (optional, passed as interface)
-	var ctyDatabase CTYDatabase
-	if cty, ok := extensionParams["cty_database"].(CTYDatabase); ok {
+	var ctyDatabase interface{}
+	if cty, ok := extensionParams["cty_database"]; ok {
 		ctyDatabase = cty
 	}
 

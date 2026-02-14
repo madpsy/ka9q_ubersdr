@@ -12,11 +12,17 @@ import (
  */
 
 var (
-	// Callsign pattern (basic validation)
-	callsignPattern = regexp.MustCompile(`^[A-Z0-9]{1,3}[0-9][A-Z0-9]{0,3}[A-Z]$`)
+	// Callsign pattern (basic validation) - allows portable suffix like /P, /M, /6, etc.
+	callsignPattern = regexp.MustCompile(`^[A-Z0-9]{1,3}[0-9][A-Z0-9]{0,3}[A-Z](/[A-Z0-9]+)?$`)
 
 	// Grid locator pattern (4 characters for FT8/FT4)
 	gridPattern = regexp.MustCompile(`^[A-R]{2}[0-9]{2}$`)
+
+	// Contest exchanges that appear after CQ
+	contestExchanges = map[string]bool{
+		"DX": true, "NA": true, "SA": true, "EU": true, "AF": true, "AS": true, "OC": true,
+		"FD": true, "WW": true, "TEST": true,
+	}
 )
 
 // extractCallsignLocator extracts callsign and grid locator from FT8/FT4 message
@@ -38,33 +44,65 @@ func extractCallsignLocator(message string) (string, string) {
 
 	var transmitterCall string
 	var locator string
+	callIndex := 1 // Default: callsign is in field[1]
+	gridIndex := 2 // Default: grid is in field[2]
 
 	// Position-based parsing:
 	// - If starts with "CQ" or "<...>": TX = field[1], Grid = field[2] (if valid)
+	// - If starts with "CQ" + contest exchange: TX = field[2], Grid = field[3]
 	// - Otherwise: TX = field[1], Grid = field[2] (if valid)
+	// - Handle angle brackets in any position
 	// This avoids ambiguity where strings like "HJ54FF" could be both callsign and grid
 
-	if fields[0] == "CQ" || fields[0] == "CQ_" || fields[0] == "<...>" {
-		// CQ or truncated message: transmitter is field[1]
-		if len(fields) >= 2 && isValidCallsign(fields[1]) {
-			transmitterCall = fields[1]
+	if fields[0] == "CQ" || fields[0] == "CQ_" {
+		// Check if field[1] is a contest exchange (e.g., "CQ DX", "CQ OC")
+		if len(fields) >= 3 && contestExchanges[strings.ToUpper(fields[1])] {
+			// Contest CQ: transmitter is field[2], grid is field[3]
+			callIndex = 2
+			gridIndex = 3
 		}
-		// Grid is field[2] if present and valid
-		if len(fields) >= 3 && isValidGridLocator(fields[2]) {
-			locator = fields[2]
-		}
+		// Otherwise transmitter is field[1], grid is field[2] (default)
+	} else if fields[0] == "<...>" {
+		// Truncated message: transmitter is field[1]
+		// (default indices are correct)
 	} else {
 		// Directed message: transmitter is field[1] (second field)
-		if len(fields) >= 2 && isValidCallsign(fields[1]) {
-			transmitterCall = fields[1]
-		}
-		// Grid is field[2] if present and valid
-		if len(fields) >= 3 && isValidGridLocator(fields[2]) {
-			locator = fields[2]
+		// Check if field[1] has angle brackets (e.g., "BI1UYL <II0LOVE> -16")
+		if len(fields) >= 2 && strings.HasPrefix(fields[1], "<") && strings.HasSuffix(fields[1], ">") {
+			// Callsign is in angle brackets at field[1]
+			// (default indices are correct)
 		}
 	}
 
+	// Extract transmitter callsign
+	if len(fields) > callIndex && isValidCallsign(fields[callIndex]) {
+		transmitterCall = normalizeCallsign(fields[callIndex])
+	}
+
+	// Extract grid locator
+	if len(fields) > gridIndex && isValidGridLocator(fields[gridIndex]) {
+		locator = fields[gridIndex]
+	}
+
 	return transmitterCall, locator
+}
+
+// normalizeCallsign strips angle brackets and portable suffixes for CTY lookups
+// Examples:
+//
+//	<II0LOVE> → II0LOVE
+//	R9KC/6 → R9KC
+//	DM4KJ → DM4KJ (unchanged)
+func normalizeCallsign(call string) string {
+	// Strip angle brackets
+	call = strings.Trim(call, "<>")
+
+	// Strip portable suffix (everything after and including /)
+	if idx := strings.Index(call, "/"); idx != -1 {
+		call = call[:idx]
+	}
+
+	return call
 }
 
 // isValidCallsign checks if a string looks like a valid amateur radio callsign
@@ -77,6 +115,8 @@ func isValidCallsign(s string) bool {
 	}
 	// Convert to uppercase for pattern matching
 	s = strings.ToUpper(s)
+
+	// Check against pattern (now allows /suffix)
 	return callsignPattern.MatchString(s)
 }
 

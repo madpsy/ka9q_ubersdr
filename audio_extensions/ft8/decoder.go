@@ -287,10 +287,10 @@ func (d *FT8Decoder) decode() []DecodeResult {
 		}
 		decodedHashes[message.Hash] = true
 
-		// Calculate SNR from sync score (matches KiwiSDR implementation)
-		// Reference: KiwiSDR/extensions/FT8/ft8_lib/decode_ft8.c:307
-		// SNR = score * 0.5 + SNR_adj, where SNR_adj = -22 dB
-		snr := float32(cand.Score)*0.5 - 22.0
+		// Calculate SNR using WSJT-X method
+		// This requires reconstructing the transmitted tones from the decoded message
+		// Reference: WSJT-X lib/ft8/ft8b.f90 lines 432, 440-461
+		snr := CalculateSNRFromBits(wf, &cand, status.Codeword, d.config.Protocol)
 
 		// Unpack message payload to human-readable text with hash table support
 		messageText := UnpackMessageWithHash(message.Payload, d.hashTable)

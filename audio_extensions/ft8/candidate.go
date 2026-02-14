@@ -12,6 +12,7 @@ type DecodeStatus struct {
 	CRCCalculated uint16 // CRC value calculated
 	Frequency     float32
 	Time          float32
+	Codeword      []uint8 // 174-bit LDPC codeword (for SNR calculation)
 }
 
 // Message represents a decoded FT8/FT4 message
@@ -36,6 +37,9 @@ func DecodeCandidate(wf *Waterfall, cand *Candidate, protocol Protocol, maxItera
 	// Perform LDPC decoding
 	plain174, ldpcErrors := LDPCDecode(log174, maxIterations)
 	status.LDPCErrors = ldpcErrors
+
+	// Store the codeword for SNR calculation
+	status.Codeword = plain174
 
 	if ldpcErrors > 0 {
 		return nil, status, false

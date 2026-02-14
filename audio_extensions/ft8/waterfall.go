@@ -2,7 +2,6 @@ package ft8
 
 import (
 	"math"
-	"math/cmplx"
 
 	"gonum.org/v1/gonum/dsp/fourier"
 )
@@ -81,14 +80,16 @@ func NewMonitor(sampleRate int, fMin, fMax float64, timeOSR, freqOSR int, protoc
 		Protocol:    protocol,
 	}
 
-	// Create Hann window
+	// Calculate normalization factor (applied to window, not FFT output)
+	fftNorm := 2.0 / float64(nfft)
+
+	// Create Hann window with normalization applied
+	// Reference: window[i] = fft_norm * hann_i(i, nfft)
 	window := make([]float64, nfft)
 	for i := 0; i < nfft; i++ {
-		window[i] = 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(nfft-1)))
+		hann := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(nfft-1)))
+		window[i] = fftNorm * hann
 	}
-
-	// Calculate normalization factor
-	fftNorm := 2.0 / float64(nfft)
 
 	return &Monitor{
 		SymbolPeriod: symbolPeriod,
@@ -173,19 +174,22 @@ func (m *Monitor) extractMagnitudes(timeSub int) {
 			break
 		}
 
-		// Calculate magnitude in dB
-		// cmplx.Abs gives amplitude, so we need 20*log10 for dB (or 10*log10 of power)
-		mag := cmplx.Abs(m.freqData[fftBin]) * m.FFTNorm
-		magDB := 20.0 * math.Log10(mag+1e-10)
+		// Calculate power (magnitude squared) and convert to dB
+		// Reference: mag2 = real^2 + imag^2, db = 10 * log10(1e-12 + mag2)
+		// Note: fft_norm is already applied in the window, so don't apply it again
+		real := real(m.freqData[fftBin])
+		imag := imag(m.freqData[fftBin])
+		mag2 := real*real + imag*imag
+		magDB := 10.0 * math.Log10(1e-12+mag2)
 
 		// Track maximum
 		if magDB > m.MaxMag {
 			m.MaxMag = magDB
 		}
 
-		// Convert to uint8 (0-255 range, representing -120 to +7.5 dB)
-		// mag_uint8 = 2 * (mag_dB + 120)
-		magUint8 := int(2.0 * (magDB + 120.0))
+		// Convert to uint8: scaled = 2 * db + 240
+		// This maps -120 dB -> 0, 0 dB -> 240, +7.5 dB -> 255
+		magUint8 := int(2.0*magDB + 240.0)
 		if magUint8 < 0 {
 			magUint8 = 0
 		}

@@ -266,6 +266,17 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 	}
 	log.Printf("[DEBUG] ============================================")
 
+	// Calculate number of channels for this mode (matching GetPixelGrid logic)
+	numChans := 3 // Default for RGB/GBR modes
+	switch {
+	case m.Name == "Robot 36" || m.Name == "Robot 24":
+		numChans = 2
+	case m.ColorEnc == ColorYUV && m.ImgWidth >= 512: // PD modes
+		numChans = 4
+	case m.ColorEnc == ColorBW:
+		numChans = 1
+	}
+
 	// Initialize image buffer
 	image := make([][][]uint8, m.ImgWidth)
 	for x := range image {
@@ -354,7 +365,9 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 			}
 
 			// Send line progressively when last pixel of line is placed (like slowrx line 428-457)
-			if lineSender != nil && p.X == m.ImgWidth-1 {
+			// Only send after the LAST channel is complete (matching KiwiSDR sstv_video.cpp:483)
+			// This prevents sending the same line multiple times in color modes
+			if lineSender != nil && p.X == m.ImgWidth-1 && int(p.Channel) >= numChans-1 {
 				// Extract line data with proper color conversion (slowrx video.c:432-456)
 				lineData := make([]uint8, m.ImgWidth*3)
 				for x := 0; x < m.ImgWidth; x++ {

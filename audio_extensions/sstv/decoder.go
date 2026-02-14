@@ -77,7 +77,7 @@ func NewSSTVDecoder(sampleRate float64, config SSTVConfig) *SSTVDecoder {
 }
 
 // Start begins the decoding process
-func (d *SSTVDecoder) Start(audioChan <-chan []int16, resultChan chan<- []byte) error {
+func (d *SSTVDecoder) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
 	d.mu.Lock()
 	if d.running {
 		d.mu.Unlock()
@@ -117,8 +117,13 @@ func (d *SSTVDecoder) GetName() string {
 }
 
 // decodeLoop is the main decoding loop
-func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []byte) {
+func (d *SSTVDecoder) decodeLoop(audioChan <-chan AudioSample, resultChan chan<- []byte) {
 	defer d.wg.Done()
+
+	// RTP timestamp tracking for synchronization
+	var initialRTPTimestamp uint32
+	var rtpTimestampSet bool
+	var totalSamplesReceived uint32
 
 	// Create sliding window PCM buffer
 	// VIS pattern is ~450ms, need buffer large enough to hold it plus margin
@@ -138,11 +143,20 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 		select {
 		case <-d.stopChan:
 			return
-		case samples, ok := <-audioChan:
+		case audioSample, ok := <-audioChan:
 			if !ok {
 				return
 			}
-			pcmBuffer.Write(samples)
+
+			// Set initial RTP timestamp on first packet
+			if !rtpTimestampSet {
+				initialRTPTimestamp = audioSample.RTPTimestamp
+				rtpTimestampSet = true
+				log.Printf("[SSTV] Initial RTP timestamp: %d", initialRTPTimestamp)
+			}
+
+			pcmBuffer.Write(audioSample.PCMData)
+			totalSamplesReceived += uint32(len(audioSample.PCMData))
 		}
 	}
 
@@ -161,14 +175,34 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan []int16, resultChan chan<- []b
 		case <-d.stopChan:
 			return
 
-		case samples, ok := <-audioChan:
+		case audioSample, ok := <-audioChan:
 			if !ok {
 				log.Printf("[SSTV Main] audioChan closed, exiting decode loop")
 				return
 			}
 
+			// Track RTP timestamp progression and detect timing drift
+			if rtpTimestampSet {
+				expectedRTP := initialRTPTimestamp + totalSamplesReceived
+				actualRTP := audioSample.RTPTimestamp
+				drift := int32(actualRTP - expectedRTP)
+
+				if drift != 0 && drift > -1000 && drift < 1000 {
+					// Small drift - log it
+					if drift > 10 || drift < -10 {
+						log.Printf("[SSTV] RTP timing drift detected: %d samples (expected %d, got %d)",
+							drift, expectedRTP, actualRTP)
+					}
+				} else if drift >= 1000 || drift <= -1000 {
+					// Large drift - likely packet loss or timing issue
+					log.Printf("[SSTV] WARNING: Large RTP drift: %d samples - possible packet loss", drift)
+				}
+			}
+
+			totalSamplesReceived += uint32(len(audioSample.PCMData))
+
 			// Accumulate samples
-			accumulator = append(accumulator, samples...)
+			accumulator = append(accumulator, audioSample.PCMData...)
 
 			// Process in 10ms chunks
 			for len(accumulator) >= samps10ms {

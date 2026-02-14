@@ -77,17 +77,8 @@ func NewSSTVExtension(audioParams AudioExtensionParams, extensionParams map[stri
 
 // Start begins processing audio
 func (e *SSTVExtension) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
-	// Convert AudioSample to []int16 for the decoder
-	// In the future, the decoder could use timestamps for image timestamping
-	legacyChan := make(chan []int16, cap(audioChan))
-	go func() {
-		defer close(legacyChan)
-		for sample := range audioChan {
-			// TODO: Could use sample.GPSTimeNs to timestamp decoded images
-			legacyChan <- sample.PCMData
-		}
-	}()
-	return e.decoder.Start(legacyChan, resultChan)
+	// Pass AudioSample directly to decoder so it can use RTP timestamps
+	return e.decoder.Start(audioChan, resultChan)
 }
 
 // Stop stops the extension

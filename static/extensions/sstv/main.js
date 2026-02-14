@@ -38,6 +38,7 @@ class SSTVExtension extends DecoderExtension {
 
         // Modal state
         this.modalImageIndex = null; // Index of image currently shown in modal
+        this.modalImageData = null; // Reference to the actual image data object shown in modal
 
         // Binary message types
         this.MSG_IMAGE_LINE = 0x01;
@@ -135,6 +136,7 @@ class SSTVExtension extends DecoderExtension {
                 if (modal) {
                     modal.style.display = 'none';
                     this.modalImageIndex = null; // Stop updating modal
+                    this.modalImageData = null;
                 }
             }
             // Check if click is on modal background
@@ -142,6 +144,7 @@ class SSTVExtension extends DecoderExtension {
                 console.log('SSTV: Modal background clicked via delegation');
                 e.target.style.display = 'none';
                 this.modalImageIndex = null; // Stop updating modal
+                this.modalImageData = null;
             }
             // Check if click is on modal save button
             else if (e.target && e.target.id === 'sstv-modal-save-btn') {
@@ -221,7 +224,7 @@ class SSTVExtension extends DecoderExtension {
         }
 
         // If modal is open and showing the current image, update it too
-        if (this.modalImageIndex === this.currentImageIndex) {
+        if (this.modalImageData && this.modalImageIndex === this.currentImageIndex) {
             this.updateModalImage();
         }
     }
@@ -318,9 +321,10 @@ class SSTVExtension extends DecoderExtension {
 
         if (!modal || !modalCanvas) return;
 
-        // Find the index of this image in the array
+        // Find the index of this image in the array and store reference to the data
         const imageIndex = this.images.indexOf(imageData);
         this.modalImageIndex = imageIndex;
+        this.modalImageData = imageData; // Store reference to the actual object
 
         console.log('SSTV: Showing enlarged image:', {
             mode: imageData.mode,
@@ -697,9 +701,10 @@ class SSTVExtension extends DecoderExtension {
         // They will be reset when a new VIS code is detected for the next image
 
         // If modal is open and was showing the previous image, update to show new image
-        if (this.modalImageIndex !== null && this.currentImageIndex === 0) {
+        if (this.modalImageData !== null && this.currentImageIndex === 0) {
             // New image is now at index 0, update modal to show it
             this.modalImageIndex = 0;
+            this.modalImageData = this.images[0]; // Update reference to new image
             const imageData = this.images[0];
             if (imageData) {
                 const modalMode = document.getElementById('sstv-modal-mode');
@@ -765,7 +770,7 @@ class SSTVExtension extends DecoderExtension {
             this.renderGrid();
 
             // If modal is open and showing this image, update the modal mode display
-            if (this.modalImageIndex === this.currentImageIndex) {
+            if (this.modalImageData && this.modalImageIndex === this.currentImageIndex) {
                 const modalMode = document.getElementById('sstv-modal-mode');
                 if (modalMode) {
                     modalMode.textContent = modeName;
@@ -792,7 +797,7 @@ class SSTVExtension extends DecoderExtension {
         }
 
         // If modal is open, clear the callsign in modal too (new image starting)
-        if (this.modalImageIndex === this.currentImageIndex) {
+        if (this.modalImageData && this.modalImageIndex === this.currentImageIndex) {
             const modalCallsign = document.getElementById('sstv-modal-callsign');
             if (modalCallsign) {
                 modalCallsign.textContent = 'Callsign: None';
@@ -900,11 +905,10 @@ class SSTVExtension extends DecoderExtension {
             this.renderGrid();
 
             // If modal is open and showing this image, update the modal to show final callsign
-            if (this.modalImageIndex === this.currentImageIndex) {
-                const imageData = this.images[this.currentImageIndex];
+            if (this.modalImageData && this.modalImageIndex === this.currentImageIndex) {
                 const modalCallsign = document.getElementById('sstv-modal-callsign');
-                if (modalCallsign && imageData) {
-                    modalCallsign.textContent = imageData.callsign ? `Callsign: ${imageData.callsign}` : 'Callsign: None';
+                if (modalCallsign && this.modalImageData) {
+                    modalCallsign.textContent = this.modalImageData.callsign ? `Callsign: ${this.modalImageData.callsign}` : 'Callsign: None';
                 }
             }
         }
@@ -962,7 +966,7 @@ class SSTVExtension extends DecoderExtension {
             this.renderGrid();
 
             // If modal is open and showing this image, update the modal callsign display
-            if (this.modalImageIndex === this.currentImageIndex) {
+            if (this.modalImageData && this.modalImageIndex === this.currentImageIndex) {
                 const modalCallsign = document.getElementById('sstv-modal-callsign');
                 if (modalCallsign) {
                     modalCallsign.textContent = `Callsign: ${callsign}`;

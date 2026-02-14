@@ -908,11 +908,19 @@ class SSTVExtension extends DecoderExtension {
         console.log('SSTV: FSK callsign:', callsign);
 
         this.fskCallsign = callsign;
-        
+
         // Update current image callsign
         if (this.currentImageIndex !== null && this.images[this.currentImageIndex]) {
             this.images[this.currentImageIndex].callsign = callsign;
             this.renderGrid();
+
+            // If modal is open and showing this image, update the modal callsign display
+            if (this.modalImageIndex === this.currentImageIndex) {
+                const modalCallsign = document.getElementById('sstv-modal-callsign');
+                if (modalCallsign) {
+                    modalCallsign.textContent = `Callsign: ${callsign}`;
+                }
+            }
         }
 
         // Update callsign display

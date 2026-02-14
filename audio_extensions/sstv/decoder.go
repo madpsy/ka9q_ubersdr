@@ -181,25 +181,8 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan AudioSample, resultChan chan<-
 				return
 			}
 
-			// Track RTP timestamp progression and detect timing drift
-			if rtpTimestampSet {
-				expectedRTP := initialRTPTimestamp + totalSamplesReceived
-				actualRTP := audioSample.RTPTimestamp
-				drift := int32(actualRTP - expectedRTP)
-
-				if drift != 0 && drift > -1000 && drift < 1000 {
-					// Small drift - log it
-					if drift > 10 || drift < -10 {
-						log.Printf("[SSTV] RTP timing drift detected: %d samples (expected %d, got %d)",
-							drift, expectedRTP, actualRTP)
-					}
-				} else if drift >= 1000 || drift <= -1000 {
-					// Large drift - likely packet loss or timing issue
-					log.Printf("[SSTV] WARNING: Large RTP drift: %d samples - possible packet loss", drift)
-				}
-			}
-
-			totalSamplesReceived += uint32(len(audioSample.PCMData))
+			// Track RTP timestamp (for future use)
+			// Note: RTP timestamps include time gaps between packets, so drift is expected
 
 			// Accumulate samples
 			accumulator = append(accumulator, audioSample.PCMData...)

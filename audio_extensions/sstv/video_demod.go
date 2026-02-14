@@ -34,6 +34,10 @@ type VideoDemodulator struct {
 
 	// Stored luminance for redrawing
 	storedLum []uint8
+
+	// Debug tracking
+	lastSyncLogTime int
+	lastFreqLogTime int
 }
 
 // NewVideoDemodulator creates a new video demodulator
@@ -293,6 +297,10 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 	snr := 0.0
 	freq := 0.0
 
+	// Reset debug tracking
+	v.lastSyncLogTime = 0
+	v.lastFreqLogTime = 0
+
 	// Process signal
 	lastLogSample := 0
 	for sampleNum := 0; sampleNum < length; sampleNum++ {
@@ -336,6 +344,14 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 		// FM demodulation (like slowrx video.c:350-400, every 6 samples)
 		if sampleNum%6 == 0 {
 			freq = v.demodulateFrequency(pcmBuffer, snr)
+
+			// Log FM demodulation for first 10 seconds, max once per second
+			if sampleNum < int(10*v.sampleRate) && sampleNum-v.lastFreqLogTime >= int(v.sampleRate) {
+				currentWindowPtr := pcmBuffer.GetWindowPtr()
+				log.Printf("[DEBUG FM] sampleNum=%d, windowPtr=%d, freq=%.1f Hz, SNR=%.1f dB",
+					sampleNum, currentWindowPtr, freq, snr)
+				v.lastFreqLogTime = sampleNum
+			}
 		}
 
 		// Store luminance

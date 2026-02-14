@@ -696,6 +696,28 @@ class SSTVExtension extends DecoderExtension {
         // Don't reset mode and callsign here - they belong to the image we just created
         // They will be reset when a new VIS code is detected for the next image
 
+        // If modal is open and was showing the previous image, update to show new image
+        if (this.modalImageIndex !== null && this.currentImageIndex === 0) {
+            // New image is now at index 0, update modal to show it
+            this.modalImageIndex = 0;
+            const imageData = this.images[0];
+            if (imageData) {
+                const modalMode = document.getElementById('sstv-modal-mode');
+                const modalCallsign = document.getElementById('sstv-modal-callsign');
+                const modalTime = document.getElementById('sstv-modal-time');
+
+                if (modalMode) {
+                    modalMode.textContent = imageData.mode || 'Mode: Unknown';
+                }
+                if (modalCallsign) {
+                    modalCallsign.textContent = imageData.callsign ? `Callsign: ${imageData.callsign}` : 'Callsign: None';
+                }
+                if (modalTime) {
+                    modalTime.textContent = `Time: ${imageData.timestamp.toLocaleString()}`;
+                }
+            }
+        }
+
         // Update info display
         const imageSizeEl = document.getElementById('sstv-image-size');
         if (imageSizeEl) {
@@ -741,6 +763,14 @@ class SSTVExtension extends DecoderExtension {
             currentImage.mode = modeName;
             console.log('SSTV: Image mode after update:', currentImage.mode);
             this.renderGrid();
+
+            // If modal is open and showing this image, update the modal mode display
+            if (this.modalImageIndex === this.currentImageIndex) {
+                const modalMode = document.getElementById('sstv-modal-mode');
+                if (modalMode) {
+                    modalMode.textContent = modeName;
+                }
+            }
         } else {
             if (this.isRedrawing) {
                 console.log('SSTV: Mode stored for next image (redraw in progress, not updating current image)');
@@ -759,6 +789,14 @@ class SSTVExtension extends DecoderExtension {
         const callsignEl = document.getElementById('sstv-callsign-display');
         if (callsignEl) {
             callsignEl.textContent = '';
+        }
+
+        // If modal is open, clear the callsign in modal too (new image starting)
+        if (this.modalImageIndex === this.currentImageIndex) {
+            const modalCallsign = document.getElementById('sstv-modal-callsign');
+            if (modalCallsign) {
+                modalCallsign.textContent = 'Callsign: None';
+            }
         }
 
         this.radio.log(`SSTV: Mode detected - ${modeName}`);

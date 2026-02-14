@@ -1,0 +1,127 @@
+<div class="ft8-container">
+    <!-- Frequency Selector -->
+    <div class="ft8-frequency-selector">
+        <label for="ft8-frequency-select">Quick Tune:</label>
+        <select id="ft8-frequency-select" class="ft8-select-wide">
+            <option value="">-- Select FT8/FT4 Frequency --</option>
+            <optgroup label="FT8 - Most Active">
+                <option value="7074000,usb">7.074 MHz USB (40m FT8)</option>
+                <option value="14074000,usb">14.074 MHz USB (20m FT8 - Primary)</option>
+                <option value="21074000,usb">21.074 MHz USB (15m FT8)</option>
+                <option value="28074000,usb">28.074 MHz USB (10m FT8)</option>
+            </optgroup>
+            <optgroup label="FT4 - Fast Mode">
+                <option value="7047500,usb">7.047.5 MHz USB (40m FT4)</option>
+                <option value="14080000,usb">14.080 MHz USB (20m FT4)</option>
+                <option value="21140000,usb">21.140 MHz USB (15m FT4)</option>
+                <option value="28180000,usb">28.180 MHz USB (10m FT4)</option>
+            </optgroup>
+            <optgroup label="Other FT8 Bands">
+                <option value="3573000,usb">3.573 MHz USB (80m FT8)</option>
+                <option value="10136000,usb">10.136 MHz USB (30m FT8)</option>
+                <option value="18100000,usb">18.100 MHz USB (17m FT8)</option>
+                <option value="24915000,usb">24.915 MHz USB (12m FT8)</option>
+                <option value="50313000,usb">50.313 MHz USB (6m FT8)</option>
+            </optgroup>
+        </select>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="ft8-status-bar">
+        <div class="ft8-status-left">
+            <span id="ft8-status-badge" class="status-badge status-disconnected">Stopped</span>
+            <span id="ft8-protocol-display" class="ft8-protocol">FT8</span>
+            <span id="ft8-slot-display" class="ft8-slot">Slot: --</span>
+            <span id="ft8-sync-display" class="ft8-sync">Sync: Waiting...</span>
+        </div>
+        <div class="ft8-status-right">
+            <button id="ft8-start-btn" class="ft8-btn ft8-btn-primary">Start</button>
+            <button id="ft8-stop-btn" class="ft8-btn ft8-btn-secondary" disabled>Stop</button>
+            <button id="ft8-clear-btn" class="ft8-btn ft8-btn-secondary">Clear</button>
+            <button id="ft8-export-btn" class="ft8-btn ft8-btn-secondary">Export</button>
+        </div>
+    </div>
+
+    <!-- Info Display -->
+    <div class="ft8-info-bar">
+        <div class="ft8-info-item">
+            <span class="ft8-info-label">Decoded:</span>
+            <span id="ft8-decode-count" class="ft8-info-value">0</span>
+        </div>
+        <div class="ft8-info-item">
+            <span class="ft8-info-label">Candidates:</span>
+            <span id="ft8-candidate-count" class="ft8-info-value">0</span>
+        </div>
+        <div class="ft8-info-item">
+            <span class="ft8-info-label">This Slot:</span>
+            <span id="ft8-slot-count" class="ft8-info-value">0</span>
+        </div>
+    </div>
+
+    <!-- Controls Panel -->
+    <div class="ft8-controls">
+        <div class="ft8-control-group">
+            <label for="ft8-protocol-select">Protocol:</label>
+            <select id="ft8-protocol-select" class="ft8-select">
+                <option value="FT8">FT8 (15s)</option>
+                <option value="FT4">FT4 (7.5s)</option>
+            </select>
+        </div>
+
+        <div class="ft8-control-group">
+            <label for="ft8-min-score">Min Score:</label>
+            <input type="number" id="ft8-min-score" class="ft8-input-small" value="10" min="0" max="100">
+        </div>
+
+        <div class="ft8-control-group">
+            <label>
+                <input type="checkbox" id="ft8-show-cq-only">
+                CQ Only
+            </label>
+        </div>
+
+        <div class="ft8-control-group">
+            <label>
+                <input type="checkbox" id="ft8-auto-clear">
+                Auto-Clear
+            </label>
+        </div>
+
+        <div class="ft8-control-group">
+            <label>
+                <input type="checkbox" id="ft8-auto-scroll" checked>
+                Auto-Scroll
+            </label>
+        </div>
+    </div>
+
+    <!-- Message Table -->
+    <div class="ft8-messages-container">
+        <table class="ft8-messages-table" id="ft8-messages-table">
+            <thead>
+                <tr>
+                    <th>UTC</th>
+                    <th>SNR</th>
+                    <th>ΔT</th>
+                    <th>Freq</th>
+                    <th>Message</th>
+                    <th>Slot</th>
+                </tr>
+            </thead>
+            <tbody id="ft8-messages-tbody">
+                <!-- Messages will be dynamically added here -->
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Help Text -->
+    <div class="ft8-help">
+        <p><strong>FT8/FT4 Decoder</strong> - Weak signal digital modes for HF</p>
+        <p><strong>FT8:</strong> 15-second transmissions, ideal for DX and weak signal work</p>
+        <p><strong>FT4:</strong> 7.5-second transmissions, faster pace for contests</p>
+        <p><strong>Common Frequencies:</strong> 7.074 MHz (40m), 14.074 MHz (20m - most active), 21.074 MHz (15m), 28.074 MHz (10m)</p>
+        <p><strong>GPS Sync:</strong> Decoder uses GPS timestamps for precise time slot alignment</p>
+        <p><strong>Tip:</strong> Tune to 14.074 MHz USB and wait for the next 15-second slot. Messages appear automatically.</p>
+        <p><strong>Message Types:</strong> CQ calls, standard QSOs, grid squares, signal reports, DXpedition mode, contesting, and more</p>
+    </div>
+</div>

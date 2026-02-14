@@ -1,0 +1,49 @@
+{
+  "name": "ft8",
+  "displayName": "FT8/FT4 Decoder",
+  "version": "1.0.0",
+  "description": "FT8 and FT4 weak signal digital mode decoder with GPS time synchronization",
+  "author": "UberSDR",
+  "type": "decoder",
+  "icon": "📡",
+  "category": "decoder",
+  "requiresAudio": true,
+  "defaultEnabled": false,
+  "files": {
+    "main": "main.js",
+    "styles": ["styles.css"],
+    "template": "template.html"
+  },
+  "settings": {
+    "protocol": {
+      "type": "select",
+      "options": ["FT8", "FT4"],
+      "default": "FT8",
+      "description": "Protocol: FT8 (15s slots) or FT4 (7.5s slots)"
+    },
+    "min_score": {
+      "type": "number",
+      "default": 10,
+      "min": 0,
+      "max": 100,
+      "description": "Minimum sync score (0=accept all, higher=fewer false decodes)"
+    },
+    "max_candidates": {
+      "type": "number",
+      "default": 100,
+      "min": 10,
+      "max": 500,
+      "description": "Maximum candidates to decode per slot"
+    },
+    "auto_clear": {
+      "type": "boolean",
+      "default": false,
+      "description": "Automatically clear old messages"
+    },
+    "show_cq_only": {
+      "type": "boolean",
+      "default": false,
+      "description": "Show only CQ messages"
+    }
+  }
+}

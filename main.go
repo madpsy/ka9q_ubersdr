@@ -22,6 +22,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/fsk"
+	"github.com/cwsl/ka9q_ubersdr/audio_extensions/ft8"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/navtex"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/sstv"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/wefax"
@@ -1061,6 +1062,35 @@ func main() {
 		},
 	)
 	log.Printf("Registered audio extension: sstv v%s", sstvInfo["version"].(string))
+
+	// Register FT8 extension
+	ft8Info := ft8.GetInfo()
+
+	ft8FactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
+		ft8Params := ft8.AudioExtensionParams{
+			SampleRate:    audioParams.SampleRate,
+			Channels:      audioParams.Channels,
+			BitsPerSample: audioParams.BitsPerSample,
+		}
+
+		ft8Ext, err := ft8.Factory(ft8Params, extensionParams)
+		if err != nil {
+			return nil, err
+		}
+
+		return &ft8ExtensionWrapper{ext: ft8Ext}, nil
+	}
+
+	audioExtensionRegistry.Register(
+		"ft8",
+		ft8FactoryWrapper,
+		AudioExtensionInfo{
+			Name:        ft8Info["name"].(string),
+			Description: ft8Info["description"].(string),
+			Version:     ft8Info["version"].(string),
+		},
+	)
+	log.Printf("Registered audio extension: ft8 v%s", ft8Info["version"].(string))
 
 	// Create audio extension manager
 	audioExtensionManager := NewAudioExtensionManager(dxClusterWsHandler, sessions, audioExtensionRegistry)
@@ -4368,5 +4398,34 @@ func (w *sstvExtensionWrapper) Stop() error {
 }
 
 func (w *sstvExtensionWrapper) GetName() string {
+	return w.ext.GetName()
+}
+
+// ft8ExtensionWrapper wraps a ft8.AudioExtension to implement main.AudioExtension
+type ft8ExtensionWrapper struct {
+	ext ft8.AudioExtension
+}
+
+func (w *ft8ExtensionWrapper) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
+	// Convert main.AudioSample to ft8.AudioSample
+	ft8Chan := make(chan ft8.AudioSample, cap(audioChan))
+	go func() {
+		defer close(ft8Chan)
+		for sample := range audioChan {
+			ft8Chan <- ft8.AudioSample{
+				PCMData:      sample.PCMData,
+				RTPTimestamp: sample.RTPTimestamp,
+				GPSTimeNs:    sample.GPSTimeNs,
+			}
+		}
+	}()
+	return w.ext.Start(ft8Chan, resultChan)
+}
+
+func (w *ft8ExtensionWrapper) Stop() error {
+	return w.ext.Stop()
+}
+
+func (w *ft8ExtensionWrapper) GetName() string {
 	return w.ext.GetName()
 }

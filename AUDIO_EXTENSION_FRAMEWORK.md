@@ -177,17 +177,24 @@ func NewMyExtension(audioParams AudioExtensionParams, extensionParams map[string
     return ext, nil
 }
 
-func (e *MyExtension) Start(audioChan <-chan []int16, resultChan chan<- []byte) error {
+func (e *MyExtension) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
     e.running = true
     
     go func() {
-        for samples := range audioChan {
+        for audioSample := range audioChan {
             if !e.running {
                 break
             }
             
-            // Process PCM samples
-            result := e.process(samples)
+            // Access PCM samples
+            samples := audioSample.PCMData
+
+            // Access timestamps (optional)
+            rtpTimestamp := audioSample.RTPTimestamp  // RTP timestamp from radiod
+            gpsTimeNs := audioSample.GPSTimeNs        // GPS-synchronized Unix time in nanoseconds
+
+            // Process PCM samples (with optional timestamp awareness)
+            result := e.process(samples, gpsTimeNs)
             
             // Send binary result
             select {
@@ -253,6 +260,22 @@ dxClusterWsHandler.audioExtensionManager = audioExtensionManager
 - **Tap location**: [`audio.go:233`](audio.go:233) - **before** Opus encoding
 - **Conversion**: [`audio.go:241`](audio.go:241) - `bytesToInt16Samples()` converts to int16 array
 - **Guarantee**: Extensions always receive uncompressed PCM, even if user receives Opus
+
+### Timestamp Data
+
+Extensions now receive timing information with each audio sample via the `AudioSample` struct:
+
+- **`PCMData []int16`**: The actual PCM audio samples (mono, int16)
+- **`RTPTimestamp uint32`**: RTP timestamp from radiod's stream (useful for detecting packet loss or jitter)
+- **`GPSTimeNs int64`**: GPS-synchronized Unix time in nanoseconds, captured when the packet arrived at ubersdr
+
+The `GPSTimeNs` field provides accurate wall-clock timing that can be used to:
+- Timestamp decoded images (SSTV, WEFAX)
+- Timestamp decoded messages (FSK, NAVTEX)
+- Correlate audio events with other system events
+- Measure decoding latency
+
+Extensions can choose to use or ignore the timestamp data based on their needs.
 
 ### Session Management
 

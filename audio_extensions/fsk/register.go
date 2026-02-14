@@ -13,7 +13,7 @@ type AudioExtensionParams struct {
 
 // AudioExtension interface for extensible audio processors
 type AudioExtension interface {
-	Start(audioChan <-chan []int16, resultChan chan<- []byte) error
+	Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error
 	Stop() error
 	GetName() string
 }

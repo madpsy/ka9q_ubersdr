@@ -4260,8 +4260,20 @@ type wefaxExtensionWrapper struct {
 	ext wefax.AudioExtension
 }
 
-func (w *wefaxExtensionWrapper) Start(audioChan <-chan []int16, resultChan chan<- []byte) error {
-	return w.ext.Start(audioChan, resultChan)
+func (w *wefaxExtensionWrapper) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
+	// Convert main.AudioSample to wefax.AudioSample
+	wefaxChan := make(chan wefax.AudioSample, cap(audioChan))
+	go func() {
+		defer close(wefaxChan)
+		for sample := range audioChan {
+			wefaxChan <- wefax.AudioSample{
+				PCMData:      sample.PCMData,
+				RTPTimestamp: sample.RTPTimestamp,
+				GPSTimeNs:    sample.GPSTimeNs,
+			}
+		}
+	}()
+	return w.ext.Start(wefaxChan, resultChan)
 }
 
 func (w *wefaxExtensionWrapper) Stop() error {
@@ -4277,8 +4289,20 @@ type navtexExtensionWrapper struct {
 	ext navtex.AudioExtension
 }
 
-func (w *navtexExtensionWrapper) Start(audioChan <-chan []int16, resultChan chan<- []byte) error {
-	return w.ext.Start(audioChan, resultChan)
+func (w *navtexExtensionWrapper) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
+	// Convert main.AudioSample to navtex.AudioSample
+	navtexChan := make(chan navtex.AudioSample, cap(audioChan))
+	go func() {
+		defer close(navtexChan)
+		for sample := range audioChan {
+			navtexChan <- navtex.AudioSample{
+				PCMData:      sample.PCMData,
+				RTPTimestamp: sample.RTPTimestamp,
+				GPSTimeNs:    sample.GPSTimeNs,
+			}
+		}
+	}()
+	return w.ext.Start(navtexChan, resultChan)
 }
 
 func (w *navtexExtensionWrapper) Stop() error {
@@ -4294,8 +4318,20 @@ type fskExtensionWrapper struct {
 	ext fsk.AudioExtension
 }
 
-func (w *fskExtensionWrapper) Start(audioChan <-chan []int16, resultChan chan<- []byte) error {
-	return w.ext.Start(audioChan, resultChan)
+func (w *fskExtensionWrapper) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
+	// Convert main.AudioSample to fsk.AudioSample
+	fskChan := make(chan fsk.AudioSample, cap(audioChan))
+	go func() {
+		defer close(fskChan)
+		for sample := range audioChan {
+			fskChan <- fsk.AudioSample{
+				PCMData:      sample.PCMData,
+				RTPTimestamp: sample.RTPTimestamp,
+				GPSTimeNs:    sample.GPSTimeNs,
+			}
+		}
+	}()
+	return w.ext.Start(fskChan, resultChan)
 }
 
 func (w *fskExtensionWrapper) Stop() error {
@@ -4311,8 +4347,20 @@ type sstvExtensionWrapper struct {
 	ext sstv.AudioExtension
 }
 
-func (w *sstvExtensionWrapper) Start(audioChan <-chan []int16, resultChan chan<- []byte) error {
-	return w.ext.Start(audioChan, resultChan)
+func (w *sstvExtensionWrapper) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
+	// Convert main.AudioSample to sstv.AudioSample
+	sstvChan := make(chan sstv.AudioSample, cap(audioChan))
+	go func() {
+		defer close(sstvChan)
+		for sample := range audioChan {
+			sstvChan <- sstv.AudioSample{
+				PCMData:      sample.PCMData,
+				RTPTimestamp: sample.RTPTimestamp,
+				GPSTimeNs:    sample.GPSTimeNs,
+			}
+		}
+	}()
+	return w.ext.Start(sstvChan, resultChan)
 }
 
 func (w *sstvExtensionWrapper) Stop() error {

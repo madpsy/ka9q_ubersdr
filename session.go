@@ -70,7 +70,7 @@ type Session struct {
 	modesMu      sync.RWMutex    // Protect VisitedModes map
 
 	// Audio extension tap (for streaming audio to background processors)
-	audioExtensionChan chan []int16
+	audioExtensionChan chan AudioSample
 	audioExtensionMu   sync.RWMutex
 }
 
@@ -319,7 +319,7 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 		VisitedBands:   make(map[string]bool),
 		VisitedModes:   make(map[string]bool),
 	}
-	
+
 	// Track initial band and mode in per-session maps
 	band := frequencyToBand(float64(frequency))
 	if band != "" {
@@ -328,7 +328,7 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 	if mode != "" {
 		session.VisitedModes[mode] = true
 	}
-	
+
 	// Also track in UUID-level maps (must be done while holding sm.mu lock, which we already have)
 	if userSessionID != "" {
 		if sm.userSessionBands[userSessionID] == nil {
@@ -580,7 +580,7 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 		VisitedBands:   make(map[string]bool),
 		VisitedModes:   make(map[string]bool),
 	}
-	
+
 	// Note: Spectrum sessions don't track bands/modes because they only show
 	// the waterfall center frequency, not actual tuned frequencies
 
@@ -665,7 +665,7 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 	}
 	session.LastActive = time.Now()
 	session.mu.Unlock()
-	
+
 	// Note: Spectrum sessions don't track bands because they only show
 	// the waterfall center frequency, not actual tuned frequencies
 
@@ -778,12 +778,12 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 	if sendBandwidth == 0 {
 		sendBandwidth = session.Bandwidth
 	}
-	
+
 	// Get current values after update for tracking
 	currentFreq := session.Frequency
 	currentMode := session.Mode
 	session.mu.Unlock()
-	
+
 	// Track band change if frequency actually changed (compare old vs current, not parameter)
 	if currentFreq != oldFreq {
 		band := frequencyToBand(float64(currentFreq))
@@ -794,7 +794,7 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 				session.VisitedBands[band] = true
 			}
 			session.bandsMu.Unlock()
-			
+
 			// Also track in UUID-level map (persists across audio/spectrum sessions)
 			if session.UserSessionID != "" {
 				sm.mu.Lock()
@@ -808,7 +808,7 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 			}
 		}
 	}
-	
+
 	// Track mode change if mode actually changed (compare old vs current, not parameter)
 	if currentMode != oldMode {
 		// Track in per-session map
@@ -817,7 +817,7 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 			session.VisitedModes[currentMode] = true
 		}
 		session.modesMu.Unlock()
-		
+
 		// Also track in UUID-level map (persists across audio/spectrum sessions)
 		if session.UserSessionID != "" {
 			sm.mu.Lock()
@@ -899,12 +899,12 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 		// Translate mode for radiod (e.g., "fm" -> "pm")
 		sendMode = translateModeForRadiod(sendMode)
 	}
-	
+
 	// Get current values after update for tracking
 	currentFreq := session.Frequency
 	currentMode := session.Mode
 	session.mu.Unlock()
-	
+
 	// Track band change if frequency actually changed (compare old vs current, not parameter)
 	if currentFreq != oldFreq {
 		band := frequencyToBand(float64(currentFreq))
@@ -915,7 +915,7 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 				session.VisitedBands[band] = true
 			}
 			session.bandsMu.Unlock()
-			
+
 			// Also track in UUID-level map (persists across audio/spectrum sessions)
 			if session.UserSessionID != "" {
 				sm.mu.Lock()
@@ -929,7 +929,7 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 			}
 		}
 	}
-	
+
 	// Track mode change if mode actually changed (compare old vs current, not parameter)
 	if currentMode != oldMode {
 		// Track in per-session map
@@ -938,7 +938,7 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 			session.VisitedModes[currentMode] = true
 		}
 		session.modesMu.Unlock()
-		
+
 		// Also track in UUID-level map (persists across audio/spectrum sessions)
 		if session.UserSessionID != "" {
 			sm.mu.Lock()
@@ -1019,7 +1019,7 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 		sm.mu.Unlock()
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
-	
+
 	// Track if this UUID is being completely removed (for activity logging)
 	// Check this BEFORE removing the session from the map
 	uuidCompletelyGone := false
@@ -1031,7 +1031,7 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 			}
 		}
 	}
-	
+
 	// Log session activity BEFORE removing from map and BEFORE cleanup
 	// Only log if the UUID is completely gone (all sessions for this UUID destroyed)
 	if sm.activityLogger != nil && uuidCompletelyGone {
@@ -1046,7 +1046,7 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 		} else {
 			bandsCopy = make(map[string]bool)
 		}
-		
+
 		if modesMap, exists := sm.userSessionModes[session.UserSessionID]; exists {
 			modesCopy = make(map[string]bool, len(modesMap))
 			for k, v := range modesMap {
@@ -1055,7 +1055,7 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 		} else {
 			modesCopy = make(map[string]bool)
 		}
-		
+
 		// Unlock before calling activity logger to avoid deadlock (it needs to read sessions)
 		sm.mu.Unlock()
 		if err := sm.activityLogger.LogSessionDestroyedWithData(session.UserSessionID, bandsCopy, modesCopy); err != nil {
@@ -1070,7 +1070,7 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 			return fmt.Errorf("session was removed while logging activity")
 		}
 	}
-	
+
 	// Now remove the session from the map
 	delete(sm.sessions, sessionID)
 	delete(sm.ssrcToSession, session.SSRC)
@@ -2060,8 +2060,8 @@ func (s *Session) GetSampleRate() int {
 }
 
 // AttachAudioExtensionTap attaches an audio extension tap to this session
-// The tap receives a copy of all PCM audio sent to the user
-func (s *Session) AttachAudioExtensionTap(audioChan chan []int16) {
+// The tap receives a copy of all PCM audio with timestamps sent to the user
+func (s *Session) AttachAudioExtensionTap(audioChan chan AudioSample) {
 	s.audioExtensionMu.Lock()
 	s.audioExtensionChan = audioChan
 	s.audioExtensionMu.Unlock()
@@ -2074,16 +2074,16 @@ func (s *Session) DetachAudioExtensionTap() {
 	s.audioExtensionMu.Unlock()
 }
 
-// SendAudioToExtension sends PCM audio to the attached extension (if any)
+// SendAudioToExtension sends PCM audio with timestamps to the attached extension (if any)
 // This should be called from the audio receiver when sending audio to the user
-func (s *Session) SendAudioToExtension(pcmData []int16) {
+func (s *Session) SendAudioToExtension(audioSample AudioSample) {
 	s.audioExtensionMu.RLock()
 	extensionChan := s.audioExtensionChan
 	s.audioExtensionMu.RUnlock()
 
 	if extensionChan != nil {
 		select {
-		case extensionChan <- pcmData:
+		case extensionChan <- audioSample:
 		default:
 			// Drop if extension can't keep up (non-blocking)
 		}

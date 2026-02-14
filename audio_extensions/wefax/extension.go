@@ -5,6 +5,13 @@ import (
 	"log"
 )
 
+// AudioSample contains PCM audio data with timing information
+type AudioSample struct {
+	PCMData      []int16 // PCM audio samples (mono, int16)
+	RTPTimestamp uint32  // RTP timestamp from radiod (for jitter/loss detection)
+	GPSTimeNs    int64   // GPS-synchronized Unix time in nanoseconds (packet arrival time)
+}
+
 // WEFAXExtension wraps the WEFAX decoder as an AudioExtension
 type WEFAXExtension struct {
 	decoder *WEFAXDecoder
@@ -74,8 +81,18 @@ func NewWEFAXExtension(sampleRate int, extensionParams map[string]interface{}) (
 }
 
 // Start begins processing audio
-func (e *WEFAXExtension) Start(audioChan <-chan []int16, resultChan chan<- []byte) error {
-	return e.decoder.Start(audioChan, resultChan)
+func (e *WEFAXExtension) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
+	// Convert AudioSample to []int16 for the decoder
+	// In the future, the decoder could use timestamps for image timestamping
+	legacyChan := make(chan []int16, cap(audioChan))
+	go func() {
+		defer close(legacyChan)
+		for sample := range audioChan {
+			// TODO: Could use sample.GPSTimeNs to timestamp decoded images
+			legacyChan <- sample.PCMData
+		}
+	}()
+	return e.decoder.Start(legacyChan, resultChan)
 }
 
 // Stop stops the extension

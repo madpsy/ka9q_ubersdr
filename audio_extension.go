@@ -12,13 +12,20 @@ type AudioExtensionParams struct {
 	BitsPerSample int // Always 16
 }
 
+// AudioSample contains PCM audio data with timing information
+type AudioSample struct {
+	PCMData      []int16 // PCM audio samples (mono, int16)
+	RTPTimestamp uint32  // RTP timestamp from radiod (for jitter/loss detection)
+	GPSTimeNs    int64   // GPS-synchronized Unix time in nanoseconds (packet arrival time)
+}
+
 // AudioExtension interface for extensible audio processors
 // These receive the same PCM audio stream as the user hears
 type AudioExtension interface {
 	// Start begins processing audio and sending results
-	// audioChan: receives PCM audio samples ([]int16)
+	// audioChan: receives PCM audio samples with timestamps
 	// resultChan: sends binary results back to user
-	Start(audioChan <-chan []int16, resultChan chan<- []byte) error
+	Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error
 
 	// Stop stops the extension
 	Stop() error

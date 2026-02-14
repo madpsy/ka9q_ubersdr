@@ -31,7 +31,7 @@ type ActiveAudioExtension struct {
 	SessionID     string
 	ExtensionName string
 	Extension     AudioExtension
-	AudioChan     chan []int16
+	AudioChan     chan AudioSample
 	ResultChan    chan []byte
 	StopChan      chan struct{}
 	Conn          *websocket.Conn
@@ -122,7 +122,7 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 	}
 
 	// Create channels for audio and results
-	audioChan := make(chan []int16, 1024)
+	audioChan := make(chan AudioSample, 1024)
 	resultChan := make(chan []byte, 100)
 	stopChan := make(chan struct{})
 

@@ -1,6 +1,7 @@
 package ft8
 
 import (
+	"log"
 	"math"
 
 	"gonum.org/v1/gonum/dsp/fourier"
@@ -169,6 +170,9 @@ func (m *Monitor) extractMagnitudes(timeSub int) {
 	// Calculate base index in magnitude array
 	baseIdx := blockIdx*wf.BlockStride + timeSub*wf.FreqOSR*wf.NumBins
 
+	// Debug: track some values for first block
+	debugBlock := blockIdx == 0 && timeSub == 0
+
 	// Extract magnitudes for each frequency bin
 	for bin := 0; bin < wf.NumBins; bin++ {
 		fftBin := m.MinBin + bin
@@ -183,6 +187,11 @@ func (m *Monitor) extractMagnitudes(timeSub int) {
 		imag := imag(m.freqData[fftBin])
 		mag2 := real*real + imag*imag
 		magDB := 10.0 * math.Log10(1e-12+mag2)
+
+		if debugBlock && bin < 5 {
+			log.Printf("[Waterfall DEBUG] bin=%d, fftBin=%d, real=%.6f, imag=%.6f, mag2=%.6e, magDB=%.2f",
+				bin, fftBin, real, imag, mag2, magDB)
+		}
 
 		// Track maximum
 		if magDB > m.MaxMag {

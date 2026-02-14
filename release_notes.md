@@ -1,4 +1,15 @@
-## Version 0.1.38 - Latest Release
+## Version 0.1.39 - Latest Release
+
+### New Features
+- Added **Extensions** for WEFAX/NAXTEX/Generic FSK
+- Added **Extension** for SSTV though known issue with alignment so work in progress. 
+- Added **Voice Activity** scanner to find active SSB phone activity
+
+### Bug Fixes
+- Elevation for some rotators being set to azimuth value which failed in rotctld
+
+
+## Version 0.1.38
 
 ### New Features
 - Added **Release notes** in version footer of admin interface

@@ -81,17 +81,17 @@ func NewMonitor(sampleRate int, fMin, fMax float64, timeOSR, freqOSR int, protoc
 		Protocol:    protocol,
 	}
 
-	// Calculate normalization factor
-	// NOTE: gonum FFT may have different scaling than KISS FFT
-	// Try WITHOUT pre-applying to window, apply after FFT instead
+	// Calculate normalization factor (applied to window like C reference)
 	fftNorm := 2.0 / float64(nfft)
 
-	// Create Hann window WITHOUT normalization
-	// We'll apply normalization to FFT output instead
+	// Create Hann window with normalization applied (matching C reference)
+	// Reference: window[i] = fft_norm * hann_i(i, nfft)
+	// where hann_i(i, N) = sin²(π*i/N)
 	window := make([]float64, nfft)
 	for i := 0; i < nfft; i++ {
 		x := math.Sin(math.Pi * float64(i) / float64(nfft))
-		window[i] = x * x // sin²(π*i/N)
+		hann := x * x
+		window[i] = fftNorm * hann
 	}
 
 	return &Monitor{
@@ -187,41 +187,44 @@ func (m *Monitor) extractMagnitudes(timeSub int) {
 	debugBlock := blockIdx == 0 && timeSub == 0
 
 	// Extract magnitudes for each frequency bin
-	for bin := 0; bin < wf.NumBins; bin++ {
-		fftBin := m.MinBin + bin
-		if fftBin >= len(m.freqData) {
-			break
-		}
+	// Reference C code loops: for (freq_sub) { for (bin) { src_bin = bin*freq_osr + freq_sub; } }
+	for freqSub := 0; freqSub < wf.FreqOSR; freqSub++ {
+		for bin := 0; bin < wf.NumBins; bin++ {
+			// Calculate FFT bin with frequency oversampling
+			// Reference: src_bin = (bin * freq_osr) + freq_sub
+			fftBin := (m.MinBin+bin)*wf.FreqOSR + freqSub
+			if fftBin >= len(m.freqData) {
+				break
+			}
 
-		// Calculate power (magnitude squared) and convert to dB
-		// Apply FFT normalization here instead of in window
-		real := real(m.freqData[fftBin]) * m.FFTNorm
-		imag := imag(m.freqData[fftBin]) * m.FFTNorm
-		mag2 := real*real + imag*imag
-		magDB := 10.0 * math.Log10(1e-12+mag2)
+			// Calculate power (magnitude squared) and convert to dB
+			// Normalization already applied in window
+			real := real(m.freqData[fftBin])
+			imag := imag(m.freqData[fftBin])
+			mag2 := real*real + imag*imag
+			magDB := 10.0 * math.Log10(1e-12+mag2)
 
-		if debugBlock && bin < 5 {
-			log.Printf("[Waterfall DEBUG] bin=%d, fftBin=%d, real=%.6f, imag=%.6f, mag2=%.6e, magDB=%.2f",
-				bin, fftBin, real, imag, mag2, magDB)
-		}
+			if debugBlock && bin < 5 && freqSub == 0 {
+				log.Printf("[Waterfall DEBUG] bin=%d, freqSub=%d, fftBin=%d, real=%.6f, imag=%.6f, mag2=%.6e, magDB=%.2f, uint8=%d",
+					bin, freqSub, fftBin, real, imag, mag2, magDB, int(2.0*magDB+240.0))
+			}
 
-		// Track maximum
-		if magDB > m.MaxMag {
-			m.MaxMag = magDB
-		}
+			// Track maximum
+			if magDB > m.MaxMag {
+				m.MaxMag = magDB
+			}
 
-		// Convert to uint8: scaled = 2 * db + 240
-		// This maps -120 dB -> 0, 0 dB -> 240, +7.5 dB -> 255
-		magUint8 := int(2.0*magDB + 240.0)
-		if magUint8 < 0 {
-			magUint8 = 0
-		}
-		if magUint8 > 255 {
-			magUint8 = 255
-		}
+			// Convert to uint8: scaled = 2 * db + 240
+			// This maps -120 dB -> 0, 0 dB -> 240, +7.5 dB -> 255
+			magUint8 := int(2.0*magDB + 240.0)
+			if magUint8 < 0 {
+				magUint8 = 0
+			}
+			if magUint8 > 255 {
+				magUint8 = 255
+			}
 
-		// Store in waterfall (handle frequency oversampling)
-		for freqSub := 0; freqSub < wf.FreqOSR; freqSub++ {
+			// Store in waterfall
 			idx := baseIdx + freqSub*wf.NumBins + bin
 			if idx < len(wf.Mag) {
 				wf.Mag[idx] = uint8(magUint8)

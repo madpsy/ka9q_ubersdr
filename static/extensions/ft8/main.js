@@ -500,6 +500,27 @@ class FT8Extension extends DecoderExtension {
         // Alias for onBinaryMessage to match DecoderExtension interface
         this.onBinaryMessage(data);
     }
+
+    onProcessAudio(dataArray) {
+        // FT8 processes audio on the backend (Go side) via the audio extension framework
+        // This method is required by DecoderExtension but does nothing for FT8
+        // Audio is sent to the backend when the decoder is attached via WebSocket
+    }
+
+    onEnable() {
+        console.log('FT8: Extension enabled');
+        this.setupBinaryMessageHandler();
+    }
+
+    onDisable() {
+        console.log('FT8: Extension disabled');
+        
+        if (this.running) {
+            this.stop();
+        }
+        
+        this.removeBinaryMessageHandler();
+    }
 }
 
 // Register the extension

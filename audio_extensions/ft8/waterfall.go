@@ -81,17 +81,17 @@ func NewMonitor(sampleRate int, fMin, fMax float64, timeOSR, freqOSR int, protoc
 		Protocol:    protocol,
 	}
 
-	// Calculate normalization factor (applied to window, not FFT output)
+	// Calculate normalization factor
+	// NOTE: gonum FFT may have different scaling than KISS FFT
+	// Try WITHOUT pre-applying to window, apply after FFT instead
 	fftNorm := 2.0 / float64(nfft)
 
-	// Create Hann window with normalization applied
-	// Reference: window[i] = fft_norm * hann_i(i, nfft)
-	// where hann_i(i, N) = sin²(π*i/N)
+	// Create Hann window WITHOUT normalization
+	// We'll apply normalization to FFT output instead
 	window := make([]float64, nfft)
 	for i := 0; i < nfft; i++ {
 		x := math.Sin(math.Pi * float64(i) / float64(nfft))
-		hann := x * x
-		window[i] = fftNorm * hann
+		window[i] = x * x // sin²(π*i/N)
 	}
 
 	return &Monitor{
@@ -194,10 +194,9 @@ func (m *Monitor) extractMagnitudes(timeSub int) {
 		}
 
 		// Calculate power (magnitude squared) and convert to dB
-		// Reference: mag2 = real^2 + imag^2, db = 10 * log10(1e-12 + mag2)
-		// Note: fft_norm is already applied in the window, so don't apply it again
-		real := real(m.freqData[fftBin])
-		imag := imag(m.freqData[fftBin])
+		// Apply FFT normalization here instead of in window
+		real := real(m.freqData[fftBin]) * m.FFTNorm
+		imag := imag(m.freqData[fftBin]) * m.FFTNorm
 		mag2 := real*real + imag*imag
 		magDB := 10.0 * math.Log10(1e-12+mag2)
 

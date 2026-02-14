@@ -41,29 +41,6 @@
         </div>
     </div>
 
-    <!-- Info Display -->
-    <div class="ft8-info-bar">
-        <div class="ft8-info-item">
-            <span class="ft8-info-label">Decoded:</span>
-            <span id="ft8-decode-count" class="ft8-info-value">0</span>
-        </div>
-        <div class="ft8-info-item">
-            <span class="ft8-info-label">Candidates:</span>
-            <span id="ft8-candidate-count" class="ft8-info-value">0</span>
-        </div>
-        <div class="ft8-info-item">
-            <span class="ft8-info-label">This Slot:</span>
-            <span id="ft8-slot-count" class="ft8-info-value">0</span>
-        </div>
-        <div class="ft8-info-item">
-            <span class="ft8-info-label">LDPC Fails:</span>
-            <span id="ft8-ldpc-failures" class="ft8-info-value">0</span>
-        </div>
-        <div class="ft8-info-item">
-            <span class="ft8-info-label">CRC Fails:</span>
-            <span id="ft8-crc-failures" class="ft8-info-value">0</span>
-        </div>
-    </div>
 
     <!-- Controls Panel -->
     <div class="ft8-controls">
@@ -103,7 +80,7 @@
 
         <div class="ft8-control-group">
             <label>
-                <input type="checkbox" id="ft8-show-latest-only">
+                <input type="checkbox" id="ft8-show-latest-only" checked>
                 Latest Cycle Only
             </label>
         </div>
@@ -132,14 +109,4 @@
         </table>
     </div>
 
-    <!-- Help Text -->
-    <div class="ft8-help">
-        <p><strong>FT8/FT4 Decoder</strong> - Weak signal digital modes for HF</p>
-        <p><strong>FT8:</strong> 15-second transmissions, ideal for DX and weak signal work</p>
-        <p><strong>FT4:</strong> 7.5-second transmissions, faster pace for contests</p>
-        <p><strong>Common Frequencies:</strong> 7.074 MHz (40m), 14.074 MHz (20m - most active), 21.074 MHz (15m), 28.074 MHz (10m)</p>
-        <p><strong>GPS Sync:</strong> Decoder uses GPS timestamps for precise time slot alignment</p>
-        <p><strong>Tip:</strong> Tune to 14.074 MHz USB and wait for the next 15-second slot. Messages appear automatically.</p>
-        <p><strong>Message Types:</strong> CQ calls, standard QSOs, grid squares, signal reports, DXpedition mode, contesting, and more</p>
-    </div>
 </div>

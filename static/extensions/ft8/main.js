@@ -20,7 +20,7 @@ class FT8Extension extends DecoderExtension {
             max_candidates: 100,
             auto_clear: false,
             show_cq_only: false,
-            show_latest_only: false
+            show_latest_only: true  // Default to checked
         };
 
         // State

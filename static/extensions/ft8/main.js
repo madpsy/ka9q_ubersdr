@@ -28,6 +28,9 @@ class FT8Extension extends DecoderExtension {
         this.totalDecoded = 0;
         this.currentSlot = 0;
         this.slotDecoded = 0;
+        this.candidateCount = 0;
+        this.ldpcFailures = 0;
+        this.crcFailures = 0;
         this.autoScroll = true;
         this.lastSyncTime = null;
     }
@@ -250,6 +253,9 @@ class FT8Extension extends DecoderExtension {
         const dxClient = window.dxClusterClient;
         if (!dxClient || !dxClient.ws) return;
 
+        // Remove any existing handler first to prevent duplicates
+        this.removeBinaryMessageHandler();
+
         // Store reference to our handler
         this.binaryMessageHandler = (event) => {
             if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
@@ -294,7 +300,18 @@ class FT8Extension extends DecoderExtension {
             this.messages.push(message);
             this.totalDecoded++;
             this.slotDecoded++;
-            
+
+            // Update decode statistics from message
+            if (message.candidate_count !== undefined) {
+                this.candidateCount = message.candidate_count;
+            }
+            if (message.ldpc_failures !== undefined) {
+                this.ldpcFailures = message.ldpc_failures;
+            }
+            if (message.crc_failures !== undefined) {
+                this.crcFailures = message.crc_failures;
+            }
+
             // Update slot if changed
             if (message.slot_number !== this.currentSlot) {
                 this.currentSlot = message.slot_number;
@@ -305,7 +322,13 @@ class FT8Extension extends DecoderExtension {
                     this.messages = this.messages.slice(-100);
                 }
             }
-            
+
+            // Update slot display
+            this.updateSlotDisplay(message.slot_number);
+
+            // Update sync display (we're synced if we're receiving decodes)
+            this.updateSyncDisplay(true);
+
             // Add to table
             this.addMessageToTable(message);
             
@@ -433,12 +456,24 @@ class FT8Extension extends DecoderExtension {
     updateCounters() {
         const decodeCount = document.getElementById('ft8-decode-count');
         const slotCount = document.getElementById('ft8-slot-count');
-        
+        const candidateCount = document.getElementById('ft8-candidate-count');
+        const ldpcFailures = document.getElementById('ft8-ldpc-failures');
+        const crcFailures = document.getElementById('ft8-crc-failures');
+
         if (decodeCount) {
             decodeCount.textContent = this.totalDecoded;
         }
         if (slotCount) {
             slotCount.textContent = this.slotDecoded;
+        }
+        if (candidateCount) {
+            candidateCount.textContent = this.candidateCount;
+        }
+        if (ldpcFailures) {
+            ldpcFailures.textContent = this.ldpcFailures;
+        }
+        if (crcFailures) {
+            crcFailures.textContent = this.crcFailures;
         }
     }
 
@@ -491,11 +526,36 @@ class FT8Extension extends DecoderExtension {
 
     tuneToFrequency(freq, mode) {
         console.log(`FT8: Tuning to ${freq} Hz, mode ${mode}`);
-        // This would call the radio tuning API
-        // For now, just log it
-        if (window.radioControl && window.radioControl.setFrequency) {
-            window.radioControl.setFrequency(freq);
-            window.radioControl.setMode(mode);
+
+        // Set frequency using the global function
+        if (window.setFrequency) {
+            window.setFrequency(freq);
+        }
+
+        // Set mode to USB
+        if (window.setMode) {
+            window.setMode('usb');
+        }
+
+        // Set bandwidth for FT8/FT4 (0 Hz low, 3200 Hz high)
+        const bandwidthLowSlider = document.getElementById('bandwidth-low');
+        const bandwidthHighSlider = document.getElementById('bandwidth-high');
+
+        if (bandwidthLowSlider) {
+            bandwidthLowSlider.value = 0;
+            document.getElementById('bandwidth-low-value').textContent = '0';
+            window.currentBandwidthLow = 0;
+        }
+
+        if (bandwidthHighSlider) {
+            bandwidthHighSlider.value = 3200;
+            document.getElementById('bandwidth-high-value').textContent = '3200';
+            window.currentBandwidthHigh = 3200;
+        }
+
+        // Trigger bandwidth update
+        if (window.updateBandwidth) {
+            window.updateBandwidth();
         }
     }
 

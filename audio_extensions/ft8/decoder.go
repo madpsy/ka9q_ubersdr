@@ -55,15 +55,18 @@ type FT8Decoder struct {
 
 // DecodeResult represents a decoded FT8/FT4 message
 type DecodeResult struct {
-	Timestamp  int64   `json:"timestamp"`   // Unix timestamp (seconds)
-	UTC        string  `json:"utc"`         // UTC time string "HH:MM:SS"
-	SNR        float32 `json:"snr"`         // Signal-to-noise ratio (dB)
-	DeltaT     float32 `json:"delta_t"`     // Time offset from slot start (seconds)
-	Frequency  float32 `json:"frequency"`   // Audio frequency (Hz)
-	Message    string  `json:"message"`     // Decoded message text
-	Protocol   string  `json:"protocol"`    // "FT8" or "FT4"
-	SlotNumber uint64  `json:"slot_number"` // Slot number since decoder start
-	Score      int     `json:"score"`       // Sync score
+	Timestamp      int64   `json:"timestamp"`       // Unix timestamp (seconds)
+	UTC            string  `json:"utc"`             // UTC time string "HH:MM:SS"
+	SNR            float32 `json:"snr"`             // Signal-to-noise ratio (dB)
+	DeltaT         float32 `json:"delta_t"`         // Time offset from slot start (seconds)
+	Frequency      float32 `json:"frequency"`       // Audio frequency (Hz)
+	Message        string  `json:"message"`         // Decoded message text
+	Protocol       string  `json:"protocol"`        // "FT8" or "FT4"
+	SlotNumber     uint64  `json:"slot_number"`     // Slot number since decoder start
+	Score          int     `json:"score"`           // Sync score
+	CandidateCount int     `json:"candidate_count"` // Total candidates found in this slot
+	LDPCFailures   int     `json:"ldpc_failures"`   // LDPC decode failures in this slot
+	CRCFailures    int     `json:"crc_failures"`    // CRC check failures in this slot
 }
 
 // NewFT8Decoder creates a new FT8/FT4 decoder
@@ -279,23 +282,27 @@ func (d *FT8Decoder) decode() []DecodeResult {
 		}
 		decodedHashes[message.Hash] = true
 
-		// Estimate SNR from sync score
-		// TODO: Implement proper SNR calculation
-		snr := float32(cand.Score)/10.0 - 15.0
+		// Calculate SNR from sync score (matches KiwiSDR implementation)
+		// Reference: KiwiSDR/extensions/FT8/ft8_lib/decode_ft8.c:307
+		// SNR = score * 0.5 + SNR_adj, where SNR_adj = -22 dB
+		snr := float32(cand.Score)*0.5 - 22.0
 
 		// Unpack message payload to human-readable text with hash table support
 		messageText := UnpackMessageWithHash(message.Payload, d.hashTable)
 
 		result := DecodeResult{
-			Timestamp:  d.slotStartTime.Unix(),
-			UTC:        d.slotStartTime.UTC().Format("15:04:05"),
-			SNR:        snr,
-			DeltaT:     status.Time,
-			Frequency:  status.Frequency,
-			Message:    messageText,
-			Protocol:   d.config.Protocol.String(),
-			SlotNumber: d.slotNumber,
-			Score:      int(cand.Score),
+			Timestamp:      d.slotStartTime.Unix(),
+			UTC:            d.slotStartTime.UTC().Format("15:04:05"),
+			SNR:            snr,
+			DeltaT:         status.Time,
+			Frequency:      status.Frequency,
+			Message:        messageText,
+			Protocol:       d.config.Protocol.String(),
+			SlotNumber:     d.slotNumber,
+			Score:          int(cand.Score),
+			CandidateCount: len(candidates),
+			LDPCFailures:   ldpcFailures,
+			CRCFailures:    crcFailures,
 		}
 
 		results = append(results, result)

@@ -224,6 +224,38 @@
     border-bottom: 2px solid #ddd;
 }
 
+/* Fixed column widths for proper alignment */
+.ft8-messages-table th:nth-child(1),
+.ft8-messages-table td:nth-child(1) {
+    width: 80px; /* UTC */
+}
+
+.ft8-messages-table th:nth-child(2),
+.ft8-messages-table td:nth-child(2) {
+    width: 60px; /* SNR */
+}
+
+.ft8-messages-table th:nth-child(3),
+.ft8-messages-table td:nth-child(3) {
+    width: 60px; /* ΔT */
+}
+
+.ft8-messages-table th:nth-child(4),
+.ft8-messages-table td:nth-child(4) {
+    width: 70px; /* Freq */
+}
+
+.ft8-messages-table th:nth-child(5),
+.ft8-messages-table td:nth-child(5) {
+    width: auto; /* Message - takes remaining space */
+    min-width: 200px;
+}
+
+.ft8-messages-table th:nth-child(6),
+.ft8-messages-table td:nth-child(6) {
+    width: 50px; /* Slot */
+}
+
 .ft8-messages-table td {
     padding: 8px;
     border-bottom: 1px solid #f0f0f0;

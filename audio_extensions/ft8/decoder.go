@@ -46,6 +46,10 @@ type FT8Decoder struct {
 	// Callsign hash table for resolving hashed callsigns
 	hashTable *CallsignHashTable
 
+	// Location and enrichment
+	receiverLocator string
+	ctyDatabase     CTYDatabase
+
 	// Control
 	running  bool
 	stopChan chan struct{}
@@ -53,24 +57,46 @@ type FT8Decoder struct {
 	wg       sync.WaitGroup
 }
 
+// CTYDatabase interface for callsign lookup
+type CTYDatabase interface {
+	LookupCallsignFull(callsign string) *CTYLookupResult
+}
+
+// CTYLookupResult contains CTY information for a callsign
+type CTYLookupResult struct {
+	Country    string
+	CQZone     int
+	ITUZone    int
+	Continent  string
+	TimeOffset float64
+	Latitude   *float64
+	Longitude  *float64
+}
+
 // DecodeResult represents a decoded FT8/FT4 message
 type DecodeResult struct {
-	Timestamp      int64   `json:"timestamp"`       // Unix timestamp (seconds)
-	UTC            string  `json:"utc"`             // UTC time string "HH:MM:SS"
-	SNR            float32 `json:"snr"`             // Signal-to-noise ratio (dB)
-	DeltaT         float32 `json:"delta_t"`         // Time offset from slot start (seconds)
-	Frequency      float32 `json:"frequency"`       // Audio frequency (Hz)
-	Message        string  `json:"message"`         // Decoded message text
-	Protocol       string  `json:"protocol"`        // "FT8" or "FT4"
-	SlotNumber     uint64  `json:"slot_number"`     // Slot number since decoder start
-	Score          int     `json:"score"`           // Sync score
-	CandidateCount int     `json:"candidate_count"` // Total candidates found in this slot
-	LDPCFailures   int     `json:"ldpc_failures"`   // LDPC decode failures in this slot
-	CRCFailures    int     `json:"crc_failures"`    // CRC check failures in this slot
+	Timestamp      int64    `json:"timestamp"`             // Unix timestamp (seconds)
+	UTC            string   `json:"utc"`                   // UTC time string "HH:MM:SS"
+	SNR            float32  `json:"snr"`                   // Signal-to-noise ratio (dB)
+	DeltaT         float32  `json:"delta_t"`               // Time offset from slot start (seconds)
+	Frequency      float32  `json:"frequency"`             // Audio frequency (Hz)
+	Callsign       string   `json:"callsign"`              // Transmitter callsign
+	Locator        string   `json:"locator,omitempty"`     // Grid square locator
+	DistanceKm     *float64 `json:"distance_km,omitempty"` // Distance from receiver in km
+	BearingDeg     *float64 `json:"bearing_deg,omitempty"` // Bearing from receiver in degrees
+	Country        string   `json:"country,omitempty"`     // Country name from CTY database
+	Continent      string   `json:"continent,omitempty"`   // Continent code (e.g., "EU", "NA")
+	Message        string   `json:"message"`               // Decoded message text
+	Protocol       string   `json:"protocol"`              // "FT8" or "FT4"
+	SlotNumber     uint64   `json:"slot_number"`           // Slot number since decoder start
+	Score          int      `json:"score"`                 // Sync score
+	CandidateCount int      `json:"candidate_count"`       // Total candidates found in this slot
+	LDPCFailures   int      `json:"ldpc_failures"`         // LDPC decode failures in this slot
+	CRCFailures    int      `json:"crc_failures"`          // CRC check failures in this slot
 }
 
 // NewFT8Decoder creates a new FT8/FT4 decoder
-func NewFT8Decoder(sampleRate int, config FT8Config) *FT8Decoder {
+func NewFT8Decoder(sampleRate int, config FT8Config, receiverLocator string, ctyDatabase CTYDatabase) *FT8Decoder {
 	slotTime := config.Protocol.GetSlotTime()
 	samplesPerSlot := int(float64(sampleRate) * slotTime)
 
@@ -84,15 +110,17 @@ func NewFT8Decoder(sampleRate int, config FT8Config) *FT8Decoder {
 	hashTable := NewCallsignHashTable(1 * time.Hour)
 
 	return &FT8Decoder{
-		sampleRate:     sampleRate,
-		config:         config,
-		state:          StateWaitingForSlot,
-		samplesPerSlot: samplesPerSlot,
-		samplesNeeded:  samplesNeeded,
-		buffer:         make([]float32, 0, samplesPerSlot),
-		monitor:        monitor,
-		hashTable:      hashTable,
-		stopChan:       make(chan struct{}),
+		sampleRate:      sampleRate,
+		config:          config,
+		state:           StateWaitingForSlot,
+		samplesPerSlot:  samplesPerSlot,
+		samplesNeeded:   samplesNeeded,
+		buffer:          make([]float32, 0, samplesPerSlot),
+		monitor:         monitor,
+		hashTable:       hashTable,
+		receiverLocator: receiverLocator,
+		ctyDatabase:     ctyDatabase,
+		stopChan:        make(chan struct{}),
 	}
 }
 
@@ -228,9 +256,6 @@ func (d *FT8Decoder) syncToSlot(gpsTimeNs int64) bool {
 	d.synced = true
 	d.state = StateAccumulating
 
-	log.Printf("[FT8 Decoder] Synced to slot at %s (time within slot: %.3f s)",
-		d.slotStartTime.UTC().Format("15:04:05"), timeWithinSlot)
-
 	return true
 }
 
@@ -238,13 +263,8 @@ func (d *FT8Decoder) syncToSlot(gpsTimeNs int64) bool {
 func (d *FT8Decoder) decode() []DecodeResult {
 	wf := d.monitor.Waterfall
 
-	log.Printf("[FT8 Decoder] Decoding waterfall: %d blocks, max_mag=%.1f dB for slot %d",
-		wf.NumBlocks, d.monitor.MaxMag, d.slotNumber)
-
 	// Find candidates using Costas sync detection
 	candidates := FindCandidates(wf, d.config.MaxCandidates, d.config.MinScore)
-
-	log.Printf("[FT8 Decoder] Found %d candidates (min_score=%d)", len(candidates), d.config.MinScore)
 
 	results := make([]DecodeResult, 0)
 	decodedHashes := make(map[uint16]bool) // Prevent duplicate decodes
@@ -290,12 +310,17 @@ func (d *FT8Decoder) decode() []DecodeResult {
 		// Unpack message payload to human-readable text with hash table support
 		messageText := UnpackMessageWithHash(message.Payload, d.hashTable)
 
+		// Extract callsign and grid locator from message
+		callsign, locator := extractCallsignLocator(messageText)
+
 		result := DecodeResult{
 			Timestamp:      d.slotStartTime.Unix(),
 			UTC:            d.slotStartTime.UTC().Format("15:04:05"),
 			SNR:            snr,
 			DeltaT:         status.Time,
 			Frequency:      status.Frequency,
+			Callsign:       callsign,
+			Locator:        locator,
 			Message:        messageText,
 			Protocol:       d.config.Protocol.String(),
 			SlotNumber:     d.slotNumber,
@@ -305,14 +330,55 @@ func (d *FT8Decoder) decode() []DecodeResult {
 			CRCFailures:    crcFailures,
 		}
 
-		results = append(results, result)
+		// Enrich with CTY data and calculate distance/bearing
+		d.enrichResult(&result)
 
-		log.Printf("[FT8 Decoder] Decoded: %s %.1f Hz, SNR %.1f dB, CRC %04X, msg: %s",
-			result.UTC, result.Frequency, result.SNR, message.Hash, result.Message)
+		results = append(results, result)
 	}
 
-	log.Printf("[FT8 Decoder] Successfully decoded %d messages in slot %d (LDPC failures: %d, CRC failures: %d)",
-		len(results), d.slotNumber, ldpcFailures, crcFailures)
-
 	return results
+}
+
+// enrichResult enriches a decode result with CTY data and distance/bearing
+func (d *FT8Decoder) enrichResult(result *DecodeResult) {
+	// Skip if no callsign
+	if result.Callsign == "" {
+		return
+	}
+
+	// Try to get CTY information if database is available
+	var ctyLat, ctyLon *float64
+	if d.ctyDatabase != nil {
+		info := d.ctyDatabase.LookupCallsignFull(result.Callsign)
+		if info != nil {
+			result.Country = info.Country
+			result.Continent = info.Continent
+			ctyLat = info.Latitude
+			ctyLon = info.Longitude
+		}
+	}
+
+	// Calculate distance and bearing if receiver locator is set
+	if d.receiverLocator == "" {
+		return
+	}
+
+	// Priority 1: Use grid square if available
+	if result.Locator != "" && len(result.Locator) >= 4 {
+		receiverLat, receiverLon, err1 := MaidenheadToLatLon(d.receiverLocator)
+		txLat, txLon, err2 := MaidenheadToLatLon(result.Locator)
+		if err1 == nil && err2 == nil {
+			dist, bearing := CalculateDistanceAndBearing(receiverLat, receiverLon, txLat, txLon)
+			result.DistanceKm = &dist
+			result.BearingDeg = &bearing
+		}
+	} else if ctyLat != nil && ctyLon != nil {
+		// Priority 2: Fall back to CTY country lat/lon if no grid square
+		receiverLat, receiverLon, err := MaidenheadToLatLon(d.receiverLocator)
+		if err == nil {
+			dist, bearing := CalculateDistanceAndBearing(receiverLat, receiverLon, *ctyLat, *ctyLon)
+			result.DistanceKm = &dist
+			result.BearingDeg = &bearing
+		}
+	}
 }

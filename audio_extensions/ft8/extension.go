@@ -72,8 +72,20 @@ func NewFT8Extension(audioParams AudioExtensionParams, extensionParams map[strin
 		config.MaxCandidates = int(maxCandidates)
 	}
 
+	// Extract receiver locator (optional)
+	receiverLocator := ""
+	if locator, ok := extensionParams["receiver_locator"].(string); ok {
+		receiverLocator = locator
+	}
+
+	// Extract CTY database (optional, passed as interface)
+	var ctyDatabase CTYDatabase
+	if cty, ok := extensionParams["cty_database"].(CTYDatabase); ok {
+		ctyDatabase = cty
+	}
+
 	// Create decoder
-	decoder := NewFT8Decoder(audioParams.SampleRate, config)
+	decoder := NewFT8Decoder(audioParams.SampleRate, config, receiverLocator, ctyDatabase)
 
 	protocolName := "FT8"
 	if config.Protocol == ProtocolFT4 {

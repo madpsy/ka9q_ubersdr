@@ -24,6 +24,10 @@ type AudioExtensionManager struct {
 
 	// Extension registry
 	registry *AudioExtensionRegistry
+
+	// Receiver location and CTY database for enrichment
+	receiverLocator string
+	ctyDatabase     *CTYDatabase
 }
 
 // ActiveAudioExtension represents a running audio extension instance for a user
@@ -40,12 +44,14 @@ type ActiveAudioExtension struct {
 }
 
 // NewAudioExtensionManager creates a new audio extension manager
-func NewAudioExtensionManager(wsHandler *DXClusterWebSocketHandler, sessionManager *SessionManager, registry *AudioExtensionRegistry) *AudioExtensionManager {
+func NewAudioExtensionManager(wsHandler *DXClusterWebSocketHandler, sessionManager *SessionManager, registry *AudioExtensionRegistry, receiverLocator string, ctyDatabase *CTYDatabase) *AudioExtensionManager {
 	return &AudioExtensionManager{
 		activeExtensions: make(map[string]*ActiveAudioExtension),
 		wsHandler:        wsHandler,
 		sessionManager:   sessionManager,
 		registry:         registry,
+		receiverLocator:  receiverLocator,
+		ctyDatabase:      ctyDatabase,
 	}
 }
 
@@ -113,6 +119,14 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 		SampleRate:    session.GetSampleRate(),
 		Channels:      1,  // Always mono
 		BitsPerSample: 16, // Always 16-bit
+	}
+
+	// Add receiver locator and CTY database to extension params
+	if aem.receiverLocator != "" {
+		extensionParams["receiver_locator"] = aem.receiverLocator
+	}
+	if aem.ctyDatabase != nil {
+		extensionParams["cty_database"] = aem.ctyDatabase
 	}
 
 	// Create extension instance

@@ -19,7 +19,8 @@ class FT8Extension extends DecoderExtension {
             min_score: 10,
             max_candidates: 100,
             auto_clear: false,
-            show_cq_only: false
+            show_cq_only: false,
+            show_latest_only: false
         };
 
         // State
@@ -153,6 +154,15 @@ class FT8Extension extends DecoderExtension {
             autoScroll.checked = this.autoScroll;
             autoScroll.addEventListener('change', (e) => {
                 this.autoScroll = e.target.checked;
+            });
+        }
+
+        const showLatestOnly = document.getElementById('ft8-show-latest-only');
+        if (showLatestOnly) {
+            showLatestOnly.checked = this.config.show_latest_only;
+            showLatestOnly.addEventListener('change', (e) => {
+                this.config.show_latest_only = e.target.checked;
+                this.filterMessages();
             });
         }
 
@@ -316,10 +326,18 @@ class FT8Extension extends DecoderExtension {
             if (message.slot_number !== this.currentSlot) {
                 this.currentSlot = message.slot_number;
                 this.slotDecoded = 1;
-                
+
                 // Auto-clear old messages if enabled
                 if (this.config.auto_clear && this.messages.length > 100) {
                     this.messages = this.messages.slice(-100);
+                }
+
+                // If showing latest only, clear table for new slot
+                if (this.config.show_latest_only) {
+                    const tbody = document.getElementById('ft8-messages-tbody');
+                    if (tbody) {
+                        tbody.innerHTML = '';
+                    }
                 }
             }
 
@@ -378,8 +396,36 @@ class FT8Extension extends DecoderExtension {
         cellFreq.textContent = message.frequency.toFixed(0);
         cellFreq.className = 'ft8-cell-freq';
         
+        // Distance
+        const cellDist = row.insertCell(4);
+        if (message.distance_km !== undefined && message.distance_km !== null) {
+            cellDist.textContent = message.distance_km.toFixed(0);
+        } else {
+            cellDist.textContent = '-';
+        }
+        cellDist.className = 'ft8-cell-distance';
+        
+        // Bearing
+        const cellBrg = row.insertCell(5);
+        if (message.bearing_deg !== undefined && message.bearing_deg !== null) {
+            cellBrg.textContent = message.bearing_deg.toFixed(0) + '°';
+        } else {
+            cellBrg.textContent = '-';
+        }
+        cellBrg.className = 'ft8-cell-bearing';
+        
+        // Country
+        const cellCountry = row.insertCell(6);
+        cellCountry.textContent = message.country || '-';
+        cellCountry.className = 'ft8-cell-country';
+        
+        // Continent
+        const cellContinent = row.insertCell(7);
+        cellContinent.textContent = message.continent || '-';
+        cellContinent.className = 'ft8-cell-continent';
+        
         // Message
-        const cellMsg = row.insertCell(4);
+        const cellMsg = row.insertCell(8);
         cellMsg.textContent = message.message;
         cellMsg.className = 'ft8-cell-message';
         
@@ -389,7 +435,7 @@ class FT8Extension extends DecoderExtension {
         }
         
         // Slot number
-        const cellSlot = row.insertCell(5);
+        const cellSlot = row.insertCell(9);
         cellSlot.textContent = message.slot_number;
         cellSlot.className = 'ft8-cell-slot';
         
@@ -419,12 +465,20 @@ class FT8Extension extends DecoderExtension {
         // Re-render table with current filter
         const tbody = document.getElementById('ft8-messages-tbody');
         if (!tbody) return;
-        
+
         tbody.innerHTML = '';
-        
+
+        // Determine which messages to show
+        let messagesToShow = this.messages;
+
+        // Filter to latest cycle only if enabled
+        if (this.config.show_latest_only && this.currentSlot > 0) {
+            messagesToShow = this.messages.filter(msg => msg.slot_number === this.currentSlot);
+        }
+
         // Add messages in reverse order (newest first)
-        for (let i = this.messages.length - 1; i >= 0; i--) {
-            this.addMessageToTable(this.messages[i]);
+        for (let i = messagesToShow.length - 1; i >= 0; i--) {
+            this.addMessageToTable(messagesToShow[i]);
         }
     }
 
@@ -435,10 +489,16 @@ class FT8Extension extends DecoderExtension {
         }
         
         // Create CSV content
-        let csv = 'UTC,SNR,DeltaT,Frequency,Message,Protocol,Slot\n';
+        let csv = 'UTC,SNR,DeltaT,Frequency,Distance_km,Bearing_deg,Country,Continent,Callsign,Locator,Message,Protocol,Slot\n';
         
         for (const msg of this.messages) {
-            csv += `${msg.utc},${msg.snr},${msg.delta_t},${msg.frequency},"${msg.message}",${msg.protocol},${msg.slot_number}\n`;
+            const dist = msg.distance_km !== undefined && msg.distance_km !== null ? msg.distance_km.toFixed(1) : '';
+            const brg = msg.bearing_deg !== undefined && msg.bearing_deg !== null ? msg.bearing_deg.toFixed(1) : '';
+            const country = msg.country || '';
+            const continent = msg.continent || '';
+            const callsign = msg.callsign || '';
+            const locator = msg.locator || '';
+            csv += `${msg.utc},${msg.snr},${msg.delta_t},${msg.frequency},${dist},${brg},"${country}","${continent}","${callsign}","${locator}","${msg.message}",${msg.protocol},${msg.slot_number}\n`;
         }
         
         // Download as file

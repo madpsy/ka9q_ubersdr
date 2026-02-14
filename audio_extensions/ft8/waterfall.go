@@ -1,7 +1,6 @@
 package ft8
 
 import (
-	"log"
 	"math"
 
 	"gonum.org/v1/gonum/dsp/fourier"
@@ -113,19 +112,6 @@ func NewMonitor(sampleRate int, fMin, fMax float64, timeOSR, freqOSR int, protoc
 
 // Process processes a block of audio samples
 func (m *Monitor) Process(frame []float32) {
-	// Debug: check input samples for first block
-	if m.Waterfall.NumBlocks == 0 {
-		var maxSample float32
-		for _, s := range frame {
-			if abs := s; abs < 0 {
-				abs = -abs
-			} else if abs > maxSample {
-				maxSample = abs
-			}
-		}
-		log.Printf("[Waterfall DEBUG] Input frame: len=%d, max_sample=%.6f", len(frame), maxSample)
-	}
-
 	// Process each time subdivision
 	for timeSub := 0; timeSub < m.Waterfall.TimeOSR; timeSub++ {
 		offset := timeSub * m.SubblockSize
@@ -183,9 +169,6 @@ func (m *Monitor) extractMagnitudes(timeSub int) {
 	// Calculate base index in magnitude array
 	baseIdx := blockIdx*wf.BlockStride + timeSub*wf.FreqOSR*wf.NumBins
 
-	// Debug: track some values for first block
-	debugBlock := blockIdx == 0 && timeSub == 0
-
 	// Extract magnitudes for each frequency bin
 	// Reference C code loops: for (freq_sub) { for (bin) { src_bin = bin*freq_osr + freq_sub; } }
 	for freqSub := 0; freqSub < wf.FreqOSR; freqSub++ {
@@ -203,11 +186,6 @@ func (m *Monitor) extractMagnitudes(timeSub int) {
 			imag := imag(m.freqData[fftBin])
 			mag2 := real*real + imag*imag
 			magDB := 10.0 * math.Log10(1e-12+mag2)
-
-			if debugBlock && bin < 5 && freqSub == 0 {
-				log.Printf("[Waterfall DEBUG] bin=%d, freqSub=%d, fftBin=%d, real=%.6f, imag=%.6f, mag2=%.6e, magDB=%.2f, uint8=%d",
-					bin, freqSub, fftBin, real, imag, mag2, magDB, int(2.0*magDB+240.0))
-			}
 
 			// Track maximum
 			if magDB > m.MaxMag {

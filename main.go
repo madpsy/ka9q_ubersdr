@@ -1092,10 +1092,10 @@ func main() {
 	)
 	log.Printf("Registered audio extension: ft8 v%s", ft8Info["version"].(string))
 
-	// Create audio extension manager
-	audioExtensionManager := NewAudioExtensionManager(dxClusterWsHandler, sessions, audioExtensionRegistry)
+	// Create audio extension manager (pass receiver locator and CTY database for enrichment)
+	audioExtensionManager := NewAudioExtensionManager(dxClusterWsHandler, sessions, audioExtensionRegistry, receiverLocator, globalCTY)
 	dxClusterWsHandler.audioExtensionManager = audioExtensionManager
-	log.Printf("Audio extension manager initialized (ready for extensions)")
+	log.Printf("Audio extension manager initialized (ready for extensions, receiver: %s)", receiverLocator)
 
 	// Connect DX cluster websocket handler to session manager for throughput tracking
 	sessions.SetDXClusterWebSocketHandler(dxClusterWsHandler)

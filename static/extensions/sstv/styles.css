@@ -246,12 +246,6 @@ input[type="checkbox"] {
 
 .sstv-image-item.decoding {
     border-color: #4aff4a;
-    animation: pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse {
-    0%, 100% { border-color: #4aff4a; }
-    50% { border-color: #2a8a2a; }
 }
 
 .sstv-image-item canvas {

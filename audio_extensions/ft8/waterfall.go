@@ -85,9 +85,11 @@ func NewMonitor(sampleRate int, fMin, fMax float64, timeOSR, freqOSR int, protoc
 
 	// Create Hann window with normalization applied
 	// Reference: window[i] = fft_norm * hann_i(i, nfft)
+	// where hann_i(i, N) = sin²(π*i/N)
 	window := make([]float64, nfft)
 	for i := 0; i < nfft; i++ {
-		hann := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(nfft-1)))
+		x := math.Sin(math.Pi * float64(i) / float64(nfft))
+		hann := x * x
 		window[i] = fftNorm * hann
 	}
 

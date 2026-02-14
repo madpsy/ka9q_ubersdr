@@ -168,26 +168,107 @@ class FT8Extension extends DecoderExtension {
     }
 
     start() {
+        if (this.running) {
+            console.log('FT8: Already running');
+            return;
+        }
+
         console.log('FT8: Starting decoder');
         
-        const params = {
-            protocol: this.config.protocol,
-            min_score: this.config.min_score,
-            max_candidates: this.config.max_candidates
-        };
+        // Clear previous messages if auto-clear enabled
+        if (this.config.auto_clear) {
+            this.clearMessages();
+        }
 
-        this.attachExtension(params);
+        // Attach to audio extension via DX WebSocket
+        this.attachAudioExtension();
+
         this.running = true;
         this.updateUI();
         this.updateStatus('Running', 'status-connected');
     }
 
     stop() {
+        if (!this.running) {
+            console.log('FT8: Not running');
+            return;
+        }
+
         console.log('FT8: Stopping decoder');
-        this.detachExtension();
+        
+        // Detach from audio extension
+        this.detachAudioExtension();
+        
         this.running = false;
         this.updateUI();
         this.updateStatus('Stopped', 'status-disconnected');
+    }
+
+    attachAudioExtension() {
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws || dxClient.ws.readyState !== WebSocket.OPEN) {
+            console.error('FT8: DX WebSocket not connected');
+            return;
+        }
+
+        // Setup binary message handler before attaching
+        this.setupBinaryMessageHandler();
+
+        const message = {
+            type: 'audio_extension_attach',
+            extension_name: 'ft8',
+            params: {
+                protocol: this.config.protocol,
+                min_score: this.config.min_score,
+                max_candidates: this.config.max_candidates
+            }
+        };
+
+        console.log('FT8: Sending attach command:', message);
+        dxClient.ws.send(JSON.stringify(message));
+    }
+
+    detachAudioExtension() {
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws || dxClient.ws.readyState !== WebSocket.OPEN) {
+            console.error('FT8: DX WebSocket not connected');
+            return;
+        }
+
+        // Remove binary message handler before detaching
+        this.removeBinaryMessageHandler();
+
+        const message = {
+            type: 'audio_extension_detach'
+        };
+
+        console.log('FT8: Sending detach command');
+        dxClient.ws.send(JSON.stringify(message));
+    }
+
+    setupBinaryMessageHandler() {
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws) return;
+
+        // Store reference to our handler
+        this.binaryMessageHandler = (event) => {
+            if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
+                this.onBinaryMessage(event.data);
+            }
+        };
+
+        // Add our handler
+        dxClient.ws.addEventListener('message', this.binaryMessageHandler);
+        console.log('FT8: Binary message handler attached');
+    }
+
+    removeBinaryMessageHandler() {
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws || !this.binaryMessageHandler) return;
+
+        dxClient.ws.removeEventListener('message', this.binaryMessageHandler);
+        this.binaryMessageHandler = null;
+        console.log('FT8: Binary message handler removed');
     }
 
     onBinaryMessage(data) {
@@ -409,9 +490,15 @@ class FT8Extension extends DecoderExtension {
 
     onDetach() {
         console.log('FT8: Extension detached');
+        this.removeBinaryMessageHandler();
         this.running = false;
         this.updateUI();
         this.updateStatus('Stopped', 'status-disconnected');
+    }
+
+    onBinaryData(data) {
+        // Alias for onBinaryMessage to match DecoderExtension interface
+        this.onBinaryMessage(data);
     }
 }
 

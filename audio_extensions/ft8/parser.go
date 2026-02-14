@@ -60,6 +60,12 @@ func extractCallsignLocator(message string) (string, string) {
 			// Contest CQ: transmitter is field[2], grid is field[3]
 			callIndex = 2
 			gridIndex = 3
+		} else if len(fields) >= 3 && !isValidCallsign(fields[1]) {
+			// field[1] is not a valid callsign (e.g., "CQ VK LA2JKA")
+			// This could be a region indicator or other prefix
+			// Try field[2] as the callsign
+			callIndex = 2
+			gridIndex = 3
 		}
 		// Otherwise transmitter is field[1], grid is field[2] (default)
 	} else if fields[0] == "<...>" {

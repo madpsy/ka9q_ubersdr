@@ -1,7 +1,7 @@
 ## Version 0.1.39 - Latest Release
 
 ### New Features
-- Added **Extensions** for WEFAX/NAXTEX/Generic FSK
+- Added **Extensions** for WEFAX/NAVTEX/Generic FSK
 - Added **Extension** for SSTV though known issue with alignment so work in progress. 
 - Added **Voice Activity** scanner to find active SSB phone activity
 

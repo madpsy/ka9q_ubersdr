@@ -271,11 +271,22 @@ class FT8Extension extends DecoderExtension {
         console.log('FT8: Binary message handler removed');
     }
 
-    onBinaryMessage(data) {
+    async onBinaryMessage(data) {
         try {
+            // Convert Blob to ArrayBuffer if necessary
+            let arrayBuffer;
+            if (data instanceof Blob) {
+                arrayBuffer = await data.arrayBuffer();
+            } else if (data instanceof ArrayBuffer) {
+                arrayBuffer = data;
+            } else {
+                console.error('FT8: Unexpected data type:', typeof data);
+                return;
+            }
+
             // Parse JSON message from decoder
             const decoder = new TextDecoder();
-            const message = JSON.parse(decoder.decode(data));
+            const message = JSON.parse(decoder.decode(arrayBuffer));
             
             console.log('FT8: Decoded message:', message);
             

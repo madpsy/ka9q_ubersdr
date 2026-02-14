@@ -26,16 +26,18 @@ func CalculateSNRFromBits(wf *Waterfall, cand *Candidate, codeword []uint8, prot
 func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol) float32 {
 	// WSJT-X uses s8(0:7,NN) array which contains magnitude for each tone at each symbol
 	// We need to extract the same information from our waterfall
+	// Reference: WSJT-X lib/ft8/ft8b.f90 lines 440-444
 
 	var xsig, xnoi float64
 	var xbase float64
 	numSymbols := len(itone)
 
-	// Get base index for this candidate
-	baseIdx := getCandidateIndex(wf, cand)
+	numTones := 8
+	if protocol == ProtocolFT4 {
+		numTones = 4
+	}
 
 	// Measure signal and noise power across all symbols
-	// Reference: ft8b.f90 lines 440-444
 	for i := 0; i < numSymbols; i++ {
 		block := int(cand.TimeOffset) + i
 
@@ -43,40 +45,30 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 			continue
 		}
 
-		// Calculate magnitude index for this symbol
-		magIdx := baseIdx + i*wf.BlockStride
-
 		// Get the transmitted tone for this symbol
 		tone := itone[i]
 
 		// Get magnitude at expected tone (signal)
-		if magIdx+tone < len(wf.Mag) {
-			mag := wf.Mag[magIdx+tone]
-			// Convert uint8 magnitude to linear power
-			// Waterfall encoding: scaled = 2*db + 240
-			// So: db = (mag - 240) / 2
-			// Linear power = 10^(db/10)
-			magDB := (float64(mag) - 240.0) / 2.0
-			power := math.Pow(10.0, magDB/10.0)
-			xsig += power * power // Sum of squared magnitudes
-			xbase += power        // Sum for baseline calculation
-		}
+		// Use getWaterfallMag which properly handles the waterfall indexing
+		mag := getWaterfallMag(wf, block, int(cand.FreqOffset)+tone, int(cand.TimeSub), int(cand.FreqSub))
+
+		// Convert uint8 magnitude to linear power
+		// Waterfall encoding: scaled = 2*db + 240
+		// So: db = (mag - 240) / 2
+		// Linear power = 10^(db/10)
+		magDB := (float64(mag) - 240.0) / 2.0
+		power := math.Pow(10.0, magDB/10.0)
+		xsig += power * power // Sum of squared magnitudes
+		xbase += power        // Sum for baseline calculation
 
 		// Get magnitude at offset tone (noise)
 		// WSJT-X uses: ios = mod(itone(i)+4, 7) for FT8
 		// This wraps around the 8-tone alphabet
-		numTones := 8
-		if protocol == ProtocolFT4 {
-			numTones = 4
-		}
-
 		noiseTone := (tone + 4) % numTones
-		if magIdx+noiseTone < len(wf.Mag) {
-			noiseMag := wf.Mag[magIdx+noiseTone]
-			noiseMagDB := (float64(noiseMag) - 240.0) / 2.0
-			noisePower := math.Pow(10.0, noiseMagDB/10.0)
-			xnoi += noisePower * noisePower
-		}
+		noiseMag := getWaterfallMag(wf, block, int(cand.FreqOffset)+noiseTone, int(cand.TimeSub), int(cand.FreqSub))
+		noiseMagDB := (float64(noiseMag) - 240.0) / 2.0
+		noisePower := math.Pow(10.0, noiseMagDB/10.0)
+		xnoi += noisePower * noisePower
 	}
 
 	// Calculate SNR using WSJT-X formula

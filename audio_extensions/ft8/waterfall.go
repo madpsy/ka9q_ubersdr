@@ -105,7 +105,7 @@ func NewMonitor(sampleRate int, fMin, fMax float64, timeOSR, freqOSR int, protoc
 		Window:       window,
 		LastFrame:    make([]float64, nfft),
 		Waterfall:    wf,
-		MaxMag:       0.0,
+		MaxMag:       -120.0, // Initialize to minimum dB value
 		timeData:     make([]float64, nfft),
 		freqData:     make([]complex128, nfft/2+1),
 	}
@@ -113,6 +113,19 @@ func NewMonitor(sampleRate int, fMin, fMax float64, timeOSR, freqOSR int, protoc
 
 // Process processes a block of audio samples
 func (m *Monitor) Process(frame []float32) {
+	// Debug: check input samples for first block
+	if m.Waterfall.NumBlocks == 0 {
+		var maxSample float32
+		for _, s := range frame {
+			if abs := s; abs < 0 {
+				abs = -abs
+			} else if abs > maxSample {
+				maxSample = abs
+			}
+		}
+		log.Printf("[Waterfall DEBUG] Input frame: len=%d, max_sample=%.6f", len(frame), maxSample)
+	}
+
 	// Process each time subdivision
 	for timeSub := 0; timeSub < m.Waterfall.TimeOSR; timeSub++ {
 		offset := timeSub * m.SubblockSize
@@ -221,7 +234,7 @@ func (m *Monitor) extractMagnitudes(timeSub int) {
 // Reset resets the waterfall for a new time slot
 func (m *Monitor) Reset() {
 	m.Waterfall.NumBlocks = 0
-	m.MaxMag = 0.0
+	m.MaxMag = -120.0 // Reset to minimum dB value
 	// Clear last frame
 	for i := range m.LastFrame {
 		m.LastFrame[i] = 0.0

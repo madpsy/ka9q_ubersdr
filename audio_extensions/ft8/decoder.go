@@ -246,13 +246,30 @@ func (d *FT8Decoder) decode() []DecodeResult {
 	results := make([]DecodeResult, 0)
 	decodedHashes := make(map[uint16]bool) // Prevent duplicate decodes
 
+	// Track decode failure reasons
+	ldpcFailures := 0
+	crcFailures := 0
+
 	// Process each candidate
-	for _, cand := range candidates {
+	for i, cand := range candidates {
 		// Attempt to decode this candidate
 		message, status, success := DecodeCandidate(wf, &cand, d.config.Protocol, d.config.LDPCIterations)
 
 		if !success {
 			// Decoding failed (LDPC errors or CRC mismatch)
+			if status.LDPCErrors > 0 {
+				ldpcFailures++
+				if i < 5 { // Log first 5 failures
+					log.Printf("[FT8 Decoder] Candidate %d: LDPC failed with %d errors (score=%d, freq=%.1f Hz)",
+						i, status.LDPCErrors, cand.Score, status.Frequency)
+				}
+			} else {
+				crcFailures++
+				if i < 5 { // Log first 5 failures
+					log.Printf("[FT8 Decoder] Candidate %d: CRC mismatch (extracted=%04X, calculated=%04X, score=%d, freq=%.1f Hz)",
+						i, status.CRCExtracted, status.CRCCalculated, cand.Score, status.Frequency)
+				}
+			}
 			continue
 		}
 
@@ -283,11 +300,12 @@ func (d *FT8Decoder) decode() []DecodeResult {
 
 		results = append(results, result)
 
-		log.Printf("[FT8 Decoder] Decoded: %s %.1f Hz, SNR %.1f dB, CRC %04X",
-			result.UTC, result.Frequency, result.SNR, message.Hash)
+		log.Printf("[FT8 Decoder] Decoded: %s %.1f Hz, SNR %.1f dB, CRC %04X, msg: %s",
+			result.UTC, result.Frequency, result.SNR, message.Hash, result.Message)
 	}
 
-	log.Printf("[FT8 Decoder] Successfully decoded %d messages in slot %d", len(results), d.slotNumber)
+	log.Printf("[FT8 Decoder] Successfully decoded %d messages in slot %d (LDPC failures: %d, CRC failures: %d)",
+		len(results), d.slotNumber, ldpcFailures, crcFailures)
 
 	return results
 }

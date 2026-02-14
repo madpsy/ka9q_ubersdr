@@ -174,8 +174,9 @@ func (m *Monitor) extractMagnitudes(timeSub int) {
 		}
 
 		// Calculate magnitude in dB
+		// cmplx.Abs gives amplitude, so we need 20*log10 for dB (or 10*log10 of power)
 		mag := cmplx.Abs(m.freqData[fftBin]) * m.FFTNorm
-		magDB := 10.0 * math.Log10(mag+1e-10)
+		magDB := 20.0 * math.Log10(mag+1e-10)
 
 		// Track maximum
 		if magDB > m.MaxMag {

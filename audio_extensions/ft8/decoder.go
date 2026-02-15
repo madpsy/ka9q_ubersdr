@@ -245,6 +245,19 @@ func (d *FT8Decoder) decode() []DecodeResult {
 	// Find candidates using Costas sync detection
 	candidates := FindCandidates(wf, d.config.MaxCandidates, d.config.MinScore)
 
+	// Debug logging for FT4 only
+	if d.config.Protocol == ProtocolFT4 {
+		log.Printf("[FT4 Debug] Found %d candidates (min_score=%d, num_blocks=%d, max_blocks=%d)",
+			len(candidates), d.config.MinScore, wf.NumBlocks, wf.MaxBlocks)
+		if len(candidates) > 0 {
+			log.Printf("[FT4 Debug] Top 5 candidate scores: ")
+			for i := 0; i < 5 && i < len(candidates); i++ {
+				log.Printf("  [%d] score=%d, time_offset=%d, freq_offset=%d",
+					i, candidates[i].Score, candidates[i].TimeOffset, candidates[i].FreqOffset)
+			}
+		}
+	}
+
 	results := make([]DecodeResult, 0)
 	decodedHashes := make(map[uint16]bool) // Prevent duplicate decodes
 

@@ -63,22 +63,21 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 	// Reference: ft8b.f90 lines 449-450, 452, 454
 	finalSNR := -24.0
 	if xbase > 0 && validSamples > 0 {
-		// Average signal power per symbol
-		avgSignalPower := xsig / float64(validSamples)
+		// WSJT-X formula: snr = 10*log10(xsig/xbase/NN) - 27.0
+		// where NN is the number of symbols and xbase is scaled baseline
+		// The division by NN normalizes the total signal power to per-symbol power
+		arg := (xsig / float64(validSamples)) / xbase
 
-		// Signal-to-noise ratio (linear scale)
-		snrLinear := avgSignalPower / xbase
+		log.Printf("[SNR Debug] validSamples=%d, xsig=%.6e, xbase=%.6e, xsig/N=%.6e, arg=%.6e",
+			validSamples, xsig, xbase, xsig/float64(validSamples), arg)
 
-		log.Printf("[SNR Debug] validSamples=%d, xsig=%.6e, xbase=%.6e, avgSignalPower=%.6e, snrLinear=%.6e",
-			validSamples, xsig, xbase, avgSignalPower, snrLinear)
-
-		if snrLinear > 0 {
+		if arg > 0 {
 			// Convert to dB and apply WSJT-X bandwidth correction
 			// The -27.0 dB accounts for 2500 Hz reference bandwidth
-			finalSNR = 10.0*math.Log10(snrLinear) - 27.0
+			finalSNR = 10.0*math.Log10(arg) - 27.0
 			log.Printf("[SNR Debug] SUCCESS: finalSNR=%.2f dB", finalSNR)
 		} else {
-			log.Printf("[SNR Debug] snrLinear <= 0, using minimum -24 dB")
+			log.Printf("[SNR Debug] arg <= 0, using minimum -24 dB")
 		}
 	} else {
 		log.Printf("[SNR Debug] xbase=%.6e, validSamples=%d - returning minimum", xbase, validSamples)
@@ -135,12 +134,12 @@ func calculateNoiseFloorBaseline(wf *Waterfall, cand *Candidate, protocol Protoc
 	baseline := sbase[freqBin]
 
 	// WSJT-X converts: xbase = 10^(0.1*(sbase - 40))
-	// This is 10^(sbase/10 - 4) = 10^(sbase/10) / 10000
-	// But sbase is in dB of power, our baseline is in dB of magnitude²
-	// So we need: xbase = 10^(baseline/10) to get power from dB
-	// Then take sqrt to get magnitude: xbase = 10^(baseline/20)
-	// But we're working with magnitude² in xsig, so use power directly
-	baselinePower := math.Pow(10.0, (baseline-40.0)/10.0)
+	// The baseline is in dB of power (magnitude²)
+	// Convert back to linear power scale
+	// The -40 offset in WSJT-X is a reference level adjustment
+	baselinePower := math.Pow(10.0, baseline/10.0)
+
+	log.Printf("[SNR Debug] baseline dB=%.2f, baselinePower=%.6e", baseline, baselinePower)
 
 	return baselinePower
 }

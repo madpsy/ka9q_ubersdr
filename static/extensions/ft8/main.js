@@ -753,7 +753,7 @@ class FT8Extension extends DecoderExtension {
     updateTotalsDisplay() {
         const totalsDisplay = document.getElementById('ft8-totals-display');
         if (totalsDisplay) {
-            totalsDisplay.textContent = `Total: ${this.totalDecoded} | Slot: ${this.slotDecoded}`;
+            totalsDisplay.textContent = `Total: ${this.messages.length} | Slot: ${this.slotDecoded}`;
         }
     }
 

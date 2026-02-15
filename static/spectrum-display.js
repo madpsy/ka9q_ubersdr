@@ -4157,10 +4157,12 @@ class SpectrumDisplay {
             // If we're zoomed in and frequency changed, pan to follow it
             // Only pan if we have a valid zoom level and the frequency actually changed
             // Skip panning if the frequency change came from clicking the waterfall
+            // ALSO skip panning if Edge Tune is disabled (user wants to scroll freely)
             if (this.binBandwidth && this.initialBinBandwidth &&
                 this.binBandwidth < this.initialBinBandwidth &&
                 oldTunedFreq !== this.currentTunedFreq &&
-                !this.skipNextPan) {
+                !this.skipNextPan &&
+                this.edgeTuneEnabled) {
 
                 console.log(`Frequency changed to ${(this.currentTunedFreq/1e6).toFixed(3)} MHz - panning spectrum to follow`);
 
@@ -4650,8 +4652,10 @@ class SpectrumDisplay {
                        `range: ${(startFreq/1e6).toFixed(3)}-${(endFreq/1e6).toFixed(3)} MHz)`);
 
             // If we're zoomed in, pan to bring marker back into view
+            // Only do this if Edge Tune is enabled (otherwise user wants to scroll freely)
             if (this.binBandwidth && this.initialBinBandwidth &&
-                this.binBandwidth < this.initialBinBandwidth) {
+                this.binBandwidth < this.initialBinBandwidth &&
+                this.edgeTuneEnabled) {
                 console.log('Sync correction: Panning to restore marker visibility');
                 this.panTo(this.currentTunedFreq);
             }

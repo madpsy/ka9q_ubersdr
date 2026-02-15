@@ -1,6 +1,7 @@
 package ft8
 
 import (
+	"log"
 	"math"
 )
 
@@ -31,6 +32,7 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 	var xsig, xnoi float64
 	var xbase float64
 	numSymbols := len(itone)
+	validSamples := 0
 
 	numTones := 8
 	if protocol == ProtocolFT4 {
@@ -69,10 +71,19 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 		noiseMagDB := (float64(noiseMag) - 240.0) / 2.0
 		noisePower := math.Pow(10.0, noiseMagDB/10.0)
 		xnoi += noisePower * noisePower
+
+		validSamples++
 	}
 
 	// Calculate SNR using WSJT-X formula
 	// Reference: ft8b.f90 lines 445-461
+
+	// Debug logging
+	if validSamples > 0 && xbase > 0 {
+		// Log first calculation for debugging
+		log.Printf("[SNR Debug] validSamples=%d, xsig=%.6e, xbase=%.6e, xnoi=%.6e, xsig/xbase=%.6e",
+			validSamples, xsig, xbase, xnoi, xsig/xbase)
+	}
 
 	// Method 1: Signal/Noise ratio
 	// xsnr = 10.0*log10(xsig/xnoi - 1.0) - 27.0
@@ -81,11 +92,15 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 
 	// Calculate using baseline method (more stable, used by WSJT-X for first-pass)
 	finalSNR := -24.0
-	if xbase > 0 {
+	if xbase > 0 && validSamples > 0 {
 		arg := xsig/xbase/3.0e6 - 1.0
 		if arg > 0.1 {
 			finalSNR = 10.0*math.Log10(arg) - 27.0
+		} else {
+			log.Printf("[SNR Debug] arg too small: %.6e (xsig/xbase/3e6 - 1)", arg)
 		}
+	} else {
+		log.Printf("[SNR Debug] xbase=%.6e, validSamples=%d - returning minimum", xbase, validSamples)
 	}
 
 	// Clamp to minimum SNR

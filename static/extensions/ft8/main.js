@@ -464,7 +464,16 @@ class FT8Extension extends DecoderExtension {
         
         // TX Callsign (normalized callsign used for CTY lookup)
         const cellTxCall = row.insertCell(8);
-        cellTxCall.textContent = message.tx_callsign || '-';
+        if (message.tx_callsign && message.tx_callsign !== '-') {
+            const link = document.createElement('a');
+            link.href = `https://www.qrz.com/db/${message.tx_callsign}`;
+            link.textContent = message.tx_callsign;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            cellTxCall.appendChild(link);
+        } else {
+            cellTxCall.textContent = '-';
+        }
         cellTxCall.className = 'ft8-cell-tx-callsign';
         
         // Message

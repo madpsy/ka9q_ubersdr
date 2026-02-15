@@ -401,6 +401,22 @@
     white-space: nowrap;
 }
 
+.ft8-cell-tx-callsign {
+    font-family: 'Courier New', monospace;
+    color: #e0e0e0;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.ft8-cell-tx-callsign a {
+    color: #e0e0e0;
+    text-decoration: underline;
+}
+
+.ft8-cell-tx-callsign a:hover {
+    color: #4a9eff;
+}
+
 .ft8-cell-message {
     font-family: 'Courier New', monospace;
     font-weight: 500;

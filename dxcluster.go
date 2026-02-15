@@ -259,21 +259,25 @@ func (c *DXClusterClient) login() error {
 		return fmt.Errorf("not connected")
 	}
 
-	// Read initial data (banner or login prompt) - use short timeout
+	// Read initial banner/login prompt using readLineOrPrompt since it may not have a newline
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	buf := make([]byte, 4096)
-	n, err := conn.Read(buf)
+
+	// The login prompt might not have a newline, so use readLineOrPrompt
+	// But first we need to peek/read to trigger the buffered reader
+	banner, err := c.readLineOrPrompt(5 * time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to read banner: %w", err)
 	}
 
-	banner := string(buf[:n])
-	log.Printf("DX Cluster: << %s", strings.TrimSpace(banner))
+	log.Printf("DX Cluster: << %s", banner)
 
 	// Check if we got login prompt
 	if !strings.Contains(strings.ToLower(banner), "login:") {
 		return fmt.Errorf("login prompt not found in banner")
 	}
+
+	// Clear the deadline we just set
+	conn.SetReadDeadline(time.Time{})
 
 	// Send callsign
 	if err := c.writeLine(c.config.Callsign); err != nil {

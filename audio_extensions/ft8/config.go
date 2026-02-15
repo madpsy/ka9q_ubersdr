@@ -25,8 +25,8 @@ type FT8Config struct {
 func DefaultFT8Config() FT8Config {
 	return FT8Config{
 		Protocol:       ProtocolFT8,
-		MinScore:       10,  // Minimum sync score
-		MaxCandidates:  100, // Max candidates per slot
+		MinScore:       0,   // Minimum sync score (0 = accept all, reference uses 0)
+		MaxCandidates:  140, // Max candidates per slot (reference uses 140)
 		LDPCIterations: 25,  // LDPC iterations
 	}
 }

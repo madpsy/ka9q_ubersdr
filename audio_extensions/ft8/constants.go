@@ -58,4 +58,4 @@ var FT8_Gray_map = [8]uint8{0, 1, 3, 2, 5, 6, 4, 7}
 var FT4_Gray_map = [4]uint8{0, 1, 3, 2}
 
 // FT4 XOR sequence for data scrambling
-var FT4_XOR_sequence = [10]uint8{0, 0, 0, 1, 1, 0, 0, 1, 0, 1}
+var FT4_XOR_sequence = [10]uint8{0x4A, 0x5E, 0x89, 0xB4, 0xB0, 0x8A, 0x79, 0x55, 0xBE, 0x28}

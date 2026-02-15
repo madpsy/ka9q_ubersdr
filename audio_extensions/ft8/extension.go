@@ -64,9 +64,8 @@ func NewFT8Extension(audioParams AudioExtensionParams, extensionParams map[strin
 		}
 	}
 
-	if minScore, ok := extensionParams["min_score"].(float64); ok {
-		config.MinScore = int(minScore)
-	}
+	// min_score is always 0 (matches reference implementation)
+	// Frontend cannot override this parameter
 
 	if maxCandidates, ok := extensionParams["max_candidates"].(float64); ok {
 		config.MaxCandidates = int(maxCandidates)

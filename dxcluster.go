@@ -281,38 +281,39 @@ func (c *DXClusterClient) login() error {
 	}
 	log.Printf("DX Cluster: >> %s", c.config.Callsign)
 
-	// Read welcome response - but we need to consume ALL of it including the prompt
-	// Use a larger buffer and longer timeout for the extended banner
-	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-	buf = make([]byte, 8192)
-	n, err = conn.Read(buf)
-	if err != nil {
-		return fmt.Errorf("failed to read welcome: %w", err)
-	}
+	// Read welcome response line by line using the buffered reader
+	// This ensures we consume everything including the final prompt
+	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	loginSuccessful := false
 
-	welcome := string(buf[:n])
-	// Log all lines
-	lines := strings.Split(welcome, "\n")
-	for _, line := range lines {
-		if strings.TrimSpace(line) != "" {
-			log.Printf("DX Cluster: << %s", strings.TrimSpace(line))
+	// Keep reading until we get the prompt line (starts with callsign + " de ")
+	for {
+		line, err := c.readLine()
+		if err != nil {
+			return fmt.Errorf("failed to read welcome: %w", err)
+		}
+
+		log.Printf("DX Cluster: << %s", line)
+
+		// Check for successful login indicators
+		lineLower := strings.ToLower(line)
+		if strings.Contains(lineLower, "hello") || strings.Contains(lineLower, "running dxspider") {
+			loginSuccessful = true
+		}
+
+		// Check if this is the prompt line (contains our callsign followed by " de ")
+		// and ends with ">"
+		if strings.Contains(line, c.config.Callsign+" de ") && strings.HasSuffix(line, ">") {
+			// This is the final prompt, we're done
+			break
 		}
 	}
 
-	// Check for success
-	welcomeLower := strings.ToLower(welcome)
-	if strings.Contains(welcomeLower, "hello") ||
-		strings.Contains(welcomeLower, "running dxspider") {
+	if loginSuccessful {
 		log.Println("DX Cluster: Login successful")
 	} else {
 		log.Println("DX Cluster: Login completed")
 	}
-
-	// IMPORTANT: The welcome message may have consumed data that was meant for the buffered reader
-	// We need to create a NEW buffered reader to ensure it's in sync
-	c.mu.Lock()
-	c.reader = bufio.NewReader(c.conn)
-	c.mu.Unlock()
 
 	// Clear read deadline for normal operation
 	conn.SetReadDeadline(time.Time{})

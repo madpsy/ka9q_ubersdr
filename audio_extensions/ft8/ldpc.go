@@ -1,16 +1,5 @@
 package ft8
 
-/*
- * LDPC Decoder for FT8/FT4
- * Converted from ft8_lib by Karlis Goba (YL3JG)
- *
- * Implementation of the sum-product algorithm (belief propagation)
- * from Sarah Johnson's Iterative Error Correction book.
- *
- * Input: 174 log-likelihood values (soft bits)
- * Output: 174 decoded bits (0 or 1)
- */
-
 // LDPCDecode decodes a 174-bit codeword using LDPC error correction
 // codeword: 174 log-likelihood values (log(P(bit=0)/P(bit=1)))
 // maxIters: maximum number of iterations (typically 25)

@@ -1,10 +1,5 @@
 package ft8
 
-/*
- * FT8/FT4 Constants
- * Based on ft8_lib by Karlis Goba (YL3JG)
- */
-
 // FT8 symbol structure: S D1 S D2 S
 // S  - sync block (7 symbols of Costas pattern)
 // D1 - first data block (29 symbols each encoding 3 bits)

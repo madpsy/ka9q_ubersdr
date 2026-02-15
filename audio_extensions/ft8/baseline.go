@@ -5,15 +5,7 @@ import (
 	"sort"
 )
 
-/*
- * Baseline Calculation
- * Fits baseline to spectrum to find noise floor
- * Reference: WSJT-X lib/ft8/baseline.f90
- */
-
 // calculateBaseline fits a baseline to the spectrum to find noise floor
-// This implements WSJT-X's baseline() function
-// Reference: WSJT-X lib/ft8/baseline.f90
 func calculateBaseline(s []float64, nfa, nfb int) []float64 {
 	npts := len(s)
 	sbase := make([]float64, npts)
@@ -33,7 +25,6 @@ func calculateBaseline(s []float64, nfa, nfb int) []float64 {
 		}
 	}
 
-	// Parameters from WSJT-X
 	nseg := 10  // Number of segments
 	npct := 10  // Percentile for lower envelope (10th percentile)
 	nterms := 5 // Polynomial order
@@ -82,7 +73,6 @@ func calculateBaseline(s []float64, nfa, nfb int) []float64 {
 }
 
 // pctile calculates the nth percentile of a dataset
-// Reference: WSJT-X lib/pctile.f90
 func pctile(data []float64, npct int) float64 {
 	if len(data) == 0 {
 		return 0
@@ -107,7 +97,6 @@ func pctile(data []float64, npct int) float64 {
 
 // polyfit fits a polynomial to data points using least squares
 // Returns coefficients [a0, a1, a2, ..., an] for polynomial of degree n
-// Reference: WSJT-X lib/polyfit.f90
 func polyfit(x, y []float64, nterms int) []float64 {
 	if len(x) != len(y) || len(x) == 0 {
 		return make([]float64, nterms)

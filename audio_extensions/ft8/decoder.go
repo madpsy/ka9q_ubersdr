@@ -10,12 +10,6 @@ import (
 	"time"
 )
 
-/*
- * FT8 Decoder - Main Orchestration
- * Pure Go implementation for UberSDR
- * Based on ft8_lib by Karlis Goba (YL3JG) and WSJT-X
- */
-
 // DecoderState represents the current state of the decoder
 type DecoderState int
 
@@ -227,7 +221,6 @@ func (d *FT8Decoder) syncToSlot(gpsTimeNs int64) bool {
 	// Get slot period for this protocol
 	slotPeriod := d.config.Protocol.GetSlotTime()
 
-	// Calculate time within current slot (with 0.8s offset like KiwiSDR)
 	timeWithinSlot := math.Mod(timeSec-0.8, slotPeriod)
 
 	// Only start accumulating at the beginning of a slot
@@ -288,9 +281,6 @@ func (d *FT8Decoder) decode() []DecodeResult {
 		}
 		decodedHashes[message.Hash] = true
 
-		// Calculate SNR using WSJT-X method
-		// This requires reconstructing the transmitted tones from the decoded message
-		// Reference: WSJT-X lib/ft8/ft8b.f90 lines 432, 440-461
 		snr := CalculateSNRFromBits(wf, &cand, status.Codeword, d.config.Protocol)
 
 		// Unpack message payload to human-readable text with hash table support

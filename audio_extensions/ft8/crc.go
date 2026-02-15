@@ -1,16 +1,10 @@
 package ft8
 
-/*
- * CRC-14 for FT8/FT4
- * Converted from ft8_lib by Karlis Goba (YL3JG)
- */
-
 const (
 	CRC_TOPBIT = 1 << (FT8_CRC_WIDTH - 1)
 )
 
 // ComputeCRC calculates 14-bit CRC for a sequence of bits
-// Adapted from https://barrgroup.com/Embedded-Systems/How-To/CRC-Calculation-C-Code
 // message: byte sequence (MSB first)
 // numBits: number of bits in the sequence
 func ComputeCRC(message []uint8, numBits int) uint16 {

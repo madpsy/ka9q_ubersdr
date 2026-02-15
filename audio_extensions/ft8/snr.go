@@ -1,15 +1,8 @@
 package ft8
 
 import (
-	"log"
 	"math"
 )
-
-/*
- * SNR Calculation
- * Implements WSJT-X method for calculating signal-to-noise ratio
- * Reference: WSJT-X lib/ft8/ft8b.f90 lines 440-461
- */
 
 // CalculateSNRFromBits computes SNR from the 174-bit codeword
 // This is the main entry point called by the decoder after successful decode
@@ -21,20 +14,15 @@ func CalculateSNRFromBits(wf *Waterfall, cand *Candidate, codeword []uint8, prot
 	return CalculateSNR(wf, cand, itone, protocol)
 }
 
-// CalculateSNR computes SNR using WSJT-X method
 // Measures signal power at decoded tone positions vs noise at offset positions
 // This is called AFTER successful LDPC decode when we know the transmitted tones
 func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol) float32 {
-	// WSJT-X uses s8(0:7,NN) array which contains magnitude for each tone at each symbol
 	// We need to extract the same information from our waterfall
-	// Reference: WSJT-X lib/ft8/ft8b.f90 lines 440-444
 
 	var xsig float64
 	numSymbols := len(itone)
 	validSamples := 0
 
-	// Calculate noise floor baseline from waterfall using WSJT-X method
-	// Reference: WSJT-X lib/ft8_decode.f90 line 201
 	// xbase = 10.0**(0.1*(sbase(nint(f1/3.125))-40.0))
 	xbase := calculateNoiseFloorBaseline(wf, cand, protocol)
 
@@ -61,46 +49,15 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 		validSamples++
 	}
 
-	// Calculate SNR using WSJT-X baseline method
-	// Reference: ft8b.f90 lines 449-450, 452, 454
-	// WSJT-X: arg = xsig/xbase/3.0e6 - 1.0; snr = 10*log10(arg) - 27.0
 	finalSNR := -24.0
 	if xbase > 0 && validSamples > 0 {
-		// Try multiple formulas to find which works best
-		// Formula 1: Direct WSJT-X style (with 3e6 divisor)
-		arg1 := xsig/xbase/3.0e6 - 1.0
-		snr1 := -24.0
-		if arg1 > 0.1 {
-			snr1 = 10.0*math.Log10(arg1) - 27.0
+		arg := xsig/xbase/3.0e6 - 1.0
+		if arg > 0.1 {
+			finalSNR = 10.0*math.Log10(arg) - 27.0
 		}
-
-		// Formula 2: Normalized by sample count
-		arg2 := (xsig / float64(validSamples)) / xbase
-		snr2 := -24.0
-		if arg2 > 0 {
-			snr2 = 10.0*math.Log10(arg2) - 27.0
-		}
-
-		// Formula 3: With -1.0 offset
-		arg3 := (xsig/float64(validSamples))/xbase - 1.0
-		snr3 := -24.0
-		if arg3 > 0.1 {
-			snr3 = 10.0*math.Log10(arg3) - 27.0
-		}
-
-		log.Printf("[SNR Debug] validSamples=%d, xsig=%.6e, xbase=%.6e", validSamples, xsig, xbase)
-		log.Printf("[SNR Debug] Formula1(WSJT-X): arg1=%.6e, snr1=%.2f dB", arg1, snr1)
-		log.Printf("[SNR Debug] Formula2(normalized): arg2=%.6e, snr2=%.2f dB", arg2, snr2)
-		log.Printf("[SNR Debug] Formula3(norm-1): arg3=%.6e, snr3=%.2f dB", arg3, snr3)
-
-		// Use Formula 1 (WSJT-X style) for now
-		finalSNR = snr1
-	} else {
-		log.Printf("[SNR Debug] xbase=%.6e, validSamples=%d - returning minimum", xbase, validSamples)
 	}
 
 	// Clamp to minimum SNR
-	// Reference: ft8b.f90 line 460
 	if finalSNR < -24.0 {
 		finalSNR = -24.0
 	}
@@ -109,8 +66,6 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 }
 
 // calculateNoiseFloorBaseline estimates the noise floor from the waterfall
-// This implements WSJT-X's get_spectrum_baseline + baseline approach
-// Reference: WSJT-X lib/ft8/get_spectrum_baseline.f90 and baseline.f90
 func calculateNoiseFloorBaseline(wf *Waterfall, cand *Candidate, protocol Protocol) float64 {
 	// Calculate average spectrum across all time blocks
 	savg := make([]float64, wf.NumBins)
@@ -151,24 +106,15 @@ func calculateNoiseFloorBaseline(wf *Waterfall, cand *Candidate, protocol Protoc
 
 	baseline := sbase[freqBin]
 
-	// WSJT-X formula: xbase = 10^(0.1*(sbase - 40))
 	// The -40 dB offset is a reference level adjustment
-	// Try both with and without offset to see which works
-	baselinePowerNoOffset := math.Pow(10.0, baseline/10.0)
-	baselinePowerWithOffset := math.Pow(10.0, (baseline-40.0)/10.0)
+	baselinePower := math.Pow(10.0, (baseline-40.0)/10.0)
 
-	log.Printf("[SNR Debug] baseline dB=%.2f, power(no offset)=%.6e, power(with -40)=%.6e",
-		baseline, baselinePowerNoOffset, baselinePowerWithOffset)
-
-	// Use WSJT-X style with -40 offset
-	return baselinePowerWithOffset
+	return baselinePower
 }
 
 // CalculateSNRFromSync provides a quick SNR estimate from sync score
-// This matches WSJT-X's initial estimate in ft8d.f90 line 53
 // Used before decoding when we don't have the transmitted tones yet
 func CalculateSNRFromSync(syncScore int) float32 {
-	// Reference: WSJT-X lib/ft8/ft8d.f90 line 53
 	// nsnr = min(99, nint(10.0*log10(sync) - 25.5))
 	if syncScore <= 0 {
 		return -24.0
@@ -187,8 +133,6 @@ func CalculateSNRFromSync(syncScore int) float32 {
 }
 
 // GetTonesFromBits reconstructs the transmitted tone sequence from 174-bit codeword
-// This implements WSJT-X's get_ft8_tones_from_77bits function
-// Reference: WSJT-X lib/ft8/genft8.f90 lines 28-43
 func GetTonesFromBits(codeword []uint8, protocol Protocol) []int {
 	if protocol == ProtocolFT8 {
 		return getTonesFromBitsFT8(codeword)
@@ -198,7 +142,6 @@ func GetTonesFromBits(codeword []uint8, protocol Protocol) []int {
 }
 
 // getTonesFromBitsFT8 extracts 79 tones for FT8 from 174-bit codeword
-// Reference: WSJT-X lib/ft8/genft8.f90 lines 32-43
 func getTonesFromBitsFT8(codeword []uint8) []int {
 	itone := make([]int, FT8_NN) // 79 symbols
 

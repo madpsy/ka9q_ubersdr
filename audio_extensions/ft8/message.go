@@ -5,12 +5,6 @@ import (
 	"strings"
 )
 
-/*
- * Complete FT8/FT4 Message Unpacking Implementation
- * Full port from message.c.ref (KiwiSDR implementation)
- * Supports all message types: 0.0-0.6, 1-5
- */
-
 // Message type constants
 const (
 	NTOKENS  = 2063592 // Number of special tokens

@@ -5,12 +5,6 @@ import (
 	"time"
 )
 
-/*
- * Callsign Hash Table for FT8/FT4
- * Stores callsigns for hash resolution (22-bit, 12-bit, 10-bit hashes)
- * Based on KiwiSDR implementation
- */
-
 // HashType represents the type of hash (22, 12, or 10 bits)
 type HashType int
 

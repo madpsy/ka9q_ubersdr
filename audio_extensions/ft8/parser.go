@@ -6,11 +6,6 @@ import (
 	"strings"
 )
 
-/*
- * FT8/FT4 Message Parsing Utilities
- * Extracts callsign and grid locator from decoded messages
- */
-
 var (
 	// Callsign pattern (basic validation) - allows portable suffix like /P, /M, /6, etc.
 	callsignPattern = regexp.MustCompile(`^[A-Z0-9]{1,3}[0-9][A-Z0-9]{0,3}[A-Z](/[A-Z0-9]+)?$`)

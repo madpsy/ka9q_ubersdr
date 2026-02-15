@@ -4,12 +4,6 @@ import (
 	"strings"
 )
 
-/*
- * Text Utilities for FT8/FT4 Message Processing
- * Ported from text.c.ref (KiwiSDR implementation)
- * Character tables, string manipulation, and encoding/decoding helpers
- */
-
 // CharTable represents different character encoding tables used in FT8
 type CharTable int
 

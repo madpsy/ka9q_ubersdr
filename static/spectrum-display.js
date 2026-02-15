@@ -2904,8 +2904,27 @@ class SpectrumDisplay {
 
     // Draw vertical green lines at bandwidth edges over waterfall/graph (split mode only)
     drawBandwidthLines(xLow, xHigh) {
+        // Only draw if both edges are visible AND tuned frequency is in range
+        // Check if tuned frequency is visible first
+        const effectiveCenterFreq = this.isDragging ?
+            this.centerFreq + this.predictedFreqOffset :
+            this.centerFreq;
+        const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
+        const endFreq = effectiveCenterFreq + this.totalBandwidth / 2;
+
+        // Don't draw bandwidth lines if tuned frequency is off-screen
+        if (this.currentTunedFreq < startFreq || this.currentTunedFreq > endFreq) {
+            // Clear any existing bandwidth lines
+            this.bandwidthLinesCtx.clearRect(0, 0, this.bandwidthLinesCanvas.width, this.bandwidthLinesCanvas.height);
+            return;
+        }
+
         // Only draw if both edges are visible
-        if (xLow < 0 || xLow > this.width || xHigh < 0 || xHigh > this.width) return;
+        if (xLow < 0 || xLow > this.width || xHigh < 0 || xHigh > this.width) {
+            // Clear any existing bandwidth lines
+            this.bandwidthLinesCtx.clearRect(0, 0, this.bandwidthLinesCanvas.width, this.bandwidthLinesCanvas.height);
+            return;
+        }
 
         // Clear the bandwidth lines overlay canvas
         this.bandwidthLinesCtx.clearRect(0, 0, this.bandwidthLinesCanvas.width, this.bandwidthLinesCanvas.height);

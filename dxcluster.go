@@ -259,31 +259,33 @@ func (c *DXClusterClient) login() error {
 		return fmt.Errorf("not connected")
 	}
 
-	// Read initial banner/login prompt using readLineOrPrompt since it may not have a newline
+	// Read initial data (banner or login prompt) - use short timeout
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-
-	// The login prompt might not have a newline, so use readLineOrPrompt
-	// But first we need to peek/read to trigger the buffered reader
-	banner, err := c.readLineOrPrompt(5 * time.Second)
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
 	if err != nil {
 		return fmt.Errorf("failed to read banner: %w", err)
 	}
 
-	log.Printf("DX Cluster: << %s", banner)
+	banner := string(buf[:n])
+	log.Printf("DX Cluster: << %s", strings.TrimSpace(banner))
 
 	// Check if we got login prompt
 	if !strings.Contains(strings.ToLower(banner), "login:") {
 		return fmt.Errorf("login prompt not found in banner")
 	}
 
-	// Clear the deadline we just set
-	conn.SetReadDeadline(time.Time{})
-
 	// Send callsign
 	if err := c.writeLine(c.config.Callsign); err != nil {
 		return err
 	}
 	log.Printf("DX Cluster: >> %s", c.config.Callsign)
+
+	// IMPORTANT: We just did a direct conn.Read() which bypassed the buffered reader
+	// We need to recreate the buffered reader so it starts fresh from the current socket position
+	c.mu.Lock()
+	c.reader = bufio.NewReader(c.conn)
+	c.mu.Unlock()
 
 	// Read welcome response line by line using the buffered reader
 	// This ensures we consume everything including the final prompt

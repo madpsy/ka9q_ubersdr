@@ -87,26 +87,24 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 	// Debug logging
 	if validSamples > 0 && xbase > 0 {
 		// Log first calculation for debugging
-		log.Printf("[SNR Debug] validSamples=%d, xsig=%.6e, xbase=%.6e, xnoi=%.6e, xsig/xbase=%.6e",
-			validSamples, xsig, xbase, xnoi, xsig/xbase)
+		log.Printf("[SNR Debug] validSamples=%d, xsig=%.6e, xbase=%.6e, xnoi=%.6e, xsig/xbase=%.6e, xsig/xnoi=%.6e",
+			validSamples, xsig, xbase, xnoi, xsig/xbase, xsig/xnoi)
 	}
 
-	// Method 1: Signal/Noise ratio
-	// xsnr = 10.0*log10(xsig/xnoi - 1.0) - 27.0
-	// Method 2: Signal/Baseline ratio (used for initial decodes)
-	// xsnr2 = 10.0*log10(xsig/xbase/3.0e6 - 1.0) - 27.0
-
-	// Calculate using baseline method (more stable, used by WSJT-X for first-pass)
+	// Use signal/noise ratio method instead of baseline method
+	// The baseline method requires calibrated sbase values from sync8 which we don't have
+	// Reference: WSJT-X lib/ft8/ft8b.f90 lines 447-448
 	finalSNR := -24.0
-	if xbase > 0 && validSamples > 0 {
-		arg := xsig/xbase/3.0e6 - 1.0
+	if xnoi > 0 && validSamples > 0 {
+		arg := xsig/xnoi - 1.0
 		if arg > 0.1 {
 			finalSNR = 10.0*math.Log10(arg) - 27.0
+			log.Printf("[SNR Debug] SUCCESS: arg=%.6e, finalSNR=%.2f dB", arg, finalSNR)
 		} else {
-			log.Printf("[SNR Debug] arg too small: %.6e (xsig/xbase/3e6 - 1)", arg)
+			log.Printf("[SNR Debug] arg too small: %.6e (xsig/xnoi - 1)", arg)
 		}
 	} else {
-		log.Printf("[SNR Debug] xbase=%.6e, validSamples=%d - returning minimum", xbase, validSamples)
+		log.Printf("[SNR Debug] xnoi=%.6e, validSamples=%d - returning minimum", xnoi, validSamples)
 	}
 
 	// Clamp to minimum SNR

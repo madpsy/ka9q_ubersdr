@@ -948,16 +948,27 @@ class FT8Extension extends DecoderExtension {
         if (this.currentSlot > 0) {
             const currentParity = this.currentSlot % 2; // 0 for even, 1 for odd
 
-            // Get messages from the most recent slot with matching parity
-            const matchingSlotMessages = this.messages
-                .filter(msg => {
-                    // Check if slot has same parity and has required fields
-                    return msg.slot_number % 2 === currentParity &&
-                           msg.tx_callsign &&
-                           msg.tx_callsign !== '-' &&
-                           msg.frequency;
-                })
-                .sort((a, b) => a.frequency - b.frequency);
+            // Find the most recent slot number with matching parity (excluding current slot)
+            let previousMatchingSlot = null;
+            for (let i = this.messages.length - 1; i >= 0; i--) {
+                const msg = this.messages[i];
+                if (msg.slot_number < this.currentSlot && msg.slot_number % 2 === currentParity) {
+                    previousMatchingSlot = msg.slot_number;
+                    break;
+                }
+            }
+
+            // Get messages only from that specific slot
+            const matchingSlotMessages = previousMatchingSlot !== null
+                ? this.messages
+                    .filter(msg => {
+                        return msg.slot_number === previousMatchingSlot &&
+                               msg.tx_callsign &&
+                               msg.tx_callsign !== '-' &&
+                               msg.frequency;
+                    })
+                    .sort((a, b) => a.frequency - b.frequency)
+                : [];
 
             // Draw each callsign at its frequency position
             ctx.font = '11px monospace';

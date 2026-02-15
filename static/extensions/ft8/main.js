@@ -470,12 +470,12 @@ class FT8Extension extends DecoderExtension {
                 const removeCount = this.messages.length - 1000;
                 this.messages = this.messages.slice(removeCount);
                 
-                // Remove old rows from DOM
+                // Always remove old rows from DOM to match messages array
                 const tbody = document.getElementById('ft8-messages-tbody');
-                if (tbody && tbody.rows.length > 1000) {
+                if (tbody) {
                     // Remove oldest rows (from the end since we insert at top)
                     for (let i = 0; i < removeCount; i++) {
-                        if (tbody.rows.length > 1000) {
+                        if (tbody.rows.length > 0) {
                             tbody.deleteRow(tbody.rows.length - 1);
                         }
                     }
@@ -503,11 +503,11 @@ class FT8Extension extends DecoderExtension {
                     const removeCount = this.messages.length - 100;
                     this.messages = this.messages.slice(removeCount);
                     
-                    // Remove old rows from DOM
+                    // Always remove old rows from DOM to match messages array
                     const tbody = document.getElementById('ft8-messages-tbody');
-                    if (tbody && tbody.rows.length > 100) {
+                    if (tbody) {
                         for (let i = 0; i < removeCount; i++) {
-                            if (tbody.rows.length > 100) {
+                            if (tbody.rows.length > 0) {
                                 tbody.deleteRow(tbody.rows.length - 1);
                             }
                         }

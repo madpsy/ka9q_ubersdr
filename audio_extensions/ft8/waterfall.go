@@ -58,10 +58,11 @@ func NewMonitor(sampleRate int, fMin, fMax float64, timeOSR, freqOSR int, protoc
 	nfft = nextPowerOf2(nfft)
 
 	// Calculate frequency bins
-	binWidth := float64(sampleRate) / float64(nfft)
-	minBin := int(fMin / binWidth)
-	maxBin := int(fMax/binWidth) + 1
-	numBins := (maxBin - minBin) * freqOSR
+	// After FFT, bins represent tone indices where tone spacing = 1/symbolPeriod Hz
+	// Reference: min_bin = (int)(f_min * symbol_period)
+	minBin := int(fMin * symbolPeriod)
+	maxBin := int(fMax*symbolPeriod) + 1
+	numBins := maxBin - minBin
 
 	// Calculate number of blocks we can store
 	slotTime := protocol.GetSlotTime()
@@ -71,11 +72,11 @@ func NewMonitor(sampleRate int, fMin, fMax float64, timeOSR, freqOSR int, protoc
 	wf := &Waterfall{
 		MaxBlocks:   maxBlocks,
 		NumBlocks:   0,
-		NumBins:     numBins / freqOSR, // In terms of 6.25 Hz bins
+		NumBins:     numBins,
 		TimeOSR:     timeOSR,
 		FreqOSR:     freqOSR,
-		Mag:         make([]uint8, maxBlocks*timeOSR*freqOSR*numBins/freqOSR),
-		BlockStride: timeOSR * freqOSR * numBins / freqOSR,
+		Mag:         make([]uint8, maxBlocks*timeOSR*freqOSR*numBins),
+		BlockStride: timeOSR * freqOSR * numBins,
 		Protocol:    protocol,
 	}
 
@@ -169,12 +170,13 @@ func (m *Monitor) extractMagnitudes(timeSub int) {
 	baseIdx := blockIdx*wf.BlockStride + timeSub*wf.FreqOSR*wf.NumBins
 
 	// Extract magnitudes for each frequency bin
-	// Reference C code loops: for (freq_sub) { for (bin) { src_bin = bin*freq_osr + freq_sub; } }
+	// Reference C code: for (freq_sub) { for (bin = min_bin; bin < max_bin; ++bin) { src_bin = (bin * freq_osr) + freq_sub; } }
+	offset := baseIdx
 	for freqSub := 0; freqSub < wf.FreqOSR; freqSub++ {
-		for bin := 0; bin < wf.NumBins; bin++ {
+		for bin := m.MinBin; bin < m.MaxBin; bin++ {
 			// Calculate FFT bin with frequency oversampling
 			// Reference: src_bin = (bin * freq_osr) + freq_sub
-			fftBin := (m.MinBin+bin)*wf.FreqOSR + freqSub
+			fftBin := bin*wf.FreqOSR + freqSub
 			if fftBin >= len(m.freqData) {
 				break
 			}
@@ -202,10 +204,10 @@ func (m *Monitor) extractMagnitudes(timeSub int) {
 			}
 
 			// Store in waterfall
-			idx := baseIdx + freqSub*wf.NumBins + bin
-			if idx < len(wf.Mag) {
-				wf.Mag[idx] = uint8(magUint8)
+			if offset < len(wf.Mag) {
+				wf.Mag[offset] = uint8(magUint8)
 			}
+			offset++
 		}
 	}
 }

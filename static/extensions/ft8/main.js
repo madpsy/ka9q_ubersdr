@@ -34,6 +34,7 @@ class FT8Extension extends DecoderExtension {
         this.crcFailures = 0;
         this.autoScroll = true;
         this.lastSyncTime = null;
+        this.messageFilter = ''; // Filter text for messages
     }
 
     onInitialize() {
@@ -166,16 +167,33 @@ class FT8Extension extends DecoderExtension {
             });
         }
 
+        // Message filter input
+        const messageFilter = document.getElementById('ft8-message-filter');
+        if (messageFilter) {
+            messageFilter.value = this.messageFilter;
+            messageFilter.addEventListener('input', (e) => {
+                this.messageFilter = e.target.value.toLowerCase();
+                this.filterMessages();
+            });
+        }
+
         // Frequency selector
         const freqSelect = document.getElementById('ft8-frequency-select');
         if (freqSelect) {
             freqSelect.addEventListener('change', (e) => {
                 if (e.target.value) {
                     const [freq, mode] = e.target.value.split(',');
-                    this.tuneToFrequency(parseInt(freq), mode);
+                    // Detect protocol from the selected option text
+                    const selectedOption = e.target.options[e.target.selectedIndex];
+                    const optionText = selectedOption.text;
+                    const protocol = optionText.includes('FT4') ? 'FT4' : 'FT8';
+                    this.tuneToFrequency(parseInt(freq), mode, protocol);
                 }
             });
         }
+
+        // Initialize totals display
+        this.updateTotalsDisplay();
 
         console.log('FT8: Event handlers setup complete');
     }
@@ -311,6 +329,23 @@ class FT8Extension extends DecoderExtension {
             this.totalDecoded++;
             this.slotDecoded++;
 
+            // Hard limit: Keep only the latest 1000 messages to prevent memory issues
+            if (this.messages.length > 1000) {
+                const removeCount = this.messages.length - 1000;
+                this.messages = this.messages.slice(removeCount);
+                
+                // Remove old rows from DOM
+                const tbody = document.getElementById('ft8-messages-tbody');
+                if (tbody && tbody.rows.length > 1000) {
+                    // Remove oldest rows (from the end since we insert at top)
+                    for (let i = 0; i < removeCount; i++) {
+                        if (tbody.rows.length > 1000) {
+                            tbody.deleteRow(tbody.rows.length - 1);
+                        }
+                    }
+                }
+            }
+
             // Update decode statistics from message
             if (message.candidate_count !== undefined) {
                 this.candidateCount = message.candidate_count;
@@ -329,15 +364,23 @@ class FT8Extension extends DecoderExtension {
 
                 // Auto-clear old messages if enabled
                 if (this.config.auto_clear && this.messages.length > 100) {
-                    this.messages = this.messages.slice(-100);
+                    const removeCount = this.messages.length - 100;
+                    this.messages = this.messages.slice(removeCount);
+                    
+                    // Remove old rows from DOM
+                    const tbody = document.getElementById('ft8-messages-tbody');
+                    if (tbody && tbody.rows.length > 100) {
+                        for (let i = 0; i < removeCount; i++) {
+                            if (tbody.rows.length > 100) {
+                                tbody.deleteRow(tbody.rows.length - 1);
+                            }
+                        }
+                    }
                 }
 
-                // If showing latest only, clear table for new slot
+                // If showing latest only, re-filter to hide old slots
                 if (this.config.show_latest_only) {
-                    const tbody = document.getElementById('ft8-messages-tbody');
-                    if (tbody) {
-                        tbody.innerHTML = '';
-                    }
+                    this.filterMessages();
                 }
             }
 
@@ -361,11 +404,6 @@ class FT8Extension extends DecoderExtension {
     addMessageToTable(message) {
         const tbody = document.getElementById('ft8-messages-tbody');
         if (!tbody) return;
-
-        // Filter if CQ only mode
-        if (this.config.show_cq_only && !message.message.startsWith('CQ')) {
-            return;
-        }
 
         const row = tbody.insertRow(0); // Insert at top
         
@@ -424,8 +462,13 @@ class FT8Extension extends DecoderExtension {
         cellContinent.textContent = message.continent || '-';
         cellContinent.className = 'ft8-cell-continent';
         
+        // TX Callsign (normalized callsign used for CTY lookup)
+        const cellTxCall = row.insertCell(8);
+        cellTxCall.textContent = message.tx_callsign || '-';
+        cellTxCall.className = 'ft8-cell-tx-callsign';
+        
         // Message
-        const cellMsg = row.insertCell(8);
+        const cellMsg = row.insertCell(9);
         cellMsg.textContent = message.message;
         cellMsg.className = 'ft8-cell-message';
         
@@ -435,9 +478,30 @@ class FT8Extension extends DecoderExtension {
         }
         
         // Slot number
-        const cellSlot = row.insertCell(9);
+        const cellSlot = row.insertCell(10);
         cellSlot.textContent = message.slot_number;
         cellSlot.className = 'ft8-cell-slot';
+        
+        // Apply filters to this row only (efficient - no iteration through all rows)
+        let shouldShow = true;
+        
+        // Filter by latest cycle only
+        if (this.config.show_latest_only && this.currentSlot > 0 && message.slot_number !== this.currentSlot) {
+            shouldShow = false;
+        }
+        
+        // Filter by CQ only
+        if (shouldShow && this.config.show_cq_only && !message.message.startsWith('CQ')) {
+            shouldShow = false;
+        }
+        
+        // Filter by message text
+        if (shouldShow && this.messageFilter && !message.message.toLowerCase().includes(this.messageFilter)) {
+            shouldShow = false;
+        }
+        
+        // Show or hide the row
+        row.style.display = shouldShow ? '' : 'none';
         
         // Auto-scroll to top if enabled
         if (this.autoScroll) {
@@ -462,23 +526,41 @@ class FT8Extension extends DecoderExtension {
     }
 
     filterMessages() {
-        // Re-render table with current filter
+        // Efficiently filter by hiding/showing rows instead of recreating DOM
         const tbody = document.getElementById('ft8-messages-tbody');
         if (!tbody) return;
 
-        tbody.innerHTML = '';
-
-        // Determine which messages to show
-        let messagesToShow = this.messages;
-
-        // Filter to latest cycle only if enabled
-        if (this.config.show_latest_only && this.currentSlot > 0) {
-            messagesToShow = this.messages.filter(msg => msg.slot_number === this.currentSlot);
-        }
-
-        // Add messages in reverse order (newest first)
-        for (let i = messagesToShow.length - 1; i >= 0; i--) {
-            this.addMessageToTable(messagesToShow[i]);
+        const rows = tbody.getElementsByTagName('tr');
+        
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const messageCell = row.cells[9]; // Message column is at index 9
+            const slotCell = row.cells[10]; // Slot column is at index 10
+            
+            if (!messageCell || !slotCell) continue;
+            
+            const messageText = messageCell.textContent.toLowerCase();
+            const slotNumber = parseInt(slotCell.textContent);
+            
+            let shouldShow = true;
+            
+            // Filter by latest cycle only
+            if (this.config.show_latest_only && this.currentSlot > 0 && slotNumber !== this.currentSlot) {
+                shouldShow = false;
+            }
+            
+            // Filter by CQ only
+            if (shouldShow && this.config.show_cq_only && !messageCell.textContent.startsWith('CQ')) {
+                shouldShow = false;
+            }
+            
+            // Filter by message text
+            if (shouldShow && this.messageFilter && !messageText.includes(this.messageFilter)) {
+                shouldShow = false;
+            }
+            
+            // Show or hide the row
+            row.style.display = shouldShow ? '' : 'none';
         }
     }
 
@@ -489,16 +571,17 @@ class FT8Extension extends DecoderExtension {
         }
         
         // Create CSV content
-        let csv = 'UTC,SNR,DeltaT,Frequency,Distance_km,Bearing_deg,Country,Continent,Callsign,Locator,Message,Protocol,Slot\n';
-        
+        let csv = 'UTC,SNR,DeltaT,Frequency,Distance_km,Bearing_deg,Country,Continent,TX_Callsign,Callsign,Locator,Message,Protocol,Slot\n';
+
         for (const msg of this.messages) {
             const dist = msg.distance_km !== undefined && msg.distance_km !== null ? msg.distance_km.toFixed(1) : '';
             const brg = msg.bearing_deg !== undefined && msg.bearing_deg !== null ? msg.bearing_deg.toFixed(1) : '';
             const country = msg.country || '';
             const continent = msg.continent || '';
+            const txCallsign = msg.tx_callsign || '';
             const callsign = msg.callsign || '';
             const locator = msg.locator || '';
-            csv += `${msg.utc},${msg.snr},${msg.delta_t},${msg.frequency},${dist},${brg},"${country}","${continent}","${callsign}","${locator}","${msg.message}",${msg.protocol},${msg.slot_number}\n`;
+            csv += `${msg.utc},${msg.snr},${msg.delta_t},${msg.frequency},${dist},${brg},"${country}","${continent}","${txCallsign}","${callsign}","${locator}","${msg.message}",${msg.protocol},${msg.slot_number}\n`;
         }
         
         // Download as file
@@ -534,6 +617,16 @@ class FT8Extension extends DecoderExtension {
         }
         if (crcFailures) {
             crcFailures.textContent = this.crcFailures;
+        }
+
+        // Update totals display in status bar
+        this.updateTotalsDisplay();
+    }
+
+    updateTotalsDisplay() {
+        const totalsDisplay = document.getElementById('ft8-totals-display');
+        if (totalsDisplay) {
+            totalsDisplay.textContent = `Total: ${this.totalDecoded} | Slot: ${this.slotDecoded}`;
         }
     }
 
@@ -584,8 +677,18 @@ class FT8Extension extends DecoderExtension {
         }
     }
 
-    tuneToFrequency(freq, mode) {
-        console.log(`FT8: Tuning to ${freq} Hz, mode ${mode}`);
+    tuneToFrequency(freq, mode, protocol) {
+        console.log(`FT8: Tuning to ${freq} Hz, mode ${mode}, protocol ${protocol}`);
+
+        // Set protocol dropdown if provided
+        if (protocol) {
+            const protocolSelect = document.getElementById('ft8-protocol-select');
+            if (protocolSelect && protocolSelect.value !== protocol) {
+                protocolSelect.value = protocol;
+                this.config.protocol = protocol;
+                this.updateProtocolDisplay();
+            }
+        }
 
         // Set frequency using the global function
         if (window.setFrequency) {

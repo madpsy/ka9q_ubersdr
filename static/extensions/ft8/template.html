@@ -32,6 +32,7 @@
             <span id="ft8-protocol-display" class="ft8-protocol">FT8</span>
             <span id="ft8-slot-display" class="ft8-slot">Slot: --</span>
             <span id="ft8-sync-display" class="ft8-sync">Sync: Waiting...</span>
+            <span id="ft8-totals-display" class="ft8-totals">Total: 0 | Slot: 0</span>
         </div>
         <div class="ft8-status-right">
             <button id="ft8-start-btn" class="ft8-btn ft8-btn-primary">Start</button>
@@ -84,6 +85,11 @@
                 Latest Cycle Only
             </label>
         </div>
+
+        <div class="ft8-control-group">
+            <label for="ft8-message-filter">Filter:</label>
+            <input type="text" id="ft8-message-filter" class="ft8-input-small" placeholder="Filter messages...">
+        </div>
     </div>
 
     <!-- Message Table -->
@@ -99,6 +105,7 @@
                     <th>Brg</th>
                     <th>Country</th>
                     <th>Cont</th>
+                    <th>TX Call</th>
                     <th>Message</th>
                     <th>Slot</th>
                 </tr>

@@ -65,7 +65,8 @@ type DecodeResult struct {
 	SNR            float32  `json:"snr"`                   // Signal-to-noise ratio (dB)
 	DeltaT         float32  `json:"delta_t"`               // Time offset from slot start (seconds)
 	Frequency      float32  `json:"frequency"`             // Audio frequency (Hz)
-	Callsign       string   `json:"callsign"`              // Transmitter callsign
+	Callsign       string   `json:"callsign"`              // Transmitter callsign (original from message)
+	TxCallsign     string   `json:"tx_callsign,omitempty"` // Normalized TX callsign used for CTY lookup (without <>, /)
 	Locator        string   `json:"locator,omitempty"`     // Grid square locator
 	DistanceKm     *float64 `json:"distance_km,omitempty"` // Distance from receiver in km
 	BearingDeg     *float64 `json:"bearing_deg,omitempty"` // Bearing from receiver in degrees
@@ -331,6 +332,10 @@ func (d *FT8Decoder) enrichResult(result *DecodeResult) {
 		return
 	}
 
+	// Normalize the callsign for CTY lookup (strip angle brackets and portable suffixes)
+	normalizedCall := normalizeCallsign(result.Callsign)
+	result.TxCallsign = normalizedCall
+
 	// Try to get CTY information if database is available
 	var ctyLat, ctyLon float64
 	var hasCTY bool
@@ -339,7 +344,7 @@ func (d *FT8Decoder) enrichResult(result *DecodeResult) {
 		dbValue := reflect.ValueOf(d.ctyDatabase)
 		method := dbValue.MethodByName("LookupCallsignFull")
 		if method.IsValid() {
-			results := method.Call([]reflect.Value{reflect.ValueOf(result.Callsign)})
+			results := method.Call([]reflect.Value{reflect.ValueOf(normalizedCall)})
 			if len(results) > 0 && !results[0].IsNil() {
 				infoValue := results[0]
 				if infoValue.Kind() == reflect.Ptr {

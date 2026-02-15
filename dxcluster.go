@@ -259,27 +259,16 @@ func (c *DXClusterClient) login() error {
 		return fmt.Errorf("not connected")
 	}
 
-	// Read initial banner/login prompt line by line
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-
-	// Read until we find the login prompt
-	loginPromptFound := false
-	for {
-		line, err := c.readLine()
-		if err != nil {
-			return fmt.Errorf("failed to read banner: %w", err)
-		}
-
-		log.Printf("DX Cluster: << %s", line)
-
-		// Check if we got login prompt
-		if strings.Contains(strings.ToLower(line), "login:") {
-			loginPromptFound = true
-			break
-		}
+	// Read initial banner/login prompt (which may not have a newline)
+	line, err := c.readLineOrPrompt(5 * time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to read banner: %w", err)
 	}
 
-	if !loginPromptFound {
+	log.Printf("DX Cluster: << %s", line)
+
+	// Check if we got login prompt
+	if !strings.Contains(strings.ToLower(line), "login:") {
 		return fmt.Errorf("login prompt not found in banner")
 	}
 

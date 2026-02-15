@@ -624,8 +624,13 @@ class FT8Extension extends DecoderExtension {
         // Show or hide the row
         row.style.display = shouldShow ? '' : 'none';
         
-        // Auto-scroll to top if enabled
-        if (this.autoScroll) {
+        // If sorting is active, re-sort the table to place new message in correct position
+        if (this.sortColumn !== null) {
+            this.sortTable(this.sortColumn);
+        }
+        
+        // Auto-scroll to top if enabled (only if not sorting, as sorting changes scroll position)
+        if (this.autoScroll && this.sortColumn === null) {
             const container = tbody.parentElement.parentElement;
             if (container) {
                 container.scrollTop = 0;

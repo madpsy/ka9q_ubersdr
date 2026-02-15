@@ -63,14 +63,22 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 	// Reference: ft8b.f90 lines 449-450, 452, 454
 	finalSNR := -24.0
 	if xbase > 0 && validSamples > 0 {
-		arg := xsig/xbase/3.0e6 - 1.0
-		log.Printf("[SNR Debug] validSamples=%d, xsig=%.6e, xbase=%.6e, xsig/xbase=%.6e, arg=%.6e",
-			validSamples, xsig, xbase, xsig/xbase, arg)
-		if arg > 0.1 {
-			finalSNR = 10.0*math.Log10(arg) - 27.0
+		// Average signal power per symbol
+		avgSignalPower := xsig / float64(validSamples)
+
+		// Signal-to-noise ratio (linear scale)
+		snrLinear := avgSignalPower / xbase
+
+		log.Printf("[SNR Debug] validSamples=%d, xsig=%.6e, xbase=%.6e, avgSignalPower=%.6e, snrLinear=%.6e",
+			validSamples, xsig, xbase, avgSignalPower, snrLinear)
+
+		if snrLinear > 0 {
+			// Convert to dB and apply WSJT-X bandwidth correction
+			// The -27.0 dB accounts for 2500 Hz reference bandwidth
+			finalSNR = 10.0*math.Log10(snrLinear) - 27.0
 			log.Printf("[SNR Debug] SUCCESS: finalSNR=%.2f dB", finalSNR)
 		} else {
-			log.Printf("[SNR Debug] arg too small, using minimum -24 dB")
+			log.Printf("[SNR Debug] snrLinear <= 0, using minimum -24 dB")
 		}
 	} else {
 		log.Printf("[SNR Debug] xbase=%.6e, validSamples=%d - returning minimum", xbase, validSamples)

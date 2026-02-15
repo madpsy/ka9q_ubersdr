@@ -20,7 +20,8 @@ class FT8Extension extends DecoderExtension {
             max_candidates: 100,
             auto_clear: false,
             show_cq_only: false,
-            show_latest_only: true  // Default to checked
+            show_latest_only: true,  // Default to checked
+            show_spectrum: true  // Default to checked
         };
 
         // State
@@ -182,6 +183,19 @@ class FT8Extension extends DecoderExtension {
             showLatestOnly.addEventListener('change', (e) => {
                 this.config.show_latest_only = e.target.checked;
                 this.filterMessages();
+            });
+        }
+
+        const showSpectrum = document.getElementById('ft8-show-spectrum');
+        if (showSpectrum) {
+            showSpectrum.checked = this.config.show_spectrum;
+            showSpectrum.addEventListener('change', (e) => {
+                this.config.show_spectrum = e.target.checked;
+                // Hide/show the spectrum container
+                const spectrumContainer = document.querySelector('.ft8-spectrum-container');
+                if (spectrumContainer) {
+                    spectrumContainer.style.display = e.target.checked ? 'flex' : 'none';
+                }
             });
         }
 
@@ -883,8 +897,10 @@ class FT8Extension extends DecoderExtension {
 
     onProcessAudio(dataArray) {
         // FT8 processes audio on the backend (Go side) via the audio extension framework
-        // Draw spectrum visualization (always, even when stopped)
-        this.drawSpectrum(dataArray);
+        // Draw spectrum visualization only if enabled
+        if (this.config.show_spectrum) {
+            this.drawSpectrum(dataArray);
+        }
     }
 
     drawSpectrum(dataArray) {

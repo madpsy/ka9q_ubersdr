@@ -193,7 +193,8 @@ func (c *DXClusterClient) connect() error {
 
 	c.mu.Lock()
 	c.conn = conn
-	c.reader = bufio.NewReader(conn)
+	// Don't create the buffered reader yet - we'll do it after the direct read in login()
+	c.reader = nil
 	c.connected = true
 	c.lastActivityTime = time.Now()
 	c.mu.Unlock()

@@ -522,7 +522,12 @@ class SpectrumDisplay {
         this.skipNextPan = false;
 
         // Flag to prevent edge detection when user manually changes frequency
-        this.skipEdgeDetection = false;
+        // This is temporarily set to true when user changes frequency to avoid interference
+        this.skipEdgeDetectionTemporary = false;
+
+        // User preference for edge detection (default disabled)
+        // When false, edge detection is completely disabled
+        this.edgeTuneEnabled = localStorage.getItem('edgeTuneEnabled') === 'true';
 
         // Auto-ranging
         this.actualMinDb = this.config.minDb;
@@ -2595,10 +2600,15 @@ class SpectrumDisplay {
             
             // Debug logging for edge detection
             if (this.currentTunedFreq < startFreq || this.currentTunedFreq > endFreq) {
-                console.log(`Edge detection check: skipEdgeDetection=${this.skipEdgeDetection}, isDragging=${this.isDragging}, hasInputFocus=${hasInputFocus}`);
+                console.log(`Edge detection check: edgeTuneEnabled=${this.edgeTuneEnabled}, skipEdgeDetectionTemporary=${this.skipEdgeDetectionTemporary}, isDragging=${this.isDragging}, hasInputFocus=${hasInputFocus}`);
             }
-            
-            if (this.config.onFrequencyClick && !this.isDragging && !hasInputFocus && !this.skipEdgeDetection) {
+
+            // Only perform edge detection if:
+            // 1. Edge Tune is enabled by user preference
+            // 2. Not temporarily disabled by manual frequency change
+            // 3. Not currently dragging
+            // 4. Frequency input doesn't have focus
+            if (this.config.onFrequencyClick && this.edgeTuneEnabled && !this.skipEdgeDetectionTemporary && !this.isDragging && !hasInputFocus) {
                 console.log(`Marker at edge - updating frequency to ${(newFreq/1e6).toFixed(3)} MHz`);
                 this.skipNextPan = true; // Don't pan back when we update frequency
                 this.config.onFrequencyClick(newFreq);
@@ -3757,6 +3767,22 @@ class SpectrumDisplay {
                 this.snapEnabled = e.target.checked;
                 const snapStep = window.frequencyScrollStep || 1000;
                 console.log(`Spectrum snap ${this.snapEnabled ? 'enabled' : 'disabled'} (step: ${snapStep} Hz)`);
+            });
+        }
+
+        // Setup Edge Tune checkbox handler
+        const edgeTuneCheckbox = document.getElementById('spectrum-edge-tune-enable');
+        if (edgeTuneCheckbox) {
+            // Load saved preference from localStorage (default disabled)
+            const savedState = localStorage.getItem('edgeTuneEnabled');
+            const isEnabled = savedState === 'true';
+            edgeTuneCheckbox.checked = isEnabled;
+            this.edgeTuneEnabled = isEnabled;
+
+            edgeTuneCheckbox.addEventListener('change', (e) => {
+                this.edgeTuneEnabled = e.target.checked;
+                localStorage.setItem('edgeTuneEnabled', e.target.checked.toString());
+                console.log(`Spectrum edge tune ${this.edgeTuneEnabled ? 'enabled' : 'disabled'}`);
             });
         }
 

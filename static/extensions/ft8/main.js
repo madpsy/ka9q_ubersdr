@@ -927,6 +927,11 @@ class FT8Extension extends DecoderExtension {
             }
         }
 
+        // Disable edge detection temporarily when changing frequency
+        if (window.spectrumDisplay) {
+            window.spectrumDisplay.skipEdgeDetectionTemporary = true;
+        }
+
         // Set frequency using the global function
         if (window.setFrequency) {
             window.setFrequency(freq);
@@ -957,6 +962,13 @@ class FT8Extension extends DecoderExtension {
         if (window.updateBandwidth) {
             window.updateBandwidth();
         }
+
+        // Re-enable edge detection after a short delay
+        setTimeout(() => {
+            if (window.spectrumDisplay) {
+                window.spectrumDisplay.skipEdgeDetectionTemporary = false;
+            }
+        }, 500);
     }
 
     startCycleProgress() {

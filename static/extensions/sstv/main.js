@@ -427,7 +427,7 @@ class SSTVExtension extends DecoderExtension {
 
         // Disable edge detection when tuning
         if (window.spectrumDisplay) {
-            window.spectrumDisplay.skipEdgeDetection = true;
+            window.spectrumDisplay.skipEdgeDetectionTemporary = true;
         }
 
         // Set frequency and mode
@@ -437,7 +437,7 @@ class SSTVExtension extends DecoderExtension {
         // Re-enable edge detection after a delay
         setTimeout(() => {
             if (window.spectrumDisplay) {
-                window.spectrumDisplay.skipEdgeDetection = false;
+                window.spectrumDisplay.skipEdgeDetectionTemporary = false;
             }
         }, 500);
 

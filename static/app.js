@@ -407,10 +407,10 @@ function loadVFOState(vfo) {
 function toggleVFO() {
     // CRITICAL: Set skip edge detection flag FIRST, before any changes
     if (window.spectrumDisplay) {
-        window.spectrumDisplay.skipEdgeDetection = true;
+        window.spectrumDisplay.skipEdgeDetectionTemporary = true;
         setTimeout(() => {
             if (window.spectrumDisplay) {
-                window.spectrumDisplay.skipEdgeDetection = false;
+                window.spectrumDisplay.skipEdgeDetectionTemporary = false;
             }
         }, 2000);
     }
@@ -1973,10 +1973,10 @@ function tuneToChannel(frequency, mode, bandwidthLow, bandwidthHigh) {
 
     // Disable edge detection temporarily when tuning to channel
     if (window.spectrumDisplay) {
-        window.spectrumDisplay.skipEdgeDetection = true;
+        window.spectrumDisplay.skipEdgeDetectionTemporary = true;
         setTimeout(() => {
             if (window.spectrumDisplay) {
-                window.spectrumDisplay.skipEdgeDetection = false;
+                window.spectrumDisplay.skipEdgeDetectionTemporary = false;
             }
         }, 2000);
     }
@@ -3135,10 +3135,10 @@ function setFrequency(freq) {
 
     // Disable edge detection when setting frequency
     if (window.spectrumDisplay) {
-        window.spectrumDisplay.skipEdgeDetection = true;
+        window.spectrumDisplay.skipEdgeDetectionTemporary = true;
         setTimeout(() => {
             if (window.spectrumDisplay) {
-                window.spectrumDisplay.skipEdgeDetection = false;
+                window.spectrumDisplay.skipEdgeDetectionTemporary = false;
             }
         }, 2000);
     }
@@ -3222,11 +3222,11 @@ function setBand(bandName) {
     // Zoom spectrum to show entire band
     if (spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
         // Set flag to prevent edge detection from interfering after zoom
-        spectrumDisplay.skipEdgeDetection = true;
+        spectrumDisplay.skipEdgeDetectionTemporary = true;
         // Clear the flag after a short delay (after zoom completes)
         setTimeout(() => {
             if (spectrumDisplay) {
-                spectrumDisplay.skipEdgeDetection = false;
+                spectrumDisplay.skipEdgeDetectionTemporary = false;
             }
         }, 2000);
 
@@ -7634,11 +7634,11 @@ function selectBandFromDropdown(value) {
         // Zoom spectrum to show entire band (same as band buttons)
         if (spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
             // Set flag to prevent edge detection from interfering after zoom
-            spectrumDisplay.skipEdgeDetection = true;
+            spectrumDisplay.skipEdgeDetectionTemporary = true;
             // Clear the flag after a short delay (after zoom completes)
             setTimeout(() => {
                 if (spectrumDisplay) {
-                    spectrumDisplay.skipEdgeDetection = false;
+                    spectrumDisplay.skipEdgeDetectionTemporary = false;
                 }
             }, 2000);
 
@@ -8260,10 +8260,10 @@ window.handleFrequencyChange = function() {
 
     // Disable edge detection temporarily when user manually changes frequency
     if (window.spectrumDisplay) {
-        window.spectrumDisplay.skipEdgeDetection = true;
+        window.spectrumDisplay.skipEdgeDetectionTemporary = true;
         setTimeout(() => {
             if (window.spectrumDisplay) {
-                window.spectrumDisplay.skipEdgeDetection = false;
+                window.spectrumDisplay.skipEdgeDetectionTemporary = false;
             }
         }, 2000);
     }
@@ -8780,8 +8780,8 @@ window.addEventListener('message', (event) => {
                 if (typeof params.frequency === 'number') {
                     // Disable edge detection BEFORE calling tuneToChannel
                     if (window.spectrumDisplay) {
-                        window.spectrumDisplay.skipEdgeDetection = true;
-                        console.log('[Popup Control] Set skipEdgeDetection=true before tuneToChannel');
+                        window.spectrumDisplay.skipEdgeDetectionTemporary = true;
+                        console.log('[Popup Control] Set skipEdgeDetectionTemporary=true before tuneToChannel');
                     }
                     // Use tuneToChannel which has proper edge detection handling
                     tuneToChannel(params.frequency, currentMode, currentBandwidthLow, currentBandwidthHigh);
@@ -8800,7 +8800,7 @@ window.addEventListener('message', (event) => {
                 if (typeof params.mode === 'string') {
                     // Disable edge detection BEFORE calling tuneToChannel
                     if (window.spectrumDisplay) {
-                        window.spectrumDisplay.skipEdgeDetection = true;
+                        window.spectrumDisplay.skipEdgeDetectionTemporary = true;
                     }
                     const preserveBandwidth = params.preserveBandwidth !== undefined ? params.preserveBandwidth : false;
                     // Use tuneToChannel which has proper edge detection handling

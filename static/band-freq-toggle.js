@@ -102,9 +102,9 @@ function setupFrequencyDigitInteraction() {
 function changeFrequencyByStep(step, increment) {
     // Disable edge detection FIRST, before any frequency changes
     if (window.spectrumDisplay) {
-        console.log('Setting skipEdgeDetection = true');
-        window.spectrumDisplay.skipEdgeDetection = true;
-        console.log('skipEdgeDetection is now:', window.spectrumDisplay.skipEdgeDetection);
+        console.log('Setting skipEdgeDetectionTemporary = true');
+        window.spectrumDisplay.skipEdgeDetectionTemporary = true;
+        console.log('skipEdgeDetectionTemporary is now:', window.spectrumDisplay.skipEdgeDetectionTemporary);
     }
 
     const freqInput = document.getElementById('frequency');
@@ -113,7 +113,7 @@ function changeFrequencyByStep(step, increment) {
         if (window.spectrumDisplay) {
             setTimeout(() => {
                 if (window.spectrumDisplay) {
-                    window.spectrumDisplay.skipEdgeDetection = false;
+                    window.spectrumDisplay.skipEdgeDetectionTemporary = false;
                 }
             }, 2000);
         }
@@ -172,7 +172,7 @@ function changeFrequencyByStep(step, increment) {
     // Re-enable edge detection after a delay to allow spectrum to update
     setTimeout(() => {
         if (window.spectrumDisplay) {
-            window.spectrumDisplay.skipEdgeDetection = false;
+            window.spectrumDisplay.skipEdgeDetectionTemporary = false;
         }
     }, 2000);
 }

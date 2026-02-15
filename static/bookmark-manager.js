@@ -452,11 +452,11 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
         // For dropdown selections, send pan request to center on bookmark
         if (spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
             // Set flag to prevent edge detection from interfering after pan
-            spectrumDisplay.skipEdgeDetection = true;
+            spectrumDisplay.skipEdgeDetectionTemporary = true;
             // Clear the flag after a short delay (after pan completes)
             setTimeout(() => {
                 if (spectrumDisplay) {
-                    spectrumDisplay.skipEdgeDetection = false;
+                    spectrumDisplay.skipEdgeDetectionTemporary = false;
                 }
             }, 2000);
 

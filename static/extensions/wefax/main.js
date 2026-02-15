@@ -276,7 +276,7 @@ class WEFAXExtension extends DecoderExtension {
 
         // Disable edge detection when tuning to station
         if (window.spectrumDisplay) {
-            window.spectrumDisplay.skipEdgeDetection = true;
+            window.spectrumDisplay.skipEdgeDetectionTemporary = true;
         }
 
         // Set frequency and mode
@@ -286,7 +286,7 @@ class WEFAXExtension extends DecoderExtension {
         // Re-enable edge detection after a delay
         setTimeout(() => {
             if (window.spectrumDisplay) {
-                window.spectrumDisplay.skipEdgeDetection = false;
+                window.spectrumDisplay.skipEdgeDetectionTemporary = false;
             }
         }, 500);
 

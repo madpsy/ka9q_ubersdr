@@ -2388,10 +2388,10 @@ class ChatUI {
 
         // Disable edge detection temporarily when syncing (same as tuneToChannel)
         if (window.spectrumDisplay) {
-            window.spectrumDisplay.skipEdgeDetection = true;
+            window.spectrumDisplay.skipEdgeDetectionTemporary = true;
             setTimeout(() => {
                 if (window.spectrumDisplay) {
-                    window.spectrumDisplay.skipEdgeDetection = false;
+                    window.spectrumDisplay.skipEdgeDetectionTemporary = false;
                 }
             }, 2000);
         }

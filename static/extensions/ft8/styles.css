@@ -231,6 +231,26 @@
     width: 120px;
 }
 
+/* Spectrum Display */
+.ft8-spectrum-container {
+    background: #0a0a0a;
+    border: 1px solid #3a3a3a;
+    border-radius: 4px;
+    padding: 5px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.ft8-spectrum-canvas {
+    display: block;
+    width: 100%;
+    height: 150px;
+    background: #000;
+    border: 1px solid #333;
+}
+
 /* Messages Container */
 .ft8-messages-container {
     height: 500px;

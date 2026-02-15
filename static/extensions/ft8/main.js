@@ -39,6 +39,10 @@ class FT8Extension extends DecoderExtension {
         // Sort state
         this.sortColumn = null; // Column index being sorted
         this.sortDirection = 'asc'; // 'asc' or 'desc'
+
+        // Spectrum visualization
+        this.spectrumCanvas = null;
+        this.spectrumCtx = null;
     }
 
     onInitialize() {
@@ -62,6 +66,7 @@ class FT8Extension extends DecoderExtension {
 
             if (table && startBtn) {
                 console.log('FT8: All DOM elements found, setting up...');
+                this.setupCanvas();
                 this.setupEventHandlers();
                 console.log('FT8: Setup complete');
             } else if (attempts < maxAttempts) {
@@ -89,6 +94,19 @@ class FT8Extension extends DecoderExtension {
             console.log('FT8: Template rendered');
         } else {
             console.error('FT8: Extension content container not found');
+        }
+    }
+
+    setupCanvas() {
+        this.spectrumCanvas = document.getElementById('ft8-spectrum-canvas');
+        if (this.spectrumCanvas) {
+            this.spectrumCtx = this.spectrumCanvas.getContext('2d');
+            // Set canvas size to match display size
+            const rect = this.spectrumCanvas.getBoundingClientRect();
+            this.spectrumCanvas.width = rect.width;
+            this.spectrumCanvas.height = rect.height;
+
+            console.log('FT8: Spectrum canvas initialized');
         }
     }
 
@@ -127,14 +145,8 @@ class FT8Extension extends DecoderExtension {
             });
         }
 
-        // Min score input
-        const minScoreInput = document.getElementById('ft8-min-score');
-        if (minScoreInput) {
-            minScoreInput.value = this.config.min_score;
-            minScoreInput.addEventListener('change', (e) => {
-                this.config.min_score = parseInt(e.target.value) || 10;
-            });
-        }
+        // Min score is fixed at 10 (not user-configurable)
+        this.config.min_score = 10;
 
         // Checkboxes
         const showCQOnly = document.getElementById('ft8-show-cq-only');
@@ -869,8 +881,144 @@ class FT8Extension extends DecoderExtension {
 
     onProcessAudio(dataArray) {
         // FT8 processes audio on the backend (Go side) via the audio extension framework
-        // This method is required by DecoderExtension but does nothing for FT8
-        // Audio is sent to the backend when the decoder is attached via WebSocket
+        // Draw spectrum visualization (always, even when stopped)
+        this.drawSpectrum(dataArray);
+    }
+
+    drawSpectrum(dataArray) {
+        if (!this.spectrumCanvas || !this.spectrumCtx) return;
+
+        const ctx = this.spectrumCtx;
+        const canvas = this.spectrumCanvas;
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // Clear canvas
+        ctx.fillStyle = '#0a0a0a';
+        ctx.fillRect(0, 0, width, height);
+
+        // Get frequency data
+        const analyser = this.radio.getAnalyser();
+        if (!analyser) return;
+
+        const bufferLength = analyser.frequencyBinCount;
+        const freqData = new Uint8Array(bufferLength);
+        analyser.getByteFrequencyData(freqData);
+
+        // Calculate frequency range to display (0-3000 Hz)
+        const sampleRate = window.audioContext ? window.audioContext.sampleRate : 48000;
+        const nyquist = sampleRate / 2;
+        const maxDisplayFreq = 3000;
+        const binWidth = nyquist / bufferLength;
+        const maxBin = Math.min(bufferLength, Math.floor(maxDisplayFreq / binWidth));
+
+        // Draw spectrum bars
+        const barWidth = width / maxBin;
+        ctx.fillStyle = '#4a9eff';
+
+        for (let i = 0; i < maxBin; i++) {
+            const barHeight = (freqData[i] / 255) * height;
+            const x = i * barWidth;
+            const y = height - barHeight;
+
+            // Color based on intensity
+            const intensity = freqData[i] / 255;
+            if (intensity > 0.7) {
+                ctx.fillStyle = '#FF5722';
+            } else if (intensity > 0.4) {
+                ctx.fillStyle = '#FFC107';
+            } else {
+                ctx.fillStyle = '#4a9eff';
+            }
+
+            ctx.fillRect(x, y, barWidth, barHeight);
+        }
+
+        // Draw frequency scale at bottom
+        ctx.fillStyle = '#666';
+        ctx.font = '9px monospace';
+        for (let freq = 0; freq <= maxDisplayFreq; freq += 500) {
+            const x = (freq / maxDisplayFreq) * width;
+            ctx.fillText(freq + 'Hz', x + 2, height - 5);
+        }
+
+        // Draw callsigns from latest cycle
+        if (this.currentSlot > 0) {
+            // Get messages from the current slot and sort by frequency
+            const currentSlotMessages = this.messages
+                .filter(msg => msg.slot_number === this.currentSlot && msg.tx_callsign && msg.tx_callsign !== '-' && msg.frequency)
+                .sort((a, b) => a.frequency - b.frequency);
+
+            // Draw each callsign at its frequency position
+            ctx.font = '11px monospace';
+            ctx.textAlign = 'center';
+
+            // Track used positions to avoid overlapping labels
+            const usedPositions = [];
+            const minHorizontalSpacing = 50; // Minimum pixels between labels horizontally
+            const verticalSpacing = 14; // Vertical spacing between stacked labels
+
+            for (const msg of currentSlotMessages) {
+                const freq = msg.frequency;
+                const x = (freq / maxDisplayFreq) * width;
+                const callsign = msg.tx_callsign;
+                const textWidth = ctx.measureText(callsign).width;
+
+                // Find appropriate vertical position to avoid overlaps
+                let yOffset = 15;
+                let foundPosition = false;
+
+                // Try different vertical positions until we find one that doesn't overlap
+                while (!foundPosition && yOffset < height - 20) {
+                    let overlaps = false;
+
+                    // Check if this position overlaps with any existing label
+                    for (const usedPos of usedPositions) {
+                        const horizontalDistance = Math.abs(usedPos.x - x);
+                        const verticalDistance = Math.abs(usedPos.y - yOffset);
+
+                        // Check for overlap: labels are too close horizontally AND vertically
+                        if (horizontalDistance < minHorizontalSpacing && verticalDistance < verticalSpacing) {
+                            overlaps = true;
+                            break;
+                        }
+                    }
+
+                    if (!overlaps) {
+                        foundPosition = true;
+                    } else {
+                        yOffset += verticalSpacing;
+                    }
+                }
+
+                // If we ran out of vertical space, wrap back to the top
+                if (yOffset >= height - 20) {
+                    yOffset = 15;
+                }
+
+                // Draw vertical line from bottom to label
+                ctx.strokeStyle = '#4caf50';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(x, height - 15);
+                ctx.lineTo(x, yOffset + 10);
+                ctx.stroke();
+
+                // Draw background rectangle
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(x - textWidth / 2 - 2, yOffset - 10, textWidth + 4, 12);
+
+                // Draw callsign text
+                ctx.fillStyle = '#4caf50';
+                ctx.fillText(callsign, x, yOffset);
+
+                // Track this position
+                usedPositions.push({ x: x, y: yOffset, width: textWidth });
+            }
+
+            // Reset text alignment
+            ctx.textAlign = 'left';
+        }
     }
 
     onEnable() {

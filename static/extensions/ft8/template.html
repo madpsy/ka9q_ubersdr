@@ -54,11 +54,6 @@
         </div>
 
         <div class="ft8-control-group">
-            <label for="ft8-min-score">Min Score:</label>
-            <input type="number" id="ft8-min-score" class="ft8-input-small" value="10" min="0" max="100">
-        </div>
-
-        <div class="ft8-control-group">
             <label>
                 <input type="checkbox" id="ft8-show-cq-only">
                 CQ Only
@@ -90,6 +85,11 @@
             <label for="ft8-message-filter">Filter:</label>
             <input type="text" id="ft8-message-filter" class="ft8-input-small" placeholder="Filter messages...">
         </div>
+    </div>
+
+    <!-- Spectrum Display -->
+    <div class="ft8-spectrum-container">
+        <canvas id="ft8-spectrum-canvas" class="ft8-spectrum-canvas"></canvas>
     </div>
 
     <!-- Message Table -->

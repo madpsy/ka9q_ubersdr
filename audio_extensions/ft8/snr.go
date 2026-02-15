@@ -29,16 +29,16 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 	// We need to extract the same information from our waterfall
 	// Reference: WSJT-X lib/ft8/ft8b.f90 lines 440-444
 
-	var xsig, xnoi float64
+	var xsig float64
 	numSymbols := len(itone)
 	validSamples := 0
 
-	numTones := 8
-	if protocol == ProtocolFT4 {
-		numTones = 4
-	}
+	// Calculate noise floor baseline from waterfall using WSJT-X method
+	// Reference: WSJT-X lib/ft8_decode.f90 line 201
+	// xbase = 10.0**(0.1*(sbase(nint(f1/3.125))-40.0))
+	xbase := calculateNoiseFloorBaseline(wf, cand, protocol)
 
-	// Measure signal and noise power across all symbols
+	// Measure signal power across all symbols
 	for i := 0; i < numSymbols; i++ {
 		block := int(cand.TimeOffset) + i
 
@@ -50,47 +50,30 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 		tone := itone[i]
 
 		// Get magnitude at expected tone (signal)
-		// Use getWaterfallMag which properly handles the waterfall indexing
 		mag := getWaterfallMag(wf, block, int(cand.FreqOffset)+tone, int(cand.TimeSub), int(cand.FreqSub))
 
-		// WSJT-X uses s8 which is the FFT magnitude directly
-		// Our waterfall stores: scaled = 2*db + 240
-		// We need the linear magnitude, not power
-		// Use the uint8 value directly as magnitude (scaled appropriately)
+		// Use the uint8 value directly as magnitude
 		magnitude := float64(mag)
 		xsig += magnitude * magnitude // Sum of squared magnitudes (like WSJT-X)
-
-		// Get magnitude at offset tone (noise)
-		// WSJT-X uses: ios = mod(itone(i)+4, 7) for FT8
-		// This wraps around the 8-tone alphabet
-		noiseTone := (tone + 4) % numTones
-		noiseMag := getWaterfallMag(wf, block, int(cand.FreqOffset)+noiseTone, int(cand.TimeSub), int(cand.FreqSub))
-		noiseMagnitude := float64(noiseMag)
-		xnoi += noiseMagnitude * noiseMagnitude
 
 		validSamples++
 	}
 
-	// Calculate SNR using WSJT-X formula
-	// Reference: ft8b.f90 lines 445-461
-
-	// Debug logging
-	log.Printf("[SNR Debug] validSamples=%d, xsig=%.6e, xnoi=%.6e, xsig/xnoi=%.6e",
-		validSamples, xsig, xnoi, xsig/xnoi)
-
-	// Use signal/noise ratio method
-	// Reference: WSJT-X lib/ft8/ft8b.f90 lines 447-448, 451
+	// Calculate SNR using WSJT-X baseline method
+	// Reference: ft8b.f90 lines 449-450, 452, 454
 	finalSNR := -24.0
-	if xnoi > 0 && validSamples > 0 {
-		arg := xsig/xnoi - 1.0
+	if xbase > 0 && validSamples > 0 {
+		arg := xsig/xbase/3.0e6 - 1.0
+		log.Printf("[SNR Debug] validSamples=%d, xsig=%.6e, xbase=%.6e, xsig/xbase=%.6e, arg=%.6e",
+			validSamples, xsig, xbase, xsig/xbase, arg)
 		if arg > 0.1 {
 			finalSNR = 10.0*math.Log10(arg) - 27.0
-			log.Printf("[SNR Debug] SUCCESS: arg=%.6e, finalSNR=%.2f dB", arg, finalSNR)
+			log.Printf("[SNR Debug] SUCCESS: finalSNR=%.2f dB", finalSNR)
 		} else {
-			log.Printf("[SNR Debug] arg too small: %.6e (xsig/xnoi - 1)", arg)
+			log.Printf("[SNR Debug] arg too small, using minimum -24 dB")
 		}
 	} else {
-		log.Printf("[SNR Debug] xnoi=%.6e, validSamples=%d - returning minimum", xnoi, validSamples)
+		log.Printf("[SNR Debug] xbase=%.6e, validSamples=%d - returning minimum", xbase, validSamples)
 	}
 
 	// Clamp to minimum SNR

@@ -126,11 +126,15 @@ func calculateNoiseFloorBaseline(wf *Waterfall, cand *Candidate, protocol Protoc
 
 	baseline := sbase[freqBin]
 
-	// Convert from dB back to linear
-	// sbase is in dB, we need linear magnitude
-	baselineMag := math.Pow(10.0, baseline/20.0) // Use 20 for magnitude (not 10 for power)
+	// WSJT-X converts: xbase = 10^(0.1*(sbase - 40))
+	// This is 10^(sbase/10 - 4) = 10^(sbase/10) / 10000
+	// But sbase is in dB of power, our baseline is in dB of magnitude²
+	// So we need: xbase = 10^(baseline/10) to get power from dB
+	// Then take sqrt to get magnitude: xbase = 10^(baseline/20)
+	// But we're working with magnitude² in xsig, so use power directly
+	baselinePower := math.Pow(10.0, (baseline-40.0)/10.0)
 
-	return baselineMag
+	return baselinePower
 }
 
 // CalculateSNRFromSync provides a quick SNR estimate from sync score

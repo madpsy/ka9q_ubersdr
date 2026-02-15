@@ -15,7 +15,8 @@ import (
 type Waterfall struct {
 	MaxBlocks   int      // Number of blocks (symbols) allocated
 	NumBlocks   int      // Number of blocks (symbols) stored
-	NumBins     int      // Number of FFT bins (in terms of 6.25 Hz)
+	NumBins     int      // Number of FFT bins (in terms of tone spacing)
+	MinBin      int      // First FFT bin index (for frequency calculation)
 	TimeOSR     int      // Time oversampling rate
 	FreqOSR     int      // Frequency oversampling rate
 	Mag         []uint8  // FFT magnitudes [blocks][time_osr][freq_osr][num_bins]
@@ -73,6 +74,7 @@ func NewMonitor(sampleRate int, fMin, fMax float64, timeOSR, freqOSR int, protoc
 		MaxBlocks:   maxBlocks,
 		NumBlocks:   0,
 		NumBins:     numBins,
+		MinBin:      minBin,
 		TimeOSR:     timeOSR,
 		FreqOSR:     freqOSR,
 		Mag:         make([]uint8, maxBlocks*timeOSR*freqOSR*numBins),

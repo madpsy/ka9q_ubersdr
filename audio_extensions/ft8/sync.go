@@ -231,8 +231,8 @@ func insertCandidate(candidates []Candidate, newCand Candidate, maxCandidates in
 // GetCandidateFrequency calculates the audio frequency of a candidate
 func GetCandidateFrequency(wf *Waterfall, cand *Candidate, symbolPeriod float64) float64 {
 	// Frequency = (minBin + freqOffset + freqSub/freqOSR) / symbolPeriod
-	// where each bin represents 6.25 Hz (1/symbolPeriod for FT8)
-	freq := (float64(cand.FreqOffset) + float64(cand.FreqSub)/float64(wf.FreqOSR)) / symbolPeriod
+	// Reference: freq_hz = (mon->min_bin + cand->freq_offset + (float)cand->freq_sub / wf->freq_osr) / mon->symbol_period
+	freq := (float64(wf.MinBin) + float64(cand.FreqOffset) + float64(cand.FreqSub)/float64(wf.FreqOSR)) / symbolPeriod
 	return freq
 }
 

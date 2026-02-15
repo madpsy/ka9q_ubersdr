@@ -226,6 +226,11 @@
     border-color: #4a9eff;
 }
 
+/* Filter input should be wider for typing messages */
+#ft8-message-filter {
+    width: 120px;
+}
+
 /* Messages Container */
 .ft8-messages-container {
     height: 500px;
@@ -303,12 +308,17 @@
 
 .ft8-messages-table th:nth-child(9),
 .ft8-messages-table td:nth-child(9) {
-    width: auto; /* Message - takes remaining space */
-    min-width: 200px;
+    width: 80px; /* TX Call */
 }
 
 .ft8-messages-table th:nth-child(10),
 .ft8-messages-table td:nth-child(10) {
+    width: auto; /* Message - takes remaining space */
+    min-width: 200px;
+}
+
+.ft8-messages-table th:nth-child(11),
+.ft8-messages-table td:nth-child(11) {
     width: 50px; /* Slot */
 }
 

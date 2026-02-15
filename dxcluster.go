@@ -281,27 +281,37 @@ func (c *DXClusterClient) login() error {
 	}
 	log.Printf("DX Cluster: >> %s", c.config.Callsign)
 
-	// Read welcome response
-	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-	n, err = conn.Read(buf)
-	if err != nil {
-		return fmt.Errorf("failed to read welcome: %w", err)
-	}
+	// Read welcome response line by line until we get the prompt
+	// The prompt line starts with our callsign followed by " de "
+	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	loginSuccessful := false
+	promptReceived := false
 
-	welcome := string(buf[:n])
-	// Log first few lines
-	lines := strings.Split(welcome, "\n")
-	for i, line := range lines {
-		if i < 10 && strings.TrimSpace(line) != "" {
-			log.Printf("DX Cluster: << %s", strings.TrimSpace(line))
+	for {
+		line, err := c.readLine()
+		if err != nil {
+			return fmt.Errorf("failed to read welcome: %w", err)
+		}
+
+		log.Printf("DX Cluster: << %s", line)
+
+		// Check for successful login indicators
+		lineLower := strings.ToLower(line)
+		if strings.Contains(lineLower, "hello") || strings.Contains(lineLower, "running dxspider") {
+			loginSuccessful = true
+		}
+
+		// Check if this is the prompt line (starts with our callsign followed by " de ")
+		if strings.HasPrefix(line, c.config.Callsign+" de ") {
+			promptReceived = true
+			break
 		}
 	}
 
-	// Check for success
-	welcomeLower := strings.ToLower(welcome)
-	if strings.Contains(welcomeLower, "hello") ||
-		strings.Contains(welcomeLower, "running dxspider") {
+	if loginSuccessful {
 		log.Println("DX Cluster: Login successful")
+	} else if promptReceived {
+		log.Println("DX Cluster: Login completed (prompt received)")
 	} else {
 		log.Println("DX Cluster: Login completed")
 	}

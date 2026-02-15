@@ -3,6 +3,7 @@ package ft8
 import (
 	"log"
 	"math"
+	"sort"
 )
 
 /*
@@ -30,7 +31,6 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 	// Reference: WSJT-X lib/ft8/ft8b.f90 lines 440-444
 
 	var xsig, xnoi float64
-	var xbase float64
 	numSymbols := len(itone)
 	validSamples := 0
 
@@ -38,6 +38,13 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 	if protocol == ProtocolFT4 {
 		numTones = 4
 	}
+
+	// Calculate noise floor baseline from waterfall
+	// Reference: WSJT-X lib/ft8_decode.f90 line 201
+	// xbase = 10.0**(0.1*(sbase(nint(f1/3.125))-40.0))
+	// sbase is the noise floor spectrum from sync8
+	// We'll estimate it by measuring average power across the waterfall at this frequency
+	xbase := calculateNoiseFloorBaseline(wf, cand, protocol)
 
 	// Measure signal and noise power across all symbols
 	for i := 0; i < numSymbols; i++ {
@@ -109,6 +116,48 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 	}
 
 	return float32(finalSNR)
+}
+
+// calculateNoiseFloorBaseline estimates the noise floor from the waterfall
+// This replaces WSJT-X's sbase calculation from sync8
+// We measure the average power across all frequency bins and time blocks
+func calculateNoiseFloorBaseline(wf *Waterfall, cand *Candidate, protocol Protocol) float64 {
+	// Sample the waterfall to estimate noise floor
+	// Use a percentile approach to avoid including strong signals
+	var samples []float64
+
+	// Sample across multiple blocks and frequency bins
+	sampleBlocks := 10
+	if sampleBlocks > wf.NumBlocks {
+		sampleBlocks = wf.NumBlocks
+	}
+
+	blockStep := wf.NumBlocks / sampleBlocks
+	if blockStep < 1 {
+		blockStep = 1
+	}
+
+	// Sample every few blocks across the waterfall
+	for block := 0; block < wf.NumBlocks; block += blockStep {
+		// Sample across frequency bins near the candidate
+		for freqBin := 0; freqBin < wf.NumBins; freqBin++ {
+			mag := getWaterfallMag(wf, block, freqBin, int(cand.TimeSub), int(cand.FreqSub))
+			samples = append(samples, float64(mag))
+		}
+	}
+
+	if len(samples) == 0 {
+		return 1.0 // Default baseline
+	}
+
+	// Calculate median (50th percentile) as noise floor estimate
+	// This is more robust than mean for excluding strong signals
+	sort.Float64s(samples)
+	median := samples[len(samples)/2]
+
+	// Return the median magnitude as baseline
+	// This will be used in the formula: xsig/xbase/3e6
+	return median
 }
 
 // CalculateSNRFromSync provides a quick SNR estimate from sync score

@@ -46,6 +46,9 @@ class FT8Extension extends DecoderExtension {
         this.spectrumCtx = null;
         this.cachedCallsigns = []; // Cache callsign positions to avoid recalculating every frame
         this.lastCachedSlot = null; // Track which slot we cached
+
+        // Cycle progress tracking
+        this.cycleProgressInterval = null;
     }
 
     onInitialize() {
@@ -353,6 +356,7 @@ class FT8Extension extends DecoderExtension {
         this.running = true;
         this.updateUI();
         this.updateStatus('Running', 'status-connected');
+        this.startCycleProgress();
     }
 
     stop() {
@@ -369,6 +373,7 @@ class FT8Extension extends DecoderExtension {
         this.running = false;
         this.updateUI();
         this.updateStatus('Stopped', 'status-disconnected');
+        this.stopCycleProgress();
     }
 
     attachAudioExtension() {
@@ -882,9 +887,66 @@ class FT8Extension extends DecoderExtension {
         }
     }
 
+    startCycleProgress() {
+        // Clear any existing interval
+        this.stopCycleProgress();
+
+        // Update progress bar every 100ms
+        this.cycleProgressInterval = setInterval(() => {
+            this.updateCycleProgress();
+        }, 100);
+
+        // Initial update
+        this.updateCycleProgress();
+    }
+
+    stopCycleProgress() {
+        if (this.cycleProgressInterval) {
+            clearInterval(this.cycleProgressInterval);
+            this.cycleProgressInterval = null;
+        }
+
+        // Reset progress bar
+        const progressBar = document.getElementById('ft8-cycle-progress-bar');
+        const progressText = document.getElementById('ft8-cycle-progress-text');
+        if (progressBar) {
+            progressBar.style.width = '0%';
+        }
+        if (progressText) {
+            progressText.textContent = '0.0s';
+        }
+    }
+
+    updateCycleProgress() {
+        const progressBar = document.getElementById('ft8-cycle-progress-bar');
+        const progressText = document.getElementById('ft8-cycle-progress-text');
+
+        if (!progressBar || !progressText) return;
+
+        // Get cycle duration based on protocol
+        const cycleDuration = this.config.protocol === 'FT4' ? 7.5 : 15.0;
+
+        // Get current time in seconds
+        const now = new Date();
+        const seconds = now.getSeconds() + (now.getMilliseconds() / 1000);
+
+        // Calculate position within current cycle
+        const cyclePosition = seconds % cycleDuration;
+
+        // Calculate percentage (0-100)
+        const percentage = (cyclePosition / cycleDuration) * 100;
+
+        // Update progress bar width
+        progressBar.style.width = percentage + '%';
+
+        // Update text display
+        progressText.textContent = cyclePosition.toFixed(1) + 's';
+    }
+
     onDetach() {
         console.log('FT8: Extension detached');
         this.removeBinaryMessageHandler();
+        this.stopCycleProgress();
         this.running = false;
         this.updateUI();
         this.updateStatus('Stopped', 'status-disconnected');
@@ -1092,6 +1154,7 @@ class FT8Extension extends DecoderExtension {
             this.stop();
         }
         
+        this.stopCycleProgress();
         this.removeBinaryMessageHandler();
     }
 }

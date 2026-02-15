@@ -231,6 +231,44 @@
     width: 120px;
 }
 
+/* Cycle Progress Bar */
+.ft8-cycle-progress-group {
+    margin-left: auto;
+}
+
+.ft8-cycle-progress-container {
+    position: relative;
+    width: 150px;
+    height: 20px;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.ft8-cycle-progress-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: linear-gradient(90deg, #4a9eff 0%, #2196F3 100%);
+    transition: width 0.1s linear;
+    width: 0%;
+}
+
+.ft8-cycle-progress-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 11px;
+    font-weight: 600;
+    color: #e0e0e0;
+    font-family: monospace;
+    text-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
+    z-index: 1;
+}
+
 /* Spectrum Display */
 .ft8-spectrum-container {
     background: #0a0a0a;

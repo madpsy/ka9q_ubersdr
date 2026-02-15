@@ -253,7 +253,7 @@ func (d *FT8Decoder) decode() []DecodeResult {
 	crcFailures := 0
 
 	// Process each candidate
-	for i, cand := range candidates {
+	for _, cand := range candidates {
 		// Attempt to decode this candidate
 		message, status, success := DecodeCandidate(wf, &cand, d.config.Protocol, d.config.LDPCIterations)
 
@@ -261,16 +261,18 @@ func (d *FT8Decoder) decode() []DecodeResult {
 			// Decoding failed (LDPC errors or CRC mismatch)
 			if status.LDPCErrors > 0 {
 				ldpcFailures++
-				if i < 5 { // Log first 5 failures
-					log.Printf("[FT8 Decoder] Candidate %d: LDPC failed with %d errors (score=%d, freq=%.1f Hz)",
-						i, status.LDPCErrors, cand.Score, status.Frequency)
-				}
+				// LDPC failure logging disabled to reduce console noise
+				// if i < 5 { // Log first 5 failures
+				// 	log.Printf("[FT8 Decoder] Candidate %d: LDPC failed with %d errors (score=%d, freq=%.1f Hz)",
+				// 		i, status.LDPCErrors, cand.Score, status.Frequency)
+				// }
 			} else {
 				crcFailures++
-				if i < 5 { // Log first 5 failures
-					log.Printf("[FT8 Decoder] Candidate %d: CRC mismatch (extracted=%04X, calculated=%04X, score=%d, freq=%.1f Hz)",
-						i, status.CRCExtracted, status.CRCCalculated, cand.Score, status.Frequency)
-				}
+				// CRC failure logging disabled to reduce console noise
+				// if i < 5 { // Log first 5 failures
+				// 	log.Printf("[FT8 Decoder] Candidate %d: CRC mismatch (extracted=%04X, calculated=%04X, score=%d, freq=%.1f Hz)",
+				// 		i, status.CRCExtracted, status.CRCCalculated, cand.Score, status.Frequency)
+				// }
 			}
 			continue
 		}

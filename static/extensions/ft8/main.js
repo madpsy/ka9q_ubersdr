@@ -40,6 +40,7 @@ class FT8Extension extends DecoderExtension {
         // Sort state
         this.sortColumn = null; // Column index being sorted
         this.sortDirection = 'asc'; // 'asc' or 'desc'
+        this.sortDebounceTimer = null; // Debounce timer for sorting
 
         // Spectrum visualization
         this.spectrumCanvas = null;
@@ -257,11 +258,12 @@ class FT8Extension extends DecoderExtension {
             this.sortDirection = 'asc';
         }
 
-        // Get all visible rows
+        // Get only visible rows (those matching current filters)
         const tbody = document.getElementById('ft8-messages-tbody');
         if (!tbody) return;
 
-        const rows = Array.from(tbody.getElementsByTagName('tr'));
+        const rows = Array.from(tbody.getElementsByTagName('tr'))
+            .filter(row => row.style.display !== 'none');
         
         // Sort rows based on column type
         rows.sort((a, b) => {
@@ -314,8 +316,10 @@ class FT8Extension extends DecoderExtension {
             }
         });
 
-        // Re-append rows in sorted order
-        rows.forEach(row => tbody.appendChild(row));
+        // Re-append rows in sorted order using DocumentFragment for better performance
+        const fragment = document.createDocumentFragment();
+        rows.forEach(row => fragment.appendChild(row));
+        tbody.appendChild(fragment);
 
         // Update sort indicators
         this.updateSortIndicators(columnIndex);
@@ -657,9 +661,12 @@ class FT8Extension extends DecoderExtension {
         // Show or hide the row
         row.style.display = shouldShow ? '' : 'none';
         
-        // If sorting is active, re-sort the table to place new message in correct position
+        // If sorting is active, debounce re-sorting (only sort after 1 second of no new messages)
         if (this.sortColumn !== null) {
-            this.sortTable(this.sortColumn);
+            clearTimeout(this.sortDebounceTimer);
+            this.sortDebounceTimer = setTimeout(() => {
+                this.sortTable(this.sortColumn);
+            }, 1000);
         }
         
         // Auto-scroll to top if enabled (only if not sorting, as sorting changes scroll position)

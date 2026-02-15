@@ -263,6 +263,14 @@
     border-bottom: 2px solid #3a3a3a;
     font-size: 11px;
     text-transform: uppercase;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s;
+}
+
+.ft8-messages-table th:hover {
+    background-color: #333;
+    color: #4a9eff;
 }
 
 /* Fixed column widths for proper alignment */
@@ -409,12 +417,13 @@
 }
 
 .ft8-cell-tx-callsign a {
-    color: #e0e0e0;
-    text-decoration: underline;
+    color: #e0e0e0 !important;
+    text-decoration: none !important;
 }
 
 .ft8-cell-tx-callsign a:hover {
-    color: #4a9eff;
+    color: #4a9eff !important;
+    text-decoration: none !important;
 }
 
 .ft8-cell-message {

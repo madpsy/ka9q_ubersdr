@@ -35,6 +35,10 @@ class FT8Extension extends DecoderExtension {
         this.autoScroll = true;
         this.lastSyncTime = null;
         this.messageFilter = ''; // Filter text for messages
+        
+        // Sort state
+        this.sortColumn = null; // Column index being sorted
+        this.sortDirection = 'asc'; // 'asc' or 'desc'
     }
 
     onInitialize() {
@@ -195,7 +199,111 @@ class FT8Extension extends DecoderExtension {
         // Initialize totals display
         this.updateTotalsDisplay();
 
+        // Add click handlers to table headers for sorting
+        this.setupTableSorting();
+
         console.log('FT8: Event handlers setup complete');
+    }
+
+    setupTableSorting() {
+        const table = document.getElementById('ft8-messages-table');
+        if (!table) return;
+
+        const headers = table.querySelectorAll('thead th');
+        headers.forEach((header, index) => {
+            header.style.cursor = 'pointer';
+            header.style.userSelect = 'none';
+            header.addEventListener('click', () => this.sortTable(index));
+        });
+    }
+
+    sortTable(columnIndex) {
+        // Toggle sort direction if clicking the same column
+        if (this.sortColumn === columnIndex) {
+            this.sortDirection = this.sortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+            this.sortColumn = columnIndex;
+            this.sortDirection = 'asc';
+        }
+
+        // Get all visible rows
+        const tbody = document.getElementById('ft8-messages-tbody');
+        if (!tbody) return;
+
+        const rows = Array.from(tbody.getElementsByTagName('tr'));
+        
+        // Sort rows based on column type
+        rows.sort((a, b) => {
+            const aCell = a.cells[columnIndex];
+            const bCell = b.cells[columnIndex];
+            
+            if (!aCell || !bCell) return 0;
+
+            let aValue, bValue;
+
+            // Determine data type and extract values
+            switch (columnIndex) {
+                case 0: // UTC (time string)
+                    aValue = aCell.textContent;
+                    bValue = bCell.textContent;
+                    return this.sortDirection === 'asc'
+                        ? aValue.localeCompare(bValue)
+                        : bValue.localeCompare(aValue);
+
+                case 1: // SNR (number)
+                case 2: // Delta T (number)
+                case 3: // Frequency (number)
+                case 4: // Distance (number)
+                case 10: // Slot (number)
+                    aValue = parseFloat(aCell.textContent) || 0;
+                    bValue = parseFloat(bCell.textContent) || 0;
+                    return this.sortDirection === 'asc'
+                        ? aValue - bValue
+                        : bValue - aValue;
+
+                case 5: // Bearing (number with °)
+                    aValue = parseFloat(aCell.textContent.replace('°', '')) || 0;
+                    bValue = parseFloat(bCell.textContent.replace('°', '')) || 0;
+                    return this.sortDirection === 'asc'
+                        ? aValue - bValue
+                        : bValue - aValue;
+
+                case 6: // Country (string)
+                case 7: // Continent (string)
+                case 8: // TX Call (string)
+                case 9: // Message (string)
+                    aValue = aCell.textContent.trim();
+                    bValue = bCell.textContent.trim();
+                    return this.sortDirection === 'asc'
+                        ? aValue.localeCompare(bValue)
+                        : bValue.localeCompare(aValue);
+
+                default:
+                    return 0;
+            }
+        });
+
+        // Re-append rows in sorted order
+        rows.forEach(row => tbody.appendChild(row));
+
+        // Update sort indicators
+        this.updateSortIndicators(columnIndex);
+    }
+
+    updateSortIndicators(columnIndex) {
+        const table = document.getElementById('ft8-messages-table');
+        if (!table) return;
+
+        const headers = table.querySelectorAll('thead th');
+        headers.forEach((header, index) => {
+            // Remove existing indicators
+            header.textContent = header.textContent.replace(' ▲', '').replace(' ▼', '');
+            
+            // Add indicator to sorted column
+            if (index === columnIndex) {
+                header.textContent += this.sortDirection === 'asc' ? ' ▲' : ' ▼';
+            }
+        });
     }
 
     start() {

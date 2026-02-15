@@ -935,18 +935,28 @@ class FT8Extension extends DecoderExtension {
         }
 
         // Draw frequency scale at bottom
-        ctx.fillStyle = '#666';
+        ctx.fillStyle = '#000';
         ctx.font = '9px monospace';
         for (let freq = 0; freq <= maxDisplayFreq; freq += 500) {
             const x = (freq / maxDisplayFreq) * width;
             ctx.fillText(freq + 'Hz', x + 2, height - 5);
         }
 
-        // Draw callsigns from latest cycle
+        // Draw callsigns from latest matching odd/even cycle
+        // FT8/FT4 stations alternate between odd and even slots, so we want to show
+        // callsigns from the previous cycle with the same parity (odd/even)
         if (this.currentSlot > 0) {
-            // Get messages from the current slot and sort by frequency
-            const currentSlotMessages = this.messages
-                .filter(msg => msg.slot_number === this.currentSlot && msg.tx_callsign && msg.tx_callsign !== '-' && msg.frequency)
+            const currentParity = this.currentSlot % 2; // 0 for even, 1 for odd
+
+            // Get messages from the most recent slot with matching parity
+            const matchingSlotMessages = this.messages
+                .filter(msg => {
+                    // Check if slot has same parity and has required fields
+                    return msg.slot_number % 2 === currentParity &&
+                           msg.tx_callsign &&
+                           msg.tx_callsign !== '-' &&
+                           msg.frequency;
+                })
                 .sort((a, b) => a.frequency - b.frequency);
 
             // Draw each callsign at its frequency position
@@ -958,7 +968,7 @@ class FT8Extension extends DecoderExtension {
             const minHorizontalSpacing = 50; // Minimum pixels between labels horizontally
             const verticalSpacing = 14; // Vertical spacing between stacked labels
 
-            for (const msg of currentSlotMessages) {
+            for (const msg of matchingSlotMessages) {
                 const freq = msg.frequency;
                 const x = (freq / maxDisplayFreq) * width;
                 const callsign = msg.tx_callsign;

@@ -227,6 +227,11 @@ class FT8Extension extends DecoderExtension {
                     const optionText = selectedOption.text;
                     const protocol = optionText.includes('FT4') ? 'FT4' : 'FT8';
                     this.tuneToFrequency(parseInt(freq), mode, protocol);
+
+                    // Reset dropdown to allow re-selection of the same preset
+                    setTimeout(() => {
+                        e.target.value = '';
+                    }, 100);
                 }
             });
         }

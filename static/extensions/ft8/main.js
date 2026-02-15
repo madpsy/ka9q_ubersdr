@@ -219,6 +219,9 @@ class FT8Extension extends DecoderExtension {
         // Frequency selector
         const freqSelect = document.getElementById('ft8-frequency-select');
         if (freqSelect) {
+            // Store the last selected value
+            let lastSelectedValue = '';
+
             freqSelect.addEventListener('change', (e) => {
                 if (e.target.value) {
                     const [freq, mode] = e.target.value.split(',');
@@ -227,11 +230,24 @@ class FT8Extension extends DecoderExtension {
                     const optionText = selectedOption.text;
                     const protocol = optionText.includes('FT4') ? 'FT4' : 'FT8';
                     this.tuneToFrequency(parseInt(freq), mode, protocol);
+                    lastSelectedValue = e.target.value;
+                }
+            });
 
-                    // Reset dropdown to allow re-selection of the same preset
-                    setTimeout(() => {
-                        e.target.value = '';
-                    }, 100);
+            // Allow re-selection by detecting focus and click
+            freqSelect.addEventListener('focus', (e) => {
+                // Store current value
+                lastSelectedValue = e.target.value;
+            });
+
+            freqSelect.addEventListener('click', (e) => {
+                // If clicking on the same option, trigger the change manually
+                if (e.target.value && e.target.value === lastSelectedValue) {
+                    const [freq, mode] = e.target.value.split(',');
+                    const selectedOption = e.target.options[e.target.selectedIndex];
+                    const optionText = selectedOption.text;
+                    const protocol = optionText.includes('FT4') ? 'FT4' : 'FT8';
+                    this.tuneToFrequency(parseInt(freq), mode, protocol);
                 }
             });
         }

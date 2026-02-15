@@ -43,6 +43,8 @@ class FT8Extension extends DecoderExtension {
         // Spectrum visualization
         this.spectrumCanvas = null;
         this.spectrumCtx = null;
+        this.cachedCallsigns = []; // Cache callsign positions to avoid recalculating every frame
+        this.lastCachedSlot = null; // Track which slot we cached
     }
 
     onInitialize() {
@@ -946,95 +948,115 @@ class FT8Extension extends DecoderExtension {
         // FT8/FT4 stations alternate between odd and even slots, so we want to show
         // callsigns from the previous cycle with the same parity (odd/even)
         if (this.currentSlot > 0) {
-            const currentParity = this.currentSlot % 2; // 0 for even, 1 for odd
+            // Only recalculate callsign positions if the slot has changed
+            if (this.lastCachedSlot !== this.currentSlot) {
+                const currentParity = this.currentSlot % 2; // 0 for even, 1 for odd
 
-            // Find the most recent slot number with matching parity (excluding current slot)
-            let previousMatchingSlot = null;
-            for (let i = this.messages.length - 1; i >= 0; i--) {
-                const msg = this.messages[i];
-                if (msg.slot_number < this.currentSlot && msg.slot_number % 2 === currentParity) {
-                    previousMatchingSlot = msg.slot_number;
-                    break;
+                // Find the most recent slot number with matching parity (excluding current slot)
+                let previousMatchingSlot = null;
+                for (let i = this.messages.length - 1; i >= 0; i--) {
+                    const msg = this.messages[i];
+                    if (msg.slot_number < this.currentSlot && msg.slot_number % 2 === currentParity) {
+                        previousMatchingSlot = msg.slot_number;
+                        break;
+                    }
                 }
-            }
 
-            // Get messages only from that specific slot
-            const matchingSlotMessages = previousMatchingSlot !== null
-                ? this.messages
-                    .filter(msg => {
-                        return msg.slot_number === previousMatchingSlot &&
-                               msg.tx_callsign &&
-                               msg.tx_callsign !== '-' &&
-                               msg.frequency;
-                    })
-                    .sort((a, b) => a.frequency - b.frequency)
-                : [];
+                // Get messages only from that specific slot
+                const matchingSlotMessages = previousMatchingSlot !== null
+                    ? this.messages
+                        .filter(msg => {
+                            return msg.slot_number === previousMatchingSlot &&
+                                   msg.tx_callsign &&
+                                   msg.tx_callsign !== '-' &&
+                                   msg.frequency;
+                        })
+                        .sort((a, b) => a.frequency - b.frequency)
+                    : [];
 
-            // Draw each callsign at its frequency position
-            ctx.font = '11px monospace';
-            ctx.textAlign = 'center';
+                // Calculate positions for all callsigns
+                const usedPositions = [];
+                const minHorizontalSpacing = 50; // Minimum pixels between labels horizontally
+                const verticalSpacing = 14; // Vertical spacing between stacked labels
 
-            // Track used positions to avoid overlapping labels
-            const usedPositions = [];
-            const minHorizontalSpacing = 50; // Minimum pixels between labels horizontally
-            const verticalSpacing = 14; // Vertical spacing between stacked labels
+                this.cachedCallsigns = [];
 
-            for (const msg of matchingSlotMessages) {
-                const freq = msg.frequency;
-                const x = (freq / maxDisplayFreq) * width;
-                const callsign = msg.tx_callsign;
-                const textWidth = ctx.measureText(callsign).width;
+                for (const msg of matchingSlotMessages) {
+                    const freq = msg.frequency;
+                    const x = (freq / maxDisplayFreq) * width;
+                    const callsign = msg.tx_callsign;
 
-                // Find appropriate vertical position to avoid overlaps
-                let yOffset = 15;
-                let foundPosition = false;
+                    // Calculate text width once
+                    ctx.font = '11px monospace';
+                    const textWidth = ctx.measureText(callsign).width;
 
-                // Try different vertical positions until we find one that doesn't overlap
-                while (!foundPosition && yOffset < height - 20) {
-                    let overlaps = false;
+                    // Find appropriate vertical position to avoid overlaps
+                    let yOffset = 15;
+                    let foundPosition = false;
 
-                    // Check if this position overlaps with any existing label
-                    for (const usedPos of usedPositions) {
-                        const horizontalDistance = Math.abs(usedPos.x - x);
-                        const verticalDistance = Math.abs(usedPos.y - yOffset);
+                    // Try different vertical positions until we find one that doesn't overlap
+                    while (!foundPosition && yOffset < height - 20) {
+                        let overlaps = false;
 
-                        // Check for overlap: labels are too close horizontally AND vertically
-                        if (horizontalDistance < minHorizontalSpacing && verticalDistance < verticalSpacing) {
-                            overlaps = true;
-                            break;
+                        // Check if this position overlaps with any existing label
+                        for (const usedPos of usedPositions) {
+                            const horizontalDistance = Math.abs(usedPos.x - x);
+                            const verticalDistance = Math.abs(usedPos.y - yOffset);
+
+                            // Check for overlap: labels are too close horizontally AND vertically
+                            if (horizontalDistance < minHorizontalSpacing && verticalDistance < verticalSpacing) {
+                                overlaps = true;
+                                break;
+                            }
+                        }
+
+                        if (!overlaps) {
+                            foundPosition = true;
+                        } else {
+                            yOffset += verticalSpacing;
                         }
                     }
 
-                    if (!overlaps) {
-                        foundPosition = true;
-                    } else {
-                        yOffset += verticalSpacing;
+                    // If we ran out of vertical space, wrap back to the top
+                    if (yOffset >= height - 20) {
+                        yOffset = 15;
                     }
+
+                    // Cache this callsign's position
+                    this.cachedCallsigns.push({
+                        callsign: callsign,
+                        x: x,
+                        y: yOffset,
+                        textWidth: textWidth
+                    });
+
+                    // Track this position
+                    usedPositions.push({ x: x, y: yOffset, width: textWidth });
                 }
 
-                // If we ran out of vertical space, wrap back to the top
-                if (yOffset >= height - 20) {
-                    yOffset = 15;
-                }
+                this.lastCachedSlot = this.currentSlot;
+            }
 
+            // Draw the cached callsigns (fast operation)
+            ctx.font = '11px monospace';
+            ctx.textAlign = 'center';
+
+            for (const cached of this.cachedCallsigns) {
                 // Draw vertical line from bottom to label
                 ctx.strokeStyle = '#4caf50';
                 ctx.lineWidth = 1;
                 ctx.beginPath();
-                ctx.moveTo(x, height - 15);
-                ctx.lineTo(x, yOffset + 10);
+                ctx.moveTo(cached.x, height - 15);
+                ctx.lineTo(cached.x, cached.y + 10);
                 ctx.stroke();
 
                 // Draw background rectangle
                 ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-                ctx.fillRect(x - textWidth / 2 - 2, yOffset - 10, textWidth + 4, 12);
+                ctx.fillRect(cached.x - cached.textWidth / 2 - 2, cached.y - 10, cached.textWidth + 4, 12);
 
                 // Draw callsign text
                 ctx.fillStyle = '#4caf50';
-                ctx.fillText(callsign, x, yOffset);
-
-                // Track this position
-                usedPositions.push({ x: x, y: yOffset, width: textWidth });
+                ctx.fillText(cached.callsign, cached.x, cached.y);
             }
 
             // Reset text alignment

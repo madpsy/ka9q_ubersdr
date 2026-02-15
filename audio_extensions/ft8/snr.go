@@ -3,7 +3,6 @@ package ft8
 import (
 	"log"
 	"math"
-	"sort"
 )
 
 /*
@@ -39,13 +38,6 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 		numTones = 4
 	}
 
-	// Calculate noise floor baseline from waterfall
-	// Reference: WSJT-X lib/ft8_decode.f90 line 201
-	// xbase = 10.0**(0.1*(sbase(nint(f1/3.125))-40.0))
-	// sbase is the noise floor spectrum from sync8
-	// We'll estimate it by measuring average power across the waterfall at this frequency
-	xbase := calculateNoiseFloorBaseline(wf, cand, protocol)
-
 	// Measure signal and noise power across all symbols
 	for i := 0; i < numSymbols; i++ {
 		block := int(cand.TimeOffset) + i
@@ -64,11 +56,9 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 		// WSJT-X uses s8 which is the FFT magnitude directly
 		// Our waterfall stores: scaled = 2*db + 240
 		// We need the linear magnitude, not power
-		// mag = float(uint8_value) gives us a proxy for magnitude
 		// Use the uint8 value directly as magnitude (scaled appropriately)
 		magnitude := float64(mag)
 		xsig += magnitude * magnitude // Sum of squared magnitudes (like WSJT-X)
-		xbase += magnitude            // Sum of magnitudes for baseline
 
 		// Get magnitude at offset tone (noise)
 		// WSJT-X uses: ios = mod(itone(i)+4, 7) for FT8
@@ -85,15 +75,11 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 	// Reference: ft8b.f90 lines 445-461
 
 	// Debug logging
-	if validSamples > 0 && xbase > 0 {
-		// Log first calculation for debugging
-		log.Printf("[SNR Debug] validSamples=%d, xsig=%.6e, xbase=%.6e, xnoi=%.6e, xsig/xbase=%.6e, xsig/xnoi=%.6e",
-			validSamples, xsig, xbase, xnoi, xsig/xbase, xsig/xnoi)
-	}
+	log.Printf("[SNR Debug] validSamples=%d, xsig=%.6e, xnoi=%.6e, xsig/xnoi=%.6e",
+		validSamples, xsig, xnoi, xsig/xnoi)
 
-	// Use signal/noise ratio method instead of baseline method
-	// The baseline method requires calibrated sbase values from sync8 which we don't have
-	// Reference: WSJT-X lib/ft8/ft8b.f90 lines 447-448
+	// Use signal/noise ratio method
+	// Reference: WSJT-X lib/ft8/ft8b.f90 lines 447-448, 451
 	finalSNR := -24.0
 	if xnoi > 0 && validSamples > 0 {
 		arg := xsig/xnoi - 1.0
@@ -117,45 +103,51 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 }
 
 // calculateNoiseFloorBaseline estimates the noise floor from the waterfall
-// This replaces WSJT-X's sbase calculation from sync8
-// We measure the average power across all frequency bins and time blocks
+// This implements WSJT-X's get_spectrum_baseline + baseline approach
+// Reference: WSJT-X lib/ft8/get_spectrum_baseline.f90 and baseline.f90
 func calculateNoiseFloorBaseline(wf *Waterfall, cand *Candidate, protocol Protocol) float64 {
-	// Sample the waterfall to estimate noise floor
-	// Use a percentile approach to avoid including strong signals
-	var samples []float64
+	// Calculate average spectrum across all time blocks
+	savg := make([]float64, wf.NumBins)
 
-	// Sample across multiple blocks and frequency bins
-	sampleBlocks := 10
-	if sampleBlocks > wf.NumBlocks {
-		sampleBlocks = wf.NumBlocks
-	}
-
-	blockStep := wf.NumBlocks / sampleBlocks
-	if blockStep < 1 {
-		blockStep = 1
-	}
-
-	// Sample every few blocks across the waterfall
-	for block := 0; block < wf.NumBlocks; block += blockStep {
-		// Sample across frequency bins near the candidate
+	// Average power across all blocks for each frequency bin
+	for block := 0; block < wf.NumBlocks; block++ {
 		for freqBin := 0; freqBin < wf.NumBins; freqBin++ {
 			mag := getWaterfallMag(wf, block, freqBin, int(cand.TimeSub), int(cand.FreqSub))
-			samples = append(samples, float64(mag))
+			// Convert uint8 to linear power (magnitude squared)
+			magnitude := float64(mag)
+			savg[freqBin] += magnitude * magnitude
 		}
 	}
 
-	if len(samples) == 0 {
-		return 1.0 // Default baseline
+	// Normalize by number of blocks
+	if wf.NumBlocks > 0 {
+		for i := 0; i < wf.NumBins; i++ {
+			savg[i] /= float64(wf.NumBlocks)
+		}
 	}
 
-	// Calculate median (50th percentile) as noise floor estimate
-	// This is more robust than mean for excluding strong signals
-	sort.Float64s(samples)
-	median := samples[len(samples)/2]
+	// Fit baseline to remove signals and find noise floor
+	// Use full frequency range
+	nfa := 0
+	nfb := wf.NumBins - 1
+	sbase := calculateBaseline(savg, nfa, nfb)
 
-	// Return the median magnitude as baseline
-	// This will be used in the formula: xsig/xbase/3e6
-	return median
+	// Get baseline value at candidate frequency
+	freqBin := int(cand.FreqOffset)
+	if freqBin < 0 {
+		freqBin = 0
+	}
+	if freqBin >= len(sbase) {
+		freqBin = len(sbase) - 1
+	}
+
+	baseline := sbase[freqBin]
+
+	// Convert from dB back to linear
+	// sbase is in dB, we need linear magnitude
+	baselineMag := math.Pow(10.0, baseline/20.0) // Use 20 for magnitude (not 10 for power)
+
+	return baselineMag
 }
 
 // CalculateSNRFromSync provides a quick SNR estimate from sync score

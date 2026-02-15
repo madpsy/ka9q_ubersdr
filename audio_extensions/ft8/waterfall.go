@@ -49,11 +49,10 @@ func NewMonitor(sampleRate int, fMin, fMax float64, timeOSR, freqOSR int, protoc
 	subblockSize := blockSize / timeOSR
 
 	// FFT size calculation
-	// We want frequency resolution of 6.25 Hz / freqOSR
-	// FFT bin width = sampleRate / NFFT
-	// So NFFT = sampleRate / (6.25 / freqOSR)
-	toneBinWidth := 6.25 / float64(freqOSR)
-	nfft := int(float64(sampleRate) / toneBinWidth)
+	// NFFT = blockSize * freqOSR
+	// This gives the correct frequency resolution for both FT8 (6.25 Hz) and FT4 (20.833 Hz)
+	// based on their respective symbol periods (1/symbolPeriod = tone spacing)
+	nfft := blockSize * freqOSR
 
 	// Round up to next power of 2 for efficiency
 	nfft = nextPowerOf2(nfft)

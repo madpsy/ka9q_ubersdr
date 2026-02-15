@@ -259,16 +259,19 @@ func (c *DXClusterClient) login() error {
 		return fmt.Errorf("not connected")
 	}
 
-	// Read initial banner/login prompt (which may not have a newline)
-	line, err := c.readLineOrPrompt(5 * time.Second)
+	// Read initial data (banner or login prompt) - use short timeout
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
 	if err != nil {
 		return fmt.Errorf("failed to read banner: %w", err)
 	}
 
-	log.Printf("DX Cluster: << %s", line)
+	banner := string(buf[:n])
+	log.Printf("DX Cluster: << %s", strings.TrimSpace(banner))
 
 	// Check if we got login prompt
-	if !strings.Contains(strings.ToLower(line), "login:") {
+	if !strings.Contains(strings.ToLower(banner), "login:") {
 		return fmt.Errorf("login prompt not found in banner")
 	}
 
@@ -278,40 +281,38 @@ func (c *DXClusterClient) login() error {
 	}
 	log.Printf("DX Cluster: >> %s", c.config.Callsign)
 
-	// Read welcome response line by line until we get the prompt
-	// The prompt line starts with our callsign followed by " de "
-	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	loginSuccessful := false
-	promptReceived := false
+	// Read welcome response - but we need to consume ALL of it including the prompt
+	// Use a larger buffer and longer timeout for the extended banner
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	buf = make([]byte, 8192)
+	n, err = conn.Read(buf)
+	if err != nil {
+		return fmt.Errorf("failed to read welcome: %w", err)
+	}
 
-	for {
-		line, err := c.readLine()
-		if err != nil {
-			return fmt.Errorf("failed to read welcome: %w", err)
-		}
-
-		log.Printf("DX Cluster: << %s", line)
-
-		// Check for successful login indicators
-		lineLower := strings.ToLower(line)
-		if strings.Contains(lineLower, "hello") || strings.Contains(lineLower, "running dxspider") {
-			loginSuccessful = true
-		}
-
-		// Check if this is the prompt line (starts with our callsign followed by " de ")
-		if strings.HasPrefix(line, c.config.Callsign+" de ") {
-			promptReceived = true
-			break
+	welcome := string(buf[:n])
+	// Log all lines
+	lines := strings.Split(welcome, "\n")
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			log.Printf("DX Cluster: << %s", strings.TrimSpace(line))
 		}
 	}
 
-	if loginSuccessful {
+	// Check for success
+	welcomeLower := strings.ToLower(welcome)
+	if strings.Contains(welcomeLower, "hello") ||
+		strings.Contains(welcomeLower, "running dxspider") {
 		log.Println("DX Cluster: Login successful")
-	} else if promptReceived {
-		log.Println("DX Cluster: Login completed (prompt received)")
 	} else {
 		log.Println("DX Cluster: Login completed")
 	}
+
+	// IMPORTANT: The welcome message may have consumed data that was meant for the buffered reader
+	// We need to create a NEW buffered reader to ensure it's in sync
+	c.mu.Lock()
+	c.reader = bufio.NewReader(c.conn)
+	c.mu.Unlock()
 
 	// Clear read deadline for normal operation
 	conn.SetReadDeadline(time.Time{})

@@ -2613,6 +2613,8 @@ class SpectrumDisplay {
                 this.skipNextPan = true; // Don't pan back when we update frequency
                 this.config.onFrequencyClick(newFreq);
             }
+            // Clear bandwidth lines when marker is off-screen
+            this.bandwidthLinesCtx.clearRect(0, 0, this.bandwidthLinesCanvas.width, this.bandwidthLinesCanvas.height);
             return; // Don't draw marker if off-screen
         }
 

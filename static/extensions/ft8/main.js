@@ -612,9 +612,13 @@ class FT8Extension extends DecoderExtension {
             shouldShow = false;
         }
         
-        // Filter by message text
-        if (shouldShow && this.messageFilter && !message.message.toLowerCase().includes(this.messageFilter)) {
-            shouldShow = false;
+        // Filter by message text or country
+        if (shouldShow && this.messageFilter) {
+            const matchesMessage = message.message.toLowerCase().includes(this.messageFilter);
+            const matchesCountry = message.country && message.country.toLowerCase().includes(this.messageFilter);
+            if (!matchesMessage && !matchesCountry) {
+                shouldShow = false;
+            }
         }
         
         // Show or hide the row
@@ -651,12 +655,14 @@ class FT8Extension extends DecoderExtension {
         
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
+            const countryCell = row.cells[6]; // Country column is at index 6
             const messageCell = row.cells[9]; // Message column is at index 9
             const slotCell = row.cells[10]; // Slot column is at index 10
             
             if (!messageCell || !slotCell) continue;
             
             const messageText = messageCell.textContent.toLowerCase();
+            const countryText = countryCell ? countryCell.textContent.toLowerCase() : '';
             const slotNumber = parseInt(slotCell.textContent);
             
             let shouldShow = true;
@@ -671,9 +677,13 @@ class FT8Extension extends DecoderExtension {
                 shouldShow = false;
             }
             
-            // Filter by message text
-            if (shouldShow && this.messageFilter && !messageText.includes(this.messageFilter)) {
-                shouldShow = false;
+            // Filter by message text or country
+            if (shouldShow && this.messageFilter) {
+                const matchesMessage = messageText.includes(this.messageFilter);
+                const matchesCountry = countryText.includes(this.messageFilter);
+                if (!matchesMessage && !matchesCountry) {
+                    shouldShow = false;
+                }
             }
             
             // Show or hide the row

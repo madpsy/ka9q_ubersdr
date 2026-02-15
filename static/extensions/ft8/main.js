@@ -719,6 +719,10 @@ class FT8Extension extends DecoderExtension {
             tbody.innerHTML = '';
         }
         
+        // Clear spectrum markers cache
+        this.cachedCallsigns = [];
+        this.lastCachedSlot = null;
+        
         this.updateCounters();
     }
 

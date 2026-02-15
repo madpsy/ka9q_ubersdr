@@ -54,23 +54,22 @@ func CalculateSNR(wf *Waterfall, cand *Candidate, itone []int, protocol Protocol
 		// Use getWaterfallMag which properly handles the waterfall indexing
 		mag := getWaterfallMag(wf, block, int(cand.FreqOffset)+tone, int(cand.TimeSub), int(cand.FreqSub))
 
-		// Convert uint8 magnitude to linear power
-		// Waterfall encoding: scaled = 2*db + 240
-		// So: db = (mag - 240) / 2
-		// Linear power = 10^(db/10)
-		magDB := (float64(mag) - 240.0) / 2.0
-		power := math.Pow(10.0, magDB/10.0)
-		xsig += power * power // Sum of squared magnitudes
-		xbase += power        // Sum for baseline calculation
+		// WSJT-X uses s8 which is the FFT magnitude directly
+		// Our waterfall stores: scaled = 2*db + 240
+		// We need the linear magnitude, not power
+		// mag = float(uint8_value) gives us a proxy for magnitude
+		// Use the uint8 value directly as magnitude (scaled appropriately)
+		magnitude := float64(mag)
+		xsig += magnitude * magnitude // Sum of squared magnitudes (like WSJT-X)
+		xbase += magnitude            // Sum of magnitudes for baseline
 
 		// Get magnitude at offset tone (noise)
 		// WSJT-X uses: ios = mod(itone(i)+4, 7) for FT8
 		// This wraps around the 8-tone alphabet
 		noiseTone := (tone + 4) % numTones
 		noiseMag := getWaterfallMag(wf, block, int(cand.FreqOffset)+noiseTone, int(cand.TimeSub), int(cand.FreqSub))
-		noiseMagDB := (float64(noiseMag) - 240.0) / 2.0
-		noisePower := math.Pow(10.0, noiseMagDB/10.0)
-		xnoi += noisePower * noisePower
+		noiseMagnitude := float64(noiseMag)
+		xnoi += noiseMagnitude * noiseMagnitude
 
 		validSamples++
 	}

@@ -50,6 +50,9 @@ class FT8Extension extends DecoderExtension {
 
         // Cycle progress tracking
         this.cycleProgressInterval = null;
+
+        // Protocol display update interval
+        this.protocolDisplayInterval = null;
     }
 
     onInitialize() {
@@ -216,10 +219,31 @@ class FT8Extension extends DecoderExtension {
         // Frequency selector
         const freqSelect = document.getElementById('ft8-frequency-select');
         if (freqSelect) {
+            // Store the last selected value
+            let lastSelectedValue = '';
+
             freqSelect.addEventListener('change', (e) => {
                 if (e.target.value) {
                     const [freq, mode] = e.target.value.split(',');
                     // Detect protocol from the selected option text
+                    const selectedOption = e.target.options[e.target.selectedIndex];
+                    const optionText = selectedOption.text;
+                    const protocol = optionText.includes('FT4') ? 'FT4' : 'FT8';
+                    this.tuneToFrequency(parseInt(freq), mode, protocol);
+                    lastSelectedValue = e.target.value;
+                }
+            });
+
+            // Allow re-selection by detecting focus and click
+            freqSelect.addEventListener('focus', (e) => {
+                // Store current value
+                lastSelectedValue = e.target.value;
+            });
+
+            freqSelect.addEventListener('click', (e) => {
+                // If clicking on the same option, trigger the change manually
+                if (e.target.value && e.target.value === lastSelectedValue) {
+                    const [freq, mode] = e.target.value.split(',');
                     const selectedOption = e.target.options[e.target.selectedIndex];
                     const optionText = selectedOption.text;
                     const protocol = optionText.includes('FT4') ? 'FT4' : 'FT8';
@@ -366,6 +390,7 @@ class FT8Extension extends DecoderExtension {
         this.updateUI();
         this.updateStatus('Running', 'status-connected');
         this.startCycleProgress();
+        this.startProtocolDisplayUpdates();
     }
 
     stop() {
@@ -383,6 +408,7 @@ class FT8Extension extends DecoderExtension {
         this.updateUI();
         this.updateStatus('Stopped', 'status-disconnected');
         this.stopCycleProgress();
+        this.stopProtocolDisplayUpdates();
     }
 
     attachAudioExtension() {
@@ -810,7 +836,37 @@ class FT8Extension extends DecoderExtension {
     updateProtocolDisplay() {
         const protocolDisplay = document.getElementById('ft8-protocol-display');
         if (protocolDisplay) {
-            protocolDisplay.textContent = this.config.protocol;
+            // Get current frequency, mode, and bandwidth
+            const freq = this.radio ? this.radio.getFrequency() : 0;
+            const mode = this.radio ? this.radio.getMode().toUpperCase() : 'USB';
+            const bwLow = window.currentBandwidthLow || 0;
+            const bwHigh = window.currentBandwidthHigh || 0;
+            const bwTotal = Math.abs(bwHigh - bwLow);
+
+            // Format frequency in MHz
+            const freqMHz = (freq / 1000000).toFixed(3);
+
+            protocolDisplay.textContent = `${this.config.protocol} | ${freqMHz} MHz ${mode} | BW: ${bwTotal} Hz`;
+        }
+    }
+
+    startProtocolDisplayUpdates() {
+        // Clear any existing interval
+        this.stopProtocolDisplayUpdates();
+
+        // Update protocol display every second to reflect frequency/bandwidth changes
+        this.protocolDisplayInterval = setInterval(() => {
+            this.updateProtocolDisplay();
+        }, 1000);
+
+        // Initial update
+        this.updateProtocolDisplay();
+    }
+
+    stopProtocolDisplayUpdates() {
+        if (this.protocolDisplayInterval) {
+            clearInterval(this.protocolDisplayInterval);
+            this.protocolDisplayInterval = null;
         }
     }
 
@@ -959,6 +1015,7 @@ class FT8Extension extends DecoderExtension {
         console.log('FT8: Extension detached');
         this.removeBinaryMessageHandler();
         this.stopCycleProgress();
+        this.stopProtocolDisplayUpdates();
         this.running = false;
         this.updateUI();
         this.updateStatus('Stopped', 'status-disconnected');
@@ -1161,12 +1218,13 @@ class FT8Extension extends DecoderExtension {
 
     onDisable() {
         console.log('FT8: Extension disabled');
-        
+
         if (this.running) {
             this.stop();
         }
-        
+
         this.stopCycleProgress();
+        this.stopProtocolDisplayUpdates();
         this.removeBinaryMessageHandler();
     }
 }

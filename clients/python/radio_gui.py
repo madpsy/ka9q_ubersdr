@@ -422,8 +422,14 @@ class RadioGUI:
         # NAVTEX extension window
         self.navtex_window = None
 
+        # FT8 extension window
+        self.ft8_window = None
+
         # FSK extension window
         self.fsk_window = None
+
+        # SSTV extension window
+        self.sstv_window = None
 
         # Create UI
         self.create_widgets()
@@ -7402,6 +7408,10 @@ class RadioGUI:
             self.open_fsk_window()
         elif ext_name == 'wefax':
             self.open_wefax_window()
+        elif ext_name == 'sstv':
+            self.open_sstv_window()
+        elif ext_name == 'ft8':
+            self.open_ft8_window()
         else:
             messagebox.showinfo("Info", f"Extension '{ext_info['displayName']}' is not yet supported in the Python client")
 
@@ -7413,6 +7423,10 @@ class RadioGUI:
             return 'FSK/RTTY'
         if hasattr(self, 'wefax_window') and self.wefax_window and self.wefax_window.window.winfo_exists():
             return 'WEFAX'
+        if hasattr(self, 'sstv_window') and self.sstv_window and self.sstv_window.window.winfo_exists():
+            return 'SSTV'
+        if hasattr(self, 'ft8_window') and self.ft8_window and self.ft8_window.window.winfo_exists():
+            return 'FT8'
         return None
 
     def open_navtex_window(self):
@@ -7527,6 +7541,78 @@ class RadioGUI:
             self
         )
 
+    def open_sstv_window(self):
+        """Open the SSTV extension window."""
+        # Don't open multiple windows
+        if hasattr(self, 'sstv_window') and self.sstv_window and self.sstv_window.window.winfo_exists():
+            self.sstv_window.window.lift()  # Bring to front
+            return
+
+        # Check if another extension is open
+        open_ext = self.get_open_extension()
+        if open_ext:
+            messagebox.showinfo(
+                "Extension Already Open",
+                f"The {open_ext} extension is currently open.\n\n"
+                f"Please close it before opening another extension."
+            )
+            return
+
+        # Check if connected
+        if not self.connected:
+            messagebox.showwarning("Not Connected", "Please connect to a server first")
+            return
+
+        # Import SSTV extension
+        try:
+            from sstv_extension import create_sstv_window
+        except ImportError:
+            messagebox.showerror("Error", "SSTV extension not available")
+            return
+
+        # Create SSTV window
+        self.sstv_window = create_sstv_window(
+            self.root,
+            self.dxcluster_ws,
+            self
+        )
+
+    def open_ft8_window(self):
+        """Open the FT8 extension window."""
+        # Don't open multiple windows
+        if hasattr(self, 'ft8_window') and self.ft8_window and self.ft8_window.window.winfo_exists():
+            self.ft8_window.window.lift()  # Bring to front
+            return
+
+        # Check if another extension is open
+        open_ext = self.get_open_extension()
+        if open_ext:
+            messagebox.showinfo(
+                "Extension Already Open",
+                f"The {open_ext} extension is currently open.\n\n"
+                f"Please close it before opening another extension."
+            )
+            return
+
+        # Check if connected
+        if not self.connected:
+            messagebox.showwarning("Not Connected", "Please connect to a server first")
+            return
+
+        # Import FT8 extension
+        try:
+            from ft8_extension import create_ft8_window
+        except ImportError:
+            messagebox.showerror("Error", "FT8 extension not available")
+            return
+
+        # Create FT8 window
+        self.ft8_window = create_ft8_window(
+            self.root,
+            self.dxcluster_ws,
+            self
+        )
+
     def on_closing(self):
         """Handle window close event."""
         if self.connected:
@@ -7599,6 +7685,22 @@ class RadioGUI:
         # Close NAVTEX window if open
         if hasattr(self, 'navtex_window') and self.navtex_window and self.navtex_window.window.winfo_exists():
             self.navtex_window.window.destroy()
+
+        # Close FSK window if open
+        if hasattr(self, 'fsk_window') and self.fsk_window and self.fsk_window.window.winfo_exists():
+            self.fsk_window.window.destroy()
+
+        # Close WEFAX window if open
+        if hasattr(self, 'wefax_window') and self.wefax_window and self.wefax_window.window.winfo_exists():
+            self.wefax_window.window.destroy()
+
+        # Close SSTV window if open
+        if hasattr(self, 'sstv_window') and self.sstv_window and self.sstv_window.window.winfo_exists():
+            self.sstv_window.window.destroy()
+
+        # Close FT8 window if open
+        if hasattr(self, 'ft8_window') and self.ft8_window and self.ft8_window.window.winfo_exists():
+            self.ft8_window.window.destroy()
 
         # Disconnect MIDI controller if active
         if self.midi_controller:

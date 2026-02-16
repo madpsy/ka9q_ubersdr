@@ -566,14 +566,31 @@ function createCountriesChart(countries) {
         countriesChart.destroy();
     }
     
+    // Custom plugin to draw flags on top of bars
+    const flagPlugin = {
+        id: 'flagPlugin',
+        afterDatasetsDraw: function(chart) {
+            const ctx = chart.ctx;
+            const meta = chart.getDatasetMeta(0);
+            
+            meta.data.forEach((bar, index) => {
+                const countryCode = top10[index].country_code;
+                const flag = countryCode ? getFlagEmoji(countryCode) : '🌍';
+                
+                ctx.save();
+                ctx.font = '28px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+                ctx.fillText(flag, bar.x, bar.y - 8);
+                ctx.restore();
+            });
+        }
+    };
+    
     countriesChart = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: top10.map(c => {
-                // Show country name with flag emoji if we have country code
-                const flag = c.country_code ? getFlagEmoji(c.country_code) : '🌍';
-                return `${flag} ${c.country}`;
-            }),
+            labels: top10.map(c => c.country), // Just country name, no flag
             datasets: [{
                 label: 'Sessions',
                 data: top10.map(c => c.sessions),
@@ -621,7 +638,8 @@ function createCountriesChart(countries) {
                     }
                 }
             }
-        }
+        },
+        plugins: [flagPlugin]
     });
 }
 

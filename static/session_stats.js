@@ -184,11 +184,11 @@ async function createWorldMap(countries) {
         
         svg.call(zoom);
         
-        // Create color scale for countries (blue gradient)
+        // Create color scale for countries (yellow-orange-red gradient)
         // Use log scale for better color distribution when there's a large range
         const countryColorScale = d3.scaleSequentialLog()
             .domain([1, maxCountrySessions]) // Start at 1 to avoid log(0)
-            .interpolator(d3.interpolateBlues)
+            .interpolator(d3.interpolateYlOrRd)
             .clamp(true);
         
         // Create size scale for location markers

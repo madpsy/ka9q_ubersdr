@@ -101,6 +101,9 @@ class SSTVExtension:
         self.modal_mode_label = None
         self.modal_callsign_label = None
         self.modal_time_label = None
+
+        # Auto-save directory
+        self.auto_save_directory = None
         
         # Tone frequency tracking
         self.tone_freq_history = []
@@ -197,9 +200,14 @@ class SSTVExtension:
         controls_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         
         self.auto_save_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(controls_frame, text="Auto-Save Images", 
-                       variable=self.auto_save_var).pack(side=tk.LEFT, padx=(0, 15))
-        
+        ttk.Checkbutton(controls_frame, text="Auto-Save Images",
+                       variable=self.auto_save_var,
+                       command=self.on_auto_save_changed).pack(side=tk.LEFT, padx=(0, 5))
+
+        # Label to show auto-save directory
+        self.auto_save_path_label = ttk.Label(controls_frame, text="", foreground='gray')
+        self.auto_save_path_label.pack(side=tk.LEFT, padx=(0, 15))
+
         self.auto_scroll_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(controls_frame, text="Auto-Scroll",
                        variable=self.auto_scroll_var).pack(side=tk.LEFT)
@@ -256,6 +264,33 @@ class SSTVExtension:
         elif event.num == 4 or event.delta > 0:
             # Scroll up
             self.grid_canvas.yview_scroll(-1, "units")
+
+    def on_auto_save_changed(self):
+        """Handle auto-save checkbox change."""
+        if self.auto_save_var.get():
+            # Checkbox was enabled - prompt for directory
+            directory = filedialog.askdirectory(
+                title="Select Directory for Auto-Saving SSTV Images",
+                mustexist=True
+            )
+            if directory:
+                self.auto_save_directory = directory
+                self.config['auto_save'] = True
+                # Show the directory path
+                self.auto_save_path_label.config(text=f"→ {directory}")
+                print(f"SSTV: Auto-save enabled, directory: {directory}")
+            else:
+                # User cancelled - uncheck the box
+                self.auto_save_var.set(False)
+                self.auto_save_directory = None
+                self.config['auto_save'] = False
+                self.auto_save_path_label.config(text="")
+        else:
+            # Checkbox was disabled
+            self.auto_save_directory = None
+            self.config['auto_save'] = False
+            self.auto_save_path_label.config(text="")
+            print("SSTV: Auto-save disabled")
 
     def open_qrz(self, callsign):
         """Open QRZ.com page for the given callsign."""
@@ -325,6 +360,14 @@ class SSTVExtension:
         self.clear_images()
         
         # Attach to audio extension via WebSocket
+        print(f"[SSTV] Checking WebSocket connection...")
+        print(f"[SSTV] dxcluster_ws exists: {self.dxcluster_ws is not None}")
+        if self.dxcluster_ws:
+            print(f"[SSTV] dxcluster_ws.is_connected(): {self.dxcluster_ws.is_connected()}")
+            print(f"[SSTV] dxcluster_ws.connected: {self.dxcluster_ws.connected}")
+            print(f"[SSTV] dxcluster_ws.running: {self.dxcluster_ws.running}")
+            print(f"[SSTV] dxcluster_ws.ws exists: {self.dxcluster_ws.ws is not None}")
+
         if not self.dxcluster_ws or not self.dxcluster_ws.is_connected():
             messagebox.showerror("Error", "WebSocket not connected")
             return
@@ -605,8 +648,8 @@ class SSTVExtension:
         print(f"SSTV: Image complete ({total_lines} lines)")
         
         # Auto-save if enabled
-        if self.config['auto_save']:
-            self.save_current_image()
+        if self.config['auto_save'] and self.auto_save_directory:
+            self.auto_save_current_image()
         
         # Update status
         self.status_label.config(text=f"Complete: {total_lines} lines decoded")
@@ -966,12 +1009,47 @@ class SSTVExtension:
         # Re-render empty grid
         self.render_grid()
     
+    def auto_save_current_image(self):
+        """Automatically save the current image to the configured directory."""
+        if len(self.images) == 0 or self.current_image_index is None:
+            print("SSTV: No image to auto-save")
+            return
+
+        if not self.auto_save_directory:
+            print("SSTV: No auto-save directory configured")
+            return
+
+        image_index = self.current_image_index
+        if image_index < 0 or image_index >= len(self.images):
+            print(f"SSTV: Invalid image index: {image_index}")
+            return
+
+        image_data = self.images[image_index]
+
+        # Generate filename
+        timestamp = image_data['timestamp'].strftime("%Y-%m-%d_%H-%M-%S")
+        mode_name = image_data['mode'] or 'unknown'
+        callsign = f"_{image_data['callsign']}" if image_data['callsign'] else ''
+        filename = f"sstv_{mode_name}{callsign}_{timestamp}.png"
+
+        # Build full path
+        import os
+        save_path = os.path.join(self.auto_save_directory, filename)
+
+        try:
+            # Convert numpy array to PIL Image
+            pil_image = Image.fromarray(image_data['array'], 'RGB')
+            pil_image.save(save_path)
+            print(f"SSTV: Auto-saved image as {save_path}")
+        except Exception as e:
+            print(f"SSTV: Error auto-saving image: {e}")
+
     def save_current_image(self):
         """Save the current (most recent) image."""
         if len(self.images) == 0 or self.current_image_index is None:
             messagebox.showinfo("Info", "No image to save")
             return
-        
+
         self.save_specific_image(self.current_image_index)
     
     def save_specific_image(self, image_index: int):

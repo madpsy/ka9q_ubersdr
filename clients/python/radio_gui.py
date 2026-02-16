@@ -5639,7 +5639,7 @@ class RadioGUI:
             self.log_status(f"ERROR: Failed to open audio spectrum - {e}")
 
     def _ensure_dxcluster_ws(self):
-        """Ensure shared DX cluster WebSocket manager exists (connection is automatic)."""
+        """Ensure shared DX cluster WebSocket manager exists and is connected."""
         if not self.dxcluster_ws and DXCLUSTER_WS_AVAILABLE:
             # Create shared WebSocket manager
             hostname = self.server_var.get().strip()
@@ -5664,8 +5664,9 @@ class RadioGUI:
             if self.client and hasattr(self.client, 'user_session_id'):
                 user_session_id = self.client.user_session_id
                 self.dxcluster_ws = DXClusterWebSocket(ws_url, user_session_id)
-                # Note: Connection happens automatically when first callback is registered
-                self.log_status("DX cluster WebSocket manager created")
+                # Explicitly connect the WebSocket (don't wait for callbacks)
+                self.dxcluster_ws.connect()
+                self.log_status("DX cluster WebSocket manager created and connecting")
             else:
                 raise Exception("No active radio session")
 
@@ -7458,10 +7459,17 @@ class RadioGUI:
             messagebox.showerror("Error", "NAVTEX extension not available")
             return
 
+        # Ensure shared WebSocket is connected
+        try:
+            ws_manager = self._ensure_dxcluster_ws()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to initialize WebSocket: {e}")
+            return
+
         # Create NAVTEX window
         self.navtex_window = create_navtex_window(
             self.root,
-            self.dxcluster_ws,
+            ws_manager,
             self
         )
 
@@ -7494,10 +7502,17 @@ class RadioGUI:
             messagebox.showerror("Error", "FSK extension not available")
             return
 
+        # Ensure shared WebSocket is connected
+        try:
+            ws_manager = self._ensure_dxcluster_ws()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to initialize WebSocket: {e}")
+            return
+
         # Create FSK window
         self.fsk_window = create_fsk_window(
             self.root,
-            self.dxcluster_ws,
+            ws_manager,
             self
         )
 
@@ -7534,10 +7549,17 @@ class RadioGUI:
             messagebox.showerror("Error", "WEFAX extension not available")
             return
 
+        # Ensure shared WebSocket is connected
+        try:
+            ws_manager = self._ensure_dxcluster_ws()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to initialize WebSocket: {e}")
+            return
+
         # Create WEFAX window
         self.wefax_window = create_wefax_window(
             self.root,
-            self.dxcluster_ws,
+            ws_manager,
             self
         )
 
@@ -7570,10 +7592,17 @@ class RadioGUI:
             messagebox.showerror("Error", "SSTV extension not available")
             return
 
+        # Ensure shared WebSocket is connected
+        try:
+            ws_manager = self._ensure_dxcluster_ws()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to initialize WebSocket: {e}")
+            return
+
         # Create SSTV window
         self.sstv_window = create_sstv_window(
             self.root,
-            self.dxcluster_ws,
+            ws_manager,
             self
         )
 
@@ -7606,10 +7635,17 @@ class RadioGUI:
             messagebox.showerror("Error", "FT8 extension not available")
             return
 
+        # Ensure shared WebSocket is connected
+        try:
+            ws_manager = self._ensure_dxcluster_ws()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to initialize WebSocket: {e}")
+            return
+
         # Create FT8 window
         self.ft8_window = create_ft8_window(
             self.root,
-            self.dxcluster_ws,
+            ws_manager,
             self
         )
 

@@ -29,7 +29,8 @@ class DXClusterWebSocket:
         self.ws: Optional[websocket.WebSocketApp] = None
         self.ws_thread: Optional[threading.Thread] = None
         self.running = False
-        self.connected = False
+        self.connected = False  # WebSocket connection state
+        self.dx_cluster_connected = False  # DX cluster TCP connection state (from server)
 
         # Callbacks for different message types
         self.cw_spot_callbacks = []
@@ -46,8 +47,10 @@ class DXClusterWebSocket:
     def connect(self):
         """Start the WebSocket connection."""
         if self.running:
+            print(f"[DXCluster WebSocket] connect() called but already running")
             return
 
+        print(f"[DXCluster WebSocket] Starting connection to {self.ws_url}")
         self.running = True
         self._create_websocket()
 
@@ -107,8 +110,8 @@ class DXClusterWebSocket:
     def _on_open(self, ws):
         """Handle WebSocket connection opened."""
         self.connected = True
-        print("DX Cluster WebSocket connected")
-        self._notify_status(True)
+        print(f"[DXCluster WebSocket] WebSocket CONNECTED (ws_connected={self.connected}, dx_cluster_connected={self.dx_cluster_connected})")
+        # Don't notify status here - wait for server to send actual DX cluster status
 
         # Send any pending subscriptions that were queued before connection
         if hasattr(self, '_pending_subscriptions'):
@@ -139,8 +142,10 @@ class DXClusterWebSocket:
             elif msg_type == 'digital_spot':
                 self._notify_digital_spot(data.get('data', {}))
             elif msg_type == 'status':
-                self.connected = data.get('connected', False)
-                self._notify_status(self.connected)
+                # This is the DX cluster TCP connection status, NOT the WebSocket status
+                self.dx_cluster_connected = data.get('connected', False)
+                print(f"[DXCluster WebSocket] Received status message: dx_cluster_connected={self.dx_cluster_connected}, ws_connected={self.connected}")
+                self._notify_status(self.dx_cluster_connected)
             elif msg_type == 'spot' or msg_type == 'dx_spot':
                 # DX cluster spots - ignore for now (not implemented in Python client)
                 pass
@@ -160,7 +165,8 @@ class DXClusterWebSocket:
     def _on_close(self, ws, close_status_code, close_msg):
         """Handle WebSocket connection closed."""
         self.connected = False
-        print("DX Cluster WebSocket disconnected")
+        print(f"[DXCluster WebSocket] WebSocket DISCONNECTED (ws_connected={self.connected}, code={close_status_code}, msg={close_msg})")
+        # Notify that WebSocket is down (this is different from DX cluster status)
         self._notify_status(False)
 
     def _notify_cw_spot(self, spot_data: Dict[str, Any]):
@@ -256,9 +262,9 @@ class DXClusterWebSocket:
             try:
                 self.ws.send(json.dumps(message))
             except Exception as e:
-                print(f"Failed to send WebSocket message: {e}")
+                print(f"[DXCluster WebSocket] Failed to send message: {e}")
         else:
-            print("WebSocket not connected, cannot send message")
+            print(f"[DXCluster WebSocket] Cannot send message - ws_connected={self.connected}, ws_exists={self.ws is not None}, message_type={message.get('type', 'unknown')}")
 
     def on_cw_spot(self, callback: Callable[[Dict[str, Any]], None]):
         """
@@ -343,7 +349,13 @@ class DXClusterWebSocket:
 
     def is_connected(self) -> bool:
         """Check if WebSocket is connected."""
-        return self.connected
+        result = self.connected
+        print(f"[DXCluster WebSocket] is_connected() called: returning {result} (ws={self.ws is not None}, running={self.running})")
+        return result
+
+    def is_dx_cluster_connected(self) -> bool:
+        """Check if DX cluster TCP connection is active (on the server side)."""
+        return self.dx_cluster_connected
 
     def _send_subscription(self, stream_type: str, subscribe: bool):
         """

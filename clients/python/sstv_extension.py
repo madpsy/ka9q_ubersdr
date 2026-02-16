@@ -13,6 +13,7 @@ from typing import Optional, Dict, Callable, List
 import struct
 from PIL import Image, ImageTk
 import numpy as np
+import webbrowser
 
 
 class SSTVExtension:
@@ -96,6 +97,10 @@ class SSTVExtension:
         # Modal state
         self.modal_window = None
         self.modal_image_index = None
+        self.modal_canvas = None
+        self.modal_mode_label = None
+        self.modal_callsign_label = None
+        self.modal_time_label = None
         
         # Tone frequency tracking
         self.tone_freq_history = []
@@ -221,6 +226,15 @@ class SSTVExtension:
         # Bind frame resize to update scroll region
         self.grid_frame.bind('<Configure>', lambda e: self.grid_canvas.configure(
             scrollregion=self.grid_canvas.bbox('all')))
+
+        # Bind canvas resize to re-render grid with new column count
+        self.grid_canvas.bind('<Configure>', self.on_grid_canvas_resize)
+        self.last_grid_width = 0  # Track last width to avoid unnecessary re-renders
+
+        # Bind mouse wheel scrolling
+        self.grid_canvas.bind('<MouseWheel>', self.on_mousewheel)  # Windows/MacOS
+        self.grid_canvas.bind('<Button-4>', self.on_mousewheel)    # Linux scroll up
+        self.grid_canvas.bind('<Button-5>', self.on_mousewheel)    # Linux scroll down
         
         # Help text
         help_frame = ttk.Frame(main_frame)
@@ -233,6 +247,21 @@ class SSTVExtension:
         ttk.Label(help_frame, text=help_text, wraplength=950, foreground='gray').pack()
         
         main_frame.columnconfigure(0, weight=1)
+
+    def on_mousewheel(self, event):
+        """Handle mouse wheel scrolling."""
+        if event.num == 5 or event.delta < 0:
+            # Scroll down
+            self.grid_canvas.yview_scroll(1, "units")
+        elif event.num == 4 or event.delta > 0:
+            # Scroll up
+            self.grid_canvas.yview_scroll(-1, "units")
+
+    def open_qrz(self, callsign):
+        """Open QRZ.com page for the given callsign."""
+        url = f"https://qrz.com/db/{callsign}"
+        webbrowser.open(url)
+        print(f"SSTV: Opening QRZ.com for {callsign}")
         
     def populate_frequencies(self):
         """Populate frequency dropdown with grouped frequencies."""
@@ -425,7 +454,21 @@ class SSTVExtension:
         
         # Create new image
         self.create_new_image(width, height)
-        
+
+        # If modal is open and was showing the previous image, update to show new image
+        if (self.modal_window and self.modal_window.winfo_exists() and
+            self.modal_image_index == 0 and len(self.images) > 0):
+            # New image is now at index 0, update modal to show it
+            image_data = self.images[0]
+            if self.modal_mode_label:
+                self.modal_mode_label.config(text=f"Mode: {image_data['mode'] or 'Unknown'}")
+            if self.modal_callsign_label:
+                callsign_text = f"Callsign: {image_data['callsign']}" if image_data['callsign'] else "Callsign: None"
+                self.modal_callsign_label.config(text=callsign_text)
+            if self.modal_time_label:
+                time_text = f"Time: {image_data['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}"
+                self.modal_time_label.config(text=time_text)
+
         # Update info display
         self.image_size_label.config(text=f"{width}x{height}")
         self.line_count_label.config(text=f"0/{height}")
@@ -455,16 +498,28 @@ class SSTVExtension:
         self.fsk_callsign = None
         
         # Update current image mode if not redrawing
-        if (self.current_image_index is not None and 
+        if (self.current_image_index is not None and
             self.current_image_index < len(self.images) and
             not self.is_redrawing):
             self.images[self.current_image_index]['mode'] = mode_name
             self.render_grid()
-        
+
+            # If modal is open and showing this image, update the modal mode display
+            if (self.modal_window and self.modal_window.winfo_exists() and
+                self.modal_image_index == self.current_image_index and
+                self.modal_mode_label):
+                self.modal_mode_label.config(text=f"Mode: {mode_name}")
+
         # Update mode display
         self.mode_label.config(text=mode_name)
         self.callsign_label.config(text="")
-        
+
+        # If modal is open, clear the callsign in modal too (new image starting)
+        if (self.modal_window and self.modal_window.winfo_exists() and
+            self.modal_image_index == self.current_image_index and
+            self.modal_callsign_label):
+            self.modal_callsign_label.config(text="Callsign: None")
+
         print(f"SSTV: Mode detected - {mode_name}")
     
     def handle_image_line(self, data: bytes):
@@ -566,26 +621,32 @@ class SSTVExtension:
         """Handle FSK ID message: [type:1][len:1][callsign:len]"""
         if len(data) < 2:
             return
-        
+
         callsign_len = data[1]
-        
+
         if len(data) < 2 + callsign_len:
             return
-        
+
         callsign = data[2:2+callsign_len].decode('utf-8', errors='ignore')
-        
+
         print(f"SSTV: FSK callsign: {callsign}")
-        
+
         self.fsk_callsign = callsign
-        
+
         # Update current image callsign
         if self.current_image_index is not None and self.current_image_index < len(self.images):
             self.images[self.current_image_index]['callsign'] = callsign
             self.render_grid()
-        
+
+            # If modal is open and showing this image, update the modal callsign display
+            if (self.modal_window and self.modal_window.winfo_exists() and
+                self.modal_image_index == self.current_image_index and
+                self.modal_callsign_label):
+                self.modal_callsign_label.config(text=f"Callsign: {callsign}")
+
         # Update callsign display
         self.callsign_label.config(text=callsign)
-        
+
         print(f"SSTV: Callsign decoded - {callsign}")
     
     def handle_redraw_start(self):
@@ -676,23 +737,87 @@ class SSTVExtension:
         # Convert to PhotoImage
         photo = ImageTk.PhotoImage(pil_image)
         image_data['photo'] = photo
-        
+
         # Update canvas if it exists
         if image_data['canvas'] and image_data['canvas_image']:
             image_data['canvas'].itemconfig(image_data['canvas_image'], image=photo)
+
+        # If modal is open and showing the current image, update it too
+        if self.modal_window and self.modal_window.winfo_exists() and self.modal_image_index == self.current_image_index:
+            self.update_modal_image()
+
+    def update_modal_image(self):
+        """Update the modal window with the current image data."""
+        if not self.modal_canvas or not self.modal_window or not self.modal_window.winfo_exists():
+            return
+
+        if self.modal_image_index is None or self.modal_image_index >= len(self.images):
+            return
+
+        image_data = self.images[self.modal_image_index]
+
+        # Get canvas size
+        canvas_width = self.modal_canvas.winfo_width()
+        canvas_height = self.modal_canvas.winfo_height()
+
+        # Skip if canvas not yet rendered
+        if canvas_width <= 1 or canvas_height <= 1:
+            return
+
+        # Convert numpy array to PIL Image
+        pil_image = Image.fromarray(image_data['array'], 'RGB')
+
+        # Calculate scaling to fit canvas while maintaining aspect ratio
+        img_width = pil_image.width
+        img_height = pil_image.height
+
+        # Calculate scale factors for width and height
+        scale_w = canvas_width / img_width
+        scale_h = canvas_height / img_height
+
+        # Use the smaller scale to ensure image fits entirely
+        scale = min(scale_w, scale_h)
+
+        # Calculate new dimensions
+        new_width = int(img_width * scale)
+        new_height = int(img_height * scale)
+
+        # Resize image to fit canvas
+        pil_image = pil_image.resize((new_width, new_height), Image.NEAREST)
+
+        # Convert to PhotoImage
+        photo = ImageTk.PhotoImage(pil_image)
+
+        # Store reference to prevent garbage collection
+        self.modal_canvas.image = photo
+
+        # Update the canvas - center the image
+        self.modal_canvas.delete('all')
+        x_offset = (canvas_width - new_width) // 2
+        y_offset = (canvas_height - new_height) // 2
+        self.modal_canvas.create_image(x_offset, y_offset, anchor=tk.NW, image=photo)
     
     def render_grid(self):
         """Render the image grid."""
         # Clear grid
         for widget in self.grid_frame.winfo_children():
             widget.destroy()
-        
-        # Render all images in a grid (4 columns)
-        cols = 4
+
+        # Calculate columns based on available width
+        # Each image is ~320px wide + 10px padding = 330px per image
+        try:
+            grid_width = self.grid_canvas.winfo_width()
+            if grid_width <= 1:  # Not yet rendered
+                grid_width = 1000  # Default width
+            cols = max(1, grid_width // 330)
+        except:
+            cols = 3  # Fallback to 3 columns
+
+        # Render all images in a grid
         for idx, image_data in enumerate(self.images):
             row = idx // cols
             col = idx % cols
-            
+
             # Create frame for this image
             item_frame = ttk.Frame(self.grid_frame, relief=tk.RAISED, borderwidth=2)
             item_frame.grid(row=row, column=col, padx=5, pady=5, sticky=(tk.N, tk.S, tk.E, tk.W))
@@ -732,11 +857,15 @@ class SSTVExtension:
             time_str = image_data['timestamp'].strftime('%H:%M:%S')
             ttk.Label(info_frame, text=time_str, foreground='gray').pack(side=tk.LEFT)
             
-            # Middle - callsign (if present)
+            # Middle - callsign (if present) - clickable
             if image_data['callsign']:
-                ttk.Label(info_frame, text=image_data['callsign'],
-                         font=('TkDefaultFont', 9, 'bold'),
-                         foreground='green').pack(side=tk.LEFT, padx=(10, 0))
+                callsign_label = ttk.Label(info_frame, text=image_data['callsign'],
+                                          font=('TkDefaultFont', 9, 'bold'),
+                                          foreground='green', cursor='hand2')
+                callsign_label.pack(side=tk.LEFT, padx=(10, 0))
+                # Make clickable
+                callsign = image_data['callsign']
+                callsign_label.bind('<Button-1>', lambda e, cs=callsign: self.open_qrz(cs))
             
             # Right side - mode
             if image_data['mode']:
@@ -751,59 +880,63 @@ class SSTVExtension:
         if self.auto_scroll_var.get():
             self.grid_canvas.yview_moveto(0)
     
+    def on_grid_canvas_resize(self, event):
+        """Handle grid canvas resize to re-render with appropriate column count."""
+        new_width = event.width
+        # Only re-render if width changed significantly (more than 50px to avoid flicker)
+        if abs(new_width - self.last_grid_width) > 50:
+            self.last_grid_width = new_width
+            if len(self.images) > 0:
+                self.render_grid()
+
     def show_enlarged_image(self, image_data: Dict, image_index: int):
         """Show enlarged view of an image in a modal window."""
         # Close existing modal if open
         if self.modal_window and self.modal_window.winfo_exists():
             self.modal_window.destroy()
-        
+
         self.modal_image_index = image_index
-        
+
         # Create modal window
         self.modal_window = tk.Toplevel(self.window)
         self.modal_window.title(f"SSTV Image - {image_data['mode'] or 'Unknown'}")
         self.modal_window.geometry("800x700")
-        
+
         # Main frame
         modal_frame = ttk.Frame(self.modal_window, padding="10")
         modal_frame.pack(fill=tk.BOTH, expand=True)
-        
+
         # Info bar
         info_bar = ttk.Frame(modal_frame)
         info_bar.pack(fill=tk.X, pady=(0, 10))
-        
+
         mode_text = f"Mode: {image_data['mode'] or 'Unknown'}"
-        ttk.Label(info_bar, text=mode_text, font=('TkDefaultFont', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 20))
+        self.modal_mode_label = ttk.Label(info_bar, text=mode_text, font=('TkDefaultFont', 10, 'bold'))
+        self.modal_mode_label.pack(side=tk.LEFT, padx=(0, 20))
+
+        callsign_text = f"Callsign: {image_data['callsign']}" if image_data['callsign'] else "Callsign: None"
+        self.modal_callsign_label = ttk.Label(info_bar, text=callsign_text, font=('TkDefaultFont', 10, 'bold'),
+                                              foreground='green', cursor='hand2' if image_data['callsign'] else '')
+        self.modal_callsign_label.pack(side=tk.LEFT, padx=(0, 20))
         
+        # Make clickable if callsign exists
         if image_data['callsign']:
-            callsign_text = f"Callsign: {image_data['callsign']}"
-            ttk.Label(info_bar, text=callsign_text, font=('TkDefaultFont', 10, 'bold'),
-                     foreground='green').pack(side=tk.LEFT, padx=(0, 20))
-        
+            self.modal_callsign_label.bind('<Button-1>', lambda e, cs=image_data['callsign']: self.open_qrz(cs))
+
         time_text = f"Time: {image_data['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}"
-        ttk.Label(info_bar, text=time_text).pack(side=tk.LEFT)
-        
+        self.modal_time_label = ttk.Label(info_bar, text=time_text)
+        self.modal_time_label.pack(side=tk.LEFT)
+
         # Canvas for enlarged image
-        canvas = tk.Canvas(modal_frame, bg='black', highlightthickness=0)
-        canvas.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        
-        # Convert numpy array to PIL Image
-        pil_image = Image.fromarray(image_data['array'], 'RGB')
-        
-        # Scale 2x for better visibility
-        scaled_width = pil_image.width * 2
-        scaled_height = pil_image.height * 2
-        pil_image = pil_image.resize((scaled_width, scaled_height), Image.NEAREST)
-        
-        # Convert to PhotoImage
-        photo = ImageTk.PhotoImage(pil_image)
-        
-        # Store reference to prevent garbage collection
-        canvas.image = photo
-        
-        # Draw image
-        canvas.create_image(0, 0, anchor=tk.NW, image=photo)
-        canvas.config(scrollregion=(0, 0, scaled_width, scaled_height))
+        self.modal_canvas = tk.Canvas(modal_frame, bg='black', highlightthickness=0)
+        self.modal_canvas.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        # Wait for canvas to be rendered to get its size, then draw image
+        self.modal_window.update_idletasks()
+        self.update_modal_image()
+
+        # Bind canvas resize to update image scaling
+        self.modal_canvas.bind('<Configure>', lambda e: self.update_modal_image())
         
         # Buttons
         button_frame = ttk.Frame(modal_frame)
@@ -877,11 +1010,19 @@ class SSTVExtension:
         """Handle window closing."""
         if self.running:
             self.stop_decoder()
-        
+
         # Close modal if open
         if self.modal_window and self.modal_window.winfo_exists():
             self.modal_window.destroy()
-        
+
+        # Clear modal references
+        self.modal_window = None
+        self.modal_image_index = None
+        self.modal_canvas = None
+        self.modal_mode_label = None
+        self.modal_callsign_label = None
+        self.modal_time_label = None
+
         self.window.destroy()
 
 

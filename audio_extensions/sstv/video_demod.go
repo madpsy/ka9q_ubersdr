@@ -74,12 +74,15 @@ func NewVideoDemodulator(mode *ModeSpec, sampleRate float64, headerShift int, ad
 		}
 	}
 
-	// Calculate maximum signal length
+	// Calculate maximum signal length with safety margin for slant correction
+	// The corrected image may have adjusted rate and skip offset, so we need extra buffer
+	// Worst case: slant correction can adjust rate by ~±4% per iteration × 3 retries = ±12%
+	// Add 30% margin plus 15000 samples (~1.25s at 12kHz) to handle extreme cases
 	var maxLength int
 	if mode.ColorEnc == ColorYUV && mode.ImgWidth >= 512 { // PD modes
-		maxLength = int(mode.LineTime * float64(mode.NumLines) / 2 * sampleRate)
+		maxLength = int(mode.LineTime*float64(mode.NumLines)/2*sampleRate*1.3) + 15000
 	} else {
-		maxLength = int(mode.LineTime * float64(mode.NumLines) * sampleRate)
+		maxLength = int(mode.LineTime*float64(mode.NumLines)*sampleRate*1.3) + 15000
 	}
 
 	return &VideoDemodulator{
@@ -445,6 +448,7 @@ func (v *VideoDemodulator) RedrawFromLuminance(rate float64, skip int) []uint8 {
 	}
 
 	// Place pixels from stored luminance
+	outOfBoundsCount := 0
 	for _, p := range pixelGrid {
 		if p.Time >= 0 && p.Time < len(v.storedLum) {
 			lum := v.storedLum[p.Time]
@@ -456,7 +460,23 @@ func (v *VideoDemodulator) RedrawFromLuminance(rate float64, skip int) []uint8 {
 					image[p.X][p.Y+1][p.Channel] = lum
 				}
 			}
+		} else if p.Time >= len(v.storedLum) {
+			// Pixel time exceeds stored buffer - use last available sample
+			// This handles edge cases where rate adjustment pushes pixels beyond buffer
+			lum := v.storedLum[len(v.storedLum)-1]
+			image[p.X][p.Y][p.Channel] = lum
+
+			if p.Channel > 0 && (m.Name == "Robot 36" || m.Name == "Robot 24") {
+				if p.Y+1 < m.NumLines {
+					image[p.X][p.Y+1][p.Channel] = lum
+				}
+			}
+			outOfBoundsCount++
 		}
+	}
+
+	if outOfBoundsCount > 0 {
+		log.Printf("[SSTV Video] Warning: %d pixels exceeded stored luminance buffer (used fallback)", outOfBoundsCount)
 	}
 
 	// Convert image to RGB byte array

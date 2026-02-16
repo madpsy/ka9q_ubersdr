@@ -622,6 +622,27 @@ class MorseExtension extends DecoderExtension {
         }
     }
 
+    onProcessAudio(dataArray) {
+        // Morse processes audio on the backend (Go side) via the audio extension framework
+        // This method is required by DecoderExtension but does nothing for Morse
+        // Audio is sent to the backend when the decoder is attached via WebSocket
+    }
+
+    onEnable() {
+        console.log('Morse: Extension enabled');
+        this.setupBinaryHandler();
+    }
+
+    onDisable() {
+        console.log('Morse: Extension disabled');
+        
+        if (this.running) {
+            this.stopDecoder();
+        }
+        
+        this.restoreBinaryHandler();
+    }
+
     onActivate() {
         console.log('Morse: Extension activated');
     }

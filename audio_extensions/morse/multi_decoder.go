@@ -52,9 +52,15 @@ type DecoderSlot struct {
 
 // NewMultiChannelDecoder creates a new multi-channel decoder
 func NewMultiChannelDecoder(sampleRate int, config MorseConfig) *MultiChannelDecoder {
-	// Use bandwidth to determine frequency range if not specified
-	minFreq := config.CenterFrequency - 500 // Default: ±500 Hz around center
-	maxFreq := config.CenterFrequency + 500
+	// Scan the full audio bandwidth (typically 0-6000 Hz at 12 kHz sample rate)
+	// Use Nyquist frequency as the upper limit
+	minFreq := 100.0                     // Start at 100 Hz to avoid DC and very low frequencies
+	maxFreq := float64(sampleRate) / 2.0 // Nyquist frequency
+
+	// Cap at 5000 Hz for practical CW range
+	if maxFreq > 5000 {
+		maxFreq = 5000
+	}
 
 	mcd := &MultiChannelDecoder{
 		sampleRate:   sampleRate,

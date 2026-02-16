@@ -70,8 +70,8 @@ type TimeSpec struct {
 
 // MorseConfig contains configuration parameters
 type MorseConfig struct {
-	CenterFrequency float64 `json:"center_frequency"` // Hz (e.g., 600 for CW)
-	Bandwidth       float64 `json:"bandwidth"`        // Hz (e.g., 100)
+	CenterFrequency float64 `json:"center_frequency"` // Hz - for single decoder or assigned frequency
+	Bandwidth       float64 `json:"bandwidth"`        // Hz (e.g., 100) - per-decoder filter bandwidth
 	MinWPM          float64 `json:"min_wpm"`          // Minimum WPM (e.g., 12)
 	MaxWPM          float64 `json:"max_wpm"`          // Maximum WPM (e.g., 45)
 	ThresholdSNR    float64 `json:"threshold_snr"`    // SNR threshold in dB (e.g., 10)
@@ -80,7 +80,7 @@ type MorseConfig struct {
 // DefaultMorseConfig returns default configuration
 func DefaultMorseConfig() MorseConfig {
 	return MorseConfig{
-		CenterFrequency: 600.0,
+		CenterFrequency: 600.0, // Not used in multi-channel mode
 		Bandwidth:       100.0,
 		MinWPM:          12.0,
 		MaxWPM:          45.0,

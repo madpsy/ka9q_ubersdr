@@ -54,10 +54,9 @@
   },
   "presets": {
     "standard": {
-      "name": "Standard CW",
-      "description": "Standard CW settings (600 Hz, 12-45 WPM)",
+      "name": "Standard",
+      "description": "Standard settings (12-45 WPM)",
       "settings": {
-        "centerFreq": 600,
         "bandwidth": 100,
         "minWPM": 12,
         "maxWPM": 45,
@@ -65,10 +64,9 @@
       }
     },
     "fast": {
-      "name": "Fast CW",
-      "description": "High-speed CW (600 Hz, 20-60 WPM)",
+      "name": "Fast",
+      "description": "High-speed (20-60 WPM)",
       "settings": {
-        "centerFreq": 600,
         "bandwidth": 100,
         "minWPM": 20,
         "maxWPM": 60,
@@ -76,10 +74,9 @@
       }
     },
     "slow": {
-      "name": "Slow CW",
-      "description": "Slow CW for learning (600 Hz, 5-20 WPM)",
+      "name": "Slow",
+      "description": "Slow for learning (5-20 WPM)",
       "settings": {
-        "centerFreq": 600,
         "bandwidth": 100,
         "minWPM": 5,
         "maxWPM": 20,

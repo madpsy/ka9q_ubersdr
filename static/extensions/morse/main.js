@@ -16,7 +16,6 @@ class MorseExtension extends DecoderExtension {
 
         // Configuration
         this.config = {
-            center_frequency: 600,
             bandwidth: 100,
             min_wpm: 12,
             max_wpm: 45,
@@ -194,14 +193,13 @@ class MorseExtension extends DecoderExtension {
 
     applyPreset(preset) {
         const presets = {
-            standard: { center_frequency: 600, bandwidth: 100, min_wpm: 12, max_wpm: 45, threshold_snr: 10 },
-            fast: { center_frequency: 600, bandwidth: 100, min_wpm: 20, max_wpm: 60, threshold_snr: 10 },
-            slow: { center_frequency: 600, bandwidth: 100, min_wpm: 5, max_wpm: 20, threshold_snr: 10 }
+            standard: { bandwidth: 100, min_wpm: 12, max_wpm: 45, threshold_snr: 10 },
+            fast: { bandwidth: 100, min_wpm: 20, max_wpm: 60, threshold_snr: 10 },
+            slow: { bandwidth: 100, min_wpm: 5, max_wpm: 20, threshold_snr: 10 }
         };
 
         if (preset !== 'custom' && presets[preset]) {
             const config = presets[preset];
-            document.getElementById('morse-center-freq').value = config.center_frequency;
             document.getElementById('morse-bandwidth').value = config.bandwidth;
             document.getElementById('morse-min-wpm').value = config.min_wpm;
             document.getElementById('morse-max-wpm').value = config.max_wpm;
@@ -212,7 +210,6 @@ class MorseExtension extends DecoderExtension {
 
     updateConfig() {
         this.config = {
-            center_frequency: parseFloat(document.getElementById('morse-center-freq').value),
             bandwidth: parseFloat(document.getElementById('morse-bandwidth').value),
             min_wpm: parseFloat(document.getElementById('morse-min-wpm').value),
             max_wpm: parseFloat(document.getElementById('morse-max-wpm').value),
@@ -267,7 +264,6 @@ class MorseExtension extends DecoderExtension {
             type: 'audio_extension_attach',
             extension_name: 'morse',
             params: {
-                center_frequency: this.config.center_frequency,
                 bandwidth: this.config.bandwidth,
                 min_wpm: this.config.min_wpm,
                 max_wpm: this.config.max_wpm,

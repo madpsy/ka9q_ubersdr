@@ -37,7 +37,7 @@ func Factory(audioParams AudioExtensionParams, extensionParams map[string]interf
 func GetInfo() map[string]interface{} {
 	return map[string]interface{}{
 		"name":        "morse",
-		"description": "Morse code (CW) decoder with adaptive WPM detection",
+		"description": "Morse code decoder with adaptive WPM detection",
 		"version":     "1.0.0",
 		"parameters": map[string]interface{}{
 			"center_frequency": map[string]interface{}{

@@ -133,7 +133,6 @@ class MorseExtension extends DecoderExtension {
 
         // Configuration inputs
         const configInputs = [
-            'morse-center-freq',
             'morse-bandwidth',
             'morse-min-wpm',
             'morse-max-wpm',

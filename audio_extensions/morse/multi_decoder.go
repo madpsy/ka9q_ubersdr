@@ -193,13 +193,28 @@ func (mcd *MultiChannelDecoder) processSamples(samples []int16, resultChan chan<
 		mcd.decodersMu.RLock()
 		for _, slot := range mcd.decoders {
 			if slot.Active && slot.Decoder != nil {
-				// Create envelope detector for this decoder's frequency
-				// (In practice, each decoder has its own envelope detector)
-				slot.Decoder.processSamples([]int16{int16(floatSample * 32768.0)})
+				// Process sample through decoder's envelope detector
+				envelope := slot.Decoder.envelope.Process(floatSample)
+
+				// Update SNR estimate
+				snr := slot.Decoder.snrEstimator.Process(envelope)
+
+				// Detect key transitions
+				slot.Decoder.detectTransition(snr)
 			}
 		}
 		mcd.decodersMu.RUnlock()
 	}
+
+	// Check for word separators and flush buffers periodically
+	mcd.decodersMu.RLock()
+	for _, slot := range mcd.decoders {
+		if slot.Active && slot.Decoder != nil {
+			slot.Decoder.checkWordSeparator()
+			slot.Decoder.flushBuffers(resultChan, slot.ID)
+		}
+	}
+	mcd.decodersMu.RUnlock()
 }
 
 // updateDecoderAssignments assigns decoders to detected peaks
@@ -266,7 +281,10 @@ func (mcd *MultiChannelDecoder) assignDecoder(slot *DecoderSlot, peak Peak, resu
 		ThresholdSNR:    mcd.thresholdSNR,
 	}
 
-	slot.Decoder = NewMorseDecoder(mcd.sampleRate, config)
+	decoder := NewMorseDecoder(mcd.sampleRate, config)
+	decoder.decoderID = slot.ID // Set the decoder ID for multi-channel mode
+
+	slot.Decoder = decoder
 	slot.Frequency = peak.Frequency
 	slot.LastActivity = time.Now()
 	slot.Active = true

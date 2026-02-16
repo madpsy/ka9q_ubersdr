@@ -19,6 +19,7 @@ type MorseDecoder struct {
 	minWPM          float64
 	maxWPM          float64
 	wpmAlpha        float64 // Smoothing factor for WPM estimation
+	decoderID       int     // Decoder ID for multi-channel mode (0 for standalone)
 
 	// Signal processing
 	envelope     *EnvelopeDetector
@@ -237,11 +238,11 @@ func (d *MorseDecoder) processLoop(audioChan <-chan []int16, resultChan chan<- [
 			// Check for word separator timeout
 			d.checkWordSeparator()
 			// Flush text buffer periodically
-			d.flushBuffers(resultChan)
+			d.flushBuffers(resultChan, d.decoderID)
 
 		case <-wpmTicker.C:
 			// Send WPM update
-			d.sendWPMUpdate(resultChan)
+			d.sendWPMUpdate(resultChan, d.decoderID)
 		}
 	}
 }
@@ -374,7 +375,7 @@ func (d *MorseDecoder) processCharacter() {
 }
 
 // flushBuffers sends accumulated morse and text to the client in a combined message
-func (d *MorseDecoder) flushBuffers(resultChan chan<- []byte) {
+func (d *MorseDecoder) flushBuffers(resultChan chan<- []byte, decoderID int) {
 	d.bufferMu.Lock()
 
 	hasMorse := len(d.morseBuffer) > 0
@@ -389,28 +390,29 @@ func (d *MorseDecoder) flushBuffers(resultChan chan<- []byte) {
 
 	// Send combined message if we have either morse or text
 	if hasMorse || hasText {
-		d.sendCombinedMessage(resultChan, morse, text)
+		d.sendCombinedMessage(resultChan, decoderID, morse, text)
 	}
 }
 
 // sendCombinedMessage sends both morse and text in a single message
-// Binary protocol: [type:1][timestamp:8][morse_length:4][morse:length][text_length:4][text:length]
+// Binary protocol: [type:1][decoder_id:1][timestamp:8][morse_length:4][morse:length][text_length:4][text:length]
 // type: 0x01 = combined morse+text message
-func (d *MorseDecoder) sendCombinedMessage(resultChan chan<- []byte, morse, text string) {
+func (d *MorseDecoder) sendCombinedMessage(resultChan chan<- []byte, decoderID int, morse, text string) {
 	morseBytes := []byte(morse)
 	textBytes := []byte(text)
 
-	msg := make([]byte, 1+8+4+len(morseBytes)+4+len(textBytes))
+	msg := make([]byte, 1+1+8+4+len(morseBytes)+4+len(textBytes))
 
 	msg[0] = 0x01 // Combined message type
-	binary.BigEndian.PutUint64(msg[1:9], uint64(time.Now().Unix()))
+	msg[1] = byte(decoderID)
+	binary.BigEndian.PutUint64(msg[2:10], uint64(time.Now().Unix()))
 
 	// Morse data
-	binary.BigEndian.PutUint32(msg[9:13], uint32(len(morseBytes)))
-	copy(msg[13:], morseBytes)
+	binary.BigEndian.PutUint32(msg[10:14], uint32(len(morseBytes)))
+	copy(msg[14:], morseBytes)
 
 	// Text data
-	offset := 13 + len(morseBytes)
+	offset := 14 + len(morseBytes)
 	binary.BigEndian.PutUint32(msg[offset:offset+4], uint32(len(textBytes)))
 	copy(msg[offset+4:], textBytes)
 
@@ -422,14 +424,15 @@ func (d *MorseDecoder) sendCombinedMessage(resultChan chan<- []byte, morse, text
 }
 
 // sendWPMUpdate sends WPM information to the client
-// Binary protocol: [type:1][wpm:8]
+// Binary protocol: [type:1][decoder_id:1][wpm:8]
 // type: 0x03 = WPM update
-func (d *MorseDecoder) sendWPMUpdate(resultChan chan<- []byte) {
-	msg := make([]byte, 1+8)
+func (d *MorseDecoder) sendWPMUpdate(resultChan chan<- []byte, decoderID int) {
+	msg := make([]byte, 1+1+8)
 	msg[0] = 0x03 // WPM update type
+	msg[1] = byte(decoderID)
 
 	// Convert float64 to bytes
-	binary.BigEndian.PutUint64(msg[1:9], math.Float64bits(d.currentWPM))
+	binary.BigEndian.PutUint64(msg[2:10], math.Float64bits(d.currentWPM))
 
 	select {
 	case resultChan <- msg:

@@ -205,11 +205,6 @@ func (d *SSTVDecoder) decodeLoop(audioChan <-chan AudioSample, resultChan chan<-
 						d.state = StateDecodingVideo
 					}
 					// VIS not found yet, will try again on next 10ms chunk
-					// Log occasionally to show we're still running
-					if d.visDetector != nil && d.visDetector.iterationCount%500 == 0 {
-						log.Printf("[SSTV] Main loop: Still waiting for VIS (iteration %d, buffer=%d)",
-							d.visDetector.iterationCount, pcmBuffer.Available())
-					}
 
 				case StateDecodingVideo:
 					// Start video decoding in background, then immediately switch to feeding state

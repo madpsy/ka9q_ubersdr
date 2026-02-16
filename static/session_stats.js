@@ -340,7 +340,7 @@ async function createWorldMap(countries) {
             .on('mouseover', function(event, d) {
                 d3.select(this)
                     .style('fill', 'rgba(255, 99, 132, 1)')
-                    .style('stroke-width', '2');
+                    .style('stroke-width', 2 / currentZoomScale);
                 
                 tooltip.transition()
                     .duration(200)
@@ -352,7 +352,7 @@ async function createWorldMap(countries) {
             .on('mouseout', function(event, d) {
                 d3.select(this)
                     .style('fill', 'rgba(255, 99, 132, 0.7)')
-                    .style('stroke-width', '1');
+                    .style('stroke-width', 1 / currentZoomScale);
                 
                 tooltip.transition()
                     .duration(500)
@@ -376,7 +376,7 @@ async function createWorldMap(countries) {
                 .on('mouseover', function(event) {
                     d3.select(this)
                         .style('fill', '#45a049')
-                        .style('stroke-width', '3');
+                        .style('stroke-width', 3 / currentZoomScale);
                     
                     let tooltipContent = '<strong>Receiver Location</strong><br/>';
                     if (receiverInfo) {
@@ -402,7 +402,7 @@ async function createWorldMap(countries) {
                 .on('mouseout', function() {
                     d3.select(this)
                         .style('fill', '#4CAF50')
-                        .style('stroke-width', '2');
+                        .style('stroke-width', 2 / currentZoomScale);
                     
                     tooltip.transition()
                         .duration(500)

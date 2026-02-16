@@ -7,7 +7,7 @@ class MorseExtension extends DecoderExtension {
     constructor() {
         console.log('Morse: Constructor called');
         super('morse', {
-            displayName: 'Morse Code (CW) Decoder',
+            displayName: 'Morse Code Decoder',
             autoTune: false,
             requiresMode: 'usb',
             preferredBandwidth: 2400

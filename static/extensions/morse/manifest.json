@@ -1,8 +1,8 @@
 {
   "name": "morse",
-  "displayName": "Morse Code (CW) Decoder",
+  "displayName": "Morse Code Decoder",
   "version": "1.0.0",
-  "description": "Multi-channel Morse code decoder with adaptive WPM detection - Decodes up to 5 simultaneous CW signals",
+  "description": "Multi-channel Morse code decoder with adaptive WPM detection - Decodes up to 5 simultaneous signals",
   "author": "UberSDR",
   "type": "decoder",
   "icon": "📡",

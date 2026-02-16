@@ -626,10 +626,10 @@ class MorseExtension extends DecoderExtension {
     }
 }
 
-// Register extension
-if (typeof registerExtension === 'function') {
-    registerExtension(MorseExtension);
-    console.log('Morse extension registered');
+// Register the extension
+if (window.decoderManager) {
+    window.decoderManager.register(new MorseExtension());
+    console.log('✅ Morse Extension registered');
 } else {
-    console.error('registerExtension function not found');
+    console.error('decoderManager not available for Morse extension');
 }

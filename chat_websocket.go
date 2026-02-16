@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -1161,8 +1162,32 @@ func sanitizeMessage(message string) string {
 }
 
 // preventAllCaps converts all-caps messages to sentence case
-// This prevents "shouting" in chat while allowing normal use of acronyms
+// This prevents "shouting" in chat while allowing normal use of acronyms and callsigns
 func preventAllCaps(message string) string {
+	// Don't process very short messages (likely callsigns, acronyms, or abbreviations)
+	trimmed := strings.TrimSpace(message)
+	if len(trimmed) <= 10 {
+		return message
+	}
+
+	// Check if message looks like a callsign pattern (e.g., MM3NDH, W1ABC, K7XYZ)
+	// Callsigns typically have: letters, numbers, and are relatively short
+	words := strings.Fields(trimmed)
+	if len(words) == 1 {
+		// Single word - check if it looks like a callsign
+		hasDigit := false
+		for _, r := range words[0] {
+			if unicode.IsDigit(r) {
+				hasDigit = true
+				break
+			}
+		}
+		// If it has a digit and is short, it's likely a callsign
+		if hasDigit && len(words[0]) <= 10 {
+			return message
+		}
+	}
+
 	// Count uppercase vs lowercase letters
 	upperCount := 0
 	lowerCount := 0
@@ -1177,7 +1202,7 @@ func preventAllCaps(message string) string {
 
 	// If message is mostly uppercase (>70% of letters), convert to sentence case
 	totalLetters := upperCount + lowerCount
-	if totalLetters > 3 && float64(upperCount)/float64(totalLetters) > 0.7 {
+	if totalLetters > 10 && float64(upperCount)/float64(totalLetters) > 0.7 {
 		// Convert to lowercase first
 		message = strings.ToLower(message)
 		// Capitalize first letter
@@ -1198,7 +1223,7 @@ func preventAllCaps(message string) string {
 // This helps maintain a family-friendly chat environment
 func censorProfanity(message string) string {
 	// Profanity list - only the worst/most offensive words (case-insensitive matching)
-	// Includes common variations and plurals
+	// Order doesn't matter with regex approach
 	profanityList := []string{
 		// F-word variants
 		"fuck", "fucks", "fucked", "fucker", "fuckers", "fucking",
@@ -1210,9 +1235,7 @@ func censorProfanity(message string) string {
 		"dick", "dicks", "cock", "cocks", "pussy", "pussies", "cunt", "cunts",
 		// Homophobic slurs
 		"fag", "fags", "faggot", "faggots",
-		"dyke", "dykes",
-		"queer", "queers",
-		"tranny", "trannies",
+		"dyke", "dykes", "queer", "queers", "tranny", "trannies",
 		// Racial slurs (most offensive)
 		"nigger", "niggers", "nigga", "niggas",
 		"chink", "chinks", "gook", "gooks",
@@ -1226,8 +1249,6 @@ func censorProfanity(message string) string {
 		"spastic", "spastics", "spaz",
 	}
 
-	// Convert to lowercase for matching, but preserve original case structure
-	lowerMessage := strings.ToLower(message)
 	result := message
 
 	for _, word := range profanityList {
@@ -1239,38 +1260,21 @@ func censorProfanity(message string) string {
 		// Create censored version: first char + asterisks + last char
 		censored := string(word[0]) + strings.Repeat("*", len(word)-2) + string(word[len(word)-1])
 
-		// Find and replace all occurrences (case-insensitive)
-		// Use word boundaries to avoid partial matches (e.g., "assassin" shouldn't match "ass")
-		for {
-			idx := strings.Index(lowerMessage, word)
-			if idx == -1 {
-				break
-			}
+		// Use regex with word boundaries for accurate matching
+		// \b ensures we match whole words only (e.g., "ass" won't match in "assassin")
+		pattern := `(?i)\b` + regexp.QuoteMeta(word) + `\b`
+		re := regexp.MustCompile(pattern)
 
-			// Check if it's a whole word (not part of a larger word)
-			isWholeWord := true
-			if idx > 0 {
-				prevChar := rune(lowerMessage[idx-1])
-				if unicode.IsLetter(prevChar) || unicode.IsDigit(prevChar) {
-					isWholeWord = false
-				}
+		// Replace all occurrences, preserving the case of first/last characters
+		result = re.ReplaceAllStringFunc(result, func(match string) string {
+			// Preserve case of first and last characters from original match
+			if len(match) >= 3 {
+				first := string(match[0])
+				last := string(match[len(match)-1])
+				return first + strings.Repeat("*", len(match)-2) + last
 			}
-			if idx+len(word) < len(lowerMessage) {
-				nextChar := rune(lowerMessage[idx+len(word)])
-				if unicode.IsLetter(nextChar) || unicode.IsDigit(nextChar) {
-					isWholeWord = false
-				}
-			}
-
-			if isWholeWord {
-				// Replace in both result and lowerMessage
-				result = result[:idx] + censored + result[idx+len(word):]
-				lowerMessage = lowerMessage[:idx] + censored + lowerMessage[idx+len(word):]
-			} else {
-				// Skip this occurrence and continue searching after it
-				lowerMessage = lowerMessage[:idx] + strings.Repeat("X", len(word)) + lowerMessage[idx+len(word):]
-			}
-		}
+			return censored
+		})
 	}
 
 	return result

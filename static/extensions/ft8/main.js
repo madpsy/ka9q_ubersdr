@@ -855,13 +855,20 @@ class FT8Extension extends DecoderExtension {
     }
 
     updateNoMessagesDisplay() {
-        const noMessagesRow = document.getElementById('ft8-no-messages-row');
-        if (!noMessagesRow) return;
-
-        // Count visible messages (not filtered out)
         const tbody = document.getElementById('ft8-messages-tbody');
         if (!tbody) return;
 
+        let noMessagesRow = document.getElementById('ft8-no-messages-row');
+
+        // Create the row if it doesn't exist
+        if (!noMessagesRow) {
+            noMessagesRow = document.createElement('tr');
+            noMessagesRow.id = 'ft8-no-messages-row';
+            noMessagesRow.innerHTML = '<td colspan="11" style="text-align: center; padding: 20px; color: #ffa500; font-style: italic;"><strong>FT4 is currently under development</strong></td>';
+            tbody.appendChild(noMessagesRow);
+        }
+
+        // Count visible messages (not filtered out)
         const visibleMessages = Array.from(tbody.getElementsByTagName('tr'))
             .filter(row => row.id !== 'ft8-no-messages-row' && row.style.display !== 'none');
 
@@ -870,6 +877,8 @@ class FT8Extension extends DecoderExtension {
         // 2. There are no visible messages
         const shouldShow = this.config.protocol === 'FT4' && visibleMessages.length === 0;
         noMessagesRow.style.display = shouldShow ? '' : 'none';
+
+        console.log('FT8: updateNoMessagesDisplay - protocol:', this.config.protocol, 'visibleMessages:', visibleMessages.length, 'shouldShow:', shouldShow);
     }
 
     updateProtocolDisplay() {

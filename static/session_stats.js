@@ -154,6 +154,9 @@ async function createWorldMap(countries) {
         // Create a group for all map elements (for zooming)
         const mapGroup = svg.append('g');
         
+        // Track current zoom scale for counter-scaling strokes
+        let currentZoomScale = 1;
+        
         // Add zoom behavior
         const zoom = d3.zoom()
             .scaleExtent([1, 8]) // Allow zoom from 1x to 8x
@@ -162,6 +165,7 @@ async function createWorldMap(countries) {
                 
                 // Counter-scale markers so they maintain visual size
                 const scale = event.transform.k;
+                currentZoomScale = scale;
                 
                 // Scale listener location markers
                 mapGroup.selectAll('circle')
@@ -294,7 +298,7 @@ async function createWorldMap(countries) {
                 
                 d3.select(this)
                     .style('stroke', '#fff')
-                    .style('stroke-width', '2');
+                    .style('stroke-width', 2 / currentZoomScale);
                 
                 tooltip.transition()
                     .duration(200)
@@ -313,7 +317,7 @@ async function createWorldMap(countries) {
             .on('mouseout', function() {
                 d3.select(this)
                     .style('stroke', '#4a5568')
-                    .style('stroke-width', '0.5');
+                    .style('stroke-width', 0.5 / currentZoomScale);
                 
                 tooltip.transition()
                     .duration(500)

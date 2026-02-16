@@ -1,6 +1,7 @@
 package morse
 
 import (
+	"log"
 	"math"
 	"sort"
 
@@ -96,18 +97,20 @@ func (sa *SpectrumAnalyzer) computeSpectrum() {
 	}
 
 	// Calculate SNR spectrum (signal / noise floor)
-	noiseFloor := percentile(sa.spectrum, 20)
+	// Use median as noise floor estimate (more robust than percentile)
+	noiseFloor := percentile(sa.spectrum, 50)
 	if noiseFloor < 1e-10 {
 		noiseFloor = 1e-10
 	}
 
 	for i := range sa.snrSpectrum {
+		// SNR ratio (not in dB yet)
 		sa.snrSpectrum[i] = sa.spectrum[i] / noiseFloor
 	}
 }
 
 // DetectPeaks finds the N strongest peaks in the spectrum within the frequency range
-func (sa *SpectrumAnalyzer) DetectPeaks(n int, minSNR float64) []Peak {
+func (sa *SpectrumAnalyzer) DetectPeaks(n int, minSNRdB float64) []Peak {
 	// Find bin range for our frequency range
 	minBin := int(sa.minFreq / sa.df)
 	maxBin := int(sa.maxFreq / sa.df)
@@ -119,21 +122,47 @@ func (sa *SpectrumAnalyzer) DetectPeaks(n int, minSNR float64) []Peak {
 		maxBin = len(sa.snrSpectrum) - 1
 	}
 
+	// Convert minSNRdB to linear ratio
+	minSNRLinear := math.Pow(10.0, minSNRdB/10.0)
+
 	// Find all peaks above threshold
 	var peaks []Peak
 
+	// Debug: Find the strongest signal in the range
+	maxPower := 0.0
+	maxPowerBin := 0
+	for i := minBin; i <= maxBin; i++ {
+		if sa.spectrum[i] > maxPower {
+			maxPower = sa.spectrum[i]
+			maxPowerBin = i
+		}
+	}
+	log.Printf("[Spectrum] Strongest signal: %.1f Hz (bin %d, power: %.2e, SNR: %.1f dB)",
+		sa.freqBins[maxPowerBin], maxPowerBin, maxPower, 10.0*math.Log10(sa.snrSpectrum[maxPowerBin]))
+
 	for i := minBin + 1; i < maxBin; i++ {
-		// Check if this is a local maximum
+		// Check if this is a local maximum and above threshold
 		if sa.snrSpectrum[i] > sa.snrSpectrum[i-1] &&
 			sa.snrSpectrum[i] > sa.snrSpectrum[i+1] &&
-			sa.snrSpectrum[i] > minSNR {
+			sa.snrSpectrum[i] > minSNRLinear {
+
+			// Additional validation: check it's a significant peak
+			// Require at least 2x the threshold to avoid noise
+			if sa.snrSpectrum[i] < minSNRLinear*2.0 {
+				continue
+			}
 
 			// Refine frequency using parabolic interpolation
 			freq := sa.refineFrequency(i)
 
+			// Convert SNR to dB
+			snrDB := 10.0 * math.Log10(sa.snrSpectrum[i])
+
+			log.Printf("[Spectrum] Peak detected: %.1f Hz (SNR: %.1f dB)", freq, snrDB)
+
 			peaks = append(peaks, Peak{
 				Frequency: freq,
-				SNR:       10.0 * math.Log10(sa.snrSpectrum[i]),
+				SNR:       snrDB,
 				Bin:       i,
 			})
 		}

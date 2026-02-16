@@ -724,21 +724,19 @@ class SSTVExtension:
             image_data['canvas'] = canvas
             image_data['canvas_image'] = canvas_image
             
-            # Add info overlay
+            # Add info overlay - single horizontal line: time | callsign | mode
             info_frame = ttk.Frame(item_frame)
             info_frame.pack(fill=tk.X, padx=5, pady=5)
             
-            # Left side - callsign and time
-            left_info = ttk.Frame(info_frame)
-            left_info.pack(side=tk.LEFT)
-            
-            if image_data['callsign']:
-                ttk.Label(left_info, text=image_data['callsign'],
-                         font=('TkDefaultFont', 9, 'bold'),
-                         foreground='green').pack(anchor=tk.W)
-            
+            # Left side - time
             time_str = image_data['timestamp'].strftime('%H:%M:%S')
-            ttk.Label(left_info, text=time_str, foreground='gray').pack(anchor=tk.W)
+            ttk.Label(info_frame, text=time_str, foreground='gray').pack(side=tk.LEFT)
+            
+            # Middle - callsign (if present)
+            if image_data['callsign']:
+                ttk.Label(info_frame, text=image_data['callsign'],
+                         font=('TkDefaultFont', 9, 'bold'),
+                         foreground='green').pack(side=tk.LEFT, padx=(10, 0))
             
             # Right side - mode
             if image_data['mode']:

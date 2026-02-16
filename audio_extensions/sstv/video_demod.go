@@ -302,16 +302,7 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 	v.lastFreqLogTime = 0
 
 	// Process signal
-	lastLogSample := 0
 	for sampleNum := 0; sampleNum < length; sampleNum++ {
-		// Log progress every 50k samples (~4 seconds at 12kHz)
-		if sampleNum-lastLogSample >= 50000 {
-			progress := float64(sampleNum) / float64(length) * 100
-			log.Printf("[SSTV Video] Progress: %d/%d samples (%.1f%%), buffer has %d samples",
-				sampleNum, length, progress, pcmBuffer.Available())
-			lastLogSample = sampleNum
-		}
-
 		// Like slowrx video.c:266, ensure we have enough samples ahead
 		// We need at least 1024 samples available for FFT operations
 		available := pcmBuffer.Available()

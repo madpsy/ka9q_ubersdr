@@ -23,6 +23,7 @@ import (
 
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/fsk"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/ft8"
+	"github.com/cwsl/ka9q_ubersdr/audio_extensions/morse"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/navtex"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/sstv"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/wefax"
@@ -1091,6 +1092,35 @@ func main() {
 		},
 	)
 	log.Printf("Registered audio extension: ft8 v%s", ft8Info["version"].(string))
+
+	// Register Morse extension
+	morseInfo := morse.GetInfo()
+
+	morseFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
+		morseParams := morse.AudioExtensionParams{
+			SampleRate:    audioParams.SampleRate,
+			Channels:      audioParams.Channels,
+			BitsPerSample: audioParams.BitsPerSample,
+		}
+
+		morseExt, err := morse.Factory(morseParams, extensionParams)
+		if err != nil {
+			return nil, err
+		}
+
+		return &morseExtensionWrapper{ext: morseExt}, nil
+	}
+
+	audioExtensionRegistry.Register(
+		"morse",
+		morseFactoryWrapper,
+		AudioExtensionInfo{
+			Name:        morseInfo["name"].(string),
+			Description: morseInfo["description"].(string),
+			Version:     morseInfo["version"].(string),
+		},
+	)
+	log.Printf("Registered audio extension: morse v%s", morseInfo["version"].(string))
 
 	// Create audio extension manager (pass receiver locator and CTY database for enrichment)
 	audioExtensionManager := NewAudioExtensionManager(dxClusterWsHandler, sessions, audioExtensionRegistry, receiverLocator, globalCTY)
@@ -4427,5 +4457,34 @@ func (w *ft8ExtensionWrapper) Stop() error {
 }
 
 func (w *ft8ExtensionWrapper) GetName() string {
+	return w.ext.GetName()
+}
+
+// morseExtensionWrapper wraps a morse.AudioExtension to implement main.AudioExtension
+type morseExtensionWrapper struct {
+	ext morse.AudioExtension
+}
+
+func (w *morseExtensionWrapper) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
+	// Convert main.AudioSample to morse.AudioSample
+	morseChan := make(chan morse.AudioSample, cap(audioChan))
+	go func() {
+		defer close(morseChan)
+		for sample := range audioChan {
+			morseChan <- morse.AudioSample{
+				PCMData:      sample.PCMData,
+				RTPTimestamp: sample.RTPTimestamp,
+				GPSTimeNs:    sample.GPSTimeNs,
+			}
+		}
+	}()
+	return w.ext.Start(morseChan, resultChan)
+}
+
+func (w *morseExtensionWrapper) Stop() error {
+	return w.ext.Stop()
+}
+
+func (w *morseExtensionWrapper) GetName() string {
 	return w.ext.GetName()
 }

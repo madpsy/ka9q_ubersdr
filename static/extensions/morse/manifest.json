@@ -1,0 +1,90 @@
+{
+  "name": "morse",
+  "displayName": "Morse Code (CW) Decoder",
+  "version": "1.0.0",
+  "description": "Multi-channel Morse code decoder with adaptive WPM detection - Decodes up to 5 simultaneous CW signals",
+  "author": "UberSDR",
+  "type": "decoder",
+  "icon": "📡",
+  "category": "decoder",
+  "requiresAudio": true,
+  "defaultEnabled": false,
+  "files": {
+    "main": "main.js",
+    "styles": ["styles.css"],
+    "template": "template.html",
+    "scripts": []
+  },
+  "settings": {
+    "centerFreq": {
+      "type": "number",
+      "default": 600,
+      "min": 100,
+      "max": 3000,
+      "description": "Center frequency in Hz (typical CW tone)"
+    },
+    "bandwidth": {
+      "type": "number",
+      "default": 100,
+      "min": 10,
+      "max": 500,
+      "description": "Filter bandwidth in Hz"
+    },
+    "minWPM": {
+      "type": "number",
+      "default": 12,
+      "min": 5,
+      "max": 60,
+      "description": "Minimum words per minute"
+    },
+    "maxWPM": {
+      "type": "number",
+      "default": 45,
+      "min": 10,
+      "max": 100,
+      "description": "Maximum words per minute"
+    },
+    "thresholdSNR": {
+      "type": "number",
+      "default": 10,
+      "min": 1,
+      "max": 30,
+      "description": "SNR threshold in dB for signal detection"
+    }
+  },
+  "presets": {
+    "standard": {
+      "name": "Standard CW",
+      "description": "Standard CW settings (600 Hz, 12-45 WPM)",
+      "settings": {
+        "centerFreq": 600,
+        "bandwidth": 100,
+        "minWPM": 12,
+        "maxWPM": 45,
+        "thresholdSNR": 10
+      }
+    },
+    "fast": {
+      "name": "Fast CW",
+      "description": "High-speed CW (600 Hz, 20-60 WPM)",
+      "settings": {
+        "centerFreq": 600,
+        "bandwidth": 100,
+        "minWPM": 20,
+        "maxWPM": 60,
+        "thresholdSNR": 10
+      }
+    },
+    "slow": {
+      "name": "Slow CW",
+      "description": "Slow CW for learning (600 Hz, 5-20 WPM)",
+      "settings": {
+        "centerFreq": 600,
+        "bandwidth": 100,
+        "minWPM": 5,
+        "maxWPM": 20,
+        "thresholdSNR": 10
+      }
+    }
+  }
+}

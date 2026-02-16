@@ -1,0 +1,208 @@
+<div class="morse-container">
+    <!-- Header -->
+    <div class="morse-header">
+        <h3>Morse Code (CW) Decoder</h3>
+        <div class="morse-header-info">
+            <span class="morse-channel-count">5 Channels</span>
+        </div>
+        <div class="morse-header-controls">
+            <button id="morse-start-btn" class="btn btn-primary">Start</button>
+            <button id="morse-clear-all-btn" class="btn btn-secondary">Clear All</button>
+            <button id="morse-settings-btn" class="btn btn-secondary">⚙️ Settings</button>
+        </div>
+    </div>
+
+    <!-- Configuration Panel (collapsible) -->
+    <div class="morse-config-panel" id="morse-config-panel" style="display: none;">
+        <div class="morse-config-row">
+            <div class="morse-config-group">
+                <label for="morse-preset-select">Preset:</label>
+                <select id="morse-preset-select" class="morse-select">
+                    <option value="standard" selected>Standard CW (12-45 WPM)</option>
+                    <option value="fast">Fast CW (20-60 WPM)</option>
+                    <option value="slow">Slow CW (5-20 WPM)</option>
+                    <option value="custom">Custom</option>
+                </select>
+            </div>
+
+            <div class="morse-config-group">
+                <label for="morse-center-freq">Center Freq (Hz):</label>
+                <input type="number" id="morse-center-freq" class="morse-input" value="600" min="100" max="3000" step="50">
+            </div>
+
+            <div class="morse-config-group">
+                <label for="morse-bandwidth">Bandwidth (Hz):</label>
+                <input type="number" id="morse-bandwidth" class="morse-input" value="100" min="10" max="500" step="10">
+            </div>
+        </div>
+
+        <div class="morse-config-row">
+            <div class="morse-config-group">
+                <label for="morse-min-wpm">Min WPM:</label>
+                <input type="number" id="morse-min-wpm" class="morse-input" value="12" min="5" max="60" step="1">
+            </div>
+
+            <div class="morse-config-group">
+                <label for="morse-max-wpm">Max WPM:</label>
+                <input type="number" id="morse-max-wpm" class="morse-input" value="45" min="10" max="100" step="1">
+            </div>
+
+            <div class="morse-config-group">
+                <label for="morse-threshold-snr">SNR Threshold (dB):</label>
+                <input type="number" id="morse-threshold-snr" class="morse-input" value="10" min="1" max="30" step="1">
+            </div>
+        </div>
+
+        <div class="morse-config-row">
+            <div class="morse-config-group">
+                <label>
+                    <input type="checkbox" id="morse-show-morse" checked>
+                    Show Morse Elements
+                </label>
+            </div>
+
+            <div class="morse-config-group">
+                <label>
+                    <input type="checkbox" id="morse-auto-scroll" checked>
+                    Auto-Scroll
+                </label>
+            </div>
+
+            <div class="morse-config-group">
+                <label>
+                    <input type="checkbox" id="morse-show-timestamp" checked>
+                    Timestamps
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Decoder Channels -->
+    <div class="morse-channels-container">
+        <!-- Channel 0 -->
+        <div class="morse-channel" id="morse-channel-0" data-channel="0">
+            <div class="morse-channel-header">
+                <div class="morse-channel-title">
+                    <span class="morse-channel-number">Channel 0</span>
+                    <span class="morse-channel-status">Idle</span>
+                </div>
+                <div class="morse-channel-info">
+                    <span class="morse-channel-freq">---</span>
+                    <span class="morse-channel-wpm">-- WPM</span>
+                </div>
+                <div class="morse-channel-controls">
+                    <button class="morse-channel-clear-btn btn-icon" title="Clear">🗑️</button>
+                    <button class="morse-channel-copy-btn btn-icon" title="Copy">📋</button>
+                </div>
+            </div>
+            <div class="morse-channel-content">
+                <div class="morse-channel-text"></div>
+                <div class="morse-channel-morse"></div>
+            </div>
+        </div>
+
+        <!-- Channel 1 -->
+        <div class="morse-channel" id="morse-channel-1" data-channel="1">
+            <div class="morse-channel-header">
+                <div class="morse-channel-title">
+                    <span class="morse-channel-number">Channel 1</span>
+                    <span class="morse-channel-status">Idle</span>
+                </div>
+                <div class="morse-channel-info">
+                    <span class="morse-channel-freq">---</span>
+                    <span class="morse-channel-wpm">-- WPM</span>
+                </div>
+                <div class="morse-channel-controls">
+                    <button class="morse-channel-clear-btn btn-icon" title="Clear">🗑️</button>
+                    <button class="morse-channel-copy-btn btn-icon" title="Copy">📋</button>
+                </div>
+            </div>
+            <div class="morse-channel-content">
+                <div class="morse-channel-text"></div>
+                <div class="morse-channel-morse"></div>
+            </div>
+        </div>
+
+        <!-- Channel 2 -->
+        <div class="morse-channel" id="morse-channel-2" data-channel="2">
+            <div class="morse-channel-header">
+                <div class="morse-channel-title">
+                    <span class="morse-channel-number">Channel 2</span>
+                    <span class="morse-channel-status">Idle</span>
+                </div>
+                <div class="morse-channel-info">
+                    <span class="morse-channel-freq">---</span>
+                    <span class="morse-channel-wpm">-- WPM</span>
+                </div>
+                <div class="morse-channel-controls">
+                    <button class="morse-channel-clear-btn btn-icon" title="Clear">🗑️</button>
+                    <button class="morse-channel-copy-btn btn-icon" title="Copy">📋</button>
+                </div>
+            </div>
+            <div class="morse-channel-content">
+                <div class="morse-channel-text"></div>
+                <div class="morse-channel-morse"></div>
+            </div>
+        </div>
+
+        <!-- Channel 3 -->
+        <div class="morse-channel" id="morse-channel-3" data-channel="3">
+            <div class="morse-channel-header">
+                <div class="morse-channel-title">
+                    <span class="morse-channel-number">Channel 3</span>
+                    <span class="morse-channel-status">Idle</span>
+                </div>
+                <div class="morse-channel-info">
+                    <span class="morse-channel-freq">---</span>
+                    <span class="morse-channel-wpm">-- WPM</span>
+                </div>
+                <div class="morse-channel-controls">
+                    <button class="morse-channel-clear-btn btn-icon" title="Clear">🗑️</button>
+                    <button class="morse-channel-copy-btn btn-icon" title="Copy">📋</button>
+                </div>
+            </div>
+            <div class="morse-channel-content">
+                <div class="morse-channel-text"></div>
+                <div class="morse-channel-morse"></div>
+            </div>
+        </div>
+
+        <!-- Channel 4 -->
+        <div class="morse-channel" id="morse-channel-4" data-channel="4">
+            <div class="morse-channel-header">
+                <div class="morse-channel-title">
+                    <span class="morse-channel-number">Channel 4</span>
+                    <span class="morse-channel-status">Idle</span>
+                </div>
+                <div class="morse-channel-info">
+                    <span class="morse-channel-freq">---</span>
+                    <span class="morse-channel-wpm">-- WPM</span>
+                </div>
+                <div class="morse-channel-controls">
+                    <button class="morse-channel-clear-btn btn-icon" title="Clear">🗑️</button>
+                    <button class="morse-channel-copy-btn btn-icon" title="Copy">📋</button>
+                </div>
+            </div>
+            <div class="morse-channel-content">
+                <div class="morse-channel-text"></div>
+                <div class="morse-channel-morse"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="morse-status-bar">
+        <div class="morse-status-left">
+            <span id="morse-status-text" class="morse-status-text">Ready</span>
+            <div class="morse-status-indicators">
+                <span class="morse-indicator" id="morse-active-channels">
+                    <span class="morse-indicator-label">Active:</span>
+                    <span class="morse-indicator-value">0/5</span>
+                </span>
+            </div>
+        </div>
+        <div class="morse-status-right">
+            <span class="morse-help-text">💡 Decoder automatically finds and tracks up to 5 CW signals</span>
+        </div>
+    </div>
+</div>

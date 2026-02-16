@@ -224,6 +224,10 @@ class DXClusterClient {
                 // Response to ping
                 break;
 
+            case 'subscription_status':
+                // Subscription status confirmation from server
+                break;
+
             // Chat message types - handled by chat.js, not by DX Cluster client
             case 'chat_message':
             case 'chat_join_confirmed':

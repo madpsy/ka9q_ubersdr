@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/gorilla/websocket"
 )
@@ -622,6 +624,12 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 	// Sanitize message (removes control chars, encodes quotes)
 	messageText = sanitizeMessage(messageText)
 
+	// Prevent all-caps messages (convert to sentence case if mostly uppercase)
+	messageText = preventAllCaps(messageText)
+
+	// Censor profanity (replace middle characters with asterisks)
+	messageText = censorProfanity(messageText)
+
 	// Create chat message
 	chatMsg := ChatMessage{
 		Username:  username,
@@ -1150,6 +1158,122 @@ func sanitizeMessage(message string) string {
 		}
 	}
 	return trimString(cleaned, 250)
+}
+
+// preventAllCaps converts all-caps messages to sentence case
+// This prevents "shouting" in chat while allowing normal use of acronyms
+func preventAllCaps(message string) string {
+	// Count uppercase vs lowercase letters
+	upperCount := 0
+	lowerCount := 0
+
+	for _, r := range message {
+		if unicode.IsUpper(r) {
+			upperCount++
+		} else if unicode.IsLower(r) {
+			lowerCount++
+		}
+	}
+
+	// If message is mostly uppercase (>70% of letters), convert to sentence case
+	totalLetters := upperCount + lowerCount
+	if totalLetters > 3 && float64(upperCount)/float64(totalLetters) > 0.7 {
+		// Convert to lowercase first
+		message = strings.ToLower(message)
+		// Capitalize first letter
+		runes := []rune(message)
+		for i, r := range runes {
+			if unicode.IsLetter(r) {
+				runes[i] = unicode.ToUpper(r)
+				break
+			}
+		}
+		return string(runes)
+	}
+
+	return message
+}
+
+// censorProfanity replaces middle characters of profane words with asterisks
+// This helps maintain a family-friendly chat environment
+func censorProfanity(message string) string {
+	// Profanity list - only the worst/most offensive words (case-insensitive matching)
+	// Includes common variations and plurals
+	profanityList := []string{
+		// F-word variants
+		"fuck", "fucks", "fucked", "fucker", "fuckers", "fucking",
+		// S-word variants
+		"shit", "shits", "shitting", "shitty",
+		// Sexual/anatomical slurs
+		"ass", "asses", "asshole", "assholes",
+		"bitch", "bitches", "bastard", "bastards",
+		"dick", "dicks", "cock", "cocks", "pussy", "pussies", "cunt", "cunts",
+		// Homophobic slurs
+		"fag", "fags", "faggot", "faggots",
+		"dyke", "dykes",
+		"queer", "queers",
+		"tranny", "trannies",
+		// Racial slurs (most offensive)
+		"nigger", "niggers", "nigga", "niggas",
+		"chink", "chinks", "gook", "gooks",
+		"spic", "spics", "wetback", "wetbacks",
+		"kike", "kikes",
+		// Sexist slurs
+		"whore", "whores", "slut", "sluts",
+		// Ableist slurs
+		"retard", "retards", "retarded",
+		"mongo", "mongol", "mongoloid",
+		"spastic", "spastics", "spaz",
+	}
+
+	// Convert to lowercase for matching, but preserve original case structure
+	lowerMessage := strings.ToLower(message)
+	result := message
+
+	for _, word := range profanityList {
+		// Skip very short words (less than 3 chars) - can't censor meaningfully
+		if len(word) < 3 {
+			continue
+		}
+
+		// Create censored version: first char + asterisks + last char
+		censored := string(word[0]) + strings.Repeat("*", len(word)-2) + string(word[len(word)-1])
+
+		// Find and replace all occurrences (case-insensitive)
+		// Use word boundaries to avoid partial matches (e.g., "assassin" shouldn't match "ass")
+		for {
+			idx := strings.Index(lowerMessage, word)
+			if idx == -1 {
+				break
+			}
+
+			// Check if it's a whole word (not part of a larger word)
+			isWholeWord := true
+			if idx > 0 {
+				prevChar := rune(lowerMessage[idx-1])
+				if unicode.IsLetter(prevChar) || unicode.IsDigit(prevChar) {
+					isWholeWord = false
+				}
+			}
+			if idx+len(word) < len(lowerMessage) {
+				nextChar := rune(lowerMessage[idx+len(word)])
+				if unicode.IsLetter(nextChar) || unicode.IsDigit(nextChar) {
+					isWholeWord = false
+				}
+			}
+
+			if isWholeWord {
+				// Replace in both result and lowerMessage
+				result = result[:idx] + censored + result[idx+len(word):]
+				lowerMessage = lowerMessage[:idx] + censored + lowerMessage[idx+len(word):]
+			} else {
+				// Skip this occurrence and continue searching after it
+				lowerMessage = lowerMessage[:idx] + strings.Repeat("X", len(word)) + lowerMessage[idx+len(word):]
+			}
+		}
+	}
+
+	return result
 }
 
 // trimString trims a string to a maximum length (by rune count for proper UTF-8 handling)

@@ -1164,16 +1164,31 @@ func sanitizeMessage(message string) string {
 // preventAllCaps converts all-caps messages to sentence case
 // This prevents "shouting" in chat while allowing normal use of acronyms and callsigns
 func preventAllCaps(message string) string {
-	// Don't process very short messages (likely callsigns, acronyms, or abbreviations)
-	trimmed := strings.TrimSpace(message)
-	if len(trimmed) <= 10 {
+	// Count uppercase vs lowercase letters
+	upperCount := 0
+	lowerCount := 0
+	letterCount := 0
+
+	for _, r := range message {
+		if unicode.IsLetter(r) {
+			letterCount++
+			if unicode.IsUpper(r) {
+				upperCount++
+			} else if unicode.IsLower(r) {
+				lowerCount++
+			}
+		}
+	}
+
+	// Don't process if too few letters (likely acronyms or callsigns)
+	if letterCount < 8 {
 		return message
 	}
 
-	// Check if message looks like a callsign pattern (e.g., MM3NDH, W1ABC, K7XYZ)
-	// Callsigns typically have: letters, numbers, and are relatively short
+	// Check if message looks like a callsign (has digits mixed with letters)
+	trimmed := strings.TrimSpace(message)
 	words := strings.Fields(trimmed)
-	if len(words) == 1 {
+	if len(words) == 1 && len(words[0]) <= 10 {
 		// Single word - check if it looks like a callsign
 		hasDigit := false
 		for _, r := range words[0] {
@@ -1183,26 +1198,13 @@ func preventAllCaps(message string) string {
 			}
 		}
 		// If it has a digit and is short, it's likely a callsign
-		if hasDigit && len(words[0]) <= 10 {
+		if hasDigit {
 			return message
 		}
 	}
 
-	// Count uppercase vs lowercase letters
-	upperCount := 0
-	lowerCount := 0
-
-	for _, r := range message {
-		if unicode.IsUpper(r) {
-			upperCount++
-		} else if unicode.IsLower(r) {
-			lowerCount++
-		}
-	}
-
 	// If message is mostly uppercase (>70% of letters), convert to sentence case
-	totalLetters := upperCount + lowerCount
-	if totalLetters > 10 && float64(upperCount)/float64(totalLetters) > 0.7 {
+	if letterCount > 0 && float64(upperCount)/float64(letterCount) > 0.7 {
 		// Convert to lowercase first
 		message = strings.ToLower(message)
 		// Capitalize first letter

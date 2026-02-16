@@ -99,6 +99,14 @@ class MorseExtension extends DecoderExtension {
         container.innerHTML = template;
     }
 
+    getContentElement() {
+        const container = document.querySelector('.extension-content[data-extension="morse"]');
+        if (!container) {
+            console.error('Morse: Extension content container not found');
+        }
+        return container;
+    }
+
     setupEventHandlers() {
         // Start/Stop button
         const startBtn = document.getElementById('morse-start-btn');

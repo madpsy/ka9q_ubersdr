@@ -493,6 +493,64 @@ func (cm *ChatManager) RemoveUser(sessionID string) {
 	}
 }
 
+// RemoveUserMessages removes all messages from a specific user from the message buffer
+// This is typically called when a user is kicked or banned
+// Returns the number of messages removed
+func (cm *ChatManager) RemoveUserMessages(sessionID string) int {
+	cm.messageBufferMu.Lock()
+	defer cm.messageBufferMu.Unlock()
+
+	// Filter out messages from this user
+	filtered := make([]ChatMessage, 0, len(cm.messageBuffer))
+	removedCount := 0
+
+	for _, msg := range cm.messageBuffer {
+		if msg.SessionID != sessionID {
+			filtered = append(filtered, msg)
+		} else {
+			removedCount++
+		}
+	}
+
+	cm.messageBuffer = filtered
+
+	if removedCount > 0 {
+		log.Printf("Chat: Removed %d message(s) from session %s from message buffer", removedCount, sessionID)
+	}
+
+	return removedCount
+}
+
+// RemoveUserMessagesByIP removes all messages from users with a specific IP address
+// This is typically called when an IP is banned
+// Returns the number of messages removed
+func (cm *ChatManager) RemoveUserMessagesByIP(ip string) int {
+	// First, find all session IDs associated with this IP
+	sessionIDs := make([]string, 0)
+
+	cm.sessionUsernamesMu.RLock()
+	for sessionID := range cm.sessionUsernames {
+		sessionIP := cm.GetSessionIP(sessionID)
+		if sessionIP == ip {
+			sessionIDs = append(sessionIDs, sessionID)
+		}
+	}
+	cm.sessionUsernamesMu.RUnlock()
+
+	// Now remove messages from all these sessions
+	totalRemoved := 0
+	for _, sessionID := range sessionIDs {
+		removed := cm.RemoveUserMessages(sessionID)
+		totalRemoved += removed
+	}
+
+	if totalRemoved > 0 {
+		log.Printf("Chat: Removed %d message(s) from IP %s from message buffer", totalRemoved, ip)
+	}
+
+	return totalRemoved
+}
+
 // SendMessage processes and broadcasts a chat message from a user
 func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 	// Get username for this session

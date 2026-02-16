@@ -585,7 +585,7 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			if password == ah.config.Admin.Password {
 				// Valid password - reset failed attempts for this IP
 				ah.loginAttempts.ResetAttempts(clientIP)
-				
+
 				// Valid password, proceed
 				if isSSHProxy {
 					log.Printf("[SSH Proxy Auth] Authenticated via X-Admin-Password header for %s", r.URL.Path)
@@ -593,10 +593,10 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				next(w, r)
 				return
 			}
-			
+
 			// Invalid password - record failed attempt
 			attemptCount := ah.loginAttempts.RecordFailedAttempt(clientIP)
-			
+
 			// Check if we should apply temporary ban
 			if attemptCount >= ah.config.Admin.MaxLoginAttempts {
 				// Apply temporary ban
@@ -610,12 +610,12 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				http.Error(w, "Too many failed authentication attempts. Your IP has been temporarily banned.", http.StatusTooManyRequests)
 				return
 			}
-			
+
 			// Log the failed attempt
 			remainingAttempts := ah.config.Admin.MaxLoginAttempts - attemptCount
 			log.Printf("Failed X-Admin-Password attempt from %s (%d/%d attempts, %d remaining)",
 				clientIP, attemptCount, ah.config.Admin.MaxLoginAttempts, remainingAttempts)
-			
+
 			// Invalid password
 			if isSSHProxy {
 				log.Printf("[SSH Proxy Auth] Invalid X-Admin-Password header for %s", r.URL.Path)
@@ -764,7 +764,7 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 	// This ensures the multicast-relay picks up any changes to radiod multicast groups
 	restartTriggerPath := "/var/run/restart-trigger/restart-multicast-relay"
 	restartTriggerDir := filepath.Dir(restartTriggerPath)
-	
+
 	// Check if restart trigger directory exists (Docker environment)
 	if _, err := os.Stat(restartTriggerDir); err == nil {
 		// Create the restart trigger file
@@ -2450,6 +2450,12 @@ func (ah *AdminHandler) HandleKickUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Remove user's chat messages from buffer (if chat is enabled)
+	messagesRemoved := 0
+	if ah.dxClusterWsHandler != nil && ah.dxClusterWsHandler.chatManager != nil {
+		messagesRemoved = ah.dxClusterWsHandler.chatManager.RemoveUserMessages(req.UserSessionID)
+	}
+
 	// Kick all sessions with this user_session_id
 	count, err := ah.sessions.KickUserBySessionID(req.UserSessionID)
 	if err != nil {
@@ -2458,11 +2464,16 @@ func (ah *AdminHandler) HandleKickUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	response := map[string]interface{}{
 		"status":           "success",
 		"message":          fmt.Sprintf("Kicked user (destroyed %d session(s))", count),
 		"sessions_removed": count,
-	}); err != nil {
+	}
+	if messagesRemoved > 0 {
+		response["messages_removed"] = messagesRemoved
+		response["message"] = fmt.Sprintf("Kicked user (destroyed %d session(s), removed %d message(s))", count, messagesRemoved)
+	}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding kick response: %v", err)
 	}
 }
@@ -2493,6 +2504,12 @@ func (ah *AdminHandler) HandleBanUser(w http.ResponseWriter, r *http.Request) {
 		req.Reason = "Banned by admin"
 	}
 
+	// Remove chat messages from this IP (if chat is enabled)
+	messagesRemoved := 0
+	if ah.dxClusterWsHandler != nil && ah.dxClusterWsHandler.chatManager != nil {
+		messagesRemoved = ah.dxClusterWsHandler.chatManager.RemoveUserMessagesByIP(req.IP)
+	}
+
 	// Ban the IP
 	if err := ah.ipBanManager.BanIP(req.IP, req.Reason, "admin"); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to ban IP: %v", err), http.StatusInternalServerError)
@@ -2506,11 +2523,16 @@ func (ah *AdminHandler) HandleBanUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	response := map[string]interface{}{
 		"status":           "success",
 		"message":          fmt.Sprintf("Banned IP %s and kicked %d session(s)", req.IP, count),
 		"sessions_removed": count,
-	}); err != nil {
+	}
+	if messagesRemoved > 0 {
+		response["messages_removed"] = messagesRemoved
+		response["message"] = fmt.Sprintf("Banned IP %s and kicked %d session(s), removed %d message(s)", req.IP, count, messagesRemoved)
+	}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding ban response: %v", err)
 	}
 }
@@ -4555,8 +4577,8 @@ type SessionEvent struct {
 	SourceIP      string    `json:"source_ip"`
 	AuthMethod    string    `json:"auth_method"`
 	SessionTypes  []string  `json:"session_types"`
-	Bands         []string  `json:"bands,omitempty"`            // Cumulative list of bands visited during session
-	Modes         []string  `json:"modes,omitempty"`            // Cumulative list of modes used during session
+	Bands         []string  `json:"bands,omitempty"` // Cumulative list of bands visited during session
+	Modes         []string  `json:"modes,omitempty"` // Cumulative list of modes used during session
 	UserAgent     string    `json:"user_agent,omitempty"`
 	Country       string    `json:"country,omitempty"`          // Country name from GeoIP lookup
 	CountryCode   string    `json:"country_code,omitempty"`     // ISO country code from GeoIP lookup
@@ -4698,10 +4720,10 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 		entry           SessionActivityEntry
 		lastSeen        time.Time
 		firstSeen       time.Time
-		allTypes        map[string]bool   // Track all session types seen
-		allBands        map[string]bool   // Track all bands visited
-		allModes        map[string]bool   // Track all modes used
-		startEventIndex int               // Index of start event in events slice (for updating types)
+		allTypes        map[string]bool // Track all session types seen
+		allBands        map[string]bool // Track all bands visited
+		allModes        map[string]bool // Track all modes used
+		startEventIndex int             // Index of start event in events slice (for updating types)
 	}
 	activeSessions := make(map[string]*sessionInfo)
 	events := []SessionEvent{}
@@ -4715,40 +4737,40 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					// Session was active, create end event with accumulated data
 					endTime := log.Timestamp
 					duration := endTime.Sub(existing.firstSeen).Seconds()
-					
+
 					// Merge final bands from destroyed event
 					for _, band := range session.Bands {
 						if band != "" {
 							existing.allBands[band] = true
 						}
 					}
-					
+
 					// Merge final modes from destroyed event
 					for _, mode := range session.Modes {
 						if mode != "" {
 							existing.allModes[mode] = true
 						}
 					}
-					
+
 					// Convert maps to slices
 					allBandsSlice := make([]string, 0, len(existing.allBands))
 					for band := range existing.allBands {
 						allBandsSlice = append(allBandsSlice, band)
 					}
 					sort.Strings(allBandsSlice)
-					
+
 					allModesSlice := make([]string, 0, len(existing.allModes))
 					for mode := range existing.allModes {
 						allModesSlice = append(allModesSlice, mode)
 					}
 					sort.Strings(allModesSlice)
-					
+
 					allTypesSlice := make([]string, 0, len(existing.allTypes))
 					for t := range existing.allTypes {
 						allTypesSlice = append(allTypesSlice, t)
 					}
 					sort.Strings(allTypesSlice)
-					
+
 					events = append(events, SessionEvent{
 						Timestamp:     endTime,
 						EventType:     "session_end",
@@ -4764,14 +4786,14 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 						CountryCode:   existing.entry.CountryCode,
 						Duration:      &duration,
 					})
-					
+
 					// Remove from active sessions
 					delete(activeSessions, session.UserSessionID)
 				}
 			}
 			continue
 		}
-		
+
 		currentSessionIDs := make(map[string]bool)
 
 		// Process all sessions in this snapshot
@@ -4781,7 +4803,7 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 			if existing, exists := activeSessions[session.UserSessionID]; exists {
 				// Session already active, update last seen and merge session types, bands, and modes
 				existing.lastSeen = log.Timestamp
-				
+
 				// Merge session types from this snapshot
 				typesChanged := false
 				for _, t := range session.SessionTypes {
@@ -4790,21 +4812,21 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 						typesChanged = true
 					}
 				}
-				
+
 				// Merge bands from this snapshot
 				for _, band := range session.Bands {
 					if band != "" && !existing.allBands[band] {
 						existing.allBands[band] = true
 					}
 				}
-				
+
 				// Merge modes from this snapshot
 				for _, mode := range session.Modes {
 					if mode != "" && !existing.allModes[mode] {
 						existing.allModes[mode] = true
 					}
 				}
-				
+
 				// If types changed, update the start event with cumulative types
 				if typesChanged && existing.startEventIndex >= 0 && existing.startEventIndex < len(events) {
 					allTypesSlice := make([]string, 0, len(existing.allTypes))
@@ -4814,7 +4836,7 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					sort.Strings(allTypesSlice)
 					events[existing.startEventIndex].SessionTypes = allTypesSlice
 				}
-				
+
 				// Always keep the most recent session entry (has most up-to-date bands/modes)
 				existing.entry = session
 			} else {
@@ -4823,7 +4845,7 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 				for _, t := range session.SessionTypes {
 					allTypes[t] = true
 				}
-				
+
 				// Initialize bands and modes tracking
 				allBands := make(map[string]bool)
 				for _, band := range session.Bands {
@@ -4831,7 +4853,7 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 						allBands[band] = true
 					}
 				}
-				
+
 				allModes := make(map[string]bool)
 				for _, mode := range session.Modes {
 					if mode != "" {
@@ -4868,8 +4890,8 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					SourceIP:      session.SourceIP,
 					AuthMethod:    session.AuthMethod,
 					SessionTypes:  startTypesSlice, // Use all types from snapshot
-					Bands:         session.Bands,    // Cumulative bands visited
-					Modes:         session.Modes,    // Cumulative modes used
+					Bands:         session.Bands,   // Cumulative bands visited
+					Modes:         session.Modes,   // Cumulative modes used
 					UserAgent:     session.UserAgent,
 					Country:       session.Country,
 					CountryCode:   session.CountryCode,
@@ -4902,14 +4924,14 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					allTypesSlice = append(allTypesSlice, t)
 				}
 				sort.Strings(allTypesSlice) // Sort for consistent ordering
-				
+
 				// Convert allBands map to slice
 				allBandsSlice := make([]string, 0, len(info.allBands))
 				for band := range info.allBands {
 					allBandsSlice = append(allBandsSlice, band)
 				}
 				sort.Strings(allBandsSlice) // Sort for consistent ordering
-				
+
 				// Convert allModes map to slice
 				allModesSlice := make([]string, 0, len(info.allModes))
 				for mode := range info.allModes {
@@ -4924,9 +4946,9 @@ func convertLogsToEvents(logs []SessionActivityLog) []SessionEvent {
 					ClientIP:      info.entry.ClientIP,
 					SourceIP:      info.entry.SourceIP,
 					AuthMethod:    info.entry.AuthMethod,
-					SessionTypes:  allTypesSlice,      // Use accumulated types
-					Bands:         allBandsSlice,      // Use accumulated bands
-					Modes:         allModesSlice,      // Use accumulated modes
+					SessionTypes:  allTypesSlice, // Use accumulated types
+					Bands:         allBandsSlice, // Use accumulated bands
+					Modes:         allModesSlice, // Use accumulated modes
 					UserAgent:     info.entry.UserAgent,
 					Country:       info.entry.Country,
 					CountryCode:   info.entry.CountryCode,

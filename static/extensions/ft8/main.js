@@ -259,6 +259,9 @@ class FT8Extension extends DecoderExtension {
         // Add click handlers to table headers for sorting
         this.setupTableSorting();
 
+        // Initialize no messages display
+        this.updateNoMessagesDisplay();
+
         console.log('FT8: Event handlers setup complete');
     }
 

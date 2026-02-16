@@ -147,6 +147,7 @@ class FT8Extension extends DecoderExtension {
             protocolSelect.addEventListener('change', (e) => {
                 this.config.protocol = e.target.value;
                 this.updateProtocolDisplay();
+                this.updateNoMessagesDisplay();
                 if (this.running) {
                     // Restart with new protocol
                     this.stop();
@@ -581,6 +582,9 @@ class FT8Extension extends DecoderExtension {
         const tbody = document.getElementById('ft8-messages-tbody');
         if (!tbody) return;
 
+        // Hide the no messages row when adding a message
+        this.updateNoMessagesDisplay();
+
         const row = tbody.insertRow(0); // Insert at top
         
         // UTC time
@@ -717,6 +721,12 @@ class FT8Extension extends DecoderExtension {
         const tbody = document.getElementById('ft8-messages-tbody');
         if (tbody) {
             tbody.innerHTML = '';
+            // Re-add the no messages row
+            const noMessagesRow = document.createElement('tr');
+            noMessagesRow.id = 'ft8-no-messages-row';
+            noMessagesRow.style.display = 'none';
+            noMessagesRow.innerHTML = '<td colspan="11" style="text-align: center; padding: 20px; color: #ffa500; font-style: italic;"><strong>FT4 is currently under development</strong></td>';
+            tbody.appendChild(noMessagesRow);
         }
         
         // Clear spectrum markers cache
@@ -724,6 +734,7 @@ class FT8Extension extends DecoderExtension {
         this.lastCachedSlot = null;
         
         this.updateCounters();
+        this.updateNoMessagesDisplay();
     }
 
     filterMessages() {
@@ -769,6 +780,9 @@ class FT8Extension extends DecoderExtension {
             // Show or hide the row
             row.style.display = shouldShow ? '' : 'none';
         }
+
+        // Update the no messages display after filtering
+        this.updateNoMessagesDisplay();
     }
 
     exportMessages() {
@@ -835,6 +849,24 @@ class FT8Extension extends DecoderExtension {
         if (totalsDisplay) {
             totalsDisplay.textContent = `Total: ${this.messages.length} | Slot: ${this.slotDecoded}`;
         }
+    }
+
+    updateNoMessagesDisplay() {
+        const noMessagesRow = document.getElementById('ft8-no-messages-row');
+        if (!noMessagesRow) return;
+
+        // Count visible messages (not filtered out)
+        const tbody = document.getElementById('ft8-messages-tbody');
+        if (!tbody) return;
+
+        const visibleMessages = Array.from(tbody.getElementsByTagName('tr'))
+            .filter(row => row.id !== 'ft8-no-messages-row' && row.style.display !== 'none');
+
+        // Show the "FT4 under development" message only if:
+        // 1. FT4 protocol is selected
+        // 2. There are no visible messages
+        const shouldShow = this.config.protocol === 'FT4' && visibleMessages.length === 0;
+        noMessagesRow.style.display = shouldShow ? '' : 'none';
     }
 
     updateProtocolDisplay() {

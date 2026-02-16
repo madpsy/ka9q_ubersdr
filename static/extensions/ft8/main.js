@@ -968,6 +968,7 @@ class FT8Extension extends DecoderExtension {
                 protocolSelect.value = protocol;
                 this.config.protocol = protocol;
                 this.updateProtocolDisplay();
+                this.updateNoMessagesDisplay();
             }
         }
 

@@ -278,9 +278,6 @@ func (d *MorseDecoder) detectTransition(snr float64) {
 		d.keyDownTime = now
 		d.lastActivity = now
 
-		log.Printf("[Morse Decoder %d] Key DOWN at %.1f Hz (SNR: %.1f dB, level: %.2f)",
-			d.decoderID, d.centerFrequency, snr, level)
-
 		// Process the space duration
 		d.processSpace(spaceDuration)
 	}
@@ -292,9 +289,6 @@ func (d *MorseDecoder) detectTransition(snr float64) {
 		d.keyUpTime = now
 		d.lastActivity = now
 
-		log.Printf("[Morse Decoder %d] Key UP at %.1f Hz (duration: %.3fs, WPM: %.1f)",
-			d.decoderID, d.centerFrequency, markDuration, d.currentWPM)
-
 		// Process the mark duration
 		d.processMark(markDuration)
 	}
@@ -305,7 +299,6 @@ func (d *MorseDecoder) processMark(duration float64) {
 	ts := d.timeSpec
 
 	if duration < ts.DotShort {
-		log.Printf("[Morse Decoder %d] Mark too short: %.3fs < %.3fs", d.decoderID, duration, ts.DotShort)
 		return // Too short, ignore
 	}
 
@@ -320,7 +313,7 @@ func (d *MorseDecoder) processMark(duration float64) {
 		element = "-"
 	}
 
-	log.Printf("[Morse Decoder %d] Decoded element: %s (duration: %.3fs)", d.decoderID, element, duration)
+	log.Printf("[Morse Decoder %d] Decoded: %s (%.3fs, %.1f WPM)", d.decoderID, element, duration, d.currentWPM)
 
 	d.morseElements += element
 	d.bufferMu.Lock()

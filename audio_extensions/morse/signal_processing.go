@@ -14,8 +14,10 @@ type EnvelopeDetector struct {
 	goertzel *GoertzelFilter
 
 	// Envelope follower (low-pass filter)
-	envelopeAlpha float64
-	envelope      float64
+	envelopeAlpha  float64
+	envelopeAttack float64
+	envelopeDecay  float64
+	envelope       float64
 }
 
 // NewEnvelopeDetector creates a new envelope detector
@@ -24,7 +26,8 @@ func NewEnvelopeDetector(sampleRate int, centerFrequency, bandwidth float64) *En
 		sampleRate:      sampleRate,
 		centerFrequency: centerFrequency,
 		bandwidth:       bandwidth,
-		envelopeAlpha:   0.1, // Smoothing factor for envelope
+		envelopeAttack:  0.01, // Fast attack (10ms time constant)
+		envelopeDecay:   0.01, // Fast decay (10ms time constant)
 		envelope:        0.0,
 	}
 
@@ -39,8 +42,14 @@ func (ed *EnvelopeDetector) Process(sample float64) float64 {
 	// Apply Goertzel filter to detect tone
 	magnitude := ed.goertzel.Process(sample)
 
-	// Envelope follower (exponential moving average)
-	ed.envelope = ed.envelopeAlpha*magnitude + (1-ed.envelopeAlpha)*ed.envelope
+	// Envelope follower with attack/decay
+	if magnitude > ed.envelope {
+		// Attack (signal increasing)
+		ed.envelope = ed.envelopeAttack*magnitude + (1-ed.envelopeAttack)*ed.envelope
+	} else {
+		// Decay (signal decreasing)
+		ed.envelope = ed.envelopeDecay*magnitude + (1-ed.envelopeDecay)*ed.envelope
+	}
 
 	return ed.envelope
 }
@@ -76,7 +85,7 @@ func NewGoertzelFilter(sampleRate int, frequency float64) *GoertzelFilter {
 	return gf
 }
 
-// Process processes a single sample and returns magnitude when block is complete
+// Process processes a single sample and returns magnitude (updated every sample)
 func (gf *GoertzelFilter) Process(sample float64) float64 {
 	// Goertzel algorithm
 	s0 := sample + gf.coeff*gf.s1 - gf.s2
@@ -90,7 +99,7 @@ func (gf *GoertzelFilter) Process(sample float64) float64 {
 		// Calculate magnitude
 		real := gf.s1 - gf.s2*math.Cos(2.0*math.Pi*gf.frequency/float64(gf.sampleRate))
 		imag := gf.s2 * math.Sin(2.0*math.Pi*gf.frequency/float64(gf.sampleRate))
-		magnitude := math.Sqrt(real*real + imag*imag)
+		magnitude := math.Sqrt(real*real+imag*imag) / float64(gf.blockSize)
 
 		// Reset for next block
 		gf.s1 = 0
@@ -100,7 +109,10 @@ func (gf *GoertzelFilter) Process(sample float64) float64 {
 		return magnitude
 	}
 
-	return 0.0
+	// Return current running magnitude estimate (not as accurate but continuous)
+	real := gf.s1 - gf.s2*math.Cos(2.0*math.Pi*gf.frequency/float64(gf.sampleRate))
+	imag := gf.s2 * math.Sin(2.0*math.Pi*gf.frequency/float64(gf.sampleRate))
+	return math.Sqrt(real*real+imag*imag) / float64(gf.count+1)
 }
 
 // SNREstimator estimates signal-to-noise ratio

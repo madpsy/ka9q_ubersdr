@@ -1,7 +1,6 @@
 package morse
 
 import (
-	"log"
 	"math"
 	"sort"
 
@@ -128,18 +127,6 @@ func (sa *SpectrumAnalyzer) DetectPeaks(n int, minSNRdB float64) []Peak {
 	// Find all peaks above threshold
 	var peaks []Peak
 
-	// Debug: Find the strongest signal in the range
-	maxPower := 0.0
-	maxPowerBin := 0
-	for i := minBin; i <= maxBin; i++ {
-		if sa.spectrum[i] > maxPower {
-			maxPower = sa.spectrum[i]
-			maxPowerBin = i
-		}
-	}
-	log.Printf("[Spectrum] Strongest signal: %.1f Hz (bin %d, power: %.2e, SNR: %.1f dB)",
-		sa.freqBins[maxPowerBin], maxPowerBin, maxPower, 10.0*math.Log10(sa.snrSpectrum[maxPowerBin]))
-
 	for i := minBin + 1; i < maxBin; i++ {
 		// Check if this is a local maximum and above threshold
 		if sa.snrSpectrum[i] > sa.snrSpectrum[i-1] &&
@@ -157,8 +144,6 @@ func (sa *SpectrumAnalyzer) DetectPeaks(n int, minSNRdB float64) []Peak {
 
 			// Convert SNR to dB
 			snrDB := 10.0 * math.Log10(sa.snrSpectrum[i])
-
-			log.Printf("[Spectrum] Peak detected: %.1f Hz (SNR: %.1f dB)", freq, snrDB)
 
 			peaks = append(peaks, Peak{
 				Frequency: freq,

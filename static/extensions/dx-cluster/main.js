@@ -469,6 +469,11 @@ class DXClusterExtension extends DecoderExtension {
     }
 
     tuneToSpot(spot) {
+        // Disable edge detection temporarily when changing frequency
+        if (window.spectrumDisplay) {
+            window.spectrumDisplay.skipEdgeDetectionTemporary = true;
+        }
+
         // Set frequency using RadioAPI
         this.radio.setFrequency(spot.frequency);
 
@@ -520,6 +525,13 @@ class DXClusterExtension extends DecoderExtension {
         }
 
         this.radio.log(`Tuned to ${spot.dx_call} on ${this.formatFrequency(spot.frequency)} MHz ${mode.toUpperCase()}`);
+
+        // Re-enable edge detection after a short delay
+        setTimeout(() => {
+            if (window.spectrumDisplay) {
+                window.spectrumDisplay.skipEdgeDetectionTemporary = false;
+            }
+        }, 500);
     }
 
     openQRZ(callsign) {

@@ -489,6 +489,9 @@ class FT8Extension:
                 self.ldpc_failures = message['ldpc_failures']
             if 'crc_failures' in message:
                 self.crc_failures = message['crc_failures']
+            # Track if we need to add message manually to table
+            should_add_to_table = True
+
             
             # Update slot if changed
             if message.get('slot_number', 0) != self.current_slot:
@@ -499,16 +502,18 @@ class FT8Extension:
                 if self.config['auto_clear'] and len(self.messages) > 100:
                     self.messages = self.messages[:100]
                 
-                # If showing latest only, re-filter
+                # If showing latest only, re-filter (which adds all messages including this one)
                 if self.config['show_latest_only']:
                     self.filter_messages()
+                    should_add_to_table = False  # Already added by filter_messages()
             
             # Update displays
             self.update_slot_display(message.get('slot_number', 0))
             self.update_sync_display(True)
             
-            # Add to table
-            self.add_message_to_table(message)
+            # Add to table only if not already added by filter_messages()
+            if should_add_to_table:
+                self.add_message_to_table(message)
             
             # Update counters
             self.update_counters()
@@ -593,6 +598,10 @@ class FT8Extension:
         for item in self.tree.get_children():
             self.tree.delete(item)
         
+        # Clear cached callsigns and markers in spectrum
+        self.cached_callsigns = []
+        self.last_cached_slot = None
+
         self.update_counters()
         print("FT8: Messages cleared")
     

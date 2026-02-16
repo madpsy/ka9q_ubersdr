@@ -6705,6 +6705,42 @@ class RadioGUI:
             self.eq_display = None
             self.log_status("EQ window closed")
 
+        # Close extensions window
+        if hasattr(self, 'extensions_window') and self.extensions_window and self.extensions_window.window.winfo_exists():
+            self.extensions_window.window.destroy()
+            self.extensions_window = None
+            self.log_status("Extensions window closed")
+
+        # Close NAVTEX extension window
+        if self.navtex_window and self.navtex_window.window.winfo_exists():
+            self.navtex_window.window.destroy()
+            self.navtex_window = None
+            self.log_status("NAVTEX window closed")
+
+        # Close FSK extension window
+        if self.fsk_window and self.fsk_window.window.winfo_exists():
+            self.fsk_window.window.destroy()
+            self.fsk_window = None
+            self.log_status("FSK window closed")
+
+        # Close WEFAX extension window
+        if hasattr(self, 'wefax_window') and self.wefax_window and self.wefax_window.window.winfo_exists():
+            self.wefax_window.window.destroy()
+            self.wefax_window = None
+            self.log_status("WEFAX window closed")
+
+        # Close SSTV extension window
+        if self.sstv_window and self.sstv_window.window.winfo_exists():
+            self.sstv_window.window.destroy()
+            self.sstv_window = None
+            self.log_status("SSTV window closed")
+
+        # Close FT8 extension window
+        if self.ft8_window and self.ft8_window.window.winfo_exists():
+            self.ft8_window.window.destroy()
+            self.ft8_window = None
+            self.log_status("FT8 window closed")
+
         # Clean up shared DX cluster WebSocket manager
         # Note: Actual disconnection happens automatically when last callback is removed
         if self.dxcluster_ws:
@@ -7369,14 +7405,14 @@ class RadioGUI:
 
     def open_extensions_window(self):
         """Open the extensions window."""
+        # Check if connected first
+        if not self.connected:
+            messagebox.showinfo("Info", "Please connect to a server first")
+            return
+
         # Don't open multiple windows
         if hasattr(self, 'extensions_window') and self.extensions_window and self.extensions_window.window.winfo_exists():
             self.extensions_window.window.lift()  # Bring to front
-            return
-
-        # Check if connected
-        if not self.connected:
-            messagebox.showinfo("Info", "Please connect to a server first")
             return
 
         # Import extensions window

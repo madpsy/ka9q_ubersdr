@@ -246,30 +246,13 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 	log.Printf("[SSTV Video] Demodulating %s: %dx%d, %d pixels",
 		m.Name, m.ImgWidth, m.NumLines, len(pixelGrid))
 
-	// Calculate signal length for nominal image duration
+	// Calculate signal length
 	var length int
 	if m.ColorEnc == ColorYUV && m.ImgWidth >= 512 { // PD modes
 		length = int(m.LineTime * float64(m.NumLines) / 2 * v.sampleRate)
 	} else {
 		length = int(m.LineTime * float64(m.NumLines) * v.sampleRate)
 	}
-
-	// Calculate extended length to fill entire storedLum buffer
-	// This ensures we capture enough signal for slant correction with adjusted rate+skip
-	var maxLength int
-	if m.ColorEnc == ColorYUV && m.ImgWidth >= 512 { // PD modes
-		maxLength = int(m.LineTime*float64(m.NumLines)/2*v.sampleRate*1.3) + 15000
-	} else {
-		maxLength = int(m.LineTime*float64(m.NumLines)*v.sampleRate*1.3) + 15000
-	}
-
-	// Ensure maxLength doesn't exceed buffer size
-	if maxLength > len(v.storedLum) {
-		maxLength = len(v.storedLum)
-	}
-
-	log.Printf("[SSTV Video] Decode lengths: nominal=%d, extended=%d (buffer=%d)",
-		length, maxLength, len(v.storedLum))
 
 	syncTargetBin := v.getBin(1200.0 + float64(v.headerShift))
 
@@ -321,9 +304,8 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 	v.lastSyncLogTime = 0
 	v.lastFreqLogTime = 0
 
-	// Process signal - decode for maxLength to fill entire storedLum buffer
-	// This ensures we have enough luminance data for slant correction
-	for sampleNum := 0; sampleNum < maxLength; sampleNum++ {
+	// Process signal
+	for sampleNum := 0; sampleNum < length; sampleNum++ {
 		// Like slowrx video.c:266, ensure we have enough samples ahead
 		// We need at least 1024 samples available for FFT operations
 		available := pcmBuffer.Available()
@@ -335,7 +317,7 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 			}
 			if pcmBuffer.Available() < 1024 {
 				log.Printf("[SSTV Video] Timeout waiting for samples at sampleNum=%d/%d (%.1f%% complete), ending decode",
-					sampleNum, maxLength, float64(sampleNum)/float64(maxLength)*100)
+					sampleNum, length, float64(sampleNum)/float64(length)*100)
 				break
 			}
 		}

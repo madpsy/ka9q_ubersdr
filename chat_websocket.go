@@ -1231,6 +1231,8 @@ func censorProfanity(message string) string {
 		"fuck", "fucks", "fucked", "fucker", "fuckers", "fucking",
 		// S-word variants
 		"shit", "shits", "shitting", "shitty",
+		// P-word variants
+		"piss", "pissed", "pissing",
 		// Sexual/anatomical slurs
 		"ass", "asses", "asshole", "assholes",
 		"bitch", "bitches", "bastard", "bastards",

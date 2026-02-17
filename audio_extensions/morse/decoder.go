@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+// StateTransition represents a state change in the circular buffer (KiwiSDR sigbuf_t)
+type StateTransition struct {
+	State bool    // true = key down (mark), false = key up (space)
+	Time  float64 // Duration in blocks
+}
+
 // MorseDecoder implements a timing-based Morse code decoder
 // Based on UHSDR/KiwiSDR algorithm
 type MorseDecoder struct {
@@ -33,6 +39,20 @@ type MorseDecoder struct {
 	snrDecay float64 // Decay factor for peak SNR
 	snrMu    sync.Mutex
 
+	// Circular buffer for state transitions (KiwiSDR approach)
+	sigBuffer     []StateTransition // Circular buffer of state transitions
+	sigLastRx     int               // Write pointer (sig_lastrx in KiwiSDR)
+	sigInCount    int               // Copy of sigLastRx (sig_incount in KiwiSDR)
+	sigOutCount   int               // Read pointer for decoding (sig_outcount in KiwiSDR)
+	sigTimer      float64           // Elapsed time of current state in blocks
+	sigBufferSize int               // Size of circular buffer (256)
+	prevState     bool              // Previous state for transition detection
+
+	// Training state (KiwiSDR approach)
+	startPos     int  // Start position for training
+	progress     int  // Progress counter for training
+	initializing bool // First time through training
+
 	// Adaptive timing (KiwiSDR approach)
 	pulseAvg            float64 // Composite average for dot/dash discrimination
 	dotAvg              float64 // Average dot duration
@@ -44,8 +64,7 @@ type MorseDecoder struct {
 	currentWPM          float64 // Calculated WPM
 	initialized         bool    // Have we learned timing yet?
 	trackTiming         bool    // Continuously adapt timing
-	trainingCount       int     // Number of marks processed during training
-	trainingStates      int     // Total states (marks+spaces) processed during training
+	trainingInterval    int     // Number of states needed for training
 	wordSpaceCorrection bool    // Enable word space correction (equation 4.15)
 
 	// Error tracking and re-training
@@ -109,6 +128,9 @@ func DefaultMorseConfig() MorseConfig {
 
 // NewMorseDecoder creates a new Morse decoder
 func NewMorseDecoder(sampleRate int, config MorseConfig) *MorseDecoder {
+	const CW_SIG_BUFSIZE = 256 // KiwiSDR buffer size
+	const TRAINING_STABLE = 32 // KiwiSDR training threshold
+
 	d := &MorseDecoder{
 		sampleRate:      sampleRate,
 		centerFrequency: config.CenterFrequency,
@@ -128,6 +150,19 @@ func NewMorseDecoder(sampleRate int, config MorseConfig) *MorseDecoder {
 		blockDuration:   32.0 / float64(sampleRate), // 32 samples per block
 		lastActivity:    time.Now(),
 		stopChan:        make(chan struct{}),
+		// Circular buffer (KiwiSDR approach)
+		sigBuffer:     make([]StateTransition, CW_SIG_BUFSIZE),
+		sigLastRx:     0,
+		sigInCount:    0,
+		sigOutCount:   0,
+		sigTimer:      0.0,
+		sigBufferSize: CW_SIG_BUFSIZE,
+		prevState:     false,
+		// Training state
+		startPos:         0,
+		progress:         0,
+		initializing:     false,
+		trainingInterval: TRAINING_STABLE * 2, // 64 states for complete training
 		// Adaptive timing (start with defaults for 16 WPM)
 		pulseAvg:            0.0,
 		dotAvg:              0.0,
@@ -137,7 +172,6 @@ func NewMorseDecoder(sampleRate int, config MorseConfig) *MorseDecoder {
 		lastWordSpace:       0.0,
 		initialized:         false,
 		trackTiming:         true, // Always track timing changes
-		trainingCount:       0,
 		wordSpaceCorrection: true, // Enable word space correction
 	}
 
@@ -172,6 +206,21 @@ func (d *MorseDecoder) initializeTimingFromWPM(wpm float64) {
 		d.decoderID, int(wpm), d.dotAvg, d.dashAvg, d.pulseAvg)
 }
 
+// Ring buffer helper functions (KiwiSDR approach)
+func (d *MorseDecoder) ringIdxIncrement(value int) int {
+	if value+1 == d.sigBufferSize {
+		return 0
+	}
+	return value + 1
+}
+
+func (d *MorseDecoder) ringDistanceFromTo(from, to int) int {
+	if to < from {
+		return (d.sigBufferSize + to) - from
+	}
+	return to - from
+}
+
 // updateWPM calculates WPM from current timing averages
 func (d *MorseDecoder) updateWPM() {
 	if !d.initialized {
@@ -193,6 +242,77 @@ func (d *MorseDecoder) updateWPM() {
 		d.currentWPM = wpmRaw
 	} else {
 		d.currentWPM = wpmRaw*0.3 + d.currentWPM*0.7
+	}
+}
+
+// cw_train processes the circular buffer to train timing parameters
+// This is the KiwiSDR training algorithm (lines 647-733)
+func (d *MorseDecoder) cwTrain() {
+	const TRAINING_STABLE = 32
+
+	// Set up progress counter at beginning of initialize
+	if !d.initializing {
+		d.startPos = d.sigOutCount // We start at last processed mark/space
+		d.progress = d.sigOutCount
+		d.initializing = true
+		// Reset CW timing variables to 0 (KiwiSDR lines 660-665)
+		d.pulseAvg = 0
+		d.dotAvg = 0
+		d.dashAvg = 0
+		d.symSpaceAvg = 0
+		d.cwSpaceAvg = 0
+		d.lastWordSpace = 0
+		log.Printf("[Decoder %d] Starting training from 0 (KiwiSDR method)", d.decoderID)
+	}
+
+	if !d.trackTiming {
+		return // No training if fixed WPM
+	}
+
+	// Determine number of states waiting to be processed
+	processed := d.ringDistanceFromTo(d.startPos, d.progress)
+
+	if processed >= d.trainingInterval {
+		d.initialized = true // Indicate we're done
+		d.initializing = false
+		log.Printf("[Decoder %d] Training complete: pulse=%.1f dot=%.1f dash=%.1f space=%.1f sym=%.1f",
+			d.decoderID, d.pulseAvg, d.dotAvg, d.dashAvg, d.cwSpaceAvg, d.symSpaceAvg)
+	}
+
+	// Do we have a new state?
+	if d.progress != d.sigInCount {
+		t := d.sigBuffer[d.progress].Time
+
+		if d.sigBuffer[d.progress].State {
+			// Is it a pulse (mark)?
+			if processed > TRAINING_STABLE {
+				// More than TRAINING_STABLE, getting stable
+				if t > d.pulseAvg {
+					d.dashAvg = d.dashAvg + (t-d.dashAvg)/4.0 // Equation 4.5
+				} else {
+					d.dotAvg = d.dotAvg + (t-d.dotAvg)/4.0 // Equation 4.4
+				}
+			} else {
+				// Less than TRAINING_STABLE, still quite unstable
+				if t > d.pulseAvg {
+					d.dashAvg = (t + d.dashAvg) / 2.0 // Equation 4.2
+				} else {
+					d.dotAvg = (t + d.dotAvg) / 2.0 // Equation 4.1
+				}
+			}
+			d.pulseAvg = (d.dotAvg/4.0 + d.dashAvg) / 2.0 // Update pulse_avg (Equation 4.3)
+		} else {
+			// Not a pulse - determine character/word space avg
+			if processed > TRAINING_STABLE {
+				if t > d.pulseAvg {
+					d.cwSpaceAvg = d.cwSpaceAvg + (t-d.cwSpaceAvg)/4.0 // Equation 4.8
+				} else {
+					d.symSpaceAvg = d.symSpaceAvg + (t-d.symSpaceAvg)/4.0
+				}
+			}
+		}
+
+		d.progress = d.ringIdxIncrement(d.progress) // Increment progress counter
 	}
 }
 
@@ -304,11 +424,17 @@ func (d *MorseDecoder) processSamples(samples []int16) {
 			// Update SNR estimate
 			snr := d.snrEstimator.Process(signal)
 
-			// Detect key transitions
+			// Detect key transitions and store in buffer
 			d.detectTransitionBlock(signal, snr)
 			blocksProcessed++
 		}
 	}
+
+	// Call training function periodically (KiwiSDR approach)
+	d.cwTrain()
+
+	// Process decoded states from buffer
+	d.processDecodedStates()
 
 	// Debug: Log block processing
 	if d.debugCounter == 0 {
@@ -317,6 +443,7 @@ func (d *MorseDecoder) processSamples(samples []int16) {
 }
 
 // detectTransitionBlock detects key up/down transitions using block-based timing
+// and stores state transitions in circular buffer (KiwiSDR approach)
 func (d *MorseDecoder) detectTransitionBlock(signal, snr float64) {
 	// Update peak SNR (with slow decay)
 	d.snrMu.Lock()
@@ -331,139 +458,80 @@ func (d *MorseDecoder) detectTransitionBlock(signal, snr float64) {
 	var newState bool
 	if d.isAutoThreshold {
 		// Auto threshold mode: nonlinear processing with configurable threshold
-		// KiwiSDR line 484: newstate = (siglevel >= threshold_linear)
 		newState = signal >= d.thresholdLinear
 	} else {
 		// Fixed threshold mode: compare magnitude directly to threshold
-		// KiwiSDR line 493: newstate = (siglevel >= threshold_linear)
-		// Signal is already low-pass filtered magnitude
 		newState = signal >= d.thresholdLinear
 	}
 
 	// Debug logging every 100 blocks (~2.67 seconds at 12kHz)
 	d.debugCounter++
 	if d.debugCounter%100 == 0 {
-		log.Printf("[Decoder %d] signal=%.0f, threshold=%.0f, newState=%v, currentState=%v, ratio=%.2f%%",
-			d.decoderID, signal, d.thresholdLinear, newState, d.envelope.currentState,
+		log.Printf("[Decoder %d] signal=%.0f, threshold=%.0f, newState=%v, prevState=%v, ratio=%.2f%%",
+			d.decoderID, signal, d.thresholdLinear, newState, d.prevState,
 			(signal/d.thresholdLinear)*100.0)
 	}
 
-	// Noise canceling: require 2 consecutive blocks with same state
-	if d.envelope.noiseCancelEnabled {
-		if d.envelope.noiseCancelChange {
-			// Second consecutive block with new state - confirm transition
-			if newState != d.envelope.currentState {
-				d.envelope.currentState = newState
-				d.envelope.noiseCancelChange = false
-				d.processStateChange(newState)
-			} else {
-				// State changed back - ignore
-				d.envelope.noiseCancelChange = false
-			}
-		} else if newState != d.envelope.currentState {
-			// First block with new state - wait for confirmation
-			d.envelope.noiseCancelChange = true
-		}
-	} else {
-		// No noise canceling
-		if newState != d.envelope.currentState {
-			d.envelope.currentState = newState
-			d.processStateChange(newState)
-		}
+	// Record state changes and durations onto circular buffer (KiwiSDR lines 547-558)
+	if newState != d.prevState {
+		// Enter the type and duration of the state change into the circular buffer
+		d.sigBuffer[d.sigLastRx].State = d.prevState
+		d.sigBuffer[d.sigLastRx].Time = d.sigTimer
+
+		log.Printf("[Decoder %d] State transition: %v -> %v, duration=%.1f blocks",
+			d.decoderID, d.prevState, newState, d.sigTimer)
+
+		// Increment circular buffer pointer
+		d.sigLastRx = d.ringIdxIncrement(d.sigLastRx)
+
+		d.sigTimer = 0.0       // Zero the signal timer
+		d.prevState = newState // Update state
 	}
 
-	// Increment block counters
-	if d.envelope.currentState {
-		d.keyDownBlocks++
-		d.keyUpBlocks = 0
-	} else {
-		d.keyUpBlocks++
-		d.keyDownBlocks = 0
+	// Count signal state timer upwards (KiwiSDR line 562)
+	d.sigTimer += 1.0 // Increment by 1 block
+
+	// Impose a timeout boundary (3 seconds worth of blocks)
+	const CW_TIMEOUT = 3
+	maxBlocks := float64(CW_TIMEOUT) * (1.0 / d.blockDuration)
+	if d.sigTimer > maxBlocks {
+		d.sigTimer = maxBlocks
 	}
+
+	// Current Incount pointer (KiwiSDR line 569)
+	d.sigInCount = d.sigLastRx
 }
 
-// processStateChange handles state transitions
-func (d *MorseDecoder) processStateChange(newState bool) {
-	now := time.Now()
-	d.lastActivity = now
+// processDecodedStates processes decoded states from the circular buffer
+// This replaces the inline training in processMark/processSpace
+func (d *MorseDecoder) processDecodedStates() {
+	// Process all available states in the buffer
+	for d.sigOutCount != d.sigInCount {
+		t := d.sigBuffer[d.sigOutCount].Time
+		isMarkState := d.sigBuffer[d.sigOutCount].State
 
-	if newState {
-		// Transition to key-down (mark)
-		spaceBlocks := d.keyUpBlocks
-		d.keyState = KeyDown
-		d.keyDownBlocks = 0
+		// Skip if not initialized yet (training handles this)
+		if !d.initialized {
+			d.sigOutCount = d.ringIdxIncrement(d.sigOutCount)
+			continue
+		}
 
-		log.Printf("[Decoder %d] KEY DOWN - space blocks: %d", d.decoderID, spaceBlocks)
+		d.lastActivity = time.Now()
 
-		d.processSpace(spaceBlocks)
-	} else {
-		// Transition to key-up (space)
-		markBlocks := d.keyDownBlocks
-		d.keyState = KeyUp
-		d.keyUpBlocks = 0
-
-		log.Printf("[Decoder %d] KEY UP - mark blocks: %d", d.decoderID, markBlocks)
-
-		d.processMark(markBlocks)
-	}
-}
-
-// processMark processes a mark (key down) duration using KiwiSDR adaptive algorithm
-func (d *MorseDecoder) processMark(blocks int) {
-	t := float64(blocks)
-
-	// Initialize timing if needed (KiwiSDR lines 660-665: start with 0)
-	if d.trainingCount == 0 {
-		// First mark - initialize to 0 like KiwiSDR, not from WPM
-		d.pulseAvg = 0
-		d.dotAvg = 0
-		d.dashAvg = 0
-		d.symSpaceAvg = 0
-		d.cwSpaceAvg = 0
-		log.Printf("[Decoder %d] Starting training from 0 (KiwiSDR method)", d.decoderID)
-	}
-
-	// Training period (KiwiSDR has 3 phases)
-	if !d.initialized {
-		d.trainingCount++
-		d.trainingStates++ // Count this mark
-
-		const TRAINING_STABLE = 32
-
-		if d.trainingCount > TRAINING_STABLE {
-			// Late training phase - more stable (equations 4.4, 4.5)
-			if t > d.pulseAvg {
-				d.dashAvg = d.dashAvg + (t-d.dashAvg)/4.0 // Equation 4.5
-				log.Printf("[Decoder %d] Training %d: DASH t=%.1f > pulse=%.1f, dash=%.1f",
-					d.decoderID, d.trainingCount, t, d.pulseAvg, d.dashAvg)
-			} else {
-				d.dotAvg = d.dotAvg + (t-d.dotAvg)/4.0 // Equation 4.4
-				log.Printf("[Decoder %d] Training %d: DOT t=%.1f <= pulse=%.1f, dot=%.1f",
-					d.decoderID, d.trainingCount, t, d.pulseAvg, d.dotAvg)
-			}
+		if isMarkState {
+			// Process mark (dot or dash)
+			d.processMark(t)
 		} else {
-			// Early training phase - unstable (equations 4.1, 4.2)
-			if t > d.pulseAvg {
-				d.dashAvg = (t + d.dashAvg) / 2.0 // Equation 4.2
-				log.Printf("[Decoder %d] Training %d (early): DASH t=%.1f > pulse=%.1f, dash=%.1f",
-					d.decoderID, d.trainingCount, t, d.pulseAvg, d.dashAvg)
-			} else {
-				d.dotAvg = (t + d.dotAvg) / 2.0 // Equation 4.1
-				log.Printf("[Decoder %d] Training %d (early): DOT t=%.1f <= pulse=%.1f, dot=%.1f",
-					d.decoderID, d.trainingCount, t, d.pulseAvg, d.dotAvg)
-			}
+			// Process space
+			d.processSpace(t)
 		}
-		d.pulseAvg = (d.dotAvg/4.0 + d.dashAvg) / 2.0 // Equation 4.3
 
-		// After enough training, mark as initialized
-		if d.trainingCount >= TRAINING_STABLE*2 {
-			d.initialized = true
-			log.Printf("[Decoder %d] Training complete after %d marks: dot=%.1f, dash=%.1f, pulse=%.1f",
-				d.decoderID, d.trainingCount, d.dotAvg, d.dashAvg, d.pulseAvg)
-		}
-		return // Don't decode during training
+		d.sigOutCount = d.ringIdxIncrement(d.sigOutCount)
 	}
+}
 
+// processMark processes a mark (key down) duration
+func (d *MorseDecoder) processMark(t float64) {
 	// Normal operation - classify as dot or dash (equation 4.10)
 	var element string
 	if (d.pulseAvg - t) >= 0 {
@@ -498,31 +566,8 @@ func (d *MorseDecoder) processMark(blocks int) {
 	d.bufferMu.Unlock()
 }
 
-// processSpace processes a space (key up) duration using KiwiSDR adaptive algorithm
-func (d *MorseDecoder) processSpace(blocks int) {
-	t := float64(blocks)
-
-	const TRAINING_STABLE = 32
-
-	// During training, update space averages (KiwiSDR line 718)
-	// KiwiSDR uses "processed" which counts ALL states, not just marks
-	if !d.initialized {
-		d.trainingStates++ // Count this space
-
-		if d.trainingStates > TRAINING_STABLE {
-			// Late training phase - update space averages (equation 4.8)
-			if t > d.pulseAvg {
-				d.cwSpaceAvg = d.cwSpaceAvg + (t-d.cwSpaceAvg)/4.0
-			} else {
-				d.symSpaceAvg = d.symSpaceAvg + (t-d.symSpaceAvg)/4.0
-			}
-		}
-		return // Don't decode during training
-	}
-
-	// Determine if symbol space or character/word space
-	// This uses KiwiSDR equations 4.11-4.14
-
+// processSpace processes a space (key up) duration
+func (d *MorseDecoder) processSpace(t float64) {
 	// Symbol space (between dots/dashes in same character)
 	if (t - d.pulseAvg) < 0 {
 		if d.trackTiming {
@@ -597,7 +642,7 @@ func (d *MorseDecoder) processCharacter() {
 		if d.errorCount > 3 {
 			log.Printf("[Decoder %d] Too many errors - re-training", d.decoderID)
 			d.initialized = false
-			d.trainingCount = 0
+			d.initializing = false
 			d.errorCount = 0
 			d.errorTimeout = time.Time{}
 		}

@@ -141,9 +141,30 @@
     transition: all 0.3s ease;
 }
 
-.morse-channel.active {
+/* Channel-specific colors matching spectrum display */
+#morse-channel-0.active {
+    border-color: #FF5722;
+    box-shadow: 0 0 10px rgba(255, 87, 34, 0.3);
+}
+
+#morse-channel-1.active {
+    border-color: #2196F3;
+    box-shadow: 0 0 10px rgba(33, 150, 243, 0.3);
+}
+
+#morse-channel-2.active {
     border-color: #4CAF50;
     box-shadow: 0 0 10px rgba(76, 175, 80, 0.3);
+}
+
+#morse-channel-3.active {
+    border-color: #FFC107;
+    box-shadow: 0 0 10px rgba(255, 193, 7, 0.3);
+}
+
+#morse-channel-4.active {
+    border-color: #9C27B0;
+    box-shadow: 0 0 10px rgba(156, 39, 176, 0.3);
 }
 
 .morse-channel.idle {
@@ -166,9 +187,29 @@
     gap: 12px;
 }
 
+/* Channel number colors matching spectrum display */
+#morse-channel-0 .morse-channel-number {
+    color: #FF5722;
+}
+
+#morse-channel-1 .morse-channel-number {
+    color: #2196F3;
+}
+
+#morse-channel-2 .morse-channel-number {
+    color: #4CAF50;
+}
+
+#morse-channel-3 .morse-channel-number {
+    color: #FFC107;
+}
+
+#morse-channel-4 .morse-channel-number {
+    color: #9C27B0;
+}
+
 .morse-channel-number {
     font-weight: bold;
-    color: #4CAF50;
     font-size: 14px;
 }
 
@@ -180,8 +221,29 @@
     color: #888;
 }
 
-.morse-channel.active .morse-channel-status {
+/* Channel status colors matching spectrum display */
+#morse-channel-0.active .morse-channel-status {
+    background: #FF5722;
+    color: #fff;
+}
+
+#morse-channel-1.active .morse-channel-status {
+    background: #2196F3;
+    color: #fff;
+}
+
+#morse-channel-2.active .morse-channel-status {
     background: #4CAF50;
+    color: #fff;
+}
+
+#morse-channel-3.active .morse-channel-status {
+    background: #FFC107;
+    color: #fff;
+}
+
+#morse-channel-4.active .morse-channel-status {
+    background: #9C27B0;
     color: #fff;
 }
 

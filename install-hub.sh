@@ -112,11 +112,13 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
 
     ports=(80 443 8080 8073)
     VENDOR=04b4
-    VALID_PRODUCTS=(00f1)
+    VALID_PRODUCT=00f1
+    DFU_PRODUCT=00f3
 
     ports_in_use=0
     rx_found=0
     vendor_found=0
+    dfu_mode_found=0
 
     # --- Port checks (show output regardless) ---
     if (( IGNORE_PORTS )); then
@@ -150,21 +152,17 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
 
             if [[ "$device_vendor" == "$VENDOR" ]]; then
                 vendor_found=1
-                # Check if product ID matches any valid product
-                product_match=0
-                for valid_product in "${VALID_PRODUCTS[@]}"; do
-                    if [[ "$device_product" == "$valid_product" ]]; then
-                        product_match=1
-                        break
-                    fi
-                done
 
-                if (( product_match )); then
+                # Check if it's the valid product (00f1)
+                if [[ "$device_product" == "$VALID_PRODUCT" ]]; then
                     rx_found=1
                     echo "RX888 device found (vendor: $device_vendor, product: $device_product)"
+                # Check if it's in DFU mode (00f3)
+                elif [[ "$device_product" == "$DFU_PRODUCT" ]]; then
+                    dfu_mode_found=1
+                    echo "RX888 found but is in DFU mode (bootloader firmware)"
                 else
-                    echo "Warning: Device with correct vendor ID ($device_vendor) found, but product ID ($device_product) doesn't match expected values (${VALID_PRODUCTS[*]})"
-                    rx_found=1  # Still consider it found since vendor matches
+                    echo "Warning: Device with correct vendor ID ($device_vendor) found, but product ID ($device_product) doesn't match expected value ($VALID_PRODUCT)"
                 fi
                 break
             fi
@@ -172,25 +170,26 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
         # Re-enable exit on error
         set -e
 
-        if (( rx_found )); then
-            if (( vendor_found == 0 )); then
-                echo "RX888 device not found (vendor ID mismatch)"
-            fi
-        else
+        if (( rx_found == 0 && dfu_mode_found == 0 )); then
             echo "RX888 device not found"
         fi
     fi
 
     # --- Decide exit code ---
-    # Exit 1 if any ports are in use OR RX888 missing
-    if (( ports_in_use > 0 || rx_found == 0 )); then
+    # Exit 1 if any ports are in use OR RX888 missing OR in DFU mode
+    if (( ports_in_use > 0 || rx_found == 0 || dfu_mode_found == 1 )); then
         echo
         echo "Pre-flight checks failed. Installation cannot continue."
         if (( ports_in_use > 0 )); then
             echo "Error: One or more required ports are in use."
             echo "Hint: Use --ignore-ports to skip this check."
         fi
-        if (( rx_found == 0 )); then
+        if (( dfu_mode_found == 1 )); then
+            echo "Error: RX888 found but is in DFU mode (bootloader firmware)."
+            echo "This could be for a number of reasons. In DFU mode, it is not loading"
+            echo "its proper firmware so this needs addressed before installing UberSDR."
+            echo "Hint: Use --ignore-rx888 to skip this check."
+        elif (( rx_found == 0 )); then
             echo "Error: RX888 MKII not detected."
             echo "Hint: Use --ignore-rx888 to skip this check."
         fi

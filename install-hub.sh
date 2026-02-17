@@ -211,6 +211,22 @@ sudo apt update
 sudo apt -y upgrade
 sudo apt install -y cron ntpsec libfftw3-bin ssh tmux btop htop
 
+# Disable IPv6 to prevent Docker NAT issues with client IP detection
+# When IPv6 clients connect to IPv4-only Docker containers, the kernel performs
+# NAT translation which causes the container to see the Docker gateway IP instead
+# of the real client IP. Disabling IPv6 forces all connections to use IPv4.
+echo "Configuring IPv6 settings..."
+if ! grep -q "^net.ipv6.conf.all.disable_ipv6" /etc/sysctl.conf; then
+    echo "Disabling IPv6 to ensure proper client IP detection in Docker containers..."
+    echo "net.ipv6.conf.all.disable_ipv6 = 1" | sudo tee -a /etc/sysctl.conf > /dev/null
+    echo "net.ipv6.conf.default.disable_ipv6 = 1" | sudo tee -a /etc/sysctl.conf > /dev/null
+    echo "net.ipv6.conf.lo.disable_ipv6 = 1" | sudo tee -a /etc/sysctl.conf > /dev/null
+    sudo sysctl -p > /dev/null 2>&1
+    echo "IPv6 disabled successfully."
+else
+    echo "IPv6 already disabled in sysctl.conf."
+fi
+
 # Install Docker if not already installed
 if command -v docker &> /dev/null; then
     echo "Docker is already installed, skipping installation..."

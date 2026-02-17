@@ -283,16 +283,18 @@
     opacity: 1;
 }
 
-/* Channel Content - Horizontal scrolling ticker style */
+/* Channel Content - Independent horizontal scrolling for text and morse */
 .morse-channel-content {
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.morse-channel-text-container {
     padding: 8px 12px;
-    height: auto;
     overflow-x: auto;
     overflow-y: hidden;
     white-space: nowrap;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
 }
 
 .morse-channel-text {
@@ -301,8 +303,15 @@
     color: #e0e0e0;
     white-space: nowrap;
     font-weight: bold;
-    direction: ltr;
-    text-align: left;
+    display: inline-block;
+}
+
+.morse-channel-morse-container {
+    padding: 4px 12px 8px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    border-top: 1px solid #3a3a3a;
 }
 
 .morse-channel-morse {
@@ -311,8 +320,7 @@
     color: #888;
     white-space: nowrap;
     font-family: 'Courier New', monospace;
-    direction: ltr;
-    text-align: left;
+    display: inline-block;
 }
 
 .morse-channel-morse.hidden {
@@ -457,21 +465,25 @@
     background: #4a4a4a;
 }
 
-/* Horizontal scrollbar for channel content */
-.morse-channel-content::-webkit-scrollbar {
+/* Horizontal scrollbar for text and morse containers */
+.morse-channel-text-container::-webkit-scrollbar,
+.morse-channel-morse-container::-webkit-scrollbar {
     height: 6px;
 }
 
-.morse-channel-content::-webkit-scrollbar-track {
+.morse-channel-text-container::-webkit-scrollbar-track,
+.morse-channel-morse-container::-webkit-scrollbar-track {
     background: #1a1a1a;
 }
 
-.morse-channel-content::-webkit-scrollbar-thumb {
+.morse-channel-text-container::-webkit-scrollbar-thumb,
+.morse-channel-morse-container::-webkit-scrollbar-thumb {
     background: #3a3a3a;
     border-radius: 3px;
 }
 
-.morse-channel-content::-webkit-scrollbar-thumb:hover {
+.morse-channel-text-container::-webkit-scrollbar-thumb:hover,
+.morse-channel-morse-container::-webkit-scrollbar-thumb:hover {
     background: #4a4a4a;
 }
 

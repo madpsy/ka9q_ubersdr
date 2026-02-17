@@ -752,11 +752,15 @@ class MorseExtension extends DecoderExtension {
             channel.morseBuffer += morse;
         }
 
-        // Auto-scroll horizontally to the right (newest content)
+        // Auto-scroll horizontally to the right (newest content) - scroll each container independently
         if (this.autoScroll) {
-            const contentEl = channelEl.querySelector('.morse-channel-content');
-            if (contentEl) {
-                contentEl.scrollLeft = contentEl.scrollWidth;
+            const textContainer = channelEl.querySelector('.morse-channel-text-container');
+            const morseContainer = channelEl.querySelector('.morse-channel-morse-container');
+            if (textContainer) {
+                textContainer.scrollLeft = textContainer.scrollWidth;
+            }
+            if (morseContainer) {
+                morseContainer.scrollLeft = morseContainer.scrollWidth;
             }
         }
     }

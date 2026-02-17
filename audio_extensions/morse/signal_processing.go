@@ -96,10 +96,13 @@ func (ed *EnvelopeDetector) ProcessBlock(samples []float64) float64 {
 	// Nonlinear processing (KiwiSDR approach)
 	envToNoise := clipped - ed.noise
 	v1 := (clipped-ed.noise)*envToNoise - 0.8*(envToNoise*envToNoise)
-	v1 = math.Sqrt(math.Abs(v1))
+
+	// Preserve sign before taking square root (KiwiSDR line 478)
+	sign := 1.0
 	if v1 < 0 {
-		v1 = -v1
+		sign = -1.0
 	}
+	v1 = math.Sqrt(math.Abs(v1)) * sign
 
 	// Low-pass filter with SIGNAL_TAU
 	signal := v1*ed.signalTau + ed.oldSignal*(1.0-ed.signalTau)

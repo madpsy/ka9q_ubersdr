@@ -304,14 +304,10 @@ func (d *MorseDecoder) detectTransitionBlock(signal, snr float64) {
 	}
 	d.snrMu.Unlock()
 
-	// Auto-threshold: use a fraction of the signal level
-	// KiwiSDR uses threshold_linear, we'll use a simple approach
-	if d.threshold == 0.0 {
-		d.threshold = signal * 0.5 // Start at 50% of first signal
-	}
-
 	// Determine new state
-	newState := signal >= d.threshold
+	// With nonlinear processing, threshold is 0 (signal can be negative)
+	// KiwiSDR line 483: newstate = (siglevel >= 0)
+	newState := signal >= 0.0
 
 	// Noise canceling: require 2 consecutive blocks with same state
 	if d.envelope.noiseCancelEnabled {

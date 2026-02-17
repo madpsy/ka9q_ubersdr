@@ -296,6 +296,12 @@
     overflow-y: hidden;
     white-space: nowrap;
     min-height: 38px;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE/Edge */
+}
+
+.morse-channel-text-container::-webkit-scrollbar {
+    display: none; /* Chrome/Safari/Opera */
 }
 
 .morse-channel-text {
@@ -315,6 +321,12 @@
     white-space: nowrap;
     border-top: 1px solid #3a3a3a;
     min-height: 32px;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE/Edge */
+}
+
+.morse-channel-morse-container::-webkit-scrollbar {
+    display: none; /* Chrome/Safari/Opera */
 }
 
 .morse-channel-morse {
@@ -469,27 +481,6 @@
     background: #4a4a4a;
 }
 
-/* Horizontal scrollbar for text and morse containers */
-.morse-channel-text-container::-webkit-scrollbar,
-.morse-channel-morse-container::-webkit-scrollbar {
-    height: 6px;
-}
-
-.morse-channel-text-container::-webkit-scrollbar-track,
-.morse-channel-morse-container::-webkit-scrollbar-track {
-    background: #1a1a1a;
-}
-
-.morse-channel-text-container::-webkit-scrollbar-thumb,
-.morse-channel-morse-container::-webkit-scrollbar-thumb {
-    background: #3a3a3a;
-    border-radius: 3px;
-}
-
-.morse-channel-text-container::-webkit-scrollbar-thumb:hover,
-.morse-channel-morse-container::-webkit-scrollbar-thumb:hover {
-    background: #4a4a4a;
-}
 
 /* Animations */
 @keyframes pulse {

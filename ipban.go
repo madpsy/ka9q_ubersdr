@@ -68,10 +68,12 @@ func (ibm *IPBanManager) loadFromFile() error {
 
 	for _, ban := range config.BannedIPs {
 		ibm.bannedIPs[ban.IP] = &BannedIP{
-			IP:       ban.IP,
-			Reason:   ban.Reason,
-			BannedAt: ban.BannedAt,
-			BannedBy: ban.BannedBy,
+			IP:        ban.IP,
+			Reason:    ban.Reason,
+			BannedAt:  ban.BannedAt,
+			BannedBy:  ban.BannedBy,
+			ExpiresAt: ban.ExpiresAt,
+			Temporary: ban.Temporary,
 		}
 	}
 

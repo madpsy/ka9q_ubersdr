@@ -4,141 +4,215 @@ import (
 	"math"
 )
 
-// EnvelopeDetector detects the envelope of a signal using a bandpass filter and envelope follower
+// EnvelopeDetector detects the envelope of a CW signal using Goertzel filter
+// Based on KiwiSDR/UHSDR CW decoder approach
 type EnvelopeDetector struct {
 	sampleRate      int
 	centerFrequency float64
 	bandwidth       float64
 
-	// Bandpass filter for tone detection
-	bandpass *BandpassFilter
+	// Goertzel filter for tone detection
+	goertzel *GoertzelFilter
 
-	// Low-pass filter for envelope smoothing
-	lowpass *LowpassFilter
+	// Envelope tracking (asymmetric decay averaging)
+	envelope     float64
+	noise        float64
+	attackWeight float64
+	decayWeight  float64
 
-	// Envelope follower (exponential smoothing)
-	envelope float64
+	// Signal smoothing (low-pass)
+	signalTau float64
+	oldSignal float64
+
+	// Noise canceling (debouncing)
+	noiseCancelEnabled bool
+	noiseCancelChange  bool
+	currentState       bool
+	previousState      bool
 }
 
 // NewEnvelopeDetector creates a new envelope detector
 func NewEnvelopeDetector(sampleRate int, centerFrequency, bandwidth float64) *EnvelopeDetector {
+	// Calculate weights for asymmetric decay averaging
+	// Based on KiwiSDR: weight_linear / 1000
+	// Fast attack: weight / 4
+	// Slow decay: weight * 16 (envelope), weight * 48 (noise)
+	baseWeight := 32.0 // Approximately one CW bit time
+
 	ed := &EnvelopeDetector{
-		sampleRate:      sampleRate,
-		centerFrequency: centerFrequency,
-		bandwidth:       bandwidth,
-		envelope:        0.0,
+		sampleRate:         sampleRate,
+		centerFrequency:    centerFrequency,
+		bandwidth:          bandwidth,
+		attackWeight:       baseWeight / 4.0,
+		decayWeight:        baseWeight * 16.0,
+		signalTau:          0.1, // 10% new signal, 90% old (SIGNAL_TAU from KiwiSDR)
+		envelope:           0.0,
+		noise:              0.0,
+		oldSignal:          0.0,
+		noiseCancelEnabled: true,
+		noiseCancelChange:  false,
+		currentState:       false,
+		previousState:      false,
 	}
 
-	// Create bandpass filter for the center frequency
-	ed.bandpass = NewBandpassFilter(sampleRate, centerFrequency, bandwidth)
-
-	// Create low-pass filter for envelope smoothing (cutoff at 20 Hz)
-	// CW keying is typically 2-10 Hz, so 20 Hz cutoff passes the envelope
-	// while removing all filter ripple and noise
-	ed.lowpass = NewLowpassFilter(sampleRate, 20.0)
+	// Create Goertzel filter for the center frequency
+	// Use block size of 32 samples (like KiwiSDR)
+	ed.goertzel = NewGoertzelFilter(sampleRate, centerFrequency, 32)
 
 	return ed
 }
 
-// Process processes a single audio sample and returns the envelope
+// ProcessBlock processes a block of samples and returns the signal level
+func (ed *EnvelopeDetector) ProcessBlock(samples []float64) float64 {
+	// Feed samples to Goertzel filter
+	for _, sample := range samples {
+		ed.goertzel.ProcessSample(sample)
+	}
+
+	// Get magnitude squared from Goertzel
+	magnitudeSquared := ed.goertzel.GetMagnitudeSquared()
+
+	// Track envelope (fast attack, slow decay)
+	var envWeight float64
+	if magnitudeSquared > ed.envelope {
+		envWeight = ed.attackWeight
+	} else {
+		envWeight = ed.decayWeight
+	}
+	ed.envelope = decayAvg(ed.envelope, magnitudeSquared, envWeight)
+
+	// Track noise (fast attack when below, slow decay when above)
+	var noiseWeight float64
+	if magnitudeSquared < ed.noise {
+		noiseWeight = ed.attackWeight
+	} else {
+		noiseWeight = ed.decayWeight * 3.0 // Even slower for noise (weight * 48)
+	}
+	ed.noise = decayAvg(ed.noise, magnitudeSquared, noiseWeight)
+
+	// Clamp signal between noise and magnitude
+	clipped := clamp(ed.envelope, ed.noise, magnitudeSquared)
+
+	// Nonlinear processing (KiwiSDR approach)
+	envToNoise := clipped - ed.noise
+	v1 := (clipped-ed.noise)*envToNoise - 0.8*(envToNoise*envToNoise)
+	v1 = math.Sqrt(math.Abs(v1))
+	if v1 < 0 {
+		v1 = -v1
+	}
+
+	// Low-pass filter with SIGNAL_TAU
+	signal := v1*ed.signalTau + ed.oldSignal*(1.0-ed.signalTau)
+	ed.oldSignal = v1
+
+	return signal
+}
+
+// Process processes a single sample (for compatibility)
+// Returns the current signal level
 func (ed *EnvelopeDetector) Process(sample float64) float64 {
-	// Apply bandpass filter
-	filtered := ed.bandpass.Process(sample)
+	// For single-sample processing, just feed to Goertzel
+	// and return the last calculated signal level
+	ed.goertzel.ProcessSample(sample)
 
-	// Rectify (get magnitude)
-	magnitude := math.Abs(filtered)
-
-	// Low-pass filter the rectified signal to get smooth envelope
-	ed.envelope = ed.lowpass.Process(magnitude)
-
-	return ed.envelope
-}
-
-// BandpassFilter implements a biquad IIR bandpass filter
-type BandpassFilter struct {
-	// Biquad coefficients
-	b0, b1, b2 float64
-	a1, a2     float64
-
-	// State variables (delayed samples)
-	x1, x2 float64 // Input history
-	y1, y2 float64 // Output history
-}
-
-// NewBandpassFilter creates a new bandpass filter
-func NewBandpassFilter(sampleRate int, centerFreq, bandwidth float64) *BandpassFilter {
-	// Design a biquad bandpass filter
-	// Q factor determines bandwidth: Q = centerFreq / bandwidth
-	Q := centerFreq / bandwidth
-	if Q < 0.5 {
-		Q = 0.5 // Minimum Q to avoid instability
+	// Check if block is complete
+	if ed.goertzel.IsBlockComplete() {
+		return ed.ProcessBlock(nil) // Block already processed
 	}
 
-	// Normalized frequency
-	omega := 2.0 * math.Pi * centerFreq / float64(sampleRate)
-	alpha := math.Sin(omega) / (2.0 * Q)
+	return ed.oldSignal // Return last signal level
+}
 
-	// Biquad coefficients for bandpass filter
-	b0 := alpha
-	b1 := 0.0
-	b2 := -alpha
-	a0 := 1.0 + alpha
-	a1 := -2.0 * math.Cos(omega)
-	a2 := 1.0 - alpha
-
-	// Normalize by a0
-	return &BandpassFilter{
-		b0: b0 / a0,
-		b1: b1 / a0,
-		b2: b2 / a0,
-		a1: a1 / a0,
-		a2: a2 / a0,
-		x1: 0,
-		x2: 0,
-		y1: 0,
-		y2: 0,
+// decayAvg implements asymmetric decay averaging
+func decayAvg(avg, input, weight float64) float64 {
+	if weight <= 0 {
+		return avg
 	}
+	return avg + (input-avg)/weight
 }
 
-// Process processes a single sample through the bandpass filter
-func (bf *BandpassFilter) Process(sample float64) float64 {
-	// Biquad difference equation:
-	// y[n] = b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2]
-	output := bf.b0*sample + bf.b1*bf.x1 + bf.b2*bf.x2 - bf.a1*bf.y1 - bf.a2*bf.y2
-
-	// Update state
-	bf.x2 = bf.x1
-	bf.x1 = sample
-	bf.y2 = bf.y1
-	bf.y1 = output
-
-	return output
-}
-
-// LowpassFilter implements a simple first-order low-pass filter
-type LowpassFilter struct {
-	alpha float64
-	y     float64
-}
-
-// NewLowpassFilter creates a new low-pass filter
-func NewLowpassFilter(sampleRate int, cutoffFreq float64) *LowpassFilter {
-	// Calculate alpha for first-order low-pass filter
-	// alpha = dt / (RC + dt) where RC = 1 / (2 * pi * fc)
-	dt := 1.0 / float64(sampleRate)
-	rc := 1.0 / (2.0 * math.Pi * cutoffFreq)
-	alpha := dt / (rc + dt)
-
-	return &LowpassFilter{
-		alpha: alpha,
-		y:     0.0,
+// clamp clamps a value between min and max
+func clamp(value, min, max float64) float64 {
+	if value < min {
+		return min
 	}
+	if value > max {
+		return max
+	}
+	return value
 }
 
-// Process processes a sample through the low-pass filter
-func (lp *LowpassFilter) Process(sample float64) float64 {
-	lp.y = lp.alpha*sample + (1-lp.alpha)*lp.y
-	return lp.y
+// GoertzelFilter implements the Goertzel algorithm for single-frequency detection
+type GoertzelFilter struct {
+	sampleRate int
+	frequency  float64
+	blockSize  int
+
+	// Goertzel coefficients
+	coeff float64
+	sin   float64
+	cos   float64
+
+	// State variables
+	s1, s2 float64
+
+	// Block processing
+	count int
+}
+
+// NewGoertzelFilter creates a new Goertzel filter
+func NewGoertzelFilter(sampleRate int, frequency float64, blockSize int) *GoertzelFilter {
+	gf := &GoertzelFilter{
+		sampleRate: sampleRate,
+		frequency:  frequency,
+		blockSize:  blockSize,
+		count:      0,
+	}
+
+	// Calculate Goertzel coefficient
+	k := 0.5 + float64(blockSize)*frequency/float64(sampleRate)
+	omega := 2.0 * math.Pi * k / float64(blockSize)
+	gf.coeff = 2.0 * math.Cos(omega)
+	gf.sin = math.Sin(omega)
+	gf.cos = math.Cos(omega)
+
+	return gf
+}
+
+// ProcessSample processes a single sample
+func (gf *GoertzelFilter) ProcessSample(sample float64) {
+	// Goertzel algorithm
+	s0 := sample + gf.coeff*gf.s1 - gf.s2
+	gf.s2 = gf.s1
+	gf.s1 = s0
+	gf.count++
+}
+
+// IsBlockComplete returns true if a block is complete
+func (gf *GoertzelFilter) IsBlockComplete() bool {
+	return gf.count >= gf.blockSize
+}
+
+// GetMagnitudeSquared calculates and returns magnitude squared, then resets for next block
+func (gf *GoertzelFilter) GetMagnitudeSquared() float64 {
+	if gf.count < gf.blockSize {
+		return 0.0
+	}
+
+	// Calculate magnitude squared
+	real := gf.s1*gf.cos - gf.s2
+	imag := gf.s1 * gf.sin
+	magnitudeSquared := real*real + imag*imag
+
+	// Normalize by block size squared
+	magnitudeSquared /= float64(gf.blockSize * gf.blockSize)
+
+	// Reset for next block
+	gf.s1 = 0
+	gf.s2 = 0
+	gf.count = 0
+
+	return magnitudeSquared
 }
 
 // SNREstimator estimates signal-to-noise ratio

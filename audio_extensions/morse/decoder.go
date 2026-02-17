@@ -25,6 +25,7 @@ type MorseDecoder struct {
 	envelope     *EnvelopeDetector
 	snrEstimator *SNREstimator
 	thresholdSNR float64
+	threshold    float64 // Linear threshold for signal detection
 
 	// SNR tracking
 	peakSNR  float64
@@ -36,10 +37,11 @@ type MorseDecoder struct {
 	timeUnit   float64 // Duration of one "dit" in seconds
 	timeSpec   TimeSpec
 
-	// State machine
+	// State machine (block-based timing)
 	keyState      KeyState
-	keyDownTime   time.Time
-	keyUpTime     time.Time
+	keyDownBlocks int     // Number of blocks in key-down state
+	keyUpBlocks   int     // Number of blocks in key-up state
+	blockDuration float64 // Duration of one block in seconds
 	lastActivity  time.Time
 	morseElements string
 
@@ -105,10 +107,13 @@ func NewMorseDecoder(sampleRate int, config MorseConfig) *MorseDecoder {
 		wpmAlpha:        0.3,  // Smoothing factor from PyMorseLive
 		snrDecay:        0.99, // Slow decay for peak SNR (holds peak for ~100 samples)
 		thresholdSNR:    config.ThresholdSNR,
+		threshold:       0.0,  // Will be set based on signal level
 		currentWPM:      16.0, // Start with 16 WPM
 		peakSNR:         0.0,
 		keyState:        KeyUp,
-		keyUpTime:       time.Now(),
+		keyDownBlocks:   0,
+		keyUpBlocks:     0,
+		blockDuration:   32.0 / float64(sampleRate), // 32 samples per block
 		lastActivity:    time.Now(),
 		stopChan:        make(chan struct{}),
 	}
@@ -256,68 +261,112 @@ func (d *MorseDecoder) processLoop(audioChan <-chan []int16, resultChan chan<- [
 
 // processSamples processes a batch of audio samples
 func (d *MorseDecoder) processSamples(samples []int16) {
-	for _, sample := range samples {
-		// Convert to float and normalize
-		floatSample := float64(sample) / 32768.0
+	// Convert to float64
+	floatSamples := make([]float64, len(samples))
+	for i, sample := range samples {
+		floatSamples[i] = float64(sample) / 32768.0
+	}
 
-		// Get envelope (signal strength)
-		envelope := d.envelope.Process(floatSample)
+	// Process in blocks of 32 samples (like KiwiSDR)
+	blockSize := 32
+	for i := 0; i < len(floatSamples); i += blockSize {
+		end := i + blockSize
+		if end > len(floatSamples) {
+			end = len(floatSamples)
+		}
 
-		// Update SNR estimate
-		snr := d.snrEstimator.Process(envelope)
+		block := floatSamples[i:end]
+		if len(block) == blockSize {
+			// Process complete block
+			signal := d.envelope.ProcessBlock(block)
 
-		// Detect key transitions based on SNR threshold
-		d.detectTransition(snr)
+			// Update SNR estimate
+			snr := d.snrEstimator.Process(signal)
+
+			// Detect key transitions
+			d.detectTransitionBlock(signal, snr)
+		}
 	}
 }
 
-// detectTransition detects key up/down transitions with hysteresis
-func (d *MorseDecoder) detectTransition(snr float64) {
-	now := time.Now()
-
+// detectTransitionBlock detects key up/down transitions using block-based timing
+func (d *MorseDecoder) detectTransitionBlock(signal, snr float64) {
 	// Update peak SNR (with slow decay)
 	d.snrMu.Lock()
 	if snr > d.peakSNR {
 		d.peakSNR = snr
 	} else {
-		// Slow decay
 		d.peakSNR *= d.snrDecay
 	}
 	d.snrMu.Unlock()
 
-	// Normalize SNR to 0-1 range for threshold comparison
-	level := math.Min(snr/d.thresholdSNR, 1.0)
-
-	// Use hysteresis to prevent rapid transitions
-	// Key down threshold: 0.7 (higher to avoid noise)
-	// Key up threshold: 0.3 (lower to hold signal)
-	const keyDownThreshold = 0.7
-	const keyUpThreshold = 0.3
-
-	// Key down transition (signal appears)
-	if d.keyState == KeyUp && level > keyDownThreshold {
-		spaceDuration := now.Sub(d.keyUpTime).Seconds()
-		d.keyState = KeyDown
-		d.keyDownTime = now
-		d.lastActivity = now
-
-		log.Printf("[Decoder %d] KEY DOWN - SNR: %.1f dB, level: %.2f", d.decoderID, snr, level)
-
-		// Process the space duration
-		d.processSpace(spaceDuration)
+	// Auto-threshold: use a fraction of the signal level
+	// KiwiSDR uses threshold_linear, we'll use a simple approach
+	if d.threshold == 0.0 {
+		d.threshold = signal * 0.5 // Start at 50% of first signal
 	}
 
-	// Key up transition (signal disappears)
-	if d.keyState == KeyDown && level < keyUpThreshold {
-		markDuration := now.Sub(d.keyDownTime).Seconds()
+	// Determine new state
+	newState := signal >= d.threshold
+
+	// Noise canceling: require 2 consecutive blocks with same state
+	if d.envelope.noiseCancelEnabled {
+		if d.envelope.noiseCancelChange {
+			// Second consecutive block with new state - confirm transition
+			if newState != d.envelope.currentState {
+				d.envelope.currentState = newState
+				d.envelope.noiseCancelChange = false
+				d.processStateChange(newState)
+			} else {
+				// State changed back - ignore
+				d.envelope.noiseCancelChange = false
+			}
+		} else if newState != d.envelope.currentState {
+			// First block with new state - wait for confirmation
+			d.envelope.noiseCancelChange = true
+		}
+	} else {
+		// No noise canceling
+		if newState != d.envelope.currentState {
+			d.envelope.currentState = newState
+			d.processStateChange(newState)
+		}
+	}
+
+	// Increment block counters
+	if d.envelope.currentState {
+		d.keyDownBlocks++
+		d.keyUpBlocks = 0
+	} else {
+		d.keyUpBlocks++
+		d.keyDownBlocks = 0
+	}
+}
+
+// processStateChange handles state transitions
+func (d *MorseDecoder) processStateChange(newState bool) {
+	now := time.Now()
+	d.lastActivity = now
+
+	if newState {
+		// Transition to key-down
+		spaceDuration := float64(d.keyUpBlocks) * d.blockDuration
+		d.keyState = KeyDown
+		d.keyDownBlocks = 0
+
+		log.Printf("[Decoder %d] KEY DOWN - blocks: %d, duration: %.3fs",
+			d.decoderID, d.keyUpBlocks, spaceDuration)
+
+		d.processSpace(spaceDuration)
+	} else {
+		// Transition to key-up
+		markDuration := float64(d.keyDownBlocks) * d.blockDuration
 		d.keyState = KeyUp
-		d.keyUpTime = now
-		d.lastActivity = now
+		d.keyUpBlocks = 0
 
-		log.Printf("[Decoder %d] KEY UP - duration: %.3fs, threshold: %.3fs, SNR: %.1f dB",
-			d.decoderID, markDuration, d.timeSpec.DotShort, snr)
+		log.Printf("[Decoder %d] KEY UP - blocks: %d, duration: %.3fs, threshold: %.3fs",
+			d.decoderID, d.keyDownBlocks, markDuration, d.timeSpec.DotShort)
 
-		// Process the mark duration
 		d.processMark(markDuration)
 	}
 }

@@ -10,9 +10,7 @@ import (
 )
 
 const (
-	MaxDecoders        = 5   // Maximum number of simultaneous decoders
-	DecoderMaxIdleSec  = 15  // Seconds before idle decoder is removed
-	SpectrumUpdateRate = 0.1 // Seconds between spectrum updates
+	MaxDecoders = 5 // Maximum number of simultaneous decoders
 )
 
 // MultiChannelDecoder manages multiple parallel Morse decoders
@@ -135,10 +133,6 @@ func (mcd *MultiChannelDecoder) GetName() string {
 func (mcd *MultiChannelDecoder) processLoop(audioChan <-chan []int16, resultChan chan<- []byte) {
 	defer mcd.wg.Done()
 
-	// Ticker for decoder management
-	managementTicker := time.NewTicker(1 * time.Second)
-	defer managementTicker.Stop()
-
 	// Ticker for status updates
 	statusTicker := time.NewTicker(5 * time.Second)
 	defer statusTicker.Stop()
@@ -154,10 +148,6 @@ func (mcd *MultiChannelDecoder) processLoop(audioChan <-chan []int16, resultChan
 			}
 			mcd.processSamples(samples, resultChan)
 
-		case <-managementTicker.C:
-			// Clean up idle decoders and reassign to new peaks
-			mcd.manageDecoders(resultChan)
-
 		case <-statusTicker.C:
 			// Send status update
 			mcd.sendStatusUpdate(resultChan)
@@ -167,26 +157,15 @@ func (mcd *MultiChannelDecoder) processLoop(audioChan <-chan []int16, resultChan
 
 // processSamples processes audio samples through active decoders
 func (mcd *MultiChannelDecoder) processSamples(samples []int16, resultChan chan<- []byte) {
-	for _, sample := range samples {
-		// Convert to float and normalize
-		floatSample := float64(sample) / 32768.0
-
-		// Feed sample to all active decoders
-		mcd.decodersMu.RLock()
-		for _, slot := range mcd.decoders {
-			if slot.Active && slot.Decoder != nil {
-				// Process sample through decoder's envelope detector
-				envelope := slot.Decoder.envelope.Process(floatSample)
-
-				// Update SNR estimate
-				snr := slot.Decoder.snrEstimator.Process(envelope)
-
-				// Detect key transitions
-				slot.Decoder.detectTransition(snr)
-			}
+	// Feed samples to all active decoders
+	mcd.decodersMu.RLock()
+	for _, slot := range mcd.decoders {
+		if slot.Active && slot.Decoder != nil {
+			// Process samples through decoder
+			slot.Decoder.processSamples(samples)
 		}
-		mcd.decodersMu.RUnlock()
 	}
+	mcd.decodersMu.RUnlock()
 
 	// Check for word separators and flush buffers periodically
 	mcd.decodersMu.RLock()

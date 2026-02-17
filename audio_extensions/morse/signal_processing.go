@@ -21,17 +21,19 @@ type EnvelopeDetector struct {
 
 // NewEnvelopeDetector creates a new envelope detector
 func NewEnvelopeDetector(sampleRate int, centerFrequency, bandwidth float64) *EnvelopeDetector {
-	// Calculate time constants for proper CW envelope detection
-	// Attack: 5ms (fast enough to catch dit start)
-	// Decay: 10ms (slow enough to smooth out Goertzel fluctuations)
-	attackTimeMs := 5.0
-	decayTimeMs := 10.0
+	// Use very slow envelope following to smooth out Goertzel block updates
+	// Attack: 10ms time constant
+	// Decay: 20ms time constant
+	// This creates a proper CW envelope that follows the actual keying
+	attackTimeMs := 10.0
+	decayTimeMs := 20.0
 
-	// Convert to alpha values (exponential moving average coefficient)
-	// alpha = 1 - exp(-1 / (time_constant_ms * sample_rate / 1000))
-	// Simplified: alpha ≈ 1 / (time_constant_ms * sample_rate / 1000) for small values
-	attackAlpha := 1.0 / (attackTimeMs * float64(sampleRate) / 1000.0)
-	decayAlpha := 1.0 / (decayTimeMs * float64(sampleRate) / 1000.0)
+	// Convert to alpha values for exponential moving average
+	// alpha = 1 - exp(-dt / time_constant)
+	// For per-sample updates: dt = 1/sample_rate
+	// Simplified for small values: alpha ≈ 1 / (time_constant_seconds * sample_rate)
+	attackAlpha := 1000.0 / (attackTimeMs * float64(sampleRate))
+	decayAlpha := 1000.0 / (decayTimeMs * float64(sampleRate))
 
 	ed := &EnvelopeDetector{
 		sampleRate:      sampleRate,
@@ -53,14 +55,18 @@ func (ed *EnvelopeDetector) Process(sample float64) float64 {
 	// Apply Goertzel filter to detect tone
 	magnitude := ed.goertzel.Process(sample)
 
-	// Envelope follower with attack/decay
-	if magnitude > ed.envelope {
-		// Attack (signal increasing)
-		ed.envelope = ed.envelopeAttack*magnitude + (1-ed.envelopeAttack)*ed.envelope
-	} else {
-		// Decay (signal decreasing)
-		ed.envelope = ed.envelopeDecay*magnitude + (1-ed.envelopeDecay)*ed.envelope
+	// Only update envelope when Goertzel returns a new value (non-zero)
+	if magnitude > 0.0 {
+		// Envelope follower with attack/decay
+		if magnitude > ed.envelope {
+			// Attack (signal increasing)
+			ed.envelope = ed.envelopeAttack*magnitude + (1-ed.envelopeAttack)*ed.envelope
+		} else {
+			// Decay (signal decreasing)
+			ed.envelope = ed.envelopeDecay*magnitude + (1-ed.envelopeDecay)*ed.envelope
+		}
 	}
+	// Otherwise hold the current envelope value
 
 	return ed.envelope
 }
@@ -96,7 +102,7 @@ func NewGoertzelFilter(sampleRate int, frequency float64) *GoertzelFilter {
 	return gf
 }
 
-// Process processes a single sample and returns magnitude (updated every sample)
+// Process processes a single sample and returns magnitude
 func (gf *GoertzelFilter) Process(sample float64) float64 {
 	// Goertzel algorithm
 	s0 := sample + gf.coeff*gf.s1 - gf.s2
@@ -105,7 +111,8 @@ func (gf *GoertzelFilter) Process(sample float64) float64 {
 
 	gf.count++
 
-	// Calculate magnitude at end of block
+	// Only calculate magnitude at end of block for stability
+	// Between blocks, return the last calculated magnitude
 	if gf.count >= gf.blockSize {
 		// Calculate magnitude
 		real := gf.s1 - gf.s2*math.Cos(2.0*math.Pi*gf.frequency/float64(gf.sampleRate))
@@ -120,10 +127,8 @@ func (gf *GoertzelFilter) Process(sample float64) float64 {
 		return magnitude
 	}
 
-	// Return current running magnitude estimate (not as accurate but continuous)
-	real := gf.s1 - gf.s2*math.Cos(2.0*math.Pi*gf.frequency/float64(gf.sampleRate))
-	imag := gf.s2 * math.Sin(2.0*math.Pi*gf.frequency/float64(gf.sampleRate))
-	return math.Sqrt(real*real+imag*imag) / float64(gf.count+1)
+	// Return 0 between blocks - envelope detector will hold the value
+	return 0.0
 }
 
 // SNREstimator estimates signal-to-noise ratio

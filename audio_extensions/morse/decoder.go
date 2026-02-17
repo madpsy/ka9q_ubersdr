@@ -10,7 +10,7 @@ import (
 )
 
 // MorseDecoder implements a timing-based Morse code decoder
-// Based on PyMorseLive algorithm
+// Based on UHSDR/KiwiSDR algorithm
 type MorseDecoder struct {
 	// Configuration
 	sampleRate      int
@@ -22,10 +22,11 @@ type MorseDecoder struct {
 	decoderID       int     // Decoder ID for multi-channel mode (0 for standalone)
 
 	// Signal processing
-	envelope     *EnvelopeDetector
-	snrEstimator *SNREstimator
-	thresholdSNR float64
-	threshold    float64 // Linear threshold for signal detection
+	envelope        *EnvelopeDetector
+	snrEstimator    *SNREstimator
+	thresholdSNR    float64
+	isAutoThreshold bool    // Use auto threshold (nonlinear) vs fixed threshold
+	thresholdLinear float64 // Linear threshold for signal detection
 
 	// SNR tracking
 	peakSNR  float64
@@ -82,14 +83,16 @@ const (
 
 // MorseConfig contains configuration parameters
 type MorseConfig struct {
-	CenterFrequency float64 `json:"center_frequency"` // Hz - for single decoder or assigned frequency
-	Bandwidth       float64 `json:"bandwidth"`        // Hz (e.g., 100) - per-decoder filter bandwidth
-	MinWPM          float64 `json:"min_wpm"`          // Minimum WPM (e.g., 12)
-	MaxWPM          float64 `json:"max_wpm"`          // Maximum WPM (e.g., 45)
-	ThresholdSNR    float64 `json:"threshold_snr"`    // SNR threshold in dB (e.g., 10)
+	CenterFrequency float64 `json:"center_frequency"`  // Hz - for single decoder or assigned frequency
+	Bandwidth       float64 `json:"bandwidth"`         // Hz (e.g., 100) - per-decoder filter bandwidth
+	MinWPM          float64 `json:"min_wpm"`           // Minimum WPM (e.g., 12)
+	MaxWPM          float64 `json:"max_wpm"`           // Maximum WPM (e.g., 45)
+	ThresholdSNR    float64 `json:"threshold_snr"`     // SNR threshold in dB (e.g., 10)
+	IsAutoThreshold bool    `json:"is_auto_threshold"` // Use auto threshold (nonlinear processing)
+	ThresholdLinear float64 `json:"threshold_linear"`  // Linear threshold value (for fixed mode)
 }
 
-// DefaultMorseConfig returns default configuration
+// DefaultMorseConfig returns default configuration matching KiwiSDR defaults
 func DefaultMorseConfig() MorseConfig {
 	return MorseConfig{
 		CenterFrequency: 600.0, // Not used in multi-channel mode
@@ -97,6 +100,8 @@ func DefaultMorseConfig() MorseConfig {
 		MinWPM:          12.0,
 		MaxWPM:          45.0,
 		ThresholdSNR:    10.0,
+		IsAutoThreshold: false,   // KiwiSDR default is FIXED mode
+		ThresholdLinear: 15849.0, // KiwiSDR AUTO_THRESHOLD_LINEAR (~42 dB)
 	}
 }
 
@@ -111,7 +116,8 @@ func NewMorseDecoder(sampleRate int, config MorseConfig) *MorseDecoder {
 		wpmAlpha:        0.3,  // Smoothing factor from PyMorseLive
 		snrDecay:        0.99, // Slow decay for peak SNR (holds peak for ~100 samples)
 		thresholdSNR:    config.ThresholdSNR,
-		threshold:       0.0, // Will be set based on signal level
+		isAutoThreshold: config.IsAutoThreshold,
+		thresholdLinear: config.ThresholdLinear,
 		currentWPM:      0.0, // Will be calculated from timing
 		peakSNR:         0.0,
 		keyState:        KeyUp,
@@ -133,14 +139,15 @@ func NewMorseDecoder(sampleRate int, config MorseConfig) *MorseDecoder {
 		wordSpaceCorrection: true, // Enable word space correction
 	}
 
-	// Initialize envelope detector
-	d.envelope = NewEnvelopeDetector(sampleRate, config.CenterFrequency, config.Bandwidth)
+	// Initialize envelope detector with threshold mode
+	d.envelope = NewEnvelopeDetector(sampleRate, config.CenterFrequency, config.Bandwidth, config.IsAutoThreshold)
 
 	// Initialize SNR estimator
 	d.snrEstimator = NewSNREstimator(100) // 100 sample window
 
-	log.Printf("[Morse] Initialized: SR=%d, CF=%.1f Hz, BW=%.1f Hz, WPM=%.1f-%.1f",
-		sampleRate, config.CenterFrequency, config.Bandwidth, config.MinWPM, config.MaxWPM)
+	log.Printf("[Morse] Initialized: SR=%d, CF=%.1f Hz, BW=%.1f Hz, WPM=%.1f-%.1f, Threshold=%s %.0f",
+		sampleRate, config.CenterFrequency, config.Bandwidth, config.MinWPM, config.MaxWPM,
+		map[bool]string{true: "AUTO", false: "FIXED"}[config.IsAutoThreshold], config.ThresholdLinear)
 
 	return d
 }
@@ -304,10 +311,18 @@ func (d *MorseDecoder) detectTransitionBlock(signal, snr float64) {
 	}
 	d.snrMu.Unlock()
 
-	// Determine new state
-	// With nonlinear processing, threshold is 0 (signal can be negative)
-	// KiwiSDR line 483: newstate = (siglevel >= 0)
-	newState := signal >= 0.0
+	// Determine new state based on threshold mode
+	var newState bool
+	if d.isAutoThreshold {
+		// Auto threshold mode: nonlinear processing with configurable threshold
+		// KiwiSDR line 484: newstate = (siglevel >= threshold_linear)
+		newState = signal >= d.thresholdLinear
+	} else {
+		// Fixed threshold mode: compare magnitude directly to threshold
+		// KiwiSDR line 493: newstate = (siglevel >= threshold_linear)
+		// Signal is already low-pass filtered magnitude
+		newState = signal >= d.thresholdLinear
+	}
 
 	// Noise canceling: require 2 consecutive blocks with same state
 	if d.envelope.noiseCancelEnabled {

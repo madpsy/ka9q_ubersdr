@@ -14,6 +14,9 @@ type EnvelopeDetector struct {
 	// Goertzel filter for tone detection
 	goertzel *GoertzelFilter
 
+	// Threshold mode
+	isAutoThreshold bool // Use auto threshold (nonlinear) vs fixed threshold
+
 	// Envelope tracking (asymmetric decay averaging)
 	envelope     float64
 	noise        float64
@@ -32,7 +35,7 @@ type EnvelopeDetector struct {
 }
 
 // NewEnvelopeDetector creates a new envelope detector
-func NewEnvelopeDetector(sampleRate int, centerFrequency, bandwidth float64) *EnvelopeDetector {
+func NewEnvelopeDetector(sampleRate int, centerFrequency, bandwidth float64, isAutoThreshold bool) *EnvelopeDetector {
 	// Calculate weights for asymmetric decay averaging
 	// Based on KiwiSDR: weight_linear / 1000
 	// Fast attack: weight / 4
@@ -43,6 +46,7 @@ func NewEnvelopeDetector(sampleRate int, centerFrequency, bandwidth float64) *En
 		sampleRate:         sampleRate,
 		centerFrequency:    centerFrequency,
 		bandwidth:          bandwidth,
+		isAutoThreshold:    isAutoThreshold,
 		attackWeight:       baseWeight / 4.0,
 		decayWeight:        baseWeight * 16.0,
 		signalTau:          0.1, // 10% new signal, 90% old (SIGNAL_TAU from KiwiSDR)
@@ -72,41 +76,53 @@ func (ed *EnvelopeDetector) ProcessBlock(samples []float64) float64 {
 	// Get magnitude squared from Goertzel
 	magnitudeSquared := ed.goertzel.GetMagnitudeSquared()
 
-	// Track envelope (fast attack, slow decay)
-	var envWeight float64
-	if magnitudeSquared > ed.envelope {
-		envWeight = ed.attackWeight
+	var signal float64
+
+	if ed.isAutoThreshold {
+		// Auto threshold mode: use nonlinear processing
+		// KiwiSDR lines 447-485
+
+		// Track envelope (fast attack, slow decay)
+		var envWeight float64
+		if magnitudeSquared > ed.envelope {
+			envWeight = ed.attackWeight
+		} else {
+			envWeight = ed.decayWeight
+		}
+		ed.envelope = decayAvg(ed.envelope, magnitudeSquared, envWeight)
+
+		// Track noise (fast attack when below, slow decay when above)
+		var noiseWeight float64
+		if magnitudeSquared < ed.noise {
+			noiseWeight = ed.attackWeight
+		} else {
+			noiseWeight = ed.decayWeight * 3.0 // Even slower for noise (weight * 48)
+		}
+		ed.noise = decayAvg(ed.noise, magnitudeSquared, noiseWeight)
+
+		// Clamp signal between noise and magnitude
+		clipped := clamp(ed.envelope, ed.noise, magnitudeSquared)
+
+		// Nonlinear processing (KiwiSDR approach)
+		envToNoise := clipped - ed.noise
+		v1 := (clipped-ed.noise)*envToNoise - 0.8*(envToNoise*envToNoise)
+
+		// Preserve sign before taking square root (KiwiSDR line 478)
+		sign := 1.0
+		if v1 < 0 {
+			sign = -1.0
+		}
+		v1 = math.Sqrt(math.Abs(v1)) * sign
+
+		// Low-pass filter with SIGNAL_TAU
+		signal = v1*ed.signalTau + ed.oldSignal*(1.0-ed.signalTau)
+		ed.oldSignal = v1
 	} else {
-		envWeight = ed.decayWeight
+		// Fixed threshold mode: simple magnitude with low-pass filter
+		// KiwiSDR lines 488-494
+		signal = magnitudeSquared*ed.signalTau + ed.oldSignal*(1.0-ed.signalTau)
+		ed.oldSignal = magnitudeSquared
 	}
-	ed.envelope = decayAvg(ed.envelope, magnitudeSquared, envWeight)
-
-	// Track noise (fast attack when below, slow decay when above)
-	var noiseWeight float64
-	if magnitudeSquared < ed.noise {
-		noiseWeight = ed.attackWeight
-	} else {
-		noiseWeight = ed.decayWeight * 3.0 // Even slower for noise (weight * 48)
-	}
-	ed.noise = decayAvg(ed.noise, magnitudeSquared, noiseWeight)
-
-	// Clamp signal between noise and magnitude
-	clipped := clamp(ed.envelope, ed.noise, magnitudeSquared)
-
-	// Nonlinear processing (KiwiSDR approach)
-	envToNoise := clipped - ed.noise
-	v1 := (clipped-ed.noise)*envToNoise - 0.8*(envToNoise*envToNoise)
-
-	// Preserve sign before taking square root (KiwiSDR line 478)
-	sign := 1.0
-	if v1 < 0 {
-		sign = -1.0
-	}
-	v1 = math.Sqrt(math.Abs(v1)) * sign
-
-	// Low-pass filter with SIGNAL_TAU
-	signal := v1*ed.signalTau + ed.oldSignal*(1.0-ed.signalTau)
-	ed.oldSignal = v1
 
 	return signal
 }

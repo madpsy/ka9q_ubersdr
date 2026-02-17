@@ -21,7 +21,7 @@ type MorseExtension struct {
 
 // NewMorseExtension creates a new Morse audio extension
 func NewMorseExtension(sampleRate int, extensionParams map[string]interface{}) (*MorseExtension, error) {
-	// Start with default config
+	// Start with default config (matches KiwiSDR defaults)
 	config := DefaultMorseConfig()
 
 	// Check if multi-channel mode is requested (default: true)
@@ -42,6 +42,14 @@ func NewMorseExtension(sampleRate int, extensionParams map[string]interface{}) (
 	}
 	if threshold, ok := extensionParams["threshold_snr"].(float64); ok {
 		config.ThresholdSNR = threshold
+	}
+
+	// Threshold mode configuration
+	if isAuto, ok := extensionParams["is_auto_threshold"].(bool); ok {
+		config.IsAutoThreshold = isAuto
+	}
+	if thresholdLinear, ok := extensionParams["threshold_linear"].(float64); ok {
+		config.ThresholdLinear = thresholdLinear
 	}
 
 	// Get channel frequencies from parameters
@@ -73,8 +81,9 @@ func NewMorseExtension(sampleRate int, extensionParams map[string]interface{}) (
 
 	decoder := NewMultiChannelDecoder(sampleRate, config, channelFreqs)
 
-	log.Printf("[Morse Extension] Created multi-channel decoder: BW=%.1f Hz, WPM=%.1f-%.1f, SNR=%.1f dB, Channels=%d",
-		config.Bandwidth, config.MinWPM, config.MaxWPM, config.ThresholdSNR, MaxDecoders)
+	log.Printf("[Morse Extension] Created multi-channel decoder: BW=%.1f Hz, WPM=%.1f-%.1f, SNR=%.1f dB, Threshold=%s %.0f, Channels=%d",
+		config.Bandwidth, config.MinWPM, config.MaxWPM, config.ThresholdSNR,
+		map[bool]string{true: "AUTO", false: "FIXED"}[config.IsAutoThreshold], config.ThresholdLinear, MaxDecoders)
 
 	return &MorseExtension{
 		decoder:      decoder,

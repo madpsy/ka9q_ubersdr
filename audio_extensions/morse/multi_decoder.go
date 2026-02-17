@@ -16,11 +16,13 @@ const (
 // MultiChannelDecoder manages multiple parallel Morse decoders
 type MultiChannelDecoder struct {
 	// Configuration
-	sampleRate   int
-	minWPM       float64
-	maxWPM       float64
-	thresholdSNR float64
-	bandwidth    float64
+	sampleRate      int
+	minWPM          float64
+	maxWPM          float64
+	thresholdSNR    float64
+	bandwidth       float64
+	isAutoThreshold bool
+	thresholdLinear float64
 
 	// Channel frequencies (user-specified)
 	channelFrequencies [MaxDecoders]float64
@@ -54,6 +56,8 @@ func NewMultiChannelDecoder(sampleRate int, config MorseConfig, channelFreqs [Ma
 		maxWPM:             config.MaxWPM,
 		thresholdSNR:       config.ThresholdSNR,
 		bandwidth:          config.Bandwidth,
+		isAutoThreshold:    config.IsAutoThreshold,
+		thresholdLinear:    config.ThresholdLinear,
 		channelFrequencies: channelFreqs,
 		decoders:           make([]*DecoderSlot, MaxDecoders),
 		stopChan:           make(chan struct{}),
@@ -200,6 +204,8 @@ func (mcd *MultiChannelDecoder) activateChannelAtFrequency(channelID int, freque
 		MinWPM:          mcd.minWPM,
 		MaxWPM:          mcd.maxWPM,
 		ThresholdSNR:    mcd.thresholdSNR,
+		IsAutoThreshold: mcd.isAutoThreshold,
+		ThresholdLinear: mcd.thresholdLinear,
 	}
 
 	decoder := NewMorseDecoder(mcd.sampleRate, config)

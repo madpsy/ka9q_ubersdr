@@ -961,7 +961,7 @@ class MorseExtension extends DecoderExtension {
         }
 
         // Draw frequency scale at bottom
-        ctx.fillStyle = '#666';
+        ctx.fillStyle = '#000';
         ctx.font = '9px monospace';
         for (let freq = 0; freq <= maxDisplayFreq; freq += 500) {
             const x = (freq / maxDisplayFreq) * width;

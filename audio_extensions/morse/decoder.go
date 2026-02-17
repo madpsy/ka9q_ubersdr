@@ -279,9 +279,10 @@ func (d *MorseDecoder) processSamples(samples []int16) {
 	}
 
 	// Convert to float64
+	// KiwiSDR divides by 4 (line 618), not by 32768
 	floatSamples := make([]float64, len(samples))
 	for i, sample := range samples {
-		floatSamples[i] = float64(sample) / 32768.0
+		floatSamples[i] = float64(sample) / 4.0
 	}
 
 	// Process in blocks of 32 samples (like KiwiSDR)

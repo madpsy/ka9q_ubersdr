@@ -45,6 +45,7 @@ type MorseDecoder struct {
 	initialized         bool    // Have we learned timing yet?
 	trackTiming         bool    // Continuously adapt timing
 	trainingCount       int     // Number of marks processed during training
+	trainingStates      int     // Total states (marks+spaces) processed during training
 	wordSpaceCorrection bool    // Enable word space correction (equation 4.15)
 
 	// Error tracking and re-training
@@ -425,6 +426,7 @@ func (d *MorseDecoder) processMark(blocks int) {
 	// Training period (KiwiSDR has 3 phases)
 	if !d.initialized {
 		d.trainingCount++
+		d.trainingStates++ // Count this mark
 
 		const TRAINING_STABLE = 32
 
@@ -502,19 +504,20 @@ func (d *MorseDecoder) processSpace(blocks int) {
 
 	const TRAINING_STABLE = 32
 
-	// During training, update space averages
-	if !d.initialized && d.trainingCount > TRAINING_STABLE {
-		// Late training phase - update space averages (equation 4.8)
-		if t > d.pulseAvg {
-			d.cwSpaceAvg = d.cwSpaceAvg + (t-d.cwSpaceAvg)/4.0
-		} else {
-			d.symSpaceAvg = d.symSpaceAvg + (t-d.symSpaceAvg)/4.0
+	// During training, update space averages (KiwiSDR line 718)
+	// KiwiSDR uses "processed" which counts ALL states, not just marks
+	if !d.initialized {
+		d.trainingStates++ // Count this space
+
+		if d.trainingStates > TRAINING_STABLE {
+			// Late training phase - update space averages (equation 4.8)
+			if t > d.pulseAvg {
+				d.cwSpaceAvg = d.cwSpaceAvg + (t-d.cwSpaceAvg)/4.0
+			} else {
+				d.symSpaceAvg = d.symSpaceAvg + (t-d.symSpaceAvg)/4.0
+			}
 		}
 		return // Don't decode during training
-	}
-
-	if !d.initialized {
-		return // Ignore spaces in early training
 	}
 
 	// Determine if symbol space or character/word space

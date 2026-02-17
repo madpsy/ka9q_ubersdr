@@ -166,14 +166,14 @@ class MorseExtension extends DecoderExtension {
         // Check if we already have 5 active channels
         const activeCount = this.channels.filter(ch => ch.active).length;
         if (activeCount >= 5) {
-            alert('Maximum of 5 channels reached. Right-click on a channel to remove it first.');
+            this.showStatusMessage('Maximum of 5 channels reached. Right-click to remove a channel first.', 'error');
             return;
         }
 
         // Find first inactive channel
         const channelId = this.channels.findIndex(ch => !ch.active);
         if (channelId === -1) {
-            alert('All channels are active');
+            this.showStatusMessage('All channels are active', 'error');
             return;
         }
 
@@ -407,14 +407,14 @@ class MorseExtension extends DecoderExtension {
             // Enable channel
             const freq = parseFloat(freqInput.value);
             if (freq < 100 || freq > 5000) {
-                alert('Frequency must be between 100 and 5000 Hz');
+                this.showStatusMessage('Frequency must be between 100 and 5000 Hz', 'error');
                 return;
             }
 
             // Check if we already have 5 active channels
             const activeCount = this.channels.filter(ch => ch.active).length;
             if (activeCount >= 5) {
-                alert('Maximum of 5 channels reached');
+                this.showStatusMessage('Maximum of 5 channels reached', 'error');
                 return;
             }
 
@@ -827,6 +827,31 @@ class MorseExtension extends DecoderExtension {
         if (statusEl) {
             statusEl.textContent = text;
         }
+    }
+
+    showStatusMessage(message, type = 'info') {
+        const statusEl = document.getElementById('morse-status-text');
+        if (!statusEl) return;
+
+        // Store original status
+        const originalText = statusEl.textContent;
+        const originalColor = statusEl.style.color;
+
+        // Set message with color
+        statusEl.textContent = message;
+        if (type === 'error') {
+            statusEl.style.color = '#f44336';
+        } else if (type === 'success') {
+            statusEl.style.color = '#4CAF50';
+        } else {
+            statusEl.style.color = '#FFC107';
+        }
+
+        // Restore original status after 3 seconds
+        setTimeout(() => {
+            statusEl.textContent = originalText;
+            statusEl.style.color = originalColor;
+        }, 3000);
     }
 
     onProcessAudio(dataArray) {

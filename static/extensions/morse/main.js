@@ -742,21 +742,21 @@ class MorseExtension extends DecoderExtension {
 
         // Append text (no timestamps)
         if (text) {
-            textEl.innerHTML += text;
+            textEl.textContent += text;
             channel.textBuffer += text;
         }
 
         // Append morse
         if (morse && this.showMorse) {
-            morseEl.innerHTML += morse;
+            morseEl.textContent += morse;
             channel.morseBuffer += morse;
         }
 
-        // Auto-scroll
+        // Auto-scroll horizontally to the right (newest content)
         if (this.autoScroll) {
             const contentEl = channelEl.querySelector('.morse-channel-content');
             if (contentEl) {
-                contentEl.scrollTop = contentEl.scrollHeight;
+                contentEl.scrollLeft = contentEl.scrollWidth;
             }
         }
     }
@@ -770,8 +770,8 @@ class MorseExtension extends DecoderExtension {
         if (channelEl) {
             const textEl = channelEl.querySelector('.morse-channel-text');
             const morseEl = channelEl.querySelector('.morse-channel-morse');
-            if (textEl) textEl.innerHTML = '';
-            if (morseEl) morseEl.innerHTML = '';
+            if (textEl) textEl.textContent = '';
+            if (morseEl) morseEl.textContent = '';
         }
     }
 

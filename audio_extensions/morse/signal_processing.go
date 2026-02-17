@@ -22,17 +22,25 @@ type EnvelopeDetector struct {
 // NewEnvelopeDetector creates a new envelope detector
 func NewEnvelopeDetector(sampleRate int, centerFrequency, bandwidth float64) *EnvelopeDetector {
 	// Envelope time constants for CW detection
-	// Attack: 5ms (fast enough to catch dit start)
-	// Decay: 15ms (slow enough to smooth out filter ripple)
-	attackTimeMs := 5.0
-	decayTimeMs := 15.0
+	// These need to be MUCH slower than the CW timing to avoid false transitions
+	// Attack: 10ms (fast enough for fastest CW)
+	// Decay: 30ms (slow enough to hold through filter ripple)
+	attackTimeMs := 10.0
+	decayTimeMs := 30.0
 
 	// Convert to alpha values for exponential moving average
-	// alpha = 1 - exp(-dt / time_constant)
-	// For per-sample updates: dt = 1/sample_rate
-	// Simplified: alpha ≈ 1 / (time_constant_seconds * sample_rate)
-	attackAlpha := 1000.0 / (attackTimeMs * float64(sampleRate))
-	decayAlpha := 1000.0 / (decayTimeMs * float64(sampleRate))
+	// alpha = dt / time_constant where dt = 1/sample_rate
+	// This gives proper exponential smoothing
+	attackAlpha := (1.0 / float64(sampleRate)) / (attackTimeMs / 1000.0)
+	decayAlpha := (1.0 / float64(sampleRate)) / (decayTimeMs / 1000.0)
+
+	// Clamp alpha values to reasonable range
+	if attackAlpha > 0.1 {
+		attackAlpha = 0.1
+	}
+	if decayAlpha > 0.1 {
+		decayAlpha = 0.1
+	}
 
 	ed := &EnvelopeDetector{
 		sampleRate:      sampleRate,

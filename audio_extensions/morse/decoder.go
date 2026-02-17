@@ -32,10 +32,23 @@ type MorseDecoder struct {
 	snrDecay float64 // Decay factor for peak SNR
 	snrMu    sync.Mutex
 
-	// Timing decoder
-	currentWPM float64
-	timeUnit   float64 // Duration of one "dit" in seconds
-	timeSpec   TimeSpec
+	// Adaptive timing (KiwiSDR approach)
+	pulseAvg            float64 // Composite average for dot/dash discrimination
+	dotAvg              float64 // Average dot duration
+	dashAvg             float64 // Average dash duration
+	symSpaceAvg         float64 // Average symbol space (between dots/dashes)
+	cwSpaceAvg          float64 // Average character/word space
+	lastWordSpace       float64 // Last word space duration (for correction)
+	wordSpaceFlag       bool    // Pending word space to output
+	currentWPM          float64 // Calculated WPM
+	initialized         bool    // Have we learned timing yet?
+	trackTiming         bool    // Continuously adapt timing
+	trainingCount       int     // Number of marks processed during training
+	wordSpaceCorrection bool    // Enable word space correction (equation 4.15)
+
+	// Error tracking and re-training
+	errorCount   int       // Count of decode errors
+	errorTimeout time.Time // Time when error count resets
 
 	// State machine (block-based timing)
 	keyState      KeyState
@@ -66,15 +79,6 @@ const (
 	KeyUp KeyState = iota
 	KeyDown
 )
-
-// TimeSpec contains timing thresholds for Morse decoding
-type TimeSpec struct {
-	DotShort     float64 // Minimum duration for a dot
-	DotLong      float64 // Maximum duration for a dot
-	CharSepShort float64 // Minimum duration for character separator
-	CharSepLong  float64 // Maximum duration for character separator
-	WordSep      float64 // Minimum duration for word separator
-}
 
 // MorseConfig contains configuration parameters
 type MorseConfig struct {
@@ -107,8 +111,8 @@ func NewMorseDecoder(sampleRate int, config MorseConfig) *MorseDecoder {
 		wpmAlpha:        0.3,  // Smoothing factor from PyMorseLive
 		snrDecay:        0.99, // Slow decay for peak SNR (holds peak for ~100 samples)
 		thresholdSNR:    config.ThresholdSNR,
-		threshold:       0.0,  // Will be set based on signal level
-		currentWPM:      16.0, // Start with 16 WPM
+		threshold:       0.0, // Will be set based on signal level
+		currentWPM:      0.0, // Will be calculated from timing
 		peakSNR:         0.0,
 		keyState:        KeyUp,
 		keyDownBlocks:   0,
@@ -116,6 +120,17 @@ func NewMorseDecoder(sampleRate int, config MorseConfig) *MorseDecoder {
 		blockDuration:   32.0 / float64(sampleRate), // 32 samples per block
 		lastActivity:    time.Now(),
 		stopChan:        make(chan struct{}),
+		// Adaptive timing (start with defaults for 16 WPM)
+		pulseAvg:            0.0,
+		dotAvg:              0.0,
+		dashAvg:             0.0,
+		symSpaceAvg:         0.0,
+		cwSpaceAvg:          0.0,
+		lastWordSpace:       0.0,
+		initialized:         false,
+		trackTiming:         true, // Always track timing changes
+		trainingCount:       0,
+		wordSpaceCorrection: true, // Enable word space correction
 	}
 
 	// Initialize envelope detector
@@ -124,62 +139,51 @@ func NewMorseDecoder(sampleRate int, config MorseConfig) *MorseDecoder {
 	// Initialize SNR estimator
 	d.snrEstimator = NewSNREstimator(100) // 100 sample window
 
-	// Calculate initial timing specifications
-	d.updateTimeSpec()
-
 	log.Printf("[Morse] Initialized: SR=%d, CF=%.1f Hz, BW=%.1f Hz, WPM=%.1f-%.1f",
 		sampleRate, config.CenterFrequency, config.Bandwidth, config.MinWPM, config.MaxWPM)
 
 	return d
 }
 
-// updateTimeSpec updates timing thresholds based on current WPM
-func (d *MorseDecoder) updateTimeSpec() {
-	// PARIS standard: 1 dit = 1.2 / WPM seconds
-	d.timeUnit = 1.2 / d.currentWPM
+// initializeTimingFromWPM initializes timing averages from a fixed WPM
+func (d *MorseDecoder) initializeTimingFromWPM(wpm float64) {
+	// Calculate block duration in blocks (not seconds)
+	blocksPerMs := 1.0 / (d.blockDuration * 1000.0)
+	msPerElement := 60000.0 / (wpm * 50.0) // PARIS = 50 elements
 
-	// Timing thresholds from PyMorseLive
-	d.timeSpec = TimeSpec{
-		DotShort:     0.8 * d.timeUnit,
-		DotLong:      2.0 * d.timeUnit,
-		CharSepShort: 1.5 * d.timeUnit,
-		CharSepLong:  4.0 * d.timeUnit,
-		WordSep:      6.5 * d.timeUnit,
-	}
+	d.dotAvg = blocksPerMs * msPerElement
+	d.dashAvg = d.dotAvg * 3.0
+	d.cwSpaceAvg = d.dotAvg * 4.2
+	d.symSpaceAvg = d.dotAvg * 0.93
+	d.pulseAvg = (d.dotAvg/4.0 + d.dashAvg) / 2.0
+
+	d.initialized = true
+	log.Printf("[Decoder %d] Initialized timing from %d WPM: dot=%.1f, dash=%.1f, pulse=%.1f blocks",
+		d.decoderID, int(wpm), d.dotAvg, d.dashAvg, d.pulseAvg)
 }
 
-// updateWPM updates the WPM estimate with smoothing
-func (d *MorseDecoder) updateWPM(markDuration float64) {
-	// Calculate WPM from mark duration
-	// A dit should be 1.2/WPM seconds, a dah should be 3*1.2/WPM seconds
-	minDitTime := 1.2 / d.maxWPM
-	maxDitTime := 1.2 / d.minWPM
-	maxDahTime := 3 * maxDitTime
-
-	if markDuration < minDitTime || markDuration > maxDahTime {
-		return // Out of range, ignore
+// updateWPM calculates WPM from current timing averages
+func (d *MorseDecoder) updateWPM() {
+	if !d.initialized {
+		return
 	}
 
-	var wpmNew float64
-	if markDuration < maxDitTime {
-		// It's a dit
-		wpmNew = 1.2 / markDuration
-	} else {
-		// It's a dah (3 dits)
-		wpmNew = 3 * 1.2 / markDuration
+	// PARIS standard calculation
+	spdCalc := 10.0*d.dotAvg + 4.0*d.dashAvg + 9.0*d.symSpaceAvg + 5.0*d.cwSpaceAvg
+	if spdCalc <= 0 {
+		return
 	}
 
-	// Clamp to valid range
-	if wpmNew < d.minWPM {
-		wpmNew = d.minWPM
-	}
-	if wpmNew > d.maxWPM {
-		wpmNew = d.maxWPM
-	}
+	// Convert to milliseconds per word
+	msPerWord := spdCalc * d.blockDuration * 1000.0
+	wpmRaw := 60000.0 / msPerWord
 
 	// Smooth the WPM estimate
-	d.currentWPM = d.wpmAlpha*wpmNew + (1-d.wpmAlpha)*d.currentWPM
-	d.updateTimeSpec()
+	if d.currentWPM == 0 {
+		d.currentWPM = wpmRaw
+	} else {
+		d.currentWPM = wpmRaw*0.3 + d.currentWPM*0.7
+	}
 }
 
 // Start begins processing audio samples
@@ -349,49 +353,95 @@ func (d *MorseDecoder) processStateChange(newState bool) {
 	d.lastActivity = now
 
 	if newState {
-		// Transition to key-down
-		spaceDuration := float64(d.keyUpBlocks) * d.blockDuration
+		// Transition to key-down (mark)
+		spaceBlocks := d.keyUpBlocks
 		d.keyState = KeyDown
 		d.keyDownBlocks = 0
 
-		log.Printf("[Decoder %d] KEY DOWN - blocks: %d, duration: %.3fs",
-			d.decoderID, d.keyUpBlocks, spaceDuration)
+		log.Printf("[Decoder %d] KEY DOWN - space blocks: %d", d.decoderID, spaceBlocks)
 
-		d.processSpace(spaceDuration)
+		d.processSpace(spaceBlocks)
 	} else {
-		// Transition to key-up
-		markDuration := float64(d.keyDownBlocks) * d.blockDuration
+		// Transition to key-up (space)
+		markBlocks := d.keyDownBlocks
 		d.keyState = KeyUp
 		d.keyUpBlocks = 0
 
-		log.Printf("[Decoder %d] KEY UP - blocks: %d, duration: %.3fs, threshold: %.3fs",
-			d.decoderID, d.keyDownBlocks, markDuration, d.timeSpec.DotShort)
+		log.Printf("[Decoder %d] KEY UP - mark blocks: %d", d.decoderID, markBlocks)
 
-		d.processMark(markDuration)
+		d.processMark(markBlocks)
 	}
 }
 
-// processMark processes a mark (key down) duration
-func (d *MorseDecoder) processMark(duration float64) {
-	ts := d.timeSpec
+// processMark processes a mark (key down) duration using KiwiSDR adaptive algorithm
+func (d *MorseDecoder) processMark(blocks int) {
+	t := float64(blocks)
 
-	if duration < ts.DotShort {
-		log.Printf("[Decoder %d] Mark REJECTED - too short: %.3fs < %.3fs", d.decoderID, duration, ts.DotShort)
-		return // Too short, ignore
+	// Initialize timing if needed
+	if d.trainingCount == 0 {
+		// First mark - initialize from default WPM
+		d.initializeTimingFromWPM(16.0)
 	}
 
-	// Update WPM estimate
-	d.updateWPM(duration)
+	// Training period (KiwiSDR has 3 phases)
+	if !d.initialized {
+		d.trainingCount++
 
-	// Classify as dit or dah
+		const TRAINING_STABLE = 32
+
+		if d.trainingCount > TRAINING_STABLE {
+			// Late training phase - more stable (equations 4.4, 4.5)
+			if t > d.pulseAvg {
+				d.dashAvg = d.dashAvg + (t-d.dashAvg)/4.0 // Equation 4.5
+			} else {
+				d.dotAvg = d.dotAvg + (t-d.dotAvg)/4.0 // Equation 4.4
+			}
+		} else {
+			// Early training phase - unstable (equations 4.1, 4.2)
+			if t > d.pulseAvg {
+				d.dashAvg = (t + d.dashAvg) / 2.0 // Equation 4.2
+			} else {
+				d.dotAvg = (t + d.dotAvg) / 2.0 // Equation 4.1
+			}
+		}
+		d.pulseAvg = (d.dotAvg/4.0 + d.dashAvg) / 2.0 // Equation 4.3
+
+		// After enough training, mark as initialized
+		if d.trainingCount >= TRAINING_STABLE*2 {
+			d.initialized = true
+			log.Printf("[Decoder %d] Training complete after %d marks: dot=%.1f, dash=%.1f, pulse=%.1f",
+				d.decoderID, d.trainingCount, d.dotAvg, d.dashAvg, d.pulseAvg)
+		}
+		return // Don't decode during training
+	}
+
+	// Normal operation - classify as dot or dash (equation 4.10)
 	var element string
-	if duration < ts.DotLong {
+	if (d.pulseAvg - t) >= 0 {
+		// It's a dot
 		element = "."
+		if d.trackTiming {
+			d.dotAvg = d.dotAvg + (t-d.dotAvg)/8.0 // Equation 4.6
+		}
 	} else {
+		// It's a dash
 		element = "-"
+		if t <= 5.0*d.dashAvg { // Ignore stuck key
+			if d.trackTiming {
+				d.dashAvg = d.dashAvg + (t-d.dashAvg)/8.0 // Equation 4.7
+			}
+		}
 	}
 
-	log.Printf("[Decoder %d] Decoded: %s (%.3fs, %.1f WPM)", d.decoderID, element, duration, d.currentWPM)
+	// Update pulse_avg (equation 4.3)
+	if d.trackTiming {
+		d.pulseAvg = (d.dotAvg/4.0 + d.dashAvg) / 2.0
+	}
+
+	// Update WPM
+	d.updateWPM()
+
+	log.Printf("[Decoder %d] Decoded: %s (%.1f blocks, %.1f WPM)", d.decoderID, element, t, d.currentWPM)
 
 	d.morseElements += element
 	d.bufferMu.Lock()
@@ -399,39 +449,76 @@ func (d *MorseDecoder) processMark(duration float64) {
 	d.bufferMu.Unlock()
 }
 
-// processSpace processes a space (key up) duration
-func (d *MorseDecoder) processSpace(duration float64) {
-	ts := d.timeSpec
+// processSpace processes a space (key up) duration using KiwiSDR adaptive algorithm
+func (d *MorseDecoder) processSpace(blocks int) {
+	t := float64(blocks)
 
-	if duration < ts.CharSepShort {
-		return // Too short, ignore
+	const TRAINING_STABLE = 32
+
+	// During training, update space averages
+	if !d.initialized && d.trainingCount > TRAINING_STABLE {
+		// Late training phase - update space averages (equation 4.8)
+		if t > d.pulseAvg {
+			d.cwSpaceAvg = d.cwSpaceAvg + (t-d.cwSpaceAvg)/4.0
+		} else {
+			d.symSpaceAvg = d.symSpaceAvg + (t-d.symSpaceAvg)/4.0
+		}
+		return // Don't decode during training
 	}
 
-	// Character separator
-	if duration < ts.CharSepLong {
+	if !d.initialized {
+		return // Ignore spaces in early training
+	}
+
+	// Determine if symbol space or character/word space
+	// This uses KiwiSDR equations 4.11-4.14
+
+	// Symbol space (between dots/dashes in same character)
+	if (t - d.pulseAvg) < 0 {
+		if d.trackTiming {
+			d.symSpaceAvg = d.symSpaceAvg + (t-d.symSpaceAvg)/8.0
+		}
+		return // Not end of character yet
+	}
+
+	// Character or word space
+	if t <= 10.0*d.dashAvg { // Not a timeout
+		if d.trackTiming {
+			d.cwSpaceAvg = d.cwSpaceAvg + (t-d.cwSpaceAvg)/8.0 // Equation 4.9
+		}
+
+		// Check if word space (equation 4.13)
+		if (t - d.cwSpaceAvg) >= 0 {
+			// Word space
+			d.lastWordSpace = t
+			d.wordSpaceFlag = true
+			d.processCharacter()
+		} else {
+			// Character space
+			d.wordSpaceFlag = false
+			d.processCharacter()
+		}
+	} else {
+		// Timeout - end of transmission
 		d.processCharacter()
 		d.bufferMu.Lock()
-		d.morseBuffer += " "
+		d.morseBuffer += " / "
+		d.textBuffer += " "
 		d.bufferMu.Unlock()
-		return
 	}
-
-	// Word separator
-	d.processCharacter()
-	d.bufferMu.Lock()
-	d.morseBuffer += " / "
-	d.textBuffer += " "
-	d.bufferMu.Unlock()
 }
 
 // checkWordSeparator checks for word separator timeout
 func (d *MorseDecoder) checkWordSeparator() {
-	if d.morseElements == "" {
+	if !d.initialized || d.morseElements == "" {
 		return
 	}
 
+	// Check if we've been idle for more than 10 * dash_avg
 	now := time.Now()
-	if now.Sub(d.lastActivity).Seconds() > d.timeSpec.WordSep {
+	idleBlocks := int(now.Sub(d.lastActivity).Seconds() / d.blockDuration)
+
+	if float64(idleBlocks) > 10.0*d.dashAvg {
 		d.processCharacter()
 		d.bufferMu.Lock()
 		d.morseBuffer += " / "
@@ -449,8 +536,65 @@ func (d *MorseDecoder) processCharacter() {
 	char := morseToChar(d.morseElements)
 	d.morseElements = ""
 
+	// Check for decode error (unknown character)
+	if char == "?" && d.trackTiming {
+		d.errorCount++
+		d.errorTimeout = time.Now().Add(8 * time.Second) // ERROR_TIMEOUT = 8 seconds
+
+		log.Printf("[Decoder %d] Decode error %d/4", d.decoderID, d.errorCount)
+
+		// After 3 errors, trigger re-training
+		if d.errorCount > 3 {
+			log.Printf("[Decoder %d] Too many errors - re-training", d.decoderID)
+			d.initialized = false
+			d.trainingCount = 0
+			d.errorCount = 0
+			d.errorTimeout = time.Time{}
+		}
+	}
+
+	// Reset error count after timeout
+	if !d.errorTimeout.IsZero() && time.Now().After(d.errorTimeout) {
+		d.errorCount = 0
+		d.errorTimeout = time.Time{}
+	}
+
 	d.bufferMu.Lock()
 	d.textBuffer += char
+
+	// Handle word space with correction (KiwiSDR equation 4.15)
+	if d.wordSpaceFlag {
+		d.wordSpaceFlag = false
+
+		// Word space correction for characters ending in dash (I, J, Q, U, V, Z)
+		if d.wordSpaceCorrection {
+			needsCorrection := char == "I" || char == "J" || char == "Q" ||
+				char == "U" || char == "V" || char == "Z"
+
+			if needsCorrection {
+				// Equation 4.15: Check if space was long enough
+				x := (d.cwSpaceAvg + d.pulseAvg) - d.lastWordSpace
+				if x < 0 {
+					// Space was long enough - add word space
+					d.morseBuffer += " / "
+					d.textBuffer += " "
+				}
+				// else: space was too short, treat as character space (no output)
+			} else {
+				// Normal word space
+				d.morseBuffer += " / "
+				d.textBuffer += " "
+			}
+		} else {
+			// No correction - always add word space
+			d.morseBuffer += " / "
+			d.textBuffer += " "
+		}
+	} else {
+		// Character space
+		d.morseBuffer += " "
+	}
+
 	d.bufferMu.Unlock()
 }
 

@@ -96,8 +96,8 @@ func (sa *SpectrumAnalyzer) computeSpectrum() {
 	}
 
 	// Calculate SNR spectrum (signal / noise floor)
-	// Use median as noise floor estimate (more robust than percentile)
-	noiseFloor := percentile(sa.spectrum, 50)
+	// Use 10th percentile as noise floor (below most signals)
+	noiseFloor := percentile(sa.spectrum, 10)
 	if noiseFloor < 1e-10 {
 		noiseFloor = 1e-10
 	}

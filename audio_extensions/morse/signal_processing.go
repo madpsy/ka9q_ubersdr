@@ -173,8 +173,9 @@ func (se *SNREstimator) Process(sample float64) float64 {
 		return 0.0
 	}
 
-	// Calculate noise floor (20th percentile)
-	noise := percentile(se.samples, 20)
+	// Calculate noise floor (5th percentile - below the signal)
+	// For CW, signal is only present ~50% of time, so 20th percentile includes signal
+	noise := percentile(se.samples, 5)
 
 	// Avoid division by zero
 	if noise < 1e-10 {

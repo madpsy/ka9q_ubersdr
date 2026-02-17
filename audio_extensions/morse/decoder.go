@@ -271,7 +271,7 @@ func (d *MorseDecoder) processSamples(samples []int16) {
 	}
 }
 
-// detectTransition detects key up/down transitions
+// detectTransition detects key up/down transitions with hysteresis
 func (d *MorseDecoder) detectTransition(snr float64) {
 	now := time.Now()
 
@@ -288,8 +288,14 @@ func (d *MorseDecoder) detectTransition(snr float64) {
 	// Normalize SNR to 0-1 range for threshold comparison
 	level := math.Min(snr/d.thresholdSNR, 1.0)
 
+	// Use hysteresis to prevent rapid transitions
+	// Key down threshold: 0.7 (higher to avoid noise)
+	// Key up threshold: 0.3 (lower to hold signal)
+	const keyDownThreshold = 0.7
+	const keyUpThreshold = 0.3
+
 	// Key down transition (signal appears)
-	if d.keyState == KeyUp && level > 0.6 {
+	if d.keyState == KeyUp && level > keyDownThreshold {
 		spaceDuration := now.Sub(d.keyUpTime).Seconds()
 		d.keyState = KeyDown
 		d.keyDownTime = now
@@ -302,13 +308,14 @@ func (d *MorseDecoder) detectTransition(snr float64) {
 	}
 
 	// Key up transition (signal disappears)
-	if d.keyState == KeyDown && level < 0.4 {
+	if d.keyState == KeyDown && level < keyUpThreshold {
 		markDuration := now.Sub(d.keyDownTime).Seconds()
 		d.keyState = KeyUp
 		d.keyUpTime = now
 		d.lastActivity = now
 
-		log.Printf("[Decoder %d] KEY UP - duration: %.3fs, threshold: %.3fs", d.decoderID, markDuration, d.timeSpec.DotShort)
+		log.Printf("[Decoder %d] KEY UP - duration: %.3fs, threshold: %.3fs, SNR: %.1f dB",
+			d.decoderID, markDuration, d.timeSpec.DotShort, snr)
 
 		// Process the mark duration
 		d.processMark(markDuration)

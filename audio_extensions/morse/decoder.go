@@ -27,9 +27,9 @@ type MorseDecoder struct {
 	thresholdSNR float64
 
 	// SNR tracking
-	averageSNR float64
-	snrAlpha   float64 // Smoothing factor for SNR
-	snrMu      sync.Mutex
+	peakSNR  float64
+	snrDecay float64 // Decay factor for peak SNR
+	snrMu    sync.Mutex
 
 	// Timing decoder
 	currentWPM float64
@@ -102,11 +102,11 @@ func NewMorseDecoder(sampleRate int, config MorseConfig) *MorseDecoder {
 		bandwidth:       config.Bandwidth,
 		minWPM:          config.MinWPM,
 		maxWPM:          config.MaxWPM,
-		wpmAlpha:        0.3, // Smoothing factor from PyMorseLive
-		snrAlpha:        0.1, // Smoothing factor for SNR
+		wpmAlpha:        0.3,  // Smoothing factor from PyMorseLive
+		snrDecay:        0.99, // Slow decay for peak SNR (holds peak for ~100 samples)
 		thresholdSNR:    config.ThresholdSNR,
 		currentWPM:      16.0, // Start with 16 WPM
-		averageSNR:      0.0,
+		peakSNR:         0.0,
 		keyState:        KeyUp,
 		keyUpTime:       time.Now(),
 		lastActivity:    time.Now(),
@@ -275,12 +275,13 @@ func (d *MorseDecoder) processSamples(samples []int16) {
 func (d *MorseDecoder) detectTransition(snr float64) {
 	now := time.Now()
 
-	// Update average SNR
+	// Update peak SNR (with slow decay)
 	d.snrMu.Lock()
-	if d.averageSNR == 0.0 {
-		d.averageSNR = snr
+	if snr > d.peakSNR {
+		d.peakSNR = snr
 	} else {
-		d.averageSNR = d.snrAlpha*snr + (1-d.snrAlpha)*d.averageSNR
+		// Slow decay
+		d.peakSNR *= d.snrDecay
 	}
 	d.snrMu.Unlock()
 

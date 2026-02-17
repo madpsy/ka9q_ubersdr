@@ -292,7 +292,7 @@ func (mcd *MultiChannelDecoder) sendStatusUpdate(resultChan chan<- []byte) {
 			if slot.Decoder != nil {
 				wpm = slot.Decoder.currentWPM
 				slot.Decoder.snrMu.Lock()
-				snr = slot.Decoder.averageSNR
+				snr = slot.Decoder.peakSNR
 				slot.Decoder.snrMu.Unlock()
 			}
 			binary.BigEndian.PutUint64(msg[offset+9:offset+17], math.Float64bits(wpm))

@@ -229,20 +229,20 @@ func (gf *GoertzelFilter) GetMagnitudeSquared() float64 {
 		return 0.0
 	}
 
-	// Calculate magnitude squared
+	// Calculate magnitude squared (KiwiSDR lines 318-320)
 	real := gf.s1*gf.cos - gf.s2
 	imag := gf.s1 * gf.sin
 	magnitudeSquared := real*real + imag*imag
 
-	// Normalize by block size squared
-	magnitudeSquared /= float64(gf.blockSize * gf.blockSize)
+	// KiwiSDR returns sqrt(mag_sq), not normalized by block size
+	magnitude := math.Sqrt(magnitudeSquared)
 
 	// Reset for next block
 	gf.s1 = 0
 	gf.s2 = 0
 	gf.count = 0
 
-	return magnitudeSquared
+	return magnitude
 }
 
 // SNREstimator estimates signal-to-noise ratio

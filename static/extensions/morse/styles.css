@@ -295,6 +295,7 @@
     overflow-x: auto;
     overflow-y: hidden;
     white-space: nowrap;
+    min-height: 38px;
 }
 
 .morse-channel-text {
@@ -304,6 +305,7 @@
     white-space: nowrap;
     font-weight: bold;
     display: inline-block;
+    min-height: 22px;
 }
 
 .morse-channel-morse-container {
@@ -312,6 +314,7 @@
     overflow-y: hidden;
     white-space: nowrap;
     border-top: 1px solid #3a3a3a;
+    min-height: 32px;
 }
 
 .morse-channel-morse {
@@ -321,6 +324,7 @@
     white-space: nowrap;
     font-family: 'Courier New', monospace;
     display: inline-block;
+    min-height: 20px;
 }
 
 .morse-channel-morse.hidden {

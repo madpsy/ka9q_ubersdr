@@ -32,9 +32,10 @@ func NewEnvelopeDetector(sampleRate int, centerFrequency, bandwidth float64) *En
 	// Create bandpass filter for the center frequency
 	ed.bandpass = NewBandpassFilter(sampleRate, centerFrequency, bandwidth)
 
-	// Create low-pass filter for envelope smoothing (cutoff at 50 Hz)
-	// This removes ripple from the rectified signal
-	ed.lowpass = NewLowpassFilter(sampleRate, 50.0)
+	// Create low-pass filter for envelope smoothing (cutoff at 20 Hz)
+	// CW keying is typically 2-10 Hz, so 20 Hz cutoff passes the envelope
+	// while removing all filter ripple and noise
+	ed.lowpass = NewLowpassFilter(sampleRate, 20.0)
 
 	return ed
 }

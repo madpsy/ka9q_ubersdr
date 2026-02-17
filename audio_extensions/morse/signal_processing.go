@@ -214,8 +214,7 @@ func (gf *GoertzelFilter) IsBlockComplete() bool {
 
 // GetMagnitudeSquared calculates and returns magnitude squared, then resets for next block
 func (gf *GoertzelFilter) GetMagnitudeSquared() float64 {
-	// Always calculate even if block not complete (for partial blocks)
-	if gf.count == 0 {
+	if gf.count < gf.blockSize {
 		return 0.0
 	}
 
@@ -224,8 +223,8 @@ func (gf *GoertzelFilter) GetMagnitudeSquared() float64 {
 	imag := gf.s1 * gf.sin
 	magnitudeSquared := real*real + imag*imag
 
-	// Normalize by actual count (not blockSize)
-	magnitudeSquared /= float64(gf.count * gf.count)
+	// Normalize by block size squared
+	magnitudeSquared /= float64(gf.blockSize * gf.blockSize)
 
 	// Reset for next block
 	gf.s1 = 0

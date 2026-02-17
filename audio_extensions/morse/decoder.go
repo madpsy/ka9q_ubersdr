@@ -286,6 +286,7 @@ func (d *MorseDecoder) processSamples(samples []int16) {
 
 	// Process in blocks of 32 samples (like KiwiSDR)
 	blockSize := 32
+	blocksProcessed := 0
 	for i := 0; i < len(floatSamples); i += blockSize {
 		end := i + blockSize
 		if end > len(floatSamples) {
@@ -302,7 +303,13 @@ func (d *MorseDecoder) processSamples(samples []int16) {
 
 			// Detect key transitions
 			d.detectTransitionBlock(signal, snr)
+			blocksProcessed++
 		}
+	}
+
+	// Debug: Log block processing
+	if d.debugCounter == 0 {
+		log.Printf("[Decoder %d] Processed %d blocks from %d samples", d.decoderID, blocksProcessed, len(samples))
 	}
 }
 

@@ -13,46 +13,28 @@ type EnvelopeDetector struct {
 	// Bandpass filter for tone detection
 	bandpass *BandpassFilter
 
-	// Envelope follower (low-pass filter)
-	envelopeAttack float64
-	envelopeDecay  float64
-	envelope       float64
+	// Low-pass filter for envelope smoothing
+	lowpass *LowpassFilter
+
+	// Envelope follower (exponential smoothing)
+	envelope float64
 }
 
 // NewEnvelopeDetector creates a new envelope detector
 func NewEnvelopeDetector(sampleRate int, centerFrequency, bandwidth float64) *EnvelopeDetector {
-	// Envelope time constants for CW detection
-	// These need to be MUCH slower than the CW timing to avoid false transitions
-	// Attack: 10ms (fast enough for fastest CW)
-	// Decay: 30ms (slow enough to hold through filter ripple)
-	attackTimeMs := 10.0
-	decayTimeMs := 30.0
-
-	// Convert to alpha values for exponential moving average
-	// alpha = dt / time_constant where dt = 1/sample_rate
-	// This gives proper exponential smoothing
-	attackAlpha := (1.0 / float64(sampleRate)) / (attackTimeMs / 1000.0)
-	decayAlpha := (1.0 / float64(sampleRate)) / (decayTimeMs / 1000.0)
-
-	// Clamp alpha values to reasonable range
-	if attackAlpha > 0.1 {
-		attackAlpha = 0.1
-	}
-	if decayAlpha > 0.1 {
-		decayAlpha = 0.1
-	}
-
 	ed := &EnvelopeDetector{
 		sampleRate:      sampleRate,
 		centerFrequency: centerFrequency,
 		bandwidth:       bandwidth,
-		envelopeAttack:  attackAlpha,
-		envelopeDecay:   decayAlpha,
 		envelope:        0.0,
 	}
 
 	// Create bandpass filter for the center frequency
 	ed.bandpass = NewBandpassFilter(sampleRate, centerFrequency, bandwidth)
+
+	// Create low-pass filter for envelope smoothing (cutoff at 50 Hz)
+	// This removes ripple from the rectified signal
+	ed.lowpass = NewLowpassFilter(sampleRate, 50.0)
 
 	return ed
 }
@@ -62,17 +44,11 @@ func (ed *EnvelopeDetector) Process(sample float64) float64 {
 	// Apply bandpass filter
 	filtered := ed.bandpass.Process(sample)
 
-	// Get magnitude (absolute value for envelope detection)
+	// Rectify (get magnitude)
 	magnitude := math.Abs(filtered)
 
-	// Envelope follower with attack/decay
-	if magnitude > ed.envelope {
-		// Attack (signal increasing)
-		ed.envelope = ed.envelopeAttack*magnitude + (1-ed.envelopeAttack)*ed.envelope
-	} else {
-		// Decay (signal decreasing)
-		ed.envelope = ed.envelopeDecay*magnitude + (1-ed.envelopeDecay)*ed.envelope
-	}
+	// Low-pass filter the rectified signal to get smooth envelope
+	ed.envelope = ed.lowpass.Process(magnitude)
 
 	return ed.envelope
 }
@@ -136,6 +112,32 @@ func (bf *BandpassFilter) Process(sample float64) float64 {
 	bf.y1 = output
 
 	return output
+}
+
+// LowpassFilter implements a simple first-order low-pass filter
+type LowpassFilter struct {
+	alpha float64
+	y     float64
+}
+
+// NewLowpassFilter creates a new low-pass filter
+func NewLowpassFilter(sampleRate int, cutoffFreq float64) *LowpassFilter {
+	// Calculate alpha for first-order low-pass filter
+	// alpha = dt / (RC + dt) where RC = 1 / (2 * pi * fc)
+	dt := 1.0 / float64(sampleRate)
+	rc := 1.0 / (2.0 * math.Pi * cutoffFreq)
+	alpha := dt / (rc + dt)
+
+	return &LowpassFilter{
+		alpha: alpha,
+		y:     0.0,
+	}
+}
+
+// Process processes a sample through the low-pass filter
+func (lp *LowpassFilter) Process(sample float64) float64 {
+	lp.y = lp.alpha*sample + (1-lp.alpha)*lp.y
+	return lp.y
 }
 
 // SNREstimator estimates signal-to-noise ratio

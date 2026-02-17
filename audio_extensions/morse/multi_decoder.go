@@ -19,15 +19,13 @@ const (
 type MultiChannelDecoder struct {
 	// Configuration
 	sampleRate   int
-	minFreq      float64
-	maxFreq      float64
 	minWPM       float64
 	maxWPM       float64
 	thresholdSNR float64
 	bandwidth    float64
 
-	// Spectrum analyzer
-	spectrum *SpectrumAnalyzer
+	// Channel frequencies (user-specified)
+	channelFrequencies [MaxDecoders]float64
 
 	// Decoder slots
 	decoders   []*DecoderSlot
@@ -51,31 +49,17 @@ type DecoderSlot struct {
 }
 
 // NewMultiChannelDecoder creates a new multi-channel decoder
-func NewMultiChannelDecoder(sampleRate int, config MorseConfig) *MultiChannelDecoder {
-	// Scan the full audio bandwidth (typically 0-6000 Hz at 12 kHz sample rate)
-	// Use Nyquist frequency as the upper limit
-	minFreq := 100.0                     // Start at 100 Hz to avoid DC and very low frequencies
-	maxFreq := float64(sampleRate) / 2.0 // Nyquist frequency
-
-	// Cap at 5000 Hz for practical CW range
-	if maxFreq > 5000 {
-		maxFreq = 5000
-	}
-
+func NewMultiChannelDecoder(sampleRate int, config MorseConfig, channelFreqs [MaxDecoders]float64) *MultiChannelDecoder {
 	mcd := &MultiChannelDecoder{
-		sampleRate:   sampleRate,
-		minFreq:      minFreq,
-		maxFreq:      maxFreq,
-		minWPM:       config.MinWPM,
-		maxWPM:       config.MaxWPM,
-		thresholdSNR: config.ThresholdSNR,
-		bandwidth:    config.Bandwidth,
-		decoders:     make([]*DecoderSlot, MaxDecoders),
-		stopChan:     make(chan struct{}),
+		sampleRate:         sampleRate,
+		minWPM:             config.MinWPM,
+		maxWPM:             config.MaxWPM,
+		thresholdSNR:       config.ThresholdSNR,
+		bandwidth:          config.Bandwidth,
+		channelFrequencies: channelFreqs,
+		decoders:           make([]*DecoderSlot, MaxDecoders),
+		stopChan:           make(chan struct{}),
 	}
-
-	// Initialize spectrum analyzer
-	mcd.spectrum = NewSpectrumAnalyzer(sampleRate, minFreq, maxFreq)
 
 	// Initialize decoder slots
 	for i := 0; i < MaxDecoders; i++ {
@@ -85,8 +69,15 @@ func NewMultiChannelDecoder(sampleRate int, config MorseConfig) *MultiChannelDec
 		}
 	}
 
-	log.Printf("[Multi-Morse] Initialized: %d decoders, freq range %.0f-%.0f Hz, SNR threshold %.1f dB",
-		MaxDecoders, minFreq, maxFreq, config.ThresholdSNR)
+	log.Printf("[Multi-Morse] Initialized: %d decoders, SNR threshold %.1f dB",
+		MaxDecoders, config.ThresholdSNR)
+
+	// Create decoders for non-zero frequencies
+	for i := 0; i < MaxDecoders; i++ {
+		if channelFreqs[i] > 0 {
+			mcd.activateChannelAtFrequency(i, channelFreqs[i])
+		}
+	}
 
 	return mcd
 }
@@ -174,20 +165,11 @@ func (mcd *MultiChannelDecoder) processLoop(audioChan <-chan []int16, resultChan
 	}
 }
 
-// processSamples processes audio samples through spectrum analyzer and decoders
+// processSamples processes audio samples through active decoders
 func (mcd *MultiChannelDecoder) processSamples(samples []int16, resultChan chan<- []byte) {
 	for _, sample := range samples {
 		// Convert to float and normalize
 		floatSample := float64(sample) / 32768.0
-
-		// Feed to spectrum analyzer
-		if mcd.spectrum.ProcessSample(floatSample) {
-			// Spectrum is ready, detect peaks
-			peaks := mcd.spectrum.DetectPeaks(MaxDecoders, mcd.thresholdSNR)
-
-			// Update decoder assignments based on peaks
-			mcd.updateDecoderAssignments(peaks, resultChan)
-		}
 
 		// Feed sample to all active decoders
 		mcd.decodersMu.RLock()
@@ -217,53 +199,13 @@ func (mcd *MultiChannelDecoder) processSamples(samples []int16, resultChan chan<
 	mcd.decodersMu.RUnlock()
 }
 
-// updateDecoderAssignments assigns decoders to detected peaks
-func (mcd *MultiChannelDecoder) updateDecoderAssignments(peaks []Peak, resultChan chan<- []byte) {
-	mcd.decodersMu.Lock()
-	defer mcd.decodersMu.Unlock()
-
-	now := time.Now()
-
-	// Match peaks to existing decoders (within bandwidth)
-	for i, peak := range peaks {
-		matched := false
-
-		// Try to match with existing decoder
-		for _, slot := range mcd.decoders {
-			if slot.Active {
-				freqDiff := peak.Frequency - slot.Frequency
-				if freqDiff < 0 {
-					freqDiff = -freqDiff
-				}
-
-				// If peak is close to existing decoder frequency, update it
-				if freqDiff < mcd.bandwidth/2 {
-					slot.LastActivity = now
-					matched = true
-					break
-				}
-			}
-		}
-
-		// If not matched, assign to free slot
-		if !matched {
-			for _, slot := range mcd.decoders {
-				if !slot.Active {
-					mcd.assignDecoder(slot, peak, resultChan)
-					break
-				}
-			}
-		}
-
-		// Stop if we've assigned all available slots
-		if i >= MaxDecoders-1 {
-			break
-		}
+// activateChannelAtFrequency activates a decoder channel at a specific frequency
+func (mcd *MultiChannelDecoder) activateChannelAtFrequency(channelID int, frequency float64) {
+	if channelID < 0 || channelID >= MaxDecoders {
+		return
 	}
-}
 
-// assignDecoder assigns a decoder slot to a specific frequency
-func (mcd *MultiChannelDecoder) assignDecoder(slot *DecoderSlot, peak Peak, resultChan chan<- []byte) {
+	slot := mcd.decoders[channelID]
 	slot.mu.Lock()
 	defer slot.mu.Unlock()
 
@@ -274,7 +216,7 @@ func (mcd *MultiChannelDecoder) assignDecoder(slot *DecoderSlot, peak Peak, resu
 
 	// Create new decoder for this frequency
 	config := MorseConfig{
-		CenterFrequency: peak.Frequency,
+		CenterFrequency: frequency,
 		Bandwidth:       mcd.bandwidth,
 		MinWPM:          mcd.minWPM,
 		MaxWPM:          mcd.maxWPM,
@@ -282,47 +224,20 @@ func (mcd *MultiChannelDecoder) assignDecoder(slot *DecoderSlot, peak Peak, resu
 	}
 
 	decoder := NewMorseDecoder(mcd.sampleRate, config)
-	decoder.decoderID = slot.ID // Set the decoder ID for multi-channel mode
+	decoder.decoderID = slot.ID
 
 	slot.Decoder = decoder
-	slot.Frequency = peak.Frequency
+	slot.Frequency = frequency
 	slot.LastActivity = time.Now()
 	slot.Active = true
 
-	log.Printf("[Multi-Morse] Decoder %d assigned to %.1f Hz (SNR: %.1f dB)",
-		slot.ID, peak.Frequency, peak.SNR)
-
-	// Send decoder assignment message
-	mcd.sendDecoderAssignment(resultChan, slot.ID, peak.Frequency, true)
+	log.Printf("[Multi-Morse] Channel %d activated at %.1f Hz", slot.ID, frequency)
 }
 
-// manageDecoders removes idle decoders
+// manageDecoders is no longer needed with manual frequency control
+// Channels stay active at their assigned frequencies
 func (mcd *MultiChannelDecoder) manageDecoders(resultChan chan<- []byte) {
-	mcd.decodersMu.Lock()
-	defer mcd.decodersMu.Unlock()
-
-	now := time.Now()
-
-	for _, slot := range mcd.decoders {
-		if slot.Active {
-			idleTime := now.Sub(slot.LastActivity).Seconds()
-
-			if idleTime > DecoderMaxIdleSec {
-				slot.mu.Lock()
-				if slot.Decoder != nil {
-					_ = slot.Decoder.Stop()
-					slot.Decoder = nil
-				}
-				slot.Active = false
-				slot.mu.Unlock()
-
-				log.Printf("[Multi-Morse] Decoder %d removed (idle for %.1fs)", slot.ID, idleTime)
-
-				// Send decoder removal message
-				mcd.sendDecoderAssignment(resultChan, slot.ID, slot.Frequency, false)
-			}
-		}
-	}
+	// No-op: channels are manually controlled
 }
 
 // sendDecoderAssignment sends decoder assignment/removal message

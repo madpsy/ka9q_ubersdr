@@ -36,10 +36,14 @@ class MorseExtension extends DecoderExtension {
                 active: false,
                 frequency: 0,
                 wpm: 0,
+                snr: 0,
                 textBuffer: '',
                 morseBuffer: ''
             });
         }
+        
+        // Channel frequencies (user-specified)
+        this.channelFrequencies = [0, 0, 0, 0, 0];
         
         this.activeChannelCount = 0;
 
@@ -173,6 +177,11 @@ class MorseExtension extends DecoderExtension {
             if (copyBtn) {
                 copyBtn.addEventListener('click', () => this.copyChannel(i));
             }
+            
+            const enableBtn = document.getElementById(`morse-enable-${i}`);
+            if (enableBtn) {
+                enableBtn.addEventListener('click', () => this.toggleChannel(i));
+            }
         }
     }
 
@@ -223,8 +232,63 @@ class MorseExtension extends DecoderExtension {
         }
     }
 
+    toggleChannel(channelId) {
+        const freqInput = document.getElementById(`morse-freq-${channelId}`);
+        const enableBtn = document.getElementById(`morse-enable-${channelId}`);
+        
+        if (!freqInput || !enableBtn) return;
+        
+        const channel = this.channels[channelId];
+        
+        if (channel.active) {
+            // Disable channel
+            this.channelFrequencies[channelId] = 0;
+            channel.active = false;
+            enableBtn.textContent = 'Enable';
+            enableBtn.classList.remove('btn-danger');
+            enableBtn.classList.add('btn-small');
+            
+            const channelEl = document.getElementById(`morse-channel-${channelId}`);
+            if (channelEl) {
+                channelEl.classList.remove('active');
+                channelEl.classList.add('idle');
+                const statusEl = channelEl.querySelector('.morse-channel-status');
+                if (statusEl) statusEl.textContent = 'Idle';
+            }
+        } else {
+            // Enable channel
+            const freq = parseFloat(freqInput.value);
+            if (freq < 100 || freq > 5000) {
+                alert('Frequency must be between 100 and 5000 Hz');
+                return;
+            }
+            
+            this.channelFrequencies[channelId] = freq;
+            channel.active = true;
+            channel.frequency = freq;
+            enableBtn.textContent = 'Disable';
+            enableBtn.classList.remove('btn-small');
+            enableBtn.classList.add('btn-danger');
+            
+            const channelEl = document.getElementById(`morse-channel-${channelId}`);
+            if (channelEl) {
+                channelEl.classList.add('active');
+                channelEl.classList.remove('idle');
+                const statusEl = channelEl.querySelector('.morse-channel-status');
+                if (statusEl) statusEl.textContent = 'Active';
+            }
+        }
+        
+        // Restart decoder if running
+        if (this.running) {
+            this.stopDecoder();
+            setTimeout(() => this.startDecoder(), 100);
+        }
+    }
+
     startDecoder() {
         console.log('Morse: Starting decoder with config:', this.config);
+        console.log('Morse: Channel frequencies:', this.channelFrequencies);
 
         // Setup binary message handler
         this.setupBinaryHandler();
@@ -233,7 +297,7 @@ class MorseExtension extends DecoderExtension {
         this.attachAudioExtension();
 
         this.running = true;
-        this.updateStatus('Running - Scanning for CW signals...');
+        this.updateStatus('Running - Manual frequency control');
         
         const startBtn = document.getElementById('morse-start-btn');
         if (startBtn) {
@@ -251,7 +315,7 @@ class MorseExtension extends DecoderExtension {
             return;
         }
 
-        // Send attach message
+        // Send attach message with channel frequencies
         const attachMsg = {
             type: 'audio_extension_attach',
             extension_name: 'morse',
@@ -259,7 +323,8 @@ class MorseExtension extends DecoderExtension {
                 bandwidth: this.config.bandwidth,
                 min_wpm: this.config.min_wpm,
                 max_wpm: this.config.max_wpm,
-                threshold_snr: this.config.threshold_snr
+                threshold_snr: this.config.threshold_snr,
+                channel_frequencies: this.channelFrequencies
             }
         };
 

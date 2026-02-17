@@ -44,7 +44,17 @@ func NewMorseExtension(sampleRate int, extensionParams map[string]interface{}) (
 		config.ThresholdSNR = threshold
 	}
 
-	// Validate configuration (center_frequency not used in multi-channel mode)
+	// Get channel frequencies from parameters
+	var channelFreqs [MaxDecoders]float64
+	if freqs, ok := extensionParams["channel_frequencies"].([]interface{}); ok {
+		for i := 0; i < MaxDecoders && i < len(freqs); i++ {
+			if freq, ok := freqs[i].(float64); ok {
+				channelFreqs[i] = freq
+			}
+		}
+	}
+
+	// Validate configuration
 	if config.Bandwidth <= 0 || config.Bandwidth > 1000 {
 		return nil, fmt.Errorf("invalid bandwidth: %.1f Hz (must be 1-1000)", config.Bandwidth)
 	}
@@ -61,9 +71,9 @@ func NewMorseExtension(sampleRate int, extensionParams map[string]interface{}) (
 		return nil, fmt.Errorf("invalid threshold SNR: %.1f dB (must be 1-100)", config.ThresholdSNR)
 	}
 
-	decoder := NewMultiChannelDecoder(sampleRate, config)
+	decoder := NewMultiChannelDecoder(sampleRate, config, channelFreqs)
 
-	log.Printf("[Morse Extension] Created multi-channel decoder: BW=%.1f Hz, WPM=%.1f-%.1f, SNR=%.1f dB, Channels=%d, Scan=full audio bandwidth",
+	log.Printf("[Morse Extension] Created multi-channel decoder: BW=%.1f Hz, WPM=%.1f-%.1f, SNR=%.1f dB, Channels=%d",
 		config.Bandwidth, config.MinWPM, config.MaxWPM, config.ThresholdSNR, MaxDecoders)
 
 	return &MorseExtension{

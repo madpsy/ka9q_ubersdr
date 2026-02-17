@@ -1,6 +1,7 @@
 package morse
 
 import (
+	"log"
 	"math"
 )
 
@@ -32,6 +33,9 @@ type EnvelopeDetector struct {
 	noiseCancelChange  bool
 	currentState       bool
 	previousState      bool
+
+	// Debug
+	debugCount int
 }
 
 // NewEnvelopeDetector creates a new envelope detector
@@ -75,6 +79,13 @@ func (ed *EnvelopeDetector) ProcessBlock(samples []float64) float64 {
 
 	// Get magnitude squared from Goertzel
 	magnitudeSquared := ed.goertzel.GetMagnitudeSquared()
+
+	// Debug: Log first few calls
+	if ed.debugCount < 3 {
+		log.Printf("[EnvelopeDetector] samples=%d, goertzel.count=%d, blockSize=%d, magnitudeSquared=%.6f",
+			len(samples), ed.goertzel.count, ed.goertzel.blockSize, magnitudeSquared)
+		ed.debugCount++
+	}
 
 	var signal float64
 

@@ -1815,7 +1815,15 @@ function displayActiveChannels(channels) {
     console.log('[displayActiveChannels] Called with channels:', channels);
     const listEl = document.getElementById('active-channels-list');
     if (!listEl) return;
-    
+
+    // Update the title with user count
+    const titleEl = document.getElementById('active-channels-title');
+    if (titleEl) {
+        const userCount = channels.length;
+        const userText = userCount === 1 ? 'User' : 'Users';
+        titleEl.textContent = `Active Channels (${userCount} ${userText})`;
+    }
+
     // Store channels globally for spectrum display markers
     window.activeChannels = channels || [];
     console.log('[displayActiveChannels] Stored window.activeChannels:', window.activeChannels);

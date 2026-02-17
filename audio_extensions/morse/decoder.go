@@ -39,6 +39,11 @@ type MorseDecoder struct {
 	snrDecay float64 // Decay factor for peak SNR
 	snrMu    sync.Mutex
 
+	// Noise canceling (KiwiSDR lines 502-518)
+	noiseCancelEnabled bool
+	noiseCancelChange  bool
+	currentState       bool
+
 	// Circular buffer for state transitions (KiwiSDR approach)
 	sigBuffer     []StateTransition // Circular buffer of state transitions
 	sigLastRx     int               // Write pointer (sig_lastrx in KiwiSDR)
@@ -132,24 +137,27 @@ func NewMorseDecoder(sampleRate int, config MorseConfig) *MorseDecoder {
 	const TRAINING_STABLE = 32 // KiwiSDR training threshold
 
 	d := &MorseDecoder{
-		sampleRate:      sampleRate,
-		centerFrequency: config.CenterFrequency,
-		bandwidth:       config.Bandwidth,
-		minWPM:          config.MinWPM,
-		maxWPM:          config.MaxWPM,
-		wpmAlpha:        0.3,  // Smoothing factor from PyMorseLive
-		snrDecay:        0.99, // Slow decay for peak SNR (holds peak for ~100 samples)
-		thresholdSNR:    config.ThresholdSNR,
-		isAutoThreshold: config.IsAutoThreshold,
-		thresholdLinear: config.ThresholdLinear,
-		currentWPM:      0.0, // Will be calculated from timing
-		peakSNR:         0.0,
-		keyState:        KeyUp,
-		keyDownBlocks:   0,
-		keyUpBlocks:     0,
-		blockDuration:   32.0 / float64(sampleRate), // 32 samples per block
-		lastActivity:    time.Now(),
-		stopChan:        make(chan struct{}),
+		sampleRate:         sampleRate,
+		centerFrequency:    config.CenterFrequency,
+		bandwidth:          config.Bandwidth,
+		minWPM:             config.MinWPM,
+		maxWPM:             config.MaxWPM,
+		wpmAlpha:           0.3,  // Smoothing factor from PyMorseLive
+		snrDecay:           0.99, // Slow decay for peak SNR (holds peak for ~100 samples)
+		thresholdSNR:       config.ThresholdSNR,
+		isAutoThreshold:    config.IsAutoThreshold,
+		thresholdLinear:    config.ThresholdLinear,
+		noiseCancelEnabled: true,
+		noiseCancelChange:  false,
+		currentState:       false,
+		currentWPM:         0.0, // Will be calculated from timing
+		peakSNR:            0.0,
+		keyState:           KeyUp,
+		keyDownBlocks:      0,
+		keyUpBlocks:        0,
+		blockDuration:      32.0 / float64(sampleRate), // 32 samples per block
+		lastActivity:       time.Now(),
+		stopChan:           make(chan struct{}),
 		// Circular buffer (KiwiSDR approach)
 		sigBuffer:     make([]StateTransition, CW_SIG_BUFSIZE),
 		sigLastRx:     0,
@@ -465,20 +473,30 @@ func (d *MorseDecoder) detectTransitionBlock(signal, snr float64) {
 	}
 
 	// Noise canceling: require 2 consecutive blocks with same state (KiwiSDR lines 502-518)
-	// This is done in the envelope detector but we need to track the confirmed state here
-	confirmedState := d.envelope.currentState
+	if d.noiseCancelEnabled {
+		if d.noiseCancelChange {
+			// Second consecutive block with new state - confirm transition
+			d.currentState = newState
+			d.noiseCancelChange = false
+		} else if newState != d.currentState {
+			// First block with new state - wait for confirmation
+			d.noiseCancelChange = true
+		}
+	} else {
+		// No noise canceling
+		d.currentState = newState
+	}
 
 	// Debug logging every 100 blocks (~2.67 seconds at 12kHz)
 	d.debugCounter++
 	if d.debugCounter%100 == 0 {
-		log.Printf("[Decoder %d] signal=%.0f, threshold=%.0f, newState=%v, confirmedState=%v, ratio=%.2f%%",
-			d.decoderID, signal, d.thresholdLinear, newState, confirmedState,
+		log.Printf("[Decoder %d] signal=%.0f, threshold=%.0f, newState=%v, currentState=%v, ratio=%.2f%%",
+			d.decoderID, signal, d.thresholdLinear, newState, d.currentState,
 			(signal/d.thresholdLinear)*100.0)
 	}
 
 	// Record state changes and durations onto circular buffer (KiwiSDR lines 547-558)
-	// Use confirmedState from envelope detector (after noise canceling)
-	if confirmedState != d.prevState {
+	if d.currentState != d.prevState {
 		// Enter the type and duration of the state change into the circular buffer
 		d.sigBuffer[d.sigLastRx].State = d.prevState
 		d.sigBuffer[d.sigLastRx].Time = d.sigTimer
@@ -486,14 +504,14 @@ func (d *MorseDecoder) detectTransitionBlock(signal, snr float64) {
 		// Only log transitions >= 2 blocks to reduce noise
 		if d.sigTimer >= 2.0 {
 			log.Printf("[Decoder %d] State transition: %v -> %v, duration=%.1f blocks",
-				d.decoderID, d.prevState, confirmedState, d.sigTimer)
+				d.decoderID, d.prevState, d.currentState, d.sigTimer)
 		}
 
 		// Increment circular buffer pointer
 		d.sigLastRx = d.ringIdxIncrement(d.sigLastRx)
 
 		d.sigTimer = 0.0             // Zero the signal timer
-		d.prevState = confirmedState // Update state
+		d.prevState = d.currentState // Update state
 	}
 
 	// Count signal state timer upwards (KiwiSDR line 562)

@@ -27,7 +27,7 @@ class MorseExtension extends DecoderExtension {
         this.autoScroll = true;
         this.showMorse = true;
         this.showTimestamp = false; // Disabled by default
-        
+
         // Channel state (5 channels)
         this.channels = [];
         for (let i = 0; i < 5; i++) {
@@ -41,15 +41,28 @@ class MorseExtension extends DecoderExtension {
                 morseBuffer: ''
             });
         }
-        
+
         // Channel frequencies (user-specified)
         this.channelFrequencies = [0, 0, 0, 0, 0];
-        
+
         this.activeChannelCount = 0;
 
         // Binary message handler
         this.binaryMessageHandler = null;
         this.originalDXHandler = null;
+
+        // Spectrum visualization
+        this.spectrumCanvas = null;
+        this.spectrumCtx = null;
+
+        // Channel colors (5 distinct colors)
+        this.channelColors = [
+            '#FF5722', // Red-Orange (Channel 0)
+            '#2196F3', // Blue (Channel 1)
+            '#4CAF50', // Green (Channel 2)
+            '#FFC107', // Amber (Channel 3)
+            '#9C27B0'  // Purple (Channel 4)
+        ];
     }
 
     onInitialize() {
@@ -75,6 +88,7 @@ class MorseExtension extends DecoderExtension {
 
             if (startBtn && clearAllBtn && settingsBtn) {
                 console.log('Morse: All DOM elements found, setting up...');
+                this.setupCanvas();
                 this.setupEventHandlers();
                 console.log('Morse: Setup complete');
             } else if (attempts < maxAttempts) {
@@ -108,6 +122,140 @@ class MorseExtension extends DecoderExtension {
             console.error('Morse: Extension content container not found');
         }
         return container;
+    }
+
+    setupCanvas() {
+        this.spectrumCanvas = document.getElementById('morse-spectrum-canvas');
+        if (this.spectrumCanvas) {
+            this.spectrumCtx = this.spectrumCanvas.getContext('2d');
+            // Set canvas size to match display size
+            const rect = this.spectrumCanvas.getBoundingClientRect();
+            this.spectrumCanvas.width = rect.width;
+            this.spectrumCanvas.height = rect.height;
+
+            // Add click handlers for channel management
+            this.spectrumCanvas.addEventListener('click', (e) => this.handleSpectrumClick(e, false));
+            this.spectrumCanvas.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                this.handleSpectrumClick(e, true);
+            });
+
+            console.log('Morse: Spectrum canvas initialized with click handlers');
+        }
+    }
+
+    handleSpectrumClick(e, isRightClick) {
+        const rect = this.spectrumCanvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const width = rect.width;
+
+        // Calculate frequency from click position (0-3000 Hz range)
+        const maxDisplayFreq = 3000;
+        const clickedFreq = Math.round((x / width) * maxDisplayFreq);
+
+        if (isRightClick) {
+            // Right-click: Remove channel at this frequency
+            this.removeChannelAtFrequency(clickedFreq);
+        } else {
+            // Left-click: Add channel at this frequency
+            this.addChannelAtFrequency(clickedFreq);
+        }
+    }
+
+    addChannelAtFrequency(frequency) {
+        // Check if we already have 5 active channels
+        const activeCount = this.channels.filter(ch => ch.active).length;
+        if (activeCount >= 5) {
+            alert('Maximum of 5 channels reached. Right-click on a channel to remove it first.');
+            return;
+        }
+
+        // Find first inactive channel
+        const channelId = this.channels.findIndex(ch => !ch.active);
+        if (channelId === -1) {
+            alert('All channels are active');
+            return;
+        }
+
+        // Set frequency and enable channel
+        const freqInput = document.getElementById(`morse-freq-${channelId}`);
+        if (freqInput) {
+            freqInput.value = frequency;
+        }
+
+        this.channelFrequencies[channelId] = frequency;
+        this.channels[channelId].active = true;
+        this.channels[channelId].frequency = frequency;
+
+        // Update UI
+        const enableBtn = document.getElementById(`morse-enable-${channelId}`);
+        if (enableBtn) {
+            enableBtn.textContent = 'Disable';
+            enableBtn.classList.remove('btn-small');
+            enableBtn.classList.add('btn-danger');
+        }
+
+        const channelEl = document.getElementById(`morse-channel-${channelId}`);
+        if (channelEl) {
+            channelEl.classList.add('active');
+            channelEl.classList.remove('idle');
+            const statusEl = channelEl.querySelector('.morse-channel-status');
+            if (statusEl) statusEl.textContent = 'Active';
+        }
+
+        console.log(`Morse: Added channel ${channelId} at ${frequency} Hz`);
+
+        // Restart decoder if running
+        if (this.running) {
+            this.stopDecoder();
+            setTimeout(() => this.startDecoder(), 100);
+        }
+    }
+
+    removeChannelAtFrequency(frequency) {
+        // Find channel closest to clicked frequency
+        const bandwidth = this.config.bandwidth;
+        let closestChannel = -1;
+        let closestDistance = Infinity;
+
+        for (let i = 0; i < 5; i++) {
+            if (this.channels[i].active) {
+                const distance = Math.abs(this.channels[i].frequency - frequency);
+                if (distance < closestDistance && distance < bandwidth) {
+                    closestDistance = distance;
+                    closestChannel = i;
+                }
+            }
+        }
+
+        if (closestChannel !== -1) {
+            // Disable the channel
+            this.channelFrequencies[closestChannel] = 0;
+            this.channels[closestChannel].active = false;
+
+            const enableBtn = document.getElementById(`morse-enable-${closestChannel}`);
+            if (enableBtn) {
+                enableBtn.textContent = 'Enable';
+                enableBtn.classList.remove('btn-danger');
+                enableBtn.classList.add('btn-small');
+            }
+
+            const channelEl = document.getElementById(`morse-channel-${closestChannel}`);
+            if (channelEl) {
+                channelEl.classList.remove('active');
+                channelEl.classList.add('idle');
+                const statusEl = channelEl.querySelector('.morse-channel-status');
+                if (statusEl) statusEl.textContent = 'Idle';
+            }
+
+            console.log(`Morse: Removed channel ${closestChannel}`);
+
+            // Restart decoder if running
+            if (this.running) {
+                this.stopDecoder();
+                setTimeout(() => this.startDecoder(), 100);
+            }
+        }
     }
 
     setupEventHandlers() {
@@ -177,7 +325,7 @@ class MorseExtension extends DecoderExtension {
             if (copyBtn) {
                 copyBtn.addEventListener('click', () => this.copyChannel(i));
             }
-            
+
             const enableBtn = document.getElementById(`morse-enable-${i}`);
             if (enableBtn) {
                 enableBtn.addEventListener('click', () => this.toggleChannel(i));
@@ -235,11 +383,11 @@ class MorseExtension extends DecoderExtension {
     toggleChannel(channelId) {
         const freqInput = document.getElementById(`morse-freq-${channelId}`);
         const enableBtn = document.getElementById(`morse-enable-${channelId}`);
-        
+
         if (!freqInput || !enableBtn) return;
-        
+
         const channel = this.channels[channelId];
-        
+
         if (channel.active) {
             // Disable channel
             this.channelFrequencies[channelId] = 0;
@@ -247,7 +395,7 @@ class MorseExtension extends DecoderExtension {
             enableBtn.textContent = 'Enable';
             enableBtn.classList.remove('btn-danger');
             enableBtn.classList.add('btn-small');
-            
+
             const channelEl = document.getElementById(`morse-channel-${channelId}`);
             if (channelEl) {
                 channelEl.classList.remove('active');
@@ -262,14 +410,21 @@ class MorseExtension extends DecoderExtension {
                 alert('Frequency must be between 100 and 5000 Hz');
                 return;
             }
-            
+
+            // Check if we already have 5 active channels
+            const activeCount = this.channels.filter(ch => ch.active).length;
+            if (activeCount >= 5) {
+                alert('Maximum of 5 channels reached');
+                return;
+            }
+
             this.channelFrequencies[channelId] = freq;
             channel.active = true;
             channel.frequency = freq;
             enableBtn.textContent = 'Disable';
             enableBtn.classList.remove('btn-small');
             enableBtn.classList.add('btn-danger');
-            
+
             const channelEl = document.getElementById(`morse-channel-${channelId}`);
             if (channelEl) {
                 channelEl.classList.add('active');
@@ -278,7 +433,7 @@ class MorseExtension extends DecoderExtension {
                 if (statusEl) statusEl.textContent = 'Active';
             }
         }
-        
+
         // Restart decoder if running
         if (this.running) {
             this.stopDecoder();
@@ -298,7 +453,7 @@ class MorseExtension extends DecoderExtension {
 
         this.running = true;
         this.updateStatus('Running - Manual frequency control');
-        
+
         const startBtn = document.getElementById('morse-start-btn');
         if (startBtn) {
             startBtn.textContent = 'Stop';
@@ -359,7 +514,7 @@ class MorseExtension extends DecoderExtension {
 
         this.running = false;
         this.updateStatus('Stopped');
-        
+
         const startBtn = document.getElementById('morse-start-btn');
         if (startBtn) {
             startBtn.textContent = 'Start';
@@ -420,7 +575,7 @@ class MorseExtension extends DecoderExtension {
             this.originalDXHandler = null;
             console.log('Morse: Original message handler restored');
         }
-        
+
         this.binaryMessageHandler = null;
     }
 
@@ -451,10 +606,10 @@ class MorseExtension extends DecoderExtension {
         // [type:1][decoder_id:1][timestamp:8][morse_length:4][morse:length][text_length:4][text:length]
         const timestamp = Number(view.getBigUint64(2, false));
         const morseLength = view.getUint32(10, false);
-        
+
         const morseBytes = new Uint8Array(view.buffer, 14, morseLength);
         const morse = new TextDecoder().decode(morseBytes);
-        
+
         const textOffset = 14 + morseLength;
         const textLength = view.getUint32(textOffset, false);
         const textBytes = new Uint8Array(view.buffer, textOffset + 4, textLength);
@@ -492,7 +647,7 @@ class MorseExtension extends DecoderExtension {
             const freq = view.getFloat64(offset + 1, false);
             const wpm = view.getFloat64(offset + 9, false);
             const snr = view.getFloat64(offset + 17, false);
-            
+
             this.updateChannelStatus(id, freq, wpm, snr);
             offset += 25;
         }
@@ -510,10 +665,10 @@ class MorseExtension extends DecoderExtension {
         if (channelEl) {
             channelEl.classList.add('active');
             channelEl.classList.remove('idle');
-            
+
             const statusEl = channelEl.querySelector('.morse-channel-status');
             if (statusEl) statusEl.textContent = 'Active';
-            
+
             const freqEl = channelEl.querySelector('.morse-channel-freq');
             if (freqEl) freqEl.textContent = `${frequency.toFixed(0)} Hz`;
         }
@@ -531,13 +686,13 @@ class MorseExtension extends DecoderExtension {
         if (channelEl) {
             channelEl.classList.remove('active');
             channelEl.classList.add('idle');
-            
+
             const statusEl = channelEl.querySelector('.morse-channel-status');
             if (statusEl) statusEl.textContent = 'Idle';
-            
+
             const freqEl = channelEl.querySelector('.morse-channel-freq');
             if (freqEl) freqEl.textContent = '---';
-            
+
             const wpmEl = channelEl.querySelector('.morse-channel-wpm');
             if (wpmEl) wpmEl.textContent = '-- WPM';
         }
@@ -567,10 +722,10 @@ class MorseExtension extends DecoderExtension {
         if (channelEl) {
             const freqEl = channelEl.querySelector('.morse-channel-freq');
             if (freqEl) freqEl.textContent = `${frequency.toFixed(0)} Hz`;
-            
+
             const wpmEl = channelEl.querySelector('.morse-channel-wpm');
             if (wpmEl) wpmEl.textContent = `${wpm.toFixed(1)} WPM`;
-            
+
             const snrEl = channelEl.querySelector('.morse-channel-snr');
             if (snrEl) snrEl.textContent = `${snr.toFixed(1)} dB`;
         }
@@ -629,7 +784,7 @@ class MorseExtension extends DecoderExtension {
     copyChannel(id) {
         const channel = this.channels[id];
         const text = channel.textBuffer;
-        
+
         if (text) {
             navigator.clipboard.writeText(text).then(() => {
                 console.log(`Morse: Channel ${id} text copied to clipboard`);
@@ -676,8 +831,117 @@ class MorseExtension extends DecoderExtension {
 
     onProcessAudio(dataArray) {
         // Morse processes audio on the backend (Go side) via the audio extension framework
-        // This method is required by DecoderExtension but does nothing for Morse
-        // Audio is sent to the backend when the decoder is attached via WebSocket
+        // But we still draw the spectrum visualization here
+        this.drawSpectrum(dataArray);
+    }
+
+    drawSpectrum(dataArray) {
+        if (!this.spectrumCanvas || !this.spectrumCtx) return;
+
+        const ctx = this.spectrumCtx;
+        const canvas = this.spectrumCanvas;
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // Clear canvas
+        ctx.fillStyle = '#0a0a0a';
+        ctx.fillRect(0, 0, width, height);
+
+        // Get frequency data
+        const analyser = this.radio.getAnalyser();
+        if (!analyser) return;
+
+        const bufferLength = analyser.frequencyBinCount;
+        const freqData = new Uint8Array(bufferLength);
+        analyser.getByteFrequencyData(freqData);
+
+        // Calculate frequency range to display (0-3000 Hz)
+        const sampleRate = window.audioContext ? window.audioContext.sampleRate : 48000;
+        const nyquist = sampleRate / 2;
+        const maxDisplayFreq = 3000;
+        const binWidth = nyquist / bufferLength;
+        const maxBin = Math.min(bufferLength, Math.floor(maxDisplayFreq / binWidth));
+
+        // Draw spectrum bars
+        const barWidth = width / maxBin;
+        ctx.fillStyle = '#4CAF50';
+
+        for (let i = 0; i < maxBin; i++) {
+            const barHeight = (freqData[i] / 255) * height;
+            const x = i * barWidth;
+            const y = height - barHeight;
+
+            // Color based on intensity
+            const intensity = freqData[i] / 255;
+            if (intensity > 0.7) {
+                ctx.fillStyle = '#FF5722';
+            } else if (intensity > 0.4) {
+                ctx.fillStyle = '#FFC107';
+            } else {
+                ctx.fillStyle = '#4CAF50';
+            }
+
+            ctx.fillRect(x, y, barWidth, barHeight);
+        }
+
+        // Draw channel markers with bandwidth indicators
+        const bandwidth = this.config.bandwidth;
+
+        for (let i = 0; i < 5; i++) {
+            if (this.channels[i].active && this.channels[i].frequency > 0) {
+                const freq = this.channels[i].frequency;
+                const color = this.channelColors[i];
+
+                // Calculate positions
+                const centerX = (freq / maxDisplayFreq) * width;
+                const leftX = ((freq - bandwidth / 2) / maxDisplayFreq) * width;
+                const rightX = ((freq + bandwidth / 2) / maxDisplayFreq) * width;
+
+                // Draw bandwidth region (semi-transparent)
+                ctx.fillStyle = color + '20'; // Add alpha for transparency
+                ctx.fillRect(leftX, 0, rightX - leftX, height);
+
+                // Draw bandwidth markers (dashed lines)
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 3]);
+
+                // Left bandwidth marker
+                ctx.beginPath();
+                ctx.moveTo(leftX, 0);
+                ctx.lineTo(leftX, height);
+                ctx.stroke();
+
+                // Right bandwidth marker
+                ctx.beginPath();
+                ctx.moveTo(rightX, 0);
+                ctx.lineTo(rightX, height);
+                ctx.stroke();
+
+                // Draw center frequency line (solid)
+                ctx.setLineDash([]);
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(centerX, 0);
+                ctx.lineTo(centerX, height);
+                ctx.stroke();
+
+                // Draw label
+                ctx.fillStyle = color;
+                ctx.font = 'bold 11px monospace';
+                ctx.fillText(`Ch${i}`, centerX + 3, 14);
+                ctx.font = '10px monospace';
+                ctx.fillText(`${freq}Hz`, centerX + 3, 26);
+            }
+        }
+
+        // Draw frequency scale at bottom
+        ctx.fillStyle = '#666';
+        ctx.font = '9px monospace';
+        for (let freq = 0; freq <= maxDisplayFreq; freq += 500) {
+            const x = (freq / maxDisplayFreq) * width;
+            ctx.fillText(freq + 'Hz', x + 2, height - 5);
+        }
     }
 
     onEnable() {
@@ -687,11 +951,11 @@ class MorseExtension extends DecoderExtension {
 
     onDisable() {
         console.log('Morse: Extension disabled');
-        
+
         if (this.running) {
             this.stopDecoder();
         }
-        
+
         this.restoreBinaryHandler();
     }
 

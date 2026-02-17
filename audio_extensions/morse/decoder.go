@@ -464,28 +464,36 @@ func (d *MorseDecoder) detectTransitionBlock(signal, snr float64) {
 		newState = signal >= d.thresholdLinear
 	}
 
+	// Noise canceling: require 2 consecutive blocks with same state (KiwiSDR lines 502-518)
+	// This is done in the envelope detector but we need to track the confirmed state here
+	confirmedState := d.envelope.currentState
+
 	// Debug logging every 100 blocks (~2.67 seconds at 12kHz)
 	d.debugCounter++
 	if d.debugCounter%100 == 0 {
-		log.Printf("[Decoder %d] signal=%.0f, threshold=%.0f, newState=%v, prevState=%v, ratio=%.2f%%",
-			d.decoderID, signal, d.thresholdLinear, newState, d.prevState,
+		log.Printf("[Decoder %d] signal=%.0f, threshold=%.0f, newState=%v, confirmedState=%v, ratio=%.2f%%",
+			d.decoderID, signal, d.thresholdLinear, newState, confirmedState,
 			(signal/d.thresholdLinear)*100.0)
 	}
 
 	// Record state changes and durations onto circular buffer (KiwiSDR lines 547-558)
-	if newState != d.prevState {
+	// Use confirmedState from envelope detector (after noise canceling)
+	if confirmedState != d.prevState {
 		// Enter the type and duration of the state change into the circular buffer
 		d.sigBuffer[d.sigLastRx].State = d.prevState
 		d.sigBuffer[d.sigLastRx].Time = d.sigTimer
 
-		log.Printf("[Decoder %d] State transition: %v -> %v, duration=%.1f blocks",
-			d.decoderID, d.prevState, newState, d.sigTimer)
+		// Only log transitions >= 2 blocks to reduce noise
+		if d.sigTimer >= 2.0 {
+			log.Printf("[Decoder %d] State transition: %v -> %v, duration=%.1f blocks",
+				d.decoderID, d.prevState, confirmedState, d.sigTimer)
+		}
 
 		// Increment circular buffer pointer
 		d.sigLastRx = d.ringIdxIncrement(d.sigLastRx)
 
-		d.sigTimer = 0.0       // Zero the signal timer
-		d.prevState = newState // Update state
+		d.sigTimer = 0.0             // Zero the signal timer
+		d.prevState = confirmedState // Update state
 	}
 
 	// Count signal state timer upwards (KiwiSDR line 562)

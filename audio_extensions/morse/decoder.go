@@ -411,10 +411,15 @@ func (d *MorseDecoder) processStateChange(newState bool) {
 func (d *MorseDecoder) processMark(blocks int) {
 	t := float64(blocks)
 
-	// Initialize timing if needed
+	// Initialize timing if needed (KiwiSDR lines 660-665: start with 0)
 	if d.trainingCount == 0 {
-		// First mark - initialize from default WPM
-		d.initializeTimingFromWPM(16.0)
+		// First mark - initialize to 0 like KiwiSDR, not from WPM
+		d.pulseAvg = 0
+		d.dotAvg = 0
+		d.dashAvg = 0
+		d.symSpaceAvg = 0
+		d.cwSpaceAvg = 0
+		log.Printf("[Decoder %d] Starting training from 0 (KiwiSDR method)", d.decoderID)
 	}
 
 	// Training period (KiwiSDR has 3 phases)
@@ -427,15 +432,23 @@ func (d *MorseDecoder) processMark(blocks int) {
 			// Late training phase - more stable (equations 4.4, 4.5)
 			if t > d.pulseAvg {
 				d.dashAvg = d.dashAvg + (t-d.dashAvg)/4.0 // Equation 4.5
+				log.Printf("[Decoder %d] Training %d: DASH t=%.1f > pulse=%.1f, dash=%.1f",
+					d.decoderID, d.trainingCount, t, d.pulseAvg, d.dashAvg)
 			} else {
 				d.dotAvg = d.dotAvg + (t-d.dotAvg)/4.0 // Equation 4.4
+				log.Printf("[Decoder %d] Training %d: DOT t=%.1f <= pulse=%.1f, dot=%.1f",
+					d.decoderID, d.trainingCount, t, d.pulseAvg, d.dotAvg)
 			}
 		} else {
 			// Early training phase - unstable (equations 4.1, 4.2)
 			if t > d.pulseAvg {
 				d.dashAvg = (t + d.dashAvg) / 2.0 // Equation 4.2
+				log.Printf("[Decoder %d] Training %d (early): DASH t=%.1f > pulse=%.1f, dash=%.1f",
+					d.decoderID, d.trainingCount, t, d.pulseAvg, d.dashAvg)
 			} else {
 				d.dotAvg = (t + d.dotAvg) / 2.0 // Equation 4.1
+				log.Printf("[Decoder %d] Training %d (early): DOT t=%.1f <= pulse=%.1f, dot=%.1f",
+					d.decoderID, d.trainingCount, t, d.pulseAvg, d.dotAvg)
 			}
 		}
 		d.pulseAvg = (d.dotAvg/4.0 + d.dashAvg) / 2.0 // Equation 4.3

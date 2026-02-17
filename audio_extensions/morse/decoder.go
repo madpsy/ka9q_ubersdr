@@ -26,6 +26,11 @@ type MorseDecoder struct {
 	snrEstimator *SNREstimator
 	thresholdSNR float64
 
+	// SNR tracking
+	averageSNR float64
+	snrAlpha   float64 // Smoothing factor for SNR
+	snrMu      sync.Mutex
+
 	// Timing decoder
 	currentWPM float64
 	timeUnit   float64 // Duration of one "dit" in seconds
@@ -98,8 +103,10 @@ func NewMorseDecoder(sampleRate int, config MorseConfig) *MorseDecoder {
 		minWPM:          config.MinWPM,
 		maxWPM:          config.MaxWPM,
 		wpmAlpha:        0.3, // Smoothing factor from PyMorseLive
+		snrAlpha:        0.1, // Smoothing factor for SNR
 		thresholdSNR:    config.ThresholdSNR,
 		currentWPM:      16.0, // Start with 16 WPM
+		averageSNR:      0.0,
 		keyState:        KeyUp,
 		keyUpTime:       time.Now(),
 		lastActivity:    time.Now(),
@@ -268,6 +275,15 @@ func (d *MorseDecoder) processSamples(samples []int16) {
 func (d *MorseDecoder) detectTransition(snr float64) {
 	now := time.Now()
 
+	// Update average SNR
+	d.snrMu.Lock()
+	if d.averageSNR == 0.0 {
+		d.averageSNR = snr
+	} else {
+		d.averageSNR = d.snrAlpha*snr + (1-d.snrAlpha)*d.averageSNR
+	}
+	d.snrMu.Unlock()
+
 	// Normalize SNR to 0-1 range for threshold comparison
 	level := math.Min(snr/d.thresholdSNR, 1.0)
 
@@ -277,6 +293,8 @@ func (d *MorseDecoder) detectTransition(snr float64) {
 		d.keyState = KeyDown
 		d.keyDownTime = now
 		d.lastActivity = now
+
+		log.Printf("[Decoder %d] KEY DOWN - SNR: %.1f dB, level: %.2f", d.decoderID, snr, level)
 
 		// Process the space duration
 		d.processSpace(spaceDuration)
@@ -289,6 +307,8 @@ func (d *MorseDecoder) detectTransition(snr float64) {
 		d.keyUpTime = now
 		d.lastActivity = now
 
+		log.Printf("[Decoder %d] KEY UP - duration: %.3fs, threshold: %.3fs", d.decoderID, markDuration, d.timeSpec.DotShort)
+
 		// Process the mark duration
 		d.processMark(markDuration)
 	}
@@ -299,6 +319,7 @@ func (d *MorseDecoder) processMark(duration float64) {
 	ts := d.timeSpec
 
 	if duration < ts.DotShort {
+		log.Printf("[Decoder %d] Mark REJECTED - too short: %.3fs < %.3fs", d.decoderID, duration, ts.DotShort)
 		return // Too short, ignore
 	}
 
@@ -313,7 +334,7 @@ func (d *MorseDecoder) processMark(duration float64) {
 		element = "-"
 	}
 
-	log.Printf("[Morse Decoder %d] Decoded: %s (%.3fs, %.1f WPM)", d.decoderID, element, duration, d.currentWPM)
+	log.Printf("[Decoder %d] Decoded: %s (%.3fs, %.1f WPM)", d.decoderID, element, duration, d.currentWPM)
 
 	d.morseElements += element
 	d.bufferMu.Lock()

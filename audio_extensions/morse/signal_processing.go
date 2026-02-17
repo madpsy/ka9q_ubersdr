@@ -14,7 +14,6 @@ type EnvelopeDetector struct {
 	goertzel *GoertzelFilter
 
 	// Envelope follower (low-pass filter)
-	envelopeAlpha  float64
 	envelopeAttack float64
 	envelopeDecay  float64
 	envelope       float64

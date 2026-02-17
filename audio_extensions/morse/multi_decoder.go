@@ -347,7 +347,7 @@ func (mcd *MultiChannelDecoder) sendDecoderAssignment(resultChan chan<- []byte, 
 
 // sendStatusUpdate sends status of all decoders
 // Binary protocol: [type:1][num_active:1][decoder_data...]
-// decoder_data: [id:1][frequency:8][wpm:8] repeated for each active decoder
+// decoder_data: [id:1][frequency:8][wpm:8][snr:8] repeated for each active decoder
 // type: 0x05 = status update
 func (mcd *MultiChannelDecoder) sendStatusUpdate(resultChan chan<- []byte) {
 	mcd.decodersMu.RLock()
@@ -362,7 +362,7 @@ func (mcd *MultiChannelDecoder) sendStatusUpdate(resultChan chan<- []byte) {
 	}
 
 	// Build message
-	msg := make([]byte, 2+numActive*17) // 2 header + 17 bytes per decoder
+	msg := make([]byte, 2+numActive*25) // 2 header + 25 bytes per decoder (id:1 + freq:8 + wpm:8 + snr:8)
 	msg[0] = 0x05                       // Status update type
 	msg[1] = byte(numActive)
 
@@ -373,12 +373,17 @@ func (mcd *MultiChannelDecoder) sendStatusUpdate(resultChan chan<- []byte) {
 			binary.BigEndian.PutUint64(msg[offset+1:offset+9], math.Float64bits(slot.Frequency))
 
 			wpm := 0.0
+			snr := 0.0
 			if slot.Decoder != nil {
 				wpm = slot.Decoder.currentWPM
+				slot.Decoder.snrMu.Lock()
+				snr = slot.Decoder.averageSNR
+				slot.Decoder.snrMu.Unlock()
 			}
 			binary.BigEndian.PutUint64(msg[offset+9:offset+17], math.Float64bits(wpm))
+			binary.BigEndian.PutUint64(msg[offset+17:offset+25], math.Float64bits(snr))
 
-			offset += 17
+			offset += 25
 		}
 	}
 

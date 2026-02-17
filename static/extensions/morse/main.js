@@ -26,7 +26,7 @@ class MorseExtension extends DecoderExtension {
         this.running = false;
         this.autoScroll = true;
         this.showMorse = true;
-        this.showTimestamp = true;
+        this.showTimestamp = false; // Disabled by default
         
         // Channel state (5 channels)
         this.channels = [];
@@ -159,13 +159,6 @@ class MorseExtension extends DecoderExtension {
         if (autoScrollCheckbox) {
             autoScrollCheckbox.addEventListener('change', (e) => {
                 this.autoScroll = e.target.checked;
-            });
-        }
-
-        const showTimestampCheckbox = document.getElementById('morse-show-timestamp');
-        if (showTimestampCheckbox) {
-            showTimestampCheckbox.addEventListener('change', (e) => {
-                this.showTimestamp = e.target.checked;
             });
         }
 
@@ -425,6 +418,7 @@ class MorseExtension extends DecoderExtension {
 
     handleStatusUpdate(view) {
         // [type:1][num_active:1][decoder_data...]
+        // decoder_data: [id:1][frequency:8][wpm:8][snr:8]
         const numActive = view.getUint8(1);
         let offset = 2;
 
@@ -432,9 +426,10 @@ class MorseExtension extends DecoderExtension {
             const id = view.getUint8(offset);
             const freq = view.getFloat64(offset + 1, false);
             const wpm = view.getFloat64(offset + 9, false);
+            const snr = view.getFloat64(offset + 17, false);
             
-            this.updateChannelStatus(id, freq, wpm);
-            offset += 17;
+            this.updateChannelStatus(id, freq, wpm, snr);
+            offset += 25;
         }
 
         this.activeChannelCount = numActive;
@@ -498,9 +493,10 @@ class MorseExtension extends DecoderExtension {
         }
     }
 
-    updateChannelStatus(id, frequency, wpm) {
+    updateChannelStatus(id, frequency, wpm, snr) {
         this.channels[id].frequency = frequency;
         this.channels[id].wpm = wpm;
+        this.channels[id].snr = snr;
 
         const channelEl = document.getElementById(`morse-channel-${id}`);
         if (channelEl) {
@@ -509,6 +505,9 @@ class MorseExtension extends DecoderExtension {
             
             const wpmEl = channelEl.querySelector('.morse-channel-wpm');
             if (wpmEl) wpmEl.textContent = `${wpm.toFixed(1)} WPM`;
+            
+            const snrEl = channelEl.querySelector('.morse-channel-snr');
+            if (snrEl) snrEl.textContent = `${snr.toFixed(1)} dB`;
         }
     }
 
@@ -521,16 +520,9 @@ class MorseExtension extends DecoderExtension {
         const morseEl = channelEl.querySelector('.morse-channel-morse');
         if (!textEl || !morseEl) return;
 
-        // Add timestamp if enabled
-        let timestampStr = '';
-        if (this.showTimestamp) {
-            const date = new Date(timestamp * 1000);
-            timestampStr = `<span class="morse-timestamp">${date.toLocaleTimeString()}</span>`;
-        }
-
-        // Append text
+        // Append text (no timestamps)
         if (text) {
-            textEl.innerHTML += timestampStr + text;
+            textEl.innerHTML += text;
             channel.textBuffer += text;
         }
 

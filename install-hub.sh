@@ -112,7 +112,7 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
 
     ports=(80 443 8080 8073)
     VENDOR=04b4
-    VALID_PRODUCTS=(00f1 00f3)
+    VALID_PRODUCTS=(00f1)
 
     ports_in_use=0
     rx_found=0

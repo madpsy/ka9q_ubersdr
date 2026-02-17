@@ -58,6 +58,7 @@ type MorseDecoder struct {
 	blockDuration float64 // Duration of one block in seconds
 	lastActivity  time.Time
 	morseElements string
+	debugCounter  int // Counter for periodic debug logging
 
 	// Output
 	morseBuffer string
@@ -272,6 +273,11 @@ func (d *MorseDecoder) processLoop(audioChan <-chan []int16, resultChan chan<- [
 
 // processSamples processes a batch of audio samples
 func (d *MorseDecoder) processSamples(samples []int16) {
+	// Debug: Log first call
+	if d.debugCounter == 0 {
+		log.Printf("[Decoder %d] First processSamples call: %d samples", d.decoderID, len(samples))
+	}
+
 	// Convert to float64
 	floatSamples := make([]float64, len(samples))
 	for i, sample := range samples {
@@ -322,6 +328,14 @@ func (d *MorseDecoder) detectTransitionBlock(signal, snr float64) {
 		// KiwiSDR line 493: newstate = (siglevel >= threshold_linear)
 		// Signal is already low-pass filtered magnitude
 		newState = signal >= d.thresholdLinear
+	}
+
+	// Debug logging every 100 blocks (~2.67 seconds at 12kHz)
+	d.debugCounter++
+	if d.debugCounter%100 == 0 {
+		log.Printf("[Decoder %d] signal=%.0f, threshold=%.0f, newState=%v, currentState=%v, ratio=%.2f%%",
+			d.decoderID, signal, d.thresholdLinear, newState, d.envelope.currentState,
+			(signal/d.thresholdLinear)*100.0)
 	}
 
 	// Noise canceling: require 2 consecutive blocks with same state

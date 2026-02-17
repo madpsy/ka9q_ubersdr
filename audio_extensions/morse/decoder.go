@@ -235,6 +235,11 @@ func (d *MorseDecoder) updateWPM() {
 		return
 	}
 
+	// Guard against invalid timing values
+	if d.dotAvg <= 0 || d.dashAvg <= 0 {
+		return
+	}
+
 	// PARIS standard calculation
 	spdCalc := 10.0*d.dotAvg + 4.0*d.dashAvg + 9.0*d.symSpaceAvg + 5.0*d.cwSpaceAvg
 	if spdCalc <= 0 {
@@ -243,7 +248,16 @@ func (d *MorseDecoder) updateWPM() {
 
 	// Convert to milliseconds per word
 	msPerWord := spdCalc * d.blockDuration * 1000.0
+	if msPerWord <= 0 {
+		return
+	}
+
 	wpmRaw := 60000.0 / msPerWord
+
+	// Clamp to reasonable range
+	if wpmRaw < d.minWPM || wpmRaw > d.maxWPM*2 {
+		return
+	}
 
 	// Smooth the WPM estimate
 	if d.currentWPM == 0 {
@@ -263,14 +277,28 @@ func (d *MorseDecoder) cwTrain() {
 		d.startPos = d.sigOutCount // We start at last processed mark/space
 		d.progress = d.sigOutCount
 		d.initializing = true
-		// Reset CW timing variables to 0 (KiwiSDR lines 660-665)
-		d.pulseAvg = 0
-		d.dotAvg = 0
-		d.dashAvg = 0
-		d.symSpaceAvg = 0
-		d.cwSpaceAvg = 0
-		d.lastWordSpace = 0
-		log.Printf("[Decoder %d] Starting training from 0 (KiwiSDR method)", d.decoderID)
+
+		// Only reset timing variables to 0 on FIRST initialization
+		// On re-training (after errors), keep previous values as starting point
+		if d.pulseAvg == 0 && d.dotAvg == 0 && d.dashAvg == 0 {
+			// First time initialization - reset to 0 (KiwiSDR lines 660-665)
+			d.pulseAvg = 0
+			d.dotAvg = 0
+			d.dashAvg = 0
+			d.symSpaceAvg = 0
+			d.cwSpaceAvg = 0
+			d.lastWordSpace = 0
+			log.Printf("[Decoder %d] Starting initial training from 0 (KiwiSDR method)", d.decoderID)
+		} else {
+			// Re-training after errors - keep 50% of previous values
+			d.pulseAvg *= 0.5
+			d.dotAvg *= 0.5
+			d.dashAvg *= 0.5
+			d.symSpaceAvg *= 0.5
+			d.cwSpaceAvg *= 0.5
+			log.Printf("[Decoder %d] Re-training from previous values (pulse=%.1f dot=%.1f dash=%.1f)",
+				d.decoderID, d.pulseAvg, d.dotAvg, d.dashAvg)
+		}
 	}
 
 	if !d.trackTiming {
@@ -283,6 +311,8 @@ func (d *MorseDecoder) cwTrain() {
 	if processed >= d.trainingInterval {
 		d.initialized = true // Indicate we're done
 		d.initializing = false
+		// Now set sigOutCount to start decoding from where training ended
+		d.sigOutCount = d.progress
 		log.Printf("[Decoder %d] Training complete: pulse=%.1f dot=%.1f dash=%.1f space=%.1f sym=%.1f",
 			d.decoderID, d.pulseAvg, d.dotAvg, d.dashAvg, d.cwSpaceAvg, d.symSpaceAvg)
 	}
@@ -531,16 +561,20 @@ func (d *MorseDecoder) detectTransitionBlock(signal, snr float64) {
 // processDecodedStates processes decoded states from the circular buffer
 // This replaces the inline training in processMark/processSpace
 func (d *MorseDecoder) processDecodedStates() {
+	// Don't decode anything during training - wait until training completes
+	if !d.initialized || d.initializing {
+		return
+	}
+
+	// Verify we have valid timing values before attempting to decode
+	if d.dotAvg <= 0 || d.dashAvg <= 0 || d.pulseAvg <= 0 {
+		return
+	}
+
 	// Process all available states in the buffer
 	for d.sigOutCount != d.sigInCount {
 		t := d.sigBuffer[d.sigOutCount].Time
 		isMarkState := d.sigBuffer[d.sigOutCount].State
-
-		// Skip if not initialized yet (training handles this)
-		if !d.initialized {
-			d.sigOutCount = d.ringIdxIncrement(d.sigOutCount)
-			continue
-		}
 
 		d.lastActivity = time.Now()
 
@@ -558,6 +592,11 @@ func (d *MorseDecoder) processDecodedStates() {
 
 // processMark processes a mark (key down) duration
 func (d *MorseDecoder) processMark(t float64) {
+	// Guard against invalid timing values
+	if d.pulseAvg <= 0 || d.dotAvg <= 0 || d.dashAvg <= 0 {
+		return
+	}
+
 	// Normal operation - classify as dot or dash (equation 4.10)
 	var element string
 	if (d.pulseAvg - t) >= 0 {
@@ -594,6 +633,11 @@ func (d *MorseDecoder) processMark(t float64) {
 
 // processSpace processes a space (key up) duration
 func (d *MorseDecoder) processSpace(t float64) {
+	// Guard against invalid timing values
+	if d.pulseAvg <= 0 || d.dashAvg <= 0 || d.cwSpaceAvg < 0 {
+		return
+	}
+
 	// Symbol space (between dots/dashes in same character)
 	if (t - d.pulseAvg) < 0 {
 		if d.trackTiming {

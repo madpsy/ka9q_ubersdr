@@ -21,12 +21,24 @@ type EnvelopeDetector struct {
 
 // NewEnvelopeDetector creates a new envelope detector
 func NewEnvelopeDetector(sampleRate int, centerFrequency, bandwidth float64) *EnvelopeDetector {
+	// Calculate time constants for proper CW envelope detection
+	// Attack: 5ms (fast enough to catch dit start)
+	// Decay: 10ms (slow enough to smooth out Goertzel fluctuations)
+	attackTimeMs := 5.0
+	decayTimeMs := 10.0
+
+	// Convert to alpha values (exponential moving average coefficient)
+	// alpha = 1 - exp(-1 / (time_constant_ms * sample_rate / 1000))
+	// Simplified: alpha ≈ 1 / (time_constant_ms * sample_rate / 1000) for small values
+	attackAlpha := 1.0 / (attackTimeMs * float64(sampleRate) / 1000.0)
+	decayAlpha := 1.0 / (decayTimeMs * float64(sampleRate) / 1000.0)
+
 	ed := &EnvelopeDetector{
 		sampleRate:      sampleRate,
 		centerFrequency: centerFrequency,
 		bandwidth:       bandwidth,
-		envelopeAttack:  0.01, // Fast attack (10ms time constant)
-		envelopeDecay:   0.01, // Fast decay (10ms time constant)
+		envelopeAttack:  attackAlpha,
+		envelopeDecay:   decayAlpha,
 		envelope:        0.0,
 	}
 

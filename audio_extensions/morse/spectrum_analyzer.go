@@ -127,6 +127,9 @@ func (sa *SpectrumAnalyzer) DetectPeaks(n int, minSNRdB float64) []Peak {
 	// Find all peaks above threshold
 	var peaks []Peak
 
+	// Minimum separation between peaks (in Hz) to avoid detecting harmonics/sidebands
+	minSeparation := 200.0 // Hz
+
 	for i := minBin + 1; i < maxBin; i++ {
 		// Check if this is a local maximum and above threshold
 		if sa.snrSpectrum[i] > sa.snrSpectrum[i-1] &&
@@ -145,11 +148,39 @@ func (sa *SpectrumAnalyzer) DetectPeaks(n int, minSNRdB float64) []Peak {
 			// Convert SNR to dB
 			snrDB := 10.0 * math.Log10(sa.snrSpectrum[i])
 
-			peaks = append(peaks, Peak{
-				Frequency: freq,
-				SNR:       snrDB,
-				Bin:       i,
-			})
+			// Check if this peak is too close to an existing peak
+			tooClose := false
+			for _, existingPeak := range peaks {
+				freqDiff := freq - existingPeak.Frequency
+				if freqDiff < 0 {
+					freqDiff = -freqDiff
+				}
+				if freqDiff < minSeparation {
+					// Keep the stronger peak
+					if snrDB > existingPeak.SNR {
+						// Remove the weaker peak and add this one
+						tooClose = false
+						// Mark existing peak for removal
+						for j := range peaks {
+							if peaks[j].Frequency == existingPeak.Frequency {
+								peaks = append(peaks[:j], peaks[j+1:]...)
+								break
+							}
+						}
+					} else {
+						tooClose = true
+					}
+					break
+				}
+			}
+
+			if !tooClose {
+				peaks = append(peaks, Peak{
+					Frequency: freq,
+					SNR:       snrDB,
+					Bin:       i,
+				})
+			}
 		}
 	}
 

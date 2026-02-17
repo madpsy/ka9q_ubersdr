@@ -154,6 +154,7 @@ func NewMorseDecoder(sampleRate int, config MorseConfig) *MorseDecoder {
 }
 
 // initializeTimingFromWPM initializes timing averages from a fixed WPM
+// This only sets initial values - does NOT set initialized flag (training will do that)
 func (d *MorseDecoder) initializeTimingFromWPM(wpm float64) {
 	// Calculate block duration in blocks (not seconds)
 	blocksPerMs := 1.0 / (d.blockDuration * 1000.0)
@@ -165,8 +166,8 @@ func (d *MorseDecoder) initializeTimingFromWPM(wpm float64) {
 	d.symSpaceAvg = d.dotAvg * 0.93
 	d.pulseAvg = (d.dotAvg/4.0 + d.dashAvg) / 2.0
 
-	d.initialized = true
-	log.Printf("[Decoder %d] Initialized timing from %d WPM: dot=%.1f, dash=%.1f, pulse=%.1f blocks",
+	// Do NOT set initialized = true here - let training complete first
+	log.Printf("[Decoder %d] Set initial timing from %d WPM: dot=%.1f, dash=%.1f, pulse=%.1f blocks (training will refine)",
 		d.decoderID, int(wpm), d.dotAvg, d.dashAvg, d.pulseAvg)
 }
 

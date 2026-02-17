@@ -528,35 +528,8 @@ func isBrowserRequest(r *http.Request) bool {
 // AuthMiddleware checks for valid admin session or password header
 func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Check IP allowlist first (before any authentication)
-		clientIP := r.RemoteAddr
-		if host, _, err := net.SplitHostPort(clientIP); err == nil {
-			clientIP = host
-		}
-
-		// Only trust X-Real-IP if request comes from tunnel server or trusted proxy
-		isTunnelServer := globalConfig != nil && globalConfig.InstanceReporting.IsTunnelServer(clientIP)
-		isTrustedProxy := globalConfig != nil && globalConfig.Server.IsTrustedProxy(clientIP)
-
-		if isTunnelServer || isTrustedProxy {
-			if xri := r.Header.Get("X-Real-IP"); xri != "" {
-				clientIP = strings.TrimSpace(xri)
-				if host, _, err := net.SplitHostPort(clientIP); err == nil {
-					clientIP = host
-				}
-			}
-		} else {
-			// Check X-Forwarded-For header for true source IP (first IP in the list)
-			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-				clientIP = strings.TrimSpace(xff)
-				if commaIdx := strings.Index(clientIP, ","); commaIdx != -1 {
-					clientIP = strings.TrimSpace(clientIP[:commaIdx])
-				}
-				if host, _, err := net.SplitHostPort(clientIP); err == nil {
-					clientIP = host
-				}
-			}
-		}
+		// Use centralized IP detection function (same as all other endpoints)
+		clientIP := getClientIP(r)
 
 		// Check if IP is allowed to access admin endpoints
 		if !ah.config.Admin.IsIPAllowed(clientIP) {

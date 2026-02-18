@@ -513,7 +513,7 @@ fi
 # Setup auto-update cron job
 echo
 echo "Setting up auto-update cron job..."
-CRON_JOB="* * * * * [ -f \$HOME/ubersdr/updater/latest ] && [ -s \$HOME/ubersdr/updater/latest ] && sudo rm -f \$HOME/ubersdr/updater/latest && curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/main/install-hub.sh | bash -s -- --force-compose >> \$HOME/ubersdr/update.log 2>&1"
+CRON_JOB="* * * * * [ -f \$HOME/ubersdr/updater/latest ] && [ -s \$HOME/ubersdr/updater/latest ] && sudo rm -f \$HOME/ubersdr/updater/latest && curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/main/install-hub.sh | bash -s -- >> \$HOME/ubersdr/update.log 2>&1"
 
 # Check if cron job already exists
 if sudo -u "$ACTUAL_USER" crontab -l 2>/dev/null | grep -q "ubersdr/updater/latest"; then

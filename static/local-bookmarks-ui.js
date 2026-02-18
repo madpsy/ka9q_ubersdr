@@ -383,10 +383,18 @@ class LocalBookmarksUI {
             mode = window.radioAPI.getMode();
         }
 
+        // Get current bandwidth settings
+        const bandwidthLow = window.currentBandwidthLow || null;
+        const bandwidthHigh = window.currentBandwidthHigh || null;
+
         if (!frequency) {
             this.showAlert('management', 'error', 'Cannot determine current frequency');
             return;
         }
+
+        // Store bandwidth in a temporary property so handleSaveBookmark can access it
+        this.tempBandwidthLow = bandwidthLow;
+        this.tempBandwidthHigh = bandwidthHigh;
 
         this.currentEditingBookmark = null;
         document.getElementById('local-bookmarks-edit-title').textContent = 'Add Current Frequency';
@@ -394,7 +402,7 @@ class LocalBookmarksUI {
         document.getElementById('local-bookmarks-edit-frequency').value = frequency / 1000; // Convert Hz to kHz
         document.getElementById('local-bookmarks-edit-mode').value = mode.toLowerCase();
         document.getElementById('local-bookmarks-edit-group').value = '';
-        document.getElementById('local-bookmarks-edit-comment').value = '';
+        document.getElementById('local-bookmarks-edit-comment').value = bandwidthLow && bandwidthHigh ? `BW: ${bandwidthLow} to ${bandwidthHigh} Hz` : '';
         document.getElementById('local-bookmarks-edit-extension').value = '';
         document.getElementById('local-bookmarks-edit-alert-container').innerHTML = '';
         document.getElementById('local-bookmarks-edit-modal').classList.add('active');
@@ -449,8 +457,14 @@ class LocalBookmarksUI {
             mode: document.getElementById('local-bookmarks-edit-mode').value,
             group: document.getElementById('local-bookmarks-edit-group').value.trim() || null,
             comment: document.getElementById('local-bookmarks-edit-comment').value.trim() || null,
-            extension: document.getElementById('local-bookmarks-edit-extension').value.trim() || null
+            extension: document.getElementById('local-bookmarks-edit-extension').value.trim() || null,
+            bandwidth_low: this.tempBandwidthLow || null,
+            bandwidth_high: this.tempBandwidthHigh || null
         };
+
+        // Clear temporary bandwidth values
+        this.tempBandwidthLow = null;
+        this.tempBandwidthHigh = null;
 
         try {
             if (this.currentEditingBookmark) {

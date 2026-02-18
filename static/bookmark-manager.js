@@ -371,13 +371,15 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
 // Third parameter indicates if click came from spectrum marker (true) or dropdown (false/undefined)
 function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrumMarker) {
     // Support both old API (frequency, mode) and new API (bookmark object, shouldZoom)
-    let frequency, bookmarkMode, extension, shouldZoom;
+    let frequency, bookmarkMode, extension, shouldZoom, bandwidthLow, bandwidthHigh;
     
     if (typeof bookmarkOrFrequency === 'object') {
         // New API: bookmark object
         frequency = bookmarkOrFrequency.frequency;
         bookmarkMode = bookmarkOrFrequency.mode;
         extension = bookmarkOrFrequency.extension;
+        bandwidthLow = bookmarkOrFrequency.bandwidth_low;
+        bandwidthHigh = bookmarkOrFrequency.bandwidth_high;
         // Second parameter is shouldZoom boolean (true if Shift/Ctrl held)
         shouldZoom = typeof modeOrShouldZoom === 'boolean' ? modeOrShouldZoom : false;
     } else {
@@ -422,8 +424,13 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
         // For CW modes, set narrow bandwidth before changing mode
         if (bookmarkMode === 'cwu' || bookmarkMode === 'cwl') {
             if (radioAPI) {
-                // Set CW bandwidth first
-                radioAPI.setBandwidth(-200, 200);
+                // Set CW bandwidth first (use bookmark bandwidth if available)
+                if (bandwidthLow !== undefined && bandwidthLow !== null &&
+                    bandwidthHigh !== undefined && bandwidthHigh !== null) {
+                    radioAPI.setBandwidth(bandwidthLow, bandwidthHigh);
+                } else {
+                    radioAPI.setBandwidth(-200, 200);
+                }
                 // Then set mode with bandwidth preservation
                 radioAPI.setMode(bookmarkMode, true);
             } else {
@@ -431,8 +438,14 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
                 setMode(bookmarkMode);
             }
         } else {
-            // For non-CW modes, use default bandwidth
+            // For non-CW modes, set mode first then bandwidth
             setMode(bookmarkMode);
+            
+            // Apply bookmark bandwidth if available
+            if (radioAPI && bandwidthLow !== undefined && bandwidthLow !== null &&
+                bandwidthHigh !== undefined && bandwidthHigh !== null) {
+                radioAPI.setBandwidth(bandwidthLow, bandwidthHigh);
+            }
         }
     }
 

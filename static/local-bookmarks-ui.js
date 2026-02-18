@@ -590,19 +590,19 @@ class LocalBookmarksUI {
             <p style="margin-bottom: 15px; color: #bdc3c7;">Choose export format:</p>
             <button class="local-bookmarks-format-btn" onclick="window.localBookmarksUI.exportFormat('json')">
                 <strong>JSON</strong>
-                <span style="color: #95a5a6;">Native format, best for backup</span>
+                <span style="color: #ecf0f1;">Native format, best for backup</span>
             </button>
             <button class="local-bookmarks-format-btn" onclick="window.localBookmarksUI.exportFormat('yaml')">
                 <strong>YAML</strong>
-                <span style="color: #95a5a6;">Compatible with server bookmarks.yaml</span>
+                <span style="color: #ecf0f1;">Compatible with server bookmarks.yaml</span>
             </button>
             <button class="local-bookmarks-format-btn" onclick="window.localBookmarksUI.exportFormat('csv')">
                 <strong>CSV</strong>
-                <span style="color: #95a5a6;">For spreadsheet editing</span>
+                <span style="color: #ecf0f1;">For spreadsheet editing</span>
             </button>
             <button class="local-bookmarks-format-btn" onclick="window.localBookmarksUI.exportFormat('kiwisdr')">
                 <strong>KiwiSDR</strong>
-                <span style="color: #95a5a6;">Compatible with KiwiSDR dx.json</span>
+                <span style="color: #ecf0f1;">Compatible with KiwiSDR dx.json</span>
             </button>
         `;
 

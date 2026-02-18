@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,6 +21,7 @@ type RadiodController struct {
 	conn            *net.UDPConn
 	iface           *net.Interface
 	frontendTracker *FrontendStatusTracker
+	cmdMu           sync.Mutex // Protects sendCommand for thread-safe parallel polling
 }
 
 // fnv1hash implements the FNV-1 hash algorithm
@@ -306,7 +308,7 @@ func (rc *RadiodController) CreateChannelWithSquelch(name string, frequency uint
 		// Check for special "always open" value (-999)
 		if *squelchOpen == -999 {
 			// Always open mode - send -999 for both thresholds
-			buf = encodeByte(&buf, 0x5C, 1) // SNR_SQUELCH = enabled
+			buf = encodeByte(&buf, 0x5C, 1)       // SNR_SQUELCH = enabled
 			buf = encodeFloat(&buf, 0x53, -999.0) // SQUELCH_OPEN = -999
 			buf = encodeFloat(&buf, 0x54, -999.0) // SQUELCH_CLOSE = -999
 		} else if squelchClose != nil {
@@ -510,7 +512,7 @@ func (rc *RadiodController) UpdateChannelWithSquelch(ssrc uint32, frequency uint
 		// Check for special "always open" value (-999)
 		if *squelchOpen == -999 {
 			// Always open mode - send -999 for both thresholds
-			buf = encodeByte(&buf, 0x5C, 1) // SNR_SQUELCH = enabled
+			buf = encodeByte(&buf, 0x5C, 1)       // SNR_SQUELCH = enabled
 			buf = encodeFloat(&buf, 0x53, -999.0) // SQUELCH_OPEN = -999
 			buf = encodeFloat(&buf, 0x54, -999.0) // SQUELCH_CLOSE = -999
 		} else if squelchClose != nil {
@@ -594,7 +596,6 @@ func (rc *RadiodController) DisableChannel(name string, ssrc uint32) error {
 	cmd := rc.buildCommand(name, ssrc, map[string]interface{}{
 		"radio.frequency": uint64(0),
 	})
-
 
 	if err := rc.sendCommand(cmd); err != nil {
 		return fmt.Errorf("failed to send disable command: %w", err)
@@ -766,7 +767,11 @@ func encodeString(buf *[]byte, tag byte, value string) []byte {
 }
 
 // sendCommand sends a command packet to radiod
+// Thread-safe: protected by mutex for parallel polling
 func (rc *RadiodController) sendCommand(cmd []byte) error {
+	rc.cmdMu.Lock()
+	defer rc.cmdMu.Unlock()
+
 	// Set write deadline
 	if err := rc.conn.SetWriteDeadline(time.Now().Add(1 * time.Second)); err != nil {
 		return fmt.Errorf("failed to set write deadline: %w", err)

@@ -159,6 +159,7 @@ func (usm *UserSpectrumManager) pollLoop() {
 }
 
 // pollAllSpectrumSessions sends poll commands for all active spectrum sessions
+// Polls are sent in parallel for better performance with many users
 func (usm *UserSpectrumManager) pollAllSpectrumSessions() {
 	// Get all sessions (need to iterate safely)
 	usm.sessions.mu.RLock()
@@ -170,12 +171,18 @@ func (usm *UserSpectrumManager) pollAllSpectrumSessions() {
 	}
 	usm.sessions.mu.RUnlock()
 
-	// Send poll for each spectrum session
+	// Send polls in parallel (non-blocking)
+	// This dramatically improves performance with many users (e.g., 50 users)
+	// sendCommand() is thread-safe (protected by mutex in RadiodController)
 	for _, ssrc := range spectrumSSRCs {
-		if err := usm.sendPoll(ssrc); err != nil {
-			log.Printf("ERROR: Failed to send spectrum poll for SSRC 0x%08x: %v", ssrc, err)
-		}
+		go func(s uint32) {
+			if err := usm.sendPoll(s); err != nil {
+				log.Printf("ERROR: Failed to send spectrum poll for SSRC 0x%08x: %v", s, err)
+			}
+		}(ssrc)
 	}
+	// Don't wait for polls to complete - they send asynchronously
+	// radiod will respond via multicast when ready
 }
 
 // sendPoll sends a poll command to request spectrum data for a specific SSRC

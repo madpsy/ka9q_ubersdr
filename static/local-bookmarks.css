@@ -388,6 +388,12 @@
     color: #3498db;
 }
 
+.local-bookmarks-format-btn span {
+    display: block;
+    color: #bdc3c7;
+    font-size: 0.9em;
+}
+
 @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }

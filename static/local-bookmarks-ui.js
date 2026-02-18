@@ -84,9 +84,9 @@ class LocalBookmarksUI {
                         <small>Unique name for this bookmark</small>
                     </div>
                     <div class="local-bookmarks-form-group">
-                        <label for="local-bookmarks-edit-frequency">Frequency (Hz) *</label>
-                        <input type="number" id="local-bookmarks-edit-frequency" required placeholder="e.g., 10000000">
-                        <small>Frequency in Hertz</small>
+                        <label for="local-bookmarks-edit-frequency">Frequency (kHz) *</label>
+                        <input type="number" id="local-bookmarks-edit-frequency" required placeholder="e.g., 7074" step="0.001">
+                        <small>Frequency in kilohertz (will be converted to Hz)</small>
                     </div>
                     <div class="local-bookmarks-form-group">
                         <label for="local-bookmarks-edit-mode">Mode *</label>
@@ -338,12 +338,8 @@ class LocalBookmarksUI {
     }
 
     formatFrequency(freq) {
-        if (freq >= 1000000) {
-            return `${(freq / 1000000).toFixed(3)} MHz`;
-        } else if (freq >= 1000) {
-            return `${(freq / 1000).toFixed(1)} kHz`;
-        }
-        return `${freq} Hz`;
+        // Always display in kHz for consistency with input format
+        return `${(freq / 1000).toFixed(1)} kHz`;
     }
 
     // Update the main UI dropdown and refresh spectrum display
@@ -396,7 +392,7 @@ class LocalBookmarksUI {
         this.currentEditingBookmark = null;
         document.getElementById('local-bookmarks-edit-title').textContent = 'Add Current Frequency';
         document.getElementById('local-bookmarks-edit-name').value = `${this.formatFrequency(frequency)}`;
-        document.getElementById('local-bookmarks-edit-frequency').value = frequency;
+        document.getElementById('local-bookmarks-edit-frequency').value = frequency / 1000; // Convert Hz to kHz
         document.getElementById('local-bookmarks-edit-mode').value = mode.toLowerCase();
         document.getElementById('local-bookmarks-edit-group').value = '';
         document.getElementById('local-bookmarks-edit-comment').value = '';
@@ -416,7 +412,7 @@ class LocalBookmarksUI {
         this.currentEditingBookmark = name;
         document.getElementById('local-bookmarks-edit-title').textContent = 'Edit Bookmark';
         document.getElementById('local-bookmarks-edit-name').value = bookmark.name;
-        document.getElementById('local-bookmarks-edit-frequency').value = bookmark.frequency;
+        document.getElementById('local-bookmarks-edit-frequency').value = bookmark.frequency / 1000; // Convert Hz to kHz
         document.getElementById('local-bookmarks-edit-mode').value = bookmark.mode;
         document.getElementById('local-bookmarks-edit-group').value = bookmark.group || '';
         document.getElementById('local-bookmarks-edit-comment').value = bookmark.comment || '';
@@ -447,9 +443,10 @@ class LocalBookmarksUI {
     handleSaveBookmark(e) {
         e.preventDefault();
 
+        const frequencyKHz = parseFloat(document.getElementById('local-bookmarks-edit-frequency').value);
         const bookmark = {
             name: document.getElementById('local-bookmarks-edit-name').value.trim(),
-            frequency: parseInt(document.getElementById('local-bookmarks-edit-frequency').value),
+            frequency: Math.round(frequencyKHz * 1000), // Convert kHz to Hz
             mode: document.getElementById('local-bookmarks-edit-mode').value,
             group: document.getElementById('local-bookmarks-edit-group').value.trim() || null,
             comment: document.getElementById('local-bookmarks-edit-comment').value.trim() || null,

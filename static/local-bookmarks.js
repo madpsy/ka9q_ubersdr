@@ -91,6 +91,7 @@ class LocalBookmarkManager {
         };
 
         this.bookmarks.push(newBookmark);
+        console.log(`[LocalBookmarks] Adding bookmark with bandwidth_low=${newBookmark.bandwidth_low}, bandwidth_high=${newBookmark.bandwidth_high}`);
         this.save();
         console.log(`[LocalBookmarks] Added bookmark: ${newBookmark.name}`);
         return newBookmark;

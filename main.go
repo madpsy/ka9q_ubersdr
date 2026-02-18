@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"html/template"
 	"io"
 	"log"
 	"net"
@@ -40,6 +41,9 @@ var StartTime time.Time
 
 // Global config for tunnel server IP checking
 var globalConfig *Config
+
+// Global index template for custom HTML injection
+var indexTemplate *template.Template
 
 // responseWriter wraps http.ResponseWriter to capture status code
 type responseWriter struct {
@@ -1666,9 +1670,24 @@ func main() {
 		log.Printf("HTTP request logging disabled")
 	}
 
-	// Serve static files
-	fs := http.FileServer(http.Dir("static"))
-	http.Handle("/", fs)
+	// Parse index.html template for custom HTML injection
+	var parseErr error
+	indexTemplate, parseErr = template.ParseFiles("static/index.html")
+	if parseErr != nil {
+		log.Fatalf("Failed to parse index.html template: %v", parseErr)
+	}
+	log.Printf("Parsed index.html template successfully")
+
+	// Handle index.html with template, serve other static files normally
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+			handleIndexPage(w, r, config)
+			return
+		}
+		// Serve other static files
+		fs := http.FileServer(http.Dir("static"))
+		fs.ServeHTTP(w, r)
+	})
 
 	// Wrap the default ServeMux with middleware layers (applied in reverse order)
 	// Order: ban (IP + country) -> CORS -> logging
@@ -2035,6 +2054,22 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
+}
+
+// handleIndexPage serves the index.html template with custom HTML injection
+func handleIndexPage(w http.ResponseWriter, r *http.Request, config *Config) {
+	data := struct {
+		CustomHeadHTML template.HTML
+	}{
+		CustomHeadHTML: template.HTML(config.Server.CustomHeadHTML),
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := indexTemplate.Execute(w, data); err != nil {
+		log.Printf("Error executing index template: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleHealth handles health check requests

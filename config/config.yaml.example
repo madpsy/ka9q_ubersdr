@@ -352,6 +352,31 @@ server:
   # Recommended: 300 (5 minutes) for good time resolution
   session_activity_log_interval_sec: 300
 
+  # Custom HTML injection for analytics, ads, and meta tags
+  # This HTML will be inserted into the <head> section of index.html
+  # Supports Google Analytics, Google Ads, meta tags, and other tracking scripts
+  # Leave empty (or comment out) to disable custom HTML injection
+  #
+  # Example usage:
+  # custom_head_html: |
+  #   <!-- Google tag (gtag.js) -->
+  #   <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
+  #   <script>
+  #     window.dataLayer = window.dataLayer || [];
+  #     function gtag(){dataLayer.push(arguments);}
+  #     gtag('js', new Date());
+  #     gtag('config', 'G-XXXXXXXXXX');
+  #   </script>
+  #
+  #   <!-- Google Ads -->
+  #   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXXXXXXXXXXX" crossorigin="anonymous"></script>
+  #
+  #   <!-- Meta tags -->
+  #   <meta name="google-site-verification" content="your-verification-code" />
+  #   <meta property="og:title" content="Your SDR Title" />
+  #
+  custom_head_html: ""
+
 # Audio settings
 audio:
   # Audio buffer size in samples

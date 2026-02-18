@@ -168,7 +168,9 @@ func generateHTTPSCaddyfile(host, email string, redirectToHTTPS bool) string {
 	   }
 
 	   # Redirect all other HTTP traffic to HTTPS using the configured domain
-	   redir https://%s{uri} permanent
+	   handle {
+	       redir https://%s{uri} permanent
+	   }
 
 	   # Logging
 	   log {

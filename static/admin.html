@@ -2529,11 +2529,11 @@
                         input.type = 'number';
                         input.value = value;
                         input.step = value % 1 === 0 ? '1' : '0.01';
-                    } else if (typeof value === 'string' && (key === 'custom_head_html' || value.includes('\n') || value.length > 100)) {
+                    } else if (typeof value === 'string' && (key === 'custom_head_html' || key === 'custom_ads_txt' || value.includes('\n') || value.length > 100)) {
                         // Use textarea for multiline strings or long strings
                         input = document.createElement('textarea');
                         input.style.width = '100%';
-                        input.style.minHeight = key === 'custom_head_html' ? '200px' : '80px';
+                        input.style.minHeight = key === 'custom_head_html' ? '200px' : (key === 'custom_ads_txt' ? '150px' : '80px');
                         input.style.fontFamily = 'monospace';
                         input.style.fontSize = '13px';
                         input.style.padding = '8px';
@@ -2545,6 +2545,14 @@
                         if (key === 'custom_head_html') {
                             const hint = document.createElement('small');
                             hint.textContent = 'Paste your Google Analytics, Google Ads, or other tracking code here. The HTML will be injected into the <head> section of index.html.';
+                            hint.style.display = 'block';
+                            hint.style.marginTop = '5px';
+                            hint.style.color = '#666';
+                            hint.style.fontStyle = 'italic';
+                            field.appendChild(hint);
+                        } else if (key === 'custom_ads_txt') {
+                            const hint = document.createElement('small');
+                            hint.textContent = 'Content for /ads.txt endpoint. Format: domain, publisher_id, relationship, certification_authority_id (one entry per line). Example: google.com, pub-0000000000000000, DIRECT, f08c47fec0942fa0';
                             hint.style.display = 'block';
                             hint.style.marginTop = '5px';
                             hint.style.color = '#666';

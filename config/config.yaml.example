@@ -377,6 +377,21 @@ server:
   #
   custom_head_html: ""
 
+  # Custom ads.txt content for Google AdSense verification
+  # This content will be served at /ads.txt endpoint
+  # Used for Google AdSense publisher verification and ad network authorization
+  # Leave empty (or comment out) to disable /ads.txt endpoint
+  #
+  # Example usage:
+  # custom_ads_txt: |
+  #   google.com, pub-1921837281690843, DIRECT, f08c47fec0942fa0
+  #   # Additional ad networks can be added here
+  #
+  # Format: domain, publisher_id, relationship, certification_authority_id
+  # See: https://iabtechlab.com/ads-txt/
+  #
+  custom_ads_txt: ""
+
 # Audio settings
 audio:
   # Audio buffer size in samples

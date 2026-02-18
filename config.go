@@ -118,6 +118,7 @@ type ServerConfig struct {
 	SessionActivityLogDir         string          `yaml:"session_activity_log_dir"`          // Directory for session activity logs (default: data/session_activity)
 	SessionActivityLogIntervalSec int             `yaml:"session_activity_log_interval_sec"` // Interval for periodic snapshots in seconds (default: 300)
 	CustomHeadHTML                string          `yaml:"custom_head_html"`                  // Custom HTML to inject into <head> section of index.html (for analytics, ads, meta tags, etc.)
+	CustomAdsTxt                  string          `yaml:"custom_ads_txt"`                    // Custom content for /ads.txt endpoint (for Google AdSense verification)
 	timeoutBypassNets             []*net.IPNet    // Parsed CIDR networks (internal use)
 	trustedProxyNets              []*net.IPNet    // Parsed CIDR networks for trusted proxies (internal use)
 }

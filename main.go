@@ -1678,6 +1678,11 @@ func main() {
 	}
 	log.Printf("Parsed index.html template successfully")
 
+	// Handle /ads.txt endpoint
+	http.HandleFunc("/ads.txt", func(w http.ResponseWriter, r *http.Request) {
+		handleAdsTxt(w, r, config)
+	})
+
 	// Handle index.html with template, serve other static files normally
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
@@ -2070,6 +2075,19 @@ func handleIndexPage(w http.ResponseWriter, r *http.Request, config *Config) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
+}
+
+// handleAdsTxt serves the ads.txt content from config
+func handleAdsTxt(w http.ResponseWriter, r *http.Request, config *Config) {
+	// If custom_ads_txt is empty, return 404
+	if config.Server.CustomAdsTxt == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(config.Server.CustomAdsTxt))
 }
 
 // handleHealth handles health check requests

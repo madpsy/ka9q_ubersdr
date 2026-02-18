@@ -25,7 +25,8 @@ class LocalBookmarksUI {
     init() {
         this.createModals();
         this.attachEventListeners();
-        this.updateMainDropdown();
+        // Delay dropdown update to ensure DOM is ready
+        setTimeout(() => this.updateMainDropdown(), 100);
         console.log('[LocalBookmarksUI] Initialized with', this.manager.getAll().length, 'bookmarks');
     }
 

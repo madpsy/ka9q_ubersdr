@@ -576,16 +576,24 @@ function createCountriesChart(countries) {
         afterDatasetsDraw: function(chart) {
             const ctx = chart.ctx;
             const meta = chart.getDatasetMeta(0);
-            
+            const chartTop = chart.chartArea.top;
+
             meta.data.forEach((bar, index) => {
                 const countryCode = top10[index].country_code;
                 const flag = countryCode ? getFlagEmoji(countryCode) : '🌍';
-                
+
+                // Calculate dynamic offset to ensure flag is always visible
+                // Keep flag close to bar (8px) unless there's not enough space at top
+                const minFlagSpace = 32; // Minimum pixels needed for flag (28px font + 4px margin)
+                const spaceAbove = bar.y - chartTop;
+                // If not enough space above, reduce offset; otherwise use standard 8px
+                const offset = spaceAbove < minFlagSpace ? Math.max(2, spaceAbove - 30) : 8;
+
                 ctx.save();
                 ctx.font = '28px Arial';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'bottom';
-                ctx.fillText(flag, bar.x, bar.y - 8);
+                ctx.fillText(flag, bar.x, bar.y - offset);
                 ctx.restore();
             });
         }
@@ -621,6 +629,7 @@ function createCountriesChart(countries) {
             scales: {
                 y: {
                     beginAtZero: true,
+                    grace: '3%', // Add 3% padding at top to ensure flags are always visible
                     ticks: {
                         color: '#fff',
                         callback: function(value) {

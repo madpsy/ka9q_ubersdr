@@ -1231,7 +1231,14 @@ function showAlert(message, type) {
 function showRestartCountdown() {
     const overlay = document.getElementById('restartOverlay');
     const countdownEl = document.getElementById('countdownNumber');
+    const emailAddressEl = document.getElementById('overlayEmailAddress');
     overlay.style.display = 'flex';
+
+    // Set the email address in the overlay
+    const adminEmail = document.getElementById('adminEmail').value.trim();
+    if (emailAddressEl && adminEmail) {
+        emailAddressEl.textContent = adminEmail;
+    }
 
     let countdown = 15;
     countdownEl.textContent = countdown;

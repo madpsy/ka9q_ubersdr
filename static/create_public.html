@@ -317,8 +317,22 @@
             <h2 style="margin-bottom: 10px;">Server is restarting...</h2>
             <p style="font-size: 18px; color: #ccc;">You will be redirected to the admin panel</p>
             
+            <!-- Email Verification Info Box -->
+            <div style="margin-top: 30px; padding: 20px; background: rgba(40, 167, 69, 0.2); border: 2px solid #28a745; border-radius: 8px; text-align: left;">
+                <h3 style="margin-top: 0; color: #28a745; font-size: 18px;">📧 Email Verification Required</h3>
+                <p style="margin: 10px 0; font-size: 14px; line-height: 1.6;">
+                    <strong>Please verify your email address.</strong> A verification email has been sent to:
+                </p>
+                <p style="margin: 15px 0; text-align: center; font-size: 18px; font-weight: bold; color: #28a745;" id="overlayEmailAddress">
+                    your.email@example.com
+                </p>
+                <p style="margin: 10px 0; font-size: 14px; line-height: 1.6;">
+                    <strong>Please check your spam/junk folder</strong> if you don't see the email in your inbox within a few minutes.
+                </p>
+            </div>
+            
             <!-- DNS Propagation Info Box -->
-            <div style="margin-top: 30px; padding: 20px; background: rgba(102, 126, 234, 0.2); border: 2px solid #667eea; border-radius: 8px; text-align: left;">
+            <div style="margin-top: 20px; padding: 20px; background: rgba(102, 126, 234, 0.2); border: 2px solid #667eea; border-radius: 8px; text-align: left;">
                 <h3 style="margin-top: 0; color: #667eea; font-size: 18px;">⏱️ DNS Propagation & Certificate Setup</h3>
                 <p style="margin: 10px 0; font-size: 14px; line-height: 1.6;">
                     <strong>Please note:</strong> It may take several minutes for DNS records to propagate globally and for the TLS certificate to be validated and issued by Let's Encrypt.

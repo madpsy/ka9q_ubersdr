@@ -385,7 +385,8 @@
     display: block;
     font-size: 1.1em;
     margin-bottom: 5px;
-    color: #3498db;
+    color: #ecf0f1;
+    font-weight: bold;
 }
 
 .local-bookmarks-format-btn span {

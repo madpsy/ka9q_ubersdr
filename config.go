@@ -97,16 +97,16 @@ type ServerConfig struct {
 	MaxSessions                   int             `yaml:"max_sessions"`
 	MaxSessionsIP                 int             `yaml:"max_sessions_ip"` // Maximum sessions per IP address (0 = unlimited)
 	SessionTimeout                int             `yaml:"session_timeout"`
-	MaxSessionTime                int             `yaml:"max_session_time"`    // Maximum time a session can exist in seconds (0 = unlimited)
-	MaxIdleTime                   int             `yaml:"max_idle_time"`       // Maximum time a user can be idle in seconds (0 = unlimited)
-	CmdRateLimit                  int             `yaml:"cmd_rate_limit"`      // Commands per second per UUID per channel (0 = unlimited)
-	ConnRateLimit                 int             `yaml:"conn_rate_limit"`     // WebSocket connections per second per IP (0 = unlimited)
-	SessionsPerMinute             int             `yaml:"sessions_per_minute"` // /connection endpoint requests per minute per IP (0 = unlimited)
+	MaxSessionTime                int             `yaml:"max_session_time"`         // Maximum time a session can exist in seconds (0 = unlimited)
+	MaxIdleTime                   int             `yaml:"max_idle_time"`            // Maximum time a user can be idle in seconds (0 = unlimited)
+	CmdRateLimit                  int             `yaml:"cmd_rate_limit"`           // Commands per second per UUID per channel (0 = unlimited)
+	ConnRateLimit                 int             `yaml:"conn_rate_limit"`          // WebSocket connections per second per IP (0 = unlimited)
+	SessionsPerMinute             int             `yaml:"sessions_per_minute"`      // /connection endpoint requests per minute per IP (0 = unlimited)
 	EnforceSessionIPMatch         bool            `yaml:"enforce_session_ip_match"` // Enforce that WebSocket connections must come from same IP as /connection (default: false)
-	TimeoutBypassIPs              []string        `yaml:"timeout_bypass_ips"`  // List of IPs/CIDRs that bypass idle and max session time limits
-	TrustedProxyIPs               []string        `yaml:"trusted_proxy_ips"`   // List of IPs/CIDRs to trust X-Real-IP header from
-	BypassPassword                string          `yaml:"bypass_password"`     // Password that grants bypass privileges (empty = disabled)
-	PublicIQModes                 map[string]bool `yaml:"public_iq_modes"`     // IQ modes accessible without bypass authentication
+	TimeoutBypassIPs              []string        `yaml:"timeout_bypass_ips"`       // List of IPs/CIDRs that bypass idle and max session time limits
+	TrustedProxyIPs               []string        `yaml:"trusted_proxy_ips"`        // List of IPs/CIDRs to trust X-Real-IP header from
+	BypassPassword                string          `yaml:"bypass_password"`          // Password that grants bypass privileges (empty = disabled)
+	PublicIQModes                 map[string]bool `yaml:"public_iq_modes"`          // IQ modes accessible without bypass authentication
 	EnableCORS                    bool            `yaml:"enable_cors"`
 	EnableKiwiSDR                 bool            `yaml:"enable_kiwisdr"`                    // Enable KiwiSDR protocol compatibility server (default: false)
 	KiwiSDRListen                 string          `yaml:"kiwisdr_listen"`                    // KiwiSDR server listen address (e.g., ":8073", default: ":8073")
@@ -213,6 +213,7 @@ type InstanceReportingConfig struct {
 	UseMyIP                    bool                   `yaml:"use_myip"`                     // Automatically use public IP for public access
 	CreateDomain               bool                   `yaml:"create_domain"`                // Request automatic DNS subdomain creation
 	GenerateTLS                bool                   `yaml:"generate_tls"`                 // Generate TLS certificate with Caddy (default: false)
+	RedirectToHTTPS            bool                   `yaml:"redirect_to_https"`            // Redirect HTTP to HTTPS when TLS is enabled (default: true)
 	Hostname                   string                 `yaml:"hostname"`                     // Central server hostname
 	Port                       int                    `yaml:"port"`                         // Central server port
 	ReportIntervalSec          int                    `yaml:"report_interval_sec"`          // Seconds between reports
@@ -673,6 +674,12 @@ func LoadConfig(filename string) (*Config, error) {
 	// In practice, users can set it to false in their config to disable
 	if !config.InstanceReporting.NotifyInstanceDisconnected {
 		config.InstanceReporting.NotifyInstanceDisconnected = true
+	}
+	// RedirectToHTTPS defaults to true
+	// When TLS is enabled, HTTP should redirect to HTTPS by default for security
+	// Users can set it to false in their config to disable redirects
+	if !config.InstanceReporting.RedirectToHTTPS {
+		config.InstanceReporting.RedirectToHTTPS = true
 	}
 	// NotifyInstanceStartup defaults to false (already false by default from YAML unmarshaling)
 

@@ -1030,6 +1030,17 @@ instance_reporting:
   # Default: false
   generate_tls: false
 
+  # Redirect HTTP to HTTPS (default: true)
+  # When true and TLS is enabled, HTTP requests on port 80 will be redirected to HTTPS
+  # When false, both HTTP and HTTPS will serve content directly (no redirect)
+  # This setting only applies when generate_tls is true and HTTPS is configured
+  # Use cases for disabling (false):
+  #   - Testing HTTPS setup without forcing redirects
+  #   - Supporting clients that need HTTP access
+  #   - Using external load balancer that handles redirects
+  # Default: true (redirect HTTP to HTTPS for security)
+  redirect_to_https: true
+
   # Use HTTPS (true) or HTTP (false) for connections to the central server
   # Default: true (HTTPS)
   # Set to false for local testing with HTTP-only collector

@@ -47,6 +47,7 @@ func GenerateCaddyfile(config *Config) error {
 	host := strings.TrimSpace(config.InstanceReporting.Instance.Host)
 	tls := config.InstanceReporting.Instance.TLS
 	generateTLS := config.InstanceReporting.GenerateTLS
+	redirectToHTTPS := config.InstanceReporting.RedirectToHTTPS
 	email := strings.TrimSpace(config.Admin.Email)
 
 	var caddyfileContent string
@@ -57,9 +58,13 @@ func GenerateCaddyfile(config *Config) error {
 	// AND email is not a placeholder @example.com address
 	if generateTLS && host != "" && !isIPAddress(host) && tls && email != "" && !isExampleEmail(email) {
 		// HTTPS mode with Let's Encrypt
-		mode = "HTTPS with Let's Encrypt"
-		caddyfileContent = generateHTTPSCaddyfile(host, email)
-		log.Printf("Generating Caddyfile for HTTPS mode: domain=%s, email=%s", host, email)
+		if redirectToHTTPS {
+			mode = "HTTPS with Let's Encrypt (HTTP redirects to HTTPS)"
+		} else {
+			mode = "HTTPS with Let's Encrypt (HTTP and HTTPS both serve content)"
+		}
+		caddyfileContent = generateHTTPSCaddyfile(host, email, redirectToHTTPS)
+		log.Printf("Generating Caddyfile for HTTPS mode: domain=%s, email=%s, redirect=%v", host, email, redirectToHTTPS)
 	} else {
 		// HTTP-only mode (safe default)
 		mode = "HTTP-only"
@@ -97,7 +102,7 @@ func GenerateCaddyfile(config *Config) error {
 	// Trigger Caddy restart by creating restart trigger file
 	restartTriggerPath := "/var/run/restart-trigger/restart-caddy"
 	restartTriggerDir := filepath.Dir(restartTriggerPath)
-	
+
 	// Check if restart trigger directory exists (Docker environment)
 	if _, err := os.Stat(restartTriggerDir); err == nil {
 		// Create the restart trigger file
@@ -143,21 +148,27 @@ func generateHTTPCaddyfile() string {
 
 // generateHTTPSCaddyfile generates an HTTPS Caddyfile with Let's Encrypt
 // This requires a valid domain, TLS enabled, and admin email configured
-func generateHTTPSCaddyfile(host, email string) string {
-	// Main domain configuration with both HTTP and HTTPS
-	mainConfig := fmt.Sprintf(`# HTTPS configuration with automatic Let's Encrypt certificates
-# Generated automatically by UberSDR based on config.yaml
-# Domain: %s
-# Email: %s
+// If redirectToHTTPS is true, HTTP requests will be redirected to HTTPS
+func generateHTTPSCaddyfile(host, email string, redirectToHTTPS bool) string {
+	var httpBlock string
 
-{
-    # Disable automatic HTTPS redirects - serve HTTP on port 80
-    auto_https disable_redirects
-    # Email for Let's Encrypt certificate notifications
-    email %s
-}
+	if redirectToHTTPS {
+		// HTTP block with redirect to HTTPS
+		// Use the specific domain name to ensure consistent HTTPS URLs
+		httpBlock = fmt.Sprintf(`# HTTP (port 80) - redirect to HTTPS
+:80 {
+	   # Redirect all HTTP traffic to HTTPS using the configured domain
+	   redir https://%s{uri} permanent
 
-# HTTP (port 80) - respond to any host header
+	   # Logging
+	   log {
+	       output file /data/access.log
+	       format json
+	   }
+}`, host)
+	} else {
+		// HTTP block serving content directly (no redirect)
+		httpBlock = `# HTTP (port 80) - respond to any host header
 :80 {
     # Reverse proxy to ubersdr container
     reverse_proxy ubersdr:8080
@@ -182,7 +193,24 @@ func generateHTTPSCaddyfile(host, email string) string {
         output file /data/access.log
         format json
     }
+}`
+	}
+
+	// Main domain configuration with both HTTP and HTTPS
+	mainConfig := fmt.Sprintf(`# HTTPS configuration with automatic Let's Encrypt certificates
+# Generated automatically by UberSDR based on config.yaml
+# Domain: %s
+# Email: %s
+# HTTP Redirect: %v
+
+{
+    # Disable automatic HTTPS redirects - we handle them manually
+    auto_https disable_redirects
+    # Email for Let's Encrypt certificate notifications
+    email %s
 }
+
+%s
 
 # HTTPS (port 443) - with Let's Encrypt
 https://%s {
@@ -212,7 +240,7 @@ https://%s {
         format json
     }
 }
-`, host, email, email, host)
+`, host, email, redirectToHTTPS, email, httpBlock, host)
 
 	return mainConfig
 }

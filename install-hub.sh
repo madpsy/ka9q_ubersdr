@@ -34,7 +34,7 @@ echo
 # Parse command line arguments
 IGNORE_RX888=0
 IGNORE_PORTS=0
-FORCE_COMPOSE=1
+FORCE_COMPOSE=0
 GENERATE_WISDOM=0
 for arg in "$@"; do
     case $arg in

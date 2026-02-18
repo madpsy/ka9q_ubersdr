@@ -339,9 +339,9 @@ else
     echo "authorized_keys created and public key added successfully."
 fi
 
-# Check if this is a fresh installation
-if [ -f "$INSTALLED_MARKER" ] && [ $FORCE_COMPOSE -eq 0 ]; then
-    echo "Existing installation detected. Preserving docker-compose.yml file."
+# Check if docker-compose.yml already exists
+if [ -f "$ACTUAL_HOME/ubersdr/docker-compose.yml" ] && [ $FORCE_COMPOSE -eq 0 ]; then
+    echo "Existing docker-compose.yml detected. Preserving file."
     echo "Hint: Use --force-compose to overwrite docker-compose.yml."
 else
     # Capture existing port configuration before overwriting

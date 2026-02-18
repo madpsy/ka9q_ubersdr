@@ -7923,13 +7923,16 @@ function populateLocalBookmarkSelector() {
         <option value="__manage__">📝 Manage Bookmarks...</option>
     `;
 
-    // Add separator if there are bookmarks
-    if (localBookmarks.length > 0) {
-        const separator = document.createElement('option');
-        separator.disabled = true;
-        separator.textContent = '──────────────';
-        selector.appendChild(separator);
+    // If no bookmarks, we're done
+    if (localBookmarks.length === 0) {
+        return;
     }
+
+    // Add separator before bookmarks
+    const separator = document.createElement('option');
+    separator.disabled = true;
+    separator.textContent = '──────────────';
+    selector.appendChild(separator);
 
     // Group bookmarks by their group field
     const grouped = {};

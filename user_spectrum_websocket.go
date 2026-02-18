@@ -99,7 +99,7 @@ type UserSpectrumServerMessage struct {
 func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Use centralized IP detection function (same as /connection endpoint)
 	clientIP := getClientIP(r)
-	
+
 	// Also get raw source IP for logging
 	sourceIP := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(sourceIP); err == nil {
@@ -186,6 +186,9 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	conn := &wsConn{conn: rawConn, aggregator: globalStatsSpectrum}
 	globalStatsSpectrum.addConnection()
 
+	// Start dedicated writer goroutine for non-blocking spectrum writes
+	conn.startSpectrumWriter()
+
 	// Record WebSocket connection in Prometheus
 	if swsh.prometheusMetrics != nil {
 		swsh.prometheusMetrics.RecordWSConnection("spectrum")
@@ -199,6 +202,8 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 			swsh.prometheusMetrics.RecordWSDisconnect("spectrum")
 		}
 
+		// Close spectrum writer and wait for it to finish
+		conn.closeSpectrumWriter()
 		conn.close()
 	}()
 
@@ -616,23 +621,16 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinarySpectrum(conn *wsConn, sessi
 		}
 	}
 
-	// Send as binary WebSocket message
-	conn.writeMu.Lock()
-	conn.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	err := conn.conn.WriteMessage(websocket.BinaryMessage, packet)
-	conn.writeMu.Unlock()
-
-	if err != nil {
-		return err
-	}
-
-	// Track waterfall bytes sent in session
-	session.AddWaterfallBytes(uint64(len(packet)))
-
-	// Track bytes for statistics
-	if conn.aggregator != nil {
-		conn.aggregator.addBytes(int64(len(packet)))
-		conn.aggregator.addMessage()
+	// Send via non-blocking buffered channel
+	if !conn.writeSpectrumBinary(packet) {
+		// Channel full - frame dropped (client too slow)
+		// This is expected behavior to prevent blocking other users
+		if DebugMode {
+			log.Printf("DEBUG: Dropped spectrum frame for session %s (client too slow)", session.ID)
+		}
+	} else {
+		// Track waterfall bytes sent in session (only if queued successfully)
+		session.AddWaterfallBytes(uint64(len(packet)))
 	}
 
 	return nil
@@ -793,23 +791,16 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinary8Spectrum(conn *wsConn, sess
 		}
 	}
 
-	// Send as binary WebSocket message
-	conn.writeMu.Lock()
-	conn.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	err := conn.conn.WriteMessage(websocket.BinaryMessage, packet)
-	conn.writeMu.Unlock()
-
-	if err != nil {
-		return err
-	}
-
-	// Track waterfall bytes sent in session
-	session.AddWaterfallBytes(uint64(len(packet)))
-
-	// Track bytes for statistics
-	if conn.aggregator != nil {
-		conn.aggregator.addBytes(int64(len(packet)))
-		conn.aggregator.addMessage()
+	// Send via non-blocking buffered channel
+	if !conn.writeSpectrumBinary(packet) {
+		// Channel full - frame dropped (client too slow)
+		// This is expected behavior to prevent blocking other users
+		if DebugMode {
+			log.Printf("DEBUG: Dropped spectrum frame for session %s (client too slow)", session.ID)
+		}
+	} else {
+		// Track waterfall bytes sent in session (only if queued successfully)
+		session.AddWaterfallBytes(uint64(len(packet)))
 	}
 
 	return nil

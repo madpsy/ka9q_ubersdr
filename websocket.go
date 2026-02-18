@@ -148,9 +148,71 @@ func (sh *sessionHolder) setSession(s *Session) {
 
 // wsConn wraps a WebSocket connection with a write mutex to prevent concurrent writes
 type wsConn struct {
-	conn       *websocket.Conn
-	writeMu    sync.Mutex
-	aggregator *statsAggregator
+	conn              *websocket.Conn
+	writeMu           sync.Mutex
+	aggregator        *statsAggregator
+	spectrumWriteChan chan []byte   // Buffered channel for non-blocking spectrum writes
+	writerDone        chan struct{} // Signal when writer goroutine exits
+	writerStarted     bool          // Track if writer goroutine is running
+}
+
+// startSpectrumWriter starts a dedicated writer goroutine for spectrum binary packets
+// This enables non-blocking writes and prevents slow clients from blocking spectrum distribution
+func (wc *wsConn) startSpectrumWriter() {
+	if wc.writerStarted {
+		return // Already started
+	}
+	wc.writerStarted = true
+	wc.spectrumWriteChan = make(chan []byte, 30) // Buffer 30 frames (3 seconds at 10 Hz)
+	wc.writerDone = make(chan struct{})
+
+	go func() {
+		defer close(wc.writerDone)
+
+		for packet := range wc.spectrumWriteChan {
+			// This goroutine owns the WebSocket write for spectrum packets
+			wc.writeMu.Lock()
+			wc.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			err := wc.conn.WriteMessage(websocket.BinaryMessage, packet)
+			wc.writeMu.Unlock()
+
+			if err != nil {
+				// Connection error - exit writer goroutine
+				// The connection will be closed by the main handler
+				return
+			}
+
+			// Track bytes for statistics
+			if wc.aggregator != nil {
+				wc.aggregator.addBytes(int64(len(packet)))
+				wc.aggregator.addMessage()
+			}
+		}
+	}()
+}
+
+// writeSpectrumBinary sends a spectrum binary packet via the buffered channel
+// Returns true if packet was queued, false if dropped (channel full)
+func (wc *wsConn) writeSpectrumBinary(packet []byte) bool {
+	if wc.spectrumWriteChan == nil {
+		return false // Writer not started
+	}
+
+	// Non-blocking send
+	select {
+	case wc.spectrumWriteChan <- packet:
+		return true // Packet queued successfully
+	default:
+		return false // Channel full - packet dropped
+	}
+}
+
+// closeSpectrumWriter closes the spectrum write channel and waits for writer to exit
+func (wc *wsConn) closeSpectrumWriter() {
+	if wc.spectrumWriteChan != nil {
+		close(wc.spectrumWriteChan)
+		<-wc.writerDone // Wait for writer goroutine to exit
+	}
 }
 
 func (wc *wsConn) writeJSON(v interface{}) error {
@@ -276,7 +338,7 @@ type ServerMessage struct {
 func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Use centralized IP detection function (same as /connection endpoint)
 	clientIP := getClientIP(r)
-	
+
 	// Also get raw source IP for logging
 	sourceIP := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(sourceIP); err == nil {

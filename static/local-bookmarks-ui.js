@@ -346,10 +346,17 @@ class LocalBookmarksUI {
         return `${freq} Hz`;
     }
 
-    // Update the main UI dropdown
+    // Update the main UI dropdown and refresh spectrum display
     updateMainDropdown() {
         if (window.populateLocalBookmarkSelector) {
             window.populateLocalBookmarkSelector();
+        }
+        // Invalidate spectrum marker cache to force redraw with new bookmarks
+        if (window.spectrumDisplay && window.spectrumDisplay.invalidateMarkerCache) {
+            window.spectrumDisplay.invalidateMarkerCache();
+            if (window.spectrumDisplay.draw) {
+                window.spectrumDisplay.draw();
+            }
         }
     }
 
@@ -371,7 +378,8 @@ class LocalBookmarksUI {
     // Add current frequency as bookmark
     addCurrentFrequency() {
         const freqInput = document.getElementById('frequency');
-        const frequency = freqInput ? parseInt(freqInput.value) : null;
+        // Get frequency from data-hz-value attribute (actual Hz value)
+        const frequency = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : null;
         
         let mode = 'usb';
         if (window.currentMode) {

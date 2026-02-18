@@ -430,20 +430,69 @@ class LocalBookmarksUI {
 
     // Delete bookmark
     deleteBookmark(name) {
-        if (!confirm(`Delete bookmark "${name}"?`)) {
-            return;
+        // Show custom confirmation dialog
+        this.showConfirmDialog(
+            'Delete Bookmark',
+            `Are you sure you want to delete "${name}"?`,
+            () => {
+                try {
+                    this.manager.delete(name);
+                    this.showAlert('management', 'success', `Deleted bookmark "${name}"`);
+                    this.renderStats();
+                    this.renderFilterTags();
+                    this.renderBookmarkList();
+                    this.updateMainDropdown();
+                } catch (error) {
+                    this.showAlert('management', 'error', error.message);
+                }
+            }
+        );
+    }
+
+    // Show custom confirmation dialog
+    showConfirmDialog(title, message, onConfirm) {
+        const existingDialog = document.getElementById('local-bookmarks-confirm-dialog');
+        if (existingDialog) {
+            existingDialog.remove();
         }
 
-        try {
-            this.manager.delete(name);
-            this.showAlert('management', 'success', `Deleted bookmark "${name}"`);
-            this.renderStats();
-            this.renderFilterTags();
-            this.renderBookmarkList();
-            this.updateMainDropdown();
-        } catch (error) {
-            this.showAlert('management', 'error', error.message);
-        }
+        const dialog = document.createElement('div');
+        dialog.id = 'local-bookmarks-confirm-dialog';
+        dialog.className = 'local-bookmarks-modal active';
+        dialog.innerHTML = `
+            <div class="local-bookmarks-modal-content" style="max-width: 400px;">
+                <div class="local-bookmarks-modal-header">
+                    <h2>${title}</h2>
+                </div>
+                <p style="margin: 20px 0; color: #ecf0f1;">${message}</p>
+                <div class="local-bookmarks-form-actions">
+                    <button class="local-bookmarks-btn secondary" id="local-bookmarks-confirm-cancel">Cancel</button>
+                    <button class="local-bookmarks-btn danger" id="local-bookmarks-confirm-ok">Delete</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(dialog);
+
+        // Handle cancel
+        const handleCancel = () => {
+            dialog.remove();
+        };
+
+        // Handle confirm
+        const handleConfirm = () => {
+            dialog.remove();
+            if (onConfirm) onConfirm();
+        };
+
+        document.getElementById('local-bookmarks-confirm-cancel').addEventListener('click', handleCancel);
+        document.getElementById('local-bookmarks-confirm-ok').addEventListener('click', handleConfirm);
+        
+        // Click outside to cancel
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) {
+                handleCancel();
+            }
+        });
     }
 
     // Handle save bookmark

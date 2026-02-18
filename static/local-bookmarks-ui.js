@@ -387,6 +387,8 @@ class LocalBookmarksUI {
         const bandwidthLow = window.currentBandwidthLow !== undefined ? window.currentBandwidthLow : null;
         const bandwidthHigh = window.currentBandwidthHigh !== undefined ? window.currentBandwidthHigh : null;
 
+        console.log('[LocalBookmarksUI] Capturing bandwidth - Low:', bandwidthLow, 'High:', bandwidthHigh);
+
         if (!frequency) {
             this.showAlert('management', 'error', 'Cannot determine current frequency');
             return;
@@ -395,6 +397,7 @@ class LocalBookmarksUI {
         // Store bandwidth in a temporary property so handleSaveBookmark can access it
         this.tempBandwidthLow = bandwidthLow;
         this.tempBandwidthHigh = bandwidthHigh;
+        console.log('[LocalBookmarksUI] Stored temp bandwidth - Low:', this.tempBandwidthLow, 'High:', this.tempBandwidthHigh);
 
         this.currentEditingBookmark = null;
         document.getElementById('local-bookmarks-edit-title').textContent = 'Add Current Frequency';
@@ -510,6 +513,9 @@ class LocalBookmarksUI {
             bandwidth_low: typeof this.tempBandwidthLow === 'number' ? this.tempBandwidthLow : null,
             bandwidth_high: typeof this.tempBandwidthHigh === 'number' ? this.tempBandwidthHigh : null
         };
+
+        console.log('[LocalBookmarksUI] Saving bookmark:', bookmark);
+        console.log('[LocalBookmarksUI] Temp bandwidth before clear - Low:', this.tempBandwidthLow, 'High:', this.tempBandwidthHigh);
 
         // Clear temporary bandwidth values
         this.tempBandwidthLow = null;

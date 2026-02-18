@@ -83,8 +83,8 @@ class LocalBookmarkManager {
             group: bookmark.group || null,
             comment: bookmark.comment || null,
             extension: bookmark.extension || null,
-            bandwidth_low: bookmark.bandwidth_low || null,
-            bandwidth_high: bookmark.bandwidth_high || null,
+            bandwidth_low: typeof bookmark.bandwidth_low === 'number' ? bookmark.bandwidth_low : null,
+            bandwidth_high: typeof bookmark.bandwidth_high === 'number' ? bookmark.bandwidth_high : null,
             source: 'local',
             created: Date.now(),
             modified: Date.now()

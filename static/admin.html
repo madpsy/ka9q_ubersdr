@@ -2727,8 +2727,17 @@
                 } else if (typeof value === 'number') {
                     return value.toString();
                 } else if (typeof value === 'string') {
+                    // Use pipe format for multiline strings
+                    if (value.includes('\n')) {
+                        const lines = value.split('\n');
+                        let result = '|\n';
+                        lines.forEach(line => {
+                            result += spaces + '  ' + line + '\n';
+                        });
+                        return result.trimEnd();
+                    }
                     // Quote strings that contain special characters
-                    if (value.includes(':') || value.includes('#') || value.includes('\n')) {
+                    if (value.includes(':') || value.includes('#')) {
                         return `"${value.replace(/"/g, '\\"')}"`;
                     }
                     return value;

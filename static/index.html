@@ -364,9 +364,14 @@
                 <select id="band-selector" onchange="selectBandFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px; width: 100%;">
                     <option value="">Select Band...</option>
                 </select>
-                <select id="bookmark-selector" onchange="selectBookmarkFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px; width: 100%;">
-                    <option value="">Select Bookmark...</option>
-                </select>
+                <div style="display: flex; gap: 5px; margin-top: 5px;">
+                    <select id="bookmark-selector" onchange="selectBookmarkFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; width: 50%;">
+                        <option value="">📡 Server Bookmarks...</option>
+                    </select>
+                    <select id="local-bookmark-selector" onchange="selectLocalBookmarkFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; width: 50%;">
+                        <option value="">⭐ My Bookmarks...</option>
+                    </select>
+                </div>
                 <select id="extensions-dropdown" onchange="toggleExtension(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px; width: 100%;">
                     <option value="">Extensions...</option>
                     <!-- Extensions populated dynamically by extension-loader.js -->

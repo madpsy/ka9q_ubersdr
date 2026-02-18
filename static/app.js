@@ -7863,9 +7863,135 @@ function selectBookmarkFromDropdown(value) {
     selector.value = '';
 }
 
+// Handle local bookmark selection from dropdown
+function selectLocalBookmarkFromDropdown(value) {
+    const selector = document.getElementById('local-bookmark-selector');
+
+    if (!value) {
+        return;
+    }
+
+    // Check for special "manage" option
+    if (value === '__manage__') {
+        if (window.localBookmarksUI) {
+            window.localBookmarksUI.show();
+        }
+        selector.value = '';
+        return;
+    }
+
+    try {
+        const bookmarkData = JSON.parse(value);
+
+        // Use the existing handleBookmarkClick function from bookmark-manager.js
+        // Pass false for shouldZoom and false for fromSpectrumMarker (dropdown selection)
+        if (window.handleBookmarkClick) {
+            window.handleBookmarkClick(bookmarkData, false, false);
+        }
+
+    } catch (e) {
+        console.error('Error parsing local bookmark data:', e);
+        log('Error selecting local bookmark', 'error');
+    }
+
+    // Reset dropdown to default after selection
+    selector.value = '';
+}
+
+// Populate local bookmark selector dropdown
+function populateLocalBookmarkSelector() {
+    console.log('[app.js] populateLocalBookmarkSelector() called');
+    const selector = document.getElementById('local-bookmark-selector');
+    
+    if (!selector) {
+        console.log('[app.js] local-bookmark-selector element not found');
+        return;
+    }
+
+    // Get local bookmarks from the manager
+    const localBookmarks = window.localBookmarksUI ? window.localBookmarksUI.manager.getAll() : [];
+    console.log('[app.js] Local bookmarks:', localBookmarks.length);
+
+    if (localBookmarks.length === 0) {
+        console.log('[app.js] No local bookmarks to populate');
+        return;
+    }
+
+    // Clear existing options and add placeholder + manage option
+    selector.innerHTML = `
+        <option value="">⭐ My Bookmarks...</option>
+        <option value="__manage__">📝 Manage Bookmarks...</option>
+    `;
+
+    // Add separator if there are bookmarks
+    if (localBookmarks.length > 0) {
+        const separator = document.createElement('option');
+        separator.disabled = true;
+        separator.textContent = '──────────────';
+        selector.appendChild(separator);
+    }
+
+    // Group bookmarks by their group field
+    const grouped = {};
+    const ungrouped = [];
+
+    localBookmarks.forEach(bookmark => {
+        if (bookmark.group) {
+            if (!grouped[bookmark.group]) {
+                grouped[bookmark.group] = [];
+            }
+            grouped[bookmark.group].push(bookmark);
+        } else {
+            ungrouped.push(bookmark);
+        }
+    });
+
+    // Add grouped bookmarks with optgroup elements
+    Object.keys(grouped).sort().forEach(groupName => {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = groupName;
+
+        grouped[groupName].forEach(bookmark => {
+            const option = document.createElement('option');
+            option.value = JSON.stringify({
+                name: bookmark.name,
+                frequency: bookmark.frequency,
+                mode: bookmark.mode,
+                extension: bookmark.extension,
+                group: bookmark.group,
+                comment: bookmark.comment
+            });
+            option.textContent = bookmark.name;
+            optgroup.appendChild(option);
+        });
+
+        selector.appendChild(optgroup);
+    });
+
+    // Add ungrouped bookmarks at the end
+    if (ungrouped.length > 0) {
+        ungrouped.forEach(bookmark => {
+            const option = document.createElement('option');
+            option.value = JSON.stringify({
+                name: bookmark.name,
+                frequency: bookmark.frequency,
+                mode: bookmark.mode,
+                extension: bookmark.extension,
+                comment: bookmark.comment
+            });
+            option.textContent = bookmark.name;
+            selector.appendChild(option);
+        });
+    }
+
+    log(`Local bookmark selector populated with ${localBookmarks.length} bookmarks`);
+}
+
 // Expose bookmark selector functions globally
 window.populateBookmarkSelector = populateBookmarkSelector;
 window.selectBookmarkFromDropdown = selectBookmarkFromDropdown;
+window.populateLocalBookmarkSelector = populateLocalBookmarkSelector;
+window.selectLocalBookmarkFromDropdown = selectLocalBookmarkFromDropdown;
 
 // Audio Buffer Configuration Functions
 function openBufferConfigModal() {

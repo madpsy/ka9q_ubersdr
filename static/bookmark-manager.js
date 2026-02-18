@@ -194,7 +194,14 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
     // to control z-index ordering with chat markers
     // drawAmateurBandBackgrounds(spectrumDisplay); // Commented out - drawn separately
 
-    if (!spectrumDisplay || !bookmarks || bookmarks.length === 0) {
+    // Merge server and local bookmarks
+    const localBookmarks = window.localBookmarksUI ? window.localBookmarksUI.manager.getAll() : [];
+    const allBookmarks = [
+        ...bookmarks.map(b => ({...b, source: 'server'})),
+        ...localBookmarks.map(b => ({...b, source: 'local'}))
+    ];
+
+    if (!spectrumDisplay || !allBookmarks || allBookmarks.length === 0) {
         bookmarkPositions = [];
         window.bookmarkPositions = bookmarkPositions;
         return;
@@ -217,7 +224,7 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
 
     // First pass: calculate positions for visible bookmarks
     const visibleBookmarks = [];
-    bookmarks.forEach(bookmark => {
+    allBookmarks.forEach(bookmark => {
         // Only process if tuned frequency is within range
         if (bookmark.frequency < startFreq || bookmark.frequency > endFreq) {
             return;
@@ -288,14 +295,26 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
     const arrowLength = 6;
     const rowSpacing = 15; // Vertical spacing between rows (increased from 13)
 
-    // Draw row 1 (top row) first, then row 0 (bottom row)
-    // This ensures row 0 labels appear on top and aren't obscured by row 1 arrows
-    const sortedByRow = [...visibleBookmarks].sort((a, b) => b.row - a.row);
+    // Sort bookmarks: server first (bottom layer), then local (top layer)
+    // Within each group, draw row 1 first, then row 0
+    const sortedBookmarks = [...visibleBookmarks].sort((a, b) => {
+        // First sort by source (server=0, local=1)
+        const sourceA = a.bookmark.source === 'local' ? 1 : 0;
+        const sourceB = b.bookmark.source === 'local' ? 1 : 0;
+        if (sourceA !== sourceB) return sourceA - sourceB;
+        // Then by row (1 before 0)
+        return b.row - a.row;
+    });
 
-    sortedByRow.forEach(item => {
+    sortedBookmarks.forEach(item => {
         const { bookmark, x, labelWidth, row } = item;
         // Row 0 at y=32, Row 1 at y=17 (32 - 15) - shifted down to avoid band name overlap
         const labelY = 32 - (row * rowSpacing);
+
+        // Choose colors based on source
+        const isLocal = bookmark.source === 'local';
+        const bgColor = isLocal ? 'rgba(52, 152, 219, 0.95)' : 'rgba(255, 215, 0, 0.95)'; // Blue for local, gold for server
+        const textColor = isLocal ? '#ffffff' : '#000000'; // White text on blue, black on gold
 
         // Draw bookmark label
         ctx.font = 'bold 10px monospace';
@@ -303,7 +322,7 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
         ctx.textBaseline = 'top';
 
         // Background for label
-        ctx.fillStyle = 'rgba(255, 215, 0, 0.95)'; // Gold background
+        ctx.fillStyle = bgColor;
         ctx.fillRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);
 
         // Border for label
@@ -312,13 +331,13 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
         ctx.strokeRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);
 
         // Label text
-        ctx.fillStyle = '#000000'; // Black text on gold background
+        ctx.fillStyle = textColor;
         ctx.fillText(bookmark.name, x, labelY + 2);
 
         // Draw downward arrow - extends from label to baseline
         const arrowStartY = labelY + labelHeight;
         const arrowTipY = 32 + labelHeight + arrowLength; // Always point to same baseline (adjusted for new position)
-        ctx.fillStyle = 'rgba(255, 215, 0, 0.95)';
+        ctx.fillStyle = bgColor;
         ctx.beginPath();
         ctx.moveTo(x, arrowTipY); // Arrow tip at baseline
         ctx.lineTo(x - 4, arrowStartY); // Left point at label bottom

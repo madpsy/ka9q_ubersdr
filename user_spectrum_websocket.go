@@ -13,6 +13,15 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// Packet buffer pool to reduce allocations for spectrum binary packets
+var spectrumPacketPool = sync.Pool{
+	New: func() interface{} {
+		// Allocate max size: header (22 bytes) + full frame (1024 bins * 4 bytes = 4096)
+		// Round up to 8KB for safety
+		return make([]byte, 0, 8192)
+	},
+}
+
 // UserSpectrumWebSocketHandler handles per-user spectrum WebSocket connections
 type UserSpectrumWebSocketHandler struct {
 	sessions           *SessionManager
@@ -502,31 +511,30 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinarySpectrum(conn *wsConn, sessi
 	// Get delta threshold from config (validated to be between 1.0 and 10.0 dB)
 	deltaThreshold := swsh.sessions.config.Spectrum.DeltaThresholdDB
 
-	state.mu.Lock()
-	defer state.mu.Unlock()
+	// Read previous data with minimal lock time (RLock allows concurrent reads)
+	state.mu.RLock()
+	prevData := state.previousData
+	needsResize := len(prevData) != len(spectrumData)
+	state.mu.RUnlock()
 
 	// Determine if we should send full or delta frame
 	sendFullFrame := false
-	if len(state.previousData) != len(spectrumData) {
-		// Bin count changed, send full frame
+	if needsResize || len(prevData) == 0 {
 		sendFullFrame = true
-		state.previousData = make([]float32, len(spectrumData))
-	} else if len(state.previousData) == 0 {
-		// First frame, send full
-		sendFullFrame = true
-		state.previousData = make([]float32, len(spectrumData))
 	}
 
-	// Calculate changes for delta encoding
+	// Calculate changes for delta encoding (no lock held - better concurrency)
 	type change struct {
 		index uint16
 		value float32
 	}
-	var changes []change
+	// Pre-allocate assuming ~10% of bins will change (typical for HF spectrum)
+	// This reduces allocations from ~10-50 to 1 per frame
+	changes := make([]change, 0, len(spectrumData)/10)
 
 	if !sendFullFrame {
 		for i := 0; i < len(spectrumData); i++ {
-			diff := math.Abs(float64(spectrumData[i] - state.previousData[i]))
+			diff := math.Abs(float64(spectrumData[i] - prevData[i]))
 			if diff > deltaThreshold {
 				changes = append(changes, change{
 					index: uint16(i),
@@ -545,11 +553,14 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinarySpectrum(conn *wsConn, sessi
 	// GPS-synchronized timestamp in nanoseconds (consistent with audio timestamps)
 	timestamp := time.Now().UnixNano()
 
+	// Get packet buffer from pool (reduces allocations)
 	var packet []byte
 	if sendFullFrame {
 		// Full frame format
 		headerSize := 22
-		packet = make([]byte, headerSize+len(spectrumData)*4)
+		packetSize := headerSize + len(spectrumData)*4
+		packet = spectrumPacketPool.Get().([]byte)[:packetSize]
+		defer spectrumPacketPool.Put(packet[:0]) // Return to pool with zero length
 
 		// Magic
 		packet[0] = 0x53 // 'S'
@@ -575,13 +586,20 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinarySpectrum(conn *wsConn, sessi
 			binary.LittleEndian.PutUint32(packet[headerSize+i*4:headerSize+i*4+4], bits)
 		}
 
-		// Update previous data
+		// Update previous data (lock only for write)
+		state.mu.Lock()
+		if needsResize {
+			state.previousData = make([]float32, len(spectrumData))
+		}
 		copy(state.previousData, spectrumData)
+		state.mu.Unlock()
 	} else {
 		// Delta frame format
 		headerSize := 22
 		changesSize := 2 + len(changes)*6 // changeCount (2 bytes) + changes
-		packet = make([]byte, headerSize+changesSize)
+		packetSize := headerSize + changesSize
+		packet = spectrumPacketPool.Get().([]byte)[:packetSize]
+		defer spectrumPacketPool.Put(packet[:0]) // Return to pool with zero length
 
 		// Magic
 		packet[0] = 0x53 // 'S'
@@ -615,10 +633,12 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinarySpectrum(conn *wsConn, sessi
 			offset += 6
 		}
 
-		// Update previous data with changes
+		// Update previous data with changes (lock only for write)
+		state.mu.Lock()
 		for _, ch := range changes {
 			state.previousData[ch.index] = ch.value
 		}
+		state.mu.Unlock()
 	}
 
 	// Send via non-blocking buffered channel
@@ -659,9 +679,6 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinary8Spectrum(conn *wsConn, sess
 	// Get delta threshold from config (validated to be between 1.0 and 10.0 dB)
 	deltaThreshold := swsh.sessions.config.Spectrum.DeltaThresholdDB
 
-	state.mu.Lock()
-	defer state.mu.Unlock()
-
 	// Convert float32 dBFS to uint8 (0 = -256 dB, 255 = -1 dB)
 	spectrumData8 := make([]uint8, len(spectrumData))
 	for i, val := range spectrumData {
@@ -676,29 +693,30 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinary8Spectrum(conn *wsConn, sess
 		spectrumData8[i] = uint8(dbValue + 256)
 	}
 
+	// Read previous data with minimal lock time (RLock allows concurrent reads)
+	state.mu.RLock()
+	prevData8 := state.previousData8
+	needsResize := len(prevData8) != len(spectrumData8)
+	state.mu.RUnlock()
+
 	// Determine if we should send full or delta frame
 	sendFullFrame := false
-	if len(state.previousData8) != len(spectrumData8) {
-		// Bin count changed, send full frame
+	if needsResize || len(prevData8) == 0 {
 		sendFullFrame = true
-		state.previousData8 = make([]uint8, len(spectrumData8))
-	} else if len(state.previousData8) == 0 {
-		// First frame, send full
-		sendFullFrame = true
-		state.previousData8 = make([]uint8, len(spectrumData8))
 	}
 
-	// Calculate changes for delta encoding
+	// Calculate changes for delta encoding (no lock held - better concurrency)
 	type change struct {
 		index uint16
 		value uint8
 	}
-	var changes []change
+	// Pre-allocate assuming ~10% of bins will change (typical for HF spectrum)
+	changes := make([]change, 0, len(spectrumData8)/10)
 
 	if !sendFullFrame {
 		for i := 0; i < len(spectrumData8); i++ {
 			// Calculate difference in dB (convert back to compare)
-			oldDB := float64(state.previousData8[i]) - 256
+			oldDB := float64(prevData8[i]) - 256
 			newDB := float64(spectrumData8[i]) - 256
 			diff := math.Abs(newDB - oldDB)
 
@@ -719,11 +737,14 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinary8Spectrum(conn *wsConn, sess
 	// GPS-synchronized timestamp in nanoseconds (consistent with audio timestamps)
 	timestamp := time.Now().UnixNano()
 
+	// Get packet buffer from pool (reduces allocations)
 	var packet []byte
 	if sendFullFrame {
 		// Full frame format (uint8)
 		headerSize := 22
-		packet = make([]byte, headerSize+len(spectrumData8))
+		packetSize := headerSize + len(spectrumData8)
+		packet = spectrumPacketPool.Get().([]byte)[:packetSize]
+		defer spectrumPacketPool.Put(packet[:0]) // Return to pool with zero length
 
 		// Magic
 		packet[0] = 0x53 // 'S'
@@ -746,13 +767,20 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinary8Spectrum(conn *wsConn, sess
 		// Spectrum data (uint8 array)
 		copy(packet[headerSize:], spectrumData8)
 
-		// Update previous data
+		// Update previous data (lock only for write)
+		state.mu.Lock()
+		if needsResize {
+			state.previousData8 = make([]uint8, len(spectrumData8))
+		}
 		copy(state.previousData8, spectrumData8)
+		state.mu.Unlock()
 	} else {
 		// Delta frame format (uint8)
 		headerSize := 22
 		changesSize := 2 + len(changes)*3 // changeCount (2 bytes) + changes (3 bytes each)
-		packet = make([]byte, headerSize+changesSize)
+		packetSize := headerSize + changesSize
+		packet = spectrumPacketPool.Get().([]byte)[:packetSize]
+		defer spectrumPacketPool.Put(packet[:0]) // Return to pool with zero length
 
 		// Magic
 		packet[0] = 0x53 // 'S'
@@ -785,10 +813,12 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinary8Spectrum(conn *wsConn, sess
 			offset += 3
 		}
 
-		// Update previous data with changes
+		// Update previous data with changes (lock only for write)
+		state.mu.Lock()
 		for _, ch := range changes {
 			state.previousData8[ch.index] = ch.value
 		}
+		state.mu.Unlock()
 	}
 
 	// Send via non-blocking buffered channel

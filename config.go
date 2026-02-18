@@ -1159,6 +1159,7 @@ func (sc *SpectrumConfig) validateFrequencyGainRanges() {
 	}
 
 	validRanges := make(map[string]FrequencyGainRange)
+	hasNonZeroGains := false
 
 	for name, r := range sc.GainDBFrequencyRanges {
 		// Check if end frequency is less than or equal to start frequency
@@ -1188,6 +1189,11 @@ func (sc *SpectrumConfig) validateFrequencyGainRanges() {
 			r.GainDB = -100
 		}
 
+		// Track if any range has non-zero gain
+		if r.GainDB != 0.0 {
+			hasNonZeroGains = true
+		}
+
 		// Validate transition_hz
 		if r.TransitionHz > 0 {
 			bandwidth := r.EndFreq - r.StartFreq
@@ -1210,10 +1216,27 @@ func (sc *SpectrumConfig) validateFrequencyGainRanges() {
 		validRanges[name] = r
 	}
 
+	// Optimization: If all gains are 0 dB, clear the map to enable fast path
+	// This avoids expensive per-user processing when gains have no effect
+	if !hasNonZeroGains {
+		fmt.Printf("All %d frequency-dependent gain ranges have 0 dB gain - bypassing per-user processing for performance\n", len(validRanges))
+		sc.GainDBFrequencyRanges = make(map[string]FrequencyGainRange)
+		return
+	}
+
 	// Replace with validated ranges
 	sc.GainDBFrequencyRanges = validRanges
 
 	if len(validRanges) > 0 {
-		fmt.Printf("Loaded %d frequency-dependent gain range(s)\n", len(validRanges))
+		fmt.Printf("Loaded %d frequency-dependent gain range(s) with non-zero gains:\n", len(validRanges))
+		// List each active range with details
+		for name, r := range validRanges {
+			fmt.Printf("  - %s: %.1f MHz - %.1f MHz (gain: %+.1f dB, transition: %.1f kHz)\n",
+				name,
+				float64(r.StartFreq)/1e6,
+				float64(r.EndFreq)/1e6,
+				r.GainDB,
+				float64(r.TransitionHz)/1e3)
+		}
 	}
 }

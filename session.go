@@ -571,7 +571,7 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 		BinBandwidth:   binBandwidth,
 		CreatedAt:      time.Now(),
 		LastActive:     time.Now(),
-		SpectrumChan:   make(chan []float32, 10), // Buffer spectrum updates
+		SpectrumChan:   make(chan []float32, 30), // Buffer spectrum updates (increased from 10 to 30 for better performance with many users)
 		Done:           make(chan struct{}),
 		SourceIP:       sourceIP,
 		ClientIP:       clientIP,

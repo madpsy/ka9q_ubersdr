@@ -201,6 +201,9 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
         ...localBookmarks.map(b => ({...b, source: 'local'}))
     ];
 
+    // Update window.bookmarks to include local bookmarks for click detection
+    window.bookmarks = allBookmarks;
+
     if (!spectrumDisplay || !allBookmarks || allBookmarks.length === 0) {
         bookmarkPositions = [];
         window.bookmarkPositions = bookmarkPositions;

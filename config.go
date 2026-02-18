@@ -675,12 +675,6 @@ func LoadConfig(filename string) (*Config, error) {
 	if !config.InstanceReporting.NotifyInstanceDisconnected {
 		config.InstanceReporting.NotifyInstanceDisconnected = true
 	}
-	// RedirectToHTTPS defaults to true
-	// When TLS is enabled, HTTP should redirect to HTTPS by default for security
-	// Users can set it to false in their config to disable redirects
-	if !config.InstanceReporting.RedirectToHTTPS {
-		config.InstanceReporting.RedirectToHTTPS = true
-	}
 	// NotifyInstanceStartup defaults to false (already false by default from YAML unmarshaling)
 
 	// Set default amateur radio bands with per-band spectrum parameters if not specified

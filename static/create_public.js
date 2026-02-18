@@ -1329,6 +1329,6 @@ function confirmEmailVerification() {
     // Reset button state
     setTimeout(() => {
         confirmButton.disabled = false;
-        confirmButton.textContent = 'Confirm & Continue →';
+        confirmButton.textContent = 'Confirm';
     }, 500);
 }

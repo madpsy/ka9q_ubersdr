@@ -155,9 +155,19 @@ func generateHTTPSCaddyfile(host, email string, redirectToHTTPS bool) string {
 	if redirectToHTTPS {
 		// HTTP block with redirect to HTTPS
 		// Use the specific domain name to ensure consistent HTTPS URLs
-		httpBlock = fmt.Sprintf(`# HTTP (port 80) - redirect to HTTPS
+		// Exclude specific API endpoints that need to remain accessible via HTTP
+		httpBlock = fmt.Sprintf(`# HTTP (port 80) - redirect to HTTPS (except specific API endpoints)
 :80 {
-	   # Redirect all HTTP traffic to HTTPS using the configured domain
+	   # Allow these endpoints to be accessed via HTTP without redirect
+	   # These are used by external services that may not support HTTPS
+	   @api_exceptions {
+	       path /api/instance /api/description
+	   }
+	   handle @api_exceptions {
+	       reverse_proxy ubersdr:8080
+	   }
+
+	   # Redirect all other HTTP traffic to HTTPS using the configured domain
 	   redir https://%s{uri} permanent
 
 	   # Logging

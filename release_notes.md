@@ -1,4 +1,13 @@
-## Version 0.1.39 - Latest Release
+## Version 0.1.40 - Latest Release
+
+### New Features
+- Added **Extension** for FT8/F4 Decoder for web users (FT8 only just now)
+
+### Bug Fixes
+- Single thread performance issue for spectrum (waterfall) pipeline fixed (when 50+ users)
+- Admin API/interface client IP resolution issues (and disabled IPv6 on host as it breaks Docker DNAT)
+
+## Version 0.1.39
 
 ### New Features
 - Added **Extensions** for WEFAX/NAVTEX/Generic FSK

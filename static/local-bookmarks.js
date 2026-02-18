@@ -245,8 +245,8 @@ class LocalBookmarkManager {
                 bookmark.group ? `"${bookmark.group}"` : '',
                 bookmark.comment ? `"${bookmark.comment}"` : '',
                 bookmark.extension || '',
-                bookmark.bandwidth_low || '',
-                bookmark.bandwidth_high || ''
+                bookmark.bandwidth_low !== null && bookmark.bandwidth_low !== undefined ? bookmark.bandwidth_low : '',
+                bookmark.bandwidth_high !== null && bookmark.bandwidth_high !== undefined ? bookmark.bandwidth_high : ''
             ];
             csv += row.join(',') + '\n';
         });

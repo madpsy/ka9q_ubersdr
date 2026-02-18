@@ -98,7 +98,6 @@ class LocalBookmarksUI {
                             <option value="cwu">CWU</option>
                             <option value="cwl">CWL</option>
                             <option value="nbfm">NBFM</option>
-                            <option value="iq">IQ</option>
                         </select>
                     </div>
                     <div class="local-bookmarks-form-group">

@@ -383,9 +383,9 @@ class LocalBookmarksUI {
             mode = window.radioAPI.getMode();
         }
 
-        // Get current bandwidth settings
-        const bandwidthLow = window.currentBandwidthLow || null;
-        const bandwidthHigh = window.currentBandwidthHigh || null;
+        // Get current bandwidth settings (use !== undefined to allow 0 values)
+        const bandwidthLow = window.currentBandwidthLow !== undefined ? window.currentBandwidthLow : null;
+        const bandwidthHigh = window.currentBandwidthHigh !== undefined ? window.currentBandwidthHigh : null;
 
         if (!frequency) {
             this.showAlert('management', 'error', 'Cannot determine current frequency');

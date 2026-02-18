@@ -7912,12 +7912,7 @@ function populateLocalBookmarkSelector() {
     const localBookmarks = window.localBookmarksUI ? window.localBookmarksUI.manager.getAll() : [];
     console.log('[app.js] Local bookmarks:', localBookmarks.length);
 
-    if (localBookmarks.length === 0) {
-        console.log('[app.js] No local bookmarks to populate');
-        return;
-    }
-
-    // Clear existing options and add placeholder + manage option
+    // Always set the placeholder and manage option
     selector.innerHTML = `
         <option value="">⭐ My Bookmarks...</option>
         <option value="__manage__">📝 Manage Bookmarks...</option>
@@ -7925,6 +7920,7 @@ function populateLocalBookmarkSelector() {
 
     // If no bookmarks, we're done
     if (localBookmarks.length === 0) {
+        console.log('[app.js] No local bookmarks to populate');
         return;
     }
 

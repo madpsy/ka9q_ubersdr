@@ -565,8 +565,13 @@ function updateTestSectionVisibility() {
 async function nextStep() {
     if (await validateCurrentStep()) {
         if (currentStep < 3) {
-            currentStep++;
-            showStep(currentStep);
+            // Show email verification modal when moving from step 2 to step 3
+            if (currentStep === 2) {
+                showEmailVerificationModal();
+            } else {
+                currentStep++;
+                showStep(currentStep);
+            }
         }
     }
 }
@@ -1253,4 +1258,77 @@ function showRestartCountdown() {
             window.location.href = '/admin.html';
         }
     }, 1000);
+}
+
+// Show email verification modal
+function showEmailVerificationModal() {
+    const modal = document.getElementById('emailVerificationModal');
+    const displayEmail = document.getElementById('modalDisplayEmail');
+    const confirmInput = document.getElementById('emailConfirmInput');
+    const errorDiv = document.getElementById('emailMismatchError');
+    
+    // Get the email from the form
+    const adminEmail = document.getElementById('adminEmail').value.trim();
+    
+    // Display the email in the modal
+    displayEmail.textContent = adminEmail;
+    
+    // Clear the confirmation input and error
+    confirmInput.value = '';
+    errorDiv.style.display = 'none';
+    
+    // Show the modal
+    modal.style.display = 'flex';
+    
+    // Focus on the input field
+    setTimeout(() => {
+        confirmInput.focus();
+    }, 100);
+    
+    // Add enter key listener to confirm input
+    confirmInput.onkeypress = function(e) {
+        if (e.key === 'Enter') {
+            confirmEmailVerification();
+        }
+    };
+}
+
+// Cancel email verification and go back
+function cancelEmailVerification() {
+    const modal = document.getElementById('emailVerificationModal');
+    modal.style.display = 'none';
+}
+
+// Confirm email verification
+function confirmEmailVerification() {
+    const originalEmail = document.getElementById('adminEmail').value.trim().toLowerCase();
+    const confirmEmail = document.getElementById('emailConfirmInput').value.trim().toLowerCase();
+    const errorDiv = document.getElementById('emailMismatchError');
+    const confirmButton = document.getElementById('confirmEmailButton');
+    
+    // Check if emails match
+    if (originalEmail !== confirmEmail) {
+        errorDiv.style.display = 'block';
+        document.getElementById('emailConfirmInput').style.borderColor = '#dc3545';
+        return;
+    }
+    
+    // Emails match - proceed to next step
+    errorDiv.style.display = 'none';
+    confirmButton.disabled = true;
+    confirmButton.textContent = 'Proceeding...';
+    
+    // Hide modal
+    const modal = document.getElementById('emailVerificationModal');
+    modal.style.display = 'none';
+    
+    // Move to next step
+    currentStep++;
+    showStep(currentStep);
+    
+    // Reset button state
+    setTimeout(() => {
+        confirmButton.disabled = false;
+        confirmButton.textContent = 'Confirm & Continue →';
+    }, 500);
 }

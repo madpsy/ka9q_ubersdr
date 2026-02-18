@@ -353,10 +353,67 @@
         </div>
     </div>
 
+    <!-- Email Verification Modal -->
+    <div id="emailVerificationModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.8); z-index: 10001; align-items: center; justify-content: center;">
+        <div style="background: white; border-radius: 8px; max-width: 500px; width: 90%; padding: 30px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);">
+            <h2 style="margin-top: 0; color: #667eea; font-size: 24px;">📧 Verify Your Email Address</h2>
+            
+            <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; border-radius: 5px;">
+                <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #856404;">
+                    <strong>⚠️ Important:</strong> A verification link will be sent to your email address. Please ensure it is correct before proceeding.
+                </p>
+            </div>
+            
+            <p style="margin: 20px 0 10px 0; font-size: 14px; color: #666;">
+                You entered the following email address:
+            </p>
+            
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 10px 0 20px 0; text-align: center;">
+                <p style="margin: 0; font-size: 18px; font-weight: bold; color: #667eea; word-break: break-all;" id="modalDisplayEmail">
+                    your.email@example.com
+                </p>
+            </div>
+            
+            <p style="margin: 20px 0 10px 0; font-size: 14px; color: #666;">
+                <strong>Please type your email address again to confirm:</strong>
+            </p>
+            
+            <input type="email" id="emailConfirmInput" placeholder="Re-enter your email address" style="width: 100%; padding: 12px; font-size: 16px; border: 2px solid #dee2e6; border-radius: 5px; box-sizing: border-box; margin-bottom: 10px;">
+            
+            <div id="emailMismatchError" style="display: none; margin: 10px 0; padding: 10px; background: #f8d7da; border-left: 4px solid #dc3545; border-radius: 5px; color: #721c24;">
+                <strong>⚠️ Email addresses do not match</strong>
+                <p style="margin: 5px 0 0 0; font-size: 13px;">Please ensure both email addresses are identical.</p>
+            </div>
+            
+            <div style="display: flex; gap: 10px; margin-top: 25px;">
+                <button type="button" onclick="cancelEmailVerification()" style="flex: 1; padding: 12px 20px; font-size: 16px; border: 2px solid #6c757d; background: white; color: #6c757d; border-radius: 5px; cursor: pointer; font-weight: bold;">
+                    ← Go Back
+                </button>
+                <button type="button" id="confirmEmailButton" onclick="confirmEmailVerification()" style="flex: 1; padding: 12px 20px; font-size: 16px; border: none; background: #667eea; color: white; border-radius: 5px; cursor: pointer; font-weight: bold;">
+                    Confirm & Continue →
+                </button>
+            </div>
+        </div>
+    </div>
+
     <style>
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
+        }
+        
+        #emailVerificationModal input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        #emailVerificationModal button:hover {
+            opacity: 0.9;
+        }
+        
+        #emailVerificationModal button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
     </style>
 

@@ -507,8 +507,8 @@ class LocalBookmarksUI {
             group: document.getElementById('local-bookmarks-edit-group').value.trim() || null,
             comment: document.getElementById('local-bookmarks-edit-comment').value.trim() || null,
             extension: document.getElementById('local-bookmarks-edit-extension').value.trim() || null,
-            bandwidth_low: this.tempBandwidthLow || null,
-            bandwidth_high: this.tempBandwidthHigh || null
+            bandwidth_low: this.tempBandwidthLow !== undefined && this.tempBandwidthLow !== null ? this.tempBandwidthLow : null,
+            bandwidth_high: this.tempBandwidthHigh !== undefined && this.tempBandwidthHigh !== null ? this.tempBandwidthHigh : null
         };
 
         // Clear temporary bandwidth values

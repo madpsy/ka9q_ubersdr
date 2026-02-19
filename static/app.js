@@ -3263,6 +3263,11 @@ function setBand(bandName) {
     } else {
         log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)} ${mode.toUpperCase()}`);
     }
+
+    // Update voice activity popup if it's open
+    if (typeof updateVoiceActivityPopup === 'function') {
+        updateVoiceActivityPopup(bandName);
+    }
 }
 
 // Adjust frequency by a given amount (Hz)
@@ -9025,13 +9030,47 @@ console.log('[Popup Control] Secure popup control system initialized');
 // Band Badge Right-Click Handler for Voice Activity Popup
 // ============================================================================
 
+// Track the voice activity popup window
+let voiceActivityWindow = null;
+let voiceActivityCurrentBand = null;
+
 /**
  * Opens voice activity popup for a specific band
  * @param {string} band - Band name (e.g., '40m', '20m')
  */
 function openVoiceActivityPopup(band) {
     const url = `voice-activity.html?band=${encodeURIComponent(band)}`;
-    return openControlPopup(url, 550, 650);
+    const popup = openControlPopup(url, 550, 650);
+
+    // Track the window and current band
+    if (popup && !popup.closed) {
+        voiceActivityWindow = popup;
+        voiceActivityCurrentBand = band;
+
+        // Clear tracking when window is closed
+        const checkClosed = setInterval(() => {
+            if (!voiceActivityWindow || voiceActivityWindow.closed) {
+                voiceActivityWindow = null;
+                voiceActivityCurrentBand = null;
+                clearInterval(checkClosed);
+            }
+        }, 500);
+    }
+
+    return popup;
+}
+
+/**
+ * Update the voice activity popup if it's open
+ * @param {string} newBand - New band to display
+ */
+function updateVoiceActivityPopup(newBand) {
+    if (voiceActivityWindow && !voiceActivityWindow.closed && voiceActivityCurrentBand !== newBand) {
+        console.log(`[Voice Activity] Updating popup from ${voiceActivityCurrentBand} to ${newBand}`);
+        const url = `voice-activity.html?band=${encodeURIComponent(newBand)}`;
+        voiceActivityWindow.location.href = url;
+        voiceActivityCurrentBand = newBand;
+    }
 }
 
 /**
@@ -9148,6 +9187,7 @@ if (document.readyState === 'loading') {
 
 // Expose globally
 window.openVoiceActivityPopup = openVoiceActivityPopup;
+window.updateVoiceActivityPopup = updateVoiceActivityPopup;
 window.initializeBandBadgeRightClick = initializeBandBadgeRightClick;
 window.initializeVoiceActivityButton = initializeVoiceActivityButton;
 window.getActiveBand = getActiveBand;

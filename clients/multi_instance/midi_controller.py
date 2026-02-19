@@ -847,7 +847,7 @@ class MIDIController:
                 for instance in target_instances:
                     if instance.spectrum and instance.spectrum.connected and instance.spectrum.event_loop:
                         current_bw = instance.spectrum.total_bandwidth
-                        new_bw = min(100000, current_bw * 1.25)  # Max 100 kHz
+                        new_bw = min(10000, current_bw * 1.25)  # Max 10 kHz
                         center_freq = instance.spectrum.center_freq
                         asyncio.run_coroutine_threadsafe(
                             instance.spectrum._send_zoom_command(center_freq, new_bw),

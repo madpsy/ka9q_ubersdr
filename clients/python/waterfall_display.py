@@ -426,9 +426,9 @@ class WaterfallDisplay:
 
         new_center = self.drag_start_freq + freq_change
 
-        # Constrain to valid range (keep view within 100 kHz - 30 MHz)
+        # Constrain to valid range (keep view within 10 kHz - 30 MHz)
         half_bw = self.spectrum_display.total_bandwidth / 2
-        min_center = 100000 + half_bw
+        min_center = 10000 + half_bw
         max_center = 30000000 - half_bw
         new_center = max(min_center, min(max_center, new_center))
 
@@ -865,8 +865,8 @@ def create_waterfall_window(parent_gui):
             else:
                 new_freq = current_freq - step_hz
             
-            # Clamp to valid range (100 kHz to 30 MHz)
-            new_freq = max(100000, min(30000000, new_freq))
+            # Clamp to valid range (10 kHz to 30 MHz)
+            new_freq = max(10000, min(30000000, new_freq))
             
             # Update frequency
             parent_gui.on_spectrum_frequency_click(float(new_freq))

@@ -3261,9 +3261,9 @@ class RadioGUI:
         try:
             freq_hz = self.get_frequency_hz()
 
-            # Validate frequency range: 100 kHz to 30 MHz
-            if freq_hz < 100000:  # 100 kHz
-                messagebox.showerror("Invalid Frequency", "Frequency must be at least 100 kHz")
+            # Validate frequency range: 10 kHz to 30 MHz
+            if freq_hz < 10000:  # 10 kHz
+                messagebox.showerror("Invalid Frequency", "Frequency must be at least 10 kHz")
                 return
             if freq_hz > 30000000:  # 30 MHz
                 messagebox.showerror("Invalid Frequency", "Frequency must not exceed 30 MHz")

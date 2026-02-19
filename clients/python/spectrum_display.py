@@ -540,8 +540,8 @@ class SpectrumDisplay:
         Args:
             frequency: New tuned frequency in Hz
         """
-        # Constrain frequency to valid range (100 kHz - 30 MHz)
-        frequency = max(100000, min(30000000, frequency))
+        # Constrain frequency to valid range (10 kHz - 30 MHz)
+        frequency = max(10000, min(30000000, frequency))
 
         # Update tuned frequency (this is what we're listening to)
         self.tuned_freq = frequency
@@ -559,8 +559,8 @@ class SpectrumDisplay:
                     # Center tune enabled - always center on tuned frequency
                     pan_center = frequency
 
-                    # Constrain to keep view within 100 kHz - 30 MHz
-                    min_center = 100000 + half_bandwidth
+                    # Constrain to keep view within 10 kHz - 30 MHz
+                    min_center = 10000 + half_bandwidth
                     max_center = 30000000 - half_bandwidth
                     pan_center = max(min_center, min(max_center, pan_center))
 
@@ -583,8 +583,8 @@ class SpectrumDisplay:
                             # Tuned freq is off the right - pan to show it at 10% from right edge
                             pan_center = frequency - (half_bandwidth * 0.9)
 
-                        # Constrain to keep view within 100 kHz - 30 MHz
-                        min_center = 100000 + half_bandwidth
+                        # Constrain to keep view within 10 kHz - 30 MHz
+                        min_center = 10000 + half_bandwidth
                         max_center = 30000000 - half_bandwidth
                         pan_center = max(min_center, min(max_center, pan_center))
 
@@ -1092,9 +1092,9 @@ class SpectrumDisplay:
 
         new_center = self.drag_start_freq + freq_change
 
-        # Constrain to valid range (keep view within 100 kHz - 30 MHz)
+        # Constrain to valid range (keep view within 10 kHz - 30 MHz)
         half_bw = self.total_bandwidth / 2
-        min_center = 100000 + half_bw
+        min_center = 10000 + half_bw
         max_center = 30000000 - half_bw
         new_center = max(min_center, min(max_center, new_center))
 
@@ -1432,9 +1432,9 @@ class SpectrumDisplay:
         # Debug: Show what we're zooming to
         print(f"Zooming to {zoom_center/1e6:.6f} MHz (tuned_freq: {self.tuned_freq/1e6:.6f} MHz)")
         
-        # Constrain center frequency to keep view within 100 kHz - 30 MHz
+        # Constrain center frequency to keep view within 10 kHz - 30 MHz
         half_bandwidth = new_total_bandwidth / 2
-        min_center = 100000 + half_bandwidth  # 100 kHz + half bandwidth
+        min_center = 10000 + half_bandwidth  # 10 kHz + half bandwidth
         max_center = 30000000 - half_bandwidth  # 30 MHz - half bandwidth
         zoom_center = max(min_center, min(max_center, zoom_center))
         
@@ -1477,9 +1477,9 @@ class SpectrumDisplay:
         # Debug: Show what we're zooming to
         print(f"Zooming to {zoom_center/1e6:.6f} MHz (tuned_freq: {self.tuned_freq/1e6:.6f} MHz)")
         
-        # Constrain center frequency to keep view within 100 kHz - 30 MHz
+        # Constrain center frequency to keep view within 10 kHz - 30 MHz
         half_bandwidth = new_total_bandwidth / 2
-        min_center = 100000 + half_bandwidth  # 100 kHz + half bandwidth
+        min_center = 10000 + half_bandwidth  # 10 kHz + half bandwidth
         max_center = 30000000 - half_bandwidth  # 30 MHz - half bandwidth
         zoom_center = max(min_center, min(max_center, zoom_center))
         
@@ -1506,9 +1506,9 @@ class SpectrumDisplay:
         # Center on current tuned frequency or spectrum center
         zoom_center = self.tuned_freq if self.tuned_freq != 0 else self.center_freq
         
-        # Constrain center frequency to keep view within 100 kHz - 30 MHz
+        # Constrain center frequency to keep view within 10 kHz - 30 MHz
         half_bandwidth = desired_bandwidth / 2
-        min_center = 100000 + half_bandwidth  # 100 kHz + half bandwidth
+        min_center = 10000 + half_bandwidth  # 10 kHz + half bandwidth
         max_center = 30000000 - half_bandwidth  # 30 MHz - half bandwidth
         zoom_center = max(min_center, min(max_center, zoom_center))
         

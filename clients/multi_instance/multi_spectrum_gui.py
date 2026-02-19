@@ -1581,7 +1581,7 @@ class MultiSpectrumGUI:
 
                     new_freq = instance.spectrum.tuned_freq + frequency_change
                     # Constrain to valid range
-                    new_freq = max(100000, min(30000000, new_freq))
+                    new_freq = max(10000, min(30000000, new_freq))
                     instance.spectrum.update_center_frequency(new_freq)
                     # Update instance's stored frequency
                     instance.frequency = int(new_freq)
@@ -1595,7 +1595,7 @@ class MultiSpectrumGUI:
                 if instance.spectrum == source_spectrum:
                     new_freq = source_spectrum.tuned_freq + frequency_change
                     # Constrain to valid range
-                    new_freq = max(100000, min(30000000, new_freq))
+                    new_freq = max(10000, min(30000000, new_freq))
                     source_spectrum.update_center_frequency(new_freq)
                     # Update instance's stored frequency
                     instance.frequency = int(new_freq)
@@ -1810,9 +1810,9 @@ class MultiSpectrumGUI:
                 freq_hz = int(freq_value)
 
             # Validate frequency range
-            if freq_hz < 100000 or freq_hz > 30000000:
+            if freq_hz < 10000 or freq_hz > 30000000:
                 messagebox.showerror("Invalid Frequency",
-                                   f"Frequency must be between 100 kHz and 30 MHz")
+                                   f"Frequency must be between 10 kHz and 30 MHz")
                 return
 
             # Update instance
@@ -2194,10 +2194,10 @@ class MultiSpectrumGUI:
         try:
             freq_hz = self._get_frequency_hz()
 
-            # Validate frequency range (100 kHz - 30 MHz)
-            if freq_hz < 100000:
+            # Validate frequency range (10 kHz - 30 MHz)
+            if freq_hz < 10000:
                 messagebox.showerror("Invalid Frequency",
-                                   f"Frequency must be at least 100 kHz\n(You entered: {freq_hz/1e3:.3f} kHz)")
+                                   f"Frequency must be at least 10 kHz\n(You entered: {freq_hz/1e3:.3f} kHz)")
                 return
             elif freq_hz > 30000000:
                 messagebox.showerror("Invalid Frequency",

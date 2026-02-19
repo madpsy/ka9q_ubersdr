@@ -2048,7 +2048,7 @@ async function handleBinaryMessage(data) {
 
             // Update global signal quality values (throttled to avoid excessive updates)
             const now = performance.now();
-            if (now - lastSignalQualityUpdate >= 500) {
+            if (now - lastSignalQualityUpdate >= 100) {
                 currentBasebandPower = basebandPower;
                 currentNoiseDensity = noiseDensity;
                 lastSignalQualityUpdate = now;

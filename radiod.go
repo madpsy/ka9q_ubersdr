@@ -520,6 +520,12 @@ func (rc *RadiodController) UpdateChannelWithSquelch(ssrc uint32, frequency uint
 		}
 	}
 
+	// Add STATUS_INTERVAL (tag 106 = 0x6A) for 100ms status updates
+	// With default blocktime of 20ms, 5 frames = 100ms (10 Hz update rate)
+	// This must be sent with every update because mode changes reload presets
+	// which reset output_interval to the preset default (25 frames = 500ms)
+	buf = encodeInt32(&buf, 0x6A, 5)
+
 	// Add COMMAND_TAG (tag 1 = 0x01)
 	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
 

@@ -688,8 +688,12 @@ body {
 .voice-activity-button:disabled {
     background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
     cursor: not-allowed;
-    opacity: 0.6;
     position: relative;
+}
+
+.voice-activity-button:disabled svg {
+    opacity: 0.7;
+    filter: brightness(1.5);
 }
 
 .voice-activity-button:disabled::after {
@@ -702,11 +706,14 @@ body {
     background: #dc3545;
     transform: translate(-50%, -50%) rotate(45deg);
     box-shadow: 0 0 4px rgba(220, 53, 69, 0.8);
+    z-index: 1;
 }
 
 .voice-activity-button svg {
     width: 16px;
     height: 16px;
+    position: relative;
+    z-index: 0;
 }
 
 .controls {

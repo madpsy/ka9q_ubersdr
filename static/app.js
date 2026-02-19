@@ -8393,15 +8393,21 @@ window.handleFrequencyChange = function() {
     const freqInput = document.getElementById('frequency');
     if (!freqInput) return;
 
+    console.log('[handleFrequencyChange] Input value before conversion:', freqInput.value);
+    console.log('[handleFrequencyChange] Current unit:', currentFrequencyUnit);
+    console.log('[handleFrequencyChange] data-hz-value before conversion:', freqInput.getAttribute('data-hz-value'));
+
     // Convert displayed value to Hz first
     convertDisplayedFrequencyToHz();
 
     // Get the Hz value
     const hzValue = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
+    console.log('[handleFrequencyChange] Hz value after conversion:', hzValue);
 
     // Temporarily set the input to Hz string for the original validation
     const savedDisplayValue = freqInput.value;
     freqInput.value = hzValue.toString();
+    console.log('[handleFrequencyChange] Calling originalHandleFrequencyChange with value:', freqInput.value);
 
     // Disable edge detection temporarily when user manually changes frequency
     if (window.spectrumDisplay) {
@@ -8416,8 +8422,12 @@ window.handleFrequencyChange = function() {
     // Call the original function (it will read freqInput.value as Hz)
     originalHandleFrequencyChange();
 
+    console.log('[handleFrequencyChange] After originalHandleFrequencyChange, data-hz-value:', freqInput.getAttribute('data-hz-value'));
+
     // Restore the display value in the current unit
     updateFrequencyDisplay();
+
+    console.log('[handleFrequencyChange] After updateFrequencyDisplay, input value:', freqInput.value);
 
     // Notify extensions of frequency change (in case original didn't)
     if (window.radioAPI && hzValue) {

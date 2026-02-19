@@ -16,6 +16,12 @@ import (
 
 const SO_REUSEPORT = 15 // Linux SO_REUSEPORT constant
 
+// spectrumPacket represents a parsed spectrum packet ready for distribution
+type spectrumPacket struct {
+	ssrc    uint32
+	binData []float32
+}
+
 // UserSpectrumManager manages per-user spectrum data polling
 type UserSpectrumManager struct {
 	radiod   *RadiodController
@@ -25,6 +31,10 @@ type UserSpectrumManager struct {
 	// Status group listener (shared across all users)
 	statusConn *net.UDPConn
 	statusAddr *net.UDPAddr
+
+	// Worker pool for parallel packet processing
+	workerCount int
+	packetQueue chan spectrumPacket
 
 	// Control
 	running      bool
@@ -48,6 +58,8 @@ func NewUserSpectrumManager(radiod *RadiodController, config *Config, sessions *
 		statusAddr:   statusAddr,
 		stopChan:     make(chan struct{}),
 		pollInterval: time.Duration(config.Spectrum.PollPeriodMs) * time.Millisecond,
+		workerCount:  2,                              // Use 2 workers for parallel processing
+		packetQueue:  make(chan spectrumPacket, 100), // Buffer 100 packets (2.5 poll cycles at 40 users)
 	}
 
 	return usm, nil
@@ -63,11 +75,17 @@ func (usm *UserSpectrumManager) Start() error {
 			return fmt.Errorf("failed to setup status listener: %w", err)
 		}
 
+		// Start worker pool for parallel packet distribution
+		for i := 0; i < usm.workerCount; i++ {
+			usm.wg.Add(1)
+			go usm.distributionWorker(i)
+		}
+
 		// Start polling loop
 		usm.wg.Add(1)
 		go usm.pollLoop()
 
-		log.Printf("User spectrum manager started (poll interval: %v)", usm.pollInterval)
+		log.Printf("User spectrum manager started (poll interval: %v, workers: %d)", usm.pollInterval, usm.workerCount)
 	} else {
 		log.Printf("User spectrum manager disabled in config")
 	}
@@ -85,7 +103,10 @@ func (usm *UserSpectrumManager) Stop() {
 	// Signal stop
 	close(usm.stopChan)
 
-	// Wait for polling loop to finish
+	// Close packet queue to signal workers to exit
+	close(usm.packetQueue)
+
+	// Wait for polling loop and workers to finish
 	usm.wg.Wait()
 
 	// Close status listener
@@ -236,8 +257,18 @@ func (usm *UserSpectrumManager) receiveLoop() {
 			continue
 		}
 
-		// Parse STATUS packet
+		// Parse STATUS packet and queue for worker pool
 		usm.parseStatusPacket(buffer[1:n])
+	}
+}
+
+// distributionWorker processes spectrum packets from the queue in parallel
+func (usm *UserSpectrumManager) distributionWorker(workerID int) {
+	defer usm.wg.Done()
+
+	for packet := range usm.packetQueue {
+		// Distribute spectrum data to the appropriate session
+		usm.distributeSpectrum(packet.ssrc, packet.binData)
 	}
 }
 
@@ -422,7 +453,17 @@ func (usm *UserSpectrumManager) parseStatusPacket(payload []byte) {
 		if foundBinBW && foundBinCount {
 			usm.checkSpectrumParameterMismatch(ssrc, radiodBinBW, radiodBinCount)
 		}
-		usm.distributeSpectrum(ssrc, binData)
+
+		// Queue packet for worker pool (non-blocking)
+		select {
+		case usm.packetQueue <- spectrumPacket{ssrc: ssrc, binData: binData}:
+			// Packet queued successfully
+		default:
+			// Queue full - drop packet (should be rare with 100-packet buffer)
+			if DebugMode {
+				log.Printf("DEBUG: Spectrum packet queue full, dropping packet for SSRC 0x%08x", ssrc)
+			}
+		}
 	} else if foundSSRC {
 		// Handle audio channels (no bin data, but has frequency and filter edges)
 		if foundFreq && foundLowEdge && foundHighEdge {

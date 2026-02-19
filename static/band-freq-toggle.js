@@ -129,8 +129,8 @@ function changeFrequencyByStep(step, increment) {
         currentFreq -= step;
     }
 
-    // Clamp frequency to reasonable bounds (0.1 MHz to 30 MHz for HF)
-    currentFreq = Math.max(100000, Math.min(30000000, currentFreq));
+    // Clamp frequency to reasonable bounds (10 kHz to 30 MHz for HF)
+    currentFreq = Math.max(10000, Math.min(30000000, currentFreq));
 
     // Use the global setFrequencyInputValue function to properly update the input
     if (typeof window.setFrequencyInputValue === 'function') {

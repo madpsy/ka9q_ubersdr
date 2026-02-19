@@ -17,9 +17,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Frequency validation constants (100 kHz - 30 MHz)
+// Frequency validation constants (10 kHz - 30 MHz)
 const (
-	MinFrequencyHz = 100000   // 100 kHz
+	MinFrequencyHz = 10000    // 10 kHz
 	MaxFrequencyHz = 30000000 // 30 MHz
 )
 

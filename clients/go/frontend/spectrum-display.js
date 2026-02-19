@@ -200,9 +200,9 @@ class SpectrumDisplay {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
         if (this.binCount === 0) return;
 
-        // Constrain frequency to keep view within 100 kHz - 30 MHz
+        // Constrain frequency to keep view within 10 kHz - 30 MHz
         const halfBw = bandwidth / 2;
-        const minCenter = 100000 + halfBw;
+        const minCenter = 10000 + halfBw;
         const maxCenter = 30000000 - halfBw;
         const constrainedFreq = Math.max(minCenter, Math.min(maxCenter, frequency));
 
@@ -222,9 +222,9 @@ class SpectrumDisplay {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
         if (this.totalBandwidth === 0) return;
 
-        // Constrain frequency to keep view within 100 kHz - 30 MHz
+        // Constrain frequency to keep view within 10 kHz - 30 MHz
         const halfBw = this.totalBandwidth / 2;
-        const minCenter = 100000 + halfBw;
+        const minCenter = 10000 + halfBw;
         const maxCenter = 30000000 - halfBw;
         const constrainedFreq = Math.max(minCenter, Math.min(maxCenter, frequency));
 
@@ -1071,9 +1071,9 @@ class SpectrumDisplay {
 
                 let newCenter = this.dragStartFreq + freqChange;
 
-                // Constrain to valid range (keep view within 100 kHz - 30 MHz)
+                // Constrain to valid range (keep view within 10 kHz - 30 MHz)
                 const halfBw = this.totalBandwidth / 2;
-                const minCenter = 100000 + halfBw;
+                const minCenter = 10000 + halfBw;
                 const maxCenter = 30000000 - halfBw;
                 newCenter = Math.max(minCenter, Math.min(maxCenter, newCenter));
 
@@ -1291,7 +1291,7 @@ class SpectrumDisplay {
 
                     // Constrain to valid range
                     const halfBw = this.totalBandwidth / 2;
-                    const minCenter = 100000 + halfBw;
+                    const minCenter = 10000 + halfBw;
                     const maxCenter = 30000000 - halfBw;
                     newCenter = Math.max(minCenter, Math.min(maxCenter, newCenter));
 
@@ -1345,9 +1345,9 @@ class SpectrumDisplay {
                 // Calculate new bin bandwidth
                 const newBinBandwidth = newBandwidth / this.binCount;
 
-                // Constrain center frequency to keep view within 100 kHz - 30 MHz
+                // Constrain center frequency to keep view within 10 kHz - 30 MHz
                 const halfBandwidth = newBandwidth / 2;
-                const minCenter = 100000 + halfBandwidth;
+                const minCenter = 10000 + halfBandwidth;
                 const maxCenter = 30000000 - halfBandwidth;
 
                 // Constrain the pinch center to valid range
@@ -1670,9 +1670,9 @@ class SpectrumDisplay {
         // Calculate new total bandwidth
         const newTotalBandwidth = newBinBandwidth * this.binCount;
 
-        // Prefer tuned frequency, but constrain to keep view within 100 kHz - 30 MHz
+        // Prefer tuned frequency, but constrain to keep view within 10 kHz - 30 MHz
         const halfBandwidth = newTotalBandwidth / 2;
-        const minCenter = 100000 + halfBandwidth;
+        const minCenter = 10000 + halfBandwidth;
         const maxCenter = 30000000 - halfBandwidth;
 
         // Start with preferred center (tuned freq or current center)
@@ -1707,9 +1707,9 @@ class SpectrumDisplay {
         // Calculate new total bandwidth
         const newTotalBandwidth = newBinBandwidth * this.binCount;
 
-        // Prefer tuned frequency, but constrain to keep view within 100 kHz - 30 MHz
+        // Prefer tuned frequency, but constrain to keep view within 10 kHz - 30 MHz
         const halfBandwidth = newTotalBandwidth / 2;
-        const minCenter = 100000 + halfBandwidth;
+        const minCenter = 10000 + halfBandwidth;
         const maxCenter = 30000000 - halfBandwidth;
 
         // Start with preferred center (tuned freq or current center)
@@ -1735,7 +1735,7 @@ class SpectrumDisplay {
 
         // Constrain center frequency
         const halfBandwidth = newTotalBandwidth / 2;
-        const minCenter = 100000 + halfBandwidth;
+        const minCenter = 10000 + halfBandwidth;
         const maxCenter = 30000000 - halfBandwidth;
         const constrainedCenter = Math.max(minCenter, Math.min(maxCenter, zoomCenter));
 
@@ -1757,7 +1757,7 @@ class SpectrumDisplay {
 
         // Constrain center frequency
         const halfBandwidth = newTotalBandwidth / 2;
-        const minCenter = 100000 + halfBandwidth;
+        const minCenter = 10000 + halfBandwidth;
         const maxCenter = 30000000 - halfBandwidth;
         const constrainedCenter = Math.max(minCenter, Math.min(maxCenter, zoomCenter));
 

@@ -342,12 +342,12 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 			newBinCount := session.BinCount
 
 			if msg.Frequency > 0 {
-				// Enforce minimum center frequency of 100 kHz
-				const minCenterFreq = 100000 // 100 kHz
+				// Enforce minimum center frequency of 10 kHz
+				const minCenterFreq = 10000 // 10 kHz
 				if msg.Frequency < minCenterFreq {
-					log.Printf("Rejecting spectrum update: center frequency %d Hz < minimum %d Hz (100 kHz)",
+					log.Printf("Rejecting spectrum update: center frequency %d Hz < minimum %d Hz (10 kHz)",
 						msg.Frequency, minCenterFreq)
-					swsh.sendError(conn, "Center frequency must be at least 100 kHz")
+					swsh.sendError(conn, "Center frequency must be at least 10 kHz")
 					continue
 				}
 				newFreq = msg.Frequency

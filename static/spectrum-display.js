@@ -2393,7 +2393,7 @@ class SpectrumDisplay {
         } else if (targetStep >= 200e3) {
             freqStep = 200e3; // 200 kHz
         } else if (targetStep >= 100e3) {
-            freqStep = 100e3; // 100 kHz
+            freqStep = 100e3; // 100 kHz (frequency scale marker step)
         } else if (targetStep >= 50e3) {
             freqStep = 50e3; // 50 kHz
         } else if (targetStep >= 20e3) {
@@ -3974,13 +3974,13 @@ class SpectrumDisplay {
                 }
             } else if (useScrollMode) {
                 // Perform initial zoom on first scroll if at default zoom level
-                // Use aggressive zoom similar to band buttons (zoom to show ~100 kHz view)
+                // Use aggressive zoom similar to band buttons (zoom to show ~10 kHz view)
                 if (!this.hasPerformedInitialZoom && this.zoomLevel === 1) {
                     this.hasPerformedInitialZoom = true;
 
                     // Calculate aggressive zoom similar to band buttons
-                    // Target a focused bandwidth of ~100 kHz for good detail
-                    const focusedBandwidth = 100000; // 100 kHz
+                    // Target a focused bandwidth of ~10 kHz for good detail
+                    const focusedBandwidth = 10000; // 10 kHz
                     const binCount = this.binCount || 2048;
                     const binBandwidth = focusedBandwidth / binCount;
 
@@ -4016,8 +4016,8 @@ class SpectrumDisplay {
                 // Round to nearest step size for clean values
                 newFreq = Math.round(newFreq / step) * step;
 
-                // Clamp to valid range (100 kHz to 30 MHz)
-                const MIN_FREQ = 100000;
+                // Clamp to valid range (10 kHz to 30 MHz)
+                const MIN_FREQ = 10000;
                 const MAX_FREQ = 30000000;
                 newFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newFreq));
                 

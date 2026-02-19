@@ -433,12 +433,12 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	if freq := query.Get("frequency"); freq != "" {
 		var f uint64
 		if _, err := fmt.Sscanf(freq, "%d", &f); err == nil {
-			// Validate frequency range: 100 kHz to 30 MHz
-			const minFreq uint64 = 100000   // 100 kHz
+			// Validate frequency range: 10 kHz to 30 MHz
+			const minFreq uint64 = 10000    // 10 kHz
 			const maxFreq uint64 = 30000000 // 30 MHz
 			if f < minFreq || f > maxFreq {
-				log.Printf("Rejected WebSocket connection: frequency %d Hz out of range (100 kHz - 30 MHz)", f)
-				wsh.sendError(conn, fmt.Sprintf("Frequency %d Hz is out of valid range (100 kHz - 30 MHz)", f))
+				log.Printf("Rejected WebSocket connection: frequency %d Hz out of range (10 kHz - 30 MHz)", f)
+				wsh.sendError(conn, fmt.Sprintf("Frequency %d Hz is out of valid range (10 kHz - 30 MHz)", f))
 				return
 			}
 			frequency = f
@@ -724,11 +724,11 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 			newBandwidthHigh := currentSession.BandwidthHigh
 
 			if msg.Frequency > 0 {
-				// Validate frequency range: 100 kHz to 30 MHz
-				const minFreq uint64 = 100000   // 100 kHz
+				// Validate frequency range: 10 kHz to 30 MHz
+				const minFreq uint64 = 10000    // 10 kHz
 				const maxFreq uint64 = 30000000 // 30 MHz
 				if msg.Frequency < minFreq || msg.Frequency > maxFreq {
-					wsh.sendError(conn, fmt.Sprintf("Frequency %d Hz is out of valid range (100 kHz - 30 MHz)", msg.Frequency))
+					wsh.sendError(conn, fmt.Sprintf("Frequency %d Hz is out of valid range (10 kHz - 30 MHz)", msg.Frequency))
 					continue // Non-fatal, keep connection open
 				}
 				newFreq = msg.Frequency

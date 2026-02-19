@@ -10,8 +10,8 @@ class UberSDRClient {
         this.userInitiatedConnection = false; // Track if connection was user-initiated
         this.hasBeenConnected = false; // Track if we've ever been connected (to distinguish page load from reconnection)
 
-        // Frequency validation constants (100 kHz - 30 MHz)
-        this.MIN_FREQUENCY_HZ = 100000;   // 100 kHz
+        // Frequency validation constants (10 kHz - 30 MHz)
+        this.MIN_FREQUENCY_HZ = 10000;    // 10 kHz
         this.MAX_FREQUENCY_HZ = 30000000; // 30 MHz
 
         // Band condition color constants (matching Python client)

@@ -47,7 +47,7 @@ const (
 	DefaultDeviceType   = DeviceHermesLite
 
 	// Frequency validation constants (UberSDR valid range)
-	MinFrequencyHz = 100000   // 100 kHz
+	MinFrequencyHz = 10000    // 10 kHz
 	MaxFrequencyHz = 30000000 // 30 MHz
 
 	// Buffering constants

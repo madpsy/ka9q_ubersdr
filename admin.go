@@ -1490,23 +1490,23 @@ func (ah *AdminHandler) handleGetBands(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(bandsConfig)
 }
 
-// validateAndClampBandFrequencies validates and clamps band frequencies to the valid range (100 kHz - 30 MHz)
+// validateAndClampBandFrequencies validates and clamps band frequencies to the valid range (10 kHz - 30 MHz)
 // Returns error if band is completely outside the valid range, otherwise clamps and returns nil
 func validateAndClampBandFrequencies(band *Band) error {
-	const minFreq uint64 = 100000   // 100 kHz in Hz
+	const minFreq uint64 = 10000    // 10 kHz in Hz
 	const maxFreq uint64 = 30000000 // 30 MHz in Hz
 
-	// Reject bands that end below 100 kHz or start above 30 MHz
+	// Reject bands that end below 10 kHz or start above 30 MHz
 	if band.End < minFreq {
-		return fmt.Errorf("band ends below minimum frequency (100 kHz)")
+		return fmt.Errorf("band ends below minimum frequency (10 kHz)")
 	}
 	if band.Start > maxFreq {
 		return fmt.Errorf("band starts above maximum frequency (30 MHz)")
 	}
 
-	// Clamp start frequency to 100 kHz minimum
+	// Clamp start frequency to 10 kHz minimum
 	if band.Start < minFreq {
-		log.Printf("Clamping band '%s' start frequency from %d Hz to %d Hz (100 kHz)", band.Label, band.Start, minFreq)
+		log.Printf("Clamping band '%s' start frequency from %d Hz to %d Hz (10 kHz)", band.Label, band.Start, minFreq)
 		band.Start = minFreq
 	}
 
@@ -1538,7 +1538,7 @@ func (ah *AdminHandler) handleAddBand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate and clamp frequencies to valid range (100 kHz - 30 MHz)
+	// Validate and clamp frequencies to valid range (10 kHz - 30 MHz)
 	if err := validateAndClampBandFrequencies(&newBand); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -1755,7 +1755,7 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Validate and clamp frequencies to valid range (100 kHz - 30 MHz)
+	// Validate and clamp frequencies to valid range (10 kHz - 30 MHz)
 	if err := validateAndClampBandFrequencies(&updatedBand); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -2857,12 +2857,12 @@ func (ah *AdminHandler) HandleSDRSharpImport(w http.ResponseWriter, r *http.Requ
 	// Convert SDR# bands to our format
 	var bands []interface{}
 	skippedCount := 0
-	const minFreq = 100000    // 100 kHz in Hz
+	const minFreq = 10000     // 10 kHz in Hz
 	const maxFreq = 30000000  // 30 MHz in Hz
 	const cwCutoff = 10000000 // 10 MHz cutoff for CW mode conversion
 
 	for _, entry := range sdrBands.Entries {
-		// Skip bands that end below 100 kHz or start above 30 MHz
+		// Skip bands that end below 10 kHz or start above 30 MHz
 		if entry.MaxFrequency < minFreq || entry.MinFrequency > maxFreq {
 			skippedCount++
 			continue
@@ -2873,7 +2873,7 @@ func (ah *AdminHandler) HandleSDRSharpImport(w http.ResponseWriter, r *http.Requ
 			continue
 		}
 
-		// Clamp start frequency to 100 kHz if it's below the limit
+		// Clamp start frequency to 10 kHz if it's below the limit
 		startFreq := entry.MinFrequency
 		if startFreq < minFreq {
 			startFreq = minFreq
@@ -2954,7 +2954,7 @@ func (ah *AdminHandler) HandleSDRSharpImport(w http.ResponseWriter, r *http.Requ
 	// Build response message
 	message := fmt.Sprintf("Successfully imported %d band(s) from SDR# XML", len(bands))
 	if skippedCount > 0 {
-		message += fmt.Sprintf(" (skipped %d band(s) outside 100 kHz - 30 MHz range)", skippedCount)
+		message += fmt.Sprintf(" (skipped %d band(s) outside 10 kHz - 30 MHz range)", skippedCount)
 	}
 
 	w.WriteHeader(http.StatusOK)

@@ -3093,8 +3093,8 @@ function handleFrequencyChange() {
     // Update page title
     updatePageTitle();
 
-    // Validate frequency range: 100 kHz to 30 MHz (in Hz)
-    const MIN_FREQ = 100000;   // 100 kHz
+    // Validate frequency range: 10 kHz to 30 MHz (in Hz)
+    const MIN_FREQ = 10000;    // 10 kHz
     const MAX_FREQ = 30000000; // 30 MHz
 
     if (isNaN(frequency) || frequency < MIN_FREQ || frequency > MAX_FREQ) {
@@ -3143,7 +3143,7 @@ function handleFrequencyChange() {
 // Set frequency from preset button
 function setFrequency(freq) {
     // Validate frequency range
-    const MIN_FREQ = 100000;   // 100 kHz
+    const MIN_FREQ = 10000;    // 10 kHz
     const MAX_FREQ = 30000000; // 30 MHz
 
     const clampedFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, freq));
@@ -3247,7 +3247,7 @@ function setBand(bandName) {
 
         // Calculate bin bandwidth to show the full band width
         // Use a minimum bandwidth to prevent excessive zoom on narrow bands like 30m
-        const minBandWidth = 100000; // 100 kHz minimum
+        const minBandWidth = 10000; // 10 kHz minimum
         const effectiveBandWidth = Math.max(bandWidth, minBandWidth);
         // Use default bin count (1024) instead of current state to ensure consistent zoom
         const binCount = 1024; // Default from config.go
@@ -3277,8 +3277,8 @@ function adjustFrequency(deltaHz) {
     const currentFreq = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
     const newFreq = currentFreq + deltaHz;
 
-    // Clamp to valid range: 100 kHz to 30 MHz
-    const MIN_FREQ = 100000;   // 100 kHz
+    // Clamp to valid range: 10 kHz to 30 MHz
+    const MIN_FREQ = 10000;    // 10 kHz
     const MAX_FREQ = 30000000; // 30 MHz
     const clampedFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newFreq));
 
@@ -3325,7 +3325,7 @@ function loadSettingsFromURL() {
     // Load frequency
     if (params.has('freq')) {
         const freq = parseInt(params.get('freq'));
-        if (!isNaN(freq) && freq >= 100000 && freq <= 30000000) {
+        if (!isNaN(freq) && freq >= 10000 && freq <= 30000000) {
             const freqInput = document.getElementById('frequency');
             if (freqInput && document.activeElement !== freqInput) {
                 // Store as Hz value directly (don't use setFrequencyInputValue yet as unit may not be loaded)
@@ -4652,8 +4652,8 @@ function performFrequencyShift() {
         newDialFreq = currentDialFreq + shiftAmount;
     }
 
-    // Clamp to valid range (100 kHz to 30 MHz)
-    const MIN_FREQ = 100000;
+    // Clamp to valid range (10 kHz to 30 MHz)
+    const MIN_FREQ = 10000;
     const MAX_FREQ = 30000000;
     newDialFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newDialFreq));
     newDialFreq = Math.round(newDialFreq);
@@ -4824,7 +4824,7 @@ function enableFrequencyTracking() {
                 }
 
                 // Clamp to valid range
-                const MIN_FREQ = 100000;
+                const MIN_FREQ = 10000;
                 const MAX_FREQ = 30000000;
                 newDialFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newDialFreq));
                 newDialFreq = Math.round(newDialFreq);
@@ -4938,7 +4938,7 @@ function enableFrequencyTracking() {
         }
 
         // Clamp to valid range
-        const MIN_FREQ = 100000;
+        const MIN_FREQ = 10000;
         const MAX_FREQ = 30000000;
         newDialFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newDialFreq));
         newDialFreq = Math.round(newDialFreq);
@@ -7663,7 +7663,7 @@ function selectBandFromDropdown(value) {
             }, 2000);
 
             // Use a minimum bandwidth to prevent excessive zoom on narrow bands
-            const minBandWidth = 100000; // 100 kHz minimum (same as band buttons)
+            const minBandWidth = 10000; // 10 kHz minimum (same as band buttons)
             const effectiveBandWidth = Math.max(bandWidth, minBandWidth);
             // Use default bin count (1024) instead of current state to ensure consistent zoom
             const binCount = 1024; // Default from config.go
@@ -8576,7 +8576,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const centerFreq = Math.round((band.start + band.end) / 2);
                 
                 if (spectrumDisplay && spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
-                    const minBandWidth = 100000; // 100 kHz minimum
+                    const minBandWidth = 10000; // 10 kHz minimum
                     const effectiveBandWidth = Math.max(bandWidth, minBandWidth);
                     const binCount = 1024;
                     const binBandwidth = effectiveBandWidth / binCount;

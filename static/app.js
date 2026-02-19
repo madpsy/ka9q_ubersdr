@@ -9092,15 +9092,24 @@ function initializeVoiceActivityButton() {
         return;
     }
 
+    let lastActiveBand = null;
+
     // Update button state based on active band
     function updateButtonState() {
         const activeBand = getActiveBand();
         if (activeBand) {
             button.disabled = false;
             button.title = `Voice Activity for ${activeBand}`;
+
+            // Update voice activity popup if band changed
+            if (lastActiveBand !== activeBand) {
+                updateVoiceActivityPopup(activeBand);
+                lastActiveBand = activeBand;
+            }
         } else {
             button.disabled = true;
             button.title = 'Voice Activity (no band active)';
+            lastActiveBand = null;
         }
     }
 

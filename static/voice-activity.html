@@ -429,6 +429,18 @@
                 if (window.opener.setFrequency && window.opener.setMode) {
                     window.opener.setFrequency(frequency);
                     window.opener.setMode(mode, false); // false = don't preserve bandwidth
+                    
+                    // Center spectrum if frequency is outside current view
+                    if (window.opener.spectrumDisplay && window.opener.spectrumCenterFrequency) {
+                        const startFreq = window.opener.spectrumDisplay.startFrequency;
+                        const endFreq = window.opener.spectrumDisplay.endFrequency;
+                        
+                        if (frequency < startFreq || frequency > endFreq) {
+                            console.log(`[Voice Activity] Centering spectrum on ${frequency} Hz`);
+                            window.opener.spectrumCenterFrequency();
+                        }
+                    }
+                    
                     console.log(`Tuned to ${frequency} Hz, mode ${mode}`);
                 } else {
                     console.error('setFrequency or setMode not available');

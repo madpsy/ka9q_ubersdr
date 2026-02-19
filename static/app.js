@@ -1989,6 +1989,17 @@ function tuneToChannel(frequency, mode, bandwidthLow, bandwidthHigh) {
         }, 2000);
     }
 
+    // Center spectrum on new frequency if it's outside current view
+    if (window.spectrumDisplay && window.spectrumCenterFrequency) {
+        const startFreq = window.spectrumDisplay.startFrequency;
+        const endFreq = window.spectrumDisplay.endFrequency;
+
+        if (frequency < startFreq || frequency > endFreq) {
+            console.log(`[tuneToChannel] Centering spectrum on ${frequency} Hz`);
+            spectrumCenterFrequency();
+        }
+    }
+
     // Tune to the new settings
     if (wsManager.isConnected()) {
         autoTune();

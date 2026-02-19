@@ -137,6 +137,17 @@ class RadioAPI {
             if (window.updateBandButtons) window.updateBandButtons(freq);
             if (window.updateURL) window.updateURL();
 
+            // Center spectrum on new frequency if it's outside current view
+            if (window.spectrumDisplay && window.spectrumCenterFrequency) {
+                const startFreq = window.spectrumDisplay.startFrequency;
+                const endFreq = window.spectrumDisplay.endFrequency;
+                
+                if (freq < startFreq || freq > endFreq) {
+                    console.log(`[RadioAPI] Centering spectrum on ${freq} Hz`);
+                    window.spectrumCenterFrequency();
+                }
+            }
+
             if (this.isConnected()) {
                 if (window.autoTune) window.autoTune();
             } else {

@@ -196,7 +196,7 @@ func (sal *SessionActivityLogger) LogSessionDestroyedWithData(uuid string, bands
 	for k, v := range bands {
 		bandsCopy[k] = v
 	}
-	
+
 	modesCopy := make(map[string]bool, len(modes))
 	for k, v := range modes {
 		modesCopy[k] = v
@@ -259,11 +259,9 @@ func (sal *SessionActivityLogger) getActiveSessionEntries(event logEvent) []Sess
 	// For session_destroyed events, the sessions are already removed from sm.sessions
 	// So we need to create the entry from the event data directly
 	if event.eventType == "session_destroyed" && event.uuid != "" {
-		log.Printf("ActivityLogger: Creating entry for destroyed UUID %s from event data", event.uuid[:8])
-		
 		// Create a single entry for the destroyed session
 		entries := make([]SessionActivityEntry, 0, 1)
-		
+
 		// We don't have session data anymore, so create a minimal entry
 		// The bands and modes will be populated below
 		entry := SessionActivityEntry{
@@ -271,32 +269,29 @@ func (sal *SessionActivityLogger) getActiveSessionEntries(event logEvent) []Sess
 			Bands:         []string{},
 			Modes:         []string{},
 		}
-		
+
 		// Populate bands from event data
 		if event.bands != nil {
 			for band := range event.bands {
 				entry.Bands = append(entry.Bands, band)
 			}
-			log.Printf("ActivityLogger: Added %d bands to destroyed session entry", len(entry.Bands))
 		}
-		
+
 		// Populate modes from event data
 		if event.modes != nil {
 			for mode := range event.modes {
 				entry.Modes = append(entry.Modes, mode)
 			}
-			log.Printf("ActivityLogger: Added %d modes to destroyed session entry", len(entry.Modes))
 		}
-		
+
 		// Sort for consistent output
 		sortStrings(entry.Bands)
 		sortStrings(entry.Modes)
-		
+
 		entries = append(entries, entry)
-		log.Printf("ActivityLogger: Returning entry with %d bands, %d modes", len(entry.Bands), len(entry.Modes))
 		return entries
 	}
-	
+
 	// For other event types (snapshot, session_created), read from active sessions
 	sal.sessionMgr.mu.RLock()
 	defer sal.sessionMgr.mu.RUnlock()
@@ -344,7 +339,7 @@ func (sal *SessionActivityLogger) getActiveSessionEntries(event logEvent) []Sess
 		createdAt := session.CreatedAt
 		country := session.Country
 		countryCode := session.CountryCode
-		
+
 		session.mu.RUnlock()
 
 		// Get or create entry for this user
@@ -396,7 +391,7 @@ func (sal *SessionActivityLogger) getActiveSessionEntries(event logEvent) []Sess
 			entry.CreatedAt = createdAt
 		}
 	}
-	
+
 	// Populate bands and modes from UUID-level maps for snapshot/session_created events
 	// (session_destroyed events already have their data populated above)
 	for userSessionID, entry := range userSessions {
@@ -407,7 +402,7 @@ func (sal *SessionActivityLogger) getActiveSessionEntries(event logEvent) []Sess
 				entry.Bands = append(entry.Bands, band)
 			}
 		}
-		
+
 		// Get modes from UUID-level map
 		modeMap, modeExists := sal.sessionMgr.userSessionModes[userSessionID]
 		if modeExists {

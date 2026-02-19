@@ -260,7 +260,7 @@ type FrontendStatusTracker struct {
 	channelStatus  map[uint32]*ChannelStatus  // Map of SSRC -> ChannelStatus
 	statusListener *net.UDPConn
 	stopListener   chan struct{}
-	debugLogged    map[uint32]bool            // Track which SSRCs we've logged debug info for
+	debugLogged    map[uint32]bool // Track which SSRCs we've logged debug info for
 }
 
 // NewFrontendStatusTracker creates a new frontend status tracker
@@ -307,8 +307,6 @@ func (fst *FrontendStatusTracker) cleanupStaleEntries() {
 			for ssrc, status := range fst.channelStatus {
 				if now.Sub(status.LastUpdate) > staleThreshold {
 					delete(fst.channelStatus, ssrc)
-					log.Printf("Removed stale channel status for SSRC 0x%08x (last update: %v ago)",
-						ssrc, now.Sub(status.LastUpdate))
 				}
 			}
 
@@ -649,13 +647,6 @@ func (fst *FrontendStatusTracker) parseStatusPacket(data []byte) {
 
 	// Store status if we got an SSRC
 	if frontendStatus.SSRC != 0 {
-		// Debug log once per SSRC when we first see FFT fields
-		if !fst.debugLogged[frontendStatus.SSRC] && (frontendStatus.FilterBlocksize > 0 || frontendStatus.FilterFirLength > 0) {
-			log.Printf("DEBUG: First FFT data for SSRC 0x%08x: FilterBlocksize=%d, FilterFirLength=%d, FeIsReal=%v, InputSamprate=%d",
-				frontendStatus.SSRC, frontendStatus.FilterBlocksize, frontendStatus.FilterFirLength, frontendStatus.FeIsReal, frontendStatus.InputSamprate)
-			fst.debugLogged[frontendStatus.SSRC] = true
-		}
-		
 		fst.mu.Lock()
 		fst.frontendStatus[frontendStatus.SSRC] = frontendStatus
 		fst.channelStatus[channelStatus.SSRC] = channelStatus

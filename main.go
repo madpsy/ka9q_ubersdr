@@ -1937,7 +1937,6 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 			Allowed: false,
 			Reason:  "Rate limit exceeded. Please wait before trying again.",
 		})
-		log.Printf("/connection endpoint rate limit exceeded for IP: %s", clientIP)
 		return
 	}
 

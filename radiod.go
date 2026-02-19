@@ -327,7 +327,6 @@ func (rc *RadiodController) CreateChannelWithSquelch(name string, frequency uint
 
 	if DebugMode {
 		log.Printf("DEBUG: Sending CreateChannel command (%d bytes) to %s", len(buf), rc.statusAddr)
-		log.Printf("DEBUG: Command hex: % x", buf)
 		if squelchOpen != nil || squelchClose != nil {
 			log.Printf("DEBUG: Squelch - open: %v, close: %v", squelchOpen, squelchClose)
 		}
@@ -361,9 +360,6 @@ func (rc *RadiodController) CreateSpectrumChannel(name string, frequency uint64,
 	// Total bandwidth = binCount * binBandwidth
 	// For 0-30 MHz with center at 15 MHz: edges at ±15 MHz
 	halfBandwidth := float64(binCount) * binBandwidth / 2.0
-
-	log.Printf("Calculated filter edges: LOW=%.1f Hz, HIGH=%.1f Hz (total BW=%.1f Hz)",
-		-halfBandwidth, halfBandwidth, halfBandwidth*2)
 
 	// Build control command for spectrum mode
 	buf := make([]byte, 0, 1500)
@@ -401,9 +397,6 @@ func (rc *RadiodController) CreateSpectrumChannel(name string, frequency uint64,
 
 	// Add EOL marker
 	buf = append(buf, 0)
-
-	log.Printf("Sending spectrum command: %d bytes", len(buf))
-	log.Printf("Command hex: % x", buf)
 
 	// Send command
 	if err := rc.sendCommand(buf); err != nil {

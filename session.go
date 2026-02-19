@@ -1301,12 +1301,9 @@ func (sm *SessionManager) cleanupOrphanedUserAgents() {
 	// Remove orphaned entries
 	if len(toRemove) > 0 {
 		for _, uuid := range toRemove {
-			userAgent := sm.userAgents[uuid]
 			delete(sm.userAgents, uuid)
 			delete(sm.userAgentLastSeen, uuid)
 			delete(sm.uuidToIP, uuid)
-			log.Printf("Cleaned up orphaned User-Agent entry for UUID %s (User-Agent: %s, no active session for >5 minutes)",
-				uuid, userAgent)
 		}
 		log.Printf("User-Agent cleanup: removed %d orphaned entries (total remaining: %d)",
 			len(toRemove), len(sm.userAgents))

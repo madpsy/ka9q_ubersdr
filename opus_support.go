@@ -44,8 +44,6 @@ func NewOpusEncoderForClient(sampleRate int, bitrate int, complexity int) (*Opus
 
 	wrapper.encoder = encoder
 	wrapper.enabled = true
-	log.Printf("Opus encoder initialized for client: %d Hz, %d bps, complexity %d, 1 channel (mono)",
-		sampleRate, bitrate, complexity)
 
 	return wrapper, nil
 }

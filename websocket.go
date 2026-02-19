@@ -384,13 +384,6 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Binary formats (all remaining formats are binary)
-	useBinaryFormat := true
-
-	if useBinaryFormat {
-		log.Printf("Client requested binary format: %s", format)
-	}
-
 	// Check connection rate limit (unless IP is bypassed via IP list or password)
 	if !wsh.config.Server.IsIPTimeoutBypassed(clientIP, password) && !wsh.connRateLimiter.AllowConnection(clientIP) {
 		log.Printf("Connection rate limit exceeded for IP: %s (client IP: %s)", sourceIP, clientIP)

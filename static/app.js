@@ -9035,6 +9035,80 @@ function openVoiceActivityPopup(band) {
 }
 
 /**
+ * Get the currently active band based on frequency
+ * @returns {string|null} Active band name or null if no band is active
+ */
+function getActiveBand() {
+    const activeBadge = document.querySelector('.band-status-badge.active');
+    return activeBadge ? activeBadge.getAttribute('data-band') : null;
+}
+
+/**
+ * Initialize voice activity button
+ */
+function initializeVoiceActivityButton() {
+    const button = document.getElementById('voice-activity-button');
+    if (!button) {
+        console.warn('[Voice Activity Button] Button not found');
+        return;
+    }
+
+    // Update button state based on active band
+    function updateButtonState() {
+        const activeBand = getActiveBand();
+        if (activeBand) {
+            button.disabled = false;
+            button.title = `Voice Activity for ${activeBand}`;
+        } else {
+            button.disabled = true;
+            button.title = 'Voice Activity (no band active)';
+        }
+    }
+
+    // Handle button click
+    button.addEventListener('click', () => {
+        const activeBand = getActiveBand();
+        if (activeBand) {
+            console.log(`[Voice Activity Button] Opening voice activity popup for ${activeBand}`);
+            openVoiceActivityPopup(activeBand);
+        }
+    });
+
+    // Initial state update
+    updateButtonState();
+
+    // Update button state when frequency changes
+    // Listen for frequency changes by observing the frequency input
+    const freqInput = document.getElementById('frequency');
+    if (freqInput) {
+        // Use MutationObserver to watch for attribute changes
+        const observer = new MutationObserver(() => {
+            updateButtonState();
+        });
+        observer.observe(freqInput, { attributes: true, attributeFilter: ['data-hz-value', 'value'] });
+
+        // Also listen for input events
+        freqInput.addEventListener('input', updateButtonState);
+        freqInput.addEventListener('change', updateButtonState);
+    }
+
+    // Also update when band badges change (when active class is added/removed)
+    const bandContainer = document.getElementById('band-buttons-container');
+    if (bandContainer) {
+        const badgeObserver = new MutationObserver(() => {
+            updateButtonState();
+        });
+        badgeObserver.observe(bandContainer, {
+            attributes: true,
+            attributeFilter: ['class'],
+            subtree: true
+        });
+    }
+
+    console.log('[Voice Activity Button] Initialized');
+}
+
+/**
  * Initialize right-click handlers on band badges
  */
 function initializeBandBadgeRightClick() {
@@ -9062,12 +9136,18 @@ function initializeBandBadgeRightClick() {
 
 // Initialize when DOM is ready
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeBandBadgeRightClick);
+    document.addEventListener('DOMContentLoaded', () => {
+        initializeBandBadgeRightClick();
+        initializeVoiceActivityButton();
+    });
 } else {
     // DOM already loaded
     initializeBandBadgeRightClick();
+    initializeVoiceActivityButton();
 }
 
 // Expose globally
 window.openVoiceActivityPopup = openVoiceActivityPopup;
 window.initializeBandBadgeRightClick = initializeBandBadgeRightClick;
+window.initializeVoiceActivityButton = initializeVoiceActivityButton;
+window.getActiveBand = getActiveBand;

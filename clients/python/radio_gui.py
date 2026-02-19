@@ -77,6 +77,14 @@ except ImportError:
     NOISE_FLOOR_AVAILABLE = False
     print("Warning: Noise floor display not available (missing dependencies)")
 
+# Import voice activity display
+try:
+    from voice_activity_display import create_voice_activity_window
+    VOICE_ACTIVITY_AVAILABLE = True
+except ImportError:
+    VOICE_ACTIVITY_AVAILABLE = False
+    print("Warning: Voice activity display not available (missing dependencies)")
+
 # Import space weather display
 try:
     from space_weather_display import create_space_weather_window
@@ -380,6 +388,10 @@ class RadioGUI:
         # Band conditions display (separate window)
         self.band_conditions_window = None
         self.band_conditions_display = None
+
+        # Voice activity display (separate window)
+        self.voice_activity_window = None
+        self.voice_activity_display = None
 
         # Noise floor display (separate window)
         self.noise_floor_window = None
@@ -1866,6 +1878,14 @@ class RadioGUI:
             else:
                 self.noise_floor_btn = None
 
+            # Voice activity button (always available)
+            if VOICE_ACTIVITY_AVAILABLE:
+                self.voice_activity_btn = ttk.Button(button_frame_row1, text="Voice", width=6,
+                                                    command=self.open_voice_activity_window)
+                self.voice_activity_btn.pack(side=tk.LEFT, padx=(0, 5))
+            else:
+                self.voice_activity_btn = None
+
             # Space weather button (always available)
             if SPACE_WEATHER_AVAILABLE:
                 self.space_weather_btn = ttk.Button(button_frame_row1, text="Weather",
@@ -2380,6 +2400,10 @@ class RadioGUI:
             if self.cw_spots_display.auto_band_var.get() and self.cw_spots_display.band_var.get() != current_band:
                 self.cw_spots_display.band_var.set(current_band)
                 self.cw_spots_display.apply_filters()
+
+        # Update band in voice activity window if open
+        if self.voice_activity_display and current_band:
+            self.voice_activity_display.set_band(current_band)
 
     def fetch_band_states(self):
         """Fetch band states from the noise floor aggregate API and update button colors."""
@@ -5810,6 +5834,54 @@ class RadioGUI:
             messagebox.showerror("Error", f"Failed to open band conditions: {e}")
             self.log_status(f"ERROR: Failed to open band conditions - {e}")
 
+    def open_voice_activity_window(self):
+        """Open a separate voice activity display window."""
+        # Don't open multiple windows
+        if self.voice_activity_window and self.voice_activity_window.winfo_exists():
+            self.voice_activity_window.lift()  # Bring to front
+            return
+
+        if not self.connected:
+            messagebox.showinfo("Not Connected", "Please connect to the server first.")
+            return
+
+        try:
+            from voice_activity_display import create_voice_activity_window
+
+            # Get server URL
+            hostname = self.server_var.get().strip()
+            port = self.port_var.get().strip()
+            server = f"{hostname}:{port}" if ':' not in hostname else hostname
+            use_tls = self.tls_var.get()
+            protocol = "https" if use_tls else "http"
+            server_url = f"{protocol}://{server}"
+
+            # Get current band
+            current_band = "40m"  # Default
+            freq_hz = self.get_frequency_hz()
+            if freq_hz and self.bands:
+                for band in self.bands:
+                    if band['start'] <= freq_hz <= band['end']:
+                        current_band = band.get('label', '40m')
+                        break
+
+            # Create tune callback
+            def tune_callback(freq_hz, mode):
+                self.set_frequency_hz(freq_hz)
+                self.select_mode(mode)
+
+            # Create voice activity window
+            self.voice_activity_display = create_voice_activity_window(
+                self.root, server_url, current_band, tune_callback
+            )
+            self.voice_activity_window = self.voice_activity_display.window
+
+            self.log_status("Voice activity window opened")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open voice activity: {e}")
+            self.log_status(f"ERROR: Failed to open voice activity - {e}")
+
     def open_noise_floor_window(self):
         """Open a separate noise floor display window."""
         # Don't open multiple windows
@@ -6645,6 +6717,13 @@ class RadioGUI:
             self.band_conditions_window = None
             self.band_conditions_display = None
             self.log_status("Band conditions window closed")
+
+        # Close voice activity window
+        if self.voice_activity_window and self.voice_activity_window.winfo_exists():
+            self.voice_activity_window.destroy()
+            self.voice_activity_window = None
+            self.voice_activity_display = None
+            self.log_status("Voice activity window closed")
 
         # Close noise floor window
         if self.noise_floor_window and self.noise_floor_window.winfo_exists():
@@ -7716,6 +7795,10 @@ class RadioGUI:
         # Close band conditions window if open
         if self.band_conditions_window and self.band_conditions_window.winfo_exists():
             self.band_conditions_window.destroy()
+
+        # Close voice activity window if open
+        if self.voice_activity_window and self.voice_activity_window.winfo_exists():
+            self.voice_activity_window.destroy()
 
         # Close noise floor window if open
         if self.noise_floor_window and self.noise_floor_window.winfo_exists():

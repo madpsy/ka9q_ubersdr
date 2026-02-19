@@ -3082,9 +3082,9 @@ function handleFrequencyChange() {
     const freqInput = document.getElementById('frequency');
     const valueStr = freqInput.value.trim();
 
-    // Don't validate incomplete input (less than 6 digits)
+    // Don't validate incomplete input (less than 5 digits for 10 kHz minimum)
     // This prevents clamping while user is still typing
-    if (valueStr.length < 6) {
+    if (valueStr.length < 5) {
         return;
     }
 

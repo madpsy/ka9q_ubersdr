@@ -423,24 +423,32 @@
                 console.warn('No opener window available');
                 return;
             }
-            
+
             try {
                 // Set frequency and mode, let system decide bandwidth
                 if (window.opener.setFrequency && window.opener.setMode) {
                     window.opener.setFrequency(frequency);
                     window.opener.setMode(mode, false); // false = don't preserve bandwidth
-                    
+
                     // Center spectrum if frequency is outside current view
-                    if (window.opener.spectrumDisplay && window.opener.spectrumCenterFrequency) {
+                    if (window.opener.spectrumDisplay && window.opener.spectrumCenterFrequency && !window.opener._centeringSpectrumFromVoiceActivity) {
                         const startFreq = window.opener.spectrumDisplay.startFrequency;
                         const endFreq = window.opener.spectrumDisplay.endFrequency;
-                        
+
                         if (frequency < startFreq || frequency > endFreq) {
                             console.log(`[Voice Activity] Centering spectrum on ${frequency} Hz`);
-                            window.opener.spectrumCenterFrequency();
+                            window.opener._centeringSpectrumFromVoiceActivity = true;
+                            setTimeout(() => {
+                                if (window.opener.spectrumCenterFrequency) {
+                                    window.opener.spectrumCenterFrequency();
+                                }
+                                setTimeout(() => {
+                                    window.opener._centeringSpectrumFromVoiceActivity = false;
+                                }, 1000);
+                            }, 100);
                         }
                     }
-                    
+
                     console.log(`Tuned to ${frequency} Hz, mode ${mode}`);
                 } else {
                     console.error('setFrequency or setMode not available');

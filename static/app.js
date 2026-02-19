@@ -1990,13 +1990,21 @@ function tuneToChannel(frequency, mode, bandwidthLow, bandwidthHigh) {
     }
 
     // Center spectrum on new frequency if it's outside current view
-    if (window.spectrumDisplay && window.spectrumCenterFrequency) {
+    if (window.spectrumDisplay && window.spectrumCenterFrequency && !window._centeringSpectrumFromTune) {
         const startFreq = window.spectrumDisplay.startFrequency;
         const endFreq = window.spectrumDisplay.endFrequency;
 
         if (frequency < startFreq || frequency > endFreq) {
             console.log(`[tuneToChannel] Centering spectrum on ${frequency} Hz`);
-            spectrumCenterFrequency();
+            window._centeringSpectrumFromTune = true;
+            setTimeout(() => {
+                if (window.spectrumCenterFrequency) {
+                    spectrumCenterFrequency();
+                }
+                setTimeout(() => {
+                    window._centeringSpectrumFromTune = false;
+                }, 1000);
+            }, 100);
         }
     }
 

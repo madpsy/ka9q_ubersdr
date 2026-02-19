@@ -138,13 +138,22 @@ class RadioAPI {
             if (window.updateURL) window.updateURL();
 
             // Center spectrum on new frequency if it's outside current view
-            if (window.spectrumDisplay && window.spectrumCenterFrequency) {
+            // Use a timeout to avoid calling during rapid frequency updates
+            if (window.spectrumDisplay && window.spectrumCenterFrequency && !this._centeringSpectrum) {
                 const startFreq = window.spectrumDisplay.startFrequency;
                 const endFreq = window.spectrumDisplay.endFrequency;
-                
+
                 if (freq < startFreq || freq > endFreq) {
                     console.log(`[RadioAPI] Centering spectrum on ${freq} Hz`);
-                    window.spectrumCenterFrequency();
+                    this._centeringSpectrum = true;
+                    setTimeout(() => {
+                        if (window.spectrumCenterFrequency) {
+                            window.spectrumCenterFrequency();
+                        }
+                        setTimeout(() => {
+                            this._centeringSpectrum = false;
+                        }, 1000);
+                    }, 100);
                 }
             }
 

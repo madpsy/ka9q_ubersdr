@@ -303,6 +303,10 @@ func (rc *RadiodController) CreateChannelWithSquelch(name string, frequency uint
 	// Add PRESET (tag 85 = 0x55)
 	buf = encodeString(&buf, 0x55, mode)
 
+	// Add STATUS_INTERVAL (tag 106 = 0x6A) for 100ms status updates
+	// With default blocktime of 20ms, 5 frames = 100ms (10 Hz update rate)
+	buf = encodeInt32(&buf, 0x6A, 5)
+
 	// Add optional squelch parameters
 	if squelchOpen != nil {
 		// Check for special "always open" value (-999)

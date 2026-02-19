@@ -1979,33 +1979,21 @@ function tuneToChannel(frequency, mode, bandwidthLow, bandwidthHigh) {
     // Update URL
     updateURL();
 
-    // Disable edge detection temporarily when tuning to channel
-    if (window.spectrumDisplay) {
-        window.spectrumDisplay.skipEdgeDetectionTemporary = true;
+    // Temporarily enable edge tune to force spectrum update
+    const edgeTuneCheckbox = document.getElementById('spectrum-edge-tune-enable');
+    const originalEdgeTuneState = edgeTuneCheckbox ? edgeTuneCheckbox.checked : false;
+
+    if (edgeTuneCheckbox && !originalEdgeTuneState) {
+        edgeTuneCheckbox.checked = true;
+        edgeTuneCheckbox.dispatchEvent(new Event('change'));
+
+        // Restore original state after spectrum updates
         setTimeout(() => {
-            if (window.spectrumDisplay) {
-                window.spectrumDisplay.skipEdgeDetectionTemporary = false;
+            if (edgeTuneCheckbox) {
+                edgeTuneCheckbox.checked = originalEdgeTuneState;
+                edgeTuneCheckbox.dispatchEvent(new Event('change'));
             }
         }, 2000);
-    }
-
-    // Center spectrum on new frequency if it's outside current view
-    if (window.spectrumDisplay && window.spectrumCenterFrequency && !window._centeringSpectrumFromTune) {
-        const startFreq = window.spectrumDisplay.startFrequency;
-        const endFreq = window.spectrumDisplay.endFrequency;
-
-        if (frequency < startFreq || frequency > endFreq) {
-            console.log(`[tuneToChannel] Centering spectrum on ${frequency} Hz`);
-            window._centeringSpectrumFromTune = true;
-            setTimeout(() => {
-                if (window.spectrumCenterFrequency) {
-                    spectrumCenterFrequency();
-                }
-                setTimeout(() => {
-                    window._centeringSpectrumFromTune = false;
-                }, 1000);
-            }, 100);
-        }
     }
 
     // Tune to the new settings

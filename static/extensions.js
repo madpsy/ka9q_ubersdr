@@ -137,24 +137,21 @@ class RadioAPI {
             if (window.updateBandButtons) window.updateBandButtons(freq);
             if (window.updateURL) window.updateURL();
 
-            // Center spectrum on new frequency if it's outside current view
-            // Use a timeout to avoid calling during rapid frequency updates
-            if (window.spectrumDisplay && window.spectrumCenterFrequency && !this._centeringSpectrum) {
-                const startFreq = window.spectrumDisplay.startFrequency;
-                const endFreq = window.spectrumDisplay.endFrequency;
+            // Temporarily enable edge tune to force spectrum update
+            const edgeTuneCheckbox = document.getElementById('spectrum-edge-tune-enable');
+            const originalEdgeTuneState = edgeTuneCheckbox ? edgeTuneCheckbox.checked : false;
 
-                if (freq < startFreq || freq > endFreq) {
-                    console.log(`[RadioAPI] Centering spectrum on ${freq} Hz`);
-                    this._centeringSpectrum = true;
-                    setTimeout(() => {
-                        if (window.spectrumCenterFrequency) {
-                            window.spectrumCenterFrequency();
-                        }
-                        setTimeout(() => {
-                            this._centeringSpectrum = false;
-                        }, 1000);
-                    }, 100);
-                }
+            if (edgeTuneCheckbox && !originalEdgeTuneState) {
+                edgeTuneCheckbox.checked = true;
+                edgeTuneCheckbox.dispatchEvent(new Event('change'));
+
+                // Restore original state after spectrum updates
+                setTimeout(() => {
+                    if (edgeTuneCheckbox) {
+                        edgeTuneCheckbox.checked = originalEdgeTuneState;
+                        edgeTuneCheckbox.dispatchEvent(new Event('change'));
+                    }
+                }, 2000);
             }
 
             if (this.isConnected()) {

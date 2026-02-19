@@ -298,8 +298,6 @@ func (fst *FrontendStatusTracker) cleanupStaleEntries() {
 			for ssrc, status := range fst.frontendStatus {
 				if now.Sub(status.LastUpdate) > staleThreshold {
 					delete(fst.frontendStatus, ssrc)
-					log.Printf("Removed stale frontend status for SSRC 0x%08x (last update: %v ago)",
-						ssrc, now.Sub(status.LastUpdate))
 				}
 			}
 

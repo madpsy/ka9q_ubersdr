@@ -1305,8 +1305,6 @@ func (sm *SessionManager) cleanupOrphanedUserAgents() {
 			delete(sm.userAgentLastSeen, uuid)
 			delete(sm.uuidToIP, uuid)
 		}
-		log.Printf("User-Agent cleanup: removed %d orphaned entries (total remaining: %d)",
-			len(toRemove), len(sm.userAgents))
 	}
 }
 

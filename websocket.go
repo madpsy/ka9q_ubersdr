@@ -694,8 +694,6 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 
 		// Check rate limit for this UUID (skip ping messages)
 		if msg.Type != "ping" && !wsh.rateLimiterManager.AllowAudio(currentSession.UserSessionID) {
-			log.Printf("Rate limit exceeded for audio command from user %s (type: %s)", currentSession.UserSessionID, msg.Type)
-
 			// Record rate limit error in Prometheus
 			if wsh.prometheusMetrics != nil {
 				wsh.prometheusMetrics.RecordRateLimitError("audio")

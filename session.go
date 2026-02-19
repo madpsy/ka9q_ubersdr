@@ -325,7 +325,8 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 	if band != "" {
 		session.VisitedBands[band] = true
 	}
-	if mode != "" {
+	// Don't track spectrum mode or invalid modes
+	if mode != "" && mode != "spectrum" {
 		session.VisitedModes[mode] = true
 	}
 
@@ -340,7 +341,8 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 		if band != "" {
 			sm.userSessionBands[userSessionID][band] = true
 		}
-		if mode != "" {
+		// Don't track spectrum mode or invalid modes
+		if mode != "" && mode != "spectrum" {
 			sm.userSessionModes[userSessionID][mode] = true
 		}
 	}
@@ -810,7 +812,8 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 	}
 
 	// Track mode change if mode actually changed (compare old vs current, not parameter)
-	if currentMode != oldMode {
+	// Don't track spectrum mode or invalid modes
+	if currentMode != oldMode && currentMode != "spectrum" {
 		// Track in per-session map
 		session.modesMu.Lock()
 		if !session.VisitedModes[currentMode] {
@@ -931,7 +934,8 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 	}
 
 	// Track mode change if mode actually changed (compare old vs current, not parameter)
-	if currentMode != oldMode {
+	// Don't track spectrum mode or invalid modes
+	if currentMode != oldMode && currentMode != "spectrum" {
 		// Track in per-session map
 		session.modesMu.Lock()
 		if !session.VisitedModes[currentMode] {

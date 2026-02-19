@@ -6,10 +6,33 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/ua-parser/uap-go/uaparser"
 )
+
+// validModes defines the set of valid mode names for validation
+var validModes = map[string]bool{
+	"usb":   true,
+	"lsb":   true,
+	"cwu":   true,
+	"cwl":   true,
+	"am":    true,
+	"fm":    true,
+	"sam":   true,
+	"nfm":   true,
+	"iq":    true,
+	"iq48":  true,
+	"iq96":  true,
+	"iq192": true,
+	"iq384": true,
+}
+
+// isValidMode checks if a mode name is valid (case-insensitive)
+func isValidMode(mode string) bool {
+	return validModes[strings.ToLower(mode)]
+}
 
 // handlePublicSessionStats returns public session statistics for the last month
 // This is a PUBLIC endpoint (no authentication required)
@@ -211,10 +234,12 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 			}
 		}
 
-		// Track modes used during this session
+		// Track modes used during this session (only valid modes)
 		for _, mode := range event.Modes {
-			if mode != "" {
-				modeCounts[mode]++
+			if mode != "" && isValidMode(mode) {
+				// Normalize to lowercase for consistent counting
+				normalizedMode := strings.ToLower(mode)
+				modeCounts[normalizedMode]++
 			}
 		}
 

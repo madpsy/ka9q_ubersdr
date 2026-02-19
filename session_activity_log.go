@@ -8,9 +8,31 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
+
+// isValidModeForLogging checks if a mode name is valid (case-insensitive)
+// This prevents corrupted or invalid mode names from being logged
+func isValidModeForLogging(mode string) bool {
+	validModes := map[string]bool{
+		"usb":   true,
+		"lsb":   true,
+		"cwu":   true,
+		"cwl":   true,
+		"am":    true,
+		"fm":    true,
+		"sam":   true,
+		"nfm":   true,
+		"iq":    true,
+		"iq48":  true,
+		"iq96":  true,
+		"iq192": true,
+		"iq384": true,
+	}
+	return validModes[strings.ToLower(mode)]
+}
 
 // SessionActivityEntry represents a single unique user session in the activity log
 type SessionActivityEntry struct {
@@ -277,10 +299,13 @@ func (sal *SessionActivityLogger) getActiveSessionEntries(event logEvent) []Sess
 			}
 		}
 
-		// Populate modes from event data
+		// Populate modes from event data (only valid modes)
 		if event.modes != nil {
 			for mode := range event.modes {
-				entry.Modes = append(entry.Modes, mode)
+				// Filter out spectrum mode and invalid modes
+				if mode != "spectrum" && isValidModeForLogging(mode) {
+					entry.Modes = append(entry.Modes, mode)
+				}
 			}
 		}
 
@@ -403,11 +428,14 @@ func (sal *SessionActivityLogger) getActiveSessionEntries(event logEvent) []Sess
 			}
 		}
 
-		// Get modes from UUID-level map
+		// Get modes from UUID-level map (only valid modes)
 		modeMap, modeExists := sal.sessionMgr.userSessionModes[userSessionID]
 		if modeExists {
 			for mode := range modeMap {
-				entry.Modes = append(entry.Modes, mode)
+				// Filter out spectrum mode and invalid modes
+				if mode != "spectrum" && isValidModeForLogging(mode) {
+					entry.Modes = append(entry.Modes, mode)
+				}
 			}
 		}
 	}

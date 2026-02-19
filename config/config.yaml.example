@@ -163,12 +163,6 @@ server:
   # Recommended: 10 (allows normal usage while preventing abuse)
   sessions_per_minute: 10
 
-  # Enforce that WebSocket connections must come from the same IP address as the /connection endpoint
-  # When enabled, prevents session hijacking by binding UUIDs to client IP addresses
-  # When disabled, allows WebSocket connections from different IPs (useful for proxies, VPNs, or mobile networks)
-  # Default: false (not enforced)
-  enforce_session_ip_match: true
-
   # List of IP addresses or CIDR ranges that bypass all session limits
   # Useful for trusted IPs like localhost, admin networks, or specific users
   # Bypassed IPs are exempt from:

@@ -255,10 +255,19 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 
 	// Start spectrum streaming goroutine
 	done := make(chan struct{})
-	go swsh.streamSpectrum(conn, session, done, state)
+	streamDone := make(chan struct{})
+	go func() {
+		defer close(streamDone)
+		swsh.streamSpectrum(conn, session, done, state)
+	}()
 
 	// Handle incoming messages
 	swsh.handleMessages(conn, session, done)
+
+	// CRITICAL: Wait for streaming goroutine to exit before closing channel
+	// This prevents "panic: send on closed channel" race condition where
+	// streamSpectrum tries to send after closeSpectrumWriter() closes the channel
+	<-streamDone
 
 	// Cleanup
 	swsh.sessions.DestroySession(session.ID)
@@ -645,9 +654,6 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinarySpectrum(conn *wsConn, sessi
 	if !conn.writeSpectrumBinary(packet) {
 		// Channel full - frame dropped (client too slow)
 		// This is expected behavior to prevent blocking other users
-		if DebugMode {
-			log.Printf("DEBUG: Dropped spectrum frame for session %s (client too slow)", session.ID)
-		}
 	} else {
 		// Track waterfall bytes sent in session (only if queued successfully)
 		session.AddWaterfallBytes(uint64(len(packet)))
@@ -825,9 +831,6 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinary8Spectrum(conn *wsConn, sess
 	if !conn.writeSpectrumBinary(packet) {
 		// Channel full - frame dropped (client too slow)
 		// This is expected behavior to prevent blocking other users
-		if DebugMode {
-			log.Printf("DEBUG: Dropped spectrum frame for session %s (client too slow)", session.ID)
-		}
 	} else {
 		// Track waterfall bytes sent in session (only if queued successfully)
 		session.AddWaterfallBytes(uint64(len(packet)))

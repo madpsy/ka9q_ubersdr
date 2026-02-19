@@ -152,14 +152,12 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Use centralized IP detection function (same as /connection endpoint)
 	clientIP := getClientIP(r)
-	
+
 	// Also get raw source IP for logging
 	sourceIP := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(sourceIP); err == nil {
 		sourceIP = host
 	}
-
-	log.Printf("DX Cluster WebSocket: sourceIP=%s, clientIP=%s (via getClientIP)", sourceIP, clientIP)
 
 	// Check if IP is banned
 	if h.ipBanManager.IsBanned(clientIP) {

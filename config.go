@@ -341,6 +341,10 @@ func LoadConfig(filename string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	// TEMPORARY: Force enforce_session_ip_match to false regardless of config setting
+	// This overrides any value set in config.yaml
+	config.Server.EnforceSessionIPMatch = false
+
 	// Parse admin allowed IPs/CIDRs
 	if err := config.Admin.parseAllowedIPs(); err != nil {
 		return nil, fmt.Errorf("failed to parse admin.allowed_ips: %w", err)

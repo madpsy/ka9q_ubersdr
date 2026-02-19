@@ -300,8 +300,6 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 
 		// Check rate limit for this UUID (skip ping messages)
 		if msg.Type != "ping" && !swsh.rateLimiterManager.AllowSpectrum(session.UserSessionID) {
-			log.Printf("Rate limit exceeded for spectrum command from user %s (type: %s)", session.UserSessionID, msg.Type)
-
 			// Record rate limit error in Prometheus
 			if swsh.prometheusMetrics != nil {
 				swsh.prometheusMetrics.RecordRateLimitError("spectrum")

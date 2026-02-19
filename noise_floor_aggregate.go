@@ -54,7 +54,6 @@ func handleNoiseFloorAggregate(w http.ResponseWriter, r *http.Request, nfm *Nois
 		json.NewEncoder(w).Encode(map[string]string{
 			"error": "Rate limit exceeded. Please wait 5 seconds between aggregate requests.",
 		})
-		log.Printf("Aggregate rate limit exceeded for IP: %s", clientIP)
 
 		// Record rate limit error in Prometheus
 		if prometheusMetrics != nil {

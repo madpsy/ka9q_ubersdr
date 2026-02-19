@@ -3132,6 +3132,23 @@ function handleFrequencyChange() {
         window.radioAPI.notifyFrequencyChange(frequency);
     }
 
+    // Temporarily enable edge tune to force spectrum update when manually entering frequency
+    const edgeTuneCheckbox = document.getElementById('spectrum-edge-tune-enable');
+    const originalEdgeTuneState = edgeTuneCheckbox ? edgeTuneCheckbox.checked : false;
+
+    if (edgeTuneCheckbox && !originalEdgeTuneState) {
+        edgeTuneCheckbox.checked = true;
+        edgeTuneCheckbox.dispatchEvent(new Event('change'));
+
+        // Restore original state after spectrum updates
+        setTimeout(() => {
+            if (edgeTuneCheckbox) {
+                edgeTuneCheckbox.checked = originalEdgeTuneState;
+                edgeTuneCheckbox.dispatchEvent(new Event('change'));
+            }
+        }, 2000);
+    }
+
     // Auto-connect if not connected
     if (!wsManager.isConnected()) {
         connect();

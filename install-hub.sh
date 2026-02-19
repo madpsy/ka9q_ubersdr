@@ -34,6 +34,7 @@ echo
 # Parse command line arguments
 IGNORE_RX888=0
 IGNORE_PORTS=0
+IGNORE_AVX2=0
 FORCE_COMPOSE=0
 GENERATE_WISDOM=0
 for arg in "$@"; do
@@ -44,6 +45,10 @@ for arg in "$@"; do
             ;;
         --ignore-ports)
             IGNORE_PORTS=1
+            shift
+            ;;
+        --ignore-avx2)
+            IGNORE_AVX2=1
             shift
             ;;
         --force-compose)
@@ -117,6 +122,20 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
     ports_in_use=0
     rx_found=0
     vendor_found=0
+    avx2_found=0
+
+    # --- AVX2 CPU extension check ---
+    if (( IGNORE_AVX2 )); then
+        echo "AVX2 CPU extension check skipped (--ignore-avx2)"
+        avx2_found=1  # Pretend it was found
+    else
+        if grep -q avx2 /proc/cpuinfo; then
+            echo "AVX2 CPU extension found"
+            avx2_found=1
+        else
+            echo "AVX2 CPU extension not found - your CPU is likely too old"
+        fi
+    fi
 
     # --- Port checks (show output regardless) ---
     if (( IGNORE_PORTS )); then
@@ -182,8 +201,8 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
     fi
 
     # --- Decide exit code ---
-    # Exit 1 if any ports are in use OR RX888 missing
-    if (( ports_in_use > 0 || rx_found == 0 )); then
+    # Exit 1 if any ports are in use OR RX888 missing OR AVX2 missing
+    if (( ports_in_use > 0 || rx_found == 0 || avx2_found == 0 )); then
         echo
         echo "Pre-flight checks failed. Installation cannot continue."
         if (( ports_in_use > 0 )); then
@@ -193,6 +212,10 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
         if (( rx_found == 0 )); then
             echo "Error: RX888 MKII not detected."
             echo "Hint: Use --ignore-rx888 to skip this check."
+        fi
+        if (( avx2_found == 0 )); then
+            echo "Error: CPU does not support AVX2 extension."
+            echo "Hint: Use --ignore-avx2 to skip this check."
         fi
         echo
         # Ensure output is flushed before exit when piped

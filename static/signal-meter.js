@@ -172,25 +172,28 @@ class SignalMeter {
 
                 // Only update SNR history every 100ms (throttled like audio packets)
                 if (timestamp - this.lastSnrHistoryUpdate >= this.snrHistoryUpdateInterval) {
-                    // Calculate smoothed SNR (average over 2 second window)
-                    const smoothedSnr = this.snrSmoothingHistory.reduce((sum, entry) => sum + entry.value, 0) / this.snrSmoothingHistory.length;
+                    // Only add to history if we have enough data for smoothing (at least 1 second of data)
+                    if (this.snrSmoothingHistory.length >= 30) { // 30 samples at 33ms = ~1 second
+                        // Calculate smoothed SNR (average over 2 second window)
+                        const smoothedSnr = this.snrSmoothingHistory.reduce((sum, entry) => sum + entry.value, 0) / this.snrSmoothingHistory.length;
 
-                    // Access global snrHistory array from app.js
-                    if (typeof window.snrHistory !== 'undefined') {
-                        window.snrHistory.push({ value: smoothedSnr, timestamp: timestamp });
+                        // Access global snrHistory array from app.js
+                        if (typeof window.snrHistory !== 'undefined') {
+                            window.snrHistory.push({ value: smoothedSnr, timestamp: timestamp });
 
-                        // Remove old entries (older than 10 seconds)
-                        const SNR_HISTORY_MAX_AGE = 10000; // 10 seconds
-                        window.snrHistory = window.snrHistory.filter(entry => timestamp - entry.timestamp <= SNR_HISTORY_MAX_AGE);
+                            // Remove old entries (older than 10 seconds)
+                            const SNR_HISTORY_MAX_AGE = 10000; // 10 seconds
+                            window.snrHistory = window.snrHistory.filter(entry => timestamp - entry.timestamp <= SNR_HISTORY_MAX_AGE);
+                        }
+
+                        // Update modal display if it's open (only when we update history)
+                        if (typeof updateSignalQualityDisplay === 'function') {
+                            updateSignalQualityDisplay();
+                        }
                     }
 
                     this.lastSnrHistoryUpdate = timestamp;
                 }
-            }
-
-            // Update modal display if it's open
-            if (typeof updateSignalQualityDisplay === 'function') {
-                updateSignalQualityDisplay();
             }
         }
 

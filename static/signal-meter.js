@@ -18,7 +18,7 @@ class SignalMeter {
 
         // SNR smoothing for spectrum data source
         this.snrSmoothingHistory = [];
-        this.snrSmoothingMaxAge = 500; // 500ms window for SNR smoothing
+        this.snrSmoothingMaxAge = 2000; // 2 second window for SNR smoothing (more aggressive smoothing)
         this.lastSnrHistoryUpdate = 0;
         this.snrHistoryUpdateInterval = 100; // Update SNR history every 100ms (matches audio packet rate)
         
@@ -167,12 +167,12 @@ class SignalMeter {
                 // Add to smoothing history
                 this.snrSmoothingHistory.push({ value: snr, timestamp: timestamp });
 
-                // Remove old entries from smoothing history (older than 500ms)
+                // Remove old entries from smoothing history (older than 2 seconds)
                 this.snrSmoothingHistory = this.snrSmoothingHistory.filter(entry => timestamp - entry.timestamp <= this.snrSmoothingMaxAge);
 
                 // Only update SNR history every 100ms (throttled like audio packets)
                 if (timestamp - this.lastSnrHistoryUpdate >= this.snrHistoryUpdateInterval) {
-                    // Calculate smoothed SNR (average over 500ms window)
+                    // Calculate smoothed SNR (average over 2 second window)
                     const smoothedSnr = this.snrSmoothingHistory.reduce((sum, entry) => sum + entry.value, 0) / this.snrSmoothingHistory.length;
 
                     // Access global snrHistory array from app.js

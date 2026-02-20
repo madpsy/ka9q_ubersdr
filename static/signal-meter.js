@@ -160,40 +160,38 @@ class SignalMeter {
             window.currentNoiseDensity = noiseDensity;
 
             // Update SNR history for the graph with smoothing (same logic as audio packets)
-            if (basebandPower > -900 && noiseDensity > -900) {
-                const snr = Math.max(0, basebandPower - noiseDensity);
-                const timestamp = Date.now();
+            const snr = Math.max(0, basebandPower - noiseDensity);
+            const timestamp = Date.now();
 
-                // Add to smoothing history
-                this.snrSmoothingHistory.push({ value: snr, timestamp: timestamp });
+            // Add to smoothing history
+            this.snrSmoothingHistory.push({ value: snr, timestamp: timestamp });
 
-                // Remove old entries from smoothing history (older than 2 seconds)
-                this.snrSmoothingHistory = this.snrSmoothingHistory.filter(entry => timestamp - entry.timestamp <= this.snrSmoothingMaxAge);
+            // Remove old entries from smoothing history (older than 2 seconds)
+            this.snrSmoothingHistory = this.snrSmoothingHistory.filter(entry => timestamp - entry.timestamp <= this.snrSmoothingMaxAge);
 
-                // Only update SNR history every 100ms (throttled like audio packets)
-                if (timestamp - this.lastSnrHistoryUpdate >= this.snrHistoryUpdateInterval) {
-                    // Only add to history if we have enough data for smoothing (at least 1 second of data)
-                    if (this.snrSmoothingHistory.length >= 30) { // 30 samples at 33ms = ~1 second
-                        // Calculate smoothed SNR (average over 2 second window)
-                        const smoothedSnr = this.snrSmoothingHistory.reduce((sum, entry) => sum + entry.value, 0) / this.snrSmoothingHistory.length;
+            // Only update SNR history every 100ms (throttled like audio packets)
+            if (timestamp - this.lastSnrHistoryUpdate >= this.snrHistoryUpdateInterval) {
+                // Only add to history if we have enough data for smoothing (at least 1 second of data)
+                if (this.snrSmoothingHistory.length >= 30) { // 30 samples at 33ms = ~1 second
+                    // Calculate smoothed SNR (average over 2 second window)
+                    const smoothedSnr = this.snrSmoothingHistory.reduce((sum, entry) => sum + entry.value, 0) / this.snrSmoothingHistory.length;
 
-                        // Access global snrHistory array from app.js
-                        if (typeof window.snrHistory !== 'undefined') {
-                            window.snrHistory.push({ value: smoothedSnr, timestamp: timestamp });
+                    // Access global snrHistory array from app.js
+                    if (typeof window.snrHistory !== 'undefined') {
+                        window.snrHistory.push({ value: smoothedSnr, timestamp: timestamp });
 
-                            // Remove old entries (older than 10 seconds)
-                            const SNR_HISTORY_MAX_AGE = 10000; // 10 seconds
-                            window.snrHistory = window.snrHistory.filter(entry => timestamp - entry.timestamp <= SNR_HISTORY_MAX_AGE);
-                        }
-
-                        // Update modal display if it's open (only when we update history)
-                        if (typeof updateSignalQualityDisplay === 'function') {
-                            updateSignalQualityDisplay();
-                        }
+                        // Remove old entries (older than 10 seconds)
+                        const SNR_HISTORY_MAX_AGE = 10000; // 10 seconds
+                        window.snrHistory = window.snrHistory.filter(entry => timestamp - entry.timestamp <= SNR_HISTORY_MAX_AGE);
                     }
-
-                    this.lastSnrHistoryUpdate = timestamp;
                 }
+
+                // Update modal display if it's open (every 100ms, even before we have history data)
+                if (typeof updateSignalQualityDisplay === 'function') {
+                    updateSignalQualityDisplay();
+                }
+
+                this.lastSnrHistoryUpdate = timestamp;
             }
         }
 

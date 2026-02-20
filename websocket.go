@@ -1070,6 +1070,30 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					if channelStatus := wsh.sessions.radiod.GetChannelStatus(session.SSRC); channelStatus != nil {
 						basebandPower = channelStatus.BasebandPower
 						noiseDensity = channelStatus.NoiseDensity
+
+						// Apply spectrum gain adjustments to match visual display
+						// This ensures signal quality values match what users see in the spectrum
+						gainAdjustment := float32(wsh.config.Spectrum.GainDB)
+
+						// Apply frequency-specific gain if configured
+						if len(wsh.config.Spectrum.GainDBFrequencyRanges) > 0 {
+							session.mu.RLock()
+							tunedFreq := session.Frequency
+							session.mu.RUnlock()
+
+							// Find matching frequency range and apply its gain
+							for _, freqRange := range wsh.config.Spectrum.GainDBFrequencyRanges {
+								if tunedFreq >= freqRange.StartFreq && tunedFreq <= freqRange.EndFreq {
+									// Apply frequency-specific gain (added to master gain)
+									gainAdjustment += float32(freqRange.GainDB)
+									break
+								}
+							}
+						}
+
+						// Apply total gain adjustment to both values
+						basebandPower += gainAdjustment
+						noiseDensity += gainAdjustment
 					}
 				}
 
@@ -1148,6 +1172,28 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					if channelStatus := wsh.sessions.radiod.GetChannelStatus(session.SSRC); channelStatus != nil {
 						basebandPower = channelStatus.BasebandPower
 						noiseDensity = channelStatus.NoiseDensity
+
+						// Apply spectrum gain adjustments to match visual display
+						gainAdjustment := float32(wsh.config.Spectrum.GainDB)
+
+						// Apply frequency-specific gain if configured
+						if len(wsh.config.Spectrum.GainDBFrequencyRanges) > 0 {
+							session.mu.RLock()
+							tunedFreq := session.Frequency
+							session.mu.RUnlock()
+
+							// Find matching frequency range and apply its gain
+							for _, freqRange := range wsh.config.Spectrum.GainDBFrequencyRanges {
+								if tunedFreq >= freqRange.StartFreq && tunedFreq <= freqRange.EndFreq {
+									gainAdjustment += float32(freqRange.GainDB)
+									break
+								}
+							}
+						}
+
+						// Apply total gain adjustment
+						basebandPower += gainAdjustment
+						noiseDensity += gainAdjustment
 					}
 				}
 

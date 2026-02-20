@@ -8836,8 +8836,10 @@ function updateSignalQualityDisplay() {
 
     let basebandPower, noiseDensity, snr;
 
-    // Determine data source
-    if (window.signalDataSource === 'spectrum' && window.signalMeter) {
+    // Determine data source (default to 'audio' if not set)
+    const dataSource = window.signalDataSource || 'audio';
+
+    if (dataSource === 'spectrum' && window.signalMeter) {
         // Use spectrum FFT data
         const peakHistory = window.signalMeter.peakHistory;
         if (peakHistory && peakHistory.length > 0) {

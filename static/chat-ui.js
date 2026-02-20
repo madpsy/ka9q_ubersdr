@@ -2261,6 +2261,18 @@ class ChatUI {
     }
 
     /**
+     * Update the total user count display
+     * Called when active channels list updates
+     */
+    updateTotalUserCount(totalCount) {
+        const totalCountEl = document.getElementById('chat-total-user-count');
+        if (totalCountEl) {
+            totalCountEl.textContent = totalCount;
+            console.log('[ChatUI] Updated total user count to:', totalCount);
+        }
+    }
+
+    /**
      * Update our own user's data in the local activeUsers list
      * Called when we change our radio settings locally
      */

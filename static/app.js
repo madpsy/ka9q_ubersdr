@@ -1840,6 +1840,12 @@ function displayActiveChannels(channels) {
         console.log('[displayActiveChannels] Invalidated spectrum marker cache');
     }
 
+    // Update chat UI total user count if chat UI is available
+    if (window.chatUI && window.chatUI.updateTotalUserCount) {
+        window.chatUI.updateTotalUserCount(channels.length);
+        console.log('[displayActiveChannels] Updated chat UI total user count');
+    }
+
     if (channels.length === 0) {
         listEl.innerHTML = '<p style="color: #888; font-style: italic;">No active channels</p>';
         return;

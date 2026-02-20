@@ -6773,9 +6773,9 @@ const ZOOM_THROTTLE_MS = 25;
 
 // Initialize spectrum display on page load
 document.addEventListener('DOMContentLoaded', () => {
-    // Load spectrum sync setting FIRST before creating spectrum display
-    loadSpectrumSyncSetting();
-    
+    // Load signal data source setting FIRST
+    loadSignalDataSource();
+
     // Load chat markers setting
     loadChatMarkersSetting();
 
@@ -8044,10 +8044,12 @@ function openBufferConfigModal() {
             }
         });
 
-        // Update spectrum sync checkbox state
-        const spectrumSyncCheckbox = document.getElementById('spectrum-sync-enable');
-        if (spectrumSyncCheckbox) {
-            spectrumSyncCheckbox.checked = window.spectrumSyncEnabled !== false;
+        // Update signal data source radio buttons
+        const audioRadio = document.querySelector('input[name="signal-source"][value="audio"]');
+        const spectrumRadio = document.querySelector('input[name="signal-source"][value="spectrum"]');
+        if (audioRadio && spectrumRadio) {
+            audioRadio.checked = (window.signalDataSource === 'audio');
+            spectrumRadio.checked = (window.signalDataSource === 'spectrum');
         }
 
         // Update signal quality display
@@ -8094,26 +8096,41 @@ function loadBufferThreshold() {
     }
 }
 
-// Toggle spectrum sync
-function toggleSpectrumSync() {
-    const checkbox = document.getElementById('spectrum-sync-enable');
-    if (!checkbox) return;
-
-    window.spectrumSyncEnabled = checkbox.checked;
+// Signal data source selection
+function setSignalDataSource(source) {
+    window.signalDataSource = source;
 
     // Save to localStorage
     try {
-        localStorage.setItem('spectrumSyncEnabled', checkbox.checked ? 'true' : 'false');
+        localStorage.setItem('signalDataSource', source);
     } catch (e) {
-        console.error('Failed to save spectrum sync setting to localStorage:', e);
+        console.error('Failed to save signal data source to localStorage:', e);
     }
 
-    // Update spectrum display if it exists
-    if (window.spectrumDisplay) {
-        window.spectrumDisplay.spectrumSyncEnabled = checkbox.checked;
-    }
+    log(`Signal data source set to: ${source}`);
 
-    log(`Spectrum sync ${checkbox.checked ? 'enabled' : 'disabled'}`);
+    // Update displays that depend on this setting
+    updateSignalQualityDisplay();
+}
+
+// Load signal data source from localStorage
+function loadSignalDataSource() {
+    try {
+        const saved = localStorage.getItem('signalDataSource');
+        window.signalDataSource = saved || 'audio'; // Default to audio
+        log(`Loaded signal data source: ${window.signalDataSource}`);
+
+        // Update radio button state if modal exists
+        const audioRadio = document.querySelector('input[name="signal-source"][value="audio"]');
+        const spectrumRadio = document.querySelector('input[name="signal-source"][value="spectrum"]');
+        if (audioRadio && spectrumRadio) {
+            audioRadio.checked = (window.signalDataSource === 'audio');
+            spectrumRadio.checked = (window.signalDataSource === 'spectrum');
+        }
+    } catch (e) {
+        console.error('Failed to load signal data source from localStorage:', e);
+        window.signalDataSource = 'audio'; // Default to audio on error
+    }
 }
 
 // Toggle chat user markers on spectrum
@@ -8187,7 +8204,7 @@ document.addEventListener('DOMContentLoaded', () => {
 window.openBufferConfigModal = openBufferConfigModal;
 window.closeBufferConfigModal = closeBufferConfigModal;
 window.setBufferThreshold = setBufferThreshold;
-window.toggleSpectrumSync = toggleSpectrumSync;
+window.setSignalDataSource = setSignalDataSource;
 window.toggleChatMarkers = toggleChatMarkers;
 
 // Copy UUID to clipboard
@@ -8817,27 +8834,47 @@ function updateSignalQualityDisplay() {
     const noiseElement = document.getElementById('signal-noise-density');
     const snrElement = document.getElementById('signal-snr');
 
+    let basebandPower, noiseDensity, snr;
+
+    // Determine data source
+    if (window.signalDataSource === 'spectrum' && window.signalMeter) {
+        // Use spectrum FFT data
+        const peakHistory = window.signalMeter.peakHistory;
+        if (peakHistory && peakHistory.length > 0) {
+            basebandPower = peakHistory[peakHistory.length - 1].value;
+            noiseDensity = window.signalMeter.getNoiseFloor();
+            snr = basebandPower - noiseDensity;
+        } else {
+            basebandPower = -999;
+            noiseDensity = -999;
+            snr = null;
+        }
+    } else {
+        // Use audio stream data (default)
+        basebandPower = currentBasebandPower;
+        noiseDensity = currentNoiseDensity;
+        snr = (basebandPower > -900 && noiseDensity > -900) ? basebandPower - noiseDensity : null;
+    }
+
+    // Update display elements
     if (basebandElement) {
-        if (currentBasebandPower > -900) {
-            basebandElement.textContent = currentBasebandPower.toFixed(1) + ' dBFS';
+        if (basebandPower > -900) {
+            basebandElement.textContent = basebandPower.toFixed(1) + ' dBFS';
         } else {
             basebandElement.textContent = 'N/A';
         }
     }
 
     if (noiseElement) {
-        if (currentNoiseDensity > -900) {
-            noiseElement.textContent = currentNoiseDensity.toFixed(1) + ' dBFS';
+        if (noiseDensity > -900) {
+            noiseElement.textContent = noiseDensity.toFixed(1) + ' dBFS';
         } else {
             noiseElement.textContent = 'N/A';
         }
     }
 
     if (snrElement) {
-        // Calculate SNR as the difference between baseband power and noise density
-        // SNR = Signal - Noise (both in dBFS, so subtraction gives the ratio in dB)
-        if (currentBasebandPower > -900 && currentNoiseDensity > -900) {
-            const snr = currentBasebandPower - currentNoiseDensity;
+        if (snr !== null && snr > -900) {
             // Clamp at 0 dB minimum (signal should not be below noise floor)
             const clampedSnr = Math.max(0, snr);
             snrElement.textContent = clampedSnr.toFixed(1) + ' dB';

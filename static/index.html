@@ -1075,13 +1075,24 @@
                         <div style="font-size: 0.9em; color: #888; margin-bottom: 8px; text-align: center;">SNR History (Last 10 Seconds)</div>
                         <canvas id="snr-chart-canvas" width="460" height="100" style="width: 100%; height: 100px; background: #2c3e50; border-radius: 4px; border: 1px solid #444;"></canvas>
                     </div>
-                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #ecf0f1;">
-                        <input type="checkbox" id="spectrum-sync-enable" onchange="toggleSpectrumSync()" style="cursor: pointer;">
-                        <span style="font-weight: bold;">Attempt Spectrum Sync</span>
-                    </label>
-                    <p style="font-size: 0.85em; color: #888; margin-top: 8px; margin-left: 28px;">
-                        When enabled, the spectrum waterfall will drop frames to stay synchronized with audio playback. Disable this if the spectrum appears to stall or freeze.
-                    </p>
+                    <div style="margin-bottom: 15px;">
+                        <label style="font-weight: bold; color: #ecf0f1; display: block; margin-bottom: 8px;">
+                            Signal Data Source:
+                        </label>
+                        <div style="display: flex; flex-direction: column; gap: 8px; margin-left: 28px;">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #ecf0f1;">
+                                <input type="radio" name="signal-source" value="audio" checked onchange="setSignalDataSource('audio')" style="cursor: pointer;">
+                                <span>Audio Stream (radiod metrics)</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #ecf0f1;">
+                                <input type="radio" name="signal-source" value="spectrum" onchange="setSignalDataSource('spectrum')" style="cursor: pointer;">
+                                <span>Spectrum FFT (peak/floor analysis)</span>
+                            </label>
+                        </div>
+                        <p style="font-size: 0.85em; color: #888; margin-top: 8px; margin-left: 28px;">
+                            Audio stream uses BasebandPower and NoiseDensity from radiod. Spectrum FFT analyzes the visual spectrum data.
+                        </p>
+                    </div>
                 </div>
             </div>
         </div>

@@ -5,16 +5,22 @@ class SignalMeter {
     constructor() {
         // Display mode: 'dbfs' or 'snr'
         this.displayMode = 'snr';
-        
+
         // Peak history for smoothing
         this.peakHistory = [];
         this.peakHistoryMaxAge = 100; // 100ms window - reduced for faster response
         this.lastMeterUpdate = 0;
         this.meterUpdateInterval = 33; // Update display every 33ms (30 fps) - matches oscilloscope
-        
+
         // Noise floor tracking (same as line graph)
         this.noiseFloorHistory = [];
         this.noiseFloorHistoryMaxAge = 2000; // 2 second window for noise floor
+
+        // SNR smoothing for spectrum data source
+        this.snrSmoothingHistory = [];
+        this.snrSmoothingMaxAge = 500; // 500ms window for SNR smoothing
+        this.lastSnrHistoryUpdate = 0;
+        this.snrHistoryUpdateInterval = 100; // Update SNR history every 100ms (matches audio packet rate)
         
         // Get DOM elements
         this.meterBar = document.getElementById('signal-meter-bar');
@@ -153,18 +159,32 @@ class SignalMeter {
             window.currentBasebandPower = basebandPower;
             window.currentNoiseDensity = noiseDensity;
 
-            // Update SNR history for the graph (same logic as audio packets)
+            // Update SNR history for the graph with smoothing (same logic as audio packets)
             if (basebandPower > -900 && noiseDensity > -900) {
                 const snr = Math.max(0, basebandPower - noiseDensity);
                 const timestamp = Date.now();
 
-                // Access global snrHistory array from app.js
-                if (typeof window.snrHistory !== 'undefined') {
-                    window.snrHistory.push({ value: snr, timestamp: timestamp });
+                // Add to smoothing history
+                this.snrSmoothingHistory.push({ value: snr, timestamp: timestamp });
 
-                    // Remove old entries (older than 10 seconds)
-                    const SNR_HISTORY_MAX_AGE = 10000; // 10 seconds
-                    window.snrHistory = window.snrHistory.filter(entry => timestamp - entry.timestamp <= SNR_HISTORY_MAX_AGE);
+                // Remove old entries from smoothing history (older than 500ms)
+                this.snrSmoothingHistory = this.snrSmoothingHistory.filter(entry => timestamp - entry.timestamp <= this.snrSmoothingMaxAge);
+
+                // Only update SNR history every 100ms (throttled like audio packets)
+                if (timestamp - this.lastSnrHistoryUpdate >= this.snrHistoryUpdateInterval) {
+                    // Calculate smoothed SNR (average over 500ms window)
+                    const smoothedSnr = this.snrSmoothingHistory.reduce((sum, entry) => sum + entry.value, 0) / this.snrSmoothingHistory.length;
+
+                    // Access global snrHistory array from app.js
+                    if (typeof window.snrHistory !== 'undefined') {
+                        window.snrHistory.push({ value: smoothedSnr, timestamp: timestamp });
+
+                        // Remove old entries (older than 10 seconds)
+                        const SNR_HISTORY_MAX_AGE = 10000; // 10 seconds
+                        window.snrHistory = window.snrHistory.filter(entry => timestamp - entry.timestamp <= SNR_HISTORY_MAX_AGE);
+                    }
+
+                    this.lastSnrHistoryUpdate = timestamp;
                 }
             }
 
@@ -214,12 +234,12 @@ class SignalMeter {
             // Weak signals (-120 to -80 dB) use 0-40% of meter
             // Medium signals (-80 to -60 dB) use 40-80% of meter
             // Strong signals (-60 to -20 dB) use 80-100% of meter (highly compressed)
-            if (avgPeakDb < -80) {
-                percentage = ((avgPeakDb + 120) / 40) * 40;
-            } else if (avgPeakDb < -60) {
-                percentage = 40 + ((avgPeakDb + 80) / 20) * 40;
+            if (basebandPower < -80) {
+                percentage = ((basebandPower + 120) / 40) * 40;
+            } else if (basebandPower < -60) {
+                percentage = 40 + ((basebandPower + 80) / 20) * 40;
             } else {
-                percentage = 80 + ((avgPeakDb + 60) / 40) * 20;
+                percentage = 80 + ((basebandPower + 60) / 40) * 20;
             }
         }
         
@@ -241,17 +261,17 @@ class SignalMeter {
             }
         } else {
             // dBFS color coding
-            if (avgPeakDb >= -70) {
+            if (basebandPower >= -70) {
                 color = '#28a745'; // Green - strong signal
-            } else if (avgPeakDb >= -85) {
+            } else if (basebandPower >= -85) {
                 color = '#ffc107'; // Yellow - moderate signal
             } else {
                 color = '#dc3545'; // Red - weak signal
             }
         }
-        
+
         // Add flashing animation for extremely strong signals (only in dBFS mode)
-        if (this.displayMode === 'dbfs' && avgPeakDb > -30) {
+        if (this.displayMode === 'dbfs' && basebandPower > -30) {
             this.meterValue.classList.add('flashing');
         } else {
             this.meterValue.classList.remove('flashing');

@@ -423,7 +423,7 @@ class ChatUI {
                         <!-- Active users sidebar -->
                         <div class="chat-users-sidebar">
                             <div class="chat-users-header">
-                                <span>👥 Users (<span id="chat-user-count">0</span>)</span>
+                                <span>👥 Users (<span id="chat-user-count">0</span>/<span id="chat-total-user-count">0</span>)</span>
                             </div>
                             <div id="chat-users-list" class="chat-users-list"></div>
                             <div class="chat-users-footer">
@@ -2099,6 +2099,13 @@ class ChatUI {
         console.log('[ChatUI] Received active users update:', data);
 
         document.getElementById('chat-user-count').textContent = data.count;
+
+        // Update total user count from active channels
+        const totalUserCount = window.activeChannels ? window.activeChannels.length : 0;
+        const totalCountEl = document.getElementById('chat-total-user-count');
+        if (totalCountEl) {
+            totalCountEl.textContent = totalUserCount;
+        }
 
         // Update the badge on the chat toggle button
         const badge = document.getElementById('chat-user-count-badge');

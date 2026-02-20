@@ -2062,8 +2062,9 @@ async function handleBinaryMessage(data) {
                 window.currentNoiseDensity = noiseDensity;
                 lastSignalQualityUpdate = now;
 
-                // Calculate SNR and add to history
-                if (basebandPower > -900 && noiseDensity > -900) {
+                // Calculate SNR and add to history (only if audio is the selected data source)
+                const dataSource = window.signalDataSource || 'audio';
+                if (dataSource === 'audio' && basebandPower > -900 && noiseDensity > -900) {
                     const snr = Math.max(0, basebandPower - noiseDensity);
                     const timestamp = Date.now();
                     snrHistory.push({ value: snr, timestamp: timestamp });
@@ -2073,10 +2074,10 @@ async function handleBinaryMessage(data) {
 
                     // Keep window reference in sync
                     window.snrHistory = snrHistory;
-                }
 
-                // Update display if modal is open
-                updateSignalQualityDisplay();
+                    // Update display if modal is open
+                    updateSignalQualityDisplay();
+                }
             }
         }
 

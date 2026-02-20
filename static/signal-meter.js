@@ -171,8 +171,8 @@ class SignalMeter {
 
             // Only update SNR history every 100ms (throttled like audio packets)
             if (timestamp - this.lastSnrHistoryUpdate >= this.snrHistoryUpdateInterval) {
-                // Only add to history if we have enough data for smoothing (at least 1 second of data)
-                if (this.snrSmoothingHistory.length >= 30) { // 30 samples at 33ms = ~1 second
+                // Only add to history if we have enough data for smoothing (at least 10 samples = ~300ms)
+                if (this.snrSmoothingHistory.length >= 10) {
                     // Calculate smoothed SNR (average over 2 second window)
                     const smoothedSnr = this.snrSmoothingHistory.reduce((sum, entry) => sum + entry.value, 0) / this.snrSmoothingHistory.length;
 

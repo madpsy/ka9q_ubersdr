@@ -2599,9 +2599,9 @@ class SpectrumDisplay {
             const hasInputFocus = freqInput && document.activeElement === freqInput;
             
             // Debug logging for edge detection
-            if (this.currentTunedFreq < startFreq || this.currentTunedFreq > endFreq) {
-                console.log(`Edge detection check: edgeTuneEnabled=${this.edgeTuneEnabled}, skipEdgeDetectionTemporary=${this.skipEdgeDetectionTemporary}, isDragging=${this.isDragging}, hasInputFocus=${hasInputFocus}`);
-            }
+            // if (this.currentTunedFreq < startFreq || this.currentTunedFreq > endFreq) {
+            //     console.log(`Edge detection check: edgeTuneEnabled=${this.edgeTuneEnabled}, skipEdgeDetectionTemporary=${this.skipEdgeDetectionTemporary}, isDragging=${this.isDragging}, hasInputFocus=${hasInputFocus}`);
+            // }
 
             // Only perform edge detection if:
             // 1. Edge Tune is enabled by user preference
@@ -4669,8 +4669,8 @@ class SpectrumDisplay {
 
         if (!isVisible) {
             // Marker has drifted off-screen - this indicates sync loss
-            console.log(`Sync check: Marker off-screen (tuned: ${(this.currentTunedFreq/1e6).toFixed(3)} MHz, ` +
-                       `range: ${(startFreq/1e6).toFixed(3)}-${(endFreq/1e6).toFixed(3)} MHz)`);
+            // console.log(`Sync check: Marker off-screen (tuned: ${(this.currentTunedFreq/1e6).toFixed(3)} MHz, ` +
+            //            `range: ${(startFreq/1e6).toFixed(3)}-${(endFreq/1e6).toFixed(3)} MHz)`);
 
             // If we're zoomed in, pan to bring marker back into view
             // Only do this if Edge Tune is enabled (otherwise user wants to scroll freely)

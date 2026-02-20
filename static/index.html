@@ -1082,15 +1082,15 @@
                         <div style="display: flex; flex-direction: column; gap: 8px; margin-left: 28px;">
                             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #ecf0f1;">
                                 <input type="radio" name="signal-source" value="audio" checked onchange="setSignalDataSource('audio')" style="cursor: pointer;">
-                                <span>Audio Stream (radiod metrics)</span>
+                                <span>Audio Stream</span>
                             </label>
                             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #ecf0f1;">
                                 <input type="radio" name="signal-source" value="spectrum" onchange="setSignalDataSource('spectrum')" style="cursor: pointer;">
-                                <span>Spectrum FFT (peak/floor analysis)</span>
+                                <span>Spectrum FFT</span>
                             </label>
                         </div>
                         <p style="font-size: 0.85em; color: #888; margin-top: 8px; margin-left: 28px;">
-                            Audio stream uses BasebandPower and NoiseDensity from radiod. Spectrum FFT analyzes the visual spectrum data.
+                            Audio stream uses BasebandPower and NoiseDensity from the SDR. Spectrum FFT uses the spectrum data.
                         </p>
                     </div>
                 </div>

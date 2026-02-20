@@ -8839,11 +8839,11 @@ function updateSignalQualityDisplay() {
     // Determine data source (default to 'audio' if not set)
     const dataSource = window.signalDataSource || 'audio';
 
-    if (dataSource === 'spectrum' && window.signalMeter) {
+    // Use explicit check - only use spectrum if explicitly selected
+    if (dataSource === 'spectrum') {
         // Use spectrum FFT data
-        const peakHistory = window.signalMeter.peakHistory;
-        if (peakHistory && peakHistory.length > 0) {
-            basebandPower = peakHistory[peakHistory.length - 1].value;
+        if (window.signalMeter && window.signalMeter.peakHistory && window.signalMeter.peakHistory.length > 0) {
+            basebandPower = window.signalMeter.peakHistory[window.signalMeter.peakHistory.length - 1].value;
             noiseDensity = window.signalMeter.getNoiseFloor();
             snr = basebandPower - noiseDensity;
         } else {
@@ -8852,7 +8852,7 @@ function updateSignalQualityDisplay() {
             snr = null;
         }
     } else {
-        // Use audio stream data (default)
+        // Use audio stream data (default for 'audio' or any other value)
         basebandPower = currentBasebandPower;
         noiseDensity = currentNoiseDensity;
         snr = (basebandPower > -900 && noiseDensity > -900) ? basebandPower - noiseDensity : null;

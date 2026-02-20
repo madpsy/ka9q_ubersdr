@@ -8719,7 +8719,10 @@ function drawSNRChart() {
     snrChartCtx.fillStyle = '#2c3e50';
     snrChartCtx.fillRect(0, 0, width, height);
 
-    if (snrHistory.length === 0) {
+    // Use window.snrHistory to support both audio and spectrum data sources
+    const historyData = window.snrHistory || snrHistory;
+
+    if (historyData.length === 0) {
         // No data yet - show message
         snrChartCtx.fillStyle = '#888';
         snrChartCtx.font = '12px monospace';
@@ -8730,8 +8733,8 @@ function drawSNRChart() {
     }
 
     // Find min and max SNR for scaling
-    let minSNR = Math.min(...snrHistory.map(e => e.value));
-    let maxSNR = Math.max(...snrHistory.map(e => e.value));
+    let minSNR = Math.min(...historyData.map(e => e.value));
+    let maxSNR = Math.max(...historyData.map(e => e.value));
 
     // Add some padding to the range
     const range = maxSNR - minSNR;
@@ -8788,7 +8791,7 @@ function drawSNRChart() {
     }
 
     // Draw SNR line graph
-    if (snrHistory.length > 1) {
+    if (historyData.length > 1) {
         snrChartCtx.strokeStyle = '#ffc107'; // Yellow/amber color
         snrChartCtx.lineWidth = 2;
         snrChartCtx.beginPath();
@@ -8796,7 +8799,7 @@ function drawSNRChart() {
         const now = Date.now();
         const timeRange = SNR_HISTORY_MAX_AGE;
 
-        snrHistory.forEach((entry, index) => {
+        historyData.forEach((entry, index) => {
             // Calculate x position based on time (right side is most recent)
             const age = now - entry.timestamp;
             const x = width - (age / timeRange) * width;
@@ -8818,14 +8821,14 @@ function drawSNRChart() {
         snrChartCtx.beginPath();
 
         // Start from bottom left
-        const firstAge = now - snrHistory[0].timestamp;
+        const firstAge = now - historyData[0].timestamp;
         const firstX = width - (firstAge / timeRange) * width;
-        const firstY = height - ((snrHistory[0].value - minSNR) / snrRange) * height;
+        const firstY = height - ((historyData[0].value - minSNR) / snrRange) * height;
         snrChartCtx.moveTo(firstX, height);
         snrChartCtx.lineTo(firstX, firstY);
 
         // Draw line through all points
-        snrHistory.forEach((entry) => {
+        historyData.forEach((entry) => {
             const age = now - entry.timestamp;
             const x = width - (age / timeRange) * width;
             const y = height - ((entry.value - minSNR) / snrRange) * height;
@@ -8833,7 +8836,7 @@ function drawSNRChart() {
         });
 
         // Close path at bottom right
-        const lastAge = now - snrHistory[snrHistory.length - 1].timestamp;
+        const lastAge = now - historyData[historyData.length - 1].timestamp;
         const lastX = width - (lastAge / timeRange) * width;
         snrChartCtx.lineTo(lastX, height);
         snrChartCtx.closePath();

@@ -181,8 +181,6 @@ class SignalMeter {
                     // Remove old entries (older than 10 seconds)
                     const SNR_HISTORY_MAX_AGE = 10000; // 10 seconds
                     window.snrHistory = window.snrHistory.filter(entry => timestamp - entry.timestamp <= SNR_HISTORY_MAX_AGE);
-                    
-                    console.log(`[Spectrum] Added SNR to history: ${smoothedSnr.toFixed(1)} dB, history length: ${window.snrHistory.length}`);
                 }
 
                 // Update modal display if it's open (every 100ms)

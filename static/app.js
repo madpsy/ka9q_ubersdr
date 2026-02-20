@@ -206,10 +206,16 @@ let currentBasebandPower = -999.0; // dBFS
 let currentNoiseDensity = -999.0; // dBFS
 let lastSignalQualityUpdate = 0;
 
+// Expose globally for signal meter
+window.currentBasebandPower = currentBasebandPower;
+window.currentNoiseDensity = currentNoiseDensity;
+
 // SNR history for chart (10 seconds at 500ms updates = 20 data points)
 let snrHistory = [];
 const SNR_HISTORY_MAX_AGE = 10000; // 10 seconds in milliseconds
 let snrChartCanvas = null;
+// Expose snrHistory globally for signal meter to update when using spectrum data
+window.snrHistory = snrHistory;
 let snrChartCtx = null;
 
 // Audio buffer configuration (user-configurable)
@@ -2051,6 +2057,9 @@ async function handleBinaryMessage(data) {
             if (now - lastSignalQualityUpdate >= 100) {
                 currentBasebandPower = basebandPower;
                 currentNoiseDensity = noiseDensity;
+                // Update global window variables for signal meter
+                window.currentBasebandPower = basebandPower;
+                window.currentNoiseDensity = noiseDensity;
                 lastSignalQualityUpdate = now;
 
                 // Calculate SNR and add to history
@@ -2061,6 +2070,9 @@ async function handleBinaryMessage(data) {
 
                     // Remove old entries (older than 10 seconds)
                     snrHistory = snrHistory.filter(entry => timestamp - entry.timestamp <= SNR_HISTORY_MAX_AGE);
+
+                    // Keep window reference in sync
+                    window.snrHistory = snrHistory;
                 }
 
                 // Update display if modal is open
@@ -8841,16 +8853,10 @@ function updateSignalQualityDisplay() {
 
     // Use explicit check - only use spectrum if explicitly selected
     if (dataSource === 'spectrum') {
-        // Use spectrum FFT data
-        if (window.signalMeter && window.signalMeter.peakHistory && window.signalMeter.peakHistory.length > 0) {
-            basebandPower = window.signalMeter.peakHistory[window.signalMeter.peakHistory.length - 1].value;
-            noiseDensity = window.signalMeter.getNoiseFloor();
-            snr = basebandPower - noiseDensity;
-        } else {
-            basebandPower = -999;
-            noiseDensity = -999;
-            snr = null;
-        }
+        // Use spectrum FFT data - get from window variables set by signal meter
+        basebandPower = window.currentBasebandPower || -999;
+        noiseDensity = window.currentNoiseDensity || -999;
+        snr = (basebandPower > -900 && noiseDensity > -900) ? basebandPower - noiseDensity : null;
     } else {
         // Use audio stream data (default for 'audio' or any other value)
         basebandPower = currentBasebandPower;

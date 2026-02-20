@@ -135,18 +135,56 @@ class SignalMeter {
     updateDisplay(avgPeakDb) {
         if (!this.meterBar || !this.meterValue) return;
 
+        // Check data source selection (default to 'audio' if not set)
+        const dataSource = window.signalDataSource || 'audio';
+
+        let basebandPower, noiseDensity;
+
+        if (dataSource === 'audio') {
+            // Use audio stream data from radiod
+            basebandPower = window.currentBasebandPower || -999;
+            noiseDensity = window.currentNoiseDensity || -999;
+        } else {
+            // Use spectrum FFT data (original behavior)
+            basebandPower = avgPeakDb;
+            noiseDensity = this.getNoiseFloor();
+
+            // Update global window variables so modal and other components can use spectrum data
+            window.currentBasebandPower = basebandPower;
+            window.currentNoiseDensity = noiseDensity;
+
+            // Update SNR history for the graph (same logic as audio packets)
+            if (basebandPower > -900 && noiseDensity > -900) {
+                const snr = Math.max(0, basebandPower - noiseDensity);
+                const timestamp = Date.now();
+
+                // Access global snrHistory array from app.js
+                if (typeof window.snrHistory !== 'undefined') {
+                    window.snrHistory.push({ value: snr, timestamp: timestamp });
+
+                    // Remove old entries (older than 10 seconds)
+                    const SNR_HISTORY_MAX_AGE = 10000; // 10 seconds
+                    window.snrHistory = window.snrHistory.filter(entry => timestamp - entry.timestamp <= SNR_HISTORY_MAX_AGE);
+                }
+            }
+
+            // Update modal display if it's open
+            if (typeof updateSignalQualityDisplay === 'function') {
+                updateSignalQualityDisplay();
+            }
+        }
+
         // Update S-meter needle if it exists
         if (typeof sMeterNeedle !== 'undefined' && sMeterNeedle) {
-            sMeterNeedle.update(avgPeakDb);
+            sMeterNeedle.update(basebandPower);
         }
         
         // Calculate SNR if in SNR mode
-        let displayValue = avgPeakDb;
+        let displayValue = basebandPower;
         let displayText = '';
         
         if (this.displayMode === 'snr') {
-            const noiseFloor = this.getNoiseFloor();
-            const snr = avgPeakDb - noiseFloor;
+            const snr = basebandPower - noiseDensity;
             displayValue = snr;
             // Pad single-digit values with a non-breaking space to prevent layout shift
             const snrText = snr.toFixed(1);
@@ -154,7 +192,7 @@ class SignalMeter {
             const paddedSnrText = (Math.abs(snr) < 10) ? '\u00A0' + snrText : snrText;
             displayText = `${paddedSnrText} dB (SNR)`;
         } else {
-            displayText = `${avgPeakDb.toFixed(1)} dBFS`;
+            displayText = `${basebandPower.toFixed(1)} dBFS`;
         }
         
         // S-meter style logarithmic scale

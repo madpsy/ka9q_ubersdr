@@ -2386,14 +2386,13 @@ class ChatUI {
         const bwHigh = userData.bw_high !== undefined ? userData.bw_high : 0;
         const zoomBW = userData.zoom_bw !== undefined ? userData.zoom_bw : 0;
 
-        // Disable edge detection temporarily when syncing (same as tuneToChannel)
-        if (window.spectrumDisplay) {
-            window.spectrumDisplay.skipEdgeDetectionTemporary = true;
-            setTimeout(() => {
-                if (window.spectrumDisplay) {
-                    window.spectrumDisplay.skipEdgeDetectionTemporary = false;
-                }
-            }, 2000);
+        // Temporarily enable edge tune to force spectrum update (same as voice activity)
+        const edgeTuneCheckbox = document.getElementById('spectrum-edge-tune-enable');
+        const originalEdgeTuneState = edgeTuneCheckbox ? edgeTuneCheckbox.checked : false;
+
+        if (edgeTuneCheckbox && !originalEdgeTuneState) {
+            edgeTuneCheckbox.checked = true;
+            edgeTuneCheckbox.dispatchEvent(new Event('change'));
         }
 
         // Step 1: Update frequency
@@ -2502,6 +2501,14 @@ class ChatUI {
         if (typeof autoTune === 'function') {
             console.log('[ChatUI] Auto-tuning with synced bandwidth');
             autoTune();
+        }
+
+        // Restore original edge tune state after spectrum updates
+        if (edgeTuneCheckbox && !originalEdgeTuneState) {
+            setTimeout(() => {
+                edgeTuneCheckbox.checked = originalEdgeTuneState;
+                edgeTuneCheckbox.dispatchEvent(new Event('change'));
+            }, 2000);
         }
 
         // Update our own user data in the local list after sync completes

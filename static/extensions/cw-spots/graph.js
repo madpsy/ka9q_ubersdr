@@ -251,7 +251,7 @@ class CWSpotsGraph {
                             label: (item) => {
                                 const spot = item.raw.spot;
                                 const lines = [];
-                                lines.push(`Freq: ${(spot.frequency / 1e6).toFixed(3)} MHz`);
+                                lines.push(`Freq: ${(spot.frequency / 1e6).toFixed(4)} MHz`);
                                 lines.push(`Band: ${spot.band || 'Unknown'}`);
                                 lines.push(`SNR: ${spot.snr} dB`);
                                 lines.push(`WPM: ${spot.wpm || 'N/A'}`);

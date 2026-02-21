@@ -252,35 +252,7 @@ class CWSpotsGraph {
                             left: 4,
                             right: 4
                         },
-                        clip: false,
-                        listeners: {
-                            click: (context) => {
-                                const spot = context.dataset.data[context.dataIndex].spot;
-                                self.tuneToSpot(spot);
-                                return true;
-                            },
-                            enter: (context) => {
-                                // Show tooltip when hovering over label
-                                const chart = context.chart;
-                                self.activeTooltip = {
-                                    datasetIndex: context.datasetIndex,
-                                    index: context.dataIndex
-                                };
-                                chart.tooltip.setActiveElements([self.activeTooltip], {x: 0, y: 0});
-                                chart.setActiveElements([self.activeTooltip]);
-                                chart.update('active');
-                                return true;
-                            },
-                            leave: (context) => {
-                                // Hide tooltip when leaving label
-                                const chart = context.chart;
-                                self.activeTooltip = null;
-                                chart.tooltip.setActiveElements([], {x: 0, y: 0});
-                                chart.setActiveElements([]);
-                                chart.update('active');
-                                return true;
-                            }
-                        }
+                        clip: false
                     }
                 },
                 scales: {

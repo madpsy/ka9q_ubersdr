@@ -231,6 +231,14 @@ class CWSpotsGraph {
                             bottom: 2,
                             left: 4,
                             right: 4
+                        },
+                        clip: false,
+                        listeners: {
+                            click: (context) => {
+                                const spot = context.dataset.data[context.dataIndex].spot;
+                                self.tuneToSpot(spot);
+                                return true;
+                            }
                         }
                     }
                 },
@@ -253,6 +261,10 @@ class CWSpotsGraph {
                         },
                         grid: {
                             color: '#444'
+                        },
+                        afterFit: (scale) => {
+                            // Add padding to the right to accommodate labels
+                            scale.paddingRight = 60;
                         }
                     },
                     y: {

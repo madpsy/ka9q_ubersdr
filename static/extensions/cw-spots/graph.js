@@ -261,27 +261,23 @@ class CWSpotsGraph {
                             },
                             enter: (context) => {
                                 // Show tooltip when hovering over label
+                                const chart = context.chart;
                                 self.activeTooltip = {
                                     datasetIndex: context.datasetIndex,
-                                    dataIndex: context.dataIndex
+                                    index: context.dataIndex
                                 };
-                                const chart = context.chart;
-                                const tooltip = chart.tooltip;
-                                if (tooltip) {
-                                    tooltip.setActiveElements([self.activeTooltip]);
-                                    tooltip.update(true);
-                                }
+                                chart.tooltip.setActiveElements([self.activeTooltip], {x: 0, y: 0});
+                                chart.setActiveElements([self.activeTooltip]);
+                                chart.update('active');
                                 return true;
                             },
                             leave: (context) => {
                                 // Hide tooltip when leaving label
-                                self.activeTooltip = null;
                                 const chart = context.chart;
-                                const tooltip = chart.tooltip;
-                                if (tooltip) {
-                                    tooltip.setActiveElements([]);
-                                    tooltip.update(true);
-                                }
+                                self.activeTooltip = null;
+                                chart.tooltip.setActiveElements([], {x: 0, y: 0});
+                                chart.setActiveElements([]);
+                                chart.update('active');
                                 return true;
                             }
                         }

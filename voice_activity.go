@@ -40,13 +40,13 @@ func StartVoiceActivityBackgroundScanner(nfm *NoiseFloorMonitor) {
 	if nfm == nil {
 		return
 	}
-	
+
 	go func() {
 		ticker := time.NewTicker(5 * time.Second) // Scan every 5 seconds
 		defer ticker.Stop()
-		
+
 		params := DefaultDetectionParams()
-		
+
 		for range ticker.C {
 			// Scan all configured bands
 			for _, bandConfig := range nfm.config.NoiseFloor.Bands {
@@ -54,30 +54,30 @@ func StartVoiceActivityBackgroundScanner(nfm *NoiseFloorMonitor) {
 				if bandConfig.Name == "2200m" || bandConfig.Name == "630m" || bandConfig.Name == "30m" {
 					continue
 				}
-				
+
 				// Get FFT data for this band
 				nfm.fftMu.RLock()
 				buffer, ok := nfm.fftBuffers[bandConfig.Name]
 				nfm.fftMu.RUnlock()
-				
+
 				if !ok {
 					continue
 				}
-				
+
 				fft := buffer.GetAveragedFFT(5 * time.Second)
 				if fft == nil {
 					continue
 				}
-				
+
 				// Detect voice activity
 				newActivities := detectVoiceActivity(fft, params)
-				
+
 				// Update cache (this will increment detection counts)
 				voiceActivityCache.mergeWithCache(bandConfig.Name, newActivities)
 			}
 		}
 	}()
-	
+
 	log.Printf("Voice activity background scanner started (scans all bands except 2200m, 630m, 30m every 5 seconds)")
 }
 
@@ -87,29 +87,29 @@ func StartVoiceActivityBackgroundScanner(nfm *NoiseFloorMonitor) {
 func (vac *VoiceActivityCache) mergeWithCache(band string, newActivities []VoiceActivity) []VoiceActivity {
 	vac.mu.Lock()
 	defer vac.mu.Unlock()
-	
+
 	now := time.Now()
 	cacheExpiry := 30 * time.Second
-	
+
 	// Initialize band cache if needed
 	if vac.cache[band] == nil {
 		vac.cache[band] = make(map[uint64]*CachedVoiceActivity)
 	}
-	
+
 	bandCache := vac.cache[band]
-	
+
 	// Remove expired cache entries
 	for key, ca := range bandCache {
 		if now.Sub(ca.Timestamp) > cacheExpiry {
 			delete(bandCache, key)
 		}
 	}
-	
+
 	// Process new activities
 	for _, activity := range newActivities {
 		// Round dial freq to 500 Hz for grouping (same station)
 		key := (activity.EstimatedDialFreq / 500) * 500
-		
+
 		if existing, ok := bandCache[key]; ok {
 			// Already seen this frequency - increment count and update
 			existing.DetectionCount++
@@ -127,7 +127,7 @@ func (vac *VoiceActivityCache) mergeWithCache(band string, newActivities []Voice
 			}
 		}
 	}
-	
+
 	// Return only activities detected at least 2 times
 	result := []VoiceActivity{}
 	for _, ca := range bandCache {
@@ -135,12 +135,12 @@ func (vac *VoiceActivityCache) mergeWithCache(band string, newActivities []Voice
 			result = append(result, ca.Activity)
 		}
 	}
-	
+
 	// Sort by frequency
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].EstimatedDialFreq < result[j].EstimatedDialFreq
 	})
-	
+
 	return result
 }
 
@@ -151,12 +151,12 @@ func (vac *VoiceActivityCache) mergeWithCache(band string, newActivities []Voice
 // VoiceActivity represents a detected voice signal
 type VoiceActivity struct {
 	// Frequency information
-	StartFreq         uint64  `json:"start_freq"`
-	EndFreq           uint64  `json:"end_freq"`
-	CenterFreq        uint64  `json:"center_freq"`
-	Bandwidth         uint64  `json:"bandwidth"`
-	EstimatedDialFreq uint64  `json:"estimated_dial_freq"`
-	Mode              string  `json:"mode"`
+	StartFreq         uint64 `json:"start_freq"`
+	EndFreq           uint64 `json:"end_freq"`
+	CenterFreq        uint64 `json:"center_freq"`
+	Bandwidth         uint64 `json:"bandwidth"`
+	EstimatedDialFreq uint64 `json:"estimated_dial_freq"`
+	Mode              string `json:"mode"`
 
 	// Signal strength
 	AvgSignalDB      float32 `json:"avg_signal_db"`
@@ -226,7 +226,7 @@ func getBandSSBStartFreq(band string) uint64 {
 		"12m":  24940000, // 24940 kHz
 		"10m":  28320000, // 28320 kHz
 	}
-	
+
 	if freq, ok := ssbStarts[band]; ok {
 		return freq
 	}
@@ -240,7 +240,7 @@ func filterActivitiesBySSBStart(activities []VoiceActivity, band string) []Voice
 		// No filtering needed for this band
 		return activities
 	}
-	
+
 	filtered := []VoiceActivity{}
 	for _, activity := range activities {
 		// Check if the estimated dial frequency is at or above the SSB start
@@ -248,7 +248,7 @@ func filterActivitiesBySSBStart(activities []VoiceActivity, band string) []Voice
 			filtered = append(filtered, activity)
 		}
 	}
-	
+
 	return filtered
 }
 
@@ -258,18 +258,18 @@ func filterActivitiesBySSBStart(activities []VoiceActivity, band string) []Voice
 
 // CandidateRegion represents a potential voice signal tracked over time
 type CandidateRegion struct {
-	StartBin      int
-	EndBin        int
-	StartFreq     uint64
-	EndFreq       uint64
-	Bandwidth     uint64
-	FirstSeen     time.Time
-	LastSeen      time.Time
-	FrameCount    int
-	AvgPower      float32
-	PeakPower     float32
-	NoiseFloor    float32
-	SNR           float32
+	StartBin       int
+	EndBin         int
+	StartFreq      uint64
+	EndFreq        uint64
+	Bandwidth      uint64
+	FirstSeen      time.Time
+	LastSeen       time.Time
+	FrameCount     int
+	AvgPower       float32
+	PeakPower      float32
+	NoiseFloor     float32
+	SNR            float32
 	InferredLowCut uint64
 }
 
@@ -290,14 +290,14 @@ func detectVoiceActivity(fft *BandFFT, params DetectionParams) []VoiceActivity {
 
 	// For now, use the averaged FFT data as a single frame
 	// In future, we'll access buffer.Samples directly for multi-frame analysis
-	
+
 	// Step 1: Per-frame noise floor estimation using median filter
 	noiseFloor := estimateNoiseFloorMedianFilter(fft.Data, 1000, 3000, fft.BinWidth, fft.StartFreq)
-	
+
 	// Step 2: Detect candidate regions (1.5-4 kHz bandwidth, 6-10 dB above noise)
 	threshold := noiseFloor + params.ThresholdDB
 	candidates := detectCandidateRegions(fft.Data, threshold, fft.BinWidth, fft.StartFreq, params)
-	
+
 	// Step 3: Apply voice-likeness filters
 	voiceCandidates := []CandidateRegion{}
 	for _, candidate := range candidates {
@@ -305,31 +305,36 @@ func detectVoiceActivity(fft *BandFFT, params DetectionParams) []VoiceActivity {
 		if !passesTonalityCheck(fft.Data, candidate.StartBin, candidate.EndBin) {
 			continue
 		}
-		
+
+		// Spectral variance check: reject flat wideband noise
+		if !passesSpectralVarianceCheck(fft.Data, candidate.StartBin, candidate.EndBin) {
+			continue
+		}
+
 		// For single-frame analysis, we can't do syllabic modulation check
 		// This would require time-domain analysis across multiple frames
-		
+
 		voiceCandidates = append(voiceCandidates, candidate)
 	}
-	
+
 	// Step 4: Convert candidates to VoiceActivity records
 	activities := []VoiceActivity{}
 	for _, candidate := range voiceCandidates {
 		// Infer low-cut from spectral ramp (80-600 Hz range)
-		lowCut := inferLowCutFromSpectralRamp(fft.Data, candidate.StartBin, candidate.EndBin, 
+		lowCut := inferLowCutFromSpectralRamp(fft.Data, candidate.StartBin, candidate.EndBin,
 			fft.BinWidth, fft.StartFreq, candidate.StartFreq)
 		candidate.InferredLowCut = lowCut
-		
+
 		// Calculate dial frequency
 		dialFreq, alternatives, mode := calculateDialFrequency(candidate, fft.StartFreq, fft.EndFreq, params)
-		
+
 		// Calculate confidence
 		confidence := calculateVoiceConfidence(candidate, params)
-		
+
 		if confidence < params.MinConfidence {
 			continue
 		}
-		
+
 		activity := VoiceActivity{
 			StartFreq:            candidate.StartFreq,
 			EndFreq:              candidate.EndFreq,
@@ -349,10 +354,10 @@ func detectVoiceActivity(fft *BandFFT, params DetectionParams) []VoiceActivity {
 			EndBin:               candidate.EndBin,
 			AlternativeDialFreqs: alternatives,
 		}
-		
+
 		activities = append(activities, activity)
 	}
-	
+
 	return activities
 }
 
@@ -366,38 +371,38 @@ func estimateNoiseFloorMedianFilter(data []float32, minFreq, maxFreq uint64, bin
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i] < sorted[j]
 	})
-	
+
 	// 10th percentile - robust noise floor that ignores signals
 	idx := len(sorted) * 10 / 100
 	if idx >= len(sorted) {
 		idx = len(sorted) - 1
 	}
-	
+
 	return sorted[idx]
 }
 
 // detectCandidateRegions finds regions 1.5-4 kHz wide, 6-10 dB above noise
 func detectCandidateRegions(data []float32, threshold float32, binWidth float64, startFreq uint64, params DetectionParams) []CandidateRegion {
 	candidates := []CandidateRegion{}
-	
+
 	// K consecutive bins above threshold (edge finding)
 	K := 3 // Require 3 consecutive bins to start/end a region
-	
+
 	// Calculate noise floor for SNR
 	noiseFloor := estimateNoiseFloorMedianFilter(data, 0, 0, binWidth, startFreq)
-	
+
 	var current *CandidateRegion
 	consecutiveAbove := 0
 	consecutiveBelow := 0
 	binCount := 0
-	
+
 	for i, power := range data {
 		freq := startFreq + uint64(float64(i)*binWidth)
-		
+
 		if power > threshold {
 			consecutiveAbove++
 			consecutiveBelow = 0
-			
+
 			if current == nil && consecutiveAbove >= K {
 				// Start new candidate
 				current = &CandidateRegion{
@@ -415,7 +420,7 @@ func detectCandidateRegions(data []float32, threshold float32, binWidth float64,
 				// Continue current candidate
 				current.EndBin = i
 				current.EndFreq = freq
-				
+
 				if power > current.PeakPower {
 					current.PeakPower = power
 				}
@@ -426,12 +431,12 @@ func detectCandidateRegions(data []float32, threshold float32, binWidth float64,
 		} else {
 			consecutiveBelow++
 			consecutiveAbove = 0
-			
+
 			// End current candidate if K consecutive bins below threshold
 			if current != nil && consecutiveBelow >= K {
 				current.Bandwidth = current.EndFreq - current.StartFreq
 				current.SNR = current.AvgPower - noiseFloor
-				
+
 				// Check bandwidth constraints
 				if current.Bandwidth >= params.MinBandwidth && current.Bandwidth <= params.MaxBandwidth {
 					candidates = append(candidates, *current)
@@ -441,18 +446,18 @@ func detectCandidateRegions(data []float32, threshold float32, binWidth float64,
 			}
 		}
 	}
-	
+
 	// Handle candidate extending to end
 	if current != nil {
 		current.EndFreq = startFreq + uint64(float64(current.EndBin)*binWidth)
 		current.Bandwidth = current.EndFreq - current.StartFreq
 		current.SNR = current.AvgPower - noiseFloor
-		
+
 		if current.Bandwidth >= params.MinBandwidth && current.Bandwidth <= params.MaxBandwidth {
 			candidates = append(candidates, *current)
 		}
 	}
-	
+
 	return candidates
 }
 
@@ -461,9 +466,9 @@ func passesTonalityCheck(data []float32, startBin, endBin int) bool {
 	if startBin < 0 || endBin >= len(data) || startBin >= endBin {
 		return false
 	}
-	
+
 	signalBins := data[startBin : endBin+1]
-	
+
 	// Find max
 	maxPower := signalBins[0]
 	for _, power := range signalBins {
@@ -471,7 +476,7 @@ func passesTonalityCheck(data []float32, startBin, endBin int) bool {
 			maxPower = power
 		}
 	}
-	
+
 	// Find median
 	sorted := make([]float32, len(signalBins))
 	copy(sorted, signalBins)
@@ -479,10 +484,66 @@ func passesTonalityCheck(data []float32, startBin, endBin int) bool {
 		return sorted[i] < sorted[j]
 	})
 	medianPower := sorted[len(sorted)/2]
-	
+
 	// Check tonality: voice should have max - median < 20 dB
 	tonality := maxPower - medianPower
 	return tonality < 20.0
+}
+
+// passesSpectralVarianceCheck rejects flat wideband noise and narrow digital modes
+// Voice has energy distributed across most of the passband with variations
+// Wideband noise has uniform energy distribution
+// Digital modes have energy in only a few narrow bins
+func passesSpectralVarianceCheck(data []float32, startBin, endBin int) bool {
+	if startBin < 0 || endBin >= len(data) || startBin >= endBin {
+		return false
+	}
+
+	signalBins := data[startBin : endBin+1]
+
+	// Calculate mean power
+	var sum float32
+	for _, power := range signalBins {
+		sum += power
+	}
+	mean := sum / float32(len(signalBins))
+
+	// Calculate standard deviation
+	var variance float32
+	for _, power := range signalBins {
+		diff := power - mean
+		variance += diff * diff
+	}
+	variance /= float32(len(signalBins))
+	stdDev := float32(math.Sqrt(float64(variance)))
+
+	// Check 1: Voice should have at least 3 dB standard deviation
+	// Flat wideband noise typically has <2 dB std dev
+	minStdDev := float32(3.0) // dB
+	if stdDev < minStdDev {
+		return false
+	}
+
+	// Check 2: Voice should have energy distributed across most of the passband
+	// Count bins that are significantly above the mean (indicating active frequency content)
+	// Digital modes have energy in only a few bins, voice spreads across many
+	significantBins := 0
+	threshold := mean - stdDev*0.5 // Bins above (mean - 0.5*stdDev) are considered active
+
+	for _, power := range signalBins {
+		if power >= threshold {
+			significantBins++
+		}
+	}
+
+	// Require at least 40% of bins to have significant energy
+	// Voice typically has 50-80% of bins active due to formants and harmonics
+	// Digital modes typically have <20% of bins active
+	// Flat noise would have ~50% but fails the stdDev check above
+	minPercentage := float32(0.40)
+	activePercentage := float32(significantBins) / float32(len(signalBins))
+
+	return activePercentage >= minPercentage
 }
 
 // inferLowCutFromSpectralRamp infers the low-cut filter frequency from spectral ramp
@@ -492,39 +553,39 @@ func inferLowCutFromSpectralRamp(data []float32, startBin, endBin int, binWidth 
 	if startBin < 0 || endBin >= len(data) || startBin >= endBin {
 		return 300 // Default
 	}
-	
+
 	signalBins := data[startBin : endBin+1]
-	
+
 	// Find reference level R (70th percentile of middle of blob)
 	// Exclude edges (~300 Hz on each side)
 	edgeExclude := int(300.0 / binWidth)
 	if edgeExclude < 1 {
 		edgeExclude = 1
 	}
-	
+
 	middleStart := edgeExclude
 	middleEnd := len(signalBins) - edgeExclude
 	if middleStart >= middleEnd {
 		// Signal too narrow, use default
 		return 300
 	}
-	
+
 	middleBins := make([]float32, middleEnd-middleStart)
 	copy(middleBins, signalBins[middleStart:middleEnd])
 	sort.Slice(middleBins, func(i, j int) bool {
 		return middleBins[i] < middleBins[j]
 	})
-	
+
 	refLevel := middleBins[len(middleBins)*70/100] // 70th percentile
-	
+
 	// Look for where signal rises above (refLevel - 8 dB) moving from edge inward
 	// This finds the "turn-on" point
 	turnOnThreshold := refLevel - 8.0
-	
+
 	// For LSB: scan from top edge (endBin) downward
 	// For USB: scan from bottom edge (startBin) upward
 	// Since we don't know mode yet, estimate from both edges and take average
-	
+
 	// Scan from top edge downward
 	var topTurnOn int = -1
 	for i := len(signalBins) - 1; i >= 0; i-- {
@@ -533,7 +594,7 @@ func inferLowCutFromSpectralRamp(data []float32, startBin, endBin int, binWidth 
 			break
 		}
 	}
-	
+
 	// Scan from bottom edge upward
 	var bottomTurnOn int = -1
 	for i := 0; i < len(signalBins); i++ {
@@ -542,10 +603,10 @@ func inferLowCutFromSpectralRamp(data []float32, startBin, endBin int, binWidth 
 			break
 		}
 	}
-	
+
 	// Calculate offset from edges
 	var lowCutEst uint64 = 300 // Default
-	
+
 	if topTurnOn >= 0 {
 		// Distance from top edge to turn-on point
 		topOffset := uint64(float64(len(signalBins)-1-topTurnOn) * binWidth)
@@ -553,7 +614,7 @@ func inferLowCutFromSpectralRamp(data []float32, startBin, endBin int, binWidth 
 			lowCutEst = topOffset
 		}
 	}
-	
+
 	if bottomTurnOn >= 0 {
 		// Distance from bottom edge to turn-on point
 		bottomOffset := uint64(float64(bottomTurnOn) * binWidth)
@@ -566,7 +627,7 @@ func inferLowCutFromSpectralRamp(data []float32, startBin, endBin int, binWidth 
 			}
 		}
 	}
-	
+
 	// Clamp to reasonable range
 	if lowCutEst < 100 {
 		lowCutEst = 100
@@ -574,7 +635,7 @@ func inferLowCutFromSpectralRamp(data []float32, startBin, endBin int, binWidth 
 	if lowCutEst > 600 {
 		lowCutEst = 600
 	}
-	
+
 	return lowCutEst
 }
 
@@ -586,10 +647,10 @@ func calculateDialFrequency(candidate CandidateRegion, bandStart, bandEnd uint64
 	if bandStart < 10000000 {
 		mode = "LSB"
 	}
-	
+
 	// Use inferred low-cut (L_est)
 	lowCut := candidate.InferredLowCut
-	
+
 	// Calculate raw dial frequency:
 	// LSB: Fc = fU + L_est (upper edge + low-cut)
 	// USB: Fc = fL - L_est (lower edge - low-cut)
@@ -599,15 +660,15 @@ func calculateDialFrequency(candidate CandidateRegion, bandStart, bandEnd uint64
 	} else {
 		rawDialFreq = candidate.StartFreq - lowCut
 	}
-	
+
 	// Smart rounding: prefer 500 Hz boundaries, but only if close
 	// Most operators tune to x.x00, x.x50 kHz (500 Hz increments)
 	dialFreq := smartRoundTo500Hz(rawDialFreq, params.RoundingInterval)
-	
+
 	// Generate alternatives with different low-cut estimates
 	alternatives := []uint64{}
 	lowCutVariants := []uint64{200, 300, 400, 500} // Common SSB filter offsets
-	
+
 	for _, lc := range lowCutVariants {
 		var altFreq uint64
 		if mode == "LSB" {
@@ -615,9 +676,9 @@ func calculateDialFrequency(candidate CandidateRegion, bandStart, bandEnd uint64
 		} else {
 			altFreq = candidate.StartFreq - lc
 		}
-		
+
 		altFreq = smartRoundTo500Hz(altFreq, params.RoundingInterval)
-		
+
 		// Avoid duplicates
 		isDuplicate := false
 		if altFreq == dialFreq {
@@ -633,7 +694,7 @@ func calculateDialFrequency(candidate CandidateRegion, bandStart, bandEnd uint64
 			alternatives = append(alternatives, altFreq)
 		}
 	}
-	
+
 	return dialFreq, alternatives, mode
 }
 
@@ -642,7 +703,7 @@ func calculateDialFrequency(candidate CandidateRegion, bandStart, bandEnd uint64
 func smartRoundTo500Hz(freq uint64, roundingInterval uint64) uint64 {
 	// Find nearest 1 kHz boundary (.000)
 	nearest1000 := ((freq + 500) / 1000) * 1000
-	
+
 	// Calculate distance to nearest 1 kHz boundary
 	var distance1000 uint64
 	if freq > nearest1000 {
@@ -650,17 +711,17 @@ func smartRoundTo500Hz(freq uint64, roundingInterval uint64) uint64 {
 	} else {
 		distance1000 = nearest1000 - freq
 	}
-	
+
 	// If within 600 Hz of a 1 kHz boundary (.000), snap to it
 	// Increased from 300 Hz to 600 Hz to catch systematic offsets in LSB/USB detection
 	// This fixes the issue where detections appear on .500 boundaries when actually on .000
 	if distance1000 <= 600 {
 		return nearest1000
 	}
-	
+
 	// Find nearest 500 Hz boundary (.000 or .500)
 	nearest500 := ((freq + 250) / 500) * 500
-	
+
 	// Calculate distance to nearest 500 Hz boundary
 	var distance500 uint64
 	if freq > nearest500 {
@@ -668,12 +729,12 @@ func smartRoundTo500Hz(freq uint64, roundingInterval uint64) uint64 {
 	} else {
 		distance500 = nearest500 - freq
 	}
-	
+
 	// If within 200 Hz of a 500 Hz boundary, snap to it
 	if distance500 <= 200 {
 		return nearest500
 	}
-	
+
 	// Otherwise, round to the specified interval (100 Hz)
 	halfInterval := roundingInterval / 2
 	return ((freq + halfInterval) / roundingInterval) * roundingInterval
@@ -682,17 +743,17 @@ func smartRoundTo500Hz(freq uint64, roundingInterval uint64) uint64 {
 // calculateVoiceConfidence computes detection confidence score (0-1)
 func calculateVoiceConfidence(candidate CandidateRegion, params DetectionParams) float32 {
 	var score float32 = 0.0
-	
+
 	// SNR contribution (0-0.4)
 	snrScore := math.Min(float64(candidate.SNR)/30.0, 1.0) * 0.4
 	score += float32(snrScore)
-	
+
 	// Bandwidth match contribution (0-0.3)
 	idealBW := 2700.0 // Typical SSB voice
 	bwDiff := math.Abs(float64(candidate.Bandwidth) - idealBW)
 	bwScore := math.Max(0, 1.0-(bwDiff/1000.0)) * 0.3
 	score += float32(bwScore)
-	
+
 	// Low-cut inference quality (0-0.2)
 	// Prefer low-cuts in typical range (200-400 Hz)
 	if candidate.InferredLowCut >= 200 && candidate.InferredLowCut <= 400 {
@@ -700,11 +761,11 @@ func calculateVoiceConfidence(candidate CandidateRegion, params DetectionParams)
 	} else if candidate.InferredLowCut >= 100 && candidate.InferredLowCut <= 600 {
 		score += 0.1
 	}
-	
+
 	// Duration/stability (0-0.1)
 	// For single-frame analysis, give partial credit
 	score += 0.05
-	
+
 	return float32(math.Min(float64(score), 1.0))
 }
 
@@ -718,7 +779,7 @@ func detectVoiceActivityMultiFrame(buffer *FFTBuffer, params DetectionParams, wi
 	if buffer == nil || len(buffer.Samples) == 0 {
 		return []VoiceActivity{}
 	}
-	
+
 	// Build time-frequency view over 2-5 seconds
 	cutoff := time.Now().Add(-windowDuration)
 	frames := []FFTSample{}
@@ -727,26 +788,26 @@ func detectVoiceActivityMultiFrame(buffer *FFTBuffer, params DetectionParams, wi
 			frames = append(frames, sample)
 		}
 	}
-	
+
 	if len(frames) == 0 {
 		return []VoiceActivity{}
 	}
-	
+
 	// Track candidate regions over time
 	regionTracker := make(map[string]*CandidateRegion)
-	
+
 	for _, frame := range frames {
 		// Per-frame noise floor estimation
 		noiseFloor := estimateNoiseFloorMedianFilter(frame.Data, 1000, 3000, buffer.BinWidth, buffer.StartFreq)
-		
+
 		// Detect candidates in this frame
 		threshold := noiseFloor + params.ThresholdDB
 		frameCandidates := detectCandidateRegions(frame.Data, threshold, buffer.BinWidth, buffer.StartFreq, params)
-		
+
 		// Update region tracker
 		for _, candidate := range frameCandidates {
 			key := fmt.Sprintf("%d-%d", candidate.StartBin, candidate.EndBin)
-			
+
 			if existing, ok := regionTracker[key]; ok {
 				// Update existing region
 				existing.LastSeen = frame.Timestamp
@@ -765,40 +826,45 @@ func detectVoiceActivityMultiFrame(buffer *FFTBuffer, params DetectionParams, wi
 			}
 		}
 	}
-	
+
 	// Filter regions by persistence and voice-likeness
 	activities := []VoiceActivity{}
-	
+
 	for _, region := range regionTracker {
 		// Require region to appear in at least 30% of frames
 		minFrames := int(float64(len(frames)) * 0.3)
 		if region.FrameCount < minFrames {
 			continue
 		}
-		
+
 		// Apply voice-likeness filters on the most recent frame
 		lastFrame := frames[len(frames)-1]
 		if !passesTonalityCheck(lastFrame.Data, region.StartBin, region.EndBin) {
 			continue
 		}
-		
+
+		// Spectral variance check: reject flat wideband noise
+		if !passesSpectralVarianceCheck(lastFrame.Data, region.StartBin, region.EndBin) {
+			continue
+		}
+
 		// Syllabic modulation check would go here (requires power variation analysis)
-		
+
 		// Infer low-cut
 		lowCut := inferLowCutFromSpectralRamp(lastFrame.Data, region.StartBin, region.EndBin,
 			buffer.BinWidth, buffer.StartFreq, region.StartFreq)
 		region.InferredLowCut = lowCut
-		
+
 		// Calculate dial frequency with median stabilization
 		dialFreq, alternatives, mode := calculateDialFrequency(*region, buffer.StartFreq, buffer.EndFreq, params)
-		
+
 		// Calculate confidence
 		confidence := calculateVoiceConfidence(*region, params)
-		
+
 		if confidence < params.MinConfidence {
 			continue
 		}
-		
+
 		activity := VoiceActivity{
 			StartFreq:            region.StartFreq,
 			EndFreq:              region.EndFreq,
@@ -818,10 +884,10 @@ func detectVoiceActivityMultiFrame(buffer *FFTBuffer, params DetectionParams, wi
 			EndBin:               region.EndBin,
 			AlternativeDialFreqs: alternatives,
 		}
-		
+
 		activities = append(activities, activity)
 	}
-	
+
 	return activities
 }
 
@@ -964,7 +1030,7 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 
 	// Merge with cache for stability (keeps activities from last 30 seconds)
 	activities := voiceActivityCache.mergeWithCache(band, newActivities)
-	
+
 	// Apply SSB start filter to cached results as well
 	activities = filterActivitiesBySSBStart(activities, band)
 
@@ -1016,10 +1082,10 @@ func GetVoiceActivityForBand(nfm *NoiseFloorMonitor, band string, params Detecti
 	}
 
 	activities := detectVoiceActivity(fft, params)
-	
+
 	// Filter by SSB start frequency for applicable bands
 	activities = filterActivitiesBySSBStart(activities, band)
-	
+
 	return activities, nil
 }
 
@@ -1036,7 +1102,7 @@ func GetAllBandsVoiceActivity(nfm *NoiseFloorMonitor, params DetectionParams) ma
 		if bandConfig.Name == "2200m" || bandConfig.Name == "630m" || bandConfig.Name == "30m" {
 			continue
 		}
-		
+
 		activities, err := GetVoiceActivityForBand(nfm, bandConfig.Name, params)
 		if err == nil && len(activities) > 0 {
 			result[bandConfig.Name] = activities

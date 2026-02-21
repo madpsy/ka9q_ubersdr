@@ -133,6 +133,7 @@ class CWSpotsExtension extends DecoderExtension {
                 this.ageFilter = value === 'none' ? null : parseInt(value);
                 this.showingAllRows = false;
                 this.filterAndRenderSpots();
+                this.refreshGraphWindow();
             } else if (e.target.id === 'cw-spots-band-filter') {
                 console.log('CW Spots: Band filter changed to:', e.target.value);
                 this.bandFilter = e.target.value;
@@ -144,26 +145,31 @@ class CWSpotsExtension extends DecoderExtension {
                 this.updateBadges(); // Update badges immediately BEFORE filtering spots
                 console.log('CW Spots: updateBadges() completed, now calling filterAndRenderSpots()');
                 this.filterAndRenderSpots();
+                this.refreshGraphWindow();
             } else if (e.target.id === 'cw-spots-snr-filter') {
                 const value = e.target.value;
                 this.snrFilter = value === 'none' ? null : parseInt(value);
                 this.showingAllRows = false;
                 this.filterAndRenderSpots();
+                this.refreshGraphWindow();
             } else if (e.target.id === 'cw-spots-wpm-filter') {
                 const value = e.target.value;
                 this.wpmFilter = value === 'none' ? null : parseInt(value);
                 this.showingAllRows = false;
                 this.filterAndRenderSpots();
+                this.refreshGraphWindow();
             } else if (e.target.id === 'cw-spots-distance-filter') {
                 const value = e.target.value;
                 this.distanceFilter = value === 'none' ? null : parseInt(value);
                 this.showingAllRows = false;
                 this.filterAndRenderSpots();
+                this.refreshGraphWindow();
             } else if (e.target.id === 'cw-spots-country-filter') {
                 this.countryFilter = e.target.value;
                 this.showingAllRows = false;
                 this.filteredSpotsCache = null; // Invalidate cache
                 this.filterAndRenderSpots();
+                this.refreshGraphWindow();
                 // Redraw spectrum markers with new filter
                 if (window.spectrumDisplay) {
                     window.spectrumDisplay.invalidateMarkerCache();
@@ -185,6 +191,7 @@ class CWSpotsExtension extends DecoderExtension {
                 this.callsignFilterDebounceTimer = setTimeout(() => {
                     this.showingAllRows = false;
                     this.filterAndRenderSpots();
+                    this.refreshGraphWindow();
                 }, this.filterDebounceDelay);
             }
         });
@@ -2202,6 +2209,17 @@ class CWSpotsExtension extends DecoderExtension {
         if (this.graphWindow && !this.graphWindow.closed) {
             this.graphWindow.postMessage({
                 type: 'cw_spots_clear'
+            }, '*');
+        }
+    }
+
+    refreshGraphWindow() {
+        // Send updated filtered spots to graph window
+        if (this.graphWindow && !this.graphWindow.closed) {
+            const filteredSpots = this.getFilteredSpotsForGraph();
+            this.graphWindow.postMessage({
+                type: 'cw_spots_initial',
+                data: filteredSpots
             }, '*');
         }
     }

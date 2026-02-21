@@ -110,22 +110,8 @@ func (sp *SSHProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get client IP for rate limiting and access control
-	clientIP := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(clientIP); err == nil {
-		clientIP = host
-	}
-
-	// Check X-Forwarded-For header for true source IP (first IP in the list)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		clientIP = strings.TrimSpace(xff)
-		if commaIdx := strings.Index(clientIP, ","); commaIdx != -1 {
-			clientIP = strings.TrimSpace(clientIP[:commaIdx])
-		}
-		if host, _, err := net.SplitHostPort(clientIP); err == nil {
-			clientIP = host
-		}
-	}
+	// Use centralized IP detection function (same as all other endpoints)
+	clientIP := getClientIP(r)
 
 	// Check if client IP is allowed
 	if !sp.config.IsIPAllowed(clientIP) {

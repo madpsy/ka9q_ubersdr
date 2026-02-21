@@ -74,12 +74,17 @@ class CWSpotsGraph {
         switch (type) {
             case 'cw_spot':
                 this.addSpot(data);
+                this.hideDisconnectedOverlay(); // Hide overlay if extension reconnects
                 break;
             case 'cw_spots_initial':
                 this.loadInitialSpots(data);
+                this.hideDisconnectedOverlay(); // Hide overlay if extension reconnects
                 break;
             case 'cw_spots_clear':
                 this.clearSpots();
+                break;
+            case 'extension_disabled':
+                this.showDisconnectedOverlay();
                 break;
             default:
                 // Ignore unknown message types

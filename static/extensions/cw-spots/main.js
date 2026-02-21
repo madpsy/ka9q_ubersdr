@@ -2043,6 +2043,13 @@ class CWSpotsExtension extends DecoderExtension {
             window.dxClusterClient.unsubscribeFromCWSpots();
         }
 
+        // Notify graph window that extension is being disabled
+        if (this.graphWindow && !this.graphWindow.closed) {
+            this.graphWindow.postMessage({
+                type: 'extension_disabled'
+            }, '*');
+        }
+
         // Hide badges when extension is disabled
         const container = document.getElementById('cw-spots-badges-main');
         if (container) {

@@ -124,15 +124,29 @@ class CWSpotsGraph {
         
         // Update last spot time
         this.lastSpotTime = spot.timestamp;
-        
+
+        // Update latest spot display
+        this.updateLatestSpot(spot);
+
         // Update chart and UI
         this.updateChart();
         this.updateUI();
     }
-    
+
     clearSpots() {
         this.spots = [];
         this.lastSpotTime = null;
+
+        // Reset latest spot display
+        const latestSpotEl = document.getElementById('latest-spot');
+        if (latestSpotEl) {
+            latestSpotEl.textContent = 'No spots yet';
+            latestSpotEl.className = 'latest-spot no-spot';
+            latestSpotEl.style.cursor = 'default';
+            latestSpotEl.onclick = null;
+            delete latestSpotEl.dataset.spot;
+        }
+
         this.updateChart();
         this.updateUI();
     }
@@ -391,6 +405,42 @@ class CWSpotsGraph {
         }
     }
     
+    updateLatestSpot(spot) {
+        const latestSpotEl = document.getElementById('latest-spot');
+        if (!latestSpotEl) return;
+
+        // Determine SNR class
+        let snrClass = 'snr-weak';
+        if (spot.snr > 26) {
+            snrClass = 'snr-excellent';
+        } else if (spot.snr >= 13) {
+            snrClass = 'snr-good';
+        } else if (spot.snr >= 6) {
+            snrClass = 'snr-fair';
+        }
+
+        // Format display text
+        const callsign = spot.dx_call || 'Unknown';
+        const wpm = spot.wpm || 'N/A';
+        const country = spot.country || '';
+        const countryText = country ? ` • ${country}` : '';
+
+        latestSpotEl.textContent = `${callsign} • ${wpm} WPM${countryText}`;
+        latestSpotEl.className = `latest-spot ${snrClass}`;
+        latestSpotEl.style.cursor = 'pointer';
+
+        // Store spot data for click handler
+        latestSpotEl.dataset.spot = JSON.stringify(spot);
+
+        // Add click handler if not already added
+        if (!latestSpotEl.onclick) {
+            latestSpotEl.onclick = () => {
+                const spotData = JSON.parse(latestSpotEl.dataset.spot);
+                this.tuneToSpot(spotData);
+            };
+        }
+    }
+
     updateUI() {
         // Update spot count
         const filtered = this.getFilteredSpots();

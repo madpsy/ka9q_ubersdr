@@ -147,6 +147,41 @@ body {
     transform: translateY(1px);
 }
 
+.latest-spot {
+    padding: 6px 16px;
+    border-radius: 4px;
+    font-size: 0.95em;
+    font-weight: 600;
+    text-align: center;
+    min-width: 200px;
+    transition: all 0.3s ease;
+}
+
+.latest-spot.snr-excellent {
+    background: #28a745;
+    color: #fff;
+}
+
+.latest-spot.snr-good {
+    background: #ffc107;
+    color: #000;
+}
+
+.latest-spot.snr-fair {
+    background: #ff8c00;
+    color: #fff;
+}
+
+.latest-spot.snr-weak {
+    background: #dc3545;
+    color: #fff;
+}
+
+.latest-spot.no-spot {
+    background: #555;
+    color: #aaa;
+}
+
 .chart-wrapper {
     flex: 1;
     position: relative;

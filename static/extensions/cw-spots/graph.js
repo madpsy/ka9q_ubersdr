@@ -8,6 +8,7 @@ class CWSpotsGraph {
         this.ageFilter = 10; // minutes
         this.snrFilter = -999; // no filter
         this.lastSpotTime = null;
+        this.showLabels = true; // Show callsign labels by default
         
         this.init();
     }
@@ -121,6 +122,12 @@ class CWSpotsGraph {
                 window.opener.postMessage({ type: 'clear_spots_from_graph' }, '*');
             }
         });
+
+        // Show labels checkbox
+        document.getElementById('show-labels-checkbox').addEventListener('change', (e) => {
+            this.showLabels = e.target.checked;
+            this.updateChart();
+        });
     }
     
     initChart() {
@@ -163,6 +170,29 @@ class CWSpotsGraph {
                                 if (spot.distance_km) lines.push(`Distance: ${Math.round(spot.distance_km)} km`);
                                 return lines;
                             }
+                        }
+                    },
+                    datalabels: {
+                        display: (context) => {
+                            return this.showLabels;
+                        },
+                        formatter: (value, context) => {
+                            return value.spot.dx_call || 'Unknown';
+                        },
+                        color: '#ffffff',
+                        font: {
+                            size: 10,
+                            weight: 'normal'
+                        },
+                        align: 'right',
+                        offset: 4,
+                        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                        borderRadius: 3,
+                        padding: {
+                            top: 2,
+                            bottom: 2,
+                            left: 4,
+                            right: 4
                         }
                     }
                 },

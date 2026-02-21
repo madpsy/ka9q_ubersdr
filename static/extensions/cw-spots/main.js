@@ -2057,17 +2057,62 @@ class CWSpotsExtension extends DecoderExtension {
         // Listen for messages from graph window
         window.addEventListener('message', (event) => {
             if (event.data.type === 'request_initial_spots') {
-                // Send current spots to graph window
+                // Send current spots AND filter settings to graph window
                 if (this.graphWindow && !this.graphWindow.closed) {
+                    // Apply main window filters to get filtered spots
+                    const filteredSpots = this.getFilteredSpotsForGraph();
                     this.graphWindow.postMessage({
                         type: 'cw_spots_initial',
-                        data: this.spots
+                        data: filteredSpots
                     }, '*');
                 }
             } else if (event.data.type === 'clear_spots_from_graph') {
                 // Clear spots when requested from graph
                 this.clearSpots();
             }
+        });
+    }
+
+    getFilteredSpotsForGraph() {
+        // Apply main window's filters (especially band filter) before sending to graph
+        const now = new Date();
+        const maxAgeMs = this.ageFilter !== null ? this.ageFilter * 60 * 1000 : null;
+        
+        return this.spots.filter(spot => {
+            // Age filter
+            if (maxAgeMs !== null) {
+                try {
+                    const spotTime = new Date(spot.time);
+                    const ageMs = now - spotTime;
+                    if (ageMs > maxAgeMs) return false;
+                } catch (e) {
+                    return false;
+                }
+            }
+            // Band filter - IMPORTANT: respect main window's band filter
+            if (this.bandFilter !== 'all' && spot.band !== this.bandFilter) return false;
+            // SNR filter
+            if (this.snrFilter !== null && spot.snr < this.snrFilter) return false;
+            // WPM filter
+            if (this.wpmFilter !== null && spot.wpm < this.wpmFilter) return false;
+            // Distance filter
+            if (this.distanceFilter !== null) {
+                if (spot.distance_km !== undefined && spot.distance_km !== null) {
+                    if (spot.distance_km < this.distanceFilter) return false;
+                }
+            }
+            // Country filter
+            if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) {
+                return false;
+            }
+            // Callsign filter
+            const callsignUpper = this.callsignFilter.toUpperCase();
+            if (callsignUpper &&
+                !spot.dx_call.toUpperCase().includes(callsignUpper) &&
+                !(spot.country && spot.country.toUpperCase().includes(callsignUpper))) {
+                return false;
+            }
+            return true;
         });
     }
 
@@ -2099,13 +2144,57 @@ class CWSpotsExtension extends DecoderExtension {
     }
 
     forwardSpotToGraph(spot) {
-        // Forward new spot to graph window if it's open
+        // Forward new spot to graph window if it's open AND it passes filters
         if (this.graphWindow && !this.graphWindow.closed) {
-            this.graphWindow.postMessage({
-                type: 'cw_spot',
-                data: spot
-            }, '*');
+            // Check if spot passes current filters
+            if (this.spotPassesFilters(spot)) {
+                this.graphWindow.postMessage({
+                    type: 'cw_spot',
+                    data: spot
+                }, '*');
+            }
         }
+    }
+
+    spotPassesFilters(spot) {
+        // Check if a single spot passes the current filters
+        const now = new Date();
+        const maxAgeMs = this.ageFilter !== null ? this.ageFilter * 60 * 1000 : null;
+        
+        // Age filter
+        if (maxAgeMs !== null) {
+            try {
+                const spotTime = new Date(spot.time);
+                const ageMs = now - spotTime;
+                if (ageMs > maxAgeMs) return false;
+            } catch (e) {
+                return false;
+            }
+        }
+        // Band filter
+        if (this.bandFilter !== 'all' && spot.band !== this.bandFilter) return false;
+        // SNR filter
+        if (this.snrFilter !== null && spot.snr < this.snrFilter) return false;
+        // WPM filter
+        if (this.wpmFilter !== null && spot.wpm < this.wpmFilter) return false;
+        // Distance filter
+        if (this.distanceFilter !== null) {
+            if (spot.distance_km !== undefined && spot.distance_km !== null) {
+                if (spot.distance_km < this.distanceFilter) return false;
+            }
+        }
+        // Country filter
+        if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) {
+            return false;
+        }
+        // Callsign filter
+        const callsignUpper = this.callsignFilter.toUpperCase();
+        if (callsignUpper &&
+            !spot.dx_call.toUpperCase().includes(callsignUpper) &&
+            !(spot.country && spot.country.toUpperCase().includes(callsignUpper))) {
+            return false;
+        }
+        return true;
     }
 
     notifyGraphWindowClear() {

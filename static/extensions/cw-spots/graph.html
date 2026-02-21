@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="graph.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 </head>
 <body>
     <div class="graph-container">
@@ -43,6 +44,13 @@
                     <option value="15">15 dB</option>
                     <option value="20">20 dB</option>
                 </select>
+            </div>
+            
+            <div class="control-group">
+                <label>
+                    <input type="checkbox" id="show-labels-checkbox" checked>
+                    Show Labels
+                </label>
             </div>
             
             <div class="control-group">

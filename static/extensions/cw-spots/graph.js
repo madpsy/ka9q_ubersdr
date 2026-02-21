@@ -165,6 +165,25 @@ class CWSpotsGraph {
             this.showLabels = e.target.checked;
             this.updateChart();
         });
+
+        // Fullscreen button
+        document.getElementById('fullscreen-btn').addEventListener('click', () => {
+            this.toggleFullscreen();
+        });
+    }
+
+    toggleFullscreen() {
+        if (!document.fullscreenElement) {
+            // Enter fullscreen
+            document.documentElement.requestFullscreen().catch(err => {
+                console.error('Error attempting to enable fullscreen:', err);
+            });
+        } else {
+            // Exit fullscreen
+            if (document.exitFullscreen) {
+                document.exitFullscreen();
+            }
+        }
     }
     
     initChart() {
@@ -237,6 +256,28 @@ class CWSpotsGraph {
                             click: (context) => {
                                 const spot = context.dataset.data[context.dataIndex].spot;
                                 self.tuneToSpot(spot);
+                                return true;
+                            },
+                            enter: (context) => {
+                                // Show tooltip when hovering over label
+                                const chart = context.chart;
+                                const tooltip = chart.tooltip;
+                                if (tooltip) {
+                                    const datasetIndex = context.datasetIndex;
+                                    const dataIndex = context.dataIndex;
+                                    tooltip.setActiveElements([{datasetIndex, index: dataIndex}]);
+                                    chart.update('none');
+                                }
+                                return true;
+                            },
+                            leave: (context) => {
+                                // Hide tooltip when leaving label
+                                const chart = context.chart;
+                                const tooltip = chart.tooltip;
+                                if (tooltip) {
+                                    tooltip.setActiveElements([]);
+                                    chart.update('none');
+                                }
                                 return true;
                             }
                         }

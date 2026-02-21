@@ -322,6 +322,7 @@ type SSHProxyConfig struct {
 	AllowedIPs []string `yaml:"allowed_ips"` // List of IPs/CIDRs allowed to access SSH proxy
 
 	allowedNets []*net.IPNet // Parsed CIDR networks (internal use)
+	adminConfig *AdminConfig // Reference to admin config for fallback (internal use)
 }
 
 // MCPConfig contains Model Context Protocol server settings
@@ -372,6 +373,8 @@ func LoadConfig(filename string) (*Config, error) {
 		if err := config.SSHProxy.parseAllowedIPs(); err != nil {
 			return nil, fmt.Errorf("failed to parse ssh_proxy.allowed_ips: %w", err)
 		}
+		// Set admin config reference for fallback
+		config.SSHProxy.adminConfig = &config.Admin
 	}
 
 	// Resolve tunnel server hostname to IPs if configured
@@ -960,8 +963,25 @@ func (spc *SSHProxyConfig) parseAllowedIPs() error {
 }
 
 // IsIPAllowed checks if an IP address is in the allowed IPs list
+// Falls back to admin allowed_ips if ssh_proxy allowed_ips is empty or set to 0.0.0.0/0
 func (spc *SSHProxyConfig) IsIPAllowed(ipStr string) bool {
-	// If no allowed IPs configured, deny all access
+	// Check if SSH proxy allowed_ips is effectively "allow all" (0.0.0.0/0)
+	// In this case, fall back to admin allowed_ips
+	isAllowAll := false
+	if len(spc.allowedNets) == 1 {
+		// Check if the single network is 0.0.0.0/0 (allow all IPv4)
+		ones, bits := spc.allowedNets[0].Mask.Size()
+		if ones == 0 && bits == 32 {
+			isAllowAll = true
+		}
+	}
+
+	// If SSH proxy is set to allow all or has no allowed IPs, fall back to admin config
+	if (len(spc.allowedNets) == 0 || isAllowAll) && spc.adminConfig != nil {
+		return spc.adminConfig.IsIPAllowed(ipStr)
+	}
+
+	// If no allowed IPs configured and no admin fallback, deny all access
 	if len(spc.allowedNets) == 0 {
 		return false
 	}

@@ -132,6 +132,7 @@ class CWSpotsGraph {
     
     initChart() {
         const ctx = document.getElementById('spotsChart').getContext('2d');
+        const self = this; // Capture reference for use in callbacks
         
         this.chart = new Chart(ctx, {
             type: 'scatter',
@@ -174,7 +175,7 @@ class CWSpotsGraph {
                     },
                     datalabels: {
                         display: (context) => {
-                            return this.showLabels;
+                            return self.showLabels;
                         },
                         formatter: (value, context) => {
                             return value.spot.dx_call || 'Unknown';

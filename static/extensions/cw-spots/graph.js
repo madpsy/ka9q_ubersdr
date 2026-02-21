@@ -1,6 +1,9 @@
 // CW Spots Graph Popup JavaScript
 // Receives spot data from parent window via postMessage
 
+// Register the datalabels plugin with Chart.js
+Chart.register(ChartDataLabels);
+
 class CWSpotsGraph {
     constructor() {
         this.spots = [];

@@ -62,8 +62,40 @@ class SSTVExtension extends DecoderExtension {
     onInitialize() {
         console.log('SSTV: onInitialize called');
         this.renderTemplate();
+        this.showImageAlignmentWarning();
         this.waitForDOMAndSetupHandlers();
         console.log('SSTV: onInitialize complete');
+    }
+
+    showImageAlignmentWarning() {
+        // Create overlay
+        const overlay = document.createElement('div');
+        overlay.className = 'sstv-warning-overlay';
+        overlay.innerHTML = `
+            <div class="sstv-warning-overlay-content">
+                <div class="sstv-warning-overlay-title">
+                    ⚠️ Known Issue
+                </div>
+                <div class="sstv-warning-overlay-message">
+                    There is a known issue with image alignment in the SSTV decoder.
+                    Images may appear skewed or misaligned during reception.
+                </div>
+                <button class="sstv-warning-overlay-button" id="sstv-warning-ok-btn">OK</button>
+            </div>
+        `;
+
+        // Add to body
+        document.body.appendChild(overlay);
+
+        // Setup OK button handler
+        const okBtn = document.getElementById('sstv-warning-ok-btn');
+        if (okBtn) {
+            okBtn.addEventListener('click', () => {
+                overlay.remove();
+            });
+        }
+
+        console.log('SSTV: Image alignment warning overlay displayed');
     }
 
     waitForDOMAndSetupHandlers() {

@@ -68,8 +68,40 @@ class MorseExtension extends DecoderExtension {
     onInitialize() {
         console.log('Morse: onInitialize called');
         this.renderTemplate();
+        this.showDevelopmentWarning();
         this.waitForDOMAndSetupHandlers();
         console.log('Morse: onInitialize complete');
+    }
+
+    showDevelopmentWarning() {
+        // Create overlay
+        const overlay = document.createElement('div');
+        overlay.className = 'morse-dev-overlay';
+        overlay.innerHTML = `
+            <div class="morse-dev-overlay-content">
+                <div class="morse-dev-overlay-title">
+                    ⚠️ Development Notice
+                </div>
+                <div class="morse-dev-overlay-message">
+                    This Morse Code Decoder extension is currently under development and does not function properly.
+                    Features may be incomplete, unstable, or non-functional.
+                </div>
+                <button class="morse-dev-overlay-button" id="morse-dev-ok-btn">OK</button>
+            </div>
+        `;
+
+        // Add to body
+        document.body.appendChild(overlay);
+
+        // Setup OK button handler
+        const okBtn = document.getElementById('morse-dev-ok-btn');
+        if (okBtn) {
+            okBtn.addEventListener('click', () => {
+                overlay.remove();
+            });
+        }
+
+        console.log('Morse: Development warning overlay displayed');
     }
 
     waitForDOMAndSetupHandlers() {

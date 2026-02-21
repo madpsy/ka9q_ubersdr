@@ -203,6 +203,52 @@ body {
     color: #fff;
 }
 
+/* Disconnected overlay */
+.disconnected-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+}
+
+.disconnected-message {
+    background: #2a2a2a;
+    border: 2px solid #ff6b6b;
+    border-radius: 8px;
+    padding: 30px;
+    max-width: 500px;
+    text-align: center;
+}
+
+.disconnected-message h2 {
+    color: #ff6b6b;
+    margin-top: 0;
+    font-size: 24px;
+}
+
+.disconnected-message p {
+    font-size: 16px;
+    line-height: 1.6;
+    margin: 15px 0;
+}
+
+.disconnected-message ul {
+    text-align: left;
+    margin: 20px auto;
+    display: inline-block;
+}
+
+.disconnected-message li {
+    margin: 10px 0;
+    font-size: 15px;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
     .graph-header {
@@ -210,13 +256,13 @@ body {
         align-items: flex-start;
         gap: 10px;
     }
-    
+
     .header-right {
         flex-direction: column;
         align-items: flex-start;
         gap: 5px;
     }
-    
+
     .graph-controls {
         flex-wrap: wrap;
     }

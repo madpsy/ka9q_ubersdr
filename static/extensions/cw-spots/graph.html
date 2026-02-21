@@ -65,6 +65,19 @@
         <div class="graph-footer">
             <p>Click on a spot to see details. Colors indicate SNR: <span class="snr-legend snr-high">Excellent (>26dB)</span> <span class="snr-legend snr-good">Good (13-26dB)</span> <span class="snr-legend snr-fair">Fair (6-12dB)</span> <span class="snr-legend snr-weak">Weak (<6dB)</span></p>
         </div>
+
+        <!-- Disconnected overlay -->
+        <div id="disconnected-overlay" class="disconnected-overlay" style="display: none;">
+            <div class="disconnected-message">
+                <h2>⚠️ Connection Lost</h2>
+                <p>The CW Spots extension has been closed.</p>
+                <p>Please either:</p>
+                <ul>
+                    <li>Re-open the CW Spots extension in the main window, or</li>
+                    <li>Close this graph window</li>
+                </ul>
+            </div>
+        </div>
     </div>
     
     <script src="graph.js"></script>

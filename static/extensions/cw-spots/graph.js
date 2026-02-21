@@ -12,31 +12,60 @@ class CWSpotsGraph {
         this.snrFilter = -999; // no filter
         this.lastSpotTime = null;
         this.showLabels = true; // Show callsign labels by default
-        
+        this.parentCheckInterval = null;
+
         this.init();
     }
-    
+
     init() {
         console.log('CW Spots Graph: Initializing...');
-        
+
         // Setup message listener from parent window
         window.addEventListener('message', (event) => {
             this.handleMessage(event);
         });
-        
+
         // Setup UI event handlers
         this.setupEventHandlers();
-        
+
         // Initialize chart
         this.initChart();
-        
+
         // Request initial data from parent
         this.requestInitialData();
-        
+
         // Update status
         this.updateStatus('connected');
-        
+
+        // Start monitoring parent window
+        this.startParentMonitoring();
+
         console.log('CW Spots Graph: Ready');
+    }
+
+    startParentMonitoring() {
+        // Check if parent window is still open every 2 seconds
+        this.parentCheckInterval = setInterval(() => {
+            if (!window.opener || window.opener.closed) {
+                this.showDisconnectedOverlay();
+                clearInterval(this.parentCheckInterval);
+            }
+        }, 2000);
+    }
+
+    showDisconnectedOverlay() {
+        const overlay = document.getElementById('disconnected-overlay');
+        if (overlay) {
+            overlay.style.display = 'flex';
+        }
+        this.updateStatus('disconnected');
+    }
+
+    hideDisconnectedOverlay() {
+        const overlay = document.getElementById('disconnected-overlay');
+        if (overlay) {
+            overlay.style.display = 'none';
+        }
     }
     
     handleMessage(event) {

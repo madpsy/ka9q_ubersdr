@@ -31,6 +31,9 @@ class CWSpotsGraph {
         // Setup UI event handlers
         this.setupEventHandlers();
 
+        // Sync checkbox states (Firefox remembers form state across refreshes)
+        this.syncCheckboxStates();
+
         // Initialize chart
         this.initChart();
 
@@ -202,6 +205,25 @@ class CWSpotsGraph {
         document.getElementById('fullscreen-btn').addEventListener('click', () => {
             this.toggleFullscreen();
         });
+    }
+
+    syncCheckboxStates() {
+        // Sync JavaScript properties with checkbox states
+        // (Firefox remembers form state across refreshes)
+        const showLabelsCheckbox = document.getElementById('show-labels-checkbox');
+        if (showLabelsCheckbox) {
+            this.showLabels = showLabelsCheckbox.checked;
+        }
+
+        const hoverTuneCheckbox = document.getElementById('hover-tune-checkbox');
+        if (hoverTuneCheckbox) {
+            this.hoverTune = hoverTuneCheckbox.checked;
+        }
+
+        const autoTuneCheckbox = document.getElementById('auto-tune-checkbox');
+        if (autoTuneCheckbox) {
+            this.autoTune = autoTuneCheckbox.checked;
+        }
     }
 
     toggleFullscreen() {

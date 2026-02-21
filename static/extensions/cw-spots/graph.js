@@ -12,6 +12,7 @@ class CWSpotsGraph {
         this.snrFilter = -999; // no filter
         this.lastSpotTime = null;
         this.showLabels = true; // Show callsign labels by default
+        this.autoTune = false; // Auto-tune to new spots
         this.parentCheckInterval = null;
         this.activeTooltip = null; // Track active tooltip from label hover
 
@@ -128,6 +129,11 @@ class CWSpotsGraph {
         // Update latest spot display
         this.updateLatestSpot(spot);
 
+        // Auto-tune if enabled
+        if (this.autoTune) {
+            this.tuneToSpot(spot);
+        }
+
         // Update chart and UI
         this.updateChart();
         this.updateUI();
@@ -179,6 +185,11 @@ class CWSpotsGraph {
         document.getElementById('show-labels-checkbox').addEventListener('change', (e) => {
             this.showLabels = e.target.checked;
             this.updateChart();
+        });
+
+        // Auto-tune checkbox
+        document.getElementById('auto-tune-checkbox').addEventListener('change', (e) => {
+            this.autoTune = e.target.checked;
         });
 
         // Fullscreen button

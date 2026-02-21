@@ -13,6 +13,7 @@ class CWSpotsGraph {
         this.lastSpotTime = null;
         this.showLabels = true; // Show callsign labels by default
         this.parentCheckInterval = null;
+        this.activeTooltip = null; // Track active tooltip from label hover
 
         this.init();
     }
@@ -260,23 +261,26 @@ class CWSpotsGraph {
                             },
                             enter: (context) => {
                                 // Show tooltip when hovering over label
+                                self.activeTooltip = {
+                                    datasetIndex: context.datasetIndex,
+                                    dataIndex: context.dataIndex
+                                };
                                 const chart = context.chart;
                                 const tooltip = chart.tooltip;
                                 if (tooltip) {
-                                    const datasetIndex = context.datasetIndex;
-                                    const dataIndex = context.dataIndex;
-                                    tooltip.setActiveElements([{datasetIndex, index: dataIndex}]);
-                                    chart.update('none');
+                                    tooltip.setActiveElements([self.activeTooltip]);
+                                    tooltip.update(true);
                                 }
                                 return true;
                             },
                             leave: (context) => {
                                 // Hide tooltip when leaving label
+                                self.activeTooltip = null;
                                 const chart = context.chart;
                                 const tooltip = chart.tooltip;
                                 if (tooltip) {
                                     tooltip.setActiveElements([]);
-                                    chart.update('none');
+                                    tooltip.update(true);
                                 }
                                 return true;
                             }

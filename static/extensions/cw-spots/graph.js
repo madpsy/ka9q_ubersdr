@@ -12,6 +12,7 @@ class CWSpotsGraph {
         this.snrFilter = -999; // no filter
         this.lastSpotTime = null;
         this.showLabels = true; // Show callsign labels by default
+        this.hoverTune = true; // Tune when hovering over spots
         this.autoTune = false; // Auto-tune to new spots
         this.parentCheckInterval = null;
         this.activeTooltip = null; // Track active tooltip from label hover
@@ -187,6 +188,11 @@ class CWSpotsGraph {
             this.updateChart();
         });
 
+        // Hover-tune checkbox
+        document.getElementById('hover-tune-checkbox').addEventListener('change', (e) => {
+            this.hoverTune = e.target.checked;
+        });
+
         // Auto-tune checkbox
         document.getElementById('auto-tune-checkbox').addEventListener('change', (e) => {
             this.autoTune = e.target.checked;
@@ -324,6 +330,12 @@ class CWSpotsGraph {
                 },
                 onClick: (event, elements) => {
                     if (elements.length > 0) {
+                        const spot = elements[0].element.$context.raw.spot;
+                        this.tuneToSpot(spot);
+                    }
+                },
+                onHover: (event, elements) => {
+                    if (this.hoverTune && elements.length > 0) {
                         const spot = elements[0].element.$context.raw.spot;
                         this.tuneToSpot(spot);
                     }

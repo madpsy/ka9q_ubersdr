@@ -336,8 +336,15 @@ class CWSpotsGraph {
                 },
                 onHover: (event, elements) => {
                     if (this.hoverTune && elements.length > 0) {
-                        const spot = elements[0].element.$context.raw.spot;
-                        this.tuneToSpot(spot);
+                        // Get the chart element
+                        const element = elements[0];
+                        // Access the data through the chart's dataset
+                        const datasetIndex = element.datasetIndex;
+                        const index = element.index;
+                        const spot = this.chart.data.datasets[datasetIndex].data[index].spot;
+                        if (spot) {
+                            this.tuneToSpot(spot);
+                        }
                     }
                 }
             }

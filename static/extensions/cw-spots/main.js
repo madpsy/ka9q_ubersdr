@@ -2083,6 +2083,11 @@ class CWSpotsExtension extends DecoderExtension {
             } else if (event.data.type === 'clear_spots_from_graph') {
                 // Clear spots when requested from graph
                 this.clearSpots();
+            } else if (event.data.type === 'tune_to_spot') {
+                // Tune to spot when clicked in graph window
+                if (event.data.spot) {
+                    this.tuneToSpot(event.data.spot);
+                }
             }
         });
     }

@@ -275,7 +275,7 @@ class CWSpotsGraph {
                 onClick: (event, elements) => {
                     if (elements.length > 0) {
                         const spot = elements[0].element.$context.raw.spot;
-                        this.showSpotDetails(spot);
+                        this.tuneToSpot(spot);
                     }
                 }
             }
@@ -353,22 +353,17 @@ class CWSpotsGraph {
         }));
     }
     
-    showSpotDetails(spot) {
-        const details = [
-            `Callsign: ${spot.dx_call || 'Unknown'}`,
-            `Frequency: ${(spot.frequency / 1e6).toFixed(3)} MHz`,
-            `Band: ${spot.band || 'Unknown'}`,
-            `SNR: ${spot.snr} dB`,
-            `WPM: ${spot.wpm || 'N/A'}`,
-            `Time: ${new Date(spot.time).toUTCString()}`
-        ];
-        
-        if (spot.country) details.push(`Country: ${spot.country}`);
-        if (spot.distance_km) details.push(`Distance: ${Math.round(spot.distance_km)} km`);
-        if (spot.bearing_deg) details.push(`Bearing: ${Math.round(spot.bearing_deg)}°`);
-        if (spot.comment) details.push(`Comment: ${spot.comment}`);
-        
-        alert(details.join('\n'));
+    tuneToSpot(spot) {
+        // Send message to parent window to tune the receiver
+        if (window.opener && !window.opener.closed) {
+            window.opener.postMessage({
+                type: 'tune_to_spot',
+                spot: spot
+            }, '*');
+            console.log('CW Spots Graph: Tuning to', spot.dx_call, 'on', (spot.frequency / 1e6).toFixed(3), 'MHz');
+        } else {
+            console.warn('CW Spots Graph: Cannot tune - parent window not available');
+        }
     }
     
     updateUI() {

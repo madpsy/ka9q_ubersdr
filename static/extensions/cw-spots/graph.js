@@ -473,11 +473,12 @@ class CWSpotsGraph {
 
         // Format display text
         const callsign = spot.dx_call || 'Unknown';
+        const frequency = (spot.frequency / 1e6).toFixed(4);
         const wpm = spot.wpm || 'N/A';
         const country = spot.country || '';
         const countryText = country ? ` • ${country}` : '';
 
-        latestSpotEl.textContent = `${callsign} • ${wpm} WPM${countryText}`;
+        latestSpotEl.textContent = `${callsign} • ${frequency} MHz • ${wpm} WPM${countryText}`;
         latestSpotEl.className = `latest-spot ${snrClass}`;
         latestSpotEl.style.cursor = 'pointer';
 

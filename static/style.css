@@ -3089,7 +3089,7 @@ input[type="range"]::-moz-range-thumb {
     background: #34495e;
     border-radius: 6px 6px 0 0;
     padding: 15px;
-    min-height: 200px;
+    min-height: 400px;
     max-height: 400px;
     overflow-y: auto;
     transition: max-height 0.1s ease-out;

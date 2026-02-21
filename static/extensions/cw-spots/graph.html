@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CW Spots Graph</title>
+    <link rel="stylesheet" href="graph.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+<body>
+    <div class="graph-container">
+        <div class="graph-header">
+            <div class="header-left">
+                <h2>CW Spots - Frequency vs Time</h2>
+                <span id="status-indicator" class="status-badge status-waiting">Waiting for data...</span>
+            </div>
+            <div class="header-right">
+                <span id="spot-count" class="spot-count">0 spots</span>
+                <span id="last-spot-time" class="last-spot-time"></span>
+            </div>
+        </div>
+        
+        <div class="graph-controls">
+            <div class="control-group">
+                <label for="graph-age-filter">Max Age:</label>
+                <select id="graph-age-filter">
+                    <option value="5">5 min</option>
+                    <option value="10" selected>10 min</option>
+                    <option value="15">15 min</option>
+                    <option value="30">30 min</option>
+                    <option value="60">1 hour</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label for="graph-snr-filter">Min SNR:</label>
+                <select id="graph-snr-filter">
+                    <option value="-999" selected>All</option>
+                    <option value="0">0 dB</option>
+                    <option value="5">5 dB</option>
+                    <option value="10">10 dB</option>
+                    <option value="15">15 dB</option>
+                    <option value="20">20 dB</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <button id="clear-btn" class="btn">Clear Spots</button>
+            </div>
+        </div>
+        
+        <div class="chart-wrapper">
+            <canvas id="spotsChart"></canvas>
+        </div>
+        
+        <div class="graph-footer">
+            <p>Click on a spot to see details. Colors indicate SNR: <span class="snr-legend snr-high">Excellent (>26dB)</span> <span class="snr-legend snr-good">Good (13-26dB)</span> <span class="snr-legend snr-fair">Fair (6-12dB)</span> <span class="snr-legend snr-weak">Weak (<6dB)</span></p>
+        </div>
+    </div>
+    
+    <script src="graph.js"></script>
+</body>
+</html>

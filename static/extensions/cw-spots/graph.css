@@ -1,0 +1,223 @@
+/* CW Spots Graph Popup Styles */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: #1a1a1a;
+    color: #e0e0e0;
+    padding: 15px;
+    overflow: hidden;
+}
+
+.graph-container {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 30px);
+    background: #2a2a2a;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+.graph-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #444;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.header-left h2 {
+    font-size: 1.5em;
+    color: #4CAF50;
+    margin: 0;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.status-badge {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.85em;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.status-waiting {
+    background: #666;
+    color: #fff;
+}
+
+.status-connected {
+    background: #4CAF50;
+    color: #fff;
+}
+
+.status-disconnected {
+    background: #f44336;
+    color: #fff;
+}
+
+.spot-count {
+    font-size: 1.1em;
+    font-weight: 600;
+    color: #4CAF50;
+}
+
+.last-spot-time {
+    font-size: 0.9em;
+    color: #888;
+}
+
+.graph-controls {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+    margin-bottom: 15px;
+    padding: 12px;
+    background: #333;
+    border-radius: 6px;
+}
+
+.control-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.control-group label {
+    font-size: 0.9em;
+    color: #aaa;
+    white-space: nowrap;
+}
+
+.control-group select {
+    padding: 6px 10px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: #2a2a2a;
+    color: #e0e0e0;
+    font-size: 0.9em;
+    cursor: pointer;
+}
+
+.control-group select:hover {
+    border-color: #4CAF50;
+}
+
+.control-group select:focus {
+    outline: none;
+    border-color: #4CAF50;
+    box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+}
+
+.btn {
+    padding: 6px 16px;
+    border: none;
+    border-radius: 4px;
+    background: #4CAF50;
+    color: white;
+    font-size: 0.9em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn:hover {
+    background: #45a049;
+}
+
+.btn:active {
+    transform: translateY(1px);
+}
+
+.chart-wrapper {
+    flex: 1;
+    position: relative;
+    background: #1a1a1a;
+    border-radius: 6px;
+    padding: 15px;
+    margin-bottom: 15px;
+    overflow: hidden;
+}
+
+.chart-wrapper canvas {
+    max-height: 100%;
+}
+
+.graph-footer {
+    padding: 10px;
+    background: #333;
+    border-radius: 6px;
+    text-align: center;
+}
+
+.graph-footer p {
+    font-size: 0.85em;
+    color: #aaa;
+    margin: 0;
+}
+
+.snr-legend {
+    display: inline-block;
+    padding: 2px 8px;
+    margin: 0 4px;
+    border-radius: 3px;
+    font-size: 0.85em;
+    font-weight: 600;
+}
+
+.snr-high {
+    background: #28a745;
+    color: #fff;
+}
+
+.snr-good {
+    background: #ffc107;
+    color: #000;
+}
+
+.snr-fair {
+    background: #ff8c00;
+    color: #fff;
+}
+
+.snr-weak {
+    background: #dc3545;
+    color: #fff;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .graph-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .header-right {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+    
+    .graph-controls {
+        flex-wrap: wrap;
+    }
+}

@@ -49,9 +49,15 @@ class CWSpotsExtension extends DecoderExtension {
         this.lastBadgeBand = null; // Track last band for badge cache
         this.pendingSpots = [];
         this.renderThrottleTimer = null;
+        
+        // Graph window reference
+        this.graphWindow = null;
 
         // Subscribe to CW spots immediately
         this.subscribeToCWSpots();
+        
+        // Setup message listener for graph window
+        this.setupGraphWindowMessageListener();
     }
 
     onInitialize() {
@@ -188,6 +194,8 @@ class CWSpotsExtension extends DecoderExtension {
                 this.clearSpots();
             } else if (e.target.id === 'cw-spots-map-btn') {
                 window.open('/cwskimmer_map.html', '_blank');
+            } else if (e.target.id === 'cw-spots-graph-btn') {
+                this.openGraphWindow();
             }
         });
 
@@ -268,6 +276,9 @@ class CWSpotsExtension extends DecoderExtension {
         if (this.spots.length > this.maxSpots) {
             this.spots = this.spots.slice(0, this.maxSpots);
         }
+
+        // Forward spot to graph window if open
+        this.forwardSpotToGraph(spot);
 
         // Invalidate caches when new spot added
         this.filteredSpotsCache = null;
@@ -745,6 +756,10 @@ class CWSpotsExtension extends DecoderExtension {
             clearTimeout(this.renderThrottleTimer);
             this.renderThrottleTimer = null;
         }
+        
+        // Notify graph window to clear
+        this.notifyGraphWindowClear();
+        
         this.filterAndRenderSpots();
     }
 
@@ -2036,6 +2051,70 @@ class CWSpotsExtension extends DecoderExtension {
 
     onProcessAudio(dataArray) {
         // CW spots extension doesn't process audio
+    }
+
+    setupGraphWindowMessageListener() {
+        // Listen for messages from graph window
+        window.addEventListener('message', (event) => {
+            if (event.data.type === 'request_initial_spots') {
+                // Send current spots to graph window
+                if (this.graphWindow && !this.graphWindow.closed) {
+                    this.graphWindow.postMessage({
+                        type: 'cw_spots_initial',
+                        data: this.spots
+                    }, '*');
+                }
+            } else if (event.data.type === 'clear_spots_from_graph') {
+                // Clear spots when requested from graph
+                this.clearSpots();
+            }
+        });
+    }
+
+    openGraphWindow() {
+        // Check if window is already open
+        if (this.graphWindow && !this.graphWindow.closed) {
+            this.graphWindow.focus();
+            return;
+        }
+
+        // Open new window
+        const width = 1000;
+        const height = 600;
+        const left = (screen.width - width) / 2;
+        const top = (screen.height - height) / 2;
+
+        this.graphWindow = window.open(
+            '/extensions/cw-spots/graph.html',
+            'CWSpots Graph',
+            `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no`
+        );
+
+        if (!this.graphWindow) {
+            alert('Failed to open graph window. Please check your popup blocker settings.');
+            return;
+        }
+
+        console.log('CW Spots: Graph window opened');
+    }
+
+    forwardSpotToGraph(spot) {
+        // Forward new spot to graph window if it's open
+        if (this.graphWindow && !this.graphWindow.closed) {
+            this.graphWindow.postMessage({
+                type: 'cw_spot',
+                data: spot
+            }, '*');
+        }
+    }
+
+    notifyGraphWindowClear() {
+        // Notify graph window to clear spots
+        if (this.graphWindow && !this.graphWindow.closed) {
+            this.graphWindow.postMessage({
+                type: 'cw_spots_clear'
+            }, '*');
+        }
     }
 }
 

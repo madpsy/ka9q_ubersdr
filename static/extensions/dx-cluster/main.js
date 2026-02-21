@@ -474,8 +474,20 @@ class DXClusterExtension extends DecoderExtension {
             window.spectrumDisplay.skipEdgeDetectionTemporary = true;
         }
 
+        // Check if frequency is already visible in spectrum to avoid unnecessary recentering
+        let centerSpectrum = true;
+        const spectrum = this.radio.getSpectrumDisplay();
+        if (spectrum && spectrum.centerFreq && spectrum.totalBandwidth) {
+            const minVisible = spectrum.centerFreq - (spectrum.totalBandwidth / 2);
+            const maxVisible = spectrum.centerFreq + (spectrum.totalBandwidth / 2);
+            const isVisible = spot.frequency >= minVisible && spot.frequency <= maxVisible;
+
+            // Only center if not visible
+            centerSpectrum = !isVisible;
+        }
+
         // Set frequency using RadioAPI
-        this.radio.setFrequency(spot.frequency);
+        this.radio.setFrequency(spot.frequency, centerSpectrum);
 
         // Determine appropriate mode based on frequency and comment
         let mode;

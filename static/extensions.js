@@ -126,7 +126,7 @@ class RadioAPI {
 
     // === RADIO CONTROLS ===
     
-    setFrequency(freq) {
+    setFrequency(freq, centerSpectrum = true) {
         const freqInput = document.getElementById('frequency');
         if (freqInput) {
             if (window.setFrequencyInputValue) {
@@ -137,21 +137,24 @@ class RadioAPI {
             if (window.updateBandButtons) window.updateBandButtons(freq);
             if (window.updateURL) window.updateURL();
 
-            // Temporarily enable edge tune to force spectrum update
-            const edgeTuneCheckbox = document.getElementById('spectrum-edge-tune-enable');
-            const originalEdgeTuneState = edgeTuneCheckbox ? edgeTuneCheckbox.checked : false;
+            // Only force spectrum centering if requested
+            if (centerSpectrum) {
+                // Temporarily enable edge tune to force spectrum update
+                const edgeTuneCheckbox = document.getElementById('spectrum-edge-tune-enable');
+                const originalEdgeTuneState = edgeTuneCheckbox ? edgeTuneCheckbox.checked : false;
 
-            if (edgeTuneCheckbox && !originalEdgeTuneState) {
-                edgeTuneCheckbox.checked = true;
-                edgeTuneCheckbox.dispatchEvent(new Event('change'));
+                if (edgeTuneCheckbox && !originalEdgeTuneState) {
+                    edgeTuneCheckbox.checked = true;
+                    edgeTuneCheckbox.dispatchEvent(new Event('change'));
 
-                // Restore original state after spectrum updates
-                setTimeout(() => {
-                    if (edgeTuneCheckbox) {
-                        edgeTuneCheckbox.checked = originalEdgeTuneState;
-                        edgeTuneCheckbox.dispatchEvent(new Event('change'));
-                    }
-                }, 2000);
+                    // Restore original state after spectrum updates
+                    setTimeout(() => {
+                        if (edgeTuneCheckbox) {
+                            edgeTuneCheckbox.checked = originalEdgeTuneState;
+                            edgeTuneCheckbox.dispatchEvent(new Event('change'));
+                        }
+                    }, 2000);
+                }
             }
 
             if (this.isConnected()) {

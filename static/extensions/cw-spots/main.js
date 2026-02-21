@@ -661,7 +661,19 @@ class CWSpotsExtension extends DecoderExtension {
     }
 
     tuneToSpot(spot) {
-        this.radio.setFrequency(spot.frequency);
+        // Check if frequency is already visible in spectrum to avoid unnecessary recentering
+        let centerSpectrum = true;
+        const spectrum = this.radio.getSpectrumDisplay();
+        if (spectrum && spectrum.centerFreq && spectrum.totalBandwidth) {
+            const minVisible = spectrum.centerFreq - (spectrum.totalBandwidth / 2);
+            const maxVisible = spectrum.centerFreq + (spectrum.totalBandwidth / 2);
+            const isVisible = spot.frequency >= minVisible && spot.frequency <= maxVisible;
+            
+            // Only center if frequency is not currently visible
+            centerSpectrum = !isVisible;
+        }
+        
+        this.radio.setFrequency(spot.frequency, centerSpectrum);
 
         // CW uses CWL for < 10 MHz, CWU for >= 10 MHz
         const mode = spot.frequency < 10000000 ? 'cwl' : 'cwu';

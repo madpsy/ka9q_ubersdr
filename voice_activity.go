@@ -306,8 +306,13 @@ func detectVoiceActivity(fft *BandFFT, params DetectionParams) []VoiceActivity {
 			continue
 		}
 
-		// Spectral variance check: reject flat wideband noise
+		// Spectral variance check: reject flat wideband noise and narrow digital modes
 		if !passesSpectralVarianceCheck(fft.Data, candidate.StartBin, candidate.EndBin) {
+			continue
+		}
+
+		// Bandwidth occupancy check: reject narrow tones in wide regions
+		if !passesBandwidthOccupancyCheck(fft.Data, candidate.StartBin, candidate.EndBin, noiseFloor, fft.BinWidth) {
 			continue
 		}
 
@@ -544,6 +549,44 @@ func passesSpectralVarianceCheck(data []float32, startBin, endBin int) bool {
 	activePercentage := float32(significantBins) / float32(len(signalBins))
 
 	return activePercentage >= minPercentage
+}
+
+// passesBandwidthOccupancyCheck rejects narrow tones in wide regions
+// Voice occupies 50-80% of the detected bandwidth
+// A narrow tone (CW, carrier) occupies <10% of the detected bandwidth
+func passesBandwidthOccupancyCheck(data []float32, startBin, endBin int, noiseFloor float32, binWidth float64) bool {
+	if startBin < 0 || endBin >= len(data) || startBin >= endBin {
+		return false
+	}
+
+	signalBins := data[startBin : endBin+1]
+
+	// Define "occupied" as bins significantly above noise floor
+	// Use noise floor + 6 dB as threshold for occupied bins
+	occupancyThreshold := noiseFloor + 6.0
+
+	// Count bins that are occupied (above threshold)
+	occupiedBins := 0
+	for _, power := range signalBins {
+		if power >= occupancyThreshold {
+			occupiedBins++
+		}
+	}
+
+	// Calculate occupied bandwidth
+	occupiedBandwidth := float64(occupiedBins) * binWidth
+	totalBandwidth := float64(len(signalBins)) * binWidth
+
+	// Calculate occupancy ratio
+	occupancyRatio := occupiedBandwidth / totalBandwidth
+
+	// Voice should occupy at least 50% of the detected bandwidth
+	// A 50 Hz tone in a 1.5 kHz region would be ~3% occupancy
+	// Digital modes are typically 10-30% occupancy
+	// Voice is typically 60-80% occupancy
+	minOccupancy := 0.50
+
+	return occupancyRatio >= minOccupancy
 }
 
 // inferLowCutFromSpectralRamp infers the low-cut filter frequency from spectral ramp
@@ -843,8 +886,13 @@ func detectVoiceActivityMultiFrame(buffer *FFTBuffer, params DetectionParams, wi
 			continue
 		}
 
-		// Spectral variance check: reject flat wideband noise
+		// Spectral variance check: reject flat wideband noise and narrow digital modes
 		if !passesSpectralVarianceCheck(lastFrame.Data, region.StartBin, region.EndBin) {
+			continue
+		}
+
+		// Bandwidth occupancy check: reject narrow tones in wide regions
+		if !passesBandwidthOccupancyCheck(lastFrame.Data, region.StartBin, region.EndBin, region.NoiseFloor, buffer.BinWidth) {
 			continue
 		}
 

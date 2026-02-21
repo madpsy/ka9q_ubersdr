@@ -58,8 +58,40 @@ class FT8Extension extends DecoderExtension {
     onInitialize() {
         console.log('FT8: onInitialize called');
         this.renderTemplate();
+        this.showImplementationNotice();
         this.waitForDOMAndSetupHandlers();
         console.log('FT8: onInitialize complete');
+    }
+
+    showImplementationNotice() {
+        // Create overlay
+        const overlay = document.createElement('div');
+        overlay.className = 'ft8-notice-overlay';
+        overlay.innerHTML = `
+            <div class="ft8-notice-overlay-content">
+                <div class="ft8-notice-overlay-title">
+                    ℹ️ Implementation Notice
+                </div>
+                <div class="ft8-notice-overlay-message">
+                    Only FT8 is currently implemented in this decoder.
+                    FT4 support is planned for a future release.
+                </div>
+                <button class="ft8-notice-overlay-button" id="ft8-notice-ok-btn">OK</button>
+            </div>
+        `;
+
+        // Add to body
+        document.body.appendChild(overlay);
+
+        // Setup OK button handler
+        const okBtn = document.getElementById('ft8-notice-ok-btn');
+        if (okBtn) {
+            okBtn.addEventListener('click', () => {
+                overlay.remove();
+            });
+        }
+
+        console.log('FT8: Implementation notice overlay displayed');
     }
 
     waitForDOMAndSetupHandlers() {

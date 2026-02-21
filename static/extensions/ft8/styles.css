@@ -567,3 +567,68 @@
         padding: 5px 4px;
     }
 }
+
+/* Implementation Notice Overlay */
+.ft8-notice-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    backdrop-filter: blur(5px);
+}
+
+.ft8-notice-overlay-content {
+    background: #2a2a2a;
+    border: 2px solid #4a9eff;
+    border-radius: 8px;
+    padding: 30px;
+    max-width: 500px;
+    text-align: center;
+    box-shadow: 0 4px 20px rgba(74, 158, 255, 0.3);
+}
+
+.ft8-notice-overlay-title {
+    color: #4a9eff;
+    font-size: 24px;
+    font-weight: bold;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+.ft8-notice-overlay-message {
+    color: #e0e0e0;
+    font-size: 16px;
+    line-height: 1.6;
+    margin-bottom: 25px;
+}
+
+.ft8-notice-overlay-button {
+    background: #4a9eff;
+    color: #1a1a1a;
+    border: none;
+    padding: 12px 30px;
+    font-size: 16px;
+    font-weight: bold;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+.ft8-notice-overlay-button:hover {
+    background: #6eb3ff;
+    transform: scale(1.05);
+}
+
+.ft8-notice-overlay-button:active {
+    transform: scale(0.95);
+}

@@ -3037,6 +3037,7 @@ input[type="range"]::-moz-range-thumb {
     border-radius: 6px;
     display: flex;
     flex-direction: column;
+    min-height: 400px;
 }
 
 .decoder-extension-header {

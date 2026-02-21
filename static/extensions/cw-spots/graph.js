@@ -92,6 +92,10 @@ class CWSpotsGraph {
             case 'extension_disabled':
                 this.showDisconnectedOverlay();
                 break;
+            case 'extension_enabled':
+                this.hideDisconnectedOverlay();
+                this.updateStatus('connected');
+                break;
             default:
                 // Ignore unknown message types
                 break;

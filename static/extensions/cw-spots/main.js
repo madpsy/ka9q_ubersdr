@@ -946,6 +946,15 @@ class CWSpotsExtension extends DecoderExtension {
 
         // Show badges when extension is enabled
         this.updateBadges();
+
+        // Notify graph window that extension is re-enabled
+        if (this.graphWindow && !this.graphWindow.closed) {
+            this.graphWindow.postMessage({
+                type: 'extension_enabled'
+            }, '*');
+            // Refresh graph window with current spots
+            this.refreshGraphWindow();
+        }
     }
 
     onDisable() {

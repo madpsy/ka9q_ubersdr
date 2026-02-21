@@ -331,3 +331,66 @@ void CleanupStaleInstances()
     
     RegCloseKey(hKey);
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// Send frequency offset command to DLL
+BOOL SendFrequencyOffsetCommand(UberSDRSharedStatus* pStatus, int receiverID, int frequencyOffset, BOOL applyImmediately)
+{
+    if (pStatus == NULL || receiverID < 0 || receiverID >= MAX_RX_COUNT) {
+        return FALSE;
+    }
+    
+    // Get next write position
+    int32_t writePos = pStatus->commandWritePos;
+    int32_t readPos = pStatus->commandReadPos;
+    
+    // Check if queue is full (leave one slot empty to distinguish full from empty)
+    if (((writePos + 1) % 16) == readPos) {
+        return FALSE;  // Queue full
+    }
+    
+    // Get next sequence number (simple increment)
+    static volatile int32_t sequenceCounter = 0;
+    int32_t seqNum = InterlockedIncrement((volatile LONG*)&sequenceCounter);
+    
+    // Fill command structure
+    UberSDRCommand* cmd = &pStatus->commandQueue[writePos % 16];
+    cmd->commandType = applyImmediately ? CMD_APPLY_OFFSET : CMD_SET_FREQUENCY_OFFSET;
+    cmd->receiverID = receiverID;
+    cmd->frequencyOffset = frequencyOffset;
+    cmd->sequenceNumber = seqNum;
+    cmd->acknowledged = 0;  // Not yet acknowledged
+    cmd->timestamp = GetCurrentTimeMs();
+    
+    // Advance write position (atomic)
+    InterlockedExchange((volatile LONG*)&pStatus->commandWritePos, (writePos + 1) % 16);
+    
+    return TRUE;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Wait for command acknowledgment
+BOOL WaitForCommandAck(UberSDRSharedStatus* pStatus, int32_t sequenceNumber, int timeoutMs)
+{
+    if (pStatus == NULL) {
+        return FALSE;
+    }
+    
+    int64_t startTime = GetCurrentTimeMs();
+    
+    // Poll for acknowledgment
+    while ((GetCurrentTimeMs() - startTime) < timeoutMs) {
+        // Search command queue for our sequence number
+        for (int i = 0; i < 16; i++) {
+            UberSDRCommand* cmd = &pStatus->commandQueue[i];
+            if (cmd->sequenceNumber == sequenceNumber && cmd->acknowledged == sequenceNumber) {
+                return TRUE;  // Command acknowledged
+            }
+        }
+        
+        // Sleep briefly to avoid busy-waiting
+        Sleep(10);
+    }
+    
+    return FALSE;  // Timeout
+}

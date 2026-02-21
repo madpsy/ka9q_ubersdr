@@ -39,7 +39,7 @@ class VoiceActivityDisplay:
         
         # Auto-refresh control
         self.auto_refresh = True
-        self.refresh_interval = 5000  # milliseconds (5 seconds)
+        self.refresh_interval = 10000  # milliseconds (10 seconds to avoid rate limiting)
         self.refresh_job = None
         
         # Scanning control
@@ -128,7 +128,8 @@ class VoiceActivityDisplay:
             padx=16,
             pady=8,
             cursor='hand2',
-            state=tk.DISABLED
+            state=tk.DISABLED,
+            disabledforeground='white'
         )
         self.stop_btn.pack(side=tk.LEFT, padx=5)
         
@@ -229,12 +230,13 @@ class VoiceActivityDisplay:
         
         # Configure Treeview style for dark theme
         style = ttk.Style()
-        style.theme_use('default')
+        # Configure custom dark style
         style.configure('Dark.Treeview',
                        background='#2c3e50',
                        foreground='#ecf0f1',
                        fieldbackground='#2c3e50',
-                       borderwidth=0)
+                       borderwidth=0,
+                       relief='flat')
         style.configure('Dark.Treeview.Heading',
                        background='#34495e',
                        foreground='#ecf0f1',
@@ -243,24 +245,23 @@ class VoiceActivityDisplay:
         style.map('Dark.Treeview',
                  background=[('selected', '#3498db')],
                  foreground=[('selected', 'white')])
+
+        # Also set the layout to ensure background fills properly
+        style.layout('Dark.Treeview', [('Dark.Treeview.treearea', {'sticky': 'nswe'})])
         
-        # Treeview
+        # Treeview (hide headings to avoid white header styling issues)
         self.activity_tree = ttk.Treeview(
             tree_frame,
             columns=('frequency', 'mode', 'bandwidth', 'snr'),
-            show='headings',
+            show='tree',
             selectmode='browse',
             yscrollcommand=scrollbar.set,
             style='Dark.Treeview'
         )
         scrollbar.config(command=self.activity_tree.yview)
         
-        # Configure columns
-        self.activity_tree.heading('frequency', text='Frequency')
-        self.activity_tree.heading('mode', text='Mode')
-        self.activity_tree.heading('bandwidth', text='Bandwidth')
-        self.activity_tree.heading('snr', text='SNR')
-        
+        # Configure columns (headings not shown but still configure for structure)
+        self.activity_tree.column('#0', width=0, stretch=False)  # Hide tree column
         self.activity_tree.column('frequency', width=120, anchor=tk.W)
         self.activity_tree.column('mode', width=60, anchor=tk.CENTER)
         self.activity_tree.column('bandwidth', width=100, anchor=tk.CENTER)
@@ -330,12 +331,53 @@ class VoiceActivityDisplay:
             try:
                 url = f"{self.server_url}/api/noisefloor/voice-activity?band={self.current_band}"
                 response = requests.get(url, timeout=5)
+
+                # Handle rate limit silently - don't show error to user
+                if response.status_code == 429:
+                    print(f"Rate limit hit for {self.current_band}, will retry on next refresh")
+                    return
+
                 response.raise_for_status()
+
+                # Handle empty response (204 No Content or empty body)
+                if response.status_code == 204 or not response.text.strip():
+                    # No data available - show empty results
+                    empty_data = {
+                        'band': self.current_band,
+                        'timestamp': None,
+                        'noise_floor_db': None,
+                        'activities': [],
+                        'total_activities': 0
+                    }
+                    self.window.after(0, lambda: self._display_data(empty_data))
+                    return
+
                 data = response.json()
-                
+
                 # Update UI in main thread
                 self.window.after(0, lambda: self._display_data(data))
                 
+            except requests.exceptions.JSONDecodeError as e:
+                # Handle JSON parsing errors (empty response, invalid JSON)
+                error_msg = f"No data available for {self.current_band} (band may have no activity)"
+                print(f"JSON decode error: {e}")
+                # Show empty results instead of error
+                empty_data = {
+                    'band': self.current_band,
+                    'timestamp': None,
+                    'noise_floor_db': None,
+                    'activities': [],
+                    'total_activities': 0
+                }
+                self.window.after(0, lambda: self._display_data(empty_data))
+            except requests.exceptions.HTTPError as e:
+                # Handle HTTP errors (including 429 rate limit)
+                if e.response.status_code == 429:
+                    # Rate limit - silently ignore and try again on next refresh
+                    print(f"Rate limit hit for {self.current_band}, will retry on next refresh")
+                else:
+                    error_msg = f"HTTP error {e.response.status_code}: {str(e)}"
+                    self.window.after(0, lambda: self._show_error(error_msg))
             except Exception as e:
                 error_msg = f"Error loading data: {str(e)}"
                 self.window.after(0, lambda: self._show_error(error_msg))

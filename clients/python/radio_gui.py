@@ -5856,13 +5856,14 @@ class RadioGUI:
             protocol = "https" if use_tls else "http"
             server_url = f"{protocol}://{server}"
 
-            # Get current band
+            # Get current band using amateur radio bands (not dropdown bands)
             current_band = "40m"  # Default
             freq_hz = self.get_frequency_hz()
-            if freq_hz and self.bands:
-                for band in self.bands:
-                    if band['start'] <= freq_hz <= band['end']:
-                        current_band = band.get('label', '40m')
+            if freq_hz:
+                # Use BAND_RANGES to match amateur radio bands only
+                for band_name, band_range in self.BAND_RANGES.items():
+                    if band_range['min'] <= freq_hz <= band_range['max']:
+                        current_band = band_name
                         break
 
             # Create tune callback

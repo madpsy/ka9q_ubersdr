@@ -4,83 +4,118 @@
 #include "resource.h"
 
 // Dialog
-IDD_MAIN DIALOGEX 0, 0, 520, 550
+IDD_MAIN DIALOGEX 0, 0, 600, 550
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "UberSDR Monitor"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     // Instance list area
     LTEXT           "Available Instances:", IDC_INSTANCE_LABEL, 10, 10, 200, 10
-    LISTBOX         IDC_INSTANCE_LIST, 10, 25, 500, 80, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON      "Connect to Selected", IDC_CONNECT_BUTTON, 420, 110, 90, 14
+    LISTBOX         IDC_INSTANCE_LIST, 10, 25, 580, 80, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "Connect to Selected", IDC_CONNECT_BUTTON, 500, 110, 90, 14
     
     // Separator after instance list
-    CONTROL         "", IDC_STATIC, "Static", SS_ETCHEDHORZ, 10, 130, 500, 1
+    CONTROL         "", IDC_STATIC, "Static", SS_ETCHEDHORZ, 10, 130, 580, 1
     
     // Server status (moved down to make room for instance list)
-    LTEXT           "Server: Connecting...", IDC_SERVER_STATUS, 10, 140, 500, 10
-    LTEXT           "Sample Rate: -- Hz", IDC_SAMPLE_RATE, 10, 155, 500, 10
+    LTEXT           "Server: Connecting...", IDC_SERVER_STATUS, 10, 140, 580, 10
+    LTEXT           "Sample Rate: -- Hz", IDC_SAMPLE_RATE, 10, 155, 580, 10
     
     // Separator
-    CONTROL         "", IDC_STATIC, "Static", SS_ETCHEDHORZ, 10, 170, 500, 1
+    CONTROL         "", IDC_STATIC, "Static", SS_ETCHEDHORZ, 10, 170, 580, 1
     
     // Receiver status header (moved down)
     LTEXT           "Receiver Status:", IDC_STATIC, 10, 175, 200, 10
-    LTEXT           "I", IDC_STATIC, 420, 175, 10, 10
-    LTEXT           "Q", IDC_STATIC, 465, 175, 10, 10
+    LTEXT           "Spots", IDC_STATIC, 343, 175, 22, 10, SS_RIGHT
+    LTEXT           "Median", IDC_STATIC, 368, 175, 50, 10, SS_CENTER
+    LTEXT           "Duration", IDC_STATIC, 470, 175, 40, 10, SS_CENTER
+    LTEXT           "I", IDC_STATIC, 520, 175, 10, 10
+    LTEXT           "Q", IDC_STATIC, 547, 175, 10, 10
     
-    // Receiver status lines with record buttons and level meters (adjusted for narrower window)
-    PUSHBUTTON      "REC", IDC_RX0_RECORD, 385, 189, 20, 12
-    LTEXT           "Rx0: Inactive", IDC_RX0_STATUS, 10, 190, 370, 10
-    CONTROL         "", IDC_RX0_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 415, 190, 40, 10
-    CONTROL         "", IDC_RX0_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 460, 190, 40, 10
+    // Receiver status lines with Spot counts, Spec and Rec buttons, Auto checkboxes and level meters
+    LTEXT           "Rx0: Inactive", IDC_RX0_STATUS, 10, 190, 330, 10
+    LTEXT           "-", IDC_RX0_SPOTS, 343, 190, 22, 10, SS_RIGHT
+    LTEXT           "-", IDC_RX0_MEDIAN, 368, 190, 50, 10, SS_CENTER
+    PUSHBUTTON      "Spec", IDC_RX0_SPECTRUM, 420, 189, 25, 12
+    PUSHBUTTON      "Rec", IDC_RX0_RECORD, 447, 189, 20, 12
+    EDITTEXT        IDC_RX0_DURATION, 470, 189, 40, 12, ES_NUMBER
+    CONTROL         "", IDC_RX0_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 515, 190, 25, 10
+    CONTROL         "", IDC_RX0_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 542, 190, 25, 10
     
-    PUSHBUTTON      "REC", IDC_RX1_RECORD, 385, 204, 20, 12
-    LTEXT           "Rx1: Inactive", IDC_RX1_STATUS, 10, 205, 370, 10
-    CONTROL         "", IDC_RX1_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 415, 205, 40, 10
-    CONTROL         "", IDC_RX1_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 460, 205, 40, 10
+    LTEXT           "Rx1: Inactive", IDC_RX1_STATUS, 10, 205, 330, 10
+    LTEXT           "-", IDC_RX1_SPOTS, 343, 205, 22, 10, SS_RIGHT
+    LTEXT           "-", IDC_RX1_MEDIAN, 368, 205, 50, 10, SS_CENTER
+    PUSHBUTTON      "Spec", IDC_RX1_SPECTRUM, 420, 204, 25, 12
+    PUSHBUTTON      "Rec", IDC_RX1_RECORD, 447, 204, 20, 12
+    EDITTEXT        IDC_RX1_DURATION, 470, 204, 40, 12, ES_NUMBER
+    CONTROL         "", IDC_RX1_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 515, 205, 25, 10
+    CONTROL         "", IDC_RX1_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 542, 205, 25, 10
     
-    PUSHBUTTON      "REC", IDC_RX2_RECORD, 385, 219, 20, 12
-    LTEXT           "Rx2: Inactive", IDC_RX2_STATUS, 10, 220, 370, 10
-    CONTROL         "", IDC_RX2_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 415, 220, 40, 10
-    CONTROL         "", IDC_RX2_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 460, 220, 40, 10
+    LTEXT           "Rx2: Inactive", IDC_RX2_STATUS, 10, 220, 330, 10
+    LTEXT           "-", IDC_RX2_SPOTS, 343, 220, 22, 10, SS_RIGHT
+    LTEXT           "-", IDC_RX2_MEDIAN, 368, 220, 50, 10, SS_CENTER
+    PUSHBUTTON      "Spec", IDC_RX2_SPECTRUM, 420, 219, 25, 12
+    PUSHBUTTON      "Rec", IDC_RX2_RECORD, 447, 219, 20, 12
+    EDITTEXT        IDC_RX2_DURATION, 470, 219, 40, 12, ES_NUMBER
+    CONTROL         "", IDC_RX2_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 515, 220, 25, 10
+    CONTROL         "", IDC_RX2_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 542, 220, 25, 10
     
-    PUSHBUTTON      "REC", IDC_RX3_RECORD, 385, 234, 20, 12
-    LTEXT           "Rx3: Inactive", IDC_RX3_STATUS, 10, 235, 370, 10
-    CONTROL         "", IDC_RX3_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 415, 235, 40, 10
-    CONTROL         "", IDC_RX3_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 460, 235, 40, 10
+    LTEXT           "Rx3: Inactive", IDC_RX3_STATUS, 10, 235, 330, 10
+    LTEXT           "-", IDC_RX3_SPOTS, 343, 235, 22, 10, SS_RIGHT
+    LTEXT           "-", IDC_RX3_MEDIAN, 368, 235, 50, 10, SS_CENTER
+    PUSHBUTTON      "Spec", IDC_RX3_SPECTRUM, 420, 234, 25, 12
+    PUSHBUTTON      "Rec", IDC_RX3_RECORD, 447, 234, 20, 12
+    EDITTEXT        IDC_RX3_DURATION, 470, 234, 40, 12, ES_NUMBER
+    CONTROL         "", IDC_RX3_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 515, 235, 25, 10
+    CONTROL         "", IDC_RX3_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 542, 235, 25, 10
     
-    PUSHBUTTON      "REC", IDC_RX4_RECORD, 385, 249, 20, 12
-    LTEXT           "Rx4: Inactive", IDC_RX4_STATUS, 10, 250, 370, 10
-    CONTROL         "", IDC_RX4_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 415, 250, 40, 10
-    CONTROL         "", IDC_RX4_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 460, 250, 40, 10
+    LTEXT           "Rx4: Inactive", IDC_RX4_STATUS, 10, 250, 330, 10
+    LTEXT           "-", IDC_RX4_SPOTS, 343, 250, 22, 10, SS_RIGHT
+    LTEXT           "-", IDC_RX4_MEDIAN, 368, 250, 50, 10, SS_CENTER
+    PUSHBUTTON      "Spec", IDC_RX4_SPECTRUM, 420, 249, 25, 12
+    PUSHBUTTON      "Rec", IDC_RX4_RECORD, 447, 249, 20, 12
+    EDITTEXT        IDC_RX4_DURATION, 470, 249, 40, 12, ES_NUMBER
+    CONTROL         "", IDC_RX4_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 515, 250, 25, 10
+    CONTROL         "", IDC_RX4_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 542, 250, 25, 10
     
-    PUSHBUTTON      "REC", IDC_RX5_RECORD, 385, 264, 20, 12
-    LTEXT           "Rx5: Inactive", IDC_RX5_STATUS, 10, 265, 370, 10
-    CONTROL         "", IDC_RX5_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 415, 265, 40, 10
-    CONTROL         "", IDC_RX5_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 460, 265, 40, 10
+    LTEXT           "Rx5: Inactive", IDC_RX5_STATUS, 10, 265, 330, 10
+    LTEXT           "-", IDC_RX5_SPOTS, 343, 265, 22, 10, SS_RIGHT
+    LTEXT           "-", IDC_RX5_MEDIAN, 368, 265, 50, 10, SS_CENTER
+    PUSHBUTTON      "Spec", IDC_RX5_SPECTRUM, 420, 264, 25, 12
+    PUSHBUTTON      "Rec", IDC_RX5_RECORD, 447, 264, 20, 12
+    EDITTEXT        IDC_RX5_DURATION, 470, 264, 40, 12, ES_NUMBER
+    CONTROL         "", IDC_RX5_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 515, 265, 25, 10
+    CONTROL         "", IDC_RX5_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 542, 265, 25, 10
     
-    PUSHBUTTON      "REC", IDC_RX6_RECORD, 385, 279, 20, 12
-    LTEXT           "Rx6: Inactive", IDC_RX6_STATUS, 10, 280, 370, 10
-    CONTROL         "", IDC_RX6_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 415, 280, 40, 10
-    CONTROL         "", IDC_RX6_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 460, 280, 40, 10
+    LTEXT           "Rx6: Inactive", IDC_RX6_STATUS, 10, 280, 330, 10
+    LTEXT           "-", IDC_RX6_SPOTS, 343, 280, 22, 10, SS_RIGHT
+    LTEXT           "-", IDC_RX6_MEDIAN, 368, 280, 50, 10, SS_CENTER
+    PUSHBUTTON      "Spec", IDC_RX6_SPECTRUM, 420, 279, 25, 12
+    PUSHBUTTON      "Rec", IDC_RX6_RECORD, 447, 279, 20, 12
+    EDITTEXT        IDC_RX6_DURATION, 470, 279, 40, 12, ES_NUMBER
+    CONTROL         "", IDC_RX6_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 515, 280, 25, 10
+    CONTROL         "", IDC_RX6_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 542, 280, 25, 10
     
-    PUSHBUTTON      "REC", IDC_RX7_RECORD, 385, 294, 20, 12
-    LTEXT           "Rx7: Inactive", IDC_RX7_STATUS, 10, 295, 370, 10
-    CONTROL         "", IDC_RX7_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 415, 295, 40, 10
-    CONTROL         "", IDC_RX7_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 460, 295, 40, 10
+    LTEXT           "Rx7: Inactive", IDC_RX7_STATUS, 10, 295, 330, 10
+    LTEXT           "-", IDC_RX7_SPOTS, 343, 295, 22, 10, SS_RIGHT
+    LTEXT           "-", IDC_RX7_MEDIAN, 368, 295, 50, 10, SS_CENTER
+    PUSHBUTTON      "Spec", IDC_RX7_SPECTRUM, 420, 294, 25, 12
+    PUSHBUTTON      "Rec", IDC_RX7_RECORD, 447, 294, 20, 12
+    EDITTEXT        IDC_RX7_DURATION, 470, 294, 40, 12, ES_NUMBER
+    CONTROL         "", IDC_RX7_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 515, 295, 25, 10
+    CONTROL         "", IDC_RX7_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 542, 295, 25, 10
     
     // Separator
-    CONTROL         "", IDC_STATIC, "Static", SS_ETCHEDHORZ, 10, 310, 500, 1
+    CONTROL         "", IDC_STATIC, "Static", SS_ETCHEDHORZ, 10, 310, 580, 1
     
     // Statistics
-    LTEXT           "Statistics:", IDC_STATIC, 10, 315, 500, 10
-    LTEXT           "Callbacks: 0", IDC_CALLBACKS, 10, 330, 500, 10
-    LTEXT           "Uptime: 00:00:00", IDC_UPTIME, 10, 345, 500, 10
-    LTEXT           "Total Throughput: 0.0 KB/s", IDC_TOTAL_THROUGHPUT, 10, 360, 500, 10
+    LTEXT           "Statistics:", IDC_STATIC, 10, 315, 580, 10
+    LTEXT           "Callbacks: 0", IDC_CALLBACKS, 10, 330, 580, 10
+    LTEXT           "Uptime: 00:00:00", IDC_UPTIME, 10, 345, 580, 10
+    LTEXT           "Total Throughput: 0.0 KB/s", IDC_TOTAL_THROUGHPUT, 10, 360, 580, 10
     
     // Separator
-    CONTROL         "", IDC_STATIC, "Static", SS_ETCHEDHORZ, 10, 375, 500, 1
+    CONTROL         "", IDC_STATIC, "Static", SS_ETCHEDHORZ, 10, 375, 580, 1
     
     // Telnet connection controls
     LTEXT           "DX Cluster (Telnet):", IDC_STATIC, 10, 380, 80, 10
@@ -90,11 +125,11 @@ BEGIN
     PUSHBUTTON      "Disconnect", IDC_TELNET_DISCONNECT, 225, 378, 50, 14
     
     // Telnet output area
-    EDITTEXT        IDC_TELNET_OUTPUT, 10, 395, 500, 120, ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL
+    EDITTEXT        IDC_TELNET_OUTPUT, 10, 395, 580, 120, ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL
     
     // Recording format info
-    LTEXT           "Recording: WAV PCM, 192kHz, 16-bit stereo I/Q (L=I, R=Q), Big-endian", IDC_STATIC, 10, 520, 440, 10
+    LTEXT           "Recording: WAV PCM, 192kHz, 16-bit stereo I/Q (L=I, R=Q), Big-endian", IDC_STATIC, 10, 520, 520, 10
     
     // Close button
-    DEFPUSHBUTTON   "Close", IDOK, 460, 530, 50, 14
+    DEFPUSHBUTTON   "Close", IDOK, 540, 530, 50, 14
 END

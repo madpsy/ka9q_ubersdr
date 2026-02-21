@@ -9,6 +9,9 @@
 // IXWebSocket library
 #include "IXWebSocket/ixwebsocket/IXWebSocket.h"
 
+// Forward declaration
+struct UberSDRSharedStatus;
+
 #pragma comment(lib, "ws2_32.lib")
 
 #define MAX_RX_COUNT 8
@@ -117,10 +120,16 @@ namespace UberSDRIntf
         CRITICAL_SECTION lock;  // Mutex for thread-safe access
         bool needsReconnect;    // Flag set by close callback
         HANDLE reconnectThread; // Handle to reconnection thread
+        int perReceiverOffset;  // Per-receiver frequency offset in Hz (dynamic)
+        
+        // Software frequency shifting (applied in IQ processing, not at tune)
+        double phaseAccumulator;  // Current phase for frequency shift
+        double phaseIncrement;    // Phase increment per sample (2*PI*offset/sampleRate)
         
         ReceiverInfo() : frequency(14074000), mode("iq192"), active(false),
                         state(DISCONNECTED), wsClient(nullptr), generation(0),
-                        needsReconnect(false), reconnectThread(NULL) {
+                        needsReconnect(false), reconnectThread(NULL), perReceiverOffset(0),
+                        phaseAccumulator(0.0), phaseIncrement(0.0) {
             InitializeCriticalSection(&lock);
         }
         
@@ -137,6 +146,8 @@ namespace UberSDRIntf
         int configPort;
         bool configFromFilename;
         bool debugRec;  // Enable 10-second WAV recording on start
+        int frequencyOffset;  // Frequency correction in Hz (can be positive or negative)
+        bool swapIQ;  // Swap I and Q channels (default: true for backward compatibility)
         
         // Server connection
         std::string serverHost;
@@ -178,6 +189,10 @@ namespace UberSDRIntf
         
         // HTTP operations
         bool HttpPost(const std::string& path, const std::string& body, std::string& response);
+        
+        // Command processing
+        void ProcessCommands(struct UberSDRSharedStatus* pSharedStatus);
+        int GetTotalFrequencyOffset(int receiverID);
         
     private:
         WSADATA wsaData;

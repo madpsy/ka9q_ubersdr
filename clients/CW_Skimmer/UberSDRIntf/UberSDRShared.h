@@ -20,6 +20,23 @@
 #define MAX_RX_COUNT 8
 #define IQ_BUFFER_SIZE 384000  // Buffer for ~2 seconds at 192kHz (2 samples per I/Q pair)
 
+// Command types for monitor-to-DLL communication
+enum UberSDRCommandType {
+    CMD_NONE = 0,
+    CMD_SET_FREQUENCY_OFFSET = 1,  // Set per-receiver frequency offset
+    CMD_APPLY_OFFSET = 2           // Apply offset and retune receiver
+};
+
+// Command structure for monitor-to-DLL communication
+struct UberSDRCommand {
+    volatile int32_t commandType;      // UberSDRCommandType
+    volatile int32_t receiverID;       // Target receiver (0-7)
+    volatile int32_t frequencyOffset;  // Frequency offset in Hz (can be negative)
+    volatile int32_t sequenceNumber;   // Incremented for each command
+    volatile int32_t acknowledged;     // Set to sequenceNumber by DLL when processed
+    volatile int64_t timestamp;        // Command timestamp
+};
+
 // Shared status structure - updated by DLL, read by monitor
 struct UberSDRSharedStatus {
     // Server information
@@ -50,6 +67,13 @@ struct UberSDRSharedStatus {
         int ringBufferUnderruns;    // Total underrun count
         int ringBufferCapacity;     // Buffer capacity in samples
         
+        // Frequency offset control (per-receiver)
+        volatile int32_t frequencyOffset;      // Per-receiver frequency offset in Hz (dynamic)
+        volatile int32_t globalFrequencyOffset; // Global offset from INI file (read-only)
+        volatile int32_t totalFrequencyOffset;  // Total offset (INI global + per-receiver)
+        volatile int32_t requestedOffset;      // Requested offset from monitor
+        volatile int32_t offsetApplied;        // Set to 1 when offset is applied
+        
         // Circular buffer for IQ recording
         int16_t iqBuffer[IQ_BUFFER_SIZE];  // Interleaved I/Q samples (big-endian)
         volatile int32_t iqBufferWritePos;  // Current write position
@@ -74,6 +98,11 @@ struct UberSDRSharedStatus {
     
     // Multi-instance support
     DWORD processID;  // Process ID of the DLL instance
+    
+    // Command queue for monitor-to-DLL communication
+    UberSDRCommand commandQueue[16];  // Ring buffer of commands
+    volatile int32_t commandWritePos;  // Write position (monitor writes here)
+    volatile int32_t commandReadPos;   // Read position (DLL reads here)
 };
 
 // Instance information structure (for monitor enumeration)
@@ -104,6 +133,10 @@ BOOL UnregisterInstance(DWORD processID);
 BOOL UpdateInstanceHeartbeat(DWORD processID);
 int EnumerateInstances(UberSDRInstanceInfo* instances, int maxInstances);
 void CleanupStaleInstances();
+
+// Command functions for monitor-to-DLL communication
+BOOL SendFrequencyOffsetCommand(UberSDRSharedStatus* pStatus, int receiverID, int frequencyOffset, BOOL applyImmediately);
+BOOL WaitForCommandAck(UberSDRSharedStatus* pStatus, int32_t sequenceNumber, int timeoutMs);
 
 #ifdef __cplusplus
 }

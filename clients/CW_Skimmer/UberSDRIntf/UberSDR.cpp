@@ -17,6 +17,7 @@
 #include <algorithm>
 #include "UberSDR.h"
 #include "UberSDRIntf.h"
+#include "UberSDRShared.h"
 
 #pragma comment(lib, "rpcrt4.lib")
 
@@ -39,6 +40,8 @@ namespace UberSDRIntf
         activeReceivers = 0;
         sampleRate = 192000;
         iqMode = "iq192";
+        frequencyOffset = 0;  // Default to no frequency correction
+        swapIQ = true;  // Default to true for backward compatibility
         
         // Initialize WinSock
         wsaInitialized = false;
@@ -164,6 +167,13 @@ namespace UberSDRIntf
         int debugRecInt = GetPrivateProfileIntA("Server", "debug_rec", 0, iniPath);
         debugRec = (debugRecInt != 0);
         
+        // Read frequency offset from INI file (can be positive or negative)
+        frequencyOffset = GetPrivateProfileIntA("Calibration", "FrequencyOffset", 0, iniPath);
+        
+        // Read swap_iq from INI file (default: 1 = true for backward compatibility)
+        int swapIQInt = GetPrivateProfileIntA("Calibration", "swap_iq", 1, iniPath);
+        swapIQ = (swapIQInt != 0);
+        
         // Validate and apply configuration
         if (isValidHostname(host) && isValidPort(port)) {
             configHost = host;
@@ -171,7 +181,9 @@ namespace UberSDRIntf
             
             ss.str("");
             ss << "Configuration loaded from INI: " << configHost << ":" << configPort
-               << ", debug_rec=" << (debugRec ? "true" : "false");
+               << ", debug_rec=" << (debugRec ? "true" : "false")
+               << ", frequencyOffset=" << frequencyOffset << " Hz"
+               << ", swap_iq=" << (swapIQ ? "true" : "false");
             write_text_to_log_file(ss.str());
             return 0;
         } else {
@@ -398,6 +410,21 @@ namespace UberSDRIntf
     }
     
     ///////////////////////////////////////////////////////////////////////////////
+    // Get total frequency offset (global + per-receiver)
+    int UberSDR::GetTotalFrequencyOffset(int receiverID)
+    {
+        if (receiverID < 0 || receiverID >= MAX_RX_COUNT) {
+            return frequencyOffset;  // Just return global offset
+        }
+        
+        EnterCriticalSection(&receivers[receiverID].lock);
+        int totalOffset = frequencyOffset + receivers[receiverID].perReceiverOffset;
+        LeaveCriticalSection(&receivers[receiverID].lock);
+        
+        return totalOffset;
+    }
+    
+    ///////////////////////////////////////////////////////////////////////////////
     // Build WebSocket URL (matches Go client format)
     std::string UberSDR::BuildWebSocketURL(int receiverID, int frequency, const std::string& mode)
     {
@@ -423,10 +450,13 @@ namespace UberSDRIntf
         }
         LeaveCriticalSection(&receivers[receiverID].lock);
         
+        // NOTE: Frequency offset is now applied in software (IQ processing), not at tune time
+        // This allows Skimmer Server to receive frequency-shifted IQ data
+        
         std::stringstream url;
         url << (useSSL ? "wss://" : "ws://");
         url << serverHost << ":" << serverPort;
-        url << "/ws?frequency=" << frequency;
+        url << "/ws?frequency=" << frequency;  // No offset applied here
         url << "&mode=" << mode;
         url << "&format=pcm-zstd";  // Request binary PCM with zstd compression
         url << "&user_session_id=" << uuidString;
@@ -568,9 +598,12 @@ namespace UberSDRIntf
         
         // If receiver is active, send tune message instead of reconnecting
         if (receivers[receiverID].active && receivers[receiverID].wsClient != nullptr) {
+            // NOTE: Frequency offset is now applied in software (IQ processing), not at tune time
+            // Send tune message without offset - offset will be applied to IQ data
+            
             // Build tune message JSON
             std::stringstream tuneMsg;
-            tuneMsg << "{\"type\":\"tune\",\"frequency\":" << frequency << "}";
+            tuneMsg << "{\"type\":\"tune\",\"frequency\":" << frequency << "}";  // No offset applied
             
             ss.str("");
             ss << "Sending tune message to receiver " << receiverID << ": " << tuneMsg.str();
@@ -1195,6 +1228,101 @@ namespace UberSDRIntf
             receivers[receiverID].state == CONNECTED) {
             std::string pingMsg = "{\"type\":\"ping\"}";
             receivers[receiverID].wsClient->send(pingMsg);
+        }
+    }
+    
+    ///////////////////////////////////////////////////////////////////////////////
+    // Process commands from monitor (via shared memory)
+    void UberSDR::ProcessCommands(UberSDRSharedStatus* pSharedStatus)
+    {
+        // This function is called periodically from the DLL to check for commands
+        // from the monitor application via shared memory
+        
+        if (pSharedStatus == NULL) {
+            return;  // Shared memory not initialized
+        }
+        
+        // Check if there are any pending commands
+        while (pSharedStatus->commandReadPos != pSharedStatus->commandWritePos) {
+            int readPos = pSharedStatus->commandReadPos;
+            UberSDRCommand& cmd = pSharedStatus->commandQueue[readPos % 16];
+            
+            // Process command based on type
+            if (cmd.commandType == CMD_SET_FREQUENCY_OFFSET) {
+                int rxID = cmd.receiverID;
+                if (rxID >= 0 && rxID < MAX_RX_COUNT) {
+                    // Calculate total offset (INI global + per-receiver)
+                    int totalOffset = frequencyOffset + cmd.frequencyOffset;
+                    
+                    // Calculate phase increment for software frequency shift
+                    // NEGATE phase increment: positive offset shifts spectrum DOWN
+                    // phaseIncrement = -2 * PI * offset / sampleRate
+                    double phaseInc = -2.0 * 3.14159265358979323846 * (double)totalOffset / (double)sampleRate;
+                    
+                    EnterCriticalSection(&receivers[rxID].lock);
+                    receivers[rxID].perReceiverOffset = cmd.frequencyOffset;
+                    receivers[rxID].phaseIncrement = phaseInc;
+                    receivers[rxID].phaseAccumulator = 0.0;  // Reset phase accumulator
+                    LeaveCriticalSection(&receivers[rxID].lock);
+                    
+                    // Update shared memory status
+                    pSharedStatus->receivers[rxID].frequencyOffset = cmd.frequencyOffset;
+                    pSharedStatus->receivers[rxID].totalFrequencyOffset = totalOffset;
+                    pSharedStatus->receivers[rxID].requestedOffset = cmd.frequencyOffset;
+                    pSharedStatus->receivers[rxID].offsetApplied = 0;  // Not yet applied
+                    
+                    std::stringstream ss;
+                    ss << "Set frequency offset for receiver " << rxID << " to " << cmd.frequencyOffset
+                       << " Hz (total: " << totalOffset << " Hz including INI offset " << frequencyOffset
+                       << " Hz) - software shift enabled";
+                    write_text_to_log_file(ss.str());
+                    
+                    // Acknowledge command
+                    cmd.acknowledged = cmd.sequenceNumber;
+                }
+            }
+            else if (cmd.commandType == CMD_APPLY_OFFSET) {
+                int rxID = cmd.receiverID;
+                if (rxID >= 0 && rxID < MAX_RX_COUNT && receivers[rxID].active) {
+                    // Calculate total offset (INI global + per-receiver)
+                    int totalOffset = frequencyOffset + cmd.frequencyOffset;
+                    
+                    // Calculate phase increment for software frequency shift
+                    // NEGATE phase increment: positive offset shifts spectrum DOWN
+                    // phaseIncrement = -2 * PI * offset / sampleRate
+                    double phaseInc = -2.0 * 3.14159265358979323846 * (double)totalOffset / (double)sampleRate;
+                    
+                    // Set the offset and phase increment
+                    EnterCriticalSection(&receivers[rxID].lock);
+                    receivers[rxID].perReceiverOffset = cmd.frequencyOffset;
+                    receivers[rxID].phaseIncrement = phaseInc;
+                    receivers[rxID].phaseAccumulator = 0.0;  // Reset phase accumulator
+                    LeaveCriticalSection(&receivers[rxID].lock);
+                    
+                    // Update shared memory status
+                    pSharedStatus->receivers[rxID].frequencyOffset = cmd.frequencyOffset;
+                    pSharedStatus->receivers[rxID].totalFrequencyOffset = totalOffset;
+                    pSharedStatus->receivers[rxID].requestedOffset = cmd.frequencyOffset;
+                    
+                    std::stringstream ss;
+                    ss << "CMD_APPLY_OFFSET: Rx" << rxID << " offset=" << cmd.frequencyOffset
+                       << " Hz, total=" << totalOffset << " Hz, phaseInc=" << phaseInc
+                       << " (sampleRate=" << sampleRate << ")";
+                    write_text_to_log_file(ss.str());
+                    
+                    // NOTE: No longer retuning the receiver - offset is applied in software
+                    // The IQ data will be frequency-shifted in the processing path
+                    
+                    // Mark as applied
+                    pSharedStatus->receivers[rxID].offsetApplied = 1;
+                    
+                    // Acknowledge command
+                    cmd.acknowledged = cmd.sequenceNumber;
+                }
+            }
+            
+            // Move to next command
+            pSharedStatus->commandReadPos = (readPos + 1) % 16;
         }
     }
 }

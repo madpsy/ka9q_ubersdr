@@ -1,32 +1,35 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRMonitor\UberSDRMonitor.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRMonitor\UberSDRMonitor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\UberSDRShared.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRMonitor\resource.h">
+    <ClInclude Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRMonitor\resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\UberSDRShared.h">
+    <ClInclude Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\UberSDRShared.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRMonitor\CMakeLists.txt" />
+    <CustomBuild Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRMonitor\CMakeLists.txt" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRMonitor\UberSDRMonitor.rc">
+    <ResourceCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRMonitor\UberSDRMonitor.rc">
       <Filter>Source Files</Filter>
     </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Header Files">
-      <UniqueIdentifier>{FFA8E85F-A895-3242-A613-A409D38A0589}</UniqueIdentifier>
+      <UniqueIdentifier>{2BF3B474-4F15-3A0D-B4F6-E5F361E7A64C}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files">
-      <UniqueIdentifier>{34A8E71D-7A36-3C55-ABDD-80AF767FDFE1}</UniqueIdentifier>
+      <UniqueIdentifier>{D4AE0668-946C-3770-8D59-A3F640FFE13B}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

@@ -18,6 +18,7 @@ add_executable(UberSDRMonitor WIN32
 target_link_libraries(UberSDRMonitor
     comctl32
     ws2_32
+    msimg32
 )
 
 # Set output directory

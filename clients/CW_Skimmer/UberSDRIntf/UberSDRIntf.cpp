@@ -173,6 +173,10 @@ namespace UberSDRIntf
         gpSharedStatus->lastUpdateTime = ::GetCurrentTimeMs();
         gpSharedStatus->processID = gProcessID;
         
+        // Initialize command queue
+        gpSharedStatus->commandWritePos = 0;
+        gpSharedStatus->commandReadPos = 0;
+        
         // Copy server info
         strncpy_s(gpSharedStatus->serverHost, sizeof(gpSharedStatus->serverHost),
                   myUberSDR.serverHost.c_str(), _TRUNCATE);
@@ -329,9 +333,13 @@ namespace UberSDRIntf
         write_text_to_log_file(ss.str());
         
         // WebSocket message processing happens in the WebSocket thread
-        // This thread just manages the receiver state
+        // This thread manages the receiver state and processes commands
         while (!gStopFlag && myUberSDR.receivers[receiverID].active)
         {
+            // Process commands from monitor every 100ms
+            if (receiverID == 0) {  // Only process commands once (from receiver 0's thread)
+                myUberSDR.ProcessCommands(gpSharedStatus);
+            }
             Sleep(100);
         }
         
@@ -491,9 +499,18 @@ void ProcessIQData(int receiverID, const std::vector<uint8_t>& iqBytes)
         // Build 32-bit values directly from bytes (like Hermes does)
         // This avoids sign extension issues when shifting int16_t values
         // Hermes puts 24-bit samples in bits [31:8], we put 16-bit samples in bits [31:16]
-        // Swap I and Q for correct sideband orientation in CW Skimmer
-        int32_t I_32 = ((int32_t)iqBytes[i*4+2] << 24) | ((int32_t)iqBytes[i*4+3] << 16);  // Read Q as I, bits [31:16]
-        int32_t Q_32 = ((int32_t)iqBytes[i*4] << 24) | ((int32_t)iqBytes[i*4+1] << 16);    // Read I as Q, bits [31:16]
+        
+        int32_t I_32, Q_32;
+        
+        if (myUberSDR.swapIQ) {
+            // Swap I and Q for correct sideband orientation in CW Skimmer (default behavior)
+            I_32 = ((int32_t)iqBytes[i*4+2] << 24) | ((int32_t)iqBytes[i*4+3] << 16);  // Read Q as I, bits [31:16]
+            Q_32 = ((int32_t)iqBytes[i*4] << 24) | ((int32_t)iqBytes[i*4+1] << 16);    // Read I as Q, bits [31:16]
+        } else {
+            // No swap - read I as I, Q as Q
+            I_32 = ((int32_t)iqBytes[i*4] << 24) | ((int32_t)iqBytes[i*4+1] << 16);    // Read I as I, bits [31:16]
+            Q_32 = ((int32_t)iqBytes[i*4+2] << 24) | ((int32_t)iqBytes[i*4+3] << 16);  // Read Q as Q, bits [31:16]
+        }
         
         // Normalize to proper range and negate Q to match Hermes (Im = -Q)
         // Divide by 2^31 to get ±1.0 range (same as WAV file normalization)
@@ -541,17 +558,47 @@ void ProcessIQData(int receiverID, const std::vector<uint8_t>& iqBytes)
 ///////////////////////////////////////////////////////////////////////////////
 // Ring buffer consumer - reads from ring buffers and fills processing buffers
 // This runs in a separate thread to provide consistent timing
+// HIGH-RESOLUTION TIMING: Uses QueryPerformanceCounter for precise sample timing
 void ConsumeRingBuffers()
 {
     using namespace UberSDRIntf;
+    
+    // High-resolution timing setup
+    LARGE_INTEGER frequency, startTime, currentTime;
+    QueryPerformanceFrequency(&frequency);
+    int64_t samplesProcessed = 0;
+    bool timingInitialized = false;
+    
+    std::stringstream ss;
+    ss << "Ring buffer consumer: High-resolution timing enabled (frequency: "
+       << frequency.QuadPart << " Hz)";
+    write_text_to_log_file(ss.str());
     
     while (!gStopFlag)
     {
         // Check if we have active receivers
         if (gActiveReceivers == 0) {
             Sleep(10);
+            timingInitialized = false;
+            samplesProcessed = 0;
             continue;
         }
+        
+        // Initialize timing on first sample
+        if (!timingInitialized) {
+            QueryPerformanceCounter(&startTime);
+            samplesProcessed = 0;
+            timingInitialized = true;
+            
+            ss.str("");
+            ss << "Ring buffer consumer: Timing initialized at sample rate " << gSampleRate << " Hz";
+            write_text_to_log_file(ss.str());
+        }
+        
+        // Calculate target time for this sample (in performance counter ticks)
+        // Target = startTime + (samplesProcessed * ticksPerSecond / sampleRate)
+        int64_t targetTicks = startTime.QuadPart +
+            ((samplesProcessed * frequency.QuadPart) / gSampleRate);
         
         // Try to read one sample from each active receiver's ring buffer
         bool anyBufferEmpty = false;
@@ -576,7 +623,42 @@ void ConsumeRingBuffers()
                 // (Logging removed to reduce log verbosity)
             }
             
+            // SOFTWARE FREQUENCY SHIFT: Apply frequency offset in IQ domain
+            // This shifts the spectrum without retuning the radio
+            // Complex multiply: (I + jQ) * e^(j*phase) = (I + jQ) * (cos + j*sin)
+            float shifted_I = I_float;
+            float shifted_Q = Q_float;
+            
+            EnterCriticalSection(&myUberSDR.receivers[receiverID].lock);
+            double phaseIncrement = myUberSDR.receivers[receiverID].phaseIncrement;
+            
+            if (phaseIncrement != 0.0) {
+                // Get current phase
+                double phase = myUberSDR.receivers[receiverID].phaseAccumulator;
+                
+                // Calculate sin/cos for this phase
+                double cosPhase = cos(phase);
+                double sinPhase = sin(phase);
+                
+                // Complex multiply: (I + jQ) * (cos + j*sin)
+                // Real part: I*cos - Q*sin
+                // Imag part: I*sin + Q*cos
+                shifted_I = (float)(I_float * cosPhase - Q_float * sinPhase);
+                shifted_Q = (float)(I_float * sinPhase + Q_float * cosPhase);
+                
+                // Increment phase and wrap to avoid precision loss
+                phase += phaseIncrement;
+                if (phase > 2.0 * 3.14159265358979323846) {
+                    phase -= 2.0 * 3.14159265358979323846;
+                } else if (phase < -2.0 * 3.14159265358979323846) {
+                    phase += 2.0 * 3.14159265358979323846;
+                }
+                myUberSDR.receivers[receiverID].phaseAccumulator = phase;
+            }
+            LeaveCriticalSection(&myUberSDR.receivers[receiverID].lock);
+            
             // Write to WAV file if recording (first 10 seconds)
+            // NOTE: WAV file gets ORIGINAL (unshifted) IQ data for debugging
             if (gWavFile[receiverID] != NULL && gWavSamplesWritten[receiverID] < (gSampleRate * WAV_RECORD_SECONDS))
             {
                 // Write as stereo float: I (left), Q (right)
@@ -598,9 +680,9 @@ void ConsumeRingBuffers()
                 }
             }
             
-            // Write to input pointer and increment (like Hermes Protocol 2)
-            gInPtr[receiverID]->Re = I_float;
-            gInPtr[receiverID]->Im = Q_float;
+            // Write SHIFTED samples to processing buffer (Skimmer Server gets shifted IQ)
+            gInPtr[receiverID]->Re = shifted_I;
+            gInPtr[receiverID]->Im = shifted_Q;
             (gInPtr[receiverID])++;
             
             gDataSamples[receiverID]++;
@@ -701,12 +783,46 @@ void ConsumeRingBuffers()
         }
         }
         
-        // Only sleep if at least one buffer was empty (to avoid busy-waiting when starved)
-        // If all buffers had data, continue immediately to consume at full rate
-        if (anyBufferEmpty) {
-            Sleep(1);
+        // Increment sample counter
+        samplesProcessed++;
+        
+        // HIGH-RESOLUTION TIMING: Wait until target time for this sample
+        // This ensures precise sample rate regardless of processing variations
+        QueryPerformanceCounter(&currentTime);
+        int64_t ticksRemaining = targetTicks - currentTime.QuadPart;
+        
+        if (ticksRemaining > 0) {
+            // Calculate microseconds remaining
+            int64_t usRemaining = (ticksRemaining * 1000000) / frequency.QuadPart;
+            
+            // If more than 1ms away, sleep to yield CPU
+            if (usRemaining > 1000) {
+                Sleep(1);
+            }
+            
+            // Busy-wait for final precision (last ~1ms)
+            while (currentTime.QuadPart < targetTicks) {
+                // Yield CPU if still >100us away
+                if ((targetTicks - currentTime.QuadPart) * 1000000 / frequency.QuadPart > 100) {
+                    Sleep(0);  // Yield to other threads
+                }
+                QueryPerformanceCounter(&currentTime);
+            }
+        } else if (ticksRemaining < -frequency.QuadPart / 100) {
+            // More than 10ms behind - we're falling behind, log warning once per second
+            static int64_t lastWarning = 0;
+            int64_t now = GetCurrentTimeMs();
+            if (now - lastWarning > 1000) {
+                int64_t usBehind = (-ticksRemaining * 1000000) / frequency.QuadPart;
+                std::stringstream ss;
+                ss << "WARNING: Ring buffer consumer falling behind by " << usBehind << " us";
+                write_text_to_log_file(ss.str());
+                lastWarning = now;
+            }
         }
     }
+    
+    write_text_to_log_file("Ring buffer consumer: High-resolution timing stopped");
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -946,10 +1062,26 @@ namespace UberSDRIntf
                         continue;
                     }
                     
+                    // Initialize phase increment for software frequency shift
+                    // Use INI global offset as initial offset
+                    // NEGATE phase increment: positive offset shifts spectrum DOWN
+                    double totalOffset = (double)myUberSDR.frequencyOffset;
+                    double phaseInc = -2.0 * 3.14159265358979323846 * totalOffset / (double)gSampleRate;
+                    
+                    EnterCriticalSection(&myUberSDR.receivers[i].lock);
+                    myUberSDR.receivers[i].phaseIncrement = phaseInc;
+                    myUberSDR.receivers[i].phaseAccumulator = 0.0;
+                    LeaveCriticalSection(&myUberSDR.receivers[i].lock);
+                    
                     // Update shared memory for this receiver
                     if (gpSharedStatus != NULL) {
                         gpSharedStatus->receivers[i].active = true;
                         gpSharedStatus->receivers[i].frequency = 14074000;
+                        gpSharedStatus->receivers[i].frequencyOffset = 0;  // Initialize per-receiver offset
+                        gpSharedStatus->receivers[i].globalFrequencyOffset = myUberSDR.frequencyOffset;  // INI offset
+                        gpSharedStatus->receivers[i].totalFrequencyOffset = myUberSDR.frequencyOffset;  // INI offset (software shift)
+                        gpSharedStatus->receivers[i].requestedOffset = 0;
+                        gpSharedStatus->receivers[i].offsetApplied = 0;
                         strncpy_s(gpSharedStatus->receivers[i].sessionId,
                                   sizeof(gpSharedStatus->receivers[i].sessionId),
                                   myUberSDR.receivers[i].sessionId.c_str(), _TRUNCATE);

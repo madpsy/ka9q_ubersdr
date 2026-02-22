@@ -761,21 +761,34 @@ func main() {
 					// Look for goroutine header lines like "goroutine 123 [running]:"
 					if strings.HasPrefix(line, "goroutine ") && strings.Contains(line, "[") {
 						// Next non-empty line should be the function name
+						funcName := "unknown"
 						for j := i + 1; j < len(lines); j++ {
 							funcLine := strings.TrimSpace(lines[j])
-							if funcLine != "" {
-								// Extract just the function name (before the parenthesis)
-								if idx := strings.Index(funcLine, "("); idx > 0 {
-									funcName := funcLine[:idx]
-									// Simplify long package paths
-									if lastDot := strings.LastIndex(funcName, "."); lastDot > 0 {
-										funcName = funcName[lastDot+1:]
+							if funcLine != "" && !strings.HasPrefix(funcLine, "created by") {
+								// Extract function name (before the parenthesis or space)
+								funcName = funcLine
+								if idx := strings.Index(funcName, "("); idx > 0 {
+									funcName = funcName[:idx]
+								}
+								if idx := strings.Index(funcName, " "); idx > 0 {
+									funcName = funcName[:idx]
+								}
+								// Simplify long package paths - keep last two parts
+								parts := strings.Split(funcName, "/")
+								if len(parts) > 0 {
+									lastPart := parts[len(parts)-1]
+									// Further split by dots and keep last 2 segments
+									dotParts := strings.Split(lastPart, ".")
+									if len(dotParts) >= 2 {
+										funcName = dotParts[len(dotParts)-2] + "." + dotParts[len(dotParts)-1]
+									} else if len(dotParts) == 1 {
+										funcName = dotParts[0]
 									}
-									goroutineCounts[funcName]++
 								}
 								break
 							}
 						}
+						goroutineCounts[funcName]++
 					}
 				}
 

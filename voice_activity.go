@@ -64,13 +64,8 @@ func StartVoiceActivityBackgroundScanner(nfm *NoiseFloorMonitor) {
 					continue
 				}
 
-				fft := buffer.GetAveragedFFT(5 * time.Second)
-				if fft == nil {
-					continue
-				}
-
-				// Detect voice activity
-				newActivities := detectVoiceActivity(fft, params)
+				// Detect voice activity using multi-frame analysis
+				newActivities := detectVoiceActivityMultiFrame(buffer, params, 5*time.Second)
 
 				// Update cache (this will increment detection counts)
 				voiceActivityCache.mergeWithCache(bandConfig.Name, newActivities)
@@ -268,6 +263,8 @@ type CandidateRegion struct {
 	FrameCount     int
 	AvgPower       float32
 	PeakPower      float32
+	MinPower       float32   // Minimum power seen (for variance calculation)
+	PowerSamples   []float32 // Power samples over time for variance calculation
 	NoiseFloor     float32
 	SNR            float32
 	InferredLowCut uint64
@@ -283,13 +280,15 @@ type TimeFrequencyView struct {
 }
 
 // detectVoiceActivity implements the proper SSB voice detection pipeline
+// This is a wrapper that uses multi-frame analysis when available
 func detectVoiceActivity(fft *BandFFT, params DetectionParams) []VoiceActivity {
 	if fft == nil || len(fft.Data) == 0 {
 		return []VoiceActivity{}
 	}
 
-	// For now, use the averaged FFT data as a single frame
-	// In future, we'll access buffer.Samples directly for multi-frame analysis
+	// Single-frame fallback (deprecated - use multi-frame when possible)
+	// This version cannot detect temporal variations (syllabic modulation)
+	// and will incorrectly classify constant carriers as voice
 
 	// Step 1: Per-frame noise floor estimation using median filter
 	noiseFloor := estimateNoiseFloorMedianFilter(fft.Data, 1000, 3000, fft.BinWidth, fft.StartFreq)
@@ -316,8 +315,9 @@ func detectVoiceActivity(fft *BandFFT, params DetectionParams) []VoiceActivity {
 			continue
 		}
 
-		// For single-frame analysis, we can't do syllabic modulation check
-		// This would require time-domain analysis across multiple frames
+		// WARNING: Single-frame analysis cannot detect syllabic modulation
+		// Constant carriers (beacons, CW, interference) will pass through
+		// Use detectVoiceActivityMultiFrame for proper temporal analysis
 
 		voiceCandidates = append(voiceCandidates, candidate)
 	}
@@ -352,9 +352,9 @@ func detectVoiceActivity(fft *BandFFT, params DetectionParams) []VoiceActivity {
 			SignalAboveNoise:     candidate.SNR,
 			SNR:                  candidate.SNR,
 			SpectralShape:        "voice",
-			PowerStdDev:          0, // Not calculated in this version
+			PowerStdDev:          0, // Not calculated in single-frame version
 			Confidence:           confidence,
-			DetectionMethod:      "ssb_pipeline",
+			DetectionMethod:      "ssb_pipeline_single_frame",
 			StartBin:             candidate.StartBin,
 			EndBin:               candidate.EndBin,
 			AlternativeDialFreqs: alternatives,
@@ -859,12 +859,19 @@ func detectVoiceActivityMultiFrame(buffer *FFTBuffer, params DetectionParams, wi
 				if candidate.PeakPower > existing.PeakPower {
 					existing.PeakPower = candidate.PeakPower
 				}
+				if existing.MinPower == 0 || candidate.AvgPower < existing.MinPower {
+					existing.MinPower = candidate.AvgPower
+				}
+				// Track power samples for variance calculation
+				existing.PowerSamples = append(existing.PowerSamples, candidate.AvgPower)
 			} else {
 				// New region
 				candidate.FirstSeen = frame.Timestamp
 				candidate.LastSeen = frame.Timestamp
 				candidate.NoiseFloor = noiseFloor
 				candidate.SNR = candidate.AvgPower - noiseFloor
+				candidate.MinPower = candidate.AvgPower
+				candidate.PowerSamples = []float32{candidate.AvgPower}
 				regionTracker[key] = &candidate
 			}
 		}
@@ -896,7 +903,12 @@ func detectVoiceActivityMultiFrame(buffer *FFTBuffer, params DetectionParams, wi
 			continue
 		}
 
-		// Syllabic modulation check would go here (requires power variation analysis)
+		// Syllabic modulation check: reject constant carriers
+		// Voice shows amplitude variation over time (syllabic modulation)
+		// Carriers, beacons, CW, and interference are constant
+		if !passesSyllabicModulationCheck(region) {
+			continue
+		}
 
 		// Infer low-cut
 		lowCut := inferLowCutFromSpectralRamp(lastFrame.Data, region.StartBin, region.EndBin,
@@ -913,6 +925,9 @@ func detectVoiceActivityMultiFrame(buffer *FFTBuffer, params DetectionParams, wi
 			continue
 		}
 
+		// Calculate power standard deviation for reporting
+		powerStdDev := calculatePowerStdDev(region.PowerSamples, region.AvgPower)
+
 		activity := VoiceActivity{
 			StartFreq:            region.StartFreq,
 			EndFreq:              region.EndFreq,
@@ -925,7 +940,7 @@ func detectVoiceActivityMultiFrame(buffer *FFTBuffer, params DetectionParams, wi
 			SignalAboveNoise:     region.SNR,
 			SNR:                  region.SNR,
 			SpectralShape:        "voice",
-			PowerStdDev:          0,
+			PowerStdDev:          powerStdDev,
 			Confidence:           confidence,
 			DetectionMethod:      "ssb_pipeline_multiframe",
 			StartBin:             region.StartBin,
@@ -937,6 +952,69 @@ func detectVoiceActivityMultiFrame(buffer *FFTBuffer, params DetectionParams, wi
 	}
 
 	return activities
+}
+
+// passesSyllabicModulationCheck checks if a signal shows amplitude variation over time
+// Voice has syllabic modulation (varies as people speak)
+// Constant carriers (beacons, CW, interference) are rejected
+func passesSyllabicModulationCheck(region *CandidateRegion) bool {
+	if len(region.PowerSamples) < 3 {
+		// Not enough samples to determine - be conservative and reject
+		return false
+	}
+
+	// Calculate power variation metrics
+	peakToPeak := region.PeakPower - region.MinPower
+	avgPower := region.AvgPower
+
+	// Method 1: Peak-to-peak variation
+	// Voice typically varies by 6-15 dB over time (syllables, pauses)
+	// Constant carriers vary by <3 dB (just noise/fading)
+	minVariation := float32(4.0) // Require at least 4 dB variation
+	if peakToPeak < minVariation {
+		return false // Too constant - likely a carrier
+	}
+
+	// Method 2: Standard deviation check
+	// Voice has stddev typically 3-8 dB
+	// Constant carriers have stddev <2 dB
+	stdDev := calculatePowerStdDev(region.PowerSamples, avgPower)
+	minStdDev := float32(2.5) // Require at least 2.5 dB standard deviation
+	if stdDev < minStdDev {
+		return false // Too stable - likely a carrier
+	}
+
+	// Method 3: Check for excessive stability
+	// If >70% of samples are within 2 dB of average, it's too constant
+	stableCount := 0
+	tolerance := float32(2.0)
+	for _, sample := range region.PowerSamples {
+		if math.Abs(float64(sample-avgPower)) <= float64(tolerance) {
+			stableCount++
+		}
+	}
+	stableRatio := float32(stableCount) / float32(len(region.PowerSamples))
+	if stableRatio > 0.70 {
+		return false // Too many stable samples - likely a carrier
+	}
+
+	return true
+}
+
+// calculatePowerStdDev calculates standard deviation of power samples
+func calculatePowerStdDev(samples []float32, mean float32) float32 {
+	if len(samples) == 0 {
+		return 0
+	}
+
+	var variance float32
+	for _, sample := range samples {
+		diff := sample - mean
+		variance += diff * diff
+	}
+	variance /= float32(len(samples))
+
+	return float32(math.Sqrt(float64(variance)))
 }
 
 // ============================================================================
@@ -1060,18 +1138,9 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 		return
 	}
 
-	// Use 5-second averaged FFT for now (single-frame analysis)
-	fft := buffer.GetAveragedFFT(5 * time.Second)
-	if fft == nil {
-		w.WriteHeader(http.StatusNoContent)
-		json.NewEncoder(w).Encode(map[string]string{
-			"message": fmt.Sprintf("No FFT data available yet for band %s", band),
-		})
-		return
-	}
-
-	// Detect voice activity using SSB pipeline
-	newActivities := detectVoiceActivity(fft, params)
+	// Use multi-frame analysis for better accuracy (detects temporal variations)
+	// This properly rejects constant carriers and interference
+	newActivities := detectVoiceActivityMultiFrame(buffer, params, 5*time.Second)
 
 	// Filter by SSB start frequency for applicable bands
 	newActivities = filterActivitiesBySSBStart(newActivities, band)
@@ -1082,13 +1151,22 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 	// Apply SSB start filter to cached results as well
 	activities = filterActivitiesBySSBStart(activities, band)
 
-	// Calculate noise floor for response
-	noiseFloor := estimateNoiseFloorMedianFilter(fft.Data, 1000, 3000, fft.BinWidth, fft.StartFreq)
+	// Get averaged FFT for noise floor calculation and timestamp
+	fft := buffer.GetAveragedFFT(5 * time.Second)
+	var noiseFloor float32
+	var timestamp string
+	if fft != nil {
+		noiseFloor = estimateNoiseFloorMedianFilter(fft.Data, 1000, 3000, fft.BinWidth, fft.StartFreq)
+		timestamp = fft.Timestamp.Format("2006-01-02T15:04:05Z07:00")
+	} else {
+		noiseFloor = 0
+		timestamp = time.Now().Format("2006-01-02T15:04:05Z07:00")
+	}
 
 	// Build response
 	response := VoiceActivityResponse{
 		Band:            band,
-		Timestamp:       fft.Timestamp.Format("2006-01-02T15:04:05Z07:00"),
+		Timestamp:       timestamp,
 		NoiseFloorDB:    noiseFloor,
 		ThresholdDB:     params.ThresholdDB,
 		MinBandwidth:    params.MinBandwidth,
@@ -1124,12 +1202,8 @@ func GetVoiceActivityForBand(nfm *NoiseFloorMonitor, band string, params Detecti
 		return nil, fmt.Errorf("no FFT buffer found for band %s", band)
 	}
 
-	fft := buffer.GetAveragedFFT(5 * time.Second)
-	if fft == nil {
-		return nil, fmt.Errorf("no FFT data available for band %s", band)
-	}
-
-	activities := detectVoiceActivity(fft, params)
+	// Use multi-frame analysis for proper temporal detection
+	activities := detectVoiceActivityMultiFrame(buffer, params, 5*time.Second)
 
 	// Filter by SSB start frequency for applicable bands
 	activities = filterActivitiesBySSBStart(activities, band)

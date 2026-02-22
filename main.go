@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -727,6 +728,61 @@ func main() {
 			defer ticker.Stop()
 			for range ticker.C {
 				prometheusMetrics.UpdateSessionMetrics(sessions)
+			}
+		}()
+
+		// Start periodic health monitoring (every 60 seconds)
+		go func() {
+			ticker := time.NewTicker(60 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				var m runtime.MemStats
+				runtime.ReadMemStats(&m)
+
+				// Get load average on Linux
+				loadAvg := "N/A"
+				if data, err := os.ReadFile("/proc/loadavg"); err == nil {
+					fields := strings.Fields(string(data))
+					if len(fields) >= 3 {
+						loadAvg = fmt.Sprintf("%.2s/%.2s/%.2s", fields[0], fields[1], fields[2])
+					}
+				}
+
+				// Get session counts
+				sessions.mu.RLock()
+				sessionCount := len(sessions.sessions)
+				ssrcCount := len(sessions.ssrcToSession)
+				uuidCount := len(sessions.userSessionUUIDs)
+				ipCount := len(sessions.ipToUUIDs)
+
+				// Count nested map sizes
+				totalIPUUIDs := 0
+				for _, uuids := range sessions.ipToUUIDs {
+					totalIPUUIDs += len(uuids)
+				}
+				totalBands := 0
+				for _, bands := range sessions.userSessionBands {
+					totalBands += len(bands)
+				}
+				totalModes := 0
+				for _, modes := range sessions.userSessionModes {
+					totalModes += len(modes)
+				}
+				sessions.mu.RUnlock()
+
+				log.Printf("[HEALTH] goroutines=%d alloc=%dMB sys=%dMB numgc=%d sessions=%d ssrcs=%d uuids=%d ips=%d ip_uuid_map=%d band_map=%d mode_map=%d load=%s",
+					runtime.NumGoroutine(),
+					m.Alloc/1024/1024,
+					m.Sys/1024/1024,
+					m.NumGC,
+					sessionCount,
+					ssrcCount,
+					uuidCount,
+					ipCount,
+					totalIPUUIDs,
+					totalBands,
+					totalModes,
+					loadAvg)
 			}
 		}()
 

@@ -286,7 +286,7 @@ class RadioGUI:
     def __init__(self, root: tk.Tk, initial_config: dict):
         self.root = root
         self.root.title("Radio Client")
-        self.root.geometry("900x920")  # Increased width for radio control VFO dropdown
+        self.root.geometry("900x960")  # Increased height for signal data source controls
         self.root.resizable(True, True)
 
         # Configuration
@@ -442,6 +442,13 @@ class RadioGUI:
 
         # SSTV extension window
         self.sstv_window = None
+
+        # SNR history window
+        self.snr_history_window = None
+        self.snr_history_display = None
+
+        # Signal data source selection (audio stream vs spectrum FFT)
+        self.signal_data_source = tk.StringVar(value="audio")  # "audio" or "spectrum"
 
         # Create UI
         self.create_widgets()
@@ -1385,6 +1392,31 @@ class RadioGUI:
         # Band selector will be populated after fetching bands from server
         self.band_selector_combo['values'] = [""]  # Empty initially
 
+        # Signal data source and quality metrics (fourth row, below band selector)
+        signal_frame = ttk.Frame(freq_frame)
+        signal_frame.grid(row=3, column=0, columnspan=8, sticky=tk.W, pady=(5, 0))
+
+        ttk.Label(signal_frame, text="Signal Data:").pack(side=tk.LEFT, padx=(0, 5))
+
+        # Radio buttons for signal data source
+        ttk.Radiobutton(signal_frame, text="Audio Stream", variable=self.signal_data_source,
+                       value="audio").pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Radiobutton(signal_frame, text="Spectrum FFT", variable=self.signal_data_source,
+                       value="spectrum").pack(side=tk.LEFT, padx=(0, 20))
+
+        # Signal quality metrics display
+        ttk.Label(signal_frame, text="Baseband:").pack(side=tk.LEFT, padx=(0, 2))
+        self.baseband_power_label = ttk.Label(signal_frame, text="-- dBFS", width=10)
+        self.baseband_power_label.pack(side=tk.LEFT, padx=(0, 10))
+
+        ttk.Label(signal_frame, text="Noise:").pack(side=tk.LEFT, padx=(0, 2))
+        self.noise_density_label = ttk.Label(signal_frame, text="-- dBFS", width=10)
+        self.noise_density_label.pack(side=tk.LEFT, padx=(0, 10))
+
+        ttk.Label(signal_frame, text="SNR:").pack(side=tk.LEFT, padx=(0, 2))
+        self.snr_label = ttk.Label(signal_frame, text="-- dB", width=10)
+        self.snr_label.pack(side=tk.LEFT)
+
         freq_frame.columnconfigure(8, weight=1)
 
         # Mode & Bandwidth control frame (combined)
@@ -1925,9 +1957,14 @@ class RadioGUI:
                 self.chat_btn = None
 
             # Extensions button (always available)
-            self.ext_btn = ttk.Button(button_frame_row2, text="Ext", width=6,
+            self.ext_btn = ttk.Button(button_frame_row2, text="Extensions", width=10,
                                       command=self.open_extensions_window)
             self.ext_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+            # SNR History button
+            self.snr_history_btn = ttk.Button(button_frame_row2, text="SNR", width=6,
+                                             command=self.open_snr_history_window)
+            self.snr_history_btn.pack(side=tk.LEFT, padx=(0, 5))
 
             # Scroll mode selector removed from here - now in waterfall window title section
             self.scroll_mode_var = tk.StringVar(value="zoom")
@@ -3159,12 +3196,23 @@ class RadioGUI:
 
         # Buttons frame
         button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=1, column=0, columnspan=2, sticky=tk.W)
+        button_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E))
 
-        ttk.Button(button_frame, text="Tune", command=self.tune_to_selected_bookmark).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(button_frame, text="Rename", command=self.rename_selected_bookmark).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(button_frame, text="Delete", command=self.delete_selected_bookmark).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(button_frame, text="Close", command=self.local_bookmarks_window.destroy).pack(side=tk.LEFT, padx=(0, 5))
+        # Left side buttons
+        left_buttons = ttk.Frame(button_frame)
+        left_buttons.pack(side=tk.LEFT)
+
+        ttk.Button(left_buttons, text="Tune", command=self.tune_to_selected_bookmark).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(left_buttons, text="Rename", command=self.rename_selected_bookmark).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(left_buttons, text="Delete", command=self.delete_selected_bookmark).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(left_buttons, text="Close", command=self.local_bookmarks_window.destroy).pack(side=tk.LEFT, padx=(0, 5))
+
+        # Right side buttons (Import/Export)
+        right_buttons = ttk.Frame(button_frame)
+        right_buttons.pack(side=tk.RIGHT)
+
+        ttk.Button(right_buttons, text="📥 Import", command=self.import_local_bookmarks).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(right_buttons, text="📤 Export", command=self.export_local_bookmarks).pack(side=tk.LEFT)
 
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(0, weight=1)
@@ -3267,6 +3315,96 @@ class RadioGUI:
             self.update_spectrum_bookmarks()
         else:
             messagebox.showerror("Error", "Failed to delete bookmark")
+
+    def import_local_bookmarks(self):
+        """Import local bookmarks from a JSON file (web UI compatible)."""
+        from tkinter import filedialog
+
+        # Ask user to select file
+        file_path = filedialog.askopenfilename(
+            title="Import Bookmarks",
+            filetypes=[
+                ("JSON files", "*.json"),
+                ("All files", "*.*")
+            ],
+            defaultextension=".json"
+        )
+
+        if not file_path:
+            return  # User cancelled
+
+        # Ask for import mode
+        merge = messagebox.askyesno(
+            "Import Mode",
+            "Merge with existing bookmarks?\n\n"
+            "Yes = Merge (skip duplicates)\n"
+            "No = Replace (delete all existing)"
+        )
+
+        # Import bookmarks
+        try:
+            from pathlib import Path
+            stats = self.local_bookmark_manager.import_bookmarks(Path(file_path), merge=merge)
+
+            # Show results
+            message = f"Import complete!\n\n" \
+                     f"Imported: {stats['imported']}\n" \
+                     f"Skipped: {stats['skipped']}\n" \
+                     f"Errors: {stats['errors']}"
+
+            if stats['imported'] > 0:
+                messagebox.showinfo("Import Successful", message)
+                self.log_status(f"Imported {stats['imported']} bookmarks from {Path(file_path).name}")
+                self.refresh_bookmarks_listbox()
+                self.populate_bookmark_dropdown()
+                self.update_spectrum_bookmarks()
+            else:
+                messagebox.showwarning("Import Complete", message)
+
+        except Exception as e:
+            messagebox.showerror("Import Failed", f"Failed to import bookmarks:\n{str(e)}")
+            self.log_status(f"Failed to import bookmarks: {e}")
+
+    def export_local_bookmarks(self):
+        """Export local bookmarks to a JSON file (web UI compatible)."""
+        from tkinter import filedialog
+
+        # Check if there are bookmarks to export
+        if not self.local_bookmarks:
+            messagebox.showinfo("No Bookmarks", "No local bookmarks to export")
+            return
+
+        # Ask user where to save
+        file_path = filedialog.asksaveasfilename(
+            title="Export Bookmarks",
+            defaultextension=".json",
+            filetypes=[
+                ("JSON files", "*.json"),
+                ("All files", "*.*")
+            ],
+            initialfile="local-bookmarks.json"
+        )
+
+        if not file_path:
+            return  # User cancelled
+
+        # Export bookmarks
+        try:
+            from pathlib import Path
+            success = self.local_bookmark_manager.export_bookmarks(Path(file_path))
+
+            if success:
+                messagebox.showinfo(
+                    "Export Successful",
+                    f"Exported {len(self.local_bookmarks)} bookmarks to:\n{Path(file_path).name}"
+                )
+                self.log_status(f"Exported {len(self.local_bookmarks)} bookmarks to {Path(file_path).name}")
+            else:
+                messagebox.showerror("Export Failed", "Failed to export bookmarks")
+
+        except Exception as e:
+            messagebox.showerror("Export Failed", f"Failed to export bookmarks:\n{str(e)}")
+            self.log_status(f"Failed to export bookmarks: {e}")
 
     def apply_frequency(self, skip_auto_mode=False):
         """Apply frequency change by sending tune message.
@@ -3401,11 +3539,11 @@ class RadioGUI:
 
             # Apply style based on button type (tk.Button on Windows, ttk.Button on Linux)
             if platform.system() == 'Windows':
-                # tk.Button: use bg, fg
+                # tk.Button: use bg, fg, relief, and borderwidth (exactly matching band button style)
                 if is_active:
-                    button.configure(bg='#16a34a', fg='white')  # Darker green for active
+                    button.configure(bg='#16a34a', fg='white', relief=tk.SOLID, borderwidth=3)  # Darker green with border
                 else:
-                    button.configure(bg='#22c55e', fg='white')  # Normal green
+                    button.configure(bg='#22c55e', fg='white', relief=tk.RAISED, borderwidth=2)  # Normal green
             else:
                 # ttk.Button: use style
                 if is_active:
@@ -5994,6 +6132,28 @@ class RadioGUI:
             messagebox.showerror("Error", f"Failed to open rotator status: {e}")
             self.log_status(f"ERROR: Failed to open rotator status - {e}")
 
+    def open_snr_history_window(self):
+        """Open a separate SNR history display window."""
+        # Don't open multiple windows
+        if self.snr_history_window and self.snr_history_window.winfo_exists():
+            self.snr_history_window.lift()  # Bring to front
+            return
+
+        try:
+            from snr_history_display import create_snr_history_window
+
+            # Create SNR history window
+            self.snr_history_window, self.snr_history_display = create_snr_history_window(self)
+
+            if self.snr_history_window:
+                self.log_status("SNR history window opened")
+
+        except ImportError:
+            messagebox.showerror("Error", "SNR history window requires matplotlib.\n\nInstall with: pip install matplotlib")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open SNR history: {e}")
+            self.log_status(f"ERROR: Failed to open SNR history - {e}")
+
     def open_eq_window(self):
         """Open the 10-band equalizer window."""
         # Check if window exists and is visible
@@ -6785,6 +6945,13 @@ class RadioGUI:
             self.eq_display = None
             self.log_status("EQ window closed")
 
+        # Close SNR history window
+        if self.snr_history_window and self.snr_history_window.winfo_exists():
+            self.snr_history_window.destroy()
+            self.snr_history_window = None
+            self.snr_history_display = None
+            self.log_status("SNR history window closed")
+
         # Close extensions window
         if hasattr(self, 'extensions_window') and self.extensions_window and self.extensions_window.window.winfo_exists():
             self.extensions_window.window.destroy()
@@ -7249,8 +7416,48 @@ class RadioGUI:
         except queue.Empty:
             pass
 
+        # Update signal quality display from client metrics
+        self.update_signal_quality_display()
+
         # Schedule next check
         self.root.after(100, self.check_status_updates)
+
+    def update_signal_quality_display(self):
+        """Update signal quality metrics display from client data."""
+        if not self.client or not self.connected:
+            # Reset display when not connected
+            self.baseband_power_label.config(text="-- dBFS")
+            self.noise_density_label.config(text="-- dBFS")
+            self.snr_label.config(text="-- dB")
+            return
+
+        try:
+            # Get signal quality metrics from client
+            baseband_power = getattr(self.client, 'baseband_power', -999.0)
+            noise_density = getattr(self.client, 'noise_density', -999.0)
+
+            # Update baseband power display
+            if baseband_power > -999:
+                self.baseband_power_label.config(text=f"{baseband_power:.1f} dBFS")
+            else:
+                self.baseband_power_label.config(text="-- dBFS")
+
+            # Update noise density display
+            if noise_density > -999:
+                self.noise_density_label.config(text=f"{noise_density:.1f} dBFS")
+            else:
+                self.noise_density_label.config(text="-- dBFS")
+
+            # Calculate and display SNR
+            if baseband_power > -999 and noise_density > -999:
+                snr = baseband_power - noise_density
+                self.snr_label.config(text=f"{snr:.1f} dB")
+            else:
+                self.snr_label.config(text="-- dB")
+
+        except (AttributeError, ValueError):
+            # Handle any errors gracefully
+            pass
 
     def toggle_recording(self):
         """Toggle audio recording on/off."""
@@ -7833,6 +8040,10 @@ class RadioGUI:
         # Close EQ window if open
         if self.eq_window and self.eq_window.winfo_exists():
             self.eq_window.destroy()
+
+        # Close SNR history window if open
+        if self.snr_history_window and self.snr_history_window.winfo_exists():
+            self.snr_history_window.destroy()
 
         # Close extensions window if open
         if hasattr(self, 'extensions_window') and self.extensions_window and self.extensions_window.window.winfo_exists():

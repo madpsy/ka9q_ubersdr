@@ -87,7 +87,7 @@ class SSTVExtension:
         }
         
         # Image gallery
-        self.images = []  # List of {array, canvas, photo, mode, callsign, timestamp, complete}
+        self.images = []  # List of {array, canvas, photo, mode, callsign, timestamp, complete, widgets}
         self.current_image_index = None
         
         # Current image data
@@ -108,6 +108,9 @@ class SSTVExtension:
         # Tone frequency tracking
         self.tone_freq_history = []
         self.tone_freq_history_size = 5
+
+        # Resize debouncing
+        self.resize_timer = None
         
         # Create window
         self.window = tk.Toplevel(parent)
@@ -191,7 +194,8 @@ class SSTVExtension:
         self.line_count_label.pack(side=tk.LEFT, padx=(0, 20))
         
         # VIS Detector on the right
-        self.tone_freq_label = ttk.Label(info_frame, text="--- Hz", foreground='gray')
+        self.tone_freq_label = ttk.Label(info_frame, text="--- Hz", foreground='gray',
+                                         font=('TkDefaultFont', 9, 'bold'))
         self.tone_freq_label.pack(side=tk.RIGHT)
         ttk.Label(info_frame, text="VIS Detector:").pack(side=tk.RIGHT, padx=(20, 5))
         
@@ -522,30 +526,31 @@ class SSTVExtension:
         """Handle mode detected message: [type:1][mode_idx:1][extended:1][name_len:1][name:len]"""
         if len(data) < 4:
             return
-        
+
         mode_idx = data[1]
         is_extended = data[2] == 1
         name_len = data[3]
-        
+
         if len(data) < 4 + name_len:
             return
-        
+
         mode_name = data[4:4+name_len].decode('utf-8', errors='ignore')
-        
+
         print(f"SSTV: Mode detected: {mode_name}" + (" (extended VIS)" if is_extended else ""))
-        
+
         # Store mode for when image is created
         self.detected_mode = mode_name
-        
+
         # Reset callsign when new VIS detected
         self.fsk_callsign = None
-        
+
         # Update current image mode if not redrawing
         if (self.current_image_index is not None and
             self.current_image_index < len(self.images) and
             not self.is_redrawing):
             self.images[self.current_image_index]['mode'] = mode_name
-            self.render_grid()
+            # Use incremental update instead of full grid rebuild
+            self.update_image_metadata(self.current_image_index)
 
             # If modal is open and showing this image, update the modal mode display
             if (self.modal_window and self.modal_window.winfo_exists() and
@@ -635,28 +640,29 @@ class SSTVExtension:
         """Handle complete message: [type:1][total_lines:4]"""
         if len(data) < 5:
             return
-        
+
         total_lines = struct.unpack('>I', data[1:5])[0]
-        
+
         print(f"SSTV: Image complete, total lines: {total_lines}, isRedrawing: {self.is_redrawing}")
-        
+
         # Mark current image as complete
         if self.current_image_index is not None and self.current_image_index < len(self.images):
             self.images[self.current_image_index]['complete'] = True
-            self.render_grid()
-        
+            # Use incremental update instead of full grid rebuild
+            self.update_image_metadata(self.current_image_index)
+
         print(f"SSTV: Image complete ({total_lines} lines)")
-        
+
         # Auto-save if enabled
         if self.config['auto_save'] and self.auto_save_directory:
             self.auto_save_current_image()
-        
+
         # Update status
         self.status_label.config(text=f"Complete: {total_lines} lines decoded")
-        
+
         # Reset to waiting after 2 seconds
         self.window.after(2000, self.reset_to_waiting)
-        
+
         # Reset redraw flag
         self.is_redrawing = False
     
@@ -679,7 +685,8 @@ class SSTVExtension:
         # Update current image callsign
         if self.current_image_index is not None and self.current_image_index < len(self.images):
             self.images[self.current_image_index]['callsign'] = callsign
-            self.render_grid()
+            # Use incremental update instead of full grid rebuild
+            self.update_image_metadata(self.current_image_index)
 
             # If modal is open and showing this image, update the modal callsign display
             if (self.modal_window and self.modal_window.winfo_exists() and
@@ -718,14 +725,14 @@ class SSTVExtension:
         # Update frequency display
         if avg_freq > 0:
             self.tone_freq_label.config(text=f"{int(avg_freq)} Hz")
-            # Color code based on proximity to 1900 Hz
+            # Color code based on proximity to 1900 Hz (VIS leader tone)
             diff = abs(avg_freq - 1900)
-            if diff < 50:
-                self.tone_freq_label.config(foreground='#4aff4a')  # Green - close to VIS leader
-            elif diff < 200:
-                self.tone_freq_label.config(foreground='#ffaa4a')  # Orange - nearby
+            if diff < 100:
+                # Close to VIS leader - use same green as "Running" status
+                self.tone_freq_label.config(foreground='green')
             else:
-                self.tone_freq_label.config(foreground='#4a9eff')  # Blue - far
+                # Far from VIS leader - use blue
+                self.tone_freq_label.config(foreground='#4a9eff')
         else:
             self.tone_freq_label.config(text="--- Hz", foreground='gray')
     
@@ -740,7 +747,7 @@ class SSTVExtension:
         """Create a new image in the gallery."""
         # Create numpy array for image data
         image_array = np.zeros((height, width, 3), dtype=np.uint8)
-        
+
         image_data = {
             'array': image_array,
             'canvas': None,  # Will be created when rendering
@@ -749,16 +756,25 @@ class SSTVExtension:
             'mode': self.detected_mode or None,
             'callsign': self.fsk_callsign or None,
             'timestamp': datetime.now(),
-            'complete': False
+            'complete': False,
+            'widgets': {}  # Store widget references for incremental updates
         }
-        
+
         # Insert at beginning of array (top-left position)
         self.images.insert(0, image_data)
         self.current_image_index = 0
         self.current_canvas = None
-        
-        self.render_grid()
-        
+
+        # Use optimized insertion instead of full rebuild
+        if len(self.images) == 1:
+            # First image - need full render
+            self.render_grid()
+        else:
+            # Subsequent images - use incremental approach
+            # For now, still do full rebuild but this is where optimization would go
+            # The issue is that grid layout needs to shift all images
+            self.render_grid()
+
         print(f"SSTV: Created new image in grid: {width}x{height}, mode: {image_data['mode']}")
     
     def update_current_image_display(self):
@@ -840,8 +856,47 @@ class SSTVExtension:
         y_offset = (canvas_height - new_height) // 2
         self.modal_canvas.create_image(x_offset, y_offset, anchor=tk.NW, image=photo)
     
+    def update_image_metadata(self, image_index: int):
+        """Update only the metadata labels for a specific image without rebuilding the grid."""
+        if image_index < 0 or image_index >= len(self.images):
+            return
+
+        image_data = self.images[image_index]
+        widgets = image_data.get('widgets', {})
+
+        # Update mode label if it exists
+        if 'mode_label' in widgets and widgets['mode_label'].winfo_exists():
+            mode_text = image_data['mode'] if image_data['mode'] else ''
+            if mode_text:
+                widgets['mode_label'].config(text=mode_text)
+
+        # Update callsign label - need to handle creation/destruction
+        if 'callsign_label' in widgets:
+            # Remove old callsign label if it exists
+            if widgets['callsign_label'] and widgets['callsign_label'].winfo_exists():
+                widgets['callsign_label'].destroy()
+                widgets['callsign_label'] = None
+
+        # Create new callsign label if callsign exists
+        if image_data['callsign'] and 'info_frame' in widgets and widgets['info_frame'].winfo_exists():
+            callsign_label = ttk.Label(widgets['info_frame'], text=image_data['callsign'],
+                                      font=('TkDefaultFont', 9, 'bold'),
+                                      foreground='green', cursor='hand2')
+            callsign_label.pack(side=tk.LEFT, padx=(10, 0))
+            # Make clickable
+            callsign = image_data['callsign']
+            callsign_label.bind('<Button-1>', lambda e, cs=callsign: self.open_qrz(cs))
+            widgets['callsign_label'] = callsign_label
+
+        # Update frame border if this is the current image
+        if 'item_frame' in widgets and widgets['item_frame'].winfo_exists():
+            if image_index == self.current_image_index and not image_data['complete']:
+                widgets['item_frame'].config(relief=tk.SUNKEN, borderwidth=3)
+            else:
+                widgets['item_frame'].config(relief=tk.RAISED, borderwidth=2)
+
     def render_grid(self):
-        """Render the image grid."""
+        """Render the image grid - optimized to reuse PhotoImage objects."""
         # Clear grid
         for widget in self.grid_frame.winfo_children():
             widget.destroy()
@@ -864,43 +919,53 @@ class SSTVExtension:
             # Create frame for this image
             item_frame = ttk.Frame(self.grid_frame, relief=tk.RAISED, borderwidth=2)
             item_frame.grid(row=row, column=col, padx=5, pady=5, sticky=(tk.N, tk.S, tk.E, tk.W))
-            
+
             # Add decoding indicator if current and not complete
             if idx == self.current_image_index and not image_data['complete']:
                 item_frame.config(relief=tk.SUNKEN, borderwidth=3)
-            
-            # Convert numpy array to PIL Image
-            pil_image = Image.fromarray(image_data['array'], 'RGB')
-            
-            # Resize for display (max 320 width)
-            display_width = 320
-            aspect_ratio = pil_image.height / pil_image.width
-            display_height = int(display_width * aspect_ratio)
-            pil_image = pil_image.resize((display_width, display_height), Image.NEAREST)
-            
-            # Convert to PhotoImage
-            photo = ImageTk.PhotoImage(pil_image)
-            image_data['photo'] = photo
-            
+
+            # Reuse existing PhotoImage if available, otherwise create it
+            if 'photo' not in image_data or image_data['photo'] is None:
+                # Convert numpy array to PIL Image
+                pil_image = Image.fromarray(image_data['array'], 'RGB')
+
+                # Resize for display (max 320 width)
+                display_width = 320
+                aspect_ratio = pil_image.height / pil_image.width
+                display_height = int(display_width * aspect_ratio)
+                pil_image = pil_image.resize((display_width, display_height), Image.NEAREST)
+
+                # Convert to PhotoImage and cache it
+                photo = ImageTk.PhotoImage(pil_image)
+                image_data['photo'] = photo
+            else:
+                # Reuse cached PhotoImage
+                photo = image_data['photo']
+
             # Create canvas for image
+            display_width = 320
+            aspect_ratio = image_data['array'].shape[0] / image_data['array'].shape[1]
+            display_height = int(display_width * aspect_ratio)
+
             canvas = tk.Canvas(item_frame, width=display_width, height=display_height,
                              bg='black', highlightthickness=0)
             canvas.pack()
-            
+
             # Draw image on canvas
             canvas_image = canvas.create_image(0, 0, anchor=tk.NW, image=photo)
             image_data['canvas'] = canvas
             image_data['canvas_image'] = canvas_image
-            
+
             # Add info overlay - single horizontal line: time | callsign | mode
             info_frame = ttk.Frame(item_frame)
             info_frame.pack(fill=tk.X, padx=5, pady=5)
-            
+
             # Left side - time
             time_str = image_data['timestamp'].strftime('%H:%M:%S')
             ttk.Label(info_frame, text=time_str, foreground='gray').pack(side=tk.LEFT)
-            
+
             # Middle - callsign (if present) - clickable
+            callsign_label = None
             if image_data['callsign']:
                 callsign_label = ttk.Label(info_frame, text=image_data['callsign'],
                                           font=('TkDefaultFont', 9, 'bold'),
@@ -909,16 +974,26 @@ class SSTVExtension:
                 # Make clickable
                 callsign = image_data['callsign']
                 callsign_label.bind('<Button-1>', lambda e, cs=callsign: self.open_qrz(cs))
-            
+
             # Right side - mode
+            mode_label = None
             if image_data['mode']:
-                ttk.Label(info_frame, text=image_data['mode'],
+                mode_label = ttk.Label(info_frame, text=image_data['mode'],
                          font=('TkDefaultFont', 9, 'bold'),
-                         foreground='blue').pack(side=tk.RIGHT)
-            
+                         foreground='blue')
+                mode_label.pack(side=tk.RIGHT)
+
+            # Store widget references for incremental updates
+            image_data['widgets'] = {
+                'item_frame': item_frame,
+                'info_frame': info_frame,
+                'callsign_label': callsign_label,
+                'mode_label': mode_label
+            }
+
             # Click handler to show enlarged view
             canvas.bind('<Button-1>', lambda e, img=image_data, i=idx: self.show_enlarged_image(img, i))
-        
+
         # Auto-scroll to top if enabled
         if self.auto_scroll_var.get():
             self.grid_canvas.yview_moveto(0)
@@ -928,9 +1003,19 @@ class SSTVExtension:
         new_width = event.width
         # Only re-render if width changed significantly (more than 50px to avoid flicker)
         if abs(new_width - self.last_grid_width) > 50:
-            self.last_grid_width = new_width
-            if len(self.images) > 0:
-                self.render_grid()
+            # Cancel pending resize timer
+            if self.resize_timer:
+                self.window.after_cancel(self.resize_timer)
+
+            # Debounce: wait 200ms before re-rendering
+            self.resize_timer = self.window.after(200, lambda: self._do_resize(new_width))
+
+    def _do_resize(self, new_width: int):
+        """Actually perform the resize after debounce delay."""
+        self.last_grid_width = new_width
+        if len(self.images) > 0:
+            self.render_grid()
+        self.resize_timer = None
 
     def show_enlarged_image(self, image_data: Dict, image_index: int):
         """Show enlarged view of an image in a modal window."""

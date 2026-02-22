@@ -1021,6 +1021,12 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 		defer pcmBinaryEncoder.Close()
 	}
 
+	// Signal quality update ticker for sending silence packets when squelch is closed
+	// This ensures clients continue to receive signal quality data even when no audio is present
+	signalUpdateTicker := time.NewTicker(100 * time.Millisecond) // 10 Hz updates
+	defer signalUpdateTicker.Stop()
+	lastAudioTime := time.Now()
+
 	for {
 		session := sessionHolder.getSession()
 
@@ -1033,12 +1039,144 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			time.Sleep(10 * time.Millisecond)
 			continue
 
+		case <-signalUpdateTicker.C:
+			// If no audio received recently (squelch closed), send silence with signal quality
+			// Only do this for version 2 clients who expect signal quality data
+			if version >= 2 && time.Since(lastAudioTime) > 200*time.Millisecond {
+				// Get current signal quality from radiod
+				var basebandPower, noiseDensity float32 = -999.0, -999.0
+				if wsh.sessions != nil && wsh.sessions.radiod != nil {
+					if channelStatus := wsh.sessions.radiod.GetChannelStatus(session.SSRC); channelStatus != nil {
+						basebandPower = channelStatus.BasebandPower
+						noiseDensity = channelStatus.NoiseDensity
+
+						// Apply spectrum gain adjustments to match visual display
+						gainAdjustment := float32(wsh.config.Spectrum.GainDB)
+
+						// Apply frequency-specific gain if configured
+						if len(wsh.config.Spectrum.GainDBFrequencyRanges) > 0 {
+							session.mu.RLock()
+							tunedFreq := session.Frequency
+							session.mu.RUnlock()
+
+							for _, freqRange := range wsh.config.Spectrum.GainDBFrequencyRanges {
+								if tunedFreq >= freqRange.StartFreq && tunedFreq <= freqRange.EndFreq {
+									gainAdjustment += float32(freqRange.GainDB)
+									break
+								}
+							}
+						}
+
+						basebandPower += gainAdjustment
+						noiseDensity += gainAdjustment
+					}
+				}
+
+				// Determine format to use (handle IQ mode fallback)
+				isIQMode := session.Mode == "iq" || session.Mode == "iq48" || session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
+				currentFormat := format
+				if isIQMode && originalFormat == "opus" {
+					currentFormat = "pcm-zstd"
+				}
+				if currentFormat == "opus" && opusEncoder == nil {
+					currentFormat = "pcm-zstd"
+				}
+
+				// Send silence packet with signal quality data
+				switch currentFormat {
+				case "opus":
+					if opusEncoder != nil {
+						// Create silence samples (100ms worth)
+						silenceDuration := session.SampleRate / 10        // 100ms
+						silenceSamples := make([]byte, silenceDuration*2) // 16-bit samples = 2 bytes each
+
+						opusData, err := opusEncoder.EncodeBinary(silenceSamples)
+						if err != nil {
+							continue // Skip this update on error
+						}
+
+						// Build version 2 packet with signal quality
+						packet := make([]byte, 21+len(opusData))
+						binary.LittleEndian.PutUint64(packet[0:8], uint64(time.Now().UnixNano()))
+						binary.LittleEndian.PutUint32(packet[8:12], uint32(session.SampleRate))
+						packet[12] = byte(session.Channels)
+						binary.LittleEndian.PutUint32(packet[13:17], math.Float32bits(basebandPower))
+						binary.LittleEndian.PutUint32(packet[17:21], math.Float32bits(noiseDensity))
+						copy(packet[21:], opusData)
+
+						conn.writeMu.Lock()
+						conn.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+						err = conn.conn.WriteMessage(websocket.BinaryMessage, packet)
+						conn.writeMu.Unlock()
+
+						if err != nil {
+							log.Printf("Failed to send silence Opus packet: %v", err)
+							return
+						}
+
+						// Track bytes sent
+						session.AddAudioBytes(uint64(len(packet)))
+						if conn.aggregator != nil {
+							conn.aggregator.addBytes(int64(len(packet)))
+							conn.aggregator.addMessage()
+						}
+						if wsh.prometheusMetrics != nil {
+							wsh.prometheusMetrics.RecordAudioBytes(len(packet))
+							wsh.prometheusMetrics.RecordWSMessageSent("audio")
+						}
+					}
+
+				case "pcm-zstd":
+					if pcmBinaryEncoder != nil {
+						// Create silence samples (100ms worth)
+						silenceDuration := session.SampleRate / 10        // 100ms
+						silenceSamples := make([]byte, silenceDuration*2) // 16-bit samples = 2 bytes each (zeros)
+
+						packet, err := pcmBinaryEncoder.EncodePCMPacketWithSignalQuality(
+							silenceSamples,
+							time.Now().UnixNano(),
+							session.SampleRate,
+							session.Channels,
+							basebandPower,
+							noiseDensity,
+						)
+						if err != nil {
+							continue // Skip this update on error
+						}
+
+						conn.writeMu.Lock()
+						conn.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+						err = conn.conn.WriteMessage(websocket.BinaryMessage, packet)
+						conn.writeMu.Unlock()
+
+						if err != nil {
+							log.Printf("Failed to send silence PCM packet: %v", err)
+							return
+						}
+
+						// Track bytes sent
+						session.AddAudioBytes(uint64(len(packet)))
+						if conn.aggregator != nil {
+							conn.aggregator.addBytes(int64(len(packet)))
+							conn.aggregator.addMessage()
+						}
+						if wsh.prometheusMetrics != nil {
+							wsh.prometheusMetrics.RecordAudioBytes(len(packet))
+							wsh.prometheusMetrics.RecordWSMessageSent("audio")
+						}
+					}
+				}
+			}
+
 		case audioPacket, ok := <-session.AudioChan:
 			if !ok {
 				// Channel closed, wait for new session
 				time.Sleep(10 * time.Millisecond)
 				continue
 			}
+
+			// Track when we receive real audio (to know when squelch is open)
+			lastAudioTime = time.Now()
 
 			// Check if current mode is IQ - IQ modes should never use lossy compression (need lossless data)
 			isIQMode := session.Mode == "iq" || session.Mode == "iq48" || session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"

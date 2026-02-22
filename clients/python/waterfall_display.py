@@ -1068,7 +1068,26 @@ def create_waterfall_window(parent_gui):
                 try:
                     bw_low = int(parent_gui.bw_low_var.get())
                     bw_high = int(parent_gui.bw_high_var.get())
-                    peak_db, floor_db, snr_db = spectrum.get_bandwidth_signal(bw_low, bw_high)
+                    
+                    # Check signal data source selection (audio stream vs spectrum FFT)
+                    use_audio_stream = parent_gui.signal_data_source.get() == "audio"
+                    
+                    if use_audio_stream and parent_gui.client:
+                        # Use audio stream data (version 2 protocol)
+                        baseband_power = getattr(parent_gui.client, 'baseband_power', -999.0)
+                        noise_density = getattr(parent_gui.client, 'noise_density', -999.0)
+                        
+                        if baseband_power > -999 and noise_density > -999:
+                            snr_db = baseband_power - noise_density
+                            peak_db = baseband_power
+                            floor_db = noise_density
+                        else:
+                            peak_db = None
+                            floor_db = None
+                            snr_db = None
+                    else:
+                        # Use spectrum FFT data (original behavior)
+                        peak_db, floor_db, snr_db = spectrum.get_bandwidth_signal(bw_low, bw_high)
                     
                     if peak_db is not None and floor_db is not None and snr_db is not None:
                         if signal_meter_mode[0] == 'snr':

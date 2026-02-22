@@ -191,7 +191,23 @@ class VoiceActivityDisplay:
             font=('Segoe UI', 9),
             bg='#2c3e50',
             fg='#95a5a6'
-        ).pack(side=tk.LEFT)
+        ).pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Random button (purple like web UI)
+        random_btn = tk.Button(
+            interval_frame,
+            text="Random",
+            command=self.tune_to_random,
+            font=('Segoe UI', 9, 'bold'),
+            bg='#9b59b6',  # Purple color from web UI
+            fg='white',
+            activebackground='#8e44ad',  # Darker purple on hover
+            relief=tk.FLAT,
+            cursor='hand2',
+            padx=10,
+            pady=2
+        )
+        random_btn.pack(side=tk.LEFT)
         
         # Scan status
         self.scan_status_label = tk.Label(
@@ -449,6 +465,30 @@ class VoiceActivityDisplay:
                 print(f"Tuned to {freq_hz} Hz, mode {mode}")
             except Exception as e:
                 print(f"Error tuning: {e}")
+    
+    def tune_to_random(self):
+        """Tune to a random activity from the current list."""
+        import random
+        
+        # Load current activities
+        activities = self._load_activities_for_navigation()
+        
+        if not activities:
+            messagebox.showwarning("No Activities", "No activities available to tune to", parent=self.window)
+            return
+        
+        # Pick a random activity
+        random_activity = random.choice(activities)
+        
+        # Tune to it
+        self.tune_to_frequency(random_activity['frequency'], random_activity['mode'])
+        
+        # Update scan index for navigation consistency (like web UI)
+        try:
+            self.current_scan_index = activities.index(random_activity)
+            self.scan_activities = activities
+        except:
+            pass
     
     def start_scan(self):
         """Start scanning through activities."""

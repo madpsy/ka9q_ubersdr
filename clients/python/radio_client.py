@@ -366,6 +366,11 @@ class RadioClient:
         self.pcm_last_sample_rate = None
         self.pcm_last_channels = None
 
+        # Signal quality metrics from audio packets (version 2 protocol)
+        self.baseband_power = -999.0  # dBFS
+        self.noise_density = -999.0   # dBFS
+        self.last_signal_quality_update = 0
+
         # FIFO (named pipe) output
         self.fifo_path = fifo_path
         self.fifo_fd = None
@@ -685,6 +690,9 @@ class RadioClient:
                 params['format'] = 'opus'
             else:
                 params['format'] = 'pcm-zstd'
+            
+            # Add version parameter: request version 2 for signal quality metrics
+            params['version'] = '2'
 
             return f"{base_url}?{urlencode(params)}"
         else:
@@ -712,6 +720,9 @@ class RadioClient:
                 url += "&format=opus"
             else:
                 url += "&format=pcm-zstd"
+            
+            # Add version parameter: request version 2 for signal quality metrics
+            url += "&version=2"
 
             return url
     
@@ -964,9 +975,18 @@ class RadioClient:
         """Decode binary Opus packet to PCM bytes.
 
         Binary packet format from server:
+        Version 1 (13 bytes header):
         - 8 bytes: timestamp (uint64, little-endian)
         - 4 bytes: sample rate (uint32, little-endian)
         - 1 byte: channels (uint8)
+        - remaining: Opus encoded data
+
+        Version 2 (21 bytes header):
+        - 8 bytes: timestamp (uint64, little-endian)
+        - 4 bytes: sample rate (uint32, little-endian)
+        - 1 byte: channels (uint8)
+        - 4 bytes: baseband power (float32, little-endian)
+        - 4 bytes: noise density (float32, little-endian)
         - remaining: Opus encoded data
 
         Returns:
@@ -976,11 +996,34 @@ class RadioClient:
             print(f"Warning: Binary packet too short: {len(binary_data)} bytes", file=sys.stderr)
             return b''
 
-        # Parse header
+        # Parse common header fields
         timestamp = struct.unpack('<Q', binary_data[0:8])[0]
         sample_rate = struct.unpack('<I', binary_data[8:12])[0]
         channels = binary_data[12]
-        opus_data = binary_data[13:]
+
+        # Detect version based on packet size and content
+        # Version 2 has 8 extra bytes (2 float32 values) after channels byte
+        # We can detect this by checking if there's enough data for version 2 header
+        if len(binary_data) >= 21:
+            # Try to parse as version 2 (with signal quality)
+            baseband_power = struct.unpack('<f', binary_data[13:17])[0]
+            noise_density = struct.unpack('<f', binary_data[17:21])[0]
+            opus_data = binary_data[21:]
+
+            # Update signal quality metrics (throttle updates to ~100ms like web UI)
+            now = time.time()
+            if now - self.last_signal_quality_update >= 0.1:
+                self.baseband_power = baseband_power
+                self.noise_density = noise_density
+                self.last_signal_quality_update = now
+
+            # Log first version 2 Opus packet to confirm it's working
+            if not hasattr(self, '_opus_v2_logged'):
+                print(f"✓ Receiving version 2 Opus packets with signal quality metrics", file=sys.stderr)
+                self._opus_v2_logged = True
+        else:
+            # Version 1 format (no signal quality)
+            opus_data = binary_data[13:]
         
         # Update client sample rate if it changes (e.g., FM/NFM switching from 12kHz to 24kHz)
         if self.sample_rate != sample_rate:
@@ -1088,7 +1131,7 @@ class RadioClient:
 
         Binary packet format from server (hybrid header strategy):
         - If zstd compressed: decompress entire packet first
-        - Full header (29 bytes):
+        - Full header Version 1 (29 bytes):
           - 2 bytes: Magic (0x5043 = "PC")
           - 1 byte: Version (1)
           - 1 byte: Format type (0=PCM, 2=PCM-zstd)
@@ -1098,9 +1141,21 @@ class RadioClient:
           - 1 byte: Channels (uint8)
           - 4 bytes: Reserved
           - remaining: PCM data (big-endian int16)
+        - Full header Version 2 (37 bytes):
+          - 2 bytes: Magic (0x5043 = "PC")
+          - 1 byte: Version (2)
+          - 1 byte: Format type (0=PCM, 2=PCM-zstd)
+          - 8 bytes: RTP timestamp (uint64, little-endian)
+          - 8 bytes: Wall clock time (uint64, little-endian)
+          - 4 bytes: Sample rate (uint32, little-endian)
+          - 1 byte: Channels (uint8)
+          - 4 bytes: Baseband power (float32, little-endian)
+          - 4 bytes: Noise density (float32, little-endian)
+          - 4 bytes: Reserved
+          - remaining: PCM data (big-endian int16)
         - Minimal header (13 bytes):
           - 2 bytes: Magic (0x504D = "PM")
-          - 1 byte: Version (1)
+          - 1 byte: Version (1 or 2)
           - 8 bytes: RTP timestamp (uint64, little-endian)
           - 2 bytes: Reserved
           - remaining: PCM data (big-endian int16)
@@ -1137,19 +1192,48 @@ class RadioClient:
         magic = struct.unpack('<H', binary_data[0:2])[0]
 
         if magic == 0x5043:  # "PC" - Full header
-            if len(binary_data) < 29:
-                print(f"Warning: Full header PCM packet too short: {len(binary_data)} bytes", file=sys.stderr)
+            # Parse version first to determine header size
+            if len(binary_data) < 3:
+                print(f"Warning: PCM packet too short to read version: {len(binary_data)} bytes", file=sys.stderr)
                 return b''
 
-            # Parse full header (little-endian)
             version = binary_data[2]
+
+            # Determine expected header size based on version
+            if version >= 2:
+                expected_header_size = 37  # Version 2: includes signal quality
+            else:
+                expected_header_size = 29  # Version 1: original format
+
+            if len(binary_data) < expected_header_size:
+                print(f"Warning: Full header PCM packet too short: {len(binary_data)} bytes (expected {expected_header_size} for version {version})", file=sys.stderr)
+                return b''
+
+            # Parse common header fields (little-endian)
             format_type = binary_data[3]
             rtp_timestamp = struct.unpack('<Q', binary_data[4:12])[0]
             wall_clock = struct.unpack('<Q', binary_data[12:20])[0]
             sample_rate = struct.unpack('<I', binary_data[20:24])[0]
             channels = binary_data[24]
-            # reserved = struct.unpack('<I', binary_data[25:29])[0]
-            pcm_data = binary_data[29:]
+
+            # Parse version-specific fields
+            if version >= 2:
+                # Version 2: Extract signal quality metrics
+                baseband_power = struct.unpack('<f', binary_data[25:29])[0]
+                noise_density = struct.unpack('<f', binary_data[29:33])[0]
+                # reserved = struct.unpack('<I', binary_data[33:37])[0]
+                pcm_data = binary_data[37:]
+
+                # Update signal quality metrics (throttle updates to ~100ms like web UI)
+                now = time.time()
+                if now - self.last_signal_quality_update >= 0.1:
+                    self.baseband_power = baseband_power
+                    self.noise_density = noise_density
+                    self.last_signal_quality_update = now
+            else:
+                # Version 1: No signal quality metrics
+                # reserved = struct.unpack('<I', binary_data[25:29])[0]
+                pcm_data = binary_data[29:]
 
             # Update tracked metadata
             self.pcm_last_sample_rate = sample_rate
@@ -1159,6 +1243,11 @@ class RadioClient:
             if self.sample_rate != sample_rate:
                 self.sample_rate = sample_rate
                 print(f"PCM sample rate updated: {sample_rate} Hz", file=sys.stderr)
+
+            # Log first version 2 packet to confirm it's working
+            if version >= 2 and not hasattr(self, '_v2_logged'):
+                print(f"✓ Receiving version 2 PCM packets with signal quality metrics", file=sys.stderr)
+                self._v2_logged = True
 
         elif magic == 0x504D:  # "PM" - Minimal header
             if len(binary_data) < 13:

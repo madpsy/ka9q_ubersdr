@@ -847,25 +847,39 @@ func detectVoiceActivityMultiFrame(buffer *FFTBuffer, params DetectionParams, wi
 		threshold := noiseFloor + params.ThresholdDB
 		frameCandidates := detectCandidateRegions(frame.Data, threshold, buffer.BinWidth, buffer.StartFreq, params)
 
-		// Update region tracker
+		// Update region tracker with fuzzy matching
+		// Voice signals may shift bins slightly, so match within ±2 bins
 		for _, candidate := range frameCandidates {
-			key := fmt.Sprintf("%d-%d", candidate.StartBin, candidate.EndBin)
+			// Try to find existing region with similar frequency range
+			var matched *CandidateRegion
 
-			if existing, ok := regionTracker[key]; ok {
-				// Update existing region
-				existing.LastSeen = frame.Timestamp
-				existing.FrameCount++
-				existing.AvgPower = (existing.AvgPower*float32(existing.FrameCount-1) + candidate.AvgPower) / float32(existing.FrameCount)
-				if candidate.PeakPower > existing.PeakPower {
-					existing.PeakPower = candidate.PeakPower
+			for _, existing := range regionTracker {
+				// Check if bins overlap or are within ±2 bins
+				binTolerance := 2
+				if (candidate.StartBin >= existing.StartBin-binTolerance && candidate.StartBin <= existing.EndBin+binTolerance) ||
+					(candidate.EndBin >= existing.StartBin-binTolerance && candidate.EndBin <= existing.EndBin+binTolerance) ||
+					(existing.StartBin >= candidate.StartBin-binTolerance && existing.StartBin <= candidate.EndBin+binTolerance) {
+					matched = existing
+					break
 				}
-				if existing.MinPower == 0 || candidate.AvgPower < existing.MinPower {
-					existing.MinPower = candidate.AvgPower
+			}
+
+			if matched != nil {
+				// Update existing region
+				matched.LastSeen = frame.Timestamp
+				matched.FrameCount++
+				matched.AvgPower = (matched.AvgPower*float32(matched.FrameCount-1) + candidate.AvgPower) / float32(matched.FrameCount)
+				if candidate.PeakPower > matched.PeakPower {
+					matched.PeakPower = candidate.PeakPower
+				}
+				if matched.MinPower == 0 || candidate.AvgPower < matched.MinPower {
+					matched.MinPower = candidate.AvgPower
 				}
 				// Track power samples for variance calculation
-				existing.PowerSamples = append(existing.PowerSamples, candidate.AvgPower)
+				matched.PowerSamples = append(matched.PowerSamples, candidate.AvgPower)
 			} else {
 				// New region
+				key := fmt.Sprintf("%d-%d", candidate.StartBin, candidate.EndBin)
 				candidate.FirstSeen = frame.Timestamp
 				candidate.LastSeen = frame.Timestamp
 				candidate.NoiseFloor = noiseFloor
@@ -958,46 +972,44 @@ func detectVoiceActivityMultiFrame(buffer *FFTBuffer, params DetectionParams, wi
 // Voice has syllabic modulation (varies as people speak)
 // Constant carriers (beacons, CW, interference) are rejected
 func passesSyllabicModulationCheck(region *CandidateRegion) bool {
-	if len(region.PowerSamples) < 3 {
-		// Not enough samples to determine - be conservative and reject
-		return false
+	// Need at least 5 samples for reliable variance calculation
+	// With 5-second window and typical FFT rate, this is reasonable
+	if len(region.PowerSamples) < 5 {
+		// Not enough samples yet - allow it through (will be checked again later)
+		return true
 	}
 
 	// Calculate power variation metrics
 	peakToPeak := region.PeakPower - region.MinPower
 	avgPower := region.AvgPower
+	stdDev := calculatePowerStdDev(region.PowerSamples, avgPower)
 
-	// Method 1: Peak-to-peak variation
-	// Voice typically varies by 6-15 dB over time (syllables, pauses)
-	// Constant carriers vary by <3 dB (just noise/fading)
-	minVariation := float32(4.0) // Require at least 4 dB variation
-	if peakToPeak < minVariation {
-		return false // Too constant - likely a carrier
+	// RELAXED thresholds - only reject obvious constant carriers
+	// Voice is highly variable, so we use OR logic (fail any ONE test = reject)
+
+	// Test 1: Extremely constant (< 2 dB variation)
+	// Even weak voice varies by at least 2-3 dB
+	// Strong constant carriers vary by < 1.5 dB
+	if peakToPeak < 2.0 && stdDev < 1.5 {
+		return false // Definitely a constant carrier
 	}
 
-	// Method 2: Standard deviation check
-	// Voice has stddev typically 3-8 dB
-	// Constant carriers have stddev <2 dB
-	stdDev := calculatePowerStdDev(region.PowerSamples, avgPower)
-	minStdDev := float32(2.5) // Require at least 2.5 dB standard deviation
-	if stdDev < minStdDev {
+	// Test 2: Check for suspiciously stable power
+	// If >85% of samples are within 1.5 dB of average, it's too constant
+	// Real voice has pauses, syllables, fading - creates more variation
+	veryStableCount := 0
+	tightTolerance := float32(1.5)
+	for _, sample := range region.PowerSamples {
+		if math.Abs(float64(sample-avgPower)) <= float64(tightTolerance) {
+			veryStableCount++
+		}
+	}
+	veryStableRatio := float32(veryStableCount) / float32(len(region.PowerSamples))
+	if veryStableRatio > 0.85 {
 		return false // Too stable - likely a carrier
 	}
 
-	// Method 3: Check for excessive stability
-	// If >70% of samples are within 2 dB of average, it's too constant
-	stableCount := 0
-	tolerance := float32(2.0)
-	for _, sample := range region.PowerSamples {
-		if math.Abs(float64(sample-avgPower)) <= float64(tolerance) {
-			stableCount++
-		}
-	}
-	stableRatio := float32(stableCount) / float32(len(region.PowerSamples))
-	if stableRatio > 0.70 {
-		return false // Too many stable samples - likely a carrier
-	}
-
+	// If we get here, signal shows enough variation to be voice
 	return true
 }
 

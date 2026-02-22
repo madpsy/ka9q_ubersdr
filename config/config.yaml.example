@@ -439,6 +439,14 @@ spectrum:
   poll_period_ms: 100
   # Maximum spectrum sessions per user (to prevent abuse)
   max_sessions_per_user: 2
+  # Number of parallel workers for spectrum packet distribution (default: 4)
+  # These workers process spectrum data from radiod and distribute to user sessions
+  # Higher values improve performance with many concurrent users
+  # Recommended: 2-8 depending on CPU cores and user load
+  #   2 = minimal (suitable for <20 users)
+  #   4 = balanced (suitable for 20-50 users) - default
+  #   8 = high performance (suitable for 50+ users)
+  worker_count: 4
   # Master gain adjustment in dB applied to all spectrum data
   # This is a global offset applied to all frequencies
   # Positive values increase displayed signal levels (brighten)

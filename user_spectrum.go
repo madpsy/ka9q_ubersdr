@@ -51,6 +51,12 @@ func NewUserSpectrumManager(radiod *RadiodController, config *Config, sessions *
 		return nil, fmt.Errorf("failed to resolve status address: %w", err)
 	}
 
+	// Determine worker count from config, default to 4 if not set or invalid
+	workerCount := config.Spectrum.WorkerCount
+	if workerCount <= 0 {
+		workerCount = 4 // Default to 4 workers for parallel processing
+	}
+
 	usm := &UserSpectrumManager{
 		radiod:       radiod,
 		config:       config,
@@ -58,7 +64,7 @@ func NewUserSpectrumManager(radiod *RadiodController, config *Config, sessions *
 		statusAddr:   statusAddr,
 		stopChan:     make(chan struct{}),
 		pollInterval: time.Duration(config.Spectrum.PollPeriodMs) * time.Millisecond,
-		workerCount:  2,                              // Use 2 workers for parallel processing
+		workerCount:  workerCount,
 		packetQueue:  make(chan spectrumPacket, 100), // Buffer 100 packets (2.5 poll cycles at 40 users)
 	}
 

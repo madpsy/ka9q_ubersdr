@@ -1044,11 +1044,6 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			// Only do this for version 2 clients who expect signal quality data
 			timeSinceAudio := time.Since(lastAudioTime)
 
-			if DebugMode && timeSinceAudio > 200*time.Millisecond {
-				log.Printf("DEBUG: Silence check - version: %d, timeSinceAudio: %v, SSRC: 0x%08x",
-					version, timeSinceAudio, session.SSRC)
-			}
-
 			if version >= 2 && timeSinceAudio > 200*time.Millisecond {
 				// Get current signal quality from radiod
 				var basebandPower, noiseDensity float32 = -999.0, -999.0
@@ -1077,17 +1072,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 
 						basebandPower += gainAdjustment
 						noiseDensity += gainAdjustment
-
-						if DebugMode {
-							log.Printf("DEBUG: Sending silence packet - SSRC: 0x%08x, timeSinceAudio: %v, basebandPower: %.1f dBFS, noiseDensity: %.1f dBFS",
-								session.SSRC, timeSinceAudio, basebandPower, noiseDensity)
-						}
-					} else if DebugMode {
-						log.Printf("DEBUG: No channel status available for SSRC: 0x%08x", session.SSRC)
 					}
-				} else if DebugMode {
-					log.Printf("DEBUG: Sessions or radiod is nil - sessions: %v, radiod: %v",
-						wsh.sessions != nil, wsh.sessions != nil && wsh.sessions.radiod != nil)
 				}
 
 				// Determine format to use (handle IQ mode fallback)
@@ -1111,10 +1096,6 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 
 						opusData, err := opusEncoder.EncodeBinary(silenceSamples)
 						if err != nil {
-							if DebugMode {
-								log.Printf("DEBUG: Opus encoding error for silence: %v (sampleRate: %d, frameSize: %d samples)",
-									err, session.SampleRate, silenceDuration)
-							}
 							continue // Skip this update on error
 						}
 

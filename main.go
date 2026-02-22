@@ -748,6 +748,59 @@ func main() {
 					}
 				}
 
+				// Get goroutine stack traces and count by function
+				buf := make([]byte, 1024*1024) // 1MB buffer for stack traces
+				n := runtime.Stack(buf, true)
+				stackTrace := string(buf[:n])
+
+				// Parse stack traces to count goroutines by function
+				goroutineCounts := make(map[string]int)
+				lines := strings.Split(stackTrace, "\n")
+				for i := 0; i < len(lines); i++ {
+					line := strings.TrimSpace(lines[i])
+					// Look for goroutine header lines like "goroutine 123 [running]:"
+					if strings.HasPrefix(line, "goroutine ") && strings.Contains(line, "[") {
+						// Next non-empty line should be the function name
+						for j := i + 1; j < len(lines); j++ {
+							funcLine := strings.TrimSpace(lines[j])
+							if funcLine != "" {
+								// Extract just the function name (before the parenthesis)
+								if idx := strings.Index(funcLine, "("); idx > 0 {
+									funcName := funcLine[:idx]
+									// Simplify long package paths
+									if lastDot := strings.LastIndex(funcName, "."); lastDot > 0 {
+										funcName = funcName[lastDot+1:]
+									}
+									goroutineCounts[funcName]++
+								}
+								break
+							}
+						}
+					}
+				}
+
+				// Get top 5 goroutine types
+				type grCount struct {
+					name  string
+					count int
+				}
+				var topGoroutines []grCount
+				for name, count := range goroutineCounts {
+					topGoroutines = append(topGoroutines, grCount{name, count})
+				}
+				sort.Slice(topGoroutines, func(i, j int) bool {
+					return topGoroutines[i].count > topGoroutines[j].count
+				})
+
+				// Build goroutine summary string (top 5)
+				grSummary := ""
+				for i := 0; i < len(topGoroutines) && i < 5; i++ {
+					if i > 0 {
+						grSummary += ","
+					}
+					grSummary += fmt.Sprintf("%s:%d", topGoroutines[i].name, topGoroutines[i].count)
+				}
+
 				// Get session counts
 				sessions.mu.RLock()
 				sessionCount := len(sessions.sessions)
@@ -770,8 +823,9 @@ func main() {
 				}
 				sessions.mu.RUnlock()
 
-				log.Printf("[HEALTH] goroutines=%d alloc=%dMB sys=%dMB numgc=%d sessions=%d ssrcs=%d uuids=%d ips=%d ip_uuid_map=%d band_map=%d mode_map=%d load=%s",
+				log.Printf("[HEALTH] goroutines=%d top_gr=[%s] alloc=%dMB sys=%dMB numgc=%d sessions=%d ssrcs=%d uuids=%d ips=%d ip_uuid_map=%d band_map=%d mode_map=%d load=%s",
 					runtime.NumGoroutine(),
+					grSummary,
 					m.Alloc/1024/1024,
 					m.Sys/1024/1024,
 					m.NumGC,

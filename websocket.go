@@ -1104,12 +1104,17 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				switch currentFormat {
 				case "opus":
 					if opusEncoder != nil {
-						// Create silence samples (100ms worth)
-						silenceDuration := session.SampleRate / 10        // 100ms
-						silenceSamples := make([]byte, silenceDuration*2) // 16-bit samples = 2 bytes each
+						// Create silence samples (20ms worth - standard Opus frame size)
+						// Opus works best with 20ms frames (2.5, 5, 10, 20, 40, 60ms are valid)
+						silenceDuration := session.SampleRate / 50        // 20ms frame
+						silenceSamples := make([]byte, silenceDuration*2) // 16-bit samples = 2 bytes each (all zeros)
 
 						opusData, err := opusEncoder.EncodeBinary(silenceSamples)
 						if err != nil {
+							if DebugMode {
+								log.Printf("DEBUG: Opus encoding error for silence: %v (sampleRate: %d, frameSize: %d samples)",
+									err, session.SampleRate, silenceDuration)
+							}
 							continue // Skip this update on error
 						}
 
@@ -1146,8 +1151,8 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 
 				case "pcm-zstd":
 					if pcmBinaryEncoder != nil {
-						// Create silence samples (100ms worth)
-						silenceDuration := session.SampleRate / 10        // 100ms
+						// Create silence samples (20ms worth to match Opus frame size)
+						silenceDuration := session.SampleRate / 50        // 20ms frame
 						silenceSamples := make([]byte, silenceDuration*2) // 16-bit samples = 2 bytes each (zeros)
 
 						packet, err := pcmBinaryEncoder.EncodePCMPacketWithSignalQuality(

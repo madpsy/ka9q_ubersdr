@@ -4541,6 +4541,177 @@ func (ah *AdminHandler) HandleSessionActivityMetrics(w http.ResponseWriter, r *h
 	}
 }
 
+// HandleSessionActivityChartData returns optimized aggregated data specifically for the admin chart
+// This endpoint reduces data size by aggregating snapshots into time buckets
+// Query parameters:
+//   - start: Start time in RFC3339 format (default: 24 hours ago)
+//   - end: End time in RFC3339 format (default: now)
+//   - bucket_minutes: Time bucket size in minutes (default: 15 for day view, 60 for week, 360 for month)
+func (ah *AdminHandler) HandleSessionActivityChartData(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if session activity logging is enabled
+	if !ah.config.Server.SessionActivityLogEnabled {
+		http.Error(w, "Session activity logging is not enabled", http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error":   "not_enabled",
+			"message": "Session activity logging is not enabled in configuration",
+		})
+		return
+	}
+
+	// Parse time range parameters
+	endTime := time.Now().UTC()
+	startTime := endTime.Add(-24 * time.Hour)
+
+	if startStr := r.URL.Query().Get("start"); startStr != "" {
+		if t, err := time.Parse(time.RFC3339, startStr); err == nil {
+			startTime = t.UTC()
+		} else {
+			http.Error(w, fmt.Sprintf("Invalid start time format: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	if endStr := r.URL.Query().Get("end"); endStr != "" {
+		if t, err := time.Parse(time.RFC3339, endStr); err == nil {
+			endTime = t.UTC()
+		} else {
+			http.Error(w, fmt.Sprintf("Invalid end time format: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	if startTime.After(endTime) {
+		http.Error(w, "Start time must be before end time", http.StatusBadRequest)
+		return
+	}
+
+	// Determine bucket size based on time range
+	duration := endTime.Sub(startTime)
+	bucketMinutes := 15 // Default: 15 minutes for day view
+	if duration > 7*24*time.Hour {
+		bucketMinutes = 360 // 6 hours for month view
+	} else if duration > 24*time.Hour {
+		bucketMinutes = 60 // 1 hour for week view
+	}
+
+	// Allow override via query parameter
+	if bucketStr := r.URL.Query().Get("bucket_minutes"); bucketStr != "" {
+		if b, err := strconv.Atoi(bucketStr); err == nil && b > 0 && b <= 1440 {
+			bucketMinutes = b
+		}
+	}
+
+	// Read logs from disk
+	logs, err := ReadActivityLogs(ah.config.Server.SessionActivityLogDir, startTime, endTime)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read activity logs: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Aggregate into time buckets
+	timeline := aggregateLogsIntoBuckets(logs, startTime, endTime, bucketMinutes)
+
+	// Build response
+	response := map[string]interface{}{
+		"start_time":     startTime.Format(time.RFC3339),
+		"end_time":       endTime.Format(time.RFC3339),
+		"bucket_minutes": bucketMinutes,
+		"metrics": map[string]interface{}{
+			"timeline": timeline,
+		},
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding session activity chart data: %v", err)
+	}
+}
+
+// aggregateLogsIntoBuckets aggregates session activity logs into time buckets
+// Returns only the data needed for the chart: timestamp and auth method counts
+func aggregateLogsIntoBuckets(logs []SessionActivityLog, startTime, endTime time.Time, bucketMinutes int) []map[string]interface{} {
+	if len(logs) == 0 {
+		return []map[string]interface{}{}
+	}
+
+	bucketDuration := time.Duration(bucketMinutes) * time.Minute
+	numBuckets := int(endTime.Sub(startTime)/bucketDuration) + 1
+
+	// Initialize buckets
+	buckets := make([]map[string]interface{}, 0, numBuckets)
+	bucketData := make(map[int64]map[string]int) // timestamp -> auth counts
+
+	// Aggregate logs into buckets
+	for _, log := range logs {
+		// Calculate which bucket this log belongs to
+		bucketTime := log.Timestamp.Truncate(bucketDuration)
+		bucketKey := bucketTime.Unix()
+
+		if _, exists := bucketData[bucketKey]; !exists {
+			bucketData[bucketKey] = map[string]int{
+				"regular":  0,
+				"password": 0,
+				"bypassed": 0,
+			}
+		}
+
+		// Count unique users per auth method in this snapshot
+		// Use a map to track unique users per auth method
+		uniqueInSnapshot := make(map[string]map[string]bool)
+		uniqueInSnapshot["regular"] = make(map[string]bool)
+		uniqueInSnapshot["password"] = make(map[string]bool)
+		uniqueInSnapshot["bypassed"] = make(map[string]bool)
+
+		for _, session := range log.ActiveSessions {
+			authMethod := "regular"
+			if session.AuthMethod == "password" {
+				authMethod = "password"
+			} else if session.AuthMethod == "ip_bypass" {
+				authMethod = "bypassed"
+			}
+			uniqueInSnapshot[authMethod][session.UserSessionID] = true
+		}
+
+		// Take the maximum count seen in this bucket (peak concurrent users)
+		for authMethod, users := range uniqueInSnapshot {
+			count := len(users)
+			if count > bucketData[bucketKey][authMethod] {
+				bucketData[bucketKey][authMethod] = count
+			}
+		}
+	}
+
+	// Convert to sorted timeline
+	timestamps := make([]int64, 0, len(bucketData))
+	for ts := range bucketData {
+		timestamps = append(timestamps, ts)
+	}
+	sort.Slice(timestamps, func(i, j int) bool {
+		return timestamps[i] < timestamps[j]
+	})
+
+	for _, ts := range timestamps {
+		counts := bucketData[ts]
+		buckets = append(buckets, map[string]interface{}{
+			"timestamp": time.Unix(ts, 0).Format(time.RFC3339),
+			"auth_breakdown": map[string]int{
+				"regular":  counts["regular"],
+				"password": counts["password"],
+				"bypassed": counts["bypassed"],
+			},
+		})
+	}
+
+	return buckets
+}
+
 // SessionEvent represents a single session start or end event
 type SessionEvent struct {
 	Timestamp     time.Time `json:"timestamp"`

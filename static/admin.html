@@ -4110,6 +4110,9 @@
 
             const tbody = document.getElementById('sessionsTableBody');
 
+            // Use DocumentFragment for batch DOM updates - improves performance with many users
+            const fragment = document.createDocumentFragment();
+
             // Sort sessions by user session ID (UUID)
             const sortedEntries = Object.entries(sessionsByUser).sort((a, b) => {
                 // Use the key which is the user_session_id or fallback to client IP
@@ -4250,8 +4253,11 @@
                         <td style="padding: 12px; font-size: 12px;">${details}</td>
                         <td style="padding: 12px; text-align: center; white-space: nowrap;">${actionButtons}</td>
                     `;
-                tbody.appendChild(row);
+                fragment.appendChild(row);
             }
+
+            // Append all rows at once - single DOM operation instead of 50+
+            tbody.appendChild(fragment);
 
             // Count bypassed vs non-bypassed users
             let bypassedCount = 0;
@@ -4429,9 +4435,9 @@
                         break;
                 }
 
-                // Fetch metrics from API
+                // Fetch optimized chart data from new endpoint (much smaller response)
                 const response = await authenticatedFetch(
-                    `/admin/session-activity/metrics?start=${startTime.toISOString()}&end=${endTime.toISOString()}`
+                    `/admin/session-activity/chart-data?start=${startTime.toISOString()}&end=${endTime.toISOString()}`
                 );
 
                 if (!response) return; // Auth failed

@@ -1042,11 +1042,19 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 		case <-signalUpdateTicker.C:
 			// If no audio received recently (squelch closed), send silence with signal quality
 			// Only do this for version 2 clients who expect signal quality data
-			if version >= 2 && time.Since(lastAudioTime) > 200*time.Millisecond {
+			timeSinceAudio := time.Since(lastAudioTime)
+
+			if DebugMode && timeSinceAudio > 200*time.Millisecond {
+				log.Printf("DEBUG: Silence check - version: %d, timeSinceAudio: %v, SSRC: 0x%08x",
+					version, timeSinceAudio, session.SSRC)
+			}
+
+			if version >= 2 && timeSinceAudio > 200*time.Millisecond {
 				// Get current signal quality from radiod
 				var basebandPower, noiseDensity float32 = -999.0, -999.0
 				if wsh.sessions != nil && wsh.sessions.radiod != nil {
-					if channelStatus := wsh.sessions.radiod.GetChannelStatus(session.SSRC); channelStatus != nil {
+					channelStatus := wsh.sessions.radiod.GetChannelStatus(session.SSRC)
+					if channelStatus != nil {
 						basebandPower = channelStatus.BasebandPower
 						noiseDensity = channelStatus.NoiseDensity
 
@@ -1069,7 +1077,17 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 
 						basebandPower += gainAdjustment
 						noiseDensity += gainAdjustment
+
+						if DebugMode {
+							log.Printf("DEBUG: Sending silence packet - SSRC: 0x%08x, timeSinceAudio: %v, basebandPower: %.1f dBFS, noiseDensity: %.1f dBFS",
+								session.SSRC, timeSinceAudio, basebandPower, noiseDensity)
+						}
+					} else if DebugMode {
+						log.Printf("DEBUG: No channel status available for SSRC: 0x%08x", session.SSRC)
 					}
+				} else if DebugMode {
+					log.Printf("DEBUG: Sessions or radiod is nil - sessions: %v, radiod: %v",
+						wsh.sessions != nil, wsh.sessions != nil && wsh.sessions.radiod != nil)
 				}
 
 				// Determine format to use (handle IQ mode fallback)

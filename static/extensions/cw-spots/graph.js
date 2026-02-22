@@ -394,18 +394,18 @@ class CWSpotsGraph {
     getFilteredSpots() {
         const now = new Date();
         const maxAge = this.ageFilter * 60 * 1000; // Convert to milliseconds
-        
+
         return this.spots.filter(spot => {
             // Age filter
             if (this.ageFilter && (now - spot.timestamp) > maxAge) {
                 return false;
             }
-            
+
             // SNR filter
             if (this.snrFilter > -999 && spot.snr < this.snrFilter) {
                 return false;
             }
-            
+
             return true;
         });
     }

@@ -20,6 +20,7 @@ class CWSpotsExtension extends DecoderExtension {
         this.distanceFilter = null;
         this.countryFilter = 'all'; // Default to all countries
         this.callsignFilter = '';
+        this.show10mBeacons = false; // Default to hiding 10m beacons (28.2 MHz+)
         this.highlightNew = true;
         this.showBadges = false; // Default to hiding badges
         this.unsubscribe = null;
@@ -166,6 +167,17 @@ class CWSpotsExtension extends DecoderExtension {
                 this.refreshGraphWindow();
             } else if (e.target.id === 'cw-spots-country-filter') {
                 this.countryFilter = e.target.value;
+                this.showingAllRows = false;
+                this.filteredSpotsCache = null; // Invalidate cache
+                this.filterAndRenderSpots();
+                this.refreshGraphWindow();
+                // Redraw spectrum markers with new filter
+                if (window.spectrumDisplay) {
+                    window.spectrumDisplay.invalidateMarkerCache();
+                    window.spectrumDisplay.draw();
+                }
+            } else if (e.target.id === 'cw-spots-10m-bcn-filter') {
+                this.show10mBeacons = e.target.checked;
                 this.showingAllRows = false;
                 this.filteredSpotsCache = null; // Invalidate cache
                 this.filterAndRenderSpots();
@@ -368,6 +380,8 @@ class CWSpotsExtension extends DecoderExtension {
             }
             // Country filter
             if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) return false;
+            // 10m Beacon filter - hide spots >= 28.2 MHz unless checkbox is checked
+            if (!this.show10mBeacons && spot.frequency >= 28200000) return false;
             // Callsign filter
             if (callsignUpper &&
                 !spot.dx_call.toUpperCase().includes(callsignUpper) &&
@@ -567,6 +581,8 @@ class CWSpotsExtension extends DecoderExtension {
                 if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) {
                     return false;
                 }
+                // 10m Beacon filter - hide spots >= 28.2 MHz unless checkbox is checked
+                if (!this.show10mBeacons && spot.frequency >= 28200000) return false;
                 // Callsign filter
                 if (callsignUpper &&
                     !spot.dx_call.toUpperCase().includes(callsignUpper) &&
@@ -1082,6 +1098,8 @@ class CWSpotsExtension extends DecoderExtension {
             if (spot.band !== currentBand) return false;
             // Country filter
             if (!spot.country) return false;
+            // 10m Beacon filter - hide spots >= 28.2 MHz unless checkbox is checked
+            if (!this.show10mBeacons && spot.frequency >= 28200000) return false;
             return true;
         });
 
@@ -1243,6 +1261,9 @@ class CWSpotsExtension extends DecoderExtension {
             // Country filter (conditional based on checkbox)
             if (!this.showAllCountriesInModal && spot.country !== country) return false;
 
+            // 10m Beacon filter - hide spots >= 28.2 MHz unless checkbox is checked
+            if (!this.show10mBeacons && spot.frequency >= 28200000) return false;
+
             return true;
         });
 
@@ -1383,6 +1404,9 @@ class CWSpotsExtension extends DecoderExtension {
 
             // Country filter (conditional based on checkbox)
             if (!this.showAllCountriesInModal && spot.country !== country) return false;
+
+            // 10m Beacon filter - hide spots >= 28.2 MHz unless checkbox is checked
+            if (!this.show10mBeacons && spot.frequency >= 28200000) return false;
 
             return true;
         });
@@ -2227,6 +2251,8 @@ class CWSpotsExtension extends DecoderExtension {
         if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) {
             return false;
         }
+        // 10m Beacon filter - hide spots >= 28.2 MHz unless checkbox is checked
+        if (!this.show10mBeacons && spot.frequency >= 28200000) return false;
         // Callsign filter
         const callsignUpper = this.callsignFilter.toUpperCase();
         if (callsignUpper &&

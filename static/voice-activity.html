@@ -236,6 +236,27 @@
             cursor: not-allowed;
         }
 
+        .random-btn {
+            background: #9b59b6;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        .random-btn:hover {
+            background: #8e44ad;
+        }
+
+        .random-btn:disabled {
+            background: #7f8c8d;
+            cursor: not-allowed;
+        }
+
         .interval-control {
             display: flex;
             align-items: center;
@@ -289,6 +310,7 @@
                 <input type="number" id="interval-input" min="2" max="30" value="5" step="1">
                 <span style="font-size: 12px; color: #95a5a6;">sec</span>
             </div>
+            <button class="random-btn" id="random-btn" onclick="tuneToRandom()">Random</button>
             <div class="scan-status" id="scan-status"></div>
         </div>
 
@@ -600,6 +622,27 @@
             }
 
             tuneToCurrentScanFrequency();
+        }
+
+        function tuneToRandom() {
+            // Load current activities
+            const activities = loadActivitiesForNavigation();
+
+            if (activities.length === 0) {
+                alert('No activities available');
+                return;
+            }
+
+            // Pick a random activity
+            const randomIndex = Math.floor(Math.random() * activities.length);
+            const activity = activities[randomIndex];
+
+            // Tune to it
+            tuneToFrequency(activity.frequency, activity.mode);
+
+            // Update current scan index for navigation consistency
+            currentScanIndex = randomIndex;
+            scanActivities = activities;
         }
 
         // Auto-refresh every 2.5 seconds

@@ -416,6 +416,10 @@ echo "Fetching restart-ubersdr.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/restart-ubersdr.sh -o "$ACTUAL_HOME/ubersdr/restart-ubersdr.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/restart-ubersdr.sh"
 
+echo "Fetching update-ubersdr.sh script..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/update-ubersdr.sh -o "$ACTUAL_HOME/ubersdr/update-ubersdr.sh"
+chmod +x "$ACTUAL_HOME/ubersdr/update-ubersdr.sh"
+
 echo "Fetching rotctld.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/rotctld.sh -o "$ACTUAL_HOME/ubersdr/rotctld.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/rotctld.sh"

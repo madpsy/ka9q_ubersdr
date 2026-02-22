@@ -157,6 +157,12 @@ func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 		return ErrInvalidUsername
 	}
 
+	// Check for profanity in username
+	if containsProfanity(username) {
+		log.Printf("Chat: Username '%s' rejected for session %s - contains profanity", username, sessionID)
+		return ErrProfaneUsername
+	}
+
 	// Sanitize username (alphanumeric only, max 15 chars)
 	username = sanitizeUsername(username)
 
@@ -1224,34 +1230,8 @@ func preventAllCaps(message string) string {
 // censorProfanity replaces middle characters of profane words with asterisks
 // This helps maintain a family-friendly chat environment
 func censorProfanity(message string) string {
-	// Profanity list - only the worst/most offensive words (case-insensitive matching)
-	// Order doesn't matter with regex approach
-	profanityList := []string{
-		// F-word variants
-		"fuck", "fucks", "fucked", "fucker", "fuckers", "fucking",
-		// S-word variants
-		"shit", "shits", "shitting", "shitty",
-		// P-word variants
-		"piss", "pissed", "pissing",
-		// Sexual/anatomical slurs
-		"ass", "asses", "asshole", "assholes",
-		"bitch", "bitches", "bastard", "bastards",
-		"dick", "dicks", "cock", "cocks", "pussy", "pussies", "cunt", "cunts",
-		// Homophobic slurs
-		"fag", "fags", "faggot", "faggots",
-		"dyke", "dykes", "queer", "queers", "tranny", "trannies",
-		// Racial slurs (most offensive)
-		"nigger", "niggers", "nigga", "niggas",
-		"chink", "chinks", "gook", "gooks",
-		"spic", "spics", "wetback", "wetbacks",
-		"kike", "kikes",
-		// Sexist slurs
-		"whore", "whores", "slut", "sluts",
-		// Ableist slurs
-		"retard", "retards", "retarded",
-		"mongo", "mongol", "mongoloid",
-		"spastic", "spastics", "spaz",
-	}
+	// Use shared profanity list
+	profanityList := getProfanityList()
 
 	result := message
 
@@ -1284,6 +1264,87 @@ func censorProfanity(message string) string {
 	return result
 }
 
+// getProfanityList returns the list of banned words
+// This is shared between message censoring and username validation
+func getProfanityList() []string {
+	return []string{
+		// F-word variants
+		"fuck", "fucks", "fucked", "fucker", "fuckers", "fucking",
+		// S-word variants
+		"shit", "shits", "shitting", "shitty",
+		// P-word variants
+		"piss", "pissed", "pissing",
+		// Sexual/anatomical slurs
+		"ass", "asses", "asshole", "assholes",
+		"bitch", "bitches", "bastard", "bastards",
+		"dick", "dicks", "cock", "cocks", "pussy", "pussies", "cunt", "cunts",
+		// Homophobic slurs
+		"fag", "fags", "faggot", "faggots",
+		"dyke", "dykes", "queer", "queers", "tranny", "trannies",
+		// Racial slurs (most offensive)
+		"nigger", "niggers", "nigga", "niggas",
+		"chink", "chinks", "gook", "gooks",
+		"spic", "spics", "wetback", "wetbacks",
+		"kike", "kikes",
+		// Sexist slurs
+		"whore", "whores", "slut", "sluts",
+		// Ableist slurs
+		"retard", "retards", "retarded",
+		"mongo", "mongol", "mongoloid",
+		"spastic", "spastics", "spaz",
+	}
+}
+
+// containsProfanity checks if a string contains any profane words
+// Returns true if profanity is found, false otherwise
+// For usernames, we check if profanity appears at word boundaries OR adjacent to numbers/special chars
+func containsProfanity(text string) bool {
+	profanityList := getProfanityList()
+
+	// Convert to lowercase for case-insensitive matching
+	lowerText := strings.ToLower(text)
+
+	for _, word := range profanityList {
+		// Check if the word exists in the text
+		if !strings.Contains(lowerText, word) {
+			continue
+		}
+
+		// Find all occurrences of the word
+		index := 0
+		for {
+			pos := strings.Index(lowerText[index:], word)
+			if pos == -1 {
+				break
+			}
+
+			actualPos := index + pos
+
+			// Check character before the word (if exists)
+			beforeOK := actualPos == 0 || !isLetter(rune(lowerText[actualPos-1]))
+
+			// Check character after the word (if exists)
+			afterPos := actualPos + len(word)
+			afterOK := afterPos >= len(lowerText) || !isLetter(rune(lowerText[afterPos]))
+
+			// If profanity is at start/end OR surrounded by non-letters (numbers, special chars)
+			// then it's a match. This blocks "fuck123", "bob_fuck", "fuckbob" but allows "assassin"
+			if beforeOK || afterOK {
+				return true
+			}
+
+			index = actualPos + 1
+		}
+	}
+
+	return false
+}
+
+// isLetter checks if a character is a letter (a-z, A-Z)
+func isLetter(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+}
+
 // trimString trims a string to a maximum length (by rune count for proper UTF-8 handling)
 func trimString(s string, maxLen int) string {
 	runes := []rune(s)
@@ -1296,6 +1357,7 @@ func trimString(s string, maxLen int) string {
 // Error types
 var (
 	ErrInvalidUsername         = &ChatError{"invalid username - must be 1-15 characters (letters, numbers, - _ /) and cannot start or end with - _ /"}
+	ErrProfaneUsername         = &ChatError{"username contains inappropriate language - please choose a different username"}
 	ErrInvalidMessage          = &ChatError{"invalid message"}
 	ErrUsernameNotSet          = &ChatError{"username not set"}
 	ErrInvalidMessageType      = &ChatError{"invalid message type"}

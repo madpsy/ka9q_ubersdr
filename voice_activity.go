@@ -625,47 +625,45 @@ func inferLowCutFromSpectralRamp(data []float32, startBin, endBin int, binWidth 
 	// This finds the "turn-on" point
 	turnOnThreshold := refLevel - 8.0
 
-	// For LSB: scan from top edge (endBin) downward
-	// For USB: scan from bottom edge (startBin) upward
-	// Since we don't know mode yet, estimate from both edges and take average
+	// Determine mode based on band (LSB below 10 MHz, USB above)
+	// This is critical: we must use the correct edge for each mode
+	isLSB := startFreq < 10000000
 
-	// Scan from top edge downward
-	var topTurnOn int = -1
-	for i := len(signalBins) - 1; i >= 0; i-- {
-		if signalBins[i] >= turnOnThreshold {
-			topTurnOn = i
-			break
-		}
-	}
-
-	// Scan from bottom edge upward
-	var bottomTurnOn int = -1
-	for i := 0; i < len(signalBins); i++ {
-		if signalBins[i] >= turnOnThreshold {
-			bottomTurnOn = i
-			break
-		}
-	}
-
-	// Calculate offset from edges
+	// For LSB: scan from top edge (endBin) downward - audio is inverted
+	// For USB: scan from bottom edge (startBin) upward - audio is normal
 	var lowCutEst uint64 = 300 // Default
 
-	if topTurnOn >= 0 {
-		// Distance from top edge to turn-on point
-		topOffset := uint64(float64(len(signalBins)-1-topTurnOn) * binWidth)
-		if topOffset >= 80 && topOffset <= 600 {
-			lowCutEst = topOffset
+	if isLSB {
+		// LSB: Only use top edge scan
+		var topTurnOn int = -1
+		for i := len(signalBins) - 1; i >= 0; i-- {
+			if signalBins[i] >= turnOnThreshold {
+				topTurnOn = i
+				break
+			}
 		}
-	}
 
-	if bottomTurnOn >= 0 {
-		// Distance from bottom edge to turn-on point
-		bottomOffset := uint64(float64(bottomTurnOn) * binWidth)
-		if bottomOffset >= 80 && bottomOffset <= 600 {
-			// Average with top estimate if both valid
-			if lowCutEst != 300 {
-				lowCutEst = (lowCutEst + bottomOffset) / 2
-			} else {
+		if topTurnOn >= 0 {
+			// Distance from top edge to turn-on point
+			topOffset := uint64(float64(len(signalBins)-1-topTurnOn) * binWidth)
+			if topOffset >= 80 && topOffset <= 600 {
+				lowCutEst = topOffset
+			}
+		}
+	} else {
+		// USB: Only use bottom edge scan
+		var bottomTurnOn int = -1
+		for i := 0; i < len(signalBins); i++ {
+			if signalBins[i] >= turnOnThreshold {
+				bottomTurnOn = i
+				break
+			}
+		}
+
+		if bottomTurnOn >= 0 {
+			// Distance from bottom edge to turn-on point
+			bottomOffset := uint64(float64(bottomTurnOn) * binWidth)
+			if bottomOffset >= 80 && bottomOffset <= 600 {
 				lowCutEst = bottomOffset
 			}
 		}

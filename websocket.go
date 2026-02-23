@@ -965,7 +965,6 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 					"mode": "always_open",
 				}})
 			} else {
-				log.Printf("Squelch updated for session %s: open=%.1f dB, close=%.1f dB", currentSession.ID, *msg.SquelchOpen, squelchClose)
 				wsh.sendMessage(conn, ServerMessage{Type: "squelch_updated", Info: map[string]interface{}{
 					"squelchOpen":  *msg.SquelchOpen,
 					"squelchClose": squelchClose,

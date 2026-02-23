@@ -574,23 +574,11 @@ func (rc *RadiodController) UpdateSquelch(ssrc uint32, squelchOpen, squelchClose
 	// Add EOL marker
 	buf = append(buf, 0)
 
-	// Always log squelch updates to verify they're being sent
-	if squelchOpen == -999 {
-		log.Printf("Updating squelch for SSRC 0x%08x: always open", ssrc)
-	} else {
-		log.Printf("Updating squelch for SSRC 0x%08x: open=%.1f dB, close=%.1f dB", ssrc, squelchOpen, squelchClose)
-	}
-
-	if DebugMode {
-		log.Printf("DEBUG: Squelch command hex: % x", buf)
-	}
-
 	// Send command
 	if err := rc.sendCommand(buf); err != nil {
 		return fmt.Errorf("failed to send squelch update command: %w", err)
 	}
 
-	log.Printf("Squelch update sent successfully for SSRC 0x%08x", ssrc)
 	return nil
 }
 

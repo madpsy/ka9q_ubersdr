@@ -3571,7 +3571,6 @@ func handleSpaceWeather(w http.ResponseWriter, r *http.Request, swm *SpaceWeathe
 		json.NewEncoder(w).Encode(map[string]string{
 			"error": "Rate limit exceeded. Please wait 1 second between requests.",
 		})
-		log.Printf("Space weather current endpoint rate limit exceeded for IP: %s", clientIP)
 		return
 	}
 

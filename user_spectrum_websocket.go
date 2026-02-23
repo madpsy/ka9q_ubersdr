@@ -132,9 +132,7 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	mode := query.Get("mode")
 	useBinary8 := mode == "binary8"
 
-	if useBinary8 {
-		log.Printf("Using binary8 spectrum mode (8-bit) with delta encoding")
-	} else {
+	if !useBinary8 {
 		log.Printf("Using binary spectrum mode (32-bit float) with delta encoding")
 	}
 

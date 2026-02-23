@@ -10767,6 +10767,47 @@ const tooltipLine2 = timeStr;
                 const load5Data = history.map(entry => entry.load_5min);
                 const load15Data = history.map(entry => entry.load_15min);
 
+                // Fetch session activity data for user count (60 minutes)
+                const endTime = new Date();
+                const startTime = new Date(endTime.getTime() - 60 * 60 * 1000);
+                let userCountData = [];
+                try {
+                    const sessionResponse = await authenticatedFetch(
+                        `/admin/session-activity/chart-data?start=${startTime.toISOString()}&end=${endTime.toISOString()}&bucket_minutes=1`
+                    );
+                    if (sessionResponse && sessionResponse.ok) {
+                        const sessionData = await sessionResponse.json();
+                        const timeline = sessionData.metrics?.timeline || [];
+
+                        // Create a map of timestamps to total user counts
+                        const userCountMap = new Map();
+                        timeline.forEach(entry => {
+                            const total = (entry.auth_breakdown?.regular || 0) +
+                                        (entry.auth_breakdown?.password || 0) +
+                                        (entry.auth_breakdown?.bypassed || 0);
+                            userCountMap.set(new Date(entry.timestamp).getTime(), total);
+                        });
+
+                        // Match user counts to load data timestamps
+                        userCountData = labels.map(label => {
+                            const timestamp = label.getTime();
+                            // Find closest user count within 2 minutes (1-minute buckets)
+                            let closestCount = 0;
+                            let minDiff = Infinity;
+                            for (const [ts, count] of userCountMap.entries()) {
+                                const diff = Math.abs(ts - timestamp);
+                                if (diff < minDiff && diff < 2 * 60 * 1000) {
+                                    minDiff = diff;
+                                    closestCount = count;
+                                }
+                            }
+                            return closestCount;
+                        });
+                    }
+                } catch (error) {
+                    console.log('Could not fetch session activity data:', error);
+                }
+
                 // Create background zone datasets if we have CPU core info
                 const backgroundDatasets = [];
                 if (cpuCores > 0) {
@@ -10827,6 +10868,7 @@ const tooltipLine2 = timeStr;
                                 borderWidth: 2,
                                 pointRadius: 2,
                                 tension: 0.3,
+                                yAxisID: 'y',
                                 order: 1
                             },
                             {
@@ -10837,6 +10879,7 @@ const tooltipLine2 = timeStr;
                                 borderWidth: 2,
                                 pointRadius: 2,
                                 tension: 0.3,
+                                yAxisID: 'y',
                                 order: 2
                             },
                             {
@@ -10847,7 +10890,19 @@ const tooltipLine2 = timeStr;
                                 borderWidth: 2,
                                 pointRadius: 2,
                                 tension: 0.3,
+                                yAxisID: 'y',
                                 order: 3
+                            },
+                            {
+                                label: 'Total Users',
+                                data: userCountData,
+                                borderColor: '#28a745',
+                                backgroundColor: 'rgba(40, 167, 69, 0.2)',
+                                borderWidth: 2,
+                                pointRadius: 2,
+                                tension: 0.3,
+                                yAxisID: 'y2',
+                                order: 0
                             }
                         ]
                     },
@@ -10908,6 +10963,24 @@ const tooltipLine2 = timeStr;
                                     text: 'Load Average'
                                 },
                                 beginAtZero: true
+                            },
+                            y2: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                title: {
+                                    display: true,
+                                    text: 'Total Users',
+                                    color: '#28a745'
+                                },
+                                beginAtZero: true,
+                                ticks: {
+                                    stepSize: 1,
+                                    color: '#28a745'
+                                },
+                                grid: {
+                                    drawOnChartArea: false
+                                }
                             }
                         }
                     }
@@ -10929,6 +11002,8 @@ const tooltipLine2 = timeStr;
                             dataset.data = load5Data;
                         } else if (dataset.label === '15 min') {
                             dataset.data = load15Data;
+                        } else if (dataset.label === 'Total Users') {
+                            dataset.data = userCountData;
                         }
                     });
                     loadHistoryChart.update('none');
@@ -10954,6 +11029,47 @@ const tooltipLine2 = timeStr;
                 const hourlyLoad1Data = hourlyHistory.map(entry => entry.load_1min);
                 const hourlyLoad5Data = hourlyHistory.map(entry => entry.load_5min);
                 const hourlyLoad15Data = hourlyHistory.map(entry => entry.load_15min);
+
+                // Fetch session activity data for user count (24 hours)
+                const hourlyEndTime = new Date();
+                const hourlyStartTime = new Date(hourlyEndTime.getTime() - 24 * 60 * 60 * 1000);
+                let hourlyUserCountData = [];
+                try {
+                    const hourlySessionResponse = await authenticatedFetch(
+                        `/admin/session-activity/chart-data?start=${hourlyStartTime.toISOString()}&end=${hourlyEndTime.toISOString()}&bucket_minutes=5`
+                    );
+                    if (hourlySessionResponse && hourlySessionResponse.ok) {
+                        const hourlySessionData = await hourlySessionResponse.json();
+                        const hourlyTimeline = hourlySessionData.metrics?.timeline || [];
+
+                        // Create a map of timestamps to total user counts
+                        const hourlyUserCountMap = new Map();
+                        hourlyTimeline.forEach(entry => {
+                            const total = (entry.auth_breakdown?.regular || 0) +
+                                        (entry.auth_breakdown?.password || 0) +
+                                        (entry.auth_breakdown?.bypassed || 0);
+                            hourlyUserCountMap.set(new Date(entry.timestamp).getTime(), total);
+                        });
+
+                        // Match user counts to load data timestamps
+                        hourlyUserCountData = hourlyLabels.map(label => {
+                            const timestamp = label.getTime();
+                            // Find closest user count within 10 minutes (5-minute buckets)
+                            let closestCount = 0;
+                            let minDiff = Infinity;
+                            for (const [ts, count] of hourlyUserCountMap.entries()) {
+                                const diff = Math.abs(ts - timestamp);
+                                if (diff < minDiff && diff < 10 * 60 * 1000) {
+                                    minDiff = diff;
+                                    closestCount = count;
+                                }
+                            }
+                            return closestCount;
+                        });
+                    }
+                } catch (error) {
+                    console.log('Could not fetch hourly session activity data:', error);
+                }
 
                 // Create background zone datasets for hourly chart
                 const hourlyBackgroundDatasets = [];
@@ -11015,6 +11131,7 @@ const tooltipLine2 = timeStr;
                                 borderWidth: 2,
                                 pointRadius: 2,
                                 tension: 0.3,
+                                yAxisID: 'y',
                                 order: 1
                             },
                             {
@@ -11025,6 +11142,7 @@ const tooltipLine2 = timeStr;
                                 borderWidth: 2,
                                 pointRadius: 2,
                                 tension: 0.3,
+                                yAxisID: 'y',
                                 order: 2
                             },
                             {
@@ -11035,7 +11153,19 @@ const tooltipLine2 = timeStr;
                                 borderWidth: 2,
                                 pointRadius: 2,
                                 tension: 0.3,
+                                yAxisID: 'y',
                                 order: 3
+                            },
+                            {
+                                label: 'Total Users',
+                                data: hourlyUserCountData,
+                                borderColor: '#28a745',
+                                backgroundColor: 'rgba(40, 167, 69, 0.2)',
+                                borderWidth: 2,
+                                pointRadius: 2,
+                                tension: 0.3,
+                                yAxisID: 'y2',
+                                order: 0
                             }
                         ]
                     },
@@ -11096,6 +11226,24 @@ const tooltipLine2 = timeStr;
                                     text: 'Load Average'
                                 },
                                 beginAtZero: true
+                            },
+                            y2: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                title: {
+                                    display: true,
+                                    text: 'Total Users',
+                                    color: '#28a745'
+                                },
+                                beginAtZero: true,
+                                ticks: {
+                                    stepSize: 1,
+                                    color: '#28a745'
+                                },
+                                grid: {
+                                    drawOnChartArea: false
+                                }
                             }
                         }
                     }
@@ -11117,6 +11265,8 @@ const tooltipLine2 = timeStr;
                             dataset.data = hourlyLoad5Data;
                         } else if (dataset.label === '15 min') {
                             dataset.data = hourlyLoad15Data;
+                        } else if (dataset.label === 'Total Users') {
+                            dataset.data = hourlyUserCountData;
                         }
                     });
                     loadHourlyChart.update('none');

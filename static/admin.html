@@ -10788,20 +10788,21 @@ const tooltipLine2 = timeStr;
                             userCountMap.set(new Date(entry.timestamp).getTime(), total);
                         });
 
-                        // Match user counts to load data timestamps
+                        // Match user counts to load data timestamps using forward-fill
+                        // (use last known value since session snapshots may be sparse)
+                        const sortedUserTimes = Array.from(userCountMap.keys()).sort((a, b) => a - b);
                         userCountData = labels.map(label => {
                             const timestamp = label.getTime();
-                            // Find closest user count within 2 minutes (1-minute buckets)
-                            let closestCount = 0;
-                            let minDiff = Infinity;
-                            for (const [ts, count] of userCountMap.entries()) {
-                                const diff = Math.abs(ts - timestamp);
-                                if (diff < minDiff && diff < 2 * 60 * 1000) {
-                                    minDiff = diff;
-                                    closestCount = count;
+                            // Find the most recent user count at or before this timestamp
+                            let lastCount = 0;
+                            for (const ts of sortedUserTimes) {
+                                if (ts <= timestamp) {
+                                    lastCount = userCountMap.get(ts);
+                                } else {
+                                    break;
                                 }
                             }
-                            return closestCount;
+                            return lastCount;
                         });
                     }
                 } catch (error) {
@@ -11051,20 +11052,21 @@ const tooltipLine2 = timeStr;
                             hourlyUserCountMap.set(new Date(entry.timestamp).getTime(), total);
                         });
 
-                        // Match user counts to load data timestamps
+                        // Match user counts to load data timestamps using forward-fill
+                        // (use last known value since session snapshots may be sparse)
+                        const sortedHourlyUserTimes = Array.from(hourlyUserCountMap.keys()).sort((a, b) => a - b);
                         hourlyUserCountData = hourlyLabels.map(label => {
                             const timestamp = label.getTime();
-                            // Find closest user count within 10 minutes (5-minute buckets)
-                            let closestCount = 0;
-                            let minDiff = Infinity;
-                            for (const [ts, count] of hourlyUserCountMap.entries()) {
-                                const diff = Math.abs(ts - timestamp);
-                                if (diff < minDiff && diff < 10 * 60 * 1000) {
-                                    minDiff = diff;
-                                    closestCount = count;
+                            // Find the most recent user count at or before this timestamp
+                            let lastCount = 0;
+                            for (const ts of sortedHourlyUserTimes) {
+                                if (ts <= timestamp) {
+                                    lastCount = hourlyUserCountMap.get(ts);
+                                } else {
+                                    break;
                                 }
                             }
-                            return closestCount;
+                            return lastCount;
                         });
                     }
                 } catch (error) {

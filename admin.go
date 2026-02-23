@@ -4594,7 +4594,7 @@ func (ah *AdminHandler) HandleSessionActivityChartData(w http.ResponseWriter, r 
 
 	// Determine bucket size based on time range
 	duration := endTime.Sub(startTime)
-	bucketMinutes := 1 // Default: 1 minute for day view (24 hours)
+	bucketMinutes := 5 // Default: 5 minutes for day view (24 hours = 288 data points)
 	if duration > 7*24*time.Hour {
 		bucketMinutes = 360 // 6 hours for month view
 	} else if duration > 24*time.Hour {

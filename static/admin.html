@@ -10768,12 +10768,13 @@ const tooltipLine2 = timeStr;
                 const load15Data = history.map(entry => entry.load_15min);
 
                 // Fetch session activity data for user count (60 minutes)
+                // Use 5-minute buckets to match Session Activity chart and smooth out anomalies
                 const endTime = new Date();
                 const startTime = new Date(endTime.getTime() - 60 * 60 * 1000);
                 let userCountData = [];
                 try {
                     const sessionResponse = await authenticatedFetch(
-                        `/admin/session-activity/chart-data?start=${startTime.toISOString()}&end=${endTime.toISOString()}&bucket_minutes=1`
+                        `/admin/session-activity/chart-data?start=${startTime.toISOString()}&end=${endTime.toISOString()}&bucket_minutes=5`
                     );
                     if (sessionResponse && sessionResponse.ok) {
                         const sessionData = await sessionResponse.json();

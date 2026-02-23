@@ -25,9 +25,12 @@ class LocalBookmarksUI {
     init() {
         this.createModals();
         this.attachEventListeners();
-        // Delay dropdown update to ensure DOM is ready
-        setTimeout(() => this.updateMainDropdown(), 100);
+        // Update dropdown immediately
+        this.updateMainDropdown();
         console.log('[LocalBookmarksUI] Initialized with', this.manager.getAll().length, 'bookmarks');
+        
+        // Dispatch ready event to notify other components
+        window.dispatchEvent(new CustomEvent('localBookmarksReady'));
     }
 
     // Create modal HTML structures
@@ -353,6 +356,8 @@ class LocalBookmarksUI {
                 window.spectrumDisplay.draw();
             }
         }
+        // Dispatch event to notify that bookmarks have been updated
+        window.dispatchEvent(new CustomEvent('localBookmarksUpdated'));
     }
 
     // Handle search

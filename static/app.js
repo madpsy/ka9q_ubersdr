@@ -6810,6 +6810,18 @@ document.addEventListener('DOMContentLoaded', () => {
             populateBookmarkSelector();
         }, 500);
 
+    // Listen for local bookmarks module ready event
+    window.addEventListener('localBookmarksReady', () => {
+        console.log('[app.js] localBookmarksReady event received');
+        populateLocalBookmarkSelector();
+    });
+
+    // Fallback: If module is already loaded before event listener is attached
+    if (window.localBookmarksUI) {
+        console.log('[app.js] localBookmarksUI already available, populating immediately');
+        populateLocalBookmarkSelector();
+    }
+
     // Initialize spectrum display
     try {
         spectrumDisplay = new SpectrumDisplay('spectrum-display-canvas', {

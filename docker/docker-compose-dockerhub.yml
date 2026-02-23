@@ -50,6 +50,7 @@ services:
     image: madpsy/ka9q_ubersdr:latest
     container_name: ka9q_ubersdr
     restart: unless-stopped
+    init: true  # Enable tini init to reap zombie processes from background watchers
 
     # Wait for ka9q-radio to be healthy before starting
     depends_on:
@@ -115,6 +116,7 @@ services:
     image: caddy:latest
     container_name: caddy
     restart: unless-stopped
+    init: true  # Enable tini init to reap zombie processes (fixes defunct ssl_client)
 
     # Wait for ubersdr to be healthy before starting
     depends_on:

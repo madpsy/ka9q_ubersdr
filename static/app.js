@@ -8205,29 +8205,13 @@ function downloadClient(platform) {
         callsign = 'UberSDR';
     }
 
-    // Determine the download URL and filename based on platform
-    let url, filename;
-    if (platform === 'windows') {
-        url = 'https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/radio_client.exe';
-        filename = `UberSDR-${callsign}.exe`;
-    } else if (platform === 'linux') {
-        url = 'https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/radio_client';
-        filename = `UberSDR-${callsign}`;
-    } else {
-        console.error('Unknown platform:', platform);
-        return;
-    }
+    // Build the download URL using the tunnel.ubersdr.org proxy
+    const url = `https://tunnel.ubersdr.org/download/client?callsign=${encodeURIComponent(callsign)}&platform=${encodeURIComponent(platform)}`;
 
-    // Create a temporary anchor element to trigger download with custom filename
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    // Open the download URL in a new window/tab
+    window.open(url, '_blank');
 
-    console.log(`Downloading ${platform} client as: ${filename}`);
+    console.log(`Downloading ${platform} client for callsign: ${callsign}`);
 
     // Close the modal after initiating download
     closeDownloadClientModal();

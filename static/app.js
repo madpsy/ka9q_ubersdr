@@ -1549,10 +1549,26 @@ async function fetchSiteDescription() {
                     }
                 }
 
-                // Show download client button (always visible)
-                const downloadClientBtn = document.getElementById('download-client-button');
-                if (downloadClientBtn) {
-                    downloadClientBtn.style.display = 'block';
+                // Show download client button if instance is registered on instances.ubersdr.org
+                if (data.receiver && data.receiver.callsign) {
+                    const callsign = data.receiver.callsign;
+                    // Check if this instance is registered
+                    fetch(`https://instances.ubersdr.org/api/callsign/${encodeURIComponent(callsign)}`)
+                        .then(response => {
+                            if (response.ok) {
+                                // Instance is registered, show the download button
+                                const downloadClientBtn = document.getElementById('download-client-button');
+                                if (downloadClientBtn) {
+                                    downloadClientBtn.style.display = 'block';
+                                    console.log('[Download Client] Button shown for registered instance:', callsign);
+                                }
+                            } else {
+                                console.log('[Download Client] Instance not registered, button hidden');
+                            }
+                        })
+                        .catch(error => {
+                            console.error('[Download Client] Error checking instance registration:', error);
+                        });
                 }
 
                 // Show live map button if digital decodes are enabled
@@ -8205,8 +8221,8 @@ function downloadClient(platform) {
         callsign = 'UberSDR';
     }
 
-    // Build the download URL using the tunnel.ubersdr.org proxy
-    const url = `https://tunnel.ubersdr.org/download/client?callsign=${encodeURIComponent(callsign)}&platform=${encodeURIComponent(platform)}`;
+    // Build the download URL using the instances.ubersdr.org proxy
+    const url = `https://instances.ubersdr.org/download/client?callsign=${encodeURIComponent(callsign)}&platform=${encodeURIComponent(platform)}`;
 
     // Open the download URL in a new window/tab
     window.open(url, '_blank');

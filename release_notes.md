@@ -4,6 +4,7 @@
 - Added **SpinTheDial.live** dedicated website which is meant as a bit of fun to find voice activity
 - Added **Signal Data** now read from audio packets rather than spectrum
 - Added **Example Popup JS** in Admin -> Config -> Server -> Custom Head HTML
+- Added **Local Bookmarks** so users can save their own bookmarks (import and export supported)
 - Improved **Voice Activity** detection logic - still not perfect but seems better
 - Improved **Spectral Data** processing logic to multi-thread architechture
 - Improved **Session Activity** API response time in admin (for >50 simultaneous listeners)

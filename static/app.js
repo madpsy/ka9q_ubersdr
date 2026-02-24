@@ -1651,21 +1651,16 @@ async function fetchSiteDescription() {
 
                     // Add marker with custom icon and permanent tooltip
                     const marker = L.marker([lat, lon], { icon: receiverIcon }).addTo(map);
-                    let tooltipContent = `<strong>${name}</strong>`;
+                    let tooltipContent = `<a href="https://www.google.com/maps?q=${lat},${lon}" target="_blank" style="color: inherit; text-decoration: none; cursor: pointer;"><strong>${name}</strong>`;
                     if (location) {
                         tooltipContent += `<br>${location}`;
                     }
-                    tooltipContent += `<br>${asl}m ASL${dayNightStatus}`;
+                    tooltipContent += `<br>${asl}m ASL${dayNightStatus}</a>`;
                     marker.bindTooltip(tooltipContent, {
                         permanent: true,
                         direction: 'top',
                         className: 'receiver-tooltip'
                     }).openTooltip();
-
-                    // Make receiver marker clickable to open Google Maps
-                    marker.on('click', () => {
-                        window.open(`https://www.google.com/maps?q=${lat},${lon}`, '_blank');
-                    });
 
                     // Fetch user's location from /api/myip
                     let userLocationText = '';

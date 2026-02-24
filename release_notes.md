@@ -1,4 +1,20 @@
-## Version 0.1.40 - Latest Release
+## Version 0.1.41 - Latest Release
+
+### New Features
+- Added **SpinTheDial.live** dedicated website which is meant as a bit of fun to find voice activity
+- Added **Signal Data** now read from audio packets rather than spectrum
+- Improved **Voice Activity** detection logic - still not perfect but seems better
+- Improved **Spectral Data** processing logic to multi-thread architechture
+- Improved **Session Activity** API response time in admin (for >50 similtanious listeners)
+
+### Bug Fixes
+- Various tuning issues where the spectrum didn't readjust (still work in progress)
+- Caddy container now runs Docker Init so wait() is called for child processes (issue with zombies)
+
+### In Progress (Coming Soon)
+- CW Skimmer (SkimSrv) as a Docker container (thanks to K1RA for making aware this was possible)
+
+## Version 0.1.40
 
 ### New Features
 - Added **Extension** for FT8/F4 Decoder for web users (FT8 only just now)

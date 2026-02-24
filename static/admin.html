@@ -2564,95 +2564,95 @@
                             exampleBtn.style.cursor = 'pointer';
                             exampleBtn.style.fontSize = '13px';
                             exampleBtn.onclick = () => {
-                                input.value = `<script>
-(function() {
-  const style = document.createElement('style');
-  style.textContent = \\\`
-    .sdr-promo-popup {
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 16px 20px;
-      border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-      z-index: 10000;
-      max-width: 320px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      animation: slideIn 0.4s ease-out;
-    }
-    @keyframes slideIn {
-      from { transform: translateX(400px); opacity: 0; }
-      to { transform: translateX(0); opacity: 1; }
-    }
-    .sdr-promo-popup a {
-      color: #fff;
-      text-decoration: underline;
-      font-weight: 600;
-    }
-    .sdr-promo-close {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      background: transparent;
-      border: none;
-      color: white;
-      cursor: pointer;
-      font-size: 24px;
-      line-height: 1;
-      font-weight: bold;
-      padding: 0;
-      width: 24px;
-      height: 24px;
-      opacity: 0.8;
-      transition: opacity 0.2s;
-    }
-    .sdr-promo-close:hover {
-      opacity: 1;
-    }
-  \\\`;
-  document.head.appendChild(style);
-
-  function showPromo() {
-    const popup = document.createElement('div');
-    popup.className = 'sdr-promo-popup';
-    popup.innerHTML = \\\`
-      <button class="sdr-promo-close" aria-label="Close">×</button>
-      <div style="padding-right: 20px;">
-        <strong style="display: block; margin-bottom: 8px; font-size: 15px;">Check out other <a href="https://instances.ubersdr.org" target="_blank" rel="noopener">UberSDR instances</a>!</strong>
-      </div>
-    \\\`;
-    document.body.appendChild(popup);
-    
-    popup.querySelector('.sdr-promo-close').onclick = () => {
-      popup.style.animation = 'slideIn 0.3s ease-in reverse';
-      setTimeout(() => popup.remove(), 300);
-    };
-    
-    // Auto-dismiss after 5 seconds
-    setTimeout(() => {
-      if (popup.parentNode) popup.querySelector('.sdr-promo-close').click();
-    }, 5000);
-  }
-
-  // Wait for overlay to be hidden (it uses classList.add('hidden'))
-  const observer = new MutationObserver(() => {
-    const overlay = document.getElementById('audio-start-overlay');
-    if (overlay && overlay.classList.contains('hidden')) {
-      setTimeout(showPromo, 1000);
-      observer.disconnect();
-    }
-  });
-  
-  window.addEventListener('DOMContentLoaded', () => {
-    const overlay = document.getElementById('audio-start-overlay');
-    if (overlay) {
-      observer.observe(overlay, { attributes: true, attributeFilter: ['class'] });
-    }
-  });
-})();
-</script>`;
+                                input.value = '<script>\n' +
+'(function() {\n' +
+'  const style = document.createElement(\'style\');\n' +
+'  style.textContent = `\n' +
+'    .sdr-promo-popup {\n' +
+'      position: fixed;\n' +
+'      top: 20px;\n' +
+'      right: 20px;\n' +
+'      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);\n' +
+'      color: white;\n' +
+'      padding: 16px 20px;\n' +
+'      border-radius: 8px;\n' +
+'      box-shadow: 0 4px 12px rgba(0,0,0,0.3);\n' +
+'      z-index: 10000;\n' +
+'      max-width: 320px;\n' +
+'      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;\n' +
+'      animation: slideIn 0.4s ease-out;\n' +
+'    }\n' +
+'    @keyframes slideIn {\n' +
+'      from { transform: translateX(400px); opacity: 0; }\n' +
+'      to { transform: translateX(0); opacity: 1; }\n' +
+'    }\n' +
+'    .sdr-promo-popup a {\n' +
+'      color: #fff;\n' +
+'      text-decoration: underline;\n' +
+'      font-weight: 600;\n' +
+'    }\n' +
+'    .sdr-promo-close {\n' +
+'      position: absolute;\n' +
+'      top: 8px;\n' +
+'      right: 8px;\n' +
+'      background: transparent;\n' +
+'      border: none;\n' +
+'      color: white;\n' +
+'      cursor: pointer;\n' +
+'      font-size: 24px;\n' +
+'      line-height: 1;\n' +
+'      font-weight: bold;\n' +
+'      padding: 0;\n' +
+'      width: 24px;\n' +
+'      height: 24px;\n' +
+'      opacity: 0.8;\n' +
+'      transition: opacity 0.2s;\n' +
+'    }\n' +
+'    .sdr-promo-close:hover {\n' +
+'      opacity: 1;\n' +
+'    }\n' +
+'  `;\n' +
+'  document.head.appendChild(style);\n' +
+'\n' +
+'  function showPromo() {\n' +
+'    const popup = document.createElement(\'div\');\n' +
+'    popup.className = \'sdr-promo-popup\';\n' +
+'    popup.innerHTML = `\n' +
+'      <button class="sdr-promo-close" aria-label="Close">×</button>\n' +
+'      <div style="padding-right: 20px;">\n' +
+'        <strong style="display: block; margin-bottom: 8px; font-size: 15px;">Check out other <a href="https://instances.ubersdr.org" target="_blank" rel="noopener">UberSDR instances</a>!</strong>\n' +
+'      </div>\n' +
+'    `;\n' +
+'    document.body.appendChild(popup);\n' +
+'    \n' +
+'    popup.querySelector(\'.sdr-promo-close\').onclick = () => {\n' +
+'      popup.style.animation = \'slideIn 0.3s ease-in reverse\';\n' +
+'      setTimeout(() => popup.remove(), 300);\n' +
+'    };\n' +
+'    \n' +
+'    // Auto-dismiss after 5 seconds\n' +
+'    setTimeout(() => {\n' +
+'      if (popup.parentNode) popup.querySelector(\'.sdr-promo-close\').click();\n' +
+'    }, 5000);\n' +
+'  }\n' +
+'\n' +
+'  // Wait for overlay to be hidden (it uses classList.add(\'hidden\'))\n' +
+'  const observer = new MutationObserver(() => {\n' +
+'    const overlay = document.getElementById(\'audio-start-overlay\');\n' +
+'    if (overlay && overlay.classList.contains(\'hidden\')) {\n' +
+'      setTimeout(showPromo, 1000);\n' +
+'      observer.disconnect();\n' +
+'    }\n' +
+'  });\n' +
+'  \n' +
+'  window.addEventListener(\'DOMContentLoaded\', () => {\n' +
+'    const overlay = document.getElementById(\'audio-start-overlay\');\n' +
+'    if (overlay) {\n' +
+'      observer.observe(overlay, { attributes: true, attributeFilter: [\'class\'] });\n' +
+'    }\n' +
+'  });\n' +
+'})();\n' +
+'</' + 'script>';
                                 input.dispatchEvent(new Event('change'));
                             };
                             field.appendChild(exampleBtn);

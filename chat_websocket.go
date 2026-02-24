@@ -173,16 +173,23 @@ func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 
 	// Check if username matches owner callsign and restriction is enabled
 	if cm.ownerCallsignFromAdminIPOnly && cm.adminCallsign != "" {
-		if strings.EqualFold(username, cm.adminCallsign) {
+		// Strip suffix from admin callsign (e.g., "MM3NDH-2" becomes "MM3NDH")
+		// This allows the base callsign to be restricted while ignoring SSID suffixes
+		baseCallsign := cm.adminCallsign
+		if hyphenIndex := strings.Index(baseCallsign, "-"); hyphenIndex != -1 {
+			baseCallsign = baseCallsign[:hyphenIndex]
+		}
+
+		if strings.EqualFold(username, baseCallsign) {
 			// Get user's IP address
 			userIP := cm.GetSessionIP(sessionID)
 
 			// Check if IP is in admin allowed list
 			if !cm.adminConfig.IsIPAllowed(userIP) {
-				log.Printf("Chat: Username '%s' (owner callsign) rejected for session %s from IP %s - not in admin allowed IPs", username, sessionID, userIP)
+				log.Printf("Chat: Username '%s' (owner callsign base) rejected for session %s from IP %s - not in admin allowed IPs", username, sessionID, userIP)
 				return ErrOwnerCallsignRestricted
 			}
-			log.Printf("Chat: Username '%s' (owner callsign) allowed for session %s from admin IP %s", username, sessionID, userIP)
+			log.Printf("Chat: Username '%s' (owner callsign base) allowed for session %s from admin IP %s", username, sessionID, userIP)
 		}
 	}
 

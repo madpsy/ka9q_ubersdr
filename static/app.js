@@ -1711,12 +1711,12 @@ async function fetchSiteDescription() {
                                     dashArray: '5, 10'
                                 }).addTo(map);
 
-                                // Fit bounds to show both markers
+                                // Fit bounds to show both markers with extra padding for tooltips
                                 const bounds = L.latLngBounds([
                                     [lat, lon],
                                     [myipData.latitude, myipData.longitude]
                                 ]);
-                                map.fitBounds(bounds, { padding: [30, 30] });
+                                map.fitBounds(bounds, { padding: [60, 60] });
                             }
 
                             // Build user location text

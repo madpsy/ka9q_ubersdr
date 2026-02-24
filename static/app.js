@@ -1524,6 +1524,10 @@ async function fetchSiteDescription() {
         const response = await fetch('/api/description');
         if (response.ok) {
             const data = await response.json();
+            
+            // Store instance description globally for use by other modules (e.g., recorder)
+            window.instanceDescription = data;
+            
             const descriptionEl = document.getElementById('site-description');
             if (descriptionEl && data.description) {
                 descriptionEl.innerHTML = data.description;

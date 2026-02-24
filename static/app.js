@@ -1700,6 +1700,17 @@ async function fetchSiteDescription() {
                                     className: 'receiver-tooltip'
                                 });
 
+                                // Draw dashed line between receiver and user
+                                const line = L.polyline([
+                                    [lat, lon],
+                                    [myipData.latitude, myipData.longitude]
+                                ], {
+                                    color: '#007bff',
+                                    weight: 2,
+                                    opacity: 0.6,
+                                    dashArray: '5, 10'
+                                }).addTo(map);
+
                                 // Fit bounds to show both markers
                                 const bounds = L.latLngBounds([
                                     [lat, lon],

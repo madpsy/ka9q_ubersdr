@@ -598,7 +598,10 @@ function updatePageTitle() {
         const freq = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
         if (!isNaN(freq)) {
             const freqMHz = (freq / 1000000).toFixed(3);
-            document.title = `UberSDR - ${freqMHz} MHz ${currentMode.toUpperCase()}`;
+            // Include callsign if available from instance description
+            const callsign = window.instanceDescription?.receiver?.callsign;
+            const prefix = callsign ? `${callsign} ` : '';
+            document.title = `${prefix}UberSDR - ${freqMHz} MHz ${currentMode.toUpperCase()}`;
         }
     }
 }

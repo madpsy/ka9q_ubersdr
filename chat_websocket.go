@@ -1388,7 +1388,7 @@ func trimString(s string, maxLen int) string {
 var (
 	ErrInvalidUsername         = &ChatError{"invalid username - must be 1-15 characters (letters, numbers, - _ /) and cannot start or end with - _ /"}
 	ErrProfaneUsername         = &ChatError{"username contains inappropriate language - please choose a different username"}
-	ErrOwnerCallsignRestricted = &ChatError{"this username is reserved for the station owner - only accessible from authorized IPs"}
+	ErrOwnerCallsignRestricted = &ChatError{"this username is reserved for the station owner - only accessible from authorised IPs"}
 	ErrInvalidMessage          = &ChatError{"invalid message"}
 	ErrUsernameNotSet          = &ChatError{"username not set"}
 	ErrInvalidMessageType      = &ChatError{"invalid message type"}

@@ -1630,6 +1630,8 @@ async function fetchSiteDescription() {
                     mapContainer.style.border = '2px solid #444';
                     mapContainer.style.borderRadius = '4px';
                     mapContainer.style.overflow = 'hidden';
+                    mapContainer.style.cursor = 'pointer';
+                    mapContainer.title = 'Click to open in Google Maps';
                     descriptionEl.appendChild(mapContainer);
 
                     // Initialize map (zoom level 6 for more zoomed out view)
@@ -1662,14 +1664,71 @@ async function fetchSiteDescription() {
                         className: 'receiver-tooltip'
                     }).openTooltip();
 
-                    // Add link to full map
-                    const mapLink = document.createElement('div');
-                    mapLink.style.marginTop = '5px';
-                    mapLink.style.fontSize = '12px';
-                    mapLink.style.textAlign = 'center';
-                    // Use Google Maps with exact coordinates - this will show a pin at the precise location
-                    mapLink.innerHTML = `<a href="https://www.google.com/maps?q=${lat},${lon}" target="_blank" style="color: #007bff;">View larger map</a>`;
-                    descriptionEl.appendChild(mapLink);
+                    // Fetch user's location from /api/myip
+                    let userLocationText = '';
+                    try {
+                        const myipResponse = await fetch('/api/myip');
+                        if (myipResponse.ok) {
+                            const myipData = await myipResponse.json();
+
+                            // Add user marker if coordinates are available
+                            if (myipData.latitude && myipData.longitude) {
+                                // Create custom icon for user
+                                const userIcon = L.divIcon({
+                                    className: '',
+                                    html: '<div style="width: 16px; height: 16px; background: #00ff00; border: 2px solid rgba(255, 255, 255, 0.9); border-radius: 50%; box-shadow: 0 0 8px rgba(0, 255, 0, 0.5);"></div>',
+                                    iconSize: [16, 16],
+                                    iconAnchor: [8, 8]
+                                });
+
+                                // Add user marker
+                                const userMarker = L.marker([myipData.latitude, myipData.longitude], { icon: userIcon }).addTo(map);
+                                userMarker.bindTooltip('You', {
+                                    permanent: false,
+                                    direction: 'top',
+                                    className: 'receiver-tooltip'
+                                });
+
+                                // Fit bounds to show both markers
+                                const bounds = L.latLngBounds([
+                                    [lat, lon],
+                                    [myipData.latitude, myipData.longitude]
+                                ]);
+                                map.fitBounds(bounds, { padding: [30, 30] });
+                            }
+
+                            // Build user location text
+                            if (myipData.country) {
+                                const parts = [];
+                                if (myipData.city) {
+                                    parts.push(myipData.city);
+                                }
+                                parts.push(myipData.country);
+
+                                const locationStr = parts.join(', ');
+                                const distanceStr = myipData.distance_km ? ` (${Math.round(myipData.distance_km)} km)` : '';
+                                userLocationText = `Looks like you're from ${locationStr}${distanceStr}`;
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Error fetching user location:', err);
+                    }
+
+                    // Make map clickable to open Google Maps
+                    mapContainer.addEventListener('click', () => {
+                        window.open(`https://www.google.com/maps?q=${lat},${lon}`, '_blank');
+                    });
+
+                    // Add user location info or nothing if not available
+                    if (userLocationText) {
+                        const locationInfo = document.createElement('div');
+                        locationInfo.style.marginTop = '5px';
+                        locationInfo.style.fontSize = '12px';
+                        locationInfo.style.textAlign = 'center';
+                        locationInfo.style.color = '#ecf0f1';
+                        locationInfo.textContent = userLocationText;
+                        descriptionEl.appendChild(locationInfo);
+                    }
                 }
             }
         } else {

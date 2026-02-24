@@ -1528,7 +1528,7 @@ func main() {
 	}
 
 	http.HandleFunc("/api/myip", func(w http.ResponseWriter, r *http.Request) {
-		handleMyIP(w, r, geoIPService)
+		handleMyIP(w, r, geoIPService, config)
 	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
 		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor)
@@ -2221,7 +2221,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleMyIP returns the client's IP address with optional GeoIP information
-func handleMyIP(w http.ResponseWriter, r *http.Request, geoIPService *GeoIPService) {
+func handleMyIP(w http.ResponseWriter, r *http.Request, geoIPService *GeoIPService, config *Config) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -2285,6 +2285,21 @@ func handleMyIP(w http.ResponseWriter, r *http.Request, geoIPService *GeoIPServi
 			}
 			if result.IsSatelliteProvider {
 				response["is_satellite_provider"] = result.IsSatelliteProvider
+			}
+
+			// Calculate distance and bearing from instance to client if both have coordinates
+			if result.Latitude != nil && result.Longitude != nil {
+				instanceLat := config.Admin.GPS.Lat
+				instanceLon := config.Admin.GPS.Lon
+
+				// Calculate distance and bearing using the Haversine formula
+				distanceKm, bearingDeg := CalculateDistanceAndBearing(
+					instanceLat, instanceLon,
+					*result.Latitude, *result.Longitude,
+				)
+
+				response["distance_km"] = distanceKm
+				response["bearing_deg"] = bearingDeg
 			}
 		}
 	}

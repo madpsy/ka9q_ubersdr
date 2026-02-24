@@ -59,8 +59,29 @@ for arg in "$@"; do
             GENERATE_WISDOM=1
             shift
             ;;
+        *)
+            echo "Error: Unknown argument: $arg"
+            echo "Valid arguments:"
+            echo "  --ignore-rx888      Skip RX888 device detection"
+            echo "  --ignore-ports      Skip port availability checks"
+            echo "  --ignore-avx2       Skip AVX2 CPU extension check"
+            echo "  --force-compose     Force overwrite of docker-compose.yml"
+            echo "  --generate-wisdom   Generate FFTW wisdom file (slow)"
+            exit 1
+            ;;
     esac
 done
+
+# Print active options
+if (( IGNORE_RX888 || IGNORE_PORTS || IGNORE_AVX2 || FORCE_COMPOSE || GENERATE_WISDOM )); then
+    echo "=== Active Options ==="
+    (( IGNORE_RX888 )) && echo "  Ignoring RX888 device check"
+    (( IGNORE_PORTS )) && echo "  Ignoring port availability checks"
+    (( IGNORE_AVX2 )) && echo "  Ignoring AVX2 CPU extension check"
+    (( FORCE_COMPOSE )) && echo "  Forcing docker-compose.yml overwrite"
+    (( GENERATE_WISDOM )) && echo "  Will generate FFTW wisdom file"
+    echo
+fi
 
 # Extract port mappings from docker-compose.yml
 extract_ubersdr_ports() {

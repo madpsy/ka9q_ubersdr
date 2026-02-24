@@ -1549,12 +1549,10 @@ async function fetchSiteDescription() {
                     }
                 }
 
-                // Show band conditions button if noise floor monitoring is enabled
-                if (data.noise_floor === true) {
-                    const bandConditionsBtn = document.getElementById('band-conditions-button');
-                    if (bandConditionsBtn) {
-                        bandConditionsBtn.style.display = 'block';
-                    }
+                // Show download client button (always visible)
+                const downloadClientBtn = document.getElementById('download-client-button');
+                if (downloadClientBtn) {
+                    downloadClientBtn.style.display = 'block';
                 }
 
                 // Show live map button if digital decodes are enabled
@@ -8176,6 +8174,69 @@ function closeBufferConfigModal() {
         modal.style.display = 'none';
     }
 }
+
+// Download Client Modal Functions
+function openDownloadClientModal() {
+    const modal = document.getElementById('download-client-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+}
+
+function closeDownloadClientModal() {
+    const modal = document.getElementById('download-client-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function downloadClient(platform) {
+    // Get the instance callsign from the receiver-callsign element
+    const callsignEl = document.getElementById('receiver-callsign');
+    let callsign = callsignEl ? callsignEl.textContent.trim() : '';
+
+    // Fallback to getting from apiDescription if not in DOM yet
+    if (!callsign && window.apiDescription && window.apiDescription.receiver && window.apiDescription.receiver.callsign) {
+        callsign = window.apiDescription.receiver.callsign;
+    }
+
+    // Default callsign if still not found
+    if (!callsign) {
+        callsign = 'UberSDR';
+    }
+
+    // Determine the download URL and filename based on platform
+    let url, filename;
+    if (platform === 'windows') {
+        url = 'https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/radio_client.exe';
+        filename = `UberSDR-${callsign}.exe`;
+    } else if (platform === 'linux') {
+        url = 'https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/radio_client';
+        filename = `UberSDR-${callsign}`;
+    } else {
+        console.error('Unknown platform:', platform);
+        return;
+    }
+
+    // Create a temporary anchor element to trigger download with custom filename
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    console.log(`Downloading ${platform} client as: ${filename}`);
+
+    // Close the modal after initiating download
+    closeDownloadClientModal();
+}
+
+// Make functions globally accessible
+window.openDownloadClientModal = openDownloadClientModal;
+window.closeDownloadClientModal = closeDownloadClientModal;
+window.downloadClient = downloadClient;
 
 function setBufferThreshold(value) {
     maxBufferMs = value;

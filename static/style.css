@@ -238,7 +238,7 @@
     align-items: center;
 }
 
-.band-conditions-button {
+.download-client-button {
     padding: 12px 24px;
     border: none;
     border-radius: 8px;
@@ -250,11 +250,11 @@
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
-.band-conditions-button:hover {
+.download-client-button:hover {
     transform: scale(1.05);
 }
 
-.band-conditions-button:active {
+.download-client-button:active {
     transform: scale(0.98);
 }
 
@@ -983,12 +983,12 @@ button:disabled {
     transform: none;
 }
 
-button:not(.primary-btn):not(:disabled):not(.band-conditions-button):not(.digital-spots-button) {
+button:not(.primary-btn):not(:disabled):not(.download-client-button):not(.digital-spots-button) {
     background: #28a745;
     color: white;
 }
 
-button:not(.primary-btn):not(:disabled):not(.band-conditions-button):not(.digital-spots-button):hover {
+button:not(.primary-btn):not(:disabled):not(.download-client-button):not(.digital-spots-button):hover {
     background: #218838;
     transform: translateY(-2px);
 }

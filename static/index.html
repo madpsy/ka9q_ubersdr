@@ -180,8 +180,8 @@
                 <p id="password-error-message" style="color: #dc3545; margin-top: 10px; font-size: 14px; display: none;"></p>
             </div>
             <div class="overlay-buttons-container">
-                <button id="band-conditions-button" class="band-conditions-button blue-button" style="display: none;" onclick="window.open('/bandconditions.html', '_blank')">
-                    <span>Band Conditions</span>
+                <button id="download-client-button" class="download-client-button blue-button" style="display: none;" onclick="openDownloadClientModal()">
+                    <span>Download Client</span>
                 </button>
                 <button id="listener-map-button" class="listener-map-button orange-button" onclick="window.open('/session_stats.html', '_blank')">
                     <span>Listener Map</span>
@@ -1201,6 +1201,40 @@
                         </tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Download Client Modal -->
+    <div id="download-client-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2>Download Client</h2>
+                <button class="modal-close" onclick="closeDownloadClientModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: #ecf0f1; margin-bottom: 20px; text-align: center;">Download the native client for your operating system:</p>
+                <div style="display: flex; flex-direction: column; gap: 15px;">
+                    <button onclick="downloadClient('windows')" style="padding: 20px; background: linear-gradient(135deg, #0078d4 0%, #1e88e5 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 18px; font-weight: bold; transition: all 0.3s; box-shadow: 0 4px 6px rgba(0,0,0,0.3);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 12px rgba(0,0,0,0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px rgba(0,0,0,0.3)'">
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 12px;">
+                            <svg width="32" height="32" viewBox="0 0 88 88" fill="white">
+                                <path d="M0,12.402,35.687,7.945,35.687,42.039,0,42.039ZM0,46.039,35.687,46.039,35.687,80.133,0,75.676ZM40.313,7.945,87.5,0,87.5,41.279,40.313,41.279ZM40.313,46.721,87.5,46.721,87.5,88,40.313,80.055Z"/>
+                            </svg>
+                            <span>Download for Windows</span>
+                        </div>
+                    </button>
+                    <button onclick="downloadClient('linux')" style="padding: 20px; background: linear-gradient(135deg, #f7941d 0%, #f15a24 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 18px; font-weight: bold; transition: all 0.3s; box-shadow: 0 4px 6px rgba(0,0,0,0.3);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 12px rgba(0,0,0,0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px rgba(0,0,0,0.3)'">
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 12px;">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="white">
+                                <path d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.3 1.953-1.05 3.02-.885 1.051-2.127 2.75-2.716 4.521-.278.84-.415 1.917-.415 2.998 0 1.031.125 2.119.45 3.23.1.346.231.672.385.985 1.061 2.081 2.898 3.423 4.431 3.423.061 0 .119-.003.176-.008 1.432-.13 2.322-1.26 2.816-2.054.494-.794.735-1.951.735-2.951 0-.061-.003-.119-.008-.176-.13-1.432-1.26-2.322-2.054-2.816-.794-.494-1.951-.735-2.951-.735-.061 0-.119.003-.176.008-1.432.13-2.322 1.26-2.816 2.054-.494.794-.735 1.951-.735 2.951 0 .061.003.119.008.176.13 1.432 1.26 2.322 2.054 2.816.794.494 1.951.735 2.951.735.061 0 .119-.003.176-.008 1.432-.13 2.322-1.26 2.816-2.054.494-.794.735-1.951.735-2.951 0-.061-.003-.119-.008-.176-.13-1.432-1.26-2.322-2.054-2.816-.794-.494-1.951-.735-2.951-.735-.061 0-.119.003-.176.008-1.432.13-2.322 1.26-2.816 2.054-.494.794-.735 1.951-.735 2.951 0 .061.003.119.008.176.13 1.432 1.26 2.322 2.054 2.816.794.494 1.951.735 2.951.735.061 0 .119-.003.176-.008 1.432-.13 2.322-1.26 2.816-2.054.494-.794.735-1.951.735-2.951 0-.061-.003-.119-.008-.176-.13-1.432-1.26-2.322-2.054-2.816-.794-.494-1.951-.735-2.951-.735-.061 0-.119.003-.176.008z"/>
+                            </svg>
+                            <span>Download for Linux</span>
+                        </div>
+                    </button>
+                </div>
+                <p style="font-size: 0.9em; color: #888; margin-top: 20px; text-align: center;">
+                    The client will be downloaded with the instance callsign in the filename.
+                </p>
             </div>
         </div>
     </div>

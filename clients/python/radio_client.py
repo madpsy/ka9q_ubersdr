@@ -2508,6 +2508,54 @@ Examples:
 
     args = parser.parse_args()
     
+    # Auto-detect callsign from executable filename (if not already specified)
+    # Format: radio_client-<callsign> or radio_client-<callsign>.exe
+    if not args.callsign and not args.uuid and not args.url:
+        # Get the executable name (works for both frozen PyInstaller and script)
+        if getattr(sys, 'frozen', False):
+            # Running as PyInstaller executable
+            executable_path = sys.executable
+        else:
+            # Running as script
+            executable_path = sys.argv[0]
+        
+        # Extract just the filename without path and extension
+        executable_name = os.path.splitext(os.path.basename(executable_path))[0]
+        
+        # Check if filename contains a hyphen (e.g., radio_client-m9psy-1)
+        if '-' in executable_name:
+            # Extract everything after the first hyphen as the callsign
+            # This allows callsigns with hyphens like m9psy-1
+            callsign = executable_name.split('-', 1)[1].upper()
+            
+            if callsign:  # Non-empty callsign
+                print(f"Auto-detected callsign from executable name: {callsign}")
+                print(f"Attempting to resolve callsign to instance...")
+                
+                # Try to resolve the callsign (silently fail if not found)
+                try:
+                    response = requests.get(f'https://instances.ubersdr.org/api/callsign/{callsign}', timeout=10)
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    # Extract UUID from callsign response
+                    uuid = data.get('public_uuid')
+                    if uuid:
+                        print(f"✓ Found instance for callsign {callsign}")
+                        # Set args.callsign so the normal callsign handling code will process it
+                        args.callsign = callsign
+                    else:
+                        print(f"No instance found for callsign {callsign}, continuing with normal startup...")
+                        print()
+                except requests.exceptions.RequestException:
+                    # Silently fail - just continue with normal startup
+                    print(f"Could not resolve callsign {callsign}, continuing with normal startup...")
+                    print()
+                except Exception:
+                    # Silently fail - just continue with normal startup
+                    print(f"Could not resolve callsign {callsign}, continuing with normal startup...")
+                    print()
+    
     # List devices mode
     if args.list_devices:
         output_mode = args.output

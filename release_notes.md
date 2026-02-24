@@ -6,7 +6,7 @@
 - Added **Example Popup JS** in Admin -> Config -> Server -> Custom Head HTML
 - Improved **Voice Activity** detection logic - still not perfect but seems better
 - Improved **Spectral Data** processing logic to multi-thread architechture
-- Improved **Session Activity** API response time in admin (for >50 similtanious listeners)
+- Improved **Session Activity** API response time in admin (for >50 simultaneous listeners)
 
 ### Bug Fixes
 - Various tuning issues where the spectrum didn't readjust (still work in progress)

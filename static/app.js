@@ -1769,6 +1769,9 @@ async function fetchSiteDescription() {
                     }
                 }
             }
+
+            // Update page title now that we have the callsign
+            updatePageTitle();
         } else {
             console.error('Failed to fetch site description:', response.status);
         }

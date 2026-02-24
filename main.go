@@ -1066,7 +1066,7 @@ func main() {
 	if config.Decoder.Enabled {
 		receiverLocator = config.Decoder.ReceiverLocator
 	}
-	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics, receiverLocator, config.Chat)
+	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics, receiverLocator, config.Chat, &config.Admin)
 
 	// Initialize audio extension manager
 	audioExtensionRegistry := NewAudioExtensionRegistry()

@@ -191,14 +191,15 @@ type DXClusterConfig struct {
 
 // ChatConfig contains live chat settings
 type ChatConfig struct {
-	Enabled                  bool   `yaml:"enabled"`                      // Enable/disable live chat functionality
-	MaxUsers                 int    `yaml:"max_users"`                    // Maximum concurrent chat users (0 = unlimited)
-	BufferedMessages         int    `yaml:"buffered_messages"`            // Number of messages to buffer for new connections (default: 50)
-	RateLimitPerSecond       int    `yaml:"rate_limit_per_second"`        // Maximum messages per second per user (default: 2)
-	RateLimitPerMinute       int    `yaml:"rate_limit_per_minute"`        // Maximum messages per minute per user (default: 30)
-	UpdateRateLimitPerSecond int    `yaml:"update_rate_limit_per_second"` // Maximum user updates per second per user (default: 4)
-	LogToCSV                 bool   `yaml:"log_to_csv"`                   // Enable CSV logging of chat messages (default: true)
-	DataDir                  string `yaml:"data_dir"`                     // Directory to store CSV chat log files (default: "chat")
+	Enabled                      bool   `yaml:"enabled"`                           // Enable/disable live chat functionality
+	MaxUsers                     int    `yaml:"max_users"`                         // Maximum concurrent chat users (0 = unlimited)
+	BufferedMessages             int    `yaml:"buffered_messages"`                 // Number of messages to buffer for new connections (default: 50)
+	RateLimitPerSecond           int    `yaml:"rate_limit_per_second"`             // Maximum messages per second per user (default: 2)
+	RateLimitPerMinute           int    `yaml:"rate_limit_per_minute"`             // Maximum messages per minute per user (default: 30)
+	UpdateRateLimitPerSecond     int    `yaml:"update_rate_limit_per_second"`      // Maximum user updates per second per user (default: 4)
+	LogToCSV                     bool   `yaml:"log_to_csv"`                        // Enable CSV logging of chat messages (default: true)
+	DataDir                      string `yaml:"data_dir"`                          // Directory to store CSV chat log files (default: "chat")
+	OwnerCallsignFromAdminIPOnly bool   `yaml:"owner_callsign_from_admin_ip_only"` // Restrict owner callsign to admin IPs only (default: true)
 }
 
 // SpaceWeatherConfig contains space weather monitoring settings
@@ -608,6 +609,12 @@ func LoadConfig(filename string) (*Config, error) {
 	// For now, we assume if the config is loaded, logging should be enabled unless explicitly disabled
 	if config.Chat.DataDir == "" {
 		config.Chat.DataDir = "chat" // Default "chat" directory
+	}
+	// Owner callsign restriction defaults to true (enabled) for security
+	// Note: YAML bool defaults to false, so we need to explicitly set it to true
+	// This prevents impersonation of the station owner in chat
+	if !config.Chat.OwnerCallsignFromAdminIPOnly {
+		config.Chat.OwnerCallsignFromAdminIPOnly = true // Default true (enabled)
 	}
 
 	// Set space weather defaults if not specified

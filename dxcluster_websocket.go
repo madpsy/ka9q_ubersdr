@@ -86,7 +86,7 @@ type DXClusterWebSocketHandler struct {
 }
 
 // NewDXClusterWebSocketHandler creates a new DX cluster WebSocket handler
-func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionManager, ipBanManager *IPBanManager, prometheusMetrics *PrometheusMetrics, receiverLocator string, chatConfig ChatConfig) *DXClusterWebSocketHandler {
+func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionManager, ipBanManager *IPBanManager, prometheusMetrics *PrometheusMetrics, receiverLocator string, chatConfig ChatConfig, adminConfig *AdminConfig) *DXClusterWebSocketHandler {
 	handler := &DXClusterWebSocketHandler{
 		clients:           make(map[*websocket.Conn]*sync.Mutex),
 		dxCluster:         dxCluster,
@@ -129,7 +129,7 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 			mqttPublisher = prometheusMetrics.mqttPublisher
 		}
 
-		handler.chatManager = NewChatManager(handler, sessions, chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatLogger, mqttPublisher)
+		handler.chatManager = NewChatManager(handler, sessions, chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatLogger, mqttPublisher, adminConfig, chatConfig)
 		log.Printf("Chat: Initialized with %d buffered messages, max %d users, rate limits: %d msg/sec, %d msg/min, %d updates/sec, logging: %v, MQTT: %v",
 			chatConfig.BufferedMessages, chatConfig.MaxUsers, chatConfig.RateLimitPerSecond, chatConfig.RateLimitPerMinute, chatConfig.UpdateRateLimitPerSecond, chatConfig.LogToCSV, mqttPublisher != nil)
 	}

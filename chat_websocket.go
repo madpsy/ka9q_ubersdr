@@ -73,23 +73,31 @@ type ChatManager struct {
 
 	// MQTT publisher for real-time chat events
 	mqttPublisher *MQTTPublisher
+
+	// Owner callsign restriction
+	adminCallsign                string       // Admin callsign (uppercase for comparison)
+	ownerCallsignFromAdminIPOnly bool         // Restrict owner callsign to admin IPs only
+	adminConfig                  *AdminConfig // For IP checking
 }
 
 // NewChatManager creates a new chat manager
-func NewChatManager(wsHandler *DXClusterWebSocketHandler, sessionManager *SessionManager, maxMessages int, maxUsers int, rateLimitPerSecond int, rateLimitPerMinute int, updateRateLimitPerSecond int, chatLogger *ChatLogger, mqttPublisher *MQTTPublisher) *ChatManager {
+func NewChatManager(wsHandler *DXClusterWebSocketHandler, sessionManager *SessionManager, maxMessages int, maxUsers int, rateLimitPerSecond int, rateLimitPerMinute int, updateRateLimitPerSecond int, chatLogger *ChatLogger, mqttPublisher *MQTTPublisher, adminConfig *AdminConfig, chatConfig ChatConfig) *ChatManager {
 	cm := &ChatManager{
-		sessionUsernames:         make(map[string]string),
-		messageBuffer:            make([]ChatMessage, 0, maxMessages),
-		maxMessages:              maxMessages,
-		wsHandler:                wsHandler,
-		sessionManager:           sessionManager,
-		activeUsers:              make(map[string]*ChatUser),
-		maxUsers:                 maxUsers,
-		rateLimitPerSecond:       rateLimitPerSecond,
-		rateLimitPerMinute:       rateLimitPerMinute,
-		updateRateLimitPerSecond: updateRateLimitPerSecond,
-		chatLogger:               chatLogger,
-		mqttPublisher:            mqttPublisher,
+		sessionUsernames:             make(map[string]string),
+		messageBuffer:                make([]ChatMessage, 0, maxMessages),
+		maxMessages:                  maxMessages,
+		wsHandler:                    wsHandler,
+		sessionManager:               sessionManager,
+		activeUsers:                  make(map[string]*ChatUser),
+		maxUsers:                     maxUsers,
+		rateLimitPerSecond:           rateLimitPerSecond,
+		rateLimitPerMinute:           rateLimitPerMinute,
+		updateRateLimitPerSecond:     updateRateLimitPerSecond,
+		chatLogger:                   chatLogger,
+		mqttPublisher:                mqttPublisher,
+		adminCallsign:                strings.ToUpper(adminConfig.Callsign),
+		ownerCallsignFromAdminIPOnly: chatConfig.OwnerCallsignFromAdminIPOnly,
+		adminConfig:                  adminConfig,
 	}
 
 	// Start cleanup goroutine for inactive users
@@ -161,6 +169,21 @@ func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 	if containsProfanity(username) {
 		log.Printf("Chat: Username '%s' rejected for session %s - contains profanity", username, sessionID)
 		return ErrProfaneUsername
+	}
+
+	// Check if username matches owner callsign and restriction is enabled
+	if cm.ownerCallsignFromAdminIPOnly && cm.adminCallsign != "" {
+		if strings.EqualFold(username, cm.adminCallsign) {
+			// Get user's IP address
+			userIP := cm.GetSessionIP(sessionID)
+
+			// Check if IP is in admin allowed list
+			if !cm.adminConfig.IsIPAllowed(userIP) {
+				log.Printf("Chat: Username '%s' (owner callsign) rejected for session %s from IP %s - not in admin allowed IPs", username, sessionID, userIP)
+				return ErrOwnerCallsignRestricted
+			}
+			log.Printf("Chat: Username '%s' (owner callsign) allowed for session %s from admin IP %s", username, sessionID, userIP)
+		}
 	}
 
 	// Sanitize username (alphanumeric only, max 15 chars)
@@ -1358,6 +1381,7 @@ func trimString(s string, maxLen int) string {
 var (
 	ErrInvalidUsername         = &ChatError{"invalid username - must be 1-15 characters (letters, numbers, - _ /) and cannot start or end with - _ /"}
 	ErrProfaneUsername         = &ChatError{"username contains inappropriate language - please choose a different username"}
+	ErrOwnerCallsignRestricted = &ChatError{"this username is reserved for the station owner - only accessible from authorized IPs"}
 	ErrInvalidMessage          = &ChatError{"invalid message"}
 	ErrUsernameNotSet          = &ChatError{"username not set"}
 	ErrInvalidMessageType      = &ChatError{"invalid message type"}

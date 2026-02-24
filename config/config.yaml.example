@@ -686,6 +686,16 @@ chat:
   #   chat/2026/01/10/chat.csv
   data_dir: "chat"
 
+  # Restrict owner callsign as username to admin IPs only (default: true)
+  # When enabled, only users connecting from admin->allowed_ips can use the
+  # admin->callsign as their chat username. This prevents impersonation of
+  # the station owner in chat.
+  # When disabled, anyone can use the owner's callsign as a username.
+  # Comparison is case-insensitive (e.g., "N0CALL", "n0call", "N0Call" all match)
+  # Recommended: true (enabled for security)
+  # Default: true
+  owner_callsign_from_admin_ip_only: true
+
 # Space Weather settings
 spaceweather:
   # Enable space weather monitoring from NOAA SWPC

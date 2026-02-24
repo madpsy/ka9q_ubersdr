@@ -8195,6 +8195,31 @@ function closeBufferConfigModal() {
 function openDownloadClientModal() {
     const modal = document.getElementById('download-client-modal');
     if (modal) {
+        // Get the instance callsign
+        const callsignEl = document.getElementById('receiver-callsign');
+        let callsign = callsignEl ? callsignEl.textContent.trim() : '';
+
+        // Fallback to getting from apiDescription if not in DOM yet
+        if (!callsign && window.apiDescription && window.apiDescription.receiver && window.apiDescription.receiver.callsign) {
+            callsign = window.apiDescription.receiver.callsign;
+        }
+
+        // Default callsign if still not found
+        if (!callsign) {
+            callsign = 'UberSDR';
+        }
+
+        // Update the download links with the callsign
+        const windowsLink = document.getElementById('download-windows-link');
+        const linuxLink = document.getElementById('download-linux-link');
+
+        if (windowsLink) {
+            windowsLink.href = `https://instances.ubersdr.org/download/client?callsign=${encodeURIComponent(callsign)}&platform=windows`;
+        }
+        if (linuxLink) {
+            linuxLink.href = `https://instances.ubersdr.org/download/client?callsign=${encodeURIComponent(callsign)}&platform=linux`;
+        }
+
         modal.style.display = 'flex';
     }
 }
@@ -8206,37 +8231,9 @@ function closeDownloadClientModal() {
     }
 }
 
-function downloadClient(platform) {
-    // Get the instance callsign from the receiver-callsign element
-    const callsignEl = document.getElementById('receiver-callsign');
-    let callsign = callsignEl ? callsignEl.textContent.trim() : '';
-
-    // Fallback to getting from apiDescription if not in DOM yet
-    if (!callsign && window.apiDescription && window.apiDescription.receiver && window.apiDescription.receiver.callsign) {
-        callsign = window.apiDescription.receiver.callsign;
-    }
-
-    // Default callsign if still not found
-    if (!callsign) {
-        callsign = 'UberSDR';
-    }
-
-    // Build the download URL using the instances.ubersdr.org proxy
-    const url = `https://instances.ubersdr.org/download/client?callsign=${encodeURIComponent(callsign)}&platform=${encodeURIComponent(platform)}`;
-
-    // Open the download URL in a new window/tab
-    window.open(url, '_blank');
-
-    console.log(`Downloading ${platform} client for callsign: ${callsign}`);
-
-    // Close the modal after initiating download
-    closeDownloadClientModal();
-}
-
 // Make functions globally accessible
 window.openDownloadClientModal = openDownloadClientModal;
 window.closeDownloadClientModal = closeDownloadClientModal;
-window.downloadClient = downloadClient;
 
 function setBufferThreshold(value) {
     maxBufferMs = value;

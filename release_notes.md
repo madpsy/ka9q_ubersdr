@@ -15,6 +15,7 @@
 
 ### In Progress (Coming Soon)
 - CW Skimmer (SkimSrv) as a Docker container (thanks to K1RA for making me aware this was possible)
+- FT2 Decoder / Skimmer
 
 ## Version 0.1.40
 

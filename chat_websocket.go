@@ -189,12 +189,12 @@ func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 	// Sanitize username (alphanumeric only, max 15 chars)
 	username = sanitizeUsername(username)
 
-	// Check if username is already taken by another user
+	// Check if username is already taken by another user (case-insensitive)
 	cm.sessionUsernamesMu.RLock()
 	for otherSessionID, existingUsername := range cm.sessionUsernames {
-		if existingUsername == username && otherSessionID != sessionID {
+		if strings.EqualFold(existingUsername, username) && otherSessionID != sessionID {
 			cm.sessionUsernamesMu.RUnlock()
-			log.Printf("Chat: Username '%s' already taken, rejecting for session %s", username, sessionID)
+			log.Printf("Chat: Username '%s' already taken (case-insensitive match with '%s'), rejecting for session %s", username, existingUsername, sessionID)
 			return ErrUsernameAlreadyTaken
 		}
 	}

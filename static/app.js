@@ -1718,7 +1718,7 @@ async function fetchSiteDescription() {
 
                                 const locationStr = parts.join(', ');
                                 const distanceStr = myipData.distance_km ? ` (${Math.round(myipData.distance_km)} km)` : '';
-                                userLocationText = `Looks like you're from ${locationStr}${distanceStr}`;
+                                userLocationText = `Hello ${locationStr}${distanceStr}`;
                             }
                         }
                     } catch (err) {

@@ -1630,8 +1630,6 @@ async function fetchSiteDescription() {
                     mapContainer.style.border = '2px solid #444';
                     mapContainer.style.borderRadius = '4px';
                     mapContainer.style.overflow = 'hidden';
-                    mapContainer.style.cursor = 'pointer';
-                    mapContainer.title = 'Click to open in Google Maps';
                     descriptionEl.appendChild(mapContainer);
 
                     // Initialize map (zoom level 6 for more zoomed out view)
@@ -1646,7 +1644,7 @@ async function fetchSiteDescription() {
                     // Create custom icon for receiver (matching digitalspots_map.js)
                     const receiverIcon = L.divIcon({
                         className: '', // Empty className to avoid default Leaflet styling
-                        html: '<div style="width: 20px; height: 20px; background: #ff0000; border: 3px solid rgba(255, 255, 255, 0.9); border-radius: 50%; box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);"></div>',
+                        html: '<div style="width: 20px; height: 20px; background: #ff0000; border: 3px solid rgba(255, 255, 255, 0.9); border-radius: 50%; box-shadow: 0 0 10px rgba(255, 0, 0, 0.5); cursor: pointer;"></div>',
                         iconSize: [20, 20],
                         iconAnchor: [10, 10]
                     });
@@ -1663,6 +1661,11 @@ async function fetchSiteDescription() {
                         direction: 'top',
                         className: 'receiver-tooltip'
                     }).openTooltip();
+
+                    // Make receiver marker clickable to open Google Maps
+                    marker.on('click', () => {
+                        window.open(`https://www.google.com/maps?q=${lat},${lon}`, '_blank');
+                    });
 
                     // Fetch user's location from /api/myip
                     let userLocationText = '';
@@ -1713,11 +1716,6 @@ async function fetchSiteDescription() {
                     } catch (err) {
                         console.error('Error fetching user location:', err);
                     }
-
-                    // Make map clickable to open Google Maps
-                    mapContainer.addEventListener('click', () => {
-                        window.open(`https://www.google.com/maps?q=${lat},${lon}`, '_blank');
-                    });
 
                     // Add user location info or nothing if not available
                     if (userLocationText) {

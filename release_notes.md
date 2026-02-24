@@ -12,7 +12,7 @@
 - Caddy container now runs Docker Init so wait() is called for child processes (issue with zombies)
 
 ### In Progress (Coming Soon)
-- CW Skimmer (SkimSrv) as a Docker container (thanks to K1RA for making aware this was possible)
+- CW Skimmer (SkimSrv) as a Docker container (thanks to K1RA for making me aware this was possible)
 
 ## Version 0.1.40
 

@@ -306,12 +306,50 @@
             color: #27ae60;
             font-weight: 600;
         }
+
+        .confidence-filter {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .confidence-filter label {
+            font-size: 12px;
+            color: #95a5a6;
+        }
+
+        .confidence-filter select {
+            background: #34495e;
+            color: #ecf0f1;
+            border: 1px solid #4a5f7f;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .confidence-filter select:hover {
+            border-color: #3498db;
+        }
     </style>
 </head>
 <body>
     <div class="header">
         <h1 id="band-title">Voice Activity</h1>
-        <button class="refresh-btn" onclick="fetchData()">↻ Refresh</button>
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div class="confidence-filter">
+                <label for="min-confidence">Min Confidence:</label>
+                <select id="min-confidence" onchange="fetchData()">
+                    <option value="0.3">30%</option>
+                    <option value="0.4">40%</option>
+                    <option value="0.5" selected>50%</option>
+                    <option value="0.6">60%</option>
+                    <option value="0.7">70%</option>
+                    <option value="0.8">80%</option>
+                </select>
+            </div>
+            <button class="refresh-btn" onclick="fetchData()">↻ Refresh</button>
+        </div>
     </div>
 
     <div id="error-container"></div>
@@ -359,7 +397,9 @@
             errorEl.innerHTML = '';
 
             try {
-                const response = await fetch(`/api/noisefloor/voice-activity?band=${encodeURIComponent(band)}`);
+                // Get minimum confidence from dropdown
+                const minConfidence = document.getElementById('min-confidence').value;
+                const response = await fetch(`/api/noisefloor/voice-activity?band=${encodeURIComponent(band)}&min_confidence=${minConfidence}`);
                 
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);

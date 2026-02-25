@@ -69,10 +69,10 @@ func getUnknownChannelSSRCs(sessions *SessionManager, multiDecoder *MultiDecoder
 		}
 	}
 
-	// Find unknown SSRCs
+	// Find unknown SSRCs (only count channels with non-zero frequency)
 	unknownSSRCs := make([]uint32, 0)
-	for ssrc := range allChannelStatus {
-		if !knownSSRCs[ssrc] {
+	for ssrc, status := range allChannelStatus {
+		if !knownSSRCs[ssrc] && status.RadioFrequency != 0 {
 			unknownSSRCs = append(unknownSSRCs, ssrc)
 		}
 	}

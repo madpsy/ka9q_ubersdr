@@ -106,6 +106,20 @@
             font-weight: 600;
             font-size: 13px;
             border-bottom: 1px solid #1a1a1a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .activity-header-status {
+            font-size: 12px;
+            color: #95a5a6;
+            font-weight: normal;
+        }
+
+        .activity-header-status.active {
+            color: #27ae60;
+            font-weight: 600;
         }
 
         .activity-item {
@@ -296,16 +310,6 @@
             font-size: 12px;
         }
 
-        .scan-status {
-            margin-left: auto;
-            font-size: 12px;
-            color: #95a5a6;
-        }
-
-        .scan-status.active {
-            color: #27ae60;
-            font-weight: 600;
-        }
 
         .confidence-filter {
             display: flex;
@@ -367,11 +371,13 @@
                 <span style="font-size: 12px; color: #95a5a6;">sec</span>
             </div>
             <button class="random-btn" id="random-btn" onclick="tuneToRandom()">Random</button>
-            <div class="scan-status" id="scan-status"></div>
         </div>
 
         <div class="activity-list">
-            <div class="activity-header">Recent Voice Activity</div>
+            <div class="activity-header">
+                <span>Recent Voice Activity</span>
+                <span class="activity-header-status" id="scan-status"></span>
+            </div>
             <div id="activity-list"></div>
         </div>
         <div class="last-updated" id="last-updated"></div>

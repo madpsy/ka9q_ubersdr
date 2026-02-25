@@ -43,6 +43,43 @@ type RadiodChannelsResponse struct {
 	LastUpdate    time.Time           `json:"last_update"`
 }
 
+// getUnknownChannelSSRCs returns a list of SSRCs that exist in radiod but not in the session manager
+// This identifies orphaned channels that should be cleaned up
+func getUnknownChannelSSRCs(sessions *SessionManager, multiDecoder *MultiDecoder) []uint32 {
+	// Get all channel status from radiod
+	allChannelStatus := sessions.radiod.GetAllChannelStatus()
+	if len(allChannelStatus) == 0 {
+		return nil
+	}
+
+	// Build map of known SSRCs from sessions
+	knownSSRCs := make(map[uint32]bool)
+
+	sessions.mu.RLock()
+	for _, session := range sessions.sessions {
+		knownSSRCs[session.SSRC] = true
+	}
+	sessions.mu.RUnlock()
+
+	// Also add decoder SSRCs if multiDecoder exists
+	// (though decoders should also have sessions, this is a safety check)
+	if multiDecoder != nil {
+		for _, band := range multiDecoder.decoderBands {
+			knownSSRCs[band.SSRC] = true
+		}
+	}
+
+	// Find unknown SSRCs
+	unknownSSRCs := make([]uint32, 0)
+	for ssrc := range allChannelStatus {
+		if !knownSSRCs[ssrc] {
+			unknownSSRCs = append(unknownSSRCs, ssrc)
+		}
+	}
+
+	return unknownSSRCs
+}
+
 // HandleRadiodChannels returns all active radiod channels
 // This is an admin-only endpoint, so IP ban checking is not needed (handled by auth middleware)
 func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Request) {

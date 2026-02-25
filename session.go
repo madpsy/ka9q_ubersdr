@@ -136,6 +136,9 @@ func NewSessionManager(config *Config, radiod *RadiodController, geoIPService *G
 		go sm.maxSessionTimeLoop()
 	}
 
+	// Start orphaned channel cleanup goroutine
+	go sm.cleanupOrphanedChannels()
+
 	return sm
 }
 
@@ -2086,5 +2089,36 @@ func (s *Session) SendAudioToExtension(audioSample AudioSample) {
 		default:
 			// Drop if extension can't keep up (non-blocking)
 		}
+	}
+}
+
+// cleanupOrphanedChannels periodically disables radiod channels that don't have corresponding sessions
+// This prevents orphaned channels from accumulating when sessions are closed but radiod hasn't cleaned them up yet
+func (sm *SessionManager) cleanupOrphanedChannels() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		// Use shared logic to find unknown channels (pass nil for multiDecoder since we don't have access to it)
+		// The session map already includes decoder sessions, so this is safe
+		orphanedSSRCs := getUnknownChannelSSRCs(sm, nil)
+
+		if len(orphanedSSRCs) == 0 {
+			continue
+		}
+
+		// Disable each orphaned channel
+		for _, ssrc := range orphanedSSRCs {
+			if err := sm.radiod.DisableChannel("orphaned", ssrc); err != nil {
+				log.Printf("Failed to disable orphaned channel 0x%08x: %v", ssrc, err)
+			}
+		}
+
+		// Log all orphaned channels that were closed (single line)
+		ssrcStrings := make([]string, len(orphanedSSRCs))
+		for i, ssrc := range orphanedSSRCs {
+			ssrcStrings[i] = fmt.Sprintf("0x%08x", ssrc)
+		}
+		log.Printf("Cleaned up %d orphaned radiod channel(s): %s", len(orphanedSSRCs), strings.Join(ssrcStrings, ", "))
 	}
 }

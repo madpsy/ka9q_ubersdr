@@ -112,7 +112,7 @@
             padding: 10px 15px;
             border-bottom: 1px solid #34495e;
             display: grid;
-            grid-template-columns: 120px 1fr 80px;
+            grid-template-columns: 120px 1fr 80px 80px;
             gap: 10px;
             align-items: center;
             transition: background 0.2s;
@@ -143,8 +143,15 @@
             font-weight: 600;
         }
 
-        .timestamp {
-            font-size: 11px;
+        .confidence {
+            font-size: 12px;
+            color: #f39c12;
+            text-align: right;
+            font-weight: 600;
+        }
+
+        .snr {
+            font-size: 12px;
             color: #95a5a6;
             text-align: right;
         }
@@ -393,6 +400,7 @@
                 const mode = modeUpper.toLowerCase(); // Convert to lowercase for tuneToChannel
                 const bandwidth = activity.bandwidth || 0;
                 const signalAboveNoise = activity.signal_above_noise ? activity.signal_above_noise.toFixed(1) + ' dB' : 'N/A';
+                const confidence = activity.confidence ? (activity.confidence * 100).toFixed(0) + '%' : 'N/A';
                 
                 const dialFreq = activity.estimated_dial_freq || activity.start_freq;
                 
@@ -401,9 +409,10 @@
                         <div class="frequency">${freq}</div>
                         <div>
                             <span class="mode">${modeUpper}</span>
-                            <span style="font-size: 11px; color: #95a5a6; margin-left: 8px;">${bandwidth} Hz | SNR: ${signalAboveNoise}</span>
+                            <span style="font-size: 11px; color: #95a5a6; margin-left: 8px;">${bandwidth} Hz</span>
                         </div>
-                        <div class="timestamp">${signalAboveNoise}</div>
+                        <div class="confidence">${confidence}</div>
+                        <div class="snr">${signalAboveNoise}</div>
                     </div>
                 `;
             }).join('');

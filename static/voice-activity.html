@@ -342,9 +342,9 @@
                 <select id="min-confidence" onchange="fetchData()">
                     <option value="0.3">30%</option>
                     <option value="0.4">40%</option>
-                    <option value="0.5" selected>50%</option>
+                    <option value="0.5">50%</option>
                     <option value="0.6">60%</option>
-                    <option value="0.7">70%</option>
+                    <option value="0.7" selected>70%</option>
                     <option value="0.8">80%</option>
                 </select>
             </div>
@@ -397,8 +397,10 @@
             errorEl.innerHTML = '';
 
             try {
-                // Get minimum confidence from dropdown
-                const minConfidence = document.getElementById('min-confidence').value;
+                // Get minimum confidence from dropdown (default to 0.7 if not found)
+                const minConfidenceEl = document.getElementById('min-confidence');
+                const minConfidence = minConfidenceEl ? minConfidenceEl.value : '0.7';
+                console.log('Fetching with min_confidence:', minConfidence);
                 const response = await fetch(`/api/noisefloor/voice-activity?band=${encodeURIComponent(band)}&min_confidence=${minConfidence}`);
                 
                 if (!response.ok) {

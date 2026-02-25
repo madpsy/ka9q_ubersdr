@@ -203,7 +203,7 @@ func DefaultDetectionParams() DetectionParams {
 		MinBandwidth:     1500, // 1.5 kHz minimum
 		MaxBandwidth:     4000, // 4 kHz maximum
 		MinSNR:           6.0,  // Minimum SNR
-		MinConfidence:    0.3,  // Minimum confidence
+		MinConfidence:    0.7,  // Minimum confidence (70%)
 		RoundingInterval: 100,  // Round to 100 Hz
 	}
 }
@@ -1160,6 +1160,15 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 
 	// Apply SSB start filter to cached results as well
 	activities = filterActivitiesBySSBStart(activities, band)
+
+	// Filter by minimum confidence (user-requested threshold)
+	filteredActivities := []VoiceActivity{}
+	for _, activity := range activities {
+		if activity.Confidence >= params.MinConfidence {
+			filteredActivities = append(filteredActivities, activity)
+		}
+	}
+	activities = filteredActivities
 
 	// Get averaged FFT for noise floor calculation and timestamp
 	fft := buffer.GetAveragedFFT(5 * time.Second)

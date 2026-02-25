@@ -2107,9 +2107,9 @@ func (sm *SessionManager) cleanupOrphanedChannels() {
 			continue
 		}
 
-		// Disable each orphaned channel
+		// Disable each orphaned channel (silently - we log in bulk below)
 		for _, ssrc := range orphanedSSRCs {
-			if err := sm.radiod.DisableChannel("orphaned", ssrc); err != nil {
+			if err := sm.radiod.DisableChannelSilent("orphaned", ssrc); err != nil {
 				log.Printf("Failed to disable orphaned channel 0x%08x: %v", ssrc, err)
 			}
 		}

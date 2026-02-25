@@ -596,6 +596,20 @@ func (rc *RadiodController) DisableChannel(name string, ssrc uint32) error {
 	return nil
 }
 
+// DisableChannelSilent disables a channel by setting its frequency to 0 (without logging)
+// Used by cleanup processes that log in bulk
+func (rc *RadiodController) DisableChannelSilent(name string, ssrc uint32) error {
+	cmd := rc.buildCommand(name, ssrc, map[string]interface{}{
+		"radio.frequency": uint64(0),
+	})
+
+	if err := rc.sendCommand(cmd); err != nil {
+		return fmt.Errorf("failed to send disable command: %w", err)
+	}
+
+	return nil
+}
+
 // TerminateChannel terminates a channel by setting frequency to 0
 // This is the same as DisableChannel - channels will expire after idle timeout
 // Note: This is a placeholder until we find a reliable way to immediately terminate channels

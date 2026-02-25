@@ -213,7 +213,7 @@ func DefaultDetectionParams() DetectionParams {
 func getBandSSBStartFreq(band string) uint64 {
 	ssbStarts := map[string]uint64{
 		"160m": 1843000,  // 1843 kHz
-		"80m":  3570000,  // 3570 kHz
+		"80m":  3600000,  // 3600 kHz
 		"40m":  7100000,  // 7100 kHz
 		"20m":  14112000, // 14112 kHz
 		"17m":  18111000, // 18111 kHz
@@ -240,6 +240,31 @@ func filterActivitiesBySSBStart(activities []VoiceActivity, band string) []Voice
 	for _, activity := range activities {
 		// Check if the estimated dial frequency is at or above the SSB start
 		if activity.EstimatedDialFreq >= ssbStart {
+			filtered = append(filtered, activity)
+		}
+	}
+
+	return filtered
+}
+
+// filterActivitiesByExclusionRange filters out activities within specific frequency ranges
+func filterActivitiesByExclusionRange(activities []VoiceActivity, band string) []VoiceActivity {
+	// Define exclusion ranges for specific bands (in Hz)
+	exclusionRanges := map[string]struct{ start, end uint64 }{
+		"60m": {start: 5354000, end: 5360000}, // Exclude 5.357 MHz ± 3 kHz
+	}
+
+	exclusion, hasExclusion := exclusionRanges[band]
+	if !hasExclusion {
+		// No exclusion range for this band
+		return activities
+	}
+
+	filtered := []VoiceActivity{}
+	for _, activity := range activities {
+		// Check if the activity falls within the exclusion range
+		// Exclude if the dial frequency is within the range
+		if activity.EstimatedDialFreq < exclusion.start || activity.EstimatedDialFreq > exclusion.end {
 			filtered = append(filtered, activity)
 		}
 	}
@@ -1155,11 +1180,17 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 	// Filter by SSB start frequency for applicable bands
 	newActivities = filterActivitiesBySSBStart(newActivities, band)
 
+	// Filter by exclusion ranges (e.g., 60m exclusion zone)
+	newActivities = filterActivitiesByExclusionRange(newActivities, band)
+
 	// Merge with cache for stability (keeps activities from last 30 seconds)
 	activities := voiceActivityCache.mergeWithCache(band, newActivities)
 
 	// Apply SSB start filter to cached results as well
 	activities = filterActivitiesBySSBStart(activities, band)
+
+	// Apply exclusion range filter to cached results as well
+	activities = filterActivitiesByExclusionRange(activities, band)
 
 	// Filter by minimum confidence (user-requested threshold)
 	filteredActivities := []VoiceActivity{}

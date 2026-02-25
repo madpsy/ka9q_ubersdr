@@ -145,9 +145,20 @@
 
         .confidence {
             font-size: 12px;
-            color: #f39c12;
             text-align: right;
             font-weight: 600;
+        }
+
+        .confidence.high {
+            color: #27ae60; /* Green - high confidence */
+        }
+
+        .confidence.medium {
+            color: #f39c12; /* Orange - medium confidence */
+        }
+
+        .confidence.low {
+            color: #e74c3c; /* Red - low confidence */
         }
 
         .snr {
@@ -400,7 +411,18 @@
                 const mode = modeUpper.toLowerCase(); // Convert to lowercase for tuneToChannel
                 const bandwidth = activity.bandwidth || 0;
                 const signalAboveNoise = activity.signal_above_noise ? activity.signal_above_noise.toFixed(1) + ' dB' : 'N/A';
-                const confidence = activity.confidence ? (activity.confidence * 100).toFixed(0) + '%' : 'N/A';
+
+                // Calculate confidence percentage and color class
+                const confidenceValue = activity.confidence ? activity.confidence * 100 : 0;
+                const confidence = confidenceValue > 0 ? confidenceValue.toFixed(0) + '%' : 'N/A';
+                let confidenceClass = 'confidence';
+                if (confidenceValue >= 70) {
+                    confidenceClass += ' high';
+                } else if (confidenceValue >= 50) {
+                    confidenceClass += ' medium';
+                } else if (confidenceValue >= 30) {
+                    confidenceClass += ' low';
+                }
                 
                 const dialFreq = activity.estimated_dial_freq || activity.start_freq;
                 
@@ -411,7 +433,7 @@
                             <span class="mode">${modeUpper}</span>
                             <span style="font-size: 11px; color: #95a5a6; margin-left: 8px;">${bandwidth} Hz</span>
                         </div>
-                        <div class="confidence">${confidence}</div>
+                        <div class="${confidenceClass}">${confidence}</div>
                         <div class="snr">${signalAboveNoise}</div>
                     </div>
                 `;

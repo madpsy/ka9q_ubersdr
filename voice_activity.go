@@ -84,7 +84,7 @@ func (vac *VoiceActivityCache) mergeWithCache(band string, newActivities []Voice
 	defer vac.mu.Unlock()
 
 	now := time.Now()
-	cacheExpiry := 30 * time.Second
+	cacheExpiry := 90 * time.Second
 
 	// Initialize band cache if needed
 	if vac.cache[band] == nil {

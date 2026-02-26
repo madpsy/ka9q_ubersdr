@@ -1392,22 +1392,17 @@ func getSystemLoad() map[string]interface{} {
 	loadData["cpu_cores"] = cpuCores
 
 	// Parse load values for status calculation
-	// Note: load1 is parsed but not used in status calculation (can spike temporarily)
-	_, err1 := strconv.ParseFloat(fields[0], 64)
-	load5, err2 := strconv.ParseFloat(fields[1], 64)
-	load15, err3 := strconv.ParseFloat(fields[2], 64)
+	// Only use 15-minute average for status (most stable, ignores temporary spikes)
+	load15, err := strconv.ParseFloat(fields[2], 64)
 
-	if err1 == nil && err2 == nil && err3 == nil {
-		// Calculate average load using only 5 and 15 minute averages
-		// (1 minute average can spike temporarily and is not a reliable indicator)
-		avgLoad := (load5 + load15) / 2.0
-
-		// Determine status based on average load vs CPU cores
+	if err == nil {
+		// Determine status based on 15-minute load average vs CPU cores
+		// This provides the most stable indicator of sustained system load
 		status := "ok"
 		if cpuCores > 0 {
-			if avgLoad >= float64(cpuCores)*2.0 {
+			if load15 >= float64(cpuCores)*2.0 {
 				status = "critical"
-			} else if avgLoad >= float64(cpuCores) {
+			} else if load15 >= float64(cpuCores) {
 				status = "warning"
 			}
 		}

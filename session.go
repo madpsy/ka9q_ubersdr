@@ -767,6 +767,12 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 		return fmt.Errorf("cannot update spectrum session with UpdateSession, use UpdateSpectrumSession instead")
 	}
 
+	// Validate frequency if provided - must not be below minimum
+	const minFrequency = 10000 // 10 kHz minimum
+	if frequency > 0 && frequency < minFrequency {
+		return fmt.Errorf("invalid audio frequency %d Hz (must be >= %d Hz)", frequency, minFrequency)
+	}
+
 	// Update session state only for parameters that changed
 	session.mu.Lock()
 	oldFreq := session.Frequency
@@ -880,6 +886,12 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 
 	if session.IsSpectrum {
 		return fmt.Errorf("cannot update spectrum session with UpdateSessionWithEdges, use UpdateSpectrumSession instead")
+	}
+
+	// Validate frequency if provided - must not be below minimum
+	const minFrequency = 10000 // 10 kHz minimum
+	if frequency > 0 && frequency < minFrequency {
+		return fmt.Errorf("invalid audio frequency %d Hz (must be >= %d Hz)", frequency, minFrequency)
 	}
 
 	// Update session state only for parameters that changed

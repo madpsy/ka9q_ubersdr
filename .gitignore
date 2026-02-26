@@ -8,3 +8,4 @@ clients/python/dist
 collector/instances.db
 .vscode
 geoip/*.mmdb
+geoip/licence.txt

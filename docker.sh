@@ -38,16 +38,64 @@ echo ""
 read -p "Press any key to continue..." -n1 -s
 echo ""
 
-# Check if GeoIP database exists
-if [ ! -f "geoip/GeoLite2-Country.mmdb" ]; then
-    echo "ERROR: geoip/GeoLite2-Country.mmdb not found!"
+# Auto-fetch GeoIP City database
+GEOIP_DIR="geoip"
+GEOIP_FILE="$GEOIP_DIR/GeoLite2-Country.mmdb"  # Keep filename for compatibility
+GEOIP_LICENSE_FILE="$GEOIP_DIR/licence.txt"
+
+# Check if license file exists
+if [ ! -f "$GEOIP_LICENSE_FILE" ]; then
+    echo "WARNING: $GEOIP_LICENSE_FILE not found - skipping GeoIP database download"
     echo ""
-    echo "Please download the GeoLite2 Country database from MaxMind:"
+    echo "To enable automatic GeoIP database downloads:"
     echo "  1. Sign up for a free account at https://www.maxmind.com/en/geolite2/signup"
-    echo "  2. Download GeoLite2-Country.mmdb"
-    echo "  3. Place it in the geoip/ directory"
+    echo "  2. Generate a license key in your account settings"
+    echo "  3. Save the license key to $GEOIP_LICENSE_FILE"
     echo ""
-    exit 1
+
+    # Check if database file exists
+    if [ ! -f "$GEOIP_FILE" ]; then
+        echo "ERROR: $GEOIP_FILE not found and cannot auto-download without license key!"
+        exit 1
+    fi
+
+    echo "Using existing GeoIP database: $GEOIP_FILE"
+else
+    # Read license key from file
+    GEOIP_LICENSE_KEY=$(cat "$GEOIP_LICENSE_FILE" | tr -d '[:space:]')
+
+    if [ -z "$GEOIP_LICENSE_KEY" ]; then
+        echo "WARNING: License key in $GEOIP_LICENSE_FILE is empty - skipping download"
+
+        if [ ! -f "$GEOIP_FILE" ]; then
+            echo "ERROR: $GEOIP_FILE not found and cannot auto-download with empty license key!"
+            exit 1
+        fi
+
+        echo "Using existing GeoIP database: $GEOIP_FILE"
+    else
+        echo "Downloading latest GeoLite2-City database..."
+        mkdir -p "$GEOIP_DIR"
+
+        # Download and extract City database (saved as Country.mmdb for compatibility)
+        if ! wget -q -O /tmp/GeoLite2-City.tar.gz \
+            "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-City&license_key=${GEOIP_LICENSE_KEY}&suffix=tar.gz"; then
+            echo "WARNING: Failed to download GeoIP database. Check your license key in $GEOIP_LICENSE_FILE"
+
+            if [ ! -f "$GEOIP_FILE" ]; then
+                echo "ERROR: $GEOIP_FILE not found and download failed!"
+                exit 1
+            fi
+
+            echo "Using existing GeoIP database: $GEOIP_FILE"
+        else
+            tar -xzf /tmp/GeoLite2-City.tar.gz -C /tmp/
+            find /tmp/GeoLite2-City_* -name "*.mmdb" -exec cp {} "$GEOIP_FILE" \;
+            rm -rf /tmp/GeoLite2-City* /tmp/GeoLite2-City.tar.gz
+
+            echo "GeoIP City database downloaded successfully to $GEOIP_FILE"
+        fi
+    fi
 fi
 
 # Build UberSDR image with version tag

@@ -564,6 +564,15 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 	binCount := sm.config.Spectrum.Default.BinCount
 	binBandwidth := sm.config.Spectrum.Default.BinBandwidth
 
+	// Validate frequency - must not be 0
+	// If config has invalid frequency, use 15 MHz as fallback (covers 0-30 MHz HF range)
+	const minFrequency = 10000 // 10 kHz minimum
+	if frequency < minFrequency {
+		log.Printf("WARNING: Invalid spectrum center frequency %d Hz in config (must be >= %d Hz), using fallback 15 MHz",
+			frequency, minFrequency)
+		frequency = 15000000 // 15 MHz fallback
+	}
+
 	// Create spectrum session
 	session := &Session{
 		ID:             sessionID,
@@ -650,6 +659,12 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 
 	if !session.IsSpectrum {
 		return fmt.Errorf("session %s is not a spectrum session", sessionID)
+	}
+
+	// Validate frequency if provided - must not be 0
+	const minFrequency = 10000 // 10 kHz minimum
+	if frequency > 0 && frequency < minFrequency {
+		return fmt.Errorf("invalid spectrum frequency %d Hz (must be >= %d Hz)", frequency, minFrequency)
 	}
 
 	// Track if bin_count changed

@@ -328,7 +328,17 @@
         // Reset map view to auto-fit mode
         function resetMapView() {
             manuallyZoomed = false;
-            updateMap(); // Trigger update which will now run fitBounds
+
+            // Immediately fit bounds to all markers
+            const allMarkers = [...markers];
+            if (receiverMarker) {
+                allMarkers.push(receiverMarker);
+            }
+
+            if (allMarkers.length > 0) {
+                const group = L.featureGroup(allMarkers);
+                map.fitBounds(group.getBounds().pad(0.1));
+            }
         }
 
         // Format frequency for display

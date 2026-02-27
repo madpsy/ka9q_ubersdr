@@ -497,8 +497,8 @@
             const notification = document.createElement('div');
             notification.className = 'tune-notification';
             notification.innerHTML = `
-                <div class="frequency">${freqMHz} MHz</div>
-                <div class="mode">${mode.toUpperCase()}</div>
+                <div style="font-size: 14px; color: #95a5a6; margin-bottom: 8px;">Tuned to:</div>
+                <div class="frequency">${freqMHz} MHz (${mode.toUpperCase()})</div>
             `;
 
             // Add to body

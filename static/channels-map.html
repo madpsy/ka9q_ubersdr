@@ -461,6 +461,14 @@
                 .bindPopup(popupContent)
                 .addTo(map);
 
+            // Add hover event to open popup
+            receiverMarker.on('mouseover', function() {
+                this.openPopup();
+            });
+            receiverMarker.on('mouseout', function() {
+                this.closePopup();
+            });
+
             // Add permanent tooltip with receiver callsign and name (description)
             let tooltipText = '';
             if (callsign) {
@@ -558,6 +566,14 @@
                 const marker = L.marker([lat, lon], { icon: icon })
                     .bindPopup(popupContent)
                     .addTo(map);
+
+                // Add hover event to open popup
+                marker.on('mouseover', function() {
+                    this.openPopup();
+                });
+                marker.on('mouseout', function() {
+                    this.closePopup();
+                });
 
                 // Add permanent tooltip if chat username is available
                 if (channel.chat_username) {

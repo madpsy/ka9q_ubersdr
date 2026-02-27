@@ -359,8 +359,11 @@ class RadioGUI:
         # Recording state
         self.recording = False
         self.recording_start_time = None
+        self.recording_end_time = None
         self.recording_data = []
-        self.recording_max_duration = 300  # 300 seconds limit
+        self.recording_signal_data = []  # List of signal quality measurements
+        self.recording_metadata = {}  # Recording metadata
+        self.recording_max_duration = 600  # 600 seconds (10 minutes) limit to match web UI
 
         # Spectrum display (always enabled)
         self.spectrum: Optional[SpectrumDisplay] = None
@@ -446,6 +449,9 @@ class RadioGUI:
         # SNR history window
         self.snr_history_window = None
         self.snr_history_display = None
+
+        # S-Meter display window
+        self.s_meter_display = None
 
         # Signal data source selection (audio stream vs spectrum FFT)
         self.signal_data_source = tk.StringVar(value="audio")  # "audio" or "spectrum"
@@ -1965,6 +1971,11 @@ class RadioGUI:
             self.snr_history_btn = ttk.Button(button_frame_row2, text="SNR", width=6,
                                              command=self.open_snr_history_window)
             self.snr_history_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+            # S-Meter button
+            self.s_meter_btn = ttk.Button(button_frame_row2, text="S-Meter", width=8,
+                                         command=self.open_s_meter_window)
+            self.s_meter_btn.pack(side=tk.LEFT, padx=(0, 5))
 
             # Scroll mode selector removed from here - now in waterfall window title section
             self.scroll_mode_var = tk.StringVar(value="zoom")
@@ -5750,6 +5761,23 @@ class RadioGUI:
             # Silent failure for auto-open (user can manually open if needed)
             self.log_status(f"Note: CW spots auto-open failed - {e}")
 
+    def auto_open_s_meter(self):
+        """Automatically open S-Meter window on connection (no error dialogs)."""
+        # Don't open multiple windows
+        if self.s_meter_display and self.s_meter_display.window and self.s_meter_display.window.winfo_exists():
+            return
+
+        try:
+            from s_meter_display import SMeterDisplay
+
+            # Create S-Meter display
+            self.s_meter_display = SMeterDisplay(self)
+            self.s_meter_display.open_window()
+
+        except Exception as e:
+            # Silent failure for auto-open (user can manually open if needed)
+            self.log_status(f"Note: S-Meter auto-open failed - {e}")
+
     def open_waterfall_window(self):
         """Open a separate waterfall display window."""
         # Don't open multiple windows
@@ -6153,6 +6181,29 @@ class RadioGUI:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open SNR history: {e}")
             self.log_status(f"ERROR: Failed to open SNR history - {e}")
+
+    def open_s_meter_window(self):
+        """Open the S-Meter display window."""
+        # Don't open multiple windows
+        if self.s_meter_display and self.s_meter_display.window and self.s_meter_display.window.winfo_exists():
+            self.s_meter_display.window.lift()  # Bring to front
+            return
+
+        try:
+            from s_meter_display import SMeterDisplay
+
+            # Create S-Meter display
+            self.s_meter_display = SMeterDisplay(self)
+            self.s_meter_display.open_window()
+
+            if self.s_meter_display.window:
+                self.log_status("S-Meter window opened")
+
+        except ImportError as e:
+            messagebox.showerror("Error", f"S-Meter display not available: {e}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open S-Meter: {e}")
+            self.log_status(f"ERROR: Failed to open S-Meter - {e}")
 
     def open_eq_window(self):
         """Open the 10-band equalizer window."""
@@ -6952,6 +7003,12 @@ class RadioGUI:
             self.snr_history_display = None
             self.log_status("SNR history window closed")
 
+        # Close S-Meter window
+        if self.s_meter_display and self.s_meter_display.window and self.s_meter_display.window.winfo_exists():
+            self.s_meter_display.close_window()
+            self.s_meter_display = None
+            self.log_status("S-Meter window closed")
+
         # Close extensions window
         if hasattr(self, 'extensions_window') and self.extensions_window and self.extensions_window.window.winfo_exists():
             self.extensions_window.window.destroy()
@@ -7376,6 +7433,9 @@ class RadioGUI:
                             if USERS_AVAILABLE:
                                 self.root.after(700, self.open_users_window)
 
+                            # Auto-open S-Meter window on successful connection
+                            self.root.after(800, self.auto_open_s_meter)
+
                             # Fetch bookmarks and bands after connection is established
                             self.root.after(500, self.fetch_bookmarks)
                             self.root.after(600, self.fetch_bands)
@@ -7473,17 +7533,44 @@ class RadioGUI:
             return
 
         import time
+        from datetime import datetime
+
         self.recording = True
         self.recording_start_time = time.time()
+        self.recording_end_time = None
         self.recording_data = []
+        self.recording_signal_data = []
+
+        # Capture metadata at start of recording
+        try:
+            frequency_hz = self.get_frequency_hz()
+            mode = self.mode_var.get().upper()
+            bandwidth_low = int(self.bw_low_var.get())
+            bandwidth_high = int(self.bw_high_var.get())
+        except (ValueError, AttributeError) as e:
+            self.log_status(f"ERROR: Could not capture recording metadata: {e}")
+            frequency_hz = 0
+            mode = 'UNKNOWN'
+            bandwidth_low = 0
+            bandwidth_high = 0
+
+        self.recording_metadata = {
+            'start_time': datetime.utcnow().isoformat() + 'Z',
+            'frequency': frequency_hz,
+            'mode': mode,
+            'bandwidth_low': bandwidth_low,
+            'bandwidth_high': bandwidth_high,
+            'sample_rate': self.client.sample_rate if self.client else 12000
+        }
 
         # Update UI
         self.rec_btn.config(text="⏹ Stop")
         self.rec_status_label.config(text="Recording...")
-        self.log_status("Recording started (mono, max 300s)")
+        self.log_status("Recording started (mono, max 600s)")
 
-        # Start recording timer check
+        # Start recording timer check and signal data collection
         self.check_recording_duration()
+        self.collect_signal_data()
 
     def stop_recording(self):
         """Stop recording and prompt to save."""
@@ -7491,8 +7578,15 @@ class RadioGUI:
             return
 
         import time
+        from datetime import datetime
+
         self.recording = False
-        elapsed = time.time() - self.recording_start_time if self.recording_start_time else 0
+        self.recording_end_time = time.time()
+        elapsed = self.recording_end_time - self.recording_start_time if self.recording_start_time else 0
+
+        # Capture end time in metadata
+        self.recording_metadata['end_time'] = datetime.utcnow().isoformat() + 'Z'
+        self.recording_metadata['duration_seconds'] = int(elapsed)
 
         # Update UI
         self.rec_btn.config(text="⏺ Record")
@@ -7505,11 +7599,23 @@ class RadioGUI:
 
         self.log_status(f"Recording stopped ({elapsed:.1f}s, {len(self.recording_data)} frames)")
 
-        # Prompt for save location
+        # Generate default filename from timestamp (matching web UI format)
+        # Web UI: new Date(recordingStartTime).toISOString().replace(/[:.]/g, '-').slice(0, -5)
+        # Result: "2026-02-27T07-12-30" (ISO format with colons/dots replaced by dashes, no milliseconds)
+        timestamp = datetime.fromisoformat(self.recording_metadata['start_time'].rstrip('Z'))
+        timestamp_str = timestamp.isoformat().replace(':', '-').replace('.', '-')
+        # Remove milliseconds if present (everything after the last dash in time portion)
+        if '.' in timestamp.isoformat():
+            # Has milliseconds, remove them
+            timestamp_str = timestamp.isoformat().split('.')[0].replace(':', '-')
+        default_filename = f'sdr-recording-{timestamp_str}.zip'
+
+        # Prompt for save location (ZIP file)
         filename = filedialog.asksaveasfilename(
-            defaultextension=".wav",
-            filetypes=[("WAV files", "*.wav"), ("All files", "*.*")],
-            title="Save Recording As"
+            defaultextension=".zip",
+            filetypes=[("ZIP files", "*.zip"), ("All files", "*.*")],
+            title="Save Recording As",
+            initialfile=default_filename
         )
 
         if filename:
@@ -7517,32 +7623,85 @@ class RadioGUI:
         else:
             self.log_status("Recording discarded")
             self.recording_data = []
+            self.recording_signal_data = []
+            self.recording_metadata = {}
 
     def save_recording(self, filename: str):
-        """Save recorded audio to WAV file."""
+        """Save recorded audio as ZIP file with audio, metadata, and signal data."""
         try:
             import wave
             import numpy as np
+            import zipfile
+            import io
+            from datetime import datetime
 
-            # Concatenate all recorded frames
-            audio_data = np.concatenate(self.recording_data)
+            # Ensure filename ends with .zip
+            if not filename.endswith('.zip'):
+                filename = filename.rsplit('.', 1)[0] + '.zip'
 
-            # Open WAV file
-            with wave.open(filename, 'wb') as wav_file:
-                wav_file.setnchannels(1)  # Mono
-                wav_file.setsampwidth(2)  # 16-bit
-                wav_file.setframerate(self.client.sample_rate)
+            # Generate base filename from timestamp
+            timestamp = datetime.fromisoformat(self.recording_metadata['start_time'].rstrip('Z'))
+            base_filename = timestamp.strftime('sdr-recording-%Y-%m-%dT%H-%M-%S')
 
-                # Convert float32 to int16
-                audio_int16 = np.clip(audio_data * 32768.0, -32768, 32767).astype(np.int16)
-                wav_file.writeframes(audio_int16.tobytes())
+            # Create ZIP file
+            with zipfile.ZipFile(filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                # 1. Save audio as WAV file
+                audio_data = np.concatenate(self.recording_data)
+                wav_buffer = io.BytesIO()
+                with wave.open(wav_buffer, 'wb') as wav_file:
+                    wav_file.setnchannels(1)  # Mono
+                    wav_file.setsampwidth(2)  # 16-bit
+                    wav_file.setframerate(self.client.sample_rate)
+                    audio_int16 = np.clip(audio_data * 32768.0, -32768, 32767).astype(np.int16)
+                    wav_file.writeframes(audio_int16.tobytes())
+                zipf.writestr(f'{base_filename}.wav', wav_buffer.getvalue())
 
-            self.log_status(f"Recording saved: {filename}")
+                # 2. Save metadata as text file
+                metadata_text = self._generate_metadata_text()
+                zipf.writestr(f'{base_filename}.txt', metadata_text)
+
+                # 3. Save signal data as CSV file
+                signal_csv = self._generate_signal_csv()
+                zipf.writestr(f'{base_filename}-signal.csv', signal_csv)
+
+            self.log_status(f"Recording saved: {filename} (ZIP with 3 files)")
             self.recording_data = []
+            self.recording_signal_data = []
+            self.recording_metadata = {}
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save recording: {e}")
             self.log_status(f"ERROR: Failed to save recording - {e}")
+            import traceback
+            traceback.print_exc()
+
+    def collect_signal_data(self):
+        """Collect signal quality data during recording (called every second)."""
+        if not self.recording:
+            return
+
+        from datetime import datetime
+
+        # Get current signal quality metrics
+        baseband_power = getattr(self.client, 'baseband_power', -999.0) if self.client else -999.0
+        noise_density = getattr(self.client, 'noise_density', -999.0) if self.client else -999.0
+
+        # Calculate SNR
+        snr = None
+        if baseband_power > -999 and noise_density > -999:
+            snr = baseband_power - noise_density
+
+        # Store signal data
+        self.recording_signal_data.append({
+            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'baseband_power': baseband_power if baseband_power > -999 else None,
+            'noise_density': noise_density if noise_density > -999 else None,
+            'snr': snr
+        })
+
+        # Schedule next collection in 1 second
+        if self.recording:
+            self.root.after(1000, self.collect_signal_data)
 
     def check_recording_duration(self):
         """Check if recording has reached the time limit."""
@@ -7559,9 +7718,103 @@ class RadioGUI:
             self.stop_recording()
         else:
             # Update status with remaining time
-            self.rec_status_label.config(text=f"Recording... ({int(remaining)}s remaining)")
+            minutes = int(remaining) // 60
+            seconds = int(remaining) % 60
+            self.rec_status_label.config(text=f"Recording... ({minutes}:{seconds:02d} remaining)")
             # Check again in 1 second
             self.root.after(1000, self.check_recording_duration)
+
+    def _generate_metadata_text(self) -> str:
+        """Generate metadata text file content."""
+        lines = ["SDR Recording Metadata", "=" * 24, ""]
+
+        # Receiver information
+        if self.client and hasattr(self.client, 'server_description'):
+            desc = self.client.server_description
+            receiver = desc.get('receiver', {})
+
+            if receiver:
+                lines.append("Receiver Information:")
+                lines.append("-" * 21)
+                if receiver.get('callsign'):
+                    lines.append(f"Callsign: {receiver['callsign']}")
+                if receiver.get('name'):
+                    lines.append(f"Name: {receiver['name']}")
+                if receiver.get('location'):
+                    lines.append(f"Location: {receiver['location']}")
+
+                gps = receiver.get('gps', {})
+                if gps and gps.get('lat') != 0 and gps.get('lon') != 0:
+                    lines.append(f"Latitude: {gps['lat']:.6f}")
+                    lines.append(f"Longitude: {gps['lon']:.6f}")
+                    if gps.get('maidenhead'):
+                        lines.append(f"Maidenhead: {gps['maidenhead']}")
+
+                if receiver.get('asl'):
+                    lines.append(f"Altitude: {receiver['asl']}m ASL")
+                if receiver.get('antenna'):
+                    lines.append(f"Antenna: {receiver['antenna']}")
+                lines.append("")
+
+        # Recording times
+        lines.append(f"Start Time (UTC): {self.recording_metadata.get('start_time', 'N/A')}")
+        lines.append(f"End Time (UTC): {self.recording_metadata.get('end_time', 'N/A')}")
+
+        duration = self.recording_metadata.get('duration_seconds', 0)
+        minutes = duration // 60
+        seconds = duration % 60
+        lines.append(f"Duration: {minutes}:{seconds:02d} ({duration} seconds)")
+        lines.append("")
+
+        # Radio settings
+        lines.append("Radio Settings:")
+        lines.append("-" * 14)
+        freq_hz = self.recording_metadata.get('frequency', 0)
+        lines.append(f"Frequency: {freq_hz} Hz ({self._format_frequency(freq_hz)})")
+        lines.append(f"Mode: {self.recording_metadata.get('mode', 'unknown').upper()}")
+        lines.append(f"Bandwidth Low: {self.recording_metadata.get('bandwidth_low', 0)} Hz")
+        lines.append(f"Bandwidth High: {self.recording_metadata.get('bandwidth_high', 0)} Hz")
+        lines.append("")
+
+        # Recording format
+        lines.append("Recording Format:")
+        lines.append("-" * 16)
+        lines.append("Container: WAV")
+        lines.append("Format: PCM 16-bit")
+        lines.append(f"Sample Rate: {self.recording_metadata.get('sample_rate', 12000)} Hz")
+        lines.append("Channels: 1 (Mono)")
+        lines.append("")
+
+        lines.append("Generated by UberSDR Python Client")
+
+        return "\n".join(lines)
+
+    def _generate_signal_csv(self) -> str:
+        """Generate signal data CSV content."""
+        lines = ["UTC Time,Baseband Power (dBFS),Noise Density (dBFS),SNR (dB)"]
+
+        for entry in self.recording_signal_data:
+            timestamp = entry['timestamp']
+            baseband = entry['baseband_power']
+            noise = entry['noise_density']
+            snr = entry['snr']
+
+            baseband_str = f"{baseband:.2f}" if baseband is not None else "N/A"
+            noise_str = f"{noise:.2f}" if noise is not None else "N/A"
+            snr_str = f"{snr:.2f}" if snr is not None else "N/A"
+
+            lines.append(f"{timestamp},{baseband_str},{noise_str},{snr_str}")
+
+        return "\n".join(lines)
+
+    def _format_frequency(self, freq_hz: int) -> str:
+        """Format frequency for display."""
+        if freq_hz >= 1_000_000:
+            return f"{freq_hz / 1_000_000:.3f} MHz"
+        elif freq_hz >= 1_000:
+            return f"{freq_hz / 1_000:.1f} kHz"
+        else:
+            return f"{freq_hz} Hz"
 
     def add_recording_frame(self, audio_float):
         """Add audio frame to recording buffer (called from client).

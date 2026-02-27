@@ -1980,6 +1980,14 @@ func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 					if result.AccuracyRadius != nil {
 						sessions[i]["accuracy_radius_km"] = *result.AccuracyRadius
 					}
+					// Add city if available
+					if result.City != "" {
+						sessions[i]["city"] = result.City
+					}
+					// Add region (first subdivision) if available
+					if len(result.Subdivisions) > 0 && result.Subdivisions[0].Name != "" {
+						sessions[i]["region"] = result.Subdivisions[0].Name
+					}
 				}
 			}
 		}
@@ -6072,6 +6080,8 @@ func (ah *AdminHandler) HandleSessionsWithCountries(w http.ResponseWriter, r *ht
 		ClientIP      string `json:"client_ip"`
 		Country       string `json:"country"`
 		CountryCode   string `json:"country_code"`
+		Region        string `json:"region,omitempty"`
+		City          string `json:"city,omitempty"`
 		Mode          string `json:"mode"`
 		Frequency     uint64 `json:"frequency"`
 		IsSpectrum    bool   `json:"is_spectrum"`
@@ -6088,7 +6098,20 @@ func (ah *AdminHandler) HandleSessionsWithCountries(w http.ResponseWriter, r *ht
 			continue
 		}
 
-		country, countryCode := ah.geoIPService.LookupSafe(clientIP)
+		// Perform full GeoIP lookup to get city and region information
+		geoResult, err := ah.geoIPService.Lookup(clientIP)
+
+		var country, countryCode, region, city string
+		if err == nil && geoResult != nil {
+			country = geoResult.Country
+			countryCode = geoResult.CountryCode
+			city = geoResult.City
+
+			// Use the first subdivision as the region (typically state/province)
+			if len(geoResult.Subdivisions) > 0 {
+				region = geoResult.Subdivisions[0].Name
+			}
+		}
 
 		// Extract other fields with type assertions
 		userSessionID, _ := sessionInfo["user_session_id"].(string)
@@ -6101,6 +6124,8 @@ func (ah *AdminHandler) HandleSessionsWithCountries(w http.ResponseWriter, r *ht
 			ClientIP:      clientIP,
 			Country:       country,
 			CountryCode:   countryCode,
+			Region:        region,
+			City:          city,
 			Mode:          mode,
 			Frequency:     frequency,
 			IsSpectrum:    isSpectrum,

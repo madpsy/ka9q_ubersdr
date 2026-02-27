@@ -4287,10 +4287,19 @@
                     ipDisplay += ` <span style="color: #666; font-size: 11px;">(via ${sourceIP})</span>`;
                 }
 
-                // Add country field underneath if it exists and isn't empty
+                // Add location field underneath if it exists and isn't empty
+                // Format: City, Region, Country (showing only available parts)
+                const city = audioSession?.city || spectrumSession?.city || '';
+                const region = audioSession?.region || spectrumSession?.region || '';
                 const country = audioSession?.country || spectrumSession?.country || '';
-                if (country) {
-                    ipDisplay += `<br><span style="color: #888; font-size: 10px;">${country}</span>`;
+                
+                if (city || region || country) {
+                    const locationParts = [];
+                    if (city) locationParts.push(city);
+                    if (region) locationParts.push(region);
+                    if (country) locationParts.push(country);
+                    const locationDisplay = locationParts.join(', ');
+                    ipDisplay += `<br><span style="color: #888; font-size: 10px;">${locationDisplay}</span>`;
                 }
 
                 let details = '';

@@ -411,7 +411,8 @@ class ChatUI {
                                            placeholder="Type message..."
                                            maxlength="250"
                                            class="chat-input"
-                                           style="padding-right: 30px;">
+                                           style="padding-right: 70px;">
+                                    <span id="chat-freq-btn" class="chat-freq-btn" onclick="chatUI.shareFrequency()" title="Share current frequency">📻</span>
                                     <span id="chat-emoji-btn" class="chat-emoji-btn" onclick="chatUI.toggleEmojiPicker()" title="Insert emoji">😊</span>
                                     <div id="chat-emoji-picker" class="chat-emoji-picker" style="display:none;"></div>
                                     <div id="chat-mention-suggestions" class="chat-mention-suggestions" style="display:none;"></div>
@@ -707,6 +708,22 @@ class ChatUI {
             .chat-input:focus {
                 outline: none;
                 border-color: #4a9eff;
+            }
+
+            .chat-freq-btn {
+                position: absolute;
+                right: 38px;
+                top: 50%;
+                transform: translateY(-50%);
+                font-size: 16px;
+                cursor: pointer;
+                user-select: none;
+                opacity: 0.6;
+                transition: opacity 0.2s;
+            }
+
+            .chat-freq-btn:hover {
+                opacity: 1;
             }
 
             .chat-emoji-btn {
@@ -1931,11 +1948,14 @@ class ChatUI {
             usernameHtml = `${countryFlag}<span class="${usernameClass}" onclick="chatUI.tuneToUser('${this.escapeHtml(username)}')" onmouseover="chatUI.updateUsernameTooltip(this, '${this.escapeHtml(username)}')">${this.escapeHtml(username)}:</span>`;
         }
 
-        // Process message: escape HTML, then linkify URLs, then highlight mentions
+        // Process message: escape HTML, then linkify URLs, frequencies, then highlight mentions
         let messageHtml = this.escapeHtml(message);
 
         // Convert URLs to clickable links
         messageHtml = this.linkifyUrls(messageHtml);
+
+        // Convert frequency patterns to clickable links
+        messageHtml = this.linkifyFrequencies(messageHtml);
 
         // Highlight @mentions in the message text
         if (this.chat && this.chat.username) {
@@ -1961,6 +1981,42 @@ class ChatUI {
         // Match URLs starting with http:// or https://
         const urlRegex = /(https?:\/\/[^\s]+)/g;
         return text.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#4a9eff; text-decoration:underline;">$1</a>');
+    }
+
+    /**
+     * Convert frequency patterns to clickable links
+     * Pattern: "XXXX.XXX KHz (MODE)" or "XXXX KHz (MODE)"
+     */
+    linkifyFrequencies(text) {
+        // Pattern matches: "14175.000 KHz (USB)", "7.100 KHz (LSB)", etc.
+        const freqPattern = /(\d+\.?\d*)\s*KHz\s*\(([A-Z]+)\)/gi;
+
+        return text.replace(freqPattern, (match, freqKHz, mode) => {
+            const freq = parseFloat(freqKHz);
+            const modeUpper = mode.toUpperCase();
+            const modeLower = mode.toLowerCase();
+
+            // Validate frequency range (10 kHz to 30 MHz = 10-30000 kHz)
+            if (freq < 10 || freq > 30000) {
+                return match; // Return unchanged if out of range
+            }
+
+            // Validate mode
+            const validModes = ['USB', 'LSB', 'AM', 'SAM', 'FM', 'NFM', 'CWU', 'CWL'];
+            if (!validModes.includes(modeUpper)) {
+                return match; // Return unchanged if invalid mode
+            }
+
+            // Convert to Hz for tuning
+            const freqHz = Math.round(freq * 1000);
+
+            // Create clickable link
+            return `<span style="color:#4a9eff; text-decoration:underline; cursor:pointer; font-weight:bold;"
+                          onclick="chatUI.tuneToFrequencyFromChat(${freqHz}, '${modeLower}')"
+                          title="Click to tune to ${freqKHz} KHz ${modeUpper}">
+                        ${match}
+                    </span>`;
+        });
     }
 
     /**
@@ -2049,6 +2105,110 @@ class ChatUI {
 
         // Hide picker
         this.hideEmojiPicker();
+    }
+
+    /**
+     * Share current frequency and mode in chat
+     */
+    shareFrequency() {
+        if (!this.chat || !this.chat.isJoined()) {
+            return;
+        }
+
+        // Get current frequency from the frequency input
+        const freqInput = document.getElementById('frequency');
+        if (!freqInput) return;
+
+        const frequencyHz = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
+        if (isNaN(frequencyHz)) return;
+
+        // Get current mode
+        const mode = window.currentMode || 'usb';
+
+        // Format frequency in KHz to 3 decimal places
+        const frequencyKHz = (frequencyHz / 1000).toFixed(3);
+
+        // Create the message: "5242.252 KHz (USB)"
+        const message = `${frequencyKHz} KHz (${mode.toUpperCase()})`;
+
+        // Insert into message input
+        const input = document.getElementById('chat-message-input');
+        if (input) {
+            const currentValue = input.value;
+            const cursorPos = input.selectionStart;
+
+            // Insert at cursor position
+            const newValue = currentValue.substring(0, cursorPos) +
+                            message +
+                            currentValue.substring(input.selectionEnd);
+            input.value = newValue;
+
+            // Move cursor after inserted text
+            const newPos = cursorPos + message.length;
+            input.setSelectionRange(newPos, newPos);
+            input.focus();
+
+            // Enable send button if there's content
+            const sendBtn = document.getElementById('chat-send-btn');
+            if (sendBtn && newValue.trim().length > 0) {
+                sendBtn.disabled = false;
+                sendBtn.style.opacity = '1';
+                sendBtn.style.cursor = 'pointer';
+            }
+        }
+    }
+
+    /**
+     * Tune to a frequency from a chat message link
+     */
+    tuneToFrequencyFromChat(frequencyHz, mode) {
+        // Use existing tuneToChannel function from app.js
+        if (!window.tuneToChannel) {
+            console.error('[ChatUI] tuneToChannel function not available');
+            return;
+        }
+
+        // Get default bandwidth for the mode
+        let bandwidthLow, bandwidthHigh;
+        switch(mode) {
+            case 'usb':
+                bandwidthLow = 50;
+                bandwidthHigh = 3000;
+                break;
+            case 'lsb':
+                bandwidthLow = -2700;
+                bandwidthHigh = -50;
+                break;
+            case 'am':
+            case 'sam':
+                bandwidthLow = -3000;
+                bandwidthHigh = 3000;
+                break;
+            case 'cwu':
+                bandwidthLow = -250;
+                bandwidthHigh = 250;
+                break;
+            case 'cwl':
+                bandwidthLow = -250;
+                bandwidthHigh = 250;
+                break;
+            case 'fm':
+                bandwidthLow = -8000;
+                bandwidthHigh = 8000;
+                break;
+            case 'nfm':
+                bandwidthLow = -5000;
+                bandwidthHigh = 5000;
+                break;
+            default:
+                bandwidthLow = 50;
+                bandwidthHigh = 3000;
+        }
+
+        window.tuneToChannel(frequencyHz, mode, bandwidthLow, bandwidthHigh);
+
+        // Show notification
+        this.addSystemMessage(`Tuned to ${(frequencyHz/1000).toFixed(3)} KHz (${mode.toUpperCase()})`);
     }
 
     /**

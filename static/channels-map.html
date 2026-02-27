@@ -297,7 +297,7 @@
         let lastChannelsData = null; // Store last data to detect changes
 
         // Cross-highlighting: map channel index to DOM elements
-        let channelElements = {}; // { channelIndex: { mapMarker, freqIndicators: [] } }
+        let channelElements = {}; // { channelIndex: { mapMarker, freqIndicators: [], accuracyCircle } }
 
         // Map zoom state
         let manuallyZoomed = false; // Track if user has manually zoomed/panned the map
@@ -380,6 +380,11 @@
                 elements.mapMarker.openPopup();
             }
 
+            // Show accuracy circle if available
+            if (elements.accuracyCircle) {
+                elements.accuracyCircle.addTo(map);
+            }
+
             // Highlight frequency bar indicators
             if (elements.freqIndicators) {
                 elements.freqIndicators.forEach(indicator => {
@@ -395,6 +400,11 @@
             // Unhighlight map marker (close popup)
             if (elements.mapMarker) {
                 elements.mapMarker.closePopup();
+            }
+
+            // Hide accuracy circle if available
+            if (elements.accuracyCircle) {
+                map.removeLayer(elements.accuracyCircle);
             }
 
             // Unhighlight frequency bar indicators
@@ -661,9 +671,22 @@
 
                 // Register marker in channelElements
                 if (!channelElements[channel.index]) {
-                    channelElements[channel.index] = { mapMarker: null, freqIndicators: [] };
+                    channelElements[channel.index] = { mapMarker: null, freqIndicators: [], accuracyCircle: null };
                 }
                 channelElements[channel.index].mapMarker = marker;
+
+                // Create accuracy circle if accuracy data is available
+                if (channel.accuracy_radius_km) {
+                    const accuracyCircle = L.circle([lat, lon], {
+                        radius: channel.accuracy_radius_km * 1000, // Convert km to meters
+                        color: '#3498db',
+                        fillColor: '#3498db',
+                        fillOpacity: 0.15,
+                        weight: 2,
+                        opacity: 0.5
+                    });
+                    channelElements[channel.index].accuracyCircle = accuracyCircle;
+                }
 
                 // Add hover event to open popup and highlight frequency bar
                 marker.on('mouseover', function() {

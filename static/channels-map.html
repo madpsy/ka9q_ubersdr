@@ -97,14 +97,10 @@
             transform: translateX(-50%);
         }
 
-        .channel-indicator[title] {
-            position: relative;
-        }
-
-        .channel-indicator[title]:hover::after {
+        .channel-indicator:hover::after {
             content: attr(title);
             position: absolute;
-            bottom: 100%;
+            bottom: calc(100% + 5px);
             left: 50%;
             transform: translateX(-50%);
             background: rgba(0, 0, 0, 0.9);
@@ -116,11 +112,10 @@
             line-height: 1.4;
             z-index: 1000;
             pointer-events: none;
-            margin-bottom: 5px;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
         }
 
-        .channel-indicator[title]:hover::before {
+        .channel-indicator:hover::before {
             content: '';
             position: absolute;
             bottom: 100%;

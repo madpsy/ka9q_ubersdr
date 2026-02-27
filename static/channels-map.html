@@ -404,7 +404,10 @@
 
             // Hide accuracy circle if available
             if (elements.accuracyCircle) {
-                map.removeLayer(elements.accuracyCircle);
+                // Check if circle is on the map before removing
+                if (map.hasLayer(elements.accuracyCircle)) {
+                    map.removeLayer(elements.accuracyCircle);
+                }
             }
 
             // Unhighlight frequency bar indicators

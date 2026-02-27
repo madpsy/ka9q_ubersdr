@@ -2209,6 +2209,12 @@ class ChatUI {
 
         // Show notification
         this.addSystemMessage(`Tuned to ${(frequencyHz/1000).toFixed(3)} KHz (${mode.toUpperCase()})`);
+
+        // Refocus message input
+        const messageInput = document.getElementById('chat-message-input');
+        if (messageInput) {
+            setTimeout(() => messageInput.focus(), 100);
+        }
     }
 
     /**
@@ -2222,6 +2228,12 @@ class ChatUI {
             this.syncToUser(user);
         } else {
             console.warn('[ChatUI] User not found or missing frequency/mode:', username);
+        }
+
+        // Refocus message input
+        const messageInput = document.getElementById('chat-message-input');
+        if (messageInput) {
+            setTimeout(() => messageInput.focus(), 100);
         }
     }
 

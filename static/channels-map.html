@@ -259,6 +259,11 @@
         const MIN_ZOOM = 1;
         const MAX_ZOOM = 100;
 
+        // Frequency bar drag state
+        let isDragging = false;
+        let dragStartX = 0;
+        let dragStartCenter = 0;
+
         // Initialize map
         function initMap() {
             map = L.map('map').setView([20, 0], 2);
@@ -720,6 +725,47 @@
 
                     console.log(`[Frequency Bar] Zoom: ${freqBarZoom.toFixed(2)}x, Center: ${(freqBarCenter / 1000000).toFixed(3)} MHz`);
                 }, { passive: false });
+
+                // Add drag-to-pan handlers
+                freqBarContainer.addEventListener('mousedown', (e) => {
+                    isDragging = true;
+                    dragStartX = e.clientX;
+                    dragStartCenter = freqBarCenter;
+                    freqBarContainer.style.cursor = 'grabbing';
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    if (!isDragging) return;
+
+                    const rect = freqBarContainer.getBoundingClientRect();
+                    const deltaX = e.clientX - dragStartX;
+                    const deltaPercent = deltaX / rect.width;
+
+                    // Calculate frequency shift
+                    const visibleRange = 30000000 / freqBarZoom;
+                    const freqShift = deltaPercent * visibleRange;
+
+                    // Update center (inverted - drag right = pan left)
+                    freqBarCenter = dragStartCenter - freqShift;
+
+                    // Clamp center to keep view within 0-30 MHz
+                    const halfRange = visibleRange / 2;
+                    freqBarCenter = Math.max(halfRange, Math.min(30000000 - halfRange, freqBarCenter));
+
+                    // Re-render frequency bar
+                    const channels = window.opener && window.opener.activeChannels ? window.opener.activeChannels : [];
+                    updateFrequencyBar(channels);
+                });
+
+                document.addEventListener('mouseup', () => {
+                    if (isDragging) {
+                        isDragging = false;
+                        freqBarContainer.style.cursor = 'grab';
+                    }
+                });
+
+                // Set initial cursor
+                freqBarContainer.style.cursor = 'grab';
             }
         });
 

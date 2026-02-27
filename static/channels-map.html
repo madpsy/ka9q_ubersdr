@@ -562,12 +562,17 @@
 
                 // Create popup content
                 let popupContent = `<div class="popup-title">`;
+
+                // Add country flag if available, otherwise use default icon
+                const flag = channel.country_code ? countryCodeToFlag(channel.country_code) : '';
+                const popupIcon = flag || (isCurrentUser ? '🟢' : (channel.chat_username ? '👤' : '📻'));
+
                 if (isCurrentUser) {
-                    popupContent += `🟢 You`;
+                    popupContent += `${popupIcon} You`;
                 } else if (channel.chat_username) {
-                    popupContent += `👤 ${channel.chat_username}`;
+                    popupContent += `${popupIcon} ${channel.chat_username}`;
                 } else {
-                    popupContent += `📻 Channel ${channel.index + 1}`;
+                    popupContent += `${popupIcon} Channel ${channel.index + 1}`;
                 }
                 popupContent += `</div>`;
 
@@ -621,14 +626,6 @@
                     tooltipLabel = 'You';
                 } else if (channel.chat_username) {
                     tooltipLabel = channel.chat_username;
-                }
-
-                // Add country flag if available
-                if (tooltipLabel && channel.country_code) {
-                    const flag = countryCodeToFlag(channel.country_code);
-                    if (flag) {
-                        tooltipLabel = flag + ' ' + tooltipLabel;
-                    }
                 }
 
                 if (tooltipLabel) {

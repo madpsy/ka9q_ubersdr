@@ -575,9 +575,16 @@
                     this.closePopup();
                 });
 
-                // Add permanent tooltip if chat username is available
-                if (channel.chat_username) {
-                    marker.bindTooltip(channel.chat_username, {
+                // Add permanent tooltip for current user or if chat username is available
+                let tooltipLabel = null;
+                if (isCurrentUser) {
+                    tooltipLabel = 'You';
+                } else if (channel.chat_username) {
+                    tooltipLabel = channel.chat_username;
+                }
+
+                if (tooltipLabel) {
+                    marker.bindTooltip(tooltipLabel, {
                         permanent: true,
                         direction: 'top',
                         className: 'channel-tooltip'
@@ -703,13 +710,20 @@
 
                     freqBar.appendChild(indicator);
 
-                    // Add username label if chat username is available
-                    if (channel.chat_username) {
+                    // Add username label for current user or if chat username is available
+                    let labelText = null;
+                    if (isCurrentUser) {
+                        labelText = 'You';
+                    } else if (channel.chat_username) {
+                        labelText = channel.chat_username;
+                    }
+
+                    if (labelText) {
                         const usernameLabel = document.createElement('div');
                         usernameLabel.className = 'freq-label';
                         usernameLabel.style.left = `${percent}%`;
                         usernameLabel.style.bottom = `${bottomOffset + 15}px`; // Position above the marker
-                        usernameLabel.textContent = channel.chat_username;
+                        usernameLabel.textContent = labelText;
                         usernameLabel.style.color = isCurrentUser ? '#28a745' : '#3498db';
                         usernameLabel.style.fontWeight = '600';
                         freqBar.appendChild(usernameLabel);

@@ -93,8 +93,14 @@
             border-radius: 50%;
             border: 2px solid white;
             cursor: pointer;
-            transition: transform 0.2s;
+            transition: transform 0.2s, box-shadow 0.2s;
             transform: translateX(-50%);
+        }
+
+        .channel-indicator.highlighted {
+            box-shadow: 0 0 12px 4px rgba(255, 255, 0, 0.8);
+            transform: translateX(-50%) scale(1.4);
+            z-index: 1000;
         }
 
         .channel-indicator:hover::after {
@@ -290,6 +296,9 @@
         let receiverMarker = null; // Store receiver marker separately
         let lastChannelsData = null; // Store last data to detect changes
 
+        // Cross-highlighting: map channel index to DOM elements
+        let channelElements = {}; // { channelIndex: { mapMarker, freqIndicators: [] } }
+
         // Map zoom state
         let manuallyZoomed = false; // Track if user has manually zoomed/panned the map
 
@@ -359,6 +368,41 @@
                 .split('')
                 .map(char => 127397 + char.charCodeAt());
             return String.fromCodePoint(...codePoints);
+        }
+
+        // Cross-highlighting functions
+        function highlightChannel(channelIndex) {
+            const elements = channelElements[channelIndex];
+            if (!elements) return;
+
+            // Highlight map marker (open popup)
+            if (elements.mapMarker) {
+                elements.mapMarker.openPopup();
+            }
+
+            // Highlight frequency bar indicators
+            if (elements.freqIndicators) {
+                elements.freqIndicators.forEach(indicator => {
+                    indicator.classList.add('highlighted');
+                });
+            }
+        }
+
+        function unhighlightChannel(channelIndex) {
+            const elements = channelElements[channelIndex];
+            if (!elements) return;
+
+            // Unhighlight map marker (close popup)
+            if (elements.mapMarker) {
+                elements.mapMarker.closePopup();
+            }
+
+            // Unhighlight frequency bar indicators
+            if (elements.freqIndicators) {
+                elements.freqIndicators.forEach(indicator => {
+                    indicator.classList.remove('highlighted');
+                });
+            }
         }
 
         // Get channels data from opener window
@@ -537,6 +581,9 @@
             markers.forEach(marker => map.removeLayer(marker));
             markers = [];
 
+            // Clear channel elements mapping (will be rebuilt)
+            channelElements = {};
+
             if (channels.length === 0) {
                 console.log('No channels with location data');
                 return;
@@ -612,12 +659,18 @@
                     .bindPopup(popupContent)
                     .addTo(map);
 
-                // Add hover event to open popup
+                // Register marker in channelElements
+                if (!channelElements[channel.index]) {
+                    channelElements[channel.index] = { mapMarker: null, freqIndicators: [] };
+                }
+                channelElements[channel.index].mapMarker = marker;
+
+                // Add hover event to open popup and highlight frequency bar
                 marker.on('mouseover', function() {
-                    this.openPopup();
+                    highlightChannel(channel.index);
                 });
                 marker.on('mouseout', function() {
-                    this.closePopup();
+                    unhighlightChannel(channel.index);
                 });
 
                 // Add permanent tooltip for current user or if chat username is available
@@ -812,6 +865,20 @@
                     const username = channel.chat_username || (isCurrentUser ? 'You' : `User ${channel.index + 1}`);
                     const freqMHz = (channel.frequency / 1000000).toFixed(3);
                     indicator.title = `${username}\n${freqMHz} MHz\n${channel.mode.toUpperCase()}`;
+
+                    // Register indicator in channelElements
+                    if (!channelElements[channel.index]) {
+                        channelElements[channel.index] = { mapMarker: null, freqIndicators: [] };
+                    }
+                    channelElements[channel.index].freqIndicators.push(indicator);
+
+                    // Add hover handlers for cross-highlighting
+                    indicator.addEventListener('mouseenter', () => {
+                        highlightChannel(channel.index);
+                    });
+                    indicator.addEventListener('mouseleave', () => {
+                        unhighlightChannel(channel.index);
+                    });
 
                     freqBar.appendChild(indicator);
 

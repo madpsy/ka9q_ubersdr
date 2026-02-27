@@ -1946,6 +1946,11 @@ function displayActiveChannels(channels) {
         console.log('[displayActiveChannels] Updated chat UI total user count');
     }
 
+    // Update channels map popup if it's open
+    if (typeof updateChannelsMapPopup === 'function') {
+        updateChannelsMapPopup();
+    }
+
     if (channels.length === 0) {
         listEl.innerHTML = '<p style="color: #888; font-style: italic;">No active channels</p>';
         return;
@@ -9422,9 +9427,48 @@ if (document.readyState === 'loading') {
     initializeVoiceActivityButton();
 }
 
+// Store reference to channels map window
+let channelsMapWindow = null;
+
+/**
+ * Open channels map popout window
+ */
+function openChannelsMap() {
+    const width = 1000;
+    const height = 700;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+
+    channelsMapWindow = window.open(
+        'channels-map.html',
+        'channels_map',
+        `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no,status=no,toolbar=no,menubar=no,location=no`
+    );
+
+    console.log('[Channels Map] Opened channels map popout window');
+}
+
+/**
+ * Update channels map popout if it's open
+ */
+function updateChannelsMapPopup() {
+    if (channelsMapWindow && !channelsMapWindow.closed) {
+        try {
+            if (channelsMapWindow.updateChannelsMap) {
+                channelsMapWindow.updateChannelsMap();
+                console.log('[Channels Map] Updated popout window with new data');
+            }
+        } catch (error) {
+            console.error('[Channels Map] Error updating popout:', error);
+        }
+    }
+}
+
 // Expose globally
 window.openVoiceActivityPopup = openVoiceActivityPopup;
 window.updateVoiceActivityPopup = updateVoiceActivityPopup;
 window.initializeBandBadgeRightClick = initializeBandBadgeRightClick;
 window.initializeVoiceActivityButton = initializeVoiceActivityButton;
 window.getActiveBand = getActiveBand;
+window.openChannelsMap = openChannelsMap;
+window.updateChannelsMapPopup = updateChannelsMapPopup;

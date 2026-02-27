@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Active Channels Map</title>
+    <link rel="stylesheet" href="leaflet.css" />
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: #ecf0f1;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            padding: 12px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #444;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .header-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .status {
+            font-size: 12px;
+            color: #95a5a6;
+        }
+
+        #map {
+            width: 100%;
+            height: calc(100vh - 50px);
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            padding: 40px;
+            color: #95a5a6;
+            background: rgba(44, 62, 80, 0.9);
+            border-radius: 8px;
+            z-index: 1000;
+        }
+
+        .error {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #c0392b;
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 400px;
+            z-index: 1000;
+        }
+
+        /* Custom marker styles */
+        .channel-marker {
+            background: #3498db;
+            border: 2px solid white;
+            border-radius: 50%;
+            width: 12px;
+            height: 12px;
+        }
+
+        .channel-marker.current-user {
+            background: #28a745;
+        }
+
+        /* Popup styles */
+        .leaflet-popup-content-wrapper {
+            background: #2c3e50;
+            color: #ecf0f1;
+            border-radius: 6px;
+        }
+
+        .leaflet-popup-content {
+            margin: 10px;
+            font-size: 13px;
+        }
+
+        .leaflet-popup-tip {
+            background: #2c3e50;
+        }
+
+        .popup-title {
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 8px;
+            color: #3498db;
+        }
+
+        .popup-row {
+            margin: 4px 0;
+        }
+
+        .popup-label {
+            color: #95a5a6;
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        .popup-value {
+            color: #ecf0f1;
+            font-weight: 500;
+        }
+
+        .leaflet-container {
+            background: #1a1a1a;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1 id="title">Active Channels Map</h1>
+        <div class="header-controls">
+            <span class="status" id="status">Waiting for data...</span>
+        </div>
+    </div>
+
+    <div id="map"></div>
+    <div id="loading" class="loading" style="display: none;">
+        <div>Loading channels...</div>
+    </div>
+    <div id="error" class="error" style="display: none;"></div>
+
+    <script src="leaflet.js"></script>
+    <script>
+        let map;
+        let markers = [];
+
+        // Initialize map
+        function initMap() {
+            map = L.map('map').setView([20, 0], 2);
+
+            // Add OpenStreetMap tile layer
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 18
+            }).addTo(map);
+
+            console.log('Map initialized');
+        }
+
+        // Format frequency for display
+        function formatFrequency(hz) {
+            if (hz >= 1000000) {
+                return (hz / 1000000).toFixed(3) + ' MHz';
+            } else if (hz >= 1000) {
+                return (hz / 1000).toFixed(1) + ' kHz';
+            }
+            return hz + ' Hz';
+        }
+
+        // Get channels data from opener window
+        function getChannelsFromOpener() {
+            if (!window.opener) {
+                console.warn('No opener window available');
+                return null;
+            }
+
+            if (!window.opener.activeChannels) {
+                console.warn('No activeChannels data in opener window');
+                return null;
+            }
+
+            return window.opener.activeChannels;
+        }
+
+        // Update the map with channel data
+        function updateMap() {
+            const statusEl = document.getElementById('status');
+            const errorEl = document.getElementById('error');
+            const titleEl = document.getElementById('title');
+
+            try {
+                const channels = getChannelsFromOpener();
+
+                if (!channels) {
+                    statusEl.textContent = 'No data available';
+                    errorEl.textContent = 'Unable to get channel data from main window';
+                    errorEl.style.display = 'block';
+                    return;
+                }
+
+                errorEl.style.display = 'none';
+
+                // Filter channels that have lat/lon
+                const channelsWithLocation = channels.filter(channel => {
+                    return channel.latitude != null && channel.longitude != null;
+                });
+
+                console.log('Channels with location:', channelsWithLocation);
+
+                // Update title with count
+                const totalCount = channels.length;
+                const locationCount = channelsWithLocation.length;
+                titleEl.textContent = `Active Channels Map (${locationCount}/${totalCount} with location)`;
+
+                // Update status
+                const now = new Date();
+                statusEl.textContent = `Updated: ${now.toLocaleTimeString()}`;
+
+                // Update markers
+                updateMarkers(channelsWithLocation);
+
+            } catch (error) {
+                console.error('Error updating map:', error);
+                statusEl.textContent = 'Error';
+                errorEl.textContent = `Error updating map: ${error.message}`;
+                errorEl.style.display = 'block';
+            }
+        }
+
+        // Update markers on map
+        function updateMarkers(channels) {
+            // Clear existing markers
+            markers.forEach(marker => map.removeLayer(marker));
+            markers = [];
+
+            if (channels.length === 0) {
+                console.log('No channels with location data');
+                return;
+            }
+
+            // Add markers for each channel
+            channels.forEach((channel, index) => {
+                const lat = channel.latitude;
+                const lon = channel.longitude;
+
+                // Determine if this is the current user (index 0 in the channels array)
+                const isCurrentUser = channel.index === 0;
+
+                // Create custom icon
+                const iconHtml = `<div class="channel-marker ${isCurrentUser ? 'current-user' : ''}"></div>`;
+                const icon = L.divIcon({
+                    html: iconHtml,
+                    className: '',
+                    iconSize: [12, 12],
+                    iconAnchor: [6, 6],
+                    popupAnchor: [0, -6]
+                });
+
+                // Create popup content
+                let popupContent = `<div class="popup-title">`;
+                if (isCurrentUser) {
+                    popupContent += `🟢 You`;
+                } else if (channel.chat_username) {
+                    popupContent += `👤 ${channel.chat_username}`;
+                } else {
+                    popupContent += `📻 Channel ${channel.index + 1}`;
+                }
+                popupContent += `</div>`;
+
+                popupContent += `<div class="popup-row">
+                    <span class="popup-label">Frequency:</span>
+                    <span class="popup-value">${formatFrequency(channel.frequency)}</span>
+                </div>`;
+
+                popupContent += `<div class="popup-row">
+                    <span class="popup-label">Mode:</span>
+                    <span class="popup-value">${channel.mode.toUpperCase()}</span>
+                </div>`;
+
+                if (channel.country) {
+                    popupContent += `<div class="popup-row">
+                        <span class="popup-label">Country:</span>
+                        <span class="popup-value">${channel.country}</span>
+                    </div>`;
+                }
+
+                if (channel.city) {
+                    popupContent += `<div class="popup-row">
+                        <span class="popup-label">City:</span>
+                        <span class="popup-value">${channel.city}</span>
+                    </div>`;
+                }
+
+                if (channel.accuracy_radius_km) {
+                    popupContent += `<div class="popup-row">
+                        <span class="popup-label">Accuracy:</span>
+                        <span class="popup-value">±${channel.accuracy_radius_km} km</span>
+                    </div>`;
+                }
+
+                // Add marker to map
+                const marker = L.marker([lat, lon], { icon: icon })
+                    .bindPopup(popupContent)
+                    .addTo(map);
+
+                markers.push(marker);
+            });
+
+            // Fit map to show all markers
+            if (markers.length > 0) {
+                const group = L.featureGroup(markers);
+                map.fitBounds(group.getBounds().pad(0.1));
+            }
+        }
+
+        // Function to be called from parent window when data updates
+        window.updateChannelsMap = function() {
+            console.log('[Channels Map] Update triggered from parent window');
+            updateMap();
+        };
+
+        // Initialize on load
+        window.addEventListener('load', () => {
+            initMap();
+            updateMap();
+
+            // Check for updates periodically (in case parent doesn't call updateChannelsMap)
+            setInterval(updateMap, 2000);
+        });
+
+        // Clean up on unload
+        window.addEventListener('beforeunload', () => {
+            console.log('[Channels Map] Window closing');
+        });
+    </script>
+</body>
+</html>

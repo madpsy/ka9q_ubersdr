@@ -938,10 +938,15 @@
             <div class="active-channels-container">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <h3 id="active-channels-title">Active Channels</h3>
-                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.9em; margin-right: 10px; color: #fff;">
-                        <input type="checkbox" id="show-chat-markers" checked onchange="toggleChatMarkers()">
-                        <span>Show Chat Markers</span>
-                    </label>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <button onclick="openChannelsMap()" style="background: #3498db; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;">
+                            Show Map
+                        </button>
+                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.9em; margin-right: 10px; color: #fff;">
+                            <input type="checkbox" id="show-chat-markers" checked onchange="toggleChatMarkers()">
+                            <span>Show Chat Markers</span>
+                        </label>
+                    </div>
                 </div>
                 <div id="active-channels-list" class="active-channels-list">
                     <p style="color: #888; font-style: italic;">Loading...</p>

@@ -418,6 +418,22 @@
             }
         }
 
+        // Tune to channel using parent window's function
+        function tuneToChannelFromMap(channel) {
+            if (!window.opener || !window.opener.tuneToChannel) {
+                console.error('Cannot tune: parent window or tuneToChannel function not available');
+                return;
+            }
+
+            // Call the parent window's tuneToChannel function
+            window.opener.tuneToChannel(
+                channel.frequency,
+                channel.mode,
+                channel.bandwidth_low,
+                channel.bandwidth_high
+            );
+        }
+
         // Get channels data from opener window
         function getChannelsFromOpener() {
             if (!window.opener) {
@@ -706,6 +722,11 @@
                     unhighlightChannel(channel.index);
                 });
 
+                // Add click event to tune to channel
+                marker.on('click', function() {
+                    tuneToChannelFromMap(channel);
+                });
+
                 // Add permanent tooltip for current user or if chat username is available
                 let tooltipLabel = null;
                 if (isCurrentUser) {
@@ -911,6 +932,11 @@
                     });
                     indicator.addEventListener('mouseleave', () => {
                         unhighlightChannel(channel.index);
+                    });
+
+                    // Add click handler to tune to channel
+                    indicator.addEventListener('click', () => {
+                        tuneToChannelFromMap(channel);
                     });
 
                     freqBar.appendChild(indicator);

@@ -618,6 +618,18 @@
 
                     freqBar.appendChild(indicator);
 
+                    // Add username label if chat username is available
+                    if (channel.chat_username) {
+                        const usernameLabel = document.createElement('div');
+                        usernameLabel.className = 'freq-label';
+                        usernameLabel.style.left = `${percent}%`;
+                        usernameLabel.style.bottom = `${bottomOffset + 15}px`; // Position above the marker
+                        usernameLabel.textContent = channel.chat_username;
+                        usernameLabel.style.color = isCurrentUser ? '#28a745' : '#3498db';
+                        usernameLabel.style.fontWeight = '600';
+                        freqBar.appendChild(usernameLabel);
+                    }
+
                     // Add frequency label for first channel in group
                     if (tierIndex === 0) {
                         const freqLabel = document.createElement('div');

@@ -46,7 +46,73 @@
 
         #map {
             width: 100%;
-            height: calc(100vh - 50px);
+            height: calc(100vh - 200px);
+        }
+
+        #frequency-bar-container {
+            width: 100%;
+            height: 150px;
+            background: #2c3e50;
+            border-top: 2px solid #444;
+            padding: 10px;
+            overflow-x: auto;
+            overflow-y: hidden;
+        }
+
+        #frequency-bar {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to bottom, #34495e 0%, #2c3e50 100%);
+            border-radius: 4px;
+        }
+
+        .freq-scale {
+            position: absolute;
+            bottom: 5px;
+            font-size: 10px;
+            color: #95a5a6;
+            transform: translateX(-50%);
+        }
+
+        .freq-marker {
+            position: absolute;
+            width: 3px;
+            background: #95a5a6;
+            opacity: 0.3;
+        }
+
+        .channel-indicator {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 2px solid white;
+            cursor: pointer;
+            transition: transform 0.2s;
+            transform: translateX(-50%);
+        }
+
+        .channel-indicator:hover {
+            transform: translateX(-50%) scale(1.3);
+            z-index: 100;
+        }
+
+        .channel-indicator.current-user {
+            background: #28a745;
+        }
+
+        .channel-indicator.other-user {
+            background: #3498db;
+        }
+
+        .freq-label {
+            position: absolute;
+            font-size: 9px;
+            color: #ecf0f1;
+            white-space: nowrap;
+            transform: translateX(-50%);
+            pointer-events: none;
         }
 
         .loading {
@@ -172,6 +238,9 @@
     </div>
 
     <div id="map"></div>
+    <div id="frequency-bar-container">
+        <div id="frequency-bar"></div>
+    </div>
     <div id="loading" class="loading" style="display: none;">
         <div>Loading channels...</div>
     </div>
@@ -265,6 +334,9 @@
                 } else {
                     console.log('[Channels Map] Data unchanged, skipping marker update');
                 }
+
+                // Always update frequency bar (uses all channels, not just those with location)
+                updateFrequencyBar(channels);
 
             } catch (error) {
                 console.error('Error updating map:', error);
@@ -463,6 +535,101 @@
                 const group = L.featureGroup(allMarkers);
                 map.fitBounds(group.getBounds().pad(0.1));
             }
+        }
+
+        // Update frequency bar visualization
+        function updateFrequencyBar(channels) {
+            const freqBar = document.getElementById('frequency-bar');
+            if (!freqBar) return;
+
+            // Clear existing content
+            freqBar.innerHTML = '';
+
+            const MIN_FREQ = 0; // 0 MHz
+            const MAX_FREQ = 30000000; // 30 MHz
+            const OVERLAP_THRESHOLD = 100000; // 100 kHz - frequencies within this are considered overlapping
+
+            // Draw frequency scale markers
+            for (let mhz = 0; mhz <= 30; mhz += 5) {
+                const freq = mhz * 1000000;
+                const percent = ((freq - MIN_FREQ) / (MAX_FREQ - MIN_FREQ)) * 100;
+
+                // Vertical marker line
+                const marker = document.createElement('div');
+                marker.className = 'freq-marker';
+                marker.style.left = `${percent}%`;
+                marker.style.top = '0';
+                marker.style.height = '100%';
+                freqBar.appendChild(marker);
+
+                // Frequency label
+                const label = document.createElement('div');
+                label.className = 'freq-scale';
+                label.style.left = `${percent}%`;
+                label.textContent = `${mhz} MHz`;
+                freqBar.appendChild(label);
+            }
+
+            if (!channels || channels.length === 0) {
+                return;
+            }
+
+            // Group channels by frequency (within overlap threshold)
+            const frequencyGroups = [];
+            channels.forEach(channel => {
+                const freq = channel.frequency;
+
+                // Find existing group within threshold
+                let group = frequencyGroups.find(g =>
+                    Math.abs(g.frequency - freq) < OVERLAP_THRESHOLD
+                );
+
+                if (group) {
+                    group.channels.push(channel);
+                } else {
+                    frequencyGroups.push({
+                        frequency: freq,
+                        channels: [channel]
+                    });
+                }
+            });
+
+            // Calculate tier positions for each group
+            frequencyGroups.forEach(group => {
+                const percent = ((group.frequency - MIN_FREQ) / (MAX_FREQ - MIN_FREQ)) * 100;
+
+                // Stack channels vertically if multiple at same frequency
+                group.channels.forEach((channel, tierIndex) => {
+                    const isCurrentUser = channel.index === 0;
+
+                    // Create channel indicator
+                    const indicator = document.createElement('div');
+                    indicator.className = `channel-indicator ${isCurrentUser ? 'current-user' : 'other-user'}`;
+                    indicator.style.left = `${percent}%`;
+
+                    // Position in tiers from bottom up
+                    const bottomOffset = 25 + (tierIndex * 18); // 25px base + 18px per tier
+                    indicator.style.bottom = `${bottomOffset}px`;
+
+                    // Add tooltip
+                    const username = channel.chat_username || (isCurrentUser ? 'You' : `User ${channel.index + 1}`);
+                    const freqMHz = (channel.frequency / 1000000).toFixed(3);
+                    indicator.title = `${username}\n${freqMHz} MHz\n${channel.mode.toUpperCase()}`;
+
+                    freqBar.appendChild(indicator);
+
+                    // Add frequency label for first channel in group
+                    if (tierIndex === 0) {
+                        const freqLabel = document.createElement('div');
+                        freqLabel.className = 'freq-label';
+                        freqLabel.style.left = `${percent}%`;
+                        freqLabel.style.bottom = '10px';
+                        freqLabel.textContent = `${freqMHz}`;
+                        freqLabel.style.color = isCurrentUser ? '#28a745' : '#3498db';
+                        freqBar.appendChild(freqLabel);
+                    }
+                });
+            });
         }
 
         // Function to be called from parent window when data updates

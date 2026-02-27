@@ -145,6 +145,22 @@
         .channel-tooltip::before {
             border-top-color: rgba(52, 152, 219, 0.9);
         }
+
+        /* Receiver tooltip styles (red/orange) */
+        .receiver-tooltip {
+            background: rgba(231, 76, 60, 0.9);
+            border: 1px solid #e74c3c;
+            border-radius: 4px;
+            color: white;
+            font-weight: 600;
+            font-size: 12px;
+            padding: 4px 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .receiver-tooltip::before {
+            border-top-color: rgba(231, 76, 60, 0.9);
+        }
     </style>
 </head>
 <body>
@@ -165,6 +181,8 @@
     <script>
         let map;
         let markers = [];
+        let receiverMarker = null; // Store receiver marker separately
+        let lastChannelsData = null; // Store last data to detect changes
 
         // Initialize map
         function initMap() {
@@ -238,8 +256,15 @@
                 const now = new Date();
                 statusEl.textContent = `Updated: ${now.toLocaleTimeString()}`;
 
-                // Update markers
-                updateMarkers(channelsWithLocation);
+                // Check if data has changed before updating markers
+                const channelsDataString = JSON.stringify(channelsWithLocation);
+                if (channelsDataString !== lastChannelsData) {
+                    console.log('[Channels Map] Data changed, updating markers');
+                    lastChannelsData = channelsDataString;
+                    updateMarkers(channelsWithLocation);
+                } else {
+                    console.log('[Channels Map] Data unchanged, skipping marker update');
+                }
 
             } catch (error) {
                 console.error('Error updating map:', error);
@@ -247,6 +272,87 @@
                 errorEl.textContent = `Error updating map: ${error.message}`;
                 errorEl.style.display = 'block';
             }
+        }
+
+        // Add receiver location marker
+        function addReceiverMarker() {
+            // Remove existing receiver marker if any
+            if (receiverMarker) {
+                map.removeLayer(receiverMarker);
+                receiverMarker = null;
+            }
+
+            // Get receiver location from opener window
+            if (!window.opener || !window.opener.instanceDescription) {
+                console.log('[Channels Map] No instance description available');
+                return;
+            }
+
+            const receiver = window.opener.instanceDescription.receiver;
+            if (!receiver || !receiver.gps || receiver.gps.lat === 0 || receiver.gps.lon === 0) {
+                console.log('[Channels Map] No receiver GPS coordinates available');
+                return;
+            }
+
+            const lat = receiver.gps.lat;
+            const lon = receiver.gps.lon;
+            const name = receiver.name || 'Receiver';
+            const location = receiver.location || '';
+            const callsign = receiver.callsign || '';
+
+            // Create custom icon for receiver (red/orange to stand out)
+            const iconHtml = `<div style="background: #e74c3c; border: 3px solid white; border-radius: 50%; width: 16px; height: 16px;"></div>`;
+            const icon = L.divIcon({
+                html: iconHtml,
+                className: '',
+                iconSize: [16, 16],
+                iconAnchor: [8, 8],
+                popupAnchor: [0, -8]
+            });
+
+            // Create popup content
+            let popupContent = `<div class="popup-title">📡 ${name}</div>`;
+
+            if (callsign) {
+                popupContent += `<div class="popup-row">
+                    <span class="popup-label">Callsign:</span>
+                    <span class="popup-value">${callsign}</span>
+                </div>`;
+            }
+
+            if (location) {
+                popupContent += `<div class="popup-row">
+                    <span class="popup-label">Location:</span>
+                    <span class="popup-value">${location}</span>
+                </div>`;
+            }
+
+            popupContent += `<div class="popup-row">
+                <span class="popup-label">Coordinates:</span>
+                <span class="popup-value">${lat.toFixed(4)}, ${lon.toFixed(4)}</span>
+            </div>`;
+
+            if (receiver.gps.maidenhead) {
+                popupContent += `<div class="popup-row">
+                    <span class="popup-label">Maidenhead:</span>
+                    <span class="popup-value">${receiver.gps.maidenhead}</span>
+                </div>`;
+            }
+
+            // Add marker to map
+            receiverMarker = L.marker([lat, lon], { icon: icon })
+                .bindPopup(popupContent)
+                .addTo(map);
+
+            // Add permanent tooltip with receiver name/callsign
+            const tooltipText = callsign || name;
+            receiverMarker.bindTooltip(tooltipText, {
+                permanent: true,
+                direction: 'top',
+                className: 'receiver-tooltip'
+            });
+
+            console.log('[Channels Map] Added receiver marker at', lat, lon);
         }
 
         // Update markers on map
@@ -337,9 +443,13 @@
                 markers.push(marker);
             });
 
-            // Fit map to show all markers
-            if (markers.length > 0) {
-                const group = L.featureGroup(markers);
+            // Fit map to show all markers (including receiver marker if present)
+            if (markers.length > 0 || receiverMarker) {
+                const allMarkers = [...markers];
+                if (receiverMarker) {
+                    allMarkers.push(receiverMarker);
+                }
+                const group = L.featureGroup(allMarkers);
                 map.fitBounds(group.getBounds().pad(0.1));
             }
         }
@@ -353,10 +463,8 @@
         // Initialize on load
         window.addEventListener('load', () => {
             initMap();
-            updateMap();
-
-            // Check for updates periodically (in case parent doesn't call updateChannelsMap)
-            setInterval(updateMap, 2000);
+            addReceiverMarker(); // Add receiver marker first
+            updateMap(); // Then add channel markers
         });
 
         // Clean up on unload

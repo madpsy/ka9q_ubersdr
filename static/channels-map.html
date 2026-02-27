@@ -621,6 +621,65 @@
             const MIN_FREQ = Math.max(0, freqBarCenter - visibleRange / 2);
             const MAX_FREQ = Math.min(30000000, freqBarCenter + visibleRange / 2);
 
+            // Amateur radio band ranges (from app.js)
+            const bandRanges = {
+                '160m': { min: 1810000, max: 2000000, color: 'rgba(255, 99, 71, 0.2)' },
+                '80m': { min: 3500000, max: 3800000, color: 'rgba(255, 165, 0, 0.2)' },
+                '60m': { min: 5258500, max: 5406500, color: 'rgba(255, 215, 0, 0.2)' },
+                '40m': { min: 7000000, max: 7200000, color: 'rgba(50, 205, 50, 0.2)' },
+                '30m': { min: 10100000, max: 10150000, color: 'rgba(0, 191, 255, 0.2)' },
+                '20m': { min: 14000000, max: 14350000, color: 'rgba(65, 105, 225, 0.2)' },
+                '17m': { min: 18068000, max: 18168000, color: 'rgba(138, 43, 226, 0.2)' },
+                '15m': { min: 21000000, max: 21450000, color: 'rgba(255, 20, 147, 0.2)' },
+                '12m': { min: 24890000, max: 24990000, color: 'rgba(255, 105, 180, 0.2)' },
+                '10m': { min: 28000000, max: 29700000, color: 'rgba(220, 20, 60, 0.2)' }
+            };
+
+            // Draw band blocks
+            Object.entries(bandRanges).forEach(([bandName, band]) => {
+                // Check if band is visible in current view
+                if (band.max < MIN_FREQ || band.min > MAX_FREQ) return;
+
+                // Calculate visible portion of band
+                const visibleMin = Math.max(band.min, MIN_FREQ);
+                const visibleMax = Math.min(band.max, MAX_FREQ);
+
+                const leftPercent = ((visibleMin - MIN_FREQ) / (MAX_FREQ - MIN_FREQ)) * 100;
+                const rightPercent = ((visibleMax - MIN_FREQ) / (MAX_FREQ - MIN_FREQ)) * 100;
+                const widthPercent = rightPercent - leftPercent;
+
+                // Create band block
+                const bandBlock = document.createElement('div');
+                bandBlock.style.position = 'absolute';
+                bandBlock.style.left = `${leftPercent}%`;
+                bandBlock.style.width = `${widthPercent}%`;
+                bandBlock.style.top = '0';
+                bandBlock.style.height = '100%';
+                bandBlock.style.background = band.color;
+                bandBlock.style.borderLeft = '1px solid rgba(255, 255, 255, 0.3)';
+                bandBlock.style.borderRight = '1px solid rgba(255, 255, 255, 0.3)';
+                bandBlock.style.pointerEvents = 'none';
+                bandBlock.style.zIndex = '1';
+
+                // Add band label if wide enough
+                if (widthPercent > 5) {
+                    const bandLabel = document.createElement('div');
+                    bandLabel.style.position = 'absolute';
+                    bandLabel.style.top = '2px';
+                    bandLabel.style.left = '50%';
+                    bandLabel.style.transform = 'translateX(-50%)';
+                    bandLabel.style.fontSize = '10px';
+                    bandLabel.style.fontWeight = '600';
+                    bandLabel.style.color = 'rgba(255, 255, 255, 0.7)';
+                    bandLabel.style.textShadow = '0 1px 2px rgba(0, 0, 0, 0.8)';
+                    bandLabel.style.pointerEvents = 'none';
+                    bandLabel.textContent = bandName;
+                    bandBlock.appendChild(bandLabel);
+                }
+
+                freqBar.appendChild(bandBlock);
+            });
+
             // Draw frequency scale markers (adaptive based on zoom)
             let step = 5000000; // 5 MHz default
             if (freqBarZoom > 5) step = 1000000; // 1 MHz when zoomed

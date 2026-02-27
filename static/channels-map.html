@@ -351,6 +351,16 @@
             return hz + ' Hz';
         }
 
+        // Convert country code to flag emoji
+        function countryCodeToFlag(countryCode) {
+            if (!countryCode || countryCode.length !== 2) return '';
+            const codePoints = countryCode
+                .toUpperCase()
+                .split('')
+                .map(char => 127397 + char.charCodeAt());
+            return String.fromCodePoint(...codePoints);
+        }
+
         // Get channels data from opener window
         function getChannelsFromOpener() {
             if (!window.opener) {
@@ -611,6 +621,14 @@
                     tooltipLabel = 'You';
                 } else if (channel.chat_username) {
                     tooltipLabel = channel.chat_username;
+                }
+
+                // Add country flag if available
+                if (tooltipLabel && channel.country_code) {
+                    const flag = countryCodeToFlag(channel.country_code);
+                    if (flag) {
+                        tooltipLabel = flag + ' ' + tooltipLabel;
+                    }
                 }
 
                 if (tooltipLabel) {

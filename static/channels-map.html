@@ -129,6 +129,22 @@
         .leaflet-container {
             background: #1a1a1a;
         }
+
+        /* Permanent tooltip styles */
+        .channel-tooltip {
+            background: rgba(52, 152, 219, 0.9);
+            border: 1px solid #3498db;
+            border-radius: 4px;
+            color: white;
+            font-weight: 500;
+            font-size: 12px;
+            padding: 4px 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .channel-tooltip::before {
+            border-top-color: rgba(52, 152, 219, 0.9);
+        }
     </style>
 </head>
 <body>
@@ -308,6 +324,15 @@
                 const marker = L.marker([lat, lon], { icon: icon })
                     .bindPopup(popupContent)
                     .addTo(map);
+
+                // Add permanent tooltip if chat username is available
+                if (channel.chat_username) {
+                    marker.bindTooltip(channel.chat_username, {
+                        permanent: true,
+                        direction: 'top',
+                        className: 'channel-tooltip'
+                    });
+                }
 
                 markers.push(marker);
             });

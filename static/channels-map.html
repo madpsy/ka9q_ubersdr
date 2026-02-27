@@ -721,11 +721,26 @@
                     if (labelText) {
                         const usernameLabel = document.createElement('div');
                         usernameLabel.className = 'freq-label';
-                        usernameLabel.style.left = `${percent}%`;
-                        usernameLabel.style.bottom = `${bottomOffset + 15}px`; // Position above the marker
+                        usernameLabel.style.bottom = `${bottomOffset}px`; // Align vertically with marker
                         usernameLabel.textContent = labelText;
                         usernameLabel.style.color = isCurrentUser ? '#28a745' : '#3498db';
                         usernameLabel.style.fontWeight = '600';
+                        usernameLabel.style.zIndex = '10';
+                        usernameLabel.style.transform = 'none'; // Remove center transform
+
+                        // Position to the right of marker, or left if near right edge
+                        if (percent > 85) {
+                            // Near right edge - position to the left
+                            usernameLabel.style.right = `${100 - percent}%`;
+                            usernameLabel.style.paddingRight = '18px'; // Space for marker
+                            usernameLabel.style.textAlign = 'right';
+                        } else {
+                            // Normal - position to the right
+                            usernameLabel.style.left = `${percent}%`;
+                            usernameLabel.style.paddingLeft = '18px'; // Space for marker
+                            usernameLabel.style.textAlign = 'left';
+                        }
+
                         freqBar.appendChild(usernameLabel);
                     }
 

@@ -344,20 +344,15 @@
                 .bindPopup(popupContent)
                 .addTo(map);
 
-            // Add permanent tooltip with receiver callsign and location
+            // Add permanent tooltip with receiver callsign and name (description)
             let tooltipText = '';
             if (callsign) {
                 tooltipText = callsign;
-                if (location) {
-                    tooltipText += '<br>' + location;
+                if (name) {
+                    tooltipText += '<br>' + name;
                 }
             } else if (name) {
                 tooltipText = name;
-                if (location) {
-                    tooltipText += '<br>' + location;
-                }
-            } else if (location) {
-                tooltipText = location;
             }
 
             if (tooltipText) {

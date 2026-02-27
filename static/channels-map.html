@@ -253,6 +253,12 @@
         let receiverMarker = null; // Store receiver marker separately
         let lastChannelsData = null; // Store last data to detect changes
 
+        // Frequency bar zoom state
+        let freqBarZoom = 1; // 1 = full 0-30MHz, higher = zoomed in
+        let freqBarCenter = 15000000; // Center frequency in Hz (default 15 MHz)
+        const MIN_ZOOM = 1;
+        const MAX_ZOOM = 100;
+
         // Initialize map
         function initMap() {
             map = L.map('map').setView([20, 0], 2);
@@ -545,13 +551,21 @@
             // Clear existing content
             freqBar.innerHTML = '';
 
-            const MIN_FREQ = 0; // 0 MHz
-            const MAX_FREQ = 30000000; // 30 MHz
             const OVERLAP_THRESHOLD = 100000; // 100 kHz - frequencies within this are considered overlapping
 
-            // Draw frequency scale markers
-            for (let mhz = 0; mhz <= 30; mhz += 5) {
-                const freq = mhz * 1000000;
+            // Calculate visible frequency range based on zoom
+            const fullRange = 30000000; // 30 MHz
+            const visibleRange = fullRange / freqBarZoom;
+            const MIN_FREQ = Math.max(0, freqBarCenter - visibleRange / 2);
+            const MAX_FREQ = Math.min(30000000, freqBarCenter + visibleRange / 2);
+
+            // Draw frequency scale markers (adaptive based on zoom)
+            let step = 5000000; // 5 MHz default
+            if (freqBarZoom > 5) step = 1000000; // 1 MHz when zoomed
+            if (freqBarZoom > 20) step = 100000; // 100 kHz when very zoomed
+
+            for (let freq = Math.floor(MIN_FREQ / step) * step; freq <= MAX_FREQ; freq += step) {
+                if (freq < 0 || freq > 30000000) continue;
                 const percent = ((freq - MIN_FREQ) / (MAX_FREQ - MIN_FREQ)) * 100;
 
                 // Vertical marker line
@@ -566,7 +580,18 @@
                 const label = document.createElement('div');
                 label.className = 'freq-scale';
                 label.style.left = `${percent}%`;
-                label.textContent = `${mhz} MHz`;
+                // Format label based on frequency and zoom level
+                let decimals = 0;
+                if (freqBarZoom > 50) decimals = 4;
+                else if (freqBarZoom > 20) decimals = 3;
+                else if (freqBarZoom > 5) decimals = 2;
+                else if (freqBarZoom > 1) decimals = 1;
+
+                if (freq >= 1000000) {
+                    label.textContent = `${(freq / 1000000).toFixed(decimals)} MHz`;
+                } else {
+                    label.textContent = `${(freq / 1000).toFixed(decimals)} kHz`;
+                }
                 freqBar.appendChild(label);
             }
 
@@ -574,9 +599,14 @@
                 return;
             }
 
+            // Filter channels to only show those in visible range
+            const visibleChannels = channels.filter(channel =>
+                channel.frequency >= MIN_FREQ && channel.frequency <= MAX_FREQ
+            );
+
             // Group channels by frequency (within overlap threshold)
             const frequencyGroups = [];
-            channels.forEach(channel => {
+            visibleChannels.forEach(channel => {
                 const freq = channel.frequency;
 
                 // Find existing group within threshold
@@ -655,6 +685,42 @@
             initMap();
             addReceiverMarker(); // Add receiver marker first
             updateMap(); // Then add channel markers
+
+            // Add mouse wheel zoom handler to frequency bar
+            const freqBarContainer = document.getElementById('frequency-bar-container');
+            if (freqBarContainer) {
+                freqBarContainer.addEventListener('wheel', (e) => {
+                    e.preventDefault();
+
+                    // Get mouse position relative to frequency bar
+                    const rect = freqBarContainer.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mousePercent = mouseX / rect.width;
+
+                    // Calculate frequency at mouse position (before zoom)
+                    const fullRange = 30000000 / freqBarZoom;
+                    const currentMin = Math.max(0, freqBarCenter - fullRange / 2);
+                    const currentMax = Math.min(30000000, freqBarCenter + fullRange / 2);
+                    const freqAtMouse = currentMin + (currentMax - currentMin) * mousePercent;
+
+                    // Update zoom level
+                    const zoomDelta = e.deltaY > 0 ? 0.9 : 1.1; // Zoom out / in
+                    freqBarZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, freqBarZoom * zoomDelta));
+
+                    // Adjust center to keep frequency at mouse position
+                    const newRange = 30000000 / freqBarZoom;
+                    freqBarCenter = freqAtMouse;
+
+                    // Clamp center to keep view within 0-30 MHz
+                    freqBarCenter = Math.max(newRange / 2, Math.min(30000000 - newRange / 2, freqBarCenter));
+
+                    // Re-render frequency bar
+                    const channels = window.opener && window.opener.activeChannels ? window.opener.activeChannels : [];
+                    updateFrequencyBar(channels);
+
+                    console.log(`[Frequency Bar] Zoom: ${freqBarZoom.toFixed(2)}x, Center: ${(freqBarCenter / 1000000).toFixed(3)} MHz`);
+                }, { passive: false });
+            }
         });
 
         // Clean up on unload

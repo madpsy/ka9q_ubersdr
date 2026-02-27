@@ -65,6 +65,10 @@
             height: 100%;
             background: linear-gradient(to bottom, #34495e 0%, #2c3e50 100%);
             border-radius: 4px;
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
         }
 
         .freq-scale {
@@ -91,6 +95,41 @@
             cursor: pointer;
             transition: transform 0.2s;
             transform: translateX(-50%);
+        }
+
+        .channel-indicator[title] {
+            position: relative;
+        }
+
+        .channel-indicator[title]:hover::after {
+            content: attr(title);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 4px;
+            white-space: pre;
+            font-size: 11px;
+            line-height: 1.4;
+            z-index: 1000;
+            pointer-events: none;
+            margin-bottom: 5px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .channel-indicator[title]:hover::before {
+            content: '';
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 5px solid transparent;
+            border-top-color: rgba(0, 0, 0, 0.9);
+            z-index: 1000;
+            pointer-events: none;
         }
 
         .channel-indicator:hover {

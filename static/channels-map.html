@@ -590,9 +590,16 @@
 
         // Update markers on map
         function updateMarkers(channels) {
-            // Clear existing markers
+            // Clear existing markers and accuracy circles
             markers.forEach(marker => map.removeLayer(marker));
             markers = [];
+
+            // Clear any remaining accuracy circles from previous channelElements
+            Object.values(channelElements).forEach(elements => {
+                if (elements.accuracyCircle && map.hasLayer(elements.accuracyCircle)) {
+                    map.removeLayer(elements.accuracyCircle);
+                }
+            });
 
             // Clear channel elements mapping (will be rebuilt)
             channelElements = {};

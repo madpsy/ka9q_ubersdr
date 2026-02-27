@@ -344,13 +344,29 @@
                 .bindPopup(popupContent)
                 .addTo(map);
 
-            // Add permanent tooltip with receiver name/callsign
-            const tooltipText = callsign || name;
-            receiverMarker.bindTooltip(tooltipText, {
-                permanent: true,
-                direction: 'top',
-                className: 'receiver-tooltip'
-            });
+            // Add permanent tooltip with receiver callsign and location
+            let tooltipText = '';
+            if (callsign) {
+                tooltipText = callsign;
+                if (location) {
+                    tooltipText += '<br>' + location;
+                }
+            } else if (name) {
+                tooltipText = name;
+                if (location) {
+                    tooltipText += '<br>' + location;
+                }
+            } else if (location) {
+                tooltipText = location;
+            }
+
+            if (tooltipText) {
+                receiverMarker.bindTooltip(tooltipText, {
+                    permanent: true,
+                    direction: 'top',
+                    className: 'receiver-tooltip'
+                });
+            }
 
             console.log('[Channels Map] Added receiver marker at', lat, lon);
         }

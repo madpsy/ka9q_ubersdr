@@ -267,6 +267,57 @@
         .receiver-tooltip::before {
             border-top-color: rgba(231, 76, 60, 0.9);
         }
+
+        /* Tune notification popup */
+        .tune-notification {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(52, 73, 94, 0.95);
+            color: #ecf0f1;
+            padding: 20px 30px;
+            border-radius: 8px;
+            border: 2px solid #3498db;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            z-index: 10000;
+            font-size: 16px;
+            font-weight: 500;
+            text-align: center;
+            pointer-events: none;
+            animation: fadeInOut 2s ease-in-out;
+        }
+
+        @keyframes fadeInOut {
+            0% {
+                opacity: 0;
+                transform: translate(-50%, -50%) scale(0.9);
+            }
+            10% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1);
+            }
+            90% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1);
+            }
+            100% {
+                opacity: 0;
+                transform: translate(-50%, -50%) scale(0.9);
+            }
+        }
+
+        .tune-notification .frequency {
+            font-size: 20px;
+            font-weight: 600;
+            color: #3498db;
+            margin-bottom: 5px;
+        }
+
+        .tune-notification .mode {
+            font-size: 14px;
+            color: #95a5a6;
+        }
     </style>
 </head>
 <body>
@@ -432,6 +483,31 @@
                 channel.bandwidth_low,
                 channel.bandwidth_high
             );
+
+            // Show tune notification
+            showTuneNotification(channel.frequency, channel.mode);
+        }
+
+        // Show tune notification popup
+        function showTuneNotification(frequency, mode) {
+            // Format frequency (Hz to MHz with appropriate decimals)
+            const freqMHz = (frequency / 1000000).toFixed(3);
+
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.className = 'tune-notification';
+            notification.innerHTML = `
+                <div class="frequency">${freqMHz} MHz</div>
+                <div class="mode">${mode.toUpperCase()}</div>
+            `;
+
+            // Add to body
+            document.body.appendChild(notification);
+
+            // Remove after animation completes (2 seconds)
+            setTimeout(() => {
+                notification.remove();
+            }, 2000);
         }
 
         // Get channels data from opener window

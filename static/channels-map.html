@@ -268,6 +268,9 @@
         <h1 id="title">Active Channels Map</h1>
         <div class="header-controls">
             <span class="status" id="status">Waiting for data...</span>
+            <button onclick="resetMapView()" style="background: #3498db; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; margin-left: 10px;">
+                Reset View
+            </button>
         </div>
     </div>
 
@@ -286,6 +289,9 @@
         let markers = [];
         let receiverMarker = null; // Store receiver marker separately
         let lastChannelsData = null; // Store last data to detect changes
+
+        // Map zoom state
+        let manuallyZoomed = false; // Track if user has manually zoomed/panned the map
 
         // Frequency bar zoom state
         let freqBarZoom = 1; // 1 = full 0-30MHz, higher = zoomed in
@@ -308,7 +314,21 @@
                 maxZoom: 18
             }).addTo(map);
 
+            // Track manual zoom/pan interactions
+            map.on('zoomstart', function() {
+                manuallyZoomed = true;
+            });
+            map.on('movestart', function() {
+                manuallyZoomed = true;
+            });
+
             console.log('Map initialized');
+        }
+
+        // Reset map view to auto-fit mode
+        function resetMapView() {
+            manuallyZoomed = false;
+            updateMap(); // Trigger update which will now run fitBounds
         }
 
         // Format frequency for display
@@ -595,7 +615,8 @@
             });
 
             // Fit map to show all markers (including receiver marker if present)
-            if (markers.length > 0 || receiverMarker) {
+            // Only auto-fit if user hasn't manually zoomed/panned
+            if (!manuallyZoomed && (markers.length > 0 || receiverMarker)) {
                 const allMarkers = [...markers];
                 if (receiverMarker) {
                     allMarkers.push(receiverMarker);

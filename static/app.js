@@ -7,6 +7,9 @@ import { loadBookmarks, drawBookmarksOnSpectrum, handleBookmarkClick } from './b
 // Import Bandwidth Control
 import { adjustBandwidth, updateBandwidthTooltips, initializeBandwidthControl } from './bandwidth-control.js';
 
+// Import Wake Lock Manager
+import { screenWakeLock } from './wake-lock.js';
+
 // Notification system
 function showNotification(message, type = 'error', duration = 5000) {
     const toast = document.getElementById('notification-toast');
@@ -856,6 +859,15 @@ document.addEventListener('DOMContentLoaded', () => {
         audioStartButton.addEventListener('click', async () => {
             // Hide overlay
             audioStartOverlay.classList.add('hidden');
+
+            // Enable screen wake lock to prevent mobile browsers from suspending WebSocket connections
+            // This must be called from a user gesture (this click handler)
+            const wakeLockEnabled = await screenWakeLock.enable();
+            if (wakeLockEnabled) {
+                console.log('🔒 Wake lock successfully enabled - mobile connections will stay alive');
+            } else {
+                console.log('⚠️ Wake lock not available on this browser - mobile may suspend after 60s idle');
+            }
 
             // Resume AudioContext if suspended (required for iOS Safari)
             // MUST await this to ensure it completes before audio playback

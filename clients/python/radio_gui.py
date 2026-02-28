@@ -7045,6 +7045,12 @@ class RadioGUI:
             self.ft8_window = None
             self.log_status("FT8 window closed")
 
+        # Close Whisper extension window
+        if hasattr(self, 'whisper_window') and self.whisper_window and self.whisper_window.window.winfo_exists():
+            self.whisper_window.window.destroy()
+            self.whisper_window = None
+            self.log_status("Whisper window closed")
+
         # Clean up shared DX cluster WebSocket manager
         # Note: Actual disconnection happens automatically when last callback is removed
         if self.dxcluster_ws:
@@ -7989,6 +7995,8 @@ class RadioGUI:
             self.open_sstv_window()
         elif ext_name == 'ft8':
             self.open_ft8_window()
+        elif ext_name == 'whisper':
+            self.open_whisper_window()
         else:
             messagebox.showinfo("Info", f"Extension '{ext_info['displayName']}' is not yet supported in the Python client")
 
@@ -8004,6 +8012,8 @@ class RadioGUI:
             return 'SSTV'
         if hasattr(self, 'ft8_window') and self.ft8_window and self.ft8_window.window.winfo_exists():
             return 'FT8'
+        if hasattr(self, 'whisper_window') and self.whisper_window and self.whisper_window.window.winfo_exists():
+            return 'Whisper'
         return None
 
     def open_navtex_window(self):
@@ -8225,6 +8235,49 @@ class RadioGUI:
             self
         )
 
+    def open_whisper_window(self):
+        """Open the Whisper speech-to-text extension window."""
+        # Don't open multiple windows
+        if hasattr(self, 'whisper_window') and self.whisper_window and self.whisper_window.window.winfo_exists():
+            self.whisper_window.window.lift()  # Bring to front
+            return
+
+        # Check if another extension is open
+        open_ext = self.get_open_extension()
+        if open_ext:
+            messagebox.showwarning(
+                "Extension Already Open",
+                f"The {open_ext} extension is currently open.\n\n"
+                f"Please close it before opening another extension."
+            )
+            return
+
+        # Check if connected
+        if not self.connected:
+            messagebox.showwarning("Not Connected", "Please connect to a server first")
+            return
+
+        # Import Whisper extension
+        try:
+            from whisper_extension import create_whisper_window
+        except ImportError:
+            messagebox.showerror("Error", "Whisper extension not available")
+            return
+
+        # Ensure shared WebSocket is connected
+        try:
+            ws_manager = self._ensure_dxcluster_ws()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to initialize WebSocket: {e}")
+            return
+
+        # Create Whisper window
+        self.whisper_window = create_whisper_window(
+            self.root,
+            ws_manager,
+            self
+        )
+
     def on_closing(self):
         """Handle window close event."""
         if self.connected:
@@ -8321,6 +8374,10 @@ class RadioGUI:
         # Close FT8 window if open
         if hasattr(self, 'ft8_window') and self.ft8_window and self.ft8_window.window.winfo_exists():
             self.ft8_window.window.destroy()
+
+        # Close Whisper window if open
+        if hasattr(self, 'whisper_window') and self.whisper_window and self.whisper_window.window.winfo_exists():
+            self.whisper_window.window.destroy()
 
         # Disconnect MIDI controller if active
         if self.midi_controller:

@@ -371,9 +371,7 @@ class WhisperExtension extends DecoderExtension {
         this.renderTranscription();
 
         // Auto-scroll if enabled - use requestAnimationFrame for proper timing
-        console.log('Whisper: Auto-scroll check', { autoScroll: this.autoScroll });
         if (this.autoScroll) {
-            console.log('Whisper: Triggering auto-scroll');
             // Double requestAnimationFrame ensures browser has completed layout
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
@@ -550,29 +548,11 @@ class WhisperExtension extends DecoderExtension {
         // The scrollbar belongs to the generic extension panel content, not the whisper-transcription div
         const extensionContent = document.getElementById('extension-panel-content');
         if (!extensionContent) {
-            console.error('Whisper: extension-panel-content not found for scrolling');
             return;
         }
 
-        const scrollHeight = extensionContent.scrollHeight;
-        const clientHeight = extensionContent.clientHeight;
-        const maxScroll = scrollHeight - clientHeight;
-
-        console.log('Whisper: Scrolling to bottom', {
-            element: 'extension-panel-content',
-            scrollHeight,
-            clientHeight,
-            maxScroll,
-            currentScrollTop: extensionContent.scrollTop,
-            hasOverflow: scrollHeight > clientHeight
-        });
-
-        // Set scroll position to maximum - use scrollHeight directly for reliability
+        // Set scroll position to maximum
         extensionContent.scrollTop = extensionContent.scrollHeight;
-
-        console.log('Whisper: After scroll attempt', {
-            newScrollTop: extensionContent.scrollTop
-        });
     }
 
     setupBinaryMessageHandler() {

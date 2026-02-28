@@ -82,13 +82,12 @@ func NewStreamingDecoder(binaryPath string, band *DecoderBand, config *DecoderCo
 	var args []string
 	if band.Config.Mode == ModeFT2 {
 		// FT2 uses jt9_decoder with specific arguments
+		// jt9_decoder reads from stdin by default when -s is specified
 		args = []string{
 			"-m", "FT2",
 			"-j", "/usr/bin/jt9",
 			"-s",
-			"--stdin",
 			"-d", fmt.Sprintf("%d", band.Config.Depth),
-			"-f", fmt.Sprintf("%d", band.Config.Frequency),
 		}
 	} else {
 		// JS8 and other streaming modes
@@ -200,13 +199,12 @@ func (sd *StreamingDecoder) restart() error {
 	var args []string
 	if sd.band.Config.Mode == ModeFT2 {
 		// FT2 uses jt9_decoder with specific arguments
+		// jt9_decoder reads from stdin by default when -s is specified
 		args = []string{
 			"-m", "FT2",
 			"-j", "/usr/bin/jt9",
 			"-s",
-			"--stdin",
 			"-d", fmt.Sprintf("%d", sd.band.Config.Depth),
-			"-f", fmt.Sprintf("%d", sd.band.Config.Frequency),
 		}
 	} else {
 		// JS8 and other streaming modes

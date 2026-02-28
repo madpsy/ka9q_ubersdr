@@ -127,7 +127,7 @@ func GetModeInfo(mode DecoderMode) ModeInfo {
 			CycleTime:        0, // No fixed cycles for streaming mode
 			TransmissionTime: 0,
 			DecoderCommand:   "jt9_decoder",
-			DecoderArgs:      []string{"-m", "FT2", "-j", "/usr/bin/jt9", "-s", "--stdin", "-d", "{depth}", "-f", "{freq}"},
+			DecoderArgs:      []string{"-m", "FT2", "-j", "/usr/bin/jt9", "-s", "-d", "{depth}"},
 			Preset:           "usb",
 			IsStreaming:      true,
 		}

@@ -325,8 +325,15 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 					}
 					log.Printf("[Whisper] Server ready with backend: %s", backend)
 				case "DISCONNECT":
-					log.Printf("[Whisper] Server disconnected")
-					return
+					log.Printf("[Whisper] Server disconnected, will reconnect...")
+					// Close connection and let the loop reconnect
+					d.wsConnMu.Lock()
+					if d.wsConn != nil {
+						_ = d.wsConn.Close()
+						d.wsConn = nil
+					}
+					d.wsConnMu.Unlock()
+					continue
 				}
 				continue
 			}

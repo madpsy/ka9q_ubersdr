@@ -1,0 +1,63 @@
+<div class="whisper-container">
+
+    <!-- Status Bar -->
+    <div class="whisper-status-bar">
+        <div class="whisper-status-left">
+            <span class="whisper-status-label">Status:</span>
+            <span id="whisper-status" class="whisper-status-value">Idle</span>
+        </div>
+        <div class="whisper-status-right">
+            <span class="whisper-status-label">Model:</span>
+            <span id="whisper-model-display" class="whisper-status-value">base</span>
+            <span class="whisper-status-separator">|</span>
+            <span class="whisper-status-label">Language:</span>
+            <span id="whisper-language-display" class="whisper-status-value">auto</span>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="whisper-controls">
+        <div class="whisper-control-group">
+            <label>
+                <input type="checkbox" id="whisper-auto-scroll" checked>
+                Auto-scroll
+            </label>
+        </div>
+        <div class="whisper-control-group">
+            <label>
+                <input type="checkbox" id="whisper-show-timestamps" checked>
+                Show timestamps
+            </label>
+        </div>
+        <div class="whisper-control-group">
+            <button id="whisper-start-button" class="whisper-button whisper-button-primary">Start</button>
+            <button id="whisper-stop-button" class="whisper-button whisper-button-danger" disabled>Stop</button>
+            <button id="whisper-clear-button" class="whisper-button">Clear</button>
+        </div>
+    </div>
+
+    <!-- Transcription Display -->
+    <div class="whisper-transcription-container">
+        <div class="whisper-transcription-header">
+            <span>Transcription</span>
+            <div class="whisper-transcription-actions">
+                <button id="whisper-copy-button" class="whisper-button-small" title="Copy to clipboard">📋 Copy</button>
+                <button id="whisper-save-button" class="whisper-button-small" title="Save to file">💾 Save</button>
+            </div>
+        </div>
+        <div id="whisper-transcription" class="whisper-transcription"></div>
+    </div>
+
+    <!-- Help Section -->
+    <div class="whisper-help">
+        <div class="whisper-help-text">
+            <strong>Whisper Speech-to-Text Decoder</strong><br>
+            Real-time transcription using OpenAI Whisper. Tune to a voice frequency, click Start, and watch the transcription appear.
+            Configure model and language in extension settings.
+        </div>
+        <div class="whisper-server-status">
+            <span class="whisper-status-label">Server:</span>
+            <span id="whisper-server-status" class="whisper-status-value">Not connected</span>
+        </div>
+    </div>
+</div>

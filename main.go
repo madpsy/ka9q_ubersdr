@@ -29,6 +29,7 @@ import (
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/navtex"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/sstv"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/wefax"
+	"github.com/cwsl/ka9q_ubersdr/audio_extensions/whisper"
 )
 
 // Global debug flag
@@ -1248,6 +1249,35 @@ func main() {
 		},
 	)
 	log.Printf("Registered audio extension: morse v%s", morseInfo["version"].(string))
+
+	// Register Whisper extension
+	whisperInfo := whisper.GetInfo()
+
+	whisperFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
+		whisperParams := whisper.AudioExtensionParams{
+			SampleRate:    audioParams.SampleRate,
+			Channels:      audioParams.Channels,
+			BitsPerSample: audioParams.BitsPerSample,
+		}
+
+		whisperExt, err := whisper.Factory(whisperParams, extensionParams)
+		if err != nil {
+			return nil, err
+		}
+
+		return &whisperExtensionWrapper{ext: whisperExt}, nil
+	}
+
+	audioExtensionRegistry.Register(
+		"whisper",
+		whisperFactoryWrapper,
+		AudioExtensionInfo{
+			Name:        whisperInfo["name"].(string),
+			Description: whisperInfo["description"].(string),
+			Version:     whisperInfo["version"].(string),
+		},
+	)
+	log.Printf("Registered audio extension: whisper v%s", whisperInfo["version"].(string))
 
 	// Create audio extension manager (pass receiver locator and CTY database for enrichment)
 	audioExtensionManager := NewAudioExtensionManager(dxClusterWsHandler, sessions, audioExtensionRegistry, receiverLocator, globalCTY)
@@ -4676,5 +4706,34 @@ func (w *morseExtensionWrapper) Stop() error {
 }
 
 func (w *morseExtensionWrapper) GetName() string {
+	return w.ext.GetName()
+}
+
+// whisperExtensionWrapper wraps a whisper.AudioExtension to implement main.AudioExtension
+type whisperExtensionWrapper struct {
+	ext whisper.AudioExtension
+}
+
+func (w *whisperExtensionWrapper) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
+	// Convert main.AudioSample to whisper.AudioSample
+	whisperChan := make(chan whisper.AudioSample, cap(audioChan))
+	go func() {
+		defer close(whisperChan)
+		for sample := range audioChan {
+			whisperChan <- whisper.AudioSample{
+				PCMData:      sample.PCMData,
+				RTPTimestamp: sample.RTPTimestamp,
+				GPSTimeNs:    sample.GPSTimeNs,
+			}
+		}
+	}()
+	return w.ext.Start(whisperChan, resultChan)
+}
+
+func (w *whisperExtensionWrapper) Stop() error {
+	return w.ext.Stop()
+}
+
+func (w *whisperExtensionWrapper) GetName() string {
 	return w.ext.GetName()
 }

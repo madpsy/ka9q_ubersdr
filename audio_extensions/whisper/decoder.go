@@ -156,6 +156,22 @@ func (d *WhisperDecoder) connectWebSocket() error {
 	return nil
 }
 
+// reconnectWebSocket attempts to reconnect to WhisperLive
+func (d *WhisperDecoder) reconnectWebSocket() error {
+	// Close existing connection if any
+	d.wsConnMu.Lock()
+	if d.wsConn != nil {
+		_ = d.wsConn.Close()
+		d.wsConn = nil
+	}
+	d.wsConnMu.Unlock()
+
+	log.Printf("[Whisper] Reconnecting to WhisperLive...")
+
+	// Attempt to reconnect
+	return d.connectWebSocket()
+}
+
 // sendAudioLoop accumulates and sends audio to WhisperLive
 func (d *WhisperDecoder) sendAudioLoop(audioChan <-chan AudioSample) {
 	defer d.wg.Done()
@@ -236,9 +252,14 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 		messageType, message, err := conn.ReadMessage()
 		if err != nil {
 			if d.running {
-				log.Printf("[Whisper] WebSocket read error: %v", err)
+				log.Printf("[Whisper] WebSocket read error: %v, attempting reconnect...", err)
+				// Try to reconnect
+				if reconnectErr := d.reconnectWebSocket(); reconnectErr != nil {
+					log.Printf("[Whisper] Reconnect failed: %v", reconnectErr)
+					time.Sleep(5 * time.Second) // Wait before next attempt
+				}
 			}
-			return
+			continue // Don't return, keep trying
 		}
 
 		if messageType == websocket.TextMessage {

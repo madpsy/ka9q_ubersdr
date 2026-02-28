@@ -5,7 +5,7 @@ class WhisperExtension extends DecoderExtension {
     constructor() {
         console.log('Whisper: Constructor called');
         super('whisper', {
-            displayName: 'Whisper Speech-to-Text',
+            displayName: 'Speech-to-Text',
             autoTune: false,
             requiresMode: 'usb',
             preferredBandwidth: 2700
@@ -24,6 +24,7 @@ class WhisperExtension extends DecoderExtension {
         this.isRunning = false;
         this.autoScroll = true;
         this.showTimestamps = true;
+        this.sessionStartTime = null;  // Track when decoder starts for wall clock timestamps
 
         console.log('Whisper: Extension initialized');
     }
@@ -114,6 +115,7 @@ class WhisperExtension extends DecoderExtension {
         console.log('Whisper: Starting decoder');
         
         this.isRunning = true;
+        this.sessionStartTime = Date.now();  // Record start time for wall clock timestamps
         this.updateButtonStates();
         this.updateStatus('Starting...', 'whisper-status-starting');
 
@@ -376,7 +378,11 @@ class WhisperExtension extends DecoderExtension {
         if (!transcriptionElement) return;
 
         if (this.transcript.length === 0 && !this.lastSegment) {
-            transcriptionElement.innerHTML = '<div class="whisper-transcription-empty">No transcription yet. Start the decoder to begin.</div>';
+            if (this.isRunning) {
+                transcriptionElement.innerHTML = '<div class="whisper-transcription-empty">Transcription started, please wait for the first chunk of text...</div>';
+            } else {
+                transcriptionElement.innerHTML = '<div class="whisper-transcription-empty">No transcription yet. Start the decoder to begin.</div>';
+            }
             return;
         }
 
@@ -391,9 +397,12 @@ class WhisperExtension extends DecoderExtension {
             const isIncomplete = (index === segmentsToDisplay.length - 1 && this.lastSegment && seg === this.lastSegment);
             let lineHtml = `<div class="whisper-transcription-line ${isIncomplete ? 'whisper-incomplete' : ''}">`;
 
-            if (this.showTimestamps && seg.start !== undefined) {
-                const startTime = parseFloat(seg.start);
-                lineHtml += `<span class="whisper-timestamp">[${startTime.toFixed(1)}s]</span> `;
+            if (this.showTimestamps && seg.start !== undefined && this.sessionStartTime) {
+                // Convert segment offset to UTC wall clock time
+                const segmentOffsetMs = parseFloat(seg.start) * 1000;
+                const wallClockTime = new Date(this.sessionStartTime + segmentOffsetMs);
+                const timeStr = wallClockTime.toISOString().substr(11, 8);  // HH:MM:SS format
+                lineHtml += `<span class="whisper-timestamp">[${timeStr}]</span> `;
             }
 
             lineHtml += `<span class="whisper-text">${this.escapeHtml(seg.text)}</span>`;

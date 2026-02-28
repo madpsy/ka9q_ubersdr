@@ -1,8 +1,8 @@
 {
   "name": "whisper",
-  "displayName": "Whisper Speech-to-Text",
+  "displayName": "Speech-to-Text",
   "version": "1.0.0",
-  "description": "Real-time speech-to-text transcription using OpenAI Whisper",
+  "description": "Real-time speech-to-text transcription",
   "author": "UberSDR",
   "type": "decoder",
   "icon": "🎤",

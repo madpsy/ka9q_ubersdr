@@ -5601,6 +5601,20 @@
             wsprdPathField.appendChild(wsprdSmall);
             globalSection.appendChild(wsprdPathField);
 
+            const js8PathField = createConfigField('JS8 Binary Path', 'text', currentDecoderConfig.js8_path || '/usr/local/bin/js8', 'js8_path');
+            js8PathField.querySelector('input').placeholder = '/usr/local/bin/js8';
+            const js8Small = document.createElement('small');
+            js8Small.textContent = 'Path to js8 binary for JS8 decoding';
+            js8PathField.appendChild(js8Small);
+            globalSection.appendChild(js8PathField);
+
+            const ft2PathField = createConfigField('JT9 Decoder Wrapper', 'text', currentDecoderConfig.ft2_path || '/usr/local/bin/jt9_decoder', 'ft2_path');
+            ft2PathField.querySelector('input').placeholder = '/usr/local/bin/jt9_decoder';
+            const ft2Small = document.createElement('small');
+            ft2Small.textContent = 'Path to jt9_decoder binary for FT2 decoding';
+            ft2PathField.appendChild(ft2Small);
+            globalSection.appendChild(ft2PathField);
+
             // File retention options
             const keepWavField = createConfigField('Keep WAV Files (Warning: Will fill Data Directory, which by default is /dev/shm)', 'checkbox', currentDecoderConfig.keep_wav || false, 'keep_wav');
             globalSection.appendChild(keepWavField);
@@ -5794,9 +5808,9 @@
             wsjtxModesContainer.style.marginLeft = '20px';
             wsjtxModesContainer.style.marginBottom = '10px';
 
-            const enabledModes = currentDecoderConfig.wsjtx_udp_enabled_modes || { FT8: true, FT4: false, WSPR: false, JS8: false };
+            const enabledModes = currentDecoderConfig.wsjtx_udp_enabled_modes || { FT8: true, FT4: false, FT2: false, WSPR: false, JS8: false };
 
-            ['FT8', 'FT4', 'WSPR', 'JS8'].forEach(mode => {
+            ['FT8', 'FT4', 'FT2', 'WSPR', 'JS8'].forEach(mode => {
                 const modeCheckbox = document.createElement('div');
                 modeCheckbox.style.marginBottom = '8px';
 
@@ -5941,6 +5955,7 @@
             // Get current depths for each mode
             const currentFT8Depth = getCurrentDepth('FT8', 2);
             const currentFT4Depth = getCurrentDepth('FT4', 2);
+            const currentFT2Depth = getCurrentDepth('FT2', 2);
             const currentWSPRDepth = getCurrentDepth('WSPR', 10000);
             const currentJS8Depth = getCurrentDepth('JS8', 2);
 
@@ -5975,6 +5990,22 @@
                 <button class="btn" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" onclick="setBulkDepth('FT4')">Apply</button>
             `;
             depthControlsGrid.appendChild(ft4Control);
+
+            // FT2 depth control
+            const ft2Control = document.createElement('div');
+            ft2Control.style.display = 'flex';
+            ft2Control.style.alignItems = 'center';
+            ft2Control.style.gap = '10px';
+            ft2Control.innerHTML = `
+                <label style="font-weight: 500; min-width: 60px;">FT2:</label>
+                <select id="bulkDepthFT2" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 5px;">
+                    <option value="1" ${currentFT2Depth === 1 ? 'selected' : ''}>Depth 1 (Fast)</option>
+                    <option value="2" ${currentFT2Depth === 2 ? 'selected' : ''}>Depth 2 (Balanced, Default)</option>
+                    <option value="3" ${currentFT2Depth === 3 ? 'selected' : ''}>Depth 3 (Deep)</option>
+                </select>
+                <button class="btn" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" onclick="setBulkDepth('FT2')">Apply</button>
+            `;
+            depthControlsGrid.appendChild(ft2Control);
 
             // WSPR cycles control
             const wsprControl = document.createElement('div');
@@ -6062,6 +6093,12 @@
             enableJS8Btn.onclick = () => enableDecoderBandsByMode('JS8');
             bandButtonsContainer.appendChild(enableJS8Btn);
 
+            const enableFT2Btn = document.createElement('button');
+            enableFT2Btn.className = 'btn btn-secondary';
+            enableFT2Btn.textContent = 'Enable All FT2';
+            enableFT2Btn.onclick = () => enableDecoderBandsByMode('FT2');
+            bandButtonsContainer.appendChild(enableFT2Btn);
+
             bandsSection.appendChild(bandButtonsContainer);
 
             container.appendChild(bandsSection);
@@ -6086,6 +6123,7 @@
                     <select id="newDecoderBandMode" onchange="updateDepthFieldVisibility(this.value)">
                         <option value="FT8">FT8</option>
                         <option value="FT4">FT4</option>
+                        <option value="FT2">FT2</option>
                         <option value="WSPR">WSPR</option>
                         <option value="JS8">JS8</option>
                     </select>
@@ -6548,12 +6586,12 @@
                             }
                         } else if (inEnabledModes) {
                             // Parse wsjtx_udp_enabled_modes
-                            if (trimmed.match(/^(FT8|FT4|WSPR|JS8):/)) {
+                            if (trimmed.match(/^(FT8|FT4|FT2|WSPR|JS8):/)) {
                                 const colonIndex = trimmed.indexOf(':');
                                 const mode = trimmed.substring(0, colonIndex).trim();
                                 const value = trimmed.substring(colonIndex + 1).trim();
                                 importedConfig.wsjtx_udp_enabled_modes[mode] = value === 'true';
-                            } else if (lineIndent <= 2 && trimmed.includes(':') && !trimmed.match(/^(FT8|FT4|WSPR|JS8):/)) {
+                            } else if (lineIndent <= 2 && trimmed.includes(':') && !trimmed.match(/^(FT8|FT4|FT2|WSPR|JS8):/)) {
                                 // End of enabled modes section
                                 inEnabledModes = false;
                                 // Process this line as top-level field

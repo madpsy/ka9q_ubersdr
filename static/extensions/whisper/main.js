@@ -25,6 +25,7 @@ class WhisperExtension extends DecoderExtension {
         this.autoScroll = true;
         this.showTimestamps = true;
         this.sessionStartTime = null;  // Track when decoder starts for wall clock timestamps
+        this.renderedSegmentCount = 0;  // Track how many completed segments are rendered
 
         console.log('Whisper: Extension initialized');
     }
@@ -104,7 +105,8 @@ class WhisperExtension extends DecoderExtension {
         if (timestampsCheckbox) {
             timestampsCheckbox.addEventListener('change', (e) => {
                 this.showTimestamps = e.target.checked;
-                this.renderTranscription();
+                // For timestamp toggle, we need to re-render all segments
+                this.forceFullRerender();
             });
         }
 
@@ -211,6 +213,14 @@ class WhisperExtension extends DecoderExtension {
         console.log('Whisper: Clearing transcription');
         this.transcript = [];
         this.lastSegment = null;
+        this.renderedSegmentCount = 0;  // Reset rendered count
+
+        // Clear the DOM
+        const transcriptionElement = document.getElementById('whisper-transcription');
+        if (transcriptionElement) {
+            transcriptionElement.innerHTML = '';
+        }
+
         this.renderTranscription();
     }
 
@@ -345,9 +355,14 @@ class WhisperExtension extends DecoderExtension {
         // Render updated transcription
         this.renderTranscription();
 
-        // Auto-scroll if enabled - use setTimeout to ensure DOM is updated
+        // Auto-scroll if enabled - use requestAnimationFrame for proper timing
         if (this.autoScroll) {
-            setTimeout(() => this.scrollToBottom(), 0);
+            // Double requestAnimationFrame ensures browser has completed layout
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    this.scrollToBottom();
+                });
+            });
         }
     }
 
@@ -377,39 +392,120 @@ class WhisperExtension extends DecoderExtension {
         const transcriptionElement = document.getElementById('whisper-transcription');
         if (!transcriptionElement) return;
 
+        // Handle empty state
         if (this.transcript.length === 0 && !this.lastSegment) {
+            // Remove any existing content
+            transcriptionElement.innerHTML = '';
+
+            // Add empty state message
+            const emptyDiv = document.createElement('div');
+            emptyDiv.className = 'whisper-transcription-empty';
             if (this.isRunning) {
-                transcriptionElement.innerHTML = '<div class="whisper-transcription-empty">Transcription started, please wait for the first chunk of text...</div>';
+                emptyDiv.textContent = 'Transcription started, please wait for the first chunk of text...';
             } else {
-                transcriptionElement.innerHTML = '<div class="whisper-transcription-empty">No transcription yet. Start the decoder to begin.</div>';
+                emptyDiv.textContent = 'No transcription yet. Start the decoder to begin.';
             }
+            transcriptionElement.appendChild(emptyDiv);
             return;
         }
 
-        // Build HTML for all segments (completed + incomplete)
-        const segmentsToDisplay = [...this.transcript];
-        if (this.lastSegment) {
-            segmentsToDisplay.push(this.lastSegment);
+        // Remove empty state message if it exists
+        const emptyMsg = transcriptionElement.querySelector('.whisper-transcription-empty');
+        if (emptyMsg) {
+            emptyMsg.remove();
         }
 
-        const html = segmentsToDisplay.map((seg, index) => {
-            const isIncomplete = (index === segmentsToDisplay.length - 1 && this.lastSegment && seg === this.lastSegment);
-            let lineHtml = `<div class="whisper-transcription-line ${isIncomplete ? 'whisper-incomplete' : ''}">`;
+        // Append only NEW completed segments that haven't been rendered yet
+        for (let i = this.renderedSegmentCount; i < this.transcript.length; i++) {
+            const seg = this.transcript[i];
+            const lineDiv = this.createSegmentElement(seg, false);
+            transcriptionElement.appendChild(lineDiv);
+        }
+        this.renderedSegmentCount = this.transcript.length;
 
-            if (this.showTimestamps && seg.start !== undefined && this.sessionStartTime) {
-                // Convert segment offset to UTC wall clock time
-                const segmentOffsetMs = parseFloat(seg.start) * 1000;
-                const wallClockTime = new Date(this.sessionStartTime + segmentOffsetMs);
-                const timeStr = wallClockTime.toISOString().substr(11, 8);  // HH:MM:SS format
-                lineHtml += `<span class="whisper-timestamp">[${timeStr}]</span> `;
+        // Handle the incomplete segment (last one being refined)
+        // IMPORTANT: This must be at the END to stay at the bottom
+        let incompleteElement = transcriptionElement.querySelector('.whisper-incomplete');
+
+        if (this.lastSegment) {
+            if (!incompleteElement) {
+                // Create new incomplete element and append to the END
+                incompleteElement = this.createSegmentElement(this.lastSegment, true);
+                transcriptionElement.appendChild(incompleteElement);
+            } else {
+                // Update existing incomplete element in-place (it's already at the end)
+                this.updateSegmentElement(incompleteElement, this.lastSegment);
             }
+        } else if (incompleteElement) {
+            // Remove incomplete element if no longer needed
+            incompleteElement.remove();
+        }
+    }
 
-            lineHtml += `<span class="whisper-text">${this.escapeHtml(seg.text)}</span>`;
-            lineHtml += '</div>';
-            return lineHtml;
-        }).join('');
+    createSegmentElement(seg, isIncomplete) {
+        const lineDiv = document.createElement('div');
+        lineDiv.className = `whisper-transcription-line ${isIncomplete ? 'whisper-incomplete' : ''}`;
 
-        transcriptionElement.innerHTML = html;
+        if (this.showTimestamps && seg.start !== undefined && this.sessionStartTime) {
+            const timestampSpan = document.createElement('span');
+            timestampSpan.className = 'whisper-timestamp';
+            const segmentOffsetMs = parseFloat(seg.start) * 1000;
+            const wallClockTime = new Date(this.sessionStartTime + segmentOffsetMs);
+            const timeStr = wallClockTime.toISOString().substr(11, 8);  // HH:MM:SS format
+            timestampSpan.textContent = `[${timeStr}] `;
+            lineDiv.appendChild(timestampSpan);
+        }
+
+        const textSpan = document.createElement('span');
+        textSpan.className = 'whisper-text';
+        textSpan.textContent = seg.text;
+        lineDiv.appendChild(textSpan);
+
+        return lineDiv;
+    }
+
+    updateSegmentElement(element, seg) {
+        // Update text content without recreating the element
+        const textSpan = element.querySelector('.whisper-text');
+        if (textSpan) {
+            textSpan.textContent = seg.text;
+        }
+
+        // Update timestamp if needed and timestamps are enabled
+        if (this.showTimestamps && seg.start !== undefined && this.sessionStartTime) {
+            let timestampSpan = element.querySelector('.whisper-timestamp');
+            if (!timestampSpan) {
+                // Create timestamp if it doesn't exist
+                timestampSpan = document.createElement('span');
+                timestampSpan.className = 'whisper-timestamp';
+                element.insertBefore(timestampSpan, element.firstChild);
+            }
+            const segmentOffsetMs = parseFloat(seg.start) * 1000;
+            const wallClockTime = new Date(this.sessionStartTime + segmentOffsetMs);
+            const timeStr = wallClockTime.toISOString().substr(11, 8);
+            timestampSpan.textContent = `[${timeStr}] `;
+        } else {
+            // Remove timestamp if timestamps are disabled
+            const timestampSpan = element.querySelector('.whisper-timestamp');
+            if (timestampSpan) {
+                timestampSpan.remove();
+            }
+        }
+    }
+
+    forceFullRerender() {
+        // Force a complete re-render of all segments (used when timestamps are toggled)
+        const transcriptionElement = document.getElementById('whisper-transcription');
+        if (!transcriptionElement) return;
+
+        // Clear everything
+        transcriptionElement.innerHTML = '';
+
+        // Reset counter to force re-render of all segments
+        this.renderedSegmentCount = 0;
+
+        // Re-render everything
+        this.renderTranscription();
     }
 
     escapeHtml(text) {

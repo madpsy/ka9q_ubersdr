@@ -230,7 +230,7 @@
 }
 
 .whisper-transcription-line {
-    margin-bottom: 4px;
+    margin-bottom: 0;
     padding: 4px 8px;
     background-color: #333;
     border-radius: 3px;
@@ -328,7 +328,9 @@ input[type="checkbox"] {
     accent-color: #4caf50;
 }
 
-/* Animation for new transcription lines */
+/* Animation for new transcription lines - DISABLED to prevent auto-scroll issues */
+/* The animation was causing content to expand after scroll, breaking auto-scroll */
+/*
 @keyframes slideIn {
     from {
         opacity: 0;
@@ -343,3 +345,4 @@ input[type="checkbox"] {
 .whisper-transcription-line {
     animation: slideIn 0.3s ease-out;
 }
+*/

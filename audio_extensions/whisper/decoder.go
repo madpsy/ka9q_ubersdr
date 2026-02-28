@@ -50,6 +50,9 @@ type WhisperDecoder struct {
 	audioBuffer []int16
 	bufferMu    sync.Mutex
 
+	// Resampler for converting to 16 kHz
+	resampler *Resampler
+
 	// Control
 	running  bool
 	stopChan chan struct{}
@@ -58,11 +61,13 @@ type WhisperDecoder struct {
 
 // NewWhisperDecoder creates a new Whisper decoder
 func NewWhisperDecoder(sampleRate int, config WhisperConfig) *WhisperDecoder {
+	log.Printf("[Whisper] Creating decoder: input=%d Hz, output=%d Hz (WhisperLive)", sampleRate, targetSampleRate)
 	return &WhisperDecoder{
 		sampleRate:  sampleRate,
 		config:      config,
 		clientUID:   uuid.New().String(),
 		audioBuffer: make([]int16, 0),
+		resampler:   NewResampler(sampleRate),
 		stopChan:    make(chan struct{}),
 	}
 }
@@ -208,6 +213,9 @@ func (d *WhisperDecoder) sendAudioLoop(audioChan <-chan AudioSample) {
 			copy(audioToSend, d.audioBuffer)
 			d.audioBuffer = d.audioBuffer[:0] // Clear buffer
 			d.bufferMu.Unlock()
+
+			// Resample to 16 kHz if needed
+			audioToSend = d.resampler.Resample(audioToSend)
 
 			// Convert int16 to float32 for Whisper (normalize to -1.0 to 1.0)
 			floatData := make([]float32, len(audioToSend))

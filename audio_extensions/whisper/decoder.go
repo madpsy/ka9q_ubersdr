@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -38,6 +40,7 @@ func DefaultWhisperConfig() WhisperConfig {
 type WhisperDecoder struct {
 	sampleRate int
 	config     WhisperConfig
+	clientUID  string // Unique client ID for WhisperLive
 
 	// WebSocket connection to WhisperLive
 	wsConn   *websocket.Conn
@@ -58,6 +61,7 @@ func NewWhisperDecoder(sampleRate int, config WhisperConfig) *WhisperDecoder {
 	return &WhisperDecoder{
 		sampleRate:  sampleRate,
 		config:      config,
+		clientUID:   uuid.New().String(),
 		audioBuffer: make([]int16, 0),
 		stopChan:    make(chan struct{}),
 	}
@@ -121,12 +125,20 @@ func (d *WhisperDecoder) connectWebSocket() error {
 	d.wsConn = conn
 	d.wsConnMu.Unlock()
 
-	// Send initial configuration to WhisperLive
+	// Send initial configuration to WhisperLive in the format it expects
+	// Based on WhisperLive client.py on_open() method
 	configMsg := map[string]interface{}{
-		"type":        "config",
-		"model":       d.config.Model,
-		"language":    d.config.Language,
-		"sample_rate": d.sampleRate,
+		"uid":                   d.clientUID,
+		"language":              d.config.Language,
+		"task":                  "transcribe", // Required field - "transcribe" or "translate"
+		"model":                 d.config.Model,
+		"use_vad":               true,
+		"send_last_n_segments":  10,
+		"no_speech_thresh":      0.45,
+		"clip_audio":            false,
+		"same_output_threshold": 10,
+		"enable_translation":    false,
+		"target_language":       "en",
 	}
 
 	configJSON, err := json.Marshal(configMsg)
@@ -138,8 +150,8 @@ func (d *WhisperDecoder) connectWebSocket() error {
 		return fmt.Errorf("failed to send config: %w", err)
 	}
 
-	log.Printf("[Whisper] Connected to WhisperLive at %s (model: %s, language: %s, sample rate: %d Hz)",
-		d.config.ServerURL, d.config.Model, d.config.Language, d.sampleRate)
+	log.Printf("[Whisper] Connected to WhisperLive at %s (uid: %s, model: %s, language: %s)",
+		d.config.ServerURL, d.clientUID, d.config.Model, d.config.Language)
 
 	return nil
 }
@@ -181,7 +193,7 @@ func (d *WhisperDecoder) sendAudioLoop(audioChan <-chan AudioSample) {
 			d.audioBuffer = d.audioBuffer[:0] // Clear buffer
 			d.bufferMu.Unlock()
 
-			// Convert int16 to float32 for Whisper
+			// Convert int16 to float32 for Whisper (normalize to -1.0 to 1.0)
 			floatData := make([]float32, len(audioToSend))
 			for i, s := range audioToSend {
 				floatData[i] = float32(s) / 32768.0
@@ -190,10 +202,11 @@ func (d *WhisperDecoder) sendAudioLoop(audioChan <-chan AudioSample) {
 			// Send as binary message
 			d.wsConnMu.Lock()
 			if d.wsConn != nil {
-				// Convert float32 array to bytes (little-endian)
+				// Convert float32 array to bytes (little-endian IEEE 754)
 				buf := make([]byte, len(floatData)*4)
 				for i, f := range floatData {
-					binary.LittleEndian.PutUint32(buf[i*4:], uint32(f))
+					bits := math.Float32bits(f)
+					binary.LittleEndian.PutUint32(buf[i*4:], bits)
 				}
 
 				err := d.wsConn.WriteMessage(websocket.BinaryMessage, buf)
@@ -229,27 +242,86 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 		}
 
 		if messageType == websocket.TextMessage {
-			// Parse transcription result from WhisperLive
-			var result struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			}
+			// Parse message from WhisperLive
+			var result map[string]interface{}
 
 			if err := json.Unmarshal(message, &result); err != nil {
 				log.Printf("[Whisper] JSON parse error: %v", err)
 				continue
 			}
 
-			// Only process transcription messages with non-empty text
-			if result.Type == "transcription" && result.Text != "" {
-				// Encode result for client
-				encoded := d.encodeResult(result.Text, time.Now().UnixNano())
+			// Check if this message is for our client
+			if uid, ok := result["uid"].(string); ok && uid != d.clientUID {
+				continue
+			}
 
-				// Send to result channel (non-blocking)
-				select {
-				case resultChan <- encoded:
-				default:
-					log.Printf("[Whisper] Result channel full, dropping transcription")
+			// Handle status messages
+			if status, ok := result["status"].(string); ok {
+				switch status {
+				case "WAIT":
+					log.Printf("[Whisper] Server is full, waiting...")
+				case "ERROR":
+					if msg, ok := result["message"].(string); ok {
+						log.Printf("[Whisper] Server error: %s", msg)
+					}
+				}
+				continue
+			}
+
+			// Handle server ready message
+			if msg, ok := result["message"].(string); ok {
+				switch msg {
+				case "SERVER_READY":
+					backend := "unknown"
+					if b, ok := result["backend"].(string); ok {
+						backend = b
+					}
+					log.Printf("[Whisper] Server ready with backend: %s", backend)
+				case "DISCONNECT":
+					log.Printf("[Whisper] Server disconnected")
+					return
+				}
+				continue
+			}
+
+			// Handle language detection
+			if lang, ok := result["language"].(string); ok {
+				langProb := 0.0
+				if lp, ok := result["language_prob"].(float64); ok {
+					langProb = lp
+				}
+				log.Printf("[Whisper] Detected language: %s (probability: %.2f)", lang, langProb)
+				continue
+			}
+
+			// Handle transcription segments
+			if segments, ok := result["segments"].([]interface{}); ok && len(segments) > 0 {
+				// Extract text from all segments
+				var texts []string
+				for _, seg := range segments {
+					if segMap, ok := seg.(map[string]interface{}); ok {
+						if text, ok := segMap["text"].(string); ok && text != "" {
+							texts = append(texts, text)
+						}
+					}
+				}
+
+				if len(texts) > 0 {
+					fullText := ""
+					for _, t := range texts {
+						fullText += t + " "
+					}
+					fullText = fullText[:len(fullText)-1] // Remove trailing space
+
+					// Encode result for client
+					encoded := d.encodeResult(fullText, time.Now().UnixNano())
+
+					// Send to result channel (non-blocking)
+					select {
+					case resultChan <- encoded:
+					default:
+						log.Printf("[Whisper] Result channel full, dropping transcription")
+					}
 				}
 			}
 		}

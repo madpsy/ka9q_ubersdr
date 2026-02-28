@@ -217,7 +217,10 @@ func (d *WhisperDecoder) sendAudioLoop(audioChan <-chan AudioSample) {
 
 			// Send as binary message
 			d.wsConnMu.Lock()
-			if d.wsConn != nil {
+			conn := d.wsConn
+			d.wsConnMu.Unlock()
+
+			if conn != nil {
 				// Convert float32 array to bytes (little-endian IEEE 754)
 				buf := make([]byte, len(floatData)*4)
 				for i, f := range floatData {
@@ -225,12 +228,18 @@ func (d *WhisperDecoder) sendAudioLoop(audioChan <-chan AudioSample) {
 					binary.LittleEndian.PutUint32(buf[i*4:], bits)
 				}
 
-				err := d.wsConn.WriteMessage(websocket.BinaryMessage, buf)
+				err := conn.WriteMessage(websocket.BinaryMessage, buf)
 				if err != nil {
-					log.Printf("[Whisper] Error sending audio: %v", err)
+					// Connection is dead, close it and let receiveResultsLoop reconnect
+					log.Printf("[Whisper] Error sending audio: %v, closing connection for reconnect", err)
+					d.wsConnMu.Lock()
+					if d.wsConn == conn {
+						_ = d.wsConn.Close()
+						d.wsConn = nil
+					}
+					d.wsConnMu.Unlock()
 				}
 			}
-			d.wsConnMu.Unlock()
 		}
 	}
 }
@@ -255,8 +264,10 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 				log.Printf("[Whisper] WebSocket read error: %v, attempting reconnect...", err)
 				// Try to reconnect
 				if reconnectErr := d.reconnectWebSocket(); reconnectErr != nil {
-					log.Printf("[Whisper] Reconnect failed: %v", reconnectErr)
+					log.Printf("[Whisper] Reconnect failed: %v, retrying in 5 seconds...", reconnectErr)
 					time.Sleep(5 * time.Second) // Wait before next attempt
+				} else {
+					log.Printf("[Whisper] Successfully reconnected to WhisperLive")
 				}
 			}
 			continue // Don't return, keep trying

@@ -420,10 +420,13 @@ class WhisperExtension extends DecoderExtension {
     }
 
     scrollToBottom() {
-        const transcriptionElement = document.getElementById('whisper-transcription');
-        if (transcriptionElement) {
-            transcriptionElement.scrollTop = transcriptionElement.scrollHeight;
-        }
+        // Use requestAnimationFrame to ensure DOM has been updated
+        requestAnimationFrame(() => {
+            const transcriptionElement = document.getElementById('whisper-transcription');
+            if (transcriptionElement) {
+                transcriptionElement.scrollTop = transcriptionElement.scrollHeight;
+            }
+        });
     }
 
     setupBinaryMessageHandler() {

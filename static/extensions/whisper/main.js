@@ -255,7 +255,9 @@ class WhisperExtension extends DecoderExtension {
 
         const text = allSegments.map(seg => {
             if (this.showTimestamps && seg.start !== undefined) {
-                return `[${seg.start.toFixed(2)}s - ${seg.end.toFixed(2)}s] ${seg.text}`;
+                const startTime = parseFloat(seg.start);
+                const endTime = parseFloat(seg.end);
+                return `[${startTime.toFixed(2)}s - ${endTime.toFixed(2)}s] ${seg.text}`;
             }
             return seg.text;
         }).join('\n');
@@ -390,7 +392,8 @@ class WhisperExtension extends DecoderExtension {
             let lineHtml = `<div class="whisper-transcription-line ${isIncomplete ? 'whisper-incomplete' : ''}">`;
 
             if (this.showTimestamps && seg.start !== undefined) {
-                lineHtml += `<span class="whisper-timestamp">[${seg.start.toFixed(1)}s]</span> `;
+                const startTime = parseFloat(seg.start);
+                lineHtml += `<span class="whisper-timestamp">[${startTime.toFixed(1)}s]</span> `;
             }
 
             lineHtml += `<span class="whisper-text">${this.escapeHtml(seg.text)}</span>`;

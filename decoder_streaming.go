@@ -315,6 +315,14 @@ func (sd *StreamingDecoder) readStdout() {
 
 				// Set timestamp to the most recent cycle boundary
 				decode.Timestamp = midnight.Add(time.Duration(boundaryNanos))
+
+				// Calculate distance/bearing if both locators available
+				if sd.config.ReceiverLocator != "" && decode.Locator != "" && len(decode.Locator) >= 4 {
+					if dist, bearing, err := CalculateDistanceAndBearingFromLocators(sd.config.ReceiverLocator, decode.Locator); err == nil {
+						decode.DistanceKm = &dist
+						decode.BearingDeg = &bearing
+					}
+				}
 			}
 		} else {
 			// JS8 uses its own format

@@ -13,13 +13,14 @@ import (
 
 // Regex patterns for parsing decoder output
 var (
-	// FT8 format: HHMMSS  SNR  DT  Freq  [~]  Message
+	// FT8 format: HHMMSS  SNR  DT  Freq  [~*]  Message
 	// Example: 203530   2  0.1 2535 ~  EI3CTB RT6C -16
-	ft8Pattern = regexp.MustCompile(`^(\d{6})\s+(-?\d+)\s+([-\d.]+)\s+(\d+)\s+[~]?\s+(.+)$`)
+	// FT2 uses same format but with * marker: 000830 -12  0.4  688 *  PB2A F5PPN JN03
+	ft8Pattern = regexp.MustCompile(`^(\d{6})\s+(-?\d+)\s+([-\d.]+)\s+(\d+)\s+[~*]?\s+(.+)$`)
 
-	// FT4 format: Same as FT8 - HHMMSS  SNR  DT  Freq  [+~]  Message
+	// FT4 format: Same as FT8 - HHMMSS  SNR  DT  Freq  [+~*]  Message
 	// Example: 130637   1  0.4  477 +  CQ RC6OD KN87
-	ft4Pattern = regexp.MustCompile(`^(\d{6})\s+(-?\d+)\s+([-\d.]+)\s+(\d+)\s+[+~]?\s+(.+)$`)
+	ft4Pattern = regexp.MustCompile(`^(\d{6})\s+(-?\d+)\s+([-\d.]+)\s+(\d+)\s+[+~*]?\s+(.+)$`)
 
 	// WSPR format varies by wsprd version, typically:
 	// Date Time Seq SNR DT Freq Call Grid dBm [optional extra columns]

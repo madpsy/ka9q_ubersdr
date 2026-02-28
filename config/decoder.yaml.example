@@ -254,6 +254,26 @@ decoder:
       frequency: 28124600  # 28.1246 MHz
       enabled: false
 
+    - name: "60m-alt-wspr"
+      mode: "WSPR"
+      frequency: 5364700
+      enabled: false
+
+    - name: "630m-wspr"
+      mode: "WSPR"
+      frequency: 474200
+      enabled: false
+
+    - name: "2200m-wspr"
+      mode: "WSPR"
+      frequency: 136000
+      enabled: false
+
+    - name: "80m-EU-wspr"
+      mode: "WSPR"
+      frequency: 3592600
+      enabled: false
+
     # ========================================
     # JS8 bands
     # JS8Call is a streaming mode (continuous audio feed)
@@ -280,31 +300,56 @@ decoder:
     # FT2 bands
     # FT2 is a streaming mode (continuous audio feed)
     # ========================================
+    - name: "160m-ft2"
+      mode: "FT2"
+      frequency: 1843000
+      enabled: false
+      depth: 3
+    - name: "80m-ft2"
+      mode: "FT2"
+      frequency: 3578000
+      enabled: false
+      depth: 3
+    - name: "60m-ft2"
+      mode: "FT2"
+      frequency: 5357000
+      enabled: false
+      depth: 3
+    - name: "40m-ft2"
+      mode: "FT2"
+      frequency: 7052000
+      enabled: false
+      depth: 3
+    - name: "30m-ft2"
+      mode: "FT2"
+      frequency: 10144000
+      enabled: false
+      depth: 3
     - name: "20m-ft2"
       mode: "FT2"
-      frequency: 14084000  # 14.084 MHz
+      frequency: 14084000
       enabled: false
-      depth: 3             # Decode depth 1-3 (default: 2)
-
-    - name: "60m-alt-wspr"
-      mode: "WSPR"
-      frequency: 5364700
+      depth: 3
+    - name: "17m-ft2"
+      mode: "FT2"
+      frequency: 18108000
       enabled: false
-
-    - name: "630m-wspr"
-      mode: "WSPR"
-      frequency: 474200
+      depth: 3
+    - name: "15m-ft2"
+      mode: "FT2"
+      frequency: 21144000
       enabled: false
-
-    - name: "2200m-wspr"
-      mode: "WSPR"
-      frequency: 136000
+      depth: 3
+    - name: "12m-ft2"
+      mode: "FT2"
+      frequency: 24923000
       enabled: false
-
-    - name: "80m-EU-wspr"
-      mode: "WSPR"
-      frequency: 3592600
+      depth: 3
+    - name: "10m-ft2"
+      mode: "FT2"
+      frequency: 28184000
       enabled: false
+      depth: 3
 
 # Notes:
 # 1. Requires external decoder binaries:

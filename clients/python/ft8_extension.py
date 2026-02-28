@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FT8/FT4 Extension Window for Python Radio Client
+FT8/FT4/FT2 Extension Window for Python Radio Client
 Replicates the JavaScript FT8 extension functionality
 """
 
@@ -14,7 +14,7 @@ import webbrowser
 
 
 class FT8Extension:
-    """FT8/FT4 decoder extension window."""
+    """FT8/FT4/FT2 decoder extension window."""
     
     # Quick tune frequencies
     FREQUENCIES = {
@@ -29,6 +29,12 @@ class FT8Extension:
             ('14.080 MHz USB (20m FT4)', 14080000, 'usb', 'FT4'),
             ('21.140 MHz USB (15m FT4)', 21140000, 'usb', 'FT4'),
             ('28.180 MHz USB (10m FT4)', 28180000, 'usb', 'FT4'),
+        ],
+        'FT2 - Very Fast Mode': [
+            ('7.074 MHz USB (40m FT2)', 7074000, 'usb', 'FT2'),
+            ('14.074 MHz USB (20m FT2)', 14074000, 'usb', 'FT2'),
+            ('21.074 MHz USB (15m FT2)', 21074000, 'usb', 'FT2'),
+            ('28.074 MHz USB (10m FT2)', 28074000, 'usb', 'FT2'),
         ],
         'Other FT8 Bands': [
             ('3.573 MHz USB (80m FT8)', 3573000, 'usb', 'FT8'),
@@ -96,7 +102,7 @@ class FT8Extension:
         
         # Create window
         self.window = tk.Toplevel(parent)
-        self.window.title("📡 FT8/FT4 Decoder")
+        self.window.title("📡 FT8/FT4/FT2 Decoder")
         self.window.geometry("1400x900")
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
         
@@ -175,7 +181,7 @@ class FT8Extension:
         ttk.Label(controls_frame, text="Protocol:").pack(side=tk.LEFT, padx=(0, 5))
         self.protocol_var = tk.StringVar(value='FT8')
         protocol_combo = ttk.Combobox(controls_frame, textvariable=self.protocol_var,
-                                      values=['FT8', 'FT4'], state='readonly', width=10)
+                                      values=['FT8', 'FT4', 'FT2'], state='readonly', width=10)
         protocol_combo.pack(side=tk.LEFT, padx=(0, 15))
         protocol_combo.bind('<<ComboboxSelected>>', lambda e: self.on_protocol_changed())
         
@@ -255,9 +261,9 @@ class FT8Extension:
         help_frame = ttk.Frame(main_frame)
         help_frame.grid(row=5, column=0, sticky=(tk.W, tk.E))
         
-        help_text = ("FT8/FT4 Decoder - Decodes weak signal digital modes. "
-                    "FT8 uses 15-second time slots, FT4 uses 7.5-second slots. "
-                    "Tune to FT8/FT4 frequencies in USB mode with 3000 Hz bandwidth. "
+        help_text = ("FT8/FT4/FT2 Decoder - Decodes weak signal digital modes. "
+                    "FT8 uses 15-second time slots, FT4 uses 7.5-second slots, FT2 uses 3.75-second slots. "
+                    "Tune to FT8/FT4/FT2 frequencies in USB mode with 3000 Hz bandwidth. "
                     "Primary frequency: 14.074 MHz (20m FT8).")
         ttk.Label(help_frame, text=help_text, wraplength=1350, foreground='gray').pack()
         
@@ -303,7 +309,7 @@ class FT8Extension:
             self.radio_control.set_frequency_hz(frequency)
             self.radio_control.select_mode(mode)
             
-            # Set bandwidth for FT8/FT4 (0 Hz low, 3200 Hz high)
+            # Set bandwidth for FT8/FT4/FT2 (0 Hz low, 3200 Hz high)
             if hasattr(self.radio_control, 'set_bandwidth'):
                 self.radio_control.set_bandwidth(0, 3200)
             
@@ -361,7 +367,7 @@ class FT8Extension:
         self.filter_messages()
     
     def start_decoder(self):
-        """Start the FT8/FT4 decoder."""
+        """Start the FT8/FT4/FT2 decoder."""
         if self.running:
             return
         
@@ -408,7 +414,7 @@ class FT8Extension:
             print(f"Error starting decoder: {e}")
     
     def stop_decoder(self):
-        """Stop the FT8/FT4 decoder."""
+        """Stop the FT8/FT4/FT2 decoder."""
         if not self.running:
             return
         
@@ -791,7 +797,12 @@ class FT8Extension:
             return
         
         # Get cycle duration based on protocol
-        cycle_duration = 7.5 if self.config['protocol'] == 'FT4' else 15.0
+        if self.config['protocol'] == 'FT4':
+            cycle_duration = 7.5
+        elif self.config['protocol'] == 'FT2':
+            cycle_duration = 3.75
+        else:  # FT8
+            cycle_duration = 15.0
         
         # Get current time
         now = datetime.now()
@@ -977,7 +988,7 @@ class FT8Extension:
                 canvas.create_line(points, fill='#00ff00', width=1)
         
         # Draw callsigns from latest matching odd/even cycle
-        # FT8/FT4 stations alternate between odd and even slots
+        # FT8/FT4/FT2 stations alternate between odd and even slots
         if self.current_slot > 0:
             # Only recalculate callsign positions if the slot has changed
             if self.last_cached_slot != self.current_slot:

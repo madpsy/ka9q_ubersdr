@@ -378,7 +378,7 @@ class DXClusterWebSocket:
             self._pending_subscriptions.add('dx_spots')
 
     def subscribe_to_digital_spots(self):
-        """Subscribe to digital spots (FT8/FT4/WSPR)."""
+        """Subscribe to digital spots (FT8/FT4/FT2/WSPR)."""
         if self.connected:
             self._send_subscription('digital_spots', True)
         else:

@@ -1081,10 +1081,13 @@ func (b *UberSDRBridge) decodeAudio(base64Data string) ([]byte, error) {
 
 // getNumReceivers returns the number of receivers for the current protocol
 func (b *UberSDRBridge) getNumReceivers() int {
-	if b.protocolMode == 1 {
+	if b.protocolMode == 1 && b.hpsdr1Server != nil {
 		return b.hpsdr1Server.config.NumReceivers
 	}
-	return b.hpsdrServer.config.NumReceivers
+	if b.hpsdrServer != nil {
+		return b.hpsdrServer.config.NumReceivers
+	}
+	return MaxReceivers // fallback
 }
 
 // getReceiverState returns receiver state (check both servers, prefer active one)

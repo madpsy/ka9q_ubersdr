@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Digital Spots Display Window for ka9q_ubersdr Python Client
-Shows real-time FT8, FT4, and WSPR spots from the multi-decoder via DX cluster WebSocket
+Shows real-time FT8, FT4, FT2, and WSPR spots from the multi-decoder via DX cluster WebSocket
 """
 
 import tkinter as tk
@@ -12,7 +12,7 @@ import queue
 
 
 class DigitalSpotsDisplay:
-    """Display window for digital mode spots (FT8, FT4, WSPR)."""
+    """Display window for digital mode spots (FT8, FT4, FT2, WSPR)."""
 
     def __init__(self, websocket_manager, on_close: Optional[Callable] = None, countries: Optional[List[Dict]] = None, radio_gui=None):
         """
@@ -116,7 +116,7 @@ class DigitalSpotsDisplay:
         # Mode filter
         ttk.Label(filter_frame, text="Mode:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
         mode_combo = ttk.Combobox(filter_frame, textvariable=self.mode_filter,
-                                 values=["all", "FT8", "FT4", "WSPR"],
+                                 values=["all", "FT8", "FT4", "FT2", "WSPR"],
                                  state='readonly', width=10)
         mode_combo.grid(row=0, column=1, sticky=tk.W, padx=(0, 15))
         mode_combo.bind('<<ComboboxSelected>>', lambda e: self.apply_filters())

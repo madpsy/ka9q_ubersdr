@@ -262,7 +262,14 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 		d.wsConnMu.Unlock()
 
 		if conn == nil {
-			time.Sleep(100 * time.Millisecond)
+			// Connection is nil, attempt to reconnect
+			log.Printf("[Whisper] Connection is nil, attempting reconnect...")
+			if reconnectErr := d.reconnectWebSocket(); reconnectErr != nil {
+				log.Printf("[Whisper] Reconnect failed: %v, retrying in 5 seconds...", reconnectErr)
+				time.Sleep(5 * time.Second)
+			} else {
+				log.Printf("[Whisper] Successfully reconnected to WhisperLive")
+			}
 			continue
 		}
 

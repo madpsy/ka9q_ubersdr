@@ -296,48 +296,38 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 
 			// Handle transcription segments
 			if segments, ok := result["segments"].([]interface{}); ok && len(segments) > 0 {
-				// Extract text from all segments
-				var texts []string
-				for _, seg := range segments {
-					if segMap, ok := seg.(map[string]interface{}); ok {
-						if text, ok := segMap["text"].(string); ok && text != "" {
-							texts = append(texts, text)
-						}
-					}
+				// Send segments as JSON to frontend
+				// The frontend will handle completed vs incomplete segments
+				segmentsJSON, err := json.Marshal(segments)
+				if err != nil {
+					log.Printf("[Whisper] Failed to marshal segments: %v", err)
+					continue
 				}
 
-				if len(texts) > 0 {
-					fullText := ""
-					for _, t := range texts {
-						fullText += t + " "
-					}
-					fullText = fullText[:len(fullText)-1] // Remove trailing space
+				// Encode segments for client
+				encoded := d.encodeSegments(segmentsJSON, time.Now().UnixNano())
 
-					// Encode result for client
-					encoded := d.encodeResult(fullText, time.Now().UnixNano())
-
-					// Send to result channel (non-blocking)
-					select {
-					case resultChan <- encoded:
-					default:
-						log.Printf("[Whisper] Result channel full, dropping transcription")
-					}
+				// Send to result channel (non-blocking)
+				select {
+				case resultChan <- encoded:
+				default:
+					log.Printf("[Whisper] Result channel full, dropping segments")
 				}
 			}
 		}
 	}
 }
 
-// encodeResult encodes transcription text into binary protocol
-// Format: [type:1][timestamp:8][text_length:4][text:N]
-func (d *WhisperDecoder) encodeResult(text string, timestamp int64) []byte {
-	textBytes := []byte(text)
-	buf := make([]byte, 1+8+4+len(textBytes))
+// encodeSegments encodes transcription segments into binary protocol
+// Format: [type:1][timestamp:8][json_length:4][json:N]
+// The JSON contains an array of segments with text, start, end, and completed fields
+func (d *WhisperDecoder) encodeSegments(segmentsJSON []byte, timestamp int64) []byte {
+	buf := make([]byte, 1+8+4+len(segmentsJSON))
 
-	buf[0] = 0x01 // Message type: transcription
+	buf[0] = 0x02 // Message type: segments (changed from 0x01)
 	binary.BigEndian.PutUint64(buf[1:9], uint64(timestamp))
-	binary.BigEndian.PutUint32(buf[9:13], uint32(len(textBytes)))
-	copy(buf[13:], textBytes)
+	binary.BigEndian.PutUint32(buf[9:13], uint32(len(segmentsJSON)))
+	copy(buf[13:], segmentsJSON)
 
 	return buf
 }

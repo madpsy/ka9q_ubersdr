@@ -237,6 +237,13 @@
     border-left: 3px solid #4caf50;
 }
 
+.whisper-transcription-line.whisper-incomplete {
+    background-color: #3a3a3a;
+    border-left-color: #ff9800;
+    font-style: italic;
+    opacity: 0.85;
+}
+
 .whisper-timestamp {
     color: #888;
     font-size: 11px;

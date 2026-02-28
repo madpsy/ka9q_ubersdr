@@ -18,12 +18,12 @@ class WhisperExtension extends DecoderExtension {
             show_timestamps: true
         };
 
-        // Transcription state
-        this.transcriptionLines = [];
+        // Transcription state - following WhisperLive client.py pattern
+        this.transcript = [];  // Completed segments only
+        this.lastSegment = null;  // Current incomplete segment being refined
         this.isRunning = false;
         this.autoScroll = true;
         this.showTimestamps = true;
-        this.lastUpdateTime = null;
 
         console.log('Whisper: Extension initialized');
     }
@@ -207,12 +207,18 @@ class WhisperExtension extends DecoderExtension {
 
     clearTranscription() {
         console.log('Whisper: Clearing transcription');
-        this.transcriptionLines = [];
+        this.transcript = [];
+        this.lastSegment = null;
         this.renderTranscription();
     }
 
     copyToClipboard() {
-        const text = this.transcriptionLines.map(line => line.text).join('\n');
+        // Get all completed segments plus the current incomplete one
+        const allSegments = [...this.transcript];
+        if (this.lastSegment) {
+            allSegments.push(this.lastSegment);
+        }
+        const text = allSegments.map(seg => seg.text).join(' ');
         
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(text).then(() => {
@@ -241,11 +247,17 @@ class WhisperExtension extends DecoderExtension {
     }
 
     saveTranscription() {
-        const text = this.transcriptionLines.map(line => {
-            if (this.showTimestamps && line.timestamp) {
-                return `[${line.timestamp}] ${line.text}`;
+        // Get all completed segments plus the current incomplete one
+        const allSegments = [...this.transcript];
+        if (this.lastSegment) {
+            allSegments.push(this.lastSegment);
+        }
+
+        const text = allSegments.map(seg => {
+            if (this.showTimestamps && seg.start !== undefined) {
+                return `[${seg.start.toFixed(2)}s - ${seg.end.toFixed(2)}s] ${seg.text}`;
             }
-            return line.text;
+            return seg.text;
         }).join('\n');
 
         const blob = new Blob([text], { type: 'text/plain' });
@@ -279,8 +291,8 @@ class WhisperExtension extends DecoderExtension {
     handleBinaryMessage(data) {
         // Binary protocol for Whisper transcription
         // Message format:
-        // Byte 0: Message type (0x01 = transcription text)
-        // Remaining bytes: UTF-8 encoded text
+        // Byte 0: Message type (0x02 = segments JSON)
+        // Remaining bytes: JSON data
 
         const view = new DataView(data);
         const messageType = view.getUint8(0);
@@ -288,56 +300,43 @@ class WhisperExtension extends DecoderExtension {
         console.log(`Whisper: Received binary message, type: 0x${messageType.toString(16).padStart(2, '0')}`);
 
         switch (messageType) {
-            case 0x01: // Transcription text
-                this.handleTranscriptionText(view, data);
+            case 0x02: // Segments JSON
+                this.handleSegments(view, data);
                 break;
             default:
                 console.warn(`Whisper: Unknown message type: 0x${messageType.toString(16).padStart(2, '0')}`);
         }
     }
 
-    handleTranscriptionText(view, data) {
-        // Binary protocol: [type:1][timestamp:8][text_length:4][text:N]
+    handleSegments(view, data) {
+        // Binary protocol: [type:1][timestamp:8][json_length:4][json:N]
         // Extract timestamp (bytes 1-8, big-endian)
         const timestampNano = view.getBigUint64(1, false); // false = big-endian
 
-        // Extract text length (bytes 9-12, big-endian)
-        const textLength = view.getUint32(9, false); // false = big-endian
+        // Extract JSON length (bytes 9-12, big-endian)
+        const jsonLength = view.getUint32(9, false); // false = big-endian
 
-        // Extract UTF-8 text (bytes 13 onwards)
-        const textBytes = new Uint8Array(data, 13, textLength);
+        // Extract JSON (bytes 13 onwards)
+        const jsonBytes = new Uint8Array(data, 13, jsonLength);
         const decoder = new TextDecoder('utf-8');
-        const text = decoder.decode(textBytes).trim();
+        const jsonStr = decoder.decode(jsonBytes);
 
-        if (!text) {
-            return; // Ignore empty messages
+        let segments;
+        try {
+            segments = JSON.parse(jsonStr);
+        } catch (e) {
+            console.error('Whisper: Failed to parse segments JSON:', e);
+            return;
         }
 
-        console.log('Whisper: Transcription:', text);
-
-        // Format timestamp for display
-        const timestamp = new Date().toLocaleTimeString();
-        const now = Date.now();
-
-        // WhisperLive sends incremental updates - always replace the last line
-        // unless there's been a pause (>3 seconds since last update)
-        const timeSinceLastUpdate = this.lastUpdateTime ? (now - this.lastUpdateTime) / 1000 : 999;
-
-        if (this.transcriptionLines.length > 0 && timeSinceLastUpdate < 3) {
-            // Recent update - replace the last line (incremental update)
-            this.transcriptionLines[this.transcriptionLines.length - 1] = {
-                text: text,
-                timestamp: timestamp
-            };
-        } else {
-            // First transcription or pause detected - add new line
-            this.transcriptionLines.push({
-                text: text,
-                timestamp: timestamp
-            });
+        if (!Array.isArray(segments) || segments.length === 0) {
+            return;
         }
 
-        this.lastUpdateTime = now;
+        console.log('Whisper: Received segments:', segments);
+
+        // Process segments following WhisperLive client.py pattern (lines 144-158)
+        this.processSegments(segments);
 
         // Render updated transcription
         this.renderTranscription();
@@ -348,21 +347,53 @@ class WhisperExtension extends DecoderExtension {
         }
     }
 
+    processSegments(segments) {
+        // Following WhisperLive client.py process_segments() method
+        for (let i = 0; i < segments.length; i++) {
+            const seg = segments[i];
+
+            // Last segment that's not completed becomes lastSegment
+            if (i === segments.length - 1 && !seg.completed) {
+                this.lastSegment = seg;
+            }
+            // Completed segments are added to transcript if not already there
+            else if (seg.completed) {
+                // Check if this segment should be added (not overlapping with existing)
+                const shouldAdd = this.transcript.length === 0 ||
+                    parseFloat(seg.start) >= parseFloat(this.transcript[this.transcript.length - 1].end);
+
+                if (shouldAdd) {
+                    this.transcript.push(seg);
+                }
+            }
+        }
+    }
+
     renderTranscription() {
         const transcriptionElement = document.getElementById('whisper-transcription');
         if (!transcriptionElement) return;
 
-        if (this.transcriptionLines.length === 0) {
+        if (this.transcript.length === 0 && !this.lastSegment) {
             transcriptionElement.innerHTML = '<div class="whisper-transcription-empty">No transcription yet. Start the decoder to begin.</div>';
             return;
         }
 
-        const html = this.transcriptionLines.map(line => {
-            let lineHtml = '<div class="whisper-transcription-line">';
-            if (this.showTimestamps && line.timestamp) {
-                lineHtml += `<span class="whisper-timestamp">[${line.timestamp}]</span> `;
+        // Following WhisperLive client.py display pattern (lines 205-209)
+        // Show completed segments plus the current incomplete segment
+        const segmentsToDisplay = [...this.transcript];
+        if (this.lastSegment) {
+            segmentsToDisplay.push(this.lastSegment);
+        }
+
+        const html = segmentsToDisplay.map((seg, index) => {
+            const isIncomplete = (index === segmentsToDisplay.length - 1 && this.lastSegment && seg === this.lastSegment);
+            let lineHtml = `<div class="whisper-transcription-line ${isIncomplete ? 'whisper-incomplete' : ''}">`;
+
+            if (this.showTimestamps && seg.start !== undefined) {
+                lineHtml += `<span class="whisper-timestamp">[${seg.start.toFixed(1)}s]</span> `;
             }
-            lineHtml += `<span class="whisper-text">${this.escapeHtml(line.text)}</span>`;
+
+            lineHtml += `<span class="whisper-text">${this.escapeHtml(seg.text)}</span>`;
             lineHtml += '</div>';
             return lineHtml;
         }).join('');

@@ -282,9 +282,9 @@ decoder:
     # ========================================
     - name: "20m-ft2"
       mode: "FT2"
-      frequency: 14077000  # 14.077 MHz
+      frequency: 14084000  # 14.084 MHz
       enabled: false
-      depth: 2             # Decode depth 1-3 (default: 2)
+      depth: 3             # Decode depth 1-3 (default: 2)
 
     - name: "60m-alt-wspr"
       mode: "WSPR"

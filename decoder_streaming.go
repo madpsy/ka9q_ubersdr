@@ -300,6 +300,22 @@ func (sd *StreamingDecoder) readStdout() {
 		if sd.band.Config.Mode == ModeFT2 {
 			// FT2 uses FT8 format output
 			decode, err = ParseFT8Line(line, sd.band.Config.Frequency, sd.band.Config.Mode)
+			if err == nil {
+				// FT2 has 3.75-second cycles - calculate most recent cycle boundary
+				// The decoder outputs the transmission time from the signal, which can be hours old.
+				// For PSK Reporter, we need to use the current time rounded to the nearest cycle boundary.
+				now := time.Now().UTC()
+				midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+				nanosSinceMidnight := now.Sub(midnight).Nanoseconds()
+
+				// FT2 cycle is 3.75 seconds = 3,750,000,000 nanoseconds
+				cycleNanos := int64(3750000000)
+				cyclesSinceMidnight := nanosSinceMidnight / cycleNanos
+				boundaryNanos := cyclesSinceMidnight * cycleNanos
+
+				// Set timestamp to the most recent cycle boundary
+				decode.Timestamp = midnight.Add(time.Duration(boundaryNanos))
+			}
 		} else {
 			// JS8 uses its own format
 			decode, err = ParseStreamingDecoderLine(line, sd.band.Config.Frequency, sd.config.ReceiverLocator, sd.ctyDatabase)

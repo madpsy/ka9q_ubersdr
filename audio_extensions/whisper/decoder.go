@@ -30,7 +30,7 @@ type WhisperConfig struct {
 func DefaultWhisperConfig() WhisperConfig {
 	return WhisperConfig{
 		ServerURL:      "ws://whisperlive:9090",
-		Model:          "base",
+		Model:          "small",
 		Language:       "en",
 		SendIntervalMs: 100, // Send audio every 100ms
 	}

@@ -23,6 +23,7 @@ class WhisperExtension extends DecoderExtension {
         this.isRunning = false;
         this.autoScroll = true;
         this.showTimestamps = true;
+        this.lastUpdateTime = null;
 
         console.log('Whisper: Extension initialized');
     }
@@ -316,34 +317,27 @@ class WhisperExtension extends DecoderExtension {
 
         // Format timestamp for display
         const timestamp = new Date().toLocaleTimeString();
+        const now = Date.now();
 
-        // WhisperLive sends incremental updates - each message contains progressively more text
-        // Heuristic: If new text is shorter or doesn't start with previous text, it's a new segment
-        if (this.transcriptionLines.length > 0) {
-            const lastLine = this.transcriptionLines[this.transcriptionLines.length - 1];
-            const lastText = lastLine.text;
+        // WhisperLive sends incremental updates - always replace the last line
+        // unless there's been a pause (>3 seconds since last update)
+        const timeSinceLastUpdate = this.lastUpdateTime ? (now - this.lastUpdateTime) / 1000 : 999;
 
-            // Check if this is an update to the current segment or a new segment
-            if (text.length < lastText.length || !text.startsWith(lastText.substring(0, Math.min(20, lastText.length)))) {
-                // New segment - add a new line
-                this.transcriptionLines.push({
-                    text: text,
-                    timestamp: timestamp
-                });
-            } else {
-                // Update to current segment - replace the last line
-                this.transcriptionLines[this.transcriptionLines.length - 1] = {
-                    text: text,
-                    timestamp: timestamp
-                };
-            }
+        if (this.transcriptionLines.length > 0 && timeSinceLastUpdate < 3) {
+            // Recent update - replace the last line (incremental update)
+            this.transcriptionLines[this.transcriptionLines.length - 1] = {
+                text: text,
+                timestamp: timestamp
+            };
         } else {
-            // First transcription
+            // First transcription or pause detected - add new line
             this.transcriptionLines.push({
                 text: text,
                 timestamp: timestamp
             });
         }
+
+        this.lastUpdateTime = now;
 
         // Render updated transcription
         this.renderTranscription();

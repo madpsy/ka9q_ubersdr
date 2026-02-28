@@ -15,16 +15,6 @@
     "template": "template.html"
   },
   "settings": {
-    "model": {
-      "type": "string",
-      "default": "base",
-      "description": "Whisper model to use (tiny, base, small, medium, large)"
-    },
-    "language": {
-      "type": "string",
-      "default": "auto",
-      "description": "Language code for transcription (auto for automatic detection)"
-    },
     "auto_scroll": {
       "type": "boolean",
       "default": true,

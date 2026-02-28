@@ -50,21 +50,14 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 	}
 
 	// Start with default config
+	// All parameters are server-side only for security and resource management
 	config := DefaultWhisperConfig()
 
-	// Override with user parameters
-	if serverURL, ok := extensionParams["server_url"].(string); ok {
-		config.ServerURL = serverURL
-	}
-	if model, ok := extensionParams["model"].(string); ok {
-		config.Model = model
-	}
-	if language, ok := extensionParams["language"].(string); ok {
-		config.Language = language
-	}
-	if sendInterval, ok := extensionParams["send_interval_ms"].(float64); ok {
-		config.SendIntervalMs = int(sendInterval)
-	}
+	// No user-configurable parameters - all settings are server-side defaults
+	// This prevents users from:
+	// - Changing the server URL (security)
+	// - Selecting expensive models (resource management)
+	// - Changing language settings (consistency)
 
 	// Create decoder
 	decoder := NewWhisperDecoder(audioParams.SampleRate, config)

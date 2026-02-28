@@ -12,10 +12,8 @@ class WhisperExtension extends DecoderExtension {
         });
         console.log('Whisper: Super constructor completed');
 
-        // Configuration
+        // Configuration (UI-only settings)
         this.config = {
-            model: 'base',
-            language: 'auto',
             auto_scroll: true,
             show_timestamps: true
         };
@@ -108,22 +106,7 @@ class WhisperExtension extends DecoderExtension {
             });
         }
 
-        // Update display with current settings
-        this.updateSettingsDisplay();
-
         console.log('Whisper: Event handlers setup complete');
-    }
-
-    updateSettingsDisplay() {
-        const modelDisplay = document.getElementById('whisper-model-display');
-        const languageDisplay = document.getElementById('whisper-language-display');
-
-        if (modelDisplay) {
-            modelDisplay.textContent = this.config.model || 'base';
-        }
-        if (languageDisplay) {
-            languageDisplay.textContent = this.config.language || 'auto';
-        }
     }
 
     startDecoder() {
@@ -163,7 +146,7 @@ class WhisperExtension extends DecoderExtension {
         const message = {
             type: 'audio_extension_attach',
             extension_name: 'whisper',
-            params: this.config
+            params: {} // No user-configurable parameters - all server-side
         };
 
         console.log('Whisper: Sending attach message:', message);

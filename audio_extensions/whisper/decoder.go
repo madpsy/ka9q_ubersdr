@@ -27,7 +27,7 @@ type WhisperConfig struct {
 // DefaultWhisperConfig returns default configuration
 func DefaultWhisperConfig() WhisperConfig {
 	return WhisperConfig{
-		ServerURL:      "ws://localhost:9090",
+		ServerURL:      "ws://whisperlive:9090",
 		Model:          "base",
 		Language:       "en",
 		SendIntervalMs: 100, // Send audio every 100ms

@@ -75,6 +75,7 @@
     border-radius: 4px;
     margin-bottom: 10px;
     flex-wrap: wrap;
+    position: relative;
 }
 
 .whisper-control-group {
@@ -93,6 +94,16 @@
 
 .whisper-control-group input[type="checkbox"] {
     cursor: pointer;
+}
+
+.whisper-control-group.whisper-last-update {
+    margin-left: auto;
+}
+
+.whisper-last-update-text {
+    color: #888;
+    font-size: 12px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
 }
 
 /* Buttons */

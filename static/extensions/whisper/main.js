@@ -23,9 +23,11 @@ class WhisperExtension extends DecoderExtension {
         this.lastSegment = null;  // Current incomplete segment being refined
         this.isRunning = false;
         this.autoScroll = true;
-        this.showTimestamps = true;
+        this.showTimestamps = false;  // Disabled by default
         this.sessionStartTime = null;  // Track when decoder starts for wall clock timestamps
         this.renderedSegmentCount = 0;  // Track how many completed segments are rendered
+        this.lastUpdateTime = null;  // Track time of last message update
+        this.updateTimerInterval = null;  // Interval for updating the "time since last update" display
 
         console.log('Whisper: Extension initialized');
     }
@@ -118,8 +120,15 @@ class WhisperExtension extends DecoderExtension {
         
         this.isRunning = true;
         this.sessionStartTime = Date.now();  // Record start time for wall clock timestamps
+        this.lastUpdateTime = null;  // Reset last update time
         this.updateButtonStates();
         this.updateStatus('Starting...', 'whisper-status-starting');
+
+        // Show the "waiting for first chunk" message
+        this.renderTranscription();
+
+        // Start the update timer
+        this.startUpdateTimer();
 
         // Attach to audio extension
         this.attachAudioExtension();
@@ -131,6 +140,9 @@ class WhisperExtension extends DecoderExtension {
         this.isRunning = false;
         this.updateButtonStates();
         this.updateStatus('Stopped', 'whisper-status-stopped');
+
+        // Stop the update timer
+        this.stopUpdateTimer();
 
         // Detach from audio extension
         this.detachAudioExtension();
@@ -351,6 +363,9 @@ class WhisperExtension extends DecoderExtension {
 
         // Process segments following WhisperLive client.py pattern (lines 144-158)
         this.processSegments(segments);
+
+        // Update last update time
+        this.lastUpdateTime = Date.now();
 
         // Render updated transcription
         this.renderTranscription();
@@ -661,6 +676,54 @@ class WhisperExtension extends DecoderExtension {
 
         // Remove binary message handler
         this.removeBinaryMessageHandler();
+    }
+
+    startUpdateTimer() {
+        // Clear any existing timer
+        this.stopUpdateTimer();
+
+        // Update immediately
+        this.updateLastUpdateDisplay();
+
+        // Update every second
+        this.updateTimerInterval = setInterval(() => {
+            this.updateLastUpdateDisplay();
+        }, 1000);
+    }
+
+    stopUpdateTimer() {
+        if (this.updateTimerInterval) {
+            clearInterval(this.updateTimerInterval);
+            this.updateTimerInterval = null;
+        }
+
+        // Reset display
+        const lastUpdateElement = document.getElementById('whisper-last-update');
+        if (lastUpdateElement) {
+            lastUpdateElement.textContent = '--';
+        }
+    }
+
+    updateLastUpdateDisplay() {
+        const lastUpdateElement = document.getElementById('whisper-last-update');
+        if (!lastUpdateElement) return;
+
+        if (!this.lastUpdateTime) {
+            lastUpdateElement.textContent = '--';
+            return;
+        }
+
+        const now = Date.now();
+        const elapsedMs = now - this.lastUpdateTime;
+        const elapsedSeconds = Math.floor(elapsedMs / 1000);
+
+        if (elapsedSeconds < 60) {
+            lastUpdateElement.textContent = `${elapsedSeconds}s`;
+        } else {
+            const minutes = Math.floor(elapsedSeconds / 60);
+            const seconds = elapsedSeconds % 60;
+            lastUpdateElement.textContent = `${minutes}m${seconds}s`;
+        }
     }
 }
 

@@ -35,9 +35,9 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     wget \
     iproute2 \
-    wsjtx \
     libopus0 \
     libopusfile0 \
+    libqt5core5a \
     libqt6core6 \
     libqt6network6 \
     libcurl4 \
@@ -47,6 +47,11 @@ RUN apt-get update && apt-get install -y \
     && chmod +x /usr/bin/yq \
     && wget https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/js8 -O /usr/bin/js8 \
     && chmod +x /usr/bin/js8 \
+    && wget https://github.com/madpsy/jt9-decode/releases/download/1.0.0/wsjtx_3.1.0_improved_AL_PLUS_260226-OFC_amd64.deb -O /tmp/wsjtx.deb \
+    && apt-get install -y /tmp/wsjtx.deb \
+    && rm /tmp/wsjtx.deb \
+    && wget https://github.com/madpsy/jt9-decode/releases/download/1.0.0/jt9_decode -O /usr/local/bin/jt9_decode \
+    && chmod +x /usr/local/bin/jt9_decode \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory

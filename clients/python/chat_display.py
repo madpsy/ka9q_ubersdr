@@ -156,13 +156,14 @@ class ChatDisplay:
 
         # Configure text tags for styling
         self.messages_text.tag_config('username', foreground='#4a9eff', font=('TkDefaultFont', 9, 'bold'))
-        self.messages_text.tag_config('username_clickable', foreground='#4a9eff', font=('TkDefaultFont', 9, 'bold'), underline=1)
+        self.messages_text.tag_config('username_clickable', foreground='#4a9eff', font=('TkDefaultFont', 9, 'bold'))
         self.messages_text.tag_config('own_username', foreground='#ff9f40', font=('TkDefaultFont', 9, 'bold'))
         self.messages_text.tag_config('timestamp', foreground='#666', font=('TkDefaultFont', 8))
         self.messages_text.tag_config('system', foreground='#999', font=('TkDefaultFont', 9, 'italic'))
         self.messages_text.tag_config('error', foreground='#ff6b6b', font=('TkDefaultFont', 9, 'bold'))
         self.messages_text.tag_config('mention', background='#ffc107', foreground='#000')
         self.messages_text.tag_config('link', foreground='#4a9eff', underline=1)
+        self.messages_text.tag_config('freq_link', foreground='#4a9eff', underline=1, font=('TkDefaultFont', 9, 'bold'))
 
         # Bind click events for clickable usernames
         self.messages_text.tag_bind('username_clickable', '<Button-1>', self.on_username_click)
@@ -203,12 +204,16 @@ class ChatDisplay:
         self.message_entry.bind('<Down>', self.on_message_down)
         self.message_entry.bind('<Escape>', self.on_message_escape)
 
+        # Frequency share button
+        self.freq_btn = ttk.Button(self.message_frame, text="📻", width=3, command=self.share_frequency)
+        self.freq_btn.grid(row=0, column=1, padx=(0, 5))
+
         # Emoji button
         self.emoji_btn = ttk.Button(self.message_frame, text="😊", width=3, command=self.toggle_emoji_picker)
-        self.emoji_btn.grid(row=0, column=1, padx=(0, 5))
+        self.emoji_btn.grid(row=0, column=2, padx=(0, 5))
 
         self.send_btn = ttk.Button(self.message_frame, text="Send", command=self.send_message)
-        self.send_btn.grid(row=0, column=2)
+        self.send_btn.grid(row=0, column=3)
 
         self.message_frame.columnconfigure(0, weight=1)
 
@@ -867,34 +872,79 @@ class ChatDisplay:
         self.messages_text.see(tk.END)
 
     def _insert_text_with_links(self, text: str):
-        """Insert text with URLs converted to clickable links"""
-        # Match URLs starting with http:// or https://
+        """Insert text with URLs and frequency patterns converted to clickable links"""
+        # First, split by URLs
         url_pattern = r'(https?://[^\s]+)'
-        parts = re.split(url_pattern, text)
+        url_parts = re.split(url_pattern, text)
 
-        for part in parts:
-            if re.match(url_pattern, part):
+        for url_part in url_parts:
+            if re.match(url_pattern, url_part):
                 # This is a URL - make it clickable
-                # Create a unique tag for this link
-                link_tag = f'link_{id(part)}_{time.time()}'
-                self.messages_text.insert(tk.END, part, ('link', link_tag))
+                link_tag = f'link_{id(url_part)}_{time.time()}'
+                self.messages_text.insert(tk.END, url_part, ('link', link_tag))
 
                 # Bind click event to open URL
                 self.messages_text.tag_bind(link_tag, '<Button-1>',
-                    lambda e, url=part: self._open_url(url))
+                    lambda e, url=url_part: self._open_url(url))
                 # Change cursor on hover
                 self.messages_text.tag_bind(link_tag, '<Enter>',
                     lambda e: self.messages_text.config(cursor='hand2'))
                 self.messages_text.tag_bind(link_tag, '<Leave>',
                     lambda e: self.messages_text.config(cursor=''))
             else:
-                # Regular text
-                self.messages_text.insert(tk.END, part)
+                # Not a URL - check for frequency patterns
+                # Pattern: "XXXX.XXX KHz (MODE)" or "XXXX KHz (MODE)"
+                freq_pattern = r'(\d+\.?\d*)\s*KHz\s*\(([A-Z]+)\)'
+
+                # Find all frequency matches in this part
+                last_end = 0
+                for freq_match in re.finditer(freq_pattern, url_part, re.IGNORECASE):
+                    # Insert text before the match
+                    if freq_match.start() > last_end:
+                        self.messages_text.insert(tk.END, url_part[last_end:freq_match.start()])
+
+                    # Get frequency and mode
+                    freq_khz = float(freq_match.group(1))
+                    mode = freq_match.group(2).upper()
+
+                    # Validate frequency range (10 kHz to 30 MHz)
+                    if 10 <= freq_khz <= 30000:
+                        # Validate mode
+                        valid_modes = ['USB', 'LSB', 'AM', 'SAM', 'FM', 'NFM', 'CWU', 'CWL']
+                        if mode in valid_modes:
+                            # Make it clickable
+                            freq_hz = int(freq_khz * 1000)
+                            freq_text = freq_match.group(0)
+                            freq_tag = f'freq_{id(freq_text)}_{time.time()}'
+                            self.messages_text.insert(tk.END, freq_text, ('freq_link', freq_tag))
+
+                            # Bind click event to tune
+                            self.messages_text.tag_bind(freq_tag, '<Button-1>',
+                                lambda e, f=freq_hz, m=mode.lower(): self._tune_to_frequency(f, m))
+                            # Change cursor on hover
+                            self.messages_text.tag_bind(freq_tag, '<Enter>',
+                                lambda e: self.messages_text.config(cursor='hand2'))
+                            self.messages_text.tag_bind(freq_tag, '<Leave>',
+                                lambda e: self.messages_text.config(cursor=''))
+                        else:
+                            # Invalid mode - insert as regular text
+                            self.messages_text.insert(tk.END, freq_match.group(0))
+                    else:
+                        # Out of range - insert as regular text
+                        self.messages_text.insert(tk.END, freq_match.group(0))
+
+                    last_end = freq_match.end()
+
+                # Insert any remaining text after the last match
+                if last_end < len(url_part):
+                    self.messages_text.insert(tk.END, url_part[last_end:])
 
     def _open_url(self, url: str):
         """Open URL in default web browser"""
         try:
             webbrowser.open(url)
+            # Refocus message entry after a short delay
+            self.window.after(50, lambda: self.message_entry.focus())
         except Exception as e:
             print(f"Failed to open URL {url}: {e}")
 
@@ -1236,8 +1286,75 @@ class ChatDisplay:
             self.add_system_message(f"Tuned to {username}'s frequency")
             # Select the user in the listbox
             self.select_user_in_listbox(username)
+            # Refocus message entry after a short delay
+            self.window.after(50, lambda: self.message_entry.focus())
         else:
             messagebox.showinfo("Info", f"{username} has no frequency/mode set")
+
+    def share_frequency(self):
+        """Share current frequency and mode in chat"""
+        if not self.username or not self.radio_gui:
+            return
+
+        try:
+            # Get current frequency and mode
+            freq_hz = self.radio_gui.get_frequency_hz()
+            mode = self.radio_gui.mode_var.get().upper()
+
+            # Format frequency in KHz to 3 decimal places
+            freq_khz = freq_hz / 1000.0
+            message = f"{freq_khz:.3f} KHz ({mode})"
+
+            # Insert at cursor position in message entry
+            cursor_pos = self.message_entry.index(tk.INSERT)
+            self.message_entry.insert(cursor_pos, message)
+
+            # Focus back to message entry
+            self.message_entry.focus()
+
+        except Exception as e:
+            print(f"Error sharing frequency: {e}")
+
+    def _tune_to_frequency(self, freq_hz: int, mode: str):
+        """Tune to a frequency from a chat message link"""
+        if not self.radio_gui:
+            return
+
+        try:
+            # Get default bandwidth for the mode
+            bandwidth_defaults = {
+                'usb': (50, 3000),
+                'lsb': (-2700, -50),
+                'am': (-3000, 3000),
+                'sam': (-3000, 3000),
+                'cwu': (-250, 250),
+                'cwl': (-250, 250),
+                'fm': (-8000, 8000),
+                'nfm': (-5000, 5000)
+            }
+
+            bw_low, bw_high = bandwidth_defaults.get(mode, (50, 3000))
+
+            # Set frequency and mode in radio GUI
+            self.radio_gui.set_frequency_hz(freq_hz)
+            self.radio_gui.mode_var.set(mode.upper())
+            self.radio_gui.on_mode_changed()
+
+            # Set bandwidth
+            self.radio_gui.bw_low_var.set(bw_low)
+            self.radio_gui.bw_high_var.set(bw_high)
+            self.radio_gui.update_bandwidth_display()
+
+            # Show notification
+            freq_khz = freq_hz / 1000.0
+            self.add_system_message(f"Tuned to {freq_khz:.3f} KHz ({mode.upper()})")
+
+            # Refocus message entry after a short delay
+            self.window.after(50, lambda: self.message_entry.focus())
+
+        except Exception as e:
+            print(f"Error tuning to frequency: {e}")
+            self.add_error_message(f"Failed to tune: {e}")
 
     def toggle_mute(self, username: str):
         """Toggle mute for a user"""

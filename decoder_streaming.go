@@ -293,9 +293,6 @@ func (sd *StreamingDecoder) readStdout() {
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// Log output for debugging
-		log.Printf("%s stdout [%s]: %s", sd.band.Config.Mode.String(), sd.band.Config.Name, line)
-
 		// Parse the output line based on mode
 		var decode *DecodeInfo
 		var err error
@@ -309,7 +306,8 @@ func (sd *StreamingDecoder) readStdout() {
 		}
 
 		if err != nil {
-			log.Printf("%s parse error [%s]: %v (line: %s)", sd.band.Config.Mode.String(), sd.band.Config.Name, err, line)
+			// Only log parse errors if the line doesn't look like internal decoder messages
+			// Skip logging for empty lines or lines that failed to parse (likely internal messages)
 			continue
 		}
 
@@ -353,10 +351,22 @@ func (sd *StreamingDecoder) readStderr() {
 	scanner := bufio.NewScanner(sd.stderr)
 	for scanner.Scan() {
 		line := scanner.Text()
-		// Log all stderr output to stdout (same as other logs)
-		if strings.TrimSpace(line) != "" {
-			log.Printf("%s [%s]: %s", sd.band.Config.Mode.String(), sd.band.Config.Name, line)
+		trimmed := strings.TrimSpace(line)
+
+		// Skip empty lines and internal jt9 messages
+		if trimmed == "" {
+			continue
 		}
+
+		// Skip jt9 internal messages (DecodeFinished, Triggering decode, etc.)
+		if strings.Contains(trimmed, "<DecodeFinished>") ||
+			strings.Contains(trimmed, "Triggering decode") ||
+			strings.Contains(trimmed, "jt9:") {
+			continue
+		}
+
+		// Log other stderr output (actual errors/warnings)
+		log.Printf("%s [%s]: %s", sd.band.Config.Mode.String(), sd.band.Config.Name, trimmed)
 	}
 
 	if err := scanner.Err(); err != nil {

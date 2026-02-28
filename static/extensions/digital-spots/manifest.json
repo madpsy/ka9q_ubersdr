@@ -2,7 +2,7 @@
   "name": "digital-spots",
   "displayName": "Digital Spots",
   "version": "1.0.0",
-  "description": "Display real-time FT8, FT4, and WSPR spots from the multi-decoder",
+  "description": "Display real-time FT8, FT4, FT2, WSPR, and JS8 spots from the multi-decoder",
   "author": "UberSDR",
   "type": "display",
   "icon": "📶",

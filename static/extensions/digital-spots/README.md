@@ -1,11 +1,11 @@
 # Digital Spots Extension
 
-Display real-time FT8, FT4, and WSPR spots from the multi-decoder.
+Display real-time FT8, FT4, FT2, WSPR, and JS8 spots from the multi-decoder.
 
 ## Features
 
 - Real-time display of decoded digital mode spots
-- Filter by mode (FT8, FT4, WSPR)
+- Filter by mode (FT8, FT4, FT2, WSPR, JS8)
 - Filter by age (5/10/15/30/60 minutes or no limit)
 - Filter by band (160m-10m)
 - Filter by callsign/grid/message

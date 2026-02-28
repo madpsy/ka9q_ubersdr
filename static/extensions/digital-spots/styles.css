@@ -333,6 +333,11 @@
     color: white;
 }
 
+.spot-mode-FT2 {
+    background: #9C27B0;
+    color: white;
+}
+
 .spot-mode-WSPR {
     background: #ffc107;
     color: black;
@@ -738,6 +743,11 @@
 
 .country-spots-modal-table .modal-mode-FT4 {
     background: #17a2b8;
+    color: white;
+}
+
+.country-spots-modal-table .modal-mode-FT2 {
+    background: #9C27B0;
     color: white;
 }
 

@@ -3,13 +3,22 @@
 
 class WhisperExtension extends DecoderExtension {
     constructor() {
-        // Call parent constructor with extension name and default settings
+        console.log('Whisper: Constructor called');
         super('whisper', {
+            displayName: 'Whisper Speech-to-Text',
+            autoTune: false,
+            requiresMode: 'usb',
+            preferredBandwidth: 2700
+        });
+        console.log('Whisper: Super constructor completed');
+
+        // Configuration
+        this.config = {
             model: 'base',
             language: 'auto',
             auto_scroll: true,
             show_timestamps: true
-        });
+        };
 
         // Transcription state
         this.transcriptionLines = [];
@@ -110,10 +119,10 @@ class WhisperExtension extends DecoderExtension {
         const languageDisplay = document.getElementById('whisper-language-display');
 
         if (modelDisplay) {
-            modelDisplay.textContent = this.settings.model || 'base';
+            modelDisplay.textContent = this.config.model || 'base';
         }
         if (languageDisplay) {
-            languageDisplay.textContent = this.settings.language || 'auto';
+            languageDisplay.textContent = this.config.language || 'auto';
         }
     }
 
@@ -140,42 +149,46 @@ class WhisperExtension extends DecoderExtension {
     }
 
     attachAudioExtension() {
-        if (!this.dxWebSocket || !this.dxWebSocket.ws) {
-            console.error('Whisper: DX WebSocket not available');
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws || dxClient.ws.readyState !== WebSocket.OPEN) {
+            console.error('Whisper: DX WebSocket not connected');
             this.updateStatus('Error: No connection', 'whisper-status-error');
             this.updateServerStatus('Not connected', 'whisper-status-error');
             return;
         }
 
+        // Setup binary message handler before attaching
+        this.setupBinaryMessageHandler();
+
         const message = {
             type: 'audio_extension_attach',
-            extension: 'whisper',
-            params: {
-                model: this.settings.model || 'base',
-                language: this.settings.language || 'auto'
-            }
+            extension_name: 'whisper',
+            params: this.config
         };
 
         console.log('Whisper: Sending attach message:', message);
-        this.dxWebSocket.ws.send(JSON.stringify(message));
+        dxClient.ws.send(JSON.stringify(message));
 
         this.updateStatus('Running', 'whisper-status-running');
         this.updateServerStatus('Connected', 'whisper-status-running');
     }
 
     detachAudioExtension() {
-        if (!this.dxWebSocket || !this.dxWebSocket.ws) {
-            console.error('Whisper: DX WebSocket not available');
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws || dxClient.ws.readyState !== WebSocket.OPEN) {
+            console.error('Whisper: DX WebSocket not connected');
             return;
         }
 
+        // Remove binary message handler before detaching
+        this.removeBinaryMessageHandler();
+
         const message = {
-            type: 'audio_extension_detach',
-            extension: 'whisper'
+            type: 'audio_extension_detach'
         };
 
-        console.log('Whisper: Sending detach message:', message);
-        this.dxWebSocket.ws.send(JSON.stringify(message));
+        console.log('Whisper: Sending detach message');
+        dxClient.ws.send(JSON.stringify(message));
 
         this.updateServerStatus('Disconnected', 'whisper-status-stopped');
     }
@@ -363,40 +376,63 @@ class WhisperExtension extends DecoderExtension {
     }
 
     setupBinaryMessageHandler() {
-        console.log('Whisper: Setting up binary message handler');
-        
-        if (!this.dxWebSocket) {
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws) {
             console.error('Whisper: DX WebSocket not available');
             return;
         }
 
-        // Store original handler if it exists
-        this.originalBinaryHandler = this.dxWebSocket.binaryMessageHandler;
+        // Store reference to original handler ONLY if we haven't already
+        if (!this.originalDXHandler) {
+            this.originalDXHandler = dxClient.ws.onmessage;
+            console.log('Whisper: Stored original DX handler');
+        }
 
-        // Set our handler
-        this.dxWebSocket.binaryMessageHandler = (data) => {
-            this.handleBinaryMessage(data);
+        // Create new handler that intercepts binary messages only
+        this.binaryMessageHandler = (event) => {
+            // Check if this is a binary message (ArrayBuffer or Blob)
+            if (event.data instanceof ArrayBuffer) {
+                // Binary message - process as Whisper data
+                if (this.isRunning) {
+                    this.handleBinaryMessage(event.data);
+                }
+                // DO NOT pass binary messages to original handler
+            } else if (event.data instanceof Blob) {
+                // Binary message as Blob - convert to ArrayBuffer first
+                event.data.arrayBuffer().then(arrayBuffer => {
+                    if (this.isRunning) {
+                        this.handleBinaryMessage(arrayBuffer);
+                    }
+                }).catch(err => {
+                    console.error('Whisper: Failed to convert Blob to ArrayBuffer:', err);
+                });
+                // DO NOT pass binary messages to original handler
+            } else {
+                // Text message - pass to original handler
+                if (this.originalDXHandler && this.originalDXHandler !== this.binaryMessageHandler) {
+                    this.originalDXHandler.call(dxClient.ws, event);
+                }
+            }
         };
 
+        dxClient.ws.onmessage = this.binaryMessageHandler;
         console.log('Whisper: Binary message handler installed');
     }
 
     removeBinaryMessageHandler() {
-        console.log('Whisper: Removing binary message handler');
-        
-        if (!this.dxWebSocket) {
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws) {
             return;
         }
 
         // Restore original handler
-        if (this.originalBinaryHandler) {
-            this.dxWebSocket.binaryMessageHandler = this.originalBinaryHandler;
-            this.originalBinaryHandler = null;
-        } else {
-            this.dxWebSocket.binaryMessageHandler = null;
+        if (this.originalDXHandler) {
+            dxClient.ws.onmessage = this.originalDXHandler;
+            this.originalDXHandler = null;
+            console.log('Whisper: Original message handler restored');
         }
 
-        console.log('Whisper: Binary message handler removed');
+        this.binaryMessageHandler = null;
     }
 
     onProcessAudio(dataArray) {

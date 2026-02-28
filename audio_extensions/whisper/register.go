@@ -23,7 +23,7 @@ func GetInfo() map[string]interface{} {
 			"server_url": map[string]interface{}{
 				"type":        "string",
 				"description": "WhisperLive WebSocket URL",
-				"default":     "ws://localhost:9090",
+				"default":     "ws://whisperlive:9090",
 			},
 			"model": map[string]interface{}{
 				"type":        "string",

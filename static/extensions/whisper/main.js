@@ -408,9 +408,15 @@ class WhisperExtension extends DecoderExtension {
                 });
                 // DO NOT pass binary messages to original handler
             } else {
-                // Text message - pass to original handler
-                if (this.originalDXHandler && this.originalDXHandler !== this.binaryMessageHandler) {
-                    this.originalDXHandler.call(dxClient.ws, event);
+                // Text message - try to parse and handle
+                try {
+                    const message = JSON.parse(event.data);
+                    this.handleTextMessage(message);
+                } catch (e) {
+                    // Not JSON or not for us, pass to original handler
+                    if (this.originalDXHandler && this.originalDXHandler !== this.binaryMessageHandler) {
+                        this.originalDXHandler.call(dxClient.ws, event);
+                    }
                 }
             }
         };
@@ -439,6 +445,20 @@ class WhisperExtension extends DecoderExtension {
         // Whisper processes audio on the backend (Go side) via the audio extension framework
         // This method is required by DecoderExtension but does nothing for Whisper
         // Audio is sent to the backend when the decoder is attached via WebSocket
+    }
+
+    handleTextMessage(message) {
+        // Handle text messages from the server
+        if (message.type === 'audio_extension_error') {
+            console.error('Whisper: Server error:', message.error);
+            this.updateStatus('Error: ' + message.error, 'whisper-status-error');
+            this.updateServerStatus('Error', 'whisper-status-error');
+            this.isRunning = false;
+            this.updateButtonStates();
+        } else if (message.type === 'audio_extension_attached') {
+            console.log('Whisper: Successfully attached to server');
+            this.updateServerStatus('Connected', 'whisper-status-running');
+        }
     }
 
     onEnable() {

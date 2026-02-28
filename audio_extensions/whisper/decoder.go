@@ -69,6 +69,8 @@ func (d *WhisperDecoder) Start(audioChan <-chan AudioSample, resultChan chan<- [
 
 	// Connect to WhisperLive WebSocket
 	if err := d.connectWebSocket(); err != nil {
+		log.Printf("[Whisper] ERROR: Failed to connect to WhisperLive server at %s: %v", d.config.ServerURL, err)
+		log.Printf("[Whisper] Make sure WhisperLive server is running on %s", d.config.ServerURL)
 		return fmt.Errorf("failed to connect to WhisperLive: %w", err)
 	}
 

@@ -296,8 +296,15 @@ class WhisperExtension extends DecoderExtension {
     }
 
     handleTranscriptionText(view, data) {
-        // Extract UTF-8 text from bytes 1 onwards
-        const textBytes = new Uint8Array(data, 1);
+        // Binary protocol: [type:1][timestamp:8][text_length:4][text:N]
+        // Extract timestamp (bytes 1-8, big-endian)
+        const timestampNano = view.getBigUint64(1, false); // false = big-endian
+
+        // Extract text length (bytes 9-12, big-endian)
+        const textLength = view.getUint32(9, false); // false = big-endian
+
+        // Extract UTF-8 text (bytes 13 onwards)
+        const textBytes = new Uint8Array(data, 13, textLength);
         const decoder = new TextDecoder('utf-8');
         const text = decoder.decode(textBytes).trim();
 
@@ -307,12 +314,36 @@ class WhisperExtension extends DecoderExtension {
 
         console.log('Whisper: Transcription:', text);
 
-        // Add to transcription with timestamp
+        // Format timestamp for display
         const timestamp = new Date().toLocaleTimeString();
-        this.transcriptionLines.push({
-            text: text,
-            timestamp: timestamp
-        });
+
+        // WhisperLive sends incremental updates - each message contains progressively more text
+        // Heuristic: If new text is shorter or doesn't start with previous text, it's a new segment
+        if (this.transcriptionLines.length > 0) {
+            const lastLine = this.transcriptionLines[this.transcriptionLines.length - 1];
+            const lastText = lastLine.text;
+
+            // Check if this is an update to the current segment or a new segment
+            if (text.length < lastText.length || !text.startsWith(lastText.substring(0, Math.min(20, lastText.length)))) {
+                // New segment - add a new line
+                this.transcriptionLines.push({
+                    text: text,
+                    timestamp: timestamp
+                });
+            } else {
+                // Update to current segment - replace the last line
+                this.transcriptionLines[this.transcriptionLines.length - 1] = {
+                    text: text,
+                    timestamp: timestamp
+                };
+            }
+        } else {
+            // First transcription
+            this.transcriptionLines.push({
+                text: text,
+                timestamp: timestamp
+            });
+        }
 
         // Render updated transcription
         this.renderTranscription();

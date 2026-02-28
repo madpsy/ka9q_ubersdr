@@ -13,7 +13,7 @@ decoder:
   jt9_path: "/usr/bin/jt9"              # Path to jt9 binary (for FT8/FT4)
   wsprd_path: "/usr/bin/wsprd"          # Path to wsprd binary (for WSPR)
   js8_path: "/usr/bin/js8"              # Path to js8 binary (for JS8)
-  ft2_path: "/usr/local/bin/jt9_decoder" # Path to jt9_decoder binary (for FT2)
+  ft2_path: "/usr/local/bin/jt9_decode" # Path to jt9_decoder binary (for FT2)
 
   # Keep WAV files after decoding (useful for debugging)
   keep_wav: false
@@ -90,6 +90,7 @@ decoder:
   wsjtx_udp_enabled_modes:              # Modes to broadcast (mode-selective, not band-selective)
     FT8: true                           # Broadcast FT8 decodes from all bands
     FT4: false                          # Don't broadcast FT4 decodes
+    FT2: false                          # Don't broadcast FT2 decodes
     WSPR: false                         # Don't broadcast WSPR decodes
   # Notes:
   # - Mode-selective: Enable/disable by mode (FT8, FT4, WSPR), not by individual band

@@ -110,9 +110,9 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_decoder_spots
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_decoder_spots",
-			mcp.WithDescription("Get recent individual digital mode spots (FT8, FT4, WSPR, JS8) decoded from the radio. Use this for RAW spot data with callsigns, locators, SNR, frequencies, and messages. For questions about specific callsigns, locators, or individual decodes, use this tool. For aggregated statistics by country/band/time, use get_decoder_analytics or get_decoder_analytics_hourly instead."),
+			mcp.WithDescription("Get recent individual digital mode spots (FT8, FT4, WSPR, JS8, FT2) decoded from the radio. Use this for RAW spot data with callsigns, locators, SNR, frequencies, and messages. For questions about specific callsigns, locators, or individual decodes, use this tool. For aggregated statistics by country/band/time, use get_decoder_analytics or get_decoder_analytics_hourly instead."),
 			mcp.WithString("mode",
-				mcp.Description("Mode filter: 'FT8', 'FT4', 'WSPR', 'JS8', or empty for all modes"),
+				mcp.Description("Mode filter: 'FT8', 'FT4', 'WSPR', 'JS8', 'FT2', or empty for all modes"),
 			),
 			mcp.WithNumber("hours",
 				mcp.Description("Hours of history to retrieve (default: 1, max: 48)"),
@@ -265,13 +265,13 @@ func (m *MCPServer) HandleMCP(w http.ResponseWriter, r *http.Request) {
 			n, err := r.Body.Read(body)
 			if err == nil || err.Error() == "EOF" {
 				body = body[:n]
-				
+
 				// Parse JSON to extract method and params
 				var reqData map[string]interface{}
 				if err := json.Unmarshal(body, &reqData); err == nil {
 					method, _ := reqData["method"].(string)
 					id := reqData["id"]
-					
+
 					// Extract params if present
 					params := make(map[string]interface{})
 					if paramsData, ok := reqData["params"].(map[string]interface{}); ok {
@@ -289,10 +289,10 @@ func (m *MCPServer) HandleMCP(w http.ResponseWriter, r *http.Request) {
 							params = paramsData
 						}
 					}
-					
+
 					globalMCPRequestLogger.LogRequest(method, params, id)
 				}
-				
+
 				// Restore body for the actual handler
 				r.Body = io.NopCloser(bytes.NewBuffer(body))
 			}

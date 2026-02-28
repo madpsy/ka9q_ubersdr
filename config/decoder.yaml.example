@@ -10,9 +10,10 @@ decoder:
   data_dir: "/dev/shm"
 
   # Decoder binary paths (absolute paths recommended)
-  jt9_path: "/usr/bin/jt9"      # Path to jt9 binary (for FT8/FT4)
-  wsprd_path: "/usr/bin/wsprd"  # Path to wsprd binary (for WSPR)
-  js8_path: "/usr/bin/js8"      # Path to js8 binary (for >)
+  jt9_path: "/usr/bin/jt9"              # Path to jt9 binary (for FT8/FT4)
+  wsprd_path: "/usr/bin/wsprd"          # Path to wsprd binary (for WSPR)
+  js8_path: "/usr/bin/js8"              # Path to js8 binary (for JS8)
+  ft2_path: "/usr/local/bin/jt9_decoder" # Path to jt9_decoder binary (for FT2)
 
   # Keep WAV files after decoding (useful for debugging)
   keep_wav: false
@@ -34,7 +35,7 @@ decoder:
 
   # Reporting services
   pskreporter_enabled: false              # Enable PSKReporter spot reporting
-  pskreporter_require_locator: false      # Require grid locator for digital spots (FT8/FT4/JS8) to PSKReporter
+  pskreporter_require_locator: false      # Require grid locator for digital spots (FT8/FT4/JS8/FT2) to PSKReporter
                                           # false (default): Send all digital spots with or without locator
                                           # true: Only send digital spots that include a grid locator
                                           # Note: WSPR always requires locator regardless of this setting
@@ -274,6 +275,16 @@ decoder:
       enabled: false
       depth: 2
 
+    # ========================================
+    # FT2 bands
+    # FT2 is a streaming mode (continuous audio feed)
+    # ========================================
+    - name: "20m-ft2"
+      mode: "FT2"
+      frequency: 14077000  # 14.077 MHz
+      enabled: false
+      depth: 2             # Decode depth 1-3 (default: 2)
+
     - name: "60m-alt-wspr"
       mode: "WSPR"
       frequency: 5364700
@@ -299,6 +310,7 @@ decoder:
 #    - wsprd (for WSPR)
 #    - jt9 (for FT8/FT4, from WSJT-X package)
 #    - js8 (for JS8, from JS8Call package)
+#    - jt9_decoder (for FT2, streaming decoder)
 #
 # 2. Each enabled band creates a dedicated audio channel
 #    consuming ~12 kHz bandwidth
@@ -319,9 +331,11 @@ decoder:
 #    - FT4: 7.5s cycle, 4.48s transmission (batch mode)
 #    - WSPR: 120s cycle, 114s transmission (batch mode)
 #    - JS8: Continuous streaming (no fixed cycles)
+#    - FT2: Continuous streaming (no fixed cycles)
 #
-# 7. JS8 mode differences:
+# 7. Streaming mode differences (JS8, FT2):
 #    - Streaming mode: audio fed continuously to decoder via stdin
 #    - No WAV file buffering (more efficient)
 #    - Real-time decodes (no cycle boundaries)
 #    - Decoder runs as persistent process (not spawned per cycle)
+#    - FT2 uses FT8-format output, JS8 uses custom format

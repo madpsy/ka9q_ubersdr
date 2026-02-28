@@ -82,7 +82,7 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 	}
 
 	stats := NewDecoderStats()
-	
+
 	md := &MultiDecoder{
 		config:            config,
 		radiod:            radiod,
@@ -366,13 +366,15 @@ func (md *MultiDecoder) bandMonitorLoop(band *DecoderBand) {
 	}
 }
 
-// streamingMonitorLoop handles streaming decoders (JS8, etc.)
+// streamingMonitorLoop handles streaming decoders (JS8, FT2, etc.)
 func (md *MultiDecoder) streamingMonitorLoop(band *DecoderBand) {
 	// Get decoder binary path based on mode
 	var binaryPath string
 	switch band.Config.Mode {
 	case ModeJS8:
 		binaryPath = md.config.JS8Path
+	case ModeFT2:
+		binaryPath = md.config.FT2Path
 	default:
 		log.Printf("Error: Unknown streaming mode %s", band.Config.Mode)
 		return
@@ -433,14 +435,14 @@ func (md *MultiDecoder) streamingMonitorLoop(band *DecoderBand) {
 
 			// Submit to PSKReporter
 			// WSPR always requires locator
-			// FT8/FT4/JS8 require locator only if pskreporter_require_locator is true
+			// FT8/FT4/JS8/FT2 require locator only if pskreporter_require_locator is true
 			if md.pskReporter != nil {
 				shouldSubmit := false
 				if decode.Mode == "WSPR" {
 					// WSPR always requires locator
 					shouldSubmit = decode.Locator != ""
 				} else {
-					// FT8/FT4/JS8: check config option
+					// FT8/FT4/JS8/FT2: check config option
 					if md.config.PSKReporterRequireLocator {
 						shouldSubmit = decode.Locator != ""
 					} else {
@@ -698,14 +700,14 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 
 				// Submit to PSKReporter
 				// WSPR always requires locator
-				// FT8/FT4/JS8 require locator only if pskreporter_require_locator is true
+				// FT8/FT4/JS8/FT2 require locator only if pskreporter_require_locator is true
 				if md.pskReporter != nil {
 					shouldSubmit := false
 					if decode.Mode == "WSPR" {
 						// WSPR always requires locator
 						shouldSubmit = decode.Locator != ""
 					} else {
-						// FT8/FT4/JS8: check config option
+						// FT8/FT4/JS8/FT2: check config option
 						if md.config.PSKReporterRequireLocator {
 							shouldSubmit = decode.Locator != ""
 						} else {

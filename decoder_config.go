@@ -13,6 +13,7 @@ const (
 	ModeFT8
 	ModeFT4
 	ModeJS8
+	ModeFT2
 )
 
 // String returns the string representation of the decoder mode
@@ -26,6 +27,8 @@ func (m DecoderMode) String() string {
 		return "FT4"
 	case ModeJS8:
 		return "JS8"
+	case ModeFT2:
+		return "FT2"
 	default:
 		return "Unknown"
 	}
@@ -63,6 +66,8 @@ func ModeFromString(s string) (DecoderMode, error) {
 		return ModeFT4, nil
 	case "JS8", "js8":
 		return ModeJS8, nil
+	case "FT2", "ft2":
+		return ModeFT2, nil
 	default:
 		return 0, fmt.Errorf("unknown decoder mode: %s", s)
 	}
@@ -117,6 +122,15 @@ func GetModeInfo(mode DecoderMode) ModeInfo {
 			Preset:           "usb",
 			IsStreaming:      true,
 		}
+	case ModeFT2:
+		return ModeInfo{
+			CycleTime:        0, // No fixed cycles for streaming mode
+			TransmissionTime: 0,
+			DecoderCommand:   "jt9_decoder",
+			DecoderArgs:      []string{"-m", "FT2", "-j", "/usr/bin/jt9", "-s", "--stdin", "-d", "{depth}", "-f", "{freq}"},
+			Preset:           "usb",
+			IsStreaming:      true,
+		}
 	default:
 		return ModeInfo{}
 	}
@@ -158,6 +172,7 @@ type DecoderConfig struct {
 	JT9Path   string `yaml:"jt9_path"`   // Path to jt9 binary (for FT8/FT4)
 	WSPRDPath string `yaml:"wsprd_path"` // Path to wsprd binary (for WSPR)
 	JS8Path   string `yaml:"js8_path"`   // Path to js8 binary (for JS8)
+	FT2Path   string `yaml:"ft2_path"`   // Path to jt9_decoder binary (for FT2)
 
 	// Recording options
 	IncludeDeadTime    bool `yaml:"include_dead_time"`    // Record entire cycle including dead time
@@ -170,7 +185,7 @@ type DecoderConfig struct {
 
 	// Reporting
 	PSKReporterEnabled        bool   `yaml:"pskreporter_enabled"`
-	PSKReporterRequireLocator bool   `yaml:"pskreporter_require_locator"` // Require locator for digital spots (FT8/FT4/JS8) to PSKReporter (default: false, WSPR always requires locator)
+	PSKReporterRequireLocator bool   `yaml:"pskreporter_require_locator"` // Require locator for digital spots (FT8/FT4/JS8/FT2) to PSKReporter (default: false, WSPR always requires locator)
 	WSPRNetEnabled            bool   `yaml:"wsprnet_enabled"`
 	WSPRNetCallsign           string `yaml:"wsprnet_callsign"` // Optional: if set, use this callsign for WSPRNet instead of receiver_callsign
 
@@ -217,6 +232,7 @@ func (dc *DecoderConfig) Validate() error {
 	needsJT9 := false
 	needsWSPRD := false
 	needsJS8 := false
+	needsFT2 := false
 	for _, band := range dc.Bands {
 		if !band.Enabled {
 			continue
@@ -230,6 +246,9 @@ func (dc *DecoderConfig) Validate() error {
 		if band.Mode == ModeJS8 {
 			needsJS8 = true
 		}
+		if band.Mode == ModeFT2 {
+			needsFT2 = true
+		}
 	}
 
 	// Validate binary paths for needed decoders
@@ -241,6 +260,9 @@ func (dc *DecoderConfig) Validate() error {
 	}
 	if needsJS8 && dc.JS8Path == "" {
 		return fmt.Errorf("js8_path required for JS8 decoding")
+	}
+	if needsFT2 && dc.FT2Path == "" {
+		return fmt.Errorf("ft2_path required for FT2 decoding")
 	}
 
 	// Validate receiver info if reporting is enabled
@@ -268,10 +290,10 @@ func (dc *DecoderConfig) Validate() error {
 				if band.Depth < 1 {
 					return fmt.Errorf("band %s: WSPR cycles must be positive (got %d)", band.Name, band.Depth)
 				}
-			} else if band.Mode == ModeJS8 {
-				// JS8 uses depth 1-3 (same as FT8/FT4)
+			} else if band.Mode == ModeJS8 || band.Mode == ModeFT2 {
+				// JS8/FT2 use depth 1-3 (same as FT8/FT4)
 				if band.Depth < 1 || band.Depth > 3 {
-					return fmt.Errorf("band %s: JS8 depth must be between 1 and 3 (got %d)", band.Name, band.Depth)
+					return fmt.Errorf("band %s: %s depth must be between 1 and 3 (got %d)", band.Name, band.Mode.String(), band.Depth)
 				}
 			} else {
 				// FT8/FT4 use depth 1-3

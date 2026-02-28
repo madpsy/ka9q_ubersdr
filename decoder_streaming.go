@@ -25,9 +25,9 @@ import (
 //
 // Example usage:
 //
-//   // Create streaming decoder for JS8 mode
+//   // Create streaming decoder for JS8 or FT2 mode
 //   decoder, err := NewStreamingDecoder(
-//       "/usr/local/bin/js8",  // Path to decoder binary
+//       "/usr/local/bin/js8",  // Path to decoder binary (or jt9_decoder for FT2)
 //       band,                   // DecoderBand configuration
 //       config,                 // DecoderConfig
 //       ctyDatabase,            // Optional CTY database for enrichment
@@ -49,9 +49,11 @@ import (
 //       log.Printf("Decoded: %s from %s (SNR: %d dB)", decode.Message, decode.Callsign, decode.SNR)
 //   }
 //
-// Supported output format (JS8-style):
-//   TIME SNR DT FREQ MODE DIAL_FREQ CALLSIGN GRID MESSAGE
-//   17:17:45 -27 -0.5 1502 A 7079502 MM7MMU <> MM7MMU: DL4VCW HEARING
+// Supported output formats:
+//   JS8-style: TIME SNR DT FREQ MODE DIAL_FREQ CALLSIGN GRID MESSAGE
+//              17:17:45 -27 -0.5 1502 A 7079502 MM7MMU <> MM7MMU: DL4VCW HEARING
+//   FT8-style (FT2): HHMMSS SNR DT FREQ [~] MESSAGE
+//                    203530   2  0.1 2535 ~  EI3CTB RT6C -16
 
 // StreamingDecoder manages a persistent decoder process with continuous audio input
 type StreamingDecoder struct {
@@ -76,11 +78,25 @@ type StreamingDecoder struct {
 // config: decoder configuration
 // ctyDatabase: optional CTY database for callsign enrichment
 func NewStreamingDecoder(binaryPath string, band *DecoderBand, config *DecoderConfig, ctyDatabase *CTYDatabase) (*StreamingDecoder, error) {
-	// Build command arguments
-	args := []string{
-		"-f", fmt.Sprintf("%d", band.Config.Frequency), // Dial frequency in Hz
-		"--stdin",                                  // Read audio from stdin
-		"-d", fmt.Sprintf("%d", band.Config.Depth), // Decode depth
+	// Build command arguments based on mode
+	var args []string
+	if band.Config.Mode == ModeFT2 {
+		// FT2 uses jt9_decoder with specific arguments
+		args = []string{
+			"-m", "FT2",
+			"-j", "/usr/bin/jt9",
+			"-s",
+			"--stdin",
+			"-d", fmt.Sprintf("%d", band.Config.Depth),
+			"-f", fmt.Sprintf("%d", band.Config.Frequency),
+		}
+	} else {
+		// JS8 and other streaming modes
+		args = []string{
+			"-f", fmt.Sprintf("%d", band.Config.Frequency), // Dial frequency in Hz
+			"--stdin",                                  // Read audio from stdin
+			"-d", fmt.Sprintf("%d", band.Config.Depth), // Decode depth
+		}
 	}
 
 	cmd := exec.Command(binaryPath, args...)
@@ -180,11 +196,25 @@ func (sd *StreamingDecoder) restart() error {
 	sd.mu.Lock()
 	defer sd.mu.Unlock()
 
-	// Build command arguments
-	args := []string{
-		"-f", fmt.Sprintf("%d", sd.band.Config.Frequency), // Dial frequency in Hz
-		"--stdin",                                     // Read audio from stdin
-		"-d", fmt.Sprintf("%d", sd.band.Config.Depth), // Decode depth
+	// Build command arguments based on mode
+	var args []string
+	if sd.band.Config.Mode == ModeFT2 {
+		// FT2 uses jt9_decoder with specific arguments
+		args = []string{
+			"-m", "FT2",
+			"-j", "/usr/bin/jt9",
+			"-s",
+			"--stdin",
+			"-d", fmt.Sprintf("%d", sd.band.Config.Depth),
+			"-f", fmt.Sprintf("%d", sd.band.Config.Frequency),
+		}
+	} else {
+		// JS8 and other streaming modes
+		args = []string{
+			"-f", fmt.Sprintf("%d", sd.band.Config.Frequency), // Dial frequency in Hz
+			"--stdin",                                     // Read audio from stdin
+			"-d", fmt.Sprintf("%d", sd.band.Config.Depth), // Decode depth
+		}
 	}
 
 	cmd := exec.Command(sd.binaryPath, args...)
@@ -265,13 +295,23 @@ func (sd *StreamingDecoder) readStdout() {
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// Always log stdout from JS8 to help with debugging
-		log.Printf("JS8 stdout [%s]: %s", sd.band.Config.Name, line)
+		// Log output for debugging
+		log.Printf("%s stdout [%s]: %s", sd.band.Config.Mode.String(), sd.band.Config.Name, line)
 
-		// Parse the output line
-		decode, err := ParseStreamingDecoderLine(line, sd.band.Config.Frequency, sd.config.ReceiverLocator, sd.ctyDatabase)
+		// Parse the output line based on mode
+		var decode *DecodeInfo
+		var err error
+
+		if sd.band.Config.Mode == ModeFT2 {
+			// FT2 uses FT8 format output
+			decode, err = ParseFT8Line(line, sd.band.Config.Frequency, sd.band.Config.Mode)
+		} else {
+			// JS8 uses its own format
+			decode, err = ParseStreamingDecoderLine(line, sd.band.Config.Frequency, sd.config.ReceiverLocator, sd.ctyDatabase)
+		}
+
 		if err != nil {
-			log.Printf("JS8 parse error [%s]: %v (line: %s)", sd.band.Config.Name, err, line)
+			log.Printf("%s parse error [%s]: %v (line: %s)", sd.band.Config.Mode.String(), sd.band.Config.Name, err, line)
 			continue
 		}
 
@@ -317,12 +357,12 @@ func (sd *StreamingDecoder) readStderr() {
 		line := scanner.Text()
 		// Log all stderr output to stdout (same as other logs)
 		if strings.TrimSpace(line) != "" {
-			log.Printf("JS8 [%s]: %s", sd.band.Config.Name, line)
+			log.Printf("%s [%s]: %s", sd.band.Config.Mode.String(), sd.band.Config.Name, line)
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		log.Printf("Error reading JS8 stderr for %s: %v", sd.band.Config.Name, err)
+		log.Printf("Error reading %s stderr for %s: %v", sd.band.Config.Mode.String(), sd.band.Config.Name, err)
 	}
 }
 

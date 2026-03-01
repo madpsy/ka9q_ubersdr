@@ -382,19 +382,32 @@ class WhisperExtension extends DecoderExtension {
     }
 
     processSegments(segments) {
-        // Segments are already deduplicated by the Go backend (decoder.go processSegments)
-        // which follows WhisperLive client.py pattern to prevent duplicates.
-        // The backend only sends NEW segments, so we can safely add them directly.
+        // Following WhisperLive client.py process_segments() method (lines 144-158)
+        // Server sends last N segments, so we need to deduplicate
+        const text = [];
+
         for (let i = 0; i < segments.length; i++) {
             const seg = segments[i];
 
-            // Last segment that's not completed becomes lastSegment
-            if (i === segments.length - 1 && !seg.completed) {
-                this.lastSegment = seg;
-            }
-            // Completed segments are added to transcript
-            else if (seg.completed) {
-                this.transcript.push(seg);
+            // Match official client.py line 148: only process if text is different from previous
+            // This prevents re-processing duplicate segments when server re-sends last N
+            if (text.length === 0 || text[text.length - 1] !== seg.text) {
+                text.push(seg.text.trim());
+
+                // Last segment that's not completed becomes lastSegment
+                if (i === segments.length - 1 && !seg.completed) {
+                    this.lastSegment = seg;
+                }
+                // Completed segments are added to transcript if not already there
+                else if (seg.completed) {
+                    // Match official client.py line 157: only add if timestamp is after last segment
+                    const shouldAdd = this.transcript.length === 0 ||
+                        parseFloat(seg.start) >= parseFloat(this.transcript[this.transcript.length - 1].end);
+
+                    if (shouldAdd) {
+                        this.transcript.push(seg);
+                    }
+                }
             }
         }
     }

@@ -360,27 +360,22 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 
 			// Handle transcription segments
 			if segments, ok := result["segments"].([]interface{}); ok && len(segments) > 0 {
-				// Process segments following WhisperLive client.py pattern (lines 144-158)
-				// This deduplicates segments on the server side before sending to client
-				filteredSegments := d.processSegments(segments)
+				// Send segments as JSON to frontend
+				// The frontend will handle deduplication following WhisperLive client.py pattern
+				segmentsJSON, err := json.Marshal(segments)
+				if err != nil {
+					log.Printf("[Whisper] Failed to marshal segments: %v", err)
+					continue
+				}
 
-				// Only send if we have new segments to send
-				if len(filteredSegments) > 0 {
-					segmentsJSON, err := json.Marshal(filteredSegments)
-					if err != nil {
-						log.Printf("[Whisper] Failed to marshal segments: %v", err)
-						continue
-					}
+				// Encode segments for client
+				encoded := d.encodeSegments(segmentsJSON, time.Now().UnixNano())
 
-					// Encode segments for client
-					encoded := d.encodeSegments(segmentsJSON, time.Now().UnixNano())
-
-					// Send to result channel (non-blocking)
-					select {
-					case resultChan <- encoded:
-					default:
-						log.Printf("[Whisper] Result channel full, dropping segments")
-					}
+				// Send to result channel (non-blocking)
+				select {
+				case resultChan <- encoded:
+				default:
+					log.Printf("[Whisper] Result channel full, dropping segments")
 				}
 			}
 		}
@@ -407,17 +402,21 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 			continue
 		}
 
+		completed, _ := seg["completed"].(bool)
+
+		// Last segment that's not completed - ALWAYS send it for real-time updates
+		if i == len(segments)-1 && !completed {
+			d.lastSegment = seg
+			filteredSegments = append(filteredSegments, seg)
+			continue
+		}
+
+		// For completed segments, apply deduplication logic
 		// Match official client.py line 148: only process if text is different from previous
-		// This is the KEY deduplication check
 		if len(text) == 0 || text[len(text)-1] != segText {
 			text = append(text, segText)
 
-			// Last segment that's not completed becomes lastSegment
-			completed, _ := seg["completed"].(bool)
-			if i == len(segments)-1 && !completed {
-				d.lastSegment = seg
-				filteredSegments = append(filteredSegments, seg)
-			} else if completed {
+			if completed {
 				// Match official client.py line 157: only add if timestamp is after last segment
 				shouldAdd := len(d.transcript) == 0
 

@@ -18,22 +18,14 @@ import (
  * Connects to WhisperLive server via WebSocket for real-time transcription
  */
 
-// WhisperConfig contains decoder configuration
+// WhisperConfig is defined in the main package (config.go)
+// This type alias allows the whisper package to use it
 type WhisperConfig struct {
-	ServerURL      string // WebSocket URL (e.g., "ws://localhost:9090")
-	Model          string // "tiny", "base", "small", "medium", "large", "tiny.en", "base.en", "small.en", "medium.en", "large.en"
-	Language       string // "en", "es", "auto", etc.
-	SendIntervalMs int    // How often to send audio chunks (milliseconds)
-}
-
-// DefaultWhisperConfig returns default configuration
-func DefaultWhisperConfig() WhisperConfig {
-	return WhisperConfig{
-		ServerURL:      "ws://whisperlive:9090",
-		Model:          "medium.en",
-		Language:       "en",
-		SendIntervalMs: 100, // Send audio every 100ms
-	}
+	Enabled        bool
+	ServerURL      string
+	Model          string
+	Language       string
+	SendIntervalMs int
 }
 
 // WhisperDecoder handles streaming audio to WhisperLive

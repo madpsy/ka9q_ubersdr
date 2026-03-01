@@ -1431,3 +1431,55 @@ mcp:
   #   - Automated band condition monitoring
   #   - Integration with Claude, ChatGPT, or other AI assistants
   #   - Programmatic SDR data access
+
+# ==============================================================================
+# Whisper Speech-to-Text Configuration
+# ==============================================================================
+# Real-time speech transcription using OpenAI Whisper via WhisperLive server
+# Provides live transcription of audio channels in the web interface
+whisper:
+  # Enable Whisper speech-to-text extension (default: false)
+  # When enabled, users can transcribe audio from any channel
+  # Requires WhisperLive server to be running (see docker-compose.yml)
+  enabled: false
+
+  # WhisperLive server WebSocket URL
+  # Default: "ws://whisperlive:9090" (Docker container name)
+  # For external server: "ws://your-server:9090"
+  # The server must be accessible from the UberSDR container
+  server_url: "ws://whisperlive:9090"
+
+  # Whisper model to use
+  # Available models:
+  #   Multilingual: tiny, base, small, medium, large
+  #   English-only: tiny.en, base.en, small.en, medium.en, large.en
+  #
+  # Model comparison:
+  #   tiny     - 39 MB  - Fastest, least accurate
+  #   base     - 74 MB  - Fast, basic accuracy
+  #   small    - 244 MB - Good balance (recommended for general use)
+  #   medium   - 769 MB - Better accuracy, slower (recommended for English)
+  #   large    - 2.9 GB - Best accuracy, slowest (GPU recommended)
+  #
+  # English-only models (.en) are optimized for English and typically
+  # perform better than multilingual models for English content
+  #
+  # Default: "small" (good balance of speed and accuracy)
+  # Recommended for English: "medium.en" or "small.en"
+  model: "small"
+
+  # Language code for transcription
+  # Use "en" for English, "es" for Spanish, "auto" for auto-detection, etc.
+  # Must match the model type (use "en" with .en models)
+  # See: https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes
+  # Default: "en"
+  language: "en"
+
+  # Audio send interval in milliseconds
+  # How often to send audio chunks to WhisperLive server
+  # Lower values = more responsive but more network traffic
+  # Higher values = less responsive but lower overhead
+  # Recommended: 100-200ms
+  # Default: 100
+  send_interval_ms: 100
+

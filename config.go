@@ -29,6 +29,7 @@ type Config struct {
 	GeoIP              GeoIPConfig              `yaml:"geoip"`
 	SSHProxy           SSHProxyConfig           `yaml:"ssh_proxy"`
 	MCP                MCPConfig                `yaml:"mcp"`
+	Whisper            WhisperConfig            `yaml:"whisper"`
 	Bookmarks          []Bookmark               `yaml:"bookmarks"`
 	Bands              []Band                   `yaml:"bands"`
 	Extensions         []string                 `yaml:"extensions"`
@@ -330,6 +331,15 @@ type SSHProxyConfig struct {
 // MCPConfig contains Model Context Protocol server settings
 type MCPConfig struct {
 	Enabled bool `yaml:"enabled"` // Enable/disable MCP endpoint
+}
+
+// WhisperConfig contains Whisper speech-to-text settings
+type WhisperConfig struct {
+	Enabled        bool   `yaml:"enabled"`          // Enable/disable Whisper extension
+	ServerURL      string `yaml:"server_url"`       // WhisperLive WebSocket URL
+	Model          string `yaml:"model"`            // Whisper model (tiny, base, small, medium, large, or .en variants)
+	Language       string `yaml:"language"`         // Language code (en, es, auto, etc.)
+	SendIntervalMs int    `yaml:"send_interval_ms"` // Audio send interval in milliseconds
 }
 
 // LoadConfig loads configuration from a YAML file
@@ -1271,4 +1281,14 @@ func (sc *SpectrumConfig) validateFrequencyGainRanges() {
 	} else if zeroGainCount > 0 {
 		fmt.Printf("All %d frequency-dependent gain ranges have 0 dB gain - bypassing per-user processing for performance\n", zeroGainCount)
 	}
+}
+
+// GetWhisperConfig returns the Whisper configuration
+func (c *Config) GetWhisperConfig() WhisperConfig {
+	return c.Whisper
+}
+
+// IsWhisperEnabled returns whether the Whisper extension is enabled
+func (c *Config) IsWhisperEnabled() bool {
+	return c.Whisper.Enabled
 }

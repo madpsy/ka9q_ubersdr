@@ -5,6 +5,18 @@ import (
 	"log"
 )
 
+// ConfigProvider is set by main package to provide access to configuration
+type ConfigProvider struct {
+	Enabled        bool
+	ServerURL      string
+	Model          string
+	Language       string
+	SendIntervalMs int
+}
+
+// GlobalConfigProvider is set by main package
+var GlobalConfigProvider *ConfigProvider
+
 /*
  * Whisper Speech-to-Text Extension
  * Streams audio to WhisperLive server for real-time transcription
@@ -41,6 +53,11 @@ type WhisperExtension struct {
 
 // NewWhisperExtension creates a new Whisper audio extension
 func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (*WhisperExtension, error) {
+	// Check if extension is enabled
+	if GlobalConfigProvider != nil && !GlobalConfigProvider.Enabled {
+		return nil, fmt.Errorf("whisper extension is disabled in configuration (set whisper.enabled: true in config.yaml)")
+	}
+
 	// Validate audio parameters
 	if audioParams.Channels != 1 {
 		return nil, fmt.Errorf("whisper requires mono audio (got %d channels)", audioParams.Channels)
@@ -49,15 +66,28 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 		return nil, fmt.Errorf("whisper requires 16-bit audio (got %d bits)", audioParams.BitsPerSample)
 	}
 
-	// Start with default config
-	// All parameters are server-side only for security and resource management
-	config := DefaultWhisperConfig()
-
-	// No user-configurable parameters - all settings are server-side defaults
-	// This prevents users from:
-	// - Changing the server URL (security)
-	// - Selecting expensive models (resource management)
-	// - Changing language settings (consistency)
+	// Get config from global config or use defaults
+	var config WhisperConfig
+	if GlobalConfigProvider != nil {
+		config = WhisperConfig{
+			Enabled:        GlobalConfigProvider.Enabled,
+			ServerURL:      GlobalConfigProvider.ServerURL,
+			Model:          GlobalConfigProvider.Model,
+			Language:       GlobalConfigProvider.Language,
+			SendIntervalMs: GlobalConfigProvider.SendIntervalMs,
+		}
+		log.Printf("[Whisper Extension] Using configuration from config.yaml")
+	} else {
+		// Default configuration if global config not available
+		config = WhisperConfig{
+			Enabled:        true, // Assume enabled if no config
+			ServerURL:      "ws://whisperlive:9090",
+			Model:          "small",
+			Language:       "en",
+			SendIntervalMs: 100,
+		}
+		log.Printf("[Whisper Extension] Using default configuration (config not available)")
+	}
 
 	// Create decoder
 	decoder := NewWhisperDecoder(audioParams.SampleRate, config)

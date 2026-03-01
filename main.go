@@ -1251,6 +1251,14 @@ func main() {
 	log.Printf("Registered audio extension: morse v%s", morseInfo["version"].(string))
 
 	// Register Whisper extension
+	// Set global config for whisper package to access configuration
+	whisper.GlobalConfigProvider = &whisper.ConfigProvider{
+		Enabled:        config.Whisper.Enabled,
+		ServerURL:      config.Whisper.ServerURL,
+		Model:          config.Whisper.Model,
+		Language:       config.Whisper.Language,
+		SendIntervalMs: config.Whisper.SendIntervalMs,
+	}
 	whisperInfo := whisper.GetInfo()
 
 	whisperFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {

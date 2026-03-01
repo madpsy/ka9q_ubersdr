@@ -170,8 +170,9 @@ func (vch *VoiceCommandHandler) handleStart(sessionID string, conn *websocket.Co
 	// Store decoder
 	vch.whisperDecoders[sessionID] = decoder
 
-	// Start result processor
-	go vch.processResults(sessionID, conn, resultChan)
+	// Start result processor (streaming mode doesn't need completion signal)
+	completedChan := make(chan bool, 1)
+	go vch.processResultsWithCompletion(sessionID, conn, resultChan, completedChan)
 
 	// Store audio channel for later use
 	vch.audioChanMu.Lock()
@@ -423,8 +424,11 @@ func (vch *VoiceCommandHandler) handleCompleteAudio(sessionID string, conn *webs
 
 	log.Printf("[VoiceCommands] Started decoder for session %s", sessionID)
 
+	// Create channel to signal when we receive completed transcription
+	completedChan := make(chan bool, 1)
+
 	// Process results in background
-	go vch.processResults(sessionID, conn, resultChan)
+	go vch.processResultsWithCompletion(sessionID, conn, resultChan, completedChan)
 
 	// Send all audio at once through the channel
 	// Convert byte array to int16 samples
@@ -445,13 +449,32 @@ func (vch *VoiceCommandHandler) handleCompleteAudio(sessionID string, conn *webs
 		GPSTimeNs:    time.Now().UnixNano(),
 	}
 
-	log.Printf("[VoiceCommands] Audio sent to decoder, waiting for transcription...")
+	log.Printf("[VoiceCommands] Audio sent to decoder channel, waiting for ticker to send to WhisperLive...")
+
+	// CRITICAL: Wait for the ticker in sendAudioLoop to fire and send the buffered audio
+	// The sendAudioLoop uses a ticker (SendIntervalMs, typically 100ms) to send accumulated audio
+	// If we close the channel immediately, the goroutine exits before the ticker fires
+	// and the audio never gets sent to WhisperLive
+	tickerWaitTime := time.Duration(vch.config.SendIntervalMs)*time.Millisecond + 50*time.Millisecond
+	time.Sleep(tickerWaitTime)
+
+	log.Printf("[VoiceCommands] Waited %v for audio transmission, now closing channel...", tickerWaitTime)
 
 	// Close audio channel to signal end of audio
 	close(audioChan)
 
-	// Wait a bit for processing to complete
-	time.Sleep(3 * time.Second)
+	// Wait for completed transcription or timeout (10 seconds)
+	select {
+	case <-completedChan:
+		log.Printf("[VoiceCommands] Received completed transcription for session %s", sessionID)
+	case <-time.After(10 * time.Second):
+		log.Printf("[VoiceCommands] Timeout waiting for transcription for session %s", sessionID)
+		vch.sendMessage(conn, map[string]interface{}{
+			"type":    "voice_command_error",
+			"error":   "transcription timeout",
+			"message": "No transcription received within 10 seconds",
+		})
+	}
 
 	// Stop decoder
 	if err := decoder.Stop(); err != nil {
@@ -463,8 +486,10 @@ func (vch *VoiceCommandHandler) handleCompleteAudio(sessionID string, conn *webs
 	return nil
 }
 
-// processResults processes transcription results and executes commands
-func (vch *VoiceCommandHandler) processResults(sessionID string, conn *websocket.Conn, resultChan <-chan []byte) {
+// processResultsWithCompletion processes transcription results and signals when completed
+func (vch *VoiceCommandHandler) processResultsWithCompletion(sessionID string, conn *websocket.Conn, resultChan <-chan []byte, completedChan chan<- bool) {
+	defer close(completedChan)
+
 	segmentCount := 0
 	for result := range resultChan {
 		// Decode result
@@ -509,6 +534,11 @@ func (vch *VoiceCommandHandler) processResults(sessionID string, conn *websocket
 				if completed {
 					log.Printf("[VoiceCommands] Processing completed segment as command: \"%s\"", text)
 					vch.processCommand(sessionID, conn, text)
+					// Signal that we received a completed transcription
+					select {
+					case completedChan <- true:
+					default:
+					}
 				} else {
 					// Send interim transcription to UI
 					log.Printf("[VoiceCommands] Sending interim transcription to UI: \"%s\"", text)

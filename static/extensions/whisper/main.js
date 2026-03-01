@@ -25,6 +25,7 @@ class WhisperExtension extends DecoderExtension {
         this.autoScroll = true;
         this.showTimestamps = false;  // Disabled by default
         this.showOnlyIncomplete = true;  // Show only in-progress by default
+        this.showOnWaterfall = false;  // Show transcription on waterfall
         this.fontSize = 13;  // Default font size in pixels
         this.sessionStartTime = null;  // Track when decoder starts for wall clock timestamps
         this.renderedSegmentCount = 0;  // Track how many completed segments are rendered
@@ -115,6 +116,7 @@ class WhisperExtension extends DecoderExtension {
         const autoScrollCheckbox = document.getElementById('whisper-auto-scroll');
         const timestampsCheckbox = document.getElementById('whisper-show-timestamps');
         const showOnlyIncompleteCheckbox = document.getElementById('whisper-show-only-incomplete');
+        const showOnWaterfallCheckbox = document.getElementById('whisper-show-on-waterfall');
 
         if (autoScrollCheckbox) {
             autoScrollCheckbox.addEventListener('change', (e) => {
@@ -133,6 +135,12 @@ class WhisperExtension extends DecoderExtension {
                 this.showOnlyIncomplete = e.target.checked;
                 // Need to re-render when toggling this mode
                 this.forceFullRerender();
+            });
+        }
+        if (showOnWaterfallCheckbox) {
+            showOnWaterfallCheckbox.addEventListener('change', (e) => {
+                this.showOnWaterfall = e.target.checked;
+                this.updateWaterfallOverlay();
             });
         }
 
@@ -168,6 +176,12 @@ class WhisperExtension extends DecoderExtension {
 
         // Stop the update timer
         this.stopUpdateTimer();
+
+        // Remove waterfall overlay
+        const overlay = document.getElementById('whisper-waterfall-overlay');
+        if (overlay) {
+            overlay.remove();
+        }
 
         // Detach from audio extension
         this.detachAudioExtension();
@@ -490,6 +504,8 @@ class WhisperExtension extends DecoderExtension {
                 emptyDiv.textContent = 'No transcription yet. Start the decoder to begin.';
                 transcriptionElement.appendChild(emptyDiv);
             }
+            // Update waterfall overlay
+            this.updateWaterfallOverlay();
             return;
         }
 
@@ -557,6 +573,9 @@ class WhisperExtension extends DecoderExtension {
             // Remove incomplete element if no longer needed
             incompleteElement.remove();
         }
+
+        // Update waterfall overlay
+        this.updateWaterfallOverlay();
     }
 
     createSegmentElement(seg, isIncomplete) {
@@ -808,6 +827,64 @@ class WhisperExtension extends DecoderExtension {
         if (transcriptionElement) {
             transcriptionElement.style.fontSize = `${this.fontSize}px`;
         }
+        // Also update waterfall overlay if it exists
+        this.updateWaterfallOverlay();
+    }
+
+    updateWaterfallOverlay() {
+        // Find or create the overlay element
+        let overlay = document.getElementById('whisper-waterfall-overlay');
+        
+        if (!this.showOnWaterfall || !this.lastSegment || !this.lastSegment.text) {
+            // Remove overlay if not needed
+            if (overlay) {
+                overlay.remove();
+            }
+            return;
+        }
+
+        // Find the main waterfall canvas at the top of the page
+        const waterfallCanvas = document.getElementById('waterfall-canvas');
+        if (!waterfallCanvas) {
+            console.warn('Whisper: Waterfall canvas not found');
+            return;
+        }
+
+        // Get the canvas parent container for positioning
+        const waterfallContainer = waterfallCanvas.parentElement;
+        if (!waterfallContainer) {
+            console.warn('Whisper: Waterfall container not found');
+            return;
+        }
+
+        // Ensure the container has position relative for absolute positioning
+        if (getComputedStyle(waterfallContainer).position === 'static') {
+            waterfallContainer.style.position = 'relative';
+        }
+
+        // Create overlay if it doesn't exist
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'whisper-waterfall-overlay';
+            overlay.style.position = 'absolute';
+            overlay.style.top = '50%';
+            overlay.style.left = '50%';
+            overlay.style.transform = 'translate(-50%, -50%)';
+            overlay.style.color = 'white';
+            overlay.style.fontFamily = 'Consolas, Monaco, monospace';
+            overlay.style.fontWeight = 'bold';
+            overlay.style.textAlign = 'center';
+            overlay.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8), -1px -1px 2px rgba(0,0,0,0.8), 1px -1px 2px rgba(0,0,0,0.8), -1px 1px 2px rgba(0,0,0,0.8)';
+            overlay.style.pointerEvents = 'none';
+            overlay.style.zIndex = '1000';
+            overlay.style.maxWidth = '80%';
+            overlay.style.wordWrap = 'break-word';
+            waterfallContainer.appendChild(overlay);
+        }
+
+        // Update overlay content and font size
+        overlay.textContent = this.lastSegment.text;
+        overlay.style.fontSize = `${this.fontSize}px`;
     }
 
     onActivate() {

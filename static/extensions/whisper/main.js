@@ -390,9 +390,12 @@ class WhisperExtension extends DecoderExtension {
             const seg = segments[i];
 
             // Match official client.py line 148: only process if text is different from previous
-            // This prevents re-processing duplicate segments when server re-sends last N
-            if (text.length === 0 || text[text.length - 1] !== seg.text) {
-                text.push(seg.text.trim());
+            // Use case-insensitive comparison to catch capitalization variations
+            const segTextLower = seg.text.trim().toLowerCase();
+            const isDifferent = text.length === 0 || text[text.length - 1] !== segTextLower;
+
+            if (isDifferent) {
+                text.push(segTextLower);
 
                 // Last segment that's not completed becomes lastSegment
                 if (i === segments.length - 1 && !seg.completed) {
@@ -400,12 +403,39 @@ class WhisperExtension extends DecoderExtension {
                 }
                 // Completed segments are added to transcript if not already there
                 else if (seg.completed) {
-                    // Match official client.py line 157: only add if timestamp is after last segment
-                    const shouldAdd = this.transcript.length === 0 ||
-                        parseFloat(seg.start) >= parseFloat(this.transcript[this.transcript.length - 1].end);
+                    // Check if this segment extends/completes a previous partial segment
+                    let isExtension = false;
+                    if (this.transcript.length > 0) {
+                        const lastTranscript = this.transcript[this.transcript.length - 1];
+                        const lastTextLower = lastTranscript.text.trim().toLowerCase();
 
-                    if (shouldAdd) {
-                        this.transcript.push(seg);
+                        // Check if current segment contains the previous segment (extension)
+                        // and has overlapping timestamps
+                        if (segTextLower.includes(lastTextLower) &&
+                            segTextLower.length > lastTextLower.length &&
+                            parseFloat(seg.start) < parseFloat(lastTranscript.end)) {
+                            // This is an extended version of the previous segment
+                            console.log(`Whisper: Extending segment: "${lastTranscript.text}" -> "${seg.text}"`);
+                            this.transcript[this.transcript.length - 1] = seg;
+                            this.renderedSegmentCount = Math.max(0, this.renderedSegmentCount - 1); // Force re-render
+                            isExtension = true;
+                        }
+                    }
+
+                    if (!isExtension) {
+                        // Match official client.py line 157: only add if timestamp is after last segment
+                        // This prevents both exact duplicates AND refined versions of same time segment
+                        const shouldAdd = this.transcript.length === 0 ||
+                            parseFloat(seg.start) >= parseFloat(this.transcript[this.transcript.length - 1].end);
+
+                        if (shouldAdd) {
+                            this.transcript.push(seg);
+                        } else {
+                            // Segment overlaps with previous - this is a refinement, replace the last one
+                            console.log(`Whisper: Replacing refined segment: "${this.transcript[this.transcript.length - 1].text}" -> "${seg.text}"`);
+                            this.transcript[this.transcript.length - 1] = seg;
+                            this.renderedSegmentCount = Math.max(0, this.renderedSegmentCount - 1); // Force re-render
+                        }
                     }
                 }
             }

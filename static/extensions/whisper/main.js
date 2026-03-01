@@ -29,6 +29,7 @@ class WhisperExtension extends DecoderExtension {
         this.renderedSegmentCount = 0;  // Track how many completed segments are rendered
         this.lastUpdateTime = null;  // Track time of last message update
         this.updateTimerInterval = null;  // Interval for updating the "time since last update" display
+        this.handlersSetup = false;  // Track if event handlers have been set up
 
         console.log('Whisper: Extension initialized');
     }
@@ -71,6 +72,11 @@ class WhisperExtension extends DecoderExtension {
     }
 
     setupEventHandlers() {
+        if (this.handlersSetup) {
+            console.log('Whisper: Event handlers already set up, skipping');
+            return;
+        }
+
         console.log('Whisper: Setting up event handlers');
 
         // Control buttons
@@ -121,6 +127,7 @@ class WhisperExtension extends DecoderExtension {
             });
         }
 
+        this.handlersSetup = true;
         console.log('Whisper: Event handlers setup complete');
     }
 
@@ -774,6 +781,19 @@ class WhisperExtension extends DecoderExtension {
             const minutes = Math.floor(elapsedSeconds / 60);
             const seconds = elapsedSeconds % 60;
             lastUpdateElement.textContent = `${minutes}m${seconds}s`;
+        }
+    }
+
+    onActivate() {
+        console.log('Whisper: Extension activated');
+        // Re-setup event handlers when extension is reopened
+        this.waitForDOMAndSetupHandlers();
+    }
+
+    onDeactivate() {
+        console.log('Whisper: Extension deactivated');
+        if (this.isRunning) {
+            this.stopDecoder();
         }
     }
 }

@@ -1506,7 +1506,7 @@ whisper:
   #   - "Maritime weather broadcast."
   # Leave empty to disable (default)
   # Default: ""
-  initial_prompt: "This is a radio transmission of either AM broadcast or amateur ham radio in various languages. Expect callsigns, grid locators and technical language to be used."
+  initial_prompt: "This is a radio transmission of either AM broadcast or amateur ham radio in various languages. Expect callsigns, grid locators, Q codes and technical language to be used as well as random topics."
 
   # Audio send interval in milliseconds
   # How often to send audio chunks to WhisperLive server

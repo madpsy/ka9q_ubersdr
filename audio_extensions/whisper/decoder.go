@@ -53,6 +53,11 @@ type WhisperDecoder struct {
 	// Resampler for converting to 16 kHz
 	resampler *Resampler
 
+	// Segment deduplication (matching WhisperLive client.py behavior)
+	transcript   []map[string]interface{} // Completed segments
+	transcriptMu sync.Mutex
+	lastSegment  map[string]interface{} // Last incomplete segment
+
 	// Control
 	running  bool
 	stopChan chan struct{}
@@ -144,6 +149,11 @@ func (d *WhisperDecoder) connectWebSocket() error {
 		"same_output_threshold": 10,
 		"enable_translation":    false,
 		"target_language":       "en",
+		"vad_parameters": map[string]interface{}{
+			"max_speech_duration_s":   15.0, // Force segment breaks every 15 seconds (default: 30)
+			"min_silence_duration_ms": 160,  // Minimum silence to detect pause (default: 160)
+			"threshold":               0.5,  // Speech detection threshold (default: 0.5)
+		},
 	}
 
 	configJSON, err := json.Marshal(configMsg)
@@ -350,26 +360,86 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 
 			// Handle transcription segments
 			if segments, ok := result["segments"].([]interface{}); ok && len(segments) > 0 {
-				// Send segments as JSON to frontend
-				// The frontend will handle completed vs incomplete segments
-				segmentsJSON, err := json.Marshal(segments)
-				if err != nil {
-					log.Printf("[Whisper] Failed to marshal segments: %v", err)
-					continue
-				}
+				// Process segments following WhisperLive client.py pattern (lines 144-158)
+				// This deduplicates segments on the server side before sending to client
+				filteredSegments := d.processSegments(segments)
 
-				// Encode segments for client
-				encoded := d.encodeSegments(segmentsJSON, time.Now().UnixNano())
+				// Only send if we have new segments to send
+				if len(filteredSegments) > 0 {
+					segmentsJSON, err := json.Marshal(filteredSegments)
+					if err != nil {
+						log.Printf("[Whisper] Failed to marshal segments: %v", err)
+						continue
+					}
 
-				// Send to result channel (non-blocking)
-				select {
-				case resultChan <- encoded:
-				default:
-					log.Printf("[Whisper] Result channel full, dropping segments")
+					// Encode segments for client
+					encoded := d.encodeSegments(segmentsJSON, time.Now().UnixNano())
+
+					// Send to result channel (non-blocking)
+					select {
+					case resultChan <- encoded:
+					default:
+						log.Printf("[Whisper] Result channel full, dropping segments")
+					}
 				}
 			}
 		}
 	}
+}
+
+// processSegments filters segments following WhisperLive client.py process_segments() method
+// This prevents duplicates when server re-sends last N segments
+func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
+	d.transcriptMu.Lock()
+	defer d.transcriptMu.Unlock()
+
+	var text []string
+	var filteredSegments []interface{}
+
+	for i, segInterface := range segments {
+		seg, ok := segInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		segText, ok := seg["text"].(string)
+		if !ok {
+			continue
+		}
+
+		// Match official client.py line 148: only process if text is different from previous
+		// This is the KEY deduplication check
+		if len(text) == 0 || text[len(text)-1] != segText {
+			text = append(text, segText)
+
+			// Last segment that's not completed becomes lastSegment
+			completed, _ := seg["completed"].(bool)
+			if i == len(segments)-1 && !completed {
+				d.lastSegment = seg
+				filteredSegments = append(filteredSegments, seg)
+			} else if completed {
+				// Match official client.py line 157: only add if timestamp is after last segment
+				shouldAdd := len(d.transcript) == 0
+
+				if !shouldAdd {
+					// Check if start time >= last segment's end time
+					if startVal, ok := seg["start"].(float64); ok {
+						lastSeg := d.transcript[len(d.transcript)-1]
+						if endVal, ok := lastSeg["end"].(float64); ok {
+							shouldAdd = startVal >= endVal
+						}
+					}
+				}
+
+				if shouldAdd {
+					d.transcript = append(d.transcript, seg)
+					filteredSegments = append(filteredSegments, seg)
+				}
+			}
+		}
+	}
+
+	return filteredSegments
 }
 
 // encodeSegments encodes transcription segments into binary protocol

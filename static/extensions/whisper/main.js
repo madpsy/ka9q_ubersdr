@@ -382,7 +382,9 @@ class WhisperExtension extends DecoderExtension {
     }
 
     processSegments(segments) {
-        // Following WhisperLive client.py process_segments() method
+        // Segments are already deduplicated by the Go backend (decoder.go processSegments)
+        // which follows WhisperLive client.py pattern to prevent duplicates.
+        // The backend only sends NEW segments, so we can safely add them directly.
         for (let i = 0; i < segments.length; i++) {
             const seg = segments[i];
 
@@ -390,15 +392,9 @@ class WhisperExtension extends DecoderExtension {
             if (i === segments.length - 1 && !seg.completed) {
                 this.lastSegment = seg;
             }
-            // Completed segments are added to transcript if not already there
+            // Completed segments are added to transcript
             else if (seg.completed) {
-                // Check if this segment should be added (not overlapping with existing)
-                const shouldAdd = this.transcript.length === 0 ||
-                    parseFloat(seg.start) >= parseFloat(this.transcript[this.transcript.length - 1].end);
-
-                if (shouldAdd) {
-                    this.transcript.push(seg);
-                }
+                this.transcript.push(seg);
             }
         }
     }

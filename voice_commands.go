@@ -38,6 +38,10 @@ type VoiceCommandHandler struct {
 	sessionState map[string]*VoiceCommandSessionState
 	stateMu      sync.RWMutex
 
+	// Per-session mutexes to ensure only one voice command at a time
+	sessionMutexes map[string]*sync.Mutex
+	sessionMuxMu   sync.Mutex
+
 	// Command parsing
 	commandPatterns map[string]*regexp.Regexp
 }
@@ -69,6 +73,7 @@ func NewVoiceCommandHandler(config WhisperConfig, sessions *SessionManager) *Voi
 		whisperDecoders: make(map[string]*whisper.WhisperDecoder),
 		audioChannels:   make(map[string]chan whisper.AudioSample),
 		sessionState:    make(map[string]*VoiceCommandSessionState),
+		sessionMutexes:  make(map[string]*sync.Mutex),
 		commandPatterns: make(map[string]*regexp.Regexp),
 	}
 
@@ -366,6 +371,20 @@ func (vch *VoiceCommandHandler) handleCompleteAudio(sessionID string, conn *webs
 		return vch.sendError(conn, "Voice commands are not enabled")
 	}
 
+	// Get or create mutex for this session to ensure only one voice command at a time
+	vch.sessionMuxMu.Lock()
+	if vch.sessionMutexes[sessionID] == nil {
+		vch.sessionMutexes[sessionID] = &sync.Mutex{}
+	}
+	sessionMux := vch.sessionMutexes[sessionID]
+	vch.sessionMuxMu.Unlock()
+
+	// Lock for this session - will queue if another voice command is in progress
+	sessionMux.Lock()
+	defer sessionMux.Unlock()
+
+	log.Printf("[VoiceCommands] Processing voice command for session %s (queued if needed)", sessionID)
+
 	// Get audio data (base64 encoded)
 	audioDataStr, ok := msg["audio"].(string)
 	if !ok {
@@ -441,6 +460,17 @@ func (vch *VoiceCommandHandler) handleCompleteAudio(sessionID string, conn *webs
 	durationSeconds := float64(numSamples) / 16000.0
 	log.Printf("[VoiceCommands] Sending audio to WhisperLive: %d bytes, %d samples, %.2f seconds @ 16kHz",
 		audioSize, numSamples, durationSeconds)
+
+	// Wait for WhisperLive server to be ready before sending audio
+	log.Printf("[VoiceCommands] Waiting for WhisperLive server to be ready...")
+	select {
+	case <-decoder.GetServerReadyChannel():
+		log.Printf("[VoiceCommands] WhisperLive server is ready, sending audio...")
+	case <-time.After(10 * time.Second):
+		log.Printf("[VoiceCommands] Timeout waiting for WhisperLive server to be ready")
+		decoder.Stop()
+		return vch.sendError(conn, "WhisperLive server not ready")
+	}
 
 	// Send as a single AudioSample
 	audioChan <- whisper.AudioSample{

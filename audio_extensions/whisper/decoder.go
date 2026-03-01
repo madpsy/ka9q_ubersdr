@@ -56,9 +56,10 @@ type WhisperDecoder struct {
 	lastSegment  map[string]interface{} // Last incomplete segment
 
 	// Control
-	running  bool
-	stopChan chan struct{}
-	wg       sync.WaitGroup
+	running     bool
+	stopChan    chan struct{}
+	wg          sync.WaitGroup
+	serverReady chan struct{} // Signals when WhisperLive server is ready
 
 	// Text filtering
 	suppressPhrases []*regexp.Regexp
@@ -86,6 +87,7 @@ func NewWhisperDecoder(sampleRate int, config WhisperConfig) *WhisperDecoder {
 		audioBuffer:     make([]int16, 0),
 		resampler:       NewResampler(sampleRate),
 		stopChan:        make(chan struct{}),
+		serverReady:     make(chan struct{}),
 		suppressPhrases: suppressPhrases,
 	}
 }
@@ -116,6 +118,11 @@ func (d *WhisperDecoder) Start(audioChan <-chan AudioSample, resultChan chan<- [
 	go d.receiveResultsLoop(resultChan)
 
 	return nil
+}
+
+// GetServerReadyChannel returns the channel that signals when the server is ready
+func (d *WhisperDecoder) GetServerReadyChannel() <-chan struct{} {
+	return d.serverReady
 }
 
 // Stop stops the decoder
@@ -375,6 +382,11 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 						backend = b
 					}
 					log.Printf("[Whisper] Server ready with backend: %s", backend)
+					// Signal that server is ready (non-blocking, may already be closed)
+					select {
+					case d.serverReady <- struct{}{}:
+					default:
+					}
 				case "DISCONNECT":
 					log.Printf("[Whisper] Server disconnected, will reconnect...")
 					// Close connection and let the loop reconnect

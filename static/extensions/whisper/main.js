@@ -867,28 +867,43 @@ class WhisperExtension extends DecoderExtension {
         if (!overlay) {
             overlay = document.createElement('div');
             overlay.id = overlayId;
-            overlay.style.position = 'absolute';
-            overlay.style.top = '50%';
-            overlay.style.left = '50%';
-            overlay.style.transform = 'translate(-50%, -50%)';
-            overlay.style.color = '#ff9800';  // Orange color
-            overlay.style.fontFamily = 'Consolas, Monaco, monospace';
-            overlay.style.fontWeight = 'bold';
-            overlay.style.textAlign = 'center';
-            overlay.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8), -1px -1px 2px rgba(0,0,0,0.8), 1px -1px 2px rgba(0,0,0,0.8), -1px 1px 2px rgba(0,0,0,0.8)';
-            overlay.style.pointerEvents = 'none';
-            overlay.style.zIndex = '10000';  // Very high z-index to ensure visibility
-            overlay.style.maxWidth = '80%';
-            overlay.style.wordWrap = 'break-word';
-            overlay.style.padding = '10px';
-            overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';  // Semi-transparent background for better visibility
+            overlay.style.cssText = `
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                color: #ff9800;
+                font-family: Consolas, Monaco, monospace;
+                font-weight: bold;
+                text-align: center;
+                text-shadow: 2px 2px 4px rgba(0,0,0,0.9), -2px -2px 4px rgba(0,0,0,0.9), 2px -2px 4px rgba(0,0,0,0.9), -2px 2px 4px rgba(0,0,0,0.9);
+                pointer-events: none;
+                z-index: 999999;
+                max-width: 80%;
+                word-wrap: break-word;
+                padding: 10px 20px;
+                background-color: rgba(0, 0, 0, 0.5);
+                border-radius: 5px;
+                white-space: pre-wrap;
+                display: block;
+                visibility: visible;
+                opacity: 1;
+            `;
             waterfallContainer.appendChild(overlay);
-            console.log(`Whisper: Created overlay ${overlayId} on canvas ${canvasId}`);
+            console.log(`Whisper: Created overlay ${overlayId} on canvas ${canvasId}`, {
+                container: waterfallContainer,
+                containerPosition: getComputedStyle(waterfallContainer).position,
+                containerDimensions: {
+                    width: waterfallContainer.offsetWidth,
+                    height: waterfallContainer.offsetHeight
+                }
+            });
         }
 
         // Update overlay content and font size
         overlay.textContent = this.lastSegment.text;
         overlay.style.fontSize = `${this.fontSize}px`;
+        console.log(`Whisper: Updated overlay ${overlayId} with text: "${this.lastSegment.text}"`);
     }
 
     onActivate() {

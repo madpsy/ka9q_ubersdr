@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -56,18 +58,33 @@ type WhisperDecoder struct {
 	running  bool
 	stopChan chan struct{}
 	wg       sync.WaitGroup
+
+	// Text filtering
+	suppressPhrases []*regexp.Regexp
 }
 
 // NewWhisperDecoder creates a new Whisper decoder
 func NewWhisperDecoder(sampleRate int, config WhisperConfig) *WhisperDecoder {
 	log.Printf("[Whisper] Creating decoder: input=%d Hz, output=%d Hz (WhisperLive)", sampleRate, targetSampleRate)
+
+	// Compile suppress phrases (case-insensitive)
+	suppressPhrases := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)thanks?\s+for\s+watching`),
+		regexp.MustCompile(`(?i)please\s+subscribe`),
+		regexp.MustCompile(`(?i)like\s+and\s+subscribe`),
+		regexp.MustCompile(`(?i)don'?t\s+forget\s+to\s+subscribe`),
+		regexp.MustCompile(`(?i)hit\s+the\s+bell`),
+		regexp.MustCompile(`(?i)smash\s+that\s+like\s+button`),
+	}
+
 	return &WhisperDecoder{
-		sampleRate:  sampleRate,
-		config:      config,
-		clientUID:   uuid.New().String(),
-		audioBuffer: make([]int16, 0),
-		resampler:   NewResampler(sampleRate),
-		stopChan:    make(chan struct{}),
+		sampleRate:      sampleRate,
+		config:          config,
+		clientUID:       uuid.New().String(),
+		audioBuffer:     make([]int16, 0),
+		resampler:       NewResampler(sampleRate),
+		stopChan:        make(chan struct{}),
+		suppressPhrases: suppressPhrases,
 	}
 }
 
@@ -444,6 +461,10 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 			continue
 		}
 
+		// Apply text filtering
+		segText = d.filterText(segText)
+		seg["text"] = segText
+
 		completed, _ := seg["completed"].(bool)
 
 		// Last segment that's not completed - ALWAYS send it for real-time updates
@@ -481,6 +502,42 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 	}
 
 	return filteredSegments
+}
+
+// filterText applies all text filters to the input string
+func (d *WhisperDecoder) filterText(text string) string {
+	// First, remove suppressed phrases
+	for _, pattern := range d.suppressPhrases {
+		text = pattern.ReplaceAllString(text, "")
+	}
+
+	// Remove consecutive word repetitions
+	text = d.removeConsecutiveWords(text)
+
+	// Clean up extra whitespace
+	text = strings.TrimSpace(text)
+	text = regexp.MustCompile(`\s+`).ReplaceAllString(text, " ")
+
+	return text
+}
+
+// removeConsecutiveWords removes consecutive repetitions of the same word
+// e.g., "ha ha ha" becomes "ha"
+func (d *WhisperDecoder) removeConsecutiveWords(text string) string {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return text
+	}
+
+	result := []string{words[0]}
+	for i := 1; i < len(words); i++ {
+		// Compare case-insensitively
+		if !strings.EqualFold(words[i], words[i-1]) {
+			result = append(result, words[i])
+		}
+	}
+
+	return strings.Join(result, " ")
 }
 
 // encodeSegments encodes transcription segments into binary protocol

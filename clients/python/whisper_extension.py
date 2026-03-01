@@ -40,13 +40,22 @@ class WhisperExtension:
         self.show_only_incomplete = True  # Show only in-progress sentence
         self.last_rendered_transcript_len = 0  # Track number of completed segments rendered
         self.last_rendered_incomplete = None  # Track last incomplete segment text
+        self.last_bionic_state = None  # Track bionic reading state to detect changes
         self.detected_language = None  # Detected language from server
         self.detected_language_prob = None  # Language detection probability
+
+        # Font size control
+        self.font_size = 10  # Default font size
+        self.floating_font_size = 14  # Default floating window font size
+
+        # Bionic reading
+        self.bionic_reading = False  # Bionic reading mode
         
         # Floating window
         self.show_floating_window = False  # Show floating window with current text
         self.floating_window = None  # Reference to floating window
-        self.floating_label = None  # Label in floating window
+        self.floating_text = None  # Text widget in floating window (for bionic reading support)
+        self.last_floating_text = None  # Track last floating window text to prevent flashing
         
         # Frequency change detection
         self.last_frequency = None  # Track last frequency
@@ -113,21 +122,25 @@ class WhisperExtension:
         ttk.Checkbutton(controls_frame, text="Only show in-progress",
                        variable=self.show_only_incomplete_var,
                        command=self.on_show_only_incomplete_changed).grid(row=0, column=2, padx=(0, 15))
-        
+
+        # Bionic reading checkbox
+        self.bionic_reading_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(controls_frame, text="Bionic reading",
+                       variable=self.bionic_reading_var,
+                       command=self.on_bionic_reading_changed).grid(row=0, column=3, padx=(0, 15))
+
         # Show floating window checkbox
         self.show_floating_window_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(controls_frame, text="Show floating window",
                        variable=self.show_floating_window_var,
-                       command=self.on_show_floating_window_changed).grid(row=0, column=3, padx=(0, 15))
+                       command=self.on_show_floating_window_changed).grid(row=0, column=4, padx=(0, 15))
         
         # Control buttons
         self.start_button = ttk.Button(controls_frame, text="Start", command=self.start_decoder)
-        self.start_button.grid(row=0, column=4, padx=(0, 5))
+        self.start_button.grid(row=0, column=5, padx=(0, 5))
 
         self.stop_button = ttk.Button(controls_frame, text="Stop", command=self.stop_decoder, state=tk.DISABLED)
-        self.stop_button.grid(row=0, column=5, padx=(0, 5))
-
-        ttk.Button(controls_frame, text="Clear", command=self.clear_transcription).grid(row=0, column=6, padx=(0, 15))
+        self.stop_button.grid(row=0, column=6, padx=(0, 15))
         
         # Last update time (right-aligned)
         self.last_update_label = ttk.Label(controls_frame, text="--", foreground="gray", font=("Courier", 9))
@@ -149,8 +162,13 @@ class WhisperExtension:
         actions_frame = ttk.Frame(trans_frame)
         actions_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 5))
         
+        # Font size controls on the left
+        ttk.Button(actions_frame, text="−", width=3, command=self.decrease_font_size).pack(side=tk.LEFT, padx=(0, 2))
+        ttk.Button(actions_frame, text="+", width=3, command=self.increase_font_size).pack(side=tk.LEFT, padx=(0, 10))
+
         ttk.Button(actions_frame, text="📋 Copy", command=self.copy_to_clipboard).pack(side=tk.RIGHT, padx=(5, 0))
-        ttk.Button(actions_frame, text="💾 Save", command=self.save_transcription).pack(side=tk.RIGHT)
+        ttk.Button(actions_frame, text="💾 Save", command=self.save_transcription).pack(side=tk.RIGHT, padx=(5, 0))
+        ttk.Button(actions_frame, text="🗑️ Clear", command=self.clear_transcription).pack(side=tk.RIGHT)
         
         # Transcription text area
         self.transcription_text = scrolledtext.ScrolledText(
@@ -158,7 +176,7 @@ class WhisperExtension:
             wrap=tk.WORD,
             width=70,
             height=20,
-            font=("Consolas", 10),
+            font=("Consolas", self.font_size),
             bg="#2a2a2a",
             fg="#e0e0e0",
             insertbackground="white"
@@ -168,8 +186,11 @@ class WhisperExtension:
         
         # Configure text tags for styling
         self.transcription_text.tag_config("completed", foreground="#e0e0e0")
-        self.transcription_text.tag_config("incomplete", foreground="#ff9800", font=("Consolas", 10, "italic"))
-        self.transcription_text.tag_config("timestamp", foreground="#888888", font=("Consolas", 9))
+        self.transcription_text.tag_config("incomplete", foreground="#ff9800", font=("Consolas", self.font_size, "italic"))
+        self.transcription_text.tag_config("timestamp", foreground="#888888", font=("Consolas", max(self.font_size - 1, 8)))
+        # Bionic reading tags
+        self.transcription_text.tag_config("bionic_bold", font=("Consolas", self.font_size, "bold"))
+        self.transcription_text.tag_config("bionic_bold_incomplete", foreground="#ff9800", font=("Consolas", self.font_size, "bold italic"))
         
         # Help section
         help_frame = ttk.LabelFrame(main_frame, text="Help", padding="10")
@@ -193,6 +214,12 @@ class WhisperExtension:
     def on_show_only_incomplete_changed(self):
         """Handle show only incomplete checkbox change."""
         self.show_only_incomplete = self.show_only_incomplete_var.get()
+        self.last_rendered_transcript_len = 0  # Reset cache to force full re-render
+        self.render_transcription()
+
+    def on_bionic_reading_changed(self):
+        """Handle bionic reading checkbox change."""
+        self.bionic_reading = self.bionic_reading_var.get()
         self.last_rendered_transcript_len = 0  # Reset cache to force full re-render
         self.render_transcription()
 
@@ -399,10 +426,72 @@ class WhisperExtension:
                 if should_add:
                     self.transcript.append(seg)
                     
+    def calculate_bionic_split(self, word):
+        """Calculate how many characters to bold for bionic reading.
+
+        Args:
+            word: The word to calculate split for
+
+        Returns:
+            Number of characters to bold
+        """
+        length = len(word)
+        if length <= 3:
+            return 1
+        elif length <= 5:
+            return 2
+        elif length <= 7:
+            return 3
+        else:
+            # For 8+ characters, bold approximately 40%
+            return max(3, int(length * 0.4))
+
+    def insert_bionic_text(self, text, tag_prefix=""):
+        """Insert text with bionic reading formatting.
+
+        Args:
+            text: The text to insert
+            tag_prefix: Prefix for tag names (e.g., "" for completed, "incomplete" for incomplete)
+        """
+        import re
+
+        # Split text into words and non-word characters
+        pattern = r'(\w+|\W+)'
+        parts = re.findall(pattern, text)
+
+        for part in parts:
+            if re.match(r'\w+', part):  # It's a word
+                split_pos = self.calculate_bionic_split(part)
+                bold_part = part[:split_pos]
+                normal_part = part[split_pos:]
+
+                # Insert bold part
+                if tag_prefix == "incomplete":
+                    self.transcription_text.insert(tk.END, bold_part, "bionic_bold_incomplete")
+                else:
+                    self.transcription_text.insert(tk.END, bold_part, "bionic_bold")
+
+                # Insert normal part
+                if tag_prefix:
+                    self.transcription_text.insert(tk.END, normal_part, tag_prefix)
+                else:
+                    self.transcription_text.insert(tk.END, normal_part, "completed")
+            else:
+                # It's whitespace or punctuation, insert as-is
+                if tag_prefix:
+                    self.transcription_text.insert(tk.END, part, tag_prefix)
+                else:
+                    self.transcription_text.insert(tk.END, part, "completed")
+
     def render_transcription(self):
         """Render the transcription to the text widget with minimal updates."""
         current_incomplete = self.last_segment.get('text', '') if self.last_segment else None
         transcript_len = len(self.transcript)
+
+        # Check if bionic reading state changed
+        bionic_state_changed = (self.bionic_reading != self.last_bionic_state)
+        if bionic_state_changed:
+            self.last_bionic_state = self.bionic_reading
 
         # In "show only incomplete" mode, always do a simple render
         if self.show_only_incomplete:
@@ -417,7 +506,10 @@ class WhisperExtension:
                     self.transcription_text.insert(tk.END, f"[{time_str}] ", "timestamp")
 
                 text = self.last_segment.get('text', '')
-                self.transcription_text.insert(tk.END, text, "incomplete")
+                if self.bionic_reading:
+                    self.insert_bionic_text(text, "incomplete")
+                else:
+                    self.transcription_text.insert(tk.END, text, "incomplete")
             elif self.running:
                 self.transcription_text.insert(tk.END,
                     "Waiting for speech...",
@@ -432,8 +524,8 @@ class WhisperExtension:
             self.last_rendered_incomplete = current_incomplete
             return
 
-        # Check if we need a full redraw (completed segments changed or timestamps toggled)
-        need_full_redraw = (transcript_len != self.last_rendered_transcript_len)
+        # Check if we need a full redraw (completed segments changed, timestamps toggled, or bionic state changed)
+        need_full_redraw = (transcript_len != self.last_rendered_transcript_len) or bionic_state_changed
 
         # Check if only the incomplete segment changed
         incomplete_changed = (current_incomplete != self.last_rendered_incomplete)
@@ -472,7 +564,11 @@ class WhisperExtension:
                     self.transcription_text.insert(tk.END, f"[{time_str}] ", "timestamp")
 
                 text = seg.get('text', '')
-                self.transcription_text.insert(tk.END, text + "\n", "completed")
+                if self.bionic_reading:
+                    self.insert_bionic_text(text, "")
+                    self.transcription_text.insert(tk.END, "\n", "completed")
+                else:
+                    self.transcription_text.insert(tk.END, text + "\n", "completed")
 
             # Add incomplete segment if exists
             if self.last_segment:
@@ -483,7 +579,11 @@ class WhisperExtension:
                     self.transcription_text.insert(tk.END, f"[{time_str}] ", "timestamp")
 
                 text = self.last_segment.get('text', '')
-                self.transcription_text.insert(tk.END, text + "\n", "incomplete")
+                if self.bionic_reading:
+                    self.insert_bionic_text(text, "incomplete")
+                    self.transcription_text.insert(tk.END, "\n", "incomplete")
+                else:
+                    self.transcription_text.insert(tk.END, text + "\n", "incomplete")
 
             self.last_rendered_transcript_len = transcript_len
             self.last_rendered_incomplete = current_incomplete
@@ -513,7 +613,11 @@ class WhisperExtension:
                     self.transcription_text.insert(tk.END, f"[{time_str}] ", "timestamp")
 
                 text = self.last_segment.get('text', '')
-                self.transcription_text.insert(tk.END, text + "\n", "incomplete")
+                if self.bionic_reading:
+                    self.insert_bionic_text(text, "incomplete")
+                    self.transcription_text.insert(tk.END, "\n", "incomplete")
+                else:
+                    self.transcription_text.insert(tk.END, text + "\n", "incomplete")
 
             self.last_rendered_incomplete = current_incomplete
 
@@ -777,7 +881,7 @@ class WhisperExtension:
             if self.floating_window and self.floating_window.winfo_exists():
                 self.floating_window.destroy()
                 self.floating_window = None
-                self.floating_label = None
+                self.floating_text = None
             return
 
         # Create floating window if it doesn't exist
@@ -796,27 +900,108 @@ class WhisperExtension:
             # Configure background
             self.floating_window.configure(bg='#1a1a1a')
 
-            # Create label for text
-            self.floating_label = tk.Label(
+            # Create Text widget for rich formatting support
+            self.floating_text = tk.Text(
                 self.floating_window,
-                text="",
-                font=("Consolas", 14, "bold"),
+                font=("Consolas", self.floating_font_size, "bold"),
                 bg='#1a1a1a',
                 fg='#ff9800',
-                wraplength=380,
-                justify=tk.CENTER,
+                wrap=tk.WORD,
                 padx=10,
-                pady=10
+                pady=10,
+                relief=tk.FLAT,
+                borderwidth=0,
+                highlightthickness=0
             )
-            self.floating_label.pack(fill=tk.BOTH, expand=True)
+            self.floating_text.pack(fill=tk.BOTH, expand=True)
+
+            # Configure text tags for bionic reading
+            # Normal text should NOT be bold, only bionic_bold should be bold
+            self.floating_text.tag_config("normal", foreground="#ff9800", font=("Consolas", self.floating_font_size))
+            self.floating_text.tag_config("bionic_bold", foreground="#ff9800", font=("Consolas", self.floating_font_size, "bold"))
 
             # Prevent window from being closed directly (only via checkbox)
             self.floating_window.protocol("WM_DELETE_WINDOW", lambda: self.show_floating_window_var.set(False) or self.update_floating_window())
 
-        # Update text
-        if self.floating_label:
+        # Update text only if it changed (prevent flashing)
+        if self.floating_text:
             text = self.last_segment.get('text', '')
-            self.floating_label.config(text=text)
+            
+            # Only update if text actually changed
+            if text != self.last_floating_text:
+                self.last_floating_text = text
+                self.floating_text.config(state=tk.NORMAL)
+                self.floating_text.delete('1.0', tk.END)
+
+                if self.bionic_reading:
+                    # Apply bionic reading to floating window
+                    import re
+                    pattern = r'(\w+|\W+)'
+                    parts = re.findall(pattern, text)
+
+                    for part in parts:
+                        if re.match(r'\w+', part):  # It's a word
+                            split_pos = self.calculate_bionic_split(part)
+                            bold_part = part[:split_pos]
+                            normal_part = part[split_pos:]
+                            self.floating_text.insert(tk.END, bold_part, "bionic_bold")
+                            self.floating_text.insert(tk.END, normal_part, "normal")
+                        else:
+                            self.floating_text.insert(tk.END, part, "normal")
+                else:
+                    self.floating_text.insert(tk.END, text, "normal")
+
+                self.floating_text.config(state=tk.DISABLED)
+
+    def increase_font_size(self):
+        """Increase the font size of the transcription text."""
+        if self.font_size < 24:  # Maximum font size
+            self.font_size += 1
+            self.update_text_font()
+            
+            # Also increase floating window font size
+            if self.floating_font_size < 28:
+                self.floating_font_size += 2
+                self.update_floating_window_font()
+
+    def decrease_font_size(self):
+        """Decrease the font size of the transcription text."""
+        if self.font_size > 6:  # Minimum font size
+            self.font_size -= 1
+            self.update_text_font()
+            
+            # Also decrease floating window font size
+            if self.floating_font_size > 10:
+                self.floating_font_size -= 2
+                self.update_floating_window_font()
+
+    def update_text_font(self):
+        """Update the font size of the transcription text widget."""
+        # Update main text widget font
+        self.transcription_text.config(font=("Consolas", self.font_size))
+
+        # Update text tags with new font sizes
+        self.transcription_text.tag_config("completed", foreground="#e0e0e0", font=("Consolas", self.font_size))
+        self.transcription_text.tag_config("incomplete", foreground="#ff9800", font=("Consolas", self.font_size, "italic"))
+        self.transcription_text.tag_config("timestamp", foreground="#888888", font=("Consolas", max(self.font_size - 1, 8)))
+        # Update bionic reading tags
+        self.transcription_text.tag_config("bionic_bold", font=("Consolas", self.font_size, "bold"))
+        self.transcription_text.tag_config("bionic_bold_incomplete", foreground="#ff9800", font=("Consolas", self.font_size, "bold italic"))
+
+        # Force re-render to apply new font
+        self.last_rendered_transcript_len = 0
+        self.last_rendered_incomplete = None
+        self.render_transcription()
+
+    def update_floating_window_font(self):
+        """Update the font size of the floating window."""
+        if self.floating_text and self.floating_window and self.floating_window.winfo_exists():
+            # Update text tags with correct font weights
+            self.floating_text.tag_config("normal", foreground="#ff9800", font=("Consolas", self.floating_font_size))
+            self.floating_text.tag_config("bionic_bold", foreground="#ff9800", font=("Consolas", self.floating_font_size, "bold"))
+            # Force re-render with new font
+            self.last_floating_text = None
+            self.update_floating_window()
 
     def on_closing(self):
         """Handle window closing."""

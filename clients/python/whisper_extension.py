@@ -40,6 +40,14 @@ class WhisperExtension:
         self.show_only_incomplete = True  # Show only in-progress sentence
         self.last_rendered_transcript_len = 0  # Track number of completed segments rendered
         self.last_rendered_incomplete = None  # Track last incomplete segment text
+        self.detected_language = None  # Detected language from server
+        self.detected_language_prob = None  # Language detection probability
+        
+        # Frequency change detection
+        self.last_frequency = None  # Track last frequency
+        self.frequency_check_timer = None  # Timer for checking frequency changes
+        self.was_running_before_freq_change = False  # Track if decoder was running before frequency change
+        self.frequency_restart_timer = None  # Timer for auto-restart after frequency stabilizes
         
         # Create window
         self.window = tk.Toplevel(parent)
@@ -114,9 +122,16 @@ class WhisperExtension:
         self.last_update_label = ttk.Label(controls_frame, text="--", foreground="gray", font=("Courier", 9))
         self.last_update_label.grid(row=0, column=6, sticky=tk.E)
         
-        # Transcription display frame
-        trans_frame = ttk.LabelFrame(main_frame, text="Transcription", padding="10")
-        trans_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        # Transcription display frame with language label
+        trans_header_frame = ttk.Frame(main_frame)
+        trans_header_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 0))
+        
+        trans_frame = ttk.LabelFrame(trans_header_frame, text="Transcription", padding="10")
+        trans_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        self.language_label = ttk.Label(trans_header_frame, text="", foreground="gray", font=("Courier", 9, "italic"))
+        self.language_label.pack(side=tk.LEFT, padx=(5, 0))
+        
         main_frame.rowconfigure(2, weight=1)
         
         # Action buttons in header
@@ -177,6 +192,9 @@ class WhisperExtension:
         self.running = True
         self.session_start_time = time.time()
         self.last_update_time = None
+        self.detected_language = None
+        self.detected_language_prob = None
+        self.update_language_display()
         self.update_button_states()
         self.update_status("Starting...", "orange")
         
@@ -185,6 +203,9 @@ class WhisperExtension:
         
         # Start update timer
         self.start_update_timer()
+        
+        # Start frequency monitoring
+        self.start_frequency_monitoring()
         
         # Attach to audio extension
         self.attach_audio_extension()
@@ -199,6 +220,9 @@ class WhisperExtension:
         
         # Stop update timer
         self.stop_update_timer()
+        
+        # Stop frequency monitoring
+        self.stop_frequency_monitoring()
         
         # Detach from audio extension
         self.detach_audio_extension()
@@ -291,6 +315,8 @@ class WhisperExtension:
         
         if message_type == 0x02:  # Segments JSON
             self.handle_segments(data)
+        elif message_type == 0x03:  # Language detection
+            self.handle_language_detection(data)
         else:
             print(f"[Whisper] Unknown message type: 0x{message_type:02x}")
             
@@ -590,12 +616,141 @@ class WhisperExtension:
             minutes = elapsed_s // 60
             seconds = elapsed_s % 60
             self.last_update_label.config(text=f"{minutes}m{seconds}s")
-            
+
+    def handle_language_detection(self, data: bytes):
+        """Handle language detection message."""
+        # Binary protocol: [type:1][timestamp:8][json_length:4][json:N]
+        if len(data) < 13:
+            return
+
+        # Extract JSON length (bytes 9-12, big-endian)
+        json_length = struct.unpack('>I', data[9:13])[0]
+
+        # Extract JSON (bytes 13 onwards)
+        if len(data) < 13 + json_length:
+            return
+
+        json_bytes = data[13:13+json_length]
+        json_str = json_bytes.decode('utf-8')
+
+        try:
+            language_data = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            print(f"[Whisper] Failed to parse language detection JSON: {e}")
+            return
+
+        self.detected_language = language_data.get('language')
+        self.detected_language_prob = language_data.get('language_prob')
+
+        if self.detected_language and self.detected_language_prob:
+            print(f"[Whisper] Detected language: {self.detected_language} ({self.detected_language_prob*100:.1f}%)")
+
+        # Update the display
+        self.update_language_display()
+
+    def update_language_display(self):
+        """Update the language detection display."""
+        if not self.language_label:
+            return
+
+        if self.detected_language and self.detected_language_prob:
+            language_names = {
+                'en': 'English',
+                'es': 'Spanish',
+                'fr': 'French',
+                'de': 'German',
+                'it': 'Italian',
+                'pt': 'Portuguese',
+                'ru': 'Russian',
+                'zh': 'Chinese',
+                'ja': 'Japanese',
+                'ko': 'Korean',
+                'ar': 'Arabic',
+                'hi': 'Hindi',
+                'nl': 'Dutch',
+                'pl': 'Polish',
+                'tr': 'Turkish',
+                'sv': 'Swedish',
+                'da': 'Danish',
+                'no': 'Norwegian',
+                'fi': 'Finnish'
+            }
+
+            language_name = language_names.get(self.detected_language, self.detected_language.upper())
+            probability = int(self.detected_language_prob * 100)
+
+            self.language_label.config(text=f"({language_name} {probability}%)")
+        else:
+            self.language_label.config(text="")
+
+    def start_frequency_monitoring(self):
+        """Start monitoring frequency changes."""
+        # Get current frequency from radio control
+        if self.radio_control and hasattr(self.radio_control, 'frequency'):
+            self.last_frequency = self.radio_control.frequency
+
+        # Check frequency every 100ms
+        self.check_frequency_change()
+
+    def check_frequency_change(self):
+        """Check if frequency has changed."""
+        if not self.running:
+            return
+
+        # Get current frequency
+        current_frequency = None
+        if self.radio_control and hasattr(self.radio_control, 'frequency'):
+            current_frequency = self.radio_control.frequency
+
+        # Check if frequency has changed
+        if self.last_frequency is not None and current_frequency is not None:
+            if current_frequency != self.last_frequency:
+                print(f"[Whisper] Frequency changed from {self.last_frequency} to {current_frequency}")
+
+                # Stop decoder if running
+                if self.running:
+                    print("[Whisper] Stopping decoder due to frequency change")
+                    self.was_running_before_freq_change = True
+                    self.stop_decoder()
+                    self.update_status("Paused (frequency change)", "orange")
+
+                # Cancel any existing restart timer
+                if self.frequency_restart_timer:
+                    self.window.after_cancel(self.frequency_restart_timer)
+
+                # Set timer to restart after 1 second of stability
+                self.frequency_restart_timer = self.window.after(1000, self.restart_after_frequency_stable)
+
+        self.last_frequency = current_frequency
+
+        # Schedule next check
+        if self.running or self.was_running_before_freq_change:
+            self.frequency_check_timer = self.window.after(100, self.check_frequency_change)
+
+    def restart_after_frequency_stable(self):
+        """Restart decoder after frequency has been stable for 1 second."""
+        if self.was_running_before_freq_change:
+            print("[Whisper] Frequency stable for 1 second, restarting decoder")
+            self.was_running_before_freq_change = False
+            self.start_decoder()
+
+    def stop_frequency_monitoring(self):
+        """Stop monitoring frequency changes."""
+        if self.frequency_check_timer:
+            self.window.after_cancel(self.frequency_check_timer)
+            self.frequency_check_timer = None
+
+        if self.frequency_restart_timer:
+            self.window.after_cancel(self.frequency_restart_timer)
+            self.frequency_restart_timer = None
+
+        self.was_running_before_freq_change = False
+
     def on_closing(self):
         """Handle window closing."""
         if self.running:
             self.stop_decoder()
-        
+
         self.window.destroy()
 
 

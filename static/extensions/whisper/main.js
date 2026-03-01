@@ -34,9 +34,9 @@ class WhisperExtension extends DecoderExtension {
         this.handlersSetup = false;  // Track if event handlers have been set up
         this.detectedLanguage = null;  // Detected language from server
         this.detectedLanguageProb = null;  // Language detection probability
-        
+
         // Frequency change detection
-        this.lastFrequency = null;  // Track last frequency
+        this.frequencyChangeHandler = null;  // Event handler for frequency changes
         this.frequencyChangeTimer = null;  // Timer for auto-restart after frequency change
         this.wasRunningBeforeFreqChange = false;  // Track if decoder was running before frequency change
 
@@ -1003,56 +1003,42 @@ class WhisperExtension extends DecoderExtension {
     }
 
     startFrequencyMonitoring() {
-        // Get current frequency
-        if (window.radioControl && window.radioControl.frequency) {
-            this.lastFrequency = window.radioControl.frequency;
-        }
+        // Subscribe to frequency change events
+        this.frequencyChangeHandler = (data) => {
+            const newFrequency = data.frequency;
+            console.log(`Whisper: Frequency changed to ${newFrequency}`);
 
-        // Monitor frequency changes every 100ms
-        this.frequencyMonitorInterval = setInterval(() => {
-            if (!window.radioControl || !window.radioControl.frequency) {
-                return;
+            // Stop decoder if running
+            if (this.isRunning) {
+                console.log('Whisper: Stopping decoder due to frequency change');
+                this.wasRunningBeforeFreqChange = true;
+                this.stopDecoder();
+                this.updateStatus('Paused (frequency change)', 'whisper-status-paused');
             }
 
-            const currentFrequency = window.radioControl.frequency;
-
-            // Check if frequency has changed
-            if (this.lastFrequency !== null && currentFrequency !== this.lastFrequency) {
-                console.log(`Whisper: Frequency changed from ${this.lastFrequency} to ${currentFrequency}`);
-
-                // Stop decoder if running
-                if (this.isRunning) {
-                    console.log('Whisper: Stopping decoder due to frequency change');
-                    this.wasRunningBeforeFreqChange = true;
-                    this.stopDecoder();
-                    this.updateStatus('Paused (frequency change)', 'whisper-status-paused');
-                }
-
-                // Clear any existing restart timer
-                if (this.frequencyChangeTimer) {
-                    clearTimeout(this.frequencyChangeTimer);
-                }
-
-                // Set timer to restart after 1 second of stability
-                this.frequencyChangeTimer = setTimeout(() => {
-                    if (this.wasRunningBeforeFreqChange) {
-                        console.log('Whisper: Frequency stable for 1 second, restarting decoder');
-                        this.wasRunningBeforeFreqChange = false;
-                        this.startDecoder();
-                    }
-                }, 1000);
+            // Clear any existing restart timer
+            if (this.frequencyChangeTimer) {
+                clearTimeout(this.frequencyChangeTimer);
             }
 
-            this.lastFrequency = currentFrequency;
-        }, 100);
+            // Set timer to restart after 1 second of stability
+            this.frequencyChangeTimer = setTimeout(() => {
+                if (this.wasRunningBeforeFreqChange) {
+                    console.log('Whisper: Frequency stable for 1 second, restarting decoder');
+                    this.wasRunningBeforeFreqChange = false;
+                    this.startDecoder();
+                }
+            }, 1000);
+        };
 
+        this.radio.on('frequency_changed', this.frequencyChangeHandler);
         console.log('Whisper: Frequency monitoring started');
     }
 
     stopFrequencyMonitoring() {
-        if (this.frequencyMonitorInterval) {
-            clearInterval(this.frequencyMonitorInterval);
-            this.frequencyMonitorInterval = null;
+        if (this.frequencyChangeHandler) {
+            this.radio.off('frequency_changed', this.frequencyChangeHandler);
+            this.frequencyChangeHandler = null;
         }
 
         if (this.frequencyChangeTimer) {

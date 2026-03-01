@@ -813,21 +813,30 @@ class WhisperExtension:
     def start_frequency_monitoring(self):
         """Start monitoring frequency changes."""
         # Get current frequency from radio control
-        if self.radio_control and hasattr(self.radio_control, 'frequency'):
-            self.last_frequency = self.radio_control.frequency
+        if self.radio_control and hasattr(self.radio_control, 'get_frequency_hz'):
+            try:
+                self.last_frequency = self.radio_control.get_frequency_hz()
+            except Exception as e:
+                print(f"[Whisper] Error getting initial frequency: {e}")
+                self.last_frequency = None
 
         # Check frequency every 100ms
         self.check_frequency_change()
 
     def check_frequency_change(self):
         """Check if frequency has changed."""
-        if not self.running:
+        # Don't check if we're not monitoring at all
+        if not self.running and not self.was_running_before_freq_change:
             return
 
         # Get current frequency
         current_frequency = None
-        if self.radio_control and hasattr(self.radio_control, 'frequency'):
-            current_frequency = self.radio_control.frequency
+        if self.radio_control and hasattr(self.radio_control, 'get_frequency_hz'):
+            try:
+                current_frequency = self.radio_control.get_frequency_hz()
+            except Exception as e:
+                print(f"[Whisper] Error getting current frequency: {e}")
+                current_frequency = None
 
         # Check if frequency has changed
         if self.last_frequency is not None and current_frequency is not None:
@@ -850,7 +859,7 @@ class WhisperExtension:
 
         self.last_frequency = current_frequency
 
-        # Schedule next check
+        # Schedule next check - continue monitoring while running OR waiting to restart
         if self.running or self.was_running_before_freq_change:
             self.frequency_check_timer = self.window.after(100, self.check_frequency_change)
 

@@ -68,13 +68,14 @@ func NewWhisperDecoder(sampleRate int, config WhisperConfig) *WhisperDecoder {
 	log.Printf("[Whisper] Creating decoder: input=%d Hz, output=%d Hz (WhisperLive)", sampleRate, targetSampleRate)
 
 	// Compile suppress phrases (case-insensitive)
+	// Include optional trailing punctuation [!.?]* to remove punctuation marks
 	suppressPhrases := []*regexp.Regexp{
-		regexp.MustCompile(`(?i)thanks?\s+for\s+watching`),
-		regexp.MustCompile(`(?i)please\s+subscribe`),
-		regexp.MustCompile(`(?i)like\s+and\s+subscribe`),
-		regexp.MustCompile(`(?i)don'?t\s+forget\s+to\s+subscribe`),
-		regexp.MustCompile(`(?i)hit\s+the\s+bell`),
-		regexp.MustCompile(`(?i)smash\s+that\s+like\s+button`),
+		regexp.MustCompile(`(?i)thanks?\s+for\s+watching[!.?]*`),
+		regexp.MustCompile(`(?i)please\s+subscribe[!.?]*`),
+		regexp.MustCompile(`(?i)like\s+and\s+subscribe[!.?]*`),
+		regexp.MustCompile(`(?i)don'?t\s+forget\s+to\s+subscribe[!.?]*`),
+		regexp.MustCompile(`(?i)hit\s+the\s+bell[!.?]*`),
+		regexp.MustCompile(`(?i)smash\s+that\s+like\s+button[!.?]*`),
 	}
 
 	return &WhisperDecoder{

@@ -14,6 +14,8 @@
     let audioWorkletNode = null;
     let countdownInterval = null;
     let recordingStartTime = null;
+    let startConfirmed = false;
+    let audioProcessor = null;
 
     const MAX_RECORDING_TIME = 10000; // 10 seconds in milliseconds
 
@@ -27,17 +29,35 @@
             return;
         }
 
-        button.addEventListener('click', handleButtonClick);
-        console.log('[VoiceCommands] Initialized');
+        // Use mousedown/mouseup for press-and-hold behavior
+        button.addEventListener('mousedown', handleMouseDown);
+        button.addEventListener('mouseup', handleMouseUp);
+        button.addEventListener('mouseleave', handleMouseUp); // Stop if mouse leaves button
+
+        // Also support touch events for mobile
+        button.addEventListener('touchstart', handleMouseDown);
+        button.addEventListener('touchend', handleMouseUp);
+        button.addEventListener('touchcancel', handleMouseUp);
+
+        console.log('[VoiceCommands] Initialized (press-and-hold)');
     }
 
     /**
-     * Handle voice command button click
+     * Handle mouse/touch down - start recording
      */
-    async function handleButtonClick() {
+    async function handleMouseDown(e) {
+        e.preventDefault();
         if (!isRecording) {
             await startRecording();
-        } else {
+        }
+    }
+
+    /**
+     * Handle mouse/touch up - stop recording
+     */
+    function handleMouseUp(e) {
+        if (e) e.preventDefault();
+        if (isRecording) {
             stopRecording();
         }
     }
@@ -60,15 +80,21 @@
                 }
             });
 
+            // Send start message first and wait for confirmation
+            sendStartMessage();
+
+            // Wait a bit for the backend to process the start message
+            await new Promise(resolve => setTimeout(resolve, 100));
+
             // Create audio context for processing
             audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
             const source = audioContext.createMediaStreamSource(mediaStream);
 
             // Create script processor for audio chunks
-            const processor = audioContext.createScriptProcessor(4096, 1, 1);
+            audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
 
-            processor.onaudioprocess = (e) => {
-                if (!isRecording) return;
+            audioProcessor.onaudioprocess = (e) => {
+                if (!isRecording || !startConfirmed) return;
 
                 const inputData = e.inputBuffer.getChannelData(0);
                 // Convert Float32Array to Int16Array for backend
@@ -80,11 +106,8 @@
                 sendAudioChunk(base64Audio);
             };
 
-            source.connect(processor);
-            processor.connect(audioContext.destination);
-
-            // Send start message
-            sendStartMessage();
+            source.connect(audioProcessor);
+            audioProcessor.connect(audioContext.destination);
 
             // Update UI
             isRecording = true;
@@ -92,9 +115,15 @@
             button.classList.add('recording');
             button.title = 'Stop Voice Command (Recording...)';
             
+            // Hide the microphone icon
+            const svg = button.querySelector('svg');
+            if (svg) {
+                svg.style.display = 'none';
+            }
+
             // Create and add progress bar
             createProgressBar(button);
-            
+
             // Start countdown timer
             startCountdown(button);
 
@@ -145,8 +174,15 @@
         button.classList.remove('recording');
         button.title = 'Voice Commands';
         
+        // Show the microphone icon again
+        const svg = button.querySelector('svg');
+        if (svg) {
+            svg.style.display = 'block';
+        }
+
         // Remove progress bar and countdown
         removeProgressBar(button);
+        removeCountdown(button);
 
         console.log('[VoiceCommands] Recording stopped');
         showNotification('Processing voice command...', 'info');
@@ -156,6 +192,11 @@
      * Cleanup recording resources
      */
     function cleanupRecording() {
+        if (audioProcessor) {
+            audioProcessor.disconnect();
+            audioProcessor = null;
+        }
+
         if (mediaStream) {
             mediaStream.getTracks().forEach(track => track.stop());
             mediaStream = null;
@@ -165,6 +206,8 @@
             audioContext.close();
             audioContext = null;
         }
+
+        startConfirmed = false;
     }
 
     /**
@@ -233,6 +276,7 @@
         switch (data.type) {
             case 'voice_command_started':
                 console.log('[VoiceCommands] Backend confirmed start');
+                startConfirmed = true;
                 break;
 
             case 'voice_command_stopped':
@@ -412,54 +456,59 @@
             style.textContent = `
                 @keyframes voice-command-pulse {
                     0%, 100% { transform: scale(1); opacity: 1; }
-                    50% { transform: scale(1.1); opacity: 0.8; }
+                    50% { transform: scale(1.15); opacity: 0.9; }
                 }
             `;
             document.head.appendChild(style);
         }
-        
-        // Create countdown display
+
+        // Create countdown display in center of button
         const countdown = document.createElement('div');
         countdown.className = 'voice-command-countdown';
         countdown.style.cssText = `
             position: absolute;
-            top: -8px;
-            right: -8px;
-            background: #f44336;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
             color: white;
-            border-radius: 50%;
-            width: 24px;
-            height: 24px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 11px;
+            font-size: 18px;
             font-weight: bold;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-            z-index: 1;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            z-index: 2;
+            pointer-events: none;
         `;
-        
+
         button.appendChild(countdown);
-        
+
         // Update countdown every 100ms for smooth updates
         countdownInterval = setInterval(() => {
             const elapsed = Date.now() - recordingStartTime;
             const remaining = Math.max(0, Math.ceil((MAX_RECORDING_TIME - elapsed) / 1000));
             countdown.textContent = remaining + 's';
-            
-            // Change color as time runs out
+
+            // Add pulsing animation when time is running out
             if (remaining <= 3) {
-                countdown.style.background = '#d32f2f';
                 countdown.style.animation = 'voice-command-pulse 0.5s ease-in-out infinite';
+                countdown.style.fontSize = '20px';
             } else if (remaining <= 5) {
-                countdown.style.background = '#f44336';
+                countdown.style.fontSize = '19px';
             }
-            
+
             if (remaining === 0) {
                 clearInterval(countdownInterval);
                 countdownInterval = null;
             }
         }, 100);
+    }
+
+    /**
+     * Remove countdown from button
+     */
+    function removeCountdown(button) {
+        const countdown = button.querySelector('.voice-command-countdown');
+        if (countdown) {
+            countdown.remove();
+        }
     }
 
     /**

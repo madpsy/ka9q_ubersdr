@@ -129,18 +129,8 @@ func (vch *VoiceCommandHandler) handleStart(sessionID string, conn *websocket.Co
 		return vch.sendError(conn, "Voice commands are not enabled")
 	}
 
-	// Validate session exists and is active
-	session, exists := vch.sessions.GetSession(sessionID)
-	if !exists {
-		log.Printf("[VoiceCommands] Invalid session ID: %s", sessionID)
-		return vch.sendError(conn, "Invalid session")
-	}
-
-	// Verify session has an active audio stream (user is authenticated and connected)
-	if session.Frequency == 0 {
-		log.Printf("[VoiceCommands] Session %s has no active frequency", sessionID)
-		return vch.sendError(conn, "No active radio session")
-	}
+	// Note: sessionID here is the DX cluster WebSocket userSessionID, not an audio session ID
+	// Voice commands work independently of audio sessions
 
 	vch.decodersMu.Lock()
 	defer vch.decodersMu.Unlock()

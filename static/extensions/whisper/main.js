@@ -177,10 +177,14 @@ class WhisperExtension extends DecoderExtension {
         // Stop the update timer
         this.stopUpdateTimer();
 
-        // Remove waterfall overlay
-        const overlay = document.getElementById('whisper-waterfall-overlay');
-        if (overlay) {
-            overlay.remove();
+        // Remove waterfall overlays
+        const rfOverlay = document.getElementById('whisper-rf-waterfall-overlay');
+        if (rfOverlay) {
+            rfOverlay.remove();
+        }
+        const audioOverlay = document.getElementById('whisper-audio-waterfall-overlay');
+        if (audioOverlay) {
+            audioOverlay.remove();
         }
 
         // Detach from audio extension
@@ -362,8 +366,6 @@ class WhisperExtension extends DecoderExtension {
         const view = new DataView(data);
         const messageType = view.getUint8(0);
 
-        console.log(`Whisper: Received binary message, type: 0x${messageType.toString(16).padStart(2, '0')}`);
-
         switch (messageType) {
             case 0x02: // Segments JSON
                 this.handleSegments(view, data);
@@ -397,8 +399,6 @@ class WhisperExtension extends DecoderExtension {
         if (!Array.isArray(segments) || segments.length === 0) {
             return;
         }
-
-        console.log('Whisper: Received segments:', segments);
 
         // Process segments following WhisperLive client.py pattern (lines 144-158)
         this.processSegments(segments);
@@ -454,7 +454,6 @@ class WhisperExtension extends DecoderExtension {
                             segTextLower.length > lastTextLower.length &&
                             parseFloat(seg.start) < parseFloat(lastTranscript.end)) {
                             // This is an extended version of the previous segment
-                            console.log(`Whisper: Extending segment: "${lastTranscript.text}" -> "${seg.text}"`);
                             this.transcript[this.transcript.length - 1] = seg;
                             this.renderedSegmentCount = Math.max(0, this.renderedSegmentCount - 1); // Force re-render
                             isExtension = true;
@@ -471,7 +470,6 @@ class WhisperExtension extends DecoderExtension {
                             this.transcript.push(seg);
                         } else {
                             // Segment overlaps with previous - this is a refinement, replace the last one
-                            console.log(`Whisper: Replacing refined segment: "${this.transcript[this.transcript.length - 1].text}" -> "${seg.text}"`);
                             this.transcript[this.transcript.length - 1] = seg;
                             this.renderedSegmentCount = Math.max(0, this.renderedSegmentCount - 1); // Force re-render
                         }
@@ -832,10 +830,19 @@ class WhisperExtension extends DecoderExtension {
     }
 
     updateWaterfallOverlay() {
-        // Find or create the overlay element
-        let overlay = document.getElementById('whisper-waterfall-overlay');
+        const shouldShow = this.showOnWaterfall && this.lastSegment && this.lastSegment.text;
         
-        if (!this.showOnWaterfall || !this.lastSegment || !this.lastSegment.text) {
+        // Update RF waterfall overlay (main waterfall at top)
+        this.updateSingleWaterfallOverlay('whisper-rf-waterfall-overlay', 'waterfall-canvas', shouldShow);
+        
+        // Update audio waterfall overlay (in extension panel)
+        this.updateSingleWaterfallOverlay('whisper-audio-waterfall-overlay', 'audio-waterfall-canvas', shouldShow);
+    }
+
+    updateSingleWaterfallOverlay(overlayId, canvasId, shouldShow) {
+        let overlay = document.getElementById(overlayId);
+        
+        if (!shouldShow) {
             // Remove overlay if not needed
             if (overlay) {
                 overlay.remove();
@@ -843,34 +850,34 @@ class WhisperExtension extends DecoderExtension {
             return;
         }
 
-        // Find the main waterfall canvas at the top of the page
-        const waterfallCanvas = document.getElementById('waterfall-canvas');
+        // Find the waterfall canvas
+        const waterfallCanvas = document.getElementById(canvasId);
         if (!waterfallCanvas) {
-            console.warn('Whisper: Waterfall canvas not found');
+            // Canvas not found - might not exist yet or not applicable
             return;
         }
 
         // Get the canvas parent container for positioning
         const waterfallContainer = waterfallCanvas.parentElement;
         if (!waterfallContainer) {
-            console.warn('Whisper: Waterfall container not found');
             return;
         }
 
         // Ensure the container has position relative for absolute positioning
-        if (getComputedStyle(waterfallContainer).position === 'static') {
+        const containerPosition = getComputedStyle(waterfallContainer).position;
+        if (containerPosition === 'static') {
             waterfallContainer.style.position = 'relative';
         }
 
         // Create overlay if it doesn't exist
         if (!overlay) {
             overlay = document.createElement('div');
-            overlay.id = 'whisper-waterfall-overlay';
+            overlay.id = overlayId;
             overlay.style.position = 'absolute';
             overlay.style.top = '50%';
             overlay.style.left = '50%';
             overlay.style.transform = 'translate(-50%, -50%)';
-            overlay.style.color = 'white';
+            overlay.style.color = '#ff9800';  // Orange color
             overlay.style.fontFamily = 'Consolas, Monaco, monospace';
             overlay.style.fontWeight = 'bold';
             overlay.style.textAlign = 'center';

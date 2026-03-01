@@ -74,18 +74,24 @@ func NewWhisperDecoder(sampleRate int, config WhisperConfig) *WhisperDecoder {
 func (d *WhisperDecoder) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
 	d.running = true
 
-	// Connect to WhisperLive WebSocket
+	// Try initial connection, but don't fail if it doesn't work
+	// The receiveResultsLoop will handle reconnection with delays
 	if err := d.connectWebSocket(); err != nil {
-		log.Printf("[Whisper] ERROR: Failed to connect to WhisperLive server at %s: %v", d.config.ServerURL, err)
-		log.Printf("[Whisper] Make sure WhisperLive server is running on %s", d.config.ServerURL)
-		return fmt.Errorf("failed to connect to WhisperLive: %w", err)
+		log.Printf("[Whisper] Initial connection failed: %v", err)
+		log.Printf("[Whisper] Will retry connection in background...")
+		// Set connection to nil so receiveResultsLoop will retry
+		d.wsConnMu.Lock()
+		d.wsConn = nil
+		d.wsConnMu.Unlock()
+	} else {
+		log.Printf("[Whisper] Successfully connected to WhisperLive")
 	}
 
 	// Start audio sender goroutine
 	d.wg.Add(1)
 	go d.sendAudioLoop(audioChan)
 
-	// Start result receiver goroutine
+	// Start result receiver goroutine (will handle reconnection if needed)
 	d.wg.Add(1)
 	go d.receiveResultsLoop(resultChan)
 
@@ -135,9 +141,18 @@ func (d *WhisperDecoder) connectWebSocket() error {
 		task = "translate"
 	}
 
+	// Set language to nil (null in JSON) for auto-detection, otherwise use the configured value
+	var language interface{}
+	if d.config.Language == "" || d.config.Language == "auto" {
+		language = nil // Will be encoded as null in JSON
+	} else {
+		language = d.config.Language
+	}
+
 	configMsg := map[string]interface{}{
 		"uid":                   d.clientUID,
-		"task":                  task, // "transcribe" or "translate" based on config
+		"language":              language, // nil for auto-detect, string for specific language
+		"task":                  task,     // "transcribe" or "translate" based on config
 		"model":                 d.config.Model,
 		"use_vad":               true,
 		"send_last_n_segments":  10,
@@ -151,11 +166,6 @@ func (d *WhisperDecoder) connectWebSocket() error {
 			"min_silence_duration_ms": 160,  // Minimum silence to detect pause (default: 160)
 			"threshold":               0.5,  // Speech detection threshold (default: 0.5)
 		},
-	}
-
-	// Only include language if it's not empty or "auto" (empty/auto = auto-detect)
-	if d.config.Language != "" && d.config.Language != "auto" {
-		configMsg["language"] = d.config.Language
 	}
 
 	configJSON, err := json.Marshal(configMsg)

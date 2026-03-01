@@ -857,10 +857,24 @@ class WhisperExtension extends DecoderExtension {
             return;
         }
 
-        // Get the canvas parent container for positioning
-        const waterfallContainer = waterfallCanvas.parentElement;
+        // For the main RF waterfall, use the .waterfall-container parent which has actual dimensions
+        // For audio waterfall, use the canvas parent
+        let waterfallContainer;
+        if (canvasId === 'waterfall-canvas') {
+            // Main RF waterfall - go up to .waterfall-container
+            waterfallContainer = waterfallCanvas.closest('.waterfall-container');
+        } else {
+            // Audio waterfall - use immediate parent
+            waterfallContainer = waterfallCanvas.parentElement;
+        }
+        
         if (!waterfallContainer) {
             return;
+        }
+
+        // Ensure container has position relative
+        if (getComputedStyle(waterfallContainer).position === 'static') {
+            waterfallContainer.style.position = 'relative';
         }
 
         // Create overlay if it doesn't exist
@@ -903,7 +917,6 @@ class WhisperExtension extends DecoderExtension {
         // Update overlay content and font size
         overlay.textContent = this.lastSegment.text;
         overlay.style.fontSize = `${this.fontSize}px`;
-        console.log(`Whisper: Updated overlay ${overlayId} with text: "${this.lastSegment.text}"`);
     }
 
     onActivate() {

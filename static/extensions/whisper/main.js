@@ -873,10 +873,7 @@ class WhisperExtension extends DecoderExtension {
             overlay = document.createElement('div');
             overlay.id = overlayId;
             overlay.style.cssText = `
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
+                position: fixed;
                 color: #ff9800;
                 font-family: Consolas, Monaco, monospace;
                 font-weight: bold;
@@ -894,16 +891,15 @@ class WhisperExtension extends DecoderExtension {
                 visibility: visible;
                 opacity: 1;
             `;
-            waterfallContainer.appendChild(overlay);
-            console.log(`Whisper: Created overlay ${overlayId} on canvas ${canvasId}`, {
-                container: waterfallContainer,
-                containerPosition: getComputedStyle(waterfallContainer).position,
-                containerDimensions: {
-                    width: waterfallContainer.offsetWidth,
-                    height: waterfallContainer.offsetHeight
-                }
-            });
+            document.body.appendChild(overlay);
+            console.log(`Whisper: Created overlay ${overlayId} on canvas ${canvasId}`);
         }
+
+        // Position overlay based on canvas position
+        const canvasRect = waterfallCanvas.getBoundingClientRect();
+        overlay.style.left = `${canvasRect.left + canvasRect.width / 2}px`;
+        overlay.style.top = `${canvasRect.top + canvasRect.height / 2}px`;
+        overlay.style.transform = 'translate(-50%, -50%)';
 
         // Update overlay content and font size
         overlay.textContent = this.lastSegment.text;

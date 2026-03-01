@@ -210,7 +210,7 @@ class WhisperExtension:
         # Attach to audio extension
         self.attach_audio_extension()
         
-    def stop_decoder(self):
+    def stop_decoder(self, skip_frequency_monitoring=False):
         """Stop the decoder."""
         print("[Whisper] Stopping decoder")
         
@@ -221,8 +221,9 @@ class WhisperExtension:
         # Stop update timer
         self.stop_update_timer()
         
-        # Stop frequency monitoring
-        self.stop_frequency_monitoring()
+        # Stop frequency monitoring (unless we're stopping due to frequency change)
+        if not skip_frequency_monitoring:
+            self.stop_frequency_monitoring()
         
         # Detach from audio extension
         self.detach_audio_extension()
@@ -711,7 +712,7 @@ class WhisperExtension:
                 if self.running:
                     print("[Whisper] Stopping decoder due to frequency change")
                     self.was_running_before_freq_change = True
-                    self.stop_decoder()
+                    self.stop_decoder(skip_frequency_monitoring=True)  # Skip stopping frequency monitoring
                     self.update_status("Paused (frequency change)", "orange")
 
                 # Cancel any existing restart timer

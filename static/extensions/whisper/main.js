@@ -180,7 +180,7 @@ class WhisperExtension extends DecoderExtension {
         this.attachAudioExtension();
     }
 
-    stopDecoder() {
+    stopDecoder(skipFrequencyMonitoring = false) {
         console.log('Whisper: Stopping decoder');
         
         this.isRunning = false;
@@ -190,8 +190,10 @@ class WhisperExtension extends DecoderExtension {
         // Stop the update timer
         this.stopUpdateTimer();
         
-        // Stop frequency monitoring
-        this.stopFrequencyMonitoring();
+        // Stop frequency monitoring (unless we're stopping due to frequency change)
+        if (!skipFrequencyMonitoring) {
+            this.stopFrequencyMonitoring();
+        }
 
         // Remove floating window
         this.updateFloatingWindow();
@@ -1012,7 +1014,7 @@ class WhisperExtension extends DecoderExtension {
             if (this.isRunning) {
                 console.log('Whisper: Stopping decoder due to frequency change');
                 this.wasRunningBeforeFreqChange = true;
-                this.stopDecoder();
+                this.stopDecoder(true); // Skip stopping frequency monitoring
                 this.updateStatus('Paused (frequency change)', 'whisper-status-paused');
             }
 

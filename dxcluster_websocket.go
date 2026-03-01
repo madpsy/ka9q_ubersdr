@@ -571,8 +571,8 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessi
 						})
 					}
 
-				case "voice_command_start", "voice_command_audio", "voice_command_stop":
-					// Handle voice command messages
+				case "voice_command", "voice_command_start", "voice_command_audio", "voice_command_stop":
+					// Handle voice command messages (both buffered and streaming)
 					if h.voiceCommandHandler != nil {
 						if err := h.voiceCommandHandler.HandleVoiceCommandMessage(userSessionID, conn, msg); err != nil {
 							// Send error back to client

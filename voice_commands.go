@@ -112,6 +112,9 @@ func (vch *VoiceCommandHandler) HandleVoiceCommandMessage(sessionID string, conn
 	}
 
 	switch msgType {
+	case "voice_command":
+		// New buffered approach - complete audio in one message
+		return vch.handleCompleteAudio(sessionID, conn, msg)
 	case "voice_command_start":
 		return vch.handleStart(sessionID, conn, msg)
 	case "voice_command_audio":
@@ -356,8 +359,113 @@ func (vch *VoiceCommandHandler) handleStop(sessionID string, conn *websocket.Con
 	})
 }
 
+// handleCompleteAudio handles complete buffered audio in one message
+func (vch *VoiceCommandHandler) handleCompleteAudio(sessionID string, conn *websocket.Conn, msg map[string]interface{}) error {
+	if !vch.config.Enabled || !vch.config.EnableVoiceCommands {
+		return vch.sendError(conn, "Voice commands are not enabled")
+	}
+
+	// Get audio data (base64 encoded)
+	audioDataStr, ok := msg["audio"].(string)
+	if !ok {
+		return vch.sendError(conn, "missing audio data")
+	}
+
+	// Validate base64 string length before decoding
+	if len(audioDataStr) > MaxTotalAudioBytes*2 {
+		log.Printf("[VoiceCommands] Audio too large for session %s: %d bytes (base64)", sessionID, len(audioDataStr))
+		return vch.sendError(conn, "audio too large")
+	}
+
+	// Decode base64
+	audioData, err := base64.StdEncoding.DecodeString(audioDataStr)
+	if err != nil {
+		return vch.sendError(conn, "failed to decode audio data")
+	}
+
+	// Validate decoded audio size
+	audioSize := int64(len(audioData))
+	if audioSize > MaxTotalAudioBytes {
+		log.Printf("[VoiceCommands] Audio exceeds limit for session %s: %d bytes", sessionID, audioSize)
+		return vch.sendError(conn, fmt.Sprintf("audio exceeds %d KB limit", MaxTotalAudioBytes/1024))
+	}
+
+	if audioSize == 0 {
+		return vch.sendError(conn, "no audio data received")
+	}
+
+	log.Printf("[VoiceCommands] Received complete audio for session %s: %d bytes", sessionID, audioSize)
+
+	// Create Whisper decoder configuration
+	whisperConfig := whisper.WhisperConfig{
+		Enabled:             vch.config.Enabled,
+		ServerURL:           vch.config.ServerURL,
+		Model:               vch.config.Model,
+		Language:            vch.config.Language,
+		Translate:           vch.config.Translate,
+		SendIntervalMs:      vch.config.SendIntervalMs,
+		InitialPrompt:       "Voice commands for radio control: tune, frequency, mode, volume, bandwidth, recording.",
+		EnableVoiceCommands: vch.config.EnableVoiceCommands,
+	}
+
+	// Create decoder (16kHz is standard for browser audio)
+	decoder := whisper.NewWhisperDecoder(16000, whisperConfig)
+
+	// Create channels for audio and results
+	audioChan := make(chan whisper.AudioSample, 100)
+	resultChan := make(chan []byte, 100)
+
+	// Start decoder
+	if err := decoder.Start(audioChan, resultChan); err != nil {
+		log.Printf("[VoiceCommands] Failed to start decoder for session %s: %v", sessionID, err)
+		return vch.sendError(conn, "failed to start speech recognition")
+	}
+
+	log.Printf("[VoiceCommands] Started decoder for session %s", sessionID)
+
+	// Process results in background
+	go vch.processResults(sessionID, conn, resultChan)
+
+	// Send all audio at once through the channel
+	// Convert byte array to int16 samples
+	numSamples := len(audioData) / 2
+	pcmData := make([]int16, numSamples)
+	for i := 0; i < numSamples; i++ {
+		pcmData[i] = int16(binary.LittleEndian.Uint16(audioData[i*2 : i*2+2]))
+	}
+
+	durationSeconds := float64(numSamples) / 16000.0
+	log.Printf("[VoiceCommands] Sending audio to WhisperLive: %d bytes, %d samples, %.2f seconds @ 16kHz",
+		audioSize, numSamples, durationSeconds)
+
+	// Send as a single AudioSample
+	audioChan <- whisper.AudioSample{
+		PCMData:      pcmData,
+		RTPTimestamp: 0,
+		GPSTimeNs:    time.Now().UnixNano(),
+	}
+
+	log.Printf("[VoiceCommands] Audio sent to decoder, waiting for transcription...")
+
+	// Close audio channel to signal end of audio
+	close(audioChan)
+
+	// Wait a bit for processing to complete
+	time.Sleep(3 * time.Second)
+
+	// Stop decoder
+	if err := decoder.Stop(); err != nil {
+		log.Printf("[VoiceCommands] Error stopping decoder for session %s: %v", sessionID, err)
+	}
+
+	log.Printf("[VoiceCommands] Completed processing for session %s", sessionID)
+
+	return nil
+}
+
 // processResults processes transcription results and executes commands
 func (vch *VoiceCommandHandler) processResults(sessionID string, conn *websocket.Conn, resultChan <-chan []byte) {
+	segmentCount := 0
 	for result := range resultChan {
 		// Decode result
 		if len(result) < 13 {
@@ -382,20 +490,28 @@ func (vch *VoiceCommandHandler) processResults(sessionID string, conn *websocket
 				continue
 			}
 
+			log.Printf("[VoiceCommands] Received %d segments from WhisperLive for session %s", len(segments), sessionID)
+
 			// Process each segment
-			for _, segment := range segments {
+			for i, segment := range segments {
 				text, ok := segment["text"].(string)
 				if !ok {
 					continue
 				}
 
 				completed, _ := segment["completed"].(bool)
+				segmentCount++
+
+				log.Printf("[VoiceCommands] Segment #%d (total: %d): text=\"%s\", completed=%v",
+					i+1, segmentCount, text, completed)
 
 				// Only process completed segments for command execution
 				if completed {
+					log.Printf("[VoiceCommands] Processing completed segment as command: \"%s\"", text)
 					vch.processCommand(sessionID, conn, text)
 				} else {
 					// Send interim transcription to UI
+					log.Printf("[VoiceCommands] Sending interim transcription to UI: \"%s\"", text)
 					vch.sendMessage(conn, map[string]interface{}{
 						"type":      "voice_command_transcription",
 						"text":      text,
@@ -406,6 +522,7 @@ func (vch *VoiceCommandHandler) processResults(sessionID string, conn *websocket
 			}
 		}
 	}
+	log.Printf("[VoiceCommands] Result channel closed for session %s, processed %d total segments", sessionID, segmentCount)
 }
 
 // sanitizeTranscription sanitizes transcription text to prevent injection attacks

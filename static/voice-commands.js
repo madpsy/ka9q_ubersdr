@@ -14,8 +14,8 @@
     let audioWorkletNode = null;
     let countdownInterval = null;
     let recordingStartTime = null;
-    let startConfirmed = false;
     let audioProcessor = null;
+    let audioBuffer = []; // Buffer to store all audio chunks
 
     const MAX_RECORDING_TIME = 10000; // 10 seconds in milliseconds
 
@@ -80,34 +80,29 @@
                 }
             });
 
-            // Send start message first and wait for confirmation
-            sendStartMessage();
-
-            // Wait a bit for the backend to process the start message
-            await new Promise(resolve => setTimeout(resolve, 100));
-
             // Create audio context for processing
             audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
             const source = audioContext.createMediaStreamSource(mediaStream);
 
-            // Create script processor for audio chunks
+            // Create script processor to buffer audio chunks
             audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
 
             audioProcessor.onaudioprocess = (e) => {
-                if (!isRecording || !startConfirmed) return;
+                if (!isRecording) return;
 
                 const inputData = e.inputBuffer.getChannelData(0);
-                // Convert Float32Array to Int16Array for backend
+                // Convert Float32Array to Int16Array
                 const int16Data = float32ToInt16(inputData);
-                // Convert to base64 for WebSocket transmission
-                const base64Audio = arrayBufferToBase64(int16Data.buffer);
 
-                // Send audio chunk via WebSocket
-                sendAudioChunk(base64Audio);
+                // Buffer the audio chunk
+                audioBuffer.push(int16Data);
             };
 
             source.connect(audioProcessor);
             audioProcessor.connect(audioContext.destination);
+
+            // Clear audio buffer
+            audioBuffer = [];
 
             // Update UI
             isRecording = true;
@@ -157,17 +152,36 @@
             clearTimeout(recordingTimeout);
             recordingTimeout = null;
         }
-        
+
         if (countdownInterval) {
             clearInterval(countdownInterval);
             countdownInterval = null;
         }
 
-        // Send stop message
-        sendStopMessage();
-
-        // Cleanup
+        // Cleanup audio resources first
         cleanupRecording();
+
+        // Combine all buffered audio chunks
+        if (audioBuffer.length > 0) {
+            const totalLength = audioBuffer.reduce((sum, chunk) => sum + chunk.length, 0);
+            const combinedAudio = new Int16Array(totalLength);
+            let offset = 0;
+            for (const chunk of audioBuffer) {
+                combinedAudio.set(chunk, offset);
+                offset += chunk.length;
+            }
+
+            // Convert to base64
+            const base64Audio = arrayBufferToBase64(combinedAudio.buffer);
+
+            // Send complete audio to backend
+            sendCompleteAudio(base64Audio);
+        } else {
+            showNotification('No audio recorded', 'warning');
+        }
+
+        // Clear buffer
+        audioBuffer = [];
 
         // Update UI
         isRecording = false;
@@ -207,64 +221,29 @@
             audioContext = null;
         }
 
-        startConfirmed = false;
     }
 
     /**
-     * Send start message to backend
+     * Send complete audio to backend
      */
-    function sendStartMessage() {
+    function sendCompleteAudio(base64Audio) {
         const ws = window.dxClusterClient?.ws;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
             console.error('[VoiceCommands] WebSocket not connected');
             showNotification('WebSocket not connected', 'error');
-            stopRecording();
             return;
         }
 
-        const message = {
-            type: 'voice_command_start'
-        };
-
-        ws.send(JSON.stringify(message));
-        console.log('[VoiceCommands] Sent start message');
-    }
-
-    /**
-     * Send audio chunk to backend
-     */
-    function sendAudioChunk(base64Audio) {
-        const ws = window.dxClusterClient?.ws;
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-            console.error('[VoiceCommands] WebSocket not connected');
-            stopRecording();
-            return;
-        }
+        console.log('[VoiceCommands] Sending complete audio:', (base64Audio.length / 1024).toFixed(2), 'KB (base64)');
 
         const message = {
-            type: 'voice_command_audio',
+            type: 'voice_command',
             audio: base64Audio
         };
 
         ws.send(JSON.stringify(message));
-    }
-
-    /**
-     * Send stop message to backend
-     */
-    function sendStopMessage() {
-        const ws = window.dxClusterClient?.ws;
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-            console.error('[VoiceCommands] WebSocket not connected');
-            return;
-        }
-
-        const message = {
-            type: 'voice_command_stop'
-        };
-
-        ws.send(JSON.stringify(message));
-        console.log('[VoiceCommands] Sent stop message');
+        console.log('[VoiceCommands] Sent complete audio');
+        showNotification('Processing voice command...', 'info');
     }
 
     /**
@@ -274,15 +253,6 @@
         console.log('[VoiceCommands] Received message:', data);
 
         switch (data.type) {
-            case 'voice_command_started':
-                console.log('[VoiceCommands] Backend confirmed start');
-                startConfirmed = true;
-                break;
-
-            case 'voice_command_stopped':
-                console.log('[VoiceCommands] Backend confirmed stop');
-                break;
-
             case 'voice_command_transcription':
                 handleTranscription(data);
                 break;

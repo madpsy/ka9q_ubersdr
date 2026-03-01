@@ -844,7 +844,7 @@ class WhisperExtension extends DecoderExtension {
                 transform: translate(-50%, -50%);
                 width: 400px;
                 padding: 15px 20px;
-                background-color: rgba(0, 0, 0, 0.85);
+                background-color: rgba(0, 0, 0, 0.6);
                 border: 2px solid #ff9800;
                 border-radius: 8px;
                 color: #ff9800;
@@ -860,7 +860,8 @@ class WhisperExtension extends DecoderExtension {
                 word-wrap: break-word;
                 white-space: pre-wrap;
                 resize: both;
-                overflow: auto;
+                overflow-y: auto;
+                overflow-x: hidden;
                 min-width: 200px;
                 min-height: 50px;
             `;
@@ -873,9 +874,18 @@ class WhisperExtension extends DecoderExtension {
             let initialY;
 
             floatingWindow.addEventListener('mousedown', (e) => {
-                isDragging = true;
-                initialX = e.clientX - floatingWindow.offsetLeft;
-                initialY = e.clientY - floatingWindow.offsetTop;
+                // Don't start dragging if clicking on the resize handle (bottom-right 15px corner)
+                const rect = floatingWindow.getBoundingClientRect();
+                const isResizeArea = (
+                    e.clientX > rect.right - 15 &&
+                    e.clientY > rect.bottom - 15
+                );
+
+                if (!isResizeArea) {
+                    isDragging = true;
+                    initialX = e.clientX - floatingWindow.offsetLeft;
+                    initialY = e.clientY - floatingWindow.offsetTop;
+                }
             });
 
             document.addEventListener('mousemove', (e) => {

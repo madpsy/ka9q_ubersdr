@@ -25,7 +25,7 @@ class WhisperExtension extends DecoderExtension {
         this.autoScroll = true;
         this.showTimestamps = false;  // Disabled by default
         this.showOnlyIncomplete = true;  // Show only in-progress by default
-        this.showOnWaterfall = false;  // Show transcription on waterfall
+        this.showFloatingWindow = false;  // Show transcription in floating window
         this.fontSize = 13;  // Default font size in pixels
         this.sessionStartTime = null;  // Track when decoder starts for wall clock timestamps
         this.renderedSegmentCount = 0;  // Track how many completed segments are rendered
@@ -116,7 +116,7 @@ class WhisperExtension extends DecoderExtension {
         const autoScrollCheckbox = document.getElementById('whisper-auto-scroll');
         const timestampsCheckbox = document.getElementById('whisper-show-timestamps');
         const showOnlyIncompleteCheckbox = document.getElementById('whisper-show-only-incomplete');
-        const showOnWaterfallCheckbox = document.getElementById('whisper-show-on-waterfall');
+        const showFloatingWindowCheckbox = document.getElementById('whisper-show-floating-window');
 
         if (autoScrollCheckbox) {
             autoScrollCheckbox.addEventListener('change', (e) => {
@@ -137,10 +137,10 @@ class WhisperExtension extends DecoderExtension {
                 this.forceFullRerender();
             });
         }
-        if (showOnWaterfallCheckbox) {
-            showOnWaterfallCheckbox.addEventListener('change', (e) => {
-                this.showOnWaterfall = e.target.checked;
-                this.updateWaterfallOverlay();
+        if (showFloatingWindowCheckbox) {
+            showFloatingWindowCheckbox.addEventListener('change', (e) => {
+                this.showFloatingWindow = e.target.checked;
+                this.updateFloatingWindow();
             });
         }
 
@@ -177,15 +177,8 @@ class WhisperExtension extends DecoderExtension {
         // Stop the update timer
         this.stopUpdateTimer();
 
-        // Remove waterfall overlays
-        const rfOverlay = document.getElementById('whisper-rf-waterfall-overlay');
-        if (rfOverlay) {
-            rfOverlay.remove();
-        }
-        const audioOverlay = document.getElementById('whisper-audio-waterfall-overlay');
-        if (audioOverlay) {
-            audioOverlay.remove();
-        }
+        // Remove floating window
+        this.updateFloatingWindow();
 
         // Detach from audio extension
         this.detachAudioExtension();
@@ -502,8 +495,8 @@ class WhisperExtension extends DecoderExtension {
                 emptyDiv.textContent = 'No transcription yet. Start the decoder to begin.';
                 transcriptionElement.appendChild(emptyDiv);
             }
-            // Update waterfall overlay
-            this.updateWaterfallOverlay();
+            // Update floating window
+            this.updateFloatingWindow();
             return;
         }
 
@@ -572,8 +565,8 @@ class WhisperExtension extends DecoderExtension {
             incompleteElement.remove();
         }
 
-        // Update waterfall overlay
-        this.updateWaterfallOverlay();
+        // Update floating window
+        this.updateFloatingWindow();
     }
 
     createSegmentElement(seg, isIncomplete) {
@@ -825,100 +818,88 @@ class WhisperExtension extends DecoderExtension {
         if (transcriptionElement) {
             transcriptionElement.style.fontSize = `${this.fontSize}px`;
         }
-        // Also update waterfall overlay if it exists
-        this.updateWaterfallOverlay();
+        // Also update floating window if it exists
+        this.updateFloatingWindow();
     }
 
-    updateWaterfallOverlay() {
-        const shouldShow = this.showOnWaterfall && this.lastSegment && this.lastSegment.text;
-        
-        // Update RF waterfall overlay (main waterfall at top)
-        this.updateSingleWaterfallOverlay('whisper-rf-waterfall-overlay', 'waterfall-canvas', shouldShow);
-        
-        // Update audio waterfall overlay (in extension panel)
-        this.updateSingleWaterfallOverlay('whisper-audio-waterfall-overlay', 'audio-waterfall-canvas', shouldShow);
-    }
-
-    updateSingleWaterfallOverlay(overlayId, canvasId, shouldShow) {
-        let overlay = document.getElementById(overlayId);
+    updateFloatingWindow() {
+        const shouldShow = this.showFloatingWindow && this.lastSegment && this.lastSegment.text;
+        let floatingWindow = document.getElementById('whisper-floating-window');
 
         if (!shouldShow) {
-            // Remove overlay if not needed
-            if (overlay) {
-                overlay.remove();
+            if (floatingWindow) {
+                floatingWindow.remove();
             }
             return;
         }
 
-        // Find the waterfall canvas
-        const waterfallCanvas = document.getElementById(canvasId);
-        if (!waterfallCanvas) {
-            // Canvas not found - might not exist yet or not applicable
-            return;
-        }
-
-        // Get the position:relative container (parent of canvas)
-        const canvasContainer = waterfallCanvas.parentElement;
-        if (!canvasContainer) {
-            return;
-        }
-
-        // Get the waterfall-container (parent of the position:relative div)
-        // This is where we'll append the overlay as a sibling to the canvas container
-        const waterfallContainer = canvasContainer.parentElement;
-        if (!waterfallContainer) {
-            return;
-        }
-
-        // Ensure waterfall container has position relative for absolute positioning
-        if (getComputedStyle(waterfallContainer).position === 'static') {
-            waterfallContainer.style.position = 'relative';
-        }
-
-        // Create overlay if it doesn't exist
-        if (!overlay) {
-            overlay = document.createElement('div');
-            overlay.id = overlayId;
-            overlay.style.cssText = `
-                position: absolute;
+        // Create floating window if it doesn't exist
+        if (!floatingWindow) {
+            floatingWindow = document.createElement('div');
+            floatingWindow.id = 'whisper-floating-window';
+            floatingWindow.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 400px;
+                padding: 15px 20px;
+                background-color: rgba(0, 0, 0, 0.85);
+                border: 2px solid #ff9800;
+                border-radius: 8px;
                 color: #ff9800;
                 font-family: Consolas, Monaco, monospace;
+                font-size: ${this.fontSize}px;
                 font-weight: bold;
                 text-align: center;
-                text-shadow: 2px 2px 4px rgba(0,0,0,0.9), -2px -2px 4px rgba(0,0,0,0.9), 2px -2px 4px rgba(0,0,0,0.9), -2px 2px 4px rgba(0,0,0,0.9);
-                pointer-events: none;
-                z-index: 100;
-                max-width: 80%;
+                text-shadow: 2px 2px 4px rgba(0,0,0,0.9);
+                z-index: 999999;
+                cursor: move;
+                user-select: none;
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
                 word-wrap: break-word;
-                padding: 10px 20px;
-                background-color: rgba(0, 0, 0, 0.5);
-                border-radius: 5px;
                 white-space: pre-wrap;
-                display: block;
-                visibility: visible;
-                opacity: 1;
+                resize: both;
+                overflow: auto;
+                min-width: 200px;
+                min-height: 50px;
             `;
-            // Append to waterfall-container, not the canvas container
-            // This makes it a sibling of the position:relative div, like waterfall-controls
-            waterfallContainer.appendChild(overlay);
-            console.log(`Whisper: Created overlay ${overlayId} on canvas ${canvasId}`);
+
+            // Make it draggable
+            let isDragging = false;
+            let currentX;
+            let currentY;
+            let initialX;
+            let initialY;
+
+            floatingWindow.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                initialX = e.clientX - floatingWindow.offsetLeft;
+                initialY = e.clientY - floatingWindow.offsetTop;
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    e.preventDefault();
+                    currentX = e.clientX - initialX;
+                    currentY = e.clientY - initialY;
+                    floatingWindow.style.left = currentX + 'px';
+                    floatingWindow.style.top = currentY + 'px';
+                    floatingWindow.style.transform = 'none';
+                }
+            });
+
+            document.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+
+            document.body.appendChild(floatingWindow);
+            console.log('Whisper: Created floating window');
         }
 
-        // Get canvas position relative to the waterfall-container
-        const containerRect = waterfallContainer.getBoundingClientRect();
-        const canvasRect = waterfallCanvas.getBoundingClientRect();
-        
-        // Calculate position relative to waterfall-container
-        const left = canvasRect.left - containerRect.left + canvasRect.width / 2;
-        const top = canvasRect.top - containerRect.top + canvasRect.height / 2;
-        
-        overlay.style.left = `${left}px`;
-        overlay.style.top = `${top}px`;
-        overlay.style.transform = 'translate(-50%, -50%)';
-
-        // Update overlay content and font size
-        overlay.textContent = this.lastSegment.text;
-        overlay.style.fontSize = `${this.fontSize}px`;
+        // Update content and font size
+        floatingWindow.textContent = this.lastSegment.text;
+        floatingWindow.style.fontSize = `${this.fontSize}px`;
     }
 
     onActivate() {

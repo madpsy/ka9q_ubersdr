@@ -841,7 +841,7 @@ class WhisperExtension extends DecoderExtension {
 
     updateSingleWaterfallOverlay(overlayId, canvasId, shouldShow) {
         let overlay = document.getElementById(overlayId);
-        
+
         if (!shouldShow) {
             // Remove overlay if not needed
             if (overlay) {
@@ -863,12 +863,6 @@ class WhisperExtension extends DecoderExtension {
             return;
         }
 
-        // Ensure the container has position relative for absolute positioning
-        const containerPosition = getComputedStyle(waterfallContainer).position;
-        if (containerPosition === 'static') {
-            waterfallContainer.style.position = 'relative';
-        }
-
         // Create overlay if it doesn't exist
         if (!overlay) {
             overlay = document.createElement('div');
@@ -883,10 +877,13 @@ class WhisperExtension extends DecoderExtension {
             overlay.style.textAlign = 'center';
             overlay.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8), -1px -1px 2px rgba(0,0,0,0.8), 1px -1px 2px rgba(0,0,0,0.8), -1px 1px 2px rgba(0,0,0,0.8)';
             overlay.style.pointerEvents = 'none';
-            overlay.style.zIndex = '1000';
+            overlay.style.zIndex = '10000';  // Very high z-index to ensure visibility
             overlay.style.maxWidth = '80%';
             overlay.style.wordWrap = 'break-word';
+            overlay.style.padding = '10px';
+            overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';  // Semi-transparent background for better visibility
             waterfallContainer.appendChild(overlay);
+            console.log(`Whisper: Created overlay ${overlayId} on canvas ${canvasId}`);
         }
 
         // Update overlay content and font size

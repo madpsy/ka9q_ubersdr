@@ -353,6 +353,26 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 					langProb = lp
 				}
 				log.Printf("[Whisper] Detected language: %s (probability: %.2f)", lang, langProb)
+
+				// Send language detection to frontend
+				languageData := map[string]interface{}{
+					"language":      lang,
+					"language_prob": langProb,
+				}
+				languageJSON, err := json.Marshal(languageData)
+				if err != nil {
+					log.Printf("[Whisper] Failed to marshal language data: %v", err)
+					continue
+				}
+
+				encoded := d.encodeLanguageDetection(languageJSON, time.Now().UnixNano())
+
+				// Send to result channel (non-blocking)
+				select {
+				case resultChan <- encoded:
+				default:
+					log.Printf("[Whisper] Result channel full, dropping language detection")
+				}
 				continue
 			}
 
@@ -445,10 +465,24 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 func (d *WhisperDecoder) encodeSegments(segmentsJSON []byte, timestamp int64) []byte {
 	buf := make([]byte, 1+8+4+len(segmentsJSON))
 
-	buf[0] = 0x02 // Message type: segments (changed from 0x01)
+	buf[0] = 0x02 // Message type: segments
 	binary.BigEndian.PutUint64(buf[1:9], uint64(timestamp))
 	binary.BigEndian.PutUint32(buf[9:13], uint32(len(segmentsJSON)))
 	copy(buf[13:], segmentsJSON)
+
+	return buf
+}
+
+// encodeLanguageDetection encodes language detection into binary protocol
+// Format: [type:1][timestamp:8][json_length:4][json:N]
+// The JSON contains language and language_prob fields
+func (d *WhisperDecoder) encodeLanguageDetection(languageJSON []byte, timestamp int64) []byte {
+	buf := make([]byte, 1+8+4+len(languageJSON))
+
+	buf[0] = 0x03 // Message type: language detection
+	binary.BigEndian.PutUint64(buf[1:9], uint64(timestamp))
+	binary.BigEndian.PutUint32(buf[9:13], uint32(len(languageJSON)))
+	copy(buf[13:], languageJSON)
 
 	return buf
 }

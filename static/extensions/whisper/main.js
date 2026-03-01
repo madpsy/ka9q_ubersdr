@@ -32,6 +32,13 @@ class WhisperExtension extends DecoderExtension {
         this.lastUpdateTime = null;  // Track time of last message update
         this.updateTimerInterval = null;  // Interval for updating the "time since last update" display
         this.handlersSetup = false;  // Track if event handlers have been set up
+        this.detectedLanguage = null;  // Detected language from server
+        this.detectedLanguageProb = null;  // Language detection probability
+        
+        // Frequency change detection
+        this.lastFrequency = null;  // Track last frequency
+        this.frequencyChangeTimer = null;  // Timer for auto-restart after frequency change
+        this.wasRunningBeforeFreqChange = false;  // Track if decoder was running before frequency change
 
         console.log('Whisper: Extension initialized');
     }
@@ -154,6 +161,9 @@ class WhisperExtension extends DecoderExtension {
         this.isRunning = true;
         this.sessionStartTime = Date.now();  // Record start time for wall clock timestamps
         this.lastUpdateTime = null;  // Reset last update time
+        this.detectedLanguage = null;  // Reset detected language
+        this.detectedLanguageProb = null;
+        this.updateDetectedLanguageDisplay();
         this.updateButtonStates();
         this.updateStatus('Starting...', 'whisper-status-starting');
 
@@ -162,6 +172,9 @@ class WhisperExtension extends DecoderExtension {
 
         // Start the update timer
         this.startUpdateTimer();
+        
+        // Start frequency monitoring
+        this.startFrequencyMonitoring();
 
         // Attach to audio extension
         this.attachAudioExtension();
@@ -176,6 +189,9 @@ class WhisperExtension extends DecoderExtension {
 
         // Stop the update timer
         this.stopUpdateTimer();
+        
+        // Stop frequency monitoring
+        this.stopFrequencyMonitoring();
 
         // Remove floating window
         this.updateFloatingWindow();
@@ -362,6 +378,9 @@ class WhisperExtension extends DecoderExtension {
         switch (messageType) {
             case 0x02: // Segments JSON
                 this.handleSegments(view, data);
+                break;
+            case 0x03: // Language detection
+                this.handleLanguageDetection(view, data);
                 break;
             default:
                 console.warn(`Whisper: Unknown message type: 0x${messageType.toString(16).padStart(2, '0')}`);
@@ -910,6 +929,139 @@ class WhisperExtension extends DecoderExtension {
         // Update content and font size
         floatingWindow.textContent = this.lastSegment.text;
         floatingWindow.style.fontSize = `${this.fontSize}px`;
+    }
+
+    handleLanguageDetection(view, data) {
+        // Binary protocol: [type:1][timestamp:8][json_length:4][json:N]
+        // Extract timestamp (bytes 1-8, big-endian)
+        const timestampNano = view.getBigUint64(1, false);
+
+        // Extract JSON length (bytes 9-12, big-endian)
+        const jsonLength = view.getUint32(9, false);
+
+        // Extract JSON (bytes 13 onwards)
+        const jsonBytes = new Uint8Array(data, 13, jsonLength);
+        const decoder = new TextDecoder('utf-8');
+        const jsonStr = decoder.decode(jsonBytes);
+
+        let languageData;
+        try {
+            languageData = JSON.parse(jsonStr);
+        } catch (e) {
+            console.error('Whisper: Failed to parse language detection JSON:', e);
+            return;
+        }
+
+        this.detectedLanguage = languageData.language;
+        this.detectedLanguageProb = languageData.language_prob;
+
+        console.log(`Whisper: Detected language: ${this.detectedLanguage} (${(this.detectedLanguageProb * 100).toFixed(1)}%)`);
+
+        // Update the display
+        this.updateDetectedLanguageDisplay();
+    }
+
+    updateDetectedLanguageDisplay() {
+        const languageElement = document.getElementById('whisper-detected-language');
+        if (!languageElement) return;
+
+        if (this.detectedLanguage && this.detectedLanguageProb) {
+            const languageNames = {
+                'en': 'English',
+                'es': 'Spanish',
+                'fr': 'French',
+                'de': 'German',
+                'it': 'Italian',
+                'pt': 'Portuguese',
+                'ru': 'Russian',
+                'zh': 'Chinese',
+                'ja': 'Japanese',
+                'ko': 'Korean',
+                'ar': 'Arabic',
+                'hi': 'Hindi',
+                'nl': 'Dutch',
+                'pl': 'Polish',
+                'tr': 'Turkish',
+                'sv': 'Swedish',
+                'da': 'Danish',
+                'no': 'Norwegian',
+                'fi': 'Finnish'
+            };
+
+            const languageName = languageNames[this.detectedLanguage] || this.detectedLanguage.toUpperCase();
+            const probability = (this.detectedLanguageProb * 100).toFixed(0);
+
+            languageElement.textContent = `(${languageName} ${probability}%)`;
+            languageElement.style.display = 'inline';
+            languageElement.style.marginLeft = '8px';
+            languageElement.style.fontSize = '0.9em';
+            languageElement.style.color = '#888';
+            languageElement.style.fontStyle = 'italic';
+        } else {
+            languageElement.style.display = 'none';
+        }
+    }
+
+    startFrequencyMonitoring() {
+        // Get current frequency
+        if (window.radioControl && window.radioControl.frequency) {
+            this.lastFrequency = window.radioControl.frequency;
+        }
+
+        // Monitor frequency changes every 100ms
+        this.frequencyMonitorInterval = setInterval(() => {
+            if (!window.radioControl || !window.radioControl.frequency) {
+                return;
+            }
+
+            const currentFrequency = window.radioControl.frequency;
+
+            // Check if frequency has changed
+            if (this.lastFrequency !== null && currentFrequency !== this.lastFrequency) {
+                console.log(`Whisper: Frequency changed from ${this.lastFrequency} to ${currentFrequency}`);
+
+                // Stop decoder if running
+                if (this.isRunning) {
+                    console.log('Whisper: Stopping decoder due to frequency change');
+                    this.wasRunningBeforeFreqChange = true;
+                    this.stopDecoder();
+                    this.updateStatus('Paused (frequency change)', 'whisper-status-paused');
+                }
+
+                // Clear any existing restart timer
+                if (this.frequencyChangeTimer) {
+                    clearTimeout(this.frequencyChangeTimer);
+                }
+
+                // Set timer to restart after 1 second of stability
+                this.frequencyChangeTimer = setTimeout(() => {
+                    if (this.wasRunningBeforeFreqChange) {
+                        console.log('Whisper: Frequency stable for 1 second, restarting decoder');
+                        this.wasRunningBeforeFreqChange = false;
+                        this.startDecoder();
+                    }
+                }, 1000);
+            }
+
+            this.lastFrequency = currentFrequency;
+        }, 100);
+
+        console.log('Whisper: Frequency monitoring started');
+    }
+
+    stopFrequencyMonitoring() {
+        if (this.frequencyMonitorInterval) {
+            clearInterval(this.frequencyMonitorInterval);
+            this.frequencyMonitorInterval = null;
+        }
+
+        if (this.frequencyChangeTimer) {
+            clearTimeout(this.frequencyChangeTimer);
+            this.frequencyChangeTimer = null;
+        }
+
+        this.wasRunningBeforeFreqChange = false;
+        console.log('Whisper: Frequency monitoring stopped');
     }
 
     onActivate() {

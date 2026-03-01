@@ -857,17 +857,8 @@ class WhisperExtension extends DecoderExtension {
             return;
         }
 
-        // For the main RF waterfall, use the .waterfall-container parent which has actual dimensions
-        // For audio waterfall, use the canvas parent
-        let waterfallContainer;
-        if (canvasId === 'waterfall-canvas') {
-            // Main RF waterfall - go up to .waterfall-container
-            waterfallContainer = waterfallCanvas.closest('.waterfall-container');
-        } else {
-            // Audio waterfall - use immediate parent
-            waterfallContainer = waterfallCanvas.parentElement;
-        }
-        
+        // Use the canvas itself as the reference point - position overlay relative to canvas
+        const waterfallContainer = waterfallCanvas.parentElement;
         if (!waterfallContainer) {
             return;
         }

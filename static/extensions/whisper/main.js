@@ -857,13 +857,20 @@ class WhisperExtension extends DecoderExtension {
             return;
         }
 
-        // Use the canvas itself as the reference point - position overlay relative to canvas
-        const waterfallContainer = waterfallCanvas.parentElement;
+        // Get the position:relative container (parent of canvas)
+        const canvasContainer = waterfallCanvas.parentElement;
+        if (!canvasContainer) {
+            return;
+        }
+
+        // Get the waterfall-container (parent of the position:relative div)
+        // This is where we'll append the overlay as a sibling to the canvas container
+        const waterfallContainer = canvasContainer.parentElement;
         if (!waterfallContainer) {
             return;
         }
 
-        // Ensure container has position relative
+        // Ensure waterfall container has position relative for absolute positioning
         if (getComputedStyle(waterfallContainer).position === 'static') {
             waterfallContainer.style.position = 'relative';
         }
@@ -880,7 +887,7 @@ class WhisperExtension extends DecoderExtension {
                 text-align: center;
                 text-shadow: 2px 2px 4px rgba(0,0,0,0.9), -2px -2px 4px rgba(0,0,0,0.9), 2px -2px 4px rgba(0,0,0,0.9), -2px 2px 4px rgba(0,0,0,0.9);
                 pointer-events: none;
-                z-index: 10;
+                z-index: 100;
                 max-width: 80%;
                 word-wrap: break-word;
                 padding: 10px 20px;
@@ -891,13 +898,22 @@ class WhisperExtension extends DecoderExtension {
                 visibility: visible;
                 opacity: 1;
             `;
+            // Append to waterfall-container, not the canvas container
+            // This makes it a sibling of the position:relative div, like waterfall-controls
             waterfallContainer.appendChild(overlay);
             console.log(`Whisper: Created overlay ${overlayId} on canvas ${canvasId}`);
         }
 
-        // Position overlay based on canvas position within container
-        overlay.style.left = `${waterfallCanvas.offsetLeft + waterfallCanvas.offsetWidth / 2}px`;
-        overlay.style.top = `${waterfallCanvas.offsetTop + waterfallCanvas.offsetHeight / 2}px`;
+        // Get canvas position relative to the waterfall-container
+        const containerRect = waterfallContainer.getBoundingClientRect();
+        const canvasRect = waterfallCanvas.getBoundingClientRect();
+        
+        // Calculate position relative to waterfall-container
+        const left = canvasRect.left - containerRect.left + canvasRect.width / 2;
+        const top = canvasRect.top - containerRect.top + canvasRect.height / 2;
+        
+        overlay.style.left = `${left}px`;
+        overlay.style.top = `${top}px`;
         overlay.style.transform = 'translate(-50%, -50%)';
 
         // Update overlay content and font size

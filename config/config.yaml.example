@@ -1437,6 +1437,10 @@ mcp:
 # ==============================================================================
 # Real-time speech transcription using OpenAI Whisper via WhisperLive server
 # Provides live transcription of audio channels in the web interface
+#
+# RENDER_GID=$(stat -c "%g" /dev/dri/render* | head -n 1)
+# docker run -d --name whisperlive -p 9090:9090 --device=/dev/dri --group-add $RENDER_GID ghcr.io/collabora/whisperlive-openvino:latest python run_server.py --backend openvino --max_connection_time 86400
+#
 whisper:
   # Enable Whisper speech-to-text extension (default: false)
   # When enabled, users can transcribe audio from any channel
@@ -1452,7 +1456,8 @@ whisper:
   # Whisper model to use
   # Available models:
   #   Multilingual: tiny, base, small, medium, large
-  #   English-only: tiny.en, base.en, small.en, medium.en, large.en
+  #   English-only: tiny.en, base.en, small.en, medium.en
+  #   Intel GPU:    OpenVINO/whisper-medium-fp16-ov
   #
   # Model comparison:
   #   tiny     - 39 MB  - Fastest, least accurate

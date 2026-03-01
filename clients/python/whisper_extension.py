@@ -37,6 +37,9 @@ class WhisperExtension:
         self.last_update_time = None
         self.auto_scroll = True
         self.show_timestamps = False
+        self.show_only_incomplete = True  # Show only in-progress sentence
+        self.last_rendered_transcript_len = 0  # Track number of completed segments rendered
+        self.last_rendered_incomplete = None  # Track last incomplete segment text
         
         # Create window
         self.window = tk.Toplevel(parent)
@@ -60,6 +63,7 @@ class WhisperExtension:
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         self.window.columnconfigure(0, weight=1)
         self.window.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(0, weight=1)
         
         # Status bar
         status_frame = ttk.Frame(main_frame)
@@ -77,32 +81,38 @@ class WhisperExtension:
         # Controls frame
         controls_frame = ttk.Frame(main_frame)
         controls_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        controls_frame.columnconfigure(5, weight=1)
+        controls_frame.columnconfigure(6, weight=1)
         
         # Auto-scroll checkbox
         self.auto_scroll_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(controls_frame, text="Auto-scroll", 
+        ttk.Checkbutton(controls_frame, text="Auto-scroll",
                        variable=self.auto_scroll_var,
                        command=self.on_auto_scroll_changed).grid(row=0, column=0, padx=(0, 15))
-        
+
         # Show timestamps checkbox
         self.show_timestamps_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(controls_frame, text="Show timestamps", 
+        ttk.Checkbutton(controls_frame, text="Show timestamps",
                        variable=self.show_timestamps_var,
                        command=self.on_show_timestamps_changed).grid(row=0, column=1, padx=(0, 15))
+
+        # Show only incomplete checkbox
+        self.show_only_incomplete_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(controls_frame, text="Only show in-progress",
+                       variable=self.show_only_incomplete_var,
+                       command=self.on_show_only_incomplete_changed).grid(row=0, column=2, padx=(0, 15))
         
         # Control buttons
         self.start_button = ttk.Button(controls_frame, text="Start", command=self.start_decoder)
-        self.start_button.grid(row=0, column=2, padx=(0, 5))
-        
+        self.start_button.grid(row=0, column=3, padx=(0, 5))
+
         self.stop_button = ttk.Button(controls_frame, text="Stop", command=self.stop_decoder, state=tk.DISABLED)
-        self.stop_button.grid(row=0, column=3, padx=(0, 5))
-        
-        ttk.Button(controls_frame, text="Clear", command=self.clear_transcription).grid(row=0, column=4, padx=(0, 15))
+        self.stop_button.grid(row=0, column=4, padx=(0, 5))
+
+        ttk.Button(controls_frame, text="Clear", command=self.clear_transcription).grid(row=0, column=5, padx=(0, 15))
         
         # Last update time (right-aligned)
         self.last_update_label = ttk.Label(controls_frame, text="--", foreground="gray", font=("Courier", 9))
-        self.last_update_label.grid(row=0, column=5, sticky=tk.E)
+        self.last_update_label.grid(row=0, column=6, sticky=tk.E)
         
         # Transcription display frame
         trans_frame = ttk.LabelFrame(main_frame, text="Transcription", padding="10")
@@ -151,6 +161,13 @@ class WhisperExtension:
     def on_show_timestamps_changed(self):
         """Handle show timestamps checkbox change."""
         self.show_timestamps = self.show_timestamps_var.get()
+        self.last_rendered_transcript_len = 0  # Reset cache to force full re-render
+        self.render_transcription()
+
+    def on_show_only_incomplete_changed(self):
+        """Handle show only incomplete checkbox change."""
+        self.show_only_incomplete = self.show_only_incomplete_var.get()
+        self.last_rendered_transcript_len = 0  # Reset cache to force full re-render
         self.render_transcription()
         
     def start_decoder(self):
@@ -305,8 +322,6 @@ class WhisperExtension:
         if not isinstance(segments, list) or len(segments) == 0:
             return
         
-        print(f"[Whisper] Received {len(segments)} segments")
-        
         # Process segments
         self.process_segments(segments)
         
@@ -336,44 +351,123 @@ class WhisperExtension:
                     self.transcript.append(seg)
                     
     def render_transcription(self):
-        """Render the transcription to the text widget."""
-        self.transcription_text.config(state=tk.NORMAL)
-        self.transcription_text.delete('1.0', tk.END)
-        
-        # Handle empty state
-        if len(self.transcript) == 0 and not self.last_segment:
-            if self.running:
-                self.transcription_text.insert(tk.END, 
-                    "Transcription started, please wait for the first chunk of text...",
+        """Render the transcription to the text widget with minimal updates."""
+        current_incomplete = self.last_segment.get('text', '') if self.last_segment else None
+        transcript_len = len(self.transcript)
+
+        # In "show only incomplete" mode, always do a simple render
+        if self.show_only_incomplete:
+            self.transcription_text.config(state=tk.NORMAL)
+            self.transcription_text.delete('1.0', tk.END)
+
+            if self.last_segment:
+                if self.show_timestamps and 'start' in self.last_segment and self.session_start_time:
+                    segment_offset_s = float(self.last_segment['start'])
+                    wall_clock_time = self.session_start_time + segment_offset_s
+                    time_str = datetime.fromtimestamp(wall_clock_time).strftime('%H:%M:%S')
+                    self.transcription_text.insert(tk.END, f"[{time_str}] ", "timestamp")
+
+                text = self.last_segment.get('text', '')
+                self.transcription_text.insert(tk.END, text, "incomplete")
+            elif self.running:
+                self.transcription_text.insert(tk.END,
+                    "Waiting for speech...",
                     "incomplete")
             else:
                 self.transcription_text.insert(tk.END,
                     "No transcription yet. Start the decoder to begin.",
                     "completed")
+
             self.transcription_text.config(state=tk.DISABLED)
+            self.last_rendered_transcript_len = transcript_len
+            self.last_rendered_incomplete = current_incomplete
             return
-        
-        # Build display for all segments (completed + incomplete)
-        segments_to_display = self.transcript.copy()
-        if self.last_segment:
-            segments_to_display.append(self.last_segment)
-        
-        for i, seg in enumerate(segments_to_display):
-            is_incomplete = (i == len(segments_to_display) - 1 and 
-                           self.last_segment and seg == self.last_segment)
-            
-            # Add timestamp if enabled
-            if self.show_timestamps and 'start' in seg and self.session_start_time:
-                segment_offset_s = float(seg['start'])
-                wall_clock_time = self.session_start_time + segment_offset_s
-                time_str = datetime.fromtimestamp(wall_clock_time).strftime('%H:%M:%S')
-                self.transcription_text.insert(tk.END, f"[{time_str}] ", "timestamp")
-            
-            # Add text
-            text = seg.get('text', '')
-            tag = "incomplete" if is_incomplete else "completed"
-            self.transcription_text.insert(tk.END, text + "\n", tag)
-        
+
+        # Check if we need a full redraw (completed segments changed or timestamps toggled)
+        need_full_redraw = (transcript_len != self.last_rendered_transcript_len)
+
+        # Check if only the incomplete segment changed
+        incomplete_changed = (current_incomplete != self.last_rendered_incomplete)
+
+        # Skip if nothing changed
+        if not need_full_redraw and not incomplete_changed:
+            return
+
+        self.transcription_text.config(state=tk.NORMAL)
+
+        if need_full_redraw:
+            # Full redraw needed - completed segments changed
+            self.transcription_text.delete('1.0', tk.END)
+
+            # Handle empty state
+            if len(self.transcript) == 0 and not self.last_segment:
+                if self.running:
+                    self.transcription_text.insert(tk.END,
+                        "Transcription started, please wait for the first chunk of text...",
+                        "incomplete")
+                else:
+                    self.transcription_text.insert(tk.END,
+                        "No transcription yet. Start the decoder to begin.",
+                        "completed")
+                self.transcription_text.config(state=tk.DISABLED)
+                self.last_rendered_transcript_len = 0
+                self.last_rendered_incomplete = None
+                return
+
+            # Render all completed segments
+            for seg in self.transcript:
+                if self.show_timestamps and 'start' in seg and self.session_start_time:
+                    segment_offset_s = float(seg['start'])
+                    wall_clock_time = self.session_start_time + segment_offset_s
+                    time_str = datetime.fromtimestamp(wall_clock_time).strftime('%H:%M:%S')
+                    self.transcription_text.insert(tk.END, f"[{time_str}] ", "timestamp")
+
+                text = seg.get('text', '')
+                self.transcription_text.insert(tk.END, text + "\n", "completed")
+
+            # Add incomplete segment if exists
+            if self.last_segment:
+                if self.show_timestamps and 'start' in self.last_segment and self.session_start_time:
+                    segment_offset_s = float(self.last_segment['start'])
+                    wall_clock_time = self.session_start_time + segment_offset_s
+                    time_str = datetime.fromtimestamp(wall_clock_time).strftime('%H:%M:%S')
+                    self.transcription_text.insert(tk.END, f"[{time_str}] ", "timestamp")
+
+                text = self.last_segment.get('text', '')
+                self.transcription_text.insert(tk.END, text + "\n", "incomplete")
+
+            self.last_rendered_transcript_len = transcript_len
+            self.last_rendered_incomplete = current_incomplete
+
+        elif incomplete_changed:
+            # Only incomplete segment changed - just update the last line
+            # Check if there was a previous incomplete segment to delete
+            if self.last_rendered_incomplete is not None:
+                # Find and delete only the last line (incomplete segment)
+                # Get the line number of the last line with content
+                end_index = self.transcription_text.index("end-1c")
+                last_line_num = int(end_index.split('.')[0]) - 1
+                if last_line_num > 0:
+                    last_line_start = f"{last_line_num}.0"
+                    last_line_end = f"{last_line_num}.end"
+                    self.transcription_text.delete(last_line_start, last_line_end)
+                    # Also delete the newline if it exists
+                    if self.transcription_text.get(last_line_start, f"{last_line_start}+1c") == "\n":
+                        self.transcription_text.delete(last_line_start, f"{last_line_start}+1c")
+
+            # Re-add the incomplete segment
+            if self.last_segment:
+                if self.show_timestamps and 'start' in self.last_segment and self.session_start_time:
+                    segment_offset_s = float(self.last_segment['start'])
+                    wall_clock_time = self.session_start_time + segment_offset_s
+                    time_str = datetime.fromtimestamp(wall_clock_time).strftime('%H:%M:%S')
+                    self.transcription_text.insert(tk.END, f"[{time_str}] ", "timestamp")
+
+                text = self.last_segment.get('text', '')
+                self.transcription_text.insert(tk.END, text + "\n", "incomplete")
+
+            self.last_rendered_incomplete = current_incomplete
+
         self.transcription_text.config(state=tk.DISABLED)
         
     def clear_transcription(self):
@@ -381,6 +475,8 @@ class WhisperExtension:
         print("[Whisper] Clearing transcription")
         self.transcript = []
         self.last_segment = None
+        self.last_rendered_transcript_len = 0  # Reset cache to force re-render
+        self.last_rendered_incomplete = None
         self.render_transcription()
         
     def copy_to_clipboard(self):

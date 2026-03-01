@@ -335,7 +335,7 @@
 }
 
 /* Input elements */
-input[type="checkbox"] {
+.whisper-container input[type="checkbox"] {
     accent-color: #4caf50;
 }
 

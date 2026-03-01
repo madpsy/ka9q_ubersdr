@@ -24,6 +24,7 @@ class WhisperExtension extends DecoderExtension {
         this.isRunning = false;
         this.autoScroll = true;
         this.showTimestamps = false;  // Disabled by default
+        this.showOnlyIncomplete = true;  // Show only in-progress by default
         this.sessionStartTime = null;  // Track when decoder starts for wall clock timestamps
         this.renderedSegmentCount = 0;  // Track how many completed segments are rendered
         this.lastUpdateTime = null;  // Track time of last message update
@@ -98,6 +99,7 @@ class WhisperExtension extends DecoderExtension {
         // Settings checkboxes
         const autoScrollCheckbox = document.getElementById('whisper-auto-scroll');
         const timestampsCheckbox = document.getElementById('whisper-show-timestamps');
+        const showOnlyIncompleteCheckbox = document.getElementById('whisper-show-only-incomplete');
 
         if (autoScrollCheckbox) {
             autoScrollCheckbox.addEventListener('change', (e) => {
@@ -108,6 +110,13 @@ class WhisperExtension extends DecoderExtension {
             timestampsCheckbox.addEventListener('change', (e) => {
                 this.showTimestamps = e.target.checked;
                 // For timestamp toggle, we need to re-render all segments
+                this.forceFullRerender();
+            });
+        }
+        if (showOnlyIncompleteCheckbox) {
+            showOnlyIncompleteCheckbox.addEventListener('change', (e) => {
+                this.showOnlyIncomplete = e.target.checked;
+                // Need to re-render when toggling this mode
                 this.forceFullRerender();
             });
         }
@@ -446,6 +455,29 @@ class WhisperExtension extends DecoderExtension {
         const transcriptionElement = document.getElementById('whisper-transcription');
         if (!transcriptionElement) return;
 
+        // Handle "show only incomplete" mode
+        if (this.showOnlyIncomplete) {
+            // Clear everything and show only the incomplete segment
+            transcriptionElement.innerHTML = '';
+
+            if (this.lastSegment) {
+                const lineDiv = this.createSegmentElement(this.lastSegment, true);
+                transcriptionElement.appendChild(lineDiv);
+            } else if (this.isRunning) {
+                const emptyDiv = document.createElement('div');
+                emptyDiv.className = 'whisper-transcription-empty';
+                emptyDiv.textContent = 'Waiting for speech...';
+                transcriptionElement.appendChild(emptyDiv);
+            } else {
+                const emptyDiv = document.createElement('div');
+                emptyDiv.className = 'whisper-transcription-empty';
+                emptyDiv.textContent = 'No transcription yet. Start the decoder to begin.';
+                transcriptionElement.appendChild(emptyDiv);
+            }
+            return;
+        }
+
+        // Normal mode: show all segments
         // Handle empty state
         if (this.transcript.length === 0 && !this.lastSegment) {
             // Remove any existing content

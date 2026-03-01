@@ -43,6 +43,11 @@ class WhisperExtension:
         self.detected_language = None  # Detected language from server
         self.detected_language_prob = None  # Language detection probability
         
+        # Floating window
+        self.show_floating_window = False  # Show floating window with current text
+        self.floating_window = None  # Reference to floating window
+        self.floating_label = None  # Label in floating window
+        
         # Frequency change detection
         self.last_frequency = None  # Track last frequency
         self.frequency_check_timer = None  # Timer for checking frequency changes
@@ -52,7 +57,7 @@ class WhisperExtension:
         # Create window
         self.window = tk.Toplevel(parent)
         self.window.title("🎤 Speech-to-Text")
-        self.window.geometry("700x600")
+        self.window.geometry("900x600")
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         # Create UI
@@ -89,7 +94,7 @@ class WhisperExtension:
         # Controls frame
         controls_frame = ttk.Frame(main_frame)
         controls_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        controls_frame.columnconfigure(6, weight=1)
+        controls_frame.columnconfigure(7, weight=1)
         
         # Auto-scroll checkbox
         self.auto_scroll_var = tk.BooleanVar(value=True)
@@ -109,18 +114,24 @@ class WhisperExtension:
                        variable=self.show_only_incomplete_var,
                        command=self.on_show_only_incomplete_changed).grid(row=0, column=2, padx=(0, 15))
         
+        # Show floating window checkbox
+        self.show_floating_window_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(controls_frame, text="Show floating window",
+                       variable=self.show_floating_window_var,
+                       command=self.on_show_floating_window_changed).grid(row=0, column=3, padx=(0, 15))
+        
         # Control buttons
         self.start_button = ttk.Button(controls_frame, text="Start", command=self.start_decoder)
-        self.start_button.grid(row=0, column=3, padx=(0, 5))
+        self.start_button.grid(row=0, column=4, padx=(0, 5))
 
         self.stop_button = ttk.Button(controls_frame, text="Stop", command=self.stop_decoder, state=tk.DISABLED)
-        self.stop_button.grid(row=0, column=4, padx=(0, 5))
+        self.stop_button.grid(row=0, column=5, padx=(0, 5))
 
-        ttk.Button(controls_frame, text="Clear", command=self.clear_transcription).grid(row=0, column=5, padx=(0, 15))
+        ttk.Button(controls_frame, text="Clear", command=self.clear_transcription).grid(row=0, column=6, padx=(0, 15))
         
         # Last update time (right-aligned)
         self.last_update_label = ttk.Label(controls_frame, text="--", foreground="gray", font=("Courier", 9))
-        self.last_update_label.grid(row=0, column=6, sticky=tk.E)
+        self.last_update_label.grid(row=0, column=7, sticky=tk.E)
         
         # Transcription display frame with language label
         trans_header_frame = ttk.Frame(main_frame)
@@ -184,7 +195,12 @@ class WhisperExtension:
         self.show_only_incomplete = self.show_only_incomplete_var.get()
         self.last_rendered_transcript_len = 0  # Reset cache to force full re-render
         self.render_transcription()
-        
+
+    def on_show_floating_window_changed(self):
+        """Handle show floating window checkbox change."""
+        self.show_floating_window = self.show_floating_window_var.get()
+        self.update_floating_window()
+
     def start_decoder(self):
         """Start the decoder."""
         print("[Whisper] Starting decoder")
@@ -224,10 +240,13 @@ class WhisperExtension:
         # Stop frequency monitoring (unless we're stopping due to frequency change)
         if not skip_frequency_monitoring:
             self.stop_frequency_monitoring()
-        
+
+        # Hide floating window
+        self.update_floating_window()
+
         # Detach from audio extension
         self.detach_audio_extension()
-        
+
     def attach_audio_extension(self):
         """Attach to the Whisper audio extension via WebSocket."""
         if not self.dxcluster_ws or not self.dxcluster_ws.is_connected():
@@ -357,11 +376,14 @@ class WhisperExtension:
         
         # Render updated transcription
         self.render_transcription()
-        
+
+        # Update floating window
+        self.update_floating_window()
+
         # Auto-scroll if enabled
         if self.auto_scroll:
             self.transcription_text.see(tk.END)
-            
+
     def process_segments(self, segments: list):
         """Process segments following WhisperLive client.py pattern."""
         for i, seg in enumerate(segments):
@@ -747,10 +769,63 @@ class WhisperExtension:
 
         self.was_running_before_freq_change = False
 
+    def update_floating_window(self):
+        """Update or hide the floating window based on state."""
+        should_show = self.show_floating_window and self.running and self.last_segment and self.last_segment.get('text')
+
+        if not should_show:
+            if self.floating_window and self.floating_window.winfo_exists():
+                self.floating_window.destroy()
+                self.floating_window = None
+                self.floating_label = None
+            return
+
+        # Create floating window if it doesn't exist
+        if not self.floating_window or not self.floating_window.winfo_exists():
+            self.floating_window = tk.Toplevel(self.window)
+            self.floating_window.title("Speech-to-Text")
+            self.floating_window.attributes('-topmost', True)  # Keep on top
+            self.floating_window.geometry("400x150")
+
+            # Make window semi-transparent (if supported)
+            try:
+                self.floating_window.attributes('-alpha', 0.9)
+            except:
+                pass  # Not supported on all platforms
+
+            # Configure background
+            self.floating_window.configure(bg='#1a1a1a')
+
+            # Create label for text
+            self.floating_label = tk.Label(
+                self.floating_window,
+                text="",
+                font=("Consolas", 14, "bold"),
+                bg='#1a1a1a',
+                fg='#ff9800',
+                wraplength=380,
+                justify=tk.CENTER,
+                padx=10,
+                pady=10
+            )
+            self.floating_label.pack(fill=tk.BOTH, expand=True)
+
+            # Prevent window from being closed directly (only via checkbox)
+            self.floating_window.protocol("WM_DELETE_WINDOW", lambda: self.show_floating_window_var.set(False) or self.update_floating_window())
+
+        # Update text
+        if self.floating_label:
+            text = self.last_segment.get('text', '')
+            self.floating_label.config(text=text)
+
     def on_closing(self):
         """Handle window closing."""
         if self.running:
             self.stop_decoder()
+
+        # Close floating window if open
+        if self.floating_window and self.floating_window.winfo_exists():
+            self.floating_window.destroy()
 
         self.window.destroy()
 

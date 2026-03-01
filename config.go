@@ -341,6 +341,7 @@ type WhisperConfig struct {
 	Language       string `yaml:"language"`         // Language code (en, es, auto, etc.)
 	Translate      bool   `yaml:"translate"`        // Enable translation to English (true) or transcription in original language (false)
 	SendIntervalMs int    `yaml:"send_interval_ms"` // Audio send interval in milliseconds
+	InitialPrompt  string `yaml:"initial_prompt"`   // Initial prompt to guide transcription style/context
 }
 
 // LoadConfig loads configuration from a YAML file

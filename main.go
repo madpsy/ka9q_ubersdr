@@ -1259,6 +1259,7 @@ func main() {
 		Language:       config.Whisper.Language,
 		Translate:      config.Whisper.Translate,
 		SendIntervalMs: config.Whisper.SendIntervalMs,
+		InitialPrompt:  config.Whisper.InitialPrompt,
 	}
 	whisperInfo := whisper.GetInfo()
 

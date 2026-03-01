@@ -1493,6 +1493,21 @@ whisper:
   # Default: true
   translate: true
 
+  # Initial prompt to guide transcription style and context
+  # This optional text helps Whisper understand the context and style of the audio
+  # Useful for:
+  #   - Setting the expected domain (e.g., "This is a radio transmission.")
+  #   - Improving accuracy for specific terminology or jargon
+  #   - Maintaining consistent spelling of names or technical terms
+  #   - Guiding the transcription style
+  # Examples:
+  #   - "This is a radio transmission."
+  #   - "Amateur radio communication on HF bands."
+  #   - "Maritime weather broadcast."
+  # Leave empty to disable (default)
+  # Default: ""
+  initial_prompt: "This is a radio transmission of either AM broadcast or amateur ham radio in various languages. Expect callsigns, grid locators and technical language to be used."
+
   # Audio send interval in milliseconds
   # How often to send audio chunks to WhisperLive server
   # Lower values = more responsive but more network traffic

@@ -13,6 +13,7 @@ type ConfigProvider struct {
 	Language       string
 	Translate      bool
 	SendIntervalMs int
+	InitialPrompt  string
 }
 
 // GlobalConfigProvider is set by main package
@@ -77,6 +78,7 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 			Language:       GlobalConfigProvider.Language,
 			Translate:      GlobalConfigProvider.Translate,
 			SendIntervalMs: GlobalConfigProvider.SendIntervalMs,
+			InitialPrompt:  GlobalConfigProvider.InitialPrompt,
 		}
 		log.Printf("[Whisper Extension] Using configuration from config.yaml")
 	} else {
@@ -88,6 +90,7 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 			Language:       "en",
 			Translate:      true, // Default to translation enabled
 			SendIntervalMs: 100,
+			InitialPrompt:  "",
 		}
 		log.Printf("[Whisper Extension] Using default configuration (config not available)")
 	}

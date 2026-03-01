@@ -27,6 +27,7 @@ type WhisperConfig struct {
 	Language       string
 	Translate      bool
 	SendIntervalMs int
+	InitialPrompt  string
 }
 
 // WhisperDecoder handles streaming audio to WhisperLive
@@ -166,6 +167,11 @@ func (d *WhisperDecoder) connectWebSocket() error {
 			"min_silence_duration_ms": 160,  // Minimum silence to detect pause (default: 160)
 			"threshold":               0.5,  // Speech detection threshold (default: 0.5)
 		},
+	}
+
+	// Add initial_prompt if configured
+	if d.config.InitialPrompt != "" {
+		configMsg["initial_prompt"] = d.config.InitialPrompt
 	}
 
 	configJSON, err := json.Marshal(configMsg)

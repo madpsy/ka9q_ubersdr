@@ -11,6 +11,7 @@ type ConfigProvider struct {
 	ServerURL      string
 	Model          string
 	Language       string
+	Translate      bool
 	SendIntervalMs int
 }
 
@@ -74,6 +75,7 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 			ServerURL:      GlobalConfigProvider.ServerURL,
 			Model:          GlobalConfigProvider.Model,
 			Language:       GlobalConfigProvider.Language,
+			Translate:      GlobalConfigProvider.Translate,
 			SendIntervalMs: GlobalConfigProvider.SendIntervalMs,
 		}
 		log.Printf("[Whisper Extension] Using configuration from config.yaml")
@@ -84,6 +86,7 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 			ServerURL:      "ws://whisperlive:9090",
 			Model:          "small",
 			Language:       "en",
+			Translate:      true, // Default to translation enabled
 			SendIntervalMs: 100,
 		}
 		log.Printf("[Whisper Extension] Using default configuration (config not available)")
@@ -92,8 +95,8 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 	// Create decoder
 	decoder := NewWhisperDecoder(audioParams.SampleRate, config)
 
-	log.Printf("[Whisper Extension] Created with server: %s, model: %s, language: %s, sample rate: %d Hz",
-		config.ServerURL, config.Model, config.Language, audioParams.SampleRate)
+	log.Printf("[Whisper Extension] Created with server: %s, model: %s, language: %s, translate: %v, sample rate: %d Hz",
+		config.ServerURL, config.Model, config.Language, config.Translate, audioParams.SampleRate)
 
 	return &WhisperExtension{
 		decoder: decoder,

@@ -1480,6 +1480,15 @@ whisper:
   # Default: "en"
   language: "en"
 
+  # Enable translation to English (default: true)
+  # When true, non-English audio will be translated to English
+  # When false, audio will be transcribed in its original language
+  # This sets the WhisperLive "task" parameter:
+  #   - true: task="translate" (translate to English)
+  #   - false: task="transcribe" (transcribe in original language)
+  # Default: true
+  translate: true
+
   # Audio send interval in milliseconds
   # How often to send audio chunks to WhisperLive server
   # Lower values = more responsive but more network traffic

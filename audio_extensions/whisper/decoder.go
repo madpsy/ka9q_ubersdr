@@ -25,6 +25,7 @@ type WhisperConfig struct {
 	ServerURL      string
 	Model          string
 	Language       string
+	Translate      bool
 	SendIntervalMs int
 }
 
@@ -129,10 +130,15 @@ func (d *WhisperDecoder) connectWebSocket() error {
 
 	// Send initial configuration to WhisperLive in the format it expects
 	// Based on WhisperLive client.py on_open() method
+	task := "transcribe"
+	if d.config.Translate {
+		task = "translate"
+	}
+
 	configMsg := map[string]interface{}{
 		"uid":                   d.clientUID,
 		"language":              d.config.Language,
-		"task":                  "transcribe", // Required field - "transcribe" or "translate"
+		"task":                  task, // "transcribe" or "translate" based on config
 		"model":                 d.config.Model,
 		"use_vad":               true,
 		"send_last_n_segments":  10,
@@ -157,8 +163,8 @@ func (d *WhisperDecoder) connectWebSocket() error {
 		return fmt.Errorf("failed to send config: %w", err)
 	}
 
-	log.Printf("[Whisper] Connected to WhisperLive at %s (uid: %s, model: %s, language: %s)",
-		d.config.ServerURL, d.clientUID, d.config.Model, d.config.Language)
+	log.Printf("[Whisper] Connected to WhisperLive at %s (uid: %s, model: %s, language: %s, task: %s)",
+		d.config.ServerURL, d.clientUID, d.config.Model, d.config.Language, task)
 
 	return nil
 }

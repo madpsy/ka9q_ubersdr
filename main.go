@@ -1257,6 +1257,7 @@ func main() {
 		ServerURL:      config.Whisper.ServerURL,
 		Model:          config.Whisper.Model,
 		Language:       config.Whisper.Language,
+		Translate:      config.Whisper.Translate,
 		SendIntervalMs: config.Whisper.SendIntervalMs,
 	}
 	whisperInfo := whisper.GetInfo()

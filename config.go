@@ -339,6 +339,7 @@ type WhisperConfig struct {
 	ServerURL      string `yaml:"server_url"`       // WhisperLive WebSocket URL
 	Model          string `yaml:"model"`            // Whisper model (tiny, base, small, medium, large, or .en variants)
 	Language       string `yaml:"language"`         // Language code (en, es, auto, etc.)
+	Translate      bool   `yaml:"translate"`        // Enable translation to English (true) or transcription in original language (false)
 	SendIntervalMs int    `yaml:"send_interval_ms"` // Audio send interval in milliseconds
 }
 

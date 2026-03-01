@@ -137,7 +137,6 @@ func (d *WhisperDecoder) connectWebSocket() error {
 
 	configMsg := map[string]interface{}{
 		"uid":                   d.clientUID,
-		"language":              d.config.Language,
 		"task":                  task, // "transcribe" or "translate" based on config
 		"model":                 d.config.Model,
 		"use_vad":               true,
@@ -154,6 +153,11 @@ func (d *WhisperDecoder) connectWebSocket() error {
 		},
 	}
 
+	// Only include language if it's not empty or "auto" (empty/auto = auto-detect)
+	if d.config.Language != "" && d.config.Language != "auto" {
+		configMsg["language"] = d.config.Language
+	}
+
 	configJSON, err := json.Marshal(configMsg)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
@@ -163,8 +167,12 @@ func (d *WhisperDecoder) connectWebSocket() error {
 		return fmt.Errorf("failed to send config: %w", err)
 	}
 
+	languageStr := d.config.Language
+	if languageStr == "" || languageStr == "auto" {
+		languageStr = "auto-detect"
+	}
 	log.Printf("[Whisper] Connected to WhisperLive at %s (uid: %s, model: %s, language: %s, task: %s)",
-		d.config.ServerURL, d.clientUID, d.config.Model, d.config.Language, task)
+		d.config.ServerURL, d.clientUID, d.config.Model, languageStr, task)
 
 	return nil
 }

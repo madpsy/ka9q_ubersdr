@@ -1516,3 +1516,16 @@ whisper:
   # Default: 100
   send_interval_ms: 100
 
+  # Enable voice commands from browser microphone (default: false)
+  # When enabled, users can give voice commands to control the radio
+  # using their browser's microphone (requires whisper.enabled: true)
+  # Commands include:
+  #   - "Tune to 14.074 megahertz" - Change frequency
+  #   - "Switch to USB mode" - Change mode
+  #   - "Set volume to 50 percent" - Adjust volume
+  #   - "Increase volume" / "Decrease volume" - Volume adjustments
+  # Voice commands are processed through the same WhisperLive server
+  # and sent via the DX cluster WebSocket (not as an audio extension)
+  # Default: false
+  enable_voice_commands: false
+

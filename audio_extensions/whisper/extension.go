@@ -7,13 +7,14 @@ import (
 
 // ConfigProvider is set by main package to provide access to configuration
 type ConfigProvider struct {
-	Enabled        bool
-	ServerURL      string
-	Model          string
-	Language       string
-	Translate      bool
-	SendIntervalMs int
-	InitialPrompt  string
+	Enabled             bool
+	ServerURL           string
+	Model               string
+	Language            string
+	Translate           bool
+	SendIntervalMs      int
+	InitialPrompt       string
+	EnableVoiceCommands bool
 }
 
 // GlobalConfigProvider is set by main package

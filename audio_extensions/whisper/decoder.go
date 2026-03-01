@@ -23,13 +23,14 @@ import (
 // WhisperConfig is defined in the main package (config.go)
 // This type alias allows the whisper package to use it
 type WhisperConfig struct {
-	Enabled        bool
-	ServerURL      string
-	Model          string
-	Language       string
-	Translate      bool
-	SendIntervalMs int
-	InitialPrompt  string
+	Enabled             bool
+	ServerURL           string
+	Model               string
+	Language            string
+	Translate           bool
+	SendIntervalMs      int
+	InitialPrompt       string
+	EnableVoiceCommands bool
 }
 
 // WhisperDecoder handles streaming audio to WhisperLive

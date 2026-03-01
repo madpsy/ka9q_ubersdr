@@ -419,22 +419,27 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 
 			// Handle transcription segments
 			if segments, ok := result["segments"].([]interface{}); ok && len(segments) > 0 {
-				// Send segments as JSON to frontend
-				// The frontend will handle deduplication following WhisperLive client.py pattern
-				segmentsJSON, err := json.Marshal(segments)
-				if err != nil {
-					log.Printf("[Whisper] Failed to marshal segments: %v", err)
-					continue
-				}
+				// Apply filtering and deduplication
+				segments = d.processSegments(segments)
 
-				// Encode segments for client
-				encoded := d.encodeSegments(segmentsJSON, time.Now().UnixNano())
+				// Only send if we have segments after filtering
+				if len(segments) > 0 {
+					// Send segments as JSON to frontend
+					segmentsJSON, err := json.Marshal(segments)
+					if err != nil {
+						log.Printf("[Whisper] Failed to marshal segments: %v", err)
+						continue
+					}
 
-				// Send to result channel (non-blocking)
-				select {
-				case resultChan <- encoded:
-				default:
-					log.Printf("[Whisper] Result channel full, dropping segments")
+					// Encode segments for client
+					encoded := d.encodeSegments(segmentsJSON, time.Now().UnixNano())
+
+					// Send to result channel (non-blocking)
+					select {
+					case resultChan <- encoded:
+					default:
+						log.Printf("[Whisper] Result channel full, dropping segments")
+					}
 				}
 			}
 		}

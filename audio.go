@@ -224,7 +224,12 @@ func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp ui
 	}
 
 	// Send audio packet to session's channel
+	// Check session.Done first to avoid race condition with DestroySession()
+	// which closes Done before closing AudioChan
 	select {
+	case <-session.Done:
+		// Session is being destroyed, skip this packet
+		return
 	case session.AudioChan <- audioPacket:
 		// Successfully sent
 	default:

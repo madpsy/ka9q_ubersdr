@@ -736,7 +736,11 @@ func (usm *UserSpectrumManager) distributeSpectrum(ssrc uint32, data []float32) 
 		}
 
 		// Send session-specific data
+		// Double-check session.Done to avoid race with DestroySession()
 		select {
+		case <-session.Done:
+			// Session destroyed during processing, skip
+			return
 		case session.SpectrumChan <- sessionData:
 			// Data sent successfully
 		default:
@@ -744,7 +748,11 @@ func (usm *UserSpectrumManager) distributeSpectrum(ssrc uint32, data []float32) 
 		}
 	} else {
 		// No frequency-specific gain configured, send original data
+		// Double-check session.Done to avoid race with DestroySession()
 		select {
+		case <-session.Done:
+			// Session destroyed during processing, skip
+			return
 		case session.SpectrumChan <- data:
 			// Data sent successfully
 		default:

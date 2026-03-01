@@ -21,7 +21,7 @@ import (
 // WhisperConfig contains decoder configuration
 type WhisperConfig struct {
 	ServerURL      string // WebSocket URL (e.g., "ws://localhost:9090")
-	Model          string // "tiny", "base", "small", "medium", "large"
+	Model          string // "tiny", "base", "small", "medium", "large", "tiny.en", "base.en", "small.en", "medium.en", "large.en"
 	Language       string // "en", "es", "auto", etc.
 	SendIntervalMs int    // How often to send audio chunks (milliseconds)
 }
@@ -30,7 +30,7 @@ type WhisperConfig struct {
 func DefaultWhisperConfig() WhisperConfig {
 	return WhisperConfig{
 		ServerURL:      "ws://whisperlive:9090",
-		Model:          "small",
+		Model:          "medium.en",
 		Language:       "en",
 		SendIntervalMs: 100, // Send audio every 100ms
 	}

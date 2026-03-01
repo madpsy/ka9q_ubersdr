@@ -844,7 +844,7 @@ class WhisperExtension extends DecoderExtension {
     }
 
     updateFloatingWindow() {
-        const shouldShow = this.showFloatingWindow && this.lastSegment && this.lastSegment.text;
+        const shouldShow = this.showFloatingWindow && this.isRunning && this.lastSegment && this.lastSegment.text;
         let floatingWindow = document.getElementById('whisper-floating-window');
 
         if (!shouldShow) {

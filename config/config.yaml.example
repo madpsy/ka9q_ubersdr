@@ -1438,8 +1438,12 @@ mcp:
 # Real-time speech transcription using OpenAI Whisper via WhisperLive server
 # Provides live transcription of audio channels in the web interface
 #
+# Intel ARC:
 # RENDER_GID=$(stat -c "%g" /dev/dri/render* | head -n 1)
 # docker run -d --name whisperlive -p 9090:9090 --device=/dev/dri --group-add $RENDER_GID ghcr.io/collabora/whisperlive-openvino:latest python run_server.py --backend openvino --max_connection_time 86400
+#
+# CPU only:
+# docker run -d --name whisperlive -p 9090:9090 ghcr.io/collabora/whisperlive-cpu:latest python run_server.py --max_connection_time 86400
 #
 whisper:
   # Enable Whisper speech-to-text extension (default: false)
@@ -1471,14 +1475,14 @@ whisper:
   #
   # Default: "small" (good balance of speed and accuracy)
   # Recommended for English: "medium.en" or "small.en"
-  model: "small"
+  model: "medium"
 
   # Language code for transcription
   # Use "en" for English, "es" for Spanish, "auto" for auto-detection, etc.
   # Must match the model type (use "en" with .en models)
   # See: https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes
-  # Default: "en"
-  language: "en"
+  # Default: "auto"
+  language: "auto"
 
   # Enable translation to English (default: true)
   # When true, non-English audio will be translated to English

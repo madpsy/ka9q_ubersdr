@@ -25,6 +25,7 @@ class WhisperExtension extends DecoderExtension {
         this.autoScroll = true;
         this.showTimestamps = false;  // Disabled by default
         this.showOnlyIncomplete = true;  // Show only in-progress by default
+        this.fontSize = 13;  // Default font size in pixels
         this.sessionStartTime = null;  // Track when decoder starts for wall clock timestamps
         this.renderedSegmentCount = 0;  // Track how many completed segments are rendered
         this.lastUpdateTime = null;  // Track time of last message update
@@ -85,6 +86,8 @@ class WhisperExtension extends DecoderExtension {
         const clearButton = document.getElementById('whisper-clear-button');
         const copyButton = document.getElementById('whisper-copy-button');
         const saveButton = document.getElementById('whisper-save-button');
+        const textSmallerButton = document.getElementById('whisper-text-smaller');
+        const textLargerButton = document.getElementById('whisper-text-larger');
 
         if (startButton) {
             startButton.addEventListener('click', () => this.startDecoder());
@@ -100,6 +103,12 @@ class WhisperExtension extends DecoderExtension {
         }
         if (saveButton) {
             saveButton.addEventListener('click', () => this.saveTranscription());
+        }
+        if (textSmallerButton) {
+            textSmallerButton.addEventListener('click', () => this.decreaseTextSize());
+        }
+        if (textLargerButton) {
+            textLargerButton.addEventListener('click', () => this.increaseTextSize());
         }
 
         // Settings checkboxes
@@ -784,10 +793,31 @@ class WhisperExtension extends DecoderExtension {
         }
     }
 
+    increaseTextSize() {
+        this.fontSize = Math.min(this.fontSize + 2, 32); // Max 32px
+        this.updateTranscriptionFontSize();
+    }
+
+    decreaseTextSize() {
+        this.fontSize = Math.max(this.fontSize - 2, 8); // Min 8px
+        this.updateTranscriptionFontSize();
+    }
+
+    updateTranscriptionFontSize() {
+        const transcriptionElement = document.getElementById('whisper-transcription');
+        if (transcriptionElement) {
+            transcriptionElement.style.fontSize = `${this.fontSize}px`;
+        }
+    }
+
     onActivate() {
         console.log('Whisper: Extension activated');
+        // Reset the flag so handlers can be re-attached to the new DOM
+        this.handlersSetup = false;
         // Re-setup event handlers when extension is reopened
         this.waitForDOMAndSetupHandlers();
+        // Apply the current font size
+        setTimeout(() => this.updateTranscriptionFontSize(), 100);
     }
 
     onDeactivate() {

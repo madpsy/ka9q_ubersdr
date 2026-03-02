@@ -30,6 +30,7 @@ type WhisperConfig struct {
 	Translate      bool
 	SendIntervalMs int
 	InitialPrompt  string
+	InstanceUUID   string
 }
 
 // WhisperDecoder handles streaming audio to WhisperLive
@@ -151,7 +152,13 @@ func (d *WhisperDecoder) connectWebSocket() error {
 		HandshakeTimeout: 10 * time.Second,
 	}
 
-	conn, _, err := dialer.Dial(d.config.ServerURL, nil)
+	// Prepare headers including instance UUID
+	headers := make(map[string][]string)
+	if d.config.InstanceUUID != "" {
+		headers["X-UberSDR-UUID"] = []string{d.config.InstanceUUID}
+	}
+
+	conn, _, err := dialer.Dial(d.config.ServerURL, headers)
 	if err != nil {
 		return fmt.Errorf("WebSocket dial failed: %w", err)
 	}

@@ -1260,6 +1260,7 @@ func main() {
 		Translate:      config.Whisper.Translate,
 		SendIntervalMs: config.Whisper.SendIntervalMs,
 		InitialPrompt:  config.Whisper.InitialPrompt,
+		InstanceUUID:   config.InstanceReporting.InstanceUUID,
 	}
 	whisperInfo := whisper.GetInfo()
 

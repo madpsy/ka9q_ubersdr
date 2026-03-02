@@ -1253,14 +1253,13 @@ func main() {
 	// Register Whisper extension
 	// Set global config for whisper package to access configuration
 	whisper.GlobalConfigProvider = &whisper.ConfigProvider{
-		Enabled:             config.Whisper.Enabled,
-		ServerURL:           config.Whisper.ServerURL,
-		Model:               config.Whisper.Model,
-		Language:            config.Whisper.Language,
-		Translate:           config.Whisper.Translate,
-		SendIntervalMs:      config.Whisper.SendIntervalMs,
-		InitialPrompt:       config.Whisper.InitialPrompt,
-		EnableVoiceCommands: config.Whisper.EnableVoiceCommands,
+		Enabled:        config.Whisper.Enabled,
+		ServerURL:      config.Whisper.ServerURL,
+		Model:          config.Whisper.Model,
+		Language:       config.Whisper.Language,
+		Translate:      config.Whisper.Translate,
+		SendIntervalMs: config.Whisper.SendIntervalMs,
+		InitialPrompt:  config.Whisper.InitialPrompt,
 	}
 	whisperInfo := whisper.GetInfo()
 
@@ -1294,15 +1293,6 @@ func main() {
 	audioExtensionManager := NewAudioExtensionManager(dxClusterWsHandler, sessions, audioExtensionRegistry, receiverLocator, globalCTY)
 	dxClusterWsHandler.audioExtensionManager = audioExtensionManager
 	log.Printf("Audio extension manager initialized (ready for extensions, receiver: %s)", receiverLocator)
-
-	// Create voice command handler if Whisper is enabled with voice commands
-	if config.Whisper.Enabled && config.Whisper.EnableVoiceCommands {
-		voiceCommandHandler := NewVoiceCommandHandler(config.Whisper, sessions)
-		dxClusterWsHandler.voiceCommandHandler = voiceCommandHandler
-		log.Printf("Voice command handler initialized (Whisper voice commands enabled)")
-	} else if config.Whisper.Enabled {
-		log.Printf("Voice commands disabled (set whisper.enable_voice_commands: true to enable)")
-	}
 
 	// Connect DX cluster websocket handler to session manager for throughput tracking
 	sessions.SetDXClusterWebSocketHandler(dxClusterWsHandler)
@@ -2727,7 +2717,6 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"rotator":              rotatorInfo,
 		"frequency_reference":  freqRefInfo,
 		"speech_to_text":       config.Whisper.Enabled,
-		"voice_commands":       config.Whisper.Enabled && config.Whisper.EnableVoiceCommands,
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

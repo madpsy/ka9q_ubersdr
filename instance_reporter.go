@@ -79,7 +79,6 @@ type InstanceReport struct {
 	Rotator                    map[string]interface{} `json:"rotator"`                      // Rotator information (enabled, connected, azimuth)
 	FrequencyReference         map[string]interface{} `json:"frequency_reference"`          // Frequency reference tracking information
 	SpeechToText               bool                   `json:"speech_to_text"`               // Whether Whisper speech-to-text is enabled
-	VoiceCommands              bool                   `json:"voice_commands"`               // Whether voice commands are enabled
 	Test                       bool                   `json:"test,omitempty"`               // If true, this is a test report - collector will verify /api/description instead of full callback
 	StartupReport              bool                   `json:"startup_report"`               // If true, this is a startup report sent regardless of instance_reporting.enabled
 	NotifyInstanceDisconnected bool                   `json:"notify_instance_disconnected"` // Notify when instance disconnects
@@ -527,7 +526,6 @@ func (ir *InstanceReporter) sendReport() error {
 		Rotator:                    rotatorInfo,
 		FrequencyReference:         freqRefInfo,
 		SpeechToText:               ir.config.Whisper.Enabled,
-		VoiceCommands:              ir.config.Whisper.Enabled && ir.config.Whisper.EnableVoiceCommands,
 		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected,
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,
 	}
@@ -882,7 +880,6 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		Rotator:                    rotatorInfo,
 		FrequencyReference:         freqRefInfo,
 		SpeechToText:               ir.config.Whisper.Enabled,
-		VoiceCommands:              ir.config.Whisper.Enabled && ir.config.Whisper.EnableVoiceCommands,
 		Test:                       isTest,
 		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected,
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,

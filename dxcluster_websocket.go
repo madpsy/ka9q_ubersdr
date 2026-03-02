@@ -71,9 +71,6 @@ type DXClusterWebSocketHandler struct {
 	// Audio extension manager for streaming audio processors
 	audioExtensionManager *AudioExtensionManager
 
-	// Voice command handler for browser microphone commands
-	voiceCommandHandler *VoiceCommandHandler
-
 	// Map websocket connections to session IDs for chat
 	connToSessionID   map[*websocket.Conn]string
 	connToSessionIDMu sync.RWMutex
@@ -571,24 +568,6 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessi
 						})
 					}
 
-				case "voice_command", "voice_command_start", "voice_command_audio", "voice_command_stop":
-					// Handle voice command messages (both buffered and streaming)
-					if h.voiceCommandHandler != nil {
-						if err := h.voiceCommandHandler.HandleVoiceCommandMessage(userSessionID, conn, msg); err != nil {
-							// Send error back to client
-							h.sendMessage(conn, map[string]interface{}{
-								"type":  "voice_command_error",
-								"error": err.Error(),
-							})
-							log.Printf("VoiceCommand: Error handling message: %v", err)
-						}
-					} else {
-						// Voice commands disabled on server
-						h.sendMessage(conn, map[string]interface{}{
-							"type":  "voice_command_error",
-							"error": "voice commands are disabled on this server",
-						})
-					}
 				}
 			}
 		}

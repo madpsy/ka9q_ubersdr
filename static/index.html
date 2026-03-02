@@ -329,12 +329,6 @@
                     <div class="band-status-badge" data-band="15m" data-status="OPEN">15m</div>
                     <div class="band-status-badge" data-band="12m" data-status="OPEN">12m</div>
                     <div class="band-status-badge" data-band="10m" data-status="OPEN">10m</div>
-                    <button id="voice-command-button" class="voice-command-button" title="Voice Commands" style="display: none;">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                            <path d="M8 1a3 3 0 0 0-3 3v4a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-                            <path d="M4 8a4 4 0 0 0 8 0h1a5 5 0 0 1-4.5 4.975V15h3v1h-7v-1h3v-2.025A5 5 0 0 1 3 8h1z"/>
-                        </svg>
-                    </button>
                 </div>
             </div>
         </div>
@@ -1337,22 +1331,6 @@
     </script>
     <!-- Voice command button visibility based on voice_commands -->
     <script>
-        (async function() {
-            try {
-                const data = await window.descriptionPromise;
-                if (data && data.voice_commands === true) {
-                    console.log('[VoiceCommands] Voice commands enabled, showing button');
-                    const voiceCommandButton = document.getElementById('voice-command-button');
-                    if (voiceCommandButton) {
-                        voiceCommandButton.style.display = '';
-                    }
-                } else {
-                    console.log('[VoiceCommands] Voice commands disabled');
-                }
-            } catch (error) {
-                console.error('[VoiceCommands] Error checking voice command status:', error);
-            }
-        })();
     </script>
     <!-- Chat scripts loaded conditionally based on chat_enabled -->
     <script>

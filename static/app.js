@@ -9432,13 +9432,11 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         initializeBandBadgeRightClick();
         initializeVoiceActivityButton();
-        initializeVoiceCommandButton();
     });
 } else {
     // DOM already loaded
     initializeBandBadgeRightClick();
     initializeVoiceActivityButton();
-    initializeVoiceCommandButton();
 }
 
 // Store reference to channels map window

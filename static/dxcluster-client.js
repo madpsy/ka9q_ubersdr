@@ -249,19 +249,6 @@ class DXClusterClient {
                 // These are handled by the audio extension system, ignore here
                 break;
 
-            // Voice command message types - handled by voice-commands.js
-            case 'voice_command_started':
-            case 'voice_command_stopped':
-            case 'voice_command_transcription':
-            case 'voice_command_result':
-            case 'voice_command_error':
-            case 'voice_command_timeout':
-                // Forward to voice command handler if available
-                if (typeof window.handleVoiceCommandMessage === 'function') {
-                    window.handleVoiceCommandMessage(message);
-                }
-                break;
-
             default:
                 console.warn('[DX Cluster] Unknown message type:', message.type);
         }

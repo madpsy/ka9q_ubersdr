@@ -601,14 +601,56 @@ func (d *WhisperDecoder) filterText(text string) string {
 	return text
 }
 
-// removeConsecutiveWords removes consecutive repetitions of the same word
+// removeConsecutiveWords removes consecutive repetitions of words and phrases
 // e.g., "ha ha ha" becomes "ha"
+// e.g., "que es el que es el que es el" becomes "que es el"
 func (d *WhisperDecoder) removeConsecutiveWords(text string) string {
 	words := strings.Fields(text)
 	if len(words) == 0 {
 		return text
 	}
 
+	// First, try to detect repeating phrases (patterns of 2-10 words)
+	// Start with longer patterns for better accuracy
+	for patternLen := 10; patternLen >= 2; patternLen-- {
+		if len(words) < patternLen*2 {
+			continue // Not enough words for this pattern length
+		}
+
+		// Check if we have a repeating pattern
+		pattern := words[:patternLen]
+		repetitions := 1
+
+		// Count how many times the pattern repeats from the start
+		for i := patternLen; i+patternLen <= len(words); i += patternLen {
+			matches := true
+			for j := 0; j < patternLen; j++ {
+				if !strings.EqualFold(words[i+j], pattern[j]) {
+					matches = false
+					break
+				}
+			}
+			if matches {
+				repetitions++
+			} else {
+				break
+			}
+		}
+
+		// If pattern repeats at least 3 times, remove the repetitions
+		if repetitions >= 3 {
+			// Keep one instance of the pattern plus any remaining words
+			remainingStart := patternLen * repetitions
+			result := make([]string, patternLen)
+			copy(result, pattern)
+			if remainingStart < len(words) {
+				result = append(result, words[remainingStart:]...)
+			}
+			return strings.Join(result, " ")
+		}
+	}
+
+	// Fall back to single word repetition removal
 	result := []string{words[0]}
 	for i := 1; i < len(words); i++ {
 		// Compare case-insensitively

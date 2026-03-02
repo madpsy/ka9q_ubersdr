@@ -551,11 +551,11 @@ class WhisperExtension extends DecoderExtension {
         // First, check if there's an existing incomplete element
         let incompleteElement = transcriptionElement.querySelector('.whisper-incomplete');
 
-        // If the incomplete element exists but is now complete, convert it to a completed segment
+        // If the incomplete element exists and we have new completed segments, remove it
+        // (the completed version will be appended from the transcript array)
         if (incompleteElement && this.renderedSegmentCount < this.transcript.length) {
-            // The previously incomplete segment is now complete
-            incompleteElement.classList.remove('whisper-incomplete');
-            incompleteElement = null; // Clear reference so we create a new one for the next incomplete
+            incompleteElement.remove();
+            incompleteElement = null;
         }
 
         // Append only NEW completed segments that haven't been rendered yet

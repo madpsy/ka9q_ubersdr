@@ -629,34 +629,36 @@ class WhisperExtension:
 
         elif incomplete_changed:
             # Only incomplete segment changed - just update the last line
-            # Check if there was a previous incomplete segment to delete
-            if self.last_rendered_incomplete is not None:
-                # Find and delete only the last line (incomplete segment)
-                # Get the line number of the last line with content
-                end_index = self.transcription_text.index("end-1c")
-                last_line_num = int(end_index.split('.')[0]) - 1
-                if last_line_num > 0:
-                    last_line_start = f"{last_line_num}.0"
-                    last_line_end = f"{last_line_num}.end"
-                    self.transcription_text.delete(last_line_start, last_line_end)
-                    # Also delete the newline if it exists
-                    if self.transcription_text.get(last_line_start, f"{last_line_start}+1c") == "\n":
-                        self.transcription_text.delete(last_line_start, f"{last_line_start}+1c")
+            # Only delete and re-add if we're not hiding incomplete segments
+            if not self.hide_incomplete:
+                # Check if there was a previous incomplete segment to delete
+                if self.last_rendered_incomplete is not None:
+                    # Find and delete only the last line (incomplete segment)
+                    # Get the line number of the last line with content
+                    end_index = self.transcription_text.index("end-1c")
+                    last_line_num = int(end_index.split('.')[0]) - 1
+                    if last_line_num > 0:
+                        last_line_start = f"{last_line_num}.0"
+                        last_line_end = f"{last_line_num}.end"
+                        self.transcription_text.delete(last_line_start, last_line_end)
+                        # Also delete the newline if it exists
+                        if self.transcription_text.get(last_line_start, f"{last_line_start}+1c") == "\n":
+                            self.transcription_text.delete(last_line_start, f"{last_line_start}+1c")
 
-            # Re-add the incomplete segment (skip if hide_incomplete is enabled)
-            if self.last_segment and not self.hide_incomplete:
-                if self.show_timestamps and 'start' in self.last_segment and self.session_start_time:
-                    segment_offset_s = float(self.last_segment['start'])
-                    wall_clock_time = self.session_start_time + segment_offset_s
-                    time_str = datetime.fromtimestamp(wall_clock_time).strftime('%H:%M:%S')
-                    self.transcription_text.insert(tk.END, f"[{time_str}] ", "timestamp")
+                # Re-add the incomplete segment
+                if self.last_segment:
+                    if self.show_timestamps and 'start' in self.last_segment and self.session_start_time:
+                        segment_offset_s = float(self.last_segment['start'])
+                        wall_clock_time = self.session_start_time + segment_offset_s
+                        time_str = datetime.fromtimestamp(wall_clock_time).strftime('%H:%M:%S')
+                        self.transcription_text.insert(tk.END, f"[{time_str}] ", "timestamp")
 
-                text = self.last_segment.get('text', '')
-                if self.bionic_reading:
-                    self.insert_bionic_text(text, "incomplete")
-                    self.transcription_text.insert(tk.END, "\n", "incomplete")
-                else:
-                    self.transcription_text.insert(tk.END, text + "\n", "incomplete")
+                    text = self.last_segment.get('text', '')
+                    if self.bionic_reading:
+                        self.insert_bionic_text(text, "incomplete")
+                        self.transcription_text.insert(tk.END, "\n", "incomplete")
+                    else:
+                        self.transcription_text.insert(tk.END, text + "\n", "incomplete")
 
             self.last_rendered_incomplete = current_incomplete
 

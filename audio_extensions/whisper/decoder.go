@@ -509,9 +509,7 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 			if !alreadySent {
 				d.transcript = append(d.transcript, seg)
 				filteredSegments = append(filteredSegments, seg)
-				log.Printf("[Whisper] Sending completed segment: %s", segText)
 			}
-			// Skip logging for duplicates - too verbose
 		} else if i == len(segments)-1 {
 			// Last segment that's not completed - send for real-time updates
 			d.lastSegment = seg

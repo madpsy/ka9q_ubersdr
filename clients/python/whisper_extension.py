@@ -38,6 +38,7 @@ class WhisperExtension:
         self.auto_scroll = True
         self.show_timestamps = False
         self.show_only_incomplete = True  # Show only in-progress sentence
+        self.hide_incomplete = False  # Hide in-progress segment
         self.last_rendered_transcript_len = 0  # Track number of completed segments rendered
         self.last_rendered_incomplete = None  # Track last incomplete segment text
         self.last_bionic_state = None  # Track bionic reading state to detect changes
@@ -103,48 +104,58 @@ class WhisperExtension:
         # Controls frame
         controls_frame = ttk.Frame(main_frame)
         controls_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        controls_frame.columnconfigure(7, weight=1)
-        
+        controls_frame.columnconfigure(5, weight=1)
+
+        # Row 0: Auto-scroll, Show timestamps, Bionic reading, Show floating window, Buttons
         # Auto-scroll checkbox
         self.auto_scroll_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(controls_frame, text="Auto-scroll",
                        variable=self.auto_scroll_var,
-                       command=self.on_auto_scroll_changed).grid(row=0, column=0, padx=(0, 15))
+                       command=self.on_auto_scroll_changed).grid(row=0, column=0, padx=(0, 15), sticky=tk.W)
 
         # Show timestamps checkbox
         self.show_timestamps_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(controls_frame, text="Show timestamps",
                        variable=self.show_timestamps_var,
-                       command=self.on_show_timestamps_changed).grid(row=0, column=1, padx=(0, 15))
-
-        # Show only incomplete checkbox
-        self.show_only_incomplete_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(controls_frame, text="Only show in-progress",
-                       variable=self.show_only_incomplete_var,
-                       command=self.on_show_only_incomplete_changed).grid(row=0, column=2, padx=(0, 15))
+                       command=self.on_show_timestamps_changed).grid(row=0, column=1, padx=(0, 15), sticky=tk.W)
 
         # Bionic reading checkbox
         self.bionic_reading_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(controls_frame, text="Bionic reading",
                        variable=self.bionic_reading_var,
-                       command=self.on_bionic_reading_changed).grid(row=0, column=3, padx=(0, 15))
+                       command=self.on_bionic_reading_changed).grid(row=0, column=2, padx=(0, 15), sticky=tk.W)
 
         # Show floating window checkbox
         self.show_floating_window_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(controls_frame, text="Show floating window",
+        self.show_floating_window_checkbox = ttk.Checkbutton(controls_frame, text="Show floating window",
                        variable=self.show_floating_window_var,
-                       command=self.on_show_floating_window_changed).grid(row=0, column=4, padx=(0, 15))
-        
+                       command=self.on_show_floating_window_changed)
+        self.show_floating_window_checkbox.grid(row=0, column=3, padx=(0, 15), sticky=tk.W)
+
         # Control buttons
         self.start_button = ttk.Button(controls_frame, text="Start", command=self.start_decoder)
-        self.start_button.grid(row=0, column=5, padx=(0, 5))
+        self.start_button.grid(row=0, column=4, padx=(0, 5))
 
         self.stop_button = ttk.Button(controls_frame, text="Stop", command=self.stop_decoder, state=tk.DISABLED)
-        self.stop_button.grid(row=0, column=6, padx=(0, 15))
-        
+        self.stop_button.grid(row=0, column=5, padx=(0, 15))
+
         # Last update time (right-aligned)
         self.last_update_label = ttk.Label(controls_frame, text="--", foreground="gray", font=("Courier", 9))
-        self.last_update_label.grid(row=0, column=7, sticky=tk.E)
+        self.last_update_label.grid(row=0, column=6, sticky=tk.E)
+
+        # Row 1: Only show in-progress, Hide in-progress
+        # Show only incomplete checkbox
+        self.show_only_incomplete_var = tk.BooleanVar(value=True)
+        self.show_only_incomplete_checkbox = ttk.Checkbutton(controls_frame, text="Only show in-progress",
+                       variable=self.show_only_incomplete_var,
+                       command=self.on_show_only_incomplete_changed)
+        self.show_only_incomplete_checkbox.grid(row=1, column=0, padx=(0, 15), pady=(5, 0), sticky=tk.W)
+
+        # Hide incomplete checkbox
+        self.hide_incomplete_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(controls_frame, text="Hide in-progress",
+                       variable=self.hide_incomplete_var,
+                       command=self.on_hide_incomplete_changed).grid(row=1, column=1, padx=(0, 15), pady=(5, 0), sticky=tk.W)
         
         # Transcription display frame with language label
         trans_header_frame = ttk.Frame(main_frame)
@@ -214,6 +225,31 @@ class WhisperExtension:
     def on_show_only_incomplete_changed(self):
         """Handle show only incomplete checkbox change."""
         self.show_only_incomplete = self.show_only_incomplete_var.get()
+        self.last_rendered_transcript_len = 0  # Reset cache to force full re-render
+        self.render_transcription()
+
+    def on_hide_incomplete_changed(self):
+        """Handle hide incomplete checkbox change."""
+        self.hide_incomplete = self.hide_incomplete_var.get()
+
+        # When hiding incomplete, disable and uncheck the related checkboxes
+        if self.hide_incomplete:
+            # Disable and uncheck "Only show in-progress"
+            self.show_only_incomplete_var.set(False)
+            self.show_only_incomplete = False
+            self.show_only_incomplete_checkbox.config(state=tk.DISABLED)
+
+            # Disable and uncheck "Show floating window"
+            self.show_floating_window_var.set(False)
+            self.show_floating_window = False
+            self.show_floating_window_checkbox.config(state=tk.DISABLED)
+            self.update_floating_window()
+        else:
+            # Re-enable the checkboxes
+            self.show_only_incomplete_checkbox.config(state=tk.NORMAL)
+            self.show_floating_window_checkbox.config(state=tk.NORMAL)
+
+        # Re-render to apply the change
         self.last_rendered_transcript_len = 0  # Reset cache to force full re-render
         self.render_transcription()
 
@@ -573,8 +609,8 @@ class WhisperExtension:
                 else:
                     self.transcription_text.insert(tk.END, text + "\n", "completed")
 
-            # Add incomplete segment if exists
-            if self.last_segment:
+            # Add incomplete segment if exists (skip if hide_incomplete is enabled)
+            if self.last_segment and not self.hide_incomplete:
                 if self.show_timestamps and 'start' in self.last_segment and self.session_start_time:
                     segment_offset_s = float(self.last_segment['start'])
                     wall_clock_time = self.session_start_time + segment_offset_s
@@ -607,8 +643,8 @@ class WhisperExtension:
                     if self.transcription_text.get(last_line_start, f"{last_line_start}+1c") == "\n":
                         self.transcription_text.delete(last_line_start, f"{last_line_start}+1c")
 
-            # Re-add the incomplete segment
-            if self.last_segment:
+            # Re-add the incomplete segment (skip if hide_incomplete is enabled)
+            if self.last_segment and not self.hide_incomplete:
                 if self.show_timestamps and 'start' in self.last_segment and self.session_start_time:
                     segment_offset_s = float(self.last_segment['start'])
                     wall_clock_time = self.session_start_time + segment_offset_s

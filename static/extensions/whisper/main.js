@@ -25,8 +25,10 @@ class WhisperExtension extends DecoderExtension {
         this.autoScroll = true;
         this.showTimestamps = false;  // Disabled by default
         this.showOnlyIncomplete = true;  // Show only in-progress by default
+        this.hideIncomplete = false;  // Hide in-progress segment
         this.showFloatingWindow = false;  // Show transcription in floating window
         this.fontSize = 13;  // Default font size in pixels
+        this.lineLimit = 20;  // Default line limit
         this.sessionStartTime = null;  // Track when decoder starts for wall clock timestamps
         this.renderedSegmentCount = 0;  // Track how many completed segments are rendered
         this.lastUpdateTime = null;  // Track time of last message update
@@ -123,7 +125,9 @@ class WhisperExtension extends DecoderExtension {
         const autoScrollCheckbox = document.getElementById('whisper-auto-scroll');
         const timestampsCheckbox = document.getElementById('whisper-show-timestamps');
         const showOnlyIncompleteCheckbox = document.getElementById('whisper-show-only-incomplete');
+        const hideIncompleteCheckbox = document.getElementById('whisper-hide-incomplete');
         const showFloatingWindowCheckbox = document.getElementById('whisper-show-floating-window');
+        const lineLimitSelect = document.getElementById('whisper-line-limit');
 
         if (autoScrollCheckbox) {
             autoScrollCheckbox.addEventListener('change', (e) => {
@@ -144,10 +148,51 @@ class WhisperExtension extends DecoderExtension {
                 this.forceFullRerender();
             });
         }
+        if (hideIncompleteCheckbox) {
+            hideIncompleteCheckbox.addEventListener('change', (e) => {
+                this.hideIncomplete = e.target.checked;
+
+                // When hiding incomplete, disable and uncheck the related checkboxes
+                if (this.hideIncomplete) {
+                    // Disable and uncheck "Only show in-progress"
+                    if (showOnlyIncompleteCheckbox) {
+                        showOnlyIncompleteCheckbox.checked = false;
+                        showOnlyIncompleteCheckbox.disabled = true;
+                        this.showOnlyIncomplete = false;
+                    }
+                    // Disable and uncheck "Show modal"
+                    if (showFloatingWindowCheckbox) {
+                        showFloatingWindowCheckbox.checked = false;
+                        showFloatingWindowCheckbox.disabled = true;
+                        this.showFloatingWindow = false;
+                        this.updateFloatingWindow();
+                    }
+                } else {
+                    // Re-enable the checkboxes
+                    if (showOnlyIncompleteCheckbox) {
+                        showOnlyIncompleteCheckbox.disabled = false;
+                    }
+                    if (showFloatingWindowCheckbox) {
+                        showFloatingWindowCheckbox.disabled = false;
+                    }
+                }
+
+                // Re-render to apply the change
+                this.forceFullRerender();
+            });
+        }
         if (showFloatingWindowCheckbox) {
             showFloatingWindowCheckbox.addEventListener('change', (e) => {
                 this.showFloatingWindow = e.target.checked;
                 this.updateFloatingWindow();
+            });
+        }
+        if (lineLimitSelect) {
+            lineLimitSelect.addEventListener('change', (e) => {
+                const value = e.target.value;
+                this.lineLimit = value === 'unlimited' ? null : parseInt(value, 10);
+                // Re-render to apply the new limit
+                this.forceFullRerender();
             });
         }
 
@@ -435,60 +480,18 @@ class WhisperExtension extends DecoderExtension {
     }
 
     processSegments(segments) {
-        // Following WhisperLive client.py process_segments() method (lines 144-158)
-        // Server sends last N segments, so we need to deduplicate
-        const text = [];
-
+        // Backend handles deduplication with send_last_n_segments=1
+        // Just process segments directly
         for (let i = 0; i < segments.length; i++) {
             const seg = segments[i];
 
-            // Match official client.py line 148: only process if text is different from previous
-            // Use case-insensitive comparison to catch capitalization variations
-            const segTextLower = seg.text.trim().toLowerCase();
-            const isDifferent = text.length === 0 || text[text.length - 1] !== segTextLower;
-
-            if (isDifferent) {
-                text.push(segTextLower);
-
-                // Last segment that's not completed becomes lastSegment
-                if (i === segments.length - 1 && !seg.completed) {
-                    this.lastSegment = seg;
-                }
-                // Completed segments are added to transcript if not already there
-                else if (seg.completed) {
-                    // Check if this segment extends/completes a previous partial segment
-                    let isExtension = false;
-                    if (this.transcript.length > 0) {
-                        const lastTranscript = this.transcript[this.transcript.length - 1];
-                        const lastTextLower = lastTranscript.text.trim().toLowerCase();
-
-                        // Check if current segment contains the previous segment (extension)
-                        // and has overlapping timestamps
-                        if (segTextLower.includes(lastTextLower) &&
-                            segTextLower.length > lastTextLower.length &&
-                            parseFloat(seg.start) < parseFloat(lastTranscript.end)) {
-                            // This is an extended version of the previous segment
-                            this.transcript[this.transcript.length - 1] = seg;
-                            this.renderedSegmentCount = Math.max(0, this.renderedSegmentCount - 1); // Force re-render
-                            isExtension = true;
-                        }
-                    }
-
-                    if (!isExtension) {
-                        // Match official client.py line 157: only add if timestamp is after last segment
-                        // This prevents both exact duplicates AND refined versions of same time segment
-                        const shouldAdd = this.transcript.length === 0 ||
-                            parseFloat(seg.start) >= parseFloat(this.transcript[this.transcript.length - 1].end);
-
-                        if (shouldAdd) {
-                            this.transcript.push(seg);
-                        } else {
-                            // Segment overlaps with previous - this is a refinement, replace the last one
-                            this.transcript[this.transcript.length - 1] = seg;
-                            this.renderedSegmentCount = Math.max(0, this.renderedSegmentCount - 1); // Force re-render
-                        }
-                    }
-                }
+            // Completed segments are sent by backend after deduplication
+            if (seg.completed) {
+                this.transcript.push(seg);
+            }
+            // Last segment that's not completed becomes lastSegment
+            else if (i === segments.length - 1) {
+                this.lastSegment = seg;
             }
         }
     }
@@ -563,12 +566,25 @@ class WhisperExtension extends DecoderExtension {
         }
         this.renderedSegmentCount = this.transcript.length;
 
+        // Apply line limit if set
+        if (this.lineLimit !== null) {
+            const completedElements = Array.from(transcriptionElement.querySelectorAll('.whisper-transcription-line:not(.whisper-incomplete)'));
+            if (completedElements.length > this.lineLimit) {
+                // Remove oldest segments to stay within limit
+                const toRemove = completedElements.length - this.lineLimit;
+                for (let i = 0; i < toRemove; i++) {
+                    completedElements[i].remove();
+                }
+            }
+        }
+
         // Re-check for incomplete element after adding new completed segments
         incompleteElement = transcriptionElement.querySelector('.whisper-incomplete');
 
         // Handle the incomplete segment (last one being refined)
         // IMPORTANT: This must be at the END to stay at the bottom
-        if (this.lastSegment) {
+        // Skip if hideIncomplete is enabled
+        if (this.lastSegment && !this.hideIncomplete) {
             if (!incompleteElement) {
                 // Create new incomplete element and append to the END
                 incompleteElement = this.createSegmentElement(this.lastSegment, true);
@@ -582,7 +598,12 @@ class WhisperExtension extends DecoderExtension {
                 }
             }
         } else if (incompleteElement) {
-            // Remove incomplete element if no longer needed
+            // Remove incomplete element if no longer needed or if hideIncomplete is enabled
+            incompleteElement.remove();
+        }
+
+        // Also remove incomplete element if hideIncomplete is enabled
+        if (this.hideIncomplete && incompleteElement) {
             incompleteElement.remove();
         }
 

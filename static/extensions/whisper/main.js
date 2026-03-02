@@ -207,6 +207,11 @@ class WhisperExtension extends DecoderExtension {
             languageSelect.addEventListener('change', (e) => {
                 this.selectedLanguage = e.target.value;
                 console.log('Whisper: Language changed to:', this.selectedLanguage);
+
+                // Auto-select matching TTS voice if not English
+                if (this.selectedLanguage !== 'en') {
+                    this.autoSelectTTSVoice(this.selectedLanguage);
+                }
             });
         }
         if (lineLimitSelect) {
@@ -1281,6 +1286,55 @@ class WhisperExtension extends DecoderExtension {
         if (window.speechSynthesis.onvoiceschanged !== undefined) {
             window.speechSynthesis.onvoiceschanged = populateVoices;
         }
+    }
+
+    autoSelectTTSVoice(languageCode) {
+        const voices = window.speechSynthesis.getVoices();
+        const voiceSelect = document.getElementById('whisper-tts-voice');
+
+        if (!voiceSelect || voices.length === 0) {
+            console.log('Whisper: Cannot auto-select TTS voice - voices not loaded yet');
+            return;
+        }
+
+        // Map common Whisper language codes to TTS language codes
+        // Whisper uses 2-letter codes, TTS often uses full locale codes
+        const languageMap = {
+            'es': 'es-ES', 'fr': 'fr-FR', 'de': 'de-DE', 'it': 'it-IT',
+            'pt': 'pt-PT', 'ru': 'ru-RU', 'ja': 'ja-JP', 'ko': 'ko-KR',
+            'zh': 'zh-CN', 'ar': 'ar-SA', 'hi': 'hi-IN', 'nl': 'nl-NL',
+            'pl': 'pl-PL', 'tr': 'tr-TR', 'sv': 'sv-SE', 'da': 'da-DK',
+            'no': 'no-NO', 'fi': 'fi-FI', 'cs': 'cs-CZ', 'el': 'el-GR',
+            'he': 'he-IL', 'hu': 'hu-HU', 'ro': 'ro-RO', 'sk': 'sk-SK',
+            'uk': 'uk-UA', 'id': 'id-ID', 'th': 'th-TH', 'vi': 'vi-VN'
+        };
+
+        // Get the full locale code if available, otherwise use the language code
+        const targetLang = languageMap[languageCode] || languageCode;
+
+        // Find matching voices, prioritizing Google voices
+        const matchingVoices = voices.filter(v =>
+            v.lang.startsWith(languageCode) || v.lang === targetLang
+        );
+
+        if (matchingVoices.length === 0) {
+            console.log(`Whisper: No TTS voice found for language: ${languageCode}`);
+            return;
+        }
+
+        // Prioritize Google voices
+        let selectedVoice = matchingVoices.find(v => v.name.toLowerCase().includes('google'));
+
+        // Fall back to first matching voice if no Google voice found
+        if (!selectedVoice) {
+            selectedVoice = matchingVoices[0];
+        }
+
+        // Update the dropdown and voice
+        voiceSelect.value = selectedVoice.name;
+        this.ttsVoice = selectedVoice;
+
+        console.log(`Whisper: Auto-selected TTS voice: ${selectedVoice.name} (${selectedVoice.lang}) for language: ${languageCode}`);
     }
 
     toggleTTS() {

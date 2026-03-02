@@ -1337,6 +1337,88 @@ class WhisperExtension extends DecoderExtension {
         console.log(`Whisper: Auto-selected TTS voice: ${selectedVoice.name} (${selectedVoice.lang}) for language: ${languageCode}`);
     }
 
+    showFirefoxTTSWarning() {
+        // Check if browser is Firefox
+        const isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
+
+        // Only show warning for Firefox users, and only once per session
+        if (!isFirefox || sessionStorage.getItem('whisper_firefox_tts_warning_shown')) {
+            return;
+        }
+
+        // Mark as shown
+        sessionStorage.setItem('whisper_firefox_tts_warning_shown', 'true');
+
+        // Create modal overlay
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+        `;
+
+        // Create modal content
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            background: #2a2a2a;
+            color: #e0e0e0;
+            padding: 25px;
+            border-radius: 8px;
+            max-width: 450px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            font-family: Arial, sans-serif;
+        `;
+
+        modal.innerHTML = `
+            <h3 style="margin-top: 0; color: #ff9800; font-size: 18px;">
+                ⚠️ Firefox TTS Quality Notice
+            </h3>
+            <p style="line-height: 1.6; margin: 15px 0;">
+                Firefox does not have high-quality text-to-speech voices.
+                TTS will work, but the voice quality may be limited.
+            </p>
+            <p style="line-height: 1.6; margin: 15px 0;">
+                For better TTS quality, we recommend using <strong>Google Chrome</strong>
+                or <strong>Microsoft Edge</strong>, which include natural-sounding voices.
+            </p>
+            <button id="whisper-firefox-warning-ok" style="
+                background: #4CAF50;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 14px;
+                margin-top: 10px;
+                width: 100%;
+            ">
+                OK, I Understand
+            </button>
+        `;
+
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        // Close modal on button click
+        document.getElementById('whisper-firefox-warning-ok').addEventListener('click', () => {
+            document.body.removeChild(overlay);
+        });
+
+        // Close modal on overlay click
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                document.body.removeChild(overlay);
+            }
+        });
+    }
+
     toggleTTS() {
         this.ttsEnabled = !this.ttsEnabled;
 
@@ -1360,6 +1442,9 @@ class WhisperExtension extends DecoderExtension {
 
             // Apply SDR mute state if enabled
             this.applySDRMuteState();
+
+            // Show Firefox TTS quality warning
+            this.showFirefoxTTSWarning();
 
             console.log('Whisper: TTS enabled');
         } else {

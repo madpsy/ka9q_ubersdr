@@ -366,6 +366,7 @@ func (vch *VoiceCommandHandler) handleStop(sessionID string, conn *websocket.Con
 }
 
 // handleCompleteAudio handles complete buffered audio in one message
+// This implementation sends audio directly to WhisperLive like the Python client's play_file() method
 func (vch *VoiceCommandHandler) handleCompleteAudio(sessionID string, conn *websocket.Conn, msg map[string]interface{}) error {
 	if !vch.config.Enabled || !vch.config.EnableVoiceCommands {
 		return vch.sendError(conn, "Voice commands are not enabled")
@@ -385,7 +386,7 @@ func (vch *VoiceCommandHandler) handleCompleteAudio(sessionID string, conn *webs
 
 	log.Printf("[VoiceCommands] Processing voice command for session %s (queued if needed)", sessionID)
 
-	// Get audio data (base64 encoded)
+	// Get audio data (base64 encoded int16 PCM)
 	audioDataStr, ok := msg["audio"].(string)
 	if !ok {
 		return vch.sendError(conn, "missing audio data")
@@ -414,42 +415,6 @@ func (vch *VoiceCommandHandler) handleCompleteAudio(sessionID string, conn *webs
 		return vch.sendError(conn, "no audio data received")
 	}
 
-	log.Printf("[VoiceCommands] Received complete audio for session %s: %d bytes", sessionID, audioSize)
-
-	// Create Whisper decoder configuration
-	whisperConfig := whisper.WhisperConfig{
-		Enabled:             vch.config.Enabled,
-		ServerURL:           vch.config.ServerURL,
-		Model:               vch.config.Model,
-		Language:            vch.config.Language,
-		Translate:           vch.config.Translate,
-		SendIntervalMs:      vch.config.SendIntervalMs,
-		InitialPrompt:       "Voice commands for radio control: tune, frequency, mode, volume, bandwidth, recording.",
-		EnableVoiceCommands: vch.config.EnableVoiceCommands,
-	}
-
-	// Create decoder (16kHz is standard for browser audio)
-	decoder := whisper.NewWhisperDecoder(16000, whisperConfig)
-
-	// Create channels for audio and results
-	audioChan := make(chan whisper.AudioSample, 100)
-	resultChan := make(chan []byte, 100)
-
-	// Start decoder
-	if err := decoder.Start(audioChan, resultChan); err != nil {
-		log.Printf("[VoiceCommands] Failed to start decoder for session %s: %v", sessionID, err)
-		return vch.sendError(conn, "failed to start speech recognition")
-	}
-
-	log.Printf("[VoiceCommands] Started decoder for session %s", sessionID)
-
-	// Create channel to signal when we receive completed transcription
-	completedChan := make(chan bool, 1)
-
-	// Process results in background
-	go vch.processResultsWithCompletion(sessionID, conn, resultChan, completedChan)
-
-	// Send all audio at once through the channel
 	// Convert byte array to int16 samples
 	numSamples := len(audioData) / 2
 	pcmData := make([]int16, numSamples)
@@ -458,62 +423,175 @@ func (vch *VoiceCommandHandler) handleCompleteAudio(sessionID string, conn *webs
 	}
 
 	durationSeconds := float64(numSamples) / 16000.0
-	log.Printf("[VoiceCommands] Sending audio to WhisperLive: %d bytes, %d samples, %.2f seconds @ 16kHz",
-		audioSize, numSamples, durationSeconds)
+	log.Printf("[VoiceCommands] Received audio for session %s: %d bytes, %d samples, %.2f seconds @ 16kHz",
+		sessionID, audioSize, numSamples, durationSeconds)
 
-	// Wait for WhisperLive server to be ready before sending audio
-	log.Printf("[VoiceCommands] Waiting for WhisperLive server to be ready...")
-	select {
-	case <-decoder.GetServerReadyChannel():
-		log.Printf("[VoiceCommands] WhisperLive server is ready, sending audio...")
-	case <-time.After(10 * time.Second):
-		log.Printf("[VoiceCommands] Timeout waiting for WhisperLive server to be ready")
-		decoder.Stop()
-		return vch.sendError(conn, "WhisperLive server not ready")
+	// Send audio directly to WhisperLive (like Python client's play_file method)
+	transcription, err := vch.sendAudioToWhisperLive(pcmData, sessionID)
+	if err != nil {
+		log.Printf("[VoiceCommands] Failed to get transcription: %v", err)
+		return vch.sendError(conn, fmt.Sprintf("transcription failed: %v", err))
 	}
 
-	// Send as a single AudioSample
-	audioChan <- whisper.AudioSample{
-		PCMData:      pcmData,
-		RTPTimestamp: 0,
-		GPSTimeNs:    time.Now().UnixNano(),
-	}
+	log.Printf("[VoiceCommands] Received transcription for session %s: \"%s\"", sessionID, transcription)
 
-	log.Printf("[VoiceCommands] Audio sent to decoder channel, waiting for ticker to send to WhisperLive...")
-
-	// CRITICAL: Wait for the ticker in sendAudioLoop to fire and send the buffered audio
-	// The sendAudioLoop uses a ticker (SendIntervalMs, typically 100ms) to send accumulated audio
-	// If we close the channel immediately, the goroutine exits before the ticker fires
-	// and the audio never gets sent to WhisperLive
-	tickerWaitTime := time.Duration(vch.config.SendIntervalMs)*time.Millisecond + 50*time.Millisecond
-	time.Sleep(tickerWaitTime)
-
-	log.Printf("[VoiceCommands] Waited %v for audio transmission, now closing channel...", tickerWaitTime)
-
-	// Close audio channel to signal end of audio
-	close(audioChan)
-
-	// Wait for completed transcription or timeout (10 seconds)
-	select {
-	case <-completedChan:
-		log.Printf("[VoiceCommands] Received completed transcription for session %s", sessionID)
-	case <-time.After(10 * time.Second):
-		log.Printf("[VoiceCommands] Timeout waiting for transcription for session %s", sessionID)
-		vch.sendMessage(conn, map[string]interface{}{
-			"type":    "voice_command_error",
-			"error":   "transcription timeout",
-			"message": "No transcription received within 10 seconds",
-		})
-	}
-
-	// Stop decoder
-	if err := decoder.Stop(); err != nil {
-		log.Printf("[VoiceCommands] Error stopping decoder for session %s: %v", sessionID, err)
-	}
-
-	log.Printf("[VoiceCommands] Completed processing for session %s", sessionID)
+	// Process the transcription as a command
+	vch.processCommand(sessionID, conn, transcription)
 
 	return nil
+}
+
+// sendAudioToWhisperLive sends audio directly to WhisperLive and waits for transcription
+// This mimics the Python client's play_file() method
+func (vch *VoiceCommandHandler) sendAudioToWhisperLive(pcmData []int16, sessionID string) (string, error) {
+	// Connect to WhisperLive WebSocket
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
+	}
+
+	wsConn, _, err := dialer.Dial(vch.config.ServerURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to WhisperLive: %w", err)
+	}
+	defer wsConn.Close()
+
+	// Generate unique client UID
+	clientUID := fmt.Sprintf("voice-cmd-%s", sessionID[:8])
+
+	// Send initial configuration (like Python client's on_open)
+	configMsg := map[string]interface{}{
+		"uid":                   clientUID,
+		"language":              vch.config.Language,
+		"task":                  "transcribe",
+		"model":                 vch.config.Model,
+		"use_vad":               false, // Don't use VAD for voice commands
+		"send_last_n_segments":  10,
+		"no_speech_thresh":      0.45,
+		"clip_audio":            false,
+		"same_output_threshold": 10,
+		"enable_translation":    false,
+		"target_language":       "",
+	}
+
+	configJSON, err := json.Marshal(configMsg)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, configJSON); err != nil {
+		return "", fmt.Errorf("failed to send config: %w", err)
+	}
+
+	log.Printf("[VoiceCommands] Sent config to WhisperLive for session %s", sessionID)
+
+	// Wait for SERVER_READY message
+	serverReady := false
+	wsConn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	for !serverReady {
+		_, message, err := wsConn.ReadMessage()
+		if err != nil {
+			return "", fmt.Errorf("failed to read SERVER_READY: %w", err)
+		}
+
+		var msg map[string]interface{}
+		if err := json.Unmarshal(message, &msg); err != nil {
+			continue
+		}
+
+		if msgStr, ok := msg["message"].(string); ok && msgStr == "SERVER_READY" {
+			serverReady = true
+			log.Printf("[VoiceCommands] WhisperLive server ready for session %s", sessionID)
+		}
+	}
+
+	// Convert int16 PCM to float32 (like Python client's bytes_to_float_array)
+	floatData := make([]float32, len(pcmData))
+	for i, sample := range pcmData {
+		floatData[i] = float32(sample) / 32768.0
+	}
+
+	// Send audio in chunks (like Python client's play_file)
+	chunkSize := 4096 // Same as Python client
+	sampleRate := 16000.0
+	chunkDuration := float64(chunkSize) / sampleRate
+
+	for offset := 0; offset < len(floatData); offset += chunkSize {
+		end := offset + chunkSize
+		if end > len(floatData) {
+			end = len(floatData)
+		}
+
+		chunk := floatData[offset:end]
+
+		// Convert float32 to bytes (little-endian IEEE 754)
+		buf := make([]byte, len(chunk)*4)
+		for i, f := range chunk {
+			bits := math.Float32bits(f)
+			binary.LittleEndian.PutUint32(buf[i*4:], bits)
+		}
+
+		// Send chunk as binary message
+		if err := wsConn.WriteMessage(websocket.BinaryMessage, buf); err != nil {
+			return "", fmt.Errorf("failed to send audio chunk: %w", err)
+		}
+
+		// Sleep to simulate real-time (like Python client)
+		time.Sleep(time.Duration(chunkDuration * float64(time.Second)))
+	}
+
+	log.Printf("[VoiceCommands] Sent all audio chunks for session %s", sessionID)
+
+	// Send END_OF_AUDIO signal (like Python client)
+	endOfAudio := []byte("END_OF_AUDIO")
+	if err := wsConn.WriteMessage(websocket.BinaryMessage, endOfAudio); err != nil {
+		return "", fmt.Errorf("failed to send END_OF_AUDIO: %w", err)
+	}
+
+	log.Printf("[VoiceCommands] Sent END_OF_AUDIO for session %s", sessionID)
+
+	// Wait for transcription results
+	transcription := ""
+	wsConn.SetReadDeadline(time.Now().Add(10 * time.Second))
+
+	for {
+		_, message, err := wsConn.ReadMessage()
+		if err != nil {
+			if transcription != "" {
+				// We got some transcription, return it
+				break
+			}
+			return "", fmt.Errorf("failed to read transcription: %w", err)
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(message, &result); err != nil {
+			continue
+		}
+
+		// Check for segments
+		if segments, ok := result["segments"].([]interface{}); ok && len(segments) > 0 {
+			for _, seg := range segments {
+				if segMap, ok := seg.(map[string]interface{}); ok {
+					if text, ok := segMap["text"].(string); ok {
+						transcription += text
+						log.Printf("[VoiceCommands] Received segment: \"%s\"", text)
+					}
+
+					// Check if this is a completed segment
+					if completed, ok := segMap["completed"].(bool); ok && completed {
+						log.Printf("[VoiceCommands] Received completed transcription for session %s", sessionID)
+						return strings.TrimSpace(transcription), nil
+					}
+				}
+			}
+		}
+	}
+
+	if transcription == "" {
+		return "", fmt.Errorf("no transcription received")
+	}
+
+	return strings.TrimSpace(transcription), nil
 }
 
 // processResultsWithCompletion processes transcription results and signals when completed

@@ -492,14 +492,17 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 
 		// Completed segments - check if we've already sent this one
 		if completed {
-			// Check if this segment is already in our transcript (by comparing timestamps)
+			// Check if this segment is already in our transcript (by comparing timestamps AND text)
 			alreadySent := false
 			if startVal, ok := seg["start"].(float64); ok {
 				for _, existingSeg := range d.transcript {
 					if existingStart, ok := existingSeg["start"].(float64); ok {
-						if existingStart == startVal {
-							alreadySent = true
-							break
+						if existingText, ok := existingSeg["text"].(string); ok {
+							// Match if both timestamp and text are the same
+							if existingStart == startVal && existingText == segText {
+								alreadySent = true
+								break
+							}
 						}
 					}
 				}
@@ -510,6 +513,8 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 				d.transcript = append(d.transcript, seg)
 				filteredSegments = append(filteredSegments, seg)
 				log.Printf("[Whisper] Sending completed segment: %s", segText)
+			} else {
+				log.Printf("[Whisper] Skipping duplicate completed segment: %s", segText)
 			}
 		} else if i == len(segments)-1 {
 			// Last segment that's not completed - send for real-time updates

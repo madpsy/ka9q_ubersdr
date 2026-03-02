@@ -460,7 +460,8 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 }
 
 // processSegments filters and processes segments from WhisperLive
-// With send_last_n_segments=1, we only receive one segment at a time
+// With send_last_n_segments=1, WhisperLive sends the last completed segment + current incomplete
+// We need to track which completed segments we've already sent to avoid duplicates
 func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 	d.transcriptMu.Lock()
 	defer d.transcriptMu.Unlock()
@@ -489,11 +490,27 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 
 		completed, _ := seg["completed"].(bool)
 
-		// Completed segments are added to our transcript and sent to client
+		// Completed segments - check if we've already sent this one
 		if completed {
-			d.transcript = append(d.transcript, seg)
-			filteredSegments = append(filteredSegments, seg)
-			log.Printf("[Whisper] Sending completed segment: %s", segText)
+			// Check if this segment is already in our transcript (by comparing timestamps)
+			alreadySent := false
+			if startVal, ok := seg["start"].(float64); ok {
+				for _, existingSeg := range d.transcript {
+					if existingStart, ok := existingSeg["start"].(float64); ok {
+						if existingStart == startVal {
+							alreadySent = true
+							break
+						}
+					}
+				}
+			}
+
+			// Only send if we haven't sent it before
+			if !alreadySent {
+				d.transcript = append(d.transcript, seg)
+				filteredSegments = append(filteredSegments, seg)
+				log.Printf("[Whisper] Sending completed segment: %s", segText)
+			}
 		} else if i == len(segments)-1 {
 			// Last segment that's not completed - send for real-time updates
 			d.lastSegment = seg

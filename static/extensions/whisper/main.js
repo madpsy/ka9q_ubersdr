@@ -1270,20 +1270,29 @@ class WhisperExtension extends DecoderExtension {
             return;
         }
 
-        // Add to queue if currently speaking
+        // Add to queue
+        this.ttsQueue.push(text);
+        console.log(`Whisper: Added to TTS queue (${this.ttsQueue.length} items)`);
+
+        // If currently speaking, just queue it - will be batched when current utterance ends
         if (this.isSpeaking) {
-            this.ttsQueue.push(text);
-            console.log(`Whisper: Added to TTS queue (${this.ttsQueue.length} items)`);
+            return;
+        }
+
+        // Start speaking immediately, batching all queued segments
+        this.speakQueuedSegments();
+    }
+
+    speakQueuedSegments() {
+        if (this.isSpeaking || this.ttsQueue.length === 0) {
             return;
         }
 
         this.isSpeaking = true;
 
-        // Batch this segment with any already queued segments for smooth continuous speech
-        const segmentsToSpeak = [text];
-        while (this.ttsQueue.length > 0) {
-            segmentsToSpeak.push(this.ttsQueue.shift());
-        }
+        // Batch all queued segments for smooth continuous speech
+        const segmentsToSpeak = [...this.ttsQueue];
+        this.ttsQueue = [];
 
         // Join segments with a space for natural flow
         const combinedText = segmentsToSpeak.join(' ');
@@ -1306,11 +1315,10 @@ class WhisperExtension extends DecoderExtension {
         // Handle completion to process any new segments that arrived
         utterance.onend = () => {
             this.isSpeaking = false;
-            // Check if new segments arrived while speaking
+            // Check if new segments arrived while speaking and batch them
             if (this.ttsQueue.length > 0) {
-                const nextText = this.ttsQueue.shift();
-                console.log(`Whisper: Processing batched TTS (${this.ttsQueue.length} more in queue)`);
-                this.speakSegment(nextText);
+                console.log(`Whisper: Processing next batch (${this.ttsQueue.length} segments in queue)`);
+                this.speakQueuedSegments();
             }
         };
 
@@ -1318,10 +1326,9 @@ class WhisperExtension extends DecoderExtension {
         utterance.onerror = (event) => {
             console.error('Whisper: TTS error:', event.error);
             this.isSpeaking = false;
-            // Try next in queue
+            // Try next batch in queue
             if (this.ttsQueue.length > 0) {
-                const nextText = this.ttsQueue.shift();
-                this.speakSegment(nextText);
+                setTimeout(() => this.speakQueuedSegments(), 100);
             }
         };
 

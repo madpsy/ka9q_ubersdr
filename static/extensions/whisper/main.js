@@ -1270,14 +1270,15 @@ class WhisperExtension extends DecoderExtension {
     }
 
     getSDRMuteState() {
-        // Check if SDR is currently muted by looking at the mute button state
-        const muteButton = document.getElementById('id-button-mute');
-        if (muteButton) {
-            return muteButton.classList.contains('w3-green');
-        }
-        // Fallback: check global isMuted variable if available
+        // First check the global isMuted variable (most reliable)
         if (typeof window.isMuted !== 'undefined') {
             return window.isMuted;
+        }
+        // Fallback: check if SDR is currently muted by looking at the mute button state
+        const muteButton = document.getElementById('mute-btn');
+        if (muteButton) {
+            // Button text is '🔇 Unmute' when muted, '🔊 Mute' when unmuted
+            return muteButton.textContent.includes('Unmute');
         }
         return false;
     }

@@ -205,6 +205,54 @@
 .whisper-transcription-actions {
     display: flex;
     gap: 6px;
+    align-items: center;
+}
+
+.whisper-actions-separator {
+    width: 1px;
+    height: 20px;
+    background-color: #555;
+    margin: 0 4px;
+}
+
+.whisper-tts-button {
+    min-width: 60px;
+}
+
+.whisper-tts-button.whisper-tts-active {
+    background-color: #4caf50;
+    border-color: #4caf50;
+    color: white;
+}
+
+.whisper-tts-voice-select {
+    padding: 4px 8px;
+    background-color: #3a3a3a;
+    color: #e0e0e0;
+    border: 1px solid #555;
+    border-radius: 3px;
+    font-size: 11px;
+    cursor: pointer;
+    max-width: 150px;
+}
+
+.whisper-tts-voice-select:focus {
+    outline: none;
+    border-color: #4caf50;
+}
+
+.whisper-tts-rate-slider {
+    width: 80px;
+    height: 4px;
+    cursor: pointer;
+    accent-color: #4caf50;
+}
+
+.whisper-tts-rate-value {
+    font-size: 11px;
+    color: #888;
+    min-width: 35px;
+    text-align: center;
 }
 
 .whisper-transcription {

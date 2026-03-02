@@ -75,6 +75,13 @@
                 <span id="whisper-detected-language" class="whisper-detected-language" style="display: none;"></span>
             </div>
             <div class="whisper-transcription-actions">
+                <button id="whisper-tts-toggle" class="whisper-button-small whisper-tts-button" title="Toggle text-to-speech">🔇 TTS</button>
+                <select id="whisper-tts-voice" class="whisper-tts-voice-select" title="Select TTS voice" style="display: none;">
+                    <option value="">Default Voice</option>
+                </select>
+                <input type="range" id="whisper-tts-rate" class="whisper-tts-rate-slider" min="0.5" max="2.0" step="0.1" value="1.0" title="Speech rate" style="display: none;">
+                <span id="whisper-tts-rate-value" class="whisper-tts-rate-value" style="display: none;">1.0x</span>
+                <span class="whisper-actions-separator"></span>
                 <button id="whisper-text-smaller" class="whisper-button-small" title="Decrease text size">Text−</button>
                 <button id="whisper-text-larger" class="whisper-button-small" title="Increase text size">Text+</button>
                 <button id="whisper-copy-button" class="whisper-button-small" title="Copy to clipboard">📋 Copy</button>

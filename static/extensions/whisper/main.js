@@ -37,6 +37,13 @@ class WhisperExtension extends DecoderExtension {
         this.detectedLanguage = null;  // Detected language from server
         this.detectedLanguageProb = null;  // Language detection probability
 
+        // Text-to-Speech configuration
+        this.ttsEnabled = false;
+        this.ttsRate = 1.0;
+        this.ttsVoice = null;
+        this.ttsQueue = [];
+        this.isSpeaking = false;
+
         // Frequency change detection
         this.frequencyChangeHandler = null;  // Event handler for frequency changes
         this.frequencyChangeTimer = null;  // Timer for auto-restart after frequency change
@@ -98,6 +105,10 @@ class WhisperExtension extends DecoderExtension {
         const saveButton = document.getElementById('whisper-save-button');
         const textSmallerButton = document.getElementById('whisper-text-smaller');
         const textLargerButton = document.getElementById('whisper-text-larger');
+        const ttsToggleButton = document.getElementById('whisper-tts-toggle');
+        const ttsVoiceSelect = document.getElementById('whisper-tts-voice');
+        const ttsRateSlider = document.getElementById('whisper-tts-rate');
+        const ttsRateValue = document.getElementById('whisper-tts-rate-value');
 
         if (startButton) {
             startButton.addEventListener('click', () => this.startDecoder());
@@ -120,6 +131,28 @@ class WhisperExtension extends DecoderExtension {
         if (textLargerButton) {
             textLargerButton.addEventListener('click', () => this.increaseTextSize());
         }
+
+        // TTS controls
+        if (ttsToggleButton) {
+            ttsToggleButton.addEventListener('click', () => this.toggleTTS());
+        }
+        if (ttsVoiceSelect) {
+            ttsVoiceSelect.addEventListener('change', (e) => {
+                const voices = window.speechSynthesis.getVoices();
+                this.ttsVoice = voices.find(v => v.name === e.target.value) || null;
+            });
+        }
+        if (ttsRateSlider) {
+            ttsRateSlider.addEventListener('input', (e) => {
+                this.ttsRate = parseFloat(e.target.value);
+                if (ttsRateValue) {
+                    ttsRateValue.textContent = `${this.ttsRate.toFixed(1)}x`;
+                }
+            });
+        }
+
+        // Initialize TTS voices
+        this.initializeTTSVoices();
 
         // Settings checkboxes
         const autoScrollCheckbox = document.getElementById('whisper-auto-scroll');
@@ -239,6 +272,9 @@ class WhisperExtension extends DecoderExtension {
         if (!skipFrequencyMonitoring) {
             this.stopFrequencyMonitoring();
         }
+
+        // Stop any ongoing TTS
+        this.stopSpeaking();
 
         // Remove floating window
         this.updateFloatingWindow();
@@ -488,6 +524,8 @@ class WhisperExtension extends DecoderExtension {
             // Completed segments are sent by backend after deduplication
             if (seg.completed) {
                 this.transcript.push(seg);
+                // Speak completed segment if TTS is enabled
+                this.speakSegment(seg.text);
             }
             // Last segment that's not completed becomes lastSegment
             else if (i === segments.length - 1) {
@@ -1071,6 +1109,162 @@ class WhisperExtension extends DecoderExtension {
 
         this.wasRunningBeforeFreqChange = false;
         console.log('Whisper: Frequency monitoring stopped');
+    }
+
+    // Text-to-Speech Methods
+    initializeTTSVoices() {
+        if (!('speechSynthesis' in window)) {
+            console.log('Whisper: Speech synthesis not supported');
+            return;
+        }
+
+        const populateVoices = () => {
+            const voices = window.speechSynthesis.getVoices();
+            const voiceSelect = document.getElementById('whisper-tts-voice');
+
+            if (!voiceSelect || voices.length === 0) return;
+
+            // Clear existing options except the first (default)
+            while (voiceSelect.options.length > 1) {
+                voiceSelect.remove(1);
+            }
+
+            // Add voices, prioritizing English voices
+            const englishVoices = voices.filter(v => v.lang.startsWith('en'));
+            const otherVoices = voices.filter(v => !v.lang.startsWith('en'));
+
+            if (englishVoices.length > 0) {
+                const optgroup = document.createElement('optgroup');
+                optgroup.label = 'English';
+                englishVoices.forEach(voice => {
+                    const option = document.createElement('option');
+                    option.value = voice.name;
+                    option.textContent = `${voice.name} (${voice.lang})`;
+                    optgroup.appendChild(option);
+                });
+                voiceSelect.appendChild(optgroup);
+            }
+
+            if (otherVoices.length > 0) {
+                const optgroup = document.createElement('optgroup');
+                optgroup.label = 'Other Languages';
+                otherVoices.forEach(voice => {
+                    const option = document.createElement('option');
+                    option.value = voice.name;
+                    option.textContent = `${voice.name} (${voice.lang})`;
+                    optgroup.appendChild(option);
+                });
+                voiceSelect.appendChild(optgroup);
+            }
+
+            console.log(`Whisper: Loaded ${voices.length} TTS voices`);
+        };
+
+        // Voices may load asynchronously
+        populateVoices();
+        if (window.speechSynthesis.onvoiceschanged !== undefined) {
+            window.speechSynthesis.onvoiceschanged = populateVoices;
+        }
+    }
+
+    toggleTTS() {
+        this.ttsEnabled = !this.ttsEnabled;
+
+        const ttsButton = document.getElementById('whisper-tts-toggle');
+        const ttsVoiceSelect = document.getElementById('whisper-tts-voice');
+        const ttsRateSlider = document.getElementById('whisper-tts-rate');
+        const ttsRateValue = document.getElementById('whisper-tts-rate-value');
+
+        if (this.ttsEnabled) {
+            // Enable TTS
+            if (ttsButton) {
+                ttsButton.textContent = '🔊 TTS';
+                ttsButton.classList.add('whisper-tts-active');
+            }
+            // Show voice and rate controls
+            if (ttsVoiceSelect) ttsVoiceSelect.style.display = 'inline-block';
+            if (ttsRateSlider) ttsRateSlider.style.display = 'inline-block';
+            if (ttsRateValue) ttsRateValue.style.display = 'inline-block';
+
+            console.log('Whisper: TTS enabled');
+        } else {
+            // Disable TTS
+            if (ttsButton) {
+                ttsButton.textContent = '🔇 TTS';
+                ttsButton.classList.remove('whisper-tts-active');
+            }
+            // Hide voice and rate controls
+            if (ttsVoiceSelect) ttsVoiceSelect.style.display = 'none';
+            if (ttsRateSlider) ttsRateSlider.style.display = 'none';
+            if (ttsRateValue) ttsRateValue.style.display = 'none';
+
+            // Stop any ongoing speech
+            this.stopSpeaking();
+
+            console.log('Whisper: TTS disabled');
+        }
+    }
+
+    speakSegment(text) {
+        if (!this.ttsEnabled || !('speechSynthesis' in window) || !text || text.trim() === '') {
+            return;
+        }
+
+        // Add to queue if currently speaking
+        if (this.isSpeaking) {
+            this.ttsQueue.push(text);
+            console.log(`Whisper: Added to TTS queue (${this.ttsQueue.length} items)`);
+            return;
+        }
+
+        this.isSpeaking = true;
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = this.ttsRate;
+        utterance.volume = 1.0;
+        utterance.pitch = 1.0;
+
+        // Use detected language if available, otherwise use voice's language
+        if (this.detectedLanguage) {
+            utterance.lang = this.detectedLanguage;
+        }
+
+        // Use selected voice if available
+        if (this.ttsVoice) {
+            utterance.voice = this.ttsVoice;
+        }
+
+        // Handle completion to process queue
+        utterance.onend = () => {
+            this.isSpeaking = false;
+            if (this.ttsQueue.length > 0) {
+                const nextText = this.ttsQueue.shift();
+                console.log(`Whisper: Processing next TTS item (${this.ttsQueue.length} remaining)`);
+                this.speakSegment(nextText);
+            }
+        };
+
+        // Handle errors
+        utterance.onerror = (event) => {
+            console.error('Whisper: TTS error:', event.error);
+            this.isSpeaking = false;
+            // Try next in queue
+            if (this.ttsQueue.length > 0) {
+                const nextText = this.ttsQueue.shift();
+                this.speakSegment(nextText);
+            }
+        };
+
+        console.log(`Whisper: Speaking text (${text.length} chars, rate: ${this.ttsRate}x)`);
+        window.speechSynthesis.speak(utterance);
+    }
+
+    stopSpeaking() {
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+            this.ttsQueue = [];
+            this.isSpeaking = false;
+            console.log('Whisper: TTS stopped and queue cleared');
+        }
     }
 
     onActivate() {

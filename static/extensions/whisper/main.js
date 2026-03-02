@@ -289,6 +289,9 @@ class WhisperExtension extends DecoderExtension {
         // Stop any ongoing TTS
         this.stopSpeaking();
 
+        // Restore SDR mute state (unmute if it was muted by TTS)
+        this.restoreSDRMuteState();
+
         // Remove floating window
         this.updateFloatingWindow();
 

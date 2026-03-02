@@ -412,19 +412,25 @@ class WhisperExtension:
             self.transcription_text.see(tk.END)
 
     def process_segments(self, segments: list):
-        """Process segments following WhisperLive client.py pattern."""
+        """Process segments from backend (backend handles deduplication)."""
+        # Track if we found an incomplete segment in this batch
+        found_incomplete = False
+
         for i, seg in enumerate(segments):
+            # Completed segments are sent by backend after deduplication
+            if seg.get('completed', False):
+                self.transcript.append(seg)
+                print(f"[Whisper] Added completed segment to transcript: {seg.get('text', '')[:50]}...")
             # Last segment that's not completed becomes last_segment
-            if i == len(segments) - 1 and not seg.get('completed', False):
+            elif i == len(segments) - 1:
                 self.last_segment = seg
-            # Completed segments are added to transcript if not already there
-            elif seg.get('completed', False):
-                # Check if this segment should be added (not overlapping with existing)
-                should_add = (len(self.transcript) == 0 or
-                            float(seg.get('start', 0)) >= float(self.transcript[-1].get('end', 0)))
-                
-                if should_add:
-                    self.transcript.append(seg)
+                found_incomplete = True
+                print(f"[Whisper] Updated incomplete segment: {seg.get('text', '')[:50]}...")
+
+        # If we didn't find an incomplete segment, clear last_segment
+        if not found_incomplete:
+            self.last_segment = None
+            print("[Whisper] No incomplete segment in this batch, cleared last_segment")
                     
     def calculate_bionic_split(self, word):
         """Calculate how many characters to bold for bionic reading.
@@ -884,13 +890,15 @@ class WhisperExtension:
 
     def update_floating_window(self):
         """Update or hide the floating window based on state."""
-        should_show = self.show_floating_window and self.running and self.last_segment and self.last_segment.get('text')
+        # Window should show when enabled and running, regardless of whether there's text yet
+        should_show = self.show_floating_window and self.running
 
         if not should_show:
             if self.floating_window and self.floating_window.winfo_exists():
                 self.floating_window.destroy()
                 self.floating_window = None
                 self.floating_text = None
+                self.last_floating_text = None
             return
 
         # Create floating window if it doesn't exist
@@ -928,13 +936,24 @@ class WhisperExtension:
             # Normal text should NOT be bold, only bionic_bold should be bold
             self.floating_text.tag_config("normal", foreground="#ff9800", font=("Consolas", self.floating_font_size))
             self.floating_text.tag_config("bionic_bold", foreground="#ff9800", font=("Consolas", self.floating_font_size, "bold"))
+            self.floating_text.tag_config("waiting", foreground="#888888", font=("Consolas", self.floating_font_size, "italic"))
 
             # Prevent window from being closed directly (only via checkbox)
-            self.floating_window.protocol("WM_DELETE_WINDOW", lambda: self.show_floating_window_var.set(False) or self.update_floating_window())
+            def on_floating_close():
+                self.show_floating_window_var.set(False)
+                self.on_show_floating_window_changed()
+
+            self.floating_window.protocol("WM_DELETE_WINDOW", on_floating_close)
 
         # Update text only if it changed (prevent flashing)
         if self.floating_text:
-            text = self.last_segment.get('text', '')
+            # Get text from last segment, or show waiting message
+            if self.last_segment and self.last_segment.get('text'):
+                text = self.last_segment.get('text', '')
+                text_tag = "normal"
+            else:
+                text = "Waiting for speech..."
+                text_tag = "waiting"
             
             # Only update if text actually changed
             if text != self.last_floating_text:
@@ -942,7 +961,10 @@ class WhisperExtension:
                 self.floating_text.config(state=tk.NORMAL)
                 self.floating_text.delete('1.0', tk.END)
 
-                if self.bionic_reading:
+                if text_tag == "waiting":
+                    # Show waiting message
+                    self.floating_text.insert(tk.END, text, "waiting")
+                elif self.bionic_reading:
                     # Apply bionic reading to floating window
                     import re
                     pattern = r'(\w+|\W+)'

@@ -465,7 +465,6 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 	d.transcriptMu.Lock()
 	defer d.transcriptMu.Unlock()
 
-	var text []string
 	var filteredSegments []interface{}
 
 	for i, segInterface := range segments {
@@ -492,29 +491,25 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 			continue
 		}
 
-		// For completed segments, apply deduplication logic
-		// Match official client.py line 148: only process if text is different from previous
-		if len(text) == 0 || text[len(text)-1] != segText {
-			text = append(text, segText)
+		// For completed segments, send them and let the client handle deduplication
+		if completed {
+			// Only add if timestamp is after last segment (prevent true duplicates)
+			shouldAdd := len(d.transcript) == 0
 
-			if completed {
-				// Match official client.py line 157: only add if timestamp is after last segment
-				shouldAdd := len(d.transcript) == 0
-
-				if !shouldAdd {
-					// Check if start time >= last segment's end time
-					if startVal, ok := seg["start"].(float64); ok {
-						lastSeg := d.transcript[len(d.transcript)-1]
-						if endVal, ok := lastSeg["end"].(float64); ok {
-							shouldAdd = startVal >= endVal
-						}
+			if !shouldAdd {
+				// Check if start time >= last segment's end time
+				if startVal, ok := seg["start"].(float64); ok {
+					lastSeg := d.transcript[len(d.transcript)-1]
+					if endVal, ok := lastSeg["end"].(float64); ok {
+						shouldAdd = startVal >= endVal
 					}
 				}
+			}
 
-				if shouldAdd {
-					d.transcript = append(d.transcript, seg)
-					filteredSegments = append(filteredSegments, seg)
-				}
+			if shouldAdd {
+				d.transcript = append(d.transcript, seg)
+				filteredSegments = append(filteredSegments, seg)
+				log.Printf("[Whisper] Sending completed segment: %s", segText)
 			}
 		}
 	}

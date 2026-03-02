@@ -437,17 +437,40 @@ class WhisperExtension extends DecoderExtension {
             return seg.text;
         }).join('\n');
 
+        // Build filename with callsign, frequency, mode, start time, and last message time
+        const callsign = window.instanceDescription?.receiver?.callsign || 'UNKNOWN';
+        const frequency = this.radio ? this.radio.getFrequency() : 0;
+        const freqMHz = (frequency / 1000000).toFixed(3);
+        const mode = this.radio ? this.radio.getMode().toUpperCase() : 'USB';
+
+        // Format start time (session start)
+        const startTime = this.sessionStartTime ? new Date(this.sessionStartTime) : new Date();
+        const startTimeStr = startTime.toISOString().replace(/[:.]/g, '-').slice(0, -5); // Remove milliseconds
+
+        // Format last message time (last segment end time)
+        let lastTimeStr = startTimeStr;
+        if (allSegments.length > 0) {
+            const lastSegment = allSegments[allSegments.length - 1];
+            if (lastSegment.end !== undefined && this.sessionStartTime) {
+                const lastSegmentOffsetMs = parseFloat(lastSegment.end) * 1000;
+                const lastTime = new Date(this.sessionStartTime + lastSegmentOffsetMs);
+                lastTimeStr = lastTime.toISOString().replace(/[:.]/g, '-').slice(0, -5);
+            }
+        }
+
+        const filename = `${callsign}_${freqMHz}MHz_${mode}_${startTimeStr}_to_${lastTimeStr}.txt`;
+
         const blob = new Blob([text], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `whisper_transcription_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+        a.download = filename;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
 
-        console.log('Whisper: Saved transcription');
+        console.log('Whisper: Saved transcription as', filename);
         this.showTemporaryMessage('Saved transcription!');
     }
 

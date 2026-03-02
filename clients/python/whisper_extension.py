@@ -700,7 +700,7 @@ class WhisperExtension:
         all_segments = self.transcript.copy()
         if self.last_segment:
             all_segments.append(self.last_segment)
-        
+
         if self.show_timestamps and self.session_start_time:
             lines = []
             for seg in all_segments:
@@ -713,11 +713,47 @@ class WhisperExtension:
             text = '\n'.join(lines)
         else:
             text = '\n'.join(seg.get('text', '') for seg in all_segments)
-        
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        # Build filename with callsign, frequency, mode, start time, and last message time
+        callsign = 'UNKNOWN'
+        if self.radio_control and hasattr(self.radio_control, 'client'):
+            client = self.radio_control.client
+            if client and hasattr(client, 'server_description'):
+                callsign = client.server_description.get('receiver', {}).get('callsign', 'UNKNOWN')
+
+        frequency = 0
+        if self.radio_control and hasattr(self.radio_control, 'get_frequency_hz'):
+            try:
+                frequency = self.radio_control.get_frequency_hz()
+            except:
+                pass
+        freq_mhz = f"{frequency / 1000000:.3f}"
+
+        mode = 'USB'
+        if self.radio_control and hasattr(self.radio_control, 'get_mode'):
+            try:
+                mode = self.radio_control.get_mode().upper()
+            except:
+                pass
+
+        # Format start time (session start)
+        start_time = datetime.fromtimestamp(self.session_start_time / 1000) if self.session_start_time else datetime.now()
+        start_time_str = start_time.strftime('%Y-%m-%dT%H-%M-%S')
+
+        # Format last message time (last segment end time)
+        last_time_str = start_time_str
+        if all_segments and self.session_start_time:
+            last_segment = all_segments[-1]
+            if 'end' in last_segment:
+                last_segment_offset_ms = float(last_segment['end']) * 1000
+                last_time = datetime.fromtimestamp((self.session_start_time + last_segment_offset_ms) / 1000)
+                last_time_str = last_time.strftime('%Y-%m-%dT%H-%M-%S')
+
+        default_filename = f"{callsign}_{freq_mhz}MHz_{mode}_{start_time_str}_to_{last_time_str}.txt"
+
         filename = filedialog.asksaveasfilename(
             defaultextension=".txt",
-            initialfile=f"whisper_transcription_{timestamp}.txt",
+            initialfile=default_filename,
             filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
         )
         

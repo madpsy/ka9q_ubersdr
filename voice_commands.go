@@ -569,14 +569,17 @@ func (vch *VoiceCommandHandler) sendAudioToWhisperLive(pcmData []int16, sessionI
 	log.Printf("[VoiceCommands] Sent END_OF_AUDIO for session %s", sessionID)
 
 	// Wait for transcription results
-	transcription := ""
+	// WhisperLive sends progressive updates - each segment contains the full text so far
+	// We should only use the LAST segment text, not concatenate them
+	var latestTranscription string
 	wsConn.SetReadDeadline(time.Now().Add(10 * time.Second))
 
 	for {
 		_, message, err := wsConn.ReadMessage()
 		if err != nil {
-			if transcription != "" {
+			if latestTranscription != "" {
 				// We got some transcription, return it
+				log.Printf("[VoiceCommands] Connection closed, returning latest transcription: \"%s\"", latestTranscription)
 				break
 			}
 			return "", fmt.Errorf("failed to read transcription: %w", err)
@@ -589,28 +592,35 @@ func (vch *VoiceCommandHandler) sendAudioToWhisperLive(pcmData []int16, sessionI
 
 		// Check for segments
 		if segments, ok := result["segments"].([]interface{}); ok && len(segments) > 0 {
-			for _, seg := range segments {
+			// Process each segment - WhisperLive sends progressive updates
+			for i, seg := range segments {
 				if segMap, ok := seg.(map[string]interface{}); ok {
-					if text, ok := segMap["text"].(string); ok {
-						transcription += text
-						log.Printf("[VoiceCommands] Received segment: \"%s\"", text)
-					}
+					text, hasText := segMap["text"].(string)
+					completed, _ := segMap["completed"].(bool)
 
-					// Check if this is a completed segment
-					if completed, ok := segMap["completed"].(bool); ok && completed {
-						log.Printf("[VoiceCommands] Received completed transcription for session %s", sessionID)
-						return strings.TrimSpace(transcription), nil
+					if hasText {
+						// For the last segment in the array, update our latest transcription
+						if i == len(segments)-1 {
+							latestTranscription = text
+							log.Printf("[VoiceCommands] Updated transcription (completed=%v): \"%s\"", completed, text)
+						}
+
+						// If this is a completed segment, return it immediately
+						if completed {
+							log.Printf("[VoiceCommands] Received completed segment for session %s: \"%s\"", sessionID, text)
+							return strings.TrimSpace(text), nil
+						}
 					}
 				}
 			}
 		}
 	}
 
-	if transcription == "" {
+	if latestTranscription == "" {
 		return "", fmt.Errorf("no transcription received")
 	}
 
-	return strings.TrimSpace(transcription), nil
+	return strings.TrimSpace(latestTranscription), nil
 }
 
 // processResultsWithCompletion processes transcription results and signals when completed

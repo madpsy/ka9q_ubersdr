@@ -24,7 +24,7 @@ class WhisperExtension extends DecoderExtension {
         this.isRunning = false;
         this.autoScroll = true;
         this.showTimestamps = false;  // Disabled by default
-        this.showOnlyIncomplete = true;  // Show only in-progress by default
+        this.showOnlyIncomplete = false;  // Show only in-progress disabled by default
         this.hideIncomplete = false;  // Hide in-progress segment
         this.showFloatingWindow = false;  // Show transcription in floating window
         this.fontSize = 13;  // Default font size in pixels
@@ -1228,27 +1228,44 @@ class WhisperExtension extends DecoderExtension {
     }
 
     applySDRMuteState() {
-        if (!this.ttsMuteSDR) return;
+        if (!this.ttsMuteSDR) {
+            console.log('Whisper: Mute SDR option disabled, not muting');
+            return;
+        }
 
         // Check current SDR mute state
         const isMuted = this.getSDRMuteState();
         this.sdrWasMuted = isMuted;
+        console.log(`Whisper: SDR mute state before TTS: ${isMuted ? 'muted' : 'unmuted'}`);
 
         // Mute SDR if not already muted
         if (!isMuted && window.toggleMute) {
             window.toggleMute();
             console.log('Whisper: Muted SDR for TTS');
+        } else if (isMuted) {
+            console.log('Whisper: SDR already muted, leaving as is');
         }
     }
 
     restoreSDRMuteState() {
-        if (!this.ttsMuteSDR) return;
+        if (!this.ttsMuteSDR) {
+            console.log('Whisper: Mute SDR option disabled, not restoring');
+            return;
+        }
+
+        console.log(`Whisper: Restoring SDR mute state (was muted before: ${this.sdrWasMuted})`);
 
         // Only unmute if SDR wasn't muted before we started TTS
         const isMuted = this.getSDRMuteState();
+        console.log(`Whisper: Current SDR mute state: ${isMuted ? 'muted' : 'unmuted'}`);
+
         if (isMuted && !this.sdrWasMuted && window.toggleMute) {
+            console.log('Whisper: Unmuting SDR (was unmuted before TTS)');
             window.toggleMute();
-            console.log('Whisper: Restored SDR mute state');
+        } else if (!isMuted) {
+            console.log('Whisper: SDR already unmuted');
+        } else if (this.sdrWasMuted) {
+            console.log('Whisper: SDR was muted before TTS, leaving muted');
         }
     }
 

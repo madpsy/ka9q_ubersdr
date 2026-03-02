@@ -156,6 +156,29 @@ func (d *WhisperDecoder) connectWebSocket() error {
 		return fmt.Errorf("WebSocket dial failed: %w", err)
 	}
 
+	// Set up ping/pong handlers to respond to server keepalive pings
+	// This prevents "keepalive ping timeout" errors
+	conn.SetPingHandler(func(appData string) error {
+		log.Printf("[Whisper] Received ping from server, sending pong")
+		// Respond with pong - must use WriteControl with deadline
+		d.wsConnMu.Lock()
+		defer d.wsConnMu.Unlock()
+		err := conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(10*time.Second))
+		if err != nil {
+			log.Printf("[Whisper] Error sending pong: %v", err)
+		}
+		return err
+	})
+
+	conn.SetPongHandler(func(appData string) error {
+		log.Printf("[Whisper] Received pong from server")
+		return nil
+	})
+
+	// Set read deadline to detect stale connections
+	// This will be reset after each successful read
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
 	d.wsConnMu.Lock()
 	d.wsConn = conn
 	d.wsConnMu.Unlock()
@@ -242,6 +265,11 @@ func (d *WhisperDecoder) sendAudioLoop(audioChan <-chan AudioSample) {
 	ticker := time.NewTicker(sendInterval)
 	defer ticker.Stop()
 
+	// Maximum audio chunk size to prevent exceeding WebSocket message limits
+	// WhisperLive server has a 1MB default limit, so we cap at 500KB to be safe
+	// At 16kHz float32 (4 bytes per sample), this is ~125K samples = ~7.8 seconds of audio
+	const maxChunkSizeBytes = 500 * 1024 // 500KB
+
 	for {
 		select {
 		case <-d.stopChan:
@@ -273,6 +301,16 @@ func (d *WhisperDecoder) sendAudioLoop(audioChan <-chan AudioSample) {
 
 			// Resample to 16 kHz if needed
 			audioToSend = d.resampler.Resample(audioToSend)
+
+			// Limit chunk size to prevent exceeding WebSocket message limits
+			// Each float32 is 4 bytes, so maxChunkSizeBytes/4 gives us max samples
+			maxSamples := maxChunkSizeBytes / 4
+			if len(audioToSend) > maxSamples {
+				log.Printf("[Whisper] Audio buffer too large (%d samples, %.2f seconds), truncating to %d samples (%.2f seconds)",
+					len(audioToSend), float64(len(audioToSend))/16000.0,
+					maxSamples, float64(maxSamples)/16000.0)
+				audioToSend = audioToSend[:maxSamples]
+			}
 
 			// Convert int16 to float32 for Whisper (normalize to -1.0 to 1.0)
 			floatData := make([]float32, len(audioToSend))
@@ -344,6 +382,9 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 			}
 			continue // Don't return, keep trying
 		}
+
+		// Reset read deadline after successful read to keep connection alive
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 		if messageType == websocket.TextMessage {
 			// Parse message from WhisperLive

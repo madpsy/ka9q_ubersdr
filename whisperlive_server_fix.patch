@@ -1,0 +1,25 @@
+--- a/whisper_live/server.py
++++ b/whisper_live/server.py
+@@ -555,11 +555,15 @@ class TranscriptionServer:
+             logging.info(f"✅ OpenAI-Compatible API started on http://0.0.0.0:{rest_port}")
+ 
+         # Original WebSocket server (always supported)
++        # Increase max_size to handle large transcription responses (default is 1MB)
++        # This prevents "message too big" errors when sending long transcriptions
+         with serve(
+             functools.partial(
+                 self.recv_audio,
+                 backend=BackendType(backend),
+                 faster_whisper_custom_model_path=faster_whisper_custom_model_path,
+                 whisper_tensorrt_path=whisper_tensorrt_path,
+                 trt_multilingual=trt_multilingual,
+                 trt_py_session=trt_py_session,
+             ),
+             host,
+-            port
++            port,
++            max_size=10 * 1024 * 1024,  # 10MB message size limit (default is 1MB)
++            ping_interval=20,  # Send ping every 20 seconds to keep connection alive
++            ping_timeout=20    # Wait 20 seconds for pong response before closing
+         ) as server:
+             server.serve_forever()

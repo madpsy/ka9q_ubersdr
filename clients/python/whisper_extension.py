@@ -145,7 +145,7 @@ class WhisperExtension:
 
         # Row 1: Only show in-progress, Hide in-progress
         # Show only incomplete checkbox
-        self.show_only_incomplete_var = tk.BooleanVar(value=True)
+        self.show_only_incomplete_var = tk.BooleanVar(value=False)
         self.show_only_incomplete_checkbox = ttk.Checkbutton(controls_frame, text="Only show in-progress",
                        variable=self.show_only_incomplete_var,
                        command=self.on_show_only_incomplete_changed)

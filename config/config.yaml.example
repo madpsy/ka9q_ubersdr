@@ -1455,7 +1455,7 @@ whisper:
   # Default: "ws://whisperlive:9090" (Docker container name)
   # For external server: "ws://your-server:9090"
   # The server must be accessible from the UberSDR container
-  server_url: "ws://whisperlive:9090"
+  server_url: "wss://whisper.ubersdr.org"
 
   # Whisper model to use
   # Available models:
@@ -1475,7 +1475,7 @@ whisper:
   #
   # Default: "small" (good balance of speed and accuracy)
   # Recommended for English: "medium.en" or "small.en"
-  model: "medium"
+  model: "OpenVINO/whisper-medium-fp16-ov"
 
   # Language code for transcription
   # Use "en" for English, "es" for Spanish, "auto" for auto-detection, etc.

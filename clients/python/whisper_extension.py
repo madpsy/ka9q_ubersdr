@@ -889,6 +889,9 @@ class WhisperExtension:
             if current_frequency != self.last_frequency:
                 print(f"[Whisper] Frequency changed from {self.last_frequency} to {current_frequency}")
 
+                # Clear transcription on frequency change
+                self.clear_transcription()
+
                 # Stop decoder if running
                 if self.running:
                     print("[Whisper] Stopping decoder due to frequency change")
@@ -900,8 +903,8 @@ class WhisperExtension:
                 if self.frequency_restart_timer:
                     self.window.after_cancel(self.frequency_restart_timer)
 
-                # Set timer to restart after 1 second of stability
-                self.frequency_restart_timer = self.window.after(1000, self.restart_after_frequency_stable)
+                # Set timer to restart after 3 seconds of stability
+                self.frequency_restart_timer = self.window.after(3000, self.restart_after_frequency_stable)
 
         self.last_frequency = current_frequency
 
@@ -910,9 +913,9 @@ class WhisperExtension:
             self.frequency_check_timer = self.window.after(100, self.check_frequency_change)
 
     def restart_after_frequency_stable(self):
-        """Restart decoder after frequency has been stable for 1 second."""
+        """Restart decoder after frequency has been stable for 3 seconds."""
         if self.was_running_before_freq_change:
-            print("[Whisper] Frequency stable for 1 second, restarting decoder")
+            print("[Whisper] Frequency stable for 3 seconds, restarting decoder")
             self.was_running_before_freq_change = False
             self.start_decoder()
 

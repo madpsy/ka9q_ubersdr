@@ -1082,6 +1082,9 @@ class WhisperExtension extends DecoderExtension {
             const newFrequency = data.frequency;
             console.log(`Whisper: Frequency changed to ${newFrequency}`);
 
+            // Clear transcription on frequency change
+            this.clearTranscription();
+
             // Stop decoder if running
             if (this.isRunning) {
                 console.log('Whisper: Stopping decoder due to frequency change');
@@ -1098,11 +1101,11 @@ class WhisperExtension extends DecoderExtension {
             // Set timer to restart after 1 second of stability
             this.frequencyChangeTimer = setTimeout(() => {
                 if (this.wasRunningBeforeFreqChange) {
-                    console.log('Whisper: Frequency stable for 1 second, restarting decoder');
+                    console.log('Whisper: Frequency stable for 3 seconds, restarting decoder');
                     this.wasRunningBeforeFreqChange = false;
                     this.startDecoder();
                 }
-            }, 1000);
+            }, 3000);
         };
 
         this.radio.on('frequency_changed', this.frequencyChangeHandler);

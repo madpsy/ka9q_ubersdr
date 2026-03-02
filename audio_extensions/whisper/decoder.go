@@ -181,7 +181,7 @@ func (d *WhisperDecoder) connectWebSocket() error {
 		"task":                  task,     // "transcribe" or "translate" based on config
 		"model":                 d.config.Model,
 		"use_vad":               true,
-		"send_last_n_segments":  10,
+		"send_last_n_segments":  1, // Only send current segment, not previous ones
 		"no_speech_thresh":      0.45,
 		"clip_audio":            false,
 		"same_output_threshold": 10,
@@ -459,8 +459,8 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 	}
 }
 
-// processSegments filters segments following WhisperLive client.py process_segments() method
-// This prevents duplicates when server re-sends last N segments
+// processSegments filters and processes segments from WhisperLive
+// With send_last_n_segments=1, we only receive one segment at a time
 func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 	d.transcriptMu.Lock()
 	defer d.transcriptMu.Unlock()
@@ -482,35 +482,22 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 		segText = d.filterText(segText)
 		seg["text"] = segText
 
-		completed, _ := seg["completed"].(bool)
-
-		// Last segment that's not completed - ALWAYS send it for real-time updates
-		if i == len(segments)-1 && !completed {
-			d.lastSegment = seg
-			filteredSegments = append(filteredSegments, seg)
+		// Skip empty segments
+		if segText == "" {
 			continue
 		}
 
-		// For completed segments, send them and let the client handle deduplication
+		completed, _ := seg["completed"].(bool)
+
+		// Completed segments are added to our transcript and sent to client
 		if completed {
-			// Only add if timestamp is after last segment (prevent true duplicates)
-			shouldAdd := len(d.transcript) == 0
-
-			if !shouldAdd {
-				// Check if start time >= last segment's end time
-				if startVal, ok := seg["start"].(float64); ok {
-					lastSeg := d.transcript[len(d.transcript)-1]
-					if endVal, ok := lastSeg["end"].(float64); ok {
-						shouldAdd = startVal >= endVal
-					}
-				}
-			}
-
-			if shouldAdd {
-				d.transcript = append(d.transcript, seg)
-				filteredSegments = append(filteredSegments, seg)
-				log.Printf("[Whisper] Sending completed segment: %s", segText)
-			}
+			d.transcript = append(d.transcript, seg)
+			filteredSegments = append(filteredSegments, seg)
+			log.Printf("[Whisper] Sending completed segment: %s", segText)
+		} else if i == len(segments)-1 {
+			// Last segment that's not completed - send for real-time updates
+			d.lastSegment = seg
+			filteredSegments = append(filteredSegments, seg)
 		}
 	}
 

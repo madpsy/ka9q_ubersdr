@@ -634,9 +634,14 @@ class WhisperExtension:
         print("[Whisper] Clearing transcription")
         self.transcript = []
         self.last_segment = None
-        self.last_rendered_transcript_len = 0  # Reset cache to force re-render
+        self.last_floating_text = None  # Reset floating window cache
+
+        # Force a full redraw by setting cache to non-zero before clearing
+        self.last_rendered_transcript_len = -1  # Force re-render
         self.last_rendered_incomplete = None
+
         self.render_transcription()
+        self.update_floating_window()  # Update floating window to show cleared state
         
     def copy_to_clipboard(self):
         """Copy transcription to clipboard."""

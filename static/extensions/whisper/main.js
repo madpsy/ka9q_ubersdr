@@ -1173,6 +1173,14 @@ class WhisperExtension extends DecoderExtension {
                 voiceSelect.appendChild(optgroup);
             }
 
+            // Try to auto-select 'Google UK English Female (en-GB)' as default
+            const preferredVoice = voices.find(v => v.name === 'Google UK English Female' && v.lang === 'en-GB');
+            if (preferredVoice) {
+                voiceSelect.value = preferredVoice.name;
+                this.ttsVoice = preferredVoice;
+                console.log(`Whisper: Auto-selected preferred voice: ${preferredVoice.name}`);
+            }
+
             console.log(`Whisper: Loaded ${voices.length} TTS voices`);
         };
 

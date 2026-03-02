@@ -458,11 +458,25 @@ func (vch *VoiceCommandHandler) sendAudioToWhisperLive(pcmData []int16, sessionI
 	// Generate unique client UID
 	clientUID := fmt.Sprintf("voice-cmd-%s", sessionID[:8])
 
-	// Send initial configuration (like Python client's on_open)
+	// Determine task
+	task := "transcribe"
+	if vch.config.Translate {
+		task = "translate"
+	}
+
+	// Set language to nil (null in JSON) for auto-detection, otherwise use the configured value
+	var language interface{}
+	if vch.config.Language == "" || vch.config.Language == "auto" {
+		language = nil // Will be encoded as null in JSON for auto-detect
+	} else {
+		language = vch.config.Language
+	}
+
+	// Send initial configuration (matching decoder.go connectWebSocket)
 	configMsg := map[string]interface{}{
 		"uid":                   clientUID,
-		"language":              vch.config.Language,
-		"task":                  "transcribe",
+		"language":              language, // nil for auto-detect, string for specific language
+		"task":                  task,
 		"model":                 vch.config.Model,
 		"use_vad":               false, // Don't use VAD for voice commands
 		"send_last_n_segments":  10,
@@ -470,7 +484,12 @@ func (vch *VoiceCommandHandler) sendAudioToWhisperLive(pcmData []int16, sessionI
 		"clip_audio":            false,
 		"same_output_threshold": 10,
 		"enable_translation":    false,
-		"target_language":       "",
+		"target_language":       "en",
+		"vad_parameters": map[string]interface{}{
+			"max_speech_duration_s":   15.0,
+			"min_silence_duration_ms": 160,
+			"threshold":               0.5,
+		},
 	}
 
 	configJSON, err := json.Marshal(configMsg)

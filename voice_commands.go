@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net"
 	"regexp"
 	"strconv"
 	"strings"
@@ -478,7 +479,7 @@ func (vch *VoiceCommandHandler) sendAudioToWhisperLive(pcmData []int16, sessionI
 		"language":              language, // nil for auto-detect, string for specific language
 		"task":                  task,
 		"model":                 vch.config.Model,
-		"use_vad":               false, // Don't use VAD for voice commands
+		"use_vad":               true, // Use VAD to detect speech boundaries and mark segments as completed
 		"send_last_n_segments":  10,
 		"no_speech_thresh":      0.45,
 		"clip_audio":            false,
@@ -519,9 +520,13 @@ func (vch *VoiceCommandHandler) sendAudioToWhisperLive(pcmData []int16, sessionI
 
 		if msgStr, ok := msg["message"].(string); ok && msgStr == "SERVER_READY" {
 			serverReady = true
-			log.Printf("[VoiceCommands] WhisperLive server ready for session %s", sessionID)
+			backend, _ := msg["backend"].(string)
+			log.Printf("[VoiceCommands] WhisperLive server ready (backend: %s) for session %s", backend, sessionID)
 		}
 	}
+
+	// Give server a moment to fully initialize after SERVER_READY
+	time.Sleep(100 * time.Millisecond)
 
 	// Convert int16 PCM to float32 (like Python client's bytes_to_float_array)
 	floatData := make([]float32, len(pcmData))
@@ -529,10 +534,15 @@ func (vch *VoiceCommandHandler) sendAudioToWhisperLive(pcmData []int16, sessionI
 		floatData[i] = float32(sample) / 32768.0
 	}
 
+	log.Printf("[VoiceCommands] Converted %d samples to float32, starting to send chunks...", len(floatData))
+
 	// Send audio in chunks (like Python client's play_file)
 	chunkSize := 4096 // Same as Python client
 	sampleRate := 16000.0
 	chunkDuration := float64(chunkSize) / sampleRate
+
+	chunksToSend := (len(floatData) + chunkSize - 1) / chunkSize
+	log.Printf("[VoiceCommands] Will send %d chunks of %d samples each (%.3fs per chunk)", chunksToSend, chunkSize, chunkDuration)
 
 	for offset := 0; offset < len(floatData); offset += chunkSize {
 		end := offset + chunkSize
@@ -549,9 +559,12 @@ func (vch *VoiceCommandHandler) sendAudioToWhisperLive(pcmData []int16, sessionI
 			binary.LittleEndian.PutUint32(buf[i*4:], bits)
 		}
 
+		chunkNum := (offset / chunkSize) + 1
+		log.Printf("[VoiceCommands] Sending chunk %d/%d (%d samples, %d bytes)", chunkNum, chunksToSend, len(chunk), len(buf))
+
 		// Send chunk as binary message
 		if err := wsConn.WriteMessage(websocket.BinaryMessage, buf); err != nil {
-			return "", fmt.Errorf("failed to send audio chunk: %w", err)
+			return "", fmt.Errorf("failed to send audio chunk %d: %w", chunkNum, err)
 		}
 
 		// Sleep to simulate real-time (like Python client)
@@ -571,19 +584,50 @@ func (vch *VoiceCommandHandler) sendAudioToWhisperLive(pcmData []int16, sessionI
 	// Wait for transcription results
 	// WhisperLive sends progressive updates - each segment contains the full text so far
 	// We should only use the LAST segment text, not concatenate them
+	// IMPORTANT: Like Python client's wait_before_disconnect(), we need to wait for the server
+	// to process the audio and send completed segments (typically takes a few seconds)
 	var latestTranscription string
-	wsConn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	lastResponseTime := time.Now()
+	maxWaitAfterLastResponse := 5 * time.Second // Wait up to 5s after last response for completed segment
 
 	for {
+		// Set read deadline based on time since last response
+		timeSinceLastResponse := time.Since(lastResponseTime)
+		if timeSinceLastResponse > maxWaitAfterLastResponse {
+			// We've waited long enough after the last response
+			if latestTranscription != "" {
+				log.Printf("[VoiceCommands] No completed segment after %v, returning latest: \"%s\"",
+					maxWaitAfterLastResponse, latestTranscription)
+				break
+			}
+		}
+
+		wsConn.SetReadDeadline(time.Now().Add(1 * time.Second))
 		_, message, err := wsConn.ReadMessage()
 		if err != nil {
+			// Check if it's a timeout
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// Timeout - check if we should continue waiting
+				if time.Since(lastResponseTime) > maxWaitAfterLastResponse {
+					if latestTranscription != "" {
+						log.Printf("[VoiceCommands] Timeout after last response, returning latest: \"%s\"", latestTranscription)
+						break
+					}
+					return "", fmt.Errorf("no transcription received")
+				}
+				// Still within wait period, continue
+				continue
+			}
+			// Other error
 			if latestTranscription != "" {
-				// We got some transcription, return it
-				log.Printf("[VoiceCommands] Connection closed, returning latest transcription: \"%s\"", latestTranscription)
+				log.Printf("[VoiceCommands] Connection error, returning latest transcription: \"%s\"", latestTranscription)
 				break
 			}
 			return "", fmt.Errorf("failed to read transcription: %w", err)
 		}
+
+		// We got a message, update last response time
+		lastResponseTime = time.Now()
 
 		var result map[string]interface{}
 		if err := json.Unmarshal(message, &result); err != nil {

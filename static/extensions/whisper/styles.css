@@ -242,10 +242,10 @@
 }
 
 .whisper-tts-rate-slider {
-    width: 80px;
-    height: 4px;
+    width: 60px;
     cursor: pointer;
     accent-color: #4caf50;
+    vertical-align: middle;
 }
 
 .whisper-tts-rate-value {
@@ -253,6 +253,26 @@
     color: #888;
     min-width: 35px;
     text-align: center;
+}
+
+.whisper-tts-mute-sdr-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: #e0e0e0;
+    cursor: pointer;
+    user-select: none;
+    margin-left: 4px;
+}
+
+.whisper-tts-mute-sdr-label input[type="checkbox"] {
+    cursor: pointer;
+    accent-color: #4caf50;
+}
+
+.whisper-tts-mute-sdr-text {
+    white-space: nowrap;
 }
 
 .whisper-transcription {

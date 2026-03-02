@@ -28,7 +28,7 @@ class WhisperExtension extends DecoderExtension {
         this.hideIncomplete = false;  // Hide in-progress segment
         this.showFloatingWindow = false;  // Show transcription in floating window
         this.fontSize = 13;  // Default font size in pixels
-        this.lineLimit = 20;  // Default line limit
+        this.lineLimit = 10;  // Default line limit
         this.sessionStartTime = null;  // Track when decoder starts for wall clock timestamps
         this.renderedSegmentCount = 0;  // Track how many completed segments are rendered
         this.lastUpdateTime = null;  // Track time of last message update
@@ -43,6 +43,8 @@ class WhisperExtension extends DecoderExtension {
         this.ttsVoice = null;
         this.ttsQueue = [];
         this.isSpeaking = false;
+        this.ttsMuteSDR = true;  // Mute SDR when TTS is active (enabled by default)
+        this.sdrWasMuted = false;  // Track if SDR was already muted before TTS
 
         // Frequency change detection
         this.frequencyChangeHandler = null;  // Event handler for frequency changes
@@ -109,6 +111,8 @@ class WhisperExtension extends DecoderExtension {
         const ttsVoiceSelect = document.getElementById('whisper-tts-voice');
         const ttsRateSlider = document.getElementById('whisper-tts-rate');
         const ttsRateValue = document.getElementById('whisper-tts-rate-value');
+        const ttsMuteSDRCheckbox = document.getElementById('whisper-tts-mute-sdr');
+        const ttsMuteSDRLabel = document.querySelector('.whisper-tts-mute-sdr-label');
 
         if (startButton) {
             startButton.addEventListener('click', () => this.startDecoder());
@@ -147,6 +151,15 @@ class WhisperExtension extends DecoderExtension {
                 this.ttsRate = parseFloat(e.target.value);
                 if (ttsRateValue) {
                     ttsRateValue.textContent = `${this.ttsRate.toFixed(1)}x`;
+                }
+            });
+        }
+        if (ttsMuteSDRCheckbox) {
+            ttsMuteSDRCheckbox.addEventListener('change', (e) => {
+                this.ttsMuteSDR = e.target.checked;
+                // If TTS is currently active, apply the mute state immediately
+                if (this.ttsEnabled) {
+                    this.applySDRMuteState();
                 }
             });
         }
@@ -1174,6 +1187,7 @@ class WhisperExtension extends DecoderExtension {
         const ttsVoiceSelect = document.getElementById('whisper-tts-voice');
         const ttsRateSlider = document.getElementById('whisper-tts-rate');
         const ttsRateValue = document.getElementById('whisper-tts-rate-value');
+        const ttsMuteSDRLabel = document.querySelector('.whisper-tts-mute-sdr-label');
 
         if (this.ttsEnabled) {
             // Enable TTS
@@ -1181,10 +1195,14 @@ class WhisperExtension extends DecoderExtension {
                 ttsButton.textContent = '🔊 TTS';
                 ttsButton.classList.add('whisper-tts-active');
             }
-            // Show voice and rate controls
+            // Show voice, rate, and mute SDR controls
             if (ttsVoiceSelect) ttsVoiceSelect.style.display = 'inline-block';
             if (ttsRateSlider) ttsRateSlider.style.display = 'inline-block';
             if (ttsRateValue) ttsRateValue.style.display = 'inline-block';
+            if (ttsMuteSDRLabel) ttsMuteSDRLabel.style.display = 'flex';
+
+            // Apply SDR mute state if enabled
+            this.applySDRMuteState();
 
             console.log('Whisper: TTS enabled');
         } else {
@@ -1193,16 +1211,58 @@ class WhisperExtension extends DecoderExtension {
                 ttsButton.textContent = '🔇 TTS';
                 ttsButton.classList.remove('whisper-tts-active');
             }
-            // Hide voice and rate controls
+            // Hide voice, rate, and mute SDR controls
             if (ttsVoiceSelect) ttsVoiceSelect.style.display = 'none';
             if (ttsRateSlider) ttsRateSlider.style.display = 'none';
             if (ttsRateValue) ttsRateValue.style.display = 'none';
+            if (ttsMuteSDRLabel) ttsMuteSDRLabel.style.display = 'none';
+
+            // Restore SDR mute state
+            this.restoreSDRMuteState();
 
             // Stop any ongoing speech
             this.stopSpeaking();
 
             console.log('Whisper: TTS disabled');
         }
+    }
+
+    applySDRMuteState() {
+        if (!this.ttsMuteSDR) return;
+
+        // Check current SDR mute state
+        const isMuted = this.getSDRMuteState();
+        this.sdrWasMuted = isMuted;
+
+        // Mute SDR if not already muted
+        if (!isMuted && window.toggleMute) {
+            window.toggleMute();
+            console.log('Whisper: Muted SDR for TTS');
+        }
+    }
+
+    restoreSDRMuteState() {
+        if (!this.ttsMuteSDR) return;
+
+        // Only unmute if SDR wasn't muted before we started TTS
+        const isMuted = this.getSDRMuteState();
+        if (isMuted && !this.sdrWasMuted && window.toggleMute) {
+            window.toggleMute();
+            console.log('Whisper: Restored SDR mute state');
+        }
+    }
+
+    getSDRMuteState() {
+        // Check if SDR is currently muted by looking at the mute button state
+        const muteButton = document.getElementById('id-button-mute');
+        if (muteButton) {
+            return muteButton.classList.contains('w3-green');
+        }
+        // Fallback: check global isMuted variable if available
+        if (typeof window.isMuted !== 'undefined') {
+            return window.isMuted;
+        }
+        return false;
     }
 
     speakSegment(text) {
@@ -1218,7 +1278,17 @@ class WhisperExtension extends DecoderExtension {
         }
 
         this.isSpeaking = true;
-        const utterance = new SpeechSynthesisUtterance(text);
+
+        // Batch this segment with any already queued segments for smooth continuous speech
+        const segmentsToSpeak = [text];
+        while (this.ttsQueue.length > 0) {
+            segmentsToSpeak.push(this.ttsQueue.shift());
+        }
+
+        // Join segments with a space for natural flow
+        const combinedText = segmentsToSpeak.join(' ');
+
+        const utterance = new SpeechSynthesisUtterance(combinedText);
         utterance.rate = this.ttsRate;
         utterance.volume = 1.0;
         utterance.pitch = 1.0;
@@ -1233,12 +1303,13 @@ class WhisperExtension extends DecoderExtension {
             utterance.voice = this.ttsVoice;
         }
 
-        // Handle completion to process queue
+        // Handle completion to process any new segments that arrived
         utterance.onend = () => {
             this.isSpeaking = false;
+            // Check if new segments arrived while speaking
             if (this.ttsQueue.length > 0) {
                 const nextText = this.ttsQueue.shift();
-                console.log(`Whisper: Processing next TTS item (${this.ttsQueue.length} remaining)`);
+                console.log(`Whisper: Processing batched TTS (${this.ttsQueue.length} more in queue)`);
                 this.speakSegment(nextText);
             }
         };
@@ -1254,7 +1325,12 @@ class WhisperExtension extends DecoderExtension {
             }
         };
 
-        console.log(`Whisper: Speaking text (${text.length} chars, rate: ${this.ttsRate}x)`);
+        const segmentCount = segmentsToSpeak.length;
+        const logMsg = segmentCount > 1
+            ? `Whisper: Speaking ${segmentCount} batched segments (${combinedText.length} chars, rate: ${this.ttsRate}x)`
+            : `Whisper: Speaking text (${combinedText.length} chars, rate: ${this.ttsRate}x)`;
+        console.log(logMsg);
+
         window.speechSynthesis.speak(utterance);
     }
 

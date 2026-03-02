@@ -492,18 +492,15 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 
 		// Completed segments - check if we've already sent this one
 		if completed {
-			// Check if this segment is already in our transcript (by comparing timestamps AND text)
+			// Check if this segment is already in our transcript
+			// Use text as primary key since timestamps might vary slightly
 			alreadySent := false
-			if startVal, ok := seg["start"].(float64); ok {
-				for _, existingSeg := range d.transcript {
-					if existingStart, ok := existingSeg["start"].(float64); ok {
-						if existingText, ok := existingSeg["text"].(string); ok {
-							// Match if both timestamp and text are the same
-							if existingStart == startVal && existingText == segText {
-								alreadySent = true
-								break
-							}
-						}
+
+			for _, existingSeg := range d.transcript {
+				if existingText, ok := existingSeg["text"].(string); ok {
+					if existingText == segText {
+						alreadySent = true
+						break
 					}
 				}
 			}

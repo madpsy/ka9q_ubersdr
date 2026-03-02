@@ -29,6 +29,7 @@ class WhisperExtension extends DecoderExtension {
         this.showFloatingWindow = false;  // Show transcription in floating window
         this.fontSize = 13;  // Default font size in pixels
         this.lineLimit = 10;  // Default line limit
+        this.selectedLanguage = 'en';  // Default to English
         this.sessionStartTime = null;  // Track when decoder starts for wall clock timestamps
         this.renderedSegmentCount = 0;  // Track how many completed segments are rendered
         this.lastUpdateTime = null;  // Track time of last message update
@@ -167,12 +168,13 @@ class WhisperExtension extends DecoderExtension {
         // Initialize TTS voices
         this.initializeTTSVoices();
 
-        // Settings checkboxes
+        // Settings checkboxes and selects
         const autoScrollCheckbox = document.getElementById('whisper-auto-scroll');
         const timestampsCheckbox = document.getElementById('whisper-show-timestamps');
         const showOnlyIncompleteCheckbox = document.getElementById('whisper-show-only-incomplete');
         const hideIncompleteCheckbox = document.getElementById('whisper-hide-incomplete');
         const showFloatingWindowCheckbox = document.getElementById('whisper-show-floating-window');
+        const languageSelect = document.getElementById('whisper-language');
         const lineLimitSelect = document.getElementById('whisper-line-limit');
 
         if (autoScrollCheckbox) {
@@ -197,6 +199,20 @@ class WhisperExtension extends DecoderExtension {
         if (hideIncompleteCheckbox) {
             hideIncompleteCheckbox.addEventListener('change', (e) => {
                 this.hideIncomplete = e.target.checked;
+                // Need to re-render when toggling this mode
+                this.forceFullRerender();
+            });
+        }
+        if (languageSelect) {
+            languageSelect.addEventListener('change', (e) => {
+                this.selectedLanguage = e.target.value;
+                console.log('Whisper: Language changed to:', this.selectedLanguage);
+            });
+        }
+        if (lineLimitSelect) {
+            lineLimitSelect.addEventListener('change', (e) => {
+                const value = e.target.value;
+                this.lineLimit = value === 'unlimited' ? null : parseInt(value, 10);
 
                 // When hiding incomplete, disable and uncheck the related checkboxes
                 if (this.hideIncomplete) {
@@ -242,8 +258,47 @@ class WhisperExtension extends DecoderExtension {
             });
         }
 
+        // Populate language dropdown
+        this.populateLanguageDropdown();
+
         this.handlersSetup = true;
         console.log('Whisper: Event handlers setup complete');
+    }
+
+    populateLanguageDropdown() {
+        const languageSelect = document.getElementById('whisper-language');
+        if (!languageSelect) return;
+
+        // Load languages from languages.js
+        fetch('/languages.js')
+            .then(response => response.text())
+            .then(script => {
+                // Execute the script to get WHISPER_LANGUAGES
+                eval(script);
+
+                if (typeof WHISPER_LANGUAGES !== 'undefined') {
+                    // Clear existing options
+                    languageSelect.innerHTML = '';
+
+                    // Populate with all languages
+                    WHISPER_LANGUAGES.forEach(lang => {
+                        const option = document.createElement('option');
+                        option.value = lang.code;
+                        option.textContent = lang.name;
+                        if (lang.code === 'en') {
+                            option.selected = true;
+                        }
+                        languageSelect.appendChild(option);
+                    });
+
+                    console.log('Whisper: Populated language dropdown with', WHISPER_LANGUAGES.length, 'languages');
+                } else {
+                    console.error('Whisper: WHISPER_LANGUAGES not found in languages.js');
+                }
+            })
+            .catch(error => {
+                console.error('Whisper: Failed to load languages.js:', error);
+            });
     }
 
     startDecoder() {
@@ -314,7 +369,9 @@ class WhisperExtension extends DecoderExtension {
         const message = {
             type: 'audio_extension_attach',
             extension_name: 'whisper',
-            params: {} // No user-configurable parameters - all server-side
+            params: {
+                language: this.selectedLanguage
+            }
         };
 
         console.log('Whisper: Sending attach message:', message);

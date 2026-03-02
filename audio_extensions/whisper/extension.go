@@ -98,6 +98,12 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 		log.Printf("[Whisper Extension] Using default configuration (config not available)")
 	}
 
+	// Override language from frontend parameter if provided
+	if language, ok := extensionParams["language"].(string); ok && language != "" {
+		config.Language = language
+		log.Printf("[Whisper Extension] Language overridden from frontend: %s", language)
+	}
+
 	// Create decoder
 	decoder := NewWhisperDecoder(audioParams.SampleRate, config)
 

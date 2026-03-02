@@ -192,9 +192,25 @@ func (d *WhisperDecoder) connectWebSocket() error {
 
 	// Send initial configuration to WhisperLive in the format it expects
 	// Based on WhisperLive client.py on_open() method
+
+	// Determine task and translation settings based on language
 	task := "transcribe"
-	if d.config.Translate {
-		task = "translate"
+	enableTranslation := false
+	targetLanguage := "en"
+
+	// If language is English, use the original translate setting
+	if d.config.Language == "en" || d.config.Language == "" || d.config.Language == "auto" {
+		if d.config.Translate {
+			task = "translate"
+		}
+	} else {
+		// For non-English languages:
+		// - Set task to "transcribe" (not "translate")
+		// - Enable translation feature
+		// - Set target language to the selected language
+		task = "transcribe"
+		enableTranslation = true
+		targetLanguage = d.config.Language
 	}
 
 	// Set language to nil (null in JSON) for auto-detection, otherwise use the configured value
@@ -208,15 +224,15 @@ func (d *WhisperDecoder) connectWebSocket() error {
 	configMsg := map[string]interface{}{
 		"uid":                   d.clientUID,
 		"language":              language, // nil for auto-detect, string for specific language
-		"task":                  task,     // "transcribe" or "translate" based on config
+		"task":                  task,     // "transcribe" or "translate" based on language
 		"model":                 d.config.Model,
 		"use_vad":               true,
 		"send_last_n_segments":  1, // Only send current segment, not previous ones
 		"no_speech_thresh":      0.45,
 		"clip_audio":            false,
 		"same_output_threshold": 10,
-		"enable_translation":    false,
-		"target_language":       "en",
+		"enable_translation":    enableTranslation,
+		"target_language":       targetLanguage,
 		"vad_parameters": map[string]interface{}{
 			"max_speech_duration_s":   15.0, // Force segment breaks every 15 seconds (default: 30)
 			"min_silence_duration_ms": 160,  // Minimum silence to detect pause (default: 160)

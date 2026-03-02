@@ -420,17 +420,14 @@ class WhisperExtension:
             # Completed segments are sent by backend after deduplication
             if seg.get('completed', False):
                 self.transcript.append(seg)
-                print(f"[Whisper] Added completed segment to transcript: {seg.get('text', '')[:50]}...")
             # Last segment that's not completed becomes last_segment
             elif i == len(segments) - 1:
                 self.last_segment = seg
                 found_incomplete = True
-                print(f"[Whisper] Updated incomplete segment: {seg.get('text', '')[:50]}...")
 
         # If we didn't find an incomplete segment, clear last_segment
         if not found_incomplete:
             self.last_segment = None
-            print("[Whisper] No incomplete segment in this batch, cleared last_segment")
                     
     def calculate_bionic_split(self, word):
         """Calculate how many characters to bold for bionic reading.

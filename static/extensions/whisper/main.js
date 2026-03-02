@@ -280,8 +280,13 @@ class WhisperExtension extends DecoderExtension {
                     // Clear existing options
                     languageSelect.innerHTML = '';
 
+                    // Sort languages alphabetically by name
+                    const sortedLanguages = [...WHISPER_LANGUAGES].sort((a, b) =>
+                        a.name.localeCompare(b.name)
+                    );
+
                     // Populate with all languages
-                    WHISPER_LANGUAGES.forEach(lang => {
+                    sortedLanguages.forEach(lang => {
                         const option = document.createElement('option');
                         option.value = lang.code;
                         option.textContent = lang.name;
@@ -291,7 +296,7 @@ class WhisperExtension extends DecoderExtension {
                         languageSelect.appendChild(option);
                     });
 
-                    console.log('Whisper: Populated language dropdown with', WHISPER_LANGUAGES.length, 'languages');
+                    console.log('Whisper: Populated language dropdown with', sortedLanguages.length, 'languages (sorted alphabetically)');
                 } else {
                     console.error('Whisper: WHISPER_LANGUAGES not found in languages.js');
                 }
@@ -404,12 +409,16 @@ class WhisperExtension extends DecoderExtension {
     updateButtonStates() {
         const startButton = document.getElementById('whisper-start-button');
         const stopButton = document.getElementById('whisper-stop-button');
+        const languageSelect = document.getElementById('whisper-language');
 
         if (startButton) {
             startButton.disabled = this.isRunning;
         }
         if (stopButton) {
             stopButton.disabled = !this.isRunning;
+        }
+        if (languageSelect) {
+            languageSelect.disabled = this.isRunning;
         }
     }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"regexp"
@@ -164,8 +165,25 @@ func (d *WhisperDecoder) connectWebSocket() error {
 		headers["X-UberSDR-Max-Users"] = []string{fmt.Sprintf("%d", GlobalConfigProvider.MaxUsers)}
 	}
 
-	conn, _, err := dialer.Dial(d.config.ServerURL, headers)
+	conn, resp, err := dialer.Dial(d.config.ServerURL, headers)
 	if err != nil {
+		// Try to parse JSON error response from server
+		if resp != nil && resp.Body != nil {
+			defer resp.Body.Close()
+			body, readErr := io.ReadAll(resp.Body)
+			if readErr == nil && len(body) > 0 {
+				// Try to parse as JSON error
+				var errorResp struct {
+					Error string `json:"error"`
+				}
+				if jsonErr := json.Unmarshal(body, &errorResp); jsonErr == nil && errorResp.Error != "" {
+					log.Printf("[Whisper] Server error: %s", errorResp.Error)
+					return fmt.Errorf("server error: %s", errorResp.Error)
+				}
+				// If not JSON, log the raw response
+				log.Printf("[Whisper] Server response: %s", string(body))
+			}
+		}
 		return fmt.Errorf("WebSocket dial failed: %w", err)
 	}
 

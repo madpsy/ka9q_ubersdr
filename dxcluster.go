@@ -269,7 +269,6 @@ func (c *DXClusterClient) login() error {
 	}
 
 	banner := string(buf[:n])
-	log.Printf("DX Cluster: << %s", strings.TrimSpace(banner))
 
 	// Check if we got login prompt
 	if !strings.Contains(strings.ToLower(banner), "login:") {
@@ -299,8 +298,6 @@ func (c *DXClusterClient) login() error {
 		if err != nil {
 			return fmt.Errorf("failed to read welcome: %w", err)
 		}
-
-		log.Printf("DX Cluster: << %s", line)
 
 		// Check for successful login indicators
 		lineLower := strings.ToLower(line)

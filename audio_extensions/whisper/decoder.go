@@ -251,13 +251,13 @@ func (d *WhisperDecoder) connectWebSocket() error {
 
 	// Send initial configuration to WhisperLive in the format it expects
 	// Based on WhisperLive client.py on_open() method
-	// Always transcribe in original language - translation will be handled by LibreTranslate
+	// Always use "translate" task to get English output from Whisper
 	// Language is always set to nil for auto-detection
 
 	configMsg := map[string]interface{}{
 		"uid":                   d.clientUID,
 		"language":              nil, // Always nil for auto-detection
-		"task":                  "transcribe",
+		"task":                  "translate",
 		"model":                 d.config.Model,
 		"use_vad":               true,
 		"send_last_n_segments":  1, // Only send current segment, not previous ones
@@ -285,7 +285,7 @@ func (d *WhisperDecoder) connectWebSocket() error {
 		return fmt.Errorf("failed to send config: %w", err)
 	}
 
-	log.Printf("[Whisper] Connected to WhisperLive at %s (uid: %s, model: %s, language: auto-detect, task: transcribe)",
+	log.Printf("[Whisper] Connected to WhisperLive at %s (uid: %s, model: %s, language: auto-detect, task: translate)",
 		d.config.ServerURL, d.clientUID, d.config.Model)
 
 	return nil

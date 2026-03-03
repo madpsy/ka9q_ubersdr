@@ -1484,21 +1484,20 @@ whisper:
   # Recommended for English: "medium.en" or "small.en"
   model: "OpenVINO/whisper-medium-int8-ov"
 
-  # Language code for transcription
-  # Use "en" for English, "es" for Spanish, "auto" for auto-detection, etc.
-  # Must match the model type (use "en" with .en models)
-  # See: https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes
-  # Default: "auto"
-  language: "auto"
-
   # Enable translation to English (default: true)
-  # When true, non-English audio will be translated to English
+  # When true, non-English audio will be translated to English via LibreTranslate
   # When false, audio will be transcribed in its original language
-  # This sets the WhisperLive "task" parameter:
-  #   - true: task="translate" (translate to English)
-  #   - false: task="transcribe" (transcribe in original language)
+  # Translation is applied to completed sentences only (not partial transcriptions)
   # Default: true
   translate: true
+
+  # LibreTranslate API URL for translation (default: "https://whisper.ubersdr.org/translate")
+  # Used when translate is enabled to translate completed sentences from non-English to English
+  # The translation happens after Whisper transcribes in the original language
+  # This provides better accuracy than Whisper's built-in translation
+  # Set to your own LibreTranslate instance URL if you have one
+  # Default: "https://whisper.ubersdr.org/translate"
+  libretranslate_url: "https://whisper.ubersdr.org/translate"
 
   # Initial prompt to guide transcription style and context
   # This optional text helps Whisper understand the context and style of the audio

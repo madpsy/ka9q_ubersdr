@@ -1192,8 +1192,12 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 		}
 	}
 
+	userID := session.UserSessionID
+	if len(userID) > 8 {
+		userID = userID[:8]
+	}
 	log.Printf("Session destroyed: %s (channel: %s, SSRC: 0x%08x, user: %s)",
-		sessionID, session.ChannelName, session.SSRC, session.UserSessionID[:8])
+		sessionID, session.ChannelName, session.SSRC, userID)
 
 	return nil
 }

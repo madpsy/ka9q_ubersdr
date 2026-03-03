@@ -335,14 +335,14 @@ type MCPConfig struct {
 
 // WhisperConfig contains Whisper speech-to-text settings
 type WhisperConfig struct {
-	Enabled        bool   `yaml:"enabled"`          // Enable/disable Whisper extension
-	ServerURL      string `yaml:"server_url"`       // WhisperLive WebSocket URL
-	Model          string `yaml:"model"`            // Whisper model (tiny, base, small, medium, large, or .en variants)
-	Language       string `yaml:"language"`         // Language code (en, es, auto, etc.)
-	Translate      bool   `yaml:"translate"`        // Enable translation to English (true) or transcription in original language (false)
-	SendIntervalMs int    `yaml:"send_interval_ms"` // Audio send interval in milliseconds
-	InitialPrompt  string `yaml:"initial_prompt"`   // Initial prompt to guide transcription style/context
-	MaxUsers       int    `yaml:"max_users"`        // Maximum concurrent users of the extension (0 = unlimited)
+	Enabled           bool   `yaml:"enabled"`            // Enable/disable Whisper extension
+	ServerURL         string `yaml:"server_url"`         // WhisperLive WebSocket URL
+	Model             string `yaml:"model"`              // Whisper model (tiny, base, small, medium, large, or .en variants)
+	Translate         bool   `yaml:"translate"`          // Enable translation to English (true) or transcription in original language (false)
+	SendIntervalMs    int    `yaml:"send_interval_ms"`   // Audio send interval in milliseconds
+	InitialPrompt     string `yaml:"initial_prompt"`     // Initial prompt to guide transcription style/context
+	MaxUsers          int    `yaml:"max_users"`          // Maximum concurrent users of the extension (0 = unlimited)
+	LibreTranslateURL string `yaml:"libretranslate_url"` // LibreTranslate API URL for translation (default: https://whisper.ubersdr.org/translate)
 }
 
 // LoadConfig loads configuration from a YAML file

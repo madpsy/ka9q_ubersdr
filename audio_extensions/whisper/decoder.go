@@ -1,12 +1,14 @@
 package whisper
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"math"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
@@ -24,14 +26,14 @@ import (
 // WhisperConfig is defined in the main package (config.go)
 // This type alias allows the whisper package to use it
 type WhisperConfig struct {
-	Enabled        bool
-	ServerURL      string
-	Model          string
-	Language       string
-	Translate      bool
-	SendIntervalMs int
-	InitialPrompt  string
-	InstanceUUID   string
+	Enabled           bool
+	ServerURL         string
+	Model             string
+	Translate         bool
+	SendIntervalMs    int
+	InitialPrompt     string
+	InstanceUUID      string
+	LibreTranslateURL string
 }
 
 // WhisperDecoder handles streaming audio to WhisperLive
@@ -68,6 +70,13 @@ type WhisperDecoder struct {
 
 	// Text filtering
 	suppressPhrases []*regexp.Regexp
+
+	// HTTP client for LibreTranslate
+	httpClient *http.Client
+
+	// Detected language from Whisper
+	detectedLanguage string
+	languageMu       sync.RWMutex
 }
 
 // NewWhisperDecoder creates a new Whisper decoder
@@ -94,6 +103,9 @@ func NewWhisperDecoder(sampleRate int, config WhisperConfig) *WhisperDecoder {
 		stopChan:        make(chan struct{}),
 		serverReady:     make(chan struct{}),
 		suppressPhrases: suppressPhrases,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}
 }
 
@@ -238,47 +250,19 @@ func (d *WhisperDecoder) connectWebSocket() error {
 
 	// Send initial configuration to WhisperLive in the format it expects
 	// Based on WhisperLive client.py on_open() method
-
-	// Determine task and translation settings based on language
-	task := "transcribe"
-	enableTranslation := false
-	targetLanguage := "en"
-
-	// If language is English, use the original translate setting
-	if d.config.Language == "en" || d.config.Language == "" || d.config.Language == "auto" {
-		if d.config.Translate {
-			task = "translate"
-		}
-	} else {
-		// For non-English languages:
-		// - Set task to "transcribe" (not "translate")
-		// - Enable translation feature
-		// - Set target language to the selected language
-		task = "transcribe"
-		enableTranslation = true
-		targetLanguage = d.config.Language
-	}
-
-	// Set language to nil (null in JSON) for auto-detection, otherwise use the configured value
-	var language interface{}
-	if d.config.Language == "" || d.config.Language == "auto" {
-		language = nil // Will be encoded as null in JSON
-	} else {
-		language = d.config.Language
-	}
+	// Always transcribe in original language - translation will be handled by LibreTranslate
+	// Language is always set to nil for auto-detection
 
 	configMsg := map[string]interface{}{
 		"uid":                   d.clientUID,
-		"language":              language, // nil for auto-detect, string for specific language
-		"task":                  task,     // "transcribe" or "translate" based on language
+		"language":              nil, // Always nil for auto-detection
+		"task":                  "transcribe",
 		"model":                 d.config.Model,
 		"use_vad":               true,
 		"send_last_n_segments":  1, // Only send current segment, not previous ones
 		"no_speech_thresh":      0.45,
 		"clip_audio":            false,
 		"same_output_threshold": 10,
-		"enable_translation":    enableTranslation,
-		"target_language":       targetLanguage,
 		"vad_parameters": map[string]interface{}{
 			"max_speech_duration_s":   15.0, // Force segment breaks every 15 seconds (default: 30)
 			"min_silence_duration_ms": 160,  // Minimum silence to detect pause (default: 160)
@@ -300,12 +284,8 @@ func (d *WhisperDecoder) connectWebSocket() error {
 		return fmt.Errorf("failed to send config: %w", err)
 	}
 
-	languageStr := d.config.Language
-	if languageStr == "" || languageStr == "auto" {
-		languageStr = "auto-detect"
-	}
-	log.Printf("[Whisper] Connected to WhisperLive at %s (uid: %s, model: %s, language: %s, task: %s)",
-		d.config.ServerURL, d.clientUID, d.config.Model, languageStr, task)
+	log.Printf("[Whisper] Connected to WhisperLive at %s (uid: %s, model: %s, language: auto-detect, task: transcribe)",
+		d.config.ServerURL, d.clientUID, d.config.Model)
 
 	return nil
 }
@@ -546,6 +526,11 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 				}
 				log.Printf("[Whisper] Detected language: %s (probability: %.2f)", lang, langProb)
 
+				// Store detected language for translation
+				d.languageMu.Lock()
+				d.detectedLanguage = lang
+				d.languageMu.Unlock()
+
 				// Send language detection to frontend
 				languageData := map[string]interface{}{
 					"language":      lang,
@@ -568,23 +553,8 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 				continue
 			}
 
-			// Handle transcription segments
-			// When translation is enabled, prefer translated_segments over segments
-			var segments []interface{}
-			var ok bool
-
-			if d.config.Language != "" && d.config.Language != "en" && d.config.Language != "auto" {
-				// Translation enabled - try translated_segments first
-				segments, ok = result["translated_segments"].([]interface{})
-				if !ok || len(segments) == 0 {
-					// Fall back to regular segments if translated_segments not available
-					segments, ok = result["segments"].([]interface{})
-				}
-			} else {
-				// No translation - use regular segments
-				segments, ok = result["segments"].([]interface{})
-			}
-
+			// Handle transcription segments - always use regular segments
+			segments, ok := result["segments"].([]interface{})
 			if ok && len(segments) > 0 {
 				// Apply filtering and deduplication
 				segments = d.processSegments(segments)
@@ -661,11 +631,27 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 
 			// Only send if we haven't sent it before
 			if !alreadySent {
+				// Apply translation if enabled and language is not English
+				if d.config.Translate {
+					d.languageMu.RLock()
+					sourceLang := d.detectedLanguage
+					d.languageMu.RUnlock()
+
+					// Always translate to English
+					targetLang := "en"
+
+					// Translate if source language is detected and not English
+					if sourceLang != "" && sourceLang != "en" {
+						translatedText := d.translateText(segText, sourceLang, targetLang)
+						seg["text"] = translatedText
+					}
+				}
+
 				d.transcript = append(d.transcript, seg)
 				filteredSegments = append(filteredSegments, seg)
 			}
 		} else if i == len(segments)-1 {
-			// Last segment that's not completed - send for real-time updates
+			// Last segment that's not completed - send for real-time updates (no translation)
 			d.lastSegment = seg
 			filteredSegments = append(filteredSegments, seg)
 		}
@@ -764,6 +750,96 @@ func (d *WhisperDecoder) encodeSegments(segmentsJSON []byte, timestamp int64) []
 	copy(buf[13:], segmentsJSON)
 
 	return buf
+}
+
+// translateText translates text using LibreTranslate API
+// Returns the translated text, or the original text if translation fails or is not needed
+func (d *WhisperDecoder) translateText(text, sourceLang, targetLang string) string {
+	// Skip translation if not configured
+	if d.config.LibreTranslateURL == "" {
+		return text
+	}
+
+	// Skip translation if source and target are the same
+	if sourceLang == targetLang {
+		return text
+	}
+
+	// Skip translation if source is already English and target is English
+	if sourceLang == "en" && targetLang == "en" {
+		return text
+	}
+
+	// Prepare request body
+	requestBody := map[string]interface{}{
+		"q":      text,
+		"source": sourceLang,
+		"target": targetLang,
+		"format": "text",
+	}
+
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		log.Printf("[Whisper] Failed to marshal LibreTranslate request: %v", err)
+		return text
+	}
+
+	// Create HTTP request with same headers as WhisperLive connection
+	req, err := http.NewRequest("POST", d.config.LibreTranslateURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Printf("[Whisper] Failed to create LibreTranslate request: %v", err)
+		return text
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	// Add same headers as WhisperLive WebSocket connection
+	if d.config.InstanceUUID != "" {
+		req.Header.Set("X-UberSDR-UUID", d.config.InstanceUUID)
+	}
+	if d.config.Model != "" {
+		req.Header.Set("X-UberSDR-Model", d.config.Model)
+	}
+	if GlobalConfigProvider != nil && GlobalConfigProvider.MaxUsers > 0 {
+		req.Header.Set("X-UberSDR-Max-Users", fmt.Sprintf("%d", GlobalConfigProvider.MaxUsers))
+	}
+
+	// Send request
+	resp, err := d.httpClient.Do(req)
+	if err != nil {
+		log.Printf("[Whisper] LibreTranslate request failed: %v", err)
+		return text
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("[Whisper] Failed to close LibreTranslate response body: %v", closeErr)
+		}
+	}()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("[Whisper] LibreTranslate returned status %d: %s", resp.StatusCode, string(body))
+		return text
+	}
+
+	// Parse response
+	var result struct {
+		TranslatedText string `json:"translatedText"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		log.Printf("[Whisper] Failed to decode LibreTranslate response: %v", err)
+		return text
+	}
+
+	if result.TranslatedText == "" {
+		log.Printf("[Whisper] LibreTranslate returned empty translation")
+		return text
+	}
+
+	log.Printf("[Whisper] Translated (%s->%s): '%s' -> '%s'", sourceLang, targetLang, text, result.TranslatedText)
+	return result.TranslatedText
 }
 
 // encodeLanguageDetection encodes language detection into binary protocol

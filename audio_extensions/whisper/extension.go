@@ -8,15 +8,15 @@ import (
 
 // ConfigProvider is set by main package to provide access to configuration
 type ConfigProvider struct {
-	Enabled        bool
-	ServerURL      string
-	Model          string
-	Language       string
-	Translate      bool
-	SendIntervalMs int
-	InitialPrompt  string
-	InstanceUUID   string
-	MaxUsers       int
+	Enabled           bool
+	ServerURL         string
+	Model             string
+	Translate         bool
+	SendIntervalMs    int
+	InitialPrompt     string
+	InstanceUUID      string
+	MaxUsers          int
+	LibreTranslateURL string
 }
 
 // GlobalConfigProvider is set by main package
@@ -92,42 +92,36 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 	var config WhisperConfig
 	if GlobalConfigProvider != nil {
 		config = WhisperConfig{
-			Enabled:        GlobalConfigProvider.Enabled,
-			ServerURL:      GlobalConfigProvider.ServerURL,
-			Model:          GlobalConfigProvider.Model,
-			Language:       GlobalConfigProvider.Language,
-			Translate:      GlobalConfigProvider.Translate,
-			SendIntervalMs: GlobalConfigProvider.SendIntervalMs,
-			InitialPrompt:  GlobalConfigProvider.InitialPrompt,
-			InstanceUUID:   GlobalConfigProvider.InstanceUUID,
+			Enabled:           GlobalConfigProvider.Enabled,
+			ServerURL:         GlobalConfigProvider.ServerURL,
+			Model:             GlobalConfigProvider.Model,
+			Translate:         GlobalConfigProvider.Translate,
+			SendIntervalMs:    GlobalConfigProvider.SendIntervalMs,
+			InitialPrompt:     GlobalConfigProvider.InitialPrompt,
+			InstanceUUID:      GlobalConfigProvider.InstanceUUID,
+			LibreTranslateURL: GlobalConfigProvider.LibreTranslateURL,
 		}
 		log.Printf("[Whisper Extension] Using configuration from config.yaml")
 	} else {
 		// Default configuration if global config not available
 		config = WhisperConfig{
-			Enabled:        true, // Assume enabled if no config
-			ServerURL:      "ws://whisperlive:9090",
-			Model:          "small",
-			Language:       "en",
-			Translate:      true, // Default to translation enabled
-			SendIntervalMs: 100,
-			InitialPrompt:  "",
-			InstanceUUID:   "",
+			Enabled:           true, // Assume enabled if no config
+			ServerURL:         "ws://whisperlive:9090",
+			Model:             "small",
+			Translate:         true, // Default to translation enabled
+			SendIntervalMs:    100,
+			InitialPrompt:     "",
+			InstanceUUID:      "",
+			LibreTranslateURL: "https://whisper.ubersdr.org/translate",
 		}
 		log.Printf("[Whisper Extension] Using default configuration (config not available)")
-	}
-
-	// Override language from frontend parameter if provided
-	if language, ok := extensionParams["language"].(string); ok && language != "" {
-		config.Language = language
-		log.Printf("[Whisper Extension] Language overridden from frontend: %s", language)
 	}
 
 	// Create decoder
 	decoder := NewWhisperDecoder(audioParams.SampleRate, config)
 
-	log.Printf("[Whisper Extension] Created with server: %s, model: %s, language: %s, translate: %v, sample rate: %d Hz",
-		config.ServerURL, config.Model, config.Language, config.Translate, audioParams.SampleRate)
+	log.Printf("[Whisper Extension] Created with server: %s, model: %s, language: auto-detect, translate: %v, sample rate: %d Hz",
+		config.ServerURL, config.Model, config.Translate, audioParams.SampleRate)
 
 	return &WhisperExtension{
 		decoder: decoder,

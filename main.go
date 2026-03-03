@@ -1253,15 +1253,15 @@ func main() {
 	// Register Whisper extension
 	// Set global config for whisper package to access configuration
 	whisper.GlobalConfigProvider = &whisper.ConfigProvider{
-		Enabled:        config.Whisper.Enabled,
-		ServerURL:      config.Whisper.ServerURL,
-		Model:          config.Whisper.Model,
-		Language:       config.Whisper.Language,
-		Translate:      config.Whisper.Translate,
-		SendIntervalMs: config.Whisper.SendIntervalMs,
-		InitialPrompt:  config.Whisper.InitialPrompt,
-		InstanceUUID:   config.InstanceReporting.InstanceUUID,
-		MaxUsers:       config.Whisper.MaxUsers,
+		Enabled:           config.Whisper.Enabled,
+		ServerURL:         config.Whisper.ServerURL,
+		Model:             config.Whisper.Model,
+		Translate:         config.Whisper.Translate,
+		SendIntervalMs:    config.Whisper.SendIntervalMs,
+		InitialPrompt:     config.Whisper.InitialPrompt,
+		InstanceUUID:      config.InstanceReporting.InstanceUUID,
+		MaxUsers:          config.Whisper.MaxUsers,
+		LibreTranslateURL: config.Whisper.LibreTranslateURL,
 	}
 	whisperInfo := whisper.GetInfo()
 

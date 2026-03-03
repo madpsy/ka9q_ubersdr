@@ -1560,8 +1560,11 @@ class WhisperExtension extends DecoderExtension {
             return;
         }
 
+        // Remove overlapping words at segment boundaries
+        const cleanedText = this.removeSegmentOverlap(this.ttsSentenceBuffer, text.trim());
+
         // Add text to sentence buffer
-        this.ttsSentenceBuffer += (this.ttsSentenceBuffer ? ' ' : '') + text.trim();
+        this.ttsSentenceBuffer += (this.ttsSentenceBuffer ? ' ' : '') + cleanedText;
 
         // Check if buffer contains complete sentences (ending with . ! or ?)
         const completeSentences = this.extractCompleteSentences(this.ttsSentenceBuffer);
@@ -1589,10 +1592,49 @@ class WhisperExtension extends DecoderExtension {
         }
     }
 
+    removeSegmentOverlap(existingText, newText) {
+        // Remove overlapping words at segment boundaries
+        // Example: "has been" at end of existing + "has been detained" at start of new
+        // Should result in just "has been detained" being added
+        if (!existingText) {
+            return newText;
+        }
+
+        const existingWords = existingText.trim().split(/\s+/);
+        const newWords = newText.trim().split(/\s+/);
+
+        // Check for overlaps of 1-3 words at the boundary
+        for (let overlapSize = Math.min(3, existingWords.length, newWords.length); overlapSize >= 1; overlapSize--) {
+            const endOfExisting = existingWords.slice(-overlapSize).join(' ').toLowerCase();
+            const startOfNew = newWords.slice(0, overlapSize).join(' ').toLowerCase();
+
+            if (endOfExisting === startOfNew) {
+                // Found overlap - remove it from the new text
+                const remainingWords = newWords.slice(overlapSize);
+                const result = remainingWords.join(' ');
+                console.log(`Whisper: Removed ${overlapSize}-word overlap: "${endOfExisting}"`);
+                return result;
+            }
+        }
+
+        // No overlap found
+        return newText;
+    }
+
     extractCompleteSentences(text) {
-        // Split text into sentences based on . ! ? terminators
+        // Split text into sentences based on sentence terminators from multiple languages:
+        // Western (English, Spanish, French, etc.): . ! ?
+        // CJK (Chinese/Japanese/Korean): 。！？
+        // Arabic/Urdu/Persian: ؟ ۔
+        // Greek: ; (question mark)
+        // Devanagari (Hindi, Bengali, etc.): । ॥
+        // Thai/Lao: ฯ ຯ ໆ
+        // Armenian: ։ ՞ ՜
+        // Burmese/Myanmar: ။ ၊
+        // Khmer: ។ ៕
+        // Ethiopic/Amharic: ። ፧ ፨
         // Keep the terminator with the sentence
-        const sentenceRegex = /[^.!?]+[.!?]+/g;
+        const sentenceRegex = /[^.!?。！？؟۔;।॥ฯຯໆ։՞՜။၊។៕።፧፨]+[.!?。！？؟۔;।॥ฯຯໆ։՞՜။၊។៕።፧፨]+/g;
         const sentences = [];
         let match;
         let lastIndex = 0;

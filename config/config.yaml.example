@@ -1482,7 +1482,7 @@ whisper:
   #
   # Default: "small" (good balance of speed and accuracy)
   # Recommended for English: "medium.en" or "small.en"
-  model: "OpenVINO/whisper-medium-fp16-ov"
+  model: "OpenVINO/distil-whisper-large-v3-int8-ov"
 
   # Language code for transcription
   # Use "en" for English, "es" for Spanish, "auto" for auto-detection, etc.

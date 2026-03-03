@@ -72,7 +72,7 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 		activeUserMutex.Lock()
 		if activeUserCount >= GlobalConfigProvider.MaxUsers {
 			activeUserMutex.Unlock()
-			return nil, fmt.Errorf("maximum whisper users reached (%d/%d)", activeUserCount, GlobalConfigProvider.MaxUsers)
+			return nil, fmt.Errorf("maximum users reached (%d/%d)", activeUserCount, GlobalConfigProvider.MaxUsers)
 		}
 		activeUserCount++
 		currentCount := activeUserCount

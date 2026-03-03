@@ -46,6 +46,7 @@ class WhisperExtension extends DecoderExtension {
         this.isSpeaking = false;
         this.ttsMuteSDR = true;  // Mute SDR when TTS is active (enabled by default)
         this.sdrWasMuted = false;  // Track if SDR was already muted before TTS
+        this.ttsSentenceBuffer = '';  // Buffer for accumulating text until a complete sentence
 
         // Frequency change detection
         this.frequencyChangeHandler = null;  // Event handler for frequency changes
@@ -336,14 +337,14 @@ class WhisperExtension extends DecoderExtension {
 
     stopDecoder(skipFrequencyMonitoring = false) {
         console.log('Whisper: Stopping decoder');
-        
+
         this.isRunning = false;
         this.updateButtonStates();
         this.updateStatus('Stopped', 'whisper-status-stopped');
 
         // Stop the update timer
         this.stopUpdateTimer();
-        
+
         // Stop frequency monitoring (unless we're stopping due to frequency change)
         if (!skipFrequencyMonitoring) {
             this.stopFrequencyMonitoring();
@@ -351,6 +352,9 @@ class WhisperExtension extends DecoderExtension {
 
         // Stop any ongoing TTS
         this.stopSpeaking();
+
+        // Clear TTS sentence buffer
+        this.ttsSentenceBuffer = '';
 
         // Restore SDR mute state (unmute if it was muted by TTS)
         this.restoreSDRMuteState();
@@ -446,6 +450,9 @@ class WhisperExtension extends DecoderExtension {
         this.transcript = [];
         this.lastSegment = null;
         this.renderedSegmentCount = 0;  // Reset rendered count
+
+        // Clear TTS sentence buffer
+        this.ttsSentenceBuffer = '';
 
         // Clear the DOM
         const transcriptionElement = document.getElementById('whisper-transcription');
@@ -1553,17 +1560,55 @@ class WhisperExtension extends DecoderExtension {
             return;
         }
 
-        // Add to queue
-        this.ttsQueue.push(text);
-        console.log(`Whisper: Added to TTS queue (${this.ttsQueue.length} items)`);
+        // Add text to sentence buffer
+        this.ttsSentenceBuffer += (this.ttsSentenceBuffer ? ' ' : '') + text.trim();
 
-        // If currently speaking, just queue it - will be batched when current utterance ends
-        if (this.isSpeaking) {
-            return;
+        // Check if buffer contains complete sentences (ending with . ! or ?)
+        const completeSentences = this.extractCompleteSentences(this.ttsSentenceBuffer);
+
+        if (completeSentences.sentences.length > 0) {
+            // Add complete sentences to TTS queue
+            completeSentences.sentences.forEach(sentence => {
+                this.ttsQueue.push(sentence);
+            });
+
+            // Update buffer to keep only the incomplete part
+            this.ttsSentenceBuffer = completeSentences.remainder;
+
+            console.log(`Whisper: Added ${completeSentences.sentences.length} complete sentence(s) to TTS queue (${this.ttsQueue.length} total items)`);
+
+            // If currently speaking, just queue it - will be batched when current utterance ends
+            if (this.isSpeaking) {
+                return;
+            }
+
+            // Start speaking immediately, batching all queued segments
+            this.speakQueuedSegments();
+        } else {
+            console.log(`Whisper: Buffering incomplete sentence: "${this.ttsSentenceBuffer}"`);
+        }
+    }
+
+    extractCompleteSentences(text) {
+        // Split text into sentences based on . ! ? terminators
+        // Keep the terminator with the sentence
+        const sentenceRegex = /[^.!?]+[.!?]+/g;
+        const sentences = [];
+        let match;
+        let lastIndex = 0;
+
+        while ((match = sentenceRegex.exec(text)) !== null) {
+            sentences.push(match[0].trim());
+            lastIndex = sentenceRegex.lastIndex;
         }
 
-        // Start speaking immediately, batching all queued segments
-        this.speakQueuedSegments();
+        // Everything after the last complete sentence is the remainder
+        const remainder = text.substring(lastIndex).trim();
+
+        return {
+            sentences: sentences,
+            remainder: remainder
+        };
     }
 
     speakQueuedSegments() {

@@ -208,10 +208,8 @@ class WhisperExtension extends DecoderExtension {
                 this.selectedLanguage = e.target.value;
                 console.log('Whisper: Language changed to:', this.selectedLanguage);
 
-                // Auto-select matching TTS voice if not English
-                if (this.selectedLanguage !== 'en') {
-                    this.autoSelectTTSVoice(this.selectedLanguage);
-                }
+                // Auto-select matching TTS voice for the selected language
+                this.autoSelectTTSVoice(this.selectedLanguage);
             });
         }
         if (lineLimitSelect) {
@@ -1325,7 +1323,7 @@ class WhisperExtension extends DecoderExtension {
         // Map common Whisper language codes to TTS language codes
         // Whisper uses 2-letter codes, TTS often uses full locale codes
         const languageMap = {
-            'es': 'es-ES', 'fr': 'fr-FR', 'de': 'de-DE', 'it': 'it-IT',
+            'en': 'en-US', 'es': 'es-ES', 'fr': 'fr-FR', 'de': 'de-DE', 'it': 'it-IT',
             'pt': 'pt-PT', 'ru': 'ru-RU', 'ja': 'ja-JP', 'ko': 'ko-KR',
             'zh': 'zh-CN', 'ar': 'ar-SA', 'hi': 'hi-IN', 'nl': 'nl-NL',
             'pl': 'pl-PL', 'tr': 'tr-TR', 'sv': 'sv-SE', 'da': 'da-DK',

@@ -62,6 +62,10 @@ type WhisperDecoder struct {
 	wg          sync.WaitGroup
 	serverReady chan struct{} // Signals when WhisperLive server is ready
 
+	// Connection failure tracking
+	failedAttempts    int
+	lastConnectionErr string
+
 	// Text filtering
 	suppressPhrases []*regexp.Regexp
 }
@@ -145,6 +149,26 @@ func (d *WhisperDecoder) Stop() error {
 
 	d.wg.Wait()
 	return nil
+}
+
+// sendErrorToFrontend sends an error message to the frontend via the result channel
+// Binary protocol: [type:1][timestamp:8][error_length:4][error:N]
+// type: 0x04 = error message
+func (d *WhisperDecoder) sendErrorToFrontend(resultChan chan<- []byte, errorMsg string) {
+	errorBytes := []byte(errorMsg)
+	msg := make([]byte, 1+8+4+len(errorBytes))
+
+	msg[0] = 0x04 // Error message type
+	binary.BigEndian.PutUint64(msg[1:9], uint64(time.Now().UnixNano()))
+	binary.BigEndian.PutUint32(msg[9:13], uint32(len(errorBytes)))
+	copy(msg[13:], errorBytes)
+
+	select {
+	case resultChan <- msg:
+		log.Printf("[Whisper] Sent error to frontend: %s", errorMsg)
+	default:
+		log.Printf("[Whisper] Failed to send error to frontend (channel full): %s", errorMsg)
+	}
 }
 
 // connectWebSocket establishes WebSocket connection to WhisperLive
@@ -407,10 +431,21 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 			// Connection is nil, attempt to reconnect
 			log.Printf("[Whisper] Connection is nil, attempting reconnect...")
 			if reconnectErr := d.reconnectWebSocket(); reconnectErr != nil {
-				log.Printf("[Whisper] Reconnect failed: %v, retrying in 5 seconds...", reconnectErr)
+				d.failedAttempts++
+				d.lastConnectionErr = reconnectErr.Error()
+				log.Printf("[Whisper] Reconnect failed (%d/3): %v, retrying in 5 seconds...", d.failedAttempts, reconnectErr)
+
+				// After 3 failed attempts, send error to frontend
+				if d.failedAttempts >= 3 {
+					d.sendErrorToFrontend(resultChan, fmt.Sprintf("Connection failed: %s", d.lastConnectionErr))
+					// Reset counter after sending error
+					d.failedAttempts = 0
+				}
+
 				time.Sleep(5 * time.Second)
 			} else {
 				log.Printf("[Whisper] Successfully reconnected to WhisperLive")
+				d.failedAttempts = 0 // Reset counter on successful connection
 			}
 			continue
 		}
@@ -421,10 +456,21 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 				log.Printf("[Whisper] WebSocket read error: %v, attempting reconnect...", err)
 				// Try to reconnect
 				if reconnectErr := d.reconnectWebSocket(); reconnectErr != nil {
-					log.Printf("[Whisper] Reconnect failed: %v, retrying in 5 seconds...", reconnectErr)
+					d.failedAttempts++
+					d.lastConnectionErr = reconnectErr.Error()
+					log.Printf("[Whisper] Reconnect failed (%d/3): %v, retrying in 5 seconds...", d.failedAttempts, reconnectErr)
+
+					// After 3 failed attempts, send error to frontend
+					if d.failedAttempts >= 3 {
+						d.sendErrorToFrontend(resultChan, fmt.Sprintf("Connection failed: %s", d.lastConnectionErr))
+						// Reset counter after sending error
+						d.failedAttempts = 0
+					}
+
 					time.Sleep(5 * time.Second) // Wait before next attempt
 				} else {
 					log.Printf("[Whisper] Successfully reconnected to WhisperLive")
+					d.failedAttempts = 0 // Reset counter on successful connection
 				}
 			}
 			continue // Don't return, keep trying

@@ -214,7 +214,6 @@ func (d *WhisperDecoder) connectWebSocket() error {
 	// Set up ping/pong handlers to respond to server keepalive pings
 	// This prevents "keepalive ping timeout" errors
 	conn.SetPingHandler(func(appData string) error {
-		log.Printf("[Whisper] Received ping from server, sending pong")
 		// Respond with pong - must use WriteControl with deadline
 		d.wsConnMu.Lock()
 		defer d.wsConnMu.Unlock()
@@ -226,7 +225,6 @@ func (d *WhisperDecoder) connectWebSocket() error {
 	})
 
 	conn.SetPongHandler(func(appData string) error {
-		log.Printf("[Whisper] Received pong from server")
 		return nil
 	})
 
@@ -578,14 +576,9 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 			if d.config.Language != "" && d.config.Language != "en" && d.config.Language != "auto" {
 				// Translation enabled - try translated_segments first
 				segments, ok = result["translated_segments"].([]interface{})
-				if ok && len(segments) > 0 {
-					log.Printf("[Whisper] Using translated_segments (target language: %s)", d.config.Language)
-				} else {
+				if !ok || len(segments) == 0 {
 					// Fall back to regular segments if translated_segments not available
 					segments, ok = result["segments"].([]interface{})
-					if ok && len(segments) > 0 {
-						log.Printf("[Whisper] translated_segments not available, falling back to segments")
-					}
 				}
 			} else {
 				// No translation - use regular segments

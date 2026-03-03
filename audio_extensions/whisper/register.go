@@ -46,7 +46,7 @@ func GetInfo() map[string]interface{} {
 		},
 		"output_format": map[string]interface{}{
 			"type":        "binary",
-			"description": "Binary protocol with transcribed text",
+			"description": "Binary protocol with transcribed text and error messages",
 			"protocol": map[string]interface{}{
 				"text_message": map[string]interface{}{
 					"type":        0x01,
@@ -72,6 +72,33 @@ func GetInfo() map[string]interface{} {
 							"name":        "text",
 							"bytes":       -1,
 							"description": "UTF-8 encoded transcribed text",
+						},
+					},
+				},
+				"error_message": map[string]interface{}{
+					"type":        0x04,
+					"description": "Error message (connection failures, etc.)",
+					"format":      "[type:1][timestamp:8][error_length:4][error:length]",
+					"fields": []map[string]interface{}{
+						{
+							"name":        "type",
+							"bytes":       1,
+							"description": "Message type (0x04 for error)",
+						},
+						{
+							"name":        "timestamp",
+							"bytes":       8,
+							"description": "Unix timestamp in nanoseconds (big-endian uint64)",
+						},
+						{
+							"name":        "error_length",
+							"bytes":       4,
+							"description": "Error message length in bytes (big-endian uint32)",
+						},
+						{
+							"name":        "error",
+							"bytes":       -1,
+							"description": "UTF-8 encoded error message",
 						},
 					},
 				},

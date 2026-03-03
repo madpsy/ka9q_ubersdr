@@ -562,8 +562,8 @@ class WhisperExtension extends DecoderExtension {
     handleBinaryMessage(data) {
         // Binary protocol for Whisper transcription
         // Message format:
-        // Byte 0: Message type (0x02 = segments JSON)
-        // Remaining bytes: JSON data
+        // Byte 0: Message type (0x02 = segments JSON, 0x03 = language detection, 0x04 = error)
+        // Remaining bytes: Data
 
         const view = new DataView(data);
         const messageType = view.getUint8(0);
@@ -574,6 +574,9 @@ class WhisperExtension extends DecoderExtension {
                 break;
             case 0x03: // Language detection
                 this.handleLanguageDetection(view, data);
+                break;
+            case 0x04: // Error message
+                this.handleErrorMessage(view, data);
                 break;
             default:
                 console.warn(`Whisper: Unknown message type: 0x${messageType.toString(16).padStart(2, '0')}`);
@@ -1130,6 +1133,27 @@ class WhisperExtension extends DecoderExtension {
 
         // Update the display
         this.updateDetectedLanguageDisplay();
+    }
+
+    handleErrorMessage(view, data) {
+        // Binary protocol: [type:1][timestamp:8][error_length:4][error:N]
+        // Extract timestamp (bytes 1-8, big-endian)
+        const timestampNano = view.getBigUint64(1, false);
+
+        // Extract error message length (bytes 9-12, big-endian)
+        const errorLength = view.getUint32(9, false);
+
+        // Extract error message (bytes 13 onwards)
+        const errorBytes = new Uint8Array(data, 13, errorLength);
+        const decoder = new TextDecoder('utf-8');
+        const errorMsg = decoder.decode(errorBytes);
+
+        console.error('Whisper: Connection error:', errorMsg);
+        
+        // Update status to show error and stop the decoder
+        this.updateStatus('Error: ' + errorMsg, 'whisper-status-error');
+        this.isRunning = false;
+        this.updateButtonStates();
     }
 
     updateDetectedLanguageDisplay() {

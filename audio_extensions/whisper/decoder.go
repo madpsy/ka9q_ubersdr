@@ -433,15 +433,18 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 			if reconnectErr := d.reconnectWebSocket(); reconnectErr != nil {
 				d.failedAttempts++
 				d.lastConnectionErr = reconnectErr.Error()
-				log.Printf("[Whisper] Reconnect failed (%d/3): %v, retrying in 5 seconds...", d.failedAttempts, reconnectErr)
+				log.Printf("[Whisper] Reconnect failed (%d/3): %v", d.failedAttempts, reconnectErr)
 
-				// After 3 failed attempts, send error to frontend
+				// After 3 failed attempts, send error to frontend and stop
 				if d.failedAttempts >= 3 {
+					log.Printf("[Whisper] Maximum reconnection attempts reached, stopping decoder")
 					d.sendErrorToFrontend(resultChan, fmt.Sprintf("Connection failed: %s", d.lastConnectionErr))
-					// Reset counter after sending error
-					d.failedAttempts = 0
+					// Stop the decoder
+					d.running = false
+					return
 				}
 
+				log.Printf("[Whisper] Retrying in 5 seconds...")
 				time.Sleep(5 * time.Second)
 			} else {
 				log.Printf("[Whisper] Successfully reconnected to WhisperLive")
@@ -458,15 +461,18 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 				if reconnectErr := d.reconnectWebSocket(); reconnectErr != nil {
 					d.failedAttempts++
 					d.lastConnectionErr = reconnectErr.Error()
-					log.Printf("[Whisper] Reconnect failed (%d/3): %v, retrying in 5 seconds...", d.failedAttempts, reconnectErr)
+					log.Printf("[Whisper] Reconnect failed (%d/3): %v", d.failedAttempts, reconnectErr)
 
-					// After 3 failed attempts, send error to frontend
+					// After 3 failed attempts, send error to frontend and stop
 					if d.failedAttempts >= 3 {
+						log.Printf("[Whisper] Maximum reconnection attempts reached, stopping decoder")
 						d.sendErrorToFrontend(resultChan, fmt.Sprintf("Connection failed: %s", d.lastConnectionErr))
-						// Reset counter after sending error
-						d.failedAttempts = 0
+						// Stop the decoder
+						d.running = false
+						return
 					}
 
+					log.Printf("[Whisper] Retrying in 5 seconds...")
 					time.Sleep(5 * time.Second) // Wait before next attempt
 				} else {
 					log.Printf("[Whisper] Successfully reconnected to WhisperLive")

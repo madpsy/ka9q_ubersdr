@@ -544,6 +544,8 @@ class WhisperExtension:
             self.handle_segments(data)
         elif message_type == 0x03:  # Language detection
             self.handle_language_detection(data)
+        elif message_type == 0x04:  # Error message
+            self.handle_error_message(data)
         else:
             print(f"[Whisper] Unknown message type: 0x{message_type:02x}")
 
@@ -1002,6 +1004,32 @@ class WhisperExtension:
 
         # Update the display
         self.update_language_display()
+
+    def handle_error_message(self, data: bytes):
+        """Handle error message."""
+        # Binary protocol: [type:1][timestamp:8][error_length:4][error:N]
+        if len(data) < 13:
+            return
+
+        # Extract error length (bytes 9-12, big-endian)
+        error_length = struct.unpack('>I', data[9:13])[0]
+
+        # Extract error message (bytes 13 onwards)
+        if len(data) < 13 + error_length:
+            return
+
+        error_bytes = data[13:13+error_length]
+        error_msg = error_bytes.decode('utf-8')
+
+        print(f"[Whisper] Connection error: {error_msg}")
+
+        # Update UI to show error
+        self.update_status(f"Error: {error_msg}", "red")
+        self.update_server_status("Error", "red")
+
+        # Stop the decoder
+        self.running = False
+        self.update_button_states()
 
     def update_language_display(self):
         """Update the language detection display."""

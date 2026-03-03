@@ -618,12 +618,20 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 		// Completed segments - check if we've already sent this one
 		if completed {
 			// Check if this segment is already in our transcript
-			// Use text as primary key since timestamps might vary slightly
+			// Use ORIGINAL text (before translation) as primary key since timestamps might vary slightly
+			// Store the original English text for deduplication
+			originalText := segText
 			alreadySent := false
 
 			for _, existingSeg := range d.transcript {
-				if existingText, ok := existingSeg["text"].(string); ok {
-					if existingText == segText {
+				// Check against the original_text field if it exists, otherwise fall back to text
+				if existingOriginal, ok := existingSeg["original_text"].(string); ok {
+					if existingOriginal == originalText {
+						alreadySent = true
+						break
+					}
+				} else if existingText, ok := existingSeg["text"].(string); ok {
+					if existingText == originalText {
 						alreadySent = true
 						break
 					}
@@ -632,6 +640,9 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 
 			// Only send if we haven't sent it before
 			if !alreadySent {
+				// Store original English text for deduplication
+				seg["original_text"] = originalText
+
 				// Apply translation if enabled and target language is not English
 				// Whisper always returns English, so we translate from English to target language
 				if d.config.Translate && d.config.TargetLanguage != "" && d.config.TargetLanguage != "en" {

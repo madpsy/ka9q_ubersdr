@@ -571,7 +571,28 @@ func (d *WhisperDecoder) receiveResultsLoop(resultChan chan<- []byte) {
 			}
 
 			// Handle transcription segments
-			if segments, ok := result["segments"].([]interface{}); ok && len(segments) > 0 {
+			// When translation is enabled, prefer translated_segments over segments
+			var segments []interface{}
+			var ok bool
+
+			if d.config.Language != "" && d.config.Language != "en" && d.config.Language != "auto" {
+				// Translation enabled - try translated_segments first
+				segments, ok = result["translated_segments"].([]interface{})
+				if ok && len(segments) > 0 {
+					log.Printf("[Whisper] Using translated_segments (target language: %s)", d.config.Language)
+				} else {
+					// Fall back to regular segments if translated_segments not available
+					segments, ok = result["segments"].([]interface{})
+					if ok && len(segments) > 0 {
+						log.Printf("[Whisper] translated_segments not available, falling back to segments")
+					}
+				}
+			} else {
+				// No translation - use regular segments
+				segments, ok = result["segments"].([]interface{})
+			}
+
+			if ok && len(segments) > 0 {
 				// Apply filtering and deduplication
 				segments = d.processSegments(segments)
 

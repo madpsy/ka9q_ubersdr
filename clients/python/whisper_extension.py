@@ -9,17 +9,19 @@ from tkinter import ttk, scrolledtext, filedialog, messagebox
 import json
 import time
 from datetime import datetime
-from typing import Optional, Dict, Callable
+from typing import Optional, Dict, Callable, List
 import struct
+import urllib.request
+import urllib.error
 
 
 class WhisperExtension:
     """Whisper speech-to-text decoder extension window."""
-    
+
     def __init__(self, parent: tk.Tk, dxcluster_ws, radio_control):
         """
         Initialize Whisper extension window.
-        
+
         Args:
             parent: Parent window
             dxcluster_ws: DX cluster WebSocket connection
@@ -28,7 +30,7 @@ class WhisperExtension:
         self.parent = parent
         self.dxcluster_ws = dxcluster_ws
         self.radio_control = radio_control
-        
+
         # State
         self.running = False
         self.transcript = []  # Completed segments only
@@ -37,7 +39,7 @@ class WhisperExtension:
         self.last_update_time = None
         self.auto_scroll = True
         self.show_timestamps = False
-        self.show_only_incomplete = True  # Show only in-progress sentence
+        self.show_only_incomplete = False  # Show only in-progress sentence
         self.hide_incomplete = False  # Hide in-progress segment
         self.last_rendered_transcript_len = 0  # Track number of completed segments rendered
         self.last_rendered_incomplete = None  # Track last incomplete segment text
@@ -45,40 +47,44 @@ class WhisperExtension:
         self.detected_language = None  # Detected language from server
         self.detected_language_prob = None  # Language detection probability
 
+        # Language selection
+        self.selected_language = 'en'  # Default to English
+        self.available_languages = []  # Will be populated from server
+
         # Font size control
         self.font_size = 10  # Default font size
         self.floating_font_size = 14  # Default floating window font size
 
         # Bionic reading
         self.bionic_reading = False  # Bionic reading mode
-        
+
         # Floating window
         self.show_floating_window = False  # Show floating window with current text
         self.floating_window = None  # Reference to floating window
         self.floating_text = None  # Text widget in floating window (for bionic reading support)
         self.last_floating_text = None  # Track last floating window text to prevent flashing
-        
+
         # Frequency change detection
         self.last_frequency = None  # Track last frequency
         self.frequency_check_timer = None  # Timer for checking frequency changes
         self.was_running_before_freq_change = False  # Track if decoder was running before frequency change
         self.frequency_restart_timer = None  # Timer for auto-restart after frequency stabilizes
-        
+
         # Create window
         self.window = tk.Toplevel(parent)
         self.window.title("🎤 Speech-to-Text")
         self.window.geometry("900x600")
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
-        
+
         # Create UI
         self.create_widgets()
-        
+
         # Setup WebSocket handler
         self.original_ws_handler = None
-        
+
         # Start update timer
         self.update_timer_id = None
-        
+
     def create_widgets(self):
         """Create UI widgets."""
         # Main frame
@@ -87,20 +93,20 @@ class WhisperExtension:
         self.window.columnconfigure(0, weight=1)
         self.window.rowconfigure(0, weight=1)
         main_frame.columnconfigure(0, weight=1)
-        
+
         # Status bar
         status_frame = ttk.Frame(main_frame)
         status_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         status_frame.columnconfigure(1, weight=1)
-        
+
         ttk.Label(status_frame, text="Status:").grid(row=0, column=0, padx=(0, 5))
         self.status_label = ttk.Label(status_frame, text="Idle", foreground="gray")
         self.status_label.grid(row=0, column=1, sticky=tk.W)
-        
+
         ttk.Label(status_frame, text="Server:").grid(row=0, column=2, padx=(20, 5))
         self.server_status_label = ttk.Label(status_frame, text="Not connected", foreground="gray")
         self.server_status_label.grid(row=0, column=3, sticky=tk.W)
-        
+
         # Controls frame
         controls_frame = ttk.Frame(main_frame)
         controls_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
@@ -110,26 +116,26 @@ class WhisperExtension:
         # Auto-scroll checkbox
         self.auto_scroll_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(controls_frame, text="Auto-scroll",
-                       variable=self.auto_scroll_var,
-                       command=self.on_auto_scroll_changed).grid(row=0, column=0, padx=(0, 15), sticky=tk.W)
+                        variable=self.auto_scroll_var,
+                        command=self.on_auto_scroll_changed).grid(row=0, column=0, padx=(0, 15), sticky=tk.W)
 
         # Show timestamps checkbox
         self.show_timestamps_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(controls_frame, text="Show timestamps",
-                       variable=self.show_timestamps_var,
-                       command=self.on_show_timestamps_changed).grid(row=0, column=1, padx=(0, 15), sticky=tk.W)
+                        variable=self.show_timestamps_var,
+                        command=self.on_show_timestamps_changed).grid(row=0, column=1, padx=(0, 15), sticky=tk.W)
 
         # Bionic reading checkbox
         self.bionic_reading_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(controls_frame, text="Bionic reading",
-                       variable=self.bionic_reading_var,
-                       command=self.on_bionic_reading_changed).grid(row=0, column=2, padx=(0, 15), sticky=tk.W)
+                        variable=self.bionic_reading_var,
+                        command=self.on_bionic_reading_changed).grid(row=0, column=2, padx=(0, 15), sticky=tk.W)
 
         # Show floating window checkbox
         self.show_floating_window_var = tk.BooleanVar(value=False)
         self.show_floating_window_checkbox = ttk.Checkbutton(controls_frame, text="Show floating window",
-                       variable=self.show_floating_window_var,
-                       command=self.on_show_floating_window_changed)
+                        variable=self.show_floating_window_var,
+                        command=self.on_show_floating_window_changed)
         self.show_floating_window_checkbox.grid(row=0, column=3, padx=(0, 15), sticky=tk.W)
 
         # Control buttons
@@ -143,36 +149,47 @@ class WhisperExtension:
         self.last_update_label = ttk.Label(controls_frame, text="--", foreground="gray", font=("Courier", 9))
         self.last_update_label.grid(row=0, column=6, sticky=tk.E)
 
-        # Row 1: Only show in-progress, Hide in-progress
+        # Row 1: Only show in-progress, Hide in-progress, Language selection
         # Show only incomplete checkbox
         self.show_only_incomplete_var = tk.BooleanVar(value=False)
         self.show_only_incomplete_checkbox = ttk.Checkbutton(controls_frame, text="Only show in-progress",
-                       variable=self.show_only_incomplete_var,
-                       command=self.on_show_only_incomplete_changed)
+                        variable=self.show_only_incomplete_var,
+                        command=self.on_show_only_incomplete_changed)
         self.show_only_incomplete_checkbox.grid(row=1, column=0, padx=(0, 15), pady=(5, 0), sticky=tk.W)
 
         # Hide incomplete checkbox
         self.hide_incomplete_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(controls_frame, text="Hide in-progress",
-                       variable=self.hide_incomplete_var,
-                       command=self.on_hide_incomplete_changed).grid(row=1, column=1, padx=(0, 15), pady=(5, 0), sticky=tk.W)
-        
+                        variable=self.hide_incomplete_var,
+                        command=self.on_hide_incomplete_changed).grid(row=1, column=1, padx=(0, 15), pady=(5, 0), sticky=tk.W)
+
+        # Language selection dropdown (far right on row 1)
+        ttk.Label(controls_frame, text="Language:").grid(row=1, column=4, padx=(0, 5), pady=(5, 0), sticky=tk.W)
+        self.language_var = tk.StringVar(value='en')
+        self.language_combo = ttk.Combobox(controls_frame, textvariable=self.language_var,
+                                            state='readonly', width=15)
+        self.language_combo.grid(row=1, column=5, padx=(0, 15), pady=(5, 0), sticky=tk.W)
+        self.language_combo.bind('<<ComboboxSelected>>', self.on_language_changed)
+
+        # Populate language dropdown from server
+        self.populate_language_dropdown()
+
         # Transcription display frame with language label
         trans_header_frame = ttk.Frame(main_frame)
         trans_header_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 0))
-        
+
         trans_frame = ttk.LabelFrame(trans_header_frame, text="Transcription", padding="10")
         trans_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
+
         self.language_label = ttk.Label(trans_header_frame, text="", foreground="gray", font=("Courier", 9, "italic"))
         self.language_label.pack(side=tk.LEFT, padx=(5, 0))
-        
+
         main_frame.rowconfigure(2, weight=1)
-        
+
         # Action buttons in header
         actions_frame = ttk.Frame(trans_frame)
         actions_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 5))
-        
+
         # Font size controls on the left
         ttk.Button(actions_frame, text="−", width=3, command=self.decrease_font_size).pack(side=tk.LEFT, padx=(0, 2))
         ttk.Button(actions_frame, text="+", width=3, command=self.increase_font_size).pack(side=tk.LEFT, padx=(0, 10))
@@ -180,7 +197,7 @@ class WhisperExtension:
         ttk.Button(actions_frame, text="📋 Copy", command=self.copy_to_clipboard).pack(side=tk.RIGHT, padx=(5, 0))
         ttk.Button(actions_frame, text="💾 Save", command=self.save_transcription).pack(side=tk.RIGHT, padx=(5, 0))
         ttk.Button(actions_frame, text="🗑️ Clear", command=self.clear_transcription).pack(side=tk.RIGHT)
-        
+
         # Transcription text area
         self.transcription_text = scrolledtext.ScrolledText(
             trans_frame,
@@ -194,7 +211,7 @@ class WhisperExtension:
         )
         self.transcription_text.pack(fill=tk.BOTH, expand=True)
         self.transcription_text.config(state=tk.DISABLED)
-        
+
         # Configure text tags for styling
         self.transcription_text.tag_config("completed", foreground="#e0e0e0")
         self.transcription_text.tag_config("incomplete", foreground="#ff9800", font=("Consolas", self.font_size, "italic"))
@@ -202,20 +219,145 @@ class WhisperExtension:
         # Bionic reading tags
         self.transcription_text.tag_config("bionic_bold", font=("Consolas", self.font_size, "bold"))
         self.transcription_text.tag_config("bionic_bold_incomplete", foreground="#ff9800", font=("Consolas", self.font_size, "bold italic"))
-        
+
         # Help section
         help_frame = ttk.LabelFrame(main_frame, text="Help", padding="10")
         help_frame.grid(row=3, column=0, sticky=(tk.W, tk.E))
-        
+
         help_text = ("Speech-to-Text Decoder\n"
                     "Real-time transcription. Tune to a voice frequency, click Start, and watch the transcription appear.\n"
-                    "Model and language are configured server-side.")
+                    "Select your language from the dropdown. The model is configured server-side.")
         ttk.Label(help_frame, text=help_text, wraplength=650, justify=tk.LEFT).pack()
-        
+
+    def populate_language_dropdown(self):
+        """Fetch and populate the language dropdown from the server."""
+        try:
+            # Get the server URL from the WebSocket connection
+            server_url = self.get_server_url()
+            if not server_url:
+                print("[Whisper] Could not determine server URL, using default language list")
+                self.use_default_languages()
+                return
+
+            # Fetch languages.js from the server
+            languages_url = f"{server_url}/languages.js"
+            print(f"[Whisper] Fetching languages from: {languages_url}")
+
+            with urllib.request.urlopen(languages_url, timeout=5) as response:
+                content = response.read().decode('utf-8')
+
+            # Parse the JavaScript to extract the language list
+            # Look for the WHISPER_LANGUAGES array
+            languages = self.parse_languages_js(content)
+
+            if languages:
+                self.available_languages = languages
+                # Sort alphabetically by name
+                self.available_languages.sort(key=lambda x: x['name'])
+
+                # Populate combobox
+                language_names = [f"{lang['name']} ({lang['code']})" for lang in self.available_languages]
+                self.language_combo['values'] = language_names
+
+                # Set default to English
+                english_idx = next((i for i, lang in enumerate(self.available_languages) if lang['code'] == 'en'), 0)
+                self.language_combo.current(english_idx)
+                self.selected_language = self.available_languages[english_idx]['code']
+
+                print(f"[Whisper] Loaded {len(self.available_languages)} languages from server")
+            else:
+                print("[Whisper] Failed to parse languages, using default list")
+                self.use_default_languages()
+
+        except Exception as e:
+            print(f"[Whisper] Error fetching languages from server: {e}")
+            print("[Whisper] Using default language list")
+            self.use_default_languages()
+
+    def get_server_url(self) -> Optional[str]:
+        """Get the server URL from the WebSocket connection."""
+        try:
+            if self.dxcluster_ws and hasattr(self.dxcluster_ws, 'ws') and hasattr(self.dxcluster_ws.ws, 'url'):
+                ws_url = self.dxcluster_ws.ws.url
+                # Convert ws:// or wss:// to http:// or https://
+                if ws_url.startswith('ws://'):
+                    return 'http://' + ws_url[5:].split('/')[0]
+                elif ws_url.startswith('wss://'):
+                    return 'https://' + ws_url[6:].split('/')[0]
+        except Exception as e:
+            print(f"[Whisper] Error getting server URL: {e}")
+        return None
+
+    def parse_languages_js(self, content: str) -> List[Dict[str, str]]:
+        """Parse the languages.js file to extract the language list."""
+        try:
+            # Find the WHISPER_LANGUAGES array in the JavaScript
+            import re
+
+            # Look for the array definition
+            match = re.search(r'const\s+WHISPER_LANGUAGES\s*=\s*\[(.*?)\];', content, re.DOTALL)
+            if not match:
+                return []
+
+            array_content = match.group(1)
+
+            # Extract language objects using regex
+            # Pattern: { code: "xx", name: "Name" }
+            pattern = r'\{\s*code:\s*"([^"]+)"\s*,\s*name:\s*"([^"]+)"\s*\}'
+            matches = re.findall(pattern, array_content)
+
+            languages = [{'code': code, 'name': name} for code, name in matches]
+            return languages
+
+        except Exception as e:
+            print(f"[Whisper] Error parsing languages.js: {e}")
+            return []
+
+    def use_default_languages(self):
+        """Use a default set of common languages if server fetch fails."""
+        self.available_languages = [
+            {'code': 'en', 'name': 'English'},
+            {'code': 'es', 'name': 'Spanish'},
+            {'code': 'fr', 'name': 'French'},
+            {'code': 'de', 'name': 'German'},
+            {'code': 'it', 'name': 'Italian'},
+            {'code': 'pt', 'name': 'Portuguese'},
+            {'code': 'ru', 'name': 'Russian'},
+            {'code': 'zh', 'name': 'Chinese'},
+            {'code': 'ja', 'name': 'Japanese'},
+            {'code': 'ko', 'name': 'Korean'},
+            {'code': 'ar', 'name': 'Arabic'},
+            {'code': 'hi', 'name': 'Hindi'},
+            {'code': 'nl', 'name': 'Dutch'},
+            {'code': 'pl', 'name': 'Polish'},
+            {'code': 'tr', 'name': 'Turkish'},
+        ]
+
+        # Sort alphabetically
+        self.available_languages.sort(key=lambda x: x['name'])
+
+        # Populate combobox
+        language_names = [f"{lang['name']} ({lang['code']})" for lang in self.available_languages]
+        self.language_combo['values'] = language_names
+
+        # Set default to English
+        english_idx = next((i for i, lang in enumerate(self.available_languages) if lang['code'] == 'en'), 0)
+        self.language_combo.current(english_idx)
+        self.selected_language = self.available_languages[english_idx]['code']
+
+        print(f"[Whisper] Using default language list with {len(self.available_languages)} languages")
+
+    def on_language_changed(self, event=None):
+        """Handle language selection change."""
+        selected_idx = self.language_combo.current()
+        if 0 <= selected_idx < len(self.available_languages):
+            self.selected_language = self.available_languages[selected_idx]['code']
+            print(f"[Whisper] Language changed to: {self.selected_language}")
+
     def on_auto_scroll_changed(self):
         """Handle auto-scroll checkbox change."""
         self.auto_scroll = self.auto_scroll_var.get()
-        
+
     def on_show_timestamps_changed(self):
         """Handle show timestamps checkbox change."""
         self.show_timestamps = self.show_timestamps_var.get()
@@ -267,7 +409,7 @@ class WhisperExtension:
     def start_decoder(self):
         """Start the decoder."""
         print("[Whisper] Starting decoder")
-        
+
         self.running = True
         self.session_start_time = time.time()
         self.last_update_time = None
@@ -276,30 +418,30 @@ class WhisperExtension:
         self.update_language_display()
         self.update_button_states()
         self.update_status("Starting...", "orange")
-        
+
         # Show waiting message
         self.render_transcription()
-        
+
         # Start update timer
         self.start_update_timer()
-        
+
         # Start frequency monitoring
         self.start_frequency_monitoring()
-        
+
         # Attach to audio extension
         self.attach_audio_extension()
-        
+
     def stop_decoder(self, skip_frequency_monitoring=False):
         """Stop the decoder."""
         print("[Whisper] Stopping decoder")
-        
+
         self.running = False
         self.update_button_states()
         self.update_status("Stopped", "gray")
-        
+
         # Stop update timer
         self.stop_update_timer()
-        
+
         # Stop frequency monitoring (unless we're stopping due to frequency change)
         if not skip_frequency_monitoring:
             self.stop_frequency_monitoring()
@@ -317,57 +459,59 @@ class WhisperExtension:
             self.update_status("Error: No connection", "red")
             self.update_server_status("Not connected", "red")
             return
-        
+
         try:
             # Setup binary message handler before attaching
             self.setup_binary_message_handler()
-            
+
             attach_msg = {
                 'type': 'audio_extension_attach',
                 'extension_name': 'whisper',
-                'params': {}  # No user-configurable parameters
+                'params': {
+                    'language': self.selected_language
+                }
             }
-            
+
             print(f"[Whisper] Sending attach message: {attach_msg}")
             self.dxcluster_ws.ws.send(json.dumps(attach_msg))
-            
+
             self.update_status("Running", "green")
             self.update_server_status("Connected", "green")
-            
+
         except Exception as e:
             print(f"[Whisper] Error attaching: {e}")
             self.update_status(f"Error: {e}", "red")
             self.update_server_status("Error", "red")
-        
+
     def detach_audio_extension(self):
         """Detach from the audio extension."""
         if not self.dxcluster_ws or not self.dxcluster_ws.is_connected():
             print("[Whisper] ERROR: DX WebSocket not connected")
             return
-        
+
         try:
             # Remove binary message handler before detaching
             self.remove_binary_message_handler()
-            
+
             detach_msg = {
                 'type': 'audio_extension_detach'
             }
-            
+
             print("[Whisper] Sending detach message")
             if hasattr(self.dxcluster_ws, 'ws'):
                 self.dxcluster_ws.ws.send(json.dumps(detach_msg))
-            
+
             self.update_server_status("Disconnected", "gray")
-            
+
         except Exception as e:
             print(f"[Whisper] Error detaching: {e}")
-        
+
     def setup_binary_message_handler(self):
         """Setup handler for binary messages from WebSocket."""
         # Store original handler
         if hasattr(self.dxcluster_ws, 'ws') and hasattr(self.dxcluster_ws.ws, 'on_message'):
             self.original_ws_handler = self.dxcluster_ws.ws.on_message
-        
+
         # Create new handler that intercepts binary messages
         def binary_handler(ws, message):
             if isinstance(message, bytes):
@@ -377,66 +521,66 @@ class WhisperExtension:
                 # Text message - pass to original handler
                 if self.original_ws_handler:
                     self.original_ws_handler(ws, message)
-        
+
         if hasattr(self.dxcluster_ws, 'ws'):
             self.dxcluster_ws.ws.on_message = binary_handler
             print("[Whisper] Binary message handler installed")
-        
+
     def remove_binary_message_handler(self):
         """Remove binary message handler."""
         if self.original_ws_handler and hasattr(self.dxcluster_ws, 'ws'):
             self.dxcluster_ws.ws.on_message = self.original_ws_handler
             self.original_ws_handler = None
             print("[Whisper] Original message handler restored")
-            
+
     def handle_binary_message(self, data: bytes):
         """Handle binary message from WebSocket."""
         if len(data) < 1:
             return
-        
+
         message_type = data[0]
-        
+
         if message_type == 0x02:  # Segments JSON
             self.handle_segments(data)
         elif message_type == 0x03:  # Language detection
             self.handle_language_detection(data)
         else:
             print(f"[Whisper] Unknown message type: 0x{message_type:02x}")
-            
+
     def handle_segments(self, data: bytes):
         """Handle segments message."""
         # Binary protocol: [type:1][timestamp:8][json_length:4][json:N]
         if len(data) < 13:
             return
-        
+
         # Extract timestamp (bytes 1-8, big-endian)
         timestamp_nano = struct.unpack('>Q', data[1:9])[0]
-        
+
         # Extract JSON length (bytes 9-12, big-endian)
         json_length = struct.unpack('>I', data[9:13])[0]
-        
+
         # Extract JSON (bytes 13 onwards)
         if len(data) < 13 + json_length:
             return
-        
+
         json_bytes = data[13:13+json_length]
         json_str = json_bytes.decode('utf-8')
-        
+
         try:
             segments = json.loads(json_str)
         except json.JSONDecodeError as e:
             print(f"[Whisper] Failed to parse segments JSON: {e}")
             return
-        
+
         if not isinstance(segments, list) or len(segments) == 0:
             return
-        
+
         # Process segments
         self.process_segments(segments)
-        
+
         # Update last update time
         self.last_update_time = time.time()
-        
+
         # Render updated transcription
         self.render_transcription()
 
@@ -464,7 +608,7 @@ class WhisperExtension:
         # If we didn't find an incomplete segment, clear last_segment
         if not found_incomplete:
             self.last_segment = None
-                    
+
     def calculate_bionic_split(self, word):
         """Calculate how many characters to bold for bionic reading.
 
@@ -663,7 +807,7 @@ class WhisperExtension:
             self.last_rendered_incomplete = current_incomplete
 
         self.transcription_text.config(state=tk.DISABLED)
-        
+
     def clear_transcription(self):
         """Clear the transcription."""
         print("[Whisper] Clearing transcription")
@@ -677,23 +821,23 @@ class WhisperExtension:
 
         self.render_transcription()
         self.update_floating_window()  # Update floating window to show cleared state
-        
+
     def copy_to_clipboard(self):
         """Copy transcription to clipboard."""
         # Get all completed segments plus the current incomplete one
         all_segments = self.transcript.copy()
         if self.last_segment:
             all_segments.append(self.last_segment)
-        
+
         text = ' '.join(seg.get('text', '') for seg in all_segments)
-        
+
         self.window.clipboard_clear()
         self.window.clipboard_append(text)
         self.window.update()  # Required for clipboard to work
-        
+
         print("[Whisper] Copied to clipboard")
         self.show_temporary_message("Copied to clipboard!")
-        
+
     def save_transcription(self):
         """Save transcription to file."""
         # Get all completed segments plus the current incomplete one
@@ -737,7 +881,7 @@ class WhisperExtension:
                 pass
 
         # Format start time (session start)
-        start_time = datetime.fromtimestamp(self.session_start_time / 1000) if self.session_start_time else datetime.now()
+        start_time = datetime.fromtimestamp(self.session_start_time) if self.session_start_time else datetime.now()
         start_time_str = start_time.strftime('%Y-%m-%dT%H-%M-%S')
 
         # Format last message time (last segment end time)
@@ -745,8 +889,8 @@ class WhisperExtension:
         if all_segments and self.session_start_time:
             last_segment = all_segments[-1]
             if 'end' in last_segment:
-                last_segment_offset_ms = float(last_segment['end']) * 1000
-                last_time = datetime.fromtimestamp((self.session_start_time + last_segment_offset_ms) / 1000)
+                last_segment_offset_s = float(last_segment['end'])
+                last_time = datetime.fromtimestamp(self.session_start_time + last_segment_offset_s)
                 last_time_str = last_time.strftime('%Y-%m-%dT%H-%M-%S')
 
         default_filename = f"{callsign}_{freq_mhz}MHz_{mode}_{start_time_str}_to_{last_time_str}.txt"
@@ -756,7 +900,7 @@ class WhisperExtension:
             initialfile=default_filename,
             filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
         )
-        
+
         if filename:
             try:
                 with open(filename, 'w', encoding='utf-8') as f:
@@ -766,59 +910,61 @@ class WhisperExtension:
             except Exception as e:
                 print(f"[Whisper] Error saving file: {e}")
                 messagebox.showerror("Error", f"Failed to save file: {e}")
-                
+
     def show_temporary_message(self, message: str):
         """Show a temporary message in the status label."""
         original_text = self.status_label.cget("text")
         original_color = self.status_label.cget("foreground")
-        
+
         self.status_label.config(text=message, foreground="green")
         self.window.after(2000, lambda: self.status_label.config(text=original_text, foreground=original_color))
-        
+
     def update_button_states(self):
         """Update button states based on running state."""
         if self.running:
             self.start_button.config(state=tk.DISABLED)
             self.stop_button.config(state=tk.NORMAL)
+            self.language_combo.config(state=tk.DISABLED)
         else:
             self.start_button.config(state=tk.NORMAL)
             self.stop_button.config(state=tk.DISABLED)
-            
+            self.language_combo.config(state='readonly')
+
     def update_status(self, text: str, color: str):
         """Update status label."""
         self.status_label.config(text=text, foreground=color)
-        
+
     def update_server_status(self, text: str, color: str):
         """Update server status label."""
         self.server_status_label.config(text=text, foreground=color)
-        
+
     def start_update_timer(self):
         """Start the update timer."""
         self.stop_update_timer()
         self.update_last_update_display()
         self.update_timer_id = self.window.after(1000, self.update_timer_tick)
-        
+
     def stop_update_timer(self):
         """Stop the update timer."""
         if self.update_timer_id:
             self.window.after_cancel(self.update_timer_id)
             self.update_timer_id = None
         self.last_update_label.config(text="--")
-        
+
     def update_timer_tick(self):
         """Timer tick to update the last update display."""
         self.update_last_update_display()
         if self.running:
             self.update_timer_id = self.window.after(1000, self.update_timer_tick)
-            
+
     def update_last_update_display(self):
         """Update the 'time since last update' display."""
         if not self.last_update_time:
             self.last_update_label.config(text="--")
             return
-        
+
         elapsed_s = int(time.time() - self.last_update_time)
-        
+
         if elapsed_s < 60:
             self.last_update_label.config(text=f"{elapsed_s}s")
         else:
@@ -1033,7 +1179,7 @@ class WhisperExtension:
             else:
                 text = "Waiting for speech..."
                 text_tag = "waiting"
-            
+
             # Only update if text actually changed
             if text != self.last_floating_text:
                 self.last_floating_text = text
@@ -1068,7 +1214,7 @@ class WhisperExtension:
         if self.font_size < 24:  # Maximum font size
             self.font_size += 1
             self.update_text_font()
-            
+
             # Also increase floating window font size
             if self.floating_font_size < 28:
                 self.floating_font_size += 2
@@ -1079,7 +1225,7 @@ class WhisperExtension:
         if self.font_size > 6:  # Minimum font size
             self.font_size -= 1
             self.update_text_font()
-            
+
             # Also decrease floating window font size
             if self.floating_font_size > 10:
                 self.floating_font_size -= 2
@@ -1128,12 +1274,12 @@ class WhisperExtension:
 def create_whisper_window(parent: tk.Tk, dxcluster_ws, radio_control) -> WhisperExtension:
     """
     Create and return a Whisper extension window.
-    
+
     Args:
         parent: Parent window
         dxcluster_ws: DX cluster WebSocket connection
         radio_control: Radio control object
-        
+
     Returns:
         WhisperExtension instance
     """

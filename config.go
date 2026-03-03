@@ -342,6 +342,7 @@ type WhisperConfig struct {
 	Translate      bool   `yaml:"translate"`        // Enable translation to English (true) or transcription in original language (false)
 	SendIntervalMs int    `yaml:"send_interval_ms"` // Audio send interval in milliseconds
 	InitialPrompt  string `yaml:"initial_prompt"`   // Initial prompt to guide transcription style/context
+	MaxUsers       int    `yaml:"max_users"`        // Maximum concurrent users of the extension (0 = unlimited)
 }
 
 // LoadConfig loads configuration from a YAML file

@@ -152,10 +152,16 @@ func (d *WhisperDecoder) connectWebSocket() error {
 		HandshakeTimeout: 10 * time.Second,
 	}
 
-	// Prepare headers including instance UUID
+	// Prepare headers including instance UUID, model, and max users
 	headers := make(map[string][]string)
 	if d.config.InstanceUUID != "" {
 		headers["X-UberSDR-UUID"] = []string{d.config.InstanceUUID}
+	}
+	if d.config.Model != "" {
+		headers["X-UberSDR-Model"] = []string{d.config.Model}
+	}
+	if GlobalConfigProvider != nil && GlobalConfigProvider.MaxUsers > 0 {
+		headers["X-UberSDR-Max-Users"] = []string{fmt.Sprintf("%d", GlobalConfigProvider.MaxUsers)}
 	}
 
 	conn, _, err := dialer.Dial(d.config.ServerURL, headers)

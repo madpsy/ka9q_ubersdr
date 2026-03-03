@@ -1261,6 +1261,7 @@ func main() {
 		SendIntervalMs: config.Whisper.SendIntervalMs,
 		InitialPrompt:  config.Whisper.InitialPrompt,
 		InstanceUUID:   config.InstanceReporting.InstanceUUID,
+		MaxUsers:       config.Whisper.MaxUsers,
 	}
 	whisperInfo := whisper.GetInfo()
 

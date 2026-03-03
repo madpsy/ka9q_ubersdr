@@ -1457,6 +1457,13 @@ whisper:
   # The server must be accessible from the UberSDR container
   server_url: "wss://whisper.ubersdr.org"
 
+  # Maximum concurrent users of the Whisper extension (default: 2)
+  # Limits how many users can use speech-to-text transcription simultaneously
+  # This helps manage server load and resource usage
+  # Set to 0 for unlimited users (not recommended for public instances)
+  # Recommended: 2-5 depending on server capacity
+  max_users: 2
+
   # Whisper model to use
   # Available models:
   #   Multilingual: tiny, base, small, medium, large

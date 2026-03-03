@@ -3,6 +3,7 @@ package whisper
 import (
 	"fmt"
 	"log"
+	"sync"
 )
 
 // ConfigProvider is set by main package to provide access to configuration
@@ -15,10 +16,15 @@ type ConfigProvider struct {
 	SendIntervalMs int
 	InitialPrompt  string
 	InstanceUUID   string
+	MaxUsers       int
 }
 
 // GlobalConfigProvider is set by main package
 var GlobalConfigProvider *ConfigProvider
+
+// activeUserCount tracks the number of concurrent whisper users
+var activeUserCount int
+var activeUserMutex sync.Mutex
 
 /*
  * Whisper Speech-to-Text Extension
@@ -59,6 +65,19 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 	// Check if extension is enabled
 	if GlobalConfigProvider != nil && !GlobalConfigProvider.Enabled {
 		return nil, fmt.Errorf("whisper extension is disabled in configuration (set whisper.enabled: true in config.yaml)")
+	}
+
+	// Check max users limit
+	if GlobalConfigProvider != nil && GlobalConfigProvider.MaxUsers > 0 {
+		activeUserMutex.Lock()
+		if activeUserCount >= GlobalConfigProvider.MaxUsers {
+			activeUserMutex.Unlock()
+			return nil, fmt.Errorf("maximum whisper users reached (%d/%d)", activeUserCount, GlobalConfigProvider.MaxUsers)
+		}
+		activeUserCount++
+		currentCount := activeUserCount
+		activeUserMutex.Unlock()
+		log.Printf("[Whisper Extension] User connected (%d/%d)", currentCount, GlobalConfigProvider.MaxUsers)
 	}
 
 	// Validate audio parameters
@@ -123,6 +142,17 @@ func (e *WhisperExtension) Start(audioChan <-chan AudioSample, resultChan chan<-
 
 // Stop stops the extension
 func (e *WhisperExtension) Stop() error {
+	// Decrement active user count
+	if GlobalConfigProvider != nil && GlobalConfigProvider.MaxUsers > 0 {
+		activeUserMutex.Lock()
+		if activeUserCount > 0 {
+			activeUserCount--
+		}
+		currentCount := activeUserCount
+		activeUserMutex.Unlock()
+		log.Printf("[Whisper Extension] User disconnected (%d/%d)", currentCount, GlobalConfigProvider.MaxUsers)
+	}
+
 	return e.decoder.Stop()
 }
 

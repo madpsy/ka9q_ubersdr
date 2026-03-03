@@ -842,7 +842,6 @@ func (d *WhisperDecoder) translateText(text, sourceLang, targetLang string) stri
 		return text
 	}
 
-	log.Printf("[Whisper] Translated (%s->%s): '%s' -> '%s'", sourceLang, targetLang, text, result.TranslatedText)
 	return result.TranslatedText
 }
 

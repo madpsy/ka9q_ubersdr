@@ -391,8 +391,6 @@ func ParseDecoderLog(filename string, dialFreq uint64, mode DecoderMode, bandNam
 		// Only include decodes with valid callsigns
 		if info.HasCallsign {
 			decodes = append(decodes, info)
-		} else if DebugMode && mode == ModeWSPR {
-			log.Printf("WSPR DEBUG: Skipping decode without valid callsign: %s", info.Callsign)
 		}
 	}
 

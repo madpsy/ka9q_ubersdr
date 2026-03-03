@@ -1626,6 +1626,11 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
     
+    /* Hide audio filters section on mobile */
+    .audio-controls-section {
+        display: none !important;
+    }
+    
     /* Hide all filter panels on mobile */
     .filters-grid,
     .filters-grid-2x3,

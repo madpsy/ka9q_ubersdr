@@ -80,11 +80,11 @@ type StreamingDecoder struct {
 func NewStreamingDecoder(binaryPath string, band *DecoderBand, config *DecoderConfig, ctyDatabase *CTYDatabase) (*StreamingDecoder, error) {
 	// Build command arguments based on mode
 	var args []string
-	if band.Config.Mode == ModeFT2 || band.Config.Mode == ModeFT8 || band.Config.Mode == ModeFT4 {
-		// FT2/FT8/FT4 use jt9_decoder with specific arguments
+	if band.Config.Mode == ModeFT2 {
+		// FT2 uses jt9_decoder with specific arguments
 		// jt9_decoder reads from stdin by default when -s is specified
 		args = []string{
-			"-m", band.Config.Mode.String(),
+			"-m", "FT2",
 			"-j", "/usr/bin/jt9",
 			"-s",
 			"-d", fmt.Sprintf("%d", band.Config.Depth),
@@ -197,11 +197,11 @@ func (sd *StreamingDecoder) restart() error {
 
 	// Build command arguments based on mode
 	var args []string
-	if sd.band.Config.Mode == ModeFT2 || sd.band.Config.Mode == ModeFT8 || sd.band.Config.Mode == ModeFT4 {
-		// FT2/FT8/FT4 use jt9_decoder with specific arguments
+	if sd.band.Config.Mode == ModeFT2 {
+		// FT2 uses jt9_decoder with specific arguments
 		// jt9_decoder reads from stdin by default when -s is specified
 		args = []string{
-			"-m", sd.band.Config.Mode.String(),
+			"-m", "FT2",
 			"-j", "/usr/bin/jt9",
 			"-s",
 			"-d", fmt.Sprintf("%d", sd.band.Config.Depth),
@@ -297,28 +297,19 @@ func (sd *StreamingDecoder) readStdout() {
 		var decode *DecodeInfo
 		var err error
 
-		if sd.band.Config.Mode == ModeFT2 || sd.band.Config.Mode == ModeFT8 || sd.band.Config.Mode == ModeFT4 {
-			// FT2/FT8/FT4 use FT8 format output
+		if sd.band.Config.Mode == ModeFT2 {
+			// FT2 uses FT8 format output
 			decode, err = ParseFT8Line(line, sd.band.Config.Frequency, sd.band.Config.Mode)
 			if err == nil {
-				// Calculate most recent cycle boundary
+				// FT2 has 3.75-second cycles - calculate most recent cycle boundary
 				// The decoder outputs the transmission time from the signal, which can be hours old.
 				// For PSK Reporter, we need to use the current time rounded to the nearest cycle boundary.
 				now := time.Now().UTC()
 				midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 				nanosSinceMidnight := now.Sub(midnight).Nanoseconds()
 
-				// Determine cycle time based on mode
-				var cycleNanos int64
-				switch sd.band.Config.Mode {
-				case ModeFT2:
-					cycleNanos = int64(3750000000) // 3.75 seconds
-				case ModeFT8:
-					cycleNanos = int64(15000000000) // 15 seconds
-				case ModeFT4:
-					cycleNanos = int64(7500000000) // 7.5 seconds
-				}
-
+				// FT2 cycle is 3.75 seconds = 3,750,000,000 nanoseconds
+				cycleNanos := int64(3750000000)
 				cyclesSinceMidnight := nanosSinceMidnight / cycleNanos
 				boundaryNanos := cyclesSinceMidnight * cycleNanos
 

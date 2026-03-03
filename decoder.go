@@ -366,14 +366,14 @@ func (md *MultiDecoder) bandMonitorLoop(band *DecoderBand) {
 	}
 }
 
-// streamingMonitorLoop handles streaming decoders (JS8, FT2, etc.)
+// streamingMonitorLoop handles streaming decoders (JS8, FT2, FT8, FT4, etc.)
 func (md *MultiDecoder) streamingMonitorLoop(band *DecoderBand) {
 	// Get decoder binary path based on mode
 	var binaryPath string
 	switch band.Config.Mode {
 	case ModeJS8:
 		binaryPath = md.config.JS8Path
-	case ModeFT2:
+	case ModeFT2, ModeFT8, ModeFT4:
 		binaryPath = md.config.FT2Path
 	default:
 		log.Printf("Error: Unknown streaming mode %s", band.Config.Mode)

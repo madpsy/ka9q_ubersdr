@@ -97,21 +97,21 @@ func GetModeInfo(mode DecoderMode) ModeInfo {
 		}
 	case ModeFT8:
 		return ModeInfo{
-			CycleTime:        15 * time.Second,
-			TransmissionTime: 12640 * time.Millisecond, // 12.64s
-			DecoderCommand:   "jt9",
-			DecoderArgs:      []string{"-8", "-d", "{depth}", "{file}"},
+			CycleTime:        0, // No fixed cycles for streaming mode
+			TransmissionTime: 0,
+			DecoderCommand:   "jt9_decoder",
+			DecoderArgs:      []string{"-m", "FT8", "-j", "/usr/bin/jt9", "-s", "-d", "{depth}"},
 			Preset:           "usb",
-			IsStreaming:      false,
+			IsStreaming:      true,
 		}
 	case ModeFT4:
 		return ModeInfo{
-			CycleTime:        7500 * time.Millisecond, // 7.5s
-			TransmissionTime: 4480 * time.Millisecond, // 4.48s
-			DecoderCommand:   "jt9",
-			DecoderArgs:      []string{"-5", "-d", "{depth}", "{file}"},
+			CycleTime:        0, // No fixed cycles for streaming mode
+			TransmissionTime: 0,
+			DecoderCommand:   "jt9_decoder",
+			DecoderArgs:      []string{"-m", "FT4", "-j", "/usr/bin/jt9", "-s", "-d", "{depth}"},
 			Preset:           "usb",
-			IsStreaming:      false,
+			IsStreaming:      true,
 		}
 	case ModeJS8:
 		return ModeInfo{
@@ -229,7 +229,6 @@ func (dc *DecoderConfig) Validate() error {
 	}
 
 	// Check if any bands need specific decoders
-	needsJT9 := false
 	needsWSPRD := false
 	needsJS8 := false
 	needsFT2 := false
@@ -237,24 +236,18 @@ func (dc *DecoderConfig) Validate() error {
 		if !band.Enabled {
 			continue
 		}
-		if band.Mode == ModeFT8 || band.Mode == ModeFT4 {
-			needsJT9 = true
-		}
 		if band.Mode == ModeWSPR {
 			needsWSPRD = true
 		}
 		if band.Mode == ModeJS8 {
 			needsJS8 = true
 		}
-		if band.Mode == ModeFT2 {
+		if band.Mode == ModeFT2 || band.Mode == ModeFT8 || band.Mode == ModeFT4 {
 			needsFT2 = true
 		}
 	}
 
 	// Validate binary paths for needed decoders
-	if needsJT9 && dc.JT9Path == "" {
-		return fmt.Errorf("jt9_path required for FT8/FT4 decoding")
-	}
 	if needsWSPRD && dc.WSPRDPath == "" {
 		return fmt.Errorf("wsprd_path required for WSPR decoding")
 	}
@@ -262,7 +255,7 @@ func (dc *DecoderConfig) Validate() error {
 		return fmt.Errorf("js8_path required for JS8 decoding")
 	}
 	if needsFT2 && dc.FT2Path == "" {
-		return fmt.Errorf("ft2_path required for FT2 decoding")
+		return fmt.Errorf("ft2_path required for FT2/FT8/FT4 decoding")
 	}
 
 	// Validate receiver info if reporting is enabled

@@ -100,6 +100,7 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 			InitialPrompt:     GlobalConfigProvider.InitialPrompt,
 			InstanceUUID:      GlobalConfigProvider.InstanceUUID,
 			LibreTranslateURL: GlobalConfigProvider.LibreTranslateURL,
+			TargetLanguage:    "en", // Default to English
 		}
 		log.Printf("[Whisper Extension] Using configuration from config.yaml")
 	} else {
@@ -113,15 +114,22 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 			InitialPrompt:     "",
 			InstanceUUID:      "",
 			LibreTranslateURL: "https://whisper.ubersdr.org/translate",
+			TargetLanguage:    "en", // Default to English
 		}
 		log.Printf("[Whisper Extension] Using default configuration (config not available)")
+	}
+
+	// Override target language from frontend parameter if provided
+	if language, ok := extensionParams["language"].(string); ok && language != "" {
+		config.TargetLanguage = language
+		log.Printf("[Whisper Extension] Target language from frontend: %s", language)
 	}
 
 	// Create decoder
 	decoder := NewWhisperDecoder(audioParams.SampleRate, config)
 
-	log.Printf("[Whisper Extension] Created with server: %s, model: %s, language: auto-detect, translate: %v, sample rate: %d Hz",
-		config.ServerURL, config.Model, config.Translate, audioParams.SampleRate)
+	log.Printf("[Whisper Extension] Created with server: %s, model: %s, language: auto-detect, translate: %v, target: %s, sample rate: %d Hz",
+		config.ServerURL, config.Model, config.Translate, config.TargetLanguage, audioParams.SampleRate)
 
 	return &WhisperExtension{
 		decoder: decoder,

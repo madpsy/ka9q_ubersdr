@@ -34,6 +34,7 @@ type WhisperConfig struct {
 	InitialPrompt     string
 	InstanceUUID      string
 	LibreTranslateURL string
+	TargetLanguage    string // Target language for translation (from frontend)
 }
 
 // WhisperDecoder handles streaming audio to WhisperLive
@@ -631,20 +632,12 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 
 			// Only send if we haven't sent it before
 			if !alreadySent {
-				// Apply translation if enabled and language is not English
-				if d.config.Translate {
-					d.languageMu.RLock()
-					sourceLang := d.detectedLanguage
-					d.languageMu.RUnlock()
-
-					// Always translate to English
-					targetLang := "en"
-
-					// Translate if source language is detected and not English
-					if sourceLang != "" && sourceLang != "en" {
-						translatedText := d.translateText(segText, sourceLang, targetLang)
-						seg["text"] = translatedText
-					}
+				// Apply translation if enabled and target language is not English
+				// Whisper always returns English, so we translate from English to target language
+				if d.config.Translate && d.config.TargetLanguage != "" && d.config.TargetLanguage != "en" {
+					// Translate from English (Whisper's output) to target language
+					translatedText := d.translateText(segText, "en", d.config.TargetLanguage)
+					seg["text"] = translatedText
 				}
 
 				d.transcript = append(d.transcript, seg)

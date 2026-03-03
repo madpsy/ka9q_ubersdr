@@ -77,7 +77,7 @@ func NewWhisperDecoder(sampleRate int, config WhisperConfig) *WhisperDecoder {
 	// Compile suppress phrases (case-insensitive)
 	// Include optional trailing punctuation [!.?]* to remove punctuation marks
 	suppressPhrases := []*regexp.Regexp{
-		regexp.MustCompile(`(?i)thanks?\s+for\s+watching[!.?]*`),
+		regexp.MustCompile(`(?i)thanks?\s+(you\s+)?for\s+watching[!.?]*`),
 		regexp.MustCompile(`(?i)please\s+subscribe[!.?]*`),
 		regexp.MustCompile(`(?i)like\s+and\s+subscribe[!.?]*`),
 		regexp.MustCompile(`(?i)don'?t\s+forget\s+to\s+subscribe[!.?]*`),

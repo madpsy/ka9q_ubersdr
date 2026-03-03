@@ -1152,6 +1152,7 @@ class WhisperExtension extends DecoderExtension {
         
         // Update status to show error and stop the decoder
         this.updateStatus('Error: ' + errorMsg, 'whisper-status-error');
+        this.updateServerStatus('Not connected', 'whisper-status-error');
         this.isRunning = false;
         this.updateButtonStates();
     }

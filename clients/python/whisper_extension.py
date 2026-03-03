@@ -1025,7 +1025,7 @@ class WhisperExtension:
 
         # Update UI to show error
         self.update_status(f"Error: {error_msg}", "red")
-        self.update_server_status("Error", "red")
+        self.update_server_status("Not connected", "red")
 
         # Stop the decoder
         self.running = False

@@ -314,22 +314,36 @@ function toggleTTS() {
         } else {
             console.log('[TTS] Notification: TTS enabled');
         }
-    } else {
-        ttsEnabled = false;
-        window.speechSynthesis.cancel();
-        announcementQueue = [];
-        isProcessingQueue = false;
-        isSpeaking = false;
-        console.log('[TTS] Disabled');
 
-        // Show notification using window.showNotification if available
-        if (typeof window.showNotification === 'function') {
-            window.showNotification('Text-to-Speech announcements disabled', 'info', 3000);
-        } else {
-            console.log('[TTS] Notification: TTS disabled');
-        }
+        // Speak the enabled message
+        announceChange('Announcements enabled', false);
+    } else {
+        // Speak the disabled message before disabling
+        const utterance = new SpeechSynthesisUtterance('Announcements disabled');
+        utterance.rate = ttsRate;
+        utterance.volume = 1.0;
+        utterance.voice = ttsVoice;
+        utterance.lang = 'en-US';
+        window.speechSynthesis.speak(utterance);
+
+        // Disable after a short delay to allow the message to be spoken
+        setTimeout(() => {
+            ttsEnabled = false;
+            window.speechSynthesis.cancel();
+            announcementQueue = [];
+            isProcessingQueue = false;
+            isSpeaking = false;
+            console.log('[TTS] Disabled');
+
+            // Show notification using window.showNotification if available
+            if (typeof window.showNotification === 'function') {
+                window.showNotification('Text-to-Speech announcements disabled', 'info', 3000);
+            } else {
+                console.log('[TTS] Notification: TTS disabled');
+            }
+        }, 1500); // Wait for speech to complete
     }
-    
+
     // Update UI button
     updateTTSButton();
 }

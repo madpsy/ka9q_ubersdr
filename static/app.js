@@ -856,7 +856,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Check if connection will be allowed
         checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML);
 
-        audioStartButton.addEventListener('click', async () => {
+        const startAudio = async () => {
             // Hide overlay
             audioStartOverlay.classList.add('hidden');
 
@@ -886,6 +886,19 @@ document.addEventListener('DOMContentLoaded', () => {
             // This will initialize audio context and connect
             // Preserve bandwidth values loaded from URL
             setMode(currentMode, true);
+        };
+
+        audioStartButton.addEventListener('click', startAudio);
+
+        // Add keyboard listener for Enter/Return key
+        document.addEventListener('keydown', (e) => {
+            // Only trigger if overlay is visible and button is not disabled
+            if (!audioStartOverlay.classList.contains('hidden') && !audioStartButton.disabled) {
+                if (e.key === 'Enter' || e.key === 'Return') {
+                    e.preventDefault();
+                    startAudio();
+                }
+            }
         });
     }
 

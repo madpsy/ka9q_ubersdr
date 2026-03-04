@@ -869,6 +869,13 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             toggleVFO();
         }
+        // Y key: Toggle TTS announcements
+        else if (e.key === 'y' || e.key === 'Y') {
+            e.preventDefault();
+            if (window.ttsAnnouncements && typeof window.ttsAnnouncements.toggleTTS === 'function') {
+                window.ttsAnnouncements.toggleTTS();
+            }
+        }
     });
 
     // Setup audio start overlay
@@ -3311,6 +3318,11 @@ function handleFrequencyChange() {
         window.radioAPI.notifyFrequencyChange(frequency);
     }
 
+    // Announce frequency change for accessibility (TTS)
+    if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+        window.ttsAnnouncements.announceFrequencyChange(frequency);
+    }
+
     // Temporarily enable edge tune to force spectrum update when manually entering frequency
     const edgeTuneCheckbox = document.getElementById('spectrum-edge-tune-enable');
     const originalEdgeTuneState = edgeTuneCheckbox ? edgeTuneCheckbox.checked : false;
@@ -3833,6 +3845,11 @@ function setMode(mode, preserveBandwidth = false) {
     // Notify extensions of mode change
     if (window.radioAPI) {
         window.radioAPI.notifyModeChange(mode);
+    }
+
+    // Announce mode change for accessibility (TTS)
+    if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+        window.ttsAnnouncements.announceModeChange(mode);
     }
 
     // Update bandpass slider ranges for new mode (important for LSB)

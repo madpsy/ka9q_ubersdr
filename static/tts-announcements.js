@@ -9,6 +9,8 @@ let isSpeaking = false;
 let frequencyChangeTimer = null;
 let lastAnnouncedFrequency = null;
 let lastAnnouncedMode = null;
+let announcementQueue = [];
+let isProcessingQueue = false;
 
 /**
  * Check if browser is Chrome or Edge (Chromium-based)
@@ -157,18 +159,20 @@ function initializeTTS() {
 }
 
 /**
- * Announce text using TTS
- * @param {string} text - Text to announce
- * @param {boolean} queue - If true, queue the announcement instead of canceling previous
+ * Process the announcement queue
  */
-function announceChange(text, queue = false) {
-    if (!ttsEnabled || !ttsVoice) {
+function processAnnouncementQueue() {
+    if (isProcessingQueue || announcementQueue.length === 0) {
         return;
     }
 
-    // Cancel any pending speech unless we're queuing
-    if (!queue) {
-        window.speechSynthesis.cancel();
+    isProcessingQueue = true;
+    const text = announcementQueue.shift();
+
+    if (!ttsEnabled || !ttsVoice) {
+        isProcessingQueue = false;
+        announcementQueue = []; // Clear queue if TTS disabled
+        return;
     }
 
     const utterance = new SpeechSynthesisUtterance(text);
@@ -183,15 +187,50 @@ function announceChange(text, queue = false) {
 
     utterance.onend = () => {
         isSpeaking = false;
+        isProcessingQueue = false;
+        // Process next item in queue
+        if (announcementQueue.length > 0) {
+            setTimeout(() => processAnnouncementQueue(), 100); // Small delay between announcements
+        }
     };
 
     utterance.onerror = (event) => {
         console.error('[TTS] Error:', event.error);
         isSpeaking = false;
+        isProcessingQueue = false;
+        // Try to continue with queue despite error
+        if (announcementQueue.length > 0) {
+            setTimeout(() => processAnnouncementQueue(), 100);
+        }
     };
 
-    console.log(`[TTS] ${queue ? 'Queuing' : 'Speaking'}: "${text}"`);
+    console.log(`[TTS] Speaking: "${text}" (${announcementQueue.length} remaining in queue)`);
     window.speechSynthesis.speak(utterance);
+}
+
+/**
+ * Announce text using TTS with queue support
+ * @param {string} text - Text to announce
+ * @param {boolean} queue - If true, add to queue; if false, clear queue and announce immediately
+ */
+function announceChange(text, queue = false) {
+    if (!ttsEnabled || !ttsVoice) {
+        return;
+    }
+
+    if (queue) {
+        // Add to queue
+        announcementQueue.push(text);
+        console.log(`[TTS] Queued: "${text}"`);
+        processAnnouncementQueue();
+    } else {
+        // Clear queue and announce immediately
+        window.speechSynthesis.cancel();
+        announcementQueue = [text];
+        isProcessingQueue = false;
+        isSpeaking = false;
+        processAnnouncementQueue();
+    }
 }
 
 /**
@@ -217,7 +256,9 @@ function announceFrequencyChange(frequencyHz) {
         const frequencyMHz = (frequencyHz / 1000000).toFixed(3);
         const announcement = `${frequencyMHz} megahertz`;
         
-        announceChange(announcement);
+        // Always queue frequency announcements
+        // This ensures if mode was announced first, frequency follows naturally
+        announceChange(announcement, true);
     }, 1000); // 1 second delay as requested
 }
 
@@ -246,10 +287,10 @@ function announceModeChange(mode) {
 
     const announcement = modeNames[mode.toLowerCase()] || mode;
     
-    // Queue mode announcement if currently speaking (likely frequency announcement)
-    // This allows both to be announced in sequence
-    const shouldQueue = isSpeaking;
-    announceChange(announcement, shouldQueue);
+    // Always queue mode announcements to work with frequency announcements
+    // Mode changes happen immediately, frequency changes are debounced by 1 second
+    // This ensures mode is announced first, then frequency follows
+    announceChange(announcement, true);
 }
 
 /**
@@ -273,6 +314,9 @@ function toggleTTS() {
     } else {
         ttsEnabled = false;
         window.speechSynthesis.cancel();
+        announcementQueue = [];
+        isProcessingQueue = false;
+        isSpeaking = false;
         console.log('[TTS] Disabled');
 
         // Show notification using window.showNotification if available

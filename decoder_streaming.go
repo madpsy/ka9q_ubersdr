@@ -71,6 +71,7 @@ type StreamingDecoder struct {
 	ctyDatabase       *CTYDatabase
 	restartChan       chan struct{} // Signal to restart the decoder
 	prometheusMetrics *PrometheusMetrics
+	lastSkippedCycles int // Track skipped cycles to detect when they increment
 }
 
 // NewStreamingDecoder creates and starts a streaming decoder process
@@ -682,5 +683,29 @@ func (sd *StreamingDecoder) parseDecodeStats(line string) {
 			sd.band.Config.Name,
 			duration,
 		)
+	}
+
+	// Extract and track skipped_cycles
+	skipIdx := strings.Index(line, "skipped_cycles=")
+	if skipIdx != -1 {
+		start := skipIdx + len("skipped_cycles=")
+		if start < len(line) {
+			end := start
+			for end < len(line) && line[end] != ' ' && line[end] != '>' {
+				end++
+			}
+
+			skippedStr := line[start:end]
+			skippedCycles, err := strconv.Atoi(skippedStr)
+			if err == nil {
+				// Check if skipped cycles increased
+				if skippedCycles > sd.lastSkippedCycles {
+					cyclesSkipped := skippedCycles - sd.lastSkippedCycles
+					log.Printf("Warning: Decoder %s skipped %d cycle(s) (total: %d)",
+						sd.band.Config.Name, cyclesSkipped, skippedCycles)
+				}
+				sd.lastSkippedCycles = skippedCycles
+			}
+		}
 	}
 }

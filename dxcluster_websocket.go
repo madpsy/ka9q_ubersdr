@@ -715,8 +715,6 @@ func (h *DXClusterWebSocketHandler) sendBufferedDigitalSpots(conn *websocket.Con
 		return
 	}
 
-	log.Printf("DX Cluster WebSocket: Sending %d buffered digital spots to new client", len(bufferedSpots))
-
 	// Send each spot as an individual message
 	for _, spotData := range bufferedSpots {
 		message := map[string]interface{}{

@@ -253,8 +253,8 @@ function announceFrequencyChange(frequencyHz) {
         lastAnnouncedFrequency = frequencyHz;
         
         // Convert to MHz and format, removing trailing zeros
-        // e.g., 7100000 Hz = "7.1" MHz, 7100200 Hz = "7.1002" MHz
-        let frequencyMHz = (frequencyHz / 1000000).toFixed(4); // Use 4 decimals for precision
+        // e.g., 7100000 Hz = "7.1" MHz, 7100010 Hz = "7.10001" MHz
+        let frequencyMHz = (frequencyHz / 1000000).toFixed(6); // Use 6 decimals for full precision
         frequencyMHz = parseFloat(frequencyMHz).toString(); // Remove trailing zeros
 
         const announcement = `${frequencyMHz} megahertz`;

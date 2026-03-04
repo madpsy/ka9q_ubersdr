@@ -6354,40 +6354,20 @@
             }
         }
 
-        async function toggleDecoderBand(index) {
+        function toggleDecoderBand(index) {
             const bands = currentDecoderConfig.bands || [];
             const band = bands[index];
-            
+
             if (!band) {
                 showAlert('Band not found', 'error');
                 return;
             }
 
-            // Toggle the enabled state
-            const newEnabledState = !band.enabled;
-            const bandData = {
-                name: band.name,
-                mode: band.mode,
-                frequency: band.frequency,
-                depth: band.depth,
-                enabled: newEnabledState
-            };
+            // Toggle the enabled state in the local config
+            band.enabled = !band.enabled;
 
-            try {
-                const response = await fetch('/admin/decoder-bands?index=' + index, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(bandData)
-                });
-                
-                if (!response.ok) throw new Error('Failed to toggle decoder band');
-                
-                const result = await response.json();
-                showAlert(result.message, 'success');
-                await loadDecoderConfig();
-            } catch (error) {
-                showAlert('Error toggling decoder band: ' + error.message, 'error');
-            }
+            // Re-render the decoder config to show the updated state
+            renderDecoderConfig();
         }
 
         function disableAllDecoderBands() {

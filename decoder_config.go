@@ -177,6 +177,7 @@ type DecoderConfig struct {
 	// Recording options
 	IncludeDeadTime    bool `yaml:"include_dead_time"`    // Record entire cycle including dead time
 	ClampExecutionTime bool `yaml:"clamp_execution_time"` // Kill decoder if it exceeds cycle time (default: false)
+	UseWrapper         bool `yaml:"use_wrapper"`          // Use jt9_decoder wrapper for FT8/FT4 (streaming mode, default: false)
 
 	// Receiver information
 	ReceiverCallsign string `yaml:"receiver_callsign"`

@@ -27,6 +27,10 @@ decoder:
                                # When true: sends SIGTERM 1 second before cycle end, then SIGKILL at cycle end
                                # Prevents runaway decoder processes and ensures predictable timing
                                # Timeout kills are tracked per band in decoder statistics
+  use_wrapper: false           # false (default) = use jt9 directly for FT8/FT4 (batch mode)
+                               # true = use jt9_decoder wrapper for FT8/FT4 (streaming mode, like FT2)
+                               # Streaming mode benefits: lower overhead, real-time decodes, detailed stats
+                               # Requires ft2_path to be set to jt9_decoder binary
 
   # Receiver information (required for reporting)
   receiver_callsign: "N0CALL"

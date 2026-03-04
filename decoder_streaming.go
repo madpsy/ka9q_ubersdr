@@ -57,19 +57,20 @@ import (
 
 // StreamingDecoder manages a persistent decoder process with continuous audio input
 type StreamingDecoder struct {
-	band        *DecoderBand
-	config      *DecoderConfig
-	binaryPath  string
-	cmd         *exec.Cmd
-	stdin       io.WriteCloser
-	stdout      io.ReadCloser
-	stderr      io.ReadCloser
-	running     bool
-	mu          sync.Mutex
-	stopChan    chan struct{}
-	resultChan  chan *DecodeInfo
-	ctyDatabase *CTYDatabase
-	restartChan chan struct{} // Signal to restart the decoder
+	band              *DecoderBand
+	config            *DecoderConfig
+	binaryPath        string
+	cmd               *exec.Cmd
+	stdin             io.WriteCloser
+	stdout            io.ReadCloser
+	stderr            io.ReadCloser
+	running           bool
+	mu                sync.Mutex
+	stopChan          chan struct{}
+	resultChan        chan *DecodeInfo
+	ctyDatabase       *CTYDatabase
+	restartChan       chan struct{} // Signal to restart the decoder
+	prometheusMetrics *PrometheusMetrics
 }
 
 // NewStreamingDecoder creates and starts a streaming decoder process
@@ -77,14 +78,15 @@ type StreamingDecoder struct {
 // band: decoder band configuration
 // config: decoder configuration
 // ctyDatabase: optional CTY database for callsign enrichment
-func NewStreamingDecoder(binaryPath string, band *DecoderBand, config *DecoderConfig, ctyDatabase *CTYDatabase) (*StreamingDecoder, error) {
+// prometheusMetrics: optional Prometheus metrics for recording execution time
+func NewStreamingDecoder(binaryPath string, band *DecoderBand, config *DecoderConfig, ctyDatabase *CTYDatabase, prometheusMetrics *PrometheusMetrics) (*StreamingDecoder, error) {
 	// Build command arguments based on mode
 	var args []string
-	if band.Config.Mode == ModeFT2 {
-		// FT2 uses jt9_decoder with specific arguments
+	if band.Config.Mode == ModeFT2 || band.Config.Mode == ModeFT8 || band.Config.Mode == ModeFT4 {
+		// FT2/FT8/FT4 use jt9_decoder with specific arguments
 		// jt9_decoder reads from stdin by default when -s is specified
 		args = []string{
-			"-m", "FT2",
+			"-m", band.Config.Mode.String(),
 			"-j", "/usr/bin/jt9",
 			"-s",
 			"-d", fmt.Sprintf("%d", band.Config.Depth),
@@ -126,18 +128,19 @@ func NewStreamingDecoder(binaryPath string, band *DecoderBand, config *DecoderCo
 	}
 
 	sd := &StreamingDecoder{
-		band:        band,
-		config:      config,
-		binaryPath:  binaryPath,
-		cmd:         cmd,
-		stdin:       stdin,
-		stdout:      stdout,
-		stderr:      stderr,
-		running:     true,
-		stopChan:    make(chan struct{}),
-		resultChan:  make(chan *DecodeInfo, 100),
-		ctyDatabase: ctyDatabase,
-		restartChan: make(chan struct{}, 1),
+		band:              band,
+		config:            config,
+		binaryPath:        binaryPath,
+		cmd:               cmd,
+		stdin:             stdin,
+		stdout:            stdout,
+		stderr:            stderr,
+		running:           true,
+		stopChan:          make(chan struct{}),
+		resultChan:        make(chan *DecodeInfo, 100),
+		ctyDatabase:       ctyDatabase,
+		restartChan:       make(chan struct{}, 1),
+		prometheusMetrics: prometheusMetrics,
 	}
 
 	// Start output readers
@@ -197,11 +200,11 @@ func (sd *StreamingDecoder) restart() error {
 
 	// Build command arguments based on mode
 	var args []string
-	if sd.band.Config.Mode == ModeFT2 {
-		// FT2 uses jt9_decoder with specific arguments
+	if sd.band.Config.Mode == ModeFT2 || sd.band.Config.Mode == ModeFT8 || sd.band.Config.Mode == ModeFT4 {
+		// FT2/FT8/FT4 use jt9_decoder with specific arguments
 		// jt9_decoder reads from stdin by default when -s is specified
 		args = []string{
-			"-m", "FT2",
+			"-m", sd.band.Config.Mode.String(),
 			"-j", "/usr/bin/jt9",
 			"-s",
 			"-d", fmt.Sprintf("%d", sd.band.Config.Depth),
@@ -293,23 +296,39 @@ func (sd *StreamingDecoder) readStdout() {
 	for scanner.Scan() {
 		line := scanner.Text()
 
+		// Check for DecodeStats XML tag first
+		if strings.Contains(line, "<DecodeStats>") {
+			// Parse: <DecodeStats> cycle_num=2 duration_s=1.456 num_decodes=1 skipped_cycles=0 </DecodeStats>
+			sd.parseDecodeStats(line)
+			continue
+		}
+
 		// Parse the output line based on mode
 		var decode *DecodeInfo
 		var err error
 
-		if sd.band.Config.Mode == ModeFT2 {
-			// FT2 uses FT8 format output
+		if sd.band.Config.Mode == ModeFT2 || sd.band.Config.Mode == ModeFT8 || sd.band.Config.Mode == ModeFT4 {
+			// FT2/FT8/FT4 use FT8 format output
 			decode, err = ParseFT8Line(line, sd.band.Config.Frequency, sd.band.Config.Mode)
 			if err == nil {
-				// FT2 has 3.75-second cycles - calculate most recent cycle boundary
+				// Calculate most recent cycle boundary
 				// The decoder outputs the transmission time from the signal, which can be hours old.
 				// For PSK Reporter, we need to use the current time rounded to the nearest cycle boundary.
 				now := time.Now().UTC()
 				midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 				nanosSinceMidnight := now.Sub(midnight).Nanoseconds()
 
-				// FT2 cycle is 3.75 seconds = 3,750,000,000 nanoseconds
-				cycleNanos := int64(3750000000)
+				// Determine cycle time based on mode
+				var cycleNanos int64
+				switch sd.band.Config.Mode {
+				case ModeFT2:
+					cycleNanos = int64(3750000000) // 3.75 seconds
+				case ModeFT8:
+					cycleNanos = int64(15000000000) // 15 seconds
+				case ModeFT4:
+					cycleNanos = int64(7500000000) // 7.5 seconds
+				}
+
 				cyclesSinceMidnight := nanosSinceMidnight / cycleNanos
 				boundaryNanos := cyclesSinceMidnight * cycleNanos
 
@@ -621,4 +640,51 @@ func ParseStreamingDecoderLine(line string, dialFreq uint64, receiverLocator str
 	}
 
 	return decode, nil
+}
+
+// parseDecodeStats parses the <DecodeStats> XML line and records execution time
+// Format: <DecodeStats> cycle_num=2 duration_s=1.456 num_decodes=1 skipped_cycles=0 </DecodeStats>
+func (sd *StreamingDecoder) parseDecodeStats(line string) {
+	// Extract duration_s value using simple string parsing
+	// Look for "duration_s=" followed by a number
+	durIdx := strings.Index(line, "duration_s=")
+	if durIdx == -1 {
+		return
+	}
+
+	// Find the start of the number
+	start := durIdx + len("duration_s=")
+	if start >= len(line) {
+		return
+	}
+
+	// Find the end of the number (space or end of string)
+	end := start
+	for end < len(line) && line[end] != ' ' && line[end] != '>' {
+		end++
+	}
+
+	// Parse the duration
+	durationStr := line[start:end]
+	durationSecs, err := strconv.ParseFloat(durationStr, 64)
+	if err != nil {
+		log.Printf("Warning: Failed to parse duration_s from DecodeStats: %v", err)
+		return
+	}
+
+	// Convert to time.Duration
+	duration := time.Duration(durationSecs * float64(time.Second))
+
+	// Record execution time if prometheusMetrics is available
+	if sd.prometheusMetrics != nil && sd.prometheusMetrics.digitalMetrics != nil {
+		sd.prometheusMetrics.digitalMetrics.RecordExecutionTime(
+			sd.band.Config.Mode.String(),
+			sd.band.Config.Name,
+			duration,
+		)
+	}
+
+	if DebugMode {
+		log.Printf("DEBUG: Recorded execution time for %s: %.3fs", sd.band.Config.Name, durationSecs)
+	}
 }

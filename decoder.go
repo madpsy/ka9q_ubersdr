@@ -331,8 +331,13 @@ func (md *MultiDecoder) bandMonitorLoop(band *DecoderBand) {
 
 	modeInfo := GetModeInfo(band.Config.Mode)
 
-	// Check if this is a streaming mode
-	if modeInfo.IsStreaming {
+	// Check if this is a streaming mode OR if use_wrapper is enabled for FT8/FT4
+	useStreaming := modeInfo.IsStreaming
+	if md.config.UseWrapper && (band.Config.Mode == ModeFT8 || band.Config.Mode == ModeFT4) {
+		useStreaming = true
+	}
+
+	if useStreaming {
 		md.streamingMonitorLoop(band)
 		return
 	}
@@ -366,14 +371,14 @@ func (md *MultiDecoder) bandMonitorLoop(band *DecoderBand) {
 	}
 }
 
-// streamingMonitorLoop handles streaming decoders (JS8, FT2, etc.)
+// streamingMonitorLoop handles streaming decoders (JS8, FT2, FT8, FT4, etc.)
 func (md *MultiDecoder) streamingMonitorLoop(band *DecoderBand) {
 	// Get decoder binary path based on mode
 	var binaryPath string
 	switch band.Config.Mode {
 	case ModeJS8:
 		binaryPath = md.config.JS8Path
-	case ModeFT2:
+	case ModeFT2, ModeFT8, ModeFT4:
 		binaryPath = md.config.FT2Path
 	default:
 		log.Printf("Error: Unknown streaming mode %s", band.Config.Mode)
@@ -381,7 +386,7 @@ func (md *MultiDecoder) streamingMonitorLoop(band *DecoderBand) {
 	}
 
 	// Create streaming decoder
-	decoder, err := NewStreamingDecoder(binaryPath, band, md.config, globalCTY)
+	decoder, err := NewStreamingDecoder(binaryPath, band, md.config, globalCTY, md.prometheusMetrics)
 	if err != nil {
 		log.Printf("Error creating streaming decoder for %s: %v", band.Config.Name, err)
 		return

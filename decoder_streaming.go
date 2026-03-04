@@ -683,8 +683,4 @@ func (sd *StreamingDecoder) parseDecodeStats(line string) {
 			duration,
 		)
 	}
-
-	if DebugMode {
-		log.Printf("DEBUG: Recorded execution time for %s: %.3fs", sd.band.Config.Name, durationSecs)
-	}
 }

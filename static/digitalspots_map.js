@@ -71,6 +71,7 @@ class DigitalSpotsMap {
             '17m': '#B07AA1',   // Purple
             '15m': '#FF9DA7',   // Pink
             '12m': '#9C755F',   // Brown
+            '11m': '#FFD700',   // Gold
             '10m': '#00D9FF',   // Bright Cyan/Turquoise
             'unknown': '#FF0000' // Red for unknown bands
         };
@@ -1565,7 +1566,7 @@ class DigitalSpotsMap {
         if (!containerEl) return;
         
         // Define all bands in order (2200m through 10m)
-        const allBands = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+        const allBands = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '11m', '10m'];
         
         // Count spots by band
         const bandCounts = {};

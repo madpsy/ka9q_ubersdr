@@ -42,12 +42,13 @@ type DecodeInfo struct {
 
 // DecoderBand represents an active decoder band with its session
 type DecoderBand struct {
-	Config       DecoderBandConfig
-	SSRC         uint32
-	SessionID    string
-	AudioChan    chan AudioPacket
-	LastDataTime time.Time
-	mu           sync.Mutex
+	Config          DecoderBandConfig
+	SSRC            uint32
+	SessionID       string
+	AudioChan       chan AudioPacket
+	LastDataTime    time.Time
+	IsStreamingMode bool // True if running in streaming mode (set at startup)
+	mu              sync.Mutex
 
 	// Decoder session state
 	DecoderSession *DecoderSession
@@ -78,16 +79,16 @@ type SpotFile struct {
 
 // DecoderStats tracks statistics for the decoder
 type DecoderStats struct {
-	TotalDecodes       int64
-	TotalSpots         int64
-	DecodesPerBand     map[string]int64
-	SpotsPerBand       map[string]int64
-	LastDecodeTime     time.Time
-	PSKReporterSent    int64
-	WSPRNetSent        int64
-	DecoderErrors      int64
+	TotalDecodes        int64
+	TotalSpots          int64
+	DecodesPerBand      map[string]int64
+	SpotsPerBand        map[string]int64
+	LastDecodeTime      time.Time
+	PSKReporterSent     int64
+	WSPRNetSent         int64
+	DecoderErrors       int64
 	TimeoutKillsPerBand map[string]int64 // Track SIGKILL timeouts per band
-	mu                 sync.RWMutex
+	mu                  sync.RWMutex
 }
 
 // NewDecoderStats creates a new decoder statistics tracker
@@ -165,14 +166,14 @@ func (ds *DecoderStats) GetStats() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"total_decodes":         ds.TotalDecodes,
-		"total_spots":           ds.TotalSpots,
-		"decodes_per_band":      decodesPerBand,
-		"spots_per_band":        spotsPerBand,
-		"last_decode_time":      ds.LastDecodeTime,
-		"pskreporter_sent":      ds.PSKReporterSent,
-		"wsprnet_sent":          ds.WSPRNetSent,
-		"decoder_errors":        ds.DecoderErrors,
+		"total_decodes":          ds.TotalDecodes,
+		"total_spots":            ds.TotalSpots,
+		"decodes_per_band":       decodesPerBand,
+		"spots_per_band":         spotsPerBand,
+		"last_decode_time":       ds.LastDecodeTime,
+		"pskreporter_sent":       ds.PSKReporterSent,
+		"wsprnet_sent":           ds.WSPRNetSent,
+		"decoder_errors":         ds.DecoderErrors,
 		"timeout_kills_per_band": timeoutKillsPerBand,
 	}
 }

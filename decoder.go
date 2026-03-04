@@ -337,6 +337,9 @@ func (md *MultiDecoder) bandMonitorLoop(band *DecoderBand) {
 		useStreaming = true
 	}
 
+	// Store the runtime streaming mode decision in the band for health checks
+	band.IsStreamingMode = useStreaming
+
 	if useStreaming {
 		md.streamingMonitorLoop(band)
 		return

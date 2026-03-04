@@ -148,12 +148,13 @@ func (md *MultiDecoder) GetHealthStatus() DecoderHealthStatus {
 
 		band.mu.Lock()
 		lastData := band.LastDataTime
+		isStreamingMode := band.IsStreamingMode // Use runtime streaming mode flag
 		band.mu.Unlock()
 
 		// Consider stale if no decoder invocation in 3x cycle time OR no data in 3x cycle time
 		// For streaming modes (CycleTime = 0), use a fixed threshold of 30 seconds
 		staleThreshold := modeInfo.CycleTime * 3
-		if modeInfo.IsStreaming && staleThreshold == 0 {
+		if isStreamingMode && staleThreshold == 0 {
 			staleThreshold = 30 * time.Second
 		}
 		timeSinceInvoke := time.Since(lastInvoke)
@@ -163,7 +164,7 @@ func (md *MultiDecoder) GetHealthStatus() DecoderHealthStatus {
 		// For streaming modes: only check data flow (decoder runs continuously)
 		// For batch modes: check both decoder invocation AND data flow
 		var isStale bool
-		if modeInfo.IsStreaming {
+		if isStreamingMode {
 			// Streaming modes: only check if data is flowing
 			isStale = !lastData.IsZero() && timeSinceData > staleThreshold
 		} else {
@@ -184,7 +185,7 @@ func (md *MultiDecoder) GetHealthStatus() DecoderHealthStatus {
 		status.Bands = append(status.Bands, bandHealth)
 
 		// Add issues - skip decoder invocation check for streaming modes
-		if !modeInfo.IsStreaming {
+		if !isStreamingMode {
 			if lastInvoke.IsZero() {
 				status.Issues = append(status.Issues, "Band "+band.Config.Name+": decoder has never been invoked")
 				status.Healthy = false
@@ -302,12 +303,13 @@ func (md *MultiDecoder) GetStartupDiagnostics() DecoderHealthDiagnostics {
 
 		band.mu.Lock()
 		lastData := band.LastDataTime
+		isStreamingMode := band.IsStreamingMode // Use runtime streaming mode flag
 		band.mu.Unlock()
 
 		timeSinceInvoke := time.Since(lastInvoke)
 		timeSinceData := time.Since(lastData)
 		staleThreshold := modeInfo.CycleTime * 3
-		if modeInfo.IsStreaming && staleThreshold == 0 {
+		if isStreamingMode && staleThreshold == 0 {
 			staleThreshold = 30 * time.Second
 		}
 
@@ -315,13 +317,13 @@ func (md *MultiDecoder) GetStartupDiagnostics() DecoderHealthDiagnostics {
 		// For streaming modes: only check data flow (decoder runs continuously)
 		// For batch modes: check both decoder invocation AND data flow
 		var isStale bool
-		if modeInfo.IsStreaming {
+		if isStreamingMode {
 			// Streaming modes: only check if data is flowing
 			isStale = !lastData.IsZero() && timeSinceData > staleThreshold
 		} else {
 			// Batch modes: check both decoder invocation and data flow
 			isStale = (!lastInvoke.IsZero() && timeSinceInvoke > staleThreshold) ||
-				(!lastData.IsZero() && timeSinceData > 30*time.Second)
+				(!lastData.IsZero() && timeSinceData > staleThreshold)
 		}
 
 		bandDiag := DecoderBandDiagnostics{

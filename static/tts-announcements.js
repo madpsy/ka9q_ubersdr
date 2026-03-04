@@ -360,11 +360,16 @@ function toggleTTS() {
 function updateTTSButton() {
     const btn = document.getElementById('tts-announce-button');
     if (btn) {
+        console.log('[TTS] Updating button, ttsEnabled:', ttsEnabled);
         if (ttsEnabled) {
             btn.classList.add('active');
+            console.log('[TTS] Added active class, classList:', btn.classList.toString());
         } else {
             btn.classList.remove('active');
+            console.log('[TTS] Removed active class, classList:', btn.classList.toString());
         }
+    } else {
+        console.error('[TTS] Button not found!');
     }
 }
 

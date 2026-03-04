@@ -13,7 +13,7 @@ decoder:
   jt9_path: "/usr/bin/jt9"              # Path to jt9 binary (for FT8/FT4)
   wsprd_path: "/usr/bin/wsprd"          # Path to wsprd binary (for WSPR)
   js8_path: "/usr/bin/js8"              # Path to js8 binary (for JS8)
-  jt9_wrapper_path: "/usr/local/bin/jt9_wrapper" # Path to jt9_wrapper binary
+  jt9_wrapper_path: "/usr/local/bin/jt9_decode" # Path to jt9_decode wrapper binary
 
   # Keep WAV files after decoding (useful for debugging)
   keep_wav: false

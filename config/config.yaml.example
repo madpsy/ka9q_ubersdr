@@ -1482,7 +1482,7 @@ whisper:
   #
   # Default: "small" (good balance of speed and accuracy)
   # Recommended for English: "medium.en" or "small.en"
-  model: "OpenVINO/whisper-medium-int8-ov"
+  model: "OpenVINO/distil-whisper-large-v3-int8-ov"
 
   # LibreTranslate API URL for translation (default: "https://whisper.ubersdr.org/translate")
   # Used when translate is enabled to translate completed sentences from non-English to English

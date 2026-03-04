@@ -308,6 +308,9 @@ function toggleTTS() {
         ttsEnabled = true;
         console.log('[TTS] Enabled');
 
+        // Update UI button immediately
+        updateTTSButton();
+
         // Show notification using window.showNotification if available
         if (typeof window.showNotification === 'function') {
             window.showNotification('Text-to-Speech announcements enabled', 'success', 3000);
@@ -318,34 +321,37 @@ function toggleTTS() {
         // Speak the enabled message
         announceChange('Announcements enabled', false);
     } else {
-        // Speak the disabled message before disabling
+        // Disable immediately for UI responsiveness
+        ttsEnabled = false;
+
+        // Update UI button immediately
+        updateTTSButton();
+
+        // Speak the disabled message before clearing
         const utterance = new SpeechSynthesisUtterance('Announcements disabled');
         utterance.rate = ttsRate;
         utterance.volume = 1.0;
         utterance.voice = ttsVoice;
         utterance.lang = 'en-US';
-        window.speechSynthesis.speak(utterance);
 
-        // Disable after a short delay to allow the message to be spoken
-        setTimeout(() => {
-            ttsEnabled = false;
+        utterance.onend = () => {
+            // Clean up after speech completes
             window.speechSynthesis.cancel();
             announcementQueue = [];
             isProcessingQueue = false;
             isSpeaking = false;
-            console.log('[TTS] Disabled');
+        };
 
-            // Show notification using window.showNotification if available
-            if (typeof window.showNotification === 'function') {
-                window.showNotification('Text-to-Speech announcements disabled', 'info', 3000);
-            } else {
-                console.log('[TTS] Notification: TTS disabled');
-            }
-        }, 1500); // Wait for speech to complete
+        window.speechSynthesis.speak(utterance);
+        console.log('[TTS] Disabled');
+
+        // Show notification using window.showNotification if available
+        if (typeof window.showNotification === 'function') {
+            window.showNotification('Text-to-Speech announcements disabled', 'info', 3000);
+        } else {
+            console.log('[TTS] Notification: TTS disabled');
+        }
     }
-
-    // Update UI button
-    updateTTSButton();
 }
 
 /**

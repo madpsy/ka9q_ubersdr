@@ -11,8 +11,6 @@ type ConfigProvider struct {
 	Enabled           bool
 	ServerURL         string
 	Model             string
-	Translate         bool
-	SendIntervalMs    int
 	InitialPrompt     string
 	InstanceUUID      string
 	MaxUsers          int
@@ -95,8 +93,6 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 			Enabled:           GlobalConfigProvider.Enabled,
 			ServerURL:         GlobalConfigProvider.ServerURL,
 			Model:             GlobalConfigProvider.Model,
-			Translate:         GlobalConfigProvider.Translate,
-			SendIntervalMs:    GlobalConfigProvider.SendIntervalMs,
 			InitialPrompt:     GlobalConfigProvider.InitialPrompt,
 			InstanceUUID:      GlobalConfigProvider.InstanceUUID,
 			LibreTranslateURL: GlobalConfigProvider.LibreTranslateURL,
@@ -109,8 +105,6 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 			Enabled:           true, // Assume enabled if no config
 			ServerURL:         "ws://whisperlive:9090",
 			Model:             "small",
-			Translate:         true, // Default to translation enabled
-			SendIntervalMs:    100,
 			InitialPrompt:     "",
 			InstanceUUID:      "",
 			LibreTranslateURL: "https://whisper.ubersdr.org/translate",
@@ -128,8 +122,8 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 	// Create decoder
 	decoder := NewWhisperDecoder(audioParams.SampleRate, config)
 
-	log.Printf("[Whisper Extension] Created with server: %s, model: %s, language: auto-detect, translate: %v, target: %s, sample rate: %d Hz",
-		config.ServerURL, config.Model, config.Translate, config.TargetLanguage, audioParams.SampleRate)
+	log.Printf("[Whisper Extension] Created with server: %s, model: %s, language: auto-detect, target: %s, sample rate: %d Hz",
+		config.ServerURL, config.Model, config.TargetLanguage, audioParams.SampleRate)
 
 	return &WhisperExtension{
 		decoder: decoder,

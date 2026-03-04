@@ -1256,8 +1256,6 @@ func main() {
 		Enabled:           config.Whisper.Enabled,
 		ServerURL:         config.Whisper.ServerURL,
 		Model:             config.Whisper.Model,
-		Translate:         config.Whisper.Translate,
-		SendIntervalMs:    config.Whisper.SendIntervalMs,
 		InitialPrompt:     config.Whisper.InitialPrompt,
 		InstanceUUID:      config.InstanceReporting.InstanceUUID,
 		MaxUsers:          config.Whisper.MaxUsers,

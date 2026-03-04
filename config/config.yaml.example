@@ -1484,13 +1484,6 @@ whisper:
   # Recommended for English: "medium.en" or "small.en"
   model: "OpenVINO/whisper-medium-int8-ov"
 
-  # Enable translation to English (default: true)
-  # When true, non-English audio will be translated to English via LibreTranslate
-  # When false, audio will be transcribed in its original language
-  # Translation is applied to completed sentences only (not partial transcriptions)
-  # Default: true
-  translate: true
-
   # LibreTranslate API URL for translation (default: "https://whisper.ubersdr.org/translate")
   # Used when translate is enabled to translate completed sentences from non-English to English
   # The translation happens after Whisper transcribes in the original language
@@ -1513,12 +1506,4 @@ whisper:
   # Leave empty to disable (default)
   # Default: ""
   initial_prompt: "This is a radio transmission of either AM broadcast or amateur ham radio in various languages. Expect callsigns, grid locators, Q codes and technical language to be used as well as random topics."
-
-  # Audio send interval in milliseconds
-  # How often to send audio chunks to WhisperLive server
-  # Lower values = more responsive but more network traffic
-  # Higher values = less responsive but lower overhead
-  # Recommended: 100-200ms
-  # Default: 100
-  send_interval_ms: 100
 

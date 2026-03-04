@@ -29,8 +29,6 @@ type WhisperConfig struct {
 	Enabled           bool
 	ServerURL         string
 	Model             string
-	Translate         bool
-	SendIntervalMs    int
 	InitialPrompt     string
 	InstanceUUID      string
 	LibreTranslateURL string
@@ -317,7 +315,8 @@ func (d *WhisperDecoder) reconnectWebSocket() error {
 func (d *WhisperDecoder) sendAudioLoop(audioChan <-chan AudioSample) {
 	defer d.wg.Done()
 
-	sendInterval := time.Duration(d.config.SendIntervalMs) * time.Millisecond
+	// Hardcoded to 100ms send interval
+	sendInterval := 100 * time.Millisecond
 	ticker := time.NewTicker(sendInterval)
 	defer ticker.Stop()
 
@@ -649,9 +648,9 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 				// Store original English text for deduplication
 				seg["original_text"] = originalText
 
-				// Apply translation if enabled and target language is not English
+				// Apply translation if target language is not English
 				// Whisper always returns English, so we translate from English to target language
-				if d.config.Translate && d.config.TargetLanguage != "" && d.config.TargetLanguage != "en" {
+				if d.config.TargetLanguage != "" && d.config.TargetLanguage != "en" {
 					// Translate from English (Whisper's output) to target language
 					translatedText := d.translateText(segText, "en", d.config.TargetLanguage)
 					seg["text"] = translatedText

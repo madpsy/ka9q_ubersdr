@@ -1614,7 +1614,7 @@ class DigitalSpotsMap {
         if (!containerEl) return;
         
         // Define the modes we're tracking
-        const modes = ['FT8', 'FT4', 'WSPR', 'JS8'];
+        const modes = ['FT8', 'FT4', 'FT2', 'WSPR', 'JS8'];
         
         // Count spots by mode
         const modeCounts = {};

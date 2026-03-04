@@ -159,35 +159,38 @@ function initializeTTS() {
 /**
  * Announce text using TTS
  * @param {string} text - Text to announce
+ * @param {boolean} queue - If true, queue the announcement instead of canceling previous
  */
-function announceChange(text) {
+function announceChange(text, queue = false) {
     if (!ttsEnabled || !ttsVoice) {
         return;
     }
-    
-    // Cancel any pending speech
-    window.speechSynthesis.cancel();
-    
+
+    // Cancel any pending speech unless we're queuing
+    if (!queue) {
+        window.speechSynthesis.cancel();
+    }
+
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = ttsRate;
     utterance.volume = 1.0;
     utterance.voice = ttsVoice;
     utterance.lang = 'en-US'; // Force English
-    
+
     utterance.onstart = () => {
         isSpeaking = true;
     };
-    
+
     utterance.onend = () => {
         isSpeaking = false;
     };
-    
+
     utterance.onerror = (event) => {
         console.error('[TTS] Error:', event.error);
         isSpeaking = false;
     };
-    
-    console.log(`[TTS] Speaking: "${text}"`);
+
+    console.log(`[TTS] ${queue ? 'Queuing' : 'Speaking'}: "${text}"`);
     window.speechSynthesis.speak(utterance);
 }
 
@@ -226,9 +229,9 @@ function announceModeChange(mode) {
     if (mode === lastAnnouncedMode) {
         return; // Already announced this mode
     }
-    
+
     lastAnnouncedMode = mode;
-    
+
     // Expand mode abbreviations for clarity
     const modeNames = {
         'usb': 'upper sideband',
@@ -240,9 +243,13 @@ function announceModeChange(mode) {
         'cwu': 'C W upper',
         'cwl': 'C W lower'
     };
-    
+
     const announcement = modeNames[mode.toLowerCase()] || mode;
-    announceChange(announcement);
+    
+    // Queue mode announcement if currently speaking (likely frequency announcement)
+    // This allows both to be announced in sequence
+    const shouldQueue = isSpeaking;
+    announceChange(announcement, shouldQueue);
 }
 
 /**

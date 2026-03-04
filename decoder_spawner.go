@@ -82,18 +82,18 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 	if ds.config.ClampExecutionTime {
 		// Use cycle time as timeout
 		cycleTime := modeInfo.CycleTime
-		
+
 		done := make(chan error, 1)
 		go func() {
 			done <- cmd.Wait()
 		}()
-		
+
 		// Wait until 1 second before cycle end
 		gracePeriod := cycleTime - time.Second
 		if gracePeriod < 0 {
 			gracePeriod = 0 // For very short cycles, skip graceful termination
 		}
-		
+
 		select {
 		case err = <-done:
 			// Decoder completed normally before timeout
@@ -103,7 +103,7 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 			if termErr := cmd.Process.Signal(syscall.SIGTERM); termErr != nil {
 				log.Printf("Failed to send SIGTERM to decoder for %s: %v", band.Config.Name, termErr)
 			}
-			
+
 			// Wait the remaining 1 second for graceful exit
 			select {
 			case err = <-done:
@@ -117,12 +117,12 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 				}
 				// Wait for process to be reaped
 				err = <-done
-				
+
 				// Track the timeout kill
 				if ds.stats != nil {
 					ds.stats.IncrementTimeoutKills(band.Config.Name)
 				}
-				
+
 				if err == nil {
 					err = fmt.Errorf("decoder killed after exceeding cycle time")
 				}
@@ -154,6 +154,7 @@ func (ds *DecoderSpawner) buildDecoderCommand(modeInfo ModeInfo, wavFile string,
 		arg = strings.ReplaceAll(arg, "{file}", wavFile)
 		arg = strings.ReplaceAll(arg, "{freq}", fmt.Sprintf("%.6f", float64(frequency)/1e6))
 		arg = strings.ReplaceAll(arg, "{depth}", fmt.Sprintf("%d", depth))
+		arg = strings.ReplaceAll(arg, "{jt9_path}", ds.config.JT9Path)
 		args[i] = arg
 	}
 
@@ -164,6 +165,8 @@ func (ds *DecoderSpawner) buildDecoderCommand(modeInfo ModeInfo, wavFile string,
 		binaryPath = ds.config.JT9Path
 	case "wsprd":
 		binaryPath = ds.config.WSPRDPath
+	case "jt9_wrapper":
+		binaryPath = ds.config.JT9WrapperPath
 	default:
 		binaryPath = modeInfo.DecoderCommand // Fallback to command name
 	}

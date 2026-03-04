@@ -5608,12 +5608,12 @@
             js8PathField.appendChild(js8Small);
             globalSection.appendChild(js8PathField);
 
-            const ft2PathField = createConfigField('JT9 Decoder Wrapper', 'text', currentDecoderConfig.ft2_path || '/usr/local/bin/jt9_decoder', 'ft2_path');
-            ft2PathField.querySelector('input').placeholder = '/usr/local/bin/jt9_decoder';
-            const ft2Small = document.createElement('small');
-            ft2Small.textContent = 'Path to jt9_decoder binary for FT2 decoding';
-            ft2PathField.appendChild(ft2Small);
-            globalSection.appendChild(ft2PathField);
+            const jt9WrapperPathField = createConfigField('JT9 Wrapper', 'text', currentDecoderConfig.jt9_wrapper_path || '/usr/local/bin/jt9_wrapper', 'jt9_wrapper_path');
+            jt9WrapperPathField.querySelector('input').placeholder = '/usr/local/bin/jt9_wrapper';
+            const jt9WrapperSmall = document.createElement('small');
+            jt9WrapperSmall.textContent = 'Path to jt9_wrapper binary for FT2 decoding';
+            jt9WrapperPathField.appendChild(jt9WrapperSmall);
+            globalSection.appendChild(jt9WrapperPathField);
 
             // File retention options
             const keepWavField = createConfigField('Keep WAV Files (Warning: Will fill Data Directory, which by default is /dev/shm)', 'checkbox', currentDecoderConfig.keep_wav || false, 'keep_wav');

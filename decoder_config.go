@@ -97,21 +97,21 @@ func GetModeInfo(mode DecoderMode) ModeInfo {
 		}
 	case ModeFT8:
 		return ModeInfo{
-			CycleTime:        15 * time.Second,
-			TransmissionTime: 12640 * time.Millisecond, // 12.64s
-			DecoderCommand:   "jt9",
-			DecoderArgs:      []string{"-8", "-d", "{depth}", "{file}"},
+			CycleTime:        0, // No fixed cycles for streaming mode
+			TransmissionTime: 0,
+			DecoderCommand:   "jt9_wrapper",
+			DecoderArgs:      []string{"-m", "FT8", "-j", "{jt9_path}", "-s", "-d", "{depth}"},
 			Preset:           "usb",
-			IsStreaming:      false,
+			IsStreaming:      true,
 		}
 	case ModeFT4:
 		return ModeInfo{
-			CycleTime:        7500 * time.Millisecond, // 7.5s
-			TransmissionTime: 4480 * time.Millisecond, // 4.48s
-			DecoderCommand:   "jt9",
-			DecoderArgs:      []string{"-5", "-d", "{depth}", "{file}"},
+			CycleTime:        0, // No fixed cycles for streaming mode
+			TransmissionTime: 0,
+			DecoderCommand:   "jt9_wrapper",
+			DecoderArgs:      []string{"-m", "FT4", "-j", "{jt9_path}", "-s", "-d", "{depth}"},
 			Preset:           "usb",
-			IsStreaming:      false,
+			IsStreaming:      true,
 		}
 	case ModeJS8:
 		return ModeInfo{
@@ -126,8 +126,8 @@ func GetModeInfo(mode DecoderMode) ModeInfo {
 		return ModeInfo{
 			CycleTime:        0, // No fixed cycles for streaming mode
 			TransmissionTime: 0,
-			DecoderCommand:   "jt9_decoder",
-			DecoderArgs:      []string{"-m", "FT2", "-j", "/usr/bin/jt9", "-s", "-d", "{depth}"},
+			DecoderCommand:   "jt9_wrapper",
+			DecoderArgs:      []string{"-m", "FT2", "-j", "{jt9_path}", "-s", "-d", "{depth}"},
 			Preset:           "usb",
 			IsStreaming:      true,
 		}
@@ -169,15 +169,14 @@ type DecoderConfig struct {
 	KeepLogs bool   `yaml:"keep_logs"` // Keep decoder log files
 
 	// Binary paths
-	JT9Path   string `yaml:"jt9_path"`   // Path to jt9 binary (for FT8/FT4)
-	WSPRDPath string `yaml:"wsprd_path"` // Path to wsprd binary (for WSPR)
-	JS8Path   string `yaml:"js8_path"`   // Path to js8 binary (for JS8)
-	FT2Path   string `yaml:"ft2_path"`   // Path to jt9_decoder binary (for FT2)
+	JT9Path        string `yaml:"jt9_path"`         // Path to jt9 binary (for FT8/FT4)
+	WSPRDPath      string `yaml:"wsprd_path"`       // Path to wsprd binary (for WSPR)
+	JS8Path        string `yaml:"js8_path"`         // Path to js8 binary (for JS8)
+	JT9WrapperPath string `yaml:"jt9_wrapper_path"` // Path to jt9_wrapper binary (for FT2)
 
 	// Recording options
 	IncludeDeadTime    bool `yaml:"include_dead_time"`    // Record entire cycle including dead time
 	ClampExecutionTime bool `yaml:"clamp_execution_time"` // Kill decoder if it exceeds cycle time (default: false)
-	UseWrapper         bool `yaml:"use_wrapper"`          // Use jt9_decoder wrapper for FT8/FT4 (streaming mode, default: false)
 
 	// Receiver information
 	ReceiverCallsign string `yaml:"receiver_callsign"`
@@ -262,8 +261,8 @@ func (dc *DecoderConfig) Validate() error {
 	if needsJS8 && dc.JS8Path == "" {
 		return fmt.Errorf("js8_path required for JS8 decoding")
 	}
-	if needsFT2 && dc.FT2Path == "" {
-		return fmt.Errorf("ft2_path required for FT2 decoding")
+	if needsFT2 && dc.JT9WrapperPath == "" {
+		return fmt.Errorf("jt9_wrapper_path required for FT2 decoding")
 	}
 
 	// Validate receiver info if reporting is enabled

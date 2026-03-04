@@ -13,7 +13,7 @@ decoder:
   jt9_path: "/usr/bin/jt9"              # Path to jt9 binary (for FT8/FT4)
   wsprd_path: "/usr/bin/wsprd"          # Path to wsprd binary (for WSPR)
   js8_path: "/usr/bin/js8"              # Path to js8 binary (for JS8)
-  ft2_path: "/usr/local/bin/jt9_decode" # Path to jt9_decoder binary (for FT2)
+  jt9_wrapper_path: "/usr/local/bin/jt9_wrapper" # Path to jt9_wrapper binary
 
   # Keep WAV files after decoding (useful for debugging)
   keep_wav: false
@@ -27,10 +27,6 @@ decoder:
                                # When true: sends SIGTERM 1 second before cycle end, then SIGKILL at cycle end
                                # Prevents runaway decoder processes and ensures predictable timing
                                # Timeout kills are tracked per band in decoder statistics
-  use_wrapper: false           # false (default) = use jt9 directly for FT8/FT4 (batch mode)
-                               # true = use jt9_decoder wrapper for FT8/FT4 (streaming mode, like FT2)
-                               # Streaming mode benefits: lower overhead, real-time decodes, detailed stats
-                               # Requires ft2_path to be set to jt9_decoder binary
 
   # Receiver information (required for reporting)
   receiver_callsign: "N0CALL"
@@ -358,9 +354,8 @@ decoder:
 # Notes:
 # 1. Requires external decoder binaries:
 #    - wsprd (for WSPR)
-#    - jt9 (for FT8/FT4, from WSJT-X package)
 #    - js8 (for JS8, from JS8Call package)
-#    - jt9_decoder (for FT2, streaming decoder)
+#    - jt9_wrapper (for JT9 binary, streaming decoder)
 #
 # 2. Each enabled band creates a dedicated audio channel
 #    consuming ~12 kHz bandwidth
@@ -377,15 +372,14 @@ decoder:
 # 5. Reporting requires valid callsign and locator
 #
 # 6. Mode timing:
-#    - FT8: 15s cycle, 12.64s transmission (batch mode)
-#    - FT4: 7.5s cycle, 4.48s transmission (batch mode)
-#    - WSPR: 120s cycle, 114s transmission (batch mode)
-#    - JS8: Continuous streaming (no fixed cycles)
-#    - FT2: Continuous streaming (no fixed cycles)
+#    - FT8: 15s cycle
+#    - FT4: 7.5s cycle
+#    - FT2: 3.75s cycle
+#    - WSPR: 120s cycle
+#    - JS8: Continuous streaming (multiple cycles)
 #
-# 7. Streaming mode differences (JS8, FT2):
+# 7. Streaming mode differences (JT9 modes):
 #    - Streaming mode: audio fed continuously to decoder via stdin
 #    - No WAV file buffering (more efficient)
 #    - Real-time decodes (no cycle boundaries)
 #    - Decoder runs as persistent process (not spawned per cycle)
-#    - FT2 uses FT8-format output, JS8 uses custom format

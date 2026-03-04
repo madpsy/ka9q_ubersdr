@@ -783,6 +783,36 @@ document.addEventListener('DOMContentLoaded', () => {
                 setMode('cwu');
             }
         }
+        // J key: Toggle between AM and SAM
+        else if (e.key === 'j' || e.key === 'J') {
+            e.preventDefault();
+            // Check if SAM button is disabled
+            const samButton = document.getElementById('mode-sam');
+            const isSamDisabled = samButton && samButton.disabled;
+            
+            // Check current mode and toggle
+            if (window.currentMode === 'am' && !isSamDisabled) {
+                setMode('sam');
+            } else if (window.currentMode === 'sam') {
+                setMode('am');
+            } else {
+                // If not in AM/SAM mode, default to AM
+                setMode('am');
+            }
+        }
+        // K key: Toggle between FM and NFM
+        else if (e.key === 'k' || e.key === 'K') {
+            e.preventDefault();
+            // Check current mode and toggle
+            if (window.currentMode === 'fm') {
+                setMode('nfm');
+            } else if (window.currentMode === 'nfm') {
+                setMode('fm');
+            } else {
+                // If not in FM/NFM mode, default to FM
+                setMode('fm');
+            }
+        }
         // Number keys 1-0: Set band (matches visual order left to right)
         else if (e.key === '1') {
             e.preventDefault();

@@ -256,15 +256,23 @@ function toggleTTS() {
         }
         ttsEnabled = true;
         console.log('[TTS] Enabled');
-        if (typeof showNotification === 'function') {
-            showNotification('Text-to-Speech announcements enabled', 'success', 3000);
+
+        // Show notification using window.showNotification if available
+        if (typeof window.showNotification === 'function') {
+            window.showNotification('Text-to-Speech announcements enabled', 'success', 3000);
+        } else {
+            console.log('[TTS] Notification: TTS enabled');
         }
     } else {
         ttsEnabled = false;
         window.speechSynthesis.cancel();
         console.log('[TTS] Disabled');
-        if (typeof showNotification === 'function') {
-            showNotification('Text-to-Speech announcements disabled', 'info', 3000);
+
+        // Show notification using window.showNotification if available
+        if (typeof window.showNotification === 'function') {
+            window.showNotification('Text-to-Speech announcements disabled', 'info', 3000);
+        } else {
+            console.log('[TTS] Notification: TTS disabled');
         }
     }
     
@@ -280,12 +288,8 @@ function updateTTSButton() {
     if (btn) {
         if (ttsEnabled) {
             btn.classList.add('active');
-            btn.style.backgroundColor = '#28a745'; // Green when active
-            btn.style.color = 'white';
         } else {
             btn.classList.remove('active');
-            btn.style.backgroundColor = '';
-            btn.style.color = '';
         }
     }
 }

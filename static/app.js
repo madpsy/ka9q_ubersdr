@@ -28,6 +28,9 @@ function showNotification(message, type = 'error', duration = 5000) {
     }, duration);
 }
 
+// Expose showNotification globally for other scripts
+window.showNotification = showNotification;
+
 // ka9q UberSDR Web Client
 
 // Generate a unique session ID for this browser session
@@ -3379,6 +3382,11 @@ function setFrequency(freq) {
         window.radioAPI.notifyFrequencyChange(clampedFreq);
     }
 
+    // Announce frequency change for accessibility (TTS)
+    if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+        window.ttsAnnouncements.announceFrequencyChange(clampedFreq);
+    }
+
     // Auto-connect if not connected
     if (!wsManager.isConnected()) {
         connect();
@@ -3433,6 +3441,11 @@ function setBand(bandName) {
     // Notify extensions of frequency change
     if (window.radioAPI) {
         window.radioAPI.notifyFrequencyChange(centerFreq);
+    }
+
+    // Announce frequency change for accessibility (TTS)
+    if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+        window.ttsAnnouncements.announceFrequencyChange(centerFreq);
     }
 
     // Auto-connect if not connected
@@ -3521,6 +3534,11 @@ function adjustFrequency(deltaHz) {
     // Notify extensions of frequency change
     if (window.radioAPI) {
         window.radioAPI.notifyFrequencyChange(roundedFreq);
+    }
+
+    // Announce frequency change for accessibility (TTS)
+    if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+        window.ttsAnnouncements.announceFrequencyChange(roundedFreq);
     }
 
     autoTune();

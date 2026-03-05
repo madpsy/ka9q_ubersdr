@@ -13472,7 +13472,13 @@ const tooltipLine2 = timeStr;
                     table.appendChild(thead);
 
                     const tbody = document.createElement('tbody');
-                    data.bands.forEach(band => {
+
+                    // Sort bands alphabetically by name
+                    const sortedBands = (data.bands || []).slice().sort((a, b) => {
+                        return a.name.localeCompare(b.name);
+                    });
+
+                    sortedBands.forEach(band => {
                         const row = document.createElement('tr');
                         row.style.borderBottom = '1px solid #dee2e6';
 
@@ -13500,14 +13506,18 @@ const tooltipLine2 = timeStr;
                             }
                         };
 
-                        // Format skipped cycles display
-                        // Modes that don't output DecodeStats will have skipped_cycles=0 and no last_skipped_cycles_change
-                        // Show '-' if there's no timestamp (meaning the mode doesn't support DecodeStats)
-                        let skippedDisplay;
-                        let skippedColor;
+                        // Determine if mode supports DecodeStats based on whether we have a valid timestamp
                         const skippedCount = band.skipped_cycles || 0;
                         const lastSkippedChange = band.last_skipped_cycles_change;
                         const hasDecodeStats = lastSkippedChange && lastSkippedChange !== '0001-01-01T00:00:00Z';
+
+                        // Format last invoke display
+                        // For streaming modes without DecodeStats (like JS8), show '-' instead of old startup time
+                        const lastInvokeDisplay = (band.is_streaming && !hasDecodeStats) ? '-' : formatTime(band.last_decoder_invoke);
+
+                        // Format skipped cycles display
+                        let skippedDisplay;
+                        let skippedColor;
 
                         if (skippedCount === 0 && !hasDecodeStats) {
                             // Mode doesn't support DecodeStats (no timestamp ever set)
@@ -13524,7 +13534,7 @@ const tooltipLine2 = timeStr;
                             <td style="padding: 10px;"><strong>${band.name}</strong></td>
                             <td style="padding: 10px;"><span style="color: #667eea;">${band.mode}</span></td>
                             <td style="padding: 10px; font-family: monospace; font-size: 12px;">${(band.frequency / 1e6).toFixed(3)} MHz</td>
-                            <td style="padding: 10px; font-family: monospace; font-size: 12px;">${formatTime(band.last_decoder_invoke)}</td>
+                            <td style="padding: 10px; font-family: monospace; font-size: 12px;">${lastInvokeDisplay}</td>
                             <td style="padding: 10px; font-family: monospace; font-size: 12px;">${formatTime(band.last_data_time)}</td>
                             <td style="padding: 10px; text-align: center; font-family: monospace; font-size: 14px;">
                                 <span style="color: ${skippedColor}; font-weight: bold;">

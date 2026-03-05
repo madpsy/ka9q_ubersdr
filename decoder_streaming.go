@@ -73,6 +73,7 @@ type StreamingDecoder struct {
 	prometheusMetrics       *PrometheusMetrics
 	lastSkippedCycles       int       // Track skipped cycles to detect when they increment
 	lastSkippedCyclesChange time.Time // Track when skipped cycles last changed
+	lastDecodeStatsTime     time.Time // Track when we last received DecodeStats
 }
 
 // NewStreamingDecoder creates and starts a streaming decoder process
@@ -699,9 +700,15 @@ func (sd *StreamingDecoder) parseDecodeStats(line string) {
 			skippedStr := line[start:end]
 			skippedCycles, err := strconv.Atoi(skippedStr)
 			if err == nil {
+				now := time.Now()
+
+				// Record when we received DecodeStats (for "Last Invoke" display)
+				sd.lastDecodeStatsTime = now
+				RecordDecoderInvoke(sd.band.Config.Name)
+
 				// Initialize timestamp on first DecodeStats (even if skipped_cycles is 0)
 				if sd.lastSkippedCyclesChange.IsZero() {
-					sd.lastSkippedCyclesChange = time.Now()
+					sd.lastSkippedCyclesChange = now
 				}
 
 				// Check if skipped cycles increased
@@ -711,7 +718,7 @@ func (sd *StreamingDecoder) parseDecodeStats(line string) {
 						sd.band.Config.Name, cyclesSkipped, skippedCycles)
 
 					// Record the time when it changed
-					sd.lastSkippedCyclesChange = time.Now()
+					sd.lastSkippedCyclesChange = now
 				}
 				sd.lastSkippedCycles = skippedCycles
 

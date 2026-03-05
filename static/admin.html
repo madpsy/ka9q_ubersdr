@@ -13500,12 +13500,6 @@ const tooltipLine2 = timeStr;
                             }
                         };
 
-                        // Use is_streaming flag from API
-                        const isStreamingMode = band.is_streaming || false;
-
-                        // Format last invoke time (show '-' for streaming modes)
-                        const lastInvokeDisplay = isStreamingMode ? '-' : formatTime(band.last_decoder_invoke);
-
                         // Format skipped cycles display
                         // Modes that don't output DecodeStats will have skipped_cycles=0 and no last_skipped_cycles_change
                         // Show '-' if there's no timestamp (meaning the mode doesn't support DecodeStats)
@@ -13530,7 +13524,7 @@ const tooltipLine2 = timeStr;
                             <td style="padding: 10px;"><strong>${band.name}</strong></td>
                             <td style="padding: 10px;"><span style="color: #667eea;">${band.mode}</span></td>
                             <td style="padding: 10px; font-family: monospace; font-size: 12px;">${(band.frequency / 1e6).toFixed(3)} MHz</td>
-                            <td style="padding: 10px; font-family: monospace; font-size: 12px;">${lastInvokeDisplay}</td>
+                            <td style="padding: 10px; font-family: monospace; font-size: 12px;">${formatTime(band.last_decoder_invoke)}</td>
                             <td style="padding: 10px; font-family: monospace; font-size: 12px;">${formatTime(band.last_data_time)}</td>
                             <td style="padding: 10px; text-align: center; font-family: monospace; font-size: 14px;">
                                 <span style="color: ${skippedColor}; font-weight: bold;">

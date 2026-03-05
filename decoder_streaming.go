@@ -57,21 +57,22 @@ import (
 
 // StreamingDecoder manages a persistent decoder process with continuous audio input
 type StreamingDecoder struct {
-	band              *DecoderBand
-	config            *DecoderConfig
-	binaryPath        string
-	cmd               *exec.Cmd
-	stdin             io.WriteCloser
-	stdout            io.ReadCloser
-	stderr            io.ReadCloser
-	running           bool
-	mu                sync.Mutex
-	stopChan          chan struct{}
-	resultChan        chan *DecodeInfo
-	ctyDatabase       *CTYDatabase
-	restartChan       chan struct{} // Signal to restart the decoder
-	prometheusMetrics *PrometheusMetrics
-	lastSkippedCycles int // Track skipped cycles to detect when they increment
+	band                    *DecoderBand
+	config                  *DecoderConfig
+	binaryPath              string
+	cmd                     *exec.Cmd
+	stdin                   io.WriteCloser
+	stdout                  io.ReadCloser
+	stderr                  io.ReadCloser
+	running                 bool
+	mu                      sync.Mutex
+	stopChan                chan struct{}
+	resultChan              chan *DecodeInfo
+	ctyDatabase             *CTYDatabase
+	restartChan             chan struct{} // Signal to restart the decoder
+	prometheusMetrics       *PrometheusMetrics
+	lastSkippedCycles       int       // Track skipped cycles to detect when they increment
+	lastSkippedCyclesChange time.Time // Track when skipped cycles last changed
 }
 
 // NewStreamingDecoder creates and starts a streaming decoder process
@@ -703,8 +704,14 @@ func (sd *StreamingDecoder) parseDecodeStats(line string) {
 					cyclesSkipped := skippedCycles - sd.lastSkippedCycles
 					log.Printf("Warning: Decoder %s skipped %d cycle(s) (total: %d)",
 						sd.band.Config.Name, cyclesSkipped, skippedCycles)
+
+					// Record the time when it changed
+					sd.lastSkippedCyclesChange = time.Now()
 				}
 				sd.lastSkippedCycles = skippedCycles
+
+				// Record skipped cycles in health system
+				RecordDecoderSkippedCycles(sd.band.Config.Name, skippedCycles, sd.lastSkippedCyclesChange)
 			}
 		}
 	}

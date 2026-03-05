@@ -19,12 +19,14 @@ type DecoderHealthStatus struct {
 
 // DecoderBandHealth represents health information for a single decoder band
 type DecoderBandHealth struct {
-	Name              string    `json:"name"`
-	Mode              string    `json:"mode"`
-	Frequency         uint64    `json:"frequency"`
-	LastDecoderInvoke time.Time `json:"last_decoder_invoke"`
-	LastDataTime      time.Time `json:"last_data_time"`
-	IsStale           bool      `json:"is_stale"`
+	Name                    string    `json:"name"`
+	Mode                    string    `json:"mode"`
+	Frequency               uint64    `json:"frequency"`
+	LastDecoderInvoke       time.Time `json:"last_decoder_invoke"`
+	LastDataTime            time.Time `json:"last_data_time"`
+	IsStale                 bool      `json:"is_stale"`
+	SkippedCycles           int       `json:"skipped_cycles"`
+	LastSkippedCyclesChange time.Time `json:"last_skipped_cycles_change"`
 }
 
 // ReporterHealthStatus represents health information for spot reporters
@@ -60,17 +62,19 @@ type DecoderHealthConfig struct {
 
 // DecoderBandDiagnostics provides detailed band diagnostics
 type DecoderBandDiagnostics struct {
-	Name              string        `json:"name"`
-	Mode              string        `json:"mode"`
-	Frequency         uint64        `json:"frequency"`
-	SSRC              uint32        `json:"ssrc"`
-	SessionID         string        `json:"session_id"`
-	LastDecoderInvoke time.Time     `json:"last_decoder_invoke"`
-	LastDataTime      time.Time     `json:"last_data_time"`
-	TimeSinceInvoke   string        `json:"time_since_invoke"`
-	TimeSinceData     string        `json:"time_since_data"`
-	CycleTime         time.Duration `json:"cycle_time"`
-	IsStale           bool          `json:"is_stale"`
+	Name                    string        `json:"name"`
+	Mode                    string        `json:"mode"`
+	Frequency               uint64        `json:"frequency"`
+	SSRC                    uint32        `json:"ssrc"`
+	SessionID               string        `json:"session_id"`
+	LastDecoderInvoke       time.Time     `json:"last_decoder_invoke"`
+	LastDataTime            time.Time     `json:"last_data_time"`
+	TimeSinceInvoke         string        `json:"time_since_invoke"`
+	TimeSinceData           string        `json:"time_since_data"`
+	CycleTime               time.Duration `json:"cycle_time"`
+	IsStale                 bool          `json:"is_stale"`
+	SkippedCycles           int           `json:"skipped_cycles"`
+	LastSkippedCyclesChange time.Time     `json:"last_skipped_cycles_change"`
 }
 
 // ReporterDiagnostics provides detailed reporter diagnostics
@@ -87,6 +91,10 @@ var (
 	lastDecoderInvokeTimes = make(map[string]time.Time)
 	lastDecoderInvokeMu    sync.RWMutex
 
+	decoderSkippedCycles        = make(map[string]int)
+	decoderSkippedCyclesChanges = make(map[string]time.Time)
+	decoderSkippedCyclesMu      sync.RWMutex
+
 	lastPSKReporterSend  time.Time
 	lastPSKReporterMu    sync.RWMutex
 	pskReporterSendCount int
@@ -101,6 +109,14 @@ func RecordDecoderInvoke(bandName string) {
 	lastDecoderInvokeMu.Lock()
 	defer lastDecoderInvokeMu.Unlock()
 	lastDecoderInvokeTimes[bandName] = time.Now()
+}
+
+// RecordDecoderSkippedCycles records the skipped cycles count and last change time for a band
+func RecordDecoderSkippedCycles(bandName string, skippedCycles int, lastChange time.Time) {
+	decoderSkippedCyclesMu.Lock()
+	defer decoderSkippedCyclesMu.Unlock()
+	decoderSkippedCycles[bandName] = skippedCycles
+	decoderSkippedCyclesChanges[bandName] = lastChange
 }
 
 // RecordPSKReporterSend records when data was sent to PSKReporter
@@ -146,6 +162,11 @@ func (md *MultiDecoder) GetHealthStatus() DecoderHealthStatus {
 		lastInvoke := lastDecoderInvokeTimes[band.Config.Name]
 		lastDecoderInvokeMu.RUnlock()
 
+		decoderSkippedCyclesMu.RLock()
+		skippedCycles := decoderSkippedCycles[band.Config.Name]
+		lastSkippedChange := decoderSkippedCyclesChanges[band.Config.Name]
+		decoderSkippedCyclesMu.RUnlock()
+
 		band.mu.Lock()
 		lastData := band.LastDataTime
 		isStreamingMode := band.IsStreamingMode // Use runtime streaming mode flag
@@ -174,12 +195,14 @@ func (md *MultiDecoder) GetHealthStatus() DecoderHealthStatus {
 		}
 
 		bandHealth := DecoderBandHealth{
-			Name:              band.Config.Name,
-			Mode:              band.Config.Mode.String(),
-			Frequency:         band.Config.Frequency,
-			LastDecoderInvoke: lastInvoke,
-			LastDataTime:      lastData,
-			IsStale:           isStale,
+			Name:                    band.Config.Name,
+			Mode:                    band.Config.Mode.String(),
+			Frequency:               band.Config.Frequency,
+			LastDecoderInvoke:       lastInvoke,
+			LastDataTime:            lastData,
+			IsStale:                 isStale,
+			SkippedCycles:           skippedCycles,
+			LastSkippedCyclesChange: lastSkippedChange,
 		}
 
 		status.Bands = append(status.Bands, bandHealth)
@@ -301,6 +324,11 @@ func (md *MultiDecoder) GetStartupDiagnostics() DecoderHealthDiagnostics {
 		lastInvoke := lastDecoderInvokeTimes[band.Config.Name]
 		lastDecoderInvokeMu.RUnlock()
 
+		decoderSkippedCyclesMu.RLock()
+		skippedCycles := decoderSkippedCycles[band.Config.Name]
+		lastSkippedChange := decoderSkippedCyclesChanges[band.Config.Name]
+		decoderSkippedCyclesMu.RUnlock()
+
 		band.mu.Lock()
 		lastData := band.LastDataTime
 		isStreamingMode := band.IsStreamingMode // Use runtime streaming mode flag
@@ -327,17 +355,19 @@ func (md *MultiDecoder) GetStartupDiagnostics() DecoderHealthDiagnostics {
 		}
 
 		bandDiag := DecoderBandDiagnostics{
-			Name:              band.Config.Name,
-			Mode:              band.Config.Mode.String(),
-			Frequency:         band.Config.Frequency,
-			SSRC:              band.SSRC,
-			SessionID:         band.SessionID,
-			LastDecoderInvoke: lastInvoke,
-			LastDataTime:      lastData,
-			TimeSinceInvoke:   timeSinceInvoke.Round(time.Second).String(),
-			TimeSinceData:     timeSinceData.Round(time.Second).String(),
-			CycleTime:         modeInfo.CycleTime,
-			IsStale:           isStale,
+			Name:                    band.Config.Name,
+			Mode:                    band.Config.Mode.String(),
+			Frequency:               band.Config.Frequency,
+			SSRC:                    band.SSRC,
+			SessionID:               band.SessionID,
+			LastDecoderInvoke:       lastInvoke,
+			LastDataTime:            lastData,
+			TimeSinceInvoke:         timeSinceInvoke.Round(time.Second).String(),
+			TimeSinceData:           timeSinceData.Round(time.Second).String(),
+			CycleTime:               modeInfo.CycleTime,
+			IsStale:                 isStale,
+			SkippedCycles:           skippedCycles,
+			LastSkippedCyclesChange: lastSkippedChange,
 		}
 
 		diag.BandDetails = append(diag.BandDetails, bandDiag)

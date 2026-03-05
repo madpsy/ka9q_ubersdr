@@ -658,13 +658,10 @@
                 this.closePopup();
             });
 
-            // Add permanent tooltip with receiver callsign and name (description)
+            // Add permanent tooltip with receiver callsign only (not description)
             let tooltipText = '';
             if (callsign) {
                 tooltipText = callsign;
-                if (name) {
-                    tooltipText += '<br>' + name;
-                }
             } else if (name) {
                 tooltipText = name;
             }

@@ -25,6 +25,7 @@ type DecoderBandHealth struct {
 	LastDecoderInvoke       time.Time `json:"last_decoder_invoke"`
 	LastDataTime            time.Time `json:"last_data_time"`
 	IsStale                 bool      `json:"is_stale"`
+	IsStreaming             bool      `json:"is_streaming"`
 	SkippedCycles           int       `json:"skipped_cycles"`
 	LastSkippedCyclesChange time.Time `json:"last_skipped_cycles_change"`
 }
@@ -73,6 +74,7 @@ type DecoderBandDiagnostics struct {
 	TimeSinceData           string        `json:"time_since_data"`
 	CycleTime               time.Duration `json:"cycle_time"`
 	IsStale                 bool          `json:"is_stale"`
+	IsStreaming             bool          `json:"is_streaming"`
 	SkippedCycles           int           `json:"skipped_cycles"`
 	LastSkippedCyclesChange time.Time     `json:"last_skipped_cycles_change"`
 }
@@ -201,6 +203,7 @@ func (md *MultiDecoder) GetHealthStatus() DecoderHealthStatus {
 			LastDecoderInvoke:       lastInvoke,
 			LastDataTime:            lastData,
 			IsStale:                 isStale,
+			IsStreaming:             isStreamingMode,
 			SkippedCycles:           skippedCycles,
 			LastSkippedCyclesChange: lastSkippedChange,
 		}
@@ -366,6 +369,7 @@ func (md *MultiDecoder) GetStartupDiagnostics() DecoderHealthDiagnostics {
 			TimeSinceData:           timeSinceData.Round(time.Second).String(),
 			CycleTime:               modeInfo.CycleTime,
 			IsStale:                 isStale,
+			IsStreaming:             isStreamingMode,
 			SkippedCycles:           skippedCycles,
 			LastSkippedCyclesChange: lastSkippedChange,
 		}

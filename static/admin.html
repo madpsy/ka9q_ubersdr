@@ -13423,11 +13423,46 @@ const tooltipLine2 = timeStr;
                 // Calculate total skipped cycles across all bands
                 const totalSkippedCycles = (data.bands || []).reduce((sum, b) => sum + (b.skipped_cycles || 0), 0);
 
+                // Find the most recent skip time across all bands
+                let mostRecentSkipTime = null;
+                (data.bands || []).forEach(b => {
+                    if (b.last_skipped_cycles_change && b.last_skipped_cycles_change !== '0001-01-01T00:00:00Z' && b.skipped_cycles > 0) {
+                        const skipTime = new Date(b.last_skipped_cycles_change);
+                        if (!mostRecentSkipTime || skipTime > mostRecentSkipTime) {
+                            mostRecentSkipTime = skipTime;
+                        }
+                    }
+                });
+
+                // Format the most recent skip time
+                const formatTime = (timeStr) => {
+                    if (!timeStr || timeStr === 'never' || timeStr === '0001-01-01T00:00:00Z') return 'never';
+                    try {
+                        const date = new Date(timeStr);
+                        const now = new Date();
+                        const diffMs = now - date;
+                        const diffSecs = Math.floor(diffMs / 1000);
+
+                        if (diffSecs < 0) return 'just now';
+                        if (diffSecs < 2) return 'just now';
+                        if (diffSecs < 60) return `${diffSecs}s ago`;
+                        if (diffSecs < 3600) return `${Math.floor(diffSecs / 60)}m ago`;
+                        if (diffSecs < 86400) return `${Math.floor(diffSecs / 3600)}h ago`;
+                        return `${Math.floor(diffSecs / 86400)}d ago`;
+                    } catch (e) {
+                        return timeStr;
+                    }
+                };
+
+                const skippedCyclesLabel = mostRecentSkipTime
+                    ? `Skipped Cycles (${formatTime(mostRecentSkipTime.toISOString())})`
+                    : 'Skipped Cycles';
+
                 const stats = [
                     { label: 'Total Bands', value: data.band_count || 0, icon: '📊' },
                     { label: 'Healthy Bands', value: (data.bands || []).filter(b => !b.is_stale).length, icon: '✅' },
                     { label: 'Stale Bands', value: (data.bands || []).filter(b => b.is_stale).length, icon: '⚠️' },
-                    { label: 'Skipped Cycles', value: totalSkippedCycles, icon: '🔄' }
+                    { label: skippedCyclesLabel, value: totalSkippedCycles, icon: '🔄' }
                 ];
 
                 stats.forEach(stat => {

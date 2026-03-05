@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -232,6 +233,13 @@ func (md *MultiDecoder) GetHealthStatus() DecoderHealthStatus {
 				status.Issues = append(status.Issues, "Band "+band.Config.Name+": no audio data in "+timeSinceData.Round(time.Second).String())
 				status.Healthy = false
 			}
+		}
+
+		// Check for skipped cycles (indicates CPU overload)
+		// Only warn if more than 10 cycles skipped (a few skipped cycles is usually fine)
+		if skippedCycles > 10 {
+			status.Issues = append(status.Issues, "Band "+band.Config.Name+": "+fmt.Sprintf("%d", skippedCycles)+" decode cycle(s) skipped due to CPU overload. Consider reducing decode depth or disabling some decoders.")
+			status.Healthy = false
 		}
 	}
 

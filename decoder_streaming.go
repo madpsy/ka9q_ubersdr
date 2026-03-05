@@ -699,6 +699,11 @@ func (sd *StreamingDecoder) parseDecodeStats(line string) {
 			skippedStr := line[start:end]
 			skippedCycles, err := strconv.Atoi(skippedStr)
 			if err == nil {
+				// Initialize timestamp on first DecodeStats (even if skipped_cycles is 0)
+				if sd.lastSkippedCyclesChange.IsZero() {
+					sd.lastSkippedCyclesChange = time.Now()
+				}
+
 				// Check if skipped cycles increased
 				if skippedCycles > sd.lastSkippedCycles {
 					cyclesSkipped := skippedCycles - sd.lastSkippedCycles

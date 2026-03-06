@@ -794,10 +794,10 @@ class SpectrumDisplay {
             switch (currentMode) {
                 case 'usb':
                     minLimit = 0;
-                    maxLimit = 4000;
+                    maxLimit = 6000;
                     break;
                 case 'lsb':
-                    minLimit = -4000;
+                    minLimit = -6000;
                     maxLimit = 0;
                     break;
                 case 'cw':
@@ -818,7 +818,7 @@ class SpectrumDisplay {
                     break;
                 default:
                     minLimit = 0;
-                    maxLimit = 4000;
+                    maxLimit = 6000;
             }
 
             // Clamp to mode-specific limits

@@ -171,15 +171,13 @@ class AudioSpectrumDisplay:
         elif (low < 0 and high > 0):
             # Symmetric bandwidth (e.g., AM: -5000 to +5000, FM: -8000 to +8000)
             max_freq = bandwidth_span / 2
-            margin = max_freq * 0.3
             self.display_freq_min = 0
-            self.display_freq_max = max_freq + margin
+            self.display_freq_max = max_freq
         else:
             # Asymmetric bandwidth (e.g., USB: 50 to 2700, LSB: -2700 to -50)
             max_freq = max(abs_low, abs_high)
-            margin = max_freq * 0.3
             self.display_freq_min = 0
-            self.display_freq_max = max_freq + margin
+            self.display_freq_max = max_freq
 
         # Ensure minimum display range
         if self.display_freq_max < 500:

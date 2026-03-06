@@ -602,9 +602,10 @@ class WhisperExtension extends DecoderExtension {
         view.setUint8(0, 0x06); // MessageTypeSummaryRequest
         view.setUint32(1, completedSegments, false); // big-endian
 
-        // Send via WebSocket
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(buffer);
+        // Send via WebSocket (using DX cluster WebSocket)
+        const dxClient = window.dxClusterClient;
+        if (dxClient && dxClient.ws && dxClient.ws.readyState === WebSocket.OPEN) {
+            dxClient.ws.send(buffer);
             console.log(`Whisper: Sent summary request for ${completedSegments} segments`);
         } else {
             console.error('Whisper: WebSocket not connected, cannot request summary');

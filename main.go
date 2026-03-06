@@ -1260,6 +1260,7 @@ func main() {
 		InstanceUUID:      config.InstanceReporting.InstanceUUID,
 		MaxUsers:          config.Whisper.MaxUsers,
 		LibreTranslateURL: config.Whisper.LibreTranslateURL,
+		SummaryURL:        config.Whisper.SummaryURL,
 	}
 	whisperInfo := whisper.GetInfo()
 

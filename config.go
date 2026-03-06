@@ -341,6 +341,7 @@ type WhisperConfig struct {
 	InitialPrompt     string `yaml:"initial_prompt"`     // Initial prompt to guide transcription style/context
 	MaxUsers          int    `yaml:"max_users"`          // Maximum concurrent users of the extension (0 = unlimited)
 	LibreTranslateURL string `yaml:"libretranslate_url"` // LibreTranslate API URL for translation (default: https://whisper.ubersdr.org/translate)
+	SummaryURL        string `yaml:"summary_url"`        // Summary API URL for text summarization (default: same host as server_url with /summarise endpoint)
 }
 
 // LoadConfig loads configuration from a YAML file

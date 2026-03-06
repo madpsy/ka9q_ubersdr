@@ -131,6 +131,37 @@ class WhisperExtension extends DecoderExtension {
         if (saveButton) {
             saveButton.addEventListener('click', () => this.saveTranscription());
         }
+        
+        // Summarise button
+        const summariseButton = document.getElementById('whisper-summarise-button');
+        if (summariseButton) {
+            summariseButton.addEventListener('click', () => this.requestSummary());
+        }
+        
+        // Summary modal controls
+        const summaryModal = document.getElementById('whisper-summary-modal');
+        const summaryClose = document.getElementById('whisper-summary-close');
+        const summaryOk = document.getElementById('whisper-summary-ok');
+        const summaryCopy = document.getElementById('whisper-summary-copy');
+        
+        if (summaryClose) {
+            summaryClose.addEventListener('click', () => this.closeSummaryModal());
+        }
+        if (summaryOk) {
+            summaryOk.addEventListener('click', () => this.closeSummaryModal());
+        }
+        if (summaryCopy) {
+            summaryCopy.addEventListener('click', () => this.copySummaryToClipboard());
+        }
+        // Close modal when clicking outside
+        if (summaryModal) {
+            summaryModal.addEventListener('click', (e) => {
+                if (e.target === summaryModal) {
+                    this.closeSummaryModal();
+                }
+            });
+        }
+        
         if (textSmallerButton) {
             textSmallerButton.addEventListener('click', () => this.decreaseTextSize());
         }
@@ -550,6 +581,154 @@ class WhisperExtension extends DecoderExtension {
         this.showTemporaryMessage('Saved transcription!');
     }
 
+    requestSummary() {
+        // Count completed segments (not just displayed ones)
+        const completedSegments = this.transcript.length;
+
+        if (completedSegments === 0) {
+            alert('No completed segments to summarize. Please wait for some transcription to complete.');
+            return;
+        }
+
+        console.log(`Whisper: Requesting summary of ${completedSegments} completed segments`);
+
+        // Show modal with spinner
+        this.showSummaryModal();
+
+        // Send summary request to backend
+        // Message format: [type:1][n_segments:4]
+        const buffer = new ArrayBuffer(5);
+        const view = new DataView(buffer);
+        view.setUint8(0, 0x06); // MessageTypeSummaryRequest
+        view.setUint32(1, completedSegments, false); // big-endian
+
+        // Send via WebSocket
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(buffer);
+            console.log(`Whisper: Sent summary request for ${completedSegments} segments`);
+        } else {
+            console.error('Whisper: WebSocket not connected, cannot request summary');
+            this.showSummaryError('Not connected to server. Please start the decoder first.');
+        }
+    }
+
+    showSummaryModal() {
+        const modal = document.getElementById('whisper-summary-modal');
+        const spinner = document.getElementById('whisper-summary-spinner');
+        const content = document.getElementById('whisper-summary-content');
+        const error = document.getElementById('whisper-summary-error');
+        const copyButton = document.getElementById('whisper-summary-copy');
+
+        if (modal) {
+            modal.style.display = 'flex';
+        }
+        if (spinner) {
+            spinner.style.display = 'block';
+        }
+        if (content) {
+            content.style.display = 'none';
+        }
+        if (error) {
+            error.style.display = 'none';
+        }
+        if (copyButton) {
+            copyButton.style.display = 'none';
+        }
+    }
+
+    closeSummaryModal() {
+        const modal = document.getElementById('whisper-summary-modal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    showSummaryError(errorMessage) {
+        const spinner = document.getElementById('whisper-summary-spinner');
+        const content = document.getElementById('whisper-summary-content');
+        const error = document.getElementById('whisper-summary-error');
+
+        if (spinner) {
+            spinner.style.display = 'none';
+        }
+        if (content) {
+            content.style.display = 'none';
+        }
+        if (error) {
+            error.textContent = errorMessage;
+            error.style.display = 'block';
+        }
+    }
+
+    handleSummaryResponse(view, data) {
+        // Binary protocol: [type:1][timestamp:8][json_length:4][json:N]
+        console.log('Whisper: Received summary response');
+
+        // Extract JSON length (bytes 9-12, big-endian)
+        const jsonLength = view.getUint32(9, false);
+
+        // Extract JSON data (bytes 13 onwards)
+        const jsonBytes = new Uint8Array(data, 13, jsonLength);
+        const jsonStr = new TextDecoder().decode(jsonBytes);
+
+        let summaryData;
+        try {
+            summaryData = JSON.parse(jsonStr);
+        } catch (e) {
+            console.error('Whisper: Failed to parse summary JSON:', e);
+            this.showSummaryError('Failed to parse summary response');
+            return;
+        }
+
+        console.log('Whisper: Summary data:', summaryData);
+
+        // Display summary in modal
+        const spinner = document.getElementById('whisper-summary-spinner');
+        const content = document.getElementById('whisper-summary-content');
+        const error = document.getElementById('whisper-summary-error');
+        const summaryText = document.getElementById('whisper-summary-text');
+        const segmentsInfo = document.getElementById('whisper-summary-segments-info');
+        const copyButton = document.getElementById('whisper-summary-copy');
+
+        if (spinner) {
+            spinner.style.display = 'none';
+        }
+        if (error) {
+            error.style.display = 'none';
+        }
+        if (content) {
+            content.style.display = 'block';
+        }
+        if (copyButton) {
+            copyButton.style.display = 'inline-block';
+        }
+
+        if (summaryText) {
+            summaryText.textContent = summaryData.summary || 'No summary available';
+        }
+
+        if (segmentsInfo) {
+            const segmentsUsed = summaryData.segments_used || 0;
+            const segmentsRequested = summaryData.segments_requested || 0;
+            const targetLanguage = summaryData.target_language || 'en';
+            segmentsInfo.textContent = `Summarized ${segmentsUsed} of ${segmentsRequested} requested segments (Language: ${targetLanguage})`;
+        }
+    }
+
+    copySummaryToClipboard() {
+        const summaryText = document.getElementById('whisper-summary-text');
+        if (summaryText) {
+            const text = summaryText.textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                console.log('Whisper: Summary copied to clipboard');
+                this.showTemporaryMessage('Summary copied!');
+            }).catch(err => {
+                console.error('Whisper: Failed to copy summary:', err);
+                alert('Failed to copy summary to clipboard');
+            });
+        }
+    }
+
     showTemporaryMessage(message) {
         const statusElement = document.getElementById('whisper-status');
         if (statusElement) {
@@ -582,6 +761,9 @@ class WhisperExtension extends DecoderExtension {
                 break;
             case 0x04: // Error message
                 this.handleErrorMessage(view, data);
+                break;
+            case 0x05: // Summary response
+                this.handleSummaryResponse(view, data);
                 break;
             default:
                 console.warn(`Whisper: Unknown message type: 0x${messageType.toString(16).padStart(2, '0')}`);

@@ -15,6 +15,7 @@ type ConfigProvider struct {
 	InstanceUUID      string
 	MaxUsers          int
 	LibreTranslateURL string
+	SummaryURL        string
 }
 
 // GlobalConfigProvider is set by main package
@@ -96,6 +97,7 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 			InitialPrompt:     GlobalConfigProvider.InitialPrompt,
 			InstanceUUID:      GlobalConfigProvider.InstanceUUID,
 			LibreTranslateURL: GlobalConfigProvider.LibreTranslateURL,
+			SummaryURL:        GlobalConfigProvider.SummaryURL,
 			TargetLanguage:    "en", // Default to English
 		}
 		log.Printf("[Whisper Extension] Using configuration from config.yaml")
@@ -108,6 +110,7 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 			InitialPrompt:     "",
 			InstanceUUID:      "",
 			LibreTranslateURL: "https://whisper.ubersdr.org/translate",
+			SummaryURL:        "",
 			TargetLanguage:    "en", // Default to English
 		}
 		log.Printf("[Whisper Extension] Using default configuration (config not available)")
@@ -155,4 +158,20 @@ func (e *WhisperExtension) Stop() error {
 // GetName returns the extension name
 func (e *WhisperExtension) GetName() string {
 	return "whisper"
+}
+
+// HandleControlMessage handles control messages from the frontend
+// This allows the frontend to send summary requests and other control commands
+func (e *WhisperExtension) HandleControlMessage(message []byte, resultChan chan<- []byte) {
+	if len(message) < 1 {
+		return
+	}
+
+	messageType := message[0]
+	switch messageType {
+	case 0x06: // MessageTypeSummaryRequest
+		e.decoder.handleSummaryRequest(message, resultChan)
+	default:
+		log.Printf("[Whisper Extension] Unknown control message type: 0x%02x", messageType)
+	}
 }

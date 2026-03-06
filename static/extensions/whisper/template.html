@@ -95,6 +95,7 @@
                 <button id="whisper-text-larger" class="whisper-button-small" title="Increase text size">Text+</button>
                 <button id="whisper-copy-button" class="whisper-button-small" title="Copy to clipboard">📋 Copy</button>
                 <button id="whisper-save-button" class="whisper-button-small" title="Save to file">💾 Save</button>
+                <button id="whisper-summarise-button" class="whisper-button-small" title="Summarise transcription">📝 Summarise</button>
             </div>
         </div>
         <div id="whisper-transcription" class="whisper-transcription"></div>
@@ -105,6 +106,33 @@
         <div class="whisper-help-text">
             <strong>Speech-to-Text Decoder</strong><br>
             Real-time transcription. Tune to a voice frequency, click Start, and watch the transcription appear.
+        </div>
+    </div>
+
+    <!-- Summary Modal -->
+    <div id="whisper-summary-modal" class="whisper-modal" style="display: none;">
+        <div class="whisper-modal-content">
+            <div class="whisper-modal-header">
+                <h3>Transcription Summary</h3>
+                <button id="whisper-summary-close" class="whisper-modal-close">&times;</button>
+            </div>
+            <div class="whisper-modal-body">
+                <div id="whisper-summary-spinner" class="whisper-summary-spinner">
+                    <div class="whisper-spinner"></div>
+                    <p>Generating summary...</p>
+                </div>
+                <div id="whisper-summary-content" class="whisper-summary-content" style="display: none;">
+                    <div class="whisper-summary-meta">
+                        <span id="whisper-summary-segments-info"></span>
+                    </div>
+                    <div id="whisper-summary-text" class="whisper-summary-text"></div>
+                </div>
+                <div id="whisper-summary-error" class="whisper-summary-error" style="display: none;"></div>
+            </div>
+            <div class="whisper-modal-footer">
+                <button id="whisper-summary-copy" class="whisper-button-small" style="display: none;">📋 Copy Summary</button>
+                <button id="whisper-summary-ok" class="whisper-button-small whisper-button-primary">OK</button>
+            </div>
         </div>
     </div>
 </div>

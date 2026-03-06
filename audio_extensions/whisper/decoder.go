@@ -23,6 +23,18 @@ import (
  * Connects to WhisperLive server via WebSocket for real-time transcription
  */
 
+// Message type constants for binary protocol
+const (
+	// Outgoing message types (backend -> frontend)
+	MessageTypeSegments          = 0x02 // Transcription segments
+	MessageTypeLanguageDetection = 0x03 // Language detection
+	MessageTypeError             = 0x04 // Error message
+	MessageTypeSummary           = 0x05 // Summary response
+
+	// Incoming message types (frontend -> backend)
+	MessageTypeSummaryRequest = 0x06 // Summary request from frontend
+)
+
 // WhisperConfig is defined in the main package (config.go)
 // This type alias allows the whisper package to use it
 type WhisperConfig struct {
@@ -32,6 +44,7 @@ type WhisperConfig struct {
 	InitialPrompt     string
 	InstanceUUID      string
 	LibreTranslateURL string
+	SummaryURL        string
 	TargetLanguage    string // Target language for translation (from frontend)
 }
 
@@ -56,6 +69,11 @@ type WhisperDecoder struct {
 	transcript   []map[string]interface{} // Completed segments
 	transcriptMu sync.Mutex
 	lastSegment  map[string]interface{} // Last incomplete segment
+
+	// Segment storage for summarization (stores English text before translation)
+	englishSegments    []string // Circular buffer of up to 5000 English segments
+	englishSegmentsMu  sync.Mutex
+	maxEnglishSegments int // Maximum number of segments to store (default: 5000)
 
 	// Control
 	running     bool
@@ -94,14 +112,16 @@ func NewWhisperDecoder(sampleRate int, config WhisperConfig) *WhisperDecoder {
 	}
 
 	return &WhisperDecoder{
-		sampleRate:      sampleRate,
-		config:          config,
-		clientUID:       uuid.New().String(),
-		audioBuffer:     make([]int16, 0),
-		resampler:       NewResampler(sampleRate),
-		stopChan:        make(chan struct{}),
-		serverReady:     make(chan struct{}),
-		suppressPhrases: suppressPhrases,
+		sampleRate:         sampleRate,
+		config:             config,
+		clientUID:          uuid.New().String(),
+		audioBuffer:        make([]int16, 0),
+		resampler:          NewResampler(sampleRate),
+		stopChan:           make(chan struct{}),
+		serverReady:        make(chan struct{}),
+		suppressPhrases:    suppressPhrases,
+		englishSegments:    make([]string, 0, 5000),
+		maxEnglishSegments: 5000,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
@@ -164,18 +184,20 @@ func (d *WhisperDecoder) Stop() error {
 	}
 	d.wsConnMu.Unlock()
 
+	// Clear stored English segments
+	d.clearEnglishSegments()
+
 	d.wg.Wait()
 	return nil
 }
 
 // sendErrorToFrontend sends an error message to the frontend via the result channel
 // Binary protocol: [type:1][timestamp:8][error_length:4][error:N]
-// type: 0x04 = error message
 func (d *WhisperDecoder) sendErrorToFrontend(resultChan chan<- []byte, errorMsg string) {
 	errorBytes := []byte(errorMsg)
 	msg := make([]byte, 1+8+4+len(errorBytes))
 
-	msg[0] = 0x04 // Error message type
+	msg[0] = MessageTypeError
 	binary.BigEndian.PutUint64(msg[1:9], uint64(time.Now().UnixNano()))
 	binary.BigEndian.PutUint32(msg[9:13], uint32(len(errorBytes)))
 	copy(msg[13:], errorBytes)
@@ -648,6 +670,9 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 				// Store original English text for deduplication
 				seg["original_text"] = originalText
 
+				// Store English segment for summarization (circular buffer)
+				d.storeEnglishSegment(originalText)
+
 				// Apply translation if target language is not English
 				// Whisper always returns English, so we translate from English to target language
 				if d.config.TargetLanguage != "" && d.config.TargetLanguage != "en" {
@@ -747,16 +772,77 @@ func (d *WhisperDecoder) removeConsecutiveWords(text string) string {
 	return strings.Join(result, " ")
 }
 
+// storeEnglishSegment stores an English segment in the circular buffer for summarization
+// Maintains a maximum of maxEnglishSegments (5000) segments
+func (d *WhisperDecoder) storeEnglishSegment(text string) {
+	d.englishSegmentsMu.Lock()
+	defer d.englishSegmentsMu.Unlock()
+
+	// Add segment to buffer
+	d.englishSegments = append(d.englishSegments, text)
+
+	// If we exceed the maximum, remove oldest segments (FIFO)
+	if len(d.englishSegments) > d.maxEnglishSegments {
+		// Remove oldest segments to maintain max size
+		excess := len(d.englishSegments) - d.maxEnglishSegments
+		d.englishSegments = d.englishSegments[excess:]
+	}
+}
+
+// getLastNEnglishSegments retrieves the last n English segments for summarization
+// Returns fewer segments if n exceeds available segments
+func (d *WhisperDecoder) getLastNEnglishSegments(n int) []string {
+	d.englishSegmentsMu.Lock()
+	defer d.englishSegmentsMu.Unlock()
+
+	totalSegments := len(d.englishSegments)
+	if totalSegments == 0 {
+		return []string{}
+	}
+
+	// If n is greater than available segments, return all segments
+	if n > totalSegments {
+		n = totalSegments
+	}
+
+	// Return last n segments
+	startIndex := totalSegments - n
+	result := make([]string, n)
+	copy(result, d.englishSegments[startIndex:])
+	return result
+}
+
+// clearEnglishSegments clears all stored English segments
+func (d *WhisperDecoder) clearEnglishSegments() {
+	d.englishSegmentsMu.Lock()
+	defer d.englishSegmentsMu.Unlock()
+	d.englishSegments = make([]string, 0, d.maxEnglishSegments)
+}
+
 // encodeSegments encodes transcription segments into binary protocol
 // Format: [type:1][timestamp:8][json_length:4][json:N]
 // The JSON contains an array of segments with text, start, end, and completed fields
 func (d *WhisperDecoder) encodeSegments(segmentsJSON []byte, timestamp int64) []byte {
 	buf := make([]byte, 1+8+4+len(segmentsJSON))
 
-	buf[0] = 0x02 // Message type: segments
+	buf[0] = MessageTypeSegments
 	binary.BigEndian.PutUint64(buf[1:9], uint64(timestamp))
 	binary.BigEndian.PutUint32(buf[9:13], uint32(len(segmentsJSON)))
 	copy(buf[13:], segmentsJSON)
+
+	return buf
+}
+
+// encodeSummaryResponse encodes summary response into binary protocol
+// Format: [type:1][timestamp:8][json_length:4][json:N]
+// The JSON contains summary text and metadata
+func (d *WhisperDecoder) encodeSummaryResponse(summaryJSON []byte, timestamp int64) []byte {
+	buf := make([]byte, 1+8+4+len(summaryJSON))
+
+	buf[0] = MessageTypeSummary
+	binary.BigEndian.PutUint64(buf[1:9], uint64(timestamp))
+	binary.BigEndian.PutUint32(buf[9:13], uint32(len(summaryJSON)))
+	copy(buf[13:], summaryJSON)
 
 	return buf
 }
@@ -850,16 +936,178 @@ func (d *WhisperDecoder) translateText(text, sourceLang, targetLang string) stri
 	return result.TranslatedText
 }
 
+// summarizeText summarizes text using the summary API endpoint
+// Returns the summary text, or the original text if summarization fails or is not configured
+func (d *WhisperDecoder) summarizeText(text string) string {
+	// Skip summarization if not configured
+	if d.config.SummaryURL == "" {
+		return text
+	}
+
+	// Skip summarization for very short text (less than 100 characters)
+	if len(text) < 100 {
+		return text
+	}
+
+	// Prepare request body
+	requestBody := map[string]interface{}{
+		"text": text,
+	}
+
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		log.Printf("[Whisper] Failed to marshal summary request: %v", err)
+		return text
+	}
+
+	// Create HTTP request with same headers as WhisperLive connection
+	req, err := http.NewRequest("POST", d.config.SummaryURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Printf("[Whisper] Failed to create summary request: %v", err)
+		return text
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	// Add same headers as WhisperLive WebSocket connection
+	if d.config.InstanceUUID != "" {
+		req.Header.Set("X-UberSDR-UUID", d.config.InstanceUUID)
+	}
+	if d.config.Model != "" {
+		req.Header.Set("X-UberSDR-Model", d.config.Model)
+	}
+	if GlobalConfigProvider != nil && GlobalConfigProvider.MaxUsers > 0 {
+		req.Header.Set("X-UberSDR-Max-Users", fmt.Sprintf("%d", GlobalConfigProvider.MaxUsers))
+	}
+
+	// Send request
+	resp, err := d.httpClient.Do(req)
+	if err != nil {
+		log.Printf("[Whisper] Summary request failed: %v", err)
+		return text
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("[Whisper] Failed to close summary response body: %v", closeErr)
+		}
+	}()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("[Whisper] Summary API returned status %d: %s", resp.StatusCode, string(body))
+		return text
+	}
+
+	// Parse response
+	var result struct {
+		InputLength  int    `json:"input_length"`
+		OutputLength int    `json:"output_length"`
+		Summary      string `json:"summary"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		log.Printf("[Whisper] Failed to decode summary response: %v", err)
+		return text
+	}
+
+	if result.Summary == "" {
+		log.Printf("[Whisper] Summary API returned empty summary")
+		return text
+	}
+
+	log.Printf("[Whisper] Summarized text: %d chars -> %d chars", result.InputLength, result.OutputLength)
+	return result.Summary
+}
+
 // encodeLanguageDetection encodes language detection into binary protocol
 // Format: [type:1][timestamp:8][json_length:4][json:N]
 // The JSON contains language and language_prob fields
 func (d *WhisperDecoder) encodeLanguageDetection(languageJSON []byte, timestamp int64) []byte {
 	buf := make([]byte, 1+8+4+len(languageJSON))
 
-	buf[0] = 0x03 // Message type: language detection
+	buf[0] = MessageTypeLanguageDetection
 	binary.BigEndian.PutUint64(buf[1:9], uint64(timestamp))
 	binary.BigEndian.PutUint32(buf[9:13], uint32(len(languageJSON)))
 	copy(buf[13:], languageJSON)
 
 	return buf
+}
+
+// handleSummaryRequest processes a summary request from the frontend
+// Request format: [type:1][n_segments:4]
+// where n_segments is the number of segments to summarize
+func (d *WhisperDecoder) handleSummaryRequest(message []byte, resultChan chan<- []byte) {
+	// Validate message length (minimum: 1 byte type + 4 bytes n_segments)
+	if len(message) < 5 {
+		log.Printf("[Whisper] Invalid summary request: message too short (%d bytes)", len(message))
+		d.sendErrorToFrontend(resultChan, "Invalid summary request: message too short")
+		return
+	}
+
+	// Extract number of segments to summarize
+	nSegments := int(binary.BigEndian.Uint32(message[1:5]))
+	log.Printf("[Whisper] Summary request received: last %d segments", nSegments)
+
+	// Validate n_segments
+	if nSegments <= 0 {
+		log.Printf("[Whisper] Invalid summary request: n_segments must be positive (got %d)", nSegments)
+		d.sendErrorToFrontend(resultChan, fmt.Sprintf("Invalid summary request: n_segments must be positive (got %d)", nSegments))
+		return
+	}
+
+	// Check if summary URL is configured
+	if d.config.SummaryURL == "" {
+		log.Printf("[Whisper] Summary request rejected: summary_url not configured")
+		d.sendErrorToFrontend(resultChan, "Summary feature not configured (summary_url is empty)")
+		return
+	}
+
+	// Get last n English segments
+	segments := d.getLastNEnglishSegments(nSegments)
+	if len(segments) == 0 {
+		log.Printf("[Whisper] No segments available for summarization")
+		d.sendErrorToFrontend(resultChan, "No segments available for summarization")
+		return
+	}
+
+	log.Printf("[Whisper] Retrieved %d segments for summarization (requested %d)", len(segments), nSegments)
+
+	// Concatenate segments with newlines
+	text := strings.Join(segments, "\n")
+
+	// Call summary API
+	summary := d.summarizeText(text)
+
+	// If target language is not English, translate the summary
+	if d.config.TargetLanguage != "" && d.config.TargetLanguage != "en" {
+		log.Printf("[Whisper] Translating summary from English to %s", d.config.TargetLanguage)
+		summary = d.translateText(summary, "en", d.config.TargetLanguage)
+	}
+
+	// Prepare response JSON
+	responseData := map[string]interface{}{
+		"summary":            summary,
+		"segments_used":      len(segments),
+		"segments_requested": nSegments,
+		"target_language":    d.config.TargetLanguage,
+	}
+
+	responseJSON, err := json.Marshal(responseData)
+	if err != nil {
+		log.Printf("[Whisper] Failed to marshal summary response: %v", err)
+		d.sendErrorToFrontend(resultChan, fmt.Sprintf("Failed to create summary response: %v", err))
+		return
+	}
+
+	// Encode and send summary response
+	encoded := d.encodeSummaryResponse(responseJSON, time.Now().UnixNano())
+
+	// Send to result channel (non-blocking)
+	select {
+	case resultChan <- encoded:
+		log.Printf("[Whisper] Summary response sent (%d segments, %d chars)", len(segments), len(summary))
+	default:
+		log.Printf("[Whisper] Result channel full, dropping summary response")
+	}
 }

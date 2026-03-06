@@ -1507,3 +1507,13 @@ whisper:
   # Default: ""
   initial_prompt: "This is a radio transmission of either AM broadcast or amateur ham radio in various languages. Expect callsigns, grid locators, Q codes and technical language to be used as well as random topics."
 
+  # Summary API URL for text summarization (default: same host as server_url with /summarise endpoint)
+  # Used to generate summaries of completed transcriptions
+  # The API expects POST requests with JSON body: {"text": "Your text here..."}
+  # And returns: {"input_length":N,"output_length":M,"summary":"Summary text..."}
+  # Set to empty string to disable summarization feature
+  # Default: Derived from server_url (e.g., if server_url is "wss://whisper.ubersdr.org",
+  #          summary_url becomes "https://whisper.ubersdr.org/summarise")
+  # Example: "https://whisper.ubersdr.org/summarise"
+  summary_url: ""
+

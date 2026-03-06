@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -74,6 +75,9 @@ func (aem *AudioExtensionManager) HandleExtensionMessage(sessionID string, conn 
 
 	case "audio_extension_list":
 		return aem.handleList(sessionID, conn)
+
+	case "audio_extension_control":
+		return aem.handleControl(sessionID, conn, msg)
 
 	default:
 		return fmt.Errorf("unknown audio extension message type: %s", msgType)
@@ -238,6 +242,57 @@ func (aem *AudioExtensionManager) handleList(sessionID string, conn *websocket.C
 		"type":       "audio_extension_list",
 		"extensions": extensions,
 	})
+}
+
+// handleControl handles control messages for audio extensions (e.g., summary requests)
+func (aem *AudioExtensionManager) handleControl(sessionID string, conn *websocket.Conn, msg map[string]interface{}) error {
+	// Get the active extension for this session
+	aem.activeExtensionsMu.RLock()
+	activeExtension, exists := aem.activeExtensions[sessionID]
+	aem.activeExtensionsMu.RUnlock()
+
+	if !exists {
+		log.Printf("AudioExtension: Control message for session %s but no active extension", sessionID)
+		return aem.sendErrorSafe(nil, conn, "no active audio extension")
+	}
+
+	// Extract control type
+	controlType, ok := msg["control_type"].(string)
+	if !ok || controlType == "" {
+		log.Printf("AudioExtension: Control message missing control_type")
+		return aem.sendErrorSafe(activeExtension, conn, "control_type is required")
+	}
+
+	// Handle different control types
+	switch controlType {
+	case "summary_request":
+		// Extract n_segments
+		nSegments, ok := msg["n_segments"].(float64) // JSON numbers are float64
+		if !ok {
+			log.Printf("AudioExtension: Summary request missing n_segments")
+			return aem.sendErrorSafe(activeExtension, conn, "n_segments is required for summary_request")
+		}
+
+		// Create binary message for the extension: [type:1][n_segments:4]
+		buffer := make([]byte, 5)
+		buffer[0] = 0x06 // MessageTypeSummaryRequest
+		binary.BigEndian.PutUint32(buffer[1:5], uint32(nSegments))
+
+		// Call HandleControlMessage on the whisper extension wrapper
+		if whisperExt, ok := activeExtension.Extension.(*whisperExtensionWrapper); ok {
+			whisperExt.HandleControlMessage(buffer, activeExtension.ResultChan)
+			log.Printf("AudioExtension: Sent summary request to whisper extension for %d segments", int(nSegments))
+		} else {
+			log.Printf("AudioExtension: Active extension is not whisper, cannot handle summary request")
+			return aem.sendErrorSafe(activeExtension, conn, "summary requests only supported for whisper extension")
+		}
+
+	default:
+		log.Printf("AudioExtension: Unknown control type: %s", controlType)
+		return aem.sendErrorSafe(activeExtension, conn, fmt.Sprintf("unknown control_type: %s", controlType))
+	}
+
+	return nil
 }
 
 // forwardResults forwards binary extension results to the client

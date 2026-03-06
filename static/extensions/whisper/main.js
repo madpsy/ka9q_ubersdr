@@ -595,17 +595,18 @@ class WhisperExtension extends DecoderExtension {
         // Show modal with spinner
         this.showSummaryModal();
 
-        // Send summary request to backend
-        // Message format: [type:1][n_segments:4]
-        const buffer = new ArrayBuffer(5);
-        const view = new DataView(buffer);
-        view.setUint8(0, 0x06); // MessageTypeSummaryRequest
-        view.setUint32(1, completedSegments, false); // big-endian
+        // Send summary request to backend as JSON message
+        const message = {
+            type: 'audio_extension_control',
+            extension_name: 'whisper',
+            control_type: 'summary_request',
+            n_segments: completedSegments
+        };
 
         // Send via WebSocket (using DX cluster WebSocket)
         const dxClient = window.dxClusterClient;
         if (dxClient && dxClient.ws && dxClient.ws.readyState === WebSocket.OPEN) {
-            dxClient.ws.send(buffer);
+            dxClient.ws.send(JSON.stringify(message));
             console.log(`Whisper: Sent summary request for ${completedSegments} segments`);
         } else {
             console.error('Whisper: WebSocket not connected, cannot request summary');

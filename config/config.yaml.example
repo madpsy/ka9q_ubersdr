@@ -1515,5 +1515,5 @@ whisper:
   # Default: Derived from server_url (e.g., if server_url is "wss://whisper.ubersdr.org",
   #          summary_url becomes "https://whisper.ubersdr.org/summarise")
   # Example: "https://whisper.ubersdr.org/summarise"
-  summary_url: ""
+  summary_url: "https://whisper.ubersdr.org/summarise"
 

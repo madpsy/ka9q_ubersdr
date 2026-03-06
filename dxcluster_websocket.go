@@ -553,7 +553,7 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessi
 						})
 					}
 
-				case "audio_extension_attach", "audio_extension_detach", "audio_extension_status", "audio_extension_list":
+				case "audio_extension_attach", "audio_extension_detach", "audio_extension_status", "audio_extension_list", "audio_extension_control":
 					// Handle audio extension messages
 					if h.audioExtensionManager != nil {
 						if err := h.audioExtensionManager.HandleExtensionMessage(userSessionID, conn, msg); err != nil {

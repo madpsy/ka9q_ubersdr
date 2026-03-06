@@ -4749,3 +4749,10 @@ func (w *whisperExtensionWrapper) Stop() error {
 func (w *whisperExtensionWrapper) GetName() string {
 	return w.ext.GetName()
 }
+
+func (w *whisperExtensionWrapper) HandleControlMessage(message []byte, resultChan chan<- []byte) {
+	// Forward control message to the whisper extension
+	if whisperExt, ok := w.ext.(*whisper.WhisperExtension); ok {
+		whisperExt.HandleControlMessage(message, resultChan)
+	}
+}

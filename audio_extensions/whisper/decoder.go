@@ -71,9 +71,9 @@ type WhisperDecoder struct {
 	lastSegment  map[string]interface{} // Last incomplete segment
 
 	// Segment storage for summarization (stores English text before translation)
-	englishSegments    []string // Circular buffer of up to 5000 English segments
+	englishSegments    []string // Circular buffer of up to 1000 English segments
 	englishSegmentsMu  sync.Mutex
-	maxEnglishSegments int // Maximum number of segments to store (default: 5000)
+	maxEnglishSegments int // Maximum number of segments to store (default: 1000)
 
 	// Control
 	running     bool
@@ -120,8 +120,8 @@ func NewWhisperDecoder(sampleRate int, config WhisperConfig) *WhisperDecoder {
 		stopChan:           make(chan struct{}),
 		serverReady:        make(chan struct{}),
 		suppressPhrases:    suppressPhrases,
-		englishSegments:    make([]string, 0, 5000),
-		maxEnglishSegments: 5000,
+		englishSegments:    make([]string, 0, 1000),
+		maxEnglishSegments: 1000,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
@@ -773,7 +773,7 @@ func (d *WhisperDecoder) removeConsecutiveWords(text string) string {
 }
 
 // storeEnglishSegment stores an English segment in the circular buffer for summarization
-// Maintains a maximum of maxEnglishSegments (5000) segments
+// Maintains a maximum of maxEnglishSegments (1000) segments
 func (d *WhisperDecoder) storeEnglishSegment(text string) {
 	d.englishSegmentsMu.Lock()
 	defer d.englishSegmentsMu.Unlock()
@@ -1073,13 +1073,34 @@ func (d *WhisperDecoder) handleSummaryRequest(message []byte, resultChan chan<- 
 
 	log.Printf("[Whisper] Retrieved %d segments for summarization (requested %d)", len(segments), nSegments)
 
-	// Concatenate segments with newlines
-	text := strings.Join(segments, "\n")
+	// Process segments in chunks of 100, starting from the oldest
+	const chunkSize = 100
+	var summaries []string
 
-	// Call summary API
-	summary := d.summarizeText(text)
+	for i := 0; i < len(segments); i += chunkSize {
+		end := i + chunkSize
+		if end > len(segments) {
+			end = len(segments)
+		}
 
-	// If target language is not English, translate the summary
+		chunk := segments[i:end]
+		chunkText := strings.Join(chunk, "\n")
+
+		log.Printf("[Whisper] Summarizing chunk %d-%d of %d segments", i+1, end, len(segments))
+
+		// Call summary API for this chunk
+		chunkSummary := d.summarizeText(chunkText)
+		if chunkSummary != "" {
+			summaries = append(summaries, chunkSummary)
+		}
+	}
+
+	// Concatenate all chunk summaries
+	summary := strings.Join(summaries, "\n\n")
+
+	log.Printf("[Whisper] Generated %d chunk summaries, total length: %d chars", len(summaries), len(summary))
+
+	// If target language is not English, translate the concatenated summary
 	if d.config.TargetLanguage != "" && d.config.TargetLanguage != "en" {
 		log.Printf("[Whisper] Translating summary from English to %s", d.config.TargetLanguage)
 		summary = d.translateText(summary, "en", d.config.TargetLanguage)

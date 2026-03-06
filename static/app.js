@@ -7084,6 +7084,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.radioAPI.notifyFrequencyChange(Math.round(freq));
                 }
 
+                // Announce frequency change for accessibility (TTS)
+                if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+                    window.ttsAnnouncements.announceFrequencyChange(Math.round(freq));
+                }
+
                 // Check if fully zoomed out (zoom level = 1.0)
                 if (spectrumDisplay && spectrumDisplay.zoomLevel <= 1.0) {
                     // Fully zoomed out - perform max zoom at clicked frequency

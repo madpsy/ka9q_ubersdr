@@ -713,7 +713,7 @@ class WhisperExtension extends DecoderExtension {
             const segmentsUsed = summaryData.segments_used || 0;
             const segmentsRequested = summaryData.segments_requested || 0;
             const targetLanguage = summaryData.target_language || 'en';
-            segmentsInfo.textContent = `Summarized ${segmentsUsed} of ${segmentsRequested} requested segments (Language: ${targetLanguage})`;
+            segmentsInfo.textContent = `Summarised ${segmentsUsed} of ${segmentsRequested} requested segments (Language: ${targetLanguage})`;
         }
     }
 

@@ -4042,6 +4042,11 @@ class SpectrumDisplay {
                 if (window.radioAPI) {
                     window.radioAPI.notifyFrequencyChange(newFreq);
                 }
+
+                // Announce frequency change for accessibility (TTS)
+                if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+                    window.ttsAnnouncements.announceFrequencyChange(newFreq);
+                }
                 
                 // Trigger tune
                 if (typeof window.autoTune === 'function') {
@@ -4538,6 +4543,16 @@ class SpectrumDisplay {
                 if (typeof window.updateURL === 'function') {
                     window.updateURL();
                 }
+            }
+
+            // Notify extensions of frequency change
+            if (window.radioAPI) {
+                window.radioAPI.notifyFrequencyChange(newDialFreq);
+            }
+
+            // Announce frequency change for accessibility (TTS)
+            if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+                window.ttsAnnouncements.announceFrequencyChange(newDialFreq);
             }
 
             // Trigger tune via app.js function

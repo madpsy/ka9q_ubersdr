@@ -331,10 +331,10 @@ function loadVFOState(vfo) {
         case 'usb':
             minLow = 0;
             maxLow = 500;
-            maxHigh = 4000;
+            maxHigh = 6000;
             break;
         case 'lsb':
-            minLow = -4000;
+            minLow = -6000;
             maxLow = 0;
             maxHigh = 0;
             break;
@@ -371,7 +371,7 @@ function loadVFOState(vfo) {
     bandwidthLowSlider.max = maxLow;
     
     // For LSB mode, high slider needs negative range; for other modes it starts at 0
-    bandwidthHighSlider.min = (state.mode === 'lsb') ? -4000 : 0;
+    bandwidthHighSlider.min = (state.mode === 'lsb') ? -6000 : 0;
     bandwidthHighSlider.max = maxHigh;
     
     // Now set the bandwidth values
@@ -3732,11 +3732,11 @@ function setMode(mode, preserveBandwidth = false) {
     		minLow = 0;
     		maxLow = 500;
     		defaultLow = 50;
-    		maxHigh = 4000;
+    		maxHigh = 6000;
     		defaultHigh = 2700;
     		break;
     	case 'lsb':
-    		minLow = -4000;
+    		minLow = -6000;
     		maxLow = 0;
     		defaultLow = -2700;
     		maxHigh = 0;
@@ -3785,7 +3785,7 @@ function setMode(mode, preserveBandwidth = false) {
     bandwidthLowSlider.max = maxLow;
 
     // For LSB mode, high slider needs negative range; for other modes it starts at 0
-    bandwidthHighSlider.min = (currentMode === 'lsb') ? -4000 : 0;
+    bandwidthHighSlider.min = (currentMode === 'lsb') ? -6000 : 0;
     bandwidthHighSlider.max = maxHigh;
 
     // Only reset bandwidth to defaults if not preserving (i.e., user clicked mode button)

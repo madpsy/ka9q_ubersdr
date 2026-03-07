@@ -69,13 +69,50 @@ The executable will be in `dist/iq_recorder/`. See [BUILD_EXECUTABLE.md](BUILD_E
 
 ## Usage
 
-### Starting the Application
+### GUI Mode (Interactive)
+
+Start the GUI application:
 
 ```bash
 python iq_recorder.py
 ```
 
-### Basic Workflow
+### CLI Mode (Headless/Scheduled)
+
+For automated scheduled recordings without a GUI (perfect for cron jobs or systemd services):
+
+```bash
+python iq_recorder.py --config /path/to/config.json
+```
+
+**CLI Mode Features:**
+- Runs headless (no GUI required)
+- Validates configuration before starting
+- Executes scheduled recordings automatically
+- Logs to both file (`iq_recorder.log`) and console
+- Graceful shutdown on SIGINT/SIGTERM
+- Warns and exits if no valid scheduled recordings are configured
+
+**CLI Mode Requirements:**
+- Config file must contain at least one enabled schedule
+- Scheduled streams must have `recording_enabled: true`
+- Config file is the same format as GUI exports (fully compatible)
+
+**Example CLI Usage:**
+
+```bash
+# Create config in GUI with schedules, then export it
+# File → Save Configuration → my_schedule.json
+
+# Run in CLI mode for automated recording
+python iq_recorder.py --config my_schedule.json
+
+# Or use with systemd/cron for unattended operation
+```
+
+See [`example_config.json`](example_config.json) for a complete example configuration with streams and schedules.
+
+### Basic Workflow (GUI Mode)
 
 1. **Configure Server Connection**
    - Enter the ka9q_ubersdr server hostname/IP
@@ -239,47 +276,125 @@ Approximate data rates and storage requirements:
 
 ## Advanced Usage
 
-### Command-Line Integration
+### Automated Scheduled Recording (CLI Mode)
 
-While the application is primarily GUI-based, you can create configurations programmatically:
+The CLI mode is designed for unattended scheduled recordings. Here's how to set it up:
+
+**1. Create Configuration in GUI:**
+```bash
+# Start GUI
+python iq_recorder.py
+
+# Configure your streams and schedules
+# File → Save Configuration → my_recordings.json
+```
+
+**2. Run in CLI Mode:**
+```bash
+# Test the configuration
+python iq_recorder.py --config my_recordings.json
+
+# If validation passes, it will run and wait for scheduled events
+```
+
+**3. Set Up as System Service (Linux):**
+
+Create `/etc/systemd/system/iq-recorder.service`:
+```ini
+[Unit]
+Description=IQ Stream Recorder
+After=network.target
+
+[Service]
+Type=simple
+User=your_user
+WorkingDirectory=/path/to/clients/python_iq_recorder
+ExecStart=/usr/bin/python3 iq_recorder.py --config /path/to/config.json
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+```bash
+sudo systemctl enable iq-recorder
+sudo systemctl start iq-recorder
+sudo systemctl status iq-recorder
+
+# View logs
+sudo journalctl -u iq-recorder -f
+```
+
+**4. Set Up with Cron (Alternative):**
+```bash
+# Edit crontab
+crontab -e
+
+# Add entry to start at boot
+@reboot cd /path/to/clients/python_iq_recorder && python3 iq_recorder.py --config /path/to/config.json >> /var/log/iq-recorder.log 2>&1
+```
+
+### CLI Mode Validation
+
+The CLI mode validates your configuration before starting:
+
+**✅ Valid Configuration:**
+- At least one enabled schedule exists
+- Scheduled streams have `recording_enabled: true`
+- Schedule times are valid (HH:MM:SS or HH:MM format)
+- Stream IDs referenced in schedules exist
+
+**❌ Invalid Configuration (will exit with error):**
+- No schedules in config
+- All schedules disabled
+- No streams with recording enabled
+- Invalid schedule times or days
+
+### Creating Configurations Programmatically
+
+You can create configuration files programmatically for CLI mode:
 
 ```python
 import json
 
 config = {
-    'host': 'localhost',
+    'host': 'ubersdr.local',
     'port': 8073,
-    'recording_dir': './recordings',
+    'recording_dir': '/home/user/recordings',
     'streams': [
         {
             'stream_id': 1,
             'frequency': 14074000,
             'iq_mode': 'iq96',
-            'output_file': './recordings/20m_ft8.wav'
-        },
-        {
-            'stream_id': 2,
-            'frequency': 7074000,
-            'iq_mode': 'iq96',
-            'output_file': './recordings/40m_ft8.wav'
+            'filename_template': 'default',
+            'host': 'ubersdr.local',
+            'port': 8073,
+            'recording_enabled': True
         }
-    ]
+    ],
+    'schedules': [
+        {
+            'schedule_id': 1,
+            'name': 'Morning FT8',
+            'start_time': '08:00:00',
+            'stop_time': '10:00:00',
+            'days_of_week': [0, 1, 2, 3, 4],  # Mon-Fri
+            'stream_ids': [1],
+            'enabled': True,
+            'start_action': 'start_selected',
+            'stop_action': 'stop_selected'
+        }
+    ],
+    'version': '1.0'
 }
 
 with open('my_config.json', 'w') as f:
     json.dump(config, f, indent=2)
 ```
 
-Then load this configuration in the GUI: File → Load Configuration...
-
-### Automated Recording
-
-For automated/scheduled recording, you can:
-
-1. Create a configuration file with your desired streams
-2. Load it in the GUI
-3. Click "Start All"
-4. Use system scheduling (cron, Task Scheduler) to start the application
+Then run: `python iq_recorder.py --config my_config.json`
 
 ## Architecture
 

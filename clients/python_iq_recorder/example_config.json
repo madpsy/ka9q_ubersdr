@@ -2,39 +2,42 @@
   "host": "localhost",
   "port": 8073,
   "recording_dir": "./recordings",
+  "duration": 0,
   "streams": [
     {
       "stream_id": 1,
       "frequency": 14074000,
       "iq_mode": "iq96",
-      "output_file": "./recordings/20260306_140000_14.074MHz_iq96.wav",
-      "host": "localhost",
-      "port": 8073,
-      "status": "Idle",
-      "bytes_recorded": 0,
-      "duration": 0
+      "filename_template": "default",
+      "recording_enabled": true
     },
     {
       "stream_id": 2,
       "frequency": 7074000,
       "iq_mode": "iq96",
-      "output_file": "./recordings/20260306_140000_7.074MHz_iq96.wav",
-      "host": "localhost",
-      "port": 8073,
-      "status": "Idle",
-      "bytes_recorded": 0,
-      "duration": 0
+      "filename_template": "default",
+      "recording_enabled": true
     },
     {
       "stream_id": 3,
       "frequency": 21074000,
       "iq_mode": "iq48",
-      "output_file": "./recordings/20260306_140000_21.074MHz_iq48.wav",
-      "host": "localhost",
-      "port": 8073,
-      "status": "Idle",
-      "bytes_recorded": 0,
-      "duration": 0
+      "filename_template": "default",
+      "recording_enabled": true
     }
-  ]
+  ],
+  "schedules": [
+    {
+      "schedule_id": 1,
+      "name": "Evening FT8 Recording",
+      "start_time": "18:00",
+      "stop_time": "22:00",
+      "days_of_week": [0, 1, 2, 3, 4],
+      "stream_ids": [1, 2],
+      "enabled": false,
+      "start_action": "start_selected",
+      "stop_action": "stop_selected"
+    }
+  ],
+  "version": "1.0"
 }

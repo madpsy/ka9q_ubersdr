@@ -47,15 +47,13 @@ class StreamConfig:
     """Configuration for a single IQ recording stream"""
     
     def __init__(self, stream_id: int, frequency: int, iq_mode: IQMode,
-                 filename_template: str = "default", host: str = "localhost", port: int = 8073,
+                 filename_template: str = "default",
                  recording_enabled: bool = True):
         self.stream_id = stream_id
         self.frequency = frequency  # Hz
         self.iq_mode = iq_mode
         self.filename_template = filename_template  # Template name, not actual filename
         self.output_file = None  # Generated when recording starts
-        self.host = host
-        self.port = port
         self.recording_enabled = recording_enabled  # Whether to write to disk
         
         # Runtime state
@@ -122,8 +120,6 @@ class StreamConfig:
             'frequency': self.frequency,
             'iq_mode': self.iq_mode.mode_name,
             'filename_template': self.filename_template,
-            'host': self.host,
-            'port': self.port,
             'recording_enabled': self.recording_enabled
         }
     
@@ -136,8 +132,6 @@ class StreamConfig:
             frequency=data['frequency'],
             iq_mode=iq_mode,
             filename_template=data.get('filename_template', 'default'),
-            host=data.get('host', 'localhost'),
-            port=data.get('port', 8073),
             recording_enabled=data.get('recording_enabled', True)
         )
     

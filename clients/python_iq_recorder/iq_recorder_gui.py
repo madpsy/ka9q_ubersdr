@@ -465,8 +465,6 @@ class IQRecorderGUI:
         for stream_data in saved_streams:
             try:
                 stream = StreamConfig.from_dict(stream_data)
-                stream.host = self.host.get()
-                stream.port = self.port.get()
                 self.streams.append(stream)
                 if stream.stream_id >= self.next_stream_id:
                     self.next_stream_id = stream.stream_id + 1
@@ -691,8 +689,6 @@ class IQRecorderGUI:
                 frequency=dialog.result['frequency'],
                 iq_mode=dialog.result['iq_mode'],
                 filename_template=dialog.result['filename_template'],
-                host=self.host.get(),
-                port=self.port.get(),
                 recording_enabled=dialog.result.get('recording_enabled', True)
             )
             
@@ -837,8 +833,8 @@ class IQRecorderGUI:
             # If recording is disabled, pass None for wav_file to skip writing
             # IMPORTANT: Must pass sample_rate explicitly for IQ modes to ensure WAV header is correct
             client = IQRecordingClient(
-                host=stream.host,
-                port=stream.port,
+                host=self.host.get(),
+                port=self.port.get(),
                 frequency=stream.frequency,
                 mode=stream.iq_mode.mode_name,
                 output_mode='wav' if stream.recording_enabled else None,
@@ -1141,6 +1137,9 @@ class IQRecorderGUI:
                 self.streams.clear()
                 self.next_stream_id = 1
                 self._load_saved_configuration()
+                
+                # Clean up the config by re-saving streams (removes old host/port fields)
+                self._save_streams_to_config()
                 
                 self.update_stream_list()
                 self.update_status()

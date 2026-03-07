@@ -1,0 +1,40 @@
+{
+  "host": "localhost",
+  "port": 8073,
+  "recording_dir": "./recordings",
+  "streams": [
+    {
+      "stream_id": 1,
+      "frequency": 14074000,
+      "iq_mode": "iq96",
+      "output_file": "./recordings/20260306_140000_14.074MHz_iq96.wav",
+      "host": "localhost",
+      "port": 8073,
+      "status": "Idle",
+      "bytes_recorded": 0,
+      "duration": 0
+    },
+    {
+      "stream_id": 2,
+      "frequency": 7074000,
+      "iq_mode": "iq96",
+      "output_file": "./recordings/20260306_140000_7.074MHz_iq96.wav",
+      "host": "localhost",
+      "port": 8073,
+      "status": "Idle",
+      "bytes_recorded": 0,
+      "duration": 0
+    },
+    {
+      "stream_id": 3,
+      "frequency": 21074000,
+      "iq_mode": "iq48",
+      "output_file": "./recordings/20260306_140000_21.074MHz_iq48.wav",
+      "host": "localhost",
+      "port": 8073,
+      "status": "Idle",
+      "bytes_recorded": 0,
+      "duration": 0
+    }
+  ]
+}

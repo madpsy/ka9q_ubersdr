@@ -1,0 +1,33 @@
+# IQ Stream Recorder Requirements
+# Python dependencies for the multi-stream IQ recording application
+
+# Core dependencies (required)
+aiohttp>=3.8.0
+websockets>=10.0
+requests>=2.28.0
+numpy>=1.21.0
+
+# Optional dependencies for enhanced functionality
+# These are used by the radio_client module
+
+# Opus audio codec support (optional, not used for IQ modes)
+opuslib>=3.0.0
+
+# Zstandard compression (optional)
+zstandard>=0.18.0
+
+# Audio resampling (optional, not used for IQ modes)
+samplerate>=0.1.0
+
+# Audio output (optional, not used for IQ recording)
+sounddevice>=0.4.0
+PyAudio>=0.2.11
+
+# Signal processing (optional)
+scipy>=1.7.0
+
+# Note: tkinter is included with Python standard library
+# If tkinter is not available, install python3-tk on Linux:
+#   Ubuntu/Debian: sudo apt-get install python3-tk
+#   Fedora/RHEL: sudo dnf install python3-tkinter
+#   Arch: sudo pacman -S tk

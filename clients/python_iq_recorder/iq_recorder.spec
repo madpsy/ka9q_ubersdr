@@ -105,7 +105,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # Add icon path here if you have one
+    icon='ubersdr.ico',
 )
 
 coll = COLLECT(

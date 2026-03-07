@@ -327,9 +327,10 @@ class IQRecorderGUI:
         
         ttk.Button(conn_frame, text="Test", command=self.test_connection).grid(row=0, column=4, padx=5)
         
-        ttk.Label(conn_frame, text="Recording Dir:").grid(row=0, column=5, sticky=tk.W, padx=5)
+        ttk.Label(conn_frame, text="Record To:").grid(row=0, column=5, sticky=tk.W, padx=5)
         ttk.Entry(conn_frame, textvariable=self.recording_dir, width=30).grid(row=0, column=6, padx=5)
         ttk.Button(conn_frame, text="Browse...", command=self.browse_directory).grid(row=0, column=7, padx=5)
+        ttk.Button(conn_frame, text="Open", command=self.open_recording_directory).grid(row=0, column=8, padx=5)
         
         # Streams frame
         streams_frame = ttk.LabelFrame(self.root, text="IQ Streams", padding="5")
@@ -366,11 +367,15 @@ class IQRecorderGUI:
         self.stream_tree.column('duration', width=100)
         self.stream_tree.column('size', width=100)
         self.stream_tree.column('spectrum', width=80)
-        
+
+        # Configure row tags for colored backgrounds
+        self.stream_tree.tag_configure('recording', background='#ffcccc')  # Light red
+        self.stream_tree.tag_configure('monitoring', background='#ccffcc')  # Light green
+
         # Scrollbar
         scrollbar = ttk.Scrollbar(streams_frame, orient=tk.VERTICAL, command=self.stream_tree.yview)
         self.stream_tree.configure(yscrollcommand=scrollbar.set)
-        
+
         self.stream_tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
         
@@ -404,7 +409,19 @@ class IQRecorderGUI:
         
         ttk.Button(control_frame, text="Stop All", command=self.stop_all_streams).pack(side=tk.LEFT, padx=5)
         ttk.Button(control_frame, text="Remove All", command=self.remove_all_streams).pack(side=tk.LEFT, padx=5)
-        
+
+        # Legend frame
+        legend_frame = ttk.Frame(control_frame)
+        legend_frame.pack(side=tk.LEFT, padx=20)
+
+        # Recording legend
+        recording_label = tk.Label(legend_frame, text=" Recording ", bg='#ffcccc', relief=tk.RIDGE, padx=5)
+        recording_label.pack(side=tk.LEFT, padx=2)
+
+        # Monitoring legend
+        monitoring_label = tk.Label(legend_frame, text=" Monitoring ", bg='#ccffcc', relief=tk.RIDGE, padx=5)
+        monitoring_label.pack(side=tk.LEFT, padx=2)
+
         # Schedules button on the right edge
         ttk.Button(control_frame, text="📅 Schedules", command=self.show_scheduler_dialog).pack(side=tk.RIGHT, padx=5)
         
@@ -638,6 +655,31 @@ class IQRecorderGUI:
             self.file_manager.set_base_directory(directory)
             # Auto-save is triggered by the trace on recording_dir
     
+    def open_recording_directory(self):
+        """Open recording directory in native file explorer"""
+        import subprocess
+        import platform
+
+        directory = self.recording_dir.get()
+
+        # Check if directory exists
+        if not os.path.exists(directory):
+            messagebox.showerror("Directory Not Found",
+                               f"Recording directory does not exist:\n{directory}")
+            return
+
+        try:
+            system = platform.system()
+            if system == "Windows":
+                os.startfile(directory)
+            elif system == "Darwin":  # macOS
+                subprocess.Popen(["open", directory])
+            else:  # Linux and other Unix-like systems
+                subprocess.Popen(["xdg-open", directory])
+        except Exception as e:
+            messagebox.showerror("Error Opening Directory",
+                               f"Failed to open directory:\n{str(e)}")
+
     def add_stream(self):
         """Add a new stream"""
         dialog = AddStreamDialog(self.root, self.file_manager, self.next_stream_id)
@@ -928,16 +970,16 @@ class IQRecorderGUI:
                                   "Start recording the stream first to view spectrum.")
                 return
             
-            # Create spectrum window (43% wider: 850 * 1.43 = 1216)
+            # Create spectrum window (20% wider: 800 * 1.20 = 960)
             spectrum_window = tk.Toplevel(self.root)
             spectrum_window.title(f"Spectrum - {stream.frequency_mhz:.3f} MHz ({stream.iq_mode.mode_name.upper()})")
-            spectrum_window.geometry("1216x450")
+            spectrum_window.geometry("960x450")
             
             # Create spectrum display
             try:
                 spectrum = IQSpectrumDisplay(
                     spectrum_window,
-                    width=1216,
+                    width=960,
                     height=400,
                     sample_rate=stream.iq_mode.sample_rate,
                     center_freq=stream.frequency
@@ -1026,9 +1068,17 @@ class IQRecorderGUI:
                 stream.format_size(),
                 spectrum_text
             )
-            
-            item_id = self.stream_tree.insert('', tk.END, values=values)
-            
+
+            # Determine row tag based on status
+            row_tags = ()
+            if stream.status == StreamStatus.RECORDING:
+                if stream.recording_enabled:
+                    row_tags = ('recording',)  # Red background for recording
+                else:
+                    row_tags = ('monitoring',)  # Green background for monitoring
+
+            item_id = self.stream_tree.insert('', tk.END, values=values, tags=row_tags)
+
             # Restore selection if this stream was selected
             if stream.stream_id in selected_stream_ids:
                 self.stream_tree.selection_add(item_id)

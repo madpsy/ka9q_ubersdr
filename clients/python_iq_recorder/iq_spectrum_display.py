@@ -39,7 +39,7 @@ FT8_BANDS = [
 class IQSpectrumDisplay:
     """Real-time spectrum display for IQ data with audio preview"""
     
-    def __init__(self, parent: tk.Widget, width: int = 800, height: int = 400,
+    def __init__(self, parent: tk.Widget, width: int = 960, height: int = 400,
                  sample_rate: int = 96000, center_freq: int = 14175000):
         """
         Initialize spectrum display
@@ -154,7 +154,7 @@ class IQSpectrumDisplay:
             control_frame,
             textvariable=self.audio_device_var,
             state="readonly",
-            width=25
+            width=33
         )
         self.audio_device_combo.pack(side=tk.LEFT, padx=2)
         

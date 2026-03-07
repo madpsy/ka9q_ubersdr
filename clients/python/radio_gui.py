@@ -255,9 +255,9 @@ class RadioGUI:
     # Band frequency ranges (in Hz) - UK RSGB allocations (from static/app.js)
     BAND_RANGES = {
         '160m': {'min': 1810000, 'max': 2000000},
-        '80m': {'min': 3500000, 'max': 3800000},
+        '80m': {'min': 3500000, 'max': 4000000},
         '60m': {'min': 5258500, 'max': 5406500},
-        '40m': {'min': 7000000, 'max': 7200000},
+        '40m': {'min': 7000000, 'max': 7300000},
         '30m': {'min': 10100000, 'max': 10150000},
         '20m': {'min': 14000000, 'max': 14350000},
         '17m': {'min': 18068000, 'max': 18168000},

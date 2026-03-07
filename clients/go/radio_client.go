@@ -36,9 +36,9 @@ type BandRange struct {
 // Based on UK RSGB allocations, matching the Python client
 var BandRanges = map[string]BandRange{
 	"160m": {Min: 1810000, Max: 2000000},
-	"80m":  {Min: 3500000, Max: 3800000},
+	"80m":  {Min: 3500000, Max: 4000000},
 	"60m":  {Min: 5258500, Max: 5406500},
-	"40m":  {Min: 7000000, Max: 7200000},
+	"40m":  {Min: 7000000, Max: 7300000},
 	"30m":  {Min: 10100000, Max: 10150000},
 	"20m":  {Min: 14000000, Max: 14350000},
 	"17m":  {Min: 18068000, Max: 18168000},

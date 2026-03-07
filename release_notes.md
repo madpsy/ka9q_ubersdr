@@ -3,7 +3,7 @@
 
 ### New Features
 - Added **Live Listener Map** with a 'Show Map' button in the Active Channels section 
-- Added **FT2 Decoding** using WSJT-X Improved implementation. Existing installations Will need to add a decoder manually for each band
+- Added **FT2 Decoding** using WSJT-X Improved implementation. Existing installations will need to add a decoder manually for each band
 - Added **Voice Announcements** for Frequency and Mode changes. Button is the megaphone next to the 10m band button. Mainly designed for accessibility
 - Added **Real-Time Speech To Text** transcription and translation to and from multiple languages. Contact me directly if interested
 - Added **IQ Recorder** with automated scheduling. Stand alone desktop application available from the https://ubersdr.org website

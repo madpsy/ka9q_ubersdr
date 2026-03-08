@@ -94,6 +94,7 @@ class ConfigManager:
             'duration': 0,  # 0 = no limit
             'streams': [],
             'schedules': [],
+            'channels': {},  # Per-stream audio channels: {stream_id: {channels: [...], active_channel_id: ..., ...}}
             'window_geometry': None,  # Store window size/position
             'last_used_template': 'default',
             'version': '1.0'
@@ -320,3 +321,44 @@ class ConfigManager:
     def set_window_geometry(self, geometry: str):
         """Set window geometry"""
         self.set('window_geometry', geometry)
+    
+    def get_stream_channels(self, stream_id: int) -> Optional[dict]:
+        """
+        Get channel configuration for a specific stream
+        
+        Args:
+            stream_id: Stream ID
+            
+        Returns:
+            Channel configuration dict or None if not found
+        """
+        channels = self.get('channels', {})
+        return channels.get(str(stream_id))
+    
+    def set_stream_channels(self, stream_id: int, channel_config: dict):
+        """
+        Set channel configuration for a specific stream
+        
+        Args:
+            stream_id: Stream ID
+            channel_config: Channel configuration dict with keys:
+                - channels: list of channel dicts
+                - active_channel_id: ID of active channel
+                - master_volume: float
+                - auto_gain: bool
+        """
+        channels = self.get('channels', {})
+        channels[str(stream_id)] = channel_config
+        self.set('channels', channels)
+    
+    def clear_stream_channels(self, stream_id: int):
+        """
+        Clear channel configuration for a specific stream
+        
+        Args:
+            stream_id: Stream ID
+        """
+        channels = self.get('channels', {})
+        if str(stream_id) in channels:
+            del channels[str(stream_id)]
+            self.set('channels', channels)

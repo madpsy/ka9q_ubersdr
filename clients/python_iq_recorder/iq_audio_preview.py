@@ -52,6 +52,12 @@ class AudioPreviewController:
         self.complex_filter_state = None
         self._design_complex_filter(2700)  # Default bandwidth
         
+        # Audio high-pass filter (100 Hz) - applied AFTER demodulation
+        self.audio_hp_filter_b = None
+        self.audio_hp_filter_a = None
+        self.audio_hp_filter_state = None
+        self._design_audio_highpass_filter()
+        
         # Audio output (stereo for channel control)
         self.audio_output = AudioOutputManager(
             sample_rate=audio_sample_rate,
@@ -107,6 +113,28 @@ class AudioPreviewController:
             self.complex_filter_a = np.array([1.0])
             self.complex_filter_state = np.zeros(1, dtype=np.complex64)
     
+    def _design_audio_highpass_filter(self):
+        """Design 100 Hz high-pass filter for audio output"""
+        from scipy import signal
+        
+        # 100 Hz high-pass filter at audio sample rate
+        nyquist = self.audio_sample_rate / 2.0
+        cutoff = 100.0 / nyquist
+        
+        try:
+            # Design 2nd-order Butterworth high-pass filter (gentle slope, stable)
+            self.audio_hp_filter_b, self.audio_hp_filter_a = signal.butter(
+                2, cutoff, btype='high'
+            )
+            # Initialize filter state
+            zi = signal.lfilter_zi(self.audio_hp_filter_b, self.audio_hp_filter_a)
+            self.audio_hp_filter_state = np.zeros(len(zi), dtype=np.float32)
+        except Exception as e:
+            print(f"Warning: Audio high-pass filter design failed: {e}")
+            self.audio_hp_filter_b = np.array([1.0])
+            self.audio_hp_filter_a = np.array([1.0])
+            self.audio_hp_filter_state = np.zeros(1, dtype=np.float32)
+    
     def start(self) -> bool:
         """
         Start audio preview
@@ -137,6 +165,10 @@ class AudioPreviewController:
             # Reset complex filter
             if self.complex_filter_state is not None:
                 self.complex_filter_state = np.zeros(len(self.complex_filter_state), dtype=np.complex64)
+            
+            # Reset audio high-pass filter
+            if self.audio_hp_filter_state is not None:
+                self.audio_hp_filter_state = np.zeros(len(self.audio_hp_filter_state), dtype=np.float32)
             
             self.enabled = True
             print(f"Audio preview started: {self.mode} @ {self.target_freq/1e6:.6f} MHz (AGC enabled)")
@@ -272,6 +304,14 @@ class AudioPreviewController:
                     audio = audio * 10.0
                 else:
                     audio = np.real(filtered_iq).astype(np.float32)
+                
+                # Apply 100 Hz high-pass filter to audio (removes DC offset and low-frequency noise)
+                if len(audio) > 0 and len(self.audio_hp_filter_b) > 1 and self.audio_hp_filter_state is not None:
+                    from scipy import signal
+                    audio, self.audio_hp_filter_state = signal.lfilter(
+                        self.audio_hp_filter_b, self.audio_hp_filter_a,
+                        audio, zi=self.audio_hp_filter_state
+                    )
                 
                 # Resample if needed
                 if self.needs_resampling and len(audio) > 0:

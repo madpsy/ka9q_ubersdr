@@ -34,7 +34,8 @@ class AudioChannel:
         # Channel settings
         self.name = name or self._generate_default_name()
         self.frequency = center_freq  # Target frequency in Hz
-        self.mode = 'USB'  # Demodulation mode (USB/LSB/CWU/CWL)
+        # Set default mode based on frequency (LSB for < 10 MHz, USB otherwise)
+        self.mode = 'LSB' if center_freq < 10_000_000 else 'USB'
         self.bandwidth = 2700  # Filter bandwidth in Hz
         self.volume = 0.5  # Channel volume (0.0-1.0)
         self.left_enabled = True  # Output to left speaker

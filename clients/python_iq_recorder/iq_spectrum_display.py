@@ -63,7 +63,8 @@ class IQSpectrumDisplay:
     """Real-time spectrum display for IQ data with audio preview"""
     
     def __init__(self, parent: tk.Widget, width: int = 960, height: int = 400,
-                 sample_rate: int = 96000, center_freq: int = 14175000):
+                 sample_rate: int = 96000, center_freq: int = 14175000,
+                 stream_id: int = None, config_manager=None):
         """
         Initialize spectrum display
         
@@ -73,12 +74,16 @@ class IQSpectrumDisplay:
             height: Canvas height in pixels
             sample_rate: IQ sample rate in Hz
             center_freq: Center frequency in Hz
+            stream_id: Stream ID for channel configuration (optional)
+            config_manager: ConfigManager instance for storing channels (optional)
         """
         self.parent = parent
         self.width = width
         self.height = height
         self.sample_rate = sample_rate
         self.center_freq = center_freq
+        self.stream_id = stream_id
+        self.config_manager = config_manager
 
         # Bandwidth settings (adjustable)
         self.ssb_bandwidth = 2700  # Default SSB bandwidth (Hz)
@@ -138,13 +143,9 @@ class IQSpectrumDisplay:
                     audio_sample_rate=48000
                 )
                 print(f"DEBUG: AudioChannelMixer created: {self.audio_mixer}")
-                # Create one default channel for backward compatibility
-                default_channel = self.audio_mixer.add_channel(name="Channel 1")
-                if default_channel:
-                    self.active_channel_id = default_channel.channel_id
-                    print(f"✅ Multi-channel audio initialized with default channel (ID: {default_channel.channel_id})")
-                else:
-                    print("⚠️  Default channel creation returned None")
+                # Don't create default channel here - let load_channel_configuration handle it
+                # This prevents overwriting saved channel configurations
+                print(f"✅ Multi-channel audio initialized (channels will be loaded from config)")
             except Exception as e:
                 print(f"❌ ERROR: Could not initialize multi-channel audio: {e}")
                 import traceback
@@ -162,7 +163,10 @@ class IQSpectrumDisplay:
                     center_freq=center_freq,
                     audio_sample_rate=48000
                 )
-                print("Using legacy single-channel audio mode")
+                # Set initial mode based on frequency (LSB for < 10 MHz, USB otherwise)
+                initial_mode = "LSB" if center_freq < 10_000_000 else "USB"
+                self.audio_preview.set_mode(initial_mode)
+                print(f"✅ AudioPreviewController initialized with mode: {initial_mode} (center_freq={center_freq/1e6:.3f} MHz)")
             except Exception as e:
                 print(f"Warning: Could not initialize audio preview: {e}")
                 self.audio_preview = None
@@ -259,6 +263,24 @@ class IQSpectrumDisplay:
             width=12
         )
         self.add_channel_button.pack(side=tk.RIGHT, padx=2)
+
+        # Stop All button
+        self.stop_all_button = ttk.Button(
+            tab_bar_frame,
+            text="⏹ Stop All",
+            command=self.on_stop_all_clicked,
+            width=10
+        )
+        self.stop_all_button.pack(side=tk.RIGHT, padx=2)
+
+        # Start All button
+        self.start_all_button = ttk.Button(
+            tab_bar_frame,
+            text="▶ Start All",
+            command=self.on_start_all_clicked,
+            width=10
+        )
+        self.start_all_button.pack(side=tk.RIGHT, padx=2)
 
         # Channel Control Panel
         self.channel_control_panel = ttk.Frame(self.control_container)
@@ -1684,7 +1706,7 @@ class IQSpectrumDisplay:
         ttk.Label(row2, text="BW:").pack(side=tk.LEFT, padx=(10, 2))
         self.channel_bandwidth_var = tk.IntVar(value=2700)
         self.channel_bandwidth_scale = ttk.Scale(
-            row2, from_=200, to=6000, orient=tk.HORIZONTAL,
+            row2, from_=1000, to=6000, orient=tk.HORIZONTAL,
             variable=self.channel_bandwidth_var,
             command=self.on_channel_bandwidth_changed, length=120
         )
@@ -1923,6 +1945,13 @@ class IQSpectrumDisplay:
         self.channel_left_var.set(active_channel.left_enabled)
         self.channel_right_var.set(active_channel.right_enabled)
         self.channel_mode_var.set(active_channel.mode)
+
+        # Adjust bandwidth slider range based on mode
+        if active_channel.mode in ['CWU', 'CWL']:
+            self.channel_bandwidth_scale.config(from_=200, to=1000)
+        else:
+            self.channel_bandwidth_scale.config(from_=1000, to=6000)
+
         self.channel_bandwidth_var.set(active_channel.bandwidth)
         self.channel_bandwidth_label.config(text=f"{active_channel.bandwidth} Hz")
         self.channel_volume_var.set(active_channel.volume)
@@ -1994,6 +2023,62 @@ class IQSpectrumDisplay:
             self.set_active_channel(new_channel.channel_id)
             self._refresh_channel_tabs()
             self._update_channel_controls()
+
+    def on_start_all_clicked(self):
+        """Handle start all button click - starts all channels"""
+        if not self.audio_mixer:
+            return
+
+        started_count = 0
+        failed_channels = []
+
+        for channel in self.audio_mixer.channels:
+            if not channel.is_active():
+                if channel.start():
+                    started_count += 1
+                    print(f"Started channel '{channel.name}'")
+                else:
+                    failed_channels.append(channel.name)
+                    print(f"Failed to start channel '{channel.name}'")
+
+        # Update UI for active channel
+        self._update_channel_controls()
+        self.redraw_all_markers()
+
+        # Show result message
+        if started_count > 0:
+            if failed_channels:
+                messagebox.showwarning(
+                    "Start All Channels",
+                    f"Started {started_count} channel(s).\n\nFailed to start: {', '.join(failed_channels)}"
+                )
+            else:
+                print(f"✅ Started all {started_count} channel(s)")
+        elif failed_channels:
+            messagebox.showerror(
+                "Start All Channels",
+                f"Failed to start channels: {', '.join(failed_channels)}"
+            )
+
+    def on_stop_all_clicked(self):
+        """Handle stop all button click - stops all channels"""
+        if not self.audio_mixer:
+            return
+
+        stopped_count = 0
+
+        for channel in self.audio_mixer.channels:
+            if channel.is_active():
+                channel.stop()
+                stopped_count += 1
+                print(f"Stopped channel '{channel.name}'")
+
+        # Update UI for active channel
+        self._update_channel_controls()
+        self.redraw_all_markers()
+
+        if stopped_count > 0:
+            print(f"⏹ Stopped all {stopped_count} channel(s)")
             self.save_channel_configuration()
 
     def on_channel_name_changed(self, event=None):
@@ -2154,80 +2239,150 @@ class IQSpectrumDisplay:
             self.save_channel_configuration()
 
     def get_channel_config_path(self):
-        """Get path to channel configuration file"""
+        """Get path to channel configuration file (DEPRECATED - now uses ConfigManager)"""
         return Path.home() / '.iq_recorder_channels.json'
 
     def save_channel_configuration(self):
-        """Save channel configuration to file"""
+        """Save channel configuration to ConfigManager"""
         if not self.audio_mixer:
             return
 
-        try:
-            config = {
-                'version': '1.0',
-                'channels': [ch.to_dict() for ch in self.audio_mixer.channels],
-                'active_channel_id': self.active_channel_id,
-                'master_volume': self.audio_mixer.master_volume,
-                'auto_gain': self.audio_mixer.auto_gain
-            }
+        # Use ConfigManager if available and stream_id is set
+        if self.config_manager and self.stream_id is not None:
+            try:
+                channels_data = [ch.to_dict() for ch in self.audio_mixer.channels]
+                config = {
+                    'version': '1.0',
+                    'channels': channels_data,
+                    'active_channel_id': self.active_channel_id,
+                    'master_volume': self.audio_mixer.master_volume,
+                    'auto_gain': self.audio_mixer.auto_gain
+                }
 
-            config_path = self.get_channel_config_path()
-            with open(config_path, 'w') as f:
-                json.dump(config, f, indent=2)
+                # Debug: show what we're saving
+                for ch_data in channels_data:
+                    print(f"💾 Saving channel: {ch_data.get('name')} at {ch_data.get('frequency')/1e6:.6f} MHz, mode={ch_data.get('mode')}")
 
-            print(f"Saved channel configuration to {config_path}")
+                self.config_manager.set_stream_channels(self.stream_id, config)
+                print(f"Saved {len(self.audio_mixer.channels)} channels for stream {self.stream_id} to config")
 
-        except Exception as e:
-            print(f"Error saving channel configuration: {e}")
+            except Exception as e:
+                print(f"Error saving channel configuration: {e}")
+        else:
+            # Fallback to old file-based method if ConfigManager not available
+            try:
+                config = {
+                    'version': '1.0',
+                    'channels': [ch.to_dict() for ch in self.audio_mixer.channels],
+                    'active_channel_id': self.active_channel_id,
+                    'master_volume': self.audio_mixer.master_volume,
+                    'auto_gain': self.audio_mixer.auto_gain
+                }
+
+                config_path = self.get_channel_config_path()
+                with open(config_path, 'w') as f:
+                    json.dump(config, f, indent=2)
+
+                print(f"Saved channel configuration to {config_path} (legacy mode)")
+
+            except Exception as e:
+                print(f"Error saving channel configuration: {e}")
 
     def load_channel_configuration(self):
-        """Load channel configuration from file"""
+        """Load channel configuration from ConfigManager"""
         if not self.audio_mixer:
             return
 
-        config_path = self.get_channel_config_path()
+        # Use ConfigManager if available and stream_id is set
+        if self.config_manager and self.stream_id is not None:
+            try:
+                print(f"🔍 Loading channels for stream {self.stream_id} from ConfigManager")
+                config = self.config_manager.get_stream_channels(self.stream_id)
 
-        if not config_path.exists():
-            print("No saved channel configuration found")
-            return
+                if not config:
+                    print(f"⚠️  No saved channel configuration found for stream {self.stream_id}")
+                    return
 
-        try:
-            with open(config_path, 'r') as f:
-                config = json.load(f)
+                if config.get('version') != '1.0':
+                    print(f"Unsupported configuration version: {config.get('version')}")
+                    return
 
-            if config.get('version') != '1.0':
-                print(f"Unsupported configuration version: {config.get('version')}")
+                # Clear existing channels
+                self.audio_mixer.clear_all_channels()
+
+                # Restore channels
+                for ch_data in config.get('channels', []):
+                    print(f"   📝 Loading channel data: freq={ch_data.get('frequency', 'N/A')/1e6:.6f} MHz, mode={ch_data.get('mode', 'N/A')}")
+                    channel = AudioChannel.from_dict(
+                        ch_data, self.sample_rate, self.center_freq, 48000
+                    )
+                    print(f"   ✅ Loaded channel: {channel.name} at {channel.frequency/1e6:.6f} MHz, mode={channel.mode}")
+                    self.audio_mixer.channels.append(channel)
+
+                    if channel.channel_id >= self.audio_mixer.next_channel_id:
+                        self.audio_mixer.next_channel_id = channel.channel_id + 1
+
+                # Restore active channel
+                self.active_channel_id = config.get('active_channel_id')
+
+                # Restore mixer settings
+                self.audio_mixer.master_volume = config.get('master_volume', 1.0)
+                self.audio_mixer.auto_gain = config.get('auto_gain', True)
+
+                print(f"Loaded {len(self.audio_mixer.channels)} channels for stream {self.stream_id} from config")
+
+                # Refresh UI
+                if hasattr(self, '_refresh_channel_tabs'):
+                    self._refresh_channel_tabs()
+                    self._update_channel_controls()
+
+            except Exception as e:
+                print(f"Error loading channel configuration: {e}")
+        else:
+            # Fallback to old file-based method if ConfigManager not available
+            config_path = self.get_channel_config_path()
+
+            if not config_path.exists():
+                print("No saved channel configuration found (legacy mode)")
                 return
 
-            # Clear existing channels
-            self.audio_mixer.clear_all_channels()
+            try:
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
 
-            # Restore channels
-            for ch_data in config.get('channels', []):
-                channel = AudioChannel.from_dict(
-                    ch_data, self.sample_rate, self.center_freq, 48000
-                )
-                self.audio_mixer.channels.append(channel)
+                if config.get('version') != '1.0':
+                    print(f"Unsupported configuration version: {config.get('version')}")
+                    return
 
-                if channel.channel_id >= self.audio_mixer.next_channel_id:
-                    self.audio_mixer.next_channel_id = channel.channel_id + 1
+                # Clear existing channels
+                self.audio_mixer.clear_all_channels()
 
-            # Restore active channel
-            self.active_channel_id = config.get('active_channel_id')
+                # Restore channels
+                for ch_data in config.get('channels', []):
+                    channel = AudioChannel.from_dict(
+                        ch_data, self.sample_rate, self.center_freq, 48000
+                    )
+                    self.audio_mixer.channels.append(channel)
 
-            # Restore mixer settings
-            self.audio_mixer.master_volume = config.get('master_volume', 1.0)
-            self.audio_mixer.auto_gain = config.get('auto_gain', True)
+                    if channel.channel_id >= self.audio_mixer.next_channel_id:
+                        self.audio_mixer.next_channel_id = channel.channel_id + 1
 
-            print(f"Loaded {len(self.audio_mixer.channels)} channels from configuration")
+                # Restore active channel
+                self.active_channel_id = config.get('active_channel_id')
 
-            # Refresh UI
-            if hasattr(self, '_refresh_channel_tabs'):
-                self._refresh_channel_tabs()
-                self._update_channel_controls()
+                # Restore mixer settings
+                self.audio_mixer.master_volume = config.get('master_volume', 1.0)
+                self.audio_mixer.auto_gain = config.get('auto_gain', True)
 
-        except Exception as e:
-            print(f"Error loading channel configuration: {e}")
+                print(f"Loaded {len(self.audio_mixer.channels)} channels from {config_path} (legacy mode)")
+
+                # Refresh UI
+                if hasattr(self, '_refresh_channel_tabs'):
+                    self._refresh_channel_tabs()
+                    self._update_channel_controls()
+
+            except Exception as e:
+                print(f"Error loading channel configuration: {e}")
 
     def get_selected_audio_device_index(self):
         """Get the device index for the selected audio device"""

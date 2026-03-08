@@ -369,8 +369,19 @@ class IQRecorderGUI:
         self.stream_tree.column('spectrum', width=80)
 
         # Configure row tags for colored backgrounds
-        self.stream_tree.tag_configure('recording', background='#ffcccc')  # Light red
-        self.stream_tree.tag_configure('monitoring', background='#ccffcc')  # Light green
+        self.stream_tree.tag_configure('recording', background='#ffcccc', foreground='black')  # Light red
+        self.stream_tree.tag_configure('monitoring', background='#ccffcc', foreground='black')  # Light green
+
+        # Configure tags for selected items - darker versions with blue border effect
+        # Use a distinct visual indicator: darker background + bold + blue left border (via special char)
+        self.stream_tree.tag_configure('recording_selected',
+                                      background='#ff6666',  # Much darker red
+                                      foreground='black',
+                                      font=('TkDefaultFont', 9, 'bold'))
+        self.stream_tree.tag_configure('monitoring_selected',
+                                      background='#66ff66',  # Much darker green
+                                      foreground='black',
+                                      font=('TkDefaultFont', 9, 'bold'))
 
         # Scrollbar
         scrollbar = ttk.Scrollbar(streams_frame, orient=tk.VERTICAL, command=self.stream_tree.yview)
@@ -378,7 +389,10 @@ class IQRecorderGUI:
 
         self.stream_tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
-        
+
+        # Bind selection change to update tags
+        self.stream_tree.bind('<<TreeviewSelect>>', self.on_stream_selection_changed)
+
         # Context menu for stream list
         self.stream_menu = tk.Menu(self.root, tearoff=0)
         self.stream_menu.add_command(label="Start", command=self.start_selected_stream)
@@ -389,7 +403,7 @@ class IQRecorderGUI:
         self.stream_menu.add_command(label="Toggle Spectrum", command=self.toggle_spectrum_for_selected)
         self.stream_menu.add_separator()
         self.stream_menu.add_command(label="Remove", command=self.remove_selected_stream)
-        
+
         self.stream_tree.bind("<Button-3>", self.show_stream_menu)
         self.stream_tree.bind("<Button-1>", self.on_tree_click)
         self.stream_tree.bind("<Double-1>", self.on_tree_double_click)
@@ -887,6 +901,30 @@ class IQRecorderGUI:
             if stream.status == StreamStatus.RECORDING:
                 self.stop_stream(stream)
     
+    def on_stream_selection_changed(self, event=None):
+        """Handle stream selection change - update tags to show selection with status color"""
+        # Get all items
+        selected_items = self.stream_tree.selection()
+        print(f"DEBUG: Selection changed, {len(selected_items)} items selected")
+
+        for item in self.stream_tree.get_children():
+            current_tags = list(self.stream_tree.item(item, 'tags'))
+
+            # Remove any _selected suffix from tags
+            base_tags = [tag.replace('_selected', '') for tag in current_tags]
+
+            # If this item is selected, add _selected suffix
+            if item in selected_items:
+                new_tags = [tag + '_selected' if tag in ('recording', 'monitoring') else tag for tag in base_tags]
+                print(f"DEBUG: Item {item} selected, tags: {current_tags} -> {new_tags}")
+            else:
+                new_tags = base_tags
+
+            # Update tags if changed
+            if new_tags != current_tags:
+                self.stream_tree.item(item, tags=tuple(new_tags))
+                print(f"DEBUG: Updated item {item} tags to {new_tags}")
+
     def on_tree_click(self, event):
         """Handle single-click on tree item"""
         # Check if clicked on spectrum column
@@ -978,7 +1016,9 @@ class IQRecorderGUI:
                     width=960,
                     height=400,
                     sample_rate=stream.iq_mode.sample_rate,
-                    center_freq=stream.frequency
+                    center_freq=stream.frequency,
+                    stream_id=stream.stream_id,
+                    config_manager=self.config_manager
                 )
                 
                 # Store references
@@ -1078,6 +1118,9 @@ class IQRecorderGUI:
             # Restore selection if this stream was selected
             if stream.stream_id in selected_stream_ids:
                 self.stream_tree.selection_add(item_id)
+
+        # Manually trigger selection change handler to update tags for selected items
+        self.on_stream_selection_changed()
     
     def update_status(self):
         """Update status bar"""

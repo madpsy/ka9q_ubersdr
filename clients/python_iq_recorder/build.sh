@@ -37,20 +37,20 @@ echo "Building executable with PyInstaller..."
 pyinstaller iq_recorder.spec
 
 # Check if build was successful
-if [ -f "dist/iq_recorder/iq_recorder" ]; then
+if [ -f "dist/iq_recorder" ]; then
     echo ""
     echo "=========================================="
     echo "Build successful!"
     echo "=========================================="
     echo ""
-    echo "Executable location: dist/iq_recorder/iq_recorder"
+    echo "Executable location: dist/iq_recorder"
+    echo ""
+    echo "File size: $(du -h dist/iq_recorder | cut -f1)"
     echo ""
     echo "To run the application:"
-    echo "  ./dist/iq_recorder/iq_recorder"
+    echo "  ./dist/iq_recorder"
     echo ""
-    echo "To create a distributable package:"
-    echo "  cd dist"
-    echo "  tar -czf iq_recorder-linux-x64.tar.gz iq_recorder/"
+    echo "The executable is a single standalone file that can be distributed directly."
     echo ""
 else
     echo ""

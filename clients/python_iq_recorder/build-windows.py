@@ -160,13 +160,13 @@ def find_executable():
     if not os.path.exists(dist_dir):
         return None
     
-    # Look for iq_recorder.exe or iq_recorder directory
-    exe_path = os.path.join(dist_dir, 'iq_recorder', 'iq_recorder.exe')
+    # Look for single-file executable (iq_recorder.exe)
+    exe_path = os.path.join(dist_dir, 'iq_recorder.exe')
     if os.path.exists(exe_path):
         return exe_path
     
-    # Try without .exe extension
-    exe_path = os.path.join(dist_dir, 'iq_recorder', 'iq_recorder')
+    # Try without .exe extension (for non-Windows builds)
+    exe_path = os.path.join(dist_dir, 'iq_recorder')
     if os.path.exists(exe_path):
         return exe_path
     
@@ -220,9 +220,7 @@ def main():
         print("You can now run:")
         print(f"  {exe_path}")
         print()
-        print("To create a distributable package:")
-        print(f"  1. Navigate to: {os.path.join(script_dir, 'dist')}")
-        print(f"  2. Zip the 'iq_recorder' folder")
+        print("The executable is a single standalone file that can be distributed directly.")
     else:
         print("✗ Executable not found in dist directory")
         return 1

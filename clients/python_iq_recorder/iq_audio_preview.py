@@ -36,7 +36,7 @@ class AudioPreviewController:
         self.target_freq = center_freq  # Frequency to demodulate
         self.lock = threading.Lock()
         
-        # Demodulators
+        # Demodulators - each mode gets its own instance with separate filter state
         self.demod_usb = SSBDemodulator(sample_rate, audio_bandwidth=2700)
         self.demod_lsb = SSBDemodulator(sample_rate, audio_bandwidth=2700)
         self.demod_cwu = CWDemodulator(sample_rate, cw_pitch=600, bandwidth=500)
@@ -44,6 +44,13 @@ class AudioPreviewController:
         
         # Frequency shifter
         self.freq_shifter = FrequencyShifter(sample_rate)
+        
+        # Complex lowpass filter (like SDR++ RxVFO filter)
+        # This filters the IQ BEFORE demodulation
+        self.complex_filter_b = None
+        self.complex_filter_a = None
+        self.complex_filter_state = None
+        self._design_complex_filter(2700)  # Default bandwidth
         
         # Audio output (stereo for channel control)
         self.audio_output = AudioOutputManager(
@@ -77,6 +84,29 @@ class AudioPreviewController:
         )
         self.agc_enabled = True  # AGC enabled by default
     
+    def _design_complex_filter(self, bandwidth_hz: int):
+        """Design complex lowpass filter for IQ samples (like SDR++ RxVFO)"""
+        from scipy import signal
+        
+        # Filter cutoff at bandwidth/2 (like SDR++ rx_vfo.h line 119)
+        filter_width = bandwidth_hz / 2.0
+        nyquist = self.sample_rate / 2.0
+        cutoff = min(filter_width / nyquist, 0.95)
+        
+        try:
+            # Design Butterworth lowpass filter
+            self.complex_filter_b, self.complex_filter_a = signal.butter(
+                5, cutoff, btype='low'
+            )
+            # Initialize filter state (for complex samples, need 2x state size)
+            zi = signal.lfilter_zi(self.complex_filter_b, self.complex_filter_a)
+            self.complex_filter_state = np.zeros(len(zi), dtype=np.complex64)
+        except Exception as e:
+            print(f"Warning: Complex filter design failed: {e}")
+            self.complex_filter_b = np.array([1.0])
+            self.complex_filter_a = np.array([1.0])
+            self.complex_filter_state = np.zeros(1, dtype=np.complex64)
+    
     def start(self) -> bool:
         """
         Start audio preview
@@ -103,6 +133,10 @@ class AudioPreviewController:
             self.demod_cwl.reset()
             self.freq_shifter.reset()
             self.agc.reset()
+            
+            # Reset complex filter
+            if self.complex_filter_state is not None:
+                self.complex_filter_state = np.zeros(len(self.complex_filter_state), dtype=np.complex64)
             
             self.enabled = True
             print(f"Audio preview started: {self.mode} @ {self.target_freq/1e6:.6f} MHz (AGC enabled)")
@@ -149,6 +183,8 @@ class AudioPreviewController:
             # Update CW demodulators
             self.demod_cwu.set_bandwidth(bandwidth_hz)
             self.demod_cwl.set_bandwidth(bandwidth_hz)
+            # Redesign complex filter for new bandwidth
+            self._design_complex_filter(bandwidth_hz)
     
     def set_target_frequency(self, freq_hz: int):
         """
@@ -185,10 +221,22 @@ class AudioPreviewController:
                 return
             
             try:
-                # Calculate frequency shift needed
-                # IQ samples are centered at center_freq
-                # We want to shift so target_freq is at DC (0 Hz)
-                shift_hz = self.center_freq - self.target_freq
+                # SDR++ VFO reference model (see plans/SDRPP_SSB_ARCHITECTURE.md)
+                # target_freq is the EDGE of the passband (like lowerOffset/upperOffset in SDR++)
+                # Calculate centerOffset from edge based on mode
+                current_mode = self.mode
+                center_offset = self.target_freq
+                
+                if current_mode == 'USB':
+                    # USB (REF_LOWER): center = edge + bandwidth/2
+                    center_offset = self.target_freq + (self.demod_usb.audio_bandwidth / 2.0)
+                elif current_mode == 'LSB':
+                    # LSB (REF_UPPER): center = edge - bandwidth/2
+                    center_offset = self.target_freq - (self.demod_lsb.audio_bandwidth / 2.0)
+                # CW modes: center = edge (no offset)
+                
+                # Shift center to DC (this is what the demodulator receives)
+                shift_hz = self.center_freq - center_offset
                 
                 # Shift frequency if needed
                 if abs(shift_hz) > 10:  # Only shift if > 10 Hz difference
@@ -196,21 +244,34 @@ class AudioPreviewController:
                 else:
                     shifted_iq = iq_samples
                 
+                # Apply complex lowpass filter (like SDR++ RxVFO)
+                # This filters the IQ BEFORE demodulation with cutoff at bandwidth/2
+                if len(self.complex_filter_b) > 1 and self.complex_filter_state is not None:
+                    from scipy import signal
+                    filtered_iq, self.complex_filter_state = signal.lfilter(
+                        self.complex_filter_b, self.complex_filter_a,
+                        shifted_iq, zi=self.complex_filter_state
+                    )
+                else:
+                    filtered_iq = shifted_iq
+                
                 # Demodulate based on mode
-                if self.mode == 'USB':
-                    audio = self.demod_usb.demodulate_usb(shifted_iq)
-                elif self.mode == 'LSB':
-                    audio = self.demod_lsb.demodulate_lsb(shifted_iq)
-                elif self.mode == 'CWU':
-                    audio = self.demod_cwu.demodulate_cwu(shifted_iq)
+                current_mode = self.mode  # Read once to avoid race conditions
+
+                if current_mode == 'USB':
+                    audio = self.demod_usb.demodulate_usb(filtered_iq)
+                elif current_mode == 'LSB':
+                    audio = self.demod_lsb.demodulate_lsb(filtered_iq)
+                elif current_mode == 'CWU':
+                    audio = self.demod_cwu.demodulate_cwu(filtered_iq)
                     # Apply CW gain boost (CW signals are typically much weaker)
                     audio = audio * 10.0
-                elif self.mode == 'CWL':
-                    audio = self.demod_cwl.demodulate_cwl(shifted_iq)
+                elif current_mode == 'CWL':
+                    audio = self.demod_cwl.demodulate_cwl(filtered_iq)
                     # Apply CW gain boost (CW signals are typically much weaker)
                     audio = audio * 10.0
                 else:
-                    audio = np.real(shifted_iq).astype(np.float32)
+                    audio = np.real(filtered_iq).astype(np.float32)
                 
                 # Resample if needed
                 if self.needs_resampling and len(audio) > 0:

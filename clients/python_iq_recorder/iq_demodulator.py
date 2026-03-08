@@ -33,18 +33,21 @@ class SSBDemodulator:
             self.filter_b, self.filter_a = signal.butter(
                 filter_order, cutoff, btype='low'
             )
-            # Initialize filter state for continuous processing
-            self.filter_state = signal.lfilter_zi(self.filter_b, self.filter_a)
+            # Initialize SEPARATE filter states for USB and LSB
+            self.filter_state_usb = signal.lfilter_zi(self.filter_b, self.filter_a)
+            self.filter_state_lsb = signal.lfilter_zi(self.filter_b, self.filter_a)
         except Exception as e:
             print(f"Warning: Filter design failed: {e}")
             # Fallback to no filtering
             self.filter_b = np.array([1.0])
             self.filter_a = np.array([1.0])
-            self.filter_state = np.zeros(1)
+            self.filter_state_usb = np.zeros(1)
+            self.filter_state_lsb = np.zeros(1)
     
     def reset(self):
-        """Reset filter state"""
-        self.filter_state = signal.lfilter_zi(self.filter_b, self.filter_a)
+        """Reset filter states for both USB and LSB"""
+        self.filter_state_usb = signal.lfilter_zi(self.filter_b, self.filter_a)
+        self.filter_state_lsb = signal.lfilter_zi(self.filter_b, self.filter_a)
 
     def set_bandwidth(self, audio_bandwidth: int):
         """
@@ -63,8 +66,9 @@ class SSBDemodulator:
             self.filter_b, self.filter_a = signal.butter(
                 self.filter_order, cutoff, btype='low'
             )
-            # Reset filter state for new filter
-            self.filter_state = signal.lfilter_zi(self.filter_b, self.filter_a)
+            # Reset filter states for new filter
+            self.filter_state_usb = signal.lfilter_zi(self.filter_b, self.filter_a)
+            self.filter_state_lsb = signal.lfilter_zi(self.filter_b, self.filter_a)
         except Exception as e:
             print(f"Warning: Filter redesign failed: {e}")
             # Keep existing filter
@@ -72,49 +76,68 @@ class SSBDemodulator:
     def demodulate_usb(self, iq_samples: np.ndarray) -> np.ndarray:
         """
         Demodulate USB (Upper Sideband)
-        
+
         Args:
-            iq_samples: Complex IQ samples
-            
+            iq_samples: Complex IQ samples (centerOffset already shifted to DC by audio preview)
+
         Returns:
             Demodulated audio samples (float32)
         """
-        # USB: Take real part (I channel)
-        # IQ samples are already at baseband (0 Hz = carrier)
-        audio = np.real(iq_samples).astype(np.float32)
+        # USB: Shift by +bandwidth/2 (exactly as SDR++ ssb.h line 108)
+        # See plans/SDRPP_COMPLETE_SIGNAL_CHAIN.md
+        n_samples = len(iq_samples)
+        shift_freq = self.audio_bandwidth / 2.0
         
-        # Lowpass filter to audio bandwidth
-        if len(self.filter_b) > 1:
-            audio_filtered, self.filter_state = signal.lfilter(
-                self.filter_b, self.filter_a, audio, zi=self.filter_state
-            )
-        else:
-            audio_filtered = audio
-        
-        return audio_filtered
+        # Generate frequency shift signal
+        phase_increment = 2 * np.pi * shift_freq / self.sample_rate
+        if not hasattr(self, '_usb_phase'):
+            self._usb_phase = 0.0
+
+        phases = self._usb_phase + phase_increment * np.arange(n_samples)
+        shift_signal = np.exp(1j * phases)
+        self._usb_phase = (phases[-1] + phase_increment) % (2 * np.pi)
+
+        # Shift frequency
+        shifted = iq_samples * shift_signal
+
+        # Take real part (SDR++ has NO filter here - just ComplexToReal)
+        audio = np.real(shifted).astype(np.float32)
+
+        # NO LOWPASS FILTER - SDR++ doesn't filter in the SSB demodulator
+        return audio
     
     def demodulate_lsb(self, iq_samples: np.ndarray) -> np.ndarray:
         """
         Demodulate LSB (Lower Sideband)
-        
+
         Args:
-            iq_samples: Complex IQ samples
-            
+            iq_samples: Complex IQ samples (centerOffset already shifted to DC by audio preview)
+
         Returns:
             Demodulated audio samples (float32)
         """
-        # LSB: Take negative of real part (inverted I channel)
-        audio = -np.real(iq_samples).astype(np.float32)
-        
-        # Lowpass filter
-        if len(self.filter_b) > 1:
-            audio_filtered, self.filter_state = signal.lfilter(
-                self.filter_b, self.filter_a, audio, zi=self.filter_state
-            )
-        else:
-            audio_filtered = audio
-        
-        return audio_filtered
+        # LSB: Shift by -bandwidth/2 (exactly as SDR++ ssb.h line 111)
+        # See plans/SDRPP_SSB_ARCHITECTURE.md for details
+        n_samples = len(iq_samples)
+        shift_freq = -self.audio_bandwidth / 2.0
+
+        # Generate frequency shift signal
+        phase_increment = 2 * np.pi * shift_freq / self.sample_rate
+        if not hasattr(self, '_lsb_phase'):
+            self._lsb_phase = 0.0
+
+        phases = self._lsb_phase + phase_increment * np.arange(n_samples)
+        shift_signal = np.exp(1j * phases)
+        self._lsb_phase = (phases[-1] + phase_increment) % (2 * np.pi)
+
+        # Shift frequency
+        shifted = iq_samples * shift_signal
+
+        # Take real part (SDR++ has NO filter here - just ComplexToReal)
+        audio = np.real(shifted).astype(np.float32)
+
+        # NO LOWPASS FILTER - SDR++ doesn't filter in the SSB demodulator
+        return audio
 
 
 class CWDemodulator:

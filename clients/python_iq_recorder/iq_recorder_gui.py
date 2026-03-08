@@ -1185,8 +1185,8 @@ class IQRecorderGUI:
     
     def on_closing(self):
         """Handle window close"""
-        # Check for active recordings
-        active_streams = [s for s in self.streams if s.status == StreamStatus.RECORDING]
+        # Check for active recordings (only count streams with recording enabled)
+        active_streams = [s for s in self.streams if s.status == StreamStatus.RECORDING and s.recording_enabled]
         
         if active_streams:
             if not messagebox.askyesno("Active Recordings",

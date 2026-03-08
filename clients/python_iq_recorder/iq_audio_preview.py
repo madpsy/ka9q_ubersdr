@@ -134,6 +134,21 @@ class AudioPreviewController:
                 self.demod_cwu.reset()
                 self.demod_cwl.reset()
                 self.freq_shifter.reset()
+
+    def set_bandwidth(self, bandwidth_hz: int):
+        """
+        Set demodulation bandwidth
+
+        Args:
+            bandwidth_hz: Bandwidth in Hz
+        """
+        with self.lock:
+            # Update SSB demodulators
+            self.demod_usb.set_bandwidth(bandwidth_hz)
+            self.demod_lsb.set_bandwidth(bandwidth_hz)
+            # Update CW demodulators
+            self.demod_cwu.set_bandwidth(bandwidth_hz)
+            self.demod_cwl.set_bandwidth(bandwidth_hz)
     
     def set_target_frequency(self, freq_hz: int):
         """

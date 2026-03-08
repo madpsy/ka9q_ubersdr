@@ -45,6 +45,29 @@ class SSBDemodulator:
     def reset(self):
         """Reset filter state"""
         self.filter_state = signal.lfilter_zi(self.filter_b, self.filter_a)
+
+    def set_bandwidth(self, audio_bandwidth: int):
+        """
+        Update audio bandwidth and redesign filter
+
+        Args:
+            audio_bandwidth: New audio bandwidth in Hz
+        """
+        self.audio_bandwidth = audio_bandwidth
+
+        # Redesign lowpass filter for new bandwidth
+        nyquist = self.sample_rate / 2
+        cutoff = min(audio_bandwidth / nyquist, 0.95)  # Ensure < 1.0
+
+        try:
+            self.filter_b, self.filter_a = signal.butter(
+                self.filter_order, cutoff, btype='low'
+            )
+            # Reset filter state for new filter
+            self.filter_state = signal.lfilter_zi(self.filter_b, self.filter_a)
+        except Exception as e:
+            print(f"Warning: Filter redesign failed: {e}")
+            # Keep existing filter
     
     def demodulate_usb(self, iq_samples: np.ndarray) -> np.ndarray:
         """
@@ -132,6 +155,29 @@ class CWDemodulator:
         """Reset filter state and phase"""
         self.filter_state = signal.lfilter_zi(self.filter_b, self.filter_a)
         self.phase = 0.0
+
+    def set_bandwidth(self, bandwidth: int):
+        """
+        Update CW bandwidth and redesign filter
+
+        Args:
+            bandwidth: New CW bandwidth in Hz
+        """
+        self.bandwidth = bandwidth
+
+        # Redesign lowpass filter for new bandwidth
+        nyquist = self.sample_rate / 2
+        high_cutoff = min(bandwidth, nyquist * 0.95) / nyquist  # Upper edge
+
+        try:
+            self.filter_b, self.filter_a = signal.butter(
+                4, high_cutoff, btype='low'
+            )
+            # Reset filter state for new filter
+            self.filter_state = signal.lfilter_zi(self.filter_b, self.filter_a)
+        except Exception as e:
+            print(f"Warning: CW filter redesign failed: {e}")
+            # Keep existing filter
     
     def demodulate_cwu(self, iq_samples: np.ndarray) -> np.ndarray:
         """

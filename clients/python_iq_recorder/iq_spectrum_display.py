@@ -56,7 +56,12 @@ class IQSpectrumDisplay:
         self.height = height
         self.sample_rate = sample_rate
         self.center_freq = center_freq
-        
+
+        # Bandwidth settings (adjustable)
+        self.ssb_bandwidth = 2700  # Default SSB bandwidth (Hz)
+        self.cw_bandwidth = 500    # Default CW bandwidth (Hz)
+        self.bandwidth_update_timer = None  # Timer for debouncing bandwidth updates
+
         # FFT parameters
         self.fft_size = 2048
         self.overlap = 0.5
@@ -84,7 +89,7 @@ class IQSpectrumDisplay:
         
         # Audio preview
         self.audio_preview = None
-        self.hover_freq = None  # Frequency at mouse position
+        self.hover_freq = center_freq  # Frequency at mouse position (default to center)
         self.audio_marker_id = None  # Canvas ID for audio marker
         self.freq_locked = False  # Whether frequency is locked (fixed)
         self.locked_freq = None  # Locked frequency when fixed
@@ -196,12 +201,11 @@ class IQSpectrumDisplay:
             control_frame,
             textvariable=self.audio_button_text,
             command=self.toggle_audio_preview,
-            width=20
+            width=14
         )
         self.audio_button.pack(side=tk.LEFT, padx=5)
-        
+
         # Mode selector - auto-select based on frequency
-        ttk.Label(control_frame, text="Mode:").pack(side=tk.LEFT, padx=(10, 2))
         
         # Auto-select LSB for < 10 MHz, USB for >= 10 MHz
         default_mode = "LSB" if self.center_freq < 10_000_000 else "USB"
@@ -216,7 +220,25 @@ class IQSpectrumDisplay:
         )
         mode_combo.pack(side=tk.LEFT, padx=2)
         mode_combo.bind('<<ComboboxSelected>>', self.on_mode_changed)
-        
+
+        # Bandwidth slider (appears after mode dropdown)
+        ttk.Label(control_frame, text="BW:").pack(side=tk.LEFT, padx=(10, 2))
+        self.bandwidth_var = tk.IntVar(value=self.ssb_bandwidth if default_mode in ['USB', 'LSB'] else self.cw_bandwidth)
+        self.bandwidth_scale = ttk.Scale(
+            control_frame,
+            from_=1000 if default_mode in ['USB', 'LSB'] else 200,
+            to=6000 if default_mode in ['USB', 'LSB'] else 1000,
+            orient=tk.HORIZONTAL,
+            variable=self.bandwidth_var,
+            command=self.on_bandwidth_changed,
+            length=120
+        )
+        self.bandwidth_scale.pack(side=tk.LEFT, padx=2)
+
+        # Bandwidth label
+        self.bandwidth_label = ttk.Label(control_frame, text=f"{self.bandwidth_var.get()} Hz")
+        self.bandwidth_label.pack(side=tk.LEFT, padx=2)
+
         # AGC checkbox
         self.agc_enabled_var = tk.BooleanVar(value=True)
         agc_check = ttk.Checkbutton(
@@ -245,10 +267,104 @@ class IQSpectrumDisplay:
         self.volume_label = ttk.Label(control_frame, text="50%")
         self.volume_label.pack(side=tk.LEFT, padx=2)
         
-        # Frequency display
-        self.freq_label = ttk.Label(control_frame, text="Hover over spectrum to tune", foreground='#888888')
-        self.freq_label.pack(side=tk.RIGHT, padx=5)
+        # Frequency input/display
+        freq_frame = ttk.Frame(control_frame)
+        freq_frame.pack(side=tk.RIGHT, padx=5)
+
+        ttk.Label(freq_frame, text="Freq (MHz):").pack(side=tk.LEFT, padx=(0, 2))
+
+        self.freq_entry_var = tk.StringVar(value=f"{self.center_freq/1e6:.6f}")
+        self.freq_entry = ttk.Entry(
+            freq_frame,
+            textvariable=self.freq_entry_var,
+            width=12,
+            justify=tk.RIGHT
+        )
+        self.freq_entry.pack(side=tk.LEFT, padx=2)
+        self.freq_entry.bind('<Return>', self.on_freq_entry_submit)
+        self.freq_entry.bind('<FocusOut>', self.on_freq_entry_submit)
+
+        # Lock checkbox (no label)
+        self.freq_lock_var = tk.BooleanVar(value=False)
+        self.freq_lock_check = ttk.Checkbutton(
+            freq_frame,
+            variable=self.freq_lock_var,
+            command=self.on_freq_lock_changed
+        )
+        self.freq_lock_check.pack(side=tk.LEFT, padx=(2, 0))
     
+    def on_freq_entry_submit(self, event=None):
+        """Handle frequency entry submission (Enter key or focus out)"""
+        try:
+            # Parse frequency in MHz
+            freq_mhz = float(self.freq_entry_var.get())
+            freq_hz = int(freq_mhz * 1e6)
+
+            # Validate frequency is within receiver range
+            freq_min = self.center_freq - self.sample_rate / 2
+            freq_max = self.center_freq + self.sample_rate / 2
+
+            if freq_hz < freq_min or freq_hz > freq_max:
+                # Out of range - show error and revert
+                messagebox.showwarning(
+                    "Frequency Out of Range",
+                    f"Frequency must be between {freq_min/1e6:.6f} and {freq_max/1e6:.6f} MHz"
+                )
+                # Revert to current frequency
+                if self.freq_locked and self.locked_freq is not None:
+                    self.freq_entry_var.set(f"{self.locked_freq/1e6:.6f}")
+                elif self.hover_freq is not None:
+                    self.freq_entry_var.set(f"{self.hover_freq/1e6:.6f}")
+                return
+
+            # Valid frequency - set hover frequency (don't lock automatically)
+            self.hover_freq = freq_hz
+
+            # If audio preview is running, update it
+            if self.audio_preview and self.audio_preview.is_enabled():
+                self.audio_preview.set_target_frequency(freq_hz)
+                # Redraw marker
+                self.redraw_audio_marker_if_active()
+
+        except ValueError:
+            # Invalid input - show error
+            messagebox.showwarning(
+                "Invalid Frequency",
+                "Please enter a valid frequency in MHz (e.g., 14.074)"
+            )
+            # Revert to current frequency
+            if self.freq_locked and self.locked_freq is not None:
+                self.freq_entry_var.set(f"{self.locked_freq/1e6:.6f}")
+            elif self.hover_freq is not None:
+                self.freq_entry_var.set(f"{self.hover_freq/1e6:.6f}")
+
+    def on_freq_lock_changed(self):
+        """Handle frequency lock checkbox change"""
+        is_locked = self.freq_lock_var.get()
+
+        if is_locked:
+            # Lock to current hover frequency
+            if self.hover_freq is not None:
+                self.freq_locked = True
+                self.locked_freq = self.hover_freq
+
+                # Set audio preview to locked frequency
+                if self.audio_preview and self.audio_preview.is_enabled():
+                    self.audio_preview.set_target_frequency(self.locked_freq)
+
+                print(f"Frequency locked at {self.locked_freq/1e6:.6f} MHz")
+
+                # Redraw marker in locked color
+                self.redraw_audio_marker_if_active()
+        else:
+            # Unlock frequency
+            self.freq_locked = False
+            self.locked_freq = None
+            print("Frequency unlocked - following mouse")
+
+            # Redraw marker
+            self.redraw_audio_marker_if_active()
+
     def populate_audio_devices(self):
         """Populate audio device dropdown"""
         try:
@@ -305,14 +421,17 @@ class IQSpectrumDisplay:
         if self.audio_preview and self.audio_preview.is_enabled():
             # Stop audio preview
             self.audio_preview.stop()
-            self.hover_freq = None
+            # Keep hover_freq so user can restart at same frequency
+            # self.hover_freq = None  # Don't clear this
             self.freq_locked = False
             self.locked_freq = None
+            self.freq_lock_var.set(False)  # Uncheck lock checkbox
             if self.audio_marker_id:
                 self.canvas.delete(self.audio_marker_id)
                 self.audio_marker_id = None
             self.canvas.delete("audio_bandwidth")
-            self.freq_label.config(text="Hover over spectrum to tune", foreground='#888888')
+            # Don't clear frequency entry - keep it so user can restart
+            # self.freq_entry_var.set("")
             self.audio_button_text.set("▶ Start Audio")
             
             # Re-enable device selector when stopped
@@ -339,14 +458,23 @@ class IQSpectrumDisplay:
                 if self.audio_preview.start():
                     self.audio_preview.set_mode(self.audio_mode_var.get())
                     self.audio_preview.set_volume(self.volume_var.get())
+
+                    # If user entered a frequency before starting, use it
+                    if self.hover_freq is not None:
+                        self.audio_preview.set_target_frequency(self.hover_freq)
+                        # Draw the bandwidth marker immediately
+                        self.redraw_audio_marker_if_active()
+
                     self.audio_button_text.set("⏹ Stop Audio")
-                    self.freq_label.config(text="Hover over spectrum to tune", foreground='#000000')
-                    
+
                     # Disable device selector while running
                     self.audio_device_combo.config(state="disabled")
-                    
+
                     print(f"Audio preview started on: {self.audio_device_var.get()}")
-                    print("Hover over spectrum to listen")
+                    if self.hover_freq is not None:
+                        print(f"Tuned to {self.hover_freq/1e6:.6f} MHz - hover over spectrum to change")
+                    else:
+                        print("Hover over spectrum to listen")
                 else:
                     messagebox.showerror(
                         "Audio Preview Error",
@@ -380,8 +508,55 @@ class IQSpectrumDisplay:
     
     def on_mode_changed(self, event=None):
         """Handle mode change"""
+        mode = self.audio_mode_var.get()
+
+        # Update bandwidth slider range and value based on mode
+        if mode in ['USB', 'LSB']:
+            # SSB mode: 1000 to 6000 Hz, default 2700 Hz
+            self.bandwidth_scale.config(from_=1000, to=6000)
+            self.bandwidth_var.set(self.ssb_bandwidth)
+        else:  # CWU, CWL
+            # CW mode: 200 to 1000 Hz, default 500 Hz
+            self.bandwidth_scale.config(from_=200, to=1000)
+            self.bandwidth_var.set(self.cw_bandwidth)
+
+        # Update bandwidth label
+        self.bandwidth_label.config(text=f"{self.bandwidth_var.get()} Hz")
+
+        # Update audio preview mode
         if self.audio_preview and self.audio_preview.is_enabled():
-            self.audio_preview.set_mode(self.audio_mode_var.get())
+            self.audio_preview.set_mode(mode)
+
+        # Redraw audio marker with new bandwidth
+        self.redraw_audio_marker_if_active()
+
+    def on_bandwidth_changed(self, value):
+        """Handle bandwidth slider change with debouncing"""
+        bandwidth = int(float(value))
+        self.bandwidth_label.config(text=f"{bandwidth} Hz")
+
+        # Store the bandwidth for the current mode
+        mode = self.audio_mode_var.get()
+        if mode in ['USB', 'LSB']:
+            self.ssb_bandwidth = bandwidth
+        else:  # CWU, CWL
+            self.cw_bandwidth = bandwidth
+
+        # Redraw audio marker with new bandwidth immediately (visual feedback)
+        self.redraw_audio_marker_if_active()
+
+        # Cancel any pending bandwidth update
+        if self.bandwidth_update_timer is not None:
+            self.parent.after_cancel(self.bandwidth_update_timer)
+
+        # Schedule bandwidth update after 300ms of no slider movement (debounce)
+        self.bandwidth_update_timer = self.parent.after(300, lambda: self._apply_bandwidth_update(bandwidth))
+
+    def _apply_bandwidth_update(self, bandwidth):
+        """Apply bandwidth update to audio preview (called after debounce delay)"""
+        if self.audio_preview:
+            self.audio_preview.set_bandwidth(bandwidth)
+        self.bandwidth_update_timer = None
     
     def on_agc_changed(self):
         """Handle AGC checkbox change"""
@@ -406,13 +581,13 @@ class IQSpectrumDisplay:
         """Calculate SNR at a specific frequency within demodulation bandwidth"""
         if len(self.spectrum_data) == 0 or not self.audio_preview or not self.audio_preview.is_enabled():
             return
-        
+
         # Get current mode to determine bandwidth
         mode = self.audio_mode_var.get()
         if mode in ['USB', 'LSB']:
-            bandwidth_hz = 2700  # SSB bandwidth
+            bandwidth_hz = self.ssb_bandwidth
         else:  # CWU, CWL
-            bandwidth_hz = 500   # CW bandwidth
+            bandwidth_hz = self.cw_bandwidth
         
         # Calculate frequency range for the passband
         full_freq_min = self.center_freq - self.sample_rate / 2
@@ -478,18 +653,16 @@ class IQSpectrumDisplay:
             # If frequency is locked, don't update from mouse motion
             if self.freq_locked:
                 # Still update hover_freq for display, but use locked_freq for audio
-                mode = self.audio_mode_var.get()
-                self.freq_label.config(text=f"🔒 {self.locked_freq/1e6:.6f} MHz ({mode}) [LOCKED]", foreground='#FF8800')
-                # Redraw marker at locked position
-                self.redraw_audio_marker_if_active()
+                self.freq_entry_var.set(f"{self.locked_freq/1e6:.6f}")
+                # Don't redraw marker - it's already at the locked position
+                # self.redraw_audio_marker_if_active()
             else:
                 # Update audio preview target frequency from mouse
                 self.audio_preview.set_target_frequency(self.hover_freq)
-                
-                # Update frequency display with mode
-                mode = self.audio_mode_var.get()
-                self.freq_label.config(text=f"{self.hover_freq/1e6:.6f} MHz ({mode})", foreground='#000000')
-                
+
+                # Update frequency display
+                self.freq_entry_var.set(f"{self.hover_freq/1e6:.6f}")
+
                 # Draw audio marker on spectrum
                 self.draw_audio_marker(event.x, freq_at_mouse)
     
@@ -549,8 +722,9 @@ class IQSpectrumDisplay:
             # Unlock frequency - return to following mouse
             self.freq_locked = False
             self.locked_freq = None
+            self.freq_lock_var.set(False)  # Sync checkbox
             print("Frequency unlocked - following mouse")
-            
+
             # Update display immediately with current mouse position
             self.on_mouse_motion(event)
         else:
@@ -558,16 +732,16 @@ class IQSpectrumDisplay:
             if self.hover_freq is not None:
                 self.freq_locked = True
                 self.locked_freq = self.hover_freq
-                
+                self.freq_lock_var.set(True)  # Sync checkbox
+
                 # Set audio preview to locked frequency
                 self.audio_preview.set_target_frequency(self.locked_freq)
-                
+
                 # Update display
-                mode = self.audio_mode_var.get()
-                self.freq_label.config(text=f"🔒 {self.locked_freq/1e6:.6f} MHz ({mode}) [LOCKED]", foreground='#FF8800')
-                
+                self.freq_entry_var.set(f"{self.locked_freq/1e6:.6f}")
+
                 print(f"Frequency locked at {self.locked_freq/1e6:.6f} MHz")
-                
+
                 # Redraw marker in locked color
                 self.redraw_audio_marker_if_active()
     
@@ -583,13 +757,13 @@ class IQSpectrumDisplay:
         if self.audio_marker_id:
             self.canvas.delete(self.audio_marker_id)
         self.canvas.delete("audio_bandwidth")
-        
+
         # Get current mode to determine bandwidth
         mode = self.audio_mode_var.get()
         if mode in ['USB', 'LSB']:
-            bandwidth_hz = 2700  # SSB bandwidth
+            bandwidth_hz = self.ssb_bandwidth
         else:  # CWU, CWL
-            bandwidth_hz = 500   # CW bandwidth
+            bandwidth_hz = self.cw_bandwidth
         
         # Calculate bandwidth in pixels
         if self.zoom_factor > 1.0:

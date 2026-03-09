@@ -1602,6 +1602,11 @@ func main() {
 		log.Printf("MCP endpoint enabled at /api/mcp")
 	}
 
+	// RMNoise CORS proxy endpoints
+	http.HandleFunc("/api/rmnoise/login", handleRMNoiseLogin)
+	http.HandleFunc("/api/rmnoise/webrtc_token", handleRMNoiseWebRTCToken)
+	http.HandleFunc("/api/rmnoise/turn_creds", handleRMNoiseTURNCreds)
+
 	// SunCalc endpoint (sun/moon position and times)
 	http.HandleFunc("/api/suncalc", func(w http.ResponseWriter, r *http.Request) {
 		handleSunCalcAPI(w, r, config)

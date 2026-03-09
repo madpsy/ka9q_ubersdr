@@ -17,7 +17,8 @@
 const RM_RATE   = 8000;   // RMNoise wire protocol sample rate
 const RM_FRAME  = 384;    // 64 ms at 8 kHz
 const RM_SERVER = 'wss://s2.rmnoise.com:8766';
-const RM_BASE   = 'https://rmnoise.com';
+// RM_BASE (https://rmnoise.com) is no longer used for fetch() calls — the Go
+// server-side CORS proxy handles those.  RM_SERVER is still used for WebSocket.
 
 // ── State ──────────────────────────────────────────────────────────────────────
 const rmNoise = {
@@ -251,32 +252,33 @@ async function rmNoise_connect(username, password, filterNumber) {
     rmNoise_updateButton();
 
     try {
-        // ── Step 1: Login ──────────────────────────────────────────────────────
-        const loginResp = await fetch(`${RM_BASE}/users2/login`, {
+        // ── Step 1: Login (via Go CORS proxy) ─────────────────────────────────
+        const loginResp = await fetch('/api/rmnoise/login', {
             method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ username, password }),
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
         });
-        if (!loginResp.ok) throw new Error(`Login failed: HTTP ${loginResp.status}`);
+        const loginData = await loginResp.json();
+        if (!loginData.ok) throw new Error(loginData.error || 'Login failed');
+        const proxyToken = loginData.token;
         rmNoise_log('Login successful');
 
-        // ── Step 2: Get JWT ────────────────────────────────────────────────────
-        const jwtResp = await fetch(`${RM_BASE}/users2/get_webrtc_token`, {
+        // ── Step 2: Get JWT (via Go CORS proxy) ───────────────────────────────
+        const jwtResp = await fetch('/api/rmnoise/webrtc_token', {
             method: 'POST',
-            credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: proxyToken }),
         });
         const jwtData = await jwtResp.json();
         if (!jwtData.success || !jwtData.token) throw new Error('Failed to get JWT token');
         const token = jwtData.token;
         rmNoise_log('JWT token received');
 
-        // ── Step 3: Get TURN credentials ───────────────────────────────────────
-        const turnResp = await fetch(`${RM_BASE}/users2/get_turn_credentials`, {
+        // ── Step 3: Get TURN credentials (via Go CORS proxy) ──────────────────
+        const turnResp = await fetch('/api/rmnoise/turn_creds', {
             method: 'POST',
-            credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: proxyToken }),
         });
         const turnData = await turnResp.json();
         if (!turnData.success) throw new Error('Failed to get TURN credentials');

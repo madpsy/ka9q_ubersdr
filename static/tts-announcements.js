@@ -134,39 +134,56 @@ function initializeTTS() {
     }
     
     const voices = window.speechSynthesis.getVoices();
-    
+
+    console.log('[TTS] All available voices:', voices.map(v => `${v.name} (${v.lang})`).join(', '));
+
     // Filter for English voices only
     const englishVoices = voices.filter(v => v.lang.startsWith('en'));
-    
+
+    console.log('[TTS] English voices:', englishVoices.map(v => `${v.name} (${v.lang})`).join(', '));
+
     // Accept both Google and Microsoft voices (for Chrome and Edge)
     const qualityEnglishVoices = englishVoices.filter(v => {
         const nameLower = v.name.toLowerCase();
         return nameLower.includes('google') || nameLower.includes('microsoft');
     });
-    
+
+    console.log('[TTS] Quality English voices (Google/Microsoft):', qualityEnglishVoices.map(v => `${v.name} (${v.lang})`).join(', '));
+
     if (qualityEnglishVoices.length === 0) {
         console.log('[TTS] No Google or Microsoft English voices available');
         console.log('[TTS] Available voices:', voices.map(v => v.name).join(', '));
         showUnsupportedBrowserModal();
         return false;
     }
-    
+
     // Try to select preferred voices in order:
     // 1. Google UK English Female (Chrome)
     // 2. Microsoft online voices (Edge - higher quality)
     // 3. Any Microsoft voice (excluding 'default')
     // 4. Any Google voice
     // 5. First available quality voice
-    ttsVoice = qualityEnglishVoices.find(v =>
+    const googleUK = qualityEnglishVoices.find(v =>
         v.name === 'Google UK English Female' && v.lang === 'en-GB'
-    ) || qualityEnglishVoices.find(v =>
+    );
+    const msOnline = qualityEnglishVoices.find(v =>
         v.name.toLowerCase().includes('microsoft') && v.name.toLowerCase().includes('online')
-    ) || qualityEnglishVoices.find(v =>
+    );
+    const msNonDefault = qualityEnglishVoices.find(v =>
         v.name.toLowerCase().includes('microsoft') && !v.name.toLowerCase().includes('default')
-    ) || qualityEnglishVoices.find(v =>
+    );
+    const anyGoogle = qualityEnglishVoices.find(v =>
         v.name.toLowerCase().includes('google')
-    ) || qualityEnglishVoices[0];
-    
+    );
+
+    console.log('[TTS] Voice selection candidates:');
+    console.log('  - Google UK:', googleUK ? `${googleUK.name} (${googleUK.lang})` : 'not found');
+    console.log('  - MS Online:', msOnline ? `${msOnline.name} (${msOnline.lang})` : 'not found');
+    console.log('  - MS Non-Default:', msNonDefault ? `${msNonDefault.name} (${msNonDefault.lang})` : 'not found');
+    console.log('  - Any Google:', anyGoogle ? `${anyGoogle.name} (${anyGoogle.lang})` : 'not found');
+
+    ttsVoice = googleUK || msOnline || msNonDefault || anyGoogle || qualityEnglishVoices[0];
+
     console.log(`[TTS] Selected voice: ${ttsVoice.name} (${ttsVoice.lang})`);
     return true;
 }

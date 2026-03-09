@@ -156,6 +156,14 @@ try:
 except ImportError:
     NR2_AVAILABLE = False
 
+# Check if RMNoise is available
+try:
+    from rmnoise_window import RMNoiseWindow, RMNOISE_AVAILABLE
+    RMNOISE_WINDOW_AVAILABLE = True
+except ImportError:
+    RMNOISE_WINDOW_AVAILABLE = False
+    RMNOISE_AVAILABLE = False
+
 try:
     from noise_blanker import create_noise_blanker
     NB_AVAILABLE = True
@@ -286,7 +294,7 @@ class RadioGUI:
     def __init__(self, root: tk.Tk, initial_config: dict):
         self.root = root
         self.root.title("Radio Client")
-        self.root.geometry("900x960")  # Increased height for signal data source controls
+        self.root.geometry("900x1056")  # Increased height for signal data source controls
         self.root.resizable(True, True)
 
         # Configuration
@@ -453,6 +461,9 @@ class RadioGUI:
         # S-Meter display window
         self.s_meter_display = None
 
+        # RMNoise denoising window and bridge
+        self.rmnoise_window: Optional['RMNoiseWindow'] = None
+
         # Signal data source selection (audio stream vs spectrum FFT)
         self.signal_data_source = tk.StringVar(value="audio")  # "audio" or "spectrum"
 
@@ -539,7 +550,10 @@ class RadioGUI:
                 'udp_host': self.udp_host_var.get(),
                 'udp_port': self.udp_port_var.get(),
                 'udp_stereo': self.udp_stereo_var.get(),
-                'opus_enabled': self.opus_var.get()
+                'opus_enabled': self.opus_var.get(),
+                'rmnoise_username': self.config.get('rmnoise_username', ''),
+                'rmnoise_password': self.config.get('rmnoise_password', ''),
+                'rmnoise_filter': self.config.get('rmnoise_filter', 1),
             }
 
             # Get current radio control settings
@@ -612,6 +626,14 @@ class RadioGUI:
         # Apply Opus settings (silently)
         if 'opus_enabled' in settings:
             self.opus_var.set(settings['opus_enabled'])
+
+        # Apply RMNoise credentials/settings (silently – stored in shared config dict)
+        if 'rmnoise_username' in settings:
+            self.config['rmnoise_username'] = settings['rmnoise_username']
+        if 'rmnoise_password' in settings:
+            self.config['rmnoise_password'] = settings['rmnoise_password']
+        if 'rmnoise_filter' in settings:
+            self.config['rmnoise_filter'] = settings['rmnoise_filter']
 
     def apply_saved_radio_control_settings(self):
         """Apply saved radio control settings to UI after it's created."""
@@ -1754,6 +1776,29 @@ class RadioGUI:
 
         self.rec_status_label = ttk.Label(nr2_container, text="", foreground='red')
         self.rec_status_label.grid(row=0, column=8, sticky=tk.W)
+
+        # RMNoise controls – second row inside nr2_container (row 1)
+        self.rm_enabled_var = tk.BooleanVar(value=False)
+        self.rm_check = ttk.Checkbutton(
+            nr2_container,
+            text="Enable RM Noise",
+            variable=self.rm_enabled_var,
+            command=self.toggle_rmnoise,
+            state='normal' if RMNOISE_WINDOW_AVAILABLE else 'disabled'
+        )
+        self.rm_check.grid(row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(4, 0))
+
+        self.rm_configure_btn = ttk.Button(
+            nr2_container,
+            text="Configure…",
+            width=10,
+            command=self.open_rmnoise_window
+        )
+        self.rm_configure_btn.grid(row=1, column=1, columnspan=2, sticky=tk.W,
+                                   padx=(0, 10), pady=(4, 0))
+
+        self.rm_status_label = ttk.Label(nr2_container, text="", foreground='gray')
+        self.rm_status_label.grid(row=1, column=3, columnspan=5, sticky=tk.W, pady=(4, 0))
 
         # Noise Blanker (row 5) - use a frame to avoid column weight issues
         nb_container = ttk.Frame(audio_frame)
@@ -3625,6 +3670,13 @@ class RadioGUI:
                 self.toggle_nr2()
             self.nr2_check.config(state='disabled')
 
+            # Disable RM denoising
+            if self.rm_enabled_var.get():
+                self.rm_enabled_var.set(False)
+                self.toggle_rmnoise()
+            self.rm_check.config(state='disabled')
+            self.rm_configure_btn.config(state='disabled')
+
             # Disable audio filter (silently, without validation)
             if self.audio_filter_enabled_var.get():
                 self.audio_filter_enabled_var.set(False)
@@ -3690,6 +3742,11 @@ class RadioGUI:
 
             # Re-enable NR2 checkbox
             self.nr2_check.config(state='normal')
+
+            # Re-enable RM checkbox and configure button
+            if RMNOISE_WINDOW_AVAILABLE:
+                self.rm_check.config(state='normal')
+                self.rm_configure_btn.config(state='normal')
 
             # Re-enable audio filter checkbox
             self.filter_check.config(state='normal')
@@ -5015,6 +5072,125 @@ class RadioGUI:
         except ValueError:
             messagebox.showerror("Error", "Invalid NR2 parameter values")
             self.nr2_enabled_var.set(not enabled)
+
+    def toggle_rmnoise(self):
+        """Toggle RMNoise denoising on/off via the bridge in the window."""
+        enabled = self.rm_enabled_var.get()
+
+        if not RMNOISE_WINDOW_AVAILABLE:
+            self.rm_enabled_var.set(False)
+            messagebox.showerror("Error",
+                "RMNoise dependencies are not installed.\n\n"
+                "Install with: pip install aiortc websockets scipy")
+            return
+
+        if enabled:
+            has_credentials = bool(
+                self.config.get('rmnoise_username', '').strip() and
+                self.config.get('rmnoise_password', '').strip()
+            )
+            if has_credentials:
+                # Show connecting state on the main window immediately
+                self.rm_status_label.config(text="● Connecting…", foreground='orange')
+                # Credentials already stored — start the bridge silently without
+                # opening the configuration window.  The window can still be
+                # opened via the "Configure" button if the user wants to change
+                # settings or view statistics.
+                if self.rmnoise_window and self.rmnoise_window.window.winfo_exists():
+                    # Window is already open — just enable inside it
+                    self.rmnoise_window.set_enabled(True)
+                else:
+                    # Create a hidden bridge by opening the window off-screen,
+                    # enabling it, then hiding the window.
+                    self.open_rmnoise_window()
+                    if self.rmnoise_window:
+                        self.rmnoise_window.set_enabled(True)
+                        self.rmnoise_window.window.withdraw()
+            else:
+                # No credentials yet — open the window so the user can enter them
+                self.rm_status_label.config(text="● Connecting…", foreground='orange')
+                self.open_rmnoise_window()
+                if self.rmnoise_window:
+                    self.rmnoise_window.set_enabled(True)
+        else:
+            # Disable via the window if it exists
+            if self.rmnoise_window:
+                self.rmnoise_window.set_enabled(False)
+            # Clear bridge reference on client
+            if self.client:
+                self.client.rmnoise_bridge = None
+            self.rm_status_label.config(text="", foreground='gray')
+            self.log_status("RMNoise denoising disabled")
+
+    def open_rmnoise_window(self):
+        """Open (or bring to front) the RMNoise configuration window."""
+        if not RMNOISE_WINDOW_AVAILABLE:
+            messagebox.showerror("Error",
+                "RMNoise dependencies are not installed.\n\n"
+                "Install with: pip install aiortc websockets scipy")
+            return
+
+        if self.rmnoise_window and self.rmnoise_window.window.winfo_exists():
+            self.rmnoise_window.show()
+            return
+
+        def _on_enable_change(enabled: bool, bridge):
+            """Called by the window when the bridge connects/disconnects."""
+            # Sync checkbox state
+            self.rm_enabled_var.set(enabled)
+            # Wire bridge into the client
+            if self.client:
+                self.client.rmnoise_bridge = bridge if enabled else None
+            # Update status label
+            if enabled and bridge:
+                self.rm_status_label.config(text="● Connected", foreground='green')
+                self.log_status("RMNoise denoising active")
+                # Start periodic latency updates on the main window label
+                self._poll_rmnoise_stats()
+            elif enabled and not bridge:
+                # Connection attempt failed
+                self.rm_status_label.config(text="● Failed", foreground='red')
+                self.log_status("RMNoise connection failed")
+            else:
+                # Explicitly disabled
+                self.rm_status_label.config(text="", foreground='gray')
+                self.log_status("RMNoise denoising disabled")
+
+        def _on_save():
+            """Called by the window when credentials are saved."""
+            self.save_servers()
+
+        # Pass the current server sample rate so the bridge resamples correctly.
+        # Falls back to 12000 Hz (most common SDR audio rate) if not yet connected.
+        current_rate = 12000
+        if self.client and hasattr(self.client, 'sample_rate'):
+            current_rate = self.client.sample_rate
+
+        self.rmnoise_window = RMNoiseWindow(
+            self.root,
+            config=self.config,
+            on_enable_change=_on_enable_change,
+            on_save=_on_save,
+            input_sample_rate=current_rate
+        )
+
+    def _poll_rmnoise_stats(self):
+        """Periodically update the main-window RMNoise status label with latency."""
+        # Stop if no longer enabled or bridge gone
+        if not self.rm_enabled_var.get():
+            return
+        bridge = None
+        if self.rmnoise_window and hasattr(self.rmnoise_window, 'bridge'):
+            bridge = self.rmnoise_window.bridge
+        if bridge and bridge.ready:
+            lat = bridge.latency_ms
+            jitter = bridge.jitter_depth
+            self.rm_status_label.config(
+                text=f"● Connected  {lat:.0f} ms  {jitter}fr",
+                foreground='green'
+            )
+        # Reschedule every 500 ms while enabled
+        self.root.after(500, self._poll_rmnoise_stats)
 
     def toggle_noise_blanker(self):
         """Toggle Noise Blanker on/off."""

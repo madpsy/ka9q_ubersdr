@@ -16,5 +16,8 @@ pyserial>=3.5
 opuslib>=3.0.1
 zstandard>=0.22.0
 
+# RMNoise AI denoising support
+aiortc>=1.9.0
+
 # Windows-only: OmniRig support
 pywin32>=306; platform_system=="Windows"

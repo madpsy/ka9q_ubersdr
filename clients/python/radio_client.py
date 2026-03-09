@@ -115,7 +115,7 @@ except ImportError:
 
 def get_pipewire_sinks() -> List[Tuple[str, str]]:
     """Get list of available PipeWire audio sinks.
-    
+
     Returns:
         List of tuples (node_name, description) for audio sinks, sorted alphabetically. Empty list on Windows or if PipeWire not available.
     """
@@ -132,52 +132,52 @@ def get_pipewire_sinks() -> List[Tuple[str, str]]:
             text=True,
             timeout=5
         )
-        
+
         sinks = []
         lines = result.stdout.split('\n')
-        
+
         current_node_name = None
         current_nick = None
         current_media_class = None
-        
+
         for line in lines:
             line = line.strip()
-            
+
             # Look for node.name
             if 'node.name = ' in line:
                 match = re.search(r'node\.name = "([^"]+)"', line)
                 if match:
                     current_node_name = match.group(1)
-            
+
             # Look for node.nick (friendly name)
             elif 'node.nick = ' in line:
                 match = re.search(r'node\.nick = "([^"]+)"', line)
                 if match:
                     current_nick = match.group(1)
-            
+
             # Look for media.class
             elif 'media.class = ' in line:
                 match = re.search(r'media\.class = "([^"]+)"', line)
                 if match:
                     current_media_class = match.group(1)
-            
+
             # When we hit a new object ID, process the previous one
             elif line.startswith('id ') and current_node_name:
                 # Only include Audio/Sink devices
                 if current_media_class == 'Audio/Sink':
                     description = current_nick if current_nick else current_node_name
                     sinks.append((current_node_name, description))
-                
+
                 # Reset for next object
                 current_node_name = None
                 current_nick = None
                 current_media_class = None
-        
+
         # Process last object if it was a sink
         if current_node_name and current_media_class == 'Audio/Sink':
             description = current_nick if current_nick else current_node_name
             sinks.append((current_node_name, description))
-        
+
         # Sort sinks alphabetically by description (case-insensitive)
         sinks.sort(key=lambda x: x[1].lower())
 
@@ -298,7 +298,7 @@ def get_sounddevice_devices(wasapi_only: bool = False) -> List[Tuple[int, str]]:
 
 class RadioClient:
     """WebSocket radio client for receiving and outputting audio."""
-    
+
     def __init__(self, url: Optional[str] = None, host: Optional[str] = None,
                  port: Optional[int] = None, frequency: int = 0, mode: str = '',
                  bandwidth_low: Optional[int] = None, bandwidth_high: Optional[int] = None,
@@ -327,7 +327,7 @@ class RadioClient:
         self.duration = duration
         self.ssl = ssl
         self.password = password
-        
+
         self.user_session_id = str(uuid.uuid4())
         self.server_session_id = None  # Will be set from server's status message
         self.running = True
@@ -401,7 +401,7 @@ class RadioClient:
 
         self.wav_writer = None
         self.pipewire_process = None
-        
+
         # PyAudio output
         self.pyaudio_instance = None
         self.pyaudio_stream = None
@@ -426,10 +426,10 @@ class RadioClient:
         self.auto_reconnect = auto_reconnect
         self.retry_count = 0
         self.max_backoff = 60  # Maximum backoff time in seconds
-        
+
         # Status callback for GUI integration
         self.status_callback = status_callback
-        
+
         # NR2 noise reduction
         self.nr2_enabled = nr2_enabled
         self.nr2_processor = None
@@ -445,11 +445,14 @@ class RadioClient:
                 adapt_rate=nr2_adapt_rate
             )
             print(f"NR2 noise reduction enabled (strength={nr2_strength}%, floor={nr2_floor}%, adapt={nr2_adapt_rate}%)", file=sys.stderr)
-        
+
         # Noise Blanker (time-domain impulse noise suppression)
         self.nb_enabled = False
         self.nb_processor = None
-        
+
+        # RMNoise bridge (set by GUI when enabled; processed before all other DSP)
+        self.rmnoise_bridge = None
+
         # Audio controls
         self.volume = max(0.0, min(2.0, volume))  # Clamp between 0.0 and 2.0 (0-200%)
         self.channel_left = channel_left
@@ -459,7 +462,7 @@ class RadioClient:
         self.audio_level_update_counter = 0
         self.recording_callback = recording_callback
         self.opus_active_callback = opus_active_callback
-        
+
         # Audio bandpass filter
         self.audio_filter_enabled = audio_filter_enabled
         self.audio_filter_low = audio_filter_low
@@ -473,13 +476,13 @@ class RadioClient:
                 sys.exit(1)
             self._init_audio_filter()
             print(f"Audio bandpass filter enabled ({audio_filter_low:.0f}-{audio_filter_high:.0f} Hz)", file=sys.stderr)
-        
+
         # 10-band equalizer
         self.eq_enabled = False
         self.eq_band_gains = {}  # Dictionary of {frequency: gain_db}
         self.eq_sos = None       # Combined second-order sections for all EQ bands
         self.eq_zi = None        # Filter state for EQ
-        
+
         # UDP output (can work as additional output alongside main output)
         self.udp_socket = None
         self.udp_host = udp_host if udp_host else '127.0.0.1'
@@ -496,7 +499,7 @@ class RadioClient:
             except Exception as e:
                 print(f"Warning: Failed to create UDP socket: {e}", file=sys.stderr)
                 self.udp_enabled = False
-    
+
     def _prepare_udp_audio(self, audio_float):
         """Prepare audio for UDP output (mono by default, stereo if enabled).
 
@@ -650,7 +653,7 @@ class RadioClient:
         print(message, file=sys.stderr)
         if self.status_callback:
             self.status_callback("info", message)
-    
+
     def build_websocket_url(self) -> str:
         """Build the WebSocket URL with query parameters."""
         # Check if this is an IQ mode (bandwidth should not be sent for IQ modes)
@@ -660,37 +663,37 @@ class RadioClient:
         if self.url:
             parsed = urlparse(self.url)
             base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path or '/ws'}"
-            
+
             # Parse existing query parameters
             existing_params = parse_qs(parsed.query)
             params = {}
-            
+
             # Use existing params as defaults, override with our values
             for key, value in existing_params.items():
                 params[key] = value[0] if isinstance(value, list) else value
-            
+
             # Override/add our parameters
             params['frequency'] = str(self.frequency)
             params['mode'] = self.mode
             params['user_session_id'] = self.user_session_id
-            
+
             # Only include bandwidth for non-IQ modes
             if not is_iq_mode:
                 if self.bandwidth_low is not None:
                     params['bandwidthLow'] = str(self.bandwidth_low)
                 if self.bandwidth_high is not None:
                     params['bandwidthHigh'] = str(self.bandwidth_high)
-            
+
             # Add password if provided
             if self.password:
                 params['password'] = self.password
-            
+
             # Add format parameter: always specify format (opus or pcm-zstd)
             if self.use_opus:
                 params['format'] = 'opus'
             else:
                 params['format'] = 'pcm-zstd'
-            
+
             # Add version parameter: request version 2 for signal quality metrics
             params['version'] = '2'
 
@@ -702,30 +705,30 @@ class RadioClient:
             url += f"?frequency={self.frequency}"
             url += f"&mode={self.mode}"
             url += f"&user_session_id={self.user_session_id}"
-            
+
             # Only include bandwidth for non-IQ modes
             if not is_iq_mode:
                 if self.bandwidth_low is not None:
                     url += f"&bandwidthLow={self.bandwidth_low}"
                 if self.bandwidth_high is not None:
                     url += f"&bandwidthHigh={self.bandwidth_high}"
-            
+
             # Add password if provided
             if self.password:
                 from urllib.parse import quote
                 url += f"&password={quote(self.password)}"
-            
+
             # Add format parameter: always specify format (opus or pcm-zstd)
             if self.use_opus:
                 url += "&format=opus"
             else:
                 url += "&format=pcm-zstd"
-            
+
             # Add version parameter: request version 2 for signal quality metrics
             url += "&version=2"
 
             return url
-    
+
     def setup_wav_writer(self):
         """Initialize WAV file writer."""
         if self.wav_file:
@@ -734,7 +737,7 @@ class RadioClient:
             self.wav_writer.setsampwidth(2)  # 16-bit
             self.wav_writer.setframerate(self.sample_rate)
             print(f"Recording to WAV file: {self.wav_file} ({self.channels} channel(s))", file=sys.stderr)
-    
+
     def setup_fifo(self):
         """Create FIFO file (doesn't open it yet)."""
         if self.fifo_path is None:
@@ -789,7 +792,7 @@ class RadioClient:
             # Just log the error and continue without PipeWire output
             if self.status_callback:
                 self.status_callback("error", "pw-play not found. Please install pipewire-utils.")
-    
+
     async def setup_pyaudio(self):
         """Start PyAudio playback stream."""
         if not PYAUDIO_AVAILABLE:
@@ -899,12 +902,12 @@ class RadioClient:
                         if device_to_check is None:
                             # Use default output device
                             device_to_check = sd.default.device[1]
-                        
+
                         # Get device info
                         device = sd.query_devices(device_to_check)
                         device_name = device['name']
                         current_hostapi = device['hostapi']
-                        
+
                         # Only apply WASAPI settings if device is already WASAPI or we can find WASAPI equivalent
                         if current_hostapi == wasapi_hostapi:
                             # Device is already WASAPI, use WASAPI settings
@@ -921,7 +924,7 @@ class RadioClient:
                                     print("Using WASAPI (Windows Audio Session API) for better compatibility", file=sys.stderr)
                                     wasapi_device_found = True
                                     break
-                            
+
                             if not wasapi_device_found:
                                 warning_msg = "Audio latency may be high with non-WASAPI device. Please select a WASAPI device from the output device dropdown for better performance."
                                 print(f"WARNING: {warning_msg}", file=sys.stderr)
@@ -936,10 +939,10 @@ class RadioClient:
                     device_to_check = self.sounddevice_device_index
                     if device_to_check is None:
                         device_to_check = sd.default.device[1]
-                    
+
                     device = sd.query_devices(device_to_check)
                     host_api_name = sd.query_hostapis(device['hostapi'])['name']
-                    
+
                     # Only apply WASAPI settings if device is actually WASAPI
                     if 'WASAPI' in host_api_name:
                         extra_settings = sd.WasapiSettings(exclusive=False)
@@ -1024,7 +1027,7 @@ class RadioClient:
         else:
             # Version 1 format (no signal quality)
             opus_data = binary_data[13:]
-        
+
         # Update client sample rate if it changes (e.g., FM/NFM switching from 12kHz to 24kHz)
         if self.sample_rate != sample_rate:
             old_rate = self.sample_rate
@@ -1035,25 +1038,25 @@ class RadioClient:
             # Reset debug flags when sample rate changes
             if hasattr(self, '_fm_decode_success_logged'):
                 delattr(self, '_fm_decode_success_logged')
-            
+
             # Recreate sounddevice stream with correct sample rate
             # Mark stream as being recreated to prevent writes during recreation
             if self.output_mode == 'sounddevice' and self.sounddevice_stream:
                 # Temporarily set stream to None to prevent writes during recreation
                 old_stream = self.sounddevice_stream
                 self.sounddevice_stream = None
-                
+
                 try:
                     # Stop and close old stream (blocking, but quick)
                     old_stream.stop()
                     old_stream.close()
-                    
+
                     # Recreate stream with new sample rate
                     if self.needs_resampling:
                         self.sounddevice_output_rate = 48000
                     else:
                         self.sounddevice_output_rate = self.sample_rate
-                    
+
                     self.sounddevice_stream = sd.OutputStream(
                         samplerate=self.sounddevice_output_rate,
                         channels=self.output_channels,
@@ -1286,11 +1289,11 @@ class RadioClient:
 
     async def output_audio(self, pcm_data: bytes):
         """Output audio data based on selected mode."""
-        
+
         # Yield control to event loop periodically to prevent audio processing
         # from blocking WebSocket sends (critical for FM modes with high packet rates)
         await asyncio.sleep(0)
-        
+
         # Send audio/IQ to TCI server if enabled (before any processing)
         if hasattr(self, 'tci_server') and self.tci_server:
             try:
@@ -1390,7 +1393,7 @@ class RadioClient:
                 print(f"TCI audio error: {e}", file=sys.stderr)
                 import traceback
                 traceback.print_exc()
-        
+
         # Write raw PCM to FIFO FIRST (before any processing)
         # This gives the FIFO the original audio straight from the source
         if self.fifo_path is not None:
@@ -1427,6 +1430,20 @@ class RadioClient:
         # Convert to float32 for processing
         audio_float = audio_array.astype(np.float32) / 32768.0
 
+        # Apply RMNoise AI denoising FIRST (mono only; skip for IQ/stereo modes).
+        # Must be the earliest processing step so NR2, NB, filter and EQ all
+        # operate on the already-denoised signal.
+        if self.rmnoise_bridge is not None and self.channels == 1:
+            try:
+                # Keep bridge in sync with the current server sample rate.
+                # The server can change rate (e.g. FM switches 12k→24k) so we
+                # update the bridge before every process() call.
+                if self.rmnoise_bridge.input_sample_rate != self.sample_rate:
+                    self.rmnoise_bridge.update_sample_rate(self.sample_rate)
+                audio_float = self.rmnoise_bridge.process(audio_float)
+            except Exception as e:
+                print(f"RMNoise bridge error: {e}", file=sys.stderr)
+
         # Apply NR2 noise reduction if enabled
         if self.nr2_processor:
             # Process through NR2 (expects and returns normalized float32)
@@ -1435,7 +1452,7 @@ class RadioClient:
             # Apply -3dB makeup gain (matches UI default)
             # -3dB = 10^(-3/20) = 0.7079 gain factor
             audio_float = audio_float * 0.7079
-        
+
         # Apply Noise Blanker if enabled (time-domain impulse noise suppression)
         if self.nb_processor:
             # Process through Noise Blanker (expects and returns normalized float32)
@@ -1478,7 +1495,7 @@ class RadioClient:
         if self.recording_callback and self.channels == 1:
             # audio_float is mono at this point, and filtered if audio_filter_enabled
             self.recording_callback(audio_float)
-        
+
         # Calculate audio level before volume adjustment (for meter)
         if self.audio_level_callback and self.audio_level_update_counter % 5 == 0:
             # Calculate RMS level in dB (update every 5th frame to reduce overhead)
@@ -1489,17 +1506,17 @@ class RadioClient:
             else:
                 # Mono
                 rms = np.sqrt(np.mean(audio_float ** 2))
-            
+
             if rms > 1e-10:  # Avoid log of zero
                 level_db = 20 * np.log10(rms)
                 # Clamp to reasonable range
                 level_db = max(-60, min(0, level_db))
             else:
                 level_db = -60  # Minimum level
-            
+
             self.audio_level_callback(level_db)
         self.audio_level_update_counter += 1
-        
+
         # Apply volume control
         if self.volume != 1.0:
             audio_float = audio_float * self.volume
@@ -1507,12 +1524,12 @@ class RadioClient:
         # UDP needs audio before L/R channel muting is applied
         audio_before_channel_selection = audio_float.copy()
 
-        
+
         # Convert mono to stereo if needed for output
         if self.channels == 1 and self.output_channels == 2:
             # Duplicate mono to both channels
             audio_float = np.column_stack((audio_float, audio_float))
-        
+
         # Apply channel selection (only if stereo output)
         if self.output_channels == 2:
             if not self.channel_left:
@@ -1544,16 +1561,16 @@ class RadioClient:
         # Convert back to int16 and clip
         audio_array = np.clip(audio_float * 32768.0, -32768, 32767).astype(np.int16)
         pcm_data = audio_array.tobytes()
-        
+
         if self.output_mode == 'stdout':
             # Write raw PCM to stdout
             sys.stdout.buffer.write(pcm_data)
             sys.stdout.buffer.flush()
-        
+
         elif self.output_mode == 'pipewire':
             # Write to PipeWire process (skip if in IQ mode)
             is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
-            
+
             if not is_iq_mode and self.pipewire_process and self.pipewire_process.stdin:
                 try:
                     self.pipewire_process.stdin.write(pcm_data)
@@ -1566,11 +1583,11 @@ class RadioClient:
                 except (BrokenPipeError, ConnectionResetError):
                     print("PipeWire connection lost", file=sys.stderr)
                     self.running = False
-        
+
         elif self.output_mode == 'pyaudio':
             # Write to PyAudio stream (skip if in IQ mode)
             is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
-            
+
             if not is_iq_mode and self.pyaudio_stream:
                 try:
                     self.pyaudio_stream.write(pcm_data)
@@ -1581,7 +1598,7 @@ class RadioClient:
         elif self.output_mode == 'sounddevice':
             # Write to sounddevice stream (skip if in IQ mode)
             is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
-            
+
             if not is_iq_mode and self.sounddevice_stream:
                 try:
                     # sounddevice expects numpy array, not bytes
@@ -1614,32 +1631,32 @@ class RadioClient:
                 self.udp_socket.sendto(udp_pcm, (self.udp_host, self.udp_port))
             except Exception as e:
                 print(f"UDP send error: {e}", file=sys.stderr)
-        
+
         elif self.output_mode == 'wav':
             # Write to WAV file
             if self.wav_writer:
                 self.wav_writer.writeframes(pcm_data)
-    
+
     def check_duration(self) -> bool:
         """Check if duration limit has been reached."""
         if self.duration is None:
             return True
-        
+
         if self.start_time is None:
             self.start_time = time.time()
             return True
-        
+
         elapsed = time.time() - self.start_time
         if elapsed >= self.duration:
             print(f"\nRecording duration reached: {elapsed:.1f}s", file=sys.stderr)
             return False
-        
+
         return True
-    
+
     async def handle_message(self, message: dict):
         """Handle incoming WebSocket message."""
         msg_type = message.get('type')
-        
+
         if msg_type == 'status':
             # Store session ID from server (like web UI does)
             session_id = message.get('sessionId', 'unknown')
@@ -1655,7 +1672,7 @@ class RadioClient:
             freq = message.get('frequency', 0)
             mode = message.get('mode', 'unknown')
             # print(f"Status: Session {session_id}, {freq} Hz, mode {mode}", file=sys.stderr)  # Removed: too verbose during rapid frequency changes
-        
+
         elif msg_type == 'error':
             # Print error message and notify via callback
             error = message.get('error', 'Unknown error')
@@ -1663,11 +1680,11 @@ class RadioClient:
             if self.status_callback:
                 self.status_callback("server_error", error)
             self.running = False
-        
+
         elif msg_type == 'pong':
             # Keepalive response
             pass
-    
+
     async def send_keepalive(self, websocket):
         """Send periodic keepalive messages."""
         while self.running:
@@ -1678,12 +1695,12 @@ class RadioClient:
             except Exception as e:
                 print(f"Keepalive error: {e}", file=sys.stderr)
                 break
-    
+
     async def fetch_description(self) -> dict:
         """Fetch server description from /api/description endpoint."""
         # Build HTTP URL for description
         protocol = 'https' if self.ssl else 'http'
-        
+
         if self.url:
             # Extract host and port from WebSocket URL
             parsed = urlparse(self.url)
@@ -1692,9 +1709,9 @@ class RadioClient:
         else:
             host = self.host
             port = self.port
-        
+
         http_url = f"{protocol}://{host}:{port}/api/description"
-        
+
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -1706,7 +1723,7 @@ class RadioClient:
                 ) as response:
                     data = await response.json()
                     return data
-                    
+
         except Exception as e:
             print(f"Failed to fetch description: {e}", file=sys.stderr)
             return {}
@@ -1715,7 +1732,7 @@ class RadioClient:
         """Fetch country list from /api/cty/countries endpoint."""
         # Build HTTP URL for countries
         protocol = 'https' if self.ssl else 'http'
-        
+
         if self.url:
             # Extract host and port from WebSocket URL
             parsed = urlparse(self.url)
@@ -1724,9 +1741,9 @@ class RadioClient:
         else:
             host = self.host
             port = self.port
-        
+
         http_url = f"{protocol}://{host}:{port}/api/cty/countries"
-        
+
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -1740,11 +1757,11 @@ class RadioClient:
                     if data.get('success') and 'data' in data:
                         return data['data'].get('countries', [])
                     return []
-                    
+
         except Exception as e:
             print(f"Failed to fetch countries: {e}", file=sys.stderr)
             return []
-    
+
     async def check_connection_allowed(self) -> tuple[bool, str]:
         """Check if connection is allowed via /connection endpoint.
 
@@ -1755,7 +1772,7 @@ class RadioClient:
         """
         # Build HTTP URL for connection check
         protocol = 'https' if self.ssl else 'http'
-        
+
         if self.url:
             # Extract host and port from WebSocket URL
             parsed = urlparse(self.url)
@@ -1764,20 +1781,20 @@ class RadioClient:
         else:
             host = self.host
             port = self.port
-        
+
         http_url = f"{protocol}://{host}:{port}/connection"
-        
+
         # Prepare request body
         request_body = {
             "user_session_id": self.user_session_id
         }
-        
+
         # Add password if provided
         if self.password:
             request_body["password"] = self.password
-        
+
         self._log("Checking connection permission...")
-        
+
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -1790,12 +1807,12 @@ class RadioClient:
                     ssl=False if not self.ssl else None
                 ) as response:
                     data = await response.json()
-                    
+
                     if not data.get('allowed', False):
                         reason = data.get('reason', 'Unknown reason')
                         self._log(f"Connection rejected: {reason}")
                         return False, reason
-                    
+
                     # Store bypassed status (deprecated), allowed IQ modes, and session time
                     self.bypassed = data.get('bypassed', False)
                     self.allowed_iq_modes = data.get('allowed_iq_modes', [])
@@ -1808,12 +1825,12 @@ class RadioClient:
                     session_msg = f", max session: {self.max_session_time}s" if self.max_session_time > 0 else ""
                     self._log(f"Connection allowed (client IP: {client_ip}){bypassed_msg}{iq_modes_msg}{session_msg}")
                     return True, ""
-                    
+
         except Exception as e:
             print(f"Connection check failed: {e}", file=sys.stderr)
             print("Attempting connection anyway...", file=sys.stderr)
             return True, ""  # Continue on error (like the web UI does)
-    
+
     async def run_once(self):
         """Single connection attempt."""
         # Check if connection is allowed before attempting WebSocket connection
@@ -1842,10 +1859,10 @@ class RadioClient:
         url = self.build_websocket_url()
         self._log(f"Connecting to {url}")
         self._log(f"Frequency: {self.frequency} Hz, Mode: {self.mode}")
-        
+
         if self.bandwidth_low is not None and self.bandwidth_high is not None:
             self._log(f"Bandwidth: {self.bandwidth_low} to {self.bandwidth_high} Hz")
-        
+
         try:
             async with websockets.connect(
                 url,
@@ -1877,10 +1894,10 @@ class RadioClient:
                 elif self.output_mode == 'udp':
                     print(f"UDP output to {self.udp_host}:{self.udp_port}: {self.sample_rate} Hz, {self.output_channels} channel(s)", file=sys.stderr)
                     print(f"VLC command: vlc --demux=rawaud \"udp://@:{self.udp_port}\" --rawaud-channels={self.output_channels} --rawaud-samplerate={self.sample_rate}", file=sys.stderr)
-                
+
                 # Start keepalive task
                 keepalive_task = asyncio.create_task(self.send_keepalive(websocket))
-                
+
                 # Start radio polling task if radio control is enabled
                 radio_poll_task = None
                 if hasattr(self, 'radio_control') and self.radio_control:
@@ -1916,7 +1933,7 @@ class RadioClient:
                             if self.use_opus:
                                 # Decode binary Opus packet
                                 pcm_data = self.decode_opus_binary(message)
-                                
+
                                 if pcm_data:
                                     await self.output_audio(pcm_data)
                                     opus_packet_count += 1
@@ -1933,7 +1950,7 @@ class RadioClient:
                             else:
                                 # Decode binary PCM-zstd packet
                                 pcm_data = self.decode_pcm_binary(message, is_zstd=True)
-                                
+
                                 if pcm_data:
                                     await self.output_audio(pcm_data)
                                     pcm_packet_count += 1
@@ -1958,7 +1975,7 @@ class RadioClient:
                     except websockets.exceptions.ConnectionClosed:
                         print("Connection closed by server", file=sys.stderr)
                         break
-                
+
                 # Cancel keepalive
                 keepalive_task.cancel()
                 try:
@@ -1973,7 +1990,7 @@ class RadioClient:
                         await radio_poll_task
                     except asyncio.CancelledError:
                         pass
-                
+
         except Exception as e:
             print(f"Connection error: {e}", file=sys.stderr)
             return 1
@@ -1982,7 +1999,7 @@ class RadioClient:
             self.ws = None
             self._event_loop = None
             await self.cleanup()
-        
+
         return 0
 
     def calculate_backoff(self) -> float:
@@ -2018,7 +2035,7 @@ class RadioClient:
                 return 1
 
         return 0
-    
+
     def _cleanup_fifo_on_exit(self):
         """Cleanup FIFO on exit (called by atexit)."""
         if self.fifo_fd is not None:
@@ -2070,7 +2087,7 @@ class RadioClient:
             except asyncio.TimeoutError:
                 self.pipewire_process.kill()
                 await self.pipewire_process.wait()
-        
+
         # Close PyAudio stream
         if self.pyaudio_stream:
             try:
@@ -2080,7 +2097,7 @@ class RadioClient:
             except Exception as e:
                 print(f"Error closing PyAudio stream: {e}", file=sys.stderr)
             self.pyaudio_stream = None
-        
+
         if self.pyaudio_instance:
             try:
                 self.pyaudio_instance.terminate()
@@ -2107,7 +2124,7 @@ class RadioClient:
             except Exception as e:
                 print(f"Error closing UDP socket: {e}", file=sys.stderr)
             self.udp_socket = None
-        
+
         # Clean up resamplers
         if self.resampler_left is not None:
             self.resampler_left = None
@@ -2132,19 +2149,19 @@ def list_local_instances():
     except ImportError:
         print("Error: zeroconf library not available. Install with: pip install zeroconf", file=sys.stderr)
         sys.exit(1)
-    
+
     print("Discovering local UberSDR instances via mDNS...")
     print()
-    
+
     instances = {}
-    
+
     class InstanceListener(ServiceListener):
         def add_service(self, zc: 'Zeroconf', type_: str, name: str) -> None:
             info = zc.get_service_info(type_, name)
             if info:
                 host = info.parsed_addresses()[0] if info.parsed_addresses() else None
                 port = info.port
-                
+
                 if host and port:
                     # Parse TXT records
                     txt_records = {}
@@ -2154,10 +2171,10 @@ def list_local_instances():
                                 txt_records[key.decode('utf-8')] = value.decode('utf-8')
                             except:
                                 pass
-                    
+
                     version = txt_records.get('version', 'Unknown')
                     display_name = name.replace('._ubersdr._tcp.local.', '')
-                    
+
                     # Fetch detailed info from /api/description
                     try:
                         protocol = 'http'  # Local instances typically don't use TLS
@@ -2165,7 +2182,7 @@ def list_local_instances():
                         response = requests.get(url, timeout=5)
                         response.raise_for_status()
                         description = response.json()
-                        
+
                         instances[name] = {
                             'name': display_name,
                             'host': host,
@@ -2176,50 +2193,50 @@ def list_local_instances():
                     except Exception:
                         # If fetch fails, skip this instance
                         pass
-        
+
         def remove_service(self, zc: 'Zeroconf', type_: str, name: str) -> None:
             pass
-        
+
         def update_service(self, zc: 'Zeroconf', type_: str, name: str) -> None:
             pass
-    
+
     # Start discovery
     zeroconf = Zeroconf()
     listener = InstanceListener()
     browser = ServiceBrowser(zeroconf, "_ubersdr._tcp.local.", listener)
-    
+
     # Wait for discovery
     print("Searching for 5 seconds...")
     time.sleep(5)
-    
+
     # Stop discovery
     browser.cancel()
     zeroconf.close()
-    
+
     # Display results
     print()
     if not instances:
         print("No local instances found")
         return
-    
+
     print(f"Found {len(instances)} local instance(s):")
     print()
-    
+
     for service_name, info in sorted(instances.items(), key=lambda x: x[1]['name']):
         description = info.get('description', {})
         receiver = description.get('receiver', {})
-        
+
         name = receiver.get('name', info['name'])
         callsign = receiver.get('callsign', '')
         location = receiver.get('location', '')
         version = description.get('version', info.get('version', 'Unknown'))
         public_uuid = description.get('public_uuid', '')
-        
+
         # Connection info
         host = info['host']
         port = info['port']
         url = f"http://{host}:{port}/"
-        
+
         # Capabilities
         available_clients = description.get('available_clients', 0)
         max_clients = description.get('max_clients', 0)
@@ -2228,7 +2245,7 @@ def list_local_instances():
         digital_decodes = description.get('digital_decodes', False)
         noise_floor = description.get('noise_floor', False)
         public_iq_modes = description.get('public_iq_modes', [])
-        
+
         print(f"  Name:     {name}")
         if callsign:
             print(f"  Callsign: {callsign}")
@@ -2243,7 +2260,7 @@ def list_local_instances():
         print(f"  Users:    {available_clients}/{max_clients}")
         if max_session_time > 0:
             print(f"  Session:  {max_session_time // 60}m")
-        
+
         # Capabilities
         capabilities = []
         if cw_skimmer:
@@ -2260,10 +2277,10 @@ def list_local_instances():
                     iq_numbers.append(digits)
             if iq_numbers:
                 capabilities.append(f"IQ: {', '.join(iq_numbers)} kHz")
-        
+
         if capabilities:
             print(f"  Features: {', '.join(capabilities)}")
-        
+
         print()
 
 
@@ -2271,22 +2288,22 @@ def list_public_instances():
     """List public UberSDR instances from the central registry."""
     print("Fetching public UberSDR instances...")
     print()
-    
+
     try:
         response = requests.get('https://instances.ubersdr.org/api/instances', timeout=10)
         response.raise_for_status()
         data = response.json()
-        
+
         # Extract instances array from response
         instances = data.get('instances', []) if isinstance(data, dict) else data
-        
+
         if not instances:
             print("No public instances found")
             return
-        
+
         print(f"Found {len(instances)} public instance(s):")
         print()
-        
+
         for instance in sorted(instances, key=lambda x: x.get('name', '')):
             name = instance.get('name', 'Unknown')
             callsign = instance.get('callsign', '')
@@ -2294,12 +2311,12 @@ def list_public_instances():
             version = instance.get('version', '')
             public_url = instance.get('public_url', '')
             uuid = instance.get('id', '')
-            
+
             # Connection info
             host = instance.get('host', '')
             port = instance.get('port', 0)
             tls = instance.get('tls', False)
-            
+
             # Capabilities
             available_clients = instance.get('available_clients', 0)
             max_clients = instance.get('max_clients', 0)
@@ -2308,7 +2325,7 @@ def list_public_instances():
             digital_decodes = instance.get('digital_decodes', False)
             noise_floor = instance.get('noise_floor', False)
             public_iq_modes = instance.get('public_iq_modes', [])
-            
+
             print(f"  Name:     {name}")
             if callsign:
                 print(f"  Callsign: {callsign}")
@@ -2326,7 +2343,7 @@ def list_public_instances():
             print(f"  Users:    {available_clients}/{max_clients}")
             if max_session_time > 0:
                 print(f"  Session:  {max_session_time // 60}m")
-            
+
             # Capabilities
             capabilities = []
             if cw_skimmer:
@@ -2343,12 +2360,12 @@ def list_public_instances():
                         iq_numbers.append(digits)
                 if iq_numbers:
                     capabilities.append(f"IQ: {', '.join(iq_numbers)} kHz")
-            
+
             if capabilities:
                 print(f"  Features: {', '.join(capabilities)}")
-            
+
             print()
-    
+
     except requests.exceptions.RequestException as e:
         print(f"Error fetching instances: {e}", file=sys.stderr)
         sys.exit(1)
@@ -2416,17 +2433,17 @@ Examples:
   %(prog)s --no-gui -f 14074000 -m usb --radio-control-type serial --radio-serial-port /dev/ttyUSB0 --radio-vfo A
         """
     )
-    
+
     parser.add_argument('--no-gui', action='store_true',
                         help='Disable GUI and use command-line interface (requires --frequency and --mode)')
-    
+
     # Create mutually exclusive group for UUID and callsign
     instance_group = parser.add_mutually_exclusive_group()
     instance_group.add_argument('--uuid', type=str,
                         help='Connect to instance by UUID (fetches connection details from central registry)')
     instance_group.add_argument('--callsign', type=str,
                         help='Connect to instance by callsign (resolves to UUID via central registry)')
-    
+
     parser.add_argument('-u', '--url',
                         help='Full WebSocket URL (e.g., ws://host:port/ws or wss://host/ws)')
     parser.add_argument('-H', '--host', default='localhost',
@@ -2461,7 +2478,7 @@ Examples:
                         help='Automatically reconnect on connection loss with exponential backoff (max 60s)')
     parser.add_argument('--password', type=str, default=None,
                         help='Bypass password for accessing wide IQ modes and bypassing session limits')
-    
+
     parser.add_argument('--pipewire-target', type=str, default=None,
                         help='PipeWire target device (node name). Use --list-devices to see available devices.')
     parser.add_argument('--list-devices', action='store_true',
@@ -2507,7 +2524,7 @@ Examples:
                         help='List available serial ports and exit')
 
     args = parser.parse_args()
-    
+
     # Auto-detect callsign from executable filename (if not already specified)
     # Format: radio_client-<callsign> or radio_client-<callsign>.exe
     if not args.callsign and not args.uuid and not args.url:
@@ -2518,26 +2535,26 @@ Examples:
         else:
             # Running as script
             executable_path = sys.argv[0]
-        
+
         # Extract just the filename without path and extension
         executable_name = os.path.splitext(os.path.basename(executable_path))[0]
-        
+
         # Check if filename contains a hyphen (e.g., radio_client-m9psy-1)
         if '-' in executable_name:
             # Extract everything after the first hyphen as the callsign
             # This allows callsigns with hyphens like m9psy-1
             callsign = executable_name.split('-', 1)[1].upper()
-            
+
             if callsign:  # Non-empty callsign
                 print(f"Auto-detected callsign from executable name: {callsign}")
                 print(f"Attempting to resolve callsign to instance...")
-                
+
                 # Try to resolve the callsign (silently fail if not found)
                 try:
                     response = requests.get(f'https://instances.ubersdr.org/api/callsign/{callsign}', timeout=10)
                     response.raise_for_status()
                     data = response.json()
-                    
+
                     # Extract UUID from callsign response
                     uuid = data.get('public_uuid')
                     if uuid:
@@ -2555,7 +2572,7 @@ Examples:
                     # Silently fail - just continue with normal startup
                     print(f"Could not resolve callsign {callsign}, continuing with normal startup...")
                     print()
-    
+
     # List devices mode
     if args.list_devices:
         output_mode = args.output
@@ -2592,7 +2609,7 @@ Examples:
             else:
                 print("  No devices found or pw-cli not available")
         sys.exit(0)
-    
+
     # List serial ports mode
     if args.list_serial_ports:
         try:
@@ -2619,12 +2636,12 @@ Examples:
     if args.list_local:
         list_local_instances()
         sys.exit(0)
-    
+
     # List public instances mode
     if args.list_public:
         list_public_instances()
         sys.exit(0)
-    
+
     # Handle callsign-based connection (resolve to UUID first)
     if args.callsign:
         print(f"Resolving callsign: {args.callsign}")
@@ -2632,24 +2649,24 @@ Examples:
             response = requests.get(f'https://instances.ubersdr.org/api/callsign/{args.callsign}', timeout=10)
             response.raise_for_status()
             data = response.json()
-            
+
             # Extract UUID from callsign response
             uuid = data.get('public_uuid')
             if not uuid:
                 print(f"Error: Could not resolve callsign {args.callsign} to UUID", file=sys.stderr)
                 sys.exit(1)
-            
+
             print(f"Resolved to UUID: {uuid}")
             # Set args.uuid so the UUID handling code below will process it
             args.uuid = uuid
-            
+
         except requests.exceptions.RequestException as e:
             print(f"Error resolving callsign: {e}", file=sys.stderr)
             sys.exit(1)
         except Exception as e:
             print(f"Unexpected error: {e}", file=sys.stderr)
             sys.exit(1)
-    
+
     # Handle UUID-based connection
     if args.uuid:
         print(f"Fetching instance details for UUID: {args.uuid}")
@@ -2657,17 +2674,17 @@ Examples:
             response = requests.get(f'https://instances.ubersdr.org/api/instances/{args.uuid}', timeout=10)
             response.raise_for_status()
             instance = response.json()
-            
+
             # Extract connection details
             host = instance.get('host')
             port = instance.get('port')
             tls = instance.get('tls', False)
             name = instance.get('name', 'Unknown')
-            
+
             if not host or not port:
                 print(f"Error: Instance {args.uuid} does not provide connection information", file=sys.stderr)
                 sys.exit(1)
-            
+
             # Override connection parameters with instance details
             # Don't set args.url - let the client build it properly with host/port/ssl
             args.host = host
@@ -2675,29 +2692,29 @@ Examples:
             args.ssl = tls
             # Clear any existing URL to ensure host/port/ssl are used
             args.url = None
-            
+
             print(f"Connecting to: {name}")
             print(f"  Host: {host}")
             print(f"  Port: {port}")
             print(f"  TLS:  {tls}")
             print()
-            
+
             # Mark that we should auto-connect in GUI mode
             # This is checked later when determining auto_connect flag
             args._uuid_or_callsign_provided = True
-            
+
         except requests.exceptions.RequestException as e:
             print(f"Error fetching instance details: {e}", file=sys.stderr)
             sys.exit(1)
         except Exception as e:
             print(f"Unexpected error: {e}", file=sys.stderr)
             sys.exit(1)
-    
+
     # Parse output mode and UDP parameters
     output_mode = args.output
     udp_host = None
     udp_port = None
-    
+
     # Check if output is UDP format: udp or udp:host:port
     if output_mode == 'udp':
         # Default to localhost:8888
@@ -2716,13 +2733,13 @@ Examples:
             parser.error("UDP port must be a valid integer")
     elif output_mode not in ['pipewire', 'pyaudio', 'sounddevice', 'stdout', 'wav']:
         parser.error(f"Invalid output mode: {output_mode}. Must be one of: pipewire, pyaudio, sounddevice, stdout, wav, udp, or udp:host:port")
-    
+
     # Parse bandwidth early for GUI
     bandwidth_low = None
     bandwidth_high = None
     if args.bandwidth:
         bandwidth_low, bandwidth_high = args.bandwidth
-    
+
     # Set bandwidth defaults based on mode if not explicitly provided
     # This ensures correct defaults for both CLI and GUI modes
     if bandwidth_low is None or bandwidth_high is None:
@@ -2808,7 +2825,7 @@ Examples:
         parser.error("--nr2-floor must be between 0 and 10")
     if args.nr2_adapt_rate < 0.1 or args.nr2_adapt_rate > 5.0:
         parser.error("--nr2-adapt-rate must be between 0.1 and 5.0")
-    
+
     # Validate URL vs host/port
     if args.url:
         # Parse URL to validate it
@@ -2818,7 +2835,7 @@ Examples:
                 parser.error("URL must use ws:// or wss:// scheme")
         except Exception as e:
             parser.error(f"Invalid URL: {e}")
-    
+
     # Determine output channels
     output_channels = None
     if hasattr(args, 'channels') and args.channels is not None:
@@ -2828,7 +2845,7 @@ Examples:
     radio_control = None
     tci_server = None
     tci_server_port = None
-    
+
     # Store TCI port for later initialization
     if args.radio_control_type == 'tci':
         tci_server_port = args.tci_server_port
@@ -2842,7 +2859,7 @@ Examples:
                 radio_port = 12345
             else:  # omnirig doesn't use port
                 radio_port = 0
-        
+
         try:
             if args.radio_control_type == 'rigctl':
                 from rigctl import ThreadedRigctlClient
@@ -2850,14 +2867,14 @@ Examples:
                 radio_control = ThreadedRigctlClient(args.radio_host, radio_port)
                 radio_control.connect()
                 print("✓ Connected to rigctl", file=sys.stderr)
-            
+
             elif args.radio_control_type == 'flrig':
                 from flrig_control import ThreadedFlrigClient
                 print(f"Connecting to flrig at {args.radio_host}:{radio_port} (VFO {args.radio_vfo})...", file=sys.stderr)
                 radio_control = ThreadedFlrigClient(args.radio_host, radio_port, args.radio_vfo)
                 radio_control.connect()
                 print("✓ Connected to flrig", file=sys.stderr)
-            
+
             elif args.radio_control_type == 'omnirig':
                 from omnirig_control import ThreadedOmniRigClient
                 print(f"Connecting to OmniRig (Rig {args.radio_rig}, VFO {args.radio_vfo})...", file=sys.stderr)
@@ -2921,7 +2938,7 @@ Examples:
         udp_stereo=False,  # CLI default: mono (can be added as argument if needed)
         use_opus=args.opus
     )
-    
+
     # Initialize TCI server now that client exists
     if tci_server_port is not None:
         try:
@@ -3013,17 +3030,17 @@ Examples:
             import traceback
             traceback.print_exc()
             sys.exit(1)
-    
+
     # Setup radio control callbacks if enabled
     if radio_control:
         sync_direction = args.radio_sync_direction
-        
+
         # Track last values to avoid feedback loops
         last_sdr_freq = args.frequency
         last_sdr_mode = args.mode
         last_rig_freq = None
         last_rig_mode = None
-        
+
         # Mode mapping: SDR modes to radio modes
         sdr_to_radio_mode = {
             'usb': 'USB',
@@ -3035,7 +3052,7 @@ Examples:
             'cwu': 'CW',
             'cwl': 'CW'
         }
-        
+
         # Mode mapping: radio modes to SDR modes
         radio_to_sdr_mode = {
             'USB': 'usb',
@@ -3044,7 +3061,7 @@ Examples:
             'FM': 'fm',
             'CW': 'cwu'
         }
-        
+
         def on_rig_frequency_change(freq_hz: int):
             """Called when rig frequency changes."""
             nonlocal last_rig_freq, last_sdr_freq
@@ -3104,11 +3121,11 @@ Examples:
                                 print(f"Radio → SDR: {mode} → {sdr_mode}", file=sys.stderr)
                             except Exception as e:
                                 print(f"Failed to send mode: {e}", file=sys.stderr)
-        
+
         def on_rig_error(error: str):
             """Called when radio control error occurs."""
             print(f"Radio control error: {error}", file=sys.stderr)
-        
+
         # Set up callbacks for rig-to-SDR sync
         if sync_direction in ('rig-to-sdr', 'bidirectional'):
             radio_control.set_callbacks(
@@ -3168,32 +3185,32 @@ Examples:
         # Store radio control and sync settings on client for later use
         client.radio_control = radio_control
         client.radio_sync_direction = sync_direction
-    
+
     # Store TCI server reference on client
     if tci_server:
         client.tci_server = tci_server
-        
+
         # Set up callbacks to update TCI server when SDR state changes
         original_handle_message = client.handle_message
-        
+
         async def handle_message_with_tci(message: dict):
             """Wrapper to update TCI server on SDR changes."""
             # Call original handler
             await original_handle_message(message)
-            
+
             # Update TCI server with SDR state changes
             msg_type = message.get('type')
             if msg_type == 'status':
                 freq = message.get('frequency')
                 mode = message.get('mode', '').lower()
-                
+
                 if freq:
                     tci_server.update_frequency(freq)
                 if mode:
                     tci_server.update_mode(mode)
-        
+
         client.handle_message = handle_message_with_tci
-    
+
     # Setup signal handler for graceful shutdown
     def signal_handler(sig, frame):
         print("\nInterrupted, shutting down...", file=sys.stderr)
@@ -3202,12 +3219,12 @@ Examples:
             radio_control.disconnect()
         if tci_server:
             tci_server.stop()
-    
+
     signal.signal(signal.SIGINT, signal_handler)
     # SIGTERM not available on Windows
     if hasattr(signal, 'SIGTERM'):
         signal.signal(signal.SIGTERM, signal_handler)
-    
+
     # Run client
     try:
         exit_code = asyncio.run(client.run())
@@ -3230,5 +3247,5 @@ if __name__ == '__main__':
     # It detects if this is a spawned child process in a frozen executable and exits
     import multiprocessing
     multiprocessing.freeze_support()
-    
+
     main()

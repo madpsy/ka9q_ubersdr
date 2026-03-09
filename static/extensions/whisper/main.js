@@ -1486,10 +1486,22 @@ class WhisperExtension extends DecoderExtension {
 
             // Try to auto-select preferred voices in order:
             // 1. Google UK English Female (Chrome)
-            // 2. Microsoft online voices (Edge - higher quality)
-            // 3. Any Microsoft English voice (excluding 'default')
+            // 2. Microsoft UK online voices (Edge - higher quality, UK accent)
+            // 3. Microsoft US online voices (Edge - higher quality, US accent)
+            // 4. Any Microsoft online voice
+            // 5. Any Microsoft English voice (excluding 'default')
             const googleUK = voices.find(v => v.name === 'Google UK English Female' && v.lang === 'en-GB');
-            const msOnline = voices.find(v =>
+            const msUKOnline = voices.find(v =>
+                v.lang === 'en-GB' &&
+                v.name.toLowerCase().includes('microsoft') &&
+                v.name.toLowerCase().includes('online')
+            );
+            const msUSOnline = voices.find(v =>
+                v.lang === 'en-US' &&
+                v.name.toLowerCase().includes('microsoft') &&
+                v.name.toLowerCase().includes('online')
+            );
+            const msAnyOnline = voices.find(v =>
                 v.lang.startsWith('en') &&
                 v.name.toLowerCase().includes('microsoft') &&
                 v.name.toLowerCase().includes('online')
@@ -1500,7 +1512,7 @@ class WhisperExtension extends DecoderExtension {
                 !v.name.toLowerCase().includes('default')
             );
 
-            const preferredVoice = googleUK || msOnline || msNonDefault;
+            const preferredVoice = googleUK || msUKOnline || msUSOnline || msAnyOnline || msNonDefault;
             if (preferredVoice) {
                 voiceSelect.value = preferredVoice.name;
                 this.ttsVoice = preferredVoice;

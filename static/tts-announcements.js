@@ -22,7 +22,10 @@ function isChromiumBrowser() {
     const isEdge = userAgent.includes('edg/') || userAgent.includes('edge/');
     // Check for Chrome
     const isChrome = userAgent.includes('chrome/');
-    return isChrome || isEdge;
+    const result = isChrome || isEdge;
+    console.log('[TTS] Browser detection - UA:', navigator.userAgent);
+    console.log('[TTS] Browser detection - isEdge:', isEdge, 'isChrome:', isChrome, 'result:', result);
+    return result;
 }
 
 /**

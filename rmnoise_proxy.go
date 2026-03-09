@@ -129,19 +129,21 @@ func handleRMNoiseLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	loginBody, _ := io.ReadAll(resp.Body)
-	log.Printf("RMNoise proxy: login HTTP %d, body: %.200s", resp.StatusCode, string(loginBody))
+	io.Copy(io.Discard, resp.Body) // drain body; we don't need it
 
 	loginURL, _ := url.Parse("https://rmnoise.com")
 	cookies := jar.Cookies(loginURL)
-	log.Printf("RMNoise proxy: cookies after login (%d): %v", len(cookies), cookies)
+	log.Printf("RMNoise proxy: login HTTP %d, cookies after login (%d): %v",
+		resp.StatusCode, len(cookies), cookies)
 
-	// After following redirects, a successful login lands on the dashboard (HTTP 200,
-	// no login-page markers). A failed login stays on the login page (HTTP 200 with
-	// the login form still present).
-	if resp.StatusCode != http.StatusOK || isHTMLLoginPage(loginBody) {
+	// Mirror the Python client exactly: accept any HTTP 200 as login success.
+	// rmnoise.com always returns 200 from the login endpoint (even on success),
+	// and the session cookie it sets IS the authenticated session — _fresh=false
+	// is normal Flask-Login behaviour and does not mean unauthenticated.
+	// Real auth failure is detected later when get_webrtc_token returns HTML.
+	if resp.StatusCode != http.StatusOK {
 		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"ok":false,"error":"Invalid username or password"}`)
+		fmt.Fprint(w, `{"ok":false,"error":"Login failed"}`)
 		return
 	}
 
@@ -281,16 +283,6 @@ func handleRMNoiseTURNCreds(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── Utility ────────────────────────────────────────────────────────────────────
-
-// isHTMLLoginPage returns true if the body is the rmnoise.com login page HTML.
-// Used after a login POST (with redirects followed) to detect failed authentication:
-// a successful login redirects to the dashboard, a failed one stays on the login page.
-func isHTMLLoginPage(body []byte) bool {
-	s := string(body)
-	return strings.Contains(s, "action=\"/users2/login\"") ||
-		strings.Contains(s, "<title>Login</title>") ||
-		strings.Contains(s, "Invalid username or password")
-}
 
 // isHTMLResponse returns true if the response body looks like an HTML page
 // rather than a JSON API response. Used to detect when rmnoise.com redirects

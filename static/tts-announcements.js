@@ -1,5 +1,5 @@
 // TTS Announcements for Accessibility
-// Announces frequency and mode changes using Google English voices only
+// Announces frequency and mode changes using Google (Chrome) or Microsoft (Edge) English voices
 
 // TTS State
 let ttsEnabled = false;
@@ -70,7 +70,7 @@ function showUnsupportedBrowserModal() {
             <strong>Microsoft Edge</strong> for high-quality voice support.
         </p>
         <p style="line-height: 1.6; margin: 20px 0; font-size: 14px; color: #aaa;">
-            Your current browser does not have the necessary Google English voices
+            Your current browser does not have the necessary Google or Microsoft English voices
             for clear and natural-sounding announcements.
         </p>
         <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 25px;">
@@ -138,26 +138,31 @@ function initializeTTS() {
     // Filter for English voices only
     const englishVoices = voices.filter(v => v.lang.startsWith('en'));
     
-    // Prioritize Google voices (following Whisper extension pattern)
-    const googleEnglishVoices = englishVoices.filter(v =>
-        v.name.toLowerCase().includes('google')
-    );
+    // Accept both Google and Microsoft voices (for Chrome and Edge)
+    const qualityEnglishVoices = englishVoices.filter(v => {
+        const nameLower = v.name.toLowerCase();
+        return nameLower.includes('google') || nameLower.includes('microsoft');
+    });
     
-    if (googleEnglishVoices.length === 0) {
-        console.log('[TTS] No Google English voices available');
+    if (qualityEnglishVoices.length === 0) {
+        console.log('[TTS] No Google or Microsoft English voices available');
+        console.log('[TTS] Available voices:', voices.map(v => v.name).join(', '));
         showUnsupportedBrowserModal();
         return false;
     }
     
-    // Try to select 'Google UK English Female' first (preferred, line 1304 pattern from Whisper)
-    ttsVoice = googleEnglishVoices.find(v =>
+    // Try to select preferred voices in order:
+    // 1. Google UK English Female (Chrome)
+    // 2. Microsoft voices (Edge)
+    // 3. Any Google voice
+    // 4. First available quality voice
+    ttsVoice = qualityEnglishVoices.find(v =>
         v.name === 'Google UK English Female' && v.lang === 'en-GB'
-    );
-    
-    // Fall back to first Google English voice if preferred not found
-    if (!ttsVoice) {
-        ttsVoice = googleEnglishVoices[0];
-    }
+    ) || qualityEnglishVoices.find(v =>
+        v.name.toLowerCase().includes('microsoft')
+    ) || qualityEnglishVoices.find(v =>
+        v.name.toLowerCase().includes('google')
+    ) || qualityEnglishVoices[0];
     
     console.log(`[TTS] Selected voice: ${ttsVoice.name} (${ttsVoice.lang})`);
     return true;

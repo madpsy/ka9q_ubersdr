@@ -111,11 +111,14 @@ func handleRMNoiseLogin(w http.ResponseWriter, r *http.Request) {
 		Timeout: 15 * time.Second,
 	}
 
-	// Direct POST — no prior GET for CSRF token.
-	// The Python client does exactly this and it works.
+	// Direct POST to rmnoise.com — no prior GET for CSRF token.
+	// A successful login returns HTTP 302 → /users2/home (followed to 200).
+	// A failed login returns HTTP 200 directly with the login page HTML.
+	// The rememberme field must be present (empty string is fine).
 	formBody := url.Values{}
 	formBody.Set("username", req.Username)
 	formBody.Set("password", req.Password)
+	formBody.Set("rememberme", "")
 
 	resp, err := rmNoiseOutboundRequest(client, http.MethodPost,
 		"https://rmnoise.com/users2/login",
@@ -136,14 +139,19 @@ func handleRMNoiseLogin(w http.ResponseWriter, r *http.Request) {
 	log.Printf("RMNoise proxy: login HTTP %d, cookies after login (%d): %v",
 		resp.StatusCode, len(cookies), cookies)
 
-	// Mirror the Python client exactly: accept any HTTP 200 as login success.
-	// rmnoise.com always returns 200 from the login endpoint (even on success),
-	// and the session cookie it sets IS the authenticated session — _fresh=false
-	// is normal Flask-Login behaviour and does not mean unauthenticated.
-	// Real auth failure is detected later when get_webrtc_token returns HTML.
+	// Successful login: server returns 302 → /users2/home (followed by client to 200).
+	// Failed login: server returns 200 directly with the login page HTML.
+	// Since we follow redirects, a success lands on HTTP 200 at /users2/home.
+	// We detect failure by checking if the final URL is still the login page.
 	if resp.StatusCode != http.StatusOK {
 		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"ok":false,"error":"Login failed"}`)
+		fmt.Fprint(w, `{"ok":false,"error":"Invalid username or password"}`)
+		return
+	}
+	// If we ended up back at the login URL, credentials were wrong
+	if strings.Contains(resp.Request.URL.Path, "/users2/login") {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"ok":false,"error":"Invalid username or password"}`)
 		return
 	}
 

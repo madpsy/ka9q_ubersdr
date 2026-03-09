@@ -10,17 +10,12 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"golang.org/x/net/publicsuffix"
 )
-
-// csrfTokenRe extracts the CSRF token from a Flask-WTF login form.
-// Matches: <input ... name="csrf_token" ... value="TOKEN" ...>
-var csrfTokenRe = regexp.MustCompile(`name="csrf_token"[^>]*value="([^"]+)"`)
 
 // ── Session store ──────────────────────────────────────────────────────────────
 
@@ -49,6 +44,11 @@ func rmNoiseSessionCleanup() {
 }
 
 // ── Outbound request helper ────────────────────────────────────────────────────
+//
+// Mirrors the Python client with _SPOOF_BROWSER_HEADERS = False:
+// no User-Agent, no Origin, no Referer — just the bare minimum headers.
+// The rmnoise.com server treats requests without an Origin header as
+// non-browser (API-style) requests and does not enforce CSRF protection.
 
 func rmNoiseOutboundRequest(client *http.Client, method, targetURL, contentType, body string) (*http.Response, error) {
 	var bodyReader io.Reader
@@ -62,9 +62,9 @@ func rmNoiseOutboundRequest(client *http.Client, method, targetURL, contentType,
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-	req.Header.Set("Origin", "https://rmnoise.com")
-	req.Header.Set("Referer", "https://rmnoise.com/")
+	// Deliberately send NO User-Agent, Origin, or Referer headers.
+	// This matches the Python client's _SPOOF_BROWSER_HEADERS = False behaviour
+	// and avoids triggering CSRF enforcement on the server side.
 	return client.Do(req)
 }
 
@@ -103,51 +103,21 @@ func handleRMNoiseLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// No-redirect client: we stop at each response to capture Set-Cookie headers
-	// before any redirect discards them, and to read the CSRF token from the login page.
-	noRedirectClient := &http.Client{
+	// Follow redirects (default behaviour), matching the Python client.
+	// On successful login rmnoise.com returns 302 → dashboard (200).
+	// On failure it returns 200 directly with the login page HTML.
+	client := &http.Client{
 		Jar:     jar,
 		Timeout: 15 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
 	}
 
-	// ── Step 1: GET the login page to obtain the CSRF token and session cookie ──
-	getResp, err := rmNoiseOutboundRequest(noRedirectClient, http.MethodGet,
-		"https://rmnoise.com/users2/login", "", "")
-	if err != nil {
-		w.WriteHeader(http.StatusBadGateway)
-		fmt.Fprintf(w, `{"ok":false,"error":"Login page fetch failed: %s"}`, jsonEscapeString(err.Error()))
-		return
-	}
-	getBody, _ := io.ReadAll(getResp.Body)
-	getResp.Body.Close()
-	log.Printf("RMNoise proxy: GET login HTTP %d, Set-Cookie: %v", getResp.StatusCode, getResp.Header["Set-Cookie"])
-
-	// Extract CSRF token from the login form HTML
-	csrfToken := ""
-	if m := csrfTokenRe.FindSubmatch(getBody); len(m) == 2 {
-		csrfToken = string(m[1])
-	}
-	// Also try value-first attribute order: value="TOKEN" ... name="csrf_token"
-	if csrfToken == "" {
-		altRe := regexp.MustCompile(`value="([^"]+)"[^>]*name="csrf_token"`)
-		if m := altRe.FindSubmatch(getBody); len(m) == 2 {
-			csrfToken = string(m[1])
-		}
-	}
-	log.Printf("RMNoise proxy: CSRF token: %.20s…", csrfToken)
-
-	// ── Step 2: POST credentials (+ CSRF token) to log in ──
+	// Direct POST — no prior GET for CSRF token.
+	// The Python client does exactly this and it works.
 	formBody := url.Values{}
 	formBody.Set("username", req.Username)
 	formBody.Set("password", req.Password)
-	if csrfToken != "" {
-		formBody.Set("csrf_token", csrfToken)
-	}
 
-	resp, err := rmNoiseOutboundRequest(noRedirectClient, http.MethodPost,
+	resp, err := rmNoiseOutboundRequest(client, http.MethodPost,
 		"https://rmnoise.com/users2/login",
 		"application/x-www-form-urlencoded",
 		formBody.Encode(),
@@ -159,35 +129,17 @@ func handleRMNoiseLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	// Read and log the login response body for debugging
 	loginBody, _ := io.ReadAll(resp.Body)
-	log.Printf("RMNoise proxy: POST login HTTP %d, Set-Cookie: %v, body: %.200s",
-		resp.StatusCode, resp.Header["Set-Cookie"], string(loginBody))
+	log.Printf("RMNoise proxy: login HTTP %d, body: %.200s", resp.StatusCode, string(loginBody))
 
-	// Log cookies stored in jar after login
 	loginURL, _ := url.Parse("https://rmnoise.com")
 	cookies := jar.Cookies(loginURL)
 	log.Printf("RMNoise proxy: cookies after login (%d): %v", len(cookies), cookies)
 
-	// rmnoise.com returns HTTP 302 on successful login, 200+login-page on failure.
-	loginBodyStr := string(loginBody)
-	loginFailed := false
-	switch resp.StatusCode {
-	case http.StatusFound, http.StatusSeeOther:
-		// 302/303 redirect = successful login (standard Flask-Login pattern)
-		loginFailed = false
-	case http.StatusOK:
-		// 200 with login page HTML = bad credentials
-		if strings.Contains(loginBodyStr, "<title>Login</title>") ||
-			strings.Contains(loginBodyStr, "Invalid username or password") ||
-			strings.Contains(loginBodyStr, "action=\"/users2/login\"") {
-			loginFailed = true
-		}
-	default:
-		loginFailed = true
-	}
-
-	if loginFailed {
+	// After following redirects, a successful login lands on the dashboard (HTTP 200,
+	// no login-page markers). A failed login stays on the login page (HTTP 200 with
+	// the login form still present).
+	if resp.StatusCode != http.StatusOK || isHTMLLoginPage(loginBody) {
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprint(w, `{"ok":false,"error":"Invalid username or password"}`)
 		return
@@ -329,6 +281,16 @@ func handleRMNoiseTURNCreds(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── Utility ────────────────────────────────────────────────────────────────────
+
+// isHTMLLoginPage returns true if the body is the rmnoise.com login page HTML.
+// Used after a login POST (with redirects followed) to detect failed authentication:
+// a successful login redirects to the dashboard, a failed one stays on the login page.
+func isHTMLLoginPage(body []byte) bool {
+	s := string(body)
+	return strings.Contains(s, "action=\"/users2/login\"") ||
+		strings.Contains(s, "<title>Login</title>") ||
+		strings.Contains(s, "Invalid username or password")
+}
 
 // isHTMLResponse returns true if the response body looks like an HTML page
 // rather than a JSON API response. Used to detect when rmnoise.com redirects

@@ -212,11 +212,8 @@ class IQSpectrumDisplay:
         # Load saved channel configuration
         if MULTI_CHANNEL_AVAILABLE and self.audio_mixer:
             self.load_channel_configuration()
-            # If no channels loaded, ensure we have at least one
-            if self.audio_mixer.get_channel_count() == 0:
-                default_channel = self.audio_mixer.add_channel(name="Channel 1")
-                if default_channel:
-                    self.active_channel_id = default_channel.channel_id
+            # Don't auto-create a channel - let user add channels explicitly
+            # This prevents confusion when clicking "Add Channel" on an empty spectrum
         
         # Draw initial grid
         self.draw_grid()
@@ -1234,7 +1231,7 @@ class IQSpectrumDisplay:
                 if ft8_end >= freq_min and ft8_start <= freq_max:
                     # Calculate pixel positions for FT8 range
                     freq_range = freq_max - freq_min
-                    
+
                     x1 = ((ft8_start - freq_min) / freq_range) * self.width
                     x2 = ((ft8_end - freq_min) / freq_range) * self.width
                     
@@ -1589,6 +1586,7 @@ class IQSpectrumDisplay:
             self.zoom_factor = 1.0
             self.pan_offset = 0
             self.draw_grid()
+            self.redraw_all_markers()
             return
         
         # Update zoom factor
@@ -2001,13 +1999,12 @@ class IQSpectrumDisplay:
         if not channel:
             return
 
-        result = messagebox.askyesno("Remove Channel", f"Remove channel '{channel.name}'?")
-        if result:
-            self.remove_channel(channel_id)
-            self._refresh_channel_tabs()
-            self._update_channel_controls()
-            self.redraw_all_markers()
-            self.save_channel_configuration()
+        # Remove channel without confirmation
+        self.remove_channel(channel_id)
+        self._refresh_channel_tabs()
+        self._update_channel_controls()
+        self.redraw_all_markers()
+        self.save_channel_configuration()
 
     def on_add_channel_clicked(self):
         """Handle add channel button click"""

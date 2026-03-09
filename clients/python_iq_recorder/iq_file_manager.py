@@ -20,7 +20,8 @@ class IQFileManager:
         'date': 'YYYYMMDD',
         'time': 'HHMMSS',
         'freq': 'Frequency in Hz',
-        'freq_mhz': 'Frequency in MHz',
+        'freq_hz': 'Frequency in Hz (for SDR++ compatibility)',
+        'freq_mhz': 'Frequency in MHz (deprecated, use freq_hz)',
         'mode': 'IQ mode (iq48/iq96/iq192)',
         'stream_id': 'Stream ID number'
     }
@@ -53,16 +54,14 @@ class IQFileManager:
         date = now.strftime("%Y%m%d")
         time_str = now.strftime("%H%M%S")
         
-        # Calculate frequency in MHz
+        # Calculate frequency in MHz (for backward compatibility)
         freq_mhz = frequency / 1_000_000.0
         
-        # Template selection
+        # Template selection - all templates end with frequency in Hz for compatibility
         templates = {
-            'default': '{timestamp}_{freq_mhz}MHz_{mode}.wav',
-            'timestamp': '{timestamp}_{freq}_{mode}.wav',
-            'frequency': '{freq_mhz}MHz_{mode}_{date}.wav',
-            'simple': '{freq_mhz}MHz_{mode}.wav',
-            'detailed': 'stream{stream_id}_{freq_mhz}MHz_{mode}_{timestamp}.wav'
+            'default': '{timestamp}_{mode}_{freq_hz}Hz.wav',
+            'simple': '{mode}_{freq_hz}Hz.wav',
+            'detailed': 'stream{stream_id}_{timestamp}_{mode}_{freq_hz}Hz.wav'
         }
         
         # Use predefined template or custom
@@ -77,7 +76,8 @@ class IQFileManager:
             date=date,
             time=time_str,
             freq=frequency,
-            freq_mhz=f"{freq_mhz:.3f}",
+            freq_hz=int(frequency),  # Integer Hz for SDR++ compatibility
+            freq_mhz=f"{freq_mhz:.3f}",  # Keep for backward compatibility
             mode=iq_mode,
             stream_id=stream_id
         )

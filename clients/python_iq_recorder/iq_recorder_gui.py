@@ -122,7 +122,7 @@ class AddStreamDialog:
         ttk.Label(main_frame, text="Filename Template:").grid(row=4, column=0, sticky=tk.W, pady=5)
         self.template_var = tk.StringVar(value="default")
         template_combo = ttk.Combobox(main_frame, textvariable=self.template_var,
-                                     values=["default", "timestamp", "frequency", "simple", "detailed"],
+                                     values=["default", "simple", "detailed"],
                                      state="readonly", width=18)
         template_combo.grid(row=4, column=1, sticky=tk.W, pady=5)
         
@@ -843,7 +843,31 @@ class IQRecorderGUI:
                 if stream.stream_id in self.spectrum_displays:
                     self.spectrum_displays[stream.stream_id].add_iq_samples(i_samples, q_samples)
             
-            # Create IQ recording client with spectrum callback
+            # Create temporary client to fetch server description for metadata
+            temp_client = IQRecordingClient(
+                host=self.host.get(),
+                port=self.port.get(),
+                frequency=stream.frequency,
+                mode=stream.iq_mode.mode_name,
+                output_mode=None,  # Don't output anything
+                wav_file=None,
+                duration=None,
+                iq_callback=None
+            )
+            
+            # Fetch server description for metadata
+            callsign = None
+            description = None
+            try:
+                server_desc = loop.run_until_complete(temp_client.fetch_description())
+                if server_desc:
+                    receiver = server_desc.get('receiver', {})
+                    callsign = receiver.get('callsign', '')
+                    description = receiver.get('name', '')
+            except:
+                pass  # Continue without metadata if fetch fails
+            
+            # Create IQ recording client with spectrum callback and metadata
             # If recording is disabled, pass None for wav_file to skip writing
             # IMPORTANT: Must pass sample_rate explicitly for IQ modes to ensure WAV header is correct
             client = IQRecordingClient(
@@ -854,7 +878,11 @@ class IQRecorderGUI:
                 output_mode='wav' if stream.recording_enabled else None,
                 wav_file=stream.output_file if stream.recording_enabled else None,
                 duration=duration,  # None = record until stopped, or specified seconds
-                iq_callback=iq_callback
+                iq_callback=iq_callback,
+                metadata_frequency=stream.frequency,
+                metadata_mode=stream.iq_mode.mode_name,
+                metadata_callsign=callsign,
+                metadata_description=description
             )
             
             # Override sample rate with the correct IQ mode sample rate
@@ -905,7 +933,6 @@ class IQRecorderGUI:
         """Handle stream selection change - update tags to show selection with status color"""
         # Get all items
         selected_items = self.stream_tree.selection()
-        print(f"DEBUG: Selection changed, {len(selected_items)} items selected")
 
         for item in self.stream_tree.get_children():
             current_tags = list(self.stream_tree.item(item, 'tags'))
@@ -916,14 +943,12 @@ class IQRecorderGUI:
             # If this item is selected, add _selected suffix
             if item in selected_items:
                 new_tags = [tag + '_selected' if tag in ('recording', 'monitoring') else tag for tag in base_tags]
-                print(f"DEBUG: Item {item} selected, tags: {current_tags} -> {new_tags}")
             else:
                 new_tags = base_tags
 
             # Update tags if changed
             if new_tags != current_tags:
                 self.stream_tree.item(item, tags=tuple(new_tags))
-                print(f"DEBUG: Updated item {item} tags to {new_tags}")
 
     def on_tree_click(self, event):
         """Handle single-click on tree item"""
@@ -1124,11 +1149,18 @@ class IQRecorderGUI:
     
     def update_status(self):
         """Update status bar"""
-        active_count = sum(1 for s in self.streams if s.status == StreamStatus.RECORDING)
+        # Count recording streams (recording_enabled=True and status=RECORDING)
+        recording_count = sum(1 for s in self.streams
+                            if s.status == StreamStatus.RECORDING and s.recording_enabled)
+
+        # Count monitoring streams (recording_enabled=False and status=RECORDING)
+        monitoring_count = sum(1 for s in self.streams
+                             if s.status == StreamStatus.RECORDING and not s.recording_enabled)
+
         total_count = len(self.streams)
-        
+
         disk_space = self.file_manager.get_disk_space_summary()
-        
+
         # Add scheduler status
         schedule_status = ""
         if self.scheduler.has_active_schedules():
@@ -1142,8 +1174,13 @@ class IQRecorderGUI:
                 seconds = int(time_until.total_seconds() % 60)
                 action_str = "starts" if action == "start" else "stops"
                 schedule_status = f" | Next: {schedule.name} {action_str} in {hours}h {minutes}m {seconds}s"
-        
-        self.status_var.set(f"Streams: {active_count}/{total_count} recording | {disk_space}{schedule_status}")
+
+        # Build status message with recording and monitoring counts
+        stream_status = f"Streams: {recording_count}/{total_count} recording"
+        if monitoring_count > 0:
+            stream_status += f", {monitoring_count} monitoring"
+
+        self.status_var.set(f"{stream_status} | {disk_space}{schedule_status}")
     
     def schedule_update(self):
         """Schedule periodic UI update"""

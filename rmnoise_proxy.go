@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"net/http/cookiejar"
+
+	"golang.org/x/net/publicsuffix"
 )
 
 // ── Session store ──────────────────────────────────────────────────────────────
@@ -58,6 +60,7 @@ func rmNoiseOutboundRequest(client *http.Client, method, targetURL, contentType,
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 	req.Header.Set("Origin", "https://rmnoise.com")
+	req.Header.Set("Referer", "https://rmnoise.com/")
 	return client.Do(req)
 }
 
@@ -89,20 +92,28 @@ func handleRMNoiseLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jar, err := cookiejar.New(nil)
+	jar, err := cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprint(w, `{"ok":false,"error":"Internal error creating session"}`)
 		return
 	}
 
-	client := &http.Client{Jar: jar, Timeout: 15 * time.Second}
+	// Use a no-redirect client for login so we capture Set-Cookie from the
+	// login response directly (before any redirect strips it).
+	noRedirectClient := &http.Client{
+		Jar:     jar,
+		Timeout: 15 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse // do not follow redirects
+		},
+	}
 
 	formBody := url.Values{}
 	formBody.Set("username", req.Username)
 	formBody.Set("password", req.Password)
 
-	resp, err := rmNoiseOutboundRequest(client, http.MethodPost,
+	resp, err := rmNoiseOutboundRequest(noRedirectClient, http.MethodPost,
 		"https://rmnoise.com/users2/login",
 		"application/x-www-form-urlencoded",
 		formBody.Encode(),
@@ -113,11 +124,21 @@ func handleRMNoiseLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
 
-	if resp.StatusCode != http.StatusOK {
+	// Read and log the login response body for debugging
+	loginBody, _ := io.ReadAll(resp.Body)
+	log.Printf("RMNoise proxy: login HTTP %d, Set-Cookie: %v, body: %.200s",
+		resp.StatusCode, resp.Header["Set-Cookie"], string(loginBody))
+
+	// Log cookies stored in jar after login
+	loginURL, _ := url.Parse("https://rmnoise.com")
+	cookies := jar.Cookies(loginURL)
+	log.Printf("RMNoise proxy: cookies after login (%d): %v", len(cookies), cookies)
+
+	// Accept 200 or 302 (redirect after successful login) as success
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusSeeOther {
 		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintf(w, `{"ok":false,"error":"Login failed: HTTP %d"}`, resp.StatusCode)
+		fmt.Fprintf(w, `{"ok":false,"error":"Login failed: HTTP %d — %s"}`, resp.StatusCode, jsonEscapeString(string(loginBody)))
 		return
 	}
 
@@ -131,7 +152,7 @@ func handleRMNoiseLogin(w http.ResponseWriter, r *http.Request) {
 	token := hex.EncodeToString(tokenBytes)
 
 	rmNoiseSessions.Store(token, rmNoiseSession{jar: jar, createdAt: time.Now()})
-	log.Printf("RMNoise proxy: login OK, session created (token prefix: %s…)", token[:8])
+	log.Printf("RMNoise proxy: login OK, session created (token prefix: %s…), %d cookies stored", token[:8], len(cookies))
 
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, `{"ok":true,"token":"%s"}`, token)
@@ -165,12 +186,18 @@ func handleRMNoiseWebRTCToken(w http.ResponseWriter, r *http.Request) {
 	}
 	sess := val.(rmNoiseSession)
 
+	// Log cookies being sent
+	targetURL, _ := url.Parse("https://rmnoise.com")
+	cookies := sess.jar.Cookies(targetURL)
+	log.Printf("RMNoise proxy: webrtc_token sending %d cookies: %v", len(cookies), cookies)
+
 	client := &http.Client{Jar: sess.jar, Timeout: 15 * time.Second}
 
+	// Match Python client exactly: Content-Type: application/json, no body
 	resp, err := rmNoiseOutboundRequest(client, http.MethodPost,
 		"https://rmnoise.com/users2/get_webrtc_token",
 		"application/json",
-		"{}",
+		"",
 	)
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
@@ -179,8 +206,11 @@ func handleRMNoiseWebRTCToken(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("RMNoise proxy: webrtc_token HTTP %d, body: %.200s", resp.StatusCode, string(body))
+
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	w.Write(body)
 }
 
 func handleRMNoiseTURNCreds(w http.ResponseWriter, r *http.Request) {
@@ -213,10 +243,11 @@ func handleRMNoiseTURNCreds(w http.ResponseWriter, r *http.Request) {
 
 	client := &http.Client{Jar: sess.jar, Timeout: 15 * time.Second}
 
+	// Match Python client exactly: Content-Type: application/json, no body
 	resp, err := rmNoiseOutboundRequest(client, http.MethodPost,
 		"https://rmnoise.com/users2/get_turn_credentials",
 		"application/json",
-		"{}",
+		"",
 	)
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
@@ -225,8 +256,11 @@ func handleRMNoiseTURNCreds(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("RMNoise proxy: turn_creds HTTP %d, body: %.200s", resp.StatusCode, string(body))
+
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	w.Write(body)
 }
 
 // ── Utility ────────────────────────────────────────────────────────────────────

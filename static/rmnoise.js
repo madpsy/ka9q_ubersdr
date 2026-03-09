@@ -258,7 +258,11 @@ async function rmNoise_connect(username, password, filterNumber) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password }),
         });
-        const loginData = await loginResp.json();
+        const loginText = await loginResp.text();
+        let loginData;
+        try { loginData = JSON.parse(loginText); } catch {
+            throw new Error(`Login proxy error (HTTP ${loginResp.status}): ${loginText.slice(0, 120)}`);
+        }
         if (!loginData.ok) throw new Error(loginData.error || 'Login failed');
         const proxyToken = loginData.token;
         rmNoise_log('Login successful');

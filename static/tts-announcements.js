@@ -153,13 +153,16 @@ function initializeTTS() {
     
     // Try to select preferred voices in order:
     // 1. Google UK English Female (Chrome)
-    // 2. Microsoft voices (Edge)
-    // 3. Any Google voice
-    // 4. First available quality voice
+    // 2. Microsoft online voices (Edge - higher quality)
+    // 3. Any Microsoft voice (excluding 'default')
+    // 4. Any Google voice
+    // 5. First available quality voice
     ttsVoice = qualityEnglishVoices.find(v =>
         v.name === 'Google UK English Female' && v.lang === 'en-GB'
     ) || qualityEnglishVoices.find(v =>
-        v.name.toLowerCase().includes('microsoft')
+        v.name.toLowerCase().includes('microsoft') && v.name.toLowerCase().includes('online')
+    ) || qualityEnglishVoices.find(v =>
+        v.name.toLowerCase().includes('microsoft') && !v.name.toLowerCase().includes('default')
     ) || qualityEnglishVoices.find(v =>
         v.name.toLowerCase().includes('google')
     ) || qualityEnglishVoices[0];

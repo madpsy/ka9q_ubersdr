@@ -1526,7 +1526,7 @@ class WhisperExtension extends DecoderExtension {
         // Get the full locale code if available, otherwise use the language code
         const targetLang = languageMap[languageCode] || languageCode;
 
-        // Find matching voices, prioritizing Google voices
+        // Find matching voices, prioritizing Google and Microsoft voices
         const matchingVoices = voices.filter(v =>
             v.lang.startsWith(languageCode) || v.lang === targetLang
         );
@@ -1536,10 +1536,15 @@ class WhisperExtension extends DecoderExtension {
             return;
         }
 
-        // Prioritize Google voices
+        // Prioritize Google voices (Chrome) and Microsoft voices (Edge)
         let selectedVoice = matchingVoices.find(v => v.name.toLowerCase().includes('google'));
 
-        // Fall back to first matching voice if no Google voice found
+        // Fall back to Microsoft voices if no Google voice found
+        if (!selectedVoice) {
+            selectedVoice = matchingVoices.find(v => v.name.toLowerCase().includes('microsoft'));
+        }
+
+        // Fall back to first matching voice if no Google or Microsoft voice found
         if (!selectedVoice) {
             selectedVoice = matchingVoices[0];
         }

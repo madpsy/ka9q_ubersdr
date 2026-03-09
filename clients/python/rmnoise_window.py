@@ -108,7 +108,9 @@ class RMNoiseBridge:
         # Number of input-rate samples that correspond to one 8 kHz frame:
         #   e.g. 12000 Hz → 384 * 12000/8000 = 576 samples
         #        24000 Hz → 384 * 24000/8000 = 1152 samples
-        self._accum_target = self._FRAME_8K * input_sample_rate // self._RM_RATE
+        # Use round() not // to avoid systematic 1-sample drift that causes
+        # the trim/pad on the send path to introduce a discontinuity every frame.
+        self._accum_target = round(self._FRAME_8K * input_sample_rate / self._RM_RATE)
 
         # Output accumulation: denoised 8 kHz samples waiting to be resampled back
         self._out_accum_8k: np.ndarray = np.zeros(0, dtype=np.float32)
@@ -219,8 +221,9 @@ class RMNoiseBridge:
                 result[:len(out)] = out
                 return result
 
-        # Not enough denoised data yet – return original
-        return audio_float
+        # Not enough denoised data yet – return silence to avoid abrupt
+        # switches between denoised and original audio (which cause clicks).
+        return np.zeros(n_in, dtype=np.float32)
 
     def update_sample_rate(self, new_rate: int):
         """
@@ -232,7 +235,7 @@ class RMNoiseBridge:
             return
         self.input_sample_rate = new_rate
         # Recalculate how many input-rate samples equal one 8 kHz frame
-        self._accum_target = self._FRAME_8K * new_rate // self._RM_RATE
+        self._accum_target = round(self._FRAME_8K * new_rate / self._RM_RATE)
         # Flush stale data from both accumulation buffers
         self._accum = np.zeros(0, dtype=np.float32)
         self._out_accum_8k = np.zeros(0, dtype=np.float32)
@@ -318,10 +321,15 @@ class RMNoiseBridge:
                     lat = (time.time() - self._send_times.pop(fn)) * 1000
                     self._last_latency_ms = lat
 
+                if self._jbuf.full():
+                    try:
+                        self._jbuf.get_nowait()  # drop oldest to make room
+                    except queue.Empty:
+                        pass
                 try:
                     self._jbuf.put_nowait(pcm8k_f32)
                 except queue.Full:
-                    pass  # drop oldest implicitly by discarding new frame
+                    pass
 
                 # Emit stats every 500 ms
                 now = time.time()

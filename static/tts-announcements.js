@@ -18,8 +18,9 @@ let isProcessingQueue = false;
  */
 function isChromiumBrowser() {
     const userAgent = navigator.userAgent.toLowerCase();
-    const isChrome = userAgent.includes('chrome') && !userAgent.includes('edg');
+    // Check for Edge first (Edge user agent contains both 'chrome' and 'edg')
     const isEdge = userAgent.includes('edg');
+    const isChrome = userAgent.includes('chrome');
     return isChrome || isEdge;
 }
 

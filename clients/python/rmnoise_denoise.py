@@ -33,12 +33,6 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s %(levelname)s %(name)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-# ── Spoofing toggle ────────────────────────────────────────────────────────────
-# Set to True to send a Chrome browser User-Agent and rmnoise.com Origin on all
-# HTTP and WebSocket requests (mimics a real browser session).
-# Set to False to send no custom headers (use the library/OS defaults).
-_SPOOF_BROWSER_HEADERS = False
-
 # ── Wire-protocol constants ────────────────────────────────────────────────────
 SAMPLE_RATE_8K  = 8000
 FRAME_SIZE_8K   = 384    # 64 ms at 8 kHz
@@ -67,27 +61,15 @@ class RMNoiseClient:
         "wss://s2.rmnoise.com:8766",
     ]
 
-    # Chrome 124 on Windows 10 — used for all HTTP and WebSocket requests so
-    # the server treats us as a standard browser client.
-    _UA = (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    )
-
     def __init__(self, username: str, password: str,
-                 base_url: str = "https://rmnoise.com",
-                 filter_number: int = 1):
+                 filter_number: int = 1,
+                 proxy_url: str = None):
         self.username         = username
         self.password         = password
-        self.base_url         = base_url
         self.filter_number    = filter_number
+        self.proxy_url        = proxy_url   # UberSDR server base URL (required for auth)
+        self._proxy_token     = None        # session token returned by /api/rmnoise/login
         self._session         = requests.Session()
-        if _SPOOF_BROWSER_HEADERS:
-            self._session.headers.update({
-                'User-Agent': self._UA,
-                'Origin': 'https://rmnoise.com',
-            })
         self.ws               = None
         self.pc               = None
         self.data_channel     = None
@@ -95,31 +77,84 @@ class RMNoiseClient:
         self.available_filters: list = []  # populated from ai_filters_list message
 
     # ── HTTP helpers ───────────────────────────────────────────────────────────
+    # All auth goes through the UberSDR Go server proxy (/api/rmnoise/*).
+    # The proxy holds the rmnoise.com cookie jar server-side; the Python client
+    # only ever talks to the local UberSDR server.
 
     def _login(self):
-        logger.info(f"Logging in as {self.username}...")
-        r = self._session.post(f"{self.base_url}/users2/login",
-                               data={'username': self.username,
-                                     'password': self.password})
+        if not self.proxy_url:
+            raise RuntimeError("proxy_url is required — auth must go through the UberSDR server")
+        logger.info(f"Logging in as {self.username} via proxy {self.proxy_url}...")
+        r = self._session.post(
+            f"{self.proxy_url}/api/rmnoise/login",
+            json={'username': self.username, 'password': self.password},
+        )
         if r.status_code != 200:
-            raise RuntimeError(f"Login failed: HTTP {r.status_code}")
+            data = {}
+            try:
+                data = r.json()
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"Login failed: HTTP {r.status_code}: "
+                f"{data.get('error', r.text[:200])}"
+            )
+        data = r.json()
+        if not data.get('ok'):
+            raise RuntimeError(f"Login failed: {data.get('error', 'invalid credentials')}")
+        self._proxy_token = data['token']
         logger.info("Login successful")
 
     def _get_jwt(self) -> str:
-        r = self._session.post(f"{self.base_url}/users2/get_webrtc_token",
-                               headers={'Content-Type': 'application/json'})
+        if not self.proxy_url:
+            raise RuntimeError("proxy_url is required — auth must go through the UberSDR server")
+        # The proxy forwards the raw rmnoise.com response: {"success": true, "token": "<jwt>"}
+        r = self._session.post(
+            f"{self.proxy_url}/api/rmnoise/webrtc_token",
+            json={'token': self._proxy_token},
+        )
+        if r.status_code != 200:
+            data = {}
+            try:
+                data = r.json()
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"WebRTC token failed: HTTP {r.status_code}: "
+                f"{data.get('error', r.text[:200])}"
+            )
         data = r.json()
         if not data.get('success') or not data.get('token'):
-            raise RuntimeError("Failed to get JWT token")
+            raise RuntimeError(
+                f"Failed to get JWT token: {data.get('error', str(data))}"
+            )
         logger.info("JWT token received")
         return data['token']
 
     def _get_turn(self) -> dict:
-        r = self._session.post(f"{self.base_url}/users2/get_turn_credentials",
-                               headers={'Content-Type': 'application/json'})
+        if not self.proxy_url:
+            raise RuntimeError("proxy_url is required — auth must go through the UberSDR server")
+        # The proxy forwards the raw rmnoise.com response:
+        # {"success": true, "uris": [...], "username": "...", "password": "..."}
+        r = self._session.post(
+            f"{self.proxy_url}/api/rmnoise/turn_creds",
+            json={'token': self._proxy_token},
+        )
+        if r.status_code != 200:
+            data = {}
+            try:
+                data = r.json()
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"TURN credentials failed: HTTP {r.status_code}: "
+                f"{data.get('error', r.text[:200])}"
+            )
         data = r.json()
         if not data.get('success'):
-            raise RuntimeError("Failed to get TURN credentials")
+            raise RuntimeError(
+                f"Failed to get TURN credentials: {data.get('error', str(data))}"
+            )
         logger.info("TURN credentials received")
         return {'urls': data.get('uris', []),
                 'username': data.get('username'),
@@ -136,10 +171,7 @@ class RMNoiseClient:
         """
         async def _probe():
             t0 = time.time()
-            kwargs = {'ssl': True}
-            if _SPOOF_BROWSER_HEADERS:
-                kwargs['extra_headers'] = {'User-Agent': self._UA}
-            async with websockets.connect(url, **kwargs) as ws:
+            async with websockets.connect(url, ssl=True) as ws:
                 await ws.send(json.dumps({'type': 'ping', 'timestamp': t0}))
                 msg = json.loads(await ws.recv())
                 if msg.get('type') == 'pong':
@@ -167,13 +199,7 @@ class RMNoiseClient:
 
     async def _connect_ws(self, url: str, token: str):
         logger.info(f"Connecting to {url}...")
-        kwargs = {}
-        if _SPOOF_BROWSER_HEADERS:
-            kwargs['extra_headers'] = {
-                'User-Agent': self._UA,
-                'Origin': 'https://rmnoise.com',
-            }
-        self.ws = await websockets.connect(url, **kwargs)
+        self.ws = await websockets.connect(url)
         await self.ws.send(json.dumps({'type': 'auth', 'token': token}))
         msg = json.loads(await self.ws.recv())
         if msg.get('type') != 'auth_ok':

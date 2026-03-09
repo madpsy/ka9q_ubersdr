@@ -5184,12 +5184,20 @@ class RadioGUI:
         if self.client and hasattr(self.client, 'sample_rate'):
             current_rate = self.client.sample_rate
 
+        # Build the UberSDR server base URL so the Python client can use the
+        # Go proxy endpoints (/api/rmnoise/*) instead of hitting rmnoise.com directly.
+        _protocol = "https" if self.tls_var.get() else "http"
+        _host = self.server_var.get().strip()
+        _port = self.port_var.get().strip()
+        _server_url = f"{_protocol}://{_host}:{_port}" if _host and _port else None
+
         self.rmnoise_window = RMNoiseWindow(
             self.root,
             config=self.config,
             on_enable_change=_on_enable_change,
             on_save=_on_save,
-            input_sample_rate=current_rate
+            input_sample_rate=current_rate,
+            server_url=_server_url,
         )
 
     def _poll_rmnoise_stats(self):

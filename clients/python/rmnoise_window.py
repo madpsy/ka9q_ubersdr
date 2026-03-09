@@ -64,11 +64,13 @@ class RMNoiseBridge:
 
     def __init__(self, username: str, password: str, filter_number: int = 1,
                  stats_callback: Optional[Callable] = None,
-                 input_sample_rate: int = 12000):
+                 input_sample_rate: int = 12000,
+                 server_url: str = None):
         self.username = username
         self.password = password
         self.stats_callback = stats_callback  # called with (jitter_depth, latency_ms)
         self.input_sample_rate = input_sample_rate
+        self.server_url = server_url  # UberSDR server base URL for proxy mode
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
@@ -317,7 +319,8 @@ class RMNoiseBridge:
         self._jbuf = queue.Queue(maxsize=256)
         self._client = RMNoiseClient(
             self.username, self.password,
-            filter_number=self._filter_number
+            filter_number=self._filter_number,
+            proxy_url=self.server_url,
         )
 
         try:
@@ -397,12 +400,14 @@ class RMNoiseWindow:
     def __init__(self, parent, config: dict,
                  on_enable_change: Optional[Callable] = None,
                  on_save: Optional[Callable] = None,
-                 input_sample_rate: int = 12000):
+                 input_sample_rate: int = 12000,
+                 server_url: str = None):
         self.parent = parent
         self.config = config
         self.on_enable_change = on_enable_change
         self.on_save = on_save
         self.input_sample_rate = input_sample_rate  # current server sample rate
+        self.server_url = server_url  # UberSDR server base URL for proxy mode
 
         self.bridge: Optional[RMNoiseBridge] = None
         self._stats_update_job = None
@@ -608,7 +613,8 @@ class RMNoiseWindow:
                 username, password,
                 filter_number=self.filter_var.get(),
                 stats_callback=self._on_stats,
-                input_sample_rate=self.input_sample_rate
+                input_sample_rate=self.input_sample_rate,
+                server_url=self.server_url,
             )
             ok = bridge.start(timeout=20.0)
             # Schedule UI update on main thread

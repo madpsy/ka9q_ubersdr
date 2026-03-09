@@ -17,6 +17,7 @@
     <script src="nr2.js"></script>
     <script src="noise-blanker.js"></script>
     <script src="filters.js"></script>
+    <script src="rmnoise.js"></script>
     {{.CustomHeadHTML}}
 </head>
 <body>
@@ -469,6 +470,7 @@
                 <button id="mute-btn" onclick="toggleMute()" style="padding: 8px 12px;" title="Toggle Mute (M key)">🔊 Mute</button>
                 <button id="nr2-quick-toggle" onclick="toggleNR2Quick()" style="background-color: #fd7e14; margin-left: 5px; padding: 8px 12px;" title="Toggle Noise Reduction (N key)">NR2</button>
                 <button id="nb-quick-toggle" onclick="toggleNBQuick()" style="background-color: #17a2b8; margin-left: 3px; padding: 8px 12px;" title="Toggle Noise Blanker (B key)">NB</button>
+                <button id="rmn-quick-toggle" style="background-color: #6f42c1; margin-left: 3px; padding: 8px 12px;" title="Toggle RM Noise AI Denoising (right-click to configure)">RMN</button>
                 <button id="eq-quick-toggle" onclick="toggleEQQuick()" style="background-color: #6c757d; margin-left: 3px; padding: 8px 12px;" title="Toggle EQ Presets (V key)">EQ</button>
                 <button id="rec-btn" onclick="openRecorderModal()" style="margin-left: 5px; padding: 8px 12px;" title="Open Recorder (R key)">⏺ Rec</button>
             </div>
@@ -1384,5 +1386,82 @@
     <script type="module" src="local-bookmarks-ui.js"></script>
     
     <script type="module" src="app.js"></script>
+
+    <!-- RM Noise AI Denoising Modal -->
+    <div id="rmnoise-modal" class="rmnoise-modal-overlay" style="display:none;">
+        <div class="rmnoise-modal-panel">
+            <div class="rmnoise-modal-header">
+                <span>RM Noise AI Denoising</span>
+                <button class="rmnoise-modal-close" onclick="closeRMNoiseModal()" title="Close">✕</button>
+            </div>
+
+            <!-- Credentials -->
+            <div class="rmnoise-section">
+                <div class="rmnoise-section-title">Credentials (rmnoise.com)</div>
+                <div class="rmnoise-row">
+                    <label class="rmnoise-label">Username</label>
+                    <input type="text" id="rmnoise-username" class="rmnoise-input" placeholder="your@email.com" autocomplete="username">
+                </div>
+                <div class="rmnoise-row">
+                    <label class="rmnoise-label">Password</label>
+                    <input type="password" id="rmnoise-password" class="rmnoise-input" placeholder="••••••••" autocomplete="current-password">
+                </div>
+                <div class="rmnoise-row">
+                    <button class="rmnoise-btn rmnoise-btn-save" onclick="rmNoise_saveCredentials()">Save Credentials</button>
+                    <span class="rmnoise-register-note">
+                        An account is required —
+                        <a href="https://ournetplace.com/rm-noise/" target="_blank" rel="noopener">Register</a>
+                    </span>
+                </div>
+            </div>
+
+            <!-- AI Filter -->
+            <div class="rmnoise-section">
+                <div class="rmnoise-section-title">AI Filter (Model)</div>
+                <div class="rmnoise-row">
+                    <label class="rmnoise-label">Filter</label>
+                    <select id="rmnoise-filter-select" class="rmnoise-select" onchange="rmNoise_onFilterChanged()">
+                        <option value="1">(connect to load filters…)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Enable / Status -->
+            <div class="rmnoise-section">
+                <div class="rmnoise-row rmnoise-row-enable">
+                    <label class="rmnoise-checkbox-label">
+                        <input type="checkbox" id="rmnoise-enable-checkbox" onchange="toggleRMNoise()">
+                        Enable RMNoise Denoising
+                    </label>
+                    <span id="rmnoise-status-text" class="rmnoise-status-text" style="color:#888;">Disconnected</span>
+                </div>
+                <div class="rmnoise-row">
+                    <button id="rmnoise-original-btn" class="rmnoise-btn rmnoise-btn-original"
+                            onclick="toggleRMNoiseBypass()" disabled>Original</button>
+                    <span id="rmnoise-status-label" class="rmnoise-status-label"></span>
+                </div>
+            </div>
+
+            <!-- Statistics -->
+            <div class="rmnoise-section">
+                <div class="rmnoise-section-title">Statistics</div>
+                <div class="rmnoise-stats-row">
+                    <span class="rmnoise-stat-label">Jitter Buffer:</span>
+                    <span id="rmnoise-jitter" class="rmnoise-stat-value">-- frames</span>
+                    <span class="rmnoise-stat-label" style="margin-left:16px;">Round-trip:</span>
+                    <span id="rmnoise-latency" class="rmnoise-stat-value">-- ms</span>
+                </div>
+                <div class="rmnoise-jitter-bar-track">
+                    <div id="rmnoise-jitter-fill" class="rmnoise-jitter-bar-fill"></div>
+                </div>
+            </div>
+
+            <!-- Log -->
+            <div class="rmnoise-section rmnoise-section-log">
+                <div class="rmnoise-section-title">Log</div>
+                <div id="rmnoise-log" class="rmnoise-log"></div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

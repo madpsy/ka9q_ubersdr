@@ -2367,13 +2367,29 @@ async function handleBinaryMessage(data) {
             sampleRate  // Use sampleRate from packet header
         );
 
+        // ── RMNoise AI denoising (FIRST — before all other DSP) ──────────────
+        // Mono only: skip for stereo/IQ modes. Mirrors radio_client.py:1436.
+        let monoData = decoded.channelData[0];
+        if (decoded.channelData.length === 1 &&
+            window.rmNoiseBridge && window.rmNoiseBridge.enabled) {
+            try {
+                const denoised = await window.rmNoise_process(monoData, sampleRate);
+                if (denoised !== null && !window.rmNoiseBridge.bypass) {
+                    monoData = denoised;
+                }
+                // bypass=true: bridge stays fed but original audio plays through
+            } catch (rmErr) {
+                console.error('[RMNoise] process error:', rmErr);
+            }
+        }
+
         // Copy decoded data to audio buffer
         if (decoded.channelData.length === 1) {
-            // Mono source - duplicate to both channels
-            audioBuffer.getChannelData(0).set(decoded.channelData[0]);
-            audioBuffer.getChannelData(1).set(decoded.channelData[0]);
+            // Mono source - duplicate to both channels (use denoised if available)
+            audioBuffer.getChannelData(0).set(monoData);
+            audioBuffer.getChannelData(1).set(monoData);
         } else {
-            // Stereo or multi-channel source
+            // Stereo or multi-channel source (RMNoise skipped for stereo)
             for (let channel = 0; channel < decoded.channelData.length && channel < 2; channel++) {
                 audioBuffer.getChannelData(channel).set(decoded.channelData[channel]);
             }
@@ -2589,7 +2605,7 @@ async function handleAudio(msg) {
 }
 
 // Handle PCM audio data
-function handlePCMAudio(msg) {
+async function handlePCMAudio(msg) {
     // Check if sample rate changed - if so, recreate AudioContext
     if (audioContext && msg.sampleRate !== currentAudioContextSampleRate) {
         log(`Sample rate changed from ${currentAudioContextSampleRate} Hz to ${msg.sampleRate} Hz - recreating AudioContext`);
@@ -2709,10 +2725,23 @@ function handlePCMAudio(msg) {
         floatData[i] = sample / 32767.0;
     }
 
+    // ── RMNoise AI denoising (FIRST — before all other DSP) ──────────────────
+    let pcmMono = floatData;
+    if (window.rmNoiseBridge && window.rmNoiseBridge.enabled) {
+        try {
+            const denoised = await window.rmNoise_process(pcmMono, msg.sampleRate);
+            if (denoised !== null && !window.rmNoiseBridge.bypass) {
+                pcmMono = denoised;
+            }
+        } catch (rmErr) {
+            console.error('[RMNoise] process error (PCM path):', rmErr);
+        }
+    }
+
     // Create stereo audio buffer (duplicate mono to both channels)
-    const audioBuffer = audioContext.createBuffer(2, floatData.length, msg.sampleRate);
-    audioBuffer.getChannelData(0).set(floatData); // Left channel
-    audioBuffer.getChannelData(1).set(floatData); // Right channel (duplicate)
+    const audioBuffer = audioContext.createBuffer(2, pcmMono.length, msg.sampleRate);
+    audioBuffer.getChannelData(0).set(pcmMono); // Left channel
+    audioBuffer.getChannelData(1).set(pcmMono); // Right channel (duplicate)
 
     // Play audio
     playAudioBuffer(audioBuffer);

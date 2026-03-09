@@ -3532,3 +3532,250 @@ input[type="range"]::-moz-range-thumb {
     color: white;
     text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
 }
+
+/* ── RMNoise AI Denoising Modal ─────────────────────────────────────────────── */
+
+.rmnoise-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 9000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.rmnoise-modal-panel {
+    background: #1e2530;
+    border: 1px solid #3a4555;
+    border-radius: 8px;
+    width: 520px;
+    max-width: 95vw;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+    color: #cdd6e0;
+    font-size: 13px;
+}
+
+.rmnoise-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: #252d3a;
+    border-bottom: 1px solid #3a4555;
+    border-radius: 8px 8px 0 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #e0e8f0;
+}
+
+.rmnoise-modal-close {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    line-height: 1;
+}
+
+.rmnoise-modal-close:hover {
+    background: #3a4555;
+    color: #e0e8f0;
+}
+
+.rmnoise-section {
+    padding: 12px 16px;
+    border-bottom: 1px solid #2a3340;
+}
+
+.rmnoise-section:last-child {
+    border-bottom: none;
+}
+
+.rmnoise-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #7a8fa8;
+    margin-bottom: 8px;
+}
+
+.rmnoise-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.rmnoise-row:last-child {
+    margin-bottom: 0;
+}
+
+.rmnoise-row-enable {
+    gap: 16px;
+}
+
+.rmnoise-label {
+    width: 72px;
+    flex-shrink: 0;
+    color: #8a9ab0;
+    font-size: 12px;
+}
+
+.rmnoise-input {
+    flex: 1;
+    background: #141a22;
+    border: 1px solid #3a4555;
+    border-radius: 4px;
+    color: #cdd6e0;
+    padding: 5px 8px;
+    font-size: 12px;
+    outline: none;
+}
+
+.rmnoise-input:focus {
+    border-color: #6f42c1;
+}
+
+.rmnoise-select {
+    flex: 1;
+    background: #141a22;
+    border: 1px solid #3a4555;
+    border-radius: 4px;
+    color: #cdd6e0;
+    padding: 5px 8px;
+    font-size: 12px;
+    outline: none;
+}
+
+.rmnoise-select:focus {
+    border-color: #6f42c1;
+}
+
+.rmnoise-btn {
+    background: #2a3340;
+    border: 1px solid #3a4555;
+    border-radius: 4px;
+    color: #cdd6e0;
+    padding: 5px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.rmnoise-btn:hover {
+    background: #3a4555;
+}
+
+.rmnoise-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.rmnoise-btn-save {
+    background: #1a3a5c;
+    border-color: #2a5a8c;
+    color: #7ab8f5;
+}
+
+.rmnoise-btn-save:hover {
+    background: #2a4a6c;
+}
+
+.rmnoise-btn-original {
+    background: #2a2a3a;
+    border-color: #4a4a6a;
+    color: #aaa;
+    min-width: 72px;
+}
+
+.rmnoise-btn-original:not(:disabled):hover {
+    background: #3a3a4a;
+}
+
+.rmnoise-register-note {
+    font-size: 11px;
+    color: #7a8fa8;
+}
+
+.rmnoise-register-note a {
+    color: #6aabf7;
+    text-decoration: none;
+}
+
+.rmnoise-register-note a:hover {
+    text-decoration: underline;
+}
+
+.rmnoise-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.rmnoise-status-text {
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.rmnoise-status-label {
+    font-size: 11px;
+    color: #28a745;
+}
+
+.rmnoise-stats-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 8px;
+    font-size: 12px;
+}
+
+.rmnoise-stat-label {
+    color: #7a8fa8;
+}
+
+.rmnoise-stat-value {
+    color: #cdd6e0;
+    min-width: 60px;
+}
+
+.rmnoise-jitter-bar-track {
+    height: 8px;
+    background: #141a22;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid #2a3340;
+}
+
+.rmnoise-jitter-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: #28a745;
+    border-radius: 4px;
+    transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+.rmnoise-section-log {
+    padding-bottom: 8px;
+}
+
+.rmnoise-log {
+    background: #141a22;
+    border: 1px solid #2a3340;
+    border-radius: 4px;
+    padding: 6px 8px;
+    max-height: 80px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 11px;
+    color: #7a9ab8;
+    line-height: 1.5;
+}

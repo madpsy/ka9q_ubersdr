@@ -1797,8 +1797,20 @@ class RadioGUI:
         self.rm_configure_btn.grid(row=1, column=1, columnspan=2, sticky=tk.W,
                                    padx=(0, 10), pady=(4, 0))
 
+        # "Original" momentary-toggle button: bypasses RM Noise while held/active.
+        # Enabled only when RM Noise is enabled AND connected.
+        self.rm_original_btn = ttk.Button(
+            nr2_container,
+            text="Original",
+            width=8,
+            command=self._on_rmnoise_original_clicked
+        )
+        self.rm_original_btn.grid(row=1, column=3, sticky=tk.W, padx=(0, 10), pady=(4, 0))
+        self.rm_original_btn.state(['disabled'])
+        self._rmnoise_original_active = False  # True while bypass is engaged
+
         self.rm_status_label = ttk.Label(nr2_container, text="", foreground='gray')
-        self.rm_status_label.grid(row=1, column=3, columnspan=5, sticky=tk.W, pady=(4, 0))
+        self.rm_status_label.grid(row=1, column=4, columnspan=4, sticky=tk.W, pady=(4, 0))
 
         # Noise Blanker (row 5) - use a frame to avoid column weight issues
         nb_container = ttk.Frame(audio_frame)
@@ -3676,6 +3688,7 @@ class RadioGUI:
                 self.toggle_rmnoise()
             self.rm_check.config(state='disabled')
             self.rm_configure_btn.config(state='disabled')
+            self.rm_original_btn.state(['disabled'])
 
             # Disable audio filter (silently, without validation)
             if self.audio_filter_enabled_var.get():
@@ -3743,10 +3756,11 @@ class RadioGUI:
             # Re-enable NR2 checkbox
             self.nr2_check.config(state='normal')
 
-            # Re-enable RM checkbox and configure button
+            # Re-enable RM checkbox and configure button; refresh Original btn state
             if RMNOISE_WINDOW_AVAILABLE:
                 self.rm_check.config(state='normal')
                 self.rm_configure_btn.config(state='normal')
+                self._update_rmnoise_original_btn()
 
             # Re-enable audio filter checkbox
             self.filter_check.config(state='normal')
@@ -5119,8 +5133,10 @@ class RadioGUI:
             # Clear bridge reference on client
             if self.client:
                 self.client.rmnoise_bridge = None
+                self.client.rmnoise_bypass = False
             self.rm_status_label.config(text="", foreground='gray')
             self.log_status("RMNoise denoising disabled")
+            self._update_rmnoise_original_btn()
 
     def open_rmnoise_window(self):
         """Open (or bring to front) the RMNoise configuration window."""
@@ -5152,9 +5168,11 @@ class RadioGUI:
                 self.rm_status_label.config(text="● Failed", foreground='red')
                 self.log_status("RMNoise connection failed")
             else:
-                # Explicitly disabled
+                # Explicitly disabled — also clear any active bypass
                 self.rm_status_label.config(text="", foreground='gray')
                 self.log_status("RMNoise denoising disabled")
+            # Refresh the Original button enabled/disabled state
+            self._update_rmnoise_original_btn()
 
         def _on_save():
             """Called by the window when credentials are saved."""
@@ -5178,6 +5196,7 @@ class RadioGUI:
         """Periodically update the main-window RMNoise status label with latency."""
         # Stop if no longer enabled or bridge gone
         if not self.rm_enabled_var.get():
+            self._update_rmnoise_original_btn()
             return
         bridge = None
         if self.rmnoise_window and hasattr(self.rmnoise_window, 'bridge'):
@@ -5189,8 +5208,54 @@ class RadioGUI:
                 text=f"● Connected  {lat:.0f} ms  {jitter}fr",
                 foreground='green'
             )
+        self._update_rmnoise_original_btn()
         # Reschedule every 500 ms while enabled
         self.root.after(500, self._poll_rmnoise_stats)
+
+    def _update_rmnoise_original_btn(self):
+        """Enable or disable the 'Original' button based on RM Noise state.
+
+        The button is enabled only when RM Noise is enabled AND the bridge is
+        connected and ready.  When RM Noise is disabled or disconnected the
+        button is disabled and any active bypass is cleared.
+        """
+        bridge = None
+        if self.rmnoise_window and hasattr(self.rmnoise_window, 'bridge'):
+            bridge = self.rmnoise_window.bridge
+
+        rm_active = self.rm_enabled_var.get() and bridge is not None and bridge.ready
+
+        if rm_active:
+            self.rm_original_btn.state(['!disabled'])
+        else:
+            # Clear bypass if it was active
+            if self._rmnoise_original_active:
+                self._rmnoise_original_active = False
+                if self.client:
+                    self.client.rmnoise_bypass = False
+            self.rm_original_btn.state(['disabled'])
+            # Reset button appearance
+            self.rm_original_btn.config(text="Original")
+
+    def _on_rmnoise_original_clicked(self):
+        """Toggle the 'Original' bypass momentary button.
+
+        First click: engage bypass (hear unprocessed audio, button shows active).
+        Second click: release bypass (return to denoised audio).
+        The button is only reachable when RM Noise is enabled and connected.
+        """
+        self._rmnoise_original_active = not self._rmnoise_original_active
+
+        if self._rmnoise_original_active:
+            # Engage bypass
+            if self.client:
+                self.client.rmnoise_bypass = True
+            self.rm_original_btn.config(text="● Original")
+        else:
+            # Release bypass
+            if self.client:
+                self.client.rmnoise_bypass = False
+            self.rm_original_btn.config(text="Original")
 
     def toggle_noise_blanker(self):
         """Toggle Noise Blanker on/off."""

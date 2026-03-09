@@ -179,11 +179,11 @@ class IQFileManager:
     def estimate_recording_size(self, iq_mode: str, duration_seconds: int) -> int:
         """
         Estimate recording file size
-        
+
         Args:
             iq_mode: IQ mode (iq48, iq96, iq192)
             duration_seconds: Recording duration in seconds
-        
+
         Returns:
             Estimated size in bytes
         """
@@ -193,20 +193,24 @@ class IQFileManager:
             'iq96': 96000,
             'iq192': 192000
         }
-        
+
         sample_rate = sample_rates.get(iq_mode.lower(), 48000)
-        
-        # WAV format: 2 channels (I and Q), 32-bit float (4 bytes per sample)
-        bytes_per_sample = 4
+
+        # WAV format: 2 channels (I and Q), 16-bit int (2 bytes per sample)
+        # Note: IQWavWriter uses 16-bit PCM, not 32-bit float
+        bytes_per_sample = 2
         channels = 2
-        
+
         # Calculate size
         samples = sample_rate * duration_seconds
         data_size = samples * channels * bytes_per_sample
-        
-        # Add WAV header overhead (44 bytes)
-        total_size = data_size + 44
-        
+
+        # Add WAV header overhead (~500 bytes for headers + metadata)
+        # This includes RIFF, fmt, auxip, data, and LIST INFO chunks
+        header_overhead = 500
+
+        total_size = data_size + header_overhead
+
         return total_size
     
     def get_recording_files(self) -> list:

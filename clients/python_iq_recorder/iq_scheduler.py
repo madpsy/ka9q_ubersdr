@@ -84,7 +84,37 @@ class ScheduleEntry:
             start_action=data.get('start_action', 'start_selected'),
             stop_action=data.get('stop_action', 'stop_selected')
         )
-    
+
+    def get_duration_seconds(self) -> Optional[int]:
+        """
+        Calculate duration in seconds between start_time and stop_time.
+
+        Returns:
+            Duration in seconds, or None if times are invalid
+        """
+        try:
+            # Support both HH:MM and HH:MM:SS formats
+            start_format = "%H:%M:%S" if self.start_time.count(':') == 2 else "%H:%M"
+            stop_format = "%H:%M:%S" if self.stop_time.count(':') == 2 else "%H:%M"
+
+            start_time = datetime.strptime(self.start_time, start_format).time()
+            stop_time = datetime.strptime(self.stop_time, stop_format).time()
+
+            # Convert to datetime for calculation (use arbitrary date)
+            today = datetime.now().date()
+            start_dt = datetime.combine(today, start_time)
+            stop_dt = datetime.combine(today, stop_time)
+
+            # Handle case where stop time is next day (e.g., 23:00 to 01:00)
+            if stop_dt <= start_dt:
+                stop_dt += timedelta(days=1)
+
+            duration = (stop_dt - start_dt).total_seconds()
+            return int(duration)
+
+        except Exception:
+            return None
+
     def get_next_start_time(self) -> Optional[datetime]:
         """Calculate next start time for this schedule"""
         if not self.enabled or not self.days_of_week:

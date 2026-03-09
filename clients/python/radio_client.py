@@ -452,6 +452,9 @@ class RadioClient:
 
         # RMNoise bridge (set by GUI when enabled; processed before all other DSP)
         self.rmnoise_bridge = None
+        # When True the bridge is still running but its output is bypassed so the
+        # user hears the unprocessed audio (momentary "Original" button in the GUI).
+        self.rmnoise_bypass = False
 
         # Audio controls
         self.volume = max(0.0, min(2.0, volume))  # Clamp between 0.0 and 2.0 (0-200%)
@@ -1440,7 +1443,13 @@ class RadioClient:
                 # update the bridge before every process() call.
                 if self.rmnoise_bridge.input_sample_rate != self.sample_rate:
                     self.rmnoise_bridge.update_sample_rate(self.sample_rate)
-                audio_float = self.rmnoise_bridge.process(audio_float)
+                if not self.rmnoise_bypass:
+                    audio_float = self.rmnoise_bridge.process(audio_float)
+                # When bypassed: still call process() to keep the bridge pipeline
+                # fed (so it stays warm and reconnects instantly when released),
+                # but discard the denoised output and use the original audio.
+                else:
+                    self.rmnoise_bridge.process(audio_float)
             except Exception as e:
                 print(f"RMNoise bridge error: {e}", file=sys.stderr)
 

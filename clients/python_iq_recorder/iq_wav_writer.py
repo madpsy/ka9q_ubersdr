@@ -7,8 +7,10 @@ Matches SDR Console format
 
 import struct
 import wave
+import os
+import tempfile
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Callable
 import xml.etree.ElementTree as ET
 
 
@@ -16,12 +18,22 @@ class IQWavWriter:
     """
     WAV file writer that includes auxip XML metadata chunk.
     This format is compatible with Windows File Explorer, SDR Console, and other software.
+    
+    Features:
+    - Write buffering (~100 KB) for efficient multi-stream recording
+    - Comprehensive error handling for disk full and I/O errors
+    - Atomic file operations (write to temp, rename on success)
+    - Write verification
     """
+    
+    # Buffer size for batching writes (100 KB provides good balance)
+    WRITE_BUFFER_SIZE = 100 * 1024  # 100 KB
     
     def __init__(self, filename: str, channels: int, sample_width: int, framerate: int,
                  frequency_hz: Optional[int] = None, iq_mode: Optional[str] = None,
                  timestamp: Optional[datetime] = None, callsign: Optional[str] = None,
-                 description: Optional[str] = None):
+                 description: Optional[str] = None,
+                 error_callback: Optional[Callable[[str, Exception], None]] = None):
         """
         Initialize WAV writer with metadata.
         
@@ -35,6 +47,7 @@ class IQWavWriter:
             timestamp: Recording timestamp (for metadata)
             callsign: Station callsign (for metadata)
             description: Station description (for metadata)
+            error_callback: Optional callback for error notifications: callback(error_type, exception)
         """
         self.filename = filename
         self.channels = channels
@@ -45,36 +58,58 @@ class IQWavWriter:
         self.timestamp = timestamp or datetime.now()
         self.callsign = callsign
         self.description = description
+        self.error_callback = error_callback
         
         self.file = None
+        self.temp_filename = None  # Temporary file for atomic writes
         self.frames_written = 0
         self.data_chunk_start = 0
         self.use_rf64 = False  # Will be set to True if file >4GB
         
+        # Write buffering
+        self.write_buffer = bytearray()
+        self.bytes_written = 0
+        self.write_errors = 0
+        self.last_error = None
+        
     def open(self):
         """Open the WAV file and write headers with metadata."""
-        self.file = open(self.filename, 'wb')
-        
-        # Build auxip chunk (for SDR Console)
-        auxip_chunk = self._build_auxip_chunk()
-        
-        # Write RIFF header (placeholder size, will update on close)
-        self.file.write(b'RIFF')
-        self.file.write(struct.pack('<I', 0))  # Placeholder for file size
-        self.file.write(b'WAVE')
-        
-        # Write fmt chunk (extended format with cbSize field)
-        fmt_chunk = self._build_fmt_chunk()
-        self.file.write(fmt_chunk)
-        
-        # Write auxip chunk (for SDR Console) - before data
-        if auxip_chunk:
-            self.file.write(auxip_chunk)
-        
-        # Write data chunk header (placeholder size, will update on close)
-        self.file.write(b'data')
-        self.data_chunk_start = self.file.tell()
-        self.file.write(struct.pack('<I', 0))  # Placeholder for data size
+        try:
+            # Create temporary file in same directory for atomic write
+            dir_name = os.path.dirname(self.filename) or '.'
+            fd, self.temp_filename = tempfile.mkstemp(
+                suffix='.tmp',
+                prefix='.iq_recording_',
+                dir=dir_name
+            )
+            
+            # Open file descriptor as file object
+            self.file = os.fdopen(fd, 'wb')
+            
+            # Build auxip chunk (for SDR Console)
+            auxip_chunk = self._build_auxip_chunk()
+            
+            # Write RIFF header (placeholder size, will update on close)
+            self.file.write(b'RIFF')
+            self.file.write(struct.pack('<I', 0))  # Placeholder for file size
+            self.file.write(b'WAVE')
+            
+            # Write fmt chunk (extended format with cbSize field)
+            fmt_chunk = self._build_fmt_chunk()
+            self.file.write(fmt_chunk)
+            
+            # Write auxip chunk (for SDR Console) - before data
+            if auxip_chunk:
+                self.file.write(auxip_chunk)
+            
+            # Write data chunk header (placeholder size, will update on close)
+            self.file.write(b'data')
+            self.data_chunk_start = self.file.tell()
+            self.file.write(struct.pack('<I', 0))  # Placeholder for data size
+            
+        except OSError as e:
+            self._handle_error("open", e)
+            raise
         
     def _build_fmt_chunk(self) -> bytes:
         """Build the fmt chunk with extended format (18 bytes)."""
@@ -227,45 +262,187 @@ class IQWavWriter:
         return list_chunk
     
     def writeframes(self, data: bytes):
-        """Write audio frames to the file."""
+        """
+        Write audio frames to the file with buffering.
+        
+        Data is buffered until WRITE_BUFFER_SIZE is reached, then flushed to disk.
+        This reduces syscall overhead and improves multi-stream performance.
+        
+        Args:
+            data: PCM audio data to write
+            
+        Raises:
+            ValueError: If file not opened
+            OSError: If disk write fails (disk full, I/O error, etc.)
+        """
         if not self.file:
             raise ValueError("File not opened. Call open() first.")
         
-        self.file.write(data)
-        self.frames_written += len(data) // (self.channels * self.sample_width)
+        try:
+            # Add data to buffer
+            self.write_buffer.extend(data)
+            
+            # Flush buffer if it exceeds threshold
+            if len(self.write_buffer) >= self.WRITE_BUFFER_SIZE:
+                self._flush_buffer()
+            
+            # Update frame count
+            self.frames_written += len(data) // (self.channels * self.sample_width)
+            
+        except OSError as e:
+            self._handle_error("write", e)
+            raise
+    
+    def _flush_buffer(self):
+        """
+        Flush write buffer to disk.
+        
+        Raises:
+            OSError: If disk write fails
+        """
+        if not self.write_buffer:
+            return
+        
+        try:
+            # Write buffer to file
+            bytes_to_write = len(self.write_buffer)
+            bytes_written = self.file.write(self.write_buffer)
+            
+            # Verify write completed successfully
+            if bytes_written is not None and bytes_written != bytes_to_write:
+                raise OSError(f"Partial write: requested {bytes_to_write} bytes, wrote {bytes_written} bytes")
+            
+            # Track total bytes written
+            self.bytes_written += bytes_to_write
+            
+            # Clear buffer
+            self.write_buffer.clear()
+            
+        except OSError as e:
+            self._handle_error("flush", e)
+            raise
+    
+    def _handle_error(self, operation: str, error: Exception):
+        """
+        Handle I/O errors with logging and callback notification.
+        
+        Args:
+            operation: Operation that failed (open, write, flush, close)
+            error: Exception that occurred
+        """
+        self.write_errors += 1
+        self.last_error = error
+        
+        # Notify via callback if provided
+        if self.error_callback:
+            try:
+                self.error_callback(operation, error)
+            except Exception:
+                pass  # Don't let callback errors propagate
     
     def close(self):
-        """Close the file and update chunk sizes."""
+        """
+        Close the file and update chunk sizes atomically.
+        
+        Uses atomic rename to ensure file is never left in corrupted state.
+        Flushes any remaining buffered data before closing.
+        """
         if not self.file:
             return
         
-        # Get current position (end of data)
-        end_of_data = self.file.tell()
-        
-        # Calculate data chunk size
-        data_size = end_of_data - self.data_chunk_start - 4
-        
-        # Update data chunk size
-        self.file.seek(self.data_chunk_start)
-        self.file.write(struct.pack('<I', data_size))
-        
-        # Seek to end of file to append LIST INFO chunk
-        self.file.seek(end_of_data)
-        
-        # Write LIST INFO chunk AFTER data (for Windows compatibility)
-        list_info_chunk = self._build_list_info_chunk()
-        if list_info_chunk:
-            self.file.write(list_info_chunk)
-        
-        # Get final file size
-        file_size = self.file.tell()
-        
-        # Update RIFF chunk size (file size - 8 bytes for RIFF header)
-        self.file.seek(4)
-        self.file.write(struct.pack('<I', file_size - 8))
-        
-        self.file.close()
-        self.file = None
+        try:
+            # Flush any remaining buffered data
+            self._flush_buffer()
+            
+            # Get current position (end of data)
+            end_of_data = self.file.tell()
+            
+            # Calculate data chunk size
+            data_size = end_of_data - self.data_chunk_start - 4
+            
+            # Update data chunk size
+            self.file.seek(self.data_chunk_start)
+            self.file.write(struct.pack('<I', data_size))
+            
+            # Seek to end of file to append LIST INFO chunk
+            self.file.seek(end_of_data)
+            
+            # Write LIST INFO chunk AFTER data (for Windows compatibility)
+            list_info_chunk = self._build_list_info_chunk()
+            if list_info_chunk:
+                self.file.write(list_info_chunk)
+            
+            # Get final file size
+            file_size = self.file.tell()
+            
+            # Update RIFF chunk size (file size - 8 bytes for RIFF header)
+            self.file.seek(4)
+            self.file.write(struct.pack('<I', file_size - 8))
+            
+            # Ensure all data is written to disk
+            self.file.flush()
+            os.fsync(self.file.fileno())
+            
+            # Close file
+            self.file.close()
+            self.file = None
+            
+            # Atomic rename: move temp file to final location
+            # This ensures the file is never left in a partially-updated state
+            if self.temp_filename:
+                os.replace(self.temp_filename, self.filename)
+                self.temp_filename = None
+                
+        except OSError as e:
+            self._handle_error("close", e)
+            # Clean up temp file on error
+            if self.temp_filename and os.path.exists(self.temp_filename):
+                try:
+                    os.unlink(self.temp_filename)
+                except OSError:
+                    pass
+            raise
+        finally:
+            # Ensure file is closed even if error occurred
+            if self.file:
+                try:
+                    self.file.close()
+                except OSError:
+                    pass
+                self.file = None
+    
+    def get_bytes_written(self) -> int:
+        """
+        Get total bytes written to disk (excluding buffered data).
+
+        Returns:
+            Number of bytes written to disk
+        """
+        return self.bytes_written
+
+    def get_total_bytes(self) -> int:
+        """
+        Get total bytes including buffered data.
+
+        Returns:
+            Number of bytes written + buffered
+        """
+        return self.bytes_written + len(self.write_buffer)
+
+    def get_stats(self) -> dict:
+        """
+        Get recording statistics.
+
+        Returns:
+            Dictionary with bytes_written, write_errors, buffer_size
+        """
+        return {
+            'bytes_written': self.bytes_written,
+            'bytes_buffered': len(self.write_buffer),
+            'total_bytes': self.get_total_bytes(),
+            'write_errors': self.write_errors,
+            'last_error': str(self.last_error) if self.last_error else None
+        }
     
     def __enter__(self):
         """Context manager entry."""
@@ -274,4 +451,13 @@ class IQWavWriter:
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""
-        self.close()
+        try:
+            self.close()
+        except OSError:
+            # If close fails, ensure temp file is cleaned up
+            if self.temp_filename and os.path.exists(self.temp_filename):
+                try:
+                    os.unlink(self.temp_filename)
+                except OSError:
+                    pass
+            raise

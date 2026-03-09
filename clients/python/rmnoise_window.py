@@ -16,20 +16,21 @@ import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Optional, Callable
-from math import gcd
 import numpy as np
 
 try:
-    from scipy.signal import resample_poly as _scipy_resample_poly
-    _SCIPY_RESAMPLE = True
+    import samplerate as _samplerate
+    _SAMPLERATE_AVAILABLE = True
 except ImportError:
-    _SCIPY_RESAMPLE = False
+    _SAMPLERATE_AVAILABLE = False
 
 # ── Optional dependency check ──────────────────────────────────────────────────
 # We use RMNoiseClient for WebRTC signalling, and pack_frame/unpack_frame for
 # the 8 kHz wire protocol.  All resampling (input_sample_rate ↔ 8 kHz) is done
-# here directly — we do NOT use rmnoise_denoise's downsample/upsample helpers
-# (those assume 48 kHz input which is not what the radio client provides).
+# here using stateful samplerate.Resampler objects (same library used by
+# radio_client.py for TCI resampling) so that FIR filter state is preserved
+# across chunk boundaries — eliminating the transient crackling that stateless
+# scipy.signal.resample_poly causes at every frame edge.
 try:
     from rmnoise_denoise import (
         RMNoiseClient,
@@ -41,23 +42,6 @@ except ImportError:
 
 
 # ── RMNoise audio bridge ───────────────────────────────────────────────────────
-
-def _resample_direct(arr: np.ndarray, from_rate: int, to_rate: int) -> np.ndarray:
-    """
-    Resample a 1-D float32 array directly from from_rate to to_rate using
-    scipy resample_poly (polyphase, anti-aliased).  Falls back to nearest-
-    neighbour if scipy is unavailable.
-    """
-    if from_rate == to_rate:
-        return arr
-    g = gcd(from_rate, to_rate)
-    up, down = to_rate // g, from_rate // g
-    if _SCIPY_RESAMPLE:
-        return _scipy_resample_poly(arr.astype(np.float64), up, down).astype(np.float32)
-    # Nearest-neighbour fallback
-    n_out = max(1, int(round(len(arr) * to_rate / from_rate)))
-    indices = np.round(np.linspace(0, len(arr) - 1, n_out)).astype(np.int32)
-    return arr[indices].astype(np.float32)
 
 
 class RMNoiseBridge:
@@ -102,14 +86,27 @@ class RMNoiseBridge:
         self._last_latency_ms: float = 0.0
         self._last_stats_update: float = 0.0
 
+        # Stateful resamplers — maintain FIR filter state across chunk boundaries
+        # so there are no transient artifacts at frame edges (unlike stateless
+        # scipy.signal.resample_poly which restarts its filter every call).
+        # Uses the same samplerate library as radio_client.py's TCI resampler.
+        self._resampler_down = (
+            _samplerate.Resampler('sinc_best', channels=1)
+            if _SAMPLERATE_AVAILABLE else None
+        )
+        self._resampler_up = (
+            _samplerate.Resampler('sinc_best', channels=1)
+            if _SAMPLERATE_AVAILABLE else None
+        )
+        self._ratio_down: float = self._RM_RATE / input_sample_rate
+        self._ratio_up: float = input_sample_rate / self._RM_RATE
+
         # Accumulation buffer: collect input-rate samples until we have enough
         # to fill one 8 kHz frame (FRAME_8K samples after downsampling).
         self._accum: np.ndarray = np.zeros(0, dtype=np.float32)
         # Number of input-rate samples that correspond to one 8 kHz frame:
         #   e.g. 12000 Hz → 384 * 12000/8000 = 576 samples
         #        24000 Hz → 384 * 24000/8000 = 1152 samples
-        # Use round() not // to avoid systematic 1-sample drift that causes
-        # the trim/pad on the send path to introduce a discontinuity every frame.
         self._accum_target = round(self._FRAME_8K * input_sample_rate / self._RM_RATE)
 
         # Output accumulation: denoised 8 kHz samples waiting to be resampled back
@@ -166,8 +163,17 @@ class RMNoiseBridge:
             self._accum = self._accum[self._accum_target:]
 
             try:
-                # Resample directly from input_sample_rate to 8 kHz
-                pcm8k_f32 = _resample_direct(chunk_in, self.input_sample_rate, self._RM_RATE)
+                # Resample from input_sample_rate → 8 kHz using stateful resampler
+                # (preserves FIR filter state across chunks — no transient crackling)
+                if self._resampler_down is not None:
+                    pcm8k_f32 = self._resampler_down.process(
+                        chunk_in.astype(np.float32), self._ratio_down
+                    ).astype(np.float32)
+                else:
+                    # Fallback: nearest-neighbour (no scipy dependency)
+                    n_out = max(1, round(len(chunk_in) * self._ratio_down))
+                    indices = np.round(np.linspace(0, len(chunk_in) - 1, n_out)).astype(np.int32)
+                    pcm8k_f32 = chunk_in[indices].astype(np.float32)
                 # Trim/pad to exactly FRAME_8K samples
                 if len(pcm8k_f32) > self._FRAME_8K:
                     pcm8k_f32 = pcm8k_f32[:self._FRAME_8K]
@@ -210,8 +216,15 @@ class RMNoiseBridge:
             chunk_8k = self._out_accum_8k[:n_8k_needed]
             self._out_accum_8k = self._out_accum_8k[n_8k_needed:]
 
-            # Resample from 8 kHz back to input_sample_rate
-            out = _resample_direct(chunk_8k, self._RM_RATE, self.input_sample_rate)
+            # Resample from 8 kHz → input_sample_rate using stateful resampler
+            if self._resampler_up is not None:
+                out = self._resampler_up.process(
+                    chunk_8k.astype(np.float32), self._ratio_up
+                ).astype(np.float32)
+            else:
+                n_out = max(1, round(len(chunk_8k) * self._ratio_up))
+                indices = np.round(np.linspace(0, len(chunk_8k) - 1, n_out)).astype(np.int32)
+                out = chunk_8k[indices].astype(np.float32)
 
             # Trim or zero-pad to exactly n_in samples
             if len(out) >= n_in:
@@ -234,8 +247,14 @@ class RMNoiseBridge:
         if new_rate == self.input_sample_rate:
             return
         self.input_sample_rate = new_rate
-        # Recalculate how many input-rate samples equal one 8 kHz frame
+        # Recalculate resampling ratios and frame target
+        self._ratio_down = self._RM_RATE / new_rate
+        self._ratio_up = new_rate / self._RM_RATE
         self._accum_target = round(self._FRAME_8K * new_rate / self._RM_RATE)
+        # Reset stateful resamplers — their internal state is now stale
+        if _SAMPLERATE_AVAILABLE:
+            self._resampler_down = _samplerate.Resampler('sinc_best', channels=1)
+            self._resampler_up = _samplerate.Resampler('sinc_best', channels=1)
         # Flush stale data from both accumulation buffers
         self._accum = np.zeros(0, dtype=np.float32)
         self._out_accum_8k = np.zeros(0, dtype=np.float32)

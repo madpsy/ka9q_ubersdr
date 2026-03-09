@@ -837,12 +837,16 @@ class IQRecorderGUI:
             # Create new event loop for this thread
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
+
             # Create IQ callback for spectrum display
             def iq_callback(i_samples, q_samples):
                 if stream.stream_id in self.spectrum_displays:
                     self.spectrum_displays[stream.stream_id].add_iq_samples(i_samples, q_samples)
-            
+
+            # Create error callback for this stream
+            def error_callback(error_type: str, error: Exception):
+                self._handle_stream_error(stream.stream_id, error_type, error)
+
             # Create temporary client to fetch server description for metadata
             temp_client = IQRecordingClient(
                 host=self.host.get(),
@@ -854,7 +858,7 @@ class IQRecorderGUI:
                 duration=None,
                 iq_callback=None
             )
-            
+
             # Fetch server description for metadata
             callsign = None
             description = None
@@ -866,7 +870,7 @@ class IQRecorderGUI:
                     description = receiver.get('name', '')
             except:
                 pass  # Continue without metadata if fetch fails
-            
+
             # Create IQ recording client with spectrum callback and metadata
             # If recording is disabled, pass None for wav_file to skip writing
             # IMPORTANT: Must pass sample_rate explicitly for IQ modes to ensure WAV header is correct
@@ -882,23 +886,29 @@ class IQRecorderGUI:
                 metadata_frequency=stream.frequency,
                 metadata_mode=stream.iq_mode.mode_name,
                 metadata_callsign=callsign,
-                metadata_description=description
+                metadata_description=description,
+                error_callback=error_callback
             )
-            
+
             # Override sample rate with the correct IQ mode sample rate
             # RadioClient defaults to 12 kHz, but IQ modes have specific rates
             client.sample_rate = stream.iq_mode.sample_rate
-            
+
             stream.client = client
             stream.status = StreamStatus.RECORDING
-            
+
             # Run client
             loop.run_until_complete(client.run())
-            
+
+        except OSError as e:
+            stream.status = StreamStatus.ERROR
+            stream.error_message = str(e)
+            print(f"I/O error recording stream {stream.stream_id}: {e}", file=sys.stderr)
+            self._handle_stream_error(stream.stream_id, "recording", e)
         except Exception as e:
             stream.status = StreamStatus.ERROR
             stream.error_message = str(e)
-            print(f"Error recording stream {stream.stream_id}: {e}")
+            print(f"Error recording stream {stream.stream_id}: {e}", file=sys.stderr)
         finally:
             stream.status = StreamStatus.STOPPED
             stream.stop_time = time.time()
@@ -1093,9 +1103,14 @@ class IQRecorderGUI:
         
         # Add streams and restore selection
         for stream in self.streams:
-            # Get file size if exists and recording
+            # Get file size from wav_writer if recording, or from file if stopped
             try:
-                if stream.output_file and os.path.exists(stream.output_file):
+                if stream.status == StreamStatus.RECORDING and stream.client:
+                    # Get size from wav_writer (includes temp file data)
+                    if hasattr(stream.client, 'wav_writer') and stream.client.wav_writer:
+                        stream.bytes_recorded = stream.client.wav_writer.get_total_bytes()
+                elif stream.output_file and os.path.exists(stream.output_file):
+                    # Recording stopped, get final file size
                     stream.bytes_recorded = os.path.getsize(stream.output_file)
             except Exception:
                 pass

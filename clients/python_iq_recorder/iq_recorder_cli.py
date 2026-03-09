@@ -123,18 +123,34 @@ class CLIStreamManager:
             self.streams[stream.stream_id] = stream
         
         self.logger.info(f"Loaded {len(self.streams)} stream configurations")
-    
+
+    def _handle_stream_error(self, stream_id: int, error_type: str, error: Exception):
+        """
+        Handle stream I/O errors
+
+        Args:
+            stream_id: ID of stream with error
+            error_type: Type of error (open, write, flush, close)
+            error: Exception that occurred
+        """
+        self.logger.error(f"Stream {stream_id} I/O error ({error_type}): {error}")
+
+        # Check if disk full
+        if isinstance(error, OSError) and error.errno == 28:  # ENOSPC
+            self.logger.critical("DISK FULL - Stopping all recordings")
+            self.stop_all_streams()
+
     def start_stream(self, stream: StreamConfig):
         """
         Start recording a stream
-        
+
         Args:
             stream: StreamConfig to start recording
         """
         if stream.status == StreamStatus.RECORDING:
             self.logger.warning(f"Stream {stream.stream_id} is already recording")
             return
-        
+
         # Generate actual filename from template (only if recording is enabled)
         if stream.recording_enabled:
             base_dir = self.config_manager.get_recording_dir()
@@ -145,10 +161,42 @@ class CLIStreamManager:
                 stream.filename_template
             )
             stream.output_file = os.path.join(base_dir, filename)
-            
+
             # Create recording directory if needed
             os.makedirs(os.path.dirname(stream.output_file), exist_ok=True)
-            
+
+            # Check disk space before starting
+            try:
+                space_info = self.file_manager.get_disk_space()
+                
+                # Estimate space needed for 1 hour of recording (conservative)
+                required_bytes = self.file_manager.estimate_recording_size(
+                    stream.iq_mode.mode_name,
+                    3600  # 1 hour
+                )
+                
+                # Calculate data rate for logging
+                data_rate_kbps = (required_bytes / 3600) / 1024  # KB/s
+
+                self.logger.info(
+                    f"Stream {stream.stream_id} disk space check: "
+                    f"Mode={stream.iq_mode.mode_name}, "
+                    f"Rate={data_rate_kbps:.1f} KB/s, "
+                    f"Need={self.file_manager.format_bytes(required_bytes)} (1hr estimate), "
+                    f"Available={self.file_manager.format_bytes(space_info['free'])}"
+                )
+
+                if not self.file_manager.check_disk_space_available(required_bytes):
+                    self.logger.error(
+                        f"Insufficient disk space for stream {stream.stream_id}: "
+                        f"need {self.file_manager.format_bytes(required_bytes)}, "
+                        f"only {self.file_manager.format_bytes(space_info['free'])} available"
+                    )
+                    return
+
+            except Exception as e:
+                self.logger.warning(f"Stream {stream.stream_id}: Disk space check failed: {e}")
+
             self.logger.info(f"Stream {stream.stream_id}: Recording to {stream.output_file}")
         else:
             stream.output_file = None
@@ -173,7 +221,7 @@ class CLIStreamManager:
     def record_stream_thread(self, stream: StreamConfig):
         """
         Thread function for recording a stream
-        
+
         Args:
             stream: StreamConfig to record
         """
@@ -181,7 +229,11 @@ class CLIStreamManager:
             # Create new event loop for this thread
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
+
+            # Create error callback for this stream
+            def error_callback(error_type: str, error: Exception):
+                self._handle_stream_error(stream.stream_id, error_type, error)
+
             # Create IQ recording client
             # If recording is disabled, pass None for wav_file to skip writing
             client = IQRecordingClient(
@@ -192,20 +244,31 @@ class CLIStreamManager:
                 output_mode='wav' if stream.recording_enabled else None,
                 wav_file=stream.output_file if stream.recording_enabled else None,
                 duration=None,  # Record until stopped
-                iq_callback=None  # No spectrum display in CLI mode
+                iq_callback=None,  # No spectrum display in CLI mode
+                metadata_frequency=stream.frequency,
+                metadata_mode=stream.iq_mode.mode_name,
+                error_callback=error_callback
             )
-            
+
             # Override sample rate with the correct IQ mode sample rate
             client.sample_rate = stream.iq_mode.sample_rate
-            
+
             stream.client = client
             stream.status = StreamStatus.RECORDING
-            
+
             self.logger.info(f"Stream {stream.stream_id} connected and recording")
-            
+
             # Run client
             loop.run_until_complete(client.run())
-            
+
+        except OSError as e:
+            stream.status = StreamStatus.ERROR
+            stream.error_message = str(e)
+            self.logger.error(f"I/O error recording stream {stream.stream_id}: {e}")
+            # Check if disk full
+            if e.errno == 28:  # ENOSPC
+                self.logger.critical("DISK FULL - Stopping all recordings")
+                self.stop_all_streams()
         except Exception as e:
             stream.status = StreamStatus.ERROR
             stream.error_message = str(e)
@@ -213,7 +276,7 @@ class CLIStreamManager:
         finally:
             stream.status = StreamStatus.STOPPED
             stream.stop_time = time.time()
-            
+
             # Log recording statistics
             if stream.recording_enabled and stream.output_file:
                 self.logger.info(
@@ -223,7 +286,7 @@ class CLIStreamManager:
                 )
             else:
                 self.logger.info(f"Stream {stream.stream_id} stopped")
-            
+
             stream.client = None
     
     def stop_stream(self, stream: StreamConfig):

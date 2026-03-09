@@ -33,6 +33,12 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s %(levelname)s %(name)s: %(message)s')
 logger = logging.getLogger(__name__)
 
+# ── Spoofing toggle ────────────────────────────────────────────────────────────
+# Set to True to send a Chrome browser User-Agent and rmnoise.com Origin on all
+# HTTP and WebSocket requests (mimics a real browser session).
+# Set to False to send no custom headers (use the library/OS defaults).
+_SPOOF_BROWSER_HEADERS = False
+
 # ── Wire-protocol constants ────────────────────────────────────────────────────
 SAMPLE_RATE_8K  = 8000
 FRAME_SIZE_8K   = 384    # 64 ms at 8 kHz
@@ -59,10 +65,15 @@ class RMNoiseClient:
 
     SERVERS = [
         "wss://s2.rmnoise.com:8766",
-        "wss://192.168.125.202:8766",
-        "wss://127.0.0.1:8767",
-        "wss://127.0.0.1:8768",
     ]
+
+    # Chrome 124 on Windows 10 — used for all HTTP and WebSocket requests so
+    # the server treats us as a standard browser client.
+    _UA = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
 
     def __init__(self, username: str, password: str,
                  base_url: str = "https://rmnoise.com",
@@ -72,6 +83,11 @@ class RMNoiseClient:
         self.base_url         = base_url
         self.filter_number    = filter_number
         self._session         = requests.Session()
+        if _SPOOF_BROWSER_HEADERS:
+            self._session.headers.update({
+                'User-Agent': self._UA,
+                'Origin': 'https://rmnoise.com',
+            })
         self.ws               = None
         self.pc               = None
         self.data_channel     = None
@@ -111,17 +127,27 @@ class RMNoiseClient:
 
     # ── Server selection ───────────────────────────────────────────────────────
 
-    async def _measure(self, url: str) -> float:
-        try:
+    async def _measure(self, url: str, timeout: float = 3.0) -> float:
+        """Probe a server with a ping/pong and return round-trip ms, or inf on failure.
+
+        A hard *timeout* (default 3 s) covers the entire attempt — TCP connect,
+        TLS handshake, send, and recv — so a hanging server never stalls the
+        gather in _best_server.
+        """
+        async def _probe():
             t0 = time.time()
-            async with websockets.connect(url, ssl=True) as ws:
+            kwargs = {'ssl': True}
+            if _SPOOF_BROWSER_HEADERS:
+                kwargs['extra_headers'] = {'User-Agent': self._UA}
+            async with websockets.connect(url, **kwargs) as ws:
                 await ws.send(json.dumps({'type': 'ping', 'timestamp': t0}))
-                try:
-                    msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=2.0))
-                    if msg.get('type') == 'pong':
-                        return (time.time() - t0) * 1000
-                except asyncio.TimeoutError:
-                    pass
+                msg = json.loads(await ws.recv())
+                if msg.get('type') == 'pong':
+                    return (time.time() - t0) * 1000
+            return float('inf')
+
+        try:
+            return await asyncio.wait_for(_probe(), timeout=timeout)
         except Exception as e:
             logger.debug(f"{url} unreachable: {e}")
         return float('inf')
@@ -141,7 +167,13 @@ class RMNoiseClient:
 
     async def _connect_ws(self, url: str, token: str):
         logger.info(f"Connecting to {url}...")
-        self.ws = await websockets.connect(url)
+        kwargs = {}
+        if _SPOOF_BROWSER_HEADERS:
+            kwargs['extra_headers'] = {
+                'User-Agent': self._UA,
+                'Origin': 'https://rmnoise.com',
+            }
+        self.ws = await websockets.connect(url, **kwargs)
         await self.ws.send(json.dumps({'type': 'auth', 'token': token}))
         msg = json.loads(await self.ws.recv())
         if msg.get('type') != 'auth_ok':

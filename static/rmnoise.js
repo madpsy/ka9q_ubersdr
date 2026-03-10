@@ -499,6 +499,7 @@ function rmNoise_handleDisconnect() {
     if (rmNoise.enabled) {
         rmNoise_setStatus('Disconnected', 'grey');
     }
+    rmNoise_clearStatusLabel();
     rmNoise_updateButton();
     rmNoise_syncCheckbox();
     rmNoise_stopStatsInterval();
@@ -540,6 +541,7 @@ async function toggleRMNoise() {
         rmNoise.bypass  = false;
         await rmNoise_disconnect();
         rmNoise_setStatus('Disconnected', 'grey');
+        rmNoise_clearStatusLabel();
         rmNoise_updateButton();
         rmNoise_syncCheckbox();
         rmNoise_log('RMNoise denoising disabled');
@@ -574,6 +576,20 @@ function toggleRMNoiseBypass() {
         btn.textContent  = rmNoise.bypass ? '● Original' : 'Original';
         btn.style.color  = rmNoise.bypass ? '#ff6b6b' : '';
     }
+}
+
+function rmNoise_clearStatusLabel() {
+    const statusLabel = document.getElementById('rmnoise-status-label');
+    if (statusLabel) {
+        statusLabel.textContent = '';
+        statusLabel.style.color = '';
+    }
+    const jEl = document.getElementById('rmnoise-jitter');
+    const lEl = document.getElementById('rmnoise-latency');
+    if (jEl) jEl.textContent = '-- frames';
+    if (lEl) lEl.textContent = '-- ms';
+    const fillEl = document.getElementById('rmnoise-jitter-fill');
+    if (fillEl) fillEl.style.width = '0%';
 }
 
 // ── Stats ──────────────────────────────────────────────────────────────────────

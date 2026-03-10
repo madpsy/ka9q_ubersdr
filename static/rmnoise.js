@@ -313,6 +313,19 @@ function rmNoise_process(audioFloat, sampleRate) {
     // overshoot is absorbed into the next call rather than causing a gap.
     const n8kNeeded = Math.ceil(nIn * RM_RATE / sampleRate);
 
+    // ── DEBUG ──────────────────────────────────────────────────────────────────
+    // Throttle to ~1 log per second to avoid flooding the console.
+    const _now = performance.now();
+    if (_now - (rmNoise._lastDebugLog || 0) >= 1000) {
+        rmNoise._lastDebugLog = _now;
+        console.log(
+            `[RMNoise] accumOut=${rmNoise.accumOut.length} n8kNeeded=${n8kNeeded}` +
+            ` nIn=${nIn} sampleRate=${sampleRate}` +
+            ` resamplerUp.phase=${rmNoise.resamplerUp.phase.toFixed(4)}`
+        );
+    }
+    // ── END DEBUG ──────────────────────────────────────────────────────────────
+
     if (rmNoise.accumOut.length >= n8kNeeded) {
         const chunk8k    = rmNoise.accumOut.slice(0, n8kNeeded);
         rmNoise.accumOut = rmNoise.accumOut.slice(n8kNeeded);
@@ -320,6 +333,15 @@ function rmNoise_process(audioFloat, sampleRate) {
         // Upsample from 8 kHz → sampleRate using stateful linear interpolation.
         // Phase is preserved across calls — no seam discontinuities.
         const upsampled = rmNoise.resamplerUp.process(chunk8k, RM_RATE, sampleRate);
+
+        // ── DEBUG ──────────────────────────────────────────────────────────────
+        if (upsampled.length !== nIn) {
+            console.warn(
+                `[RMNoise] length mismatch: upsampled=${upsampled.length} nIn=${nIn}` +
+                ` n8kNeeded=${n8kNeeded} sampleRate=${sampleRate}`
+            );
+        }
+        // ── END DEBUG ──────────────────────────────────────────────────────────
 
         // Trim or zero-pad to exactly nIn samples
         if (upsampled.length >= nIn) {
@@ -338,6 +360,7 @@ function rmNoise_process(audioFloat, sampleRate) {
     // Resetting primed here caused repeated 240 ms re-priming silence periods
     // whenever the near-0 jitter buffer had a momentary underrun, which
     // manifested as continuous amplitude-dependent crackling.
+    console.warn(`[RMNoise] UNDERRUN: accumOut=${rmNoise.accumOut.length} < n8kNeeded=${n8kNeeded}`);
     return new Float32Array(audioFloat.length);
 }
 

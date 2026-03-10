@@ -137,16 +137,7 @@ function rmNoise_resample(float32, fromRate, toRate) {
  */
 function rmNoise_process(audioFloat, sampleRate) {
     if (!rmNoise.ready || !rmNoise.dc || rmNoise.dc.readyState !== 'open') {
-        // Throttled diagnostic — log once per second so console isn't flooded
-        const now = Date.now();
-        if (!rmNoise._lastNullLog || now - rmNoise._lastNullLog > 1000) {
-            rmNoise._lastNullLog = now;
-            console.debug('[RMNoise] process→null: ready=%s dc=%s dcState=%s',
-                rmNoise.ready,
-                !!rmNoise.dc,
-                rmNoise.dc ? rmNoise.dc.readyState : 'n/a');
-        }
-        return null;
+        return null;   // not connected — caller uses original audio
     }
 
     // Update rate if changed
@@ -236,8 +227,9 @@ function rmNoise_process(audioFloat, sampleRate) {
             rmNoise.primed = true;
             rmNoise_log(`Buffer primed (${rmNoise.accumOut.length} samples @ 8 kHz) — denoising active`);
         } else {
-            // Still filling — return null so caller uses original audio
-            return null;
+            // Still filling — return silence (like Python client) so the
+            // caller doesn't fall back to original audio during priming.
+            return new Float32Array(audioFloat.length);
         }
     }
 
@@ -261,9 +253,10 @@ function rmNoise_process(audioFloat, sampleRate) {
         }
     }
 
-    // accumOut ran dry (network hiccup) — reset primed so we re-buffer
+    // accumOut ran dry (network hiccup) — reset primed so we re-buffer,
+    // return silence to avoid a jarring switch back to original audio.
     rmNoise.primed = false;
-    return null;
+    return new Float32Array(audioFloat.length);
 }
 
 // ── Connection ─────────────────────────────────────────────────────────────────

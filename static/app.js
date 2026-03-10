@@ -2368,14 +2368,17 @@ async function handleBinaryMessage(data) {
         );
 
         // ── RMNoise AI denoising (FIRST — before all other DSP) ──────────────
-        // Mono only: skip for stereo/IQ modes. Mirrors radio_client.py:1436.
+        // Always process channel 0 — RMNoise is a mono processor.
+        // The Opus decoder may return 1 or 2 channels for a mono source;
+        // either way we denoise ch0 and write it to all output channels.
         let monoData = decoded.channelData[0];
-        if (decoded.channelData.length === 1 &&
-            window.rmNoiseBridge && window.rmNoiseBridge.enabled) {
+        let rmNoiseActive = false;
+        if (window.rmNoiseBridge && window.rmNoiseBridge.enabled) {
             try {
-                const denoised = await window.rmNoise_process(monoData, sampleRate);
+                const denoised = window.rmNoise_process(monoData, sampleRate);
                 if (denoised !== null && !window.rmNoiseBridge.bypass) {
                     monoData = denoised;
+                    rmNoiseActive = true;
                 }
                 // bypass=true: bridge stays fed but original audio plays through
             } catch (rmErr) {
@@ -2384,12 +2387,17 @@ async function handleBinaryMessage(data) {
         }
 
         // Copy decoded data to audio buffer
-        if (decoded.channelData.length === 1) {
-            // Mono source - duplicate to both channels (use denoised if available)
+        if (rmNoiseActive) {
+            // RMNoise processed mono — write to all output channels
+            for (let ch = 0; ch < numChannels; ch++) {
+                audioBuffer.getChannelData(ch).set(monoData);
+            }
+        } else if (decoded.channelData.length === 1) {
+            // Mono source - duplicate to both channels
             audioBuffer.getChannelData(0).set(monoData);
             audioBuffer.getChannelData(1).set(monoData);
         } else {
-            // Stereo or multi-channel source (RMNoise skipped for stereo)
+            // Stereo or multi-channel source
             for (let channel = 0; channel < decoded.channelData.length && channel < 2; channel++) {
                 audioBuffer.getChannelData(channel).set(decoded.channelData[channel]);
             }
@@ -2729,7 +2737,7 @@ async function handlePCMAudio(msg) {
     let pcmMono = floatData;
     if (window.rmNoiseBridge && window.rmNoiseBridge.enabled) {
         try {
-            const denoised = await window.rmNoise_process(pcmMono, msg.sampleRate);
+            const denoised = window.rmNoise_process(pcmMono, msg.sampleRate);
             if (denoised !== null && !window.rmNoiseBridge.bypass) {
                 pcmMono = denoised;
             }

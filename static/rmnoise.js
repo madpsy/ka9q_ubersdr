@@ -23,14 +23,13 @@ const RM_SERVER = 'wss://s2.rmnoise.com:8766';
 // ── StatefulResampler ──────────────────────────────────────────────────────────
 //
 // A stateful linear interpolation resampler that preserves fractional phase
-// and the last sample across chunk boundaries.
+// across chunk boundaries.
 //
-// This is the JS equivalent of Python's samplerate.Resampler('sinc_best') in
-// terms of boundary continuity: it never produces a discontinuity at a chunk
-// seam because:
-//   1. `this.phase` carries the exact fractional position into the next chunk.
-//   2. `this.lastSample` provides the left-hand sample for interpolation when
-//      the first output sample of a new chunk straddles the boundary.
+// Continuity guarantee: `this.phase` carries the exact fractional position
+// into the next chunk, so the output stream is seamless without any
+// cross-boundary bookkeeping.  Both samples used for each interpolation step
+// are always within the current input chunk (i >= 0 always, because phase is
+// the non-negative carry from the previous call).
 //
 // Linear interpolation is entirely adequate for 8 kHz voice audio — the
 // RMNoise server already band-limits to 4 kHz, so there is nothing above
@@ -43,14 +42,13 @@ const RM_SERVER = 'wss://s2.rmnoise.com:8766';
 //
 class StatefulResampler {
     constructor() {
-        this.phase      = 0.0;   // fractional position within the current input chunk
-        this.lastSample = 0.0;   // last sample of the previous chunk (for cross-boundary interp)
+        this.phase = 0.0;   // fractional position carry from the previous call
     }
 
     /**
      * Resample `input` from `fromRate` to `toRate`.
-     * Returns a new Float32Array of the resampled output.
-     * Maintains `phase` and `lastSample` for the next call.
+     * Returns a Float32Array view of the resampled output.
+     * Maintains `phase` for the next call.
      *
      * @param {Float32Array} input
      * @param {number} fromRate
@@ -59,8 +57,6 @@ class StatefulResampler {
      */
     process(input, fromRate, toRate) {
         if (fromRate === toRate) {
-            // No resampling needed — update lastSample and return a copy.
-            if (input.length > 0) this.lastSample = input[input.length - 1];
             return input.slice();
         }
 
@@ -74,36 +70,29 @@ class StatefulResampler {
         let   p      = this.phase;
 
         while (true) {
-            const i    = Math.floor(p);
+            const i = Math.floor(p);
             if (i >= len) break;
 
             const frac = p - i;
-
-            // Cross-boundary interpolation: when i === 0 and frac > 0, the output
-            // sample straddles the boundary between the previous chunk's last sample
-            // (this.lastSample) and input[0].  Use lastSample as the left-hand
-            // sample so the interpolated value is continuous across the seam.
-            // For i > 0, both samples are within the current chunk.
-            const s0 = (i === 0 && frac > 0) ? this.lastSample : input[i];
+            // Both s0 and s1 are always within the current chunk.
+            // phase is always >= 0 (it is the non-negative carry p - len from
+            // the previous call), so i >= 0 always holds.
+            const s0 = input[i];
             const s1 = (i + 1 < len) ? input[i + 1] : input[len - 1]; // clamp at end
             out[outIdx++] = s0 + frac * (s1 - s0);
             p += step;
         }
 
-        // Carry fractional remainder into next call
+        // Carry fractional remainder into next call (always >= 0)
         this.phase = p - len;
         if (this.phase < 0) this.phase = 0;   // numerical safety
-
-        // Store last sample for cross-boundary interpolation on next call
-        if (len > 0) this.lastSample = input[len - 1];
 
         return out.subarray(0, outIdx);
     }
 
     /** Reset state (e.g. on sample-rate change or disconnect). */
     reset() {
-        this.phase      = 0.0;
-        this.lastSample = 0.0;
+        this.phase = 0.0;
     }
 }
 
@@ -313,19 +302,6 @@ function rmNoise_process(audioFloat, sampleRate) {
     // overshoot is absorbed into the next call rather than causing a gap.
     const n8kNeeded = Math.ceil(nIn * RM_RATE / sampleRate);
 
-    // ── DEBUG ──────────────────────────────────────────────────────────────────
-    // Throttle to ~1 log per second to avoid flooding the console.
-    const _now = performance.now();
-    if (_now - (rmNoise._lastDebugLog || 0) >= 1000) {
-        rmNoise._lastDebugLog = _now;
-        console.log(
-            `[RMNoise] accumOut=${rmNoise.accumOut.length} n8kNeeded=${n8kNeeded}` +
-            ` nIn=${nIn} sampleRate=${sampleRate}` +
-            ` resamplerUp.phase=${rmNoise.resamplerUp.phase.toFixed(4)}`
-        );
-    }
-    // ── END DEBUG ──────────────────────────────────────────────────────────────
-
     if (rmNoise.accumOut.length >= n8kNeeded) {
         const chunk8k    = rmNoise.accumOut.slice(0, n8kNeeded);
         rmNoise.accumOut = rmNoise.accumOut.slice(n8kNeeded);
@@ -333,15 +309,6 @@ function rmNoise_process(audioFloat, sampleRate) {
         // Upsample from 8 kHz → sampleRate using stateful linear interpolation.
         // Phase is preserved across calls — no seam discontinuities.
         const upsampled = rmNoise.resamplerUp.process(chunk8k, RM_RATE, sampleRate);
-
-        // ── DEBUG ──────────────────────────────────────────────────────────────
-        if (upsampled.length !== nIn) {
-            console.warn(
-                `[RMNoise] length mismatch: upsampled=${upsampled.length} nIn=${nIn}` +
-                ` n8kNeeded=${n8kNeeded} sampleRate=${sampleRate}`
-            );
-        }
-        // ── END DEBUG ──────────────────────────────────────────────────────────
 
         // Trim or zero-pad to exactly nIn samples
         if (upsampled.length >= nIn) {
@@ -357,10 +324,6 @@ function rmNoise_process(audioFloat, sampleRate) {
     // switch back to original audio.  Do NOT reset primed: the Python client
     // never re-primes after the initial prime, it just returns silence on
     // underrun and resumes denoised audio as soon as data is available again.
-    // Resetting primed here caused repeated 240 ms re-priming silence periods
-    // whenever the near-0 jitter buffer had a momentary underrun, which
-    // manifested as continuous amplitude-dependent crackling.
-    console.warn(`[RMNoise] UNDERRUN: accumOut=${rmNoise.accumOut.length} < n8kNeeded=${n8kNeeded}`);
     return new Float32Array(audioFloat.length);
 }
 

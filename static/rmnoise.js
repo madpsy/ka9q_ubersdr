@@ -46,6 +46,13 @@ const rmNoise = {
     accumIn:          new Float32Array(0),   // input samples at inputRate
     accumOut:         new Float32Array(0),   // denoised 8 kHz samples
 
+    // Pre-buffering: don't output denoised audio until we have a reserve built up.
+    // At 8 kHz, RM_FRAME=384 samples = 48 ms per frame.
+    // We wait for 5 frames (≈240 ms) before starting playback so the pipeline
+    // stays ahead of the network round-trip.
+    primed:           false,
+    primeFrames:      5,       // number of 8 kHz frames to accumulate before starting
+
     // Latency tracking
     sendTimes:        new Map(),             // BigInt frameNum → performance.now()
     lastLatencyMs:    0,
@@ -138,6 +145,7 @@ function rmNoise_process(audioFloat, sampleRate) {
         rmNoise.inputRate = sampleRate;
         rmNoise.accumIn   = new Float32Array(0);
         rmNoise.accumOut  = new Float32Array(0);
+        rmNoise.primed    = false;
     }
 
     const nIn        = audioFloat.length;
@@ -201,21 +209,34 @@ function rmNoise_process(audioFloat, sampleRate) {
         }
     }
 
-    // ── Receive path: drain jitter buffer → upsample ──────────────────────────
-    // Drain all available 8 kHz frames into accumOut
+    // ── Receive path: drain jitter buffer → accumOut ──────────────────────────
     while (rmNoise.jitterBuf.length > 0) {
-        const frame = rmNoise.jitterBuf.shift();
+        const frame  = rmNoise.jitterBuf.shift();
         const merged = new Float32Array(rmNoise.accumOut.length + frame.length);
         merged.set(rmNoise.accumOut);
         merged.set(frame, rmNoise.accumOut.length);
         rmNoise.accumOut = merged;
     }
 
+    // Wait until we have primeFrames worth of 8 kHz data buffered before
+    // starting playback.  This absorbs the network round-trip so we never
+    // starve the output.
+    const primeThreshold = RM_FRAME * rmNoise.primeFrames;
+    if (!rmNoise.primed) {
+        if (rmNoise.accumOut.length >= primeThreshold) {
+            rmNoise.primed = true;
+            rmNoise_log(`Buffer primed (${rmNoise.accumOut.length} samples @ 8 kHz) — denoising active`);
+        } else {
+            // Still filling — return null so caller uses original audio
+            return null;
+        }
+    }
+
     // How many 8 kHz samples do we need to cover nIn input samples?
     const n8kNeeded = Math.ceil(nIn * RM_RATE / sampleRate);
 
     if (rmNoise.accumOut.length >= n8kNeeded) {
-        const chunk8k = rmNoise.accumOut.slice(0, n8kNeeded);
+        const chunk8k    = rmNoise.accumOut.slice(0, n8kNeeded);
         rmNoise.accumOut = rmNoise.accumOut.slice(n8kNeeded);
 
         // Upsample from 8 kHz → sampleRate
@@ -231,7 +252,8 @@ function rmNoise_process(audioFloat, sampleRate) {
         }
     }
 
-    // Not enough denoised data yet — return null (caller uses original audio)
+    // accumOut ran dry (network hiccup) — reset primed so we re-buffer
+    rmNoise.primed = false;
     return null;
 }
 
@@ -499,6 +521,7 @@ async function rmNoise_disconnect() {
 
     rmNoise.ready      = false;
     rmNoise.connecting = false;
+    rmNoise.primed     = false;
     rmNoise.accumIn    = new Float32Array(0);
     rmNoise.accumOut   = new Float32Array(0);
     rmNoise.jitterBuf  = [];
@@ -679,17 +702,22 @@ function rmNoise_setStatus(text, colour) {
 
 function rmNoise_updateButton() {
     const btn = document.getElementById('rmn-quick-toggle');
+    const cog = document.getElementById('rmn-cog-btn');
     if (!btn) return;
 
+    let colour;
     if (rmNoise.connecting) {
-        btn.style.backgroundColor = '#fd7e14';  // orange
+        colour = '#fd7e14';  // orange
     } else if (rmNoise.ready && rmNoise.enabled) {
-        btn.style.backgroundColor = '#28a745';  // green
+        colour = '#28a745';  // green
     } else if (!rmNoise.enabled) {
-        btn.style.backgroundColor = '#6f42c1';  // purple (idle)
+        colour = '#6f42c1';  // purple (idle)
     } else {
-        btn.style.backgroundColor = '#dc3545';  // red (failed)
+        colour = '#dc3545';  // red (failed)
     }
+
+    btn.style.backgroundColor = colour;
+    if (cog) cog.style.backgroundColor = colour;
 
     // Original button
     const origBtn = document.getElementById('rmnoise-original-btn');

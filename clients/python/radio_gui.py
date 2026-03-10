@@ -3664,6 +3664,10 @@ class RadioGUI:
         # Check if this is an IQ mode
         is_iq_mode = mode in ['iq', 'iq48', 'iq96', 'iq192', 'iq384']
 
+        # RMNoise is only meaningful for SSB/CW modes
+        _RM_SUPPORTED = {'usb', 'lsb', 'cwu', 'cwl'}
+        is_rm_supported = mode in _RM_SUPPORTED
+
         # Update last mode
         self.last_mode = mode
 
@@ -3764,11 +3768,9 @@ class RadioGUI:
             # Re-enable NR2 checkbox
             self.nr2_check.config(state='normal')
 
-            # Re-enable RM checkbox and configure button; refresh Original btn state
+            # Re-enable RM checkbox only for supported modes (USB/LSB/CWU/CWL)
             if RMNOISE_WINDOW_AVAILABLE:
-                self.rm_check.config(state='normal')
-                self.rm_configure_btn.config(state='normal')
-                self._update_rmnoise_original_btn()
+                self._update_rmnoise_mode_support(is_rm_supported)
 
             # Re-enable audio filter checkbox
             self.filter_check.config(state='normal')
@@ -5094,6 +5096,34 @@ class RadioGUI:
         except ValueError:
             messagebox.showerror("Error", "Invalid NR2 parameter values")
             self.nr2_enabled_var.set(not enabled)
+
+    def _update_rmnoise_mode_support(self, supported: bool):
+        """
+        Enable or disable the RMNoise controls based on whether the current
+        mode supports denoising (USB / LSB / CWU / CWL only).
+
+        When switching to an unsupported mode (AM, FM, NFM, SAM, …):
+          - Disconnects the bridge if active
+          - Disables the checkbox, configure button, and mix slider
+          - Shows a tooltip-style status hint
+
+        When switching back to a supported mode:
+          - Re-enables the controls (bridge is NOT auto-started)
+        """
+        if supported:
+            self.rm_check.config(state='normal')
+            self.rm_configure_btn.config(state='normal')
+            self._update_rmnoise_original_btn()
+        else:
+            # Disconnect if currently active
+            if self.rm_enabled_var.get():
+                self.rm_enabled_var.set(False)
+                self.toggle_rmnoise()
+            self.rm_check.config(state='disabled')
+            self.rm_configure_btn.config(state='disabled')
+            self.rm_mix_scale.state(['disabled'])
+            self.rm_status_label.config(
+                text="(USB/LSB/CW only)", foreground='gray')
 
     def toggle_rmnoise(self):
         """Toggle RMNoise denoising on/off via the bridge in the window."""

@@ -1409,6 +1409,10 @@ func main() {
 	sessionStatsRateLimiter := NewSessionStatsRateLimiter()
 	log.Printf("Session stats endpoint rate limiting: 1 request per 3 seconds per IP")
 
+	// Initialize RMNoise proxy rate limiter (1 request per second per endpoint per IP)
+	rmNoiseRateLimiter := NewRMNoiseRateLimiter()
+	log.Printf("RMNoise proxy rate limiting: 1 request per second per endpoint per IP")
+
 	// Initialize SSH proxy if enabled (declare before rate limiter cleanup goroutine)
 	var sshProxy *SSHProxy
 	if config.SSHProxy.Enabled {
@@ -1434,6 +1438,7 @@ func main() {
 			spaceWeatherRateLimiter.Cleanup()
 			summaryRateLimiter.Cleanup()
 			sessionStatsRateLimiter.Cleanup()
+			rmNoiseRateLimiter.Cleanup()
 			// Cleanup SSH proxy rate limiter if enabled
 			if sshProxy != nil && sshProxy.rateLimiter != nil {
 				sshProxy.rateLimiter.Cleanup()
@@ -1602,10 +1607,16 @@ func main() {
 		log.Printf("MCP endpoint enabled at /api/mcp")
 	}
 
-	// RMNoise CORS proxy endpoints
-	http.HandleFunc("/api/rmnoise/login", handleRMNoiseLogin)
-	http.HandleFunc("/api/rmnoise/webrtc_token", handleRMNoiseWebRTCToken)
-	http.HandleFunc("/api/rmnoise/turn_creds", handleRMNoiseTURNCreds)
+	// RMNoise CORS proxy endpoints (1 request per second per endpoint per IP)
+	http.HandleFunc("/api/rmnoise/login", func(w http.ResponseWriter, r *http.Request) {
+		handleRMNoiseLogin(w, r, rmNoiseRateLimiter)
+	})
+	http.HandleFunc("/api/rmnoise/webrtc_token", func(w http.ResponseWriter, r *http.Request) {
+		handleRMNoiseWebRTCToken(w, r, rmNoiseRateLimiter)
+	})
+	http.HandleFunc("/api/rmnoise/turn_creds", func(w http.ResponseWriter, r *http.Request) {
+		handleRMNoiseTURNCreds(w, r, rmNoiseRateLimiter)
+	})
 
 	// SunCalc endpoint (sun/moon position and times)
 	http.HandleFunc("/api/suncalc", func(w http.ResponseWriter, r *http.Request) {

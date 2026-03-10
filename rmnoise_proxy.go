@@ -70,8 +70,14 @@ func rmNoiseOutboundRequest(client *http.Client, method, targetURL, contentType,
 
 // ── Handlers ───────────────────────────────────────────────────────────────────
 
-func handleRMNoiseLogin(w http.ResponseWriter, r *http.Request) {
+func handleRMNoiseLogin(w http.ResponseWriter, r *http.Request, rateLimiter *RMNoiseRateLimiter) {
 	w.Header().Set("Content-Type", "application/json")
+
+	if !rateLimiter.AllowRequest(getClientIP(r), "login") {
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprint(w, `{"ok":false,"error":"Rate limit exceeded"}`)
+		return
+	}
 
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -177,8 +183,14 @@ func handleRMNoiseLogin(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"ok":true,"token":"%s"}`, token)
 }
 
-func handleRMNoiseWebRTCToken(w http.ResponseWriter, r *http.Request) {
+func handleRMNoiseWebRTCToken(w http.ResponseWriter, r *http.Request, rateLimiter *RMNoiseRateLimiter) {
 	w.Header().Set("Content-Type", "application/json")
+
+	if !rateLimiter.AllowRequest(getClientIP(r), "webrtc_token") {
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprint(w, `{"ok":false,"error":"Rate limit exceeded"}`)
+		return
+	}
 
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -234,8 +246,14 @@ func handleRMNoiseWebRTCToken(w http.ResponseWriter, r *http.Request) {
 	w.Write(body)
 }
 
-func handleRMNoiseTURNCreds(w http.ResponseWriter, r *http.Request) {
+func handleRMNoiseTURNCreds(w http.ResponseWriter, r *http.Request, rateLimiter *RMNoiseRateLimiter) {
 	w.Header().Set("Content-Type", "application/json")
+
+	if !rateLimiter.AllowRequest(getClientIP(r), "turn_creds") {
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprint(w, `{"ok":false,"error":"Rate limit exceeded"}`)
+		return
+	}
 
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)

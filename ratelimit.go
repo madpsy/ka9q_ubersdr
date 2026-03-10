@@ -635,6 +635,84 @@ func (rrl *RotctlRateLimiter) GetStats() (int, int) {
 	return len(rrl.limiters), totalEndpoints
 }
 
+// RMNoiseRateLimiter manages rate limiters for RMNoise proxy requests per IP per endpoint.
+// Each of the three endpoints (/login, /webrtc_token, /turn_creds) is limited independently
+// to 1 request per second per IP, so that a normal auth flow (all three called in quick
+// succession) is not blocked.
+type RMNoiseRateLimiter struct {
+	limiters map[string]map[string]*RateLimiter // map[ip]map[endpoint]*RateLimiter
+	mu       sync.RWMutex
+}
+
+// NewRMNoiseRateLimiter creates a new RMNoise proxy rate limiter.
+// Fixed at 1 request per second per endpoint per IP.
+func NewRMNoiseRateLimiter() *RMNoiseRateLimiter {
+	return &RMNoiseRateLimiter{
+		limiters: make(map[string]map[string]*RateLimiter),
+	}
+}
+
+// AllowRequest checks if an RMNoise proxy request is allowed for the given IP and endpoint.
+// endpoint should be "login", "webrtc_token", or "turn_creds".
+// Returns true if allowed, false if rate limit exceeded.
+func (rnrl *RMNoiseRateLimiter) AllowRequest(ip, endpoint string) bool {
+	rnrl.mu.Lock()
+	ipLimiters, exists := rnrl.limiters[ip]
+	if !exists {
+		ipLimiters = make(map[string]*RateLimiter)
+		rnrl.limiters[ip] = ipLimiters
+	}
+
+	endpointLimiter, exists := ipLimiters[endpoint]
+	if !exists {
+		// 1 request per second, burst of 1
+		endpointLimiter = &RateLimiter{
+			tokens:     1.0,
+			maxTokens:  1.0,
+			refillRate: 1.0, // 1 request per second
+			lastRefill: time.Now(),
+		}
+		ipLimiters[endpoint] = endpointLimiter
+	}
+	rnrl.mu.Unlock()
+
+	return endpointLimiter.Allow()
+}
+
+// Cleanup removes rate limiters for IPs that haven't been used recently.
+func (rnrl *RMNoiseRateLimiter) Cleanup() {
+	rnrl.mu.Lock()
+	defer rnrl.mu.Unlock()
+
+	now := time.Now()
+	for ip, ipLimiters := range rnrl.limiters {
+		for endpoint, limiter := range ipLimiters {
+			limiter.mu.Lock()
+			// Remove limiters that haven't been used in the last 10 minutes
+			if now.Sub(limiter.lastRefill) > 10*time.Minute {
+				delete(ipLimiters, endpoint)
+			}
+			limiter.mu.Unlock()
+		}
+		// Remove IP entry if no endpoints left
+		if len(ipLimiters) == 0 {
+			delete(rnrl.limiters, ip)
+		}
+	}
+}
+
+// GetStats returns the current number of tracked IPs and total endpoint limiters.
+func (rnrl *RMNoiseRateLimiter) GetStats() (int, int) {
+	rnrl.mu.RLock()
+	defer rnrl.mu.RUnlock()
+
+	totalEndpoints := 0
+	for _, ipLimiters := range rnrl.limiters {
+		totalEndpoints += len(ipLimiters)
+	}
+	return len(rnrl.limiters), totalEndpoints
+}
+
 // SSHProxyRateLimiter manages rate limiters for SSH proxy requests per IP
 // Limits to 100 requests per minute per IP
 type SSHProxyRateLimiter struct {

@@ -95,6 +95,12 @@ func handleRMNoiseLogin(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"ok":false,"error":"username and password are required"}`)
 		return
 	}
+	const maxCredLen = 50
+	if len(req.Username) > maxCredLen || len(req.Password) > maxCredLen {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"ok":false,"error":"username and password must be 50 characters or fewer"}`)
+		return
+	}
 
 	jar, err := cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})
 	if err != nil {

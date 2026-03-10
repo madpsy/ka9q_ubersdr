@@ -134,6 +134,13 @@ const rmNoise = {
     // 10 samples of context is sufficient for Lanczos-3 (kernel half-width = 3).
     ctxDown:          new RMNoiseOversizeBuffer(10),
     ctxUp:            new RMNoiseOversizeBuffer(10),
+
+    // Fractional phase accumulator for the receive-path resampling.
+    // Tracks the exact (non-integer) number of 8 kHz samples needed to cover
+    // each input packet.  Using floor()+carry instead of ceil()/round() per
+    // call eliminates the rounding drift that causes periodic clicks when
+    // discrete AudioBufferSourceNodes are scheduled back-to-back.
+    outputPhase:      0.0,
 };
 
 // Expose globally so app.js can call rmNoise_process()
@@ -244,10 +251,11 @@ function rmNoise_process(audioFloat, sampleRate) {
 
     // Update rate if changed — flush all state so stale context doesn't bleed in
     if (rmNoise.inputRate !== sampleRate) {
-        rmNoise.inputRate = sampleRate;
-        rmNoise.accumIn   = new Float32Array(0);
-        rmNoise.accumOut  = new Float32Array(0);
-        rmNoise.primed    = false;
+        rmNoise.inputRate   = sampleRate;
+        rmNoise.accumIn     = new Float32Array(0);
+        rmNoise.accumOut    = new Float32Array(0);
+        rmNoise.primed      = false;
+        rmNoise.outputPhase = 0.0;
         rmNoise.ctxDown.reset();
         rmNoise.ctxUp.reset();
     }
@@ -340,7 +348,14 @@ function rmNoise_process(audioFloat, sampleRate) {
     }
 
     // How many 8 kHz samples do we need to cover nIn input samples?
-    const n8kNeeded = Math.ceil(nIn * RM_RATE / sampleRate);
+    // Use a running phase accumulator (floor + carry) instead of ceil/round so
+    // the cumulative output sample count never drifts — eliminating the
+    // 1-sample gaps/overlaps between consecutive AudioBufferSourceNodes that
+    // cause periodic clicks.  This mirrors what samplerate.Resampler does
+    // internally in the Python client.
+    rmNoise.outputPhase += nIn * RM_RATE / sampleRate;
+    const n8kNeeded = Math.floor(rmNoise.outputPhase);
+    rmNoise.outputPhase -= n8kNeeded;
 
     if (rmNoise.accumOut.length >= n8kNeeded) {
         const chunk8k    = rmNoise.accumOut.slice(0, n8kNeeded);
@@ -638,7 +653,8 @@ async function rmNoise_disconnect() {
     rmNoise.accumOut   = new Float32Array(0);
     rmNoise.jitterBuf  = [];
     rmNoise.sendTimes.clear();
-    rmNoise.frameNum   = BigInt(0);
+    rmNoise.frameNum    = BigInt(0);
+    rmNoise.outputPhase = 0.0;
     rmNoise.ctxDown.reset();
     rmNoise.ctxUp.reset();
 }

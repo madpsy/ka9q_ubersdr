@@ -96,31 +96,26 @@ function rmNoise_unpackFrame(data) {
 // ── Resampling ─────────────────────────────────────────────────────────────────
 
 /**
- * Resample a Float32Array from fromRate to toRate using OfflineAudioContext.
- * High-quality browser-native resampling (async).
+ * Resample a Float32Array from fromRate to toRate using synchronous linear
+ * interpolation.  Synchronous execution is critical: rmNoise_process() is
+ * called on every audio packet and must not suspend mid-accumulator-update,
+ * otherwise concurrent invocations corrupt rmNoise.accumIn / accumOut.
  */
-async function rmNoise_resample(float32, fromRate, toRate) {
+function rmNoise_resample(float32, fromRate, toRate) {
     if (fromRate === toRate) return float32.slice();
-    const outLen = Math.max(1, Math.ceil(float32.length * toRate / fromRate));
-    try {
-        const ctx = new OfflineAudioContext(1, outLen, toRate);
-        const buf = ctx.createBuffer(1, float32.length, fromRate);
-        buf.getChannelData(0).set(float32);
-        const src = ctx.createBufferSource();
-        src.buffer = buf;
-        src.connect(ctx.destination);
-        src.start(0);
-        const rendered = await ctx.startRendering();
-        return rendered.getChannelData(0);
-    } catch (e) {
-        // Fallback: nearest-neighbour (no async context available)
-        const out = new Float32Array(outLen);
-        const ratio = float32.length / outLen;
-        for (let i = 0; i < outLen; i++) {
-            out[i] = float32[Math.min(Math.round(i * ratio), float32.length - 1)];
-        }
-        return out;
+    const ratio  = fromRate / toRate;
+    const outLen = Math.max(1, Math.ceil(float32.length / ratio));
+    const out    = new Float32Array(outLen);
+    const last   = float32.length - 1;
+    for (let i = 0; i < outLen; i++) {
+        const pos  = i * ratio;
+        const idx  = Math.floor(pos);
+        const frac = pos - idx;
+        const a    = float32[idx       <= last ? idx       : last];
+        const b    = float32[idx + 1   <= last ? idx + 1   : last];
+        out[i] = a + frac * (b - a);
     }
+    return out;
 }
 
 // ── Audio processing ───────────────────────────────────────────────────────────
@@ -133,7 +128,7 @@ async function rmNoise_resample(float32, fromRate, toRate) {
  * @param {number}       sampleRate  current server sample rate
  * @returns {Float32Array|null}  denoised samples at sampleRate, or null if not ready
  */
-async function rmNoise_process(audioFloat, sampleRate) {
+function rmNoise_process(audioFloat, sampleRate) {
     if (!rmNoise.ready || !rmNoise.dc || rmNoise.dc.readyState !== 'open') {
         return null;
     }
@@ -160,7 +155,7 @@ async function rmNoise_process(audioFloat, sampleRate) {
 
         try {
             // Downsample to 8 kHz
-            const pcm8k_f32 = await rmNoise_resample(chunk, sampleRate, RM_RATE);
+            const pcm8k_f32 = rmNoise_resample(chunk, sampleRate, RM_RATE);
 
             // Trim/pad to exactly RM_FRAME samples
             let frame8k = pcm8k_f32;
@@ -224,7 +219,7 @@ async function rmNoise_process(audioFloat, sampleRate) {
         rmNoise.accumOut = rmNoise.accumOut.slice(n8kNeeded);
 
         // Upsample from 8 kHz → sampleRate
-        const upsampled = await rmNoise_resample(chunk8k, RM_RATE, sampleRate);
+        const upsampled = rmNoise_resample(chunk8k, RM_RATE, sampleRate);
 
         // Trim or zero-pad to exactly nIn samples
         if (upsampled.length >= nIn) {
@@ -399,6 +394,7 @@ async function rmNoise_setupWebRTC(ws, iceServers) {
     rmNoise.pc = pc;
 
     const dc = pc.createDataChannel('audio', { ordered: false, maxRetransmits: 0 });
+    dc.binaryType = 'arraybuffer';   // must be set before onmessage fires
     rmNoise.dc = dc;
 
     dc.onopen = () => {
@@ -758,11 +754,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        // Right-click always opens config modal
-        rmnBtn.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            openRMNoiseModal();
-        });
     }
 
     // Load saved credentials into modal fields

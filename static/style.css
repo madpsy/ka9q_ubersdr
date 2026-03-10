@@ -3533,6 +3533,34 @@ input[type="range"]::-moz-range-thumb {
     text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
 }
 
+/* ── RMNoise button group (RMN + cog) ───────────────────────────────────────── */
+
+.rmn-btn-group {
+    display: inline-flex;
+    vertical-align: middle;
+}
+
+.rmn-btn-group button {
+    border: none;
+    cursor: pointer;
+    color: #fff;
+    font-weight: 600;
+    font-size: 13px;
+    transition: filter 0.15s;
+}
+
+.rmn-btn-group button:hover {
+    filter: brightness(1.2);
+}
+
+#rmn-cog-btn {
+    opacity: 0.75;
+}
+
+#rmn-cog-btn:hover {
+    opacity: 1;
+}
+
 /* ── RMNoise AI Denoising Modal ─────────────────────────────────────────────── */
 
 .rmnoise-modal-overlay {

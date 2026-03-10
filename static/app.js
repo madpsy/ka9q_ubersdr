@@ -2347,6 +2347,12 @@ async function handleBinaryMessage(data) {
                 }
             }
 
+            // Flush RMNoise pipeline — stale jitter frames from the old rate
+            // must not contaminate the new-rate upsample path.
+            if (window.rmNoise_onSampleRateChange) {
+                window.rmNoise_onSampleRateChange(sampleRate);
+            }
+
             log(`AudioContext recreated at ${sampleRate} Hz (eliminates Chrome resampling artifacts)`);
         }
 
@@ -2713,6 +2719,12 @@ async function handlePCMAudio(msg) {
                 }
                 log('❌ Failed to reinitialize NR2 - disabled', 'error');
             }
+        }
+
+        // Flush RMNoise pipeline — stale jitter frames from the old rate
+        // must not contaminate the new-rate upsample path.
+        if (window.rmNoise_onSampleRateChange) {
+            window.rmNoise_onSampleRateChange(msg.sampleRate);
         }
 
         log(`AudioContext recreated at ${msg.sampleRate} Hz (eliminates Chrome resampling artifacts)`);

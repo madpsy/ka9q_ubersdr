@@ -605,6 +605,11 @@ async function rmNoise_setupWebRTC(ws, iceServers) {
     };
 
     dc.onmessage = (ev) => {
+        // Discard frames that arrived within 300 ms of a sample-rate change.
+        // They were sent at the old rate and will corrupt the new pipeline.
+        if (rmNoise.rateChangedAt && performance.now() - rmNoise.rateChangedAt < 300) {
+            return;
+        }
         try {
             const { frameNum, scale, pcm } = rmNoise_unpackFrame(ev.data);
 
@@ -981,13 +986,36 @@ document.addEventListener('DOMContentLoaded', () => {
     rmNoise_updateButton();
 });
 
+// ── Sample-rate change flush ───────────────────────────────────────────────────
+//
+// Called by app.js from both the Opus and PCM AudioContext-recreation blocks
+// whenever the server sample rate changes (e.g. switching from LSB/USB to AM/FM).
+// Must be called BEFORE rmNoise_process() receives the first frame at the new rate.
+//
+function rmNoise_onSampleRateChange(newRate) {
+    if (!window.rmNoiseBridge || !window.rmNoiseBridge.enabled) return;
+    rmNoise_log(`Sample rate changed to ${newRate} Hz — flushing pipeline`);
+
+    rmNoise.inputRate     = newRate;
+    rmNoise.accumIn       = new Float32Array(0);
+    rmNoise.accumOut      = new Float32Array(0);
+    rmNoise.jitterBuf     = [];           // critical: discard stale 8 kHz frames
+    rmNoise.primed        = false;
+    rmNoise.frameNum      = BigInt(0);
+    rmNoise.sendTimes.clear();
+    rmNoise.rateChangedAt = performance.now(); // arms the 300 ms in-flight discard window
+    rmNoise.downsampleOSB = null;
+    rmNoise.upsampleOSB   = null;
+}
+
 // ── Expose globals for app.js ──────────────────────────────────────────────────
 window.toggleRMNoise        = toggleRMNoise;
 window.toggleRMNoiseQuick   = toggleRMNoiseQuick;
 window.toggleRMNoiseBypass  = toggleRMNoiseBypass;
 window.openRMNoiseModal     = openRMNoiseModal;
 window.closeRMNoiseModal    = closeRMNoiseModal;
-window.rmNoise_saveCredentials  = rmNoise_saveCredentials;
-window.rmNoise_onFilterChanged  = rmNoise_onFilterChanged;
-window.rmNoise_onMixChanged     = rmNoise_onMixChanged;
-window.rmNoise_process          = rmNoise_process;
+window.rmNoise_saveCredentials      = rmNoise_saveCredentials;
+window.rmNoise_onFilterChanged      = rmNoise_onFilterChanged;
+window.rmNoise_onMixChanged         = rmNoise_onMixChanged;
+window.rmNoise_process              = rmNoise_process;
+window.rmNoise_onSampleRateChange   = rmNoise_onSampleRateChange;

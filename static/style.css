@@ -3588,9 +3588,9 @@ input[type="range"]::-moz-range-thumb {
     background: #1e2530;
     border: 1px solid #3a4555;
     border-radius: 8px;
-    width: 520px;
+    width: 560px;
     max-width: 95vw;
-    max-height: 90vh;
+    max-height: 95vh;
     overflow-x: hidden;
     overflow-y: auto;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);

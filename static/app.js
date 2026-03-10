@@ -2376,11 +2376,20 @@ async function handleBinaryMessage(data) {
         if (window.rmNoiseBridge && window.rmNoiseBridge.enabled) {
             try {
                 const denoised = window.rmNoise_process(monoData, sampleRate);
-                if (denoised !== null && !window.rmNoiseBridge.bypass) {
-                    monoData = denoised;
+                if (denoised !== null) {
+                    const mix = window.rmNoiseBridge.mixRatio ?? 1.0;
+                    if (mix >= 1.0) {
+                        monoData = denoised;
+                    } else if (mix > 0.0) {
+                        const blended = new Float32Array(monoData.length);
+                        for (let i = 0; i < monoData.length; i++) {
+                            blended[i] = denoised[i] * mix + monoData[i] * (1 - mix);
+                        }
+                        monoData = blended;
+                    }
+                    // mix === 0.0: keep original monoData unchanged
                     rmNoiseActive = true;
                 }
-                // bypass=true: bridge stays fed but original audio plays through
             } catch (rmErr) {
                 console.error('[RMNoise] process error:', rmErr);
             }
@@ -2738,8 +2747,18 @@ async function handlePCMAudio(msg) {
     if (window.rmNoiseBridge && window.rmNoiseBridge.enabled) {
         try {
             const denoised = window.rmNoise_process(pcmMono, msg.sampleRate);
-            if (denoised !== null && !window.rmNoiseBridge.bypass) {
-                pcmMono = denoised;
+            if (denoised !== null) {
+                const mix = window.rmNoiseBridge.mixRatio ?? 1.0;
+                if (mix >= 1.0) {
+                    pcmMono = denoised;
+                } else if (mix > 0.0) {
+                    const blended = new Float32Array(pcmMono.length);
+                    for (let i = 0; i < pcmMono.length; i++) {
+                        blended[i] = denoised[i] * mix + pcmMono[i] * (1 - mix);
+                    }
+                    pcmMono = blended;
+                }
+                // mix === 0.0: keep original pcmMono unchanged
             }
         } catch (rmErr) {
             console.error('[RMNoise] process error (PCM path):', rmErr);

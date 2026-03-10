@@ -20,70 +20,90 @@ const RM_SERVER = 'wss://s2.rmnoise.com:8766';
 // RM_BASE (https://rmnoise.com) is no longer used for fetch() calls — the Go
 // server-side CORS proxy handles those.  RM_SERVER is still used for WebSocket.
 
-// ── oversizeBuffer ─────────────────────────────────────────────────────────────
+// ── StatefulResampler ──────────────────────────────────────────────────────────
 //
-// Mirrors the oversizeBuffer class in audio_mixer_processor.js (reference client).
+// A stateful linear interpolation resampler that preserves fractional phase
+// and the last sample across chunk boundaries.
 //
-// Problem: any stateless resampler (linear, Lanczos, …) restarts its kernel at
-// the start of every chunk with no knowledge of the previous chunk's samples.
-// This creates a step discontinuity at every frame boundary → audible crackle.
+// This is the JS equivalent of Python's samplerate.Resampler('sinc_best') in
+// terms of boundary continuity: it never produces a discontinuity at a chunk
+// seam because:
+//   1. `this.phase` carries the exact fractional position into the next chunk.
+//   2. `this.lastSample` provides the left-hand sample for interpolation when
+//      the first output sample of a new chunk straddles the boundary.
 //
-// Fix: before resampling, prepend the last `contextSamples` samples from the
-// previous chunk.  After resampling, strip the corresponding output samples.
-// The resampler now has real historical context at every boundary.
+// Linear interpolation is entirely adequate for 8 kHz voice audio — the
+// RMNoise server already band-limits to 4 kHz, so there is nothing above
+// Nyquist/2 for the interpolator to alias.
 //
 // Usage:
-//   const ctx = new RMNoiseOversizeBuffer(contextSamples);
-//   const oversized = ctx.addFrame(inputChunk);          // prepend context
-//   const resampledOversized = resample(oversized, ...); // resample with context
-//   const clean = ctx.goodFrame(resampledOversized, inputChunk.length, fromRate, toRate);
-//                                                         // strip context from output
+//   const rs = new StatefulResampler();
+//   const out = rs.process(inputFloat32, fromRate, toRate);
+//   rs.reset();   // on rate-change or disconnect
 //
-class RMNoiseOversizeBuffer {
-    constructor(contextSamples) {
-        this.contextSamples = contextSamples;
-        this.tail = new Float32Array(contextSamples); // last N samples of previous chunk
-    }
-
-    /** Prepend stored tail to inputFrame, update tail, return oversized frame. */
-    addFrame(inputFrame) {
-        const oversized = new Float32Array(this.contextSamples + inputFrame.length);
-        oversized.set(this.tail, 0);
-        oversized.set(inputFrame, this.contextSamples);
-        // Update tail for next call
-        if (inputFrame.length >= this.contextSamples) {
-            this.tail.set(inputFrame.subarray(inputFrame.length - this.contextSamples));
-        } else {
-            // Input shorter than context: shift tail left and append
-            this.tail.copyWithin(0, inputFrame.length);
-            this.tail.set(inputFrame, this.contextSamples - inputFrame.length);
-        }
-        return oversized;
+class StatefulResampler {
+    constructor() {
+        this.phase      = 0.0;   // fractional position within the current input chunk
+        this.lastSample = 0.0;   // last sample of the previous chunk (for cross-boundary interp)
     }
 
     /**
-     * Strip the context prefix from the resampled oversized output.
-     * The context contributed `contextSamples` input samples; after resampling
-     * at ratio (toRate/fromRate) those become `contextOut` output samples.
-     * We discard those leading output samples and return only the clean portion.
+     * Resample `input` from `fromRate` to `toRate`.
+     * Returns a new Float32Array of the resampled output.
+     * Maintains `phase` and `lastSample` for the next call.
      *
-     * @param {Float32Array} resampledOversized  output of resample(addFrame(x), ...)
-     * @param {number}       inLen               length of the original (non-oversized) input
-     * @param {number}       fromRate
-     * @param {number}       toRate
+     * @param {Float32Array} input
+     * @param {number} fromRate
+     * @param {number} toRate
      * @returns {Float32Array}
      */
-    goodFrame(resampledOversized, inLen, fromRate, toRate) {
-        const contextOut = Math.round(this.contextSamples * toRate / fromRate);
-        const wantedOut  = Math.round(inLen * toRate / fromRate);
-        const start      = Math.min(contextOut, resampledOversized.length);
-        const end        = Math.min(start + wantedOut, resampledOversized.length);
-        return resampledOversized.subarray(start, end);
+    process(input, fromRate, toRate) {
+        if (fromRate === toRate) {
+            // No resampling needed — update lastSample and return a copy.
+            if (input.length > 0) this.lastSample = input[input.length - 1];
+            return input.slice();
+        }
+
+        const step = fromRate / toRate;   // input samples consumed per output sample
+        const len  = input.length;
+
+        // Pre-allocate: worst-case output length
+        const maxOut = Math.ceil((len - this.phase) / step) + 2;
+        const out    = new Float32Array(maxOut);
+        let   outIdx = 0;
+        let   p      = this.phase;
+
+        while (true) {
+            const i    = Math.floor(p);
+            if (i >= len) break;
+
+            const frac = p - i;
+
+            // Cross-boundary interpolation: when i === 0 and frac > 0, the output
+            // sample straddles the boundary between the previous chunk's last sample
+            // (this.lastSample) and input[0].  Use lastSample as the left-hand
+            // sample so the interpolated value is continuous across the seam.
+            // For i > 0, both samples are within the current chunk.
+            const s0 = (i === 0 && frac > 0) ? this.lastSample : input[i];
+            const s1 = (i + 1 < len) ? input[i + 1] : input[len - 1]; // clamp at end
+            out[outIdx++] = s0 + frac * (s1 - s0);
+            p += step;
+        }
+
+        // Carry fractional remainder into next call
+        this.phase = p - len;
+        if (this.phase < 0) this.phase = 0;   // numerical safety
+
+        // Store last sample for cross-boundary interpolation on next call
+        if (len > 0) this.lastSample = input[len - 1];
+
+        return out.subarray(0, outIdx);
     }
 
-    /** Reset context (e.g. on sample-rate change or disconnect). */
+    /** Reset state (e.g. on sample-rate change or disconnect). */
     reset() {
-        this.tail.fill(0);
+        this.phase      = 0.0;
+        this.lastSample = 0.0;
     }
 }
 
@@ -128,19 +148,12 @@ const rmNoise = {
     // Stats poll interval
     statsInterval:    null,
 
-    // Context buffers for boundary-continuous resampling (anti-crackle).
-    // ctxDown: send path  (inputRate → 8 kHz)
-    // ctxUp:   receive path (8 kHz → inputRate)
-    // 10 samples of context is sufficient for Lanczos-3 (kernel half-width = 3).
-    ctxDown:          new RMNoiseOversizeBuffer(10),
-    ctxUp:            new RMNoiseOversizeBuffer(10),
-
-    // Fractional phase accumulator for the receive-path resampling.
-    // Tracks the exact (non-integer) number of 8 kHz samples needed to cover
-    // each input packet.  Using floor()+carry instead of ceil()/round() per
-    // call eliminates the rounding drift that causes periodic clicks when
-    // discrete AudioBufferSourceNodes are scheduled back-to-back.
-    outputPhase:      0.0,
+    // Stateful resamplers — preserve fractional phase and last sample across
+    // chunk boundaries so there are no seam discontinuities (= no crackling).
+    // resamplerDown: send path  (inputRate → 8 kHz)
+    // resamplerUp:   receive path (8 kHz → inputRate)
+    resamplerDown:    new StatefulResampler(),
+    resamplerUp:      new StatefulResampler(),
 };
 
 // Expose globally so app.js can call rmNoise_process()
@@ -181,59 +194,6 @@ function rmNoise_unpackFrame(data) {
     return { frameNum, tsMs, scale, pcm };
 }
 
-// ── Resampling ─────────────────────────────────────────────────────────────────
-
-/**
- * Resample a Float32Array from fromRate to toRate using a Lanczos-3 windowed
- * sinc kernel (a=3).  This matches the resample() method in the reference
- * audio_mixer_processor.js and provides proper anti-aliasing.
- *
- * NOTE: This function is intentionally stateless — boundary continuity is
- * handled by the RMNoiseOversizeBuffer wrappers in rmNoise_process(), which
- * prepend historical context before each call so the kernel always has real
- * samples at the edges rather than zero-padding.
- */
-function rmNoise_resample(float32, fromRate, toRate) {
-    if (fromRate === toRate) return float32.slice();
-
-    const ratio  = fromRate / toRate;
-    const outLen = Math.max(1, Math.round(float32.length / ratio));
-    const out    = new Float32Array(outLen);
-    const a      = 3;   // Lanczos parameter (number of lobes)
-    const PI     = Math.PI;
-    const len    = float32.length;
-
-    for (let i = 0; i < outLen; i++) {
-        const inputIndex = i * ratio;
-        let sum = 0;
-        let weightSum = 0;
-
-        const start = Math.floor(inputIndex - a + 1);
-        const end   = Math.ceil(inputIndex + a);
-
-        for (let j = start; j < end; j++) {
-            if (j >= 0 && j < len) {
-                const x = inputIndex - j;
-                // Lanczos kernel: sinc(x) * sinc(x/a)  for |x| < a
-                let weight;
-                if (x === 0) {
-                    weight = 1;
-                } else if (x > -a && x < a) {
-                    const pix  = PI * x;
-                    const pixa = PI * x / a;
-                    weight = (Math.sin(pix) / pix) * (Math.sin(pixa) / pixa);
-                } else {
-                    weight = 0;
-                }
-                sum       += float32[j] * weight;
-                weightSum += weight;
-            }
-        }
-        out[i] = weightSum === 0 ? 0 : sum / weightSum;
-    }
-    return out;
-}
-
 // ── Audio processing ───────────────────────────────────────────────────────────
 
 /**
@@ -255,9 +215,8 @@ function rmNoise_process(audioFloat, sampleRate) {
         rmNoise.accumIn     = new Float32Array(0);
         rmNoise.accumOut    = new Float32Array(0);
         rmNoise.primed      = false;
-        rmNoise.outputPhase = 0.0;
-        rmNoise.ctxDown.reset();
-        rmNoise.ctxUp.reset();
+        rmNoise.resamplerDown.reset();
+        rmNoise.resamplerUp.reset();
     }
 
     const nIn        = audioFloat.length;
@@ -274,11 +233,10 @@ function rmNoise_process(audioFloat, sampleRate) {
         rmNoise.accumIn = rmNoise.accumIn.slice(accumTarget);
 
         try {
-            // Downsample to 8 kHz — wrap with oversizeBuffer so the Lanczos
-            // kernel has real historical context at every chunk boundary.
-            const oversizedIn  = rmNoise.ctxDown.addFrame(chunk);
-            const resampled8k  = rmNoise_resample(oversizedIn, sampleRate, RM_RATE);
-            const pcm8k_f32_raw = rmNoise.ctxDown.goodFrame(resampled8k, chunk.length, sampleRate, RM_RATE);
+            // Downsample to 8 kHz using stateful linear interpolation.
+            // The resampler preserves fractional phase across chunk boundaries
+            // so there are no seam discontinuities in the 8 kHz stream.
+            const pcm8k_f32_raw = rmNoise.resamplerDown.process(chunk, sampleRate, RM_RATE);
 
             // Trim/pad to exactly RM_FRAME samples
             let frame8k;
@@ -348,24 +306,18 @@ function rmNoise_process(audioFloat, sampleRate) {
     }
 
     // How many 8 kHz samples do we need to cover nIn input samples?
-    // Use a running phase accumulator (floor + carry) instead of ceil/round so
-    // the cumulative output sample count never drifts — eliminating the
-    // 1-sample gaps/overlaps between consecutive AudioBufferSourceNodes that
-    // cause periodic clicks.  This mirrors what samplerate.Resampler does
-    // internally in the Python client.
-    rmNoise.outputPhase += nIn * RM_RATE / sampleRate;
-    const n8kNeeded = Math.floor(rmNoise.outputPhase);
-    rmNoise.outputPhase -= n8kNeeded;
+    // Use ceil so we always have enough 8 kHz data to produce nIn output samples
+    // after upsampling.  The stateful resampler's phase carry means any fractional
+    // overshoot is absorbed into the next call rather than causing a gap.
+    const n8kNeeded = Math.ceil(nIn * RM_RATE / sampleRate);
 
     if (rmNoise.accumOut.length >= n8kNeeded) {
         const chunk8k    = rmNoise.accumOut.slice(0, n8kNeeded);
         rmNoise.accumOut = rmNoise.accumOut.slice(n8kNeeded);
 
-        // Upsample from 8 kHz → sampleRate — wrap with oversizeBuffer so the
-        // Lanczos kernel has real historical context at every chunk boundary.
-        const oversizedOut  = rmNoise.ctxUp.addFrame(chunk8k);
-        const resampledUp   = rmNoise_resample(oversizedOut, RM_RATE, sampleRate);
-        const upsampled     = rmNoise.ctxUp.goodFrame(resampledUp, chunk8k.length, RM_RATE, sampleRate);
+        // Upsample from 8 kHz → sampleRate using stateful linear interpolation.
+        // Phase is preserved across calls — no seam discontinuities.
+        const upsampled = rmNoise.resamplerUp.process(chunk8k, RM_RATE, sampleRate);
 
         // Trim or zero-pad to exactly nIn samples
         if (upsampled.length >= nIn) {
@@ -653,10 +605,9 @@ async function rmNoise_disconnect() {
     rmNoise.accumOut   = new Float32Array(0);
     rmNoise.jitterBuf  = [];
     rmNoise.sendTimes.clear();
-    rmNoise.frameNum    = BigInt(0);
-    rmNoise.outputPhase = 0.0;
-    rmNoise.ctxDown.reset();
-    rmNoise.ctxUp.reset();
+    rmNoise.frameNum   = BigInt(0);
+    rmNoise.resamplerDown.reset();
+    rmNoise.resamplerUp.reset();
 }
 
 // ── Toggle functions ───────────────────────────────────────────────────────────

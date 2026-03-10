@@ -136,20 +136,20 @@ func handleRMNoiseLogin(w http.ResponseWriter, r *http.Request) {
 
 	loginURL, _ := url.Parse("https://rmnoise.com")
 	cookies := jar.Cookies(loginURL)
-	log.Printf("RMNoise proxy: login HTTP %d, cookies after login (%d): %v",
-		resp.StatusCode, len(cookies), cookies)
 
 	// Successful login: server returns 302 → /users2/home (followed by client to 200).
 	// Failed login: server returns 200 directly with the login page HTML.
 	// Since we follow redirects, a success lands on HTTP 200 at /users2/home.
 	// We detect failure by checking if the final URL is still the login page.
 	if resp.StatusCode != http.StatusOK {
+		log.Printf("RMNoise proxy: login failed for user %q (HTTP %d)", req.Username, resp.StatusCode)
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprint(w, `{"ok":false,"error":"Invalid username or password"}`)
 		return
 	}
 	// If we ended up back at the login URL, credentials were wrong
 	if strings.Contains(resp.Request.URL.Path, "/users2/login") {
+		log.Printf("RMNoise proxy: login failed for user %q (redirected back to login page)", req.Username)
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprint(w, `{"ok":false,"error":"Invalid username or password"}`)
 		return
@@ -165,7 +165,7 @@ func handleRMNoiseLogin(w http.ResponseWriter, r *http.Request) {
 	token := hex.EncodeToString(tokenBytes)
 
 	rmNoiseSessions.Store(token, rmNoiseSession{jar: jar, createdAt: time.Now()})
-	log.Printf("RMNoise proxy: login OK, session created (token prefix: %s…), %d cookies stored", token[:8], len(cookies))
+	log.Printf("RMNoise proxy: login OK for user %q (%d cookies stored)", req.Username, len(cookies))
 
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, `{"ok":true,"token":"%s"}`, token)
@@ -199,11 +199,6 @@ func handleRMNoiseWebRTCToken(w http.ResponseWriter, r *http.Request) {
 	}
 	sess := val.(rmNoiseSession)
 
-	// Log cookies being sent
-	targetURL, _ := url.Parse("https://rmnoise.com")
-	cookies := sess.jar.Cookies(targetURL)
-	log.Printf("RMNoise proxy: webrtc_token sending %d cookies: %v", len(cookies), cookies)
-
 	client := &http.Client{Jar: sess.jar, Timeout: 15 * time.Second}
 
 	// Match Python client exactly: Content-Type: application/json, no body
@@ -220,7 +215,7 @@ func handleRMNoiseWebRTCToken(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	log.Printf("RMNoise proxy: webrtc_token HTTP %d, body: %.200s", resp.StatusCode, string(body))
+	log.Printf("RMNoise proxy: webrtc_token HTTP %d", resp.StatusCode)
 
 	// Never forward HTML to the client — it means the session is not authenticated
 	if isHTMLResponse(resp, body) {
@@ -277,7 +272,7 @@ func handleRMNoiseTURNCreds(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	log.Printf("RMNoise proxy: turn_creds HTTP %d, body: %.200s", resp.StatusCode, string(body))
+	log.Printf("RMNoise proxy: turn_creds HTTP %d", resp.StatusCode)
 
 	// Never forward HTML to the client — it means the session is not authenticated
 	if isHTMLResponse(resp, body) {

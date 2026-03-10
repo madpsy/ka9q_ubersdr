@@ -202,9 +202,14 @@ const rmNoise = {
     filterNumber:     1,
     availableFilters: [],
 
-    // Jitter buffer (stores Float32Array frames at 8 kHz)
+    // Jitter buffer (stores Float32Array frames at 8 kHz).
+    // Each frame is 384 samples = 48 ms.  Keep at most ~1 s (20 frames) here;
+    // accumOut is separately capped at ~500 ms so the total pipeline latency
+    // stays bounded.  The old value of 256 (≈12 s) allowed the buffer to grow
+    // enormous during network bursts, causing loud pops when frames were
+    // eventually dropped.
     jitterBuf:        [],
-    jitterMax:        256,
+    jitterMax:        20,
 
     // Accumulators
     accumIn:          new Float32Array(0),   // input samples at inputRate
@@ -371,6 +376,23 @@ function rmNoise_process(audioFloat, sampleRate) {
         merged.set(rmNoise.accumOut);
         merged.set(frame, rmNoise.accumOut.length);
         rmNoise.accumOut = merged;
+    }
+
+    // Cap accumOut to prevent unbounded growth during network bursts.
+    // If the backlog exceeds ~500 ms of 8 kHz audio (4000 samples), drop the
+    // oldest samples so the output stays close to real-time.  Without this cap,
+    // a burst of server frames fills accumOut far ahead of the playback cursor;
+    // when the jitter buffer later hits its own limit and drops whole frames,
+    // there is a hard discontinuity in accumOut that plays as a loud pop.
+    //
+    // When we trim, also reset the upsampleOSB context buffer.  It holds the
+    // tail of the audio that is about to be discarded; if we leave it intact
+    // the Lanczos kernel will bridge across the discontinuity and produce a
+    // transient artifact on the very next upsample call.
+    const accumOutMax = 4000;   // ~500 ms at 8 kHz
+    if (rmNoise.accumOut.length > accumOutMax) {
+        rmNoise.accumOut = rmNoise.accumOut.slice(rmNoise.accumOut.length - accumOutMax);
+        if (rmNoise.upsampleOSB) rmNoise.upsampleOSB.reset();
     }
 
     // Wait until we have primeFrames worth of 8 kHz data buffered before

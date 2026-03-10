@@ -55,7 +55,7 @@ def unpack_frame(data: bytes) -> tuple:
 # ── WebRTC / WebSocket client ──────────────────────────────────────────────────
 
 class RMNoiseClient:
-    """Handles login, JWT, TURN, WebSocket signaling, and WebRTC data channel."""
+    """Handles authentication, WebSocket signalling, and WebRTC data channel for rmnoise.com."""
 
     SERVERS = [
         "wss://s2.rmnoise.com:8766",

@@ -9,11 +9,12 @@
 - Added **IQ Recorder** with automated scheduling. Stand alone desktop application available from the https://ubersdr.org website
 
 ### Improvements
-- Added **Signal data for recordings** when recording audio the ZIP now also contains power data, once per second, in CSV format.
+- Added **Signal data for recordings** when recording audio the ZIP now also contains power data, once per second, in CSV format
 - Changed **SSB maximum bandwidth** to 6 KHz for ESSB listening
 - Migrated **FT2/4/8 decoding** from WAV file record -> jt9 processing model to purely in-memory using a circular buffer and IPC. WSPR still uses WAV -> wsprd. This is how WSJT-X does it.
 
 ### In Progress (Coming Soon)
+- RMNoise.com integration for SSB & CW noise reduction
 - CW Skimmer (SkimSrv) as a Docker container (thanks to K1RA for making me aware this was possible)
 
 ## Version 0.1.41

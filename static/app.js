@@ -3962,6 +3962,11 @@ function setMode(mode, preserveBandwidth = false) {
         spectrumDisplay.updateSnapCheckboxState();
     }
 
+    // Update RMNoise mode support (only USB/LSB/CWU/CWL are supported)
+    if (window.rmNoise_updateModeSupport) {
+        window.rmNoise_updateModeSupport(mode);
+    }
+
     // Auto-connect if not connected
     if (!wsManager.isConnected()) {
         connect();

@@ -984,7 +984,87 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialise button state
     rmNoise_updateButton();
+
+    // Apply mode gating for the initial mode.
+    // Deferred so app.js has time to set window.currentMode from URL params.
+    setTimeout(() => {
+        const initialMode = window.currentMode || 'usb';
+        if (window.rmNoise_updateModeSupport) {
+            window.rmNoise_updateModeSupport(initialMode);
+        }
+    }, 0);
 });
+
+// ── Mode support gating ────────────────────────────────────────────────────────
+//
+// RMNoise only makes sense for SSB/CW modes (USB, LSB, CWU, CWL).
+// For AM, FM, NFM, SAM, WFM etc. the denoiser produces garbage because the
+// audio bandwidth and spectral character are completely different.
+//
+// Called by app.js setMode() on every mode change and on initial page load.
+//
+const RM_SUPPORTED_MODES = new Set(['usb', 'lsb', 'cwu', 'cwl']);
+
+function rmNoise_isModeSupported(mode) {
+    return RM_SUPPORTED_MODES.has((mode || '').toLowerCase());
+}
+
+/**
+ * Update RMNoise UI and connection state for the given mode.
+ * - Supported modes  (USB/LSB/CWU/CWL): enable button + checkbox
+ * - Unsupported modes (AM/FM/NFM/…):    disable button + checkbox, disconnect if active
+ */
+async function rmNoise_updateModeSupport(mode) {
+    const supported = rmNoise_isModeSupported(mode);
+
+    const btn     = document.getElementById('rmn-quick-toggle');
+    const cogBtn  = document.getElementById('rmn-cog-btn');
+    const cb      = document.getElementById('rmnoise-enable-checkbox');
+
+    if (supported) {
+        // Re-enable controls
+        if (btn) {
+            btn.disabled = false;
+            btn.title    = 'Toggle RM Noise AI Denoising';
+            btn.style.opacity = '';
+            btn.style.cursor  = '';
+        }
+        if (cogBtn) {
+            cogBtn.disabled = false;
+            cogBtn.style.opacity = '';
+            cogBtn.style.cursor  = '';
+        }
+        if (cb) {
+            cb.disabled = false;
+        }
+    } else {
+        // Disable controls
+        if (btn) {
+            btn.disabled = true;
+            btn.title    = 'RMNoise is only available in USB / LSB / CWU / CWL modes';
+            btn.style.opacity = '0.4';
+            btn.style.cursor  = 'not-allowed';
+        }
+        if (cogBtn) {
+            cogBtn.disabled = true;
+            cogBtn.style.opacity = '0.4';
+            cogBtn.style.cursor  = 'not-allowed';
+        }
+        if (cb) {
+            cb.disabled = true;
+        }
+
+        // Disconnect if currently active
+        if (rmNoise.enabled || rmNoise.ready || rmNoise.connecting) {
+            rmNoise_log(`Mode changed to ${mode.toUpperCase()} — RMNoise disabled (unsupported mode)`);
+            rmNoise.enabled = false;
+            await rmNoise_disconnect();
+            rmNoise_setStatus('Disabled (unsupported mode)', 'grey');
+            rmNoise_updateButton();
+            rmNoise_syncCheckbox();
+        }
+    }
+}
 
 // ── Sample-rate change flush ───────────────────────────────────────────────────
 //
@@ -1019,3 +1099,5 @@ window.rmNoise_onFilterChanged      = rmNoise_onFilterChanged;
 window.rmNoise_onMixChanged         = rmNoise_onMixChanged;
 window.rmNoise_process              = rmNoise_process;
 window.rmNoise_onSampleRateChange   = rmNoise_onSampleRateChange;
+window.rmNoise_updateModeSupport    = rmNoise_updateModeSupport;
+window.rmNoise_isModeSupported      = rmNoise_isModeSupported;

@@ -22,17 +22,24 @@ const RM_SERVER = 'wss://s2.rmnoise.com:8766';
 
 // ── StatefulResampler ──────────────────────────────────────────────────────────
 //
-// A stateful windowed-sinc resampler with proper anti-aliasing / anti-imaging
-// filtering and FIR delay-line state preservation across chunk boundaries.
+// A stateful linear interpolation resampler that preserves fractional phase
+// AND the last input sample across chunk boundaries.
 //
-// This mirrors the Python client's use of samplerate.Resampler('sinc_best')
-// (libsamplerate) which eliminated crackling caused by the previous linear
-// interpolation resampler.  Linear interpolation only attenuates spectral
-// images by ~13 dB; this Kaiser-windowed sinc filter achieves >60 dB rejection.
+// Mirrors the Python client's samplerate.Resampler statefulness: the key
+// property that eliminates crackling is that the resampler's internal state
+// carries across chunk boundaries so there are no transient artifacts at
+// frame edges.
 //
-// The FIR delay line (this.history) carries across chunk boundaries so there
-// are no transient discontinuities at frame edges — the same property that
-// makes libsamplerate's stateful mode crackle-free.
+// The previous implementation only carried `phase` but used clamping
+// (`input[len-1]`) when the interpolator needed the next sample beyond the
+// chunk boundary.  This created a tiny flat segment at every chunk edge —
+// audible as periodic crackling.  By also carrying `lastSamp` (the final
+// sample of the previous chunk), the interpolator can smoothly bridge the
+// gap between consecutive chunks.
+//
+// Linear interpolation is adequate for 8 kHz voice audio — the RMNoise
+// server band-limits to 4 kHz, and the ratios involved (8k↔12k, 8k↔24k)
+// are modest enough that imaging artifacts are inaudible.
 //
 // Usage:
 //   const rs = new StatefulResampler();
@@ -40,43 +47,16 @@ const RM_SERVER = 'wss://s2.rmnoise.com:8766';
 //   rs.reset();   // on rate-change or disconnect
 //
 class StatefulResampler {
-    /**
-     * @param {number} [taps=32] - Number of sinc filter taps (half-width).
-     *   Total filter length is 2*taps+1.  32 gives >60 dB stopband attenuation
-     *   with a Kaiser window (beta=6).  This is more than adequate for 8 kHz
-     *   voice audio resampling.
-     */
-    constructor(taps = 32) {
-        this.TAPS    = taps;
-        this.phase   = 0.0;       // fractional position carry
-        this.history = null;      // Float32Array delay line, lazily allocated
-        this._lastFromRate = 0;
-        this._lastToRate   = 0;
-    }
-
-    /**
-     * Compute a Kaiser window value.
-     * I0(beta) is the zeroth-order modified Bessel function of the first kind.
-     * @param {number} x
-     * @returns {number}
-     */
-    static _I0(x) {
-        // Series expansion of I0(x), converges quickly for typical beta values
-        let sum = 1.0;
-        let term = 1.0;
-        const halfX = x * 0.5;
-        for (let k = 1; k <= 25; k++) {
-            term *= (halfX / k) * (halfX / k);
-            sum += term;
-            if (term < 1e-12 * sum) break;
-        }
-        return sum;
+    constructor() {
+        this.phase    = 0.0;    // fractional position carry from previous call
+        this.lastSamp = 0.0;   // last sample of previous chunk
+        this.hasLast  = false;  // true once we've processed at least one chunk
     }
 
     /**
      * Resample `input` from `fromRate` to `toRate`.
      * Returns a Float32Array of the resampled output.
-     * Maintains phase and FIR delay-line state for the next call.
+     * Maintains `phase` and `lastSamp` for the next call.
      *
      * @param {Float32Array} input
      * @param {number} fromRate
@@ -85,131 +65,57 @@ class StatefulResampler {
      */
     process(input, fromRate, toRate) {
         if (fromRate === toRate) {
-            // Still feed the history buffer so a future rate change is seamless
-            if (this.history) {
-                const T = this.TAPS;
-                if (input.length >= T) {
-                    this.history.set(input.subarray(input.length - T));
-                } else {
-                    // Shift history left and append input
-                    const shift = T - input.length;
-                    this.history.copyWithin(0, input.length);
-                    this.history.set(input, shift);
-                }
+            if (input.length > 0) {
+                this.lastSamp = input[input.length - 1];
+                this.hasLast  = true;
             }
             return input.slice();
         }
 
-        // Detect rate change → rebuild filter kernel cache
-        if (fromRate !== this._lastFromRate || toRate !== this._lastToRate) {
-            this._lastFromRate = fromRate;
-            this._lastToRate   = toRate;
-            // Don't reset history on rate change — it's handled by the caller
-            // (rmNoise_process resets resamplers on rate change)
-        }
-
-        const T    = this.TAPS;
-        const step = fromRate / toRate;  // input samples consumed per output sample
+        const step = fromRate / toRate;   // input samples consumed per output sample
         const len  = input.length;
+        if (len === 0) return new Float32Array(0);
 
-        // Cutoff frequency: min(fromRate, toRate) / 2, normalised to input rate
-        // This is the anti-aliasing (downsampling) or anti-imaging (upsampling) cutoff
-        const cutoff = Math.min(fromRate, toRate) / (2.0 * fromRate);
-        // Gain compensation: when downsampling, scale by the ratio to preserve amplitude
-        const gain = 2.0 * cutoff;
+        // Sample accessor that can reach index -1 (previous chunk's last sample)
+        // and clamps at the end of the current chunk.
+        const last  = this.hasLast ? this.lastSamp : input[0];
+        const getSample = (idx) => {
+            if (idx < 0)    return last;
+            if (idx >= len) return input[len - 1];
+            return input[idx];
+        };
 
-        // Kaiser window parameter (beta=6 gives ~60 dB sidelobe attenuation)
-        const beta = 6.0;
-        const I0beta = StatefulResampler._I0(beta);
-
-        // Lazily allocate history buffer (stores the last T input samples from
-        // the previous chunk for filter overlap)
-        if (!this.history) {
-            this.history = new Float32Array(T);  // zero-initialised
-        }
-
-        // Build a virtual input array: [history | input]
-        // history has T samples, input has len samples
-        // Virtual index 0..T-1 = history, T..T+len-1 = input
-        // The resampler phase is relative to the input array (not virtual),
-        // so virtual position = phase + T
-
-        // Pre-allocate output
+        // Pre-allocate: worst-case output length
         const maxOut = Math.ceil((len - this.phase) / step) + 2;
-        const out    = new Float32Array(Math.max(maxOut, 1));
+        const out    = new Float32Array(maxOut);
         let   outIdx = 0;
         let   p      = this.phase;
 
         while (p < len) {
-            const center = p + T;  // center position in virtual array
-            let sample = 0.0;
-
-            // Convolve with windowed sinc kernel
-            for (let j = -T; j <= T; j++) {
-                const vi = Math.floor(center) + j;  // virtual index
-                let s;
-                if (vi < 0) {
-                    s = 0.0;  // before history — zero
-                } else if (vi < T) {
-                    s = this.history[vi];
-                } else if (vi - T < len) {
-                    s = input[vi - T];
-                } else {
-                    // Past end of input — use last sample (edge extension)
-                    s = input[len - 1];
-                }
-
-                // sinc argument: distance from the fractional center
-                const frac = center - Math.floor(center);
-                const d = j - frac;
-
-                // Windowed sinc value
-                let sincVal;
-                if (Math.abs(d) < 1e-7) {
-                    sincVal = 1.0;
-                } else {
-                    const pid = Math.PI * d;
-                    sincVal = Math.sin(2.0 * cutoff * pid) / (pid);
-                }
-
-                // Kaiser window
-                const wArg = d / T;
-                let win;
-                if (Math.abs(wArg) > 1.0) {
-                    win = 0.0;
-                } else {
-                    win = StatefulResampler._I0(beta * Math.sqrt(1.0 - wArg * wArg)) / I0beta;
-                }
-
-                sample += s * sincVal * win;
-            }
-
-            out[outIdx++] = sample;
+            const i    = Math.floor(p);
+            const frac = p - i;
+            const s0   = getSample(i);
+            const s1   = getSample(i + 1);
+            out[outIdx++] = s0 + frac * (s1 - s0);
             p += step;
         }
 
-        // Update history: store the last T samples of input
-        if (len >= T) {
-            this.history.set(input.subarray(len - T));
-        } else {
-            // Input shorter than T: shift history left, append input
-            this.history.copyWithin(0, len);
-            this.history.set(input, T - len);
-        }
+        // Save state for next chunk
+        this.lastSamp = input[len - 1];
+        this.hasLast  = true;
 
-        // Carry fractional remainder into next call
+        // Carry fractional remainder into next call (always >= 0)
         this.phase = p - len;
-        if (this.phase < 0) this.phase = 0;
+        if (this.phase < 0) this.phase = 0;   // numerical safety
 
         return out.subarray(0, outIdx);
     }
 
     /** Reset state (e.g. on sample-rate change or disconnect). */
     reset() {
-        this.phase   = 0.0;
-        this.history = null;
-        this._lastFromRate = 0;
-        this._lastToRate   = 0;
+        this.phase    = 0.0;
+        this.lastSamp = 0.0;
+        this.hasLast  = false;
     }
 }
 

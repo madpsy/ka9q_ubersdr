@@ -20,6 +20,73 @@ const RM_SERVER = 'wss://s2.rmnoise.com:8766';
 // RM_BASE (https://rmnoise.com) is no longer used for fetch() calls — the Go
 // server-side CORS proxy handles those.  RM_SERVER is still used for WebSocket.
 
+// ── oversizeBuffer ─────────────────────────────────────────────────────────────
+//
+// Mirrors the oversizeBuffer class in audio_mixer_processor.js (reference client).
+//
+// Problem: any stateless resampler (linear, Lanczos, …) restarts its kernel at
+// the start of every chunk with no knowledge of the previous chunk's samples.
+// This creates a step discontinuity at every frame boundary → audible crackle.
+//
+// Fix: before resampling, prepend the last `contextSamples` samples from the
+// previous chunk.  After resampling, strip the corresponding output samples.
+// The resampler now has real historical context at every boundary.
+//
+// Usage:
+//   const ctx = new RMNoiseOversizeBuffer(contextSamples);
+//   const oversized = ctx.addFrame(inputChunk);          // prepend context
+//   const resampledOversized = resample(oversized, ...); // resample with context
+//   const clean = ctx.goodFrame(resampledOversized, inputChunk.length, fromRate, toRate);
+//                                                         // strip context from output
+//
+class RMNoiseOversizeBuffer {
+    constructor(contextSamples) {
+        this.contextSamples = contextSamples;
+        this.tail = new Float32Array(contextSamples); // last N samples of previous chunk
+    }
+
+    /** Prepend stored tail to inputFrame, update tail, return oversized frame. */
+    addFrame(inputFrame) {
+        const oversized = new Float32Array(this.contextSamples + inputFrame.length);
+        oversized.set(this.tail, 0);
+        oversized.set(inputFrame, this.contextSamples);
+        // Update tail for next call
+        if (inputFrame.length >= this.contextSamples) {
+            this.tail.set(inputFrame.subarray(inputFrame.length - this.contextSamples));
+        } else {
+            // Input shorter than context: shift tail left and append
+            this.tail.copyWithin(0, inputFrame.length);
+            this.tail.set(inputFrame, this.contextSamples - inputFrame.length);
+        }
+        return oversized;
+    }
+
+    /**
+     * Strip the context prefix from the resampled oversized output.
+     * The context contributed `contextSamples` input samples; after resampling
+     * at ratio (toRate/fromRate) those become `contextOut` output samples.
+     * We discard those leading output samples and return only the clean portion.
+     *
+     * @param {Float32Array} resampledOversized  output of resample(addFrame(x), ...)
+     * @param {number}       inLen               length of the original (non-oversized) input
+     * @param {number}       fromRate
+     * @param {number}       toRate
+     * @returns {Float32Array}
+     */
+    goodFrame(resampledOversized, inLen, fromRate, toRate) {
+        const contextOut = Math.round(this.contextSamples * toRate / fromRate);
+        const wantedOut  = Math.round(inLen * toRate / fromRate);
+        const start      = Math.min(contextOut, resampledOversized.length);
+        const end        = Math.min(start + wantedOut, resampledOversized.length);
+        return resampledOversized.subarray(start, end);
+    }
+
+    /** Reset context (e.g. on sample-rate change or disconnect). */
+    reset() {
+        this.tail.fill(0);
+    }
+}
+
 // ── State ──────────────────────────────────────────────────────────────────────
 const rmNoise = {
     enabled:          false,
@@ -60,6 +127,13 @@ const rmNoise = {
 
     // Stats poll interval
     statsInterval:    null,
+
+    // Context buffers for boundary-continuous resampling (anti-crackle).
+    // ctxDown: send path  (inputRate → 8 kHz)
+    // ctxUp:   receive path (8 kHz → inputRate)
+    // 10 samples of context is sufficient for Lanczos-3 (kernel half-width = 3).
+    ctxDown:          new RMNoiseOversizeBuffer(10),
+    ctxUp:            new RMNoiseOversizeBuffer(10),
 };
 
 // Expose globally so app.js can call rmNoise_process()
@@ -103,24 +177,52 @@ function rmNoise_unpackFrame(data) {
 // ── Resampling ─────────────────────────────────────────────────────────────────
 
 /**
- * Resample a Float32Array from fromRate to toRate using synchronous linear
- * interpolation.  Synchronous execution is critical: rmNoise_process() is
- * called on every audio packet and must not suspend mid-accumulator-update,
- * otherwise concurrent invocations corrupt rmNoise.accumIn / accumOut.
+ * Resample a Float32Array from fromRate to toRate using a Lanczos-3 windowed
+ * sinc kernel (a=3).  This matches the resample() method in the reference
+ * audio_mixer_processor.js and provides proper anti-aliasing.
+ *
+ * NOTE: This function is intentionally stateless — boundary continuity is
+ * handled by the RMNoiseOversizeBuffer wrappers in rmNoise_process(), which
+ * prepend historical context before each call so the kernel always has real
+ * samples at the edges rather than zero-padding.
  */
 function rmNoise_resample(float32, fromRate, toRate) {
     if (fromRate === toRate) return float32.slice();
+
     const ratio  = fromRate / toRate;
-    const outLen = Math.max(1, Math.ceil(float32.length / ratio));
+    const outLen = Math.max(1, Math.round(float32.length / ratio));
     const out    = new Float32Array(outLen);
-    const last   = float32.length - 1;
+    const a      = 3;   // Lanczos parameter (number of lobes)
+    const PI     = Math.PI;
+    const len    = float32.length;
+
     for (let i = 0; i < outLen; i++) {
-        const pos  = i * ratio;
-        const idx  = Math.floor(pos);
-        const frac = pos - idx;
-        const a    = float32[idx       <= last ? idx       : last];
-        const b    = float32[idx + 1   <= last ? idx + 1   : last];
-        out[i] = a + frac * (b - a);
+        const inputIndex = i * ratio;
+        let sum = 0;
+        let weightSum = 0;
+
+        const start = Math.floor(inputIndex - a + 1);
+        const end   = Math.ceil(inputIndex + a);
+
+        for (let j = start; j < end; j++) {
+            if (j >= 0 && j < len) {
+                const x = inputIndex - j;
+                // Lanczos kernel: sinc(x) * sinc(x/a)  for |x| < a
+                let weight;
+                if (x === 0) {
+                    weight = 1;
+                } else if (x > -a && x < a) {
+                    const pix  = PI * x;
+                    const pixa = PI * x / a;
+                    weight = (Math.sin(pix) / pix) * (Math.sin(pixa) / pixa);
+                } else {
+                    weight = 0;
+                }
+                sum       += float32[j] * weight;
+                weightSum += weight;
+            }
+        }
+        out[i] = weightSum === 0 ? 0 : sum / weightSum;
     }
     return out;
 }
@@ -140,12 +242,14 @@ function rmNoise_process(audioFloat, sampleRate) {
         return null;   // not connected — caller uses original audio
     }
 
-    // Update rate if changed
+    // Update rate if changed — flush all state so stale context doesn't bleed in
     if (rmNoise.inputRate !== sampleRate) {
         rmNoise.inputRate = sampleRate;
         rmNoise.accumIn   = new Float32Array(0);
         rmNoise.accumOut  = new Float32Array(0);
         rmNoise.primed    = false;
+        rmNoise.ctxDown.reset();
+        rmNoise.ctxUp.reset();
     }
 
     const nIn        = audioFloat.length;
@@ -162,17 +266,19 @@ function rmNoise_process(audioFloat, sampleRate) {
         rmNoise.accumIn = rmNoise.accumIn.slice(accumTarget);
 
         try {
-            // Downsample to 8 kHz
-            const pcm8k_f32 = rmNoise_resample(chunk, sampleRate, RM_RATE);
+            // Downsample to 8 kHz — wrap with oversizeBuffer so the Lanczos
+            // kernel has real historical context at every chunk boundary.
+            const oversizedIn  = rmNoise.ctxDown.addFrame(chunk);
+            const resampled8k  = rmNoise_resample(oversizedIn, sampleRate, RM_RATE);
+            const pcm8k_f32_raw = rmNoise.ctxDown.goodFrame(resampled8k, chunk.length, sampleRate, RM_RATE);
 
             // Trim/pad to exactly RM_FRAME samples
-            let frame8k = pcm8k_f32;
-            if (frame8k.length > RM_FRAME) {
-                frame8k = frame8k.slice(0, RM_FRAME);
-            } else if (frame8k.length < RM_FRAME) {
-                const padded = new Float32Array(RM_FRAME);
-                padded.set(frame8k);
-                frame8k = padded;
+            let frame8k;
+            if (pcm8k_f32_raw.length >= RM_FRAME) {
+                frame8k = pcm8k_f32_raw.slice(0, RM_FRAME);
+            } else {
+                frame8k = new Float32Array(RM_FRAME);
+                frame8k.set(pcm8k_f32_raw);
             }
 
             // Compute audioScale and convert to int16
@@ -240,8 +346,11 @@ function rmNoise_process(audioFloat, sampleRate) {
         const chunk8k    = rmNoise.accumOut.slice(0, n8kNeeded);
         rmNoise.accumOut = rmNoise.accumOut.slice(n8kNeeded);
 
-        // Upsample from 8 kHz → sampleRate
-        const upsampled = rmNoise_resample(chunk8k, RM_RATE, sampleRate);
+        // Upsample from 8 kHz → sampleRate — wrap with oversizeBuffer so the
+        // Lanczos kernel has real historical context at every chunk boundary.
+        const oversizedOut  = rmNoise.ctxUp.addFrame(chunk8k);
+        const resampledUp   = rmNoise_resample(oversizedOut, RM_RATE, sampleRate);
+        const upsampled     = rmNoise.ctxUp.goodFrame(resampledUp, chunk8k.length, RM_RATE, sampleRate);
 
         // Trim or zero-pad to exactly nIn samples
         if (upsampled.length >= nIn) {
@@ -530,6 +639,8 @@ async function rmNoise_disconnect() {
     rmNoise.jitterBuf  = [];
     rmNoise.sendTimes.clear();
     rmNoise.frameNum   = BigInt(0);
+    rmNoise.ctxDown.reset();
+    rmNoise.ctxUp.reset();
 }
 
 // ── Toggle functions ───────────────────────────────────────────────────────────

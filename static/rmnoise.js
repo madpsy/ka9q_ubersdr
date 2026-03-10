@@ -137,6 +137,15 @@ function rmNoise_resample(float32, fromRate, toRate) {
  */
 function rmNoise_process(audioFloat, sampleRate) {
     if (!rmNoise.ready || !rmNoise.dc || rmNoise.dc.readyState !== 'open') {
+        // Throttled diagnostic — log once per second so console isn't flooded
+        const now = Date.now();
+        if (!rmNoise._lastNullLog || now - rmNoise._lastNullLog > 1000) {
+            rmNoise._lastNullLog = now;
+            console.debug('[RMNoise] process→null: ready=%s dc=%s dcState=%s',
+                rmNoise.ready,
+                !!rmNoise.dc,
+                rmNoise.dc ? rmNoise.dc.readyState : 'n/a');
+        }
         return null;
     }
 

@@ -433,41 +433,30 @@ async function rmNoise_connect(username, password, filterNumber) {
     rmNoise_updateButton();
 
     try {
-        // ── Step 1: Login (via Go CORS proxy) ─────────────────────────────────
-        const loginResp = await fetch('/api/rmnoise/login', {
+        // ── Single proxy call: login + webrtc_token + turn_creds in one request ─
+        const credsText = await fetch('/api/rmnoise/credentials', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password }),
-        });
-        const loginText = await loginResp.text();
-        let loginData;
-        try { loginData = JSON.parse(loginText); } catch {
-            throw new Error(`Login proxy error (HTTP ${loginResp.status}): ${loginText.slice(0, 120)}`);
+        }).then(r => r.text());
+
+        let credsData;
+        try { credsData = JSON.parse(credsText); } catch {
+            throw new Error(`Proxy error: unexpected non-JSON response`);
         }
-        if (!loginData.ok) throw new Error(loginData.error || 'Login failed');
-        const proxyToken = loginData.token;
-        rmNoise_log('Login successful');
+        if (!credsData.ok) throw new Error(credsData.error || 'Authentication failed');
 
-        // ── Step 2: Get JWT (via Go CORS proxy) ───────────────────────────────
-        const jwtResp = await fetch('/api/rmnoise/webrtc_token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: proxyToken }),
-        });
-        const jwtData = await jwtResp.json();
-        if (!jwtData.success || !jwtData.token) throw new Error('Failed to get JWT token');
-        const token = jwtData.token;
-        rmNoise_log('JWT token received');
+        const webrtcToken = credsData.webrtc_token;
+        const turnData    = credsData.turn_creds;
 
-        // ── Step 3: Get TURN credentials (via Go CORS proxy) ──────────────────
-        const turnResp = await fetch('/api/rmnoise/turn_creds', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: proxyToken }),
-        });
-        const turnData = await turnResp.json();
-        if (!turnData.success) throw new Error('Failed to get TURN credentials');
-        rmNoise_log('TURN credentials received');
+        if (!webrtcToken?.success || !webrtcToken?.token) {
+            throw new Error('Failed to get WebRTC token from proxy response');
+        }
+        if (!turnData?.success) {
+            throw new Error('Failed to get TURN credentials from proxy response');
+        }
+
+        rmNoise_log('Credentials received');
 
         const iceServers = [
             { urls: 'stun:stun.l.google.com:19302' },
@@ -478,8 +467,8 @@ async function rmNoise_connect(username, password, filterNumber) {
             },
         ];
 
-        // ── Step 4: WebSocket signalling ───────────────────────────────────────
-        await rmNoise_connectWS(token, iceServers);
+        // ── WebSocket signalling ───────────────────────────────────────────────
+        await rmNoise_connectWS(webrtcToken.token, iceServers);
 
     } catch (e) {
         console.error('[RMNoise] Connection error:', e);

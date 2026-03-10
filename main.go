@@ -1409,9 +1409,9 @@ func main() {
 	sessionStatsRateLimiter := NewSessionStatsRateLimiter()
 	log.Printf("Session stats endpoint rate limiting: 1 request per 3 seconds per IP")
 
-	// Initialize RMNoise proxy rate limiter (1 request per second per endpoint per IP)
+	// Initialize RMNoise proxy rate limiter (1 request per second per IP)
 	rmNoiseRateLimiter := NewRMNoiseRateLimiter()
-	log.Printf("RMNoise proxy rate limiting: 1 request per second per endpoint per IP")
+	log.Printf("RMNoise proxy rate limiting: 1 request per second per IP")
 
 	// Initialize SSH proxy if enabled (declare before rate limiter cleanup goroutine)
 	var sshProxy *SSHProxy
@@ -1607,15 +1607,10 @@ func main() {
 		log.Printf("MCP endpoint enabled at /api/mcp")
 	}
 
-	// RMNoise CORS proxy endpoints (1 request per second per endpoint per IP)
-	http.HandleFunc("/api/rmnoise/login", func(w http.ResponseWriter, r *http.Request) {
-		handleRMNoiseLogin(w, r, rmNoiseRateLimiter)
-	})
-	http.HandleFunc("/api/rmnoise/webrtc_token", func(w http.ResponseWriter, r *http.Request) {
-		handleRMNoiseWebRTCToken(w, r, rmNoiseRateLimiter)
-	})
-	http.HandleFunc("/api/rmnoise/turn_creds", func(w http.ResponseWriter, r *http.Request) {
-		handleRMNoiseTURNCreds(w, r, rmNoiseRateLimiter)
+	// RMNoise CORS proxy — single endpoint: POST {username, password} → {webrtc_token, turn_creds}
+	// Rate limited to 1 request per second per IP.
+	http.HandleFunc("/api/rmnoise/credentials", func(w http.ResponseWriter, r *http.Request) {
+		handleRMNoiseCredentials(w, r, rmNoiseRateLimiter)
 	})
 
 	// SunCalc endpoint (sun/moon position and times)

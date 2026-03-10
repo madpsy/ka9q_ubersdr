@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,69 +9,25 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/net/publicsuffix"
 )
 
-// ── Session store ──────────────────────────────────────────────────────────────
-
-type rmNoiseSession struct {
-	jar       http.CookieJar
-	createdAt time.Time
-}
-
-var rmNoiseSessions sync.Map
-
-func init() {
-	go rmNoiseSessionCleanup()
-}
-
-func rmNoiseSessionCleanup() {
-	ticker := time.NewTicker(5 * time.Minute)
-	for range ticker.C {
-		now := time.Now()
-		rmNoiseSessions.Range(func(k, v any) bool {
-			if now.Sub(v.(rmNoiseSession).createdAt) > 10*time.Minute {
-				rmNoiseSessions.Delete(k)
-			}
-			return true
-		})
-	}
-}
-
-// ── Outbound request helper ────────────────────────────────────────────────────
+// handleRMNoiseCredentials is a single collapsed proxy endpoint.
+// The client POSTs {username, password} and receives the WebRTC token and
+// TURN credentials needed to establish a connection to rmnoise.com — all in
+// one round-trip. No server-side session state is kept; the cookie jar is
+// created per-request and discarded when the handler returns.
 //
-// Mirrors the Python client with _SPOOF_BROWSER_HEADERS = False:
-// no User-Agent, no Origin, no Referer — just the bare minimum headers.
-// The rmnoise.com server treats requests without an Origin header as
-// non-browser (API-style) requests and does not enforce CSRF protection.
-
-func rmNoiseOutboundRequest(client *http.Client, method, targetURL, contentType, body string) (*http.Response, error) {
-	var bodyReader io.Reader
-	if body != "" {
-		bodyReader = strings.NewReader(body)
-	}
-	req, err := http.NewRequest(method, targetURL, bodyReader)
-	if err != nil {
-		return nil, err
-	}
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-	// Deliberately send NO User-Agent, Origin, or Referer headers.
-	// This matches the Python client's _SPOOF_BROWSER_HEADERS = False behaviour
-	// and avoids triggering CSRF enforcement on the server side.
-	return client.Do(req)
-}
-
-// ── Handlers ───────────────────────────────────────────────────────────────────
-
-func handleRMNoiseLogin(w http.ResponseWriter, r *http.Request, rateLimiter *RMNoiseRateLimiter) {
+// Upstream flow (identical to the previous three-step design):
+//  1. POST /users2/login          — authenticate, obtain session cookies
+//  2. POST /users2/get_webrtc_token   — fetch WebRTC signalling token
+//  3. POST /users2/get_turn_credentials — fetch TURN server credentials
+func handleRMNoiseCredentials(w http.ResponseWriter, r *http.Request, rateLimiter *RMNoiseRateLimiter) {
 	w.Header().Set("Content-Type", "application/json")
 
-	if !rateLimiter.AllowRequest(getClientIP(r), "login") {
+	if !rateLimiter.AllowRequest(getClientIP(r), "credentials") {
 		w.WriteHeader(http.StatusTooManyRequests)
 		fmt.Fprint(w, `{"ok":false,"error":"Rate limit exceeded"}`)
 		return
@@ -108,21 +62,16 @@ func handleRMNoiseLogin(w http.ResponseWriter, r *http.Request, rateLimiter *RMN
 		return
 	}
 
+	// Build a one-shot HTTP client with a cookie jar — discarded after this request.
 	jar, err := cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprint(w, `{"ok":false,"error":"Internal error creating session"}`)
 		return
 	}
+	client := &http.Client{Jar: jar, Timeout: 15 * time.Second}
 
-	// Follow redirects (default behaviour), matching the Python client.
-	// On successful login rmnoise.com returns 302 → dashboard (200).
-	// On failure it returns 200 directly with the login page HTML.
-	client := &http.Client{
-		Jar:     jar,
-		Timeout: 15 * time.Second,
-	}
-
+	// ── Step 1: Login ──────────────────────────────────────────────────────────
 	// Direct POST to rmnoise.com — no prior GET for CSRF token.
 	// A successful login returns HTTP 302 → /users2/home (followed to 200).
 	// A failed login returns HTTP 200 directly with the login page HTML.
@@ -142,85 +91,20 @@ func handleRMNoiseLogin(w http.ResponseWriter, r *http.Request, rateLimiter *RMN
 		fmt.Fprintf(w, `{"ok":false,"error":"Login request failed: %s"}`, jsonEscapeString(err.Error()))
 		return
 	}
-	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
 
-	io.Copy(io.Discard, resp.Body) // drain body; we don't need it
-
-	loginURL, _ := url.Parse("https://rmnoise.com")
-	cookies := jar.Cookies(loginURL)
-
-	// Successful login: server returns 302 → /users2/home (followed by client to 200).
-	// Failed login: server returns 200 directly with the login page HTML.
-	// Since we follow redirects, a success lands on HTTP 200 at /users2/home.
-	// We detect failure by checking if the final URL is still the login page.
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("RMNoise proxy: login failed for user %q (HTTP %d)", req.Username, resp.StatusCode)
+	if resp.StatusCode != http.StatusOK || strings.Contains(resp.Request.URL.Path, "/users2/login") {
+		log.Printf("RMNoise proxy: login failed for user %q (HTTP %d, final path: %s)",
+			req.Username, resp.StatusCode, resp.Request.URL.Path)
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprint(w, `{"ok":false,"error":"Invalid username or password"}`)
 		return
 	}
-	// If we ended up back at the login URL, credentials were wrong
-	if strings.Contains(resp.Request.URL.Path, "/users2/login") {
-		log.Printf("RMNoise proxy: login failed for user %q (redirected back to login page)", req.Username)
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"ok":false,"error":"Invalid username or password"}`)
-		return
-	}
+	log.Printf("RMNoise proxy: login OK for user %q", req.Username)
 
-	// Generate a 16-byte hex token
-	tokenBytes := make([]byte, 16)
-	if _, err := rand.Read(tokenBytes); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, `{"ok":false,"error":"Failed to generate session token"}`)
-		return
-	}
-	token := hex.EncodeToString(tokenBytes)
-
-	rmNoiseSessions.Store(token, rmNoiseSession{jar: jar, createdAt: time.Now()})
-	log.Printf("RMNoise proxy: login OK for user %q (%d cookies stored)", req.Username, len(cookies))
-
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"ok":true,"token":"%s"}`, token)
-}
-
-func handleRMNoiseWebRTCToken(w http.ResponseWriter, r *http.Request, rateLimiter *RMNoiseRateLimiter) {
-	w.Header().Set("Content-Type", "application/json")
-
-	if !rateLimiter.AllowRequest(getClientIP(r), "webrtc_token") {
-		w.WriteHeader(http.StatusTooManyRequests)
-		fmt.Fprint(w, `{"ok":false,"error":"Rate limit exceeded"}`)
-		return
-	}
-
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		fmt.Fprint(w, `{"ok":false,"error":"Method not allowed"}`)
-		return
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
-
-	var req struct {
-		Token string `json:"token"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprint(w, `{"ok":false,"error":"Invalid JSON body"}`)
-		return
-	}
-
-	val, ok := rmNoiseSessions.Load(req.Token)
-	if !ok {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"ok":false,"error":"Session expired or invalid"}`)
-		return
-	}
-	sess := val.(rmNoiseSession)
-
-	client := &http.Client{Jar: sess.jar, Timeout: 15 * time.Second}
-
-	// Match Python client exactly: Content-Type: application/json, no body
-	resp, err := rmNoiseOutboundRequest(client, http.MethodPost,
+	// ── Step 2: WebRTC token ───────────────────────────────────────────────────
+	resp, err = rmNoiseOutboundRequest(client, http.MethodPost,
 		"https://rmnoise.com/users2/get_webrtc_token",
 		"application/json",
 		"",
@@ -230,60 +114,18 @@ func handleRMNoiseWebRTCToken(w http.ResponseWriter, r *http.Request, rateLimite
 		fmt.Fprintf(w, `{"ok":false,"error":"WebRTC token request failed: %s"}`, jsonEscapeString(err.Error()))
 		return
 	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
+	webrtcBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
 	log.Printf("RMNoise proxy: webrtc_token HTTP %d", resp.StatusCode)
 
-	// Never forward HTML to the client — it means the session is not authenticated
-	if isHTMLResponse(resp, body) {
+	if isHTMLResponse(resp, webrtcBody) {
 		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"ok":false,"error":"Session not authenticated — please log in again"}`)
+		fmt.Fprint(w, `{"ok":false,"error":"Session not authenticated after login — please try again"}`)
 		return
 	}
 
-	w.WriteHeader(resp.StatusCode)
-	w.Write(body)
-}
-
-func handleRMNoiseTURNCreds(w http.ResponseWriter, r *http.Request, rateLimiter *RMNoiseRateLimiter) {
-	w.Header().Set("Content-Type", "application/json")
-
-	if !rateLimiter.AllowRequest(getClientIP(r), "turn_creds") {
-		w.WriteHeader(http.StatusTooManyRequests)
-		fmt.Fprint(w, `{"ok":false,"error":"Rate limit exceeded"}`)
-		return
-	}
-
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		fmt.Fprint(w, `{"ok":false,"error":"Method not allowed"}`)
-		return
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
-
-	var req struct {
-		Token string `json:"token"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprint(w, `{"ok":false,"error":"Invalid JSON body"}`)
-		return
-	}
-
-	val, ok := rmNoiseSessions.Load(req.Token)
-	if !ok {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"ok":false,"error":"Session expired or invalid"}`)
-		return
-	}
-	sess := val.(rmNoiseSession)
-
-	client := &http.Client{Jar: sess.jar, Timeout: 15 * time.Second}
-
-	// Match Python client exactly: Content-Type: application/json, no body
-	resp, err := rmNoiseOutboundRequest(client, http.MethodPost,
+	// ── Step 3: TURN credentials ───────────────────────────────────────────────
+	resp, err = rmNoiseOutboundRequest(client, http.MethodPost,
 		"https://rmnoise.com/users2/get_turn_credentials",
 		"application/json",
 		"",
@@ -293,20 +135,68 @@ func handleRMNoiseTURNCreds(w http.ResponseWriter, r *http.Request, rateLimiter 
 		fmt.Fprintf(w, `{"ok":false,"error":"TURN credentials request failed: %s"}`, jsonEscapeString(err.Error()))
 		return
 	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
+	turnBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
 	log.Printf("RMNoise proxy: turn_creds HTTP %d", resp.StatusCode)
 
-	// Never forward HTML to the client — it means the session is not authenticated
-	if isHTMLResponse(resp, body) {
+	if isHTMLResponse(resp, turnBody) {
 		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"ok":false,"error":"Session not authenticated — please log in again"}`)
+		fmt.Fprint(w, `{"ok":false,"error":"Session not authenticated after login — please try again"}`)
 		return
 	}
 
-	w.WriteHeader(resp.StatusCode)
-	w.Write(body)
+	// ── Combine and return ─────────────────────────────────────────────────────
+	// Unmarshal both upstream responses and re-encode as a single JSON object
+	// so the client receives one clean, well-formed response.
+	var webrtcData, turnData json.RawMessage
+	if err := json.Unmarshal(webrtcBody, &webrtcData); err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		fmt.Fprint(w, `{"ok":false,"error":"Invalid WebRTC token response from upstream"}`)
+		return
+	}
+	if err := json.Unmarshal(turnBody, &turnData); err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		fmt.Fprint(w, `{"ok":false,"error":"Invalid TURN credentials response from upstream"}`)
+		return
+	}
+
+	result := struct {
+		OK          bool            `json:"ok"`
+		WebRTCToken json.RawMessage `json:"webrtc_token"`
+		TURNCreds   json.RawMessage `json:"turn_creds"`
+	}{
+		OK:          true,
+		WebRTCToken: webrtcData,
+		TURNCreds:   turnData,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(result)
+}
+
+// ── Outbound request helper ────────────────────────────────────────────────────
+//
+// Mirrors the Python client with _SPOOF_BROWSER_HEADERS = False:
+// no User-Agent, no Origin, no Referer — just the bare minimum headers.
+// The rmnoise.com server treats requests without an Origin header as
+// non-browser (API-style) requests and does not enforce CSRF protection.
+
+func rmNoiseOutboundRequest(client *http.Client, method, targetURL, contentType, body string) (*http.Response, error) {
+	var bodyReader io.Reader
+	if body != "" {
+		bodyReader = strings.NewReader(body)
+	}
+	req, err := http.NewRequest(method, targetURL, bodyReader)
+	if err != nil {
+		return nil, err
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	// Deliberately send NO User-Agent, Origin, or Referer headers.
+	// This matches the Python client's _SPOOF_BROWSER_HEADERS = False behaviour
+	// and avoids triggering CSRF enforcement on the server side.
+	return client.Do(req)
 }
 
 // ── Utility ────────────────────────────────────────────────────────────────────

@@ -68,7 +68,6 @@ class RMNoiseClient:
         self.password         = password
         self.filter_number    = filter_number
         self.proxy_url        = proxy_url   # UberSDR server base URL (required for auth)
-        self._proxy_token     = None        # session token returned by /api/rmnoise/login
         self._session         = requests.Session()
         self.ws               = None
         self.pc               = None
@@ -77,88 +76,55 @@ class RMNoiseClient:
         self.available_filters: list = []  # populated from ai_filters_list message
 
     # ── HTTP helpers ───────────────────────────────────────────────────────────
-    # All auth goes through the UberSDR Go server proxy (/api/rmnoise/*).
-    # The proxy holds the rmnoise.com cookie jar server-side; the Python client
-    # only ever talks to the local UberSDR server.
+    # All auth goes through the UberSDR Go server proxy (/api/rmnoise/credentials).
+    # A single POST {username, password} returns both the WebRTC token and TURN
+    # credentials in one response — no server-side session state is kept.
 
-    def _login(self):
+    def _get_credentials(self) -> tuple[str, dict]:
+        """POST {username, password} to the proxy and return (jwt_token, turn_dict).
+
+        Returns:
+            jwt_token : str  — WebRTC signalling token
+            turn      : dict — {'urls': [...], 'username': ..., 'credential': ...}
+        """
         if not self.proxy_url:
             raise RuntimeError("proxy_url is required — auth must go through the UberSDR server")
-        logger.info(f"Logging in as {self.username} via proxy {self.proxy_url}...")
+        logger.info(f"Authenticating as {self.username} via proxy {self.proxy_url}...")
         r = self._session.post(
-            f"{self.proxy_url}/api/rmnoise/login",
+            f"{self.proxy_url}/api/rmnoise/credentials",
             json={'username': self.username, 'password': self.password},
         )
-        if r.status_code != 200:
-            data = {}
-            try:
-                data = r.json()
-            except Exception:
-                pass
+        try:
+            data = r.json()
+        except Exception:
             raise RuntimeError(
-                f"Login failed: HTTP {r.status_code}: "
-                f"{data.get('error', r.text[:200])}"
+                f"Proxy returned non-JSON response (HTTP {r.status_code}): {r.text[:200]}"
             )
-        data = r.json()
-        if not data.get('ok'):
-            raise RuntimeError(f"Login failed: {data.get('error', 'invalid credentials')}")
-        self._proxy_token = data['token']
-        logger.info("Login successful")
+        if r.status_code != 200 or not data.get('ok'):
+            raise RuntimeError(
+                f"Authentication failed (HTTP {r.status_code}): "
+                f"{data.get('error', str(data))}"
+            )
 
-    def _get_jwt(self) -> str:
-        if not self.proxy_url:
-            raise RuntimeError("proxy_url is required — auth must go through the UberSDR server")
-        # The proxy forwards the raw rmnoise.com response: {"success": true, "token": "<jwt>"}
-        r = self._session.post(
-            f"{self.proxy_url}/api/rmnoise/webrtc_token",
-            json={'token': self._proxy_token},
-        )
-        if r.status_code != 200:
-            data = {}
-            try:
-                data = r.json()
-            except Exception:
-                pass
-            raise RuntimeError(
-                f"WebRTC token failed: HTTP {r.status_code}: "
-                f"{data.get('error', r.text[:200])}"
-            )
-        data = r.json()
-        if not data.get('success') or not data.get('token'):
-            raise RuntimeError(
-                f"Failed to get JWT token: {data.get('error', str(data))}"
-            )
-        logger.info("JWT token received")
-        return data['token']
+        webrtc = data.get('webrtc_token', {})
+        turn   = data.get('turn_creds', {})
 
-    def _get_turn(self) -> dict:
-        if not self.proxy_url:
-            raise RuntimeError("proxy_url is required — auth must go through the UberSDR server")
-        # The proxy forwards the raw rmnoise.com response:
-        # {"success": true, "uris": [...], "username": "...", "password": "..."}
-        r = self._session.post(
-            f"{self.proxy_url}/api/rmnoise/turn_creds",
-            json={'token': self._proxy_token},
-        )
-        if r.status_code != 200:
-            data = {}
-            try:
-                data = r.json()
-            except Exception:
-                pass
+        if not webrtc.get('success') or not webrtc.get('token'):
             raise RuntimeError(
-                f"TURN credentials failed: HTTP {r.status_code}: "
-                f"{data.get('error', r.text[:200])}"
+                f"Failed to get WebRTC token: {webrtc.get('error', str(webrtc))}"
             )
-        data = r.json()
-        if not data.get('success'):
+        if not turn.get('success'):
             raise RuntimeError(
-                f"Failed to get TURN credentials: {data.get('error', str(data))}"
+                f"Failed to get TURN credentials: {turn.get('error', str(turn))}"
             )
-        logger.info("TURN credentials received")
-        return {'urls': data.get('uris', []),
-                'username': data.get('username'),
-                'credential': data.get('password')}
+
+        logger.info("Credentials received (WebRTC token + TURN)")
+        turn_dict = {
+            'urls':       turn.get('uris', []),
+            'username':   turn.get('username'),
+            'credential': turn.get('password'),
+        }
+        return webrtc['token'], turn_dict
 
     # ── Server selection ───────────────────────────────────────────────────────
 
@@ -281,10 +247,8 @@ class RMNoiseClient:
     # ── Public API ─────────────────────────────────────────────────────────────
 
     async def start(self):
-        """Login, connect, set up WebRTC, wait for data channel."""
-        self._login()
-        token = self._get_jwt()
-        turn  = self._get_turn()
+        """Authenticate, connect, set up WebRTC, wait for data channel."""
+        token, turn = self._get_credentials()
         url   = await self._best_server()
         await self._connect_ws(url, token)
         await self._setup_webrtc(turn)

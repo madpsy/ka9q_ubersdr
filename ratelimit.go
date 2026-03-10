@@ -635,10 +635,8 @@ func (rrl *RotctlRateLimiter) GetStats() (int, int) {
 	return len(rrl.limiters), totalEndpoints
 }
 
-// RMNoiseRateLimiter manages rate limiters for RMNoise proxy requests per IP per endpoint.
-// Each of the three endpoints (/login, /webrtc_token, /turn_creds) is limited independently
-// to 1 request per second per IP, so that a normal auth flow (all three called in quick
-// succession) is not blocked.
+// RMNoiseRateLimiter manages rate limiters for the RMNoise proxy endpoint per IP.
+// Limits to 1 request per second per IP.
 type RMNoiseRateLimiter struct {
 	limiters map[string]map[string]*RateLimiter // map[ip]map[endpoint]*RateLimiter
 	mu       sync.RWMutex

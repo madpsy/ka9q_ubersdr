@@ -138,7 +138,9 @@ const rmNoise = {
     // We wait for 5 frames (≈240 ms) before starting playback so the pipeline
     // stays ahead of the network round-trip.
     primed:           false,
-    primeFrames:      5,       // number of 8 kHz frames to accumulate before starting
+    primeFrames:      2,       // number of 8 kHz frames to accumulate before starting
+                               // (jitter buffer stays near 0 in practice; 5 was too
+                               // aggressive and caused long silence on initial connect)
 
     // Latency tracking
     sendTimes:        new Map(),             // BigInt frameNum → performance.now()
@@ -329,9 +331,13 @@ function rmNoise_process(audioFloat, sampleRate) {
         }
     }
 
-    // accumOut ran dry (network hiccup) — reset primed so we re-buffer,
-    // return silence to avoid a jarring switch back to original audio.
-    rmNoise.primed = false;
+    // accumOut ran dry (network hiccup) — return silence to avoid a jarring
+    // switch back to original audio.  Do NOT reset primed: the Python client
+    // never re-primes after the initial prime, it just returns silence on
+    // underrun and resumes denoised audio as soon as data is available again.
+    // Resetting primed here caused repeated 240 ms re-priming silence periods
+    // whenever the near-0 jitter buffer had a momentary underrun, which
+    // manifested as continuous amplitude-dependent crackling.
     return new Float32Array(audioFloat.length);
 }
 

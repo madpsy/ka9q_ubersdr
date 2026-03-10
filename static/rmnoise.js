@@ -743,11 +743,6 @@ function toggleRMNoiseBypass() {
 }
 
 function rmNoise_clearStatusLabel() {
-    const statusLabel = document.getElementById('rmnoise-status-label');
-    if (statusLabel) {
-        statusLabel.textContent = '';
-        statusLabel.style.color = '';
-    }
     const jEl = document.getElementById('rmnoise-jitter');
     const lEl = document.getElementById('rmnoise-latency');
     if (jEl) jEl.textContent = '-- frames';
@@ -792,12 +787,6 @@ function rmNoise_updateStats() {
             jitter <= 12 ? '#ffc107' : '#dc3545';
     }
 
-    // Update main-window status label
-    const statusLabel = document.getElementById('rmnoise-status-label');
-    if (statusLabel && rmNoise.ready) {
-        statusLabel.textContent = `● Connected  ${latency.toFixed(0)} ms  ${jitter}fr`;
-        statusLabel.style.color = '#28a745';
-    }
 }
 
 // ── Filter list ────────────────────────────────────────────────────────────────

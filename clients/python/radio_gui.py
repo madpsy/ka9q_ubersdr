@@ -1797,20 +1797,28 @@ class RadioGUI:
         self.rm_configure_btn.grid(row=1, column=1, columnspan=2, sticky=tk.W,
                                    padx=(0, 10), pady=(4, 0))
 
-        # "Original" momentary-toggle button: bypasses RM Noise while held/active.
+        # Mix slider: 0% = 100% original, 100% = 100% denoised.
         # Enabled only when RM Noise is enabled AND connected.
-        self.rm_original_btn = ttk.Button(
+        ttk.Label(nr2_container, text="Mix:").grid(
+            row=1, column=3, sticky=tk.W, padx=(0, 4), pady=(4, 0))
+
+        self.rm_mix_var = tk.IntVar(value=100)
+        self.rm_mix_scale = ttk.Scale(
             nr2_container,
-            text="Original",
-            width=8,
-            command=self._on_rmnoise_original_clicked
+            from_=0, to=100,
+            orient=tk.HORIZONTAL,
+            variable=self.rm_mix_var,
+            command=self._on_rmnoise_mix_changed,
+            length=120,
         )
-        self.rm_original_btn.grid(row=1, column=3, sticky=tk.W, padx=(0, 10), pady=(4, 0))
-        self.rm_original_btn.state(['disabled'])
-        self._rmnoise_original_active = False  # True while bypass is engaged
+        self.rm_mix_scale.grid(row=1, column=4, sticky=tk.W, padx=(0, 4), pady=(4, 0))
+        self.rm_mix_scale.state(['disabled'])
+
+        self.rm_mix_label = ttk.Label(nr2_container, text="100% Filtered", width=13)
+        self.rm_mix_label.grid(row=1, column=5, sticky=tk.W, padx=(0, 10), pady=(4, 0))
 
         self.rm_status_label = ttk.Label(nr2_container, text="", foreground='gray')
-        self.rm_status_label.grid(row=1, column=4, columnspan=4, sticky=tk.W, pady=(4, 0))
+        self.rm_status_label.grid(row=1, column=6, columnspan=3, sticky=tk.W, pady=(4, 0))
 
         # Noise Blanker (row 5) - use a frame to avoid column weight issues
         nb_container = ttk.Frame(audio_frame)
@@ -3688,7 +3696,7 @@ class RadioGUI:
                 self.toggle_rmnoise()
             self.rm_check.config(state='disabled')
             self.rm_configure_btn.config(state='disabled')
-            self.rm_original_btn.state(['disabled'])
+            self.rm_mix_scale.state(['disabled'])
 
             # Disable audio filter (silently, without validation)
             if self.audio_filter_enabled_var.get():
@@ -5133,7 +5141,7 @@ class RadioGUI:
             # Clear bridge reference on client
             if self.client:
                 self.client.rmnoise_bridge = None
-                self.client.rmnoise_bypass = False
+                self.client.rmnoise_mix_ratio = 1.0
             self.rm_status_label.config(text="", foreground='gray')
             self.log_status("RMNoise denoising disabled")
             self._update_rmnoise_original_btn()
@@ -5221,11 +5229,11 @@ class RadioGUI:
         self.root.after(500, self._poll_rmnoise_stats)
 
     def _update_rmnoise_original_btn(self):
-        """Enable or disable the 'Original' button based on RM Noise state.
+        """Enable or disable the mix slider based on RM Noise state.
 
-        The button is enabled only when RM Noise is enabled AND the bridge is
+        The slider is enabled only when RM Noise is enabled AND the bridge is
         connected and ready.  When RM Noise is disabled or disconnected the
-        button is disabled and any active bypass is cleared.
+        slider is disabled.
         """
         bridge = None
         if self.rmnoise_window and hasattr(self.rmnoise_window, 'bridge'):
@@ -5234,36 +5242,20 @@ class RadioGUI:
         rm_active = self.rm_enabled_var.get() and bridge is not None and bridge.ready
 
         if rm_active:
-            self.rm_original_btn.state(['!disabled'])
+            self.rm_mix_scale.state(['!disabled'])
         else:
-            # Clear bypass if it was active
-            if self._rmnoise_original_active:
-                self._rmnoise_original_active = False
-                if self.client:
-                    self.client.rmnoise_bypass = False
-            self.rm_original_btn.state(['disabled'])
-            # Reset button appearance
-            self.rm_original_btn.config(text="Original")
+            self.rm_mix_scale.state(['disabled'])
 
-    def _on_rmnoise_original_clicked(self):
-        """Toggle the 'Original' bypass momentary button.
+    def _on_rmnoise_mix_changed(self, value):
+        """Handle mix slider movement.
 
-        First click: engage bypass (hear unprocessed audio, button shows active).
-        Second click: release bypass (return to denoised audio).
-        The button is only reachable when RM Noise is enabled and connected.
+        Updates the client's mix ratio and the label showing the current mix.
         """
-        self._rmnoise_original_active = not self._rmnoise_original_active
-
-        if self._rmnoise_original_active:
-            # Engage bypass
-            if self.client:
-                self.client.rmnoise_bypass = True
-            self.rm_original_btn.config(text="● Original")
-        else:
-            # Release bypass
-            if self.client:
-                self.client.rmnoise_bypass = False
-            self.rm_original_btn.config(text="Original")
+        pct = int(float(value))
+        mix_ratio = pct / 100.0
+        if self.client:
+            self.client.rmnoise_mix_ratio = mix_ratio
+        self.rm_mix_label.config(text=f"{pct}% Filtered")
 
     def toggle_noise_blanker(self):
         """Toggle Noise Blanker on/off."""

@@ -1029,11 +1029,56 @@ class RadioGUI:
         style.map('Excellent.Active.TButton', background=[('active', self.BAND_COLORS['EXCELLENT'])], relief=[('active', 'raised')])
         style.map('Unknown.Active.TButton', background=[('active', self.BAND_COLORS['UNKNOWN'])], relief=[('active', 'raised')])
 
-        # Main container with padding
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
+        # Main container with vertical scroll support
+        # Canvas + scrollbar so the window can scroll vertically on small screens
+        _scroll_canvas = tk.Canvas(self.root, highlightthickness=0)
+        _vscrollbar = ttk.Scrollbar(self.root, orient=tk.VERTICAL, command=_scroll_canvas.yview)
+        _scroll_canvas.configure(yscrollcommand=_vscrollbar.set)
+        _vscrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        _scroll_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        main_frame = ttk.Frame(_scroll_canvas, padding="10")
+        _canvas_window = _scroll_canvas.create_window((0, 0), window=main_frame, anchor="nw")
+
+        # Keep main_frame width in sync with canvas width (no horizontal scroll)
+        def _on_canvas_resize(event):
+            _scroll_canvas.itemconfig(_canvas_window, width=event.width)
+        _scroll_canvas.bind("<Configure>", _on_canvas_resize)
+
+        # Update scroll region when content height changes
+        def _on_frame_resize(event):
+            _scroll_canvas.configure(scrollregion=_scroll_canvas.bbox("all"))
+        main_frame.bind("<Configure>", _on_frame_resize)
+
+        # Mousewheel scrolling — only scroll the main canvas when the pointer is
+        # inside it (or one of its children), so sub-widgets like the status Text
+        # box keep their own independent scroll behaviour.
+        def _is_inside_scroll_canvas(widget):
+            w = widget
+            while w:
+                if w is _scroll_canvas or w is main_frame:
+                    return True
+                try:
+                    w = w.master
+                except AttributeError:
+                    break
+            return False
+
+        def _on_mousewheel(event):
+            if _is_inside_scroll_canvas(event.widget):
+                _scroll_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def _on_mousewheel_linux_up(event):
+            if _is_inside_scroll_canvas(event.widget):
+                _scroll_canvas.yview_scroll(-1, "units")
+
+        def _on_mousewheel_linux_down(event):
+            if _is_inside_scroll_canvas(event.widget):
+                _scroll_canvas.yview_scroll(1, "units")
+
+        self.root.bind_all("<MouseWheel>", _on_mousewheel)          # Windows / macOS
+        self.root.bind_all("<Button-4>", _on_mousewheel_linux_up)   # Linux scroll up
+        self.root.bind_all("<Button-5>", _on_mousewheel_linux_down) # Linux scroll down
 
         # Connection settings frame
         conn_frame = ttk.LabelFrame(main_frame, text="Connection", padding="10")

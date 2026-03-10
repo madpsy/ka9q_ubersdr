@@ -1244,7 +1244,10 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					continue
 				}
 
-				// Build binary packet with version-specific header
+				// Build binary packet with version-specific header.
+				// Use audioPacket.SampleRate (stamped when the packet was received from
+				// radiod) rather than session.SampleRate (which may already reflect a
+				// new mode by the time we dequeue this buffered packet).
 				var packet []byte
 				if version >= 2 {
 					// Version 2: include signal quality metrics
@@ -1252,7 +1255,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					// GPS timestamp in nanoseconds (8 bytes, little-endian uint64)
 					binary.LittleEndian.PutUint64(packet[0:8], uint64(audioPacket.GPSTimeNs))
 					// Sample rate (4 bytes, little-endian uint32)
-					binary.LittleEndian.PutUint32(packet[8:12], uint32(session.SampleRate))
+					binary.LittleEndian.PutUint32(packet[8:12], uint32(audioPacket.SampleRate))
 					// Channels (1 byte)
 					packet[12] = byte(session.Channels)
 					// Baseband power (4 bytes, float32)
@@ -1267,7 +1270,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					// GPS timestamp in nanoseconds (8 bytes, little-endian uint64)
 					binary.LittleEndian.PutUint64(packet[0:8], uint64(audioPacket.GPSTimeNs))
 					// Sample rate (4 bytes, little-endian uint32)
-					binary.LittleEndian.PutUint32(packet[8:12], uint32(session.SampleRate))
+					binary.LittleEndian.PutUint32(packet[8:12], uint32(audioPacket.SampleRate))
 					// Channels (1 byte)
 					packet[12] = byte(session.Channels)
 					// Opus data
@@ -1341,10 +1344,12 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				// Encode PCM packet with hybrid header strategy
 				// Version 1: First packet or metadata change: full header (29 bytes), subsequent: minimal (13 bytes)
 				// Version 2: First packet or metadata change: full header (37 bytes), subsequent: minimal (13 bytes)
+				// Use audioPacket.SampleRate (stamped at receive time) not session.SampleRate
+				// (which may already reflect a new mode for buffered packets).
 				packet, err := pcmBinaryEncoder.EncodePCMPacketWithSignalQuality(
 					audioPacket.PCMData,
 					audioPacket.GPSTimeNs,
-					session.SampleRate,
+					audioPacket.SampleRate,
 					session.Channels,
 					basebandPower,
 					noiseDensity,

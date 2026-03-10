@@ -19,6 +19,7 @@ type AudioPacket struct {
 	PCMData      []byte
 	RTPTimestamp uint32 // RTP timestamp from radiod (kept for reference)
 	GPSTimeNs    int64  // GPS-synchronized Unix time in nanoseconds
+	SampleRate   int    // sample rate at which this PCM was encoded by radiod
 }
 
 // AudioReceiver receives PCM audio from radiod multicast streams
@@ -216,11 +217,15 @@ func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp ui
 	dataCopy := make([]byte, len(pcmData))
 	copy(dataCopy, pcmData)
 
-	// Create audio packet with PCM data and timestamps
+	// Create audio packet with PCM data and timestamps.
+	// Stamp SampleRate NOW from the session — by the time the websocket loop
+	// dequeues this packet, session.SampleRate may already reflect a new mode,
+	// causing the packet header to lie about the rate of the buffered payload.
 	audioPacket := AudioPacket{
 		PCMData:      dataCopy,
 		RTPTimestamp: rtpTimestamp,
 		GPSTimeNs:    gpsTimeNs,
+		SampleRate:   session.SampleRate,
 	}
 
 	// Send audio packet to session's channel

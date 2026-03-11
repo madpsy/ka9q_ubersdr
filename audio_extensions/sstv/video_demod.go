@@ -37,7 +37,6 @@ type VideoDemodulator struct {
 
 	// Debug tracking
 	lastSyncLogTime int
-	lastFreqLogTime int
 }
 
 // NewVideoDemodulator creates a new video demodulator
@@ -256,23 +255,6 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 
 	syncTargetBin := v.getBin(1200.0 + float64(v.headerShift))
 
-	// Like slowrx, we advance WindowPtr by 1 each sample during decode
-	// The buffer management keeps pace by shifting/refilling as needed
-	windowPtr := pcmBuffer.GetWindowPtr()
-	available := pcmBuffer.Available()
-
-	log.Printf("[DEBUG] ========== VIDEO DECODE STARTING ==========")
-	log.Printf("[DEBUG] windowPtr=%d", windowPtr)
-	log.Printf("[DEBUG] available=%d samples", available)
-	log.Printf("[DEBUG] skip=%d", skip)
-	log.Printf("[DEBUG] rate=%.1f Hz", rate)
-	log.Printf("[DEBUG] First 10 pixel times:")
-	for i := 0; i < 10 && i < len(pixelGrid); i++ {
-		log.Printf("[DEBUG]   Pixel %d: Time=%d, X=%d, Y=%d, Channel=%d",
-			i, pixelGrid[i].Time, pixelGrid[i].X, pixelGrid[i].Y, pixelGrid[i].Channel)
-	}
-	log.Printf("[DEBUG] ============================================")
-
 	// Calculate number of channels for this mode (matching GetPixelGrid logic)
 	numChans := 3 // Default for RGB/GBR modes
 	switch {
@@ -302,7 +284,6 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 
 	// Reset debug tracking
 	v.lastSyncLogTime = 0
-	v.lastFreqLogTime = 0
 
 	// Process signal
 	for sampleNum := 0; sampleNum < length; sampleNum++ {
@@ -339,13 +320,6 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 		if sampleNum%6 == 0 {
 			freq = v.demodulateFrequency(pcmBuffer, snr)
 
-			// Log FM demodulation for first 10 seconds, max once per second
-			if sampleNum < int(10*v.sampleRate) && sampleNum-v.lastFreqLogTime >= int(v.sampleRate) {
-				currentWindowPtr := pcmBuffer.GetWindowPtr()
-				log.Printf("[DEBUG FM] sampleNum=%d, windowPtr=%d, freq=%.1f Hz, SNR=%.1f dB",
-					sampleNum, currentWindowPtr, freq, snr)
-				v.lastFreqLogTime = sampleNum
-			}
 		}
 
 		// Store luminance
@@ -357,13 +331,6 @@ func (v *VideoDemodulator) Demodulate(pcmBuffer *SlidingPCMBuffer, rate float64,
 		// Place pixels
 		for pixelIdx < len(pixelGrid) && pixelGrid[pixelIdx].Time == sampleNum {
 			p := pixelGrid[pixelIdx]
-
-			// Debug first 10 pixel placements
-			if pixelIdx < 10 {
-				currentWindowPtr := pcmBuffer.GetWindowPtr()
-				log.Printf("[DEBUG] Placing pixel %d: sampleNum=%d, pixelTime=%d, windowPtr=%d, X=%d, Y=%d, Ch=%d",
-					pixelIdx, sampleNum, p.Time, currentWindowPtr, p.X, p.Y, p.Channel)
-			}
 
 			image[p.X][p.Y][p.Channel] = lum
 

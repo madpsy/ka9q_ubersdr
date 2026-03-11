@@ -436,19 +436,22 @@
                     }
                 }
 
-                // Enable/disable existing bands based on checkbox state
+                // Enable existing bands based on checkbox state.
+                // Only set enabled=true when the checkbox is checked; if unchecked,
+                // leave the band's existing enabled value untouched so re-running
+                // the wizard doesn't disable modes the user already had configured.
                 if (existingBands.length > 0) {
                     existingBands.forEach(band => {
-                        if (band.mode === 'FT8') {
-                            band.enabled = formData.ft8Enabled || false;
-                        } else if (band.mode === 'FT4') {
-                            band.enabled = formData.ft4Enabled || false;
-                        } else if (band.mode === 'WSPR') {
-                            band.enabled = formData.wsprEnabled || false;
-                        } else if (band.mode === 'JS8') {
-                            band.enabled = formData.js8Enabled || false;
-                        } else if (band.mode === 'FT2') {
-                            band.enabled = formData.ft2Enabled || false;
+                        if (band.mode === 'FT8' && formData.ft8Enabled) {
+                            band.enabled = true;
+                        } else if (band.mode === 'FT4' && formData.ft4Enabled) {
+                            band.enabled = true;
+                        } else if (band.mode === 'WSPR' && formData.wsprEnabled) {
+                            band.enabled = true;
+                        } else if (band.mode === 'JS8' && formData.js8Enabled) {
+                            band.enabled = true;
+                        } else if (band.mode === 'FT2' && formData.ft2Enabled) {
+                            band.enabled = true;
                         }
                     });
                 }

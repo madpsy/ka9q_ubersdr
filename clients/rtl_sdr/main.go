@@ -107,6 +107,7 @@ type RTLTCPBridge struct {
 	tcpConn       net.Conn
 	userSessionID string
 	frequency     int64
+	currentURL    string // URL of the currently connected UberSDR instance
 	sampleRate    int    // actual UberSDR sample rate (always IQModeRate = 192000)
 	requestedRate uint32 // rate requested by rtl_tcp client (e.g. 2048000)
 
@@ -369,18 +370,66 @@ func (b *RTLTCPBridge) connectToUberSDR(clientAddr net.Addr) error {
 
 	b.mu.Lock()
 	b.wsConn = conn
+	b.currentURL = targetURL
 	b.mu.Unlock()
 
-	log.Printf("Bridge: Connected to UberSDR (%d Hz, %s)", frequency, mode)
+	log.Printf("Bridge: Connected to UberSDR at %s (%d Hz, %s)", targetURL, frequency, mode)
 	return nil
 }
 
-// tuneUberSDR sends a tune message to UberSDR
+// tuneUberSDR tunes the current UberSDR connection to a new frequency.
+// If the frequency maps to a different UberSDR host (via routing config), the
+// existing WebSocket is closed and a new connection is established to the correct host.
 func (b *RTLTCPBridge) tuneUberSDR(frequency int64, mode string) {
+	// Check if this frequency requires a different UberSDR host
+	newURL, newPassword := b.getURLForFrequency(frequency)
+
 	b.mu.RLock()
+	currentURL := b.currentURL
 	conn := b.wsConn
+	tcpConn := b.tcpConn
 	b.mu.RUnlock()
 
+	if conn == nil {
+		return
+	}
+
+	if newURL != currentURL {
+		// Frequency crossed into a different host's range — reconnect
+		log.Printf("Bridge: Frequency %d Hz requires different host: %s → %s", frequency, currentURL, newURL)
+
+		// Check connection permission on the new host
+		allowed, err := b.checkConnection(newURL, newPassword, tcpConn.RemoteAddr())
+		if err != nil {
+			log.Printf("Bridge: Connection check error for %s: %v", newURL, err)
+		}
+		if !allowed {
+			log.Printf("Bridge: Connection to %s not allowed — staying on %s", newURL, currentURL)
+			// Fall through and tune on the current host anyway
+		} else {
+			// Close existing connection
+			b.mu.Lock()
+			if b.wsConn != nil {
+				closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Retuning to different host")
+				_ = b.wsConn.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(time.Second))
+				_ = b.wsConn.Close()
+				b.wsConn = nil
+				b.currentURL = ""
+			}
+			b.mu.Unlock()
+
+			// Connect to new host
+			if err := b.connectToUberSDR(tcpConn.RemoteAddr()); err != nil {
+				log.Printf("Bridge: Failed to connect to new host %s: %v", newURL, err)
+			}
+			return // connectToUberSDR already tunes to b.frequency
+		}
+	}
+
+	// Same host — just send a tune message
+	b.mu.RLock()
+	conn = b.wsConn
+	b.mu.RUnlock()
 	if conn == nil {
 		return
 	}

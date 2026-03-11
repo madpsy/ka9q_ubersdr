@@ -1,0 +1,94 @@
+# rtl_tcp Bridge - Frequency Routing Configuration
+# Route different frequency ranges to different UberSDR instances.
+# Useful for multi-SDR setups covering different HF bands or geographic locations.
+#
+# Usage:
+#   ./ubersdr-rtltcp-bridge --config routing.yaml
+#
+# Notes:
+# - Frequency ranges are evaluated in order; first match wins.
+# - Frequencies not matching any range use default_url.
+# - When the client tunes across a range boundary, the bridge automatically
+#   disconnects from the current UberSDR instance and connects to the new one.
+# - All instances must support iq192 (192 kHz IQ mode).
+
+# Default instance (fallback when no frequency range matches)
+default_url: "http://127.0.0.1:8080"
+default_password: ""
+
+frequency_ranges:
+  - name: "160m (1.8–2 MHz)"
+    min_freq: 1800000
+    max_freq: 2000000
+    url: "http://sdr-160m.example.com:8080"
+    password: ""
+
+  - name: "80m (3.5–4 MHz)"
+    min_freq: 3500000
+    max_freq: 4000000
+    url: "http://sdr-80m.example.com:8080"
+    password: ""
+
+  - name: "60m (5.3–5.4 MHz)"
+    min_freq: 5300000
+    max_freq: 5400000
+    url: "http://sdr-60m.example.com:8080"
+    password: ""
+
+  - name: "40m (7–7.3 MHz)"
+    min_freq: 7000000
+    max_freq: 7300000
+    url: "http://sdr-40m.example.com:8080"
+    password: ""
+
+  - name: "30m (10.1–10.15 MHz)"
+    min_freq: 10100000
+    max_freq: 10150000
+    url: "http://sdr-30m.example.com:8080"
+    password: ""
+
+  - name: "20m (14–14.35 MHz)"
+    min_freq: 14000000
+    max_freq: 14350000
+    url: "http://sdr-20m.example.com:8080"
+    password: ""
+
+  - name: "17m (18.068–18.168 MHz)"
+    min_freq: 18068000
+    max_freq: 18168000
+    url: "http://sdr-17m.example.com:8080"
+    password: ""
+
+  - name: "15m (21–21.45 MHz)"
+    min_freq: 21000000
+    max_freq: 21450000
+    url: "http://sdr-15m.example.com:8080"
+    password: ""
+
+  - name: "12m (24.89–24.99 MHz)"
+    min_freq: 24890000
+    max_freq: 24990000
+    url: "http://sdr-12m.example.com:8080"
+    password: ""
+
+  - name: "10m (28–29.7 MHz)"
+    min_freq: 28000000
+    max_freq: 29700000
+    url: "http://sdr-10m.example.com:8080"
+    password: ""
+
+# Example: two geographically separate SDRs covering the full HF range
+# Uncomment and edit to use:
+#
+# frequency_ranges:
+#   - name: "EU SDR (full HF)"
+#     min_freq: 10000
+#     max_freq: 30000000
+#     url: "http://eu-sdr.example.com:8080"
+#     password: "eu_password"
+#
+#   - name: "US SDR (full HF)"
+#     min_freq: 10000
+#     max_freq: 30000000
+#     url: "http://us-sdr.example.com:8080"
+#     password: "us_password"

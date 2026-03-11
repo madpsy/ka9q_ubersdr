@@ -1,0 +1,22 @@
+# rtl_tcp Bridge - Simple Frequency Routing Configuration
+# Route different frequency ranges to different UberSDR instances.
+# Copy to routing.yaml and edit, then run:
+#   ./ubersdr-rtltcp-bridge --config routing.yaml
+
+# Default instance (used when no frequency range matches)
+default_url: "http://127.0.0.1:8080"
+default_password: ""
+
+# Frequency ranges — first match wins
+frequency_ranges:
+  - name: "LF/MF (below 2 MHz)"
+    min_freq: 10000        # 10 kHz
+    max_freq: 1999999      # just below 2 MHz
+    url: "http://sdr-lowband.example.com:8080"
+    password: ""
+
+  - name: "HF High (2–30 MHz)"
+    min_freq: 2000000      # 2 MHz
+    max_freq: 30000000     # 30 MHz
+    url: "http://sdr-hf.example.com:8080"
+    password: ""

@@ -1,0 +1,26 @@
+[Unit]
+Description=UberSDR rtl_tcp Bridge
+After=network.target
+Documentation=https://github.com/cwsl/ka9q_ubersdr
+
+[Service]
+Type=simple
+User=nobody
+Group=nogroup
+ExecStart=/usr/local/bin/ubersdr-rtltcp-bridge \
+    --url http://localhost:8073 \
+    --listen 0.0.0.0:1234
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ubersdr-rtltcp
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

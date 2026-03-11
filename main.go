@@ -1757,8 +1757,10 @@ func main() {
 	// Admin authentication endpoints (no auth required)
 	http.HandleFunc("/admin/login", adminHandler.HandleLogin)
 	http.HandleFunc("/admin/logout", adminHandler.HandleLogout)
-	http.HandleFunc("/admin/wizard-status", adminHandler.HandleWizardStatus)
-	http.HandleFunc("/admin/wizard-complete", adminHandler.HandleWizardComplete)
+
+	// Wizard endpoints (auth required — wizard-complete writes config and restarts the server)
+	http.HandleFunc("/admin/wizard-status", adminHandler.AuthMiddleware(adminHandler.HandleWizardStatus))
+	http.HandleFunc("/admin/wizard-complete", adminHandler.AuthMiddleware(adminHandler.HandleWizardComplete))
 
 	// Admin endpoints (session protected)
 	http.HandleFunc("/admin/config", adminHandler.AuthMiddleware(adminHandler.HandleConfig))

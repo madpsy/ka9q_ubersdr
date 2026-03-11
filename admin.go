@@ -370,35 +370,8 @@ func (ah *AdminHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get client IP for rate limiting using the same logic as other endpoints
-	clientIP := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(clientIP); err == nil {
-		clientIP = host
-	}
-
-	// Only trust X-Real-IP if request comes from tunnel server or trusted proxy
-	isTunnelServer := globalConfig != nil && globalConfig.InstanceReporting.IsTunnelServer(clientIP)
-	isTrustedProxy := globalConfig != nil && globalConfig.Server.IsTrustedProxy(clientIP)
-
-	if isTunnelServer || isTrustedProxy {
-		if xri := r.Header.Get("X-Real-IP"); xri != "" {
-			clientIP = strings.TrimSpace(xri)
-			if host, _, err := net.SplitHostPort(clientIP); err == nil {
-				clientIP = host
-			}
-		}
-	} else {
-		// Check X-Forwarded-For header for true source IP (first IP in the list)
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			clientIP = strings.TrimSpace(xff)
-			if commaIdx := strings.Index(clientIP, ","); commaIdx != -1 {
-				clientIP = strings.TrimSpace(clientIP[:commaIdx])
-			}
-			if host, _, err := net.SplitHostPort(clientIP); err == nil {
-				clientIP = host
-			}
-		}
-	}
+	// Get client IP using the centralised function (same as AuthMiddleware and all other endpoints)
+	clientIP := getClientIP(r)
 
 	// Check if IP is allowed to access admin endpoints
 	if !ah.config.Admin.IsIPAllowed(clientIP) {
@@ -460,13 +433,29 @@ func (ah *AdminHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set HTTP-only cookie
+	// Detect whether the connection is HTTPS so the Secure flag is set correctly
+	// for both direct TLS and TLS-terminating reverse proxies (e.g. Caddy).
+	isHTTPS := r.TLS != nil
+	if !isHTTPS {
+		// Trust X-Forwarded-Proto only from a verified tunnel server or trusted proxy
+		sourceIP := r.RemoteAddr
+		if host, _, err := net.SplitHostPort(sourceIP); err == nil {
+			sourceIP = host
+		}
+		isTunnelServer := globalConfig != nil && globalConfig.InstanceReporting.IsTunnelServer(sourceIP)
+		isTrustedProxy := globalConfig != nil && globalConfig.Server.IsTrustedProxy(sourceIP)
+		if (isTunnelServer || isTrustedProxy) && r.Header.Get("X-Forwarded-Proto") == "https" {
+			isHTTPS = true
+		}
+	}
+
+	// Set HTTP-only cookie; Secure flag is enabled automatically when served over HTTPS
 	http.SetCookie(w, &http.Cookie{
 		Name:     "admin_session",
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false, // Set to true if using HTTPS
+		Secure:   isHTTPS,
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   86400, // 24 hours
 	})

@@ -857,7 +857,7 @@ func (b *RTLTCPBridge) Stop() {
 }
 
 func main() {
-	ubersdrURL := flag.String("url", "http://localhost:8073", "UberSDR server URL (http://, https://, ws://, or wss://)")
+	ubersdrURL := flag.String("url", "http://127.0.0.1:8080", "UberSDR server URL (http://, https://, ws://, or wss://)")
 	password := flag.String("password", "", "UberSDR server password (optional)")
 	listenAddr := flag.String("listen", "0.0.0.0:1234", "Address and port to listen on for rtl_tcp clients")
 	configFile := flag.String("config", "", "Frequency routing configuration file (optional, YAML format)")
@@ -871,7 +871,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "UberSDR Connection Options:\n")
 		fmt.Fprintf(os.Stderr, "  -url string\n")
-		fmt.Fprintf(os.Stderr, "        UberSDR server URL (default \"http://localhost:8073\")\n")
+		fmt.Fprintf(os.Stderr, "        UberSDR server URL (default \"http://127.0.0.1:8080\")\n")
 		fmt.Fprintf(os.Stderr, "        Accepts http://, https://, ws://, or wss://\n")
 		fmt.Fprintf(os.Stderr, "  -password string\n")
 		fmt.Fprintf(os.Stderr, "        UberSDR server password (optional)\n")
@@ -883,8 +883,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  -freq int\n")
 		fmt.Fprintf(os.Stderr, "        Initial frequency in Hz (default 14200000 = 14.2 MHz)\n\n")
 		fmt.Fprintf(os.Stderr, "Examples:\n")
-		fmt.Fprintf(os.Stderr, "  # Connect to local UberSDR, listen on default port\n")
-		fmt.Fprintf(os.Stderr, "  %s --url http://localhost:8073\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # Connect to UberSDR on local network (default)\n")
+		fmt.Fprintf(os.Stderr, "  %s\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # Connect to remote UberSDR with password, custom port\n")
 		fmt.Fprintf(os.Stderr, "  %s --url https://sdr.example.com --password mypass --listen 0.0.0.0:1234\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # Use frequency routing config\n")
@@ -928,7 +928,7 @@ func main() {
 			log.Fatalf("Failed to parse config file %s: %v", *configFile, err)
 		}
 		// Command-line flags override config file defaults
-		if *ubersdrURL != "http://localhost:8073" {
+		if *ubersdrURL != "http://127.0.0.1:8080" {
 			routingConfig.DefaultURL = *ubersdrURL
 		}
 		if *password != "" {

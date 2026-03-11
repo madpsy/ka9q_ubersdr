@@ -389,6 +389,13 @@ func main() {
 	// Set global config for tunnel server IP checking
 	globalConfig = config
 
+	// Check for empty admin password
+	if config.Admin.Password == "" {
+		log.Fatalf("SECURITY ERROR: Admin password is not set!\n" +
+			"Please set the admin password in config.yaml before starting the server.\n" +
+			"An empty password allows anyone to access the admin interface.")
+	}
+
 	// Check for default admin password
 	if config.Admin.Password == "mypassword" {
 		log.Fatalf("SECURITY ERROR: Default admin password detected!\n" +

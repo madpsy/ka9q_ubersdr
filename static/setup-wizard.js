@@ -447,6 +447,8 @@
                             band.enabled = formData.wsprEnabled || false;
                         } else if (band.mode === 'JS8') {
                             band.enabled = formData.js8Enabled || false;
+                        } else if (band.mode === 'FT2') {
+                            band.enabled = formData.ft2Enabled || false;
                         }
                     });
                 }

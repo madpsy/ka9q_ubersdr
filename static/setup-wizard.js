@@ -256,9 +256,10 @@
             // Try to load existing config to pre-fill fields
             const response = await fetch('/admin/config');
             
-            // If unauthorized, redirect to admin login
+            // If unauthorized, redirect to admin login with return URL
             if (response.status === 401) {
-                window.location.href = '/admin.html';
+                const returnUrl = encodeURIComponent(window.location.pathname);
+                window.location.href = `/admin.html?return=${returnUrl}`;
                 return;
             }
             
@@ -325,9 +326,10 @@
             // Try to load decoder config
             const decoderResponse = await fetch('/admin/decoder-config');
             
-            // If unauthorized, redirect to admin login
+            // If unauthorized, redirect to admin login with return URL
             if (decoderResponse.status === 401) {
-                window.location.href = '/admin.html';
+                const returnUrl = encodeURIComponent(window.location.pathname);
+                window.location.href = `/admin.html?return=${returnUrl}`;
                 return;
             }
             

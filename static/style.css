@@ -3548,7 +3548,6 @@ input[type="range"]::-moz-range-thumb {
     cursor: pointer;
     color: #fff;
     font-weight: 600;
-    font-size: 13px;
     transition: filter 0.15s;
 }
 

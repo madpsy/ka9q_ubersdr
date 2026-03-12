@@ -463,6 +463,10 @@ echo "Fetching restart-ubersdr.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/restart-ubersdr.sh -o "$ACTUAL_HOME/ubersdr/restart-ubersdr.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/restart-ubersdr.sh"
 
+echo "Fetching check-health.sh script..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/check-health.sh -o "$ACTUAL_HOME/ubersdr/check-health.sh"
+chmod +x "$ACTUAL_HOME/ubersdr/check-health.sh"
+
 echo "Fetching update-ubersdr.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/update-ubersdr.sh -o "$ACTUAL_HOME/ubersdr/update-ubersdr.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/update-ubersdr.sh"

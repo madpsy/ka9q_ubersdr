@@ -1964,11 +1964,6 @@ func main() {
 		kiwiMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
 
-			// Log all requests for debugging
-			if DebugMode {
-				log.Printf("KiwiSDR request: %s %s", r.Method, path)
-			}
-
 			// Check if this is a WebSocket connection
 			isWebSocket := false
 
@@ -2014,9 +2009,6 @@ func main() {
 			}
 
 			// Otherwise, serve static files
-			if DebugMode {
-				log.Printf("KiwiSDR serving static file: %s", path)
-			}
 			kiwiFS.ServeHTTP(w, r)
 		})
 

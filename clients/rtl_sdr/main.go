@@ -120,6 +120,17 @@ type RTLTCPBridge struct {
 	// signalling forwardIQToClient to stop.
 	clientDone chan struct{}
 
+	// forwardDone is closed when the forwardIQToClient goroutine exits.
+	// It is nil until streaming starts (first SET_FREQ received).
+	forwardDone chan struct{}
+
+	// streamingStarted is true once the UberSDR WebSocket has been connected
+	// and IQ forwarding goroutines have been launched for the current client.
+	// It is reset to false for each new TCP client connection.
+	// UberSDR is not connected until the first SET_FREQ command is received,
+	// preventing IQ data from flooding the TCP socket before the client is ready.
+	streamingStarted bool
+
 	// upsample controls whether received 192 kHz IQ frames are nearest-neighbour
 	// upsampled to the rate the client requested via SET_SAMPLE_RATE.
 	// When false (default), the raw 192 kHz stream is forwarded unchanged and the
@@ -200,6 +211,7 @@ func NewRTLTCPBridge(ubersdrURL, password, listenAddr string, initialFreq int64,
 		upsample:      upsample,
 		iqChan:        make(chan []byte, 512),
 		clientDone:    make(chan struct{}),
+		forwardDone:   nil, // allocated when streaming starts
 		pcmDecoder:    pcmDecoder,
 		running:       true,
 		stopCh:        make(chan struct{}),
@@ -618,6 +630,38 @@ func (b *RTLTCPBridge) sendKeepalive() {
 	}
 }
 
+// startStreaming connects to UberSDR and launches the IQ receive/forward goroutines
+// for the current TCP client. It is called on the first SET_FREQ command so that
+// no IQ data is generated until the client has configured its pipeline and is ready
+// to consume data. Safe to call only once per client session (guarded by streamingStarted).
+func (b *RTLTCPBridge) startStreaming() {
+	b.mu.RLock()
+	conn := b.tcpConn
+	b.mu.RUnlock()
+
+	if conn == nil {
+		return
+	}
+
+	if err := b.connectToUberSDR(conn.RemoteAddr()); err != nil {
+		log.Printf("Bridge: Failed to connect to UberSDR: %v", err)
+		return
+	}
+
+	fd := make(chan struct{})
+	b.mu.Lock()
+	b.forwardDone = fd
+	b.streamingStarted = true
+	b.mu.Unlock()
+
+	go b.receiveFromUberSDR()
+	go b.sendKeepalive()
+	go func() {
+		defer close(fd)
+		b.forwardIQToClient(conn)
+	}()
+}
+
 // handleClient handles a single rtl_tcp client connection
 func (b *RTLTCPBridge) handleClient(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
@@ -633,7 +677,9 @@ func (b *RTLTCPBridge) handleClient(conn net.Conn) {
 		_ = b.tcpConn.Close()
 	}
 	b.tcpConn = conn
-	b.requestedRate = 0 // reset so we don't upsample before client sends SET_SAMPLE_RATE
+	b.requestedRate = 0        // reset so we don't upsample before client sends SET_SAMPLE_RATE
+	b.streamingStarted = false // reset: UberSDR not connected until first SET_FREQ
+	b.forwardDone = nil
 	b.clientDone = make(chan struct{})
 	b.mu.Unlock()
 
@@ -647,23 +693,11 @@ func (b *RTLTCPBridge) handleClient(conn net.Conn) {
 	}
 drained:
 
-	// Connect to UberSDR
-	if err := b.connectToUberSDR(clientAddr); err != nil {
-		log.Printf("Bridge: Failed to connect to UberSDR: %v", err)
-		return
-	}
-	defer func() {
-		b.mu.Lock()
-		if b.wsConn != nil {
-			closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Client disconnected")
-			_ = b.wsConn.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(time.Second))
-			_ = b.wsConn.Close()
-			b.wsConn = nil
-		}
-		b.mu.Unlock()
-	}()
-
 	// Send dongle info header: "RTL0" + tuner_type (BE uint32) + tuner_gain_count (BE uint32)
+	// Do NOT connect to UberSDR yet — wait for the first SET_FREQ command so that
+	// IQ data only flows once the client has configured its DSP pipeline and is
+	// actively reading from the socket. This prevents the TCP send buffer from
+	// filling up and timing out before the user presses "Start" in GQRX etc.
 	var headerBuf [12]byte
 	copy(headerBuf[0:4], "RTL0")
 	binary.BigEndian.PutUint32(headerBuf[4:8], TunerR820T)
@@ -675,24 +709,17 @@ drained:
 	}
 	log.Printf("Bridge: Sent dongle info to client (R820T, %d gains)", R820TGainCount)
 
-	// Start UberSDR receive goroutine and keepalive
-	go b.receiveFromUberSDR()
-	go b.sendKeepalive()
-
-	// Start IQ forwarding goroutine (UberSDR → TCP client)
-	forwardDone := make(chan struct{})
-	go func() {
-		defer close(forwardDone)
-		b.forwardIQToClient(conn)
-	}()
-
-	// Command receive loop (TCP client → bridge) — blocks until client disconnects
+	// Command receive loop (TCP client → bridge) — blocks until client disconnects.
+	// The first SET_FREQ command will trigger startStreaming() which connects to
+	// UberSDR and launches the IQ receive/forward goroutines.
 	b.commandLoop(conn)
 
 	// Signal forwardIQToClient to stop (it may be blocked on a TCP write)
 	b.mu.RLock()
 	cd := b.clientDone
+	fd := b.forwardDone
 	b.mu.RUnlock()
+
 	select {
 	case <-cd:
 		// already closed
@@ -700,8 +727,20 @@ drained:
 		close(cd)
 	}
 
-	// Wait for forward goroutine to finish
-	<-forwardDone
+	// Close UberSDR WebSocket
+	b.mu.Lock()
+	if b.wsConn != nil {
+		closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Client disconnected")
+		_ = b.wsConn.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(time.Second))
+		_ = b.wsConn.Close()
+		b.wsConn = nil
+	}
+	b.mu.Unlock()
+
+	// Wait for forward goroutine to finish (only if streaming was ever started)
+	if fd != nil {
+		<-fd
+	}
 
 	log.Printf("Bridge: rtl_tcp client disconnected from %s", clientAddr)
 }
@@ -784,9 +823,17 @@ func (b *RTLTCPBridge) handleCommand(cmd uint8, param uint32) {
 
 		b.mu.Lock()
 		b.frequency = freq
+		alreadyStreaming := b.streamingStarted
 		b.mu.Unlock()
 
-		go b.tuneUberSDR(freq, IQMode)
+		if !alreadyStreaming {
+			// First SET_FREQ: connect to UberSDR and start IQ forwarding.
+			// We defer this until now so the TCP send buffer doesn't fill up
+			// while the client is still configuring (e.g. GQRX before "Start").
+			b.startStreaming()
+		} else {
+			go b.tuneUberSDR(freq, IQMode)
+		}
 
 	case 0x02: // SET_SAMPLE_RATE
 		// We always use iq192 (192 kHz). Store the client's requested rate so

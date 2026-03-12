@@ -337,6 +337,32 @@ else
     echo "Warning: Failed to download HPSDR bridge binary. Skipping HPSDR bridge installation."
 fi
 
+# Install RTL-TCP bridge binary
+echo "Installing UberSDR RTL-TCP bridge..."
+if curl -fsSL https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/ubersdr-rtltcp-bridge -o /tmp/ubersdr-rtltcp-bridge 2>/dev/null; then
+    sudo mv /tmp/ubersdr-rtltcp-bridge /usr/local/bin/ubersdr-rtltcp-bridge
+    sudo chmod +x /usr/local/bin/ubersdr-rtltcp-bridge
+    echo "RTL-TCP bridge binary installed successfully."
+
+    # Install systemd service
+    if [ -f /etc/systemd/system/ubersdr-rtltcp-bridge.service ]; then
+        echo "RTL-TCP bridge service file already exists, skipping."
+        sudo systemctl restart ubersdr-rtltcp-bridge.service
+    else
+        if curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/clients/rtl_sdr/ubersdr-rtltcp-bridge.service -o /tmp/ubersdr-rtltcp-bridge.service 2>/dev/null; then
+            sudo mv /tmp/ubersdr-rtltcp-bridge.service /etc/systemd/system/ubersdr-rtltcp-bridge.service
+            sudo systemctl daemon-reload
+            sudo systemctl enable ubersdr-rtltcp-bridge.service
+            sudo systemctl start ubersdr-rtltcp-bridge.service
+            echo "RTL-TCP bridge service installed, enabled, and started."
+        else
+            echo "Warning: Failed to download RTL-TCP bridge service file. Skipping service installation."
+        fi
+    fi
+else
+    echo "Warning: Failed to download RTL-TCP bridge binary. Skipping RTL-TCP bridge installation."
+fi
+
 # Create ubersdr directory in user's home
 echo "Creating ~/ubersdr directory..."
 sudo -u "$ACTUAL_USER" mkdir -p "$ACTUAL_HOME/ubersdr"

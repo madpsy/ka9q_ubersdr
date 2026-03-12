@@ -57,29 +57,49 @@ Then configure your SDR software to connect to `rtl_tcp=127.0.0.1:1234`.
 ./ubersdr-rtltcp-bridge --url http://localhost:8073 --config routing.yaml
 ```
 
+### Multiple Simultaneous Clients
+
+By default up to 4 rtl_tcp clients can connect at the same time, each with an independent UberSDR session:
+
+```bash
+# Default: 4 simultaneous clients
+./ubersdr-rtltcp-bridge --url http://localhost:8073
+
+# Allow up to 8 simultaneous clients
+./ubersdr-rtltcp-bridge --url http://localhost:8073 --max-clients 8
+
+# Unlimited clients (limited only by UberSDR server capacity)
+./ubersdr-rtltcp-bridge --url http://localhost:8073 --max-clients 0
+```
+
+When the limit is reached, new connections are rejected immediately with a log message and the existing sessions are unaffected.
+
 ## Command-Line Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-url` | `http://localhost:8073` | UberSDR server URL (http/https/ws/wss) |
+| `-url` | `http://127.0.0.1:8080` | UberSDR server URL (http/https/ws/wss) |
 | `-password` | _(none)_ | UberSDR server password |
 | `-listen` | `0.0.0.0:1234` | TCP address and port to listen on |
 | `-freq` | `14200000` | Initial frequency in Hz (14.2 MHz) |
 | `-config` | _(none)_ | Frequency routing config file (YAML) |
+| `-max-clients` | `4` | Maximum simultaneous rtl_tcp clients (0 = unlimited) |
 
 ## How It Works
 
 1. The bridge listens on TCP port 1234 for `rtl_tcp` client connections
-2. When a client connects:
+2. Each client gets its own **independent session** with a unique UberSDR WebSocket connection — multiple clients can be active simultaneously, each tuned to a different frequency
+3. When a client connects:
+   - If the client limit (`-max-clients`) is reached, the connection is rejected immediately and logged
    - The bridge checks connection permission via UberSDR's `/connection` HTTP endpoint
-   - Connects to UberSDR via WebSocket (`/ws?frequency=N&mode=iq192&user_session_id=UUID`)
    - Sends the 12-byte `RTL0` dongle info header (emulating an R820T tuner with 29 gain steps)
-3. UberSDR streams IQ data as pcm-zstd binary WebSocket frames
-4. The bridge decodes the pcm-zstd frames and converts int16 IQ → uint8 offset-binary IQ
-5. The uint8 IQ stream is forwarded continuously to the TCP client
-6. When the client sends commands (frequency, sample rate, gain, etc.):
-   - **Frequency** (`0x01`): Sends `{"type":"tune","frequency":N,"mode":"iqXXX"}` to UberSDR
-   - **Sample rate** (`0x02`): Maps to nearest UberSDR mode (iq48/iq96/iq192)
+4. On the first `SET_FREQ` command, the session connects to UberSDR via WebSocket (`/ws?frequency=N&mode=iq192&user_session_id=UUID`)
+5. UberSDR streams IQ data as pcm-zstd binary WebSocket frames
+6. The bridge decodes the pcm-zstd frames and converts int16 IQ → uint8 offset-binary IQ
+7. The uint8 IQ stream is forwarded continuously to the TCP client
+8. When the client sends commands (frequency, sample rate, gain, etc.):
+   - **Frequency** (`0x01`): Sends `{"type":"tune","frequency":N,"mode":"iq192"}` to UberSDR
+   - **Sample rate** (`0x02`): IQ is resampled from 192 kHz to the requested rate using Kaiser-windowed sinc interpolation
    - **Gain/AGC/other** (`0x03`–`0x0e`): Acknowledged silently (UberSDR manages gain)
 
 ## rtl_tcp Protocol
@@ -118,17 +138,22 @@ Offset  Size  Content
 | 0x0d | SET_GAIN_BY_INDEX | No-op |
 | 0x0e | SET_BIAS_TEE | No-op |
 
-## Sample Rate Mapping
+## Sample Rate
 
-`rtl_tcp` clients typically request sample rates of 225 kHz to 3.2 MHz. UberSDR supports a maximum of 192 kHz IQ. The bridge maps requested rates as follows:
+`rtl_tcp` clients typically request sample rates of 225 kHz to 3.2 MHz. The bridge always uses `iq192` (192 kHz) from UberSDR.
 
-| Requested Rate | UberSDR Mode | Actual Rate |
-|----------------|--------------|-------------|
-| ≤ 72 kHz | iq48 | 48 kHz |
-| ≤ 144 kHz | iq96 | 96 kHz |
-| > 144 kHz (any) | iq192 | 192 kHz |
+When the client requests a rate different from 192 kHz, the bridge resamples using a **Kaiser-windowed sinc interpolator** (β=8, 25-tap FIR, ~80 dB stopband attenuation). This is the mathematically correct approach:
 
-Most SDR software (SDR#, GQRX, CubicSDR) adapts gracefully to the actual delivered sample rate.
+- Frequencies within **±96 kHz** of centre contain the real signal from UberSDR
+- Frequencies **outside ±96 kHz** are filled with zeros — no signal, no spectral images
+- The output byte rate matches exactly what the client requested
+
+**Recommended client setting: set your SDR software's bandwidth to 250 kHz.** This keeps the display within the valid ±96 kHz passband.
+
+| Client Requested Rate | UberSDR Mode | Actual IQ Rate | Resampling |
+|-----------------------|--------------|----------------|------------|
+| 192 kHz | iq192 | 192 kHz | None (pass-through) |
+| Any other rate | iq192 | 192 kHz | Kaiser-windowed sinc to requested rate |
 
 ## IQ Sample Conversion
 
@@ -198,9 +223,9 @@ sudo make install-service
 
 ## Limitations
 
-- **Single client**: Only one `rtl_tcp` client can be connected at a time. A new connection will displace the existing one.
+- **Client limit**: Up to `-max-clients` (default 4) simultaneous `rtl_tcp` clients. Set to 0 for unlimited. Each client consumes one UberSDR WebSocket session.
 - **HF only**: UberSDR covers 10 kHz–30 MHz. VHF/UHF frequencies are not supported.
-- **Sample rate**: Maximum 192 kHz (UberSDR limit). Clients requesting higher rates receive 192 kHz.
+- **Sample rate**: Always 192 kHz from UberSDR. Clients requesting any other rate receive Kaiser-windowed sinc resampled data — the inner ±96 kHz contains real signal, the outer bands are clean zeros. Set client bandwidth to 250 kHz for best results.
 - **Gain control**: UberSDR manages gain automatically. Gain commands from the client are acknowledged but have no effect.
 - **No wideband spectrum**: Spectrum/waterfall data is not provided (IQ stream only).
 

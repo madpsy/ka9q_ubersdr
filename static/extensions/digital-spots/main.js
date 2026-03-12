@@ -1599,8 +1599,8 @@ class DigitalSpotsExtension extends DecoderExtension {
             spotsByMode[spot.mode].push(spot);
         });
 
-        // Sort modes in preferred order: FT8, FT4, WSPR, JS8, then others alphabetically
-        const modeOrder = { 'FT8': 1, 'FT4': 2, 'WSPR': 3, 'JS8': 4 };
+        // Sort modes in preferred order: FT8, FT4, FT2, WSPR, JS8, then others alphabetically
+        const modeOrder = { 'FT8': 1, 'FT4': 2, 'FT2': 3, 'WSPR': 4, 'JS8': 5 };
         const modes = Object.keys(spotsByMode).sort((a, b) => {
             const orderA = modeOrder[a] || 999;
             const orderB = modeOrder[b] || 999;

@@ -268,10 +268,13 @@ class Oscilloscope {
         if (this.trackingEnabled) {
             const freqInput = document.getElementById('frequency');
             if (freqInput) {
-                const currentDialFreq = parseInt(freqInput.value);
+                const currentDialFreq = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
                 if (!isNaN(currentDialFreq)) {
                     const adjustedDialFreq = currentDialFreq + this.frequencyOffset;
-                    adjustedFreqText = `${(adjustedDialFreq / 1000).toFixed(2)} kHz`;
+                    const adjustedMHz = adjustedDialFreq / 1e6;
+                    adjustedFreqText = adjustedMHz >= 1
+                        ? `${adjustedMHz.toFixed(6)} MHz`
+                        : `${(adjustedDialFreq / 1000).toFixed(3)} kHz`;
                     totalHeight = 40;
                 }
             }

@@ -57,11 +57,14 @@ if ! command -v docker &>/dev/null; then
 else
     RUNNING_CONTAINERS=$(docker ps --format '{{.Names}}' 2>/dev/null)
 
-    # Expected containers (adjust names to match docker-compose service names)
+    # Expected containers (names as shown in `docker ps`)
     EXPECTED_CONTAINERS=(
         "ka9q_ubersdr"
         "ka9q-radio"
         "caddy"
+        "tunnel-client"
+        "multicast-relay"
+        "fluent-bit"
         "ubersdr-gotty"
     )
 
@@ -94,6 +97,17 @@ check_port() {
 check_port 8080 "UberSDR"
 check_port 80   "Caddy (HTTP)"
 check_port 443  "Caddy (HTTPS)"
+
+echo
+echo "--- HTTP Response Checks ---"
+
+# Check UberSDR returns HTTP 200
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:8080/ 2>/dev/null)
+if [ "$HTTP_CODE" = "200" ]; then
+    ok "UberSDR (http://localhost:8080/) returned HTTP $HTTP_CODE"
+else
+    fail "UberSDR (http://localhost:8080/) returned HTTP ${HTTP_CODE:-000} (expected 200)"
+fi
 
 echo
 

@@ -61,7 +61,7 @@ else
     EXPECTED_CONTAINERS=(
         "ka9q_ubersdr"
         "ka9q-radio"
-        "ubersdr-caddy"
+        "caddy"
         "ubersdr-gotty"
     )
 

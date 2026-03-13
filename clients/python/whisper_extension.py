@@ -196,7 +196,8 @@ class WhisperExtension:
 
         ttk.Button(actions_frame, text="📋 Copy", command=self.copy_to_clipboard).pack(side=tk.RIGHT, padx=(5, 0))
         ttk.Button(actions_frame, text="💾 Save", command=self.save_transcription).pack(side=tk.RIGHT, padx=(5, 0))
-        ttk.Button(actions_frame, text="🗑️ Clear", command=self.clear_transcription).pack(side=tk.RIGHT)
+        ttk.Button(actions_frame, text="🗑️ Clear", command=self.clear_transcription).pack(side=tk.RIGHT, padx=(5, 0))
+        ttk.Button(actions_frame, text="📝 Summarise", command=self.request_summary).pack(side=tk.RIGHT, padx=(5, 0))
 
         # Transcription text area
         self.transcription_text = scrolledtext.ScrolledText(
@@ -546,6 +547,8 @@ class WhisperExtension:
             self.handle_language_detection(data)
         elif message_type == 0x04:  # Error message
             self.handle_error_message(data)
+        elif message_type == 0x05:  # Summary response
+            self.handle_summary_response(data)
         else:
             print(f"[Whisper] Unknown message type: 0x{message_type:02x}")
 
@@ -809,6 +812,183 @@ class WhisperExtension:
             self.last_rendered_incomplete = current_incomplete
 
         self.transcription_text.config(state=tk.DISABLED)
+
+    def request_summary(self):
+        """Request a summary of the current transcription from the server."""
+        completed_segments = len(self.transcript)
+
+        if completed_segments == 0:
+            messagebox.showinfo(
+                "No Transcription",
+                "No completed segments to summarise. Please wait for some transcription to complete.",
+                parent=self.window,
+            )
+            return
+
+        print(f"[Whisper] Requesting summary of {completed_segments} completed segments")
+
+        # Show modal with spinner
+        self.show_summary_modal()
+
+        # Send summary request via WebSocket
+        message = {
+            'type': 'audio_extension_control',
+            'extension_name': 'whisper',
+            'control_type': 'summary_request',
+            'n_segments': completed_segments,
+        }
+
+        if self.dxcluster_ws and self.dxcluster_ws.is_connected():
+            try:
+                self.dxcluster_ws.ws.send(json.dumps(message))
+                print(f"[Whisper] Sent summary request for {completed_segments} segments")
+            except Exception as e:
+                print(f"[Whisper] Error sending summary request: {e}")
+                self._summary_show_error(f"Failed to send request: {e}")
+        else:
+            print("[Whisper] WebSocket not connected, cannot request summary")
+            self._summary_show_error("Not connected to server. Please start the decoder first.")
+
+    def show_summary_modal(self):
+        """Open the summary modal window with a loading spinner."""
+        # Destroy any existing summary window
+        if hasattr(self, '_summary_win') and self._summary_win and self._summary_win.winfo_exists():
+            self._summary_win.destroy()
+
+        self._summary_win = tk.Toplevel(self.window)
+        self._summary_win.title("📝 Summary")
+        self._summary_win.geometry("600x420")
+        self._summary_win.resizable(True, True)
+        self._summary_win.transient(self.window)
+        self._summary_win.grab_set()
+
+        frame = ttk.Frame(self._summary_win, padding=16)
+        frame.pack(fill=tk.BOTH, expand=True)
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
+
+        # Title
+        ttk.Label(frame, text="Transcription Summary", font=("TkDefaultFont", 12, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
+        )
+
+        # Spinner / status label (shown while loading)
+        self._summary_status_label = ttk.Label(frame, text="⏳ Requesting summary…", foreground="gray")
+        self._summary_status_label.grid(row=1, column=0, columnspan=2, sticky="nsew")
+
+        # Text widget (hidden until response arrives)
+        self._summary_text = scrolledtext.ScrolledText(
+            frame,
+            wrap=tk.WORD,
+            font=("Consolas", self.font_size),
+            bg="#1a1a2e",
+            fg="#e0e0e0",
+            insertbackground="white",
+            state=tk.DISABLED,
+            relief=tk.FLAT,
+            borderwidth=1,
+        )
+        # Configure bold tag for markdown rendering
+        self._summary_text.tag_config("bold", font=("Consolas", self.font_size, "bold"))
+        # Not packed yet — shown after response
+
+        # Segments info label
+        self._summary_segments_label = ttk.Label(frame, text="", foreground="gray",
+                                                  font=("TkDefaultFont", 8, "italic"))
+        self._summary_segments_label.grid(row=2, column=0, sticky="w", pady=(4, 0))
+
+        # Button bar
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=3, column=0, columnspan=2, sticky="e", pady=(8, 0))
+
+        self._summary_copy_btn = ttk.Button(btn_frame, text="📋 Copy", command=self._summary_copy, state=tk.DISABLED)
+        self._summary_copy_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        ttk.Button(btn_frame, text="Close", command=self._summary_win.destroy).pack(side=tk.RIGHT)
+
+    def _summary_show_error(self, message: str):
+        """Display an error in the summary modal."""
+        if not hasattr(self, '_summary_win') or not self._summary_win or not self._summary_win.winfo_exists():
+            return
+        if self._summary_status_label:
+            self._summary_status_label.config(text=f"❌ {message}", foreground="red")
+
+    def handle_summary_response(self, data: bytes):
+        """Handle summary response binary message (type 0x05)."""
+        # Binary protocol: [type:1][timestamp:8][json_length:4][json:N]
+        if len(data) < 13:
+            print("[Whisper] Summary response too short")
+            return
+
+        json_length = struct.unpack('>I', data[9:13])[0]
+        if len(data) < 13 + json_length:
+            print("[Whisper] Summary response truncated")
+            return
+
+        json_bytes = data[13:13 + json_length]
+        json_str = json_bytes.decode('utf-8')
+
+        try:
+            summary_data = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            print(f"[Whisper] Failed to parse summary JSON: {e}")
+            self.window.after(0, lambda: self._summary_show_error("Failed to parse summary response"))
+            return
+
+        print(f"[Whisper] Summary data received: {list(summary_data.keys())}")
+
+        # Update UI on the main thread
+        self.window.after(0, lambda: self._display_summary(summary_data))
+
+    def _display_summary(self, summary_data: dict):
+        """Populate the summary modal with the received data (runs on main thread)."""
+        if not hasattr(self, '_summary_win') or not self._summary_win or not self._summary_win.winfo_exists():
+            return
+
+        summary_text = summary_data.get('summary') or 'No summary available.'
+        segments_used = summary_data.get('segments_used', 0)
+        segments_requested = summary_data.get('segments_requested', 0)
+        target_language = summary_data.get('target_language', 'en')
+
+        # Hide spinner, show text widget
+        self._summary_status_label.grid_remove()
+        self._summary_text.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(0, 4))
+
+        # Render markdown bold into the text widget
+        self._summary_text.config(state=tk.NORMAL)
+        self._summary_text.delete('1.0', tk.END)
+        self._render_markdown_bold(self._summary_text, summary_text)
+        self._summary_text.config(state=tk.DISABLED)
+
+        # Update segments info
+        self._summary_segments_label.config(
+            text=f"Summarised {segments_used} of {segments_requested} requested segments (Language: {target_language})"
+        )
+
+        # Enable copy button
+        self._summary_copy_btn.config(state=tk.NORMAL)
+
+    def _render_markdown_bold(self, text_widget: scrolledtext.ScrolledText, text: str):
+        """Insert text into a Text widget, rendering **bold** markdown as bold."""
+        import re
+        parts = re.split(r'\*\*(.+?)\*\*', text, flags=re.DOTALL)
+        for i, part in enumerate(parts):
+            if not part:
+                continue
+            if i % 2 == 0:
+                text_widget.insert(tk.END, part)
+            else:
+                text_widget.insert(tk.END, part, "bold")
+
+    def _summary_copy(self):
+        """Copy the summary text (plain, no markdown) to the clipboard."""
+        if not hasattr(self, '_summary_text') or not self._summary_text:
+            return
+        text = self._summary_text.get('1.0', tk.END).strip()
+        if text:
+            self.window.clipboard_clear()
+            self.window.clipboard_append(text)
+            self.window.update()
+            print("[Whisper] Summary copied to clipboard")
 
     def clear_transcription(self):
         """Clear the transcription."""

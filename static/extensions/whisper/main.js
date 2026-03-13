@@ -706,7 +706,7 @@ class WhisperExtension extends DecoderExtension {
         }
 
         if (summaryText) {
-            summaryText.textContent = summaryData.summary || 'No summary available';
+            this.renderMarkdownBold(summaryText, summaryData.summary || 'No summary available');
         }
 
         if (segmentsInfo) {
@@ -715,6 +715,27 @@ class WhisperExtension extends DecoderExtension {
             const targetLanguage = summaryData.target_language || 'en';
             segmentsInfo.textContent = `Summarised ${segmentsUsed} of ${segmentsRequested} requested segments (Language: ${targetLanguage})`;
         }
+    }
+
+    renderMarkdownBold(element, text) {
+        // Clear existing content
+        element.innerHTML = '';
+
+        // Split on **...** markers and insert text nodes / <strong> elements
+        const parts = text.split(/\*\*(.+?)\*\*/s);
+        parts.forEach((part, i) => {
+            if (i % 2 === 0) {
+                // Normal text
+                if (part) {
+                    element.appendChild(document.createTextNode(part));
+                }
+            } else {
+                // Bold text (between ** markers)
+                const strong = document.createElement('strong');
+                strong.textContent = part;
+                element.appendChild(strong);
+            }
+        });
     }
 
     copySummaryToClipboard() {

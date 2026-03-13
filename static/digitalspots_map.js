@@ -2574,6 +2574,7 @@ class DigitalSpotsMap {
         const timings = {
             'FT8': { duration: 15000, align: true },   // 15 seconds, aligned to :00, :15, :30, :45
             'FT4': { duration: 7500, align: true },    // 7.5 seconds
+            'FT2': { duration: 3750, align: true },    // 3.75 seconds
             'WSPR': { duration: 120000, align: true }, // 2 minutes, aligned to even minutes
             'JS8': { duration: 30000, align: false }   // 30 seconds, rolling window
         };
@@ -2604,6 +2605,15 @@ class DigitalSpotsMap {
             const ms = date.getUTCMilliseconds();
             const totalMs = seconds * 1000 + ms;
             const alignedMs = Math.floor(totalMs / 7500) * 7500;
+            date.setUTCSeconds(0, alignedMs);
+            return date.getTime();
+        } else if (mode === 'FT2') {
+            // FT2: align to 3.75 second boundaries
+            const date = new Date(timestamp);
+            const seconds = date.getUTCSeconds();
+            const ms = date.getUTCMilliseconds();
+            const totalMs = seconds * 1000 + ms;
+            const alignedMs = Math.floor(totalMs / 3750) * 3750;
             date.setUTCSeconds(0, alignedMs);
             return date.getTime();
         } else if (mode === 'WSPR') {

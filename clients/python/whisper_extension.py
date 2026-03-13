@@ -110,7 +110,7 @@ class WhisperExtension:
         # Controls frame
         controls_frame = ttk.Frame(main_frame)
         controls_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        controls_frame.columnconfigure(5, weight=1)
+        controls_frame.columnconfigure(6, weight=1)
 
         # Row 0: Auto-scroll, Show timestamps, Bionic reading, Show floating window, Buttons
         # Auto-scroll checkbox
@@ -140,14 +140,14 @@ class WhisperExtension:
 
         # Control buttons
         self.start_button = ttk.Button(controls_frame, text="Start", command=self.start_decoder)
-        self.start_button.grid(row=0, column=4, padx=(0, 5))
+        self.start_button.grid(row=0, column=4, padx=(0, 2))
 
         self.stop_button = ttk.Button(controls_frame, text="Stop", command=self.stop_decoder, state=tk.DISABLED)
-        self.stop_button.grid(row=0, column=5, padx=(0, 15))
+        self.stop_button.grid(row=0, column=5, padx=(0, 5))
 
         # Last update time (right-aligned)
         self.last_update_label = ttk.Label(controls_frame, text="--", foreground="gray", font=("Courier", 9))
-        self.last_update_label.grid(row=0, column=6, sticky=tk.E)
+        self.last_update_label.grid(row=0, column=7, sticky=tk.E)
 
         # Row 1: Only show in-progress, Hide in-progress, Language selection
         # Show only incomplete checkbox
@@ -168,7 +168,7 @@ class WhisperExtension:
         self.language_var = tk.StringVar(value='en')
         self.language_combo = ttk.Combobox(controls_frame, textvariable=self.language_var,
                                             state='readonly', width=15)
-        self.language_combo.grid(row=1, column=5, padx=(0, 15), pady=(5, 0), sticky=tk.W)
+        self.language_combo.grid(row=1, column=5, columnspan=2, padx=(0, 15), pady=(5, 0), sticky=tk.W)
         self.language_combo.bind('<<ComboboxSelected>>', self.on_language_changed)
 
         # Populate language dropdown from server

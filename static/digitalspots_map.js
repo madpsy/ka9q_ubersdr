@@ -959,6 +959,34 @@ class DigitalSpotsMap {
         this.updateSpaceWeatherPosition(); // Update space weather panel position
     }
 
+    setFilter(type, value) {
+        // If clicking the already-active filter value, toggle it off (reset to 'all')
+        const currentValue = type === 'mode' ? this.modeFilter
+                           : type === 'band' ? this.bandFilter
+                           : this.countryFilter;
+        const newValue = currentValue === value ? 'all' : value;
+
+        const selectId = type === 'mode' ? 'mode-filter'
+                       : type === 'band' ? 'band-filter'
+                       : 'country-filter';
+
+        const select = document.getElementById(selectId);
+        if (select) select.value = newValue;
+
+        if (type === 'mode') {
+            this.modeFilter = newValue;
+            this.savePreference('modeFilter', newValue);
+        } else if (type === 'band') {
+            this.bandFilter = newValue;
+            this.savePreference('bandFilter', newValue);
+        } else if (type === 'country') {
+            this.countryFilter = newValue;
+            this.savePreference('countryFilter', newValue);
+        }
+
+        this.applyFilters();
+    }
+
     async loadReceiverLocation() {
         try {
             const response = await fetch('/api/description');
@@ -1528,9 +1556,12 @@ class DigitalSpotsMap {
         // Build HTML for top 10 countries
         let html = '';
         sortedCountries.forEach(([country, count], index) => {
+            const isActive = this.countryFilter === country;
             html += `
                 <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: #ccc;">
-                    <span>${index + 1}. ${country}</span>
+                    <span style="cursor: pointer; ${isActive ? 'color: #4a9eff; font-weight: bold;' : ''}"
+                          title="Filter by ${country}"
+                          onclick="window.digitalSpotsMap.setFilter('country', '${country.replace(/'/g, "\\'")}')">${index + 1}. ${country}</span>
                     <span style="color: #4a9eff;">${count}</span>
                 </div>
             `;
@@ -1600,9 +1631,11 @@ class DigitalSpotsMap {
         sortedBands.forEach(band => {
             const count = bandCounts[band];
             const color = count > 0 ? '#ccc' : '#555';
+            const isActive = this.bandFilter === band;
             html += `
                 <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: ${color};">
-                    <span>${band}</span>
+                    <span style="${count > 0 ? 'cursor: pointer;' : ''} ${isActive ? 'color: #4a9eff; font-weight: bold;' : ''}"
+                          ${count > 0 ? `title="Filter by ${band}" onclick="window.digitalSpotsMap.setFilter('band', '${band}')"` : ''}>${band}</span>
                     <span style="color: ${count > 0 ? '#4a9eff' : '#555'};">${count}</span>
                 </div>
             `;
@@ -1641,9 +1674,11 @@ class DigitalSpotsMap {
         modes.forEach(mode => {
             const count = modeCounts[mode];
             const color = count > 0 ? '#ccc' : '#555';
+            const isActive = this.modeFilter === mode;
             html += `
                 <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: ${color};">
-                    <span>${mode}</span>
+                    <span style="${count > 0 ? 'cursor: pointer;' : ''} ${isActive ? 'color: #4a9eff; font-weight: bold;' : ''}"
+                          ${count > 0 ? `title="Filter by ${mode}" onclick="window.digitalSpotsMap.setFilter('mode', '${mode}')"` : ''}>${mode}</span>
                     <span style="color: ${count > 0 ? '#4a9eff' : '#555'};">${count}</span>
                 </div>
             `;

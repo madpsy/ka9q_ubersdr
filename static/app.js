@@ -2117,75 +2117,52 @@ function displayActiveChannels(channels) {
 }
 
 // Tune to a channel from the active channels list
+// Uses the same RadioAPI path as the DX cluster's tuneToSpot() for reliable behaviour:
+// setFrequency() handles autoTune + spectrum centering; setMode() sets slider constraints
+// first then resets bandwidth to mode defaults; setBandwidth() applies the channel's
+// stored bandwidth after constraints are in place.
 function tuneToChannel(frequency, mode, bandwidthLow, bandwidthHigh) {
-    // Update frequency input (only if not currently being edited)
-    const freqInput = document.getElementById('frequency');
-    if (freqInput && document.activeElement !== freqInput) {
-        setFrequencyInputValue(frequency);
-    }
-    updateBandButtons(frequency);
-    updateBandSelector();
-
-    // Update mode
-    currentMode = mode;
-    window.currentMode = mode;
-
-    // Update mode button states
-    document.querySelectorAll('.mode-btn').forEach(btn => {
-        btn.classList.remove('active');
-    });
-    const activeBtn = document.getElementById(`mode-${mode}`);
-    if (activeBtn) {
-        activeBtn.classList.add('active');
+    // Disable edge detection before tuning (same as DX cluster tuneToSpot)
+    if (window.spectrumDisplay) {
+        window.spectrumDisplay.skipEdgeDetectionTemporary = true;
     }
 
-    // Update bandwidth sliders
-    currentBandwidthLow = bandwidthLow;
-    currentBandwidthHigh = bandwidthHigh;
-    window.currentBandwidthLow = bandwidthLow;
-    window.currentBandwidthHigh = bandwidthHigh;
-
-    const bandwidthLowSlider = document.getElementById('bandwidth-low');
-    const bandwidthHighSlider = document.getElementById('bandwidth-high');
-
-    if (bandwidthLowSlider) {
-        bandwidthLowSlider.value = bandwidthLow;
-        document.getElementById('bandwidth-low-value').textContent = bandwidthLow;
+    // Decide whether to re-centre the spectrum (only if frequency is not already visible)
+    let centerSpectrum = true;
+    if (window.spectrumDisplay && window.spectrumDisplay.centerFreq && window.spectrumDisplay.totalBandwidth) {
+        const minVisible = window.spectrumDisplay.centerFreq - (window.spectrumDisplay.totalBandwidth / 2);
+        const maxVisible = window.spectrumDisplay.centerFreq + (window.spectrumDisplay.totalBandwidth / 2);
+        centerSpectrum = !(frequency >= minVisible && frequency <= maxVisible);
     }
 
-    if (bandwidthHighSlider) {
-        bandwidthHighSlider.value = bandwidthHigh;
-        document.getElementById('bandwidth-high-value').textContent = bandwidthHigh;
-    }
+    if (window.radioAPI) {
+        // 1. Set frequency — internally calls autoTune() (or connect()) and notifies extensions
+        window.radioAPI.setFrequency(frequency, centerSpectrum);
 
-    // Update URL
-    updateURL();
+        // 2. Set mode — sets slider min/max constraints for the mode first, then resets
+        //    bandwidth to mode defaults, updates FFT size, notifies extensions, etc.
+        window.radioAPI.setMode(mode, false);
 
-    // Temporarily enable edge tune to force spectrum update
-    const edgeTuneCheckbox = document.getElementById('spectrum-edge-tune-enable');
-    const originalEdgeTuneState = edgeTuneCheckbox ? edgeTuneCheckbox.checked : false;
-
-    if (edgeTuneCheckbox && !originalEdgeTuneState) {
-        edgeTuneCheckbox.checked = true;
-        edgeTuneCheckbox.dispatchEvent(new Event('change'));
-
-        // Restore original state after spectrum updates
-        setTimeout(() => {
-            if (edgeTuneCheckbox) {
-                edgeTuneCheckbox.checked = originalEdgeTuneState;
-                edgeTuneCheckbox.dispatchEvent(new Event('change'));
-            }
-        }, 2000);
-    }
-
-    // Tune to the new settings
-    if (wsManager.isConnected()) {
-        autoTune();
-        log(`Tuned to channel: ${formatFrequency(frequency)} ${mode.toUpperCase()} (BW: ${bandwidthLow} to ${bandwidthHigh} Hz)`);
+        // 3. Apply the channel's stored bandwidth AFTER setMode has set correct constraints,
+        //    so slider values are never silently clamped to wrong limits.
+        window.radioAPI.setBandwidth(bandwidthLow, bandwidthHigh);
     } else {
-        connect();
-        log(`Connecting to channel: ${formatFrequency(frequency)} ${mode.toUpperCase()} (BW: ${bandwidthLow} to ${bandwidthHigh} Hz)`);
+        // Fallback if radioAPI is not yet available
+        if (wsManager.isConnected()) {
+            autoTune();
+        } else {
+            connect();
+        }
     }
+
+    // Re-enable edge detection after a short delay (same as DX cluster)
+    setTimeout(() => {
+        if (window.spectrumDisplay) {
+            window.spectrumDisplay.skipEdgeDetectionTemporary = false;
+        }
+    }, 500);
+
+    log(`Tuned to channel: ${formatFrequency(frequency)} ${mode.toUpperCase()} (BW: ${bandwidthLow} to ${bandwidthHigh} Hz)`);
 }
 
 // Handle incoming binary messages (Opus format)

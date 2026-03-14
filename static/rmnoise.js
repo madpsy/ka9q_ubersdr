@@ -308,10 +308,29 @@ function rmNoise_process(audioFloat, sampleRate) {
     const nIn        = audioFloat.length;
     const accumTarget = Math.round(RM_FRAME * sampleRate / RM_RATE);
 
+    // ── 2.8 kHz LPF — keep AI model in its trained voice-bandwidth domain ─────
+    // The RMNoise AI is a voice denoiser trained on ~300–2800 Hz content.
+    // Audio wider than ~2700 Hz causes the model to produce discontinuous output
+    // frames (pops).  We apply a high-quality 2.8 kHz low-pass filter here,
+    // before the send path, regardless of the UI bandwidth setting.
+    //
+    // Technique: exploit the Lanczos resampler's built-in anti-aliasing.
+    // Downsampling to an intermediate rate of 5600 Hz (= 2 × 2800) forces the
+    // Lanczos kernel to attenuate everything above 2800 Hz (the Nyquist of
+    // 5600 Hz).  Upsampling back to sampleRate restores the original sample
+    // count.  No separate FIR/IIR implementation needed — lanczosResample()
+    // is already present and tested.
+    const RM_LPF_RATE = 5600;   // intermediate rate → 2800 Hz Nyquist cutoff
+    let sendAudio = audioFloat;
+    if (sampleRate !== RM_LPF_RATE) {
+        const lpfDown = lanczosResample(audioFloat, sampleRate, RM_LPF_RATE);
+        sendAudio     = lanczosResample(lpfDown,    RM_LPF_RATE, sampleRate);
+    }
+
     // ── Send path: accumulate → downsample → pack → send ──────────────────────
     const newAccumIn = new Float32Array(rmNoise.accumIn.length + nIn);
     newAccumIn.set(rmNoise.accumIn);
-    newAccumIn.set(audioFloat, rmNoise.accumIn.length);
+    newAccumIn.set(sendAudio, rmNoise.accumIn.length);
     rmNoise.accumIn = newAccumIn;
 
     while (rmNoise.accumIn.length >= accumTarget) {

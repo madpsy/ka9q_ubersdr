@@ -239,6 +239,13 @@ const rmNoise = {
     // or rate change.
     downsampleOSB:    null,   // send path  (inputRate → 8 kHz)
     upsampleOSB:      null,   // receive path (8 kHz → inputRate)
+
+    // 2.8 kHz send-path LPF — keeps the AI model in its trained voice-bandwidth
+    // domain.  Coefficients and state are initialised lazily in rmNoise_process()
+    // and reset on sample-rate change.
+    lpfCoeffs:        null,   // Float32Array of FIR taps
+    lpfState:         null,   // Float32Array delay line (length = taps - 1)
+    lpfRate:          0,      // sample rate for which lpfCoeffs were designed
 };
 
 // Expose globally so app.js can call rmNoise_process()
@@ -281,6 +288,74 @@ function rmNoise_unpackFrame(data) {
 
 // ── Audio processing ───────────────────────────────────────────────────────────
 
+// ── Send-path LPF helpers ──────────────────────────────────────────────────────
+//
+// Design and apply a windowed-sinc FIR low-pass filter.  Logic mirrors
+// NoiseBlanker.designFIRLowpass() and NoiseBlanker.applyAudioFilter() in
+// noise-blanker.js, adapted as standalone functions so rmnoise.js has no
+// dependency on the NoiseBlanker class.
+
+/**
+ * Design a windowed-sinc (Hamming) FIR low-pass filter.
+ * @param {number} cutoffHz   -3 dB cutoff frequency in Hz
+ * @param {number} sampleRate input sample rate in Hz
+ * @returns {Float32Array}    FIR coefficients (odd length, normalised to unity DC gain)
+ */
+function rmNoise_designLPF(cutoffHz, sampleRate) {
+    let numTaps = Math.min(Math.floor(sampleRate / 10), 1001);
+    if (numTaps % 2 === 0) numTaps += 1;   // must be odd
+
+    const coeffs = new Float32Array(numTaps);
+    const fc     = cutoffHz / sampleRate;  // normalised cutoff
+    const M      = (numTaps - 1) / 2;
+
+    for (let n = 0; n < numTaps; n++) {
+        const x = n - M;
+        // Windowed sinc
+        const h = (x === 0) ? 2 * fc
+                             : Math.sin(2 * Math.PI * fc * x) / (Math.PI * x);
+        // Hamming window
+        const w = 0.54 - 0.46 * Math.cos(2 * Math.PI * n / (numTaps - 1));
+        coeffs[n] = h * w;
+    }
+
+    // Normalise to unity DC gain
+    let sum = 0;
+    for (let i = 0; i < numTaps; i++) sum += coeffs[i];
+    for (let i = 0; i < numTaps; i++) coeffs[i] /= sum;
+
+    return coeffs;
+}
+
+/**
+ * Apply a stateful FIR filter in-place, preserving state across calls.
+ * @param {Float32Array} input   samples to filter (read-only)
+ * @param {Float32Array} coeffs  FIR coefficients
+ * @param {Float32Array} state   delay line (length = coeffs.length - 1), mutated in place
+ * @returns {Float32Array}       filtered copy of input
+ */
+function rmNoise_applyLPF(input, coeffs, state) {
+    const numTaps    = coeffs.length;
+    const numSamples = input.length;
+    const output     = new Float32Array(numSamples);
+
+    for (let i = 0; i < numSamples; i++) {
+        // Shift delay line
+        for (let j = numTaps - 2; j > 0; j--) {
+            state[j] = state[j - 1];
+        }
+        state[0] = input[i];
+
+        // Convolve
+        let y = coeffs[0] * input[i];
+        for (let j = 1; j < numTaps; j++) {
+            y += coeffs[j] * state[j - 1];
+        }
+        output[i] = y;
+    }
+    return output;
+}
+
 /**
  * Process a mono Float32Array through the RMNoise bridge.
  * Mirrors RMNoiseBridge.process() in rmnoise_window.py
@@ -311,21 +386,19 @@ function rmNoise_process(audioFloat, sampleRate) {
     // ── 2.8 kHz LPF — keep AI model in its trained voice-bandwidth domain ─────
     // The RMNoise AI is a voice denoiser trained on ~300–2800 Hz content.
     // Audio wider than ~2700 Hz causes the model to produce discontinuous output
-    // frames (pops).  We apply a high-quality 2.8 kHz low-pass filter here,
+    // frames (pops).  We apply a stateful windowed-sinc FIR LPF at 2800 Hz here,
     // before the send path, regardless of the UI bandwidth setting.
     //
-    // Technique: exploit the Lanczos resampler's built-in anti-aliasing.
-    // Downsampling to an intermediate rate of 5600 Hz (= 2 × 2800) forces the
-    // Lanczos kernel to attenuate everything above 2800 Hz (the Nyquist of
-    // 5600 Hz).  Upsampling back to sampleRate restores the original sample
-    // count.  No separate FIR/IIR implementation needed — lanczosResample()
-    // is already present and tested.
-    const RM_LPF_RATE = 5600;   // intermediate rate → 2800 Hz Nyquist cutoff
-    let sendAudio = audioFloat;
-    if (sampleRate !== RM_LPF_RATE) {
-        const lpfDown = lanczosResample(audioFloat, sampleRate, RM_LPF_RATE);
-        sendAudio     = lanczosResample(lpfDown,    RM_LPF_RATE, sampleRate);
+    // The filter coefficients and state are initialised lazily and stored on the
+    // rmNoise object so state is preserved across 240-sample chunk boundaries
+    // (no edge artifacts).  The design mirrors NoiseBlanker.designFIRLowpass()
+    // and NoiseBlanker.applyAudioFilter() in noise-blanker.js.
+    if (!rmNoise.lpfCoeffs || rmNoise.lpfRate !== sampleRate) {
+        rmNoise.lpfRate   = sampleRate;
+        rmNoise.lpfCoeffs = rmNoise_designLPF(2800, sampleRate);
+        rmNoise.lpfState  = new Float32Array(rmNoise.lpfCoeffs.length - 1);
     }
+    const sendAudio = rmNoise_applyLPF(audioFloat, rmNoise.lpfCoeffs, rmNoise.lpfState);
 
     // ── Send path: accumulate → downsample → pack → send ──────────────────────
     const newAccumIn = new Float32Array(rmNoise.accumIn.length + nIn);
@@ -1116,6 +1189,11 @@ function rmNoise_onSampleRateChange(newRate) {
     rmNoise.rateChangedAt = performance.now(); // arms the 300 ms in-flight discard window
     rmNoise.downsampleOSB = null;
     rmNoise.upsampleOSB   = null;
+    // Force LPF redesign at the new rate (lpfCoeffs check in rmNoise_process
+    // uses lpfRate !== sampleRate to detect this).
+    rmNoise.lpfCoeffs     = null;
+    rmNoise.lpfState      = null;
+    rmNoise.lpfRate       = 0;
 }
 
 // ── Expose globals for app.js ──────────────────────────────────────────────────

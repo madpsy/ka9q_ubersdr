@@ -343,6 +343,50 @@ function announceModeChange(mode) {
 }
 
 /**
+ * Announce both frequency and mode together as a single combined announcement.
+ * This avoids the race condition where announceModeChange (immediate) fires before
+ * announceFrequencyChange (1-second debounce), causing only the mode to be heard.
+ * Also bypasses the lastAnnouncedFrequency dedup so re-tuning to the same frequency
+ * (e.g. clicking Go on the current channel) still announces correctly.
+ * @param {number} frequencyHz - Frequency in Hz
+ * @param {string} mode - Mode name (e.g. 'usb', 'lsb', 'cwu')
+ */
+function announceFrequencyAndMode(frequencyHz, mode) {
+    // Cancel any pending debounced frequency announcement to avoid double-speaking
+    if (frequencyChangeTimer) {
+        clearTimeout(frequencyChangeTimer);
+        frequencyChangeTimer = null;
+    }
+
+    // Update dedup state so individual announcements don't re-fire
+    lastAnnouncedFrequency = frequencyHz;
+    lastAnnouncedMode = mode;
+
+    // Format frequency in MHz, removing trailing zeros
+    let frequencyMHz = (frequencyHz / 1000000).toFixed(6);
+    frequencyMHz = parseFloat(frequencyMHz).toString();
+
+    // Expand mode abbreviation
+    const modeNames = {
+        'usb': 'upper sideband',
+        'lsb': 'lower sideband',
+        'am': 'A M',
+        'fm': 'F M',
+        'nfm': 'narrow F M',
+        'cw': 'C W',
+        'cwu': 'C W upper',
+        'cwl': 'C W lower',
+        'sam': 'synchronous A M'
+    };
+    const modeName = modeNames[mode.toLowerCase()] || mode;
+
+    const announcement = `${frequencyMHz} megahertz, ${modeName}`;
+
+    // Clear queue and announce immediately (interrupts any current speech)
+    announceChange(announcement, false);
+}
+
+/**
  * Toggle TTS on/off
  */
 function toggleTTS() {
@@ -452,6 +496,7 @@ document.addEventListener('DOMContentLoaded', () => {
 window.ttsAnnouncements = {
     announceFrequencyChange,
     announceModeChange,
+    announceFrequencyAndMode,
     toggleTTS,
     isEnabled: () => ttsEnabled
 };

@@ -538,6 +538,12 @@ class DXClusterExtension extends DecoderExtension {
 
         this.radio.log(`Tuned to ${spot.dx_call} on ${this.formatFrequency(spot.frequency)} MHz ${mode.toUpperCase()}`);
 
+        // Announce via TTS — use combined announcement to avoid the race condition where
+        // announceModeChange (immediate) fires before announceFrequencyChange (1s debounce)
+        if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+            window.ttsAnnouncements.announceFrequencyAndMode(spot.frequency, mode);
+        }
+
         // Re-enable edge detection after a short delay
         setTimeout(() => {
             if (window.spectrumDisplay) {

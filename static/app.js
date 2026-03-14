@@ -2116,11 +2116,11 @@ function displayActiveChannels(channels) {
     listEl.innerHTML = html;
 }
 
-// Tune to a channel from the active channels list
-// Uses the same RadioAPI path as the DX cluster's tuneToSpot() for reliable behaviour:
-// setFrequency() handles autoTune + spectrum centering; setMode() sets slider constraints
-// first then resets bandwidth to mode defaults; setBandwidth() applies the channel's
-// stored bandwidth after constraints are in place.
+// Tune to a channel from the active channels list.
+// Mirrors the DX cluster's tuneToSpot() exactly:
+//   setFrequency() → sets input + calls autoTune() with current (old) bandwidth
+//   setMode()      → resets bandwidth to mode defaults + calls autoTune() again (wins)
+// No setBandwidth() call — that would fire a third autoTune() with wrong intermediate state.
 function tuneToChannel(frequency, mode, bandwidthLow, bandwidthHigh) {
     // Disable edge detection before tuning (same as DX cluster tuneToSpot)
     if (window.spectrumDisplay) {
@@ -2136,16 +2136,12 @@ function tuneToChannel(frequency, mode, bandwidthLow, bandwidthHigh) {
     }
 
     if (window.radioAPI) {
-        // 1. Set frequency — internally calls autoTune() (or connect()) and notifies extensions
+        // 1. Set frequency — updates input, calls autoTune(), notifies extensions
         window.radioAPI.setFrequency(frequency, centerSpectrum);
 
-        // 2. Set mode — sets slider min/max constraints for the mode first, then resets
-        //    bandwidth to mode defaults, updates FFT size, notifies extensions, etc.
+        // 2. Set mode — sets slider constraints, resets bandwidth to mode defaults,
+        //    calls autoTune() again (this is the final, correct tune command)
         window.radioAPI.setMode(mode, false);
-
-        // 3. Apply the channel's stored bandwidth AFTER setMode has set correct constraints,
-        //    so slider values are never silently clamped to wrong limits.
-        window.radioAPI.setBandwidth(bandwidthLow, bandwidthHigh);
     } else {
         // Fallback if radioAPI is not yet available
         if (wsManager.isConnected()) {
@@ -2161,6 +2157,13 @@ function tuneToChannel(frequency, mode, bandwidthLow, bandwidthHigh) {
             window.spectrumDisplay.skipEdgeDetectionTemporary = false;
         }
     }, 500);
+
+    // Announce via TTS — use combined announcement to avoid the race condition where
+    // announceModeChange (immediate) fires before announceFrequencyChange (1s debounce),
+    // and the dedup check silently drops the frequency if it hasn't changed.
+    if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+        window.ttsAnnouncements.announceFrequencyAndMode(frequency, mode);
+    }
 
     log(`Tuned to channel: ${formatFrequency(frequency)} ${mode.toUpperCase()} (BW: ${bandwidthLow} to ${bandwidthHigh} Hz)`);
 }

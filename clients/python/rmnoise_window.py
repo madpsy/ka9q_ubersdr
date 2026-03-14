@@ -24,6 +24,12 @@ try:
 except ImportError:
     _SAMPLERATE_AVAILABLE = False
 
+try:
+    from scipy import signal as _scipy_signal
+    _SCIPY_AVAILABLE = True
+except ImportError:
+    _SCIPY_AVAILABLE = False
+
 # ── Optional dependency check ──────────────────────────────────────────────────
 # We use RMNoiseClient for WebRTC signalling, and pack_frame/unpack_frame for
 # the 8 kHz wire protocol.  All resampling (input_sample_rate ↔ 8 kHz) is done
@@ -103,6 +109,18 @@ class RMNoiseBridge:
         self._ratio_down: float = self._RM_RATE / input_sample_rate
         self._ratio_up: float = input_sample_rate / self._RM_RATE
 
+        # 2.8 kHz send-path LPF — keeps the AI model in its trained voice-bandwidth
+        # domain.  Audio wider than ~2700 Hz causes the model to produce discontinuous
+        # output frames (pops).  We use a windowed-sinc FIR LPF via scipy.signal.firwin
+        # with persistent lfilter_zi state so there are no transient artifacts at
+        # chunk boundaries.  Same pattern as radio_client.py's audio bandpass filter.
+        # Falls back to no filtering if scipy is unavailable.
+        if _SCIPY_AVAILABLE:
+            self._lpf_taps, self._lpf_zi = self._design_lpf(input_sample_rate)
+        else:
+            self._lpf_taps = None
+            self._lpf_zi   = None
+
         # Accumulation buffer: collect input-rate samples until we have enough
         # to fill one 8 kHz frame (FRAME_8K samples after downsampling).
         self._accum: np.ndarray = np.zeros(0, dtype=np.float32)
@@ -113,6 +131,26 @@ class RMNoiseBridge:
 
         # Output accumulation: denoised 8 kHz samples waiting to be resampled back
         self._out_accum_8k: np.ndarray = np.zeros(0, dtype=np.float32)
+
+    # ── Internal helpers ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _design_lpf(sample_rate: int):
+        """Design a windowed-sinc FIR lowpass filter at 2800 Hz.
+
+        Uses the same firwin / lfilter_zi pattern as radio_client.py's
+        _init_audio_filter() so the filter behaviour is consistent across
+        the codebase.
+
+        Returns:
+            (taps, zi) — FIR coefficient array and zeroed initial state vector.
+        """
+        numtaps = min(int(sample_rate / 10), 1001)
+        if numtaps % 2 == 0:
+            numtaps += 1  # firwin lowpass requires odd tap count
+        taps = _scipy_signal.firwin(numtaps, 2800, pass_zero='lowpass', fs=sample_rate)
+        zi   = _scipy_signal.lfilter_zi(taps, 1.0) * 0.0
+        return taps, zi
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -156,6 +194,14 @@ class RMNoiseBridge:
             return audio_float
 
         n_in = len(audio_float)
+
+        # ── 2.8 kHz LPF — keep AI model in its trained voice-bandwidth domain ─
+        # Apply before accumulation so the resampler and AI server only ever see
+        # voice-bandwidth content, regardless of the UI bandwidth setting.
+        if self._lpf_taps is not None and self._lpf_zi is not None:
+            audio_float, self._lpf_zi = _scipy_signal.lfilter(
+                self._lpf_taps, 1.0, audio_float, zi=self._lpf_zi)
+            audio_float = audio_float.astype(np.float32)
 
         # ── Send path: accumulate → resample to 8 kHz → send ─────────────────
         self._accum = np.concatenate((self._accum, audio_float))
@@ -257,6 +303,9 @@ class RMNoiseBridge:
         if _SAMPLERATE_AVAILABLE:
             self._resampler_down = _samplerate.Resampler('sinc_best', channels=1)
             self._resampler_up = _samplerate.Resampler('sinc_best', channels=1)
+        # Redesign LPF for the new sample rate and reset its state
+        if _SCIPY_AVAILABLE:
+            self._lpf_taps, self._lpf_zi = self._design_lpf(new_rate)
         # Flush stale data from both accumulation buffers
         self._accum = np.zeros(0, dtype=np.float32)
         self._out_accum_8k = np.zeros(0, dtype=np.float32)

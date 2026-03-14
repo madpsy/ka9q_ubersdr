@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Active Channels Map</title>
     <link rel="stylesheet" href="leaflet.css" />
+    <script src="L.Terminator.js"></script>
     <style>
         * {
             margin: 0;
@@ -365,6 +366,8 @@
         let dragStartCenter = 0;
 
         // Initialize map
+        let terminator = null;
+
         function initMap() {
             map = L.map('map').setView([20, 0], 2);
 
@@ -373,6 +376,12 @@
                 attribution: '© OpenStreetMap contributors',
                 maxZoom: 18
             }).addTo(map);
+
+            // Add day/night terminator
+            if (typeof L.terminator === 'function') {
+                terminator = L.terminator({ fillOpacity: 0.3, color: '#000', weight: 2 }).addTo(map);
+                setInterval(() => { if (terminator) terminator.setTime(); }, 60000);
+            }
 
             // Track manual zoom/pan interactions
             map.on('zoomstart', function() {

@@ -164,6 +164,11 @@ function changeFrequencyByStep(step, increment) {
         window.radioAPI.notifyFrequencyChange(currentFreq);
     }
 
+    // Announce frequency change for accessibility (TTS)
+    if (window.ttsAnnouncements && window.ttsAnnouncements.isEnabled()) {
+        window.ttsAnnouncements.announceFrequencyChange(currentFreq);
+    }
+
     // Apply the frequency change
     if (typeof window.autoTune === 'function') {
         window.autoTune();

@@ -694,6 +694,36 @@ func (d *WhisperDecoder) processSegments(segments []interface{}) []interface{} {
 	return filteredSegments
 }
 
+// trimToLastSentence trims text to end at the last complete sentence boundary.
+// A sentence boundary is defined as a '.', '!', or '?' character (optionally
+// followed by a closing quote or parenthesis) that is followed by whitespace or
+// the end of the string.  If no sentence boundary is found the original text is
+// returned unchanged so the caller always gets something useful.
+func trimToLastSentence(text string) string {
+	// Walk backwards through the runes looking for a sentence-ending punctuation
+	// mark that is followed by whitespace (or is at the very end).
+	runes := []rune(text)
+	n := len(runes)
+
+	for i := n - 1; i >= 0; i-- {
+		r := runes[i]
+		if r == '.' || r == '!' || r == '?' {
+			// Allow an optional closing quote/paren immediately after the punctuation
+			end := i + 1
+			for end < n && (runes[end] == '"' || runes[end] == '\'' || runes[end] == ')') {
+				end++
+			}
+			// The character after the sentence-end must be whitespace or EOT
+			if end == n || runes[end] == ' ' || runes[end] == '\n' || runes[end] == '\t' || runes[end] == '\r' {
+				return strings.TrimRight(string(runes[:end]), " \t\r\n")
+			}
+		}
+	}
+
+	// No sentence boundary found – return the original text trimmed of trailing space
+	return strings.TrimRight(text, " \t\r\n")
+}
+
 // filterText applies all text filters to the input string
 func (d *WhisperDecoder) filterText(text string) string {
 	// First, remove suppressed phrases
@@ -1073,32 +1103,34 @@ func (d *WhisperDecoder) handleSummaryRequest(message []byte, resultChan chan<- 
 
 	log.Printf("[Whisper] Retrieved %d segments for summarization (requested %d)", len(segments), nSegments)
 
-	// Process segments in chunks of 100, starting from the oldest
-	const chunkSize = 100
-	var summaries []string
-
-	for i := 0; i < len(segments); i += chunkSize {
-		end := i + chunkSize
-		if end > len(segments) {
-			end = len(segments)
+	// Build a single block of text from the segments (oldest first), capped at
+	// 20,000 words.  If the cap is reached we trim to the last complete sentence
+	// so the LLM always receives well-formed input.
+	const maxWords = 20000
+	wordCount := 0
+	lastIncluded := 0 // index of the last segment included (exclusive)
+	for lastIncluded < len(segments) {
+		segWords := len(strings.Fields(segments[lastIncluded]))
+		if wordCount+segWords > maxWords {
+			break
 		}
-
-		chunk := segments[i:end]
-		chunkText := strings.Join(chunk, "\n")
-
-		log.Printf("[Whisper] Summarizing chunk %d-%d of %d segments", i+1, end, len(segments))
-
-		// Call summary API for this chunk
-		chunkSummary := d.summarizeText(chunkText)
-		if chunkSummary != "" {
-			summaries = append(summaries, chunkSummary)
-		}
+		wordCount += segWords
+		lastIncluded++
 	}
 
-	// Concatenate all chunk summaries
-	summary := strings.Join(summaries, "\n\n")
+	inputText := strings.Join(segments[:lastIncluded], "\n")
 
-	log.Printf("[Whisper] Generated %d chunk summaries, total length: %d chars", len(summaries), len(summary))
+	// If we stopped before the end, trim to the last complete sentence boundary.
+	if lastIncluded < len(segments) {
+		inputText = trimToLastSentence(inputText)
+		log.Printf("[Whisper] Word limit reached after %d segments (~%d words); trimmed to last sentence", lastIncluded, wordCount)
+	}
+
+	log.Printf("[Whisper] Summarizing %d segments (~%d words)", lastIncluded, wordCount)
+
+	summary := d.summarizeText(inputText)
+
+	log.Printf("[Whisper] Summary generated, length: %d chars", len(summary))
 
 	// If target language is not English, translate the concatenated summary
 	if d.config.TargetLanguage != "" && d.config.TargetLanguage != "en" {

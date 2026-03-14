@@ -270,12 +270,15 @@ function announceChange(text, queue = false) {
         console.log(`[TTS] Queued: "${text}"`);
         processAnnouncementQueue();
     } else {
-        // Clear queue and announce immediately
+        // Clear queue and announce immediately.
+        // IMPORTANT: Chromium (Chrome/Edge) has a bug where calling speechSynthesis.speak()
+        // in the same synchronous call stack as cancel() silently drops the utterance.
+        // A small setTimeout after cancel() works around this reliably.
         window.speechSynthesis.cancel();
         announcementQueue = [text];
         isProcessingQueue = false;
         isSpeaking = false;
-        processAnnouncementQueue();
+        setTimeout(() => processAnnouncementQueue(), 50);
     }
 }
 

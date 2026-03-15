@@ -1399,6 +1399,7 @@ static std::vector<std::map<std::string, std::string>> fetchPublicInstances()
         instance["tls"] = extractValue("tls");
         instance["callsign"] = extractValue("callsign");
         instance["location"] = extractValue("location");
+        instance["max_session_time"] = extractValue("max_session_time");
         
         // Extract public_iq_modes array
         size_t modesPos = instanceObj.find("\"public_iq_modes\"");
@@ -1595,6 +1596,10 @@ static SoapySDR::KwargsList findUberSDR(const SoapySDR::Kwargs &args)
                 std::string name = sanitizeForDeviceString(instance.count("name") ? instance.at("name") : host);
                 std::string callsign = sanitizeForDeviceString(instance.count("callsign") ? instance.at("callsign") : "");
                 std::string location = sanitizeForDeviceString(instance.count("location") ? instance.at("location") : "");
+                std::string maxSessionTimeStr = (instance.count("max_session_time") && !instance.at("max_session_time").empty())
+                    ? instance.at("max_session_time") : "0";
+                std::string sessionTimeDisplay = (maxSessionTimeStr == "0" || maxSessionTimeStr.empty())
+                    ? "unlimited" : (maxSessionTimeStr + "s");
                 
                 // Parse public_iq_modes
                 std::vector<std::string> publicModes;
@@ -1654,6 +1659,7 @@ static SoapySDR::KwargsList findUberSDR(const SoapySDR::Kwargs &args)
                     if (!location.empty()) {
                         dev["location"] = location;
                     }
+                    dev["max_session_time"] = sessionTimeDisplay;
                     results.push_back(dev);
                 }
             }

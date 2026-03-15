@@ -1,0 +1,28 @@
+# Virtual environment
+.venv/
+
+# PyInstaller output
+dist/
+build/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Egg / distribution metadata
+*.egg-info/
+*.egg
+.eggs/
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

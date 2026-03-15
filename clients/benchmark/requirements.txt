@@ -1,0 +1,12 @@
+# UberSDR Benchmark Tool - Python dependencies
+#
+# Install with:
+#   pip install -r requirements.txt
+#
+# Python 3.10+ required (uses match/case and newer type hints).
+
+# Async HTTP client - used for POST /connection
+aiohttp>=3.9.0
+
+# WebSocket client - used for /ws, /ws/user-spectrum, /ws/dxcluster
+websockets>=12.0

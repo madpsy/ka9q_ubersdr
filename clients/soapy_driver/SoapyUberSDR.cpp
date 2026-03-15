@@ -173,6 +173,9 @@ public:
     void setGain(const int direction, const size_t channel, const double value);
     double getGain(const int direction, const size_t channel) const;
     SoapySDR::Range getGainRange(const int direction, const size_t channel) const;
+    bool hasGainMode(const int direction, const size_t channel) const;
+    bool getGainMode(const int direction, const size_t channel) const;
+    void setGainMode(const int direction, const size_t channel, const bool automatic);
 
     // Frequency API
     void setFrequency(const int direction, const size_t channel, const double frequency, const SoapySDR::Kwargs &args = SoapySDR::Kwargs());
@@ -214,6 +217,7 @@ private:
     std::thread _wsThread;
     std::atomic<bool> _streaming;
     std::atomic<bool> _connected;
+    std::atomic<bool> _readyToConsume;
     
     // I/Q buffer management
     std::queue<std::vector<std::complex<float>>> _iqBuffers;
@@ -249,6 +253,7 @@ SoapyUberSDR::SoapyUberSDR(const SoapySDR::Kwargs &args)
     _sampleRate = modeToSampleRate(_currentMode);
     _streaming = false;
     _connected = false;
+    _readyToConsume = false;
     _userSessionID = generateUUID();
     _partialBufferOffset = 0;
     
@@ -357,7 +362,18 @@ int SoapyUberSDR::activateStream(
         _streaming = false;
         return SOAPY_SDR_STREAM_ERROR;
     }
-    
+
+    // Discard any data that arrived during connection setup before the
+    // consumer (readStream) was ready, to avoid an immediate buffer overflow.
+    {
+        std::lock_guard<std::mutex> lock(_bufferMutex);
+        while (!_iqBuffers.empty())
+            _iqBuffers.pop();
+        _partialBuffer.clear();
+        _partialBufferOffset = 0;
+    }
+    _readyToConsume = true;
+
     SoapySDR::log(SOAPY_SDR_INFO, "SoapyUberSDR: Stream activated");
     return 0;
 }
@@ -365,6 +381,7 @@ int SoapyUberSDR::activateStream(
 int SoapyUberSDR::deactivateStream(SoapySDR::Stream *stream, const int flags, const long long timeNs)
 {
     _streaming = false;
+    _readyToConsume = false;
     disconnectWebSocket();
     
     std::lock_guard<std::mutex> lock(_bufferMutex);
@@ -484,6 +501,18 @@ SoapySDR::Range SoapyUberSDR::getGainRange(const int direction, const size_t cha
 {
     return SoapySDR::Range(0, 0);
 }
+
+bool SoapyUberSDR::hasGainMode(const int direction, const size_t channel) const
+{
+    return true;
+}
+
+bool SoapyUberSDR::getGainMode(const int direction, const size_t channel) const
+{
+    return false;
+}
+
+void SoapyUberSDR::setGainMode(const int direction, const size_t channel, const bool automatic) {}
 
 // Frequency API
 void SoapyUberSDR::setFrequency(
@@ -613,10 +642,13 @@ double SoapyUberSDR::modeToSampleRate(const std::string &mode) const
 
 std::string SoapyUberSDR::sampleRateToMode(double rate) const
 {
-    if (rate <= 48000) return "iq48";
-    if (rate <= 96000) return "iq96";
-    if (rate <= 192000) return "iq192";
-    return "iq384";
+    if (rate == 48000) return "iq48";
+    if (rate == 96000) return "iq96";
+    if (rate == 192000) return "iq192";
+    if (rate == 384000) return "iq384";
+    throw std::runtime_error(
+        "SoapyUberSDR: unsupported sample rate " + std::to_string((int)rate) +
+        " Hz. Valid rates: 48000, 96000, 192000, 384000");
 }
 
 void SoapyUberSDR::handleTLSMessage(websocketpp::connection_hdl hdl, tls_message_ptr msg)
@@ -702,9 +734,11 @@ void SoapyUberSDR::handleTLSMessage(websocketpp::connection_hdl hdl, tls_message
             
             // Limit queue depth to prevent memory bloat and excessive latency
             if (_iqBuffers.size() >= MAX_BUFFER_QUEUE_SIZE) {
-                SoapySDR::logf(SOAPY_SDR_WARNING,
-                    "SoapyUberSDR: Buffer queue full (%zu), dropping oldest buffer",
-                    _iqBuffers.size());
+                if (_readyToConsume) {
+                    SoapySDR::logf(SOAPY_SDR_WARNING,
+                        "SoapyUberSDR: Buffer queue full (%zu), dropping oldest buffer",
+                        _iqBuffers.size());
+                }
                 _iqBuffers.pop();
             }
             
@@ -806,9 +840,11 @@ void SoapyUberSDR::handlePlainMessage(websocketpp::connection_hdl hdl, plain_mes
             
             // Limit queue depth to prevent memory bloat and excessive latency
             if (_iqBuffers.size() >= MAX_BUFFER_QUEUE_SIZE) {
-                SoapySDR::logf(SOAPY_SDR_WARNING,
-                    "SoapyUberSDR: Buffer queue full (%zu), dropping oldest buffer",
-                    _iqBuffers.size());
+                if (_readyToConsume) {
+                    SoapySDR::logf(SOAPY_SDR_WARNING,
+                        "SoapyUberSDR: Buffer queue full (%zu), dropping oldest buffer",
+                        _iqBuffers.size());
+                }
                 _iqBuffers.pop();
             }
             

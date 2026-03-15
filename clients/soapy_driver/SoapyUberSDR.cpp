@@ -991,6 +991,25 @@ bool SoapyUberSDR::checkConnectionAllowed()
             
             if (modeAllowed) {
                 SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Connection allowed - mode '%s' is available", _currentMode.c_str());
+
+                // Parse and log max_session_time
+                size_t mstPos = response.find("\"max_session_time\"");
+                if (mstPos != std::string::npos) {
+                    size_t colonPos = response.find(":", mstPos);
+                    if (colonPos != std::string::npos) {
+                        size_t numStart = response.find_first_not_of(" \t", colonPos + 1);
+                        if (numStart != std::string::npos && isdigit(response[numStart])) {
+                            size_t numEnd = response.find_first_not_of("0123456789", numStart);
+                            int maxSessionTime = std::stoi(response.substr(numStart, numEnd - numStart));
+                            if (maxSessionTime == 0) {
+                                SoapySDR::log(SOAPY_SDR_INFO, "SoapyUberSDR: Session time limit: unlimited");
+                            } else {
+                                SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Session time limit: %d seconds", maxSessionTime);
+                            }
+                        }
+                    }
+                }
+
                 return true;
             } else {
                 SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: Connection allowed but mode '%s' is not in allowed list", _currentMode.c_str());

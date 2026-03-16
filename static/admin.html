@@ -580,11 +580,14 @@
                     <!-- Analytics Links Section -->
                     <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; border: 1px solid #dee2e6;">
                         <strong style="color: #333; margin-bottom: 10px; display: block;">📊 Analytics & Reports:</strong>
-                        <div style="display: flex; flex-wrap: wrap; gap: 10px;">
-                            <a href="bandconditions.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">🌐 Band Conditions</a>
-                            <a href="spaceweather_history.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">☀️ Space Weather History</a>
-                            <a href="noisefloor.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📡 Noise Floor</a>
-                            <a href="noisefloor_aggregate.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📊 Noise Floor Aggregate</a>
+                        <div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center;">
+                            <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                                <a href="bandconditions.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">🌐 Band Conditions</a>
+                                <a href="spaceweather_history.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">☀️ Space Weather History</a>
+                                <a href="noisefloor.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📡 Noise Floor</a>
+                                <a href="noisefloor_aggregate.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📊 Noise Floor Aggregate</a>
+                            </div>
+                            <button onclick="showLoginHistoryModal()" style="padding: 6px 12px; background: #495057; color: white; border: none; border-radius: 4px; font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.2s; white-space: nowrap;" onmouseover="this.style.background='#343a40'" onmouseout="this.style.background='#495057'">🔐 Login History</button>
                         </div>
                     </div>
                     <!-- Session Activity Chart (outside sessionsList so it persists) -->
@@ -17762,6 +17765,156 @@ Referer: ${log.referer}`;
             URL.revokeObjectURL(url);
         }
 
+    </script>
+
+    <!-- Login History Modal -->
+    <div id="loginHistoryModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9999; overflow-y:auto;">
+        <div style="background:#fff; border-radius:8px; max-width:900px; width:95%; margin:40px auto; padding:0; box-shadow:0 8px 32px rgba(0,0,0,0.25);">
+            <!-- Header -->
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:20px 24px; border-bottom:2px solid #667eea; background:#f8f9fa; border-radius:8px 8px 0 0;">
+                <h2 style="margin:0; color:#333; font-size:18px;">🔐 Admin Login History</h2>
+                <button onclick="closeLoginHistoryModal()" style="background:none; border:none; font-size:22px; cursor:pointer; color:#666; line-height:1;" title="Close">✕</button>
+            </div>
+            <!-- Body -->
+            <div style="padding:24px;">
+                <div id="loginHistoryContent">
+                    <div style="text-align:center; padding:40px; color:#666;">Loading…</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ── Login History Modal ──────────────────────────────────────────────────
+
+    function closeLoginHistoryModal() {
+        document.getElementById('loginHistoryModal').style.display = 'none';
+    }
+
+    // Close on backdrop click
+    document.getElementById('loginHistoryModal').addEventListener('click', function(e) {
+        if (e.target === this) closeLoginHistoryModal();
+    });
+
+    async function showLoginHistoryModal() {
+        const modal = document.getElementById('loginHistoryModal');
+        const content = document.getElementById('loginHistoryContent');
+        modal.style.display = 'block';
+        content.innerHTML = '<div style="text-align:center;padding:40px;color:#666;">Loading…</div>';
+
+        try {
+            const resp = await fetch('/admin/login-history');
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const data = await resp.json();
+            content.innerHTML = renderLoginHistory(data);
+        } catch (err) {
+            content.innerHTML = '<div style="color:#dc3545;padding:20px;">Failed to load login history: ' + escapeHtml(String(err)) + '</div>';
+        }
+    }
+
+    function renderLoginHistory(data) {
+        const active   = data.active   || [];
+        const previous = data.previous || [];
+        const failed   = data.failed   || [];
+
+        let html = '';
+
+        // ── Currently Valid Sessions ─────────────────────────────────────────
+        html += '<h3 style="margin:0 0 12px; color:#333; font-size:15px; border-bottom:1px solid #dee2e6; padding-bottom:8px;">✅ Currently Valid Sessions (' + active.length + ')</h3>';
+        if (active.length === 0) {
+            html += '<p style="color:#666; font-size:13px; margin:0 0 24px;">No active admin sessions.</p>';
+        } else {
+            html += '<div style="overflow-x:auto; margin-bottom:24px;"><table style="width:100%; border-collapse:collapse; font-size:13px;">';
+            html += '<thead><tr style="background:#f8f9fa;">'
+                  + '<th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6; white-space:nowrap;">IP Address</th>'
+                  + '<th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6; white-space:nowrap;">Login Time</th>'
+                  + '<th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6; white-space:nowrap;">Expires At</th>'
+                  + '<th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6;">User Agent</th>'
+                  + '</tr></thead><tbody>';
+            active.forEach(function(s, i) {
+                const bg = i % 2 === 0 ? '#fff' : '#f8f9fa';
+                html += '<tr style="background:' + bg + ';">'
+                      + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; font-family:monospace; white-space:nowrap;">' + escapeHtml(s.ip || '—') + '</td>'
+                      + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; white-space:nowrap;">' + formatLoginDate(s.created_at) + '</td>'
+                      + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; white-space:nowrap;">' + formatLoginDate(s.expires_at) + '</td>'
+                      + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; color:#555; font-size:12px; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="' + escapeHtml(s.user_agent || '') + '">' + escapeHtml(s.user_agent || '—') + '</td>'
+                      + '</tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        // ── Previous Sessions ────────────────────────────────────────────────
+        html += '<h3 style="margin:0 0 12px; color:#333; font-size:15px; border-bottom:1px solid #dee2e6; padding-bottom:8px;">🕓 Previous Sessions (' + previous.length + ')</h3>';
+        if (previous.length === 0) {
+            html += '<p style="color:#666; font-size:13px; margin:0 0 24px;">No previous sessions recorded yet.</p>';
+        } else {
+            html += '<div style="overflow-x:auto; margin-bottom:24px;"><table style="width:100%; border-collapse:collapse; font-size:13px;">';
+            html += '<thead><tr style="background:#f8f9fa;">'
+                  + '<th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6; white-space:nowrap;">IP Address</th>'
+                  + '<th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6; white-space:nowrap;">Login Time</th>'
+                  + '<th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6; white-space:nowrap;">Ended At</th>'
+                  + '<th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6; white-space:nowrap;">Reason</th>'
+                  + '<th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6;">User Agent</th>'
+                  + '</tr></thead><tbody>';
+            previous.forEach(function(s, i) {
+                const bg = i % 2 === 0 ? '#fff' : '#f8f9fa';
+                html += '<tr style="background:' + bg + ';">'
+                      + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; font-family:monospace; white-space:nowrap;">' + escapeHtml(s.ip || '—') + '</td>'
+                      + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; white-space:nowrap;">' + formatLoginDate(s.created_at) + '</td>'
+                      + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; white-space:nowrap;">' + formatLoginDate(s.ended_at) + '</td>'
+                      + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; white-space:nowrap;">' + loginReasonBadge(s.end_reason) + '</td>'
+                      + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; color:#555; font-size:12px; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="' + escapeHtml(s.user_agent || '') + '">' + escapeHtml(s.user_agent || '—') + '</td>'
+                      + '</tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        // ── Failed Login Attempts ────────────────────────────────────────────
+        html += '<h3 style="margin:0 0 12px; color:#333; font-size:15px; border-bottom:1px solid #dee2e6; padding-bottom:8px;">❌ Failed Login Attempts (' + failed.length + ')</h3>';
+        if (failed.length === 0) {
+            html += '<p style="color:#666; font-size:13px; margin:0;">No failed login attempts recorded.</p>';
+        } else {
+            html += '<div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse; font-size:13px;">';
+            html += '<thead><tr style="background:#f8f9fa;">'
+                  + '<th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6; white-space:nowrap;">IP Address</th>'
+                  + '<th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6; white-space:nowrap;">Attempted At</th>'
+                  + '<th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6;">User Agent</th>'
+                  + '</tr></thead><tbody>';
+            failed.forEach(function(s, i) {
+                const bg = i % 2 === 0 ? '#fff' : '#fff0f0';
+                html += '<tr style="background:' + bg + ';">'
+                      + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; font-family:monospace; white-space:nowrap;">' + escapeHtml(s.ip || '—') + '</td>'
+                      + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; white-space:nowrap;">' + formatLoginDate(s.attempted_at) + '</td>'
+                      + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; color:#555; font-size:12px; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="' + escapeHtml(s.user_agent || '') + '">' + escapeHtml(s.user_agent || '—') + '</td>'
+                      + '</tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        return html;
+    }
+
+    function loginReasonBadge(reason) {
+        const styles = {
+            logout:  'background:#d4edda; color:#155724; border:1px solid #c3e6cb;',
+            expired: 'background:#fff3cd; color:#856404; border:1px solid #ffeeba;',
+            failed:  'background:#f8d7da; color:#721c24; border:1px solid #f5c6cb;',
+        };
+        const labels = { logout: 'Logout', expired: 'Expired', failed: 'Failed' };
+        const style = styles[reason] || 'background:#e2e3e5; color:#383d41; border:1px solid #d6d8db;';
+        const label = labels[reason] || escapeHtml(reason || '—');
+        return '<span style="padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; ' + style + '">' + label + '</span>';
+    }
+
+    function formatLoginDate(iso) {
+        if (!iso) return '—';
+        try {
+            const d = new Date(iso);
+            return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'medium' });
+        } catch(e) {
+            return escapeHtml(iso);
+        }
+    }
     </script>
 </body>
 </html>

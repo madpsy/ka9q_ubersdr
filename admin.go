@@ -67,28 +67,100 @@ func convertFrequencies(v interface{}) {
 // AdminSession represents an authenticated admin session
 type AdminSession struct {
 	Token     string
+	IP        string
+	UserAgent string
 	CreatedAt time.Time
 	ExpiresAt time.Time
+	EndedAt   *time.Time
+	EndReason string // "active", "logout", "expired"
+}
+
+// AdminLoginRecord is a flattened record used for the login history API response
+type AdminLoginRecord struct {
+	IP          string     `json:"ip"`
+	UserAgent   string     `json:"user_agent"`
+	AttemptedAt *time.Time `json:"attempted_at,omitempty"` // failed attempts only
+	CreatedAt   *time.Time `json:"created_at,omitempty"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	EndedAt     *time.Time `json:"ended_at,omitempty"`
+	EndReason   string     `json:"end_reason"` // "active", "logout", "expired", "failed"
+}
+
+const adminLoginHistoryCap = 100
+
+// AdminLoginHistory holds in-memory login history (not persisted to disk)
+type AdminLoginHistory struct {
+	mu       sync.RWMutex
+	previous []AdminLoginRecord // ended sessions (logout / expired) — capped at adminLoginHistoryCap
+	failed   []AdminLoginRecord // failed login attempts — capped at adminLoginHistoryCap
+}
+
+// NewAdminLoginHistory creates a new login history store
+func NewAdminLoginHistory() *AdminLoginHistory {
+	return &AdminLoginHistory{}
+}
+
+// RecordPrevious appends a completed session to the previous list (capped)
+func (h *AdminLoginHistory) RecordPrevious(rec AdminLoginRecord) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.previous = append(h.previous, rec)
+	if len(h.previous) > adminLoginHistoryCap {
+		h.previous = h.previous[len(h.previous)-adminLoginHistoryCap:]
+	}
+}
+
+// RecordFailed appends a failed login attempt to the failed list (capped)
+func (h *AdminLoginHistory) RecordFailed(rec AdminLoginRecord) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.failed = append(h.failed, rec)
+	if len(h.failed) > adminLoginHistoryCap {
+		h.failed = h.failed[len(h.failed)-adminLoginHistoryCap:]
+	}
+}
+
+// Snapshot returns copies of the previous and failed slices (newest-first)
+func (h *AdminLoginHistory) Snapshot() (previous, failed []AdminLoginRecord) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	prev := make([]AdminLoginRecord, len(h.previous))
+	copy(prev, h.previous)
+	// Reverse so newest is first
+	for i, j := 0, len(prev)-1; i < j; i, j = i+1, j-1 {
+		prev[i], prev[j] = prev[j], prev[i]
+	}
+
+	fail := make([]AdminLoginRecord, len(h.failed))
+	copy(fail, h.failed)
+	for i, j := 0, len(fail)-1; i < j; i, j = i+1, j-1 {
+		fail[i], fail[j] = fail[j], fail[i]
+	}
+
+	return prev, fail
 }
 
 // AdminSessionStore manages admin sessions
 type AdminSessionStore struct {
-	sessions map[string]*AdminSession
-	mu       sync.RWMutex
+	sessions     map[string]*AdminSession
+	mu           sync.RWMutex
+	loginHistory *AdminLoginHistory // back-reference for expiry recording
 }
 
 // NewAdminSessionStore creates a new session store
-func NewAdminSessionStore() *AdminSessionStore {
+func NewAdminSessionStore(history *AdminLoginHistory) *AdminSessionStore {
 	store := &AdminSessionStore{
-		sessions: make(map[string]*AdminSession),
+		sessions:     make(map[string]*AdminSession),
+		loginHistory: history,
 	}
 	// Start cleanup goroutine
 	go store.cleanupExpiredSessions()
 	return store
 }
 
-// CreateSession creates a new admin session
-func (s *AdminSessionStore) CreateSession() string {
+// CreateSession creates a new admin session with IP and User-Agent recorded
+func (s *AdminSessionStore) CreateSession(ip, userAgent string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -103,8 +175,11 @@ func (s *AdminSessionStore) CreateSession() string {
 	// Create session with 24 hour expiry
 	session := &AdminSession{
 		Token:     token,
+		IP:        ip,
+		UserAgent: userAgent,
 		CreatedAt: time.Now(),
 		ExpiresAt: time.Now().Add(24 * time.Hour),
+		EndReason: "active",
 	}
 
 	s.sessions[token] = session
@@ -136,7 +211,7 @@ func (s *AdminSessionStore) DeleteSession(token string) {
 	delete(s.sessions, token)
 }
 
-// cleanupExpiredSessions periodically removes expired sessions
+// cleanupExpiredSessions periodically removes expired sessions and records them in history
 func (s *AdminSessionStore) cleanupExpiredSessions() {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
@@ -144,12 +219,29 @@ func (s *AdminSessionStore) cleanupExpiredSessions() {
 	for range ticker.C {
 		s.mu.Lock()
 		now := time.Now()
+		var expired []*AdminSession
 		for token, session := range s.sessions {
 			if now.After(session.ExpiresAt) {
+				expired = append(expired, session)
 				delete(s.sessions, token)
 			}
 		}
 		s.mu.Unlock()
+
+		// Record expired sessions in history (outside the lock)
+		if s.loginHistory != nil {
+			for _, session := range expired {
+				endedAt := now
+				s.loginHistory.RecordPrevious(AdminLoginRecord{
+					IP:        session.IP,
+					UserAgent: session.UserAgent,
+					CreatedAt: &session.CreatedAt,
+					ExpiresAt: &session.ExpiresAt,
+					EndedAt:   &endedAt,
+					EndReason: "expired",
+				})
+			}
+		}
 	}
 }
 
@@ -263,6 +355,7 @@ type AdminHandler struct {
 	rotatorScheduler    *RotatorScheduler
 	geoIPService        *GeoIPService
 	loginAttempts       *LoginAttemptTracker
+	loginHistory        *AdminLoginHistory
 	frontendHistory     *FrontendHistoryTracker
 	loadHistory         *LoadHistoryTracker
 }
@@ -327,12 +420,13 @@ func (ah *AdminHandler) restartServer() {
 
 // NewAdminHandler creates a new admin handler
 func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, countryBanManager *CountryBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, geoIPService *GeoIPService, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker) *AdminHandler {
+	history := NewAdminLoginHistory()
 	return &AdminHandler{
 		config:              config,
 		configFile:          configFile,
 		configDir:           configDir,
 		sessions:            sessions,
-		adminSessions:       NewAdminSessionStore(),
+		adminSessions:       NewAdminSessionStore(history),
 		ipBanManager:        ipBanManager,
 		countryBanManager:   countryBanManager,
 		audioReceiver:       audioReceiver,
@@ -350,6 +444,7 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		rotatorScheduler:    rotatorScheduler,
 		geoIPService:        geoIPService,
 		loginAttempts:       NewLoginAttemptTracker(),
+		loginHistory:        history,
 		frontendHistory:     frontendHistory,
 		loadHistory:         loadHistory,
 	}
@@ -372,6 +467,7 @@ func (ah *AdminHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Get client IP using the centralised function (same as AuthMiddleware and all other endpoints)
 	clientIP := getClientIP(r)
+	userAgent := r.Header.Get("User-Agent")
 
 	// Check if IP is allowed to access admin endpoints
 	if !ah.config.Admin.IsIPAllowed(clientIP) {
@@ -397,7 +493,18 @@ func (ah *AdminHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Validate password
 	if loginReq.Password != ah.config.Admin.Password {
-		// Record failed attempt
+		// Record failed attempt in history
+		now := time.Now()
+		if ah.loginHistory != nil {
+			ah.loginHistory.RecordFailed(AdminLoginRecord{
+				IP:          clientIP,
+				UserAgent:   userAgent,
+				AttemptedAt: &now,
+				EndReason:   "failed",
+			})
+		}
+
+		// Record failed attempt for rate limiting
 		attemptCount := ah.loginAttempts.RecordFailedAttempt(clientIP)
 
 		// Check if we should apply temporary ban
@@ -426,8 +533,8 @@ func (ah *AdminHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	// Successful login - reset attempts for this IP
 	ah.loginAttempts.ResetAttempts(clientIP)
 
-	// Create session
-	token := ah.adminSessions.CreateSession()
+	// Create session (IP and User-Agent are stored on the session for history)
+	token := ah.adminSessions.CreateSession(clientIP, userAgent)
 	if token == "" {
 		http.Error(w, "Failed to create session", http.StatusInternalServerError)
 		return
@@ -481,6 +588,23 @@ func (ah *AdminHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	// Get session token from cookie
 	cookie, err := r.Cookie("admin_session")
 	if err == nil {
+		// Retrieve session details before deleting (for history)
+		if ah.loginHistory != nil {
+			ah.adminSessions.mu.RLock()
+			session, exists := ah.adminSessions.sessions[cookie.Value]
+			ah.adminSessions.mu.RUnlock()
+			if exists {
+				now := time.Now()
+				ah.loginHistory.RecordPrevious(AdminLoginRecord{
+					IP:        session.IP,
+					UserAgent: session.UserAgent,
+					CreatedAt: &session.CreatedAt,
+					ExpiresAt: &session.ExpiresAt,
+					EndedAt:   &now,
+					EndReason: "logout",
+				})
+			}
+		}
 		// Delete session
 		ah.adminSessions.DeleteSession(cookie.Value)
 	}
@@ -6286,5 +6410,70 @@ func (ah *AdminHandler) HandleBannedCountries(w http.ResponseWriter, r *http.Req
 		"count":            len(bannedCountries),
 	}); err != nil {
 		log.Printf("Error encoding banned countries: %v", err)
+	}
+}
+
+// HandleLoginHistory returns the in-memory admin login history.
+// Response shape:
+//
+//	{
+//	  "active":   [ { ip, user_agent, created_at, expires_at, end_reason:"active" }, ... ],
+//	  "previous": [ { ip, user_agent, created_at, expires_at, ended_at, end_reason }, ... ],  // newest first, capped at 100
+//	  "failed":   [ { ip, user_agent, attempted_at, end_reason:"failed" }, ... ]               // newest first, capped at 100
+//	}
+func (ah *AdminHandler) HandleLoginHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Build active sessions list from the live session store
+	ah.adminSessions.mu.RLock()
+	active := make([]AdminLoginRecord, 0, len(ah.adminSessions.sessions))
+	for _, s := range ah.adminSessions.sessions {
+		// Skip already-expired sessions (cleanup goroutine may not have run yet)
+		if time.Now().After(s.ExpiresAt) {
+			continue
+		}
+		createdAt := s.CreatedAt
+		expiresAt := s.ExpiresAt
+		active = append(active, AdminLoginRecord{
+			IP:        s.IP,
+			UserAgent: s.UserAgent,
+			CreatedAt: &createdAt,
+			ExpiresAt: &expiresAt,
+			EndReason: "active",
+		})
+	}
+	ah.adminSessions.mu.RUnlock()
+
+	// Sort active sessions newest-first
+	sort.Slice(active, func(i, j int) bool {
+		if active[i].CreatedAt == nil || active[j].CreatedAt == nil {
+			return false
+		}
+		return active[i].CreatedAt.After(*active[j].CreatedAt)
+	})
+
+	previous, failed := ah.loginHistory.Snapshot()
+
+	// Use empty slices (not nil) so JSON encodes as [] not null
+	if previous == nil {
+		previous = []AdminLoginRecord{}
+	}
+	if failed == nil {
+		failed = []AdminLoginRecord{}
+	}
+
+	response := map[string]interface{}{
+		"active":   active,
+		"previous": previous,
+		"failed":   failed,
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding login history: %v", err)
 	}
 }

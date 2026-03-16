@@ -6492,10 +6492,18 @@ func (ah *AdminHandler) HandleLoginHistory(w http.ResponseWriter, r *http.Reques
 		failed = []AdminLoginRecord{}
 	}
 
+	// Include the caller's own token so the frontend can identify and disable
+	// the Force Logout button for the current session.
+	currentToken := ""
+	if cookie, err := r.Cookie("admin_session"); err == nil {
+		currentToken = cookie.Value
+	}
+
 	response := map[string]interface{}{
-		"active":   active,
-		"previous": previous,
-		"failed":   failed,
+		"active":        active,
+		"previous":      previous,
+		"failed":        failed,
+		"current_token": currentToken,
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

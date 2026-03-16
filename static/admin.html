@@ -17851,9 +17851,10 @@ Referer: ${log.referer}`;
     }
 
     function renderLoginHistory(data) {
-        const active   = data.active   || [];
-        const previous = data.previous || [];
-        const failed   = data.failed   || [];
+        const active       = data.active        || [];
+        const previous     = data.previous      || [];
+        const failed       = data.failed        || [];
+        const currentToken = data.current_token || '';
 
         let html = '';
 
@@ -17873,14 +17874,21 @@ Referer: ${log.referer}`;
             active.forEach(function(s, i) {
                 const bg = i % 2 === 0 ? '#fff' : '#f8f9fa';
                 const safeToken = escapeHtml(s.token || '');
+                const isSelf = s.token && currentToken && s.token === currentToken;
+                let actionCell;
+                if (isSelf) {
+                    actionCell = '<span style="color:#666; font-size:12px; font-style:italic;">Current session</span>';
+                } else if (s.token) {
+                    actionCell = '<button onclick="forceRevokeLoginSession(\'' + safeToken + '\', this)" style="padding:3px 10px; background:#dc3545; color:white; border:none; border-radius:3px; font-size:12px; cursor:pointer;" title="Force this session to end immediately">Force Logout</button>';
+                } else {
+                    actionCell = '—';
+                }
                 html += '<tr style="background:' + bg + ';">'
                       + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; font-family:monospace; white-space:nowrap;">' + escapeHtml(s.ip || '—') + '</td>'
                       + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; white-space:nowrap;">' + formatLoginDate(s.created_at) + '</td>'
                       + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; white-space:nowrap;">' + formatLoginDate(s.expires_at) + '</td>'
                       + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; color:#555; font-size:12px; max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="' + escapeHtml(s.user_agent || '') + '">' + escapeHtml(s.user_agent || '—') + '</td>'
-                      + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; white-space:nowrap;">'
-                      + (s.token ? '<button onclick="forceRevokeLoginSession(\'' + safeToken + '\', this)" style="padding:3px 10px; background:#dc3545; color:white; border:none; border-radius:3px; font-size:12px; cursor:pointer;" title="Force this session to end immediately">Force Logout</button>' : '—')
-                      + '</td>'
+                      + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; white-space:nowrap;">' + actionCell + '</td>'
                       + '</tr>';
             });
             html += '</tbody></table></div>';

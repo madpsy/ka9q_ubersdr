@@ -22,6 +22,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// debugBridge enables verbose bridge-level debug logging (set via -debug flag)
+var debugBridge = false
+
 // ConnectionCheckRequest for /connection endpoint
 type ConnectionCheckRequest struct {
 	UserSessionID string `json:"user_session_id"`
@@ -40,10 +43,24 @@ type ConnectionCheckResponse struct {
 }
 
 const (
+	// HPSDR device types
+	DeviceHermes     = 0x01
+	DeviceHermesLite = 0x06
+
+	// Maximum number of receivers
+	MaxReceivers = 10
+
+	// Protocol 1 packet constants
+	// Protocol 1 IQ data: 126 samples per 1032-byte packet
+	SamplesPerPacket = 126
+
+	// Firmware version reported in discovery responses
+	FirmwareVersion = 64 // 0x40 — matches real HL2
+
 	// Default HPSDR configuration
 	DefaultInterface    = ""
 	DefaultIPAddress    = "0.0.0.0"
-	DefaultNumReceivers = 10
+	DefaultNumReceivers = 10 // HL2 Protocol 1 extension supports up to 10 receivers
 	DefaultDeviceType   = DeviceHermesLite
 
 	// Frequency validation constants (UberSDR valid range)
@@ -53,14 +70,11 @@ const (
 	// Buffering constants
 	// Keep a jitter buffer of ~100ms worth of samples to smooth out network variability
 	// At 192 kHz: 192000 samples/sec * 0.1 sec = 19200 samples
-	// This is ~80 HPSDR packets (238 samples each)
 	JitterBufferSamples = 19200
 	// Minimum buffer level before we start sending (pre-fill buffer)
-	// Small pre-fill like ka9q_hpsdr - just enough to prevent initial underrun
-	// 3 packets = ~714 samples = ~3.7ms at 192kHz
-	MinBufferSamples = SamplesPerPacket * 3 // ~3 packets = ~3.7ms at 192kHz
+	MinBufferSamples = SamplesPerPacket * 3
 	// Low water mark - if buffer drops below this, warn about potential issues
-	LowWaterMark = SamplesPerPacket * 2 // ~2 packets = ~2.5ms at 192kHz
+	LowWaterMark = SamplesPerPacket * 2
 )
 
 // FrequencyRange defines a frequency range mapped to a specific UberSDR instance
@@ -102,10 +116,9 @@ type UberSDRBridge struct {
 	wsConnMus      [MaxReceivers]sync.Mutex      // Protects WebSocket writes per receiver
 	userSessionIDs [MaxReceivers]string          // Unique session ID per receiver
 
-	// HPSDR servers (can run both simultaneously for auto-detection)
-	hpsdrServer  *Protocol2Server
+	// HPSDR Protocol 1 server
 	hpsdr1Server *Protocol1Server
-	protocolMode int // 0 = both (auto), 1 = Protocol 1 only, 2 = Protocol 2 only
+	protocolMode int // always 1 (Protocol 1 only)
 
 	// State
 	running    bool
@@ -135,53 +148,37 @@ type UberSDRBridge struct {
 	bufferOverruns  [MaxReceivers]uint64    // Count of overrun events
 	lastBufferLog   [MaxReceivers]time.Time // Last time we logged buffer stats
 
-	// PCM-zstd decoder
-	pcmDecoder *PCMBinaryDecoder
+	// PCM-zstd decoders — one per receiver (zstd.Decoder is NOT goroutine-safe)
+	pcmDecoders [MaxReceivers]*PCMBinaryDecoder
 }
 
 // NewUberSDRBridge creates a new bridge instance
-// protocolMode: 0 = both (auto-detect), 1 = Protocol 1 only, 2 = Protocol 2 only
-func NewUberSDRBridge(url string, password string, hpsdr2Config Protocol2Config, hpsdr1Config Protocol1Config, routingConfig *RoutingConfig, protocolMode int) (*UberSDRBridge, error) {
-	var hpsdrServer *Protocol2Server
-	var hpsdr1Server *Protocol1Server
-	var err error
-
-	// Create Protocol 2 server if needed
-	if protocolMode == 0 || protocolMode == 2 {
-		hpsdrServer, err = NewProtocol2Server(hpsdr2Config)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create HPSDR Protocol 2 server: %w", err)
-		}
-	}
-
-	// Create Protocol 1 server if needed
-	if protocolMode == 0 || protocolMode == 1 {
-		hpsdr1Server, err = NewProtocol1Server(hpsdr1Config)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create HPSDR Protocol 1 server: %w", err)
-		}
-	}
-
-	pcmDecoder, err := NewPCMBinaryDecoder()
+func NewUberSDRBridge(url string, password string, hpsdr1Config Protocol1Config, routingConfig *RoutingConfig) (*UberSDRBridge, error) {
+	hpsdr1Server, err := NewProtocol1Server(hpsdr1Config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create PCM decoder: %w", err)
+		return nil, fmt.Errorf("failed to create HPSDR Protocol 1 server: %w", err)
 	}
 
 	bridge := &UberSDRBridge{
 		url:           url,
 		password:      password,
 		routingConfig: routingConfig,
-		hpsdrServer:   hpsdrServer,
 		hpsdr1Server:  hpsdr1Server,
-		protocolMode:  protocolMode,
+		protocolMode:  1,
 		running:       true,
 		sampleRate:    192000, // Default
 		channels:      2,      // IQ mode
-		pcmDecoder:    pcmDecoder,
 	}
 
-	// Initialize receiver frequencies and unique session IDs
+	// Initialize receiver frequencies, session IDs, and per-receiver PCM decoders.
+	// Each receiver gets its own decoder because zstd.Decoder is NOT goroutine-safe —
+	// sharing one decoder across concurrent receiveAudio goroutines corrupts its state.
 	for i := 0; i < MaxReceivers; i++ {
+		dec, err := NewPCMBinaryDecoder()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create PCM decoder for receiver %d: %w", i, err)
+		}
+		bridge.pcmDecoders[i] = dec
 		bridge.receiverFreqs[i] = 14200000                                  // 14.2 MHz default
 		bridge.receiverModes[i] = "iq192"                                   // IQ mode at 192 kHz
 		bridge.userSessionIDs[i] = uuid.New().String()                      // Unique UUID per receiver
@@ -196,46 +193,11 @@ func NewUberSDRBridge(url string, password string, hpsdr2Config Protocol2Config,
 
 // Start begins the bridge operation
 func (b *UberSDRBridge) Start() error {
-	// Start HPSDR servers based on protocol mode
-	if b.protocolMode == 0 {
-		// Auto mode: Link Protocol1 to Protocol2 and start Protocol1 without socket
-		// Protocol2's discovery port will forward Protocol1 packets to Protocol1Server
-		if b.hpsdr1Server != nil && b.hpsdrServer != nil {
-			// Link Protocol1Server to Protocol2Server
-			b.hpsdrServer.protocol1Server = b.hpsdr1Server
-
-			// Start Protocol1 without creating socket (will use Protocol2's port 1024)
-			if err := b.hpsdr1Server.StartWithSocket(false); err != nil {
-				return fmt.Errorf("failed to start HPSDR Protocol 1 server: %w", err)
-			}
-			log.Println("Bridge: HPSDR Protocol 1 server started (socket-less, using Protocol2's discovery port)")
-		}
-		if b.hpsdrServer != nil {
-			if err := b.hpsdrServer.Start(); err != nil {
-				return fmt.Errorf("failed to start HPSDR Protocol 2 server: %w", err)
-			}
-			log.Println("Bridge: HPSDR Protocol 2 server started (auto-detect mode)")
-
-			// Give Protocol1 access to Protocol2's discovery socket for sending data
-			if b.hpsdr1Server != nil {
-				b.hpsdr1Server.SetSharedSocket(b.hpsdrServer.discoverySock)
-				log.Println("Bridge: Protocol 1 server configured to use Protocol 2's socket for data transmission")
-			}
-		}
-		log.Println("Bridge: Auto-detect mode - will respond to both Protocol 1 and Protocol 2 clients on port 1024")
-	} else if b.protocolMode == 1 {
-		// Protocol 1 only - create socket
-		if err := b.hpsdr1Server.StartWithSocket(true); err != nil {
-			return fmt.Errorf("failed to start HPSDR Protocol 1 server: %w", err)
-		}
-		log.Println("Bridge: HPSDR Protocol 1 server started")
-	} else {
-		// Protocol 2 only
-		if err := b.hpsdrServer.Start(); err != nil {
-			return fmt.Errorf("failed to start HPSDR Protocol 2 server: %w", err)
-		}
-		log.Println("Bridge: HPSDR Protocol 2 server started")
+	// Always Protocol 1 — create own socket on port 1024
+	if err := b.hpsdr1Server.StartWithSocket(true); err != nil {
+		return fmt.Errorf("failed to start HPSDR Protocol 1 server: %w", err)
 	}
+	log.Println("Bridge: HPSDR Protocol 1 server started")
 
 	// Start monitoring HPSDR receivers
 	go b.monitorReceivers()
@@ -248,45 +210,35 @@ func (b *UberSDRBridge) Start() error {
 
 // Stop shuts down the bridge
 func (b *UberSDRBridge) Stop() {
-	log.Println("DEBUG: Stop: Entering Stop() function")
+	if debugBridge {
+		log.Println("Bridge: Stop: entering Stop()")
+	}
 
 	// Step 1: Set running flag to false to signal all goroutines to stop
 	b.mu.Lock()
-	log.Println("DEBUG: Stop: Acquired lock, setting running=false")
 	wasRunning := b.running
 	b.running = false
 	b.mu.Unlock()
-	log.Println("DEBUG: Stop: Released lock, running flag set to false")
 
 	if !wasRunning {
-		log.Println("DEBUG: Stop: Bridge was already stopped")
+		if debugBridge {
+			log.Println("Bridge: Stop: bridge was already stopped")
+		}
 		return
 	}
 
-	// Step 2: Stop HPSDR servers first to stop receiving new control packets
-	log.Println("DEBUG: Stop: Stopping HPSDR servers")
-	if b.protocolMode == 1 && b.hpsdr1Server != nil {
+	log.Println("Bridge: stopping HPSDR servers")
+
+	// Step 2: Stop HPSDR Protocol 1 server
+	if b.hpsdr1Server != nil {
 		b.hpsdr1Server.Stop()
-	} else if b.hpsdrServer != nil {
-		b.hpsdrServer.Stop()
 	}
-	if b.protocolMode == 0 {
-		// Auto mode - stop both servers
-		if b.hpsdr1Server != nil {
-			b.hpsdr1Server.Stop()
-		}
-		if b.hpsdrServer != nil {
-			b.hpsdrServer.Stop()
-		}
-	}
-	log.Println("DEBUG: Stop: HPSDR servers stopped")
 
 	// Step 3: Give receiveAudio goroutines time to notice the running flag change
-	log.Println("DEBUG: Stop: Waiting for receiveAudio goroutines to exit")
+	// (Fix 1+2 ensure LoadIQData() unblocks quickly so this sleep is sufficient)
 	time.Sleep(200 * time.Millisecond)
 
 	// Step 4: Close all active WebSocket connections gracefully
-	log.Println("DEBUG: Stop: Starting to close WebSocket connections")
 	var wg sync.WaitGroup
 	for i := 0; i < MaxReceivers; i++ {
 		b.mu.RLock()
@@ -297,7 +249,9 @@ func (b *UberSDRBridge) Stop() {
 			wg.Add(1)
 			go func(receiverNum int, wsConn *websocket.Conn) {
 				defer wg.Done()
-				log.Printf("DEBUG: Stop: Closing WebSocket connection for receiver %d", receiverNum)
+				if debugBridge {
+					log.Printf("Bridge: Stop: closing WebSocket connection for receiver %d", receiverNum)
+				}
 
 				// Send close frame
 				closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Bridge stopping")
@@ -310,8 +264,6 @@ func (b *UberSDRBridge) Stop() {
 				b.mu.Lock()
 				b.wsConns[receiverNum] = nil
 				b.mu.Unlock()
-
-				log.Printf("DEBUG: Stop: Closed WebSocket connection for receiver %d", receiverNum)
 			}(i, conn)
 		}
 	}
@@ -325,24 +277,27 @@ func (b *UberSDRBridge) Stop() {
 
 	select {
 	case <-done:
-		log.Println("DEBUG: Stop: All WebSocket connections closed")
+		if debugBridge {
+			log.Println("Bridge: Stop: all WebSocket connections closed")
+		}
 	case <-time.After(2 * time.Second):
-		log.Println("DEBUG: Stop: Timeout waiting for WebSocket connections to close")
+		log.Println("Bridge: Stop: timeout waiting for WebSocket connections to close")
 	}
 
-	log.Println("Bridge: Stopped")
+	log.Println("Bridge: stopped")
 }
 
 // monitorReceivers monitors HPSDR receiver state changes
 func (b *UberSDRBridge) monitorReceivers() {
-	log.Println("DEBUG: monitorReceivers: Entering monitoring loop")
+	if debugBridge {
+		log.Println("Bridge: monitorReceivers: entering monitoring loop")
+	}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	// Track which receivers are connected
 	connectedReceivers := make(map[int]bool)
-	// Track if Protocol2 was running (to detect when it stops)
-	wasProtocol2Running := false
+	wasRunning := false
 
 	for {
 		// Check if we should stop before blocking on ticker
@@ -351,18 +306,14 @@ func (b *UberSDRBridge) monitorReceivers() {
 		b.mu.RUnlock()
 
 		if !running {
-			log.Println("DEBUG: monitorReceivers: running=false, exiting loop")
+			if debugBridge {
+				log.Println("Bridge: monitorReceivers: running=false, exiting loop")
+			}
 			return
 		}
 
-		// Check if any HPSDR server is running
-		var hpsdrRunning bool
-		if b.hpsdr1Server != nil && b.hpsdr1Server.IsRunning() {
-			hpsdrRunning = true
-		}
-		if b.hpsdrServer != nil && b.hpsdrServer.IsRunning() {
-			hpsdrRunning = true
-		}
+		// Check if HPSDR server is running
+		hpsdrRunning := b.hpsdr1Server != nil && b.hpsdr1Server.IsRunning()
 
 		// Use longer sleep interval when no client connected to reduce CPU usage
 		if !hpsdrRunning {
@@ -372,34 +323,33 @@ func (b *UberSDRBridge) monitorReceivers() {
 		}
 
 		// Detect transition from running to stopped
-		if wasProtocol2Running && !hpsdrRunning {
-			log.Println("DEBUG: monitorReceivers: HPSDR server stopped, cleaning up all receivers")
-			// HPSDR server stopped, clean up all receivers
-			// Clean up ALL receivers unconditionally - the cleanupReceiver() function
-			// safely handles cases where there's no active connection
+		justCleaned := false
+		if wasRunning && !hpsdrRunning {
+			log.Println("Bridge: HPSDR server stopped, cleaning up all receivers")
 			numReceivers := b.getNumReceivers()
 			for i := 0; i < numReceivers; i++ {
-				log.Printf("DEBUG: monitorReceivers: Cleaning up receiver %d due to server shutdown", i)
+				if debugBridge {
+					log.Printf("Bridge: monitorReceivers: cleaning up receiver %d due to server shutdown", i)
+				}
 				b.cleanupReceiver(i)
 				connectedReceivers[i] = false
 			}
+			justCleaned = true
 		}
 
 		// Update tracking flag
-		wasProtocol2Running = hpsdrRunning
+		wasRunning = hpsdrRunning
 
-		// If HPSDR is not running, skip receiver checks
-		if !hpsdrRunning {
+		// If HPSDR is not running, or we just cleaned up, skip receiver checks this tick
+		// (give WebSocket connections time to fully close before reconnecting)
+		if !hpsdrRunning || justCleaned {
 			continue
 		}
 
-		// Get client IP for logging (check both servers)
+		// Get client IP for logging
 		var clientIP *net.UDPAddr
 		if b.hpsdr1Server != nil && b.hpsdr1Server.IsRunning() {
 			clientIP = b.hpsdr1Server.GetClientAddr()
-		}
-		if clientIP == nil && b.hpsdrServer != nil && b.hpsdrServer.IsRunning() {
-			clientIP = b.hpsdrServer.GetClientAddr()
 		}
 		clientIPStr := "unknown"
 		if clientIP != nil {
@@ -417,10 +367,13 @@ func (b *UberSDRBridge) monitorReceivers() {
 			if enabled && frequency > 0 && sampleRate > 0 {
 				// Validate frequency is within UberSDR range
 				if !isValidFrequency(frequency) {
-					log.Printf("Bridge: [%s] Receiver %d invalid frequency %d Hz (%.3f kHz) - must be between %d Hz (%.1f kHz) and %d Hz (%.1f MHz), skipping",
-						clientIPStr, i, frequency, float64(frequency)/1000.0,
-						MinFrequencyHz, float64(MinFrequencyHz)/1000.0,
-						MaxFrequencyHz, float64(MaxFrequencyHz)/1000000.0)
+					// Only log once per receiver (not every 100ms tick)
+					if !connectedReceivers[i] {
+						log.Printf("Bridge: [%s] Receiver %d frequency %d Hz (%.3f MHz) out of range [%d-%d Hz], skipping",
+							clientIPStr, i, frequency, float64(frequency)/1e6,
+							MinFrequencyHz, MaxFrequencyHz)
+						connectedReceivers[i] = true // suppress repeat logs
+					}
 					continue
 				}
 
@@ -429,7 +382,6 @@ func (b *UberSDRBridge) monitorReceivers() {
 
 				// Receiver is active
 				if !connectedReceivers[i] {
-					log.Printf("DEBUG: monitorReceivers: Receiver %d state change - newly enabled", i)
 					log.Printf("Bridge: [%s] Receiver %d enabled: %d Hz, %d kHz", clientIPStr, i, frequency, sampleRate)
 					connectedReceivers[i] = true
 
@@ -450,11 +402,15 @@ func (b *UberSDRBridge) monitorReceivers() {
 
 					// Connect to ubersdr for this receiver
 					if b.wsConns[i] == nil {
-						log.Printf("DEBUG: monitorReceivers: Receiver %d starting connection goroutine", i)
+						if debugBridge {
+							log.Printf("Bridge: monitorReceivers: receiver %d starting connection goroutine", i)
+						}
 						go b.connectToUberSDR(i)
 					} else {
 						// Send tune message to change frequency
-						log.Printf("DEBUG: monitorReceivers: Receiver %d already connected, tuning", i)
+						if debugBridge {
+							log.Printf("Bridge: monitorReceivers: receiver %d already connected, tuning", i)
+						}
 						go b.tuneReceiver(i, frequency, mode)
 					}
 				} else {
@@ -505,7 +461,6 @@ func (b *UberSDRBridge) monitorReceivers() {
 				}
 			} else if connectedReceivers[i] {
 				// Receiver was disabled - clean up connection state
-				log.Printf("DEBUG: monitorReceivers: Receiver %d state change - disabled, cleaning up", i)
 				log.Printf("Bridge: [%s] Receiver %d disabled, cleaning up connection", clientIPStr, i)
 				connectedReceivers[i] = false
 				b.cleanupReceiver(i)
@@ -516,7 +471,9 @@ func (b *UberSDRBridge) monitorReceivers() {
 
 // cleanupReceiver closes WebSocket connection and clears state for a receiver
 func (b *UberSDRBridge) cleanupReceiver(receiverNum int) {
-	log.Printf("DEBUG: cleanupReceiver: Receiver %d starting cleanup", receiverNum)
+	if debugBridge {
+		log.Printf("Bridge: cleanupReceiver: receiver %d starting cleanup", receiverNum)
+	}
 
 	// Get the URL that this receiver was connected to
 	b.mu.Lock()
@@ -527,22 +484,26 @@ func (b *UberSDRBridge) cleanupReceiver(receiverNum int) {
 	// Release instance usage for smart routing
 	if instanceURL != "" && b.routingConfig != nil && b.routingConfig.SmartRouting != nil && b.routingConfig.SmartRouting.Enabled {
 		b.routingConfig.SmartRouting.ReleaseInstance(instanceURL)
-		log.Printf("DEBUG: cleanupReceiver: Receiver %d released smart routing instance", receiverNum)
+		if debugBridge {
+			log.Printf("Bridge: cleanupReceiver: receiver %d released smart routing instance", receiverNum)
+		}
 	}
 
 	// Close WebSocket connection gracefully with proper close frame
 	if conn != nil {
-		log.Printf("DEBUG: cleanupReceiver: Receiver %d sending WebSocket close frame", receiverNum)
-		// Send close frame with normal closure code
+		if debugBridge {
+			log.Printf("Bridge: cleanupReceiver: receiver %d sending WebSocket close frame", receiverNum)
+		}
 		closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Client stopping")
 		_ = conn.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(time.Second))
 
 		// Give the server a moment to acknowledge the close
 		time.Sleep(100 * time.Millisecond)
 
-		log.Printf("DEBUG: cleanupReceiver: Receiver %d closing WebSocket connection", receiverNum)
 		_ = conn.Close()
-		log.Printf("DEBUG: cleanupReceiver: Receiver %d WebSocket connection closed", receiverNum)
+		if debugBridge {
+			log.Printf("Bridge: cleanupReceiver: receiver %d WebSocket connection closed", receiverNum)
+		}
 	}
 
 	// Clear connection state
@@ -553,28 +514,32 @@ func (b *UberSDRBridge) cleanupReceiver(receiverNum int) {
 	b.lastFailedMode[receiverNum] = ""
 	b.receiverURLs[receiverNum] = ""
 	b.mu.Unlock()
-	log.Printf("DEBUG: cleanupReceiver: Receiver %d cleared connection state", receiverNum)
 
-	// Clear buffer state with timeout to prevent deadlock
-	// Use a goroutine with timeout to avoid blocking cleanup
+	// Clear buffer state with timeout to prevent deadlock.
+	// forwardToHPSDR() may be holding bufferMus while blocked in LoadIQData().
+	// Fix 1+2 ensure LoadIQData() unblocks quickly when running→false, so this
+	// timeout should rarely trigger in practice.
 	bufferCleared := make(chan bool, 1)
 	go func() {
 		b.bufferMus[receiverNum].Lock()
-		b.sampleBuffers[receiverNum] = b.sampleBuffers[receiverNum][:0] // Clear buffer but keep capacity
-		b.bufferPrimed[receiverNum] = false                             // Reset buffer primed flag
+		b.sampleBuffers[receiverNum] = b.sampleBuffers[receiverNum][:0]
+		b.bufferPrimed[receiverNum] = false
 		b.bufferMus[receiverNum].Unlock()
 		bufferCleared <- true
 	}()
 
-	// Wait for buffer clear with timeout
 	select {
 	case <-bufferCleared:
-		log.Printf("DEBUG: cleanupReceiver: Receiver %d buffer cleared", receiverNum)
+		if debugBridge {
+			log.Printf("Bridge: cleanupReceiver: receiver %d buffer cleared", receiverNum)
+		}
 	case <-time.After(500 * time.Millisecond):
-		log.Printf("DEBUG: cleanupReceiver: Receiver %d buffer clear timed out (receiveAudio may still be running)", receiverNum)
+		log.Printf("Bridge: cleanupReceiver: receiver %d buffer clear timed out (forwardToHPSDR may be blocked in LoadIQData)", receiverNum)
 	}
 
-	log.Printf("DEBUG: cleanupReceiver: Receiver %d cleanup complete", receiverNum)
+	if debugBridge {
+		log.Printf("Bridge: cleanupReceiver: receiver %d cleanup complete", receiverNum)
+	}
 }
 
 // sampleRateToMode converts sample rate (kHz) to ubersdr mode
@@ -684,13 +649,9 @@ func (b *UberSDRBridge) checkConnection(receiverNum int, targetURL string, targe
 	req.Header.Set("User-Agent", "UberSDR_HPSDR/1.0")
 
 	// Add X-Real-IP header with the HPSDR client's IP address
-	// Check both servers to find which one has an active client
 	var clientAddr *net.UDPAddr
 	if b.hpsdr1Server != nil && b.hpsdr1Server.IsRunning() {
 		clientAddr = b.hpsdr1Server.GetClientAddr()
-	}
-	if clientAddr == nil && b.hpsdrServer != nil && b.hpsdrServer.IsRunning() {
-		clientAddr = b.hpsdrServer.GetClientAddr()
 	}
 	if clientAddr != nil {
 		clientIP := clientAddr.IP.String()
@@ -728,13 +689,16 @@ func (b *UberSDRBridge) checkConnection(receiverNum int, targetURL string, targe
 
 // connectToUberSDR establishes WebSocket connection to ubersdr for a specific receiver
 func (b *UberSDRBridge) connectToUberSDR(receiverNum int) {
-	log.Printf("DEBUG: connectToUberSDR: Receiver %d entering connection function", receiverNum)
+	if debugBridge {
+		log.Printf("Bridge: connectToUberSDR: receiver %d entering connection function", receiverNum)
+	}
 
 	b.mu.Lock()
-	log.Printf("DEBUG: connectToUberSDR: Receiver %d acquired lock", receiverNum)
 
 	if b.wsConns[receiverNum] != nil {
-		log.Printf("DEBUG: connectToUberSDR: Receiver %d already connected, exiting", receiverNum)
+		if debugBridge {
+			log.Printf("Bridge: connectToUberSDR: receiver %d already connected, exiting", receiverNum)
+		}
 		b.mu.Unlock()
 		return // Already connected
 	}
@@ -755,8 +719,10 @@ func (b *UberSDRBridge) connectToUberSDR(receiverNum int) {
 	}
 	targetURL, targetPassword := b.getURLForFrequency(frequency, true, excludeURL) // Reserve instance
 
-	log.Printf("DEBUG: connectToUberSDR: Receiver %d current freq=%d mode=%s URL=%s, lastFailed URL=%s freq=%d mode=%s",
-		receiverNum, frequency, mode, targetURL, lastFailedURL, lastFailedFreq, lastFailedMode)
+	if debugBridge {
+		log.Printf("Bridge: connectToUberSDR: receiver %d freq=%d mode=%s URL=%s, lastFailed URL=%s freq=%d mode=%s",
+			receiverNum, frequency, mode, targetURL, lastFailedURL, lastFailedFreq, lastFailedMode)
+	}
 
 	// Prevent reconnection loops - block if we're trying to reconnect to the SAME
 	// URL/frequency/mode that just failed. This allows smart routing to select a different
@@ -766,12 +732,13 @@ func (b *UberSDRBridge) connectToUberSDR(receiverNum int) {
 		if b.routingConfig != nil && b.routingConfig.SmartRouting != nil && b.routingConfig.SmartRouting.Enabled {
 			b.routingConfig.SmartRouting.ReleaseInstance(targetURL)
 		}
-		log.Printf("DEBUG: connectToUberSDR: Receiver %d BLOCKED - same URL/freq/mode as last failure", receiverNum)
 		log.Printf("Bridge: Receiver %d skipping reconnection to %s (%d Hz/%s) - previous attempt to this instance failed",
 			receiverNum, targetURL, frequency, mode)
 		return
 	}
-	log.Printf("DEBUG: connectToUberSDR: Receiver %d reconnection allowed (URL/freq/mode different or no prior failure)", receiverNum)
+	if debugBridge {
+		log.Printf("Bridge: connectToUberSDR: receiver %d reconnection allowed", receiverNum)
+	}
 
 	// Check if connection is allowed with per-receiver session ID
 	allowed, err := b.checkConnection(receiverNum, targetURL, targetPassword)
@@ -828,13 +795,9 @@ func (b *UberSDRBridge) connectToUberSDR(receiverNum int) {
 	headers.Set("User-Agent", "UberSDR_HPSDR/1.0")
 
 	// Add X-Real-IP header with the HPSDR client's IP address
-	// Check both servers to find which one has an active client
 	var clientAddr *net.UDPAddr
 	if b.hpsdr1Server != nil && b.hpsdr1Server.IsRunning() {
 		clientAddr = b.hpsdr1Server.GetClientAddr()
-	}
-	if clientAddr == nil && b.hpsdrServer != nil && b.hpsdrServer.IsRunning() {
-		clientAddr = b.hpsdrServer.GetClientAddr()
 	}
 	if clientAddr != nil {
 		clientIP := clientAddr.IP.String()
@@ -934,8 +897,14 @@ func (b *UberSDRBridge) tuneReceiver(receiverNum int, frequency int64, mode stri
 
 // receiveAudio receives audio from ubersdr and forwards to HPSDR for a specific receiver
 func (b *UberSDRBridge) receiveAudio(receiverNum int) {
-	log.Printf("DEBUG: receiveAudio: Receiver %d starting audio receive loop", receiverNum)
-	defer log.Printf("DEBUG: receiveAudio: Receiver %d exiting audio receive loop", receiverNum)
+	if debugBridge {
+		log.Printf("Bridge: receiveAudio: receiver %d starting", receiverNum)
+	}
+	defer func() {
+		if debugBridge {
+			log.Printf("Bridge: receiveAudio: receiver %d exiting", receiverNum)
+		}
+	}()
 
 	for {
 		// Check if bridge is still running
@@ -945,18 +914,22 @@ func (b *UberSDRBridge) receiveAudio(receiverNum int) {
 		b.mu.RUnlock()
 
 		if !running {
-			log.Printf("DEBUG: receiveAudio: Receiver %d exiting - bridge not running", receiverNum)
+			if debugBridge {
+				log.Printf("Bridge: receiveAudio: receiver %d exiting — bridge not running", receiverNum)
+			}
 			break
 		}
 
 		if conn == nil {
-			log.Printf("DEBUG: receiveAudio: Receiver %d exiting - connection is nil", receiverNum)
+			if debugBridge {
+				log.Printf("Bridge: receiveAudio: receiver %d exiting — connection is nil", receiverNum)
+			}
 			break
 		}
 
 		// Set read deadline to allow periodic checking of running state
 		if err := conn.SetReadDeadline(time.Now().Add(1 * time.Second)); err != nil {
-			log.Printf("DEBUG: receiveAudio: Receiver %d failed to set read deadline: %v", receiverNum, err)
+			log.Printf("Bridge: receiveAudio: receiver %d failed to set read deadline: %v", receiverNum, err)
 			break
 		}
 
@@ -985,8 +958,8 @@ func (b *UberSDRBridge) receiveAudio(receiverNum int) {
 
 		// Handle binary messages (PCM-zstd format)
 		if messageType == websocket.BinaryMessage {
-			if b.pcmDecoder != nil {
-				pcmData, sampleRate, channels, err := b.pcmDecoder.DecodePCMBinary(message, true)
+			if b.pcmDecoders[receiverNum] != nil {
+				pcmData, sampleRate, channels, err := b.pcmDecoders[receiverNum].DecodePCMBinary(message, true)
 				if err != nil {
 					log.Printf("Bridge: Receiver %d PCM decode error: %v", receiverNum, err)
 					continue
@@ -1045,13 +1018,16 @@ func (b *UberSDRBridge) receiveAudio(receiverNum int) {
 		}
 	}
 
-	// Clean up buffer on exit
-	log.Printf("DEBUG: receiveAudio: Receiver %d cleaning up buffer on exit", receiverNum)
+	// Clean up buffer on exit.
+	// Note: forwardToHPSDR() no longer holds bufferMus across LoadIQData() (Fix 3),
+	// so this lock acquisition should complete promptly.
 	b.bufferMus[receiverNum].Lock()
 	b.sampleBuffers[receiverNum] = b.sampleBuffers[receiverNum][:0]
 	b.bufferPrimed[receiverNum] = false
 	b.bufferMus[receiverNum].Unlock()
-	log.Printf("DEBUG: receiveAudio: Receiver %d buffer cleanup complete", receiverNum)
+	if debugBridge {
+		log.Printf("Bridge: receiveAudio: receiver %d buffer cleared on exit", receiverNum)
+	}
 }
 
 // decodeAudio decodes base64 audio data to PCM bytes
@@ -1079,13 +1055,10 @@ func (b *UberSDRBridge) decodeAudio(base64Data string) ([]byte, error) {
 	return pcmData, nil
 }
 
-// getNumReceivers returns the number of receivers for the current protocol
+// getNumReceivers returns the number of receivers
 func (b *UberSDRBridge) getNumReceivers() int {
-	if b.protocolMode == 1 && b.hpsdr1Server != nil {
+	if b.hpsdr1Server != nil {
 		return b.hpsdr1Server.config.NumReceivers
-	}
-	if b.hpsdrServer != nil {
-		return b.hpsdrServer.config.NumReceivers
 	}
 	return MaxReceivers // fallback
 }
@@ -1098,10 +1071,6 @@ func (b *UberSDRBridge) getReceiverState(receiverNum int) (enabled bool, frequen
 		if err == nil && enabled {
 			return
 		}
-	}
-	// Check Protocol 2 server
-	if b.hpsdrServer != nil {
-		return b.hpsdrServer.GetReceiverState(receiverNum)
 	}
 	return false, 0, 0, fmt.Errorf("no HPSDR server available")
 }
@@ -1149,58 +1118,58 @@ func (b *UberSDRBridge) forwardToHPSDR(receiverNum int, pcmData []byte) error {
 		tempSamples[i] = complex(iNorm, qNorm)
 	}
 
-	// Now lock only for buffer operations and packet sending
+	// Fix 3: Lock bufferMus only for buffer manipulation, NOT for the LoadIQData() call.
+	// LoadIQData() blocks waiting for the previous packet to be sent (doneSendCond).
+	// Holding bufferMus across that blocking call causes a deadlock when:
+	//   - cleanupReceiver() tries to acquire bufferMus to clear the buffer
+	//   - LoadIQData() is blocked because receiverThread is sleeping (running=false)
+	// Solution: drain packets into a local slice under the lock, then release the lock
+	// before calling LoadIQData().
+
+	// --- Phase 1: buffer management (under lock) ---
 	b.bufferMus[receiverNum].Lock()
-	defer b.bufferMus[receiverNum].Unlock()
 
 	// Add converted samples to buffer
 	b.sampleBuffers[receiverNum] = append(b.sampleBuffers[receiverNum], tempSamples...)
-
 	bufferLevel := len(b.sampleBuffers[receiverNum])
 
 	// Check if buffer is getting too large (prevent unbounded growth)
 	if bufferLevel > JitterBufferSamples {
-		// Drop oldest samples to maintain buffer size
 		excess := bufferLevel - JitterBufferSamples
 		b.bufferOverruns[receiverNum]++
-		// Only log first overrun and then every 100th to avoid spam
 		if b.bufferOverruns[receiverNum] == 1 || b.bufferOverruns[receiverNum]%100 == 0 {
 			log.Printf("Bridge: Receiver %d buffer OVERRUN #%d, dropping %d samples (buffer was %d samples, %.1f ms)",
 				receiverNum, b.bufferOverruns[receiverNum], excess, bufferLevel,
-				float64(bufferLevel)/192.0) // Assume 192 kHz
+				float64(bufferLevel)/192.0)
 		}
 		b.sampleBuffers[receiverNum] = b.sampleBuffers[receiverNum][excess:]
 		bufferLevel = len(b.sampleBuffers[receiverNum])
 	}
 
 	// Pre-fill buffer before starting to send (jitter buffer priming)
-	// This prevents initial underruns when connection starts
 	if !b.bufferPrimed[receiverNum] {
 		if bufferLevel >= MinBufferSamples {
 			b.bufferPrimed[receiverNum] = true
 		} else {
-			// Still filling buffer, don't send yet
+			b.bufferMus[receiverNum].Unlock()
 			return nil
 		}
 	}
 
-	// Detect underruns (buffer depleted while primed)
-	// Don't send if we don't have enough samples - just accumulate
+	// Detect underruns
 	if b.bufferPrimed[receiverNum] && bufferLevel < SamplesPerPacket {
 		b.bufferUnderruns[receiverNum]++
-		// Re-prime buffer to recover from underrun - need to refill to minimum level
 		b.bufferPrimed[receiverNum] = false
-		// Don't send anything, just accumulate
+		b.bufferMus[receiverNum].Unlock()
 		return nil
 	}
 
-	// If not primed and don't have minimum samples yet, just accumulate
 	if !b.bufferPrimed[receiverNum] && bufferLevel < MinBufferSamples {
-		// Still filling, don't send yet
+		b.bufferMus[receiverNum].Unlock()
 		return nil
 	}
 
-	// Periodic buffer statistics (every 30 seconds) - only log if there are issues
+	// Periodic buffer statistics (every 30 seconds)
 	now := time.Now()
 	if now.Sub(b.lastBufferLog[receiverNum]) > 30*time.Second {
 		b.lastBufferLog[receiverNum] = now
@@ -1211,29 +1180,52 @@ func (b *UberSDRBridge) forwardToHPSDR(receiverNum int, pcmData []byte) error {
 		}
 	}
 
-	// Determine which protocol server is active and send to it
-	// Check Protocol 1 first if it's running
-	if b.hpsdr1Server != nil && b.hpsdr1Server.IsRunning() {
-		samplesPerPacket := 126 // Protocol 1 uses 126 samples per packet (63 per frame × 2 frames)
-		for len(b.sampleBuffers[receiverNum]) >= samplesPerPacket {
-			packet := make([]complex64, samplesPerPacket)
-			copy(packet, b.sampleBuffers[receiverNum][:samplesPerPacket])
-			b.sampleBuffers[receiverNum] = b.sampleBuffers[receiverNum][samplesPerPacket:]
+	// Determine which protocol server is active and what packet size to use.
+	// Use IsRunning() only to pick the server; don't gate packet draining on it —
+	// a transient IsRunning()=false (e.g. during receiver reconfiguration) would
+	// cause samplesPerPacket=0, leaving the buffer to grow until overrun.
+	// Protocol 1: 126 samples per packet
+	samplesPerPacket := 126
+	if b.hpsdr1Server == nil {
+		b.bufferMus[receiverNum].Unlock()
+		return nil
+	}
 
-			if err := b.hpsdr1Server.LoadIQData(receiverNum, packet); err != nil {
-				return err
-			}
-		}
-	} else if b.hpsdrServer != nil && b.hpsdrServer.IsRunning() {
-		samplesPerPacket := SamplesPerPacket // Protocol 2 uses 238 samples per packet
-		for len(b.sampleBuffers[receiverNum]) >= samplesPerPacket {
-			packet := make([]complex64, samplesPerPacket)
-			copy(packet, b.sampleBuffers[receiverNum][:samplesPerPacket])
-			b.sampleBuffers[receiverNum] = b.sampleBuffers[receiverNum][samplesPerPacket:]
+	if samplesPerPacket == 0 {
+		// No server configured at all — just accumulate
+		b.bufferMus[receiverNum].Unlock()
+		return nil
+	}
 
-			if err := b.hpsdrServer.LoadIQData(receiverNum, packet); err != nil {
-				return err
+	// Drain ready packets into a local slice under the lock
+	var packets [][]complex64
+	for len(b.sampleBuffers[receiverNum]) >= samplesPerPacket {
+		packet := make([]complex64, samplesPerPacket)
+		copy(packet, b.sampleBuffers[receiverNum][:samplesPerPacket])
+		b.sampleBuffers[receiverNum] = b.sampleBuffers[receiverNum][samplesPerPacket:]
+		packets = append(packets, packet)
+	}
+
+	// --- Phase 2: release lock BEFORE calling LoadIQData() ---
+	// LoadIQData() may block on doneSendCond; holding bufferMus across that
+	// call would deadlock cleanupReceiver() which also needs bufferMus.
+	b.bufferMus[receiverNum].Unlock()
+
+	// --- Phase 3: send packets WITHOUT holding bufferMus ---
+	// If LoadIQData() returns an error (e.g. server not running transiently),
+	// log it and continue — the buffer will re-prime on the next call.
+	// Do NOT return the error to the caller, as that would cause receiveAudio
+	// to log noise on every frequency change / receiver reconfiguration.
+	for _, packet := range packets {
+		if err := b.hpsdr1Server.LoadIQData(receiverNum, packet); err != nil {
+			if debugBridge {
+				log.Printf("Bridge: forwardToHPSDR: receiver %d LoadIQData error: %v", receiverNum, err)
 			}
+			// Reset primed state so buffer re-fills before next send attempt
+			b.bufferMus[receiverNum].Lock()
+			b.bufferPrimed[receiverNum] = false
+			b.bufferMus[receiverNum].Unlock()
+			return nil
 		}
 	}
 
@@ -1329,11 +1321,10 @@ func main() {
 	// HPSDR configuration
 	hpsdrInterface := flag.String("interface", DefaultInterface, "Network interface to bind to (optional)")
 	hpsdrIP := flag.String("ip", DefaultIPAddress, "IP address for HPSDR server")
-	numReceivers := flag.Int("receivers", DefaultNumReceivers, "Number of receivers (1-10 for Protocol 2, 1-4 for Protocol 1)")
+	numReceivers := flag.Int("receivers", DefaultNumReceivers, "Number of receivers (1-4)")
 	deviceType := flag.Int("device", int(DefaultDeviceType), "Device type (1=Hermes, 6=HermesLite)")
-	protocol := flag.Int("protocol", 0, "HPSDR protocol version (0=auto-detect, 1=Protocol 1 only, 2=Protocol 2 only)")
-	enableMicrophone := flag.Bool("enable-microphone", false, "Enable microphone thread (for TX monitoring, not needed for RX-only)")
 	debugDiscovery := flag.Bool("debug-discovery", false, "Enable debug logging for port 1024 discovery packets")
+	debugFlag := flag.Bool("debug", false, "Enable verbose debug logging (bridge state, sync, receiver transitions)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "UberSDR to HPSDR Protocol 2 Bridge\n\n")
@@ -1367,6 +1358,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  -enable-microphone\n")
 		fmt.Fprintf(os.Stderr, "        Enable microphone thread (for TX monitoring, not needed for RX-only)\n\n")
 		fmt.Fprintf(os.Stderr, "Debug Options:\n")
+		fmt.Fprintf(os.Stderr, "  -debug\n")
+		fmt.Fprintf(os.Stderr, "        Enable verbose debug logging (bridge state, sync, receiver transitions)\n")
+		fmt.Fprintf(os.Stderr, "        Logs: receiver enable/disable, LoadIQData waits, forwardToHPSDR packets,\n")
+		fmt.Fprintf(os.Stderr, "              doneSendCond broadcasts, buffer drain, connection lifecycle\n\n")
 		fmt.Fprintf(os.Stderr, "  -debug-discovery\n")
 		fmt.Fprintf(os.Stderr, "        Enable detailed logging of port 1024 discovery packets\n")
 		fmt.Fprintf(os.Stderr, "        Shows hex dumps of all packets received and sent\n\n")
@@ -1382,6 +1377,15 @@ func main() {
 	}
 
 	flag.Parse()
+
+	// Enable verbose debug logging if requested (-debug flag)
+	// Logs state transitions only: receiver enable/disable, running flag changes,
+	// doneSendCond broadcasts, LoadIQData abort events, connection lifecycle.
+	// Does NOT log per-packet hot-path events (those would be hundreds/sec).
+	if *debugFlag {
+		debugBridge = true
+		log.Println("Debug logging enabled (-debug): state transitions, sync events, connection lifecycle")
+	}
 
 	// Enable discovery debug logging if requested
 	if *debugDiscovery {
@@ -1504,21 +1508,19 @@ func main() {
 			log.Printf("Using MAC address %s from interface %s", macAddr.String(), *hpsdrInterface)
 		}
 	} else {
-		// Generate MAC address (use a locally administered address)
-		macAddr = net.HardwareAddr{0x02, 0x00, 0x00, 0x00, 0x00, 0x01}
+		// HL2 MAC address structure (tcpdump-verified against real HL2 hardware):
+		//   Bytes 0-2: 1c:c0:a2  — Microchip Technology OUI (all HL2s use this)
+		//   Bytes 3-4: unit ID   — manually set per-device to distinguish multiple HL2s
+		//                          (e.g. 03:09, 3f:14, 09:02 — any non-zero value)
+		//   Byte  5:   0x48      — SparkSDR checks this byte to identify "Hermes-Lite 2"
+		//                          vs "Hermes-Lite". Both real HL2s observed use 0x48.
+		//
+		// Discovery response bytes 17-18 must match MAC bytes 3-4 (unit ID).
+		// SparkSDR cross-checks these to confirm the device is a genuine HL2.
+		//
+		// We use unit ID 0a:01 — unique, won't conflict with real HL2s on the network.
+		macAddr = net.HardwareAddr{0x1c, 0xc0, 0xa2, 0x0a, 0x01, 0x48}
 		log.Printf("Using generated MAC address: %s", macAddr.String())
-	}
-
-	// Create configurations for both protocols
-	hpsdr2Config := Protocol2Config{
-		Interface:        *hpsdrInterface,
-		IPAddress:        *hpsdrIP,
-		MACAddress:       macAddr,
-		NumReceivers:     *numReceivers,
-		DeviceType:       byte(*deviceType),
-		WidebandEnable:   false, // Wideband not supported yet
-		MicrophoneEnable: *enableMicrophone,
-		ProtocolMode:     *protocol,
 	}
 
 	hpsdr1Config := Protocol1Config{
@@ -1529,22 +1531,9 @@ func main() {
 		DeviceType:   byte(*deviceType),
 	}
 
-	// Create bridge with protocol mode
-	// protocol: 0 = auto (both), 1 = Protocol 1 only, 2 = Protocol 2 only
-	var protocolMode int
-	if *protocol == 0 {
-		protocolMode = 0 // Auto-detect (run both)
-		log.Printf("Using auto-detect mode - will respond to both Protocol 1 and Protocol 2 clients")
-	} else {
-		protocolMode = *protocol
-		if *protocol == 1 {
-			log.Printf("Using HPSDR Protocol 1 only (Metis/Hermes) - compatible with SDR Console")
-		} else {
-			log.Printf("Using HPSDR Protocol 2 only (Hermes-Lite2) - compatible with Thetis, PowerSDR, Spark SDR")
-		}
-	}
+	log.Printf("Using HPSDR Protocol 1 (Metis/Hermes) — compatible with SparkSDR, SDR Console")
 
-	bridge, err := NewUberSDRBridge(*urlFlag, *password, hpsdr2Config, hpsdr1Config, routingConfig, protocolMode)
+	bridge, err := NewUberSDRBridge(*urlFlag, *password, hpsdr1Config, routingConfig)
 	if err != nil {
 		log.Fatalf("Failed to create bridge: %v", err)
 	}
@@ -1558,7 +1547,7 @@ func main() {
 		log.Fatalf("Failed to start bridge: %v", err)
 	}
 
-	log.Printf("Bridge running - UberSDR at %s, HPSDR Protocol %d on %s", *urlFlag, bridge.protocolMode, *hpsdrIP)
+	log.Printf("Bridge running - UberSDR at %s, HPSDR Protocol 1 on %s", *urlFlag, *hpsdrIP)
 	log.Printf("Press Ctrl+C to stop")
 
 	// Wait for signal

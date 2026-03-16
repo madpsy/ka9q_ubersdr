@@ -40,6 +40,16 @@ const (
 	Protocol1Port = 1024
 )
 
+// Debug flags — set via SetDebugDiscovery from main()
+var (
+	debugDiscovery bool // Log discovery and control packet details
+	debugSeqNum    bool // Log sequence numbers every 100 packets
+	// debugBridge is declared in main.go
+)
+
+// SetDebugDiscovery enables/disables discovery debug logging
+func SetDebugDiscovery(v bool) { debugDiscovery = v }
+
 // Protocol1Config holds configuration for HPSDR Protocol 1 emulation
 type Protocol1Config struct {
 	Interface    string
@@ -98,7 +108,7 @@ type Protocol1ReceiverState struct {
 // NewProtocol1Server creates a new HPSDR Protocol 1 server
 func NewProtocol1Server(config Protocol1Config) (*Protocol1Server, error) {
 	if config.NumReceivers < 1 || config.NumReceivers > MaxReceivers {
-		config.NumReceivers = 4 // Protocol 1 typically supports up to 4 receivers
+		config.NumReceivers = MaxReceivers
 	}
 
 	s := &Protocol1Server{
@@ -221,10 +231,10 @@ func (s *Protocol1Server) mainThread() {
 			continue
 		}
 
-		// Check for Protocol 1 magic bytes
+		// Check for Protocol 1 magic bytes — ignore anything else (e.g. Protocol 2 discovery probes)
 		if n < 3 || buffer[0] != Protocol1MagicByte1 || buffer[1] != Protocol1MagicByte2 {
 			if debugDiscovery {
-				log.Printf("Protocol1: Received non-Protocol1 packet (%d bytes) from %s", n, addr)
+				log.Printf("Protocol1: Ignoring non-Protocol1 packet (%d bytes) from %s", n, addr)
 			}
 			continue
 		}
@@ -242,10 +252,11 @@ func (s *Protocol1Server) mainThread() {
 
 		case n == Protocol1ControlSize || n == Protocol1DataSize:
 			// Control packet (start/stop, frequency changes, etc.)
-			// Accept both 1024 and 1032 byte packets (Thetis sends 1032)
-			if debugDiscovery {
-				log.Printf("Protocol1: Control packet from %s (cmd=0x%02x, %d bytes)", addr, cmd, n)
-			}
+			// Accept both 1024 and 1032 byte packets
+			s.handleControl(buffer[:n], addr)
+
+		case n == 64 && cmd == 0x04:
+			// SparkSDR start/stop command: ef fe 04 03 (start) or ef fe 04 00 (stop)
 			s.handleControl(buffer[:n], addr)
 
 		default:
@@ -256,7 +267,25 @@ func (s *Protocol1Server) mainThread() {
 	}
 }
 
-// handleDiscovery sends Protocol 1 discovery response
+// handleDiscovery sends Protocol 1 discovery response.
+//
+// HL2 discovery response layout (60 bytes, tcpdump-verified against real HL2 hardware):
+//
+//	Byte  0:    0xef  (magic)
+//	Byte  1:    0xfe  (magic)
+//	Byte  2:    0x02 (not running) or 0x03 (running)
+//	Byte  3:    0x00 (reserved)
+//	Bytes 4-9:  MAC address (6 bytes)
+//	              Bytes 4-6: OUI 1c:c0:a2 (Microchip Technology — all HL2s)
+//	              Bytes 7-8: unit ID (non-zero; manually set per-device)
+//	              Byte  9:   0x48 (SparkSDR checks this to identify "Hermes-Lite 2")
+//	Byte  10:   device type (0x06 = HermesLite)
+//	Byte  11:   firmware version (0x40 = 64)
+//	Bytes 12-16: zeros (reserved)
+//	Bytes 17-18: unit ID (must match MAC bytes 7-8; SparkSDR cross-checks these)
+//	Byte  19:   number of receivers (HL2 extension; SparkSDR reads "nb N" from this)
+//	Bytes 20-21: 0x45 0x08 (HL2 extended info, tcpdump-verified)
+//	Bytes 22-59: zeros (reserved)
 func (s *Protocol1Server) handleDiscovery(addr *net.UDPAddr) {
 	response := make([]byte, Protocol1ResponseSize)
 
@@ -273,16 +302,34 @@ func (s *Protocol1Server) handleDiscovery(addr *net.UDPAddr) {
 	}
 	s.mu.RUnlock()
 
-	// Bytes 3-8: MAC address (6 bytes)
-	copy(response[3:9], s.config.MACAddress)
+	// Byte 3: Reserved/zero (real HL2 sends 0x00 here)
 
-	// Byte 9: Device type
-	response[9] = s.config.DeviceType
+	// Bytes 4-9: MAC address (6 bytes) — matches real HL2 layout
+	copy(response[4:10], s.config.MACAddress)
 
-	// Byte 10: Code version (firmware version)
-	response[10] = FirmwareVersion
+	// Byte 10: Device type
+	response[10] = s.config.DeviceType
 
-	// Bytes 11-59: Reserved/zeros
+	// Byte 11: Code version (firmware version)
+	response[11] = FirmwareVersion
+
+	// Bytes 12-16: zeros (reserved)
+
+	// Bytes 17-18: HL2 unit ID — must match MAC bytes 4-5.
+	// SparkSDR identifies "Hermes-Lite 2" by checking that discovery bytes 17-18
+	// match the MAC unit ID bytes (bytes 4-5). Real HL2s put their MAC unit ID here.
+	response[17] = s.config.MACAddress[3]
+	response[18] = s.config.MACAddress[4]
+
+	// Byte 19: Number of receivers (HL2 Protocol 1 extension)
+	// Real HL2 (tcpdump verified): byte 19 = 0x0a (10)
+	response[19] = byte(s.config.NumReceivers)
+
+	// Bytes 20-21: HL2 extended info (tcpdump verified: 0x45 0x08)
+	response[20] = 0x45
+	response[21] = 0x08
+
+	// Bytes 22-59: Reserved/zeros
 
 	// Use shared socket if available (socket-less mode), otherwise use own socket
 	sock := s.sock
@@ -321,12 +368,6 @@ func (s *Protocol1Server) handleDiscovery(addr *net.UDPAddr) {
 	}
 }
 
-// handleControlFromDiscoveryPort handles Protocol 1 control packets received from Protocol2's discovery port
-// This is used when running in auto-detect mode where Protocol2 forwards Protocol1 packets
-func (s *Protocol1Server) handleControlFromDiscoveryPort(buffer []byte, addr *net.UDPAddr) {
-	s.handleControl(buffer, addr)
-}
-
 // handleControl processes Protocol 1 control packets
 func (s *Protocol1Server) handleControl(buffer []byte, addr *net.UDPAddr) {
 	if len(buffer) < 3 {
@@ -343,22 +384,38 @@ func (s *Protocol1Server) handleControl(buffer []byte, addr *net.UDPAddr) {
 		s.receivers[i].mu.Unlock()
 	}
 
-	if debugDiscovery {
-		log.Printf("Protocol1: Control packet received from %s: cmd=0x%02x, %d bytes", addr, cmd, len(buffer))
-	}
-
 	// Handle different packet types
 	switch cmd {
-	case 0x04: // Program/Set packet (64 bytes) - used for configuration
-		if len(buffer) < 64 {
-			if debugDiscovery {
-				log.Printf("Protocol1: Program packet too short: %d bytes", len(buffer))
-			}
+	case 0x04: // Start/stop command (64 bytes): ef fe 04 <running>
+		// byte[3]: 0x01 or 0x03 = start (running), 0x00 = stop
+		// SparkSDR sends: ef fe 04 03 (start) and ef fe 04 00 (stop)
+		if len(buffer) < 4 {
 			return
 		}
-		// These are configuration packets, can be safely ignored for basic operation
-		if debugDiscovery {
-			log.Printf("Protocol1: Program/Set packet received (ignoring)")
+		running := buffer[3] != 0x00
+		if running {
+			s.mu.Lock()
+			if !s.running {
+				s.running = true
+				s.clientAddr = addr
+				log.Printf("Protocol1: Radio STARTING by client %s (cmd=0x04 start)", addr)
+				s.wg.Add(1)
+				go s.senderThread()
+			}
+			s.mu.Unlock()
+		} else {
+			s.mu.Lock()
+			if s.running {
+				s.running = false
+				log.Printf("Protocol1: Radio STOPPING by client %s (cmd=0x04 stop)", addr)
+				s.doneSendMu.Lock()
+				for i := 0; i < s.config.NumReceivers; i++ {
+					s.doneSendFlags |= s.receivers[i].receiverMask
+				}
+				s.doneSendCond.Broadcast()
+				s.doneSendMu.Unlock()
+			}
+			s.mu.Unlock()
 		}
 		return
 
@@ -445,11 +502,6 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 		// Determine command type from C0
 		commandType := (c0 >> 1) & 0x1F
 
-		if debugDiscovery {
-			log.Printf("Protocol1: Frame 1 - C0=0x%02x (MOX=%v, Cmd=%d), C1-C4=%02x %02x %02x %02x",
-				c0, (c0&0x01) != 0, commandType, c1, c2, c3, c4)
-		}
-
 		// Handle different command types
 		switch commandType {
 		case 0: // Configuration command (command 0x00)
@@ -491,19 +543,20 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 				log.Printf("Protocol1: TX frequency command: %d Hz (%.3f MHz)", freq, float64(freq)/1e6)
 			}
 
-		case 2, 3, 4, 5: // RX frequencies (commands 0x04, 0x06, 0x08, 0x0A)
-			// RX frequency commands: 0x04=RX0, 0x06=RX1, 0x08=RX2, 0x0A=RX3
-			// Command type 2 = 0x04 >> 1, type 3 = 0x06 >> 1, etc.
-			// So receiver number = commandType - 2
+		case 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13: // RX frequencies
+			// Standard Protocol 1: commandTypes 2-5 = RX0-RX3 (C0 = 0x04, 0x06, 0x08, 0x0A)
+			// HL2 extension:        commandTypes 6-13 = RX4-RX11
+			// receiverNum = commandType - 2
 			receiverNum := int(commandType) - 2
 
 			if receiverNum >= 0 && receiverNum < s.config.NumReceivers {
 				// C1-C4 contain the 32-bit frequency in Hz (big-endian)
 				freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
 
-				// Ignore 10 MHz - SDR Console uses this as a "park" frequency in command cycling
-				// Only process frequencies that are NOT 10 MHz
-				if freq > 0 && freq != 10000000 {
+				// Skip park/unset frequencies:
+				// - 0 Hz or < 10 kHz: unset/garbage (SparkSDR sends 32 Hz for unconfigured receivers)
+				// - 10 MHz: SDR Console park frequency
+				if freq >= MinFrequencyHz && freq != 10000000 {
 					s.receivers[receiverNum].mu.Lock()
 					oldFreq := s.receivers[receiverNum].frequency
 					wasEnabled := s.receivers[receiverNum].enabled
@@ -551,11 +604,6 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 
 		commandType := (c0 >> 1) & 0x1F
 
-		if debugDiscovery {
-			log.Printf("Protocol1: Frame 2 - C0=0x%02x (MOX=%v, Cmd=%d), C1-C4=%02x %02x %02x %02x",
-				c0, (c0&0x01) != 0, commandType, c1, c2, c3, c4)
-		}
-
 		// Process Frame 2 commands as well (SDR Console uses both frames for command cycling)
 		switch commandType {
 		case 0: // Configuration command
@@ -588,14 +636,14 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 				}
 			}
 
-		case 2, 3, 4, 5: // RX frequencies (commands 0x04, 0x06, 0x08, 0x0A)
+		case 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13: // RX frequencies (HL2 extension: up to RX11)
 			receiverNum := int(commandType) - 2
 
 			if receiverNum >= 0 && receiverNum < s.config.NumReceivers {
 				freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
 
-				// Ignore 10 MHz - SDR Console uses this as a "park" frequency in command cycling
-				if freq > 0 && freq != 10000000 {
+				// Skip park/unset frequencies (same as Frame 1)
+				if freq >= MinFrequencyHz && freq != 10000000 {
 					s.receivers[receiverNum].mu.Lock()
 					oldFreq := s.receivers[receiverNum].frequency
 					wasEnabled := s.receivers[receiverNum].enabled

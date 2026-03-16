@@ -95,6 +95,11 @@ Bind to a specific IP address:
 - `--debug-discovery` - Enable detailed logging of port 1024 discovery packets
   - Shows hex dumps of all packets received and sent on the discovery port
   - Useful for troubleshooting connection issues with specific HPSDR clients (e.g., SDR Console)
+- `--debug` - Enable general debug logging for state transitions and sync events
+  - Logs bridge state changes (connect/disconnect, receiver enable/disable)
+  - Logs sync events (doneSendCond broadcasts, LoadIQData aborts)
+  - Logs HP packet heartbeats every 500 packets showing raw frequency values
+  - Does NOT log hot-path per-packet events (safe to leave on during normal use)
 
 ## How It Works
 

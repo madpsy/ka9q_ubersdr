@@ -17773,7 +17773,10 @@ Referer: ${log.referer}`;
             <!-- Header -->
             <div style="display:flex; justify-content:space-between; align-items:center; padding:20px 24px; border-bottom:2px solid #667eea; background:#f8f9fa; border-radius:8px 8px 0 0;">
                 <h2 style="margin:0; color:#333; font-size:18px;">🔐 Admin Login History</h2>
-                <button onclick="closeLoginHistoryModal()" style="background:none; border:none; font-size:22px; cursor:pointer; color:#666; line-height:1;" title="Close">✕</button>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <button onclick="refreshLoginHistory()" id="loginHistoryRefreshBtn" style="padding:6px 14px; background:#667eea; color:white; border:none; border-radius:4px; font-size:13px; font-weight:500; cursor:pointer;" title="Refresh">↻ Refresh</button>
+                    <button onclick="closeLoginHistoryModal()" style="background:none; border:none; font-size:22px; cursor:pointer; color:#666; line-height:1;" title="Close">✕</button>
+                </div>
             </div>
             <!-- Body -->
             <div style="padding:24px;">
@@ -17796,12 +17799,10 @@ Referer: ${log.referer}`;
         if (e.target === this) closeLoginHistoryModal();
     });
 
-    async function showLoginHistoryModal() {
-        const modal = document.getElementById('loginHistoryModal');
+    async function loadLoginHistoryContent() {
         const content = document.getElementById('loginHistoryContent');
-        modal.style.display = 'block';
-        content.innerHTML = '<div style="text-align:center;padding:40px;color:#666;">Loading…</div>';
-
+        const btn = document.getElementById('loginHistoryRefreshBtn');
+        if (btn) { btn.disabled = true; btn.textContent = '↻ Loading…'; }
         try {
             const resp = await fetch('/admin/login-history');
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -17809,6 +17810,43 @@ Referer: ${log.referer}`;
             content.innerHTML = renderLoginHistory(data);
         } catch (err) {
             content.innerHTML = '<div style="color:#dc3545;padding:20px;">Failed to load login history: ' + escapeHtml(String(err)) + '</div>';
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh'; }
+        }
+    }
+
+    async function showLoginHistoryModal() {
+        const modal = document.getElementById('loginHistoryModal');
+        const content = document.getElementById('loginHistoryContent');
+        modal.style.display = 'block';
+        content.innerHTML = '<div style="text-align:center;padding:40px;color:#666;">Loading…</div>';
+        await loadLoginHistoryContent();
+    }
+
+    function refreshLoginHistory() {
+        loadLoginHistoryContent();
+    }
+
+    async function forceRevokeLoginSession(token, btn) {
+        if (!confirm('Force-logout this admin session?')) return;
+        btn.disabled = true;
+        btn.textContent = '…';
+        try {
+            const resp = await fetch('/admin/login-session-revoke', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: token })
+            });
+            if (!resp.ok) {
+                const txt = await resp.text();
+                throw new Error(txt || 'HTTP ' + resp.status);
+            }
+            // Refresh the modal content after successful revoke
+            await loadLoginHistoryContent();
+        } catch (err) {
+            alert('Failed to revoke session: ' + err.message);
+            btn.disabled = false;
+            btn.textContent = 'Force Logout';
         }
     }
 
@@ -17830,14 +17868,19 @@ Referer: ${log.referer}`;
                   + '<th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6; white-space:nowrap;">Login Time</th>'
                   + '<th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6; white-space:nowrap;">Expires At</th>'
                   + '<th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6;">User Agent</th>'
+                  + '<th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6; white-space:nowrap;">Action</th>'
                   + '</tr></thead><tbody>';
             active.forEach(function(s, i) {
                 const bg = i % 2 === 0 ? '#fff' : '#f8f9fa';
+                const safeToken = escapeHtml(s.token || '');
                 html += '<tr style="background:' + bg + ';">'
                       + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; font-family:monospace; white-space:nowrap;">' + escapeHtml(s.ip || '—') + '</td>'
                       + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; white-space:nowrap;">' + formatLoginDate(s.created_at) + '</td>'
                       + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; white-space:nowrap;">' + formatLoginDate(s.expires_at) + '</td>'
-                      + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; color:#555; font-size:12px; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="' + escapeHtml(s.user_agent || '') + '">' + escapeHtml(s.user_agent || '—') + '</td>'
+                      + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; color:#555; font-size:12px; max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="' + escapeHtml(s.user_agent || '') + '">' + escapeHtml(s.user_agent || '—') + '</td>'
+                      + '<td style="padding:7px 10px; border-bottom:1px solid #dee2e6; white-space:nowrap;">'
+                      + (s.token ? '<button onclick="forceRevokeLoginSession(\'' + safeToken + '\', this)" style="padding:3px 10px; background:#dc3545; color:white; border:none; border-radius:3px; font-size:12px; cursor:pointer;" title="Force this session to end immediately">Force Logout</button>' : '—')
+                      + '</td>'
                       + '</tr>';
             });
             html += '</tbody></table></div>';
@@ -17899,8 +17942,9 @@ Referer: ${log.referer}`;
             logout:  'background:#d4edda; color:#155724; border:1px solid #c3e6cb;',
             expired: 'background:#fff3cd; color:#856404; border:1px solid #ffeeba;',
             failed:  'background:#f8d7da; color:#721c24; border:1px solid #f5c6cb;',
+            forced:  'background:#f8d7da; color:#721c24; border:1px solid #f5c6cb;',
         };
-        const labels = { logout: 'Logout', expired: 'Expired', failed: 'Failed' };
+        const labels = { logout: 'Logout', expired: 'Expired', failed: 'Failed', forced: 'Force Logout' };
         const style = styles[reason] || 'background:#e2e3e5; color:#383d41; border:1px solid #d6d8db;';
         const label = labels[reason] || escapeHtml(reason || '—');
         return '<span style="padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; ' + style + '">' + label + '</span>';

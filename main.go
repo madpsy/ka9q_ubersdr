@@ -1781,6 +1781,7 @@ func main() {
 	http.HandleFunc("/admin/load-history", adminHandler.AuthMiddleware(adminHandler.HandleLoadHistory))
 	http.HandleFunc("/admin/load-hourly-history", adminHandler.AuthMiddleware(adminHandler.HandleLoadHourlyHistory))
 	http.HandleFunc("/admin/login-history", adminHandler.AuthMiddleware(adminHandler.HandleLoginHistory))
+	http.HandleFunc("/admin/login-session-revoke", adminHandler.AuthMiddleware(adminHandler.HandleRevokeLoginSession))
 	http.HandleFunc("/admin/kick", adminHandler.AuthMiddleware(adminHandler.HandleKickUser))
 	http.HandleFunc("/admin/ban", adminHandler.AuthMiddleware(adminHandler.HandleBanUser))
 	http.HandleFunc("/admin/unban", adminHandler.AuthMiddleware(adminHandler.HandleUnbanIP))

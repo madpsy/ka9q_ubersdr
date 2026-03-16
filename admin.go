@@ -79,11 +79,12 @@ type AdminSession struct {
 type AdminLoginRecord struct {
 	IP          string     `json:"ip"`
 	UserAgent   string     `json:"user_agent"`
+	Token       string     `json:"token,omitempty"`        // only present in active list (for force-revoke)
 	AttemptedAt *time.Time `json:"attempted_at,omitempty"` // failed attempts only
 	CreatedAt   *time.Time `json:"created_at,omitempty"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
 	EndedAt     *time.Time `json:"ended_at,omitempty"`
-	EndReason   string     `json:"end_reason"` // "active", "logout", "expired", "failed"
+	EndReason   string     `json:"end_reason"` // "active", "logout", "expired", "failed", "forced"
 }
 
 const adminLoginHistoryCap = 100
@@ -209,6 +210,28 @@ func (s *AdminSessionStore) DeleteSession(token string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, token)
+}
+
+// ForceDeleteSession removes a session and records it in history with end_reason "forced"
+func (s *AdminSessionStore) ForceDeleteSession(token string) {
+	s.mu.Lock()
+	session, exists := s.sessions[token]
+	if exists {
+		delete(s.sessions, token)
+	}
+	s.mu.Unlock()
+
+	if exists && s.loginHistory != nil {
+		now := time.Now()
+		s.loginHistory.RecordPrevious(AdminLoginRecord{
+			IP:        session.IP,
+			UserAgent: session.UserAgent,
+			CreatedAt: &session.CreatedAt,
+			ExpiresAt: &session.ExpiresAt,
+			EndedAt:   &now,
+			EndReason: "forced",
+		})
+	}
 }
 
 // cleanupExpiredSessions periodically removes expired sessions and records them in history
@@ -6429,10 +6452,11 @@ func (ah *AdminHandler) HandleLoginHistory(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 
-	// Build active sessions list from the live session store
+	// Build active sessions list from the live session store.
+	// Token is included so the frontend can issue a force-revoke without displaying it.
 	ah.adminSessions.mu.RLock()
 	active := make([]AdminLoginRecord, 0, len(ah.adminSessions.sessions))
-	for _, s := range ah.adminSessions.sessions {
+	for token, s := range ah.adminSessions.sessions {
 		// Skip already-expired sessions (cleanup goroutine may not have run yet)
 		if time.Now().After(s.ExpiresAt) {
 			continue
@@ -6442,6 +6466,7 @@ func (ah *AdminHandler) HandleLoginHistory(w http.ResponseWriter, r *http.Reques
 		active = append(active, AdminLoginRecord{
 			IP:        s.IP,
 			UserAgent: s.UserAgent,
+			Token:     token,
 			CreatedAt: &createdAt,
 			ExpiresAt: &expiresAt,
 			EndReason: "active",
@@ -6475,5 +6500,50 @@ func (ah *AdminHandler) HandleLoginHistory(w http.ResponseWriter, r *http.Reques
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding login history: %v", err)
+	}
+}
+
+// HandleRevokeLoginSession force-terminates a specific admin session by token.
+// The caller must be authenticated (AuthMiddleware) and cannot revoke their own session
+// via this endpoint (they should use /admin/logout for that).
+func (ah *AdminHandler) HandleRevokeLoginSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Token == "" {
+		http.Error(w, "token is required", http.StatusBadRequest)
+		return
+	}
+
+	// Refuse to revoke the caller's own session (they should use /admin/logout)
+	if cookie, err := r.Cookie("admin_session"); err == nil && cookie.Value == req.Token {
+		http.Error(w, "Cannot revoke your own session via this endpoint; use /admin/logout", http.StatusBadRequest)
+		return
+	}
+
+	// Check the session exists before revoking
+	ah.adminSessions.mu.RLock()
+	_, exists := ah.adminSessions.sessions[req.Token]
+	ah.adminSessions.mu.RUnlock()
+
+	if !exists {
+		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	ah.adminSessions.ForceDeleteSession(req.Token)
+	log.Printf("Admin session force-revoked by %s", getClientIP(r))
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Session revoked",
+	}); err != nil {
+		log.Printf("Error encoding revoke response: %v", err)
 	}
 }

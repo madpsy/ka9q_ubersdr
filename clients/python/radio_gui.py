@@ -7766,6 +7766,50 @@ class RadioGUI:
                             # Add delay to allow other connections to establish first
                             self.root.after(3000, self.start_band_state_polling)
 
+                        # Send initial tune command so the server is tuned to the
+                        # frequency/mode shown in the GUI fields.  This is needed both
+                        # on first connect and on reconnect (same or different instance).
+                        # Use skip_auto_mode=True so the mode set by server_defaults (or
+                        # the user's own choice) is not overridden by the auto-LSB/USB logic.
+                        # A short delay (200 ms) lets the WebSocket handshake fully settle.
+                        self.root.after(200, lambda: self.apply_frequency(skip_auto_mode=True))
+
+                elif msg_type == "server_defaults":
+                    # Server has sent its preferred default frequency and mode.
+                    # Update the GUI fields so the user sees the server's defaults
+                    # before they click Apply.  Only applied when the frequency/mode
+                    # lock checkboxes are not engaged (respects user overrides).
+                    if isinstance(msg, dict):
+                        srv_freq = msg.get("frequency")
+                        srv_mode = msg.get("mode")
+
+                        if srv_freq and not self.freq_lock_var.get():
+                            try:
+                                unit = self.freq_unit_var.get()
+                                if unit == "MHz":
+                                    self.freq_var.set(f"{int(srv_freq) / 1e6:.6f}")
+                                elif unit == "kHz":
+                                    self.freq_var.set(f"{int(srv_freq) / 1e3:.3f}")
+                                else:
+                                    self.freq_var.set(str(int(srv_freq)))
+                                self.log_status(f"Default frequency from server: {int(srv_freq) / 1e6:.4f} MHz")
+                            except Exception:
+                                pass
+
+                        if srv_mode and not self.mode_lock_var.get():
+                            valid_modes = {'usb', 'lsb', 'cwu', 'cwl', 'am', 'sam', 'fm', 'nfm'}
+                            if srv_mode.lower() in valid_modes:
+                                mode_map = {
+                                    'usb': 'USB', 'lsb': 'LSB',
+                                    'cwu': 'CWU', 'cwl': 'CWL',
+                                    'am': 'AM', 'sam': 'SAM',
+                                    'fm': 'FM', 'nfm': 'NFM',
+                                }
+                                gui_mode = mode_map.get(srv_mode.lower(), srv_mode.upper())
+                                self.mode_var.set(gui_mode)
+                                self.on_mode_changed()
+                                self.log_status(f"Default mode from server: {gui_mode}")
+
                 elif msg_type == "error":
                     self.log_status(f"ERROR: {msg}")
                 elif msg_type == "wasapi_warning":

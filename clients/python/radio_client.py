@@ -1861,6 +1861,33 @@ class RadioClient:
             if receiver_name:
                 self._log(f"Receiver: {receiver_name}")
 
+            # Apply server-configured defaults for frequency and mode when the
+            # user has not explicitly specified them on the command line.
+            # Priority: CLI args > server config defaults > built-in fallbacks.
+            valid_modes = {'usb', 'lsb', 'cwu', 'cwl', 'am', 'sam', 'fm', 'nfm'}
+
+            if self.frequency == 0:
+                server_freq = description.get('default_frequency', 0)
+                try:
+                    server_freq = int(server_freq)
+                except (TypeError, ValueError):
+                    server_freq = 0
+                if 10000 <= server_freq <= 30000000:
+                    self.frequency = server_freq
+                    self._log(f"Default frequency from server config: {server_freq} Hz")
+                else:
+                    self.frequency = 14175000  # built-in fallback
+                    self._log(f"Using built-in default frequency: {self.frequency} Hz")
+
+            if self.mode == '':
+                server_mode = description.get('default_mode', '')
+                if isinstance(server_mode, str) and server_mode.lower() in valid_modes:
+                    self.mode = server_mode.lower()
+                    self._log(f"Default mode from server config: {self.mode}")
+                else:
+                    self.mode = 'usb'  # built-in fallback
+                    self._log(f"Using built-in default mode: {self.mode}")
+
         # Fetch country list
         countries = await self.fetch_countries()
         if countries:

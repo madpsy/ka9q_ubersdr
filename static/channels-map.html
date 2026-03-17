@@ -316,15 +316,10 @@
 
         /* Custom marker styles */
         .channel-marker {
-            background: #3498db;
             border: 2px solid white;
             border-radius: 50%;
             width: 12px;
             height: 12px;
-        }
-
-        .channel-marker.current-user {
-            background: #28a745;
         }
 
         /* Popup styles */
@@ -553,6 +548,26 @@
         function hideBarTooltip() {
             const tip = _tooltip();
             if (tip) tip.style.display = 'none';
+        }
+
+        // Amateur radio band definitions (ordered 160m → 10m)
+        const BAND_RANGES = [
+            { name: '160m', min: 1810000,  max: 2000000,  color: 'rgba(255, 99, 71, 0.25)',   labelColor: '#ff6347' },
+            { name: '80m',  min: 3500000,  max: 4000000,  color: 'rgba(255, 165, 0, 0.25)',   labelColor: '#ffa500' },
+            { name: '60m',  min: 5258500,  max: 5406500,  color: 'rgba(255, 215, 0, 0.25)',   labelColor: '#ffd700' },
+            { name: '40m',  min: 7000000,  max: 7300000,  color: 'rgba(50, 205, 50, 0.25)',   labelColor: '#32cd32' },
+            { name: '30m',  min: 10100000, max: 10150000, color: 'rgba(0, 191, 255, 0.25)',   labelColor: '#00bfff' },
+            { name: '20m',  min: 14000000, max: 14350000, color: 'rgba(65, 105, 225, 0.25)',  labelColor: '#4169e1' },
+            { name: '17m',  min: 18068000, max: 18168000, color: 'rgba(138, 43, 226, 0.25)',  labelColor: '#8a2be2' },
+            { name: '15m',  min: 21000000, max: 21450000, color: 'rgba(255, 20, 147, 0.25)',  labelColor: '#ff1493' },
+            { name: '12m',  min: 24890000, max: 24990000, color: 'rgba(255, 105, 180, 0.25)', labelColor: '#ff69b4' },
+            { name: '10m',  min: 28000000, max: 29700000, color: 'rgba(220, 20, 60, 0.25)',   labelColor: '#dc143c' }
+        ];
+
+        // Return the band colour for a given frequency, or a default grey if out-of-band
+        function getBandColor(frequency) {
+            const band = BAND_RANGES.find(b => frequency >= b.min && frequency <= b.max);
+            return band ? band.labelColor : '#7f8c8d';
         }
 
         // Initialize map
@@ -909,8 +924,9 @@
                 // Determine if this is the current user (index 0 in the channels array)
                 const isCurrentUser = channel.index === 0;
 
-                // Create custom icon
-                const iconHtml = `<div class="channel-marker ${isCurrentUser ? 'current-user' : ''}"></div>`;
+                // Create custom icon — colour by band
+                const bandColor = getBandColor(channel.frequency);
+                const iconHtml = `<div class="channel-marker" style="background:${bandColor};"></div>`;
                 const icon = L.divIcon({
                     html: iconHtml,
                     className: '',
@@ -1323,20 +1339,6 @@
                 setTimeout(() => map.invalidateSize(), 50);
             }
         }
-
-        // Amateur radio band definitions (ordered 160m → 10m)
-        const BAND_RANGES = [
-            { name: '160m', min: 1810000,  max: 2000000,  color: 'rgba(255, 99, 71, 0.25)',   labelColor: '#ff6347' },
-            { name: '80m',  min: 3500000,  max: 4000000,  color: 'rgba(255, 165, 0, 0.25)',   labelColor: '#ffa500' },
-            { name: '60m',  min: 5258500,  max: 5406500,  color: 'rgba(255, 215, 0, 0.25)',   labelColor: '#ffd700' },
-            { name: '40m',  min: 7000000,  max: 7300000,  color: 'rgba(50, 205, 50, 0.25)',   labelColor: '#32cd32' },
-            { name: '30m',  min: 10100000, max: 10150000, color: 'rgba(0, 191, 255, 0.25)',   labelColor: '#00bfff' },
-            { name: '20m',  min: 14000000, max: 14350000, color: 'rgba(65, 105, 225, 0.25)',  labelColor: '#4169e1' },
-            { name: '17m',  min: 18068000, max: 18168000, color: 'rgba(138, 43, 226, 0.25)',  labelColor: '#8a2be2' },
-            { name: '15m',  min: 21000000, max: 21450000, color: 'rgba(255, 20, 147, 0.25)',  labelColor: '#ff1493' },
-            { name: '12m',  min: 24890000, max: 24990000, color: 'rgba(255, 105, 180, 0.25)', labelColor: '#ff69b4' },
-            { name: '10m',  min: 28000000, max: 29700000, color: 'rgba(220, 20, 60, 0.25)',   labelColor: '#dc143c' }
-        ];
 
         // Render the per-band stacked view
         function updateBandView(channels) {

@@ -48,6 +48,8 @@ type AdminConfig struct {
 	ASL                  int       `yaml:"asl"` // Altitude above sea level in meters
 	Location             string    `yaml:"location"`
 	Antenna              string    `yaml:"antenna"`                // Antenna description
+	DefaultFrequency     uint64    `yaml:"default_frequency"`      // Default tuning frequency in Hz for new visitors (0 = use built-in default of 14175000)
+	DefaultMode          string    `yaml:"default_mode"`           // Default demodulation mode for new visitors (empty = use built-in default of "usb")
 	VersionCheckEnabled  bool      `yaml:"version_check_enabled"`  // Enable automatic version checking from GitHub
 	VersionCheckInterval int       `yaml:"version_check_interval"` // Version check interval in minutes (default: 60)
 	MaxLoginAttempts     int       `yaml:"max_login_attempts"`     // Maximum failed login attempts before temporary ban (default: 5)

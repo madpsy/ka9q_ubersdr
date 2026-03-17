@@ -2695,9 +2695,27 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 	// Calculate Maidenhead grid locator from GPS coordinates
 	maidenhead := latLonToGridSquare(config.Admin.GPS.Lat, config.Admin.GPS.Lon)
 
+	// Resolve and sanitise default frequency (must be in valid HF range 10 kHz–30 MHz)
+	effectiveDefaultFreq := config.Admin.DefaultFrequency
+	if effectiveDefaultFreq < 10000 || effectiveDefaultFreq > 30000000 {
+		effectiveDefaultFreq = 14175000 // built-in default: 14.175 MHz (20m USB calling)
+	}
+
+	// Resolve and sanitise default mode (must be one of the known demodulation modes)
+	validModes := map[string]bool{
+		"usb": true, "lsb": true, "cwu": true, "cwl": true,
+		"am": true, "sam": true, "fm": true, "nfm": true,
+	}
+	effectiveDefaultMode := config.Admin.DefaultMode
+	if !validModes[effectiveDefaultMode] {
+		effectiveDefaultMode = "usb" // built-in default
+	}
+
 	// Build the response with description plus status information (without sdrs)
 	response := map[string]interface{}{
-		"description": config.Admin.Description,
+		"description":       config.Admin.Description,
+		"default_frequency": effectiveDefaultFreq,
+		"default_mode":      effectiveDefaultMode,
 		"receiver": map[string]interface{}{
 			"name":       config.Admin.Name,
 			"callsign":   config.Admin.Callsign,

@@ -29,7 +29,21 @@ admin:
   location: "London, England, UK"
   # Antenna description (displayed in KiwiSDR client and status page)
   antenna: "Multi-band HF antenna"
-  
+
+  # Default tuning frequency for new visitors (Hz)
+  # This is the frequency shown when a user first opens the web UI
+  # Can be overridden per-link with the URL parameter: ?freq=7074000
+  # Valid range: 10000 (10 kHz) to 30000000 (30 MHz)
+  # Set to 0 (or omit) to use the built-in default of 14175000 (14.175 MHz - 20m USB calling frequency)
+  default_frequency: 14175000
+
+  # Default demodulation mode for new visitors
+  # This is the mode selected when a user first opens the web UI
+  # Can be overridden per-link with the URL parameter: ?mode=lsb
+  # Valid values: usb, lsb, cwu, cwl, am, sam, fm, nfm
+  # Leave empty (or omit) to use the built-in default of "usb"
+  default_mode: "usb"
+
   # Automatic version checking from GitHub
   # When enabled, checks for new versions periodically and writes to /var/run/updater/latest
   version_check_enabled: true

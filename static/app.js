@@ -1595,7 +1595,33 @@ async function fetchSiteDescription() {
             
             // Store instance description globally for use by other modules (e.g., recorder)
             window.instanceDescription = data;
-            
+
+            // Apply server-configured defaults for frequency and mode.
+            // Only applied when no URL parameters override them (URL params take priority).
+            const urlParams = new URLSearchParams(window.location.search);
+
+            if (data.default_frequency && !urlParams.has('freq')) {
+                const freq = parseInt(data.default_frequency);
+                if (!isNaN(freq) && freq >= 10000 && freq <= 30000000) {
+                    const freqInput = document.getElementById('frequency');
+                    if (freqInput) {
+                        freqInput.value = freq;
+                        freqInput.setAttribute('data-hz-value', freq);
+                    }
+                    updateBandButtons(freq);
+                    log(`Default frequency set from server config: ${freq} Hz`);
+                }
+            }
+
+            if (data.default_mode && !urlParams.has('mode')) {
+                const validModes = ['usb', 'lsb', 'cwu', 'cwl', 'am', 'sam', 'fm', 'nfm'];
+                if (validModes.includes(data.default_mode)) {
+                    currentMode = data.default_mode;
+                    window.currentMode = data.default_mode;
+                    log(`Default mode set from server config: ${data.default_mode}`);
+                }
+            }
+
             const descriptionEl = document.getElementById('site-description');
             if (descriptionEl && data.description) {
                 descriptionEl.innerHTML = data.description;

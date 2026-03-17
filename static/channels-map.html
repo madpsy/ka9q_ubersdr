@@ -75,7 +75,9 @@
             border-top: 2px solid #444;
             padding: 10px;
             overflow-x: auto;
-            overflow-y: hidden;
+            overflow-y: visible;
+            position: relative;
+            z-index: 200;
         }
 
         /* Band view styles */
@@ -83,9 +85,11 @@
             width: 100%;
             background: #2c3e50;
             border-top: 2px solid #444;
-            overflow-y: auto;
+            overflow-y: visible;
             overflow-x: hidden;
             display: none;
+            position: relative;
+            z-index: 200;
         }
 
         .band-row {
@@ -115,7 +119,7 @@
         .band-bar-area {
             position: relative;
             flex: 1;
-            overflow: hidden;
+            overflow: visible;
         }
 
         .band-bar-bg {
@@ -174,34 +178,20 @@
             z-index: 100;
         }
 
-        .band-channel-indicator:hover::after {
-            content: attr(title);
-            position: absolute;
-            bottom: calc(100% + 5px);
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.9);
+        /* Floating tooltip (JS-rendered, appended to body to escape stacking contexts) */
+        #freq-bar-tooltip {
+            position: fixed;
+            background: rgba(0, 0, 0, 0.92);
             color: white;
             padding: 6px 10px;
             border-radius: 4px;
             white-space: pre;
             font-size: 11px;
             line-height: 1.4;
-            z-index: 1000;
+            z-index: 99999;
             pointer-events: none;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-        }
-
-        .band-channel-indicator:hover::before {
-            content: '';
-            position: absolute;
-            bottom: 100%;
-            left: 50%;
-            transform: translateX(-50%);
-            border: 5px solid transparent;
-            border-top-color: rgba(0, 0, 0, 0.9);
-            z-index: 1000;
-            pointer-events: none;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+            display: none;
         }
 
         .band-username-label {
@@ -242,6 +232,7 @@
             -webkit-user-select: none;
             -moz-user-select: none;
             -ms-user-select: none;
+            overflow: visible;
         }
 
         .freq-scale {
@@ -274,36 +265,6 @@
             box-shadow: 0 0 12px 4px rgba(255, 255, 0, 0.8);
             transform: translateX(-50%) scale(1.4);
             z-index: 1000;
-        }
-
-        .channel-indicator:hover::after {
-            content: attr(title);
-            position: absolute;
-            bottom: calc(100% + 5px);
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.9);
-            color: white;
-            padding: 6px 10px;
-            border-radius: 4px;
-            white-space: pre;
-            font-size: 11px;
-            line-height: 1.4;
-            z-index: 1000;
-            pointer-events: none;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-        }
-
-        .channel-indicator:hover::before {
-            content: '';
-            position: absolute;
-            bottom: 100%;
-            left: 50%;
-            transform: translateX(-50%);
-            border: 5px solid transparent;
-            border-top-color: rgba(0, 0, 0, 0.9);
-            z-index: 1000;
-            pointer-events: none;
         }
 
         .channel-indicator:hover {
@@ -517,6 +478,7 @@
         <div>Loading channels...</div>
     </div>
     <div id="error" class="error" style="display: none;"></div>
+    <div id="freq-bar-tooltip"></div>
 
     <script src="leaflet.js"></script>
     <script src="L.Terminator.js"></script>
@@ -545,6 +507,39 @@
 
         // View mode: 'freq' = single frequency bar, 'band' = per-band stacked view
         let currentViewMode = 'freq';
+
+        // Floating tooltip helpers (renders above map by using fixed positioning on body)
+        const _tooltip = () => document.getElementById('freq-bar-tooltip');
+
+        function showBarTooltip(text, mouseEvent) {
+            const tip = _tooltip();
+            if (!tip) return;
+            tip.textContent = text;
+            tip.style.display = 'block';
+            positionBarTooltip(mouseEvent);
+        }
+
+        function positionBarTooltip(mouseEvent) {
+            const tip = _tooltip();
+            if (!tip || tip.style.display === 'none') return;
+            const x = mouseEvent.clientX;
+            const y = mouseEvent.clientY;
+            const tw = tip.offsetWidth;
+            const th = tip.offsetHeight;
+            // Position above cursor, centred horizontally, clamped to viewport
+            let left = x - tw / 2;
+            let top = y - th - 12;
+            if (left < 4) left = 4;
+            if (left + tw > window.innerWidth - 4) left = window.innerWidth - tw - 4;
+            if (top < 4) top = y + 16; // flip below if too close to top
+            tip.style.left = `${left}px`;
+            tip.style.top = `${top}px`;
+        }
+
+        function hideBarTooltip() {
+            const tip = _tooltip();
+            if (tip) tip.style.display = 'none';
+        }
 
         // Initialize map
         let terminator = null;
@@ -1182,10 +1177,10 @@
                     const bottomOffset = 25 + (tierIndex * 18); // 25px base + 18px per tier
                     indicator.style.bottom = `${bottomOffset}px`;
 
-                    // Add tooltip
+                    // Build tooltip text
                     const username = channel.chat_username || (isCurrentUser ? 'You' : `User ${channel.index + 1}`);
                     const freqMHz = (channel.frequency / 1000000).toFixed(3);
-                    indicator.title = `${username}\n${freqMHz} MHz\n${channel.mode.toUpperCase()}`;
+                    const tooltipText = `${username}\n${freqMHz} MHz\n${channel.mode.toUpperCase()}`;
 
                     // Register indicator in channelElements
                     if (!channelElements[channel.index]) {
@@ -1193,12 +1188,17 @@
                     }
                     channelElements[channel.index].freqIndicators.push(indicator);
 
-                    // Add hover handlers for cross-highlighting
-                    indicator.addEventListener('mouseenter', () => {
+                    // Add hover handlers for cross-highlighting + JS tooltip
+                    indicator.addEventListener('mouseenter', (e) => {
                         highlightChannel(channel.index);
+                        showBarTooltip(tooltipText, e);
+                    });
+                    indicator.addEventListener('mousemove', (e) => {
+                        positionBarTooltip(e);
                     });
                     indicator.addEventListener('mouseleave', () => {
                         unhighlightChannel(channel.index);
+                        hideBarTooltip();
                     });
 
                     // Add click handler to tune to channel
@@ -1436,10 +1436,10 @@
                         dot.style.top = `${baseTopPct - tierIndex * 18}%`;
                         dot.style.marginTop = '-5px';
 
-                        // Tooltip
+                        // Build tooltip text
                         const username = channel.chat_username || (isCurrentUser ? 'You' : `User ${channel.index + 1}`);
                         const freqMHz = (channel.frequency / 1000000).toFixed(3);
-                        dot.title = `${username}\n${freqMHz} MHz\n${channel.mode.toUpperCase()}`;
+                        const dotTooltip = `${username}\n${freqMHz} MHz\n${channel.mode.toUpperCase()}`;
 
                         // Register in channelElements for cross-highlighting
                         if (!channelElements[channel.index]) {
@@ -1447,8 +1447,15 @@
                         }
                         channelElements[channel.index].freqIndicators.push(dot);
 
-                        dot.addEventListener('mouseenter', () => highlightChannel(channel.index));
-                        dot.addEventListener('mouseleave', () => unhighlightChannel(channel.index));
+                        dot.addEventListener('mouseenter', (e) => {
+                            highlightChannel(channel.index);
+                            showBarTooltip(dotTooltip, e);
+                        });
+                        dot.addEventListener('mousemove', (e) => positionBarTooltip(e));
+                        dot.addEventListener('mouseleave', () => {
+                            unhighlightChannel(channel.index);
+                            hideBarTooltip();
+                        });
                         dot.addEventListener('click', () => tuneToChannelFromMap(channel));
 
                         barArea.appendChild(dot);

@@ -1592,7 +1592,8 @@ async function fetchSiteDescription() {
         const response = await fetch('/api/description');
         if (response.ok) {
             const data = await response.json();
-            console.log(`[initial_debug] fetchSiteDescription resolved: default_frequency=${JSON.stringify(data.default_frequency)} default_mode=${JSON.stringify(data.default_mode)}`);
+            const _urlParamsDebug = new URLSearchParams(window.location.search);
+            console.log(`[initial_debug] fetchSiteDescription resolved: default_frequency=${JSON.stringify(data.default_frequency)} default_mode=${JSON.stringify(data.default_mode)} urlHasFreq=${_urlParamsDebug.has('freq')} urlHasMode=${_urlParamsDebug.has('mode')} href=${window.location.href}`);
             
             // Store instance description globally for use by other modules (e.g., recorder)
             window.instanceDescription = data;

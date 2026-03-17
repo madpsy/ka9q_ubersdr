@@ -385,6 +385,21 @@
             border-top-color: rgba(52, 152, 219, 0.9);
         }
 
+        .channel-tooltip-you {
+            background: rgba(40, 167, 69, 0.9);
+            border: 1px solid #28a745;
+            border-radius: 4px;
+            color: white;
+            font-weight: 600;
+            font-size: 12px;
+            padding: 4px 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .channel-tooltip-you::before {
+            border-top-color: rgba(40, 167, 69, 0.9);
+        }
+
         /* Receiver tooltip styles (red/orange) */
         .receiver-tooltip {
             background: rgba(231, 76, 60, 0.9);
@@ -1000,7 +1015,7 @@
                     marker.bindTooltip(tooltipLabel, {
                         permanent: true,
                         direction: 'top',
-                        className: 'channel-tooltip'
+                        className: isCurrentUser ? 'channel-tooltip-you' : 'channel-tooltip'
                     });
                 }
 

@@ -1472,7 +1472,8 @@
                             lbl.textContent = labelText;
                             lbl.style.color = isCurrentUser ? '#28a745' : '#3498db';
                             lbl.style.fontWeight = '600';
-                            lbl.style.top = `${baseTop - tierIndex * 14}px`;
+                            // Centre label vertically with the dot (dot centre = baseTop + DOT_H/2)
+                            lbl.style.top = `${baseTop - tierIndex * 14 + Math.round(DOT_H / 2)}px`;
                             lbl.style.bottom = 'auto';
                             lbl.style.transform = 'translateY(-50%)';
                             if (pct > 85) {

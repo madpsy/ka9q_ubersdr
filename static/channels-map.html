@@ -120,6 +120,8 @@
             position: relative;
             flex: 1;
             overflow: visible;
+            height: 100%;
+            align-self: stretch;
         }
 
         .band-bar-bg {
@@ -1427,11 +1429,15 @@
                         dot.className = `band-channel-indicator ${isCurrentUser ? 'current-user' : 'other-user'}`;
                         dot.style.left = `${pct}%`;
 
-                        // Position dot just above the freq scale labels (bottom: 4px + ~10px text + 6px gap = 20px)
+                        // Row is 75px. Scale area at bottom ~18px. Dot is 11px.
+                        // Place dot top edge at: 75 - 18 - 11 - 4 = 42px from top (just above scale)
                         // Each stacked tier shifts up by 14px
-                        const baseBottom = 20; // px above bottom of row
-                        dot.style.bottom = `${baseBottom + tierIndex * 14}px`;
-                        dot.style.top = 'auto';
+                        const ROW_H = 75;
+                        const SCALE_H = 18;
+                        const DOT_H = 11;
+                        const baseTop = ROW_H - SCALE_H - DOT_H - 4; // 42px
+                        dot.style.top = `${baseTop - tierIndex * 14}px`;
+                        dot.style.bottom = 'auto';
                         dot.style.marginTop = '0';
 
                         // Build tooltip text
@@ -1466,9 +1472,9 @@
                             lbl.textContent = labelText;
                             lbl.style.color = isCurrentUser ? '#28a745' : '#3498db';
                             lbl.style.fontWeight = '600';
-                            lbl.style.bottom = `${baseBottom + tierIndex * 14}px`;
-                            lbl.style.top = 'auto';
-                            lbl.style.transform = 'translateY(50%)';
+                            lbl.style.top = `${baseTop - tierIndex * 14}px`;
+                            lbl.style.bottom = 'auto';
+                            lbl.style.transform = 'translateY(-50%)';
                             if (pct > 85) {
                                 lbl.style.right = `${100 - pct}%`;
                                 lbl.style.paddingRight = '10px';

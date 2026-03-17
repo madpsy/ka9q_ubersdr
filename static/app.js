@@ -1601,8 +1601,6 @@ async function fetchSiteDescription() {
         const response = await fetch('/api/description');
         if (response.ok) {
             const data = await response.json();
-            const _urlParamsDebug = new URLSearchParams(window.location.search);
-            console.log(`[initial_debug] fetchSiteDescription resolved: default_frequency=${JSON.stringify(data.default_frequency)} default_mode=${JSON.stringify(data.default_mode)} urlHasFreq=${_urlParamsDebug.has('freq')} urlHasMode=${_urlParamsDebug.has('mode')} href=${window.location.href}`);
             
             // Store instance description globally for use by other modules (e.g., recorder)
             window.instanceDescription = data;
@@ -1615,7 +1613,6 @@ async function fetchSiteDescription() {
 
             if (data.default_frequency && !urlParams.has('freq')) {
                 const freq = parseInt(data.default_frequency);
-                console.log(`[initial_debug] fetchSiteDescription: default_frequency=${data.default_frequency} parsed=${freq} urlHasFreq=${urlParams.has('freq')}`);
                 if (!isNaN(freq) && freq >= 10000 && freq <= 30000000) {
                     // Use setFrequencyInputValue so the display is updated correctly
                     // regardless of the current frequency unit (Hz/kHz/MHz).
@@ -8777,7 +8774,6 @@ function updateFrequencyDisplay() {
 
     // Get the internal Hz value
     const hzValue = parseFloat(freqInput.getAttribute('data-hz-value') || freqInput.value);
-    console.log(`[initial_debug] updateFrequencyDisplay called: data-hz-value="${freqInput.getAttribute('data-hz-value')}" freqInput.value="${freqInput.value}" resolved hzValue=${hzValue}`);
     if (isNaN(hzValue)) return;
 
     // Store the Hz value as a data attribute
@@ -8803,7 +8799,6 @@ function setFrequencyInputValue(hzValue) {
     if (!freqInput) return;
 
     const roundedHz = Math.round(hzValue);
-    console.log(`[initial_debug] setFrequencyInputValue called with ${roundedHz} Hz (current data-hz-value="${freqInput.getAttribute('data-hz-value')}")`);
 
     // CRITICAL: Set the Hz value attribute FIRST
     freqInput.setAttribute('data-hz-value', roundedHz);
@@ -8925,7 +8920,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (freqInput) {
         // The HTML value is always in Hz (e.g., "14175000")
         const initialHz = parseInt(freqInput.value);
-        console.log(`[initial_debug] freq DOMContentLoaded: freqInput.value="${freqInput.value}" initialHz=${initialHz} existing data-hz-value="${freqInput.getAttribute('data-hz-value')}"`);
         if (!isNaN(initialHz)) {
             freqInput.setAttribute('data-hz-value', initialHz);
         }

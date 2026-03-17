@@ -1406,8 +1406,9 @@
                     barArea.appendChild(tickLabel);
                 }
 
-                // Group channels within this band by proximity (50 kHz threshold)
-                const OVERLAP = 50000;
+                // Group channels within this band by proximity (1 kHz threshold)
+                // Only stack channels that are essentially on the same frequency
+                const OVERLAP = 1000;
                 const groups = [];
                 bandChannels.forEach(ch => {
                     let grp = groups.find(g => Math.abs(g.freq - ch.frequency) < OVERLAP);

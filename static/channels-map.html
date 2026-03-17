@@ -1430,8 +1430,9 @@
                         dot.style.left = `${pct}%`;
 
                         // Offset vertically for stacked channels at same freq
-                        // Centre is 50% of 75px row = 37.5px; each tier shifts up by 14px
-                        const baseTopPct = 50; // percent
+                        // Centre dot in the usable area above the freq scale (~bottom 18px of 75px row)
+                        // Usable centre = (75 - 18) / 2 / 75 * 100 ≈ 38%
+                        const baseTopPct = 38; // percent
                         dot.style.top = `${baseTopPct - tierIndex * 18}%`;
                         dot.style.marginTop = '-5px';
 

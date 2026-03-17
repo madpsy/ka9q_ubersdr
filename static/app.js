@@ -1619,6 +1619,48 @@ async function fetchSiteDescription() {
                     currentMode = data.default_mode;
                     window.currentMode = data.default_mode;
                     log(`Default mode set from server config: ${data.default_mode}`);
+
+                    // Also apply correct bandwidth defaults for the mode when no URL bandwidth params
+                    // are present. Without this, the HTML slider defaults (low=50, high=3000) are
+                    // USB-appropriate and will be used incorrectly for non-USB modes when
+                    // setMode(currentMode, true) fires on Start with preserveBandwidth=true.
+                    if (!urlParams.has('bwl') && !urlParams.has('bwh')) {
+                        let defaultLow, defaultHigh;
+                        switch (data.default_mode) {
+                            case 'usb':
+                                defaultLow = 50;   defaultHigh = 2700;  break;
+                            case 'lsb':
+                                defaultLow = -2700; defaultHigh = -50;  break;
+                            case 'am':
+                            case 'sam':
+                                defaultLow = -5000; defaultHigh = 5000; break;
+                            case 'cwu':
+                            case 'cwl':
+                                defaultLow = -200;  defaultHigh = 200;  break;
+                            case 'fm':
+                                defaultLow = -8000; defaultHigh = 8000; break;
+                            case 'nfm':
+                                defaultLow = -5000; defaultHigh = 5000; break;
+                            default:
+                                defaultLow = 50;   defaultHigh = 3000;  break;
+                        }
+                        currentBandwidthLow = defaultLow;
+                        currentBandwidthHigh = defaultHigh;
+                        window.currentBandwidthLow = defaultLow;
+                        window.currentBandwidthHigh = defaultHigh;
+
+                        const bwLowSlider = document.getElementById('bandwidth-low');
+                        const bwHighSlider = document.getElementById('bandwidth-high');
+                        if (bwLowSlider)  bwLowSlider.value  = defaultLow;
+                        if (bwHighSlider) bwHighSlider.value = defaultHigh;
+
+                        const bwLowVal  = document.getElementById('bandwidth-low-value');
+                        const bwHighVal = document.getElementById('bandwidth-high-value');
+                        if (bwLowVal)  bwLowVal.textContent  = defaultLow;
+                        if (bwHighVal) bwHighVal.textContent = defaultHigh;
+
+                        log(`Default bandwidth set for mode ${data.default_mode}: ${defaultLow} to ${defaultHigh} Hz`);
+                    }
                 }
             }
 

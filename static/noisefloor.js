@@ -1796,6 +1796,32 @@ class NoiseFloorMonitor {
                 }
             };
 
+            // Add scroll wheel handler to adjust width slider
+            ctx.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                if (!this.wideBandChart) return;
+
+                const widthSlider = document.getElementById('wideband-width');
+                const widthValue = document.getElementById('wideband-width-value');
+                const widthInput = document.getElementById('wideband-width-input');
+
+                // Zoom in (scroll up / deltaY < 0) = decrease width
+                // Zoom out (scroll down / deltaY > 0) = increase width
+                // Use a multiplicative factor for smooth logarithmic-feel zooming
+                const factor = e.deltaY < 0 ? 0.85 : 1.0 / 0.85;
+                let newWidth = this.widebandWidth * factor;
+
+                // Clamp to slider range [3, 30000]
+                newWidth = Math.max(3, Math.min(30000, newWidth));
+                this.widebandWidth = newWidth;
+
+                if (widthSlider) widthSlider.value = newWidth;
+                if (widthValue) widthValue.textContent = newWidth.toFixed(0);
+                if (widthInput) widthInput.value = newWidth.toFixed(0);
+
+                this.updateWidebandZoom();
+            }, { passive: false });
+
             // Apply initial zoom if not at default (full spectrum)
             this.applyWidebandZoomToChart();
             

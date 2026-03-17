@@ -215,9 +215,11 @@ private:
     std::unique_ptr<plain_client> _plainClient;
     websocketpp::connection_hdl _wsHandle;
     std::thread _wsThread;
+    std::thread _pingThread;
     std::atomic<bool> _streaming;
     std::atomic<bool> _connected;
     std::atomic<bool> _readyToConsume;
+    std::atomic<bool> _pingStop;
     
     // I/Q buffer management
     std::queue<std::vector<std::complex<float>>> _iqBuffers;
@@ -235,6 +237,9 @@ private:
     void handleTLSMessage(websocketpp::connection_hdl hdl, tls_message_ptr msg);
     void handlePlainMessage(websocketpp::connection_hdl hdl, plain_message_ptr msg);
     void sendTuneCommand(uint64_t freq, const std::string &mode);
+    void sendPingMessage();
+    void startPingThread();
+    void stopPingThread();
     bool checkConnectionAllowed();
     void connectWebSocket();
     void disconnectWebSocket();
@@ -254,6 +259,7 @@ SoapyUberSDR::SoapyUberSDR(const SoapySDR::Kwargs &args)
     _streaming = false;
     _connected = false;
     _readyToConsume = false;
+    _pingStop = false;
     _userSessionID = generateUUID();
     _partialBufferOffset = 0;
     
@@ -863,6 +869,51 @@ void SoapyUberSDR::handlePlainMessage(websocketpp::connection_hdl hdl, plain_mes
     }
 }
 
+void SoapyUberSDR::sendPingMessage()
+{
+    try {
+        std::string pingMsg = "{\"type\":\"ping\"}";
+        if (_useTLS && _tlsClient) {
+            _tlsClient->send(_wsHandle, pingMsg, websocketpp::frame::opcode::text);
+        } else if (_plainClient) {
+            _plainClient->send(_wsHandle, pingMsg, websocketpp::frame::opcode::text);
+        }
+        SoapySDR::log(SOAPY_SDR_DEBUG, "SoapyUberSDR: Sent ping");
+    } catch (const std::exception &e) {
+        SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyUberSDR: Failed to send ping: %s", e.what());
+    }
+}
+
+void SoapyUberSDR::startPingThread()
+{
+    _pingStop = false;
+    _pingThread = std::thread([this]() {
+        // Send a ping every 30 seconds while connected, matching the Python client behaviour.
+        // Uses 1-second sleep slices so the thread responds promptly to _pingStop.
+        int elapsed = 0;
+        while (!_pingStop) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            if (_pingStop) break;
+            elapsed++;
+            if (elapsed >= 30) {
+                elapsed = 0;
+                if (_connected && !_pingStop) {
+                    sendPingMessage();
+                }
+            }
+        }
+    });
+    SoapySDR::log(SOAPY_SDR_DEBUG, "SoapyUberSDR: Ping thread started");
+}
+
+void SoapyUberSDR::stopPingThread()
+{
+    _pingStop = true;
+    if (_pingThread.joinable())
+        _pingThread.join();
+    SoapySDR::log(SOAPY_SDR_DEBUG, "SoapyUberSDR: Ping thread stopped");
+}
+
 void SoapyUberSDR::sendTuneCommand(uint64_t freq, const std::string &mode)
 {
     try {
@@ -1166,12 +1217,18 @@ void SoapyUberSDR::connectWebSocket()
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     _connected = true;
 
+    // Start keepalive ping thread (sends {"type":"ping"} every 30 seconds)
+    startPingThread();
+
     SoapySDR::log(SOAPY_SDR_INFO, "SoapyUberSDR: WebSocket connected");
 }
 
 void SoapyUberSDR::disconnectWebSocket()
 {
     _connected = false;
+
+    // Stop keepalive ping thread before closing the WebSocket
+    stopPingThread();
 
     try {
         if (_useTLS && _tlsClient) {

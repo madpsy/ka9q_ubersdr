@@ -200,8 +200,7 @@
             color: #ecf0f1;
             white-space: nowrap;
             pointer-events: none;
-            top: 50%;
-            margin-top: 8px;
+            transform: translateY(-50%);
         }
 
         .band-tick {
@@ -1469,7 +1468,6 @@
                             lbl.style.color = isCurrentUser ? '#28a745' : '#3498db';
                             lbl.style.fontWeight = '600';
                             lbl.style.top = `${baseTopPct - tierIndex * 18}%`;
-                            lbl.style.marginTop = '8px';
                             if (pct > 85) {
                                 lbl.style.right = `${100 - pct}%`;
                                 lbl.style.paddingRight = '10px';

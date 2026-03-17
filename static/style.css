@@ -3194,13 +3194,14 @@ input[type="range"]::-moz-range-thumb {
 
 /* Resize Handle for Extension Panel */
 .decoder-extension-resize-handle {
-    height: 12px;
+    height: 18px;
     background: #2c3e50;
     border-radius: 0 0 6px 6px;
     cursor: ns-resize;
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 8px;
     transition: background 0.2s ease;
     user-select: none;
     position: relative;
@@ -3220,15 +3221,33 @@ input[type="range"]::-moz-range-thumb {
     background: #7f8c8d;
     border-radius: 2px;
     pointer-events: none;
-    transition: background 0.2s ease;
+    transition: background 0.2s ease, width 0.2s ease;
 }
 
 .decoder-extension-resize-handle:hover .resize-handle-bar {
+    width: 80px;
     background: #95a5a6;
 }
 
 .decoder-extension-resize-handle:active .resize-handle-bar {
     background: #667eea;
+}
+
+.resize-handle-hint {
+    position: absolute;
+    right: 12px;
+    font-size: 9px;
+    color: transparent;
+    letter-spacing: 0.05em;
+    pointer-events: none;
+    transition: color 0.2s ease;
+    user-select: none;
+    white-space: nowrap;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.decoder-extension-resize-handle:hover .resize-handle-hint {
+    color: #95a5a6;
 }
 
 /* When resizing, add a class to show visual feedback */

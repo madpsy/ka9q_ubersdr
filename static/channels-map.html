@@ -1388,7 +1388,8 @@
                 const DOT_H = 11;
                 const TIER_H = 14;
                 const GAP = 4;
-                const maxTiers = Math.max(...groups.map(g => g.channels.length), 1);
+                const MAX_TIERS = 5;
+                const maxTiers = Math.min(Math.max(...groups.map(g => g.channels.length), 1), MAX_TIERS);
                 const rowHeight = SCALE_H + GAP + DOT_H + (maxTiers - 1) * TIER_H;
 
                 // --- Row container ---
@@ -1451,7 +1452,7 @@
                 groups.forEach(grp => {
                     const pct = ((grp.freq - band.min) / bandWidth) * 100;
 
-                    grp.channels.forEach((channel, tierIndex) => {
+                    grp.channels.slice(0, MAX_TIERS).forEach((channel, tierIndex) => {
                         const isCurrentUser = channel.index === 0;
 
                         const dot = document.createElement('div');

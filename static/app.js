@@ -10,6 +10,15 @@ import { adjustBandwidth, updateBandwidthTooltips, initializeBandwidthControl } 
 // Import Wake Lock Manager
 import { screenWakeLock } from './wake-lock.js';
 
+// Capture the URL parameters that were present when the page first loaded.
+// updateURL() rewrites window.location.search as soon as DOMContentLoaded fires
+// (via loadVFOState → updateURL), so any async code that reads
+// window.location.search later will see the rewritten URL and incorrectly
+// think the user specified ?freq=, ?mode= etc.  Using this snapshot ensures
+// fetchSiteDescription() only skips server defaults when the user genuinely
+// navigated to the page with those parameters.
+const initialPageParams = new URLSearchParams(window.location.search);
+
 // Notification system
 function showNotification(message, type = 'error', duration = 5000) {
     const toast = document.getElementById('notification-toast');
@@ -1599,8 +1608,10 @@ async function fetchSiteDescription() {
             window.instanceDescription = data;
 
             // Apply server-configured defaults for frequency and mode.
-            // Only applied when no URL parameters override them (URL params take priority).
-            const urlParams = new URLSearchParams(window.location.search);
+            // Use initialPageParams (captured at module load time) rather than re-reading
+            // window.location.search, because updateURL() may have already rewritten the
+            // URL with the HTML default values before this async fetch resolved.
+            const urlParams = initialPageParams;
 
             if (data.default_frequency && !urlParams.has('freq')) {
                 const freq = parseInt(data.default_frequency);

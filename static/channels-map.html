@@ -474,8 +474,8 @@
         <div class="header-controls">
             <span class="status" id="status">Waiting for data...</span>
             <div style="display:flex; gap:4px; margin-left:10px;">
-                <button id="btn-freq-bar" class="toggle-btn active" onclick="setViewMode('freq')">Frequency Bar</button>
-                <button id="btn-band-view" class="toggle-btn" onclick="setViewMode('band')">Band View</button>
+                <button id="btn-freq-bar" class="toggle-btn" onclick="setViewMode('freq')">Frequency</button>
+                <button id="btn-band-view" class="toggle-btn active" onclick="setViewMode('band')">Band</button>
             </div>
             <button onclick="resetMapView()" style="background: #3498db; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; margin-left: 4px;">
                 Reset View
@@ -484,10 +484,10 @@
     </div>
 
     <div id="map"></div>
-    <div id="frequency-bar-container">
+    <div id="frequency-bar-container" style="display:none;">
         <div id="frequency-bar"></div>
     </div>
-    <div id="band-view-container"></div>
+    <div id="band-view-container" style="display:block;"></div>
     <div id="loading" class="loading" style="display: none;">
         <div>Loading channels...</div>
     </div>
@@ -520,7 +520,7 @@
         let dragStartCenter = 0;
 
         // View mode: 'freq' = single frequency bar, 'band' = per-band stacked view
-        let currentViewMode = 'freq';
+        let currentViewMode = 'band';
 
         // Floating tooltip helpers (renders above map by using fixed positioning on body)
         const _tooltip = () => document.getElementById('freq-bar-tooltip');

@@ -96,7 +96,7 @@
             display: flex;
             align-items: stretch;
             border-bottom: 1px solid #3a4a5a;
-            height: 75px;
+            min-height: 33px;
         }
 
         .band-row:last-child {
@@ -1371,9 +1371,30 @@
                     ch.frequency >= band.min && ch.frequency <= band.max
                 );
 
+                // Group channels by proximity first (needed for row height calculation)
+                const OVERLAP = 1000;
+                const groups = [];
+                bandChannels.forEach(ch => {
+                    let grp = groups.find(g => Math.abs(g.freq - ch.frequency) < OVERLAP);
+                    if (grp) {
+                        grp.channels.push(ch);
+                    } else {
+                        groups.push({ freq: ch.frequency, channels: [ch] });
+                    }
+                });
+
+                // Compute dynamic row height based on max stacked channels
+                const SCALE_H = 18;
+                const DOT_H = 11;
+                const TIER_H = 14;
+                const GAP = 4;
+                const maxTiers = Math.max(...groups.map(g => g.channels.length), 1);
+                const rowHeight = SCALE_H + GAP + DOT_H + (maxTiers - 1) * TIER_H;
+
                 // --- Row container ---
                 const row = document.createElement('div');
                 row.className = 'band-row';
+                row.style.height = `${rowHeight}px`;
 
                 // --- Label column ---
                 const labelCol = document.createElement('div');
@@ -1426,19 +1447,6 @@
                     barArea.appendChild(tickLabel);
                 }
 
-                // Group channels within this band by proximity (1 kHz threshold)
-                // Only stack channels that are essentially on the same frequency
-                const OVERLAP = 1000;
-                const groups = [];
-                bandChannels.forEach(ch => {
-                    let grp = groups.find(g => Math.abs(g.freq - ch.frequency) < OVERLAP);
-                    if (grp) {
-                        grp.channels.push(ch);
-                    } else {
-                        groups.push({ freq: ch.frequency, channels: [ch] });
-                    }
-                });
-
                 // Render channel dots
                 groups.forEach(grp => {
                     const pct = ((grp.freq - band.min) / bandWidth) * 100;
@@ -1450,14 +1458,9 @@
                         dot.className = `band-channel-indicator ${isCurrentUser ? 'current-user' : 'other-user'}`;
                         dot.style.left = `${pct}%`;
 
-                        // Row is 75px. Scale area at bottom ~18px. Dot is 11px.
-                        // Place dot top edge at: 75 - 18 - 11 - 4 = 42px from top (just above scale)
-                        // Each stacked tier shifts up by 14px
-                        const ROW_H = 75;
-                        const SCALE_H = 18;
-                        const DOT_H = 11;
-                        const baseTop = ROW_H - SCALE_H - DOT_H - 4; // 42px
-                        dot.style.top = `${baseTop - tierIndex * 14}px`;
+                        // Place dot just above the scale area; each tier shifts up by TIER_H
+                        const baseTop = rowHeight - SCALE_H - DOT_H - GAP;
+                        dot.style.top = `${baseTop - tierIndex * TIER_H}px`;
                         dot.style.bottom = 'auto';
                         dot.style.marginTop = '0';
 
@@ -1494,7 +1497,7 @@
                             lbl.style.color = isCurrentUser ? '#28a745' : '#3498db';
                             lbl.style.fontWeight = '600';
                             // Centre label vertically with the dot (dot centre = baseTop + DOT_H/2)
-                            lbl.style.top = `${baseTop - tierIndex * 14 + Math.round(DOT_H / 2)}px`;
+                            lbl.style.top = `${baseTop - tierIndex * TIER_H + Math.round(DOT_H / 2)}px`;
                             lbl.style.bottom = 'auto';
                             lbl.style.transform = 'translateY(-50%)';
                             if (pct > 85) {

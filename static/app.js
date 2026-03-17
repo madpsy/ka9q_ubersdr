@@ -1603,12 +1603,11 @@ async function fetchSiteDescription() {
             if (data.default_frequency && !urlParams.has('freq')) {
                 const freq = parseInt(data.default_frequency);
                 if (!isNaN(freq) && freq >= 10000 && freq <= 30000000) {
-                    const freqInput = document.getElementById('frequency');
-                    if (freqInput) {
-                        freqInput.value = freq;
-                        freqInput.setAttribute('data-hz-value', freq);
-                    }
+                    // Use setFrequencyInputValue so the display is updated correctly
+                    // regardless of the current frequency unit (Hz/kHz/MHz).
+                    setFrequencyInputValue(freq);
                     updateBandButtons(freq);
+                    updateBandSelector();
                     log(`Default frequency set from server config: ${freq} Hz`);
                 }
             }
@@ -1618,6 +1617,12 @@ async function fetchSiteDescription() {
                 if (validModes.includes(data.default_mode)) {
                     currentMode = data.default_mode;
                     window.currentMode = data.default_mode;
+
+                    // Update the active mode button in the UI to match the server default.
+                    document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+                    const modeBtn = document.getElementById(`mode-${data.default_mode}`);
+                    if (modeBtn) modeBtn.classList.add('active');
+
                     log(`Default mode set from server config: ${data.default_mode}`);
 
                     // Also apply correct bandwidth defaults for the mode when no URL bandwidth params

@@ -6851,11 +6851,13 @@ function _updateNRUI() {
     const nr2Controls = document.getElementById('nr2-controls');
     const nrEngineControls = document.getElementById('nr-engine-controls');
 
-    // Helper: style a mode label — active = bold + coloured, inactive = normal
+    // Helper: style a mode label — active = coloured, inactive = normal.
+    // Do NOT change font-weight: bold changes glyph widths and causes layout shift
+    // inside the (NR2/NR) label, making it appear as "(  NR2   /  NR  )".
     function _styleLabel(el, active) {
         if (!el) return;
-        el.style.fontWeight = active ? 'bold' : 'normal';
         el.style.color      = active ? '#4fc3f7' : '';
+        el.style.fontWeight = '';  // always reset — never change weight
     }
 
     if (noiseReductionMode === 'off') {

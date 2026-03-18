@@ -6824,7 +6824,13 @@ function autoScaleOscilloscope() {
 // ── Helper: tear down any existing NR processor nodes ──────────────────────────
 function _teardownNRProcessor() {
     try {
-        if (noiseReductionProcessor) noiseReductionProcessor.disconnect();
+        if (noiseReductionProcessor) {
+            // Null the handler FIRST so any in-flight or queued onaudioprocess
+            // callbacks stop immediately — prevents zombie nodes from calling
+            // nr2.process() after a new NR2 instance has been created.
+            noiseReductionProcessor.onaudioprocess = null;
+            noiseReductionProcessor.disconnect();
+        }
         if (noiseReductionMakeupGain) noiseReductionMakeupGain.disconnect();
         if (noiseReductionAnalyser) noiseReductionAnalyser.disconnect();
     } catch (e) { /* ignore */ }
@@ -6945,6 +6951,12 @@ function initNR2() {
         nr2 = new NR2Processor(audioContext, 2048, 4);
         nr2.setParameters(noiseReductionStrength, noiseReductionFloor, 1.0);
 
+        // Capture a LOCAL reference to this specific nr2 instance.
+        // Defense-in-depth: if a zombie ScriptProcessorNode from a previous
+        // cycle somehow fires after teardown (before GC), it will use its own
+        // localNr2 (the old, orphaned instance) and cannot corrupt the new one.
+        const localNr2 = nr2;
+
         // Create script processor: mono input, stereo output (1 in, 2 out)
         const bufferSize = 2048;
         noiseReductionProcessor = audioContext.createScriptProcessor(bufferSize, 1, 2);
@@ -6954,15 +6966,16 @@ function initNR2() {
             const outputL = e.outputBuffer.getChannelData(0);
             const outputR = e.outputBuffer.getChannelData(1);
 
-            // Guard: nr2 may be null if teardown raced with this callback
-            if (!nr2) {
-                outputL.set(input);
-                outputR.set(input);
+            // Guard: localNr2 is the instance this node was created for.
+            // If onaudioprocess fires after teardown (race), output silence.
+            if (!localNr2) {
+                outputL.fill(0);
+                outputR.fill(0);
                 return;
             }
 
             // Process through NR2 to left channel, duplicate to right
-            nr2.process(input, outputL);
+            localNr2.process(input, outputL);
             outputR.set(outputL);
         };
 

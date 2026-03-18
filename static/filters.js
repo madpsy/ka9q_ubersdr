@@ -1165,14 +1165,19 @@ function saveFilterSettings() {
         };
         localStorage.setItem(STORAGE_KEY_PREFIX + 'squelch', JSON.stringify(squelchSettings));
 
-        // Noise Reduction (NR2) - from app.js
+        // Noise Reduction - from app.js (mode: 'off' | 'nr2' | 'nr')
         const nr2Checkbox = document.getElementById('noise-reduction-enable');
         const nr2Settings = {
             enabled: nr2Checkbox ? nr2Checkbox.checked : false,
+            mode: (typeof noiseReductionMode !== 'undefined') ? noiseReductionMode : 'nr2',
             strength: document.getElementById('noise-reduction-strength')?.value || 40,
             floor: document.getElementById('noise-reduction-floor')?.value || 10,
             adaptRate: document.getElementById('noise-reduction-adapt-rate')?.value || 1.0,
-            makeupGain: document.getElementById('noise-reduction-makeup-gain')?.value || -3
+            makeupGain: document.getElementById('noise-reduction-makeup-gain')?.value || -3,
+            // NR engine (websdr-nr) params
+            nrThreshold: document.getElementById('nr-engine-threshold')?.value || 0.057,
+            nrMult: document.getElementById('nr-engine-mult')?.value || 0.10,
+            nrSquelch: document.getElementById('nr-engine-squelch')?.checked !== false
         };
         localStorage.setItem(STORAGE_KEY_PREFIX + 'nr2', JSON.stringify(nr2Settings));
 
@@ -1295,29 +1300,50 @@ function restoreFilterSettings() {
             updateSquelch();
         }
 
-        // Noise Reduction (NR2) - from app.js
+        // Noise Reduction - from app.js
         const nr2Settings = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + 'nr2'));
         if (nr2Settings) {
-            // Set slider values first
+            // Restore NR2 slider values
             if (nr2Settings.strength) document.getElementById('noise-reduction-strength').value = nr2Settings.strength;
             if (nr2Settings.floor) document.getElementById('noise-reduction-floor').value = nr2Settings.floor;
             if (nr2Settings.adaptRate) document.getElementById('noise-reduction-adapt-rate').value = nr2Settings.adaptRate;
             if (nr2Settings.makeupGain !== undefined) document.getElementById('noise-reduction-makeup-gain').value = nr2Settings.makeupGain;
 
-            // Set checkbox state
+            // Restore NR engine slider values
+            const threshEl = document.getElementById('nr-engine-threshold');
+            if (threshEl && nr2Settings.nrThreshold !== undefined) {
+                threshEl.value = nr2Settings.nrThreshold;
+            }
+            const multEl = document.getElementById('nr-engine-mult');
+            if (multEl && nr2Settings.nrMult !== undefined) {
+                multEl.value = nr2Settings.nrMult;
+            }
+            const squelchEl = document.getElementById('nr-engine-squelch');
+            if (squelchEl && nr2Settings.nrSquelch !== undefined) {
+                squelchEl.checked = nr2Settings.nrSquelch;
+            }
+
+            // Restore the saved mode into the global (app.js reads this on audio start)
+            if (nr2Settings.mode && typeof noiseReductionMode !== 'undefined') {
+                noiseReductionMode = nr2Settings.mode;
+            }
+
+            // Set checkbox state to match saved enabled flag
             const checkbox = document.getElementById('noise-reduction-enable');
             if (checkbox) {
                 checkbox.checked = nr2Settings.enabled;
             }
 
-            // Update the parameters (this will update the display values)
-            // This is safe to call even without audio context
+            // Update the parameter display values (safe without audio context)
             if (window.updateNoiseReduction) {
                 window.updateNoiseReduction();
             }
+            if (window.updateNREngineParams) {
+                window.updateNREngineParams();
+            }
 
-            // Note: toggleNoiseReduction will be called automatically when audio context
-            // is initialized if the checkbox is checked
+            // Note: setNoiseReductionMode / toggleNoiseReduction will be called
+            // automatically when the audio context is initialized if checkbox is checked
         }
 
         console.log('✅ Filter settings restored from localStorage');

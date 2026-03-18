@@ -555,6 +555,7 @@ let oscilloscope = null; // Oscilloscope instance
 let lowpassFilters = []; // Array of cascaded low-pass filters for steep rolloff
 let audioVisualizationEnabled = false; // Track if audio visualization is expanded
 let noiseReductionEnabled = false; // Track if noise reduction is enabled
+let noiseReductionMode = 'off'; // 'off' | 'nr2' | 'nr'  — which engine is active
 let noiseReductionProcessor = null; // ScriptProcessor for noise reduction
 let noiseReductionStrength = 40; // Noise reduction strength (0-100%)
 let noiseReductionFloor = 10; // Spectral floor (0-10%)
@@ -2381,7 +2382,7 @@ async function handleBinaryMessage(data) {
                 window.restoreFilterSettings();
             }
 
-            // Reinitialize NR2 if it was enabled
+            // Reinitialize noise reduction if it was enabled
             if (noiseReductionEnabled) {
                 try {
                     if (noiseReductionProcessor) noiseReductionProcessor.disconnect();
@@ -2390,24 +2391,19 @@ async function handleBinaryMessage(data) {
                 } catch (e) {
                     // Ignore disconnect errors from closed context
                 }
-
                 noiseReductionProcessor = null;
                 noiseReductionMakeupGain = null;
                 noiseReductionAnalyser = null;
                 nr2 = null;
 
-                const success = initNoiseReduction();
-                if (success) {
-                    if (nr2) {
-                        nr2.enabled = true;
-                        nr2.setParameters(noiseReductionStrength, noiseReductionFloor, 1.0);
-                    }
-                    log('✅ NR2 reinitialized after AudioContext recreation');
+                const prevMode = noiseReductionMode;
+                noiseReductionMode = 'off';
+                noiseReductionEnabled = false;
+                const success = setNoiseReductionMode(prevMode);
+                if (!success) {
+                    log('❌ Failed to reinitialize noise reduction after AudioContext recreation', 'error');
                 } else {
-                    noiseReductionEnabled = false;
-                    const nr2Checkbox = document.getElementById('noise-reduction-enable');
-                    if (nr2Checkbox) nr2Checkbox.checked = false;
-                    log('❌ Failed to reinitialize NR2 - disabled', 'error');
+                    log(`✅ Noise reduction (${prevMode.toUpperCase()}) reinitialized after AudioContext recreation`);
                 }
             }
 
@@ -2743,45 +2739,28 @@ async function handlePCMAudio(msg) {
             window.restoreFilterSettings();
         }
 
-        // Reinitialize NR2 processor if it was enabled
+        // Reinitialize noise reduction processor if it was enabled
         if (noiseReductionEnabled) {
-            // Disconnect and clear old processor (belongs to closed AudioContext)
             try {
-                if (noiseReductionProcessor) {
-                    noiseReductionProcessor.disconnect();
-                }
-                if (noiseReductionMakeupGain) {
-                    noiseReductionMakeupGain.disconnect();
-                }
-                if (noiseReductionAnalyser) {
-                    noiseReductionAnalyser.disconnect();
-                }
+                if (noiseReductionProcessor) noiseReductionProcessor.disconnect();
+                if (noiseReductionMakeupGain) noiseReductionMakeupGain.disconnect();
+                if (noiseReductionAnalyser) noiseReductionAnalyser.disconnect();
             } catch (e) {
                 // Ignore disconnect errors from closed context
             }
-
             noiseReductionProcessor = null;
             noiseReductionMakeupGain = null;
             noiseReductionAnalyser = null;
             nr2 = null;
 
-            // Reinitialize with new AudioContext
-            const success = initNoiseReduction();
-            if (success) {
-                // Enable processing in NR2
-                if (nr2) {
-                    nr2.enabled = true;
-                    nr2.setParameters(noiseReductionStrength, noiseReductionFloor, 1.0);
-                }
-                log('✅ NR2 reinitialized after AudioContext recreation');
+            const prevMode = noiseReductionMode;
+            noiseReductionMode = 'off';
+            noiseReductionEnabled = false;
+            const success = setNoiseReductionMode(prevMode);
+            if (!success) {
+                log('❌ Failed to reinitialize noise reduction after AudioContext recreation', 'error');
             } else {
-                // Failed to reinitialize - disable NR2
-                noiseReductionEnabled = false;
-                const nr2Checkbox = document.getElementById('noise-reduction-enable');
-                if (nr2Checkbox) {
-                    nr2Checkbox.checked = false;
-                }
-                log('❌ Failed to reinitialize NR2 - disabled', 'error');
+                log(`✅ Noise reduction (${prevMode.toUpperCase()}) reinitialized after AudioContext recreation`);
             }
         }
 
@@ -3359,10 +3338,15 @@ function tune() {
     wsManager.send(msg);
     log(`Tuning to ${formatFrequency(frequency)} ${mode.toUpperCase()} (BW: ${bandwidthLow} to ${bandwidthHigh} Hz)...`);
 
-    // Re-learn noise profile when frequency changes (if NR2 is enabled)
-    if (noiseReductionEnabled && nr2) {
-        nr2.resetLearning();
-        log('NR2: Re-learning noise profile for new frequency...');
+    // Reset noise reduction state when frequency changes
+    if (noiseReductionEnabled) {
+        if (noiseReductionMode === 'nr2' && nr2) {
+            nr2.resetLearning();
+            log('NR2: Re-learning noise profile for new frequency...');
+        } else if (noiseReductionMode === 'nr' && window.websdrNR) {
+            window.websdrNR.reset();
+            log('NR: Flushing engine state for new frequency...');
+        }
     }
 }
 
@@ -4031,6 +4015,9 @@ function setMode(mode, preserveBandwidth = false) {
         window.rmNoise_updateModeSupport(mode);
     }
 
+    // Update NR engine mode support (fm/nfm not suitable for entropy VAD)
+    updateNRModeSupport(mode);
+
     // Auto-connect if not connected
     if (!wsManager.isConnected()) {
         connect();
@@ -4333,27 +4320,55 @@ function initializeStereoChannels() {
     log('Stereo channel routing initialized (L/R selection enabled, mono recording)');
 }
 
-// Quick toggle for NR2 filter
-function toggleNR2Quick() {
-    const checkbox = document.getElementById('noise-reduction-enable');
+// Modes for which the NR engine (websdr-nr entropy VAD) is not suitable.
+// fm/nfm: noise floor shaped differently, squelch handles gating.
+// cwu/cwl: single-tone signal; syncBins() hits minimum of 4 bins — mask too coarse. NR2 is better.
+const NR_ENGINE_UNSUPPORTED_MODES = ['fm', 'nfm', 'cwu', 'cwl'];
+
+// Called from setMode() — disables/enables the NR quick-toggle button and
+// forces the engine off when switching to an unsupported mode.
+function updateNRModeSupport(mode) {
     const btn = document.getElementById('nr2-quick-toggle');
+    const unsupported = NR_ENGINE_UNSUPPORTED_MODES.includes(mode);
 
-    if (!checkbox) return;
-
-    // Toggle the checkbox
-    checkbox.checked = !checkbox.checked;
-
-    // Call the main toggle function
-    toggleNoiseReduction();
-
-    // Update button appearance
-    if (checkbox.checked) {
-        btn.style.backgroundColor = '#28a745'; // Green when enabled
-        log('NR2 enabled via quick toggle');
+    if (unsupported) {
+        // If the NR engine is currently active, force it off
+        if (noiseReductionMode === 'nr') {
+            setNoiseReductionMode('off');
+            log('NR engine disabled — not suitable for ' + mode.toUpperCase() + ' mode', 'info');
+        }
+        // Disable the button so the user cannot select 'nr' in this mode
+        if (btn) {
+            btn.disabled = true;
+            btn.title = 'NR engine not available in ' + mode.toUpperCase() + ' mode (Off / NR2 only)';
+            btn.style.opacity = '0.5';
+            btn.style.cursor = 'not-allowed';
+        }
     } else {
-        btn.style.backgroundColor = '#fd7e14'; // Orange when disabled
-        log('NR2 disabled via quick toggle');
+        // Re-enable the button for supported modes
+        if (btn) {
+            btn.disabled = false;
+            btn.title = 'Cycle Noise Reduction: Off → NR2 → NR → Off (N key)';
+            btn.style.opacity = '';
+            btn.style.cursor = '';
+        }
     }
+}
+
+// Quick toggle: cycles Off → NR2 → NR → Off
+// Skips the 'nr' step on modes where the NR engine is not suitable.
+function toggleNR2Quick() {
+    const unsupported = NR_ENGINE_UNSUPPORTED_MODES.includes(currentMode);
+    let nextMode;
+    if (noiseReductionMode === 'off') {
+        nextMode = 'nr2';
+    } else if (noiseReductionMode === 'nr2') {
+        // Skip 'nr' on unsupported modes — go straight to off
+        nextMode = unsupported ? 'off' : 'nr';
+    } else {
+        nextMode = 'off';
+    }
+    setNoiseReductionMode(nextMode);
 }
 
 // Quick toggle for Noise Blanker
@@ -6804,10 +6819,110 @@ function autoScaleOscilloscope() {
 // Fixed 30-second interval removed to allow proper idle detection
 
 
-// Noise Reduction Functions (NR2 Spectral Subtraction with Overlap-Add)
+// Noise Reduction Functions
 
-// Initialize noise reduction processor
-function initNoiseReduction() {
+// ── Helper: tear down any existing NR processor nodes ──────────────────────────
+function _teardownNRProcessor() {
+    try {
+        if (noiseReductionProcessor) noiseReductionProcessor.disconnect();
+        if (noiseReductionMakeupGain) noiseReductionMakeupGain.disconnect();
+        if (noiseReductionAnalyser) noiseReductionAnalyser.disconnect();
+    } catch (e) { /* ignore */ }
+    noiseReductionProcessor = null;
+    noiseReductionMakeupGain = null;
+    noiseReductionAnalyser = null;
+    nr2 = null;
+    if (window.websdrNR) window.websdrNR.setEnabled(false);
+}
+
+// ── Helper: update all UI elements to reflect current noiseReductionMode ───────
+function _updateNRUI() {
+    const btn = document.getElementById('nr2-quick-toggle');
+    const statusBadge = document.getElementById('noise-reduction-status-badge');
+    const checkbox = document.getElementById('noise-reduction-enable');
+    const modeLabel = document.getElementById('nr-mode-label');
+    const nr2Controls = document.getElementById('nr2-controls');
+    const nrEngineControls = document.getElementById('nr-engine-controls');
+
+    if (noiseReductionMode === 'off') {
+        if (btn) { btn.textContent = 'NR'; btn.style.backgroundColor = '#fd7e14'; }
+        if (statusBadge) { statusBadge.textContent = 'DISABLED'; statusBadge.className = 'filter-status-badge filter-disabled'; }
+        if (checkbox) checkbox.checked = false;
+        if (modeLabel) modeLabel.textContent = 'NR2';
+        // Show NR2 controls by default when off
+        if (nr2Controls) nr2Controls.style.display = '';
+        if (nrEngineControls) nrEngineControls.style.display = 'none';
+    } else if (noiseReductionMode === 'nr2') {
+        if (btn) { btn.textContent = 'NR2'; btn.style.backgroundColor = '#28a745'; }
+        if (statusBadge) { statusBadge.textContent = 'ENABLED'; statusBadge.className = 'filter-status-badge filter-enabled'; }
+        if (checkbox) checkbox.checked = true;
+        if (modeLabel) modeLabel.textContent = 'NR2';
+        if (nr2Controls) nr2Controls.style.display = '';
+        if (nrEngineControls) nrEngineControls.style.display = 'none';
+    } else { // 'nr'
+        if (btn) { btn.textContent = 'NR'; btn.style.backgroundColor = '#6f42c1'; }
+        if (statusBadge) { statusBadge.textContent = 'ENABLED'; statusBadge.className = 'filter-status-badge filter-enabled'; }
+        if (checkbox) checkbox.checked = true;
+        if (modeLabel) modeLabel.textContent = 'NR';
+        if (nr2Controls) nr2Controls.style.display = 'none';
+        if (nrEngineControls) nrEngineControls.style.display = '';
+    }
+}
+
+// ── setNoiseReductionMode: the single entry point for all NR state changes ─────
+// mode: 'off' | 'nr2' | 'nr'
+// Returns true on success, false if audio context not ready or init failed.
+function setNoiseReductionMode(mode) {
+    if (!audioContext && mode !== 'off') {
+        log('Please start audio first (click "Click to Start")', 'error');
+        return false;
+    }
+
+    // Tear down whatever is currently running
+    _teardownNRProcessor();
+    noiseReductionEnabled = false;
+    noiseReductionMode = 'off';
+
+    if (mode === 'off') {
+        _updateNRUI();
+        log('❌ Noise Reduction DISABLED');
+        if (window.saveFilterSettings) window.saveFilterSettings();
+        if (window.updateAllLatencyDisplays) window.updateAllLatencyDisplays();
+        return true;
+    }
+
+    if (mode === 'nr2') {
+        const ok = initNR2();
+        if (!ok) { _updateNRUI(); return false; }
+        noiseReductionMode = 'nr2';
+        noiseReductionEnabled = true;
+        if (nr2) {
+            nr2.enabled = true;
+            nr2.setParameters(noiseReductionStrength, noiseReductionFloor, 1.0);
+        }
+        log('✅ NR2 Noise Reduction ENABLED (spectral subtraction)');
+    } else if (mode === 'nr') {
+        if (!window.websdrNR) {
+            log('websdr-nr.js not loaded — NR engine unavailable', 'error');
+            _updateNRUI();
+            return false;
+        }
+        const ok = initNREngine();
+        if (!ok) { _updateNRUI(); return false; }
+        noiseReductionMode = 'nr';
+        noiseReductionEnabled = true;
+        window.websdrNR.setEnabled(true);
+        log('✅ NR Noise Reduction ENABLED (entropy VAD + soft masking)');
+    }
+
+    _updateNRUI();
+    if (window.saveFilterSettings) window.saveFilterSettings();
+    if (window.updateAllLatencyDisplays) window.updateAllLatencyDisplays();
+    return true;
+}
+
+// ── initNR2: initialise the NR2 spectral-subtraction ScriptProcessorNode ───────
+function initNR2() {
     if (!audioContext) {
         log('Audio context not initialized', 'error');
         return false;
@@ -6862,6 +6977,53 @@ function initNoiseReduction() {
     } catch (e) {
         console.error('Failed to initialize noise reduction:', e);
         log('Failed to initialize noise reduction: ' + e.message, 'error');
+        return false;
+    }
+}
+
+// ── initNREngine: initialise the websdr-nr entropy-VAD ScriptProcessorNode ─────
+function initNREngine() {
+    if (!audioContext) {
+        log('Audio context not initialized', 'error');
+        return false;
+    }
+
+    if (!window.websdrNR) {
+        log('websdr-nr.js not loaded — NR engine unavailable', 'error');
+        return false;
+    }
+
+    try {
+        // Reset engine state (flush ring buffer, OLA tail, delay buffer)
+        window.websdrNR.reset();
+
+        // 4096-sample buffer required by the engine (AUDIO_BUF = 3×8192, OUTPUT_FRAMES = 32 = 4096/HOP)
+        const bufferSize = 4096;
+        noiseReductionProcessor = audioContext.createScriptProcessor(bufferSize, 1, 2);
+
+        noiseReductionProcessor.onaudioprocess = (e) => {
+            const input = e.inputBuffer.getChannelData(0);
+            const processed = window.websdrNR.process(input);
+            // On the very first call processWithDelay returns null — pass through
+            const out = (processed !== null) ? processed : input;
+            e.outputBuffer.getChannelData(0).set(out);
+            e.outputBuffer.getChannelData(1).set(out);
+        };
+
+        // Makeup gain node (unity by default — NR engine preserves level)
+        noiseReductionMakeupGain = audioContext.createGain();
+        noiseReductionMakeupGain.gain.value = 1.0;
+
+        // Analyser for clipping detection (shared with NR2 path)
+        noiseReductionAnalyser = audioContext.createAnalyser();
+        noiseReductionAnalyser.fftSize = 2048;
+        noiseReductionAnalyser.smoothingTimeConstant = 0;
+
+        log('✅ NR Engine initialized (entropy VAD + soft spectral masking, 4096-sample buffer)');
+        return true;
+    } catch (e) {
+        console.error('Failed to initialize NR engine:', e);
+        log('Failed to initialize NR engine: ' + e.message, 'error');
         return false;
     }
 }
@@ -6923,6 +7085,31 @@ function initNoiseBlanker() {
         log('Failed to initialize noise blanker: ' + e.message, 'error');
         return false;
     }
+}
+
+// Update NR engine (websdr-nr) parameters from the NR-engine-specific sliders
+function updateNREngineParams() {
+    const threshSlider = document.getElementById('nr-engine-threshold');
+    const multSlider = document.getElementById('nr-engine-mult');
+    const squelchCheck = document.getElementById('nr-engine-squelch');
+
+    if (threshSlider) {
+        const thresh = parseFloat(threshSlider.value);
+        document.getElementById('nr-engine-threshold-value').textContent = thresh.toFixed(3);
+        if (window.websdrNR) window.websdrNR.setThreshold(thresh);
+    }
+
+    if (multSlider) {
+        const mult = parseFloat(multSlider.value);
+        document.getElementById('nr-engine-mult-value').textContent = mult.toFixed(2);
+        if (window.websdrNR) window.websdrNR.setMult(mult);
+    }
+
+    if (squelchCheck !== null && squelchCheck !== undefined) {
+        if (window.websdrNR) window.websdrNR.setSquelch(squelchCheck.checked);
+    }
+
+    if (window.saveFilterSettings) window.saveFilterSettings();
 }
 
 // Update noise reduction parameters from sliders
@@ -7023,83 +7210,22 @@ function showStereoClipIndicator() {
     }, 2000);
 }
 
-// Toggle noise reduction on/off
+// Toggle noise reduction on/off (called by the settings-panel checkbox).
+// When the checkbox is checked, activate the last-used mode (or NR2 as default).
+// When unchecked, turn off.
 function toggleNoiseReduction() {
     const checkbox = document.getElementById('noise-reduction-enable');
-    const statusBadge = document.getElementById('noise-reduction-status-badge');
-    const quickToggleBtn = document.getElementById('nr2-quick-toggle');
-
     if (!checkbox) {
         console.error('Noise reduction checkbox not found');
         return;
     }
 
-    noiseReductionEnabled = checkbox.checked;
-
-    if (noiseReductionEnabled) {
-        if (!audioContext) {
-            log('Please start audio first (click "Click to Start")', 'error');
-            checkbox.checked = false;
-            noiseReductionEnabled = false;
-            return;
-        }
-
-        if (!noiseReductionProcessor) {
-            const success = initNoiseReduction();
-            if (!success) {
-                checkbox.checked = false;
-                noiseReductionEnabled = false;
-                return;
-            }
-        }
-
-        // Enable processing in NR2
-        if (nr2) {
-            nr2.enabled = true;
-            // Force parameter update to ensure processor activates immediately
-            // This fixes browser-specific initialization race conditions
-            nr2.setParameters(noiseReductionStrength, noiseReductionFloor, 1.0);
-        }
-
-        if (statusBadge) {
-            statusBadge.textContent = 'ENABLED';
-            statusBadge.className = 'filter-status-badge filter-enabled';
-        }
-
-        // Update quick toggle button appearance
-        if (quickToggleBtn) {
-            quickToggleBtn.style.backgroundColor = '#28a745'; // Green when enabled
-        }
-
-        log('✅ NR2 Noise Reduction ENABLED');
-        log('Using FFT-based spectral subtraction with overlap-add processing');
+    if (checkbox.checked) {
+        // Re-enable: use current mode if already set, otherwise default to NR2
+        const targetMode = (noiseReductionMode !== 'off') ? noiseReductionMode : 'nr2';
+        setNoiseReductionMode(targetMode);
     } else {
-        // Disable processing in NR2
-        if (nr2) {
-            nr2.enabled = false;
-        }
-
-        if (statusBadge) {
-            statusBadge.textContent = 'DISABLED';
-            statusBadge.className = 'filter-status-badge filter-disabled';
-        }
-
-        // Update quick toggle button appearance
-        if (quickToggleBtn) {
-            quickToggleBtn.style.backgroundColor = '#fd7e14'; // Orange when disabled
-        }
-
-        log('❌ NR2 Noise Reduction DISABLED');
-    }
-
-    // Update latency displays
-    if (window.updateAllLatencyDisplays) {
-        window.updateAllLatencyDisplays();
-    }
-
-    // Save settings to localStorage
-    if (window.saveFilterSettings) {
-        window.saveFilterSettings();
+        setNoiseReductionMode('off');
     }
 }
 
@@ -7646,6 +7772,7 @@ window.getCurrentDialFrequency = function() {
 window.toggleMute = toggleMute;
 window.toggleNR2Quick = toggleNR2Quick;
 window.toggleNBQuick = toggleNBQuick;
+window.setNoiseReductionMode = setNoiseReductionMode;
 window.updateChannelSelection = updateChannelSelection;
 
 // Expose core functions for bookmark-manager.js
@@ -7691,6 +7818,7 @@ window.updateBandpassFilter = updateBandpassFilter;
 window.resetBandpassFilter = resetBandpassFilter;
 window.toggleNoiseReduction = toggleNoiseReduction;
 window.updateNoiseReduction = updateNoiseReduction;
+window.updateNREngineParams = updateNREngineParams;
 window.resetNoiseReduction = resetNoiseReduction;
 window.toggleSquelch = toggleSquelch;
 window.updateSquelch = updateSquelch;

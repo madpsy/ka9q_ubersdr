@@ -15,6 +15,7 @@
     <!-- FFT and NR2 libraries for noise reduction -->
     <script src="fft.js"></script>
     <script src="nr2.js"></script>
+    <script src="websdr-nr.js"></script>
     <script src="noise-blanker.js"></script>
     <script src="filters.js"></script>
     <script src="rmnoise.js"></script>
@@ -468,7 +469,7 @@
             </div>
             <div class="control-group">
                 <button id="mute-btn" onclick="toggleMute()" style="padding: 8px 12px;" title="Toggle Mute (M key)">🔊 Mute</button>
-                <button id="nr2-quick-toggle" onclick="toggleNR2Quick()" style="background-color: #fd7e14; margin-left: 5px; padding: 8px 12px;" title="Toggle Noise Reduction (N key)">NR2</button>
+                <button id="nr2-quick-toggle" onclick="toggleNR2Quick()" style="background-color: #fd7e14; margin-left: 5px; padding: 8px 12px;" title="Cycle Noise Reduction: Off → NR2 → NR → Off (N key)">NR</button>
                 <button id="nb-quick-toggle" onclick="toggleNBQuick()" style="background-color: #17a2b8; margin-left: 3px; padding: 8px 12px;" title="Toggle Noise Blanker (B key)">NB</button>
                 <span class="rmn-btn-group" style="margin-left:3px; display: inline-flex; align-items: stretch;">
                     <button id="rmn-quick-toggle" style="background-color: #6f42c1; padding: 8px 12px; border-right: 1px solid rgba(255,255,255,0.25);" title="Toggle RM Noise AI Denoising">RMN</button><button id="rmn-cog-btn" onclick="openRMNoiseModal()" style="background-color: #6f42c1; padding: 8px 7px; display: inline-flex; align-items: center; justify-content: center;" title="Configure RM Noise">⚙</button>
@@ -709,27 +710,49 @@
                     <div class="control-group">
                         <label>
                             <input type="checkbox" id="noise-reduction-enable" onchange="toggleNoiseReduction()">
-                            Noise Reduction (NR2)
+                            Noise Reduction (<span id="nr-mode-label">NR2</span>)
                         </label>
                     </div>
                     <div id="noise-reduction-controls">
-                        <div class="control-group">
-                            <label for="noise-reduction-strength">Strength: <span id="noise-reduction-strength-value">40%</span></label>
-                            <input type="range" id="noise-reduction-strength" min="0" max="100" value="40" step="5" oninput="updateNoiseReduction()">
+                        <!-- NR2 (spectral subtraction) controls — shown when mode = 'nr2' -->
+                        <div id="nr2-controls">
+                            <div class="control-group">
+                                <label for="noise-reduction-strength">Strength: <span id="noise-reduction-strength-value">40%</span></label>
+                                <input type="range" id="noise-reduction-strength" min="0" max="100" value="40" step="5" oninput="updateNoiseReduction()">
+                            </div>
+                            <div class="control-group">
+                                <label for="noise-reduction-floor">Spectral Floor: <span id="noise-reduction-floor-value">10%</span></label>
+                                <input type="range" id="noise-reduction-floor" min="0" max="10" value="10" step="0.5" oninput="updateNoiseReduction()">
+                            </div>
+                            <div class="control-group">
+                                <label for="noise-reduction-adapt-rate">Adaptation Rate: <span id="noise-reduction-adapt-rate-value">1.0%</span></label>
+                                <input type="range" id="noise-reduction-adapt-rate" min="0.1" max="5.0" value="1.0" step="0.1" oninput="updateNoiseReduction()">
+                            </div>
+                            <p class="help-text" style="font-size: 11px; margin-top: 8px;">Auto-learns noise on startup and frequency changes. Continuously adapts to slow variations. Higher strength = more aggressive. Adaptation rate controls how quickly the filter tracks changing noise.</p>
                         </div>
-                        <div class="control-group">
-                            <label for="noise-reduction-floor">Spectral Floor: <span id="noise-reduction-floor-value">10%</span></label>
-                            <input type="range" id="noise-reduction-floor" min="0" max="10" value="10" step="0.5" oninput="updateNoiseReduction()">
+                        <!-- NR engine (entropy VAD + soft masking) controls — shown when mode = 'nr' -->
+                        <div id="nr-engine-controls" style="display: none;">
+                            <div class="control-group">
+                                <label for="nr-engine-threshold">VAD Threshold: <span id="nr-engine-threshold-value">0.057</span></label>
+                                <input type="range" id="nr-engine-threshold" min="0.01" max="0.30" value="0.057" step="0.001" oninput="updateNREngineParams()">
+                            </div>
+                            <div class="control-group">
+                                <label for="nr-engine-mult">Peak Strength: <span id="nr-engine-mult-value">0.10</span></label>
+                                <input type="range" id="nr-engine-mult" min="0.05" max="0.99" value="0.10" step="0.01" oninput="updateNREngineParams()">
+                            </div>
+                            <div class="control-group">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="nr-engine-squelch" checked onchange="updateNREngineParams()">
+                                    Squelch (silence pure-noise frames)
+                                </label>
+                            </div>
+                            <p class="help-text" style="font-size: 11px; margin-top: 8px;">VAD Threshold: lower = more sensitive (triggers on weaker signals). Peak Strength: higher = more aggressive gating. Squelch: outputs silence when no signal detected.</p>
                         </div>
-                        <div class="control-group">
-                            <label for="noise-reduction-adapt-rate">Adaptation Rate: <span id="noise-reduction-adapt-rate-value">1.0%</span></label>
-                            <input type="range" id="noise-reduction-adapt-rate" min="0.1" max="5.0" value="1.0" step="0.1" oninput="updateNoiseReduction()">
-                        </div>
+                        <!-- Makeup gain — shared by both engines -->
                         <div class="control-group">
                             <label for="noise-reduction-makeup-gain">Makeup Gain: <span id="noise-reduction-makeup-gain-value">-3 dB</span></label>
                             <input type="range" id="noise-reduction-makeup-gain" min="-12" max="12" value="-3" step="0.5" oninput="updateNoiseReduction()">
                         </div>
-                        <p class="help-text" style="font-size: 11px; margin-top: 8px;">Auto-learns noise on startup and frequency changes. Continuously adapts to slow variations. Higher strength = more aggressive. Adaptation rate controls how quickly the filter tracks changing noise.</p>
                         <button onclick="resetNoiseReduction()" class="eq-reset-btn">Reset</button>
                     </div>
                 </div>

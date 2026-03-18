@@ -6862,14 +6862,14 @@ function _updateNRUI() {
         if (btn) { btn.textContent = 'NR2'; btn.style.backgroundColor = '#28a745'; }
         if (statusBadge) { statusBadge.textContent = 'ENABLED'; statusBadge.className = 'filter-status-badge filter-enabled'; }
         if (checkbox) checkbox.checked = true;
-        if (modeLabel) { modeLabel.textContent = '(NR2 ▸ click for NR)'; modeLabel.style.color = '#4fc3f7'; }
+        if (modeLabel) { modeLabel.textContent = '(NR2)'; modeLabel.style.color = '#4fc3f7'; }
         if (nr2Controls) nr2Controls.style.display = '';
         if (nrEngineControls) nrEngineControls.style.display = 'none';
     } else { // 'nr'
         if (btn) { btn.textContent = 'NR'; btn.style.backgroundColor = '#6f42c1'; }
         if (statusBadge) { statusBadge.textContent = 'ENABLED'; statusBadge.className = 'filter-status-badge filter-enabled'; }
         if (checkbox) checkbox.checked = true;
-        if (modeLabel) { modeLabel.textContent = '(NR ▸ click for NR2)'; modeLabel.style.color = '#ce93d8'; }
+        if (modeLabel) { modeLabel.textContent = '(NR)'; modeLabel.style.color = '#ce93d8'; }
         if (nr2Controls) nr2Controls.style.display = 'none';
         if (nrEngineControls) nrEngineControls.style.display = '';
     }

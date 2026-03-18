@@ -707,12 +707,11 @@
                     <span id="noise-reduction-latency-badge" class="filter-latency-badge" style="display: none;">0ms</span>
                     <span id="noise-reduction-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
                     <span id="noise-reduction-clip-indicator" style="display: none; position: absolute; bottom: 8px; right: 15px; color: #ff0000; font-weight: bold; padding: 4px 10px; background-color: rgba(255, 0, 0, 0.15); border: 2px solid #ff0000; border-radius: 4px; z-index: 100; font-size: 11px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠ CLIPPING</span>
-                    <div class="control-group" style="display:flex;align-items:center;gap:0;">
-                        <label style="flex:none;margin-bottom:0;">
+                    <div class="control-group">
+                        <label>
                             <input type="checkbox" id="noise-reduction-enable" onchange="toggleNoiseReduction()">
-                            Noise Reduction
+                            Noise Reduction <span id="nr-mode-label" title="Click to switch between NR2 and NR" style="cursor:pointer;text-decoration:underline dotted;min-width:0;margin-left:0;" onclick="if(noiseReductionEnabled){setNoiseReductionMode(noiseReductionMode==='nr2'?'nr':'nr2');}">(NR2)</span>
                         </label>
-                        <span style="font-size:0.9em;font-weight:bold;color:#ecf0f1;margin-left:4px;white-space:nowrap;">(<span id="nr-mode-label-nr2" title="Switch to NR2 (spectral subtraction)" style="cursor:pointer;text-decoration:underline dotted;" onclick="if(noiseReductionEnabled)setNoiseReductionMode('nr2')">NR2</span>/<span id="nr-mode-label-nr" title="Switch to NR (entropy VAD)" style="cursor:pointer;text-decoration:underline dotted;" onclick="if(noiseReductionEnabled)setNoiseReductionMode('nr')">NR</span>)</span>
                     </div>
                     <div id="noise-reduction-controls">
                         <!-- NR2 (spectral subtraction) controls — shown when mode = 'nr2' -->

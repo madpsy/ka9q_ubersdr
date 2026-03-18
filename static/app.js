@@ -6846,26 +6846,15 @@ function _updateNRUI() {
     const btn = document.getElementById('nr2-quick-toggle');
     const statusBadge = document.getElementById('noise-reduction-status-badge');
     const checkbox = document.getElementById('noise-reduction-enable');
-    const labelNr2 = document.getElementById('nr-mode-label-nr2');
-    const labelNr  = document.getElementById('nr-mode-label-nr');
+    const modeLabel = document.getElementById('nr-mode-label');
     const nr2Controls = document.getElementById('nr2-controls');
     const nrEngineControls = document.getElementById('nr-engine-controls');
-
-    // Helper: style a mode label — active = coloured, inactive = normal.
-    // Do NOT change font-weight: bold changes glyph widths and causes layout shift
-    // inside the (NR2/NR) label, making it appear as "(  NR2   /  NR  )".
-    function _styleLabel(el, active) {
-        if (!el) return;
-        el.style.color      = active ? '#4fc3f7' : '';
-        el.style.fontWeight = '';  // always reset — never change weight
-    }
 
     if (noiseReductionMode === 'off') {
         if (btn) { btn.textContent = 'NR'; btn.style.backgroundColor = '#fd7e14'; }
         if (statusBadge) { statusBadge.textContent = 'DISABLED'; statusBadge.className = 'filter-status-badge filter-disabled'; }
         if (checkbox) checkbox.checked = false;
-        _styleLabel(labelNr2, false);
-        _styleLabel(labelNr,  false);
+        if (modeLabel) { modeLabel.textContent = '(NR2)'; modeLabel.style.color = ''; }
         // Show NR2 controls by default when off
         if (nr2Controls) nr2Controls.style.display = '';
         if (nrEngineControls) nrEngineControls.style.display = 'none';
@@ -6873,16 +6862,14 @@ function _updateNRUI() {
         if (btn) { btn.textContent = 'NR2'; btn.style.backgroundColor = '#28a745'; }
         if (statusBadge) { statusBadge.textContent = 'ENABLED'; statusBadge.className = 'filter-status-badge filter-enabled'; }
         if (checkbox) checkbox.checked = true;
-        _styleLabel(labelNr2, true);
-        _styleLabel(labelNr,  false);
+        if (modeLabel) { modeLabel.textContent = '(NR2 ▸ click for NR)'; modeLabel.style.color = '#4fc3f7'; }
         if (nr2Controls) nr2Controls.style.display = '';
         if (nrEngineControls) nrEngineControls.style.display = 'none';
     } else { // 'nr'
         if (btn) { btn.textContent = 'NR'; btn.style.backgroundColor = '#6f42c1'; }
         if (statusBadge) { statusBadge.textContent = 'ENABLED'; statusBadge.className = 'filter-status-badge filter-enabled'; }
         if (checkbox) checkbox.checked = true;
-        _styleLabel(labelNr2, false);
-        _styleLabel(labelNr,  true);
+        if (modeLabel) { modeLabel.textContent = '(NR ▸ click for NR2)'; modeLabel.style.color = '#ce93d8'; }
         if (nr2Controls) nr2Controls.style.display = 'none';
         if (nrEngineControls) nrEngineControls.style.display = '';
     }

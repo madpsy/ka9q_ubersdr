@@ -4370,16 +4370,16 @@ function updateNRModeSupport(mode) {
     }
 }
 
-// Quick toggle: cycles Off → NR2 → NR → Off
+// Quick toggle: cycles Off → NR → NR2 → Off
 // Skips the 'nr' step on modes where the NR engine is not suitable.
 function toggleNR2Quick() {
     const unsupported = NR_ENGINE_UNSUPPORTED_MODES.includes(currentMode);
     let nextMode;
     if (noiseReductionMode === 'off') {
+        // First press: prefer NR engine; fall back to NR2 on unsupported modes
+        nextMode = unsupported ? 'nr2' : 'nr';
+    } else if (noiseReductionMode === 'nr') {
         nextMode = 'nr2';
-    } else if (noiseReductionMode === 'nr2') {
-        // Skip 'nr' on unsupported modes — go straight to off
-        nextMode = unsupported ? 'off' : 'nr';
     } else {
         nextMode = 'off';
     }
@@ -7276,12 +7276,12 @@ function toggleNoiseReduction() {
 
     if (checkbox.checked) {
         // Re-enable: use current mode if already set, otherwise check window.noiseReductionMode
-        // (set by filters.js restoreFilterSettings from localStorage), then default to NR2
+        // (set by filters.js restoreFilterSettings from localStorage), then default to NR
         const targetMode = (noiseReductionMode !== 'off')
             ? noiseReductionMode
             : (window.noiseReductionMode && window.noiseReductionMode !== 'off')
                 ? window.noiseReductionMode
-                : 'nr2';
+                : 'nr';
         setNoiseReductionMode(targetMode);
     } else {
         setNoiseReductionMode('off');

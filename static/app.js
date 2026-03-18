@@ -4363,7 +4363,7 @@ function updateNRModeSupport(mode) {
         // Re-enable the button for supported modes
         if (btn) {
             btn.disabled = false;
-            btn.title = 'Cycle Noise Reduction: Off → NR2 → NR → Off (N key)';
+            btn.title = 'Cycle Noise Reduction: Off → NR → NR2 → Off (N key)';
             btn.style.opacity = '';
             btn.style.cursor = '';
         }
@@ -6869,7 +6869,7 @@ function _updateNRUI() {
         if (btn) { btn.textContent = 'NR'; btn.style.backgroundColor = '#fd7e14'; }
         if (statusBadge) { statusBadge.textContent = 'DISABLED'; statusBadge.className = 'filter-status-badge filter-disabled'; }
         if (checkbox) checkbox.checked = false;
-        if (modeLabel) { modeLabel.textContent = '(NR2)'; modeLabel.style.color = ''; }
+        if (modeLabel) { modeLabel.textContent = '(NR)'; modeLabel.style.color = ''; }
         // Show NR2 controls by default when off
         if (nr2Controls) nr2Controls.style.display = '';
         if (nrEngineControls) nrEngineControls.style.display = 'none';

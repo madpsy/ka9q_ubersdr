@@ -710,7 +710,7 @@
                     <div class="control-group">
                         <label>
                             <input type="checkbox" id="noise-reduction-enable" onchange="toggleNoiseReduction()">
-                            Noise Reduction <span id="nr-mode-label" title="Click to switch between NR2 and NR" style="cursor:pointer;text-decoration:underline dotted;min-width:0;margin-left:0;" onclick="if(noiseReductionEnabled){setNoiseReductionMode(noiseReductionMode==='nr2'?'nr':'nr2');}">(NR2)</span>
+                            Noise Reduction <span id="nr-mode-label" title="Click to switch between NR and NR2" style="cursor:pointer;text-decoration:underline dotted;min-width:0;margin-left:4px;" onclick="event.preventDefault();event.stopPropagation();if(noiseReductionEnabled){setNoiseReductionMode(noiseReductionMode==='nr2'?'nr':'nr2');}">(NR)</span>
                         </label>
                     </div>
                     <div id="noise-reduction-controls">

@@ -2934,7 +2934,6 @@ func checkIPBan(w http.ResponseWriter, r *http.Request, ipBanManager *IPBanManag
 		json.NewEncoder(w).Encode(map[string]string{
 			"error": "Access denied",
 		})
-		log.Printf("Blocked request from banned IP: %s to %s", clientIP, r.URL.Path)
 		return true
 	}
 	return false

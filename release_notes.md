@@ -1,5 +1,19 @@
+## Version 0.1.43 - Latest Release
 
-## Version 0.1.42 - Latest Release
+### New Features
+- Added **Admin Session Logs** to show login attempts and current admin sessions 
+- Added **RM Noise** in the web UI and desktop client - see https://rmnoise.com/ (waiting for feedback from the author)
+- Added **Default frequency / mode** to set what users are tuned to when first opening the UI (config -> admin -> default frequency/mode)
+- Added **rtl_tcp service** which emulates an RTL-SDR over the network. Listens on port 1234 - LAN use only. Limited to 192 KHz.
+
+### Improvements
+- Added **Band view in current listener map** which is easier to see where listeners are currently tuned
+- Removed **Log message every time a banned IP tries to access** as it caused a lot of noise
+
+### In Progress (Coming Soon)
+- CW Skimmer (SkimSrv) as a Docker container (thanks to K1RA for making me aware this was possible)
+
+## Version 0.1.42
 
 ### New Features
 - Added **Live Listener Map** with a 'Show Map' button in the Active Channels section 

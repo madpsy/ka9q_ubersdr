@@ -1,13 +1,13 @@
 ## Version 0.1.43 - Latest Release
 
 ### New Features
-- Added **Admin Session Logs** to show login attempts and current admin sessions (in memory only)
-- Added **RM Noise** in the web UI and desktop client - see https://rmnoise.com/ (waiting for feedback from the author)
+- Added **Admin Session Logs** to show login attempts and current admin sessions (in memory only). Admin -> Active Sessions -> Login History button
+- Added **RM Noise** in the web UI and desktop client - see https://rmnoise.com/ (waiting for feedback from the author). RMN button in the UI
 - Added **Default frequency / mode** to set what users are tuned to when first opening the UI (config -> admin -> default frequency/mode)
 - Added **rtl_tcp service** which emulates an RTL-SDR over the network. Listens on port 1234 - LAN use only. Limited to 192 KHz.
 
 ### Improvements
-- Added **Band view in current listener map** which is easier to see where listeners are currently tuned
+- Added **Band view in current listener map** which is easier to see where listeners are currently tuned ('Show Map' at the bottom of the web UI)
 - Removed **Log message every time a banned IP tries to access** as it caused a lot of noise
 
 ### In Progress (Coming Soon)

@@ -3927,6 +3927,11 @@ function setMode(mode, preserveBandwidth = false) {
         }
 
         log(`Mode changed to ${mode.toUpperCase()} (BW: ${defaultLow} to ${defaultHigh} Hz)`);
+
+        // Sync NR engine bins to new bandwidth
+        if (noiseReductionMode === 'nr' && window.websdrNR && audioContext) {
+            window.websdrNR.syncBins(Math.abs(defaultHigh - defaultLow), audioContext.sampleRate);
+        }
     } else {
         // Preserve existing bandwidth values, just update the display
         bandwidthLowSlider.value = currentBandwidthLow;
@@ -3948,6 +3953,11 @@ function setMode(mode, preserveBandwidth = false) {
         }
 
         log(`Mode changed to ${mode.toUpperCase()} (BW: ${currentBandwidthLow} to ${currentBandwidthHigh} Hz)`);
+
+        // Sync NR engine bins to preserved bandwidth
+        if (noiseReductionMode === 'nr' && window.websdrNR && audioContext) {
+            window.websdrNR.syncBins(Math.abs(currentBandwidthHigh - currentBandwidthLow), audioContext.sampleRate);
+        }
     }
 
     // Update FFT size based on new bandwidth
@@ -4171,6 +4181,11 @@ function updateBandwidth() {
     }
 
     log(`Bandwidth changed to ${bandwidthLow} to ${bandwidthHigh} Hz`);
+
+    // Sync NR engine bins to new bandwidth
+    if (noiseReductionMode === 'nr' && window.websdrNR && audioContext) {
+        window.websdrNR.syncBins(Math.abs(bandwidthHigh - bandwidthLow), audioContext.sampleRate);
+    }
 
     // Update URL with new bandwidth
     updateURL();
@@ -7019,6 +7034,11 @@ function initNREngine() {
     try {
         // Reset engine state (flush ring buffer, OLA tail, delay buffer)
         window.websdrNR.reset();
+
+        // Sync active bins to current filter bandwidth so the engine processes
+        // the full passband rather than the hardcoded 37-bin default (~867 Hz at 12 kHz).
+        const _initBwHz = Math.abs(currentBandwidthHigh - currentBandwidthLow);
+        window.websdrNR.syncBins(_initBwHz, audioContext.sampleRate);
 
         // 4096-sample buffer required by the engine (AUDIO_BUF = 3×8192, OUTPUT_FRAMES = 32 = 4096/HOP)
         const bufferSize = 4096;

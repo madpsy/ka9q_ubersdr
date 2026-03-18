@@ -1,7 +1,7 @@
 ## Version 0.1.43 - Latest Release
 
 ### New Features
-- Added **Admin Session Logs** to show login attempts and current admin sessions 
+- Added **Admin Session Logs** to show login attempts and current admin sessions (in memory only)
 - Added **RM Noise** in the web UI and desktop client - see https://rmnoise.com/ (waiting for feedback from the author)
 - Added **Default frequency / mode** to set what users are tuned to when first opening the UI (config -> admin -> default frequency/mode)
 - Added **rtl_tcp service** which emulates an RTL-SDR over the network. Listens on port 1234 - LAN use only. Limited to 192 KHz.

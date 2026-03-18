@@ -6884,6 +6884,9 @@ function _updateNRUI() {
         if (nr2Controls) nr2Controls.style.display = 'none';
         if (nrEngineControls) nrEngineControls.style.display = '';
     }
+
+    // Refresh the latency badge — it differs between NR2 (~85ms) and NR (~171ms)
+    if (window.updateAllLatencyDisplays) window.updateAllLatencyDisplays();
 }
 
 // ── setNoiseReductionMode: the single entry point for all NR state changes ─────

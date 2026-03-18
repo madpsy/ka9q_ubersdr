@@ -45,9 +45,10 @@ function calculateFilterLatencies() {
     }
 
     // NR / NR2: latency depends on which engine is active
+    // Note: app.js is a module so noiseReductionMode is not global — read from window.noiseReductionMode
     const nr2Checkbox = document.getElementById('noise-reduction-enable');
     if (nr2Checkbox && nr2Checkbox.checked) {
-        const nrMode = (typeof noiseReductionMode !== 'undefined') ? noiseReductionMode : 'nr2';
+        const nrMode = window.noiseReductionMode || 'nr2';
         if (nrMode === 'nr2') {
             // NR2 spectral subtraction:
             //   ScriptProcessorNode buffer = 2048 samples
@@ -1174,10 +1175,11 @@ function saveFilterSettings() {
         localStorage.setItem(STORAGE_KEY_PREFIX + 'squelch', JSON.stringify(squelchSettings));
 
         // Noise Reduction - from app.js (mode: 'off' | 'nr2' | 'nr')
+        // Note: app.js is a module — read from window.noiseReductionMode
         const nr2Checkbox = document.getElementById('noise-reduction-enable');
         const nr2Settings = {
             enabled: nr2Checkbox ? nr2Checkbox.checked : false,
-            mode: (typeof noiseReductionMode !== 'undefined') ? noiseReductionMode : 'nr2',
+            mode: window.noiseReductionMode || 'nr2',
             strength: document.getElementById('noise-reduction-strength')?.value || 40,
             floor: document.getElementById('noise-reduction-floor')?.value || 10,
             adaptRate: document.getElementById('noise-reduction-adapt-rate')?.value || 1.0,
@@ -1331,9 +1333,9 @@ function restoreFilterSettings() {
                 squelchEl.checked = nr2Settings.nrSquelch;
             }
 
-            // Restore the saved mode into the global (app.js reads this on audio start)
-            if (nr2Settings.mode && typeof noiseReductionMode !== 'undefined') {
-                noiseReductionMode = nr2Settings.mode;
+            // Restore the saved mode — write to window so app.js (a module) can read it on audio start
+            if (nr2Settings.mode) {
+                window.noiseReductionMode = nr2Settings.mode;
             }
 
             // Set checkbox state to match saved enabled flag

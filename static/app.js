@@ -6891,6 +6891,7 @@ function setNoiseReductionMode(mode) {
     _teardownNRProcessor();
     noiseReductionEnabled = false;
     noiseReductionMode = 'off';
+    window.noiseReductionMode = 'off'; // mirror for filters.js (app.js is a module)
 
     if (mode === 'off') {
         _updateNRUI();
@@ -6904,6 +6905,7 @@ function setNoiseReductionMode(mode) {
         const ok = initNR2();
         if (!ok) { _updateNRUI(); return false; }
         noiseReductionMode = 'nr2';
+        window.noiseReductionMode = 'nr2'; // mirror for filters.js
         noiseReductionEnabled = true;
         if (nr2) {
             nr2.enabled = true;
@@ -6919,6 +6921,7 @@ function setNoiseReductionMode(mode) {
         const ok = initNREngine();
         if (!ok) { _updateNRUI(); return false; }
         noiseReductionMode = 'nr';
+        window.noiseReductionMode = 'nr'; // mirror for filters.js
         noiseReductionEnabled = true;
         window.websdrNR.setEnabled(true);
         log('✅ NR Noise Reduction ENABLED (entropy VAD + soft masking)');
@@ -7252,8 +7255,13 @@ function toggleNoiseReduction() {
     }
 
     if (checkbox.checked) {
-        // Re-enable: use current mode if already set, otherwise default to NR2
-        const targetMode = (noiseReductionMode !== 'off') ? noiseReductionMode : 'nr2';
+        // Re-enable: use current mode if already set, otherwise check window.noiseReductionMode
+        // (set by filters.js restoreFilterSettings from localStorage), then default to NR2
+        const targetMode = (noiseReductionMode !== 'off')
+            ? noiseReductionMode
+            : (window.noiseReductionMode && window.noiseReductionMode !== 'off')
+                ? window.noiseReductionMode
+                : 'nr2';
         setNoiseReductionMode(targetMode);
     } else {
         setNoiseReductionMode('off');

@@ -6950,15 +6950,19 @@ function initNR2() {
         noiseReductionProcessor = audioContext.createScriptProcessor(bufferSize, 1, 2);
 
         noiseReductionProcessor.onaudioprocess = (e) => {
-            // Process mono input through NR2
             const input = e.inputBuffer.getChannelData(0);
             const outputL = e.outputBuffer.getChannelData(0);
-
-            // Process through NR2 to left channel
-            nr2.process(input, outputL);
-
-            // Duplicate left channel to right channel
             const outputR = e.outputBuffer.getChannelData(1);
+
+            // Guard: nr2 may be null if teardown raced with this callback
+            if (!nr2) {
+                outputL.set(input);
+                outputR.set(input);
+                return;
+            }
+
+            // Process through NR2 to left channel, duplicate to right
+            nr2.process(input, outputL);
             outputR.set(outputL);
         };
 

@@ -6846,15 +6846,24 @@ function _updateNRUI() {
     const btn = document.getElementById('nr2-quick-toggle');
     const statusBadge = document.getElementById('noise-reduction-status-badge');
     const checkbox = document.getElementById('noise-reduction-enable');
-    const modeLabel = document.getElementById('nr-mode-label');
+    const labelNr2 = document.getElementById('nr-mode-label-nr2');
+    const labelNr  = document.getElementById('nr-mode-label-nr');
     const nr2Controls = document.getElementById('nr2-controls');
     const nrEngineControls = document.getElementById('nr-engine-controls');
+
+    // Helper: style a mode label — active = bold + coloured, inactive = normal
+    function _styleLabel(el, active) {
+        if (!el) return;
+        el.style.fontWeight = active ? 'bold' : 'normal';
+        el.style.color      = active ? '#4fc3f7' : '';
+    }
 
     if (noiseReductionMode === 'off') {
         if (btn) { btn.textContent = 'NR'; btn.style.backgroundColor = '#fd7e14'; }
         if (statusBadge) { statusBadge.textContent = 'DISABLED'; statusBadge.className = 'filter-status-badge filter-disabled'; }
         if (checkbox) checkbox.checked = false;
-        if (modeLabel) modeLabel.textContent = 'NR2';
+        _styleLabel(labelNr2, false);
+        _styleLabel(labelNr,  false);
         // Show NR2 controls by default when off
         if (nr2Controls) nr2Controls.style.display = '';
         if (nrEngineControls) nrEngineControls.style.display = 'none';
@@ -6862,14 +6871,16 @@ function _updateNRUI() {
         if (btn) { btn.textContent = 'NR2'; btn.style.backgroundColor = '#28a745'; }
         if (statusBadge) { statusBadge.textContent = 'ENABLED'; statusBadge.className = 'filter-status-badge filter-enabled'; }
         if (checkbox) checkbox.checked = true;
-        if (modeLabel) modeLabel.textContent = 'NR2';
+        _styleLabel(labelNr2, true);
+        _styleLabel(labelNr,  false);
         if (nr2Controls) nr2Controls.style.display = '';
         if (nrEngineControls) nrEngineControls.style.display = 'none';
     } else { // 'nr'
         if (btn) { btn.textContent = 'NR'; btn.style.backgroundColor = '#6f42c1'; }
         if (statusBadge) { statusBadge.textContent = 'ENABLED'; statusBadge.className = 'filter-status-badge filter-enabled'; }
         if (checkbox) checkbox.checked = true;
-        if (modeLabel) modeLabel.textContent = 'NR';
+        _styleLabel(labelNr2, false);
+        _styleLabel(labelNr,  true);
         if (nr2Controls) nr2Controls.style.display = 'none';
         if (nrEngineControls) nrEngineControls.style.display = '';
     }
@@ -7176,12 +7187,23 @@ function updateNoiseReduction() {
 }
 
 function resetNoiseReduction() {
+    // Reset NR2 (spectral subtraction) sliders
     const defaults = { strength: 40, floor: 10, adaptRate: 1.0, makeupGain: -3 };
     document.getElementById('noise-reduction-strength').value = defaults.strength;
     document.getElementById('noise-reduction-floor').value = defaults.floor;
     document.getElementById('noise-reduction-adapt-rate').value = defaults.adaptRate;
     document.getElementById('noise-reduction-makeup-gain').value = defaults.makeupGain;
     updateNoiseReduction();
+
+    // Reset NR engine (entropy VAD) sliders
+    const nrThresh = document.getElementById('nr-engine-threshold');
+    const nrMult = document.getElementById('nr-engine-mult');
+    const nrSquelch = document.getElementById('nr-engine-squelch');
+    if (nrThresh) nrThresh.value = 0.057;
+    if (nrMult) nrMult.value = 0.10;
+    if (nrSquelch) nrSquelch.checked = true;
+    updateNREngineParams();
+
     console.log('Noise reduction reset');
 }
 

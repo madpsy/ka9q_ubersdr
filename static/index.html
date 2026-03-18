@@ -710,7 +710,7 @@
                     <div class="control-group">
                         <label>
                             <input type="checkbox" id="noise-reduction-enable" onchange="toggleNoiseReduction()">
-                            Noise Reduction (<span id="nr-mode-label">NR2</span>)
+                            Noise Reduction (<span id="nr-mode-label-nr2" title="Switch to NR2 (spectral subtraction)" style="cursor:pointer;text-decoration:underline dotted;" onclick="if(noiseReductionEnabled)setNoiseReductionMode('nr2')">NR2</span>/<span id="nr-mode-label-nr" title="Switch to NR (entropy VAD)" style="cursor:pointer;text-decoration:underline dotted;" onclick="if(noiseReductionEnabled)setNoiseReductionMode('nr')">NR</span>)
                         </label>
                     </div>
                     <div id="noise-reduction-controls">

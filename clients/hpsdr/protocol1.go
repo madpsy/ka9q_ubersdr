@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -76,14 +77,6 @@ type Protocol1Server struct {
 	// Receiver state (Protocol 1 typically supports 1-4 receivers)
 	receivers [MaxReceivers]*Protocol1ReceiverState
 
-	// Synchronization for IQ data
-	sendFlags     uint32
-	doneSendFlags uint32
-	sendMu        sync.Mutex
-	sendCond      *sync.Cond
-	doneSendMu    sync.Mutex
-	doneSendCond  *sync.Cond
-
 	// Shutdown
 	stopChan chan struct{}
 	wg       sync.WaitGroup
@@ -92,17 +85,30 @@ type Protocol1Server struct {
 	seqNum uint32
 }
 
+// iqChanDepth is the number of IQ sample packets buffered per receiver channel.
+// Depth 4 gives ~4 packet-intervals of headroom before LoadIQData drops a packet.
+const iqChanDepth = 4
+
+// maxSamplesPerPacket is the maximum number of IQ samples in one Protocol 1 packet
+// (single-receiver case: 63 samples/frame × 2 frames = 126).
+const maxSamplesPerPacket = 126
+
 // Protocol1ReceiverState holds state for a single receiver in Protocol 1
 type Protocol1ReceiverState struct {
 	num          int
 	enabled      bool
 	frequency    int64
 	sampleRate   int // in kHz (typically 48, 96, or 192)
-	iqBuffer     []complex64
-	packetBuf    [63 * 6 * 2]byte // 2 frames × 63 IQ samples × 6 bytes (I24 + Q24) = 756 bytes
 	mu           sync.Mutex
-	receiverMask uint32
 	lastActivity time.Time // Last time a control packet was received
+
+	// iqChan carries raw complex64 IQ samples from LoadIQData to senderThread.
+	// The sender encodes them with the current samplesPerFrame so the encoding
+	// is always consistent with the current receiver count — no layout mismatch
+	// when the receiver count changes mid-stream.
+	// Buffered at depth iqChanDepth; oldest packet dropped if full (non-blocking send).
+	iqChan  chan [maxSamplesPerPacket]complex64
+	iqDrops uint64 // count of packets dropped due to full iqChan (accessed atomically)
 }
 
 // NewProtocol1Server creates a new HPSDR Protocol 1 server
@@ -116,21 +122,17 @@ func NewProtocol1Server(config Protocol1Config) (*Protocol1Server, error) {
 		stopChan: make(chan struct{}),
 	}
 
-	s.sendCond = sync.NewCond(&s.sendMu)
-	s.doneSendCond = sync.NewCond(&s.doneSendMu)
-
-	// Initialize receivers
+	// Initialize receivers — each gets its own buffered IQ channel.
+	// Depth 4 gives ~4 packet-intervals of headroom (~2–4 ms at 192 kHz) before
+	// LoadIQData drops a packet.  The sender drains at the hardware-paced rate so
+	// the channel should rarely be more than 1 deep in steady state.
 	for i := 0; i < config.NumReceivers; i++ {
-		receiverMask := uint32(1 << uint(i))
 		s.receivers[i] = &Protocol1ReceiverState{
-			num:          i,
-			frequency:    10000000,               // 10 MHz default
-			sampleRate:   192,                    // 192 kHz default
-			iqBuffer:     make([]complex64, 126), // 126 samples per packet (63 per frame × 2 frames)
-			receiverMask: receiverMask,
+			num:        i,
+			frequency:  10000000, // 10 MHz default
+			sampleRate: 0,        // 0 = not yet set by client
+			iqChan:     make(chan [maxSamplesPerPacket]complex64, iqChanDepth),
 		}
-		// Initialize doneSendFlags so first LoadIQData() call doesn't block
-		s.doneSendFlags |= receiverMask
 	}
 
 	return s, nil
@@ -181,16 +183,11 @@ func (s *Protocol1Server) SetSharedSocket(sock *net.UDPConn) {
 // Stop shuts down the Protocol 1 server
 func (s *Protocol1Server) Stop() {
 	close(s.stopChan)
-
-	// Wake up all threads waiting on condition variables
-	s.sendCond.Broadcast()
-	s.doneSendCond.Broadcast()
-
 	s.wg.Wait()
 
 	// Close socket
 	if s.sock != nil {
-		s.sock.Close()
+		_ = s.sock.Close()
 	}
 
 	log.Println("Protocol1: Server stopped")
@@ -202,7 +199,7 @@ func (s *Protocol1Server) mainThread() {
 	log.Println("Protocol1: Main thread started")
 
 	buffer := make([]byte, 2048)
-	s.sock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	_ = s.sock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 
 	for {
 		select {
@@ -221,9 +218,9 @@ func (s *Protocol1Server) mainThread() {
 				s.mu.RUnlock()
 
 				if hasClient {
-					s.sock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+					_ = s.sock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 				} else {
-					s.sock.SetReadDeadline(time.Now().Add(1 * time.Second))
+					_ = s.sock.SetReadDeadline(time.Now().Add(1 * time.Second))
 				}
 				continue
 			}
@@ -269,22 +266,20 @@ func (s *Protocol1Server) mainThread() {
 
 // handleDiscovery sends Protocol 1 discovery response.
 //
-// HL2 discovery response layout (60 bytes, tcpdump-verified against real HL2 hardware):
+// HL2 discovery response layout (60 bytes) per PROTOCOL.md §Metis Discovery Reply:
 //
 //	Byte  0:    0xef  (magic)
 //	Byte  1:    0xfe  (magic)
 //	Byte  2:    0x02 (not running) or 0x03 (running)
-//	Byte  3:    0x00 (reserved)
-//	Bytes 4-9:  MAC address (6 bytes)
-//	              Bytes 4-6: OUI 1c:c0:a2 (Microchip Technology — all HL2s)
-//	              Bytes 7-8: unit ID (non-zero; manually set per-device)
-//	              Byte  9:   0x48 (SparkSDR checks this to identify "Hermes-Lite 2")
-//	Byte  10:   device type (0x06 = HermesLite)
-//	Byte  11:   firmware version (0x40 = 64)
-//	Bytes 12-16: zeros (reserved)
-//	Bytes 17-18: unit ID (must match MAC bytes 7-8; SparkSDR cross-checks these)
-//	Byte  19:   number of receivers (HL2 extension; SparkSDR reads "nb N" from this)
-//	Bytes 20-21: 0x45 0x08 (HL2 extended info, tcpdump-verified)
+//	Bytes 3-8:  MAC address (6 bytes)
+//	              Bytes 3-6: OUI+fixed 00:1c:c0:a2 (Microchip Technology — all HL2s)
+//	              Bytes 7-8: unit ID Y:Z (user-configurable per-device)
+//	Byte  9:    Gateware Major Version (firmware version)
+//	Byte  10:   Board ID (0x06 = HermesLite2, 0x01 = Hermes emulation)
+//	Bytes 11-16: zeros (MCP4662 EEPROM fields, not used here)
+//	Bytes 17-18: MCP4662 0x0C/0x0D — MAC unit ID Y:Z (must match MAC bytes 7-8)
+//	Byte  19:   Number of Hardware Receivers (0x13 per spec)
+//	Bytes 20-21: 0x45 0x08 (HL2 extended info)
 //	Bytes 22-59: zeros (reserved)
 func (s *Protocol1Server) handleDiscovery(addr *net.UDPAddr) {
 	response := make([]byte, Protocol1ResponseSize)
@@ -302,30 +297,27 @@ func (s *Protocol1Server) handleDiscovery(addr *net.UDPAddr) {
 	}
 	s.mu.RUnlock()
 
-	// Byte 3: Reserved/zero (real HL2 sends 0x00 here)
+	// Bytes 3-8: MAC address (6 bytes) — per spec byte 0x03 = MAC[0]
+	copy(response[3:9], s.config.MACAddress)
 
-	// Bytes 4-9: MAC address (6 bytes) — matches real HL2 layout
-	copy(response[4:10], s.config.MACAddress)
+	// Byte 9: Gateware Major Version (firmware version)
+	response[9] = FirmwareVersion
 
-	// Byte 10: Device type
+	// Byte 10: Board ID (device type)
 	response[10] = s.config.DeviceType
 
-	// Byte 11: Code version (firmware version)
-	response[11] = FirmwareVersion
+	// Bytes 11-16: zeros (MCP4662 EEPROM fields — not populated)
 
-	// Bytes 12-16: zeros (reserved)
+	// Bytes 17-18: MAC unit ID Y:Z — must match MAC bytes 4-5 (the user-configurable octets).
+	// Per spec: byte 0x11 = MCP4662 0x0C (MAC Y), byte 0x12 = MCP4662 0x0D (MAC Z).
+	// Real HL2 MAC: 00:1c:c0:a2:<Y>:<Z> where Y and Z are the configurable unit ID bytes.
+	response[17] = s.config.MACAddress[4]
+	response[18] = s.config.MACAddress[5]
 
-	// Bytes 17-18: HL2 unit ID — must match MAC bytes 4-5.
-	// SparkSDR identifies "Hermes-Lite 2" by checking that discovery bytes 17-18
-	// match the MAC unit ID bytes (bytes 4-5). Real HL2s put their MAC unit ID here.
-	response[17] = s.config.MACAddress[3]
-	response[18] = s.config.MACAddress[4]
-
-	// Byte 19: Number of receivers (HL2 Protocol 1 extension)
-	// Real HL2 (tcpdump verified): byte 19 = 0x0a (10)
+	// Byte 19: Number of receivers (spec byte 0x13)
 	response[19] = byte(s.config.NumReceivers)
 
-	// Bytes 20-21: HL2 extended info (tcpdump verified: 0x45 0x08)
+	// Bytes 20-21: HL2 extended info
 	response[20] = 0x45
 	response[21] = 0x08
 
@@ -363,8 +355,8 @@ func (s *Protocol1Server) handleDiscovery(addr *net.UDPAddr) {
 			}())
 		log.Printf("Protocol1:   MAC: %02x:%02x:%02x:%02x:%02x:%02x",
 			response[3], response[4], response[5], response[6], response[7], response[8])
-		log.Printf("Protocol1:   Device Type: 0x%02x", response[9])
-		log.Printf("Protocol1:   Firmware: %d", response[10])
+		log.Printf("Protocol1:   Device Type: 0x%02x", response[10])
+		log.Printf("Protocol1:   Firmware: %d", response[9])
 	}
 }
 
@@ -408,12 +400,6 @@ func (s *Protocol1Server) handleControl(buffer []byte, addr *net.UDPAddr) {
 			if s.running {
 				s.running = false
 				log.Printf("Protocol1: Radio STOPPING by client %s (cmd=0x04 stop)", addr)
-				s.doneSendMu.Lock()
-				for i := 0; i < s.config.NumReceivers; i++ {
-					s.doneSendFlags |= s.receivers[i].receiverMask
-				}
-				s.doneSendCond.Broadcast()
-				s.doneSendMu.Unlock()
 			}
 			s.mu.Unlock()
 		}
@@ -448,6 +434,11 @@ func (s *Protocol1Server) handleControl(buffer []byte, addr *net.UDPAddr) {
 			return
 		}
 
+		// Parse control bytes even on stop — the packet still carries valid C0-C4
+		// configuration (sample rate, frequencies, etc.) that we need to capture
+		// before the radio starts. SparkSDR sends 48 kHz in a stop packet first.
+		s.parseControlPacket(buffer)
+
 		// Stop command
 		s.mu.Lock()
 		if s.running {
@@ -472,6 +463,35 @@ func (s *Protocol1Server) handleControl(buffer []byte, addr *net.UDPAddr) {
 			s.parseControlPacket(buffer)
 		}
 	}
+}
+
+// setReceiverFrequency updates a receiver's frequency and enables it if not already enabled.
+// Skips park/unset frequencies (< MinFrequencyHz or exactly 10 MHz SDR Console park).
+// receiverNum is 0-based (0 = RX1, 1 = RX2, ...).
+func (s *Protocol1Server) setReceiverFrequency(receiverNum int, freq int64) {
+	if receiverNum < 0 || receiverNum >= s.config.NumReceivers {
+		return
+	}
+	// Skip park/unset frequencies:
+	// - < MinFrequencyHz: unset/garbage (SparkSDR sends 32 Hz for unconfigured receivers)
+	// - 10 MHz: SDR Console park frequency
+	if freq < MinFrequencyHz || freq == 10000000 {
+		return
+	}
+	s.receivers[receiverNum].mu.Lock()
+	oldFreq := s.receivers[receiverNum].frequency
+	wasEnabled := s.receivers[receiverNum].enabled
+	if freq != oldFreq {
+		s.receivers[receiverNum].frequency = freq
+		log.Printf("Protocol1: Receiver %d frequency = %d Hz (%.3f MHz)",
+			receiverNum, freq, float64(freq)/1e6)
+	}
+	if !wasEnabled {
+		s.receivers[receiverNum].enabled = true
+		log.Printf("Protocol1: Receiver %d enabled at %d Hz (%.3f MHz)",
+			receiverNum, freq, float64(freq)/1e6)
+	}
+	s.receivers[receiverNum].mu.Unlock()
 }
 
 // parseControlPacket extracts control information from Protocol 1 control packet
@@ -499,14 +519,16 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 		c3 := buffer[14] // Control byte 3: varies by command
 		c4 := buffer[15] // Control byte 4: varies by command
 
-		// Determine command type from C0
-		commandType := (c0 >> 1) & 0x1F
+		// Determine command type from C0.
+		// Spec: C0[6:1] = ADDR[5:0] (6 bits), C0[0] = MOX.
+		// Mask must be 0x3F (6 bits), not 0x1F (5 bits).
+		commandType := (c0 >> 1) & 0x3F
 
 		// Handle different command types
 		switch commandType {
-		case 0: // Configuration command (command 0x00)
-			// C1 contains sample rate and other config
-			// Bits 0-1: Sample rate (00=48k, 01=96k, 02=192k, 03=384k)
+		case 0: // Configuration command (ADDR 0x00)
+			// DATA[25:24] = Speed (bits 1:0 of C1)
+			// DATA[6:3]   = Number of Receivers (bits 6:3 of C4, i.e. DATA[7:0])
 			sampleRateBits := c1 & 0x03
 			var sampleRateKHz int
 			switch sampleRateBits {
@@ -522,61 +544,44 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 				sampleRateKHz = 192 // Default to 192 kHz
 			}
 
-			// Ignore 48 kHz - SDR Console uses this as a default in command cycling
-			// Only accept 96, 192, or 384 kHz
-			if sampleRateKHz != 48 {
-				// Update sample rate for all receivers
-				for i := 0; i < s.config.NumReceivers; i++ {
-					s.receivers[i].mu.Lock()
-					if s.receivers[i].sampleRate != sampleRateKHz {
-						s.receivers[i].sampleRate = sampleRateKHz
-						log.Printf("Protocol1: Receiver %d sample rate = %d kHz", i, sampleRateKHz)
-					}
-					s.receivers[i].mu.Unlock()
+			// Update sample rate for all receivers (all rates including 48 kHz are valid)
+			log.Printf("Protocol1: Client requested sample rate = %d kHz", sampleRateKHz)
+			for i := 0; i < s.config.NumReceivers; i++ {
+				s.receivers[i].mu.Lock()
+				if s.receivers[i].sampleRate != sampleRateKHz {
+					s.receivers[i].sampleRate = sampleRateKHz
+					log.Printf("Protocol1: Receiver %d sample rate = %d kHz", i, sampleRateKHz)
+				}
+				s.receivers[i].mu.Unlock()
+			}
+
+			// Parse number of receivers from ADDR 0x00 bits [6:3] = DATA[6:3] = C4[6:3].
+			// Spec encoding: 0000=1 receiver, 0001=2, ..., 1011=12.
+			numRxBits := (c4 >> 3) & 0x0F
+			numRx := int(numRxBits) + 1
+			if numRx >= 1 && numRx <= MaxReceivers {
+				if numRx != s.config.NumReceivers {
+					log.Printf("Protocol1: Client requested %d receivers (was %d)", numRx, s.config.NumReceivers)
+					s.config.NumReceivers = numRx
 				}
 			}
 
-		case 1: // TX frequency (command 0x02)
-			// TX frequency - we don't need to handle this for RX-only operation
-			if debugDiscovery {
-				freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
-				log.Printf("Protocol1: TX frequency command: %d Hz (%.3f MHz)", freq, float64(freq)/1e6)
-			}
+		case 1: // TX frequency (ADDR 0x01) — RX-only bridge; silently ignore
 
-		case 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13: // RX frequencies
-			// Standard Protocol 1: commandTypes 2-5 = RX0-RX3 (C0 = 0x04, 0x06, 0x08, 0x0A)
-			// HL2 extension:        commandTypes 6-13 = RX4-RX11
-			// receiverNum = commandType - 2
-			receiverNum := int(commandType) - 2
+		// ADDR 0x02-0x08: RX1-RX7 NCO frequencies (receiver indices 0-6)
+		// Spec: 0x02=RX1, 0x03=RX2, ..., 0x08=RX7
+		// Note: ADDR 0x09-0x11 are NOT RX frequencies (TX drive, LNA gain, CW hang time, etc.)
+		case 2, 3, 4, 5, 6, 7, 8:
+			receiverNum := int(commandType) - 2 // 0x02→0, 0x03→1, ..., 0x08→6
+			freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
+			s.setReceiverFrequency(receiverNum, freq)
 
-			if receiverNum >= 0 && receiverNum < s.config.NumReceivers {
-				// C1-C4 contain the 32-bit frequency in Hz (big-endian)
-				freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
-
-				// Skip park/unset frequencies:
-				// - 0 Hz or < 10 kHz: unset/garbage (SparkSDR sends 32 Hz for unconfigured receivers)
-				// - 10 MHz: SDR Console park frequency
-				if freq >= MinFrequencyHz && freq != 10000000 {
-					s.receivers[receiverNum].mu.Lock()
-					oldFreq := s.receivers[receiverNum].frequency
-					wasEnabled := s.receivers[receiverNum].enabled
-
-					// Update frequency immediately (no debouncing)
-					if freq != oldFreq {
-						s.receivers[receiverNum].frequency = freq
-						log.Printf("Protocol1: Receiver %d frequency = %d Hz (%.3f MHz)",
-							receiverNum, freq, float64(freq)/1e6)
-					}
-
-					// Enable receiver when frequency is set
-					if !wasEnabled {
-						s.receivers[receiverNum].enabled = true
-						log.Printf("Protocol1: Receiver %d enabled at %d Hz (%.3f MHz)",
-							receiverNum, freq, float64(freq)/1e6)
-					}
-					s.receivers[receiverNum].mu.Unlock()
-				}
-			}
+		// ADDR 0x12-0x16: RX8-RX12 NCO frequencies (receiver indices 7-11)
+		// Spec: 0x12=RX8, 0x13=RX9, 0x14=RX10, 0x15=RX11, 0x16=RX12
+		case 0x12, 0x13, 0x14, 0x15, 0x16:
+			receiverNum := int(commandType) - 0x12 + 7 // 0x12→7, 0x13→8, 0x14→9, 0x15→10, 0x16→11
+			freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
+			s.setReceiverFrequency(receiverNum, freq)
 		}
 
 		// Enable receiver 0 immediately when radio starts if not already enabled
@@ -602,7 +607,8 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 		c3 := buffer[526]
 		c4 := buffer[527]
 
-		commandType := (c0 >> 1) & 0x1F
+		// Spec: C0[6:1] = ADDR[5:0] (6 bits) — mask must be 0x3F
+		commandType := (c0 >> 1) & 0x3F
 
 		// Process Frame 2 commands as well (SDR Console uses both frames for command cycling)
 		switch commandType {
@@ -623,55 +629,57 @@ func (s *Protocol1Server) parseControlPacket(buffer []byte) {
 				sampleRateKHz = 192
 			}
 
-			// Ignore 48 kHz - SDR Console uses this as a default in command cycling
-			if sampleRateKHz != 48 {
-				// Update sample rate for all receivers
-				for i := 0; i < s.config.NumReceivers; i++ {
-					s.receivers[i].mu.Lock()
-					if s.receivers[i].sampleRate != sampleRateKHz {
-						s.receivers[i].sampleRate = sampleRateKHz
-						log.Printf("Protocol1: Receiver %d sample rate = %d kHz", i, sampleRateKHz)
-					}
-					s.receivers[i].mu.Unlock()
+			// Update sample rate for all receivers (all rates including 48 kHz are valid)
+			log.Printf("Protocol1: Client requested sample rate = %d kHz (Frame 2)", sampleRateKHz)
+			for i := 0; i < s.config.NumReceivers; i++ {
+				s.receivers[i].mu.Lock()
+				if s.receivers[i].sampleRate != sampleRateKHz {
+					s.receivers[i].sampleRate = sampleRateKHz
+					log.Printf("Protocol1: Receiver %d sample rate = %d kHz", i, sampleRateKHz)
+				}
+				s.receivers[i].mu.Unlock()
+			}
+
+			// Parse number of receivers from ADDR 0x00 bits [6:3] = DATA[6:3] = C4[6:3].
+			// Spec encoding: 0000=1 receiver, 0001=2, ..., 1011=12.
+			numRxBits := (c4 >> 3) & 0x0F
+			numRx := int(numRxBits) + 1
+			if numRx >= 1 && numRx <= MaxReceivers {
+				if numRx != s.config.NumReceivers {
+					log.Printf("Protocol1: Client requested %d receivers (was %d)", numRx, s.config.NumReceivers)
+					s.config.NumReceivers = numRx
 				}
 			}
 
-		case 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13: // RX frequencies (HL2 extension: up to RX11)
+		// ADDR 0x02-0x08: RX1-RX7 NCO frequencies (receiver indices 0-6)
+		case 2, 3, 4, 5, 6, 7, 8:
 			receiverNum := int(commandType) - 2
+			freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
+			s.setReceiverFrequency(receiverNum, freq)
 
-			if receiverNum >= 0 && receiverNum < s.config.NumReceivers {
-				freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
-
-				// Skip park/unset frequencies (same as Frame 1)
-				if freq >= MinFrequencyHz && freq != 10000000 {
-					s.receivers[receiverNum].mu.Lock()
-					oldFreq := s.receivers[receiverNum].frequency
-					wasEnabled := s.receivers[receiverNum].enabled
-
-					// Update frequency immediately (no debouncing)
-					if freq != oldFreq {
-						s.receivers[receiverNum].frequency = freq
-						log.Printf("Protocol1: Receiver %d frequency = %d Hz (%.3f MHz)",
-							receiverNum, freq, float64(freq)/1e6)
-					}
-
-					// Enable receiver when frequency is set
-					if !wasEnabled {
-						s.receivers[receiverNum].enabled = true
-						log.Printf("Protocol1: Receiver %d enabled at %d Hz (%.3f MHz)",
-							receiverNum, freq, float64(freq)/1e6)
-					}
-					s.receivers[receiverNum].mu.Unlock()
-				}
-			}
+		// ADDR 0x12-0x16: RX8-RX12 NCO frequencies (receiver indices 7-11)
+		case 0x12, 0x13, 0x14, 0x15, 0x16:
+			receiverNum := int(commandType) - 0x12 + 7
+			freq := int64(uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4))
+			s.setReceiverFrequency(receiverNum, freq)
 		}
 	}
 }
 
-// senderThread sends IQ data packets with all receivers interleaved (Protocol 1 format)
+// senderThread sends IQ data packets with all receivers interleaved (Protocol 1 format).
+//
+// Rate pacing: the send rate is naturally controlled by the primary receiver's iqChan.
+// LoadIQData pushes one packet per audio delivery cycle; senderThread blocks on the
+// channel read, so it sends at exactly the rate audio arrives — no separate ticker needed.
+// Additional receivers are read non-blocking (silence used if no data available), so a
+// slow or reconnecting secondary receiver never stalls the primary.
 func (s *Protocol1Server) senderThread() {
 	defer s.wg.Done()
 	log.Printf("Protocol1: Sender thread started")
+
+	lastEnabledCnt := -1 // sentinel: force flush on first iteration
+	// Per-receiver silence counters for throttled debug logging.
+	silenceCounts := make([]uint64, s.config.NumReceivers)
 
 	for {
 		select {
@@ -692,7 +700,7 @@ func (s *Protocol1Server) senderThread() {
 			continue
 		}
 
-		// Count enabled receivers
+		// Count enabled receivers and read the current sample rate.
 		enabledCount := 0
 		var enabledReceivers []*Protocol1ReceiverState
 		for i := 0; i < numReceivers; i++ {
@@ -709,39 +717,101 @@ func (s *Protocol1Server) senderThread() {
 			continue
 		}
 
-		// Wait for ALL enabled receivers to have data ready
-		s.sendMu.Lock()
-		allReady := false
-		for !allReady {
-			allReady = true
-			for _, rcv := range enabledReceivers {
-				if (s.sendFlags & rcv.receiverMask) == 0 {
-					allReady = false
-					break
+		// When the number of enabled receivers changes, the samplesPerFrame formula
+		// produces a different value, so any packets already queued in iqChan were
+		// produced for the OLD samplesPerFrame.  Reading them with the new value
+		// would cause frame 2 to index into the wrong samples (layout mismatch).
+		// Drain all iqChans before proceeding so we only ever encode fresh packets.
+		if enabledCount != lastEnabledCnt {
+			log.Printf("Protocol1: Receiver count changed %d→%d (samplesPerFrame %d→%d), flushing iqChans",
+				lastEnabledCnt, enabledCount,
+				func() int {
+					if lastEnabledCnt > 0 {
+						return (512 - 8) / ((lastEnabledCnt * 6) + 2)
+					}
+					return 0
+				}(),
+				(512-8)/((enabledCount*6)+2),
+			)
+			lastEnabledCnt = enabledCount
+			for i := 0; i < numReceivers; i++ {
+				drained := 0
+				for {
+					select {
+					case <-s.receivers[i].iqChan:
+						drained++
+					default:
+						goto doneDrain
+					}
+				}
+			doneDrain:
+				if drained > 0 {
+					log.Printf("Protocol1: Flushed %d stale packet(s) from receiver %d iqChan", drained, i)
 				}
 			}
-			if !allReady {
-				select {
-				case <-s.stopChan:
-					s.sendMu.Unlock()
-					return
-				default:
-				}
-				s.sendCond.Wait()
-			}
+			// After flushing, loop back so we block on a fresh packet from the
+			// primary receiver rather than immediately reading stale data.
+			continue
 		}
-		// Clear all enabled receiver flags
-		for _, rcv := range enabledReceivers {
-			s.sendFlags &= ^rcv.receiverMask
-		}
-		s.sendMu.Unlock()
 
-		// Calculate number of IQ samples per frame based on number of receivers
+		// Calculate number of IQ samples per frame based on number of receivers.
 		// Formula from linhpsdr: iq_samples = (512-8) / ((num_receivers * 6) + 2)
 		samplesPerFrame := (512 - 8) / ((enabledCount * 6) + 2)
 
-		// Build Protocol 1 data packet (1032 bytes)
-		// Structure: 8-byte Metis header + 2 frames of 512 bytes each
+		// Collect one pre-encoded IQ buffer from each enabled receiver.
+		// Each receiver's LoadIQData goroutine pushes [iqPacketBufSize]byte values
+		// into rcv.iqChan independently — no rendezvous needed.
+		//
+		// We wait up to one packet-interval for the first (primary) receiver so that
+		// the sender stays in sync with the incoming audio rate.  For additional
+		// receivers we do a non-blocking read: if no data is available we use silence
+		// (all zeros) for that receiver this packet.  This prevents a slow or
+		// reconnecting secondary receiver from stalling the primary.
+		// Collect one raw IQ sample buffer from each enabled receiver.
+		// The sender encodes them itself using the current samplesPerFrame so the
+		// encoding is always consistent with the current receiver count.
+		snapshots := make([][maxSamplesPerPacket]complex64, len(enabledReceivers))
+		if len(enabledReceivers) > 0 {
+			// Wait for primary receiver with stopChan escape.
+			select {
+			case buf, ok := <-enabledReceivers[0].iqChan:
+				if ok {
+					snapshots[0] = buf
+				}
+			case <-s.stopChan:
+				return
+			}
+			// Non-blocking reads for additional receivers.
+			for i := 1; i < len(enabledReceivers); i++ {
+				select {
+				case buf, ok := <-enabledReceivers[i].iqChan:
+					if ok {
+						snapshots[i] = buf
+						silenceCounts[i] = 0 // reset on successful read
+					}
+				default:
+					// No data yet — silence (zeros already in snapshots[i])
+					silenceCounts[i]++
+					if debugBridge && (silenceCounts[i] == 1 || silenceCounts[i]%500 == 0) {
+						log.Printf("Protocol1: Receiver %d: no IQ data available, using silence (count=%d)", i, silenceCounts[i])
+					}
+				}
+			}
+		}
+
+		// Periodic sender health log: every 500 packets log geometry and channel depths.
+		if debugBridge && s.seqNum%500 == 0 {
+			samplesPerFrame := (512 - 8) / ((enabledCount * 6) + 2)
+			depths := make([]int, numReceivers)
+			for i := 0; i < numReceivers; i++ {
+				depths[i] = len(s.receivers[i].iqChan)
+			}
+			log.Printf("Protocol1: seq=%d enabledRx=%d samplesPerFrame=%d samplesPerPacket=%d iqChanDepths=%v",
+				s.seqNum, enabledCount, samplesPerFrame, samplesPerFrame*2, depths)
+		}
+
+		// Build Protocol 1 data packet (1032 bytes).
+		// Structure: 8-byte Metis header + 2 frames of 512 bytes each.
 		packet := make([]byte, Protocol1DataSize)
 
 		// Metis header (8 bytes)
@@ -756,62 +826,103 @@ func (s *Protocol1Server) senderThread() {
 		packet[6] = byte(s.seqNum >> 8)
 		packet[7] = byte(s.seqNum)
 
+		// Build the Classic Response C0-C4 bytes for this packet.
+		//
+		// Per PROTOCOL.md "Classic Response when ACK==0":
+		//   C0[7]   = 0 (ACK=0)
+		//   C0[6:3] = RADDR[3:0]
+		//   C0[2]   = Dot (CW key, always 0 for RX-only bridge)
+		//   C0[1]   = Dash (always 0)
+		//   C0[0]   = PTT (always 0 for RX-only bridge)
+		//
+		// Per PROTOCOL.md "Base Memory Map when ACK==0":
+		//   RADDR=0x00: DATA[25]=Tx Inhibited (Active Low), DATA[7:0]=Firmware Version
+		//   RADDR=0x01: DATA[31:16]=Temperature, DATA[15:0]=Forward Power
+		//   RADDR=0x02: DATA[31:16]=Reverse Power, DATA[15:0]=Current
+		//
+		// The radio must cycle through RADDR 0x00→0x01→0x02 on successive packets.
+		// Both frames in the same packet carry the same RADDR.
+		raddr := byte(s.seqNum % 3) // 0x00, 0x01, 0x02, 0x00, ...
+		c0 := raddr << 3            // C0[6:3] = RADDR[3:0]; C0[2:0] = 0 (no PTT/dot/dash)
+
+		var c1, c2, c3, c4 byte
+		switch raddr {
+		case 0x00:
+			// DATA[25] = Tx Inhibited (Active Low) → must be 1 = TX not inhibited.
+			// C1 = DATA[31:24]; DATA[25] = C1[1] → C1 = 0x02.
+			// DATA[7:0] = Firmware Version → C4 = FirmwareVersion.
+			c1 = 0x02
+			c4 = FirmwareVersion // 0x40
+		case 0x01:
+			// Temperature=0, Forward Power=0 — all zeros (RX-only bridge has no PA)
+		case 0x02:
+			// Reverse Power=0, Current=0 — all zeros
+		}
+
 		// Frame 1 (512 bytes starting at offset 8)
 		packet[8] = 0x7F  // Sync 0
 		packet[9] = 0x7F  // Sync 1
 		packet[10] = 0x7F // Sync 2
-		packet[11] = 0x00 // C0 - control byte 0
-		packet[12] = 0x00 // C1 - control byte 1
-		packet[13] = 0x00 // C2 - control byte 2
-		packet[14] = 0x00 // C3 - control byte 3
-		packet[15] = 0x00 // C4 - control byte 4
+		packet[11] = c0   // C0 - RADDR cycling per openHPSDR spec
+		packet[12] = c1   // C1 - status data for this RADDR
+		packet[13] = c2   // C2
+		packet[14] = c3   // C3
+		packet[15] = c4   // C4
 
-		// Pack IQ samples with all receivers interleaved for frame 1
-		// Format: RX0_I(3) RX0_Q(3) RX1_I(3) RX1_Q(3) ... Mic(2) repeated samplesPerFrame times
+		// encodeIQ writes one complex64 sample as 24-bit big-endian I then Q into packet[off:off+6].
+		// Scale factor 4000.0 matches Protocol 2 signal levels (full 24-bit range is too hot).
+		const scale = float32(4000.0)
+		encodeIQ := func(off int, s complex64) {
+			iVal := int32(real(s) * scale)
+			qVal := int32(imag(s) * scale)
+			packet[off+0] = byte(iVal >> 16)
+			packet[off+1] = byte(iVal >> 8)
+			packet[off+2] = byte(iVal)
+			packet[off+3] = byte(qVal >> 16)
+			packet[off+4] = byte(qVal >> 8)
+			packet[off+5] = byte(qVal)
+		}
+
+		// Pack IQ samples with all receivers interleaved for frame 1.
+		// Format: RX0_I(3) RX0_Q(3) RX1_I(3) RX1_Q(3) ... Mic(2) repeated samplesPerFrame times.
+		// snapshots[i] contains raw complex64 samples; we encode here with the current samplesPerFrame.
 		frameOffset := 16
 		for sampleIdx := 0; sampleIdx < samplesPerFrame; sampleIdx++ {
-			// Interleave all enabled receivers' samples
-			for _, rcv := range enabledReceivers {
-				rcv.mu.Lock()
-				// Copy I and Q samples (6 bytes) for this receiver
-				copy(packet[frameOffset:frameOffset+6], rcv.packetBuf[sampleIdx*6:(sampleIdx+1)*6])
-				rcv.mu.Unlock()
+			for i := range enabledReceivers {
+				encodeIQ(frameOffset, snapshots[i][sampleIdx])
 				frameOffset += 6
 			}
-			// Add mic sample (2 bytes, zeros for now)
+			// Mic sample (2 bytes, zeros — RX-only bridge)
 			packet[frameOffset] = 0x00
 			packet[frameOffset+1] = 0x00
 			frameOffset += 2
 		}
 
 		// Frame 2 (512 bytes starting at offset 520)
+		// Same RADDR/C0-C4 as frame 1 — both frames in a packet share the same response.
 		packet[520] = 0x7F // Sync 0
 		packet[521] = 0x7F // Sync 1
 		packet[522] = 0x7F // Sync 2
-		packet[523] = 0x00 // C0 - control byte 0
-		packet[524] = 0x00 // C1 - control byte 1
-		packet[525] = 0x00 // C2 - control byte 2
-		packet[526] = 0x00 // C3 - control byte 3
-		packet[527] = 0x00 // C4 - control byte 4
+		packet[523] = c0   // C0 - same RADDR as frame 1
+		packet[524] = c1   // C1
+		packet[525] = c2   // C2
+		packet[526] = c3   // C3
+		packet[527] = c4   // C4
 
-		// Pack IQ samples with all receivers interleaved for frame 2
+		// Pack IQ samples with all receivers interleaved for frame 2.
 		frameOffset = 528
 		for sampleIdx := samplesPerFrame; sampleIdx < samplesPerFrame*2; sampleIdx++ {
-			// Interleave all enabled receivers' samples
-			for _, rcv := range enabledReceivers {
-				rcv.mu.Lock()
-				// Copy I and Q samples (6 bytes) for this receiver
-				copy(packet[frameOffset:frameOffset+6], rcv.packetBuf[sampleIdx*6:(sampleIdx+1)*6])
-				rcv.mu.Unlock()
+			for i := range enabledReceivers {
+				encodeIQ(frameOffset, snapshots[i][sampleIdx])
 				frameOffset += 6
 			}
-			// Add mic sample (2 bytes, zeros for now)
+			// Mic sample (2 bytes, zeros — RX-only bridge)
 			packet[frameOffset] = 0x00
 			packet[frameOffset+1] = 0x00
 			frameOffset += 2
 		}
 
-		// Send packet to client
+		// Send packet to client.
 		var sock *net.UDPConn
 		if s.sock != nil {
 			sock = s.sock
@@ -834,88 +945,78 @@ func (s *Protocol1Server) senderThread() {
 			continue
 		}
 
-		// Log first few packets to confirm sending is working
+		// Log first few packets to confirm sending is working.
 		if s.seqNum < 5 {
 			log.Printf("Protocol1: Successfully sent IQ packet seq=%d (%d bytes) to %s", s.seqNum, len(packet), clientAddr)
 		}
 
-		// Increment sequence number
+		// Increment sequence number.
 		s.seqNum++
-
-		// Signal completion to all enabled receivers
-		s.doneSendMu.Lock()
-		for _, rcv := range enabledReceivers {
-			s.doneSendFlags |= rcv.receiverMask
-		}
-		s.doneSendCond.Broadcast()
-		s.doneSendMu.Unlock()
 	}
 }
 
-// LoadIQData loads IQ samples into a receiver's buffer (Protocol 1 format)
-// Converts complex64 samples to 24-bit integer format
-func (s *Protocol1Server) LoadIQData(receiverNum int, samples []complex64) error {
+// LoadIQData encodes IQ samples into Protocol 1 24-bit format and pushes them
+// into the receiver's iqChan for the sender thread to consume.
+//
+// samplesPerPacket must match the value computed by forwardToHPSDR() and senderThread()
+// for the current enabled-receiver count:
+//
+//	samplesPerFrame  = (512-8) / ((numEnabledReceivers*6)+2)
+//	samplesPerPacket = samplesPerFrame * 2
+//
+// The call is non-blocking: if the channel is full (sender is behind) the oldest
+// buffered packet is discarded and the new one is queued.  This prevents any
+// receiver goroutine from ever blocking on another receiver's progress.
+func (s *Protocol1Server) LoadIQData(receiverNum int, samples []complex64, samplesPerPacket int) error {
 	if receiverNum < 0 || receiverNum >= s.config.NumReceivers {
 		return fmt.Errorf("invalid receiver number: %d", receiverNum)
 	}
 
-	// Calculate expected number of samples based on number of enabled receivers
-	// For now, we'll accept variable length and store what we get
-	// The sender thread will calculate the correct number to use
+	// Clamp samplesPerPacket to the physical buffer size (126 = single-receiver max).
+	const maxPacketSamples = 126
+	if samplesPerPacket <= 0 || samplesPerPacket > maxPacketSamples {
+		samplesPerPacket = maxPacketSamples
+	}
 
 	rcv := s.receivers[receiverNum]
 
-	// Wait for previous packet to be sent
-	s.doneSendMu.Lock()
-	for (s.doneSendFlags & rcv.receiverMask) == 0 {
+	// Copy samples into a fixed-size [maxSamplesPerPacket]complex64 array.
+	// The sender encodes them to 24-bit bytes using its own samplesPerFrame,
+	// which is always consistent with the current receiver count.
+	// Tail beyond writeSamples is zero (zero-value array = silence).
+	var buf [maxSamplesPerPacket]complex64
+	writeSamples := len(samples)
+	if writeSamples > samplesPerPacket {
+		writeSamples = samplesPerPacket
+	}
+	copy(buf[:writeSamples], samples[:writeSamples])
+
+	// Non-blocking send: if the channel is full, drain the oldest entry first
+	// so we always push the freshest data.
+	dropped := false
+	select {
+	case rcv.iqChan <- buf:
+		// queued successfully
+	default:
+		// Channel full — discard oldest, then queue new.
+		dropped = true
 		select {
-		case <-s.stopChan:
-			s.doneSendMu.Unlock()
-			return fmt.Errorf("server stopping")
+		case <-rcv.iqChan:
 		default:
 		}
-		s.doneSendCond.Wait()
+		select {
+		case rcv.iqChan <- buf:
+		default:
+		}
 	}
-	s.doneSendFlags &= ^rcv.receiverMask
-	s.doneSendMu.Unlock()
 
-	// Convert complex64 samples to 24-bit integer format
-	// Protocol 1 uses 24-bit samples (3 bytes each for I and Q)
-	// Scale factor: Use same as Protocol 2 for 192 kHz (4000.0)
-	// The full 24-bit range (8388607) is too hot and causes S9+80 readings
-	const scale = 4000.0
-
-	rcv.mu.Lock()
-	// Store up to 126 samples (maximum for single receiver case)
-	maxSamples := len(samples)
-	if maxSamples > 126 {
-		maxSamples = 126
+	if dropped {
+		drops := atomic.AddUint64(&rcv.iqDrops, 1)
+		if debugBridge && (drops == 1 || drops%100 == 0) {
+			log.Printf("Protocol1: Receiver %d iqChan full, dropped oldest packet (total drops=%d, chan depth=%d/%d)",
+				receiverNum, drops, len(rcv.iqChan), cap(rcv.iqChan))
+		}
 	}
-	for i := 0; i < maxSamples; i++ {
-		// Scale from float32 [-1.0, 1.0] to int32 24-bit range
-		// Use moderate scaling to match Protocol 2 signal levels
-		iVal := int32(real(samples[i]) * scale)
-		qVal := int32(imag(samples[i]) * scale)
-
-		// Pack as 24-bit big-endian, signed (Q first, then I - opposite of Protocol 2!)
-		// linhpsdr reads: left_sample (I), right_sample (Q)
-		// But the spectrum is backwards, so we need to swap: Q first, then I
-		// Each sample is 6 bytes total (3 for Q, 3 for I)
-		offset := i * 6
-		rcv.packetBuf[offset+0] = byte(qVal >> 16)
-		rcv.packetBuf[offset+1] = byte(qVal >> 8)
-		rcv.packetBuf[offset+2] = byte(qVal)
-		rcv.packetBuf[offset+3] = byte(iVal >> 16)
-		rcv.packetBuf[offset+4] = byte(iVal >> 8)
-		rcv.packetBuf[offset+5] = byte(iVal)
-	}
-	rcv.mu.Unlock()
-
-	// Signal that data is ready
-	s.sendMu.Lock()
-	s.sendFlags |= rcv.receiverMask
-	s.sendCond.Broadcast()
-	s.sendMu.Unlock()
 
 	return nil
 }

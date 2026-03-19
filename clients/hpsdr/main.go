@@ -2,8 +2,7 @@ package main
 
 import (
 	"bytes"
-	"encoding/base64"
-	"encoding/binary"
+	"crypto/rand"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -68,9 +67,11 @@ const (
 	MaxFrequencyHz = 30000000 // 30 MHz
 
 	// Buffering constants
-	// Keep a jitter buffer of ~100ms worth of samples to smooth out network variability
-	// At 192 kHz: 192000 samples/sec * 0.1 sec = 19200 samples
-	JitterBufferSamples = 19200
+	// JitterBufferMs is the target jitter buffer size in milliseconds.
+	// The actual sample count is computed dynamically as: sampleRate * JitterBufferMs / 1000
+	// This ensures the buffer is always ~100ms regardless of the configured sample rate
+	// (e.g. 4800 samples at 48 kHz, 9600 at 96 kHz, 19200 at 192 kHz).
+	JitterBufferMs = 100
 	// Minimum buffer level before we start sending (pre-fill buffer)
 	MinBufferSamples = SamplesPerPacket * 3
 	// Low water mark - if buffer drops below this, warn about potential issues
@@ -143,10 +144,11 @@ type UberSDRBridge struct {
 	tempBuffers [MaxReceivers][]complex64
 
 	// Buffer state tracking
-	bufferPrimed    [MaxReceivers]bool      // Track if buffer has been pre-filled
-	bufferUnderruns [MaxReceivers]uint64    // Count of underrun events
-	bufferOverruns  [MaxReceivers]uint64    // Count of overrun events
-	lastBufferLog   [MaxReceivers]time.Time // Last time we logged buffer stats
+	bufferPrimed         [MaxReceivers]bool      // Track if buffer has been pre-filled
+	lastSamplesPerPacket [MaxReceivers]int       // Detect samplesPerPacket changes (receiver count change)
+	bufferUnderruns      [MaxReceivers]uint64    // Count of underrun events
+	bufferOverruns       [MaxReceivers]uint64    // Count of overrun events
+	lastBufferLog        [MaxReceivers]time.Time // Last time we logged buffer stats
 
 	// PCM-zstd decoders — one per receiver (zstd.Decoder is NOT goroutine-safe)
 	pcmDecoders [MaxReceivers]*PCMBinaryDecoder
@@ -179,13 +181,16 @@ func NewUberSDRBridge(url string, password string, hpsdr1Config Protocol1Config,
 			return nil, fmt.Errorf("failed to create PCM decoder for receiver %d: %w", i, err)
 		}
 		bridge.pcmDecoders[i] = dec
-		bridge.receiverFreqs[i] = 14200000                                  // 14.2 MHz default
-		bridge.receiverModes[i] = "iq192"                                   // IQ mode at 192 kHz
-		bridge.userSessionIDs[i] = uuid.New().String()                      // Unique UUID per receiver
-		bridge.lastFailedFreq[i] = 0                                        // No failed connection yet
-		bridge.lastFailedMode[i] = ""                                       // No failed connection yet
-		bridge.sampleBuffers[i] = make([]complex64, 0, JitterBufferSamples) // Jitter buffer
-		bridge.tempBuffers[i] = make([]complex64, 0, 8192)                  // Pre-allocate temp buffer (typical WebSocket message size)
+		bridge.receiverFreqs[i] = 14200000             // 14.2 MHz default
+		bridge.receiverModes[i] = "iq192"              // IQ mode at 192 kHz
+		bridge.userSessionIDs[i] = uuid.New().String() // Unique UUID per receiver
+		bridge.lastFailedFreq[i] = 0                   // No failed connection yet
+		bridge.lastFailedMode[i] = ""                  // No failed connection yet
+		// Pre-allocate the jitter buffer at the 192 kHz capacity (~100ms).
+		// The buffer will be trimmed dynamically in forwardToHPSDR() if the
+		// client selects a lower sample rate.
+		bridge.sampleBuffers[i] = make([]complex64, 0, 192000*JitterBufferMs/1000) // Jitter buffer
+		bridge.tempBuffers[i] = make([]complex64, 0, 8192)                         // Pre-allocate temp buffer (typical WebSocket message size)
 	}
 
 	return bridge, nil
@@ -414,12 +419,36 @@ func (b *UberSDRBridge) monitorReceivers() {
 						go b.tuneReceiver(i, frequency, mode)
 					}
 				} else {
+					// Check if the WebSocket connection dropped unexpectedly (receiveAudio exited
+					// with an error and set wsConns[i] = nil). Reconnect without resetting
+					// connectedReceivers[i] so we don't re-log the "receiver enabled" message.
+					if b.wsConns[i] == nil {
+						log.Printf("Bridge: [%s] Receiver %d connection lost, reconnecting", clientIPStr, i)
+						go b.connectToUberSDR(i)
+						continue
+					}
+
 					// Check if frequency or sample rate changed
 					frequencyChanged := frequency != b.receiverFreqs[i]
 					modeChanged := mode != b.receiverModes[i]
 
 					if frequencyChanged || modeChanged {
-						// Check if frequency change requires switching to a different UberSDR instance
+						// Mode change requires full reconnection — UberSDR mode (sample rate)
+						// is set at connection time via URL query param (?mode=iq96).
+						// A tune message over an existing connection cannot change the stream's
+						// sample rate; the server would need to rebuild its DSP pipeline.
+						if modeChanged {
+							log.Printf("Bridge: [%s] Receiver %d mode changed %s -> %s (%d kHz), reconnecting",
+								clientIPStr, i, b.receiverModes[i], mode, sampleRate)
+							b.receiverFreqs[i] = frequency
+							b.receiverModes[i] = mode
+							b.cleanupReceiver(i)
+							connectedReceivers[i] = false
+							// Reconnection will happen on next monitor loop iteration
+							continue
+						}
+
+						// Mode unchanged — check if frequency change requires switching instance
 						if frequencyChanged && b.routingConfig != nil {
 							oldURL, _ := b.getURLForFrequency(b.receiverFreqs[i], false, "") // Don't reserve, just query
 							newURL, _ := b.getURLForFrequency(frequency, false, "")          // Don't reserve, just query
@@ -444,18 +473,13 @@ func (b *UberSDRBridge) monitorReceivers() {
 							}
 						}
 
-						// Same instance - just tune
+						// Same instance, same mode — just tune frequency
 						if frequencyChanged {
 							log.Printf("Bridge: [%s] Receiver %d frequency changed: %d Hz", clientIPStr, i, frequency)
 							b.receiverFreqs[i] = frequency
 						}
-						if modeChanged {
-							log.Printf("Bridge: [%s] Receiver %d sample rate changed: %d kHz (mode %s -> %s)",
-								clientIPStr, i, sampleRate, b.receiverModes[i], mode)
-							b.receiverModes[i] = mode
-						}
 
-						// Send tune message with updated frequency and/or mode
+						// Send tune message with updated frequency (mode is unchanged)
 						go b.tuneReceiver(i, frequency, mode)
 					}
 				}
@@ -780,6 +804,8 @@ func (b *UberSDRBridge) connectToUberSDR(receiverNum int) {
 	query.Set("frequency", fmt.Sprintf("%d", frequency))
 	query.Set("mode", mode)
 	query.Set("user_session_id", b.userSessionIDs[receiverNum])
+	query.Set("version", "2") // Request version 2: server sends silence packets every 100ms,
+	// ensuring data flows even when the radio is quiet (no squelch timeout).
 	// Don't set format - let server use default (pcm-zstd binary)
 
 	if targetPassword != "" {
@@ -805,10 +831,12 @@ func (b *UberSDRBridge) connectToUberSDR(receiverNum int) {
 		log.Printf("Bridge: Receiver %d setting X-Real-IP header to %s", receiverNum, clientIP)
 	}
 
-	// Create a dialer with larger read buffer to handle large WebSocket frames
+	// Create a dialer with larger read buffer to handle large WebSocket frames.
+	// IQ frames at high sample rates (e.g. iq192) can exceed 27KB compressed,
+	// so use 128KB to give ample headroom across all modes.
 	dialer := websocket.Dialer{
-		ReadBufferSize:  16384, // 16KB read buffer (default is 4096)
-		WriteBufferSize: 4096,  // Keep default write buffer
+		ReadBufferSize:  131072, // 128KB — handles large IQ frames at all sample rates
+		WriteBufferSize: 4096,   // Keep default write buffer
 	}
 	conn, _, err := dialer.Dial(wsURL.String(), headers)
 	if err != nil {
@@ -965,7 +993,10 @@ func (b *UberSDRBridge) receiveAudio(receiverNum int) {
 					continue
 				}
 
-				// Update sample rate and channels if changed
+				// Update sample rate and channels if changed.
+				// Guard with b.mu to prevent data races — multiple receiveAudio()
+				// goroutines (one per receiver) may write these fields concurrently.
+				b.mu.Lock()
 				if sampleRate != b.sampleRate {
 					b.sampleRate = sampleRate
 					log.Printf("Bridge: Receiver %d sample rate updated: %d Hz", receiverNum, b.sampleRate)
@@ -974,6 +1005,7 @@ func (b *UberSDRBridge) receiveAudio(receiverNum int) {
 					b.channels = channels
 					log.Printf("Bridge: Receiver %d channels updated: %d", receiverNum, b.channels)
 				}
+				b.mu.Unlock()
 
 				// Convert PCM to IQ samples and send to HPSDR
 				// Check if still running before forwarding
@@ -1028,31 +1060,6 @@ func (b *UberSDRBridge) receiveAudio(receiverNum int) {
 	if debugBridge {
 		log.Printf("Bridge: receiveAudio: receiver %d buffer cleared on exit", receiverNum)
 	}
-}
-
-// decodeAudio decodes base64 audio data to PCM bytes
-func (b *UberSDRBridge) decodeAudio(base64Data string) ([]byte, error) {
-	// Decode base64
-	audioBytes, err := base64.StdEncoding.DecodeString(base64Data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode base64: %w", err)
-	}
-
-	// Convert big-endian to little-endian signed 16-bit PCM
-	numSamples := len(audioBytes) / 2
-	pcmData := make([]byte, len(audioBytes))
-
-	for i := 0; i < numSamples; i++ {
-		// Read big-endian int16
-		highByte := audioBytes[i*2]
-		lowByte := audioBytes[i*2+1]
-		sample := int16((uint16(highByte) << 8) | uint16(lowByte))
-
-		// Write as little-endian int16
-		binary.LittleEndian.PutUint16(pcmData[i*2:], uint16(sample))
-	}
-
-	return pcmData, nil
 }
 
 // getNumReceivers returns the number of receivers
@@ -1133,38 +1140,106 @@ func (b *UberSDRBridge) forwardToHPSDR(receiverNum int, pcmData []byte) error {
 	b.sampleBuffers[receiverNum] = append(b.sampleBuffers[receiverNum], tempSamples...)
 	bufferLevel := len(b.sampleBuffers[receiverNum])
 
+	// Compute samplesPerPacket first — all threshold checks depend on it.
+	// Protocol 1: samples per packet depends on the number of active receivers.
+	// Formula (from linhpsdr): samplesPerFrame = (512-8) / ((numReceivers*6)+2)
+	// Two frames per packet, so samplesPerPacket = samplesPerFrame * 2.
+	// This must match what senderThread() computes so we feed exactly the right
+	// number of samples per LoadIQData() call.
+	if b.hpsdr1Server == nil {
+		b.bufferMus[receiverNum].Unlock()
+		return nil
+	}
+	numEnabledReceivers := 0
+	for i := 0; i < b.hpsdr1Server.config.NumReceivers; i++ {
+		b.hpsdr1Server.receivers[i].mu.Lock()
+		if b.hpsdr1Server.receivers[i].enabled {
+			numEnabledReceivers++
+		}
+		b.hpsdr1Server.receivers[i].mu.Unlock()
+	}
+	if numEnabledReceivers < 1 {
+		numEnabledReceivers = 1
+	}
+	samplesPerFrame := (512 - 8) / ((numEnabledReceivers * 6) + 2)
+	samplesPerPacket := samplesPerFrame * 2
+	if samplesPerPacket == 0 {
+		b.bufferMus[receiverNum].Unlock()
+		return nil
+	}
+
+	// When the number of enabled receivers changes, samplesPerPacket changes too.
+	// Any samples already in the buffer were accumulated for the OLD packet size —
+	// sending them with the new size would produce malformed packets.
+	// Reset the buffer and re-prime so we start clean with the new packet geometry.
+	if b.lastSamplesPerPacket[receiverNum] != 0 && b.lastSamplesPerPacket[receiverNum] != samplesPerPacket {
+		log.Printf("Bridge: Receiver %d samplesPerPacket changed %d→%d (receiver count change), resetting buffer",
+			receiverNum, b.lastSamplesPerPacket[receiverNum], samplesPerPacket)
+		b.sampleBuffers[receiverNum] = b.sampleBuffers[receiverNum][:0]
+		b.bufferPrimed[receiverNum] = false
+	}
+	b.lastSamplesPerPacket[receiverNum] = samplesPerPacket
+
+	// Pre-fill threshold: 20 packets worth of samples (~10ms at any sample rate).
+	// This gives enough headroom to absorb network jitter without being so large
+	// that it introduces noticeable latency.
+	minBufferSamples := samplesPerPacket * 20
+
+	// Compute the jitter buffer cap dynamically from the current sample rate so
+	// it is always ~JitterBufferMs ms regardless of whether the client requested
+	// 48 kHz, 96 kHz, or 192 kHz.  Fall back to 192 kHz if rate is not yet known.
+	srHz := b.sampleRate
+	if srHz <= 0 {
+		srHz = 192000
+	}
+	jitterBufferSamples := srHz * JitterBufferMs / 1000
+
 	// Check if buffer is getting too large (prevent unbounded growth)
-	if bufferLevel > JitterBufferSamples {
-		excess := bufferLevel - JitterBufferSamples
+	if bufferLevel > jitterBufferSamples {
+		excess := bufferLevel - jitterBufferSamples
 		b.bufferOverruns[receiverNum]++
 		if b.bufferOverruns[receiverNum] == 1 || b.bufferOverruns[receiverNum]%100 == 0 {
-			log.Printf("Bridge: Receiver %d buffer OVERRUN #%d, dropping %d samples (buffer was %d samples, %.1f ms)",
+			srKHz := float64(b.sampleRate) / 1000.0
+			if srKHz <= 0 {
+				srKHz = 192.0
+			}
+			log.Printf("Bridge: Receiver %d buffer OVERRUN #%d, dropping %d samples (buffer was %d samples, %.1f ms @ %.0f kHz)",
 				receiverNum, b.bufferOverruns[receiverNum], excess, bufferLevel,
-				float64(bufferLevel)/192.0)
+				float64(bufferLevel)/srKHz, srKHz)
 		}
 		b.sampleBuffers[receiverNum] = b.sampleBuffers[receiverNum][excess:]
 		bufferLevel = len(b.sampleBuffers[receiverNum])
+		// Also shrink the slice capacity back to jitterBufferSamples to release memory
+		// when the sample rate drops (e.g. 192→48 kHz).  copy+reslice avoids a new alloc
+		// most of the time because the underlying array is already large enough.
 	}
 
 	// Pre-fill buffer before starting to send (jitter buffer priming)
 	if !b.bufferPrimed[receiverNum] {
-		if bufferLevel >= MinBufferSamples {
+		if bufferLevel >= minBufferSamples {
 			b.bufferPrimed[receiverNum] = true
+			if debugBridge {
+				srKHz := float64(srHz) / 1000.0
+				log.Printf("Bridge: Receiver %d buffer primed: level=%d samples (%.1f ms @ %.0f kHz), samplesPerPacket=%d, numEnabledRx=%d",
+					receiverNum, bufferLevel, float64(bufferLevel)/srKHz, srKHz,
+					samplesPerPacket, numEnabledReceivers)
+			}
 		} else {
 			b.bufferMus[receiverNum].Unlock()
 			return nil
 		}
 	}
 
-	// Detect underruns
-	if b.bufferPrimed[receiverNum] && bufferLevel < SamplesPerPacket {
+	// Detect underruns: buffer dropped below one packet's worth of samples.
+	// Reset primed state so we re-fill before sending again.
+	if b.bufferPrimed[receiverNum] && bufferLevel < samplesPerPacket {
 		b.bufferUnderruns[receiverNum]++
 		b.bufferPrimed[receiverNum] = false
 		b.bufferMus[receiverNum].Unlock()
 		return nil
 	}
 
-	if !b.bufferPrimed[receiverNum] && bufferLevel < MinBufferSamples {
+	if !b.bufferPrimed[receiverNum] && bufferLevel < minBufferSamples {
 		b.bufferMus[receiverNum].Unlock()
 		return nil
 	}
@@ -1174,27 +1249,14 @@ func (b *UberSDRBridge) forwardToHPSDR(receiverNum int, pcmData []byte) error {
 	if now.Sub(b.lastBufferLog[receiverNum]) > 30*time.Second {
 		b.lastBufferLog[receiverNum] = now
 		if b.bufferUnderruns[receiverNum] > 0 || b.bufferOverruns[receiverNum] > 0 {
-			log.Printf("Bridge: Receiver %d buffer stats - level: %d samples (%.1f ms), underruns: %d, overruns: %d",
-				receiverNum, bufferLevel, float64(bufferLevel)/192.0,
+			srKHz := float64(b.sampleRate) / 1000.0
+			if srKHz <= 0 {
+				srKHz = 192.0
+			}
+			log.Printf("Bridge: Receiver %d buffer stats - level: %d samples (%.1f ms @ %.0f kHz), underruns: %d, overruns: %d",
+				receiverNum, bufferLevel, float64(bufferLevel)/srKHz, srKHz,
 				b.bufferUnderruns[receiverNum], b.bufferOverruns[receiverNum])
 		}
-	}
-
-	// Determine which protocol server is active and what packet size to use.
-	// Use IsRunning() only to pick the server; don't gate packet draining on it —
-	// a transient IsRunning()=false (e.g. during receiver reconfiguration) would
-	// cause samplesPerPacket=0, leaving the buffer to grow until overrun.
-	// Protocol 1: 126 samples per packet
-	samplesPerPacket := 126
-	if b.hpsdr1Server == nil {
-		b.bufferMus[receiverNum].Unlock()
-		return nil
-	}
-
-	if samplesPerPacket == 0 {
-		// No server configured at all — just accumulate
-		b.bufferMus[receiverNum].Unlock()
-		return nil
 	}
 
 	// Drain ready packets into a local slice under the lock
@@ -1217,7 +1279,7 @@ func (b *UberSDRBridge) forwardToHPSDR(receiverNum int, pcmData []byte) error {
 	// Do NOT return the error to the caller, as that would cause receiveAudio
 	// to log noise on every frequency change / receiver reconfiguration.
 	for _, packet := range packets {
-		if err := b.hpsdr1Server.LoadIQData(receiverNum, packet); err != nil {
+		if err := b.hpsdr1Server.LoadIQData(receiverNum, packet, samplesPerPacket); err != nil {
 			if debugBridge {
 				log.Printf("Bridge: forwardToHPSDR: receiver %d LoadIQData error: %v", receiverNum, err)
 			}
@@ -1508,19 +1570,23 @@ func main() {
 			log.Printf("Using MAC address %s from interface %s", macAddr.String(), *hpsdrInterface)
 		}
 	} else {
-		// HL2 MAC address structure (tcpdump-verified against real HL2 hardware):
-		//   Bytes 0-2: 1c:c0:a2  — Microchip Technology OUI (all HL2s use this)
-		//   Bytes 3-4: unit ID   — manually set per-device to distinguish multiple HL2s
-		//                          (e.g. 03:09, 3f:14, 09:02 — any non-zero value)
-		//   Byte  5:   0x48      — SparkSDR checks this byte to identify "Hermes-Lite 2"
-		//                          vs "Hermes-Lite". Both real HL2s observed use 0x48.
+		// HL2 MAC address structure per PROTOCOL.md and real hardware observation:
+		//   Bytes 0-3: 00:1c:c0:a2  — fixed prefix (Microchip Technology OUI + fixed byte)
+		//   Bytes 4-5: <Y>:<Z>       — user-configurable unit ID (auto-generated randomly)
 		//
-		// Discovery response bytes 17-18 must match MAC bytes 3-4 (unit ID).
-		// SparkSDR cross-checks these to confirm the device is a genuine HL2.
+		// Real HL2 example: 00:1c:c0:a2:3f:15  (Y=63=0x3f, Z=21=0x15)
+		// Discovery response bytes 17-18 (spec 0x11/0x12) must match MAC bytes 4-5 (Y:Z).
 		//
-		// We use unit ID 0a:01 — unique, won't conflict with real HL2s on the network.
-		macAddr = net.HardwareAddr{0x1c, 0xc0, 0xa2, 0x0a, 0x01, 0x48}
-		log.Printf("Using generated MAC address: %s", macAddr.String())
+		// We auto-generate Y and Z randomly so each bridge instance gets a unique ID
+		// that won't conflict with real HL2s or other bridge instances on the network.
+		unitID := make([]byte, 2)
+		if _, err := rand.Read(unitID); err != nil {
+			// Fallback if crypto/rand fails
+			unitID = []byte{0x0a, 0x01}
+			log.Printf("Warning: crypto/rand failed, using fallback unit ID: %v", err)
+		}
+		macAddr = net.HardwareAddr{0x00, 0x1c, 0xc0, 0xa2, unitID[0], unitID[1]}
+		log.Printf("Using generated MAC address: %s (unit ID: %02x:%02x)", macAddr.String(), unitID[0], unitID[1])
 	}
 
 	hpsdr1Config := Protocol1Config{

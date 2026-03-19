@@ -26,6 +26,18 @@ if [ "$NEW_PASSWORD" = "mypassword" ]; then
     echo "Error: Cannot use the default password" >&2
     exit 1
 fi
+if [ "${#NEW_PASSWORD}" -lt 16 ]; then
+    echo "Error: Password must be at least 16 characters long" >&2
+    exit 1
+fi
+if ! [[ "$NEW_PASSWORD" =~ [A-Za-z] ]]; then
+    echo "Error: Password must contain at least one letter" >&2
+    exit 1
+fi
+if ! [[ "$NEW_PASSWORD" =~ [0-9] ]]; then
+    echo "Error: Password must contain at least one number" >&2
+    exit 1
+fi
 
 # Check directory exists
 if [ ! -d "$UBERSDR_DIR" ]; then

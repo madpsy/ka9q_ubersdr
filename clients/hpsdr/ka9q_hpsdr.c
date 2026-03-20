@@ -1070,7 +1070,7 @@ int main (int argc, char *argv[])
             buffer[13] = 18;
             buffer[20] = mcb.num_rxs;
             buffer[21] = 1;
-            buffer[22] = 3;
+            buffer[22] = 7; // sample rate bitmask: bits 0+1+2 = 48/96/192 kHz (ubersdr cap)
 
             sendto(sock_udp, buffer, 60, 0, (struct sockaddr *)&addr_from, sizeof(addr_from));
             continue;
@@ -1398,6 +1398,8 @@ void *ddc_specific_thread(void *data)
             struct rcvr_cb *rcb = &mcb.rcb[i];
 
             rc = (ddc_buffer[18 + 6 * i] << 8) + ddc_buffer[19 + 6 * i];
+            /* Clamp to 192 kHz — ubersdr WebSocket only supports up to iq192 */
+            if (rc > 192) rc = 192;
             if (rc != rxrate[i] && rc != 0) {
                 rxrate[i] = rc;
                 mcb.rcb[i].output_rate = (rxrate[i] * 1000);
@@ -1411,16 +1413,9 @@ void *ddc_specific_thread(void *data)
                     mcb.rcb[i].scale = 6000.0f;
                     break;
                 case 192:
+                default:
                     mcb.rcb[i].scale = 4000.0f;
                     break;
-                case 384:
-                    mcb.rcb[i].scale = 3000.0f;
-                    break;
-                case 768:
-                    mcb.rcb[i].scale = 1700.0f;
-                    break;
-                case 1536:
-                    mcb.rcb[i].scale = 1000.0f;
                 }
 
                 /* Rate change requires WebSocket reconnect (mode is baked into URL) */

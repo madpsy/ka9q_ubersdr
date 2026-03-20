@@ -40,11 +40,25 @@ static int interface_offset = 0;
 
 static u_int send_flags = 0;
 static u_int done_send_flags = 0;
+
+/*
+ * Mutex serialising lws_create_context() calls across ws_threads.
+ *
+ * lws_context_init_ssl_library() calls OPENSSL_init_ssl() and checks a
+ * one-time .bss flag.  Concurrent calls from multiple threads race on that
+ * flag and can corrupt OpenSSL global state, causing SIGSEGV in
+ * CRYPTO_THREAD_read_lock(rwlock=0x0) during a TLS handshake.
+ *
+ * Each ws_thread has its own lws_context (so lws_service() is never called
+ * concurrently on the same context — lws is not thread-safe for that).
+ * Only lws_create_context() needs serialisation.
+ */
+static pthread_mutex_t lws_ctx_create_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 static pthread_mutex_t send_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t send_cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t done_send_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t done_send_cond = PTHREAD_COND_INITIALIZER;
-
 static int running = 0;
 static bool gen_rcvd = false;
 static bool wbenable = false;
@@ -400,6 +414,344 @@ bool decode_pcm_frame(struct rcvr_cb *rcb,
     return true;
 }
 
+/*
+ * Fetch public UberSDR instances from the instances API.
+ * Filters to only those supporting iq48/iq96/iq192 (≤192 kHz).
+ * Prints a numbered list and prompts the user to pick one.
+ * On success, writes the chosen HTTP base URL into url_out (size url_out_size)
+ * and returns true.  Returns false if discovery fails or user cancels.
+ */
+#define MAX_INSTANCES 64
+#define MAX_IQ_MODES  8
+
+struct ubersdr_instance {
+    char name[128];
+    char callsign[32];
+    char location[128];
+    char host[128];
+    char port[8];
+    bool tls;
+    char iq_modes[MAX_IQ_MODES][16]; /* e.g. "iq48", "iq96", "iq192" */
+    int  n_modes;
+};
+
+/* Find the matching closing brace for the '{' at *start.
+ * Returns pointer to the '}', or NULL if not found. */
+static const char *find_matching_brace(const char *start)
+{
+    int depth = 0;
+    bool in_string = false;
+    for (const char *p = start; *p; p++) {
+        if (in_string) {
+            if (*p == '\\') { p++; continue; } /* skip escaped char */
+            if (*p == '"') in_string = false;
+        } else {
+            if (*p == '"') { in_string = true; continue; }
+            if (*p == '{') depth++;
+            else if (*p == '}') {
+                depth--;
+                if (depth == 0) return p;
+            }
+        }
+    }
+    return NULL;
+}
+
+/* Extract a JSON string value for key from obj into out (size out_size).
+ * Returns true on success. */
+static bool json_str(const char *obj, const char *key, char *out, size_t out_size)
+{
+    char search[64];
+    snprintf(search, sizeof(search), "\"%s\"", key);
+    const char *p = strstr(obj, search);
+    if (!p) return false;
+    p += strlen(search);
+    while (*p == ' ' || *p == ':' || *p == '\t') p++;
+    if (*p != '"') return false;
+    p++;
+    const char *end = strchr(p, '"');
+    if (!end) return false;
+    size_t len = end - p;
+    if (len >= out_size) len = out_size - 1;
+    memcpy(out, p, len);
+    out[len] = '\0';
+    return true;
+}
+
+/* Extract a JSON number value for key from obj into out (size out_size).
+ * Returns true on success. */
+static bool json_num(const char *obj, const char *key, char *out, size_t out_size)
+{
+    char search[64];
+    snprintf(search, sizeof(search), "\"%s\"", key);
+    const char *p = strstr(obj, search);
+    if (!p) return false;
+    p += strlen(search);
+    while (*p == ' ' || *p == ':' || *p == '\t') p++;
+    if (!isdigit((unsigned char)*p)) return false;
+    size_t len = 0;
+    while (isdigit((unsigned char)p[len])) len++;
+    if (len >= out_size) len = out_size - 1;
+    memcpy(out, p, len);
+    out[len] = '\0';
+    return true;
+}
+
+/* Extract a JSON boolean value for key. Returns 1=true, 0=false, -1=not found. */
+static int json_bool(const char *obj, const char *key)
+{
+    char search[64];
+    snprintf(search, sizeof(search), "\"%s\"", key);
+    const char *p = strstr(obj, search);
+    if (!p) return -1;
+    p += strlen(search);
+    while (*p == ' ' || *p == ':' || *p == '\t') p++;
+    if (strncmp(p, "true", 4) == 0) return 1;
+    if (strncmp(p, "false", 5) == 0) return 0;
+    return -1;
+}
+
+/* Parse the public_iq_modes array from an instance JSON object.
+ * Only keeps modes ≤ iq192 (i.e. iq48, iq96, iq192).
+ * Returns number of modes found. */
+static int parse_iq_modes(const char *obj, char modes[][16], int max_modes)
+{
+    static const char *allowed[] = {"iq48", "iq96", "iq192", NULL};
+    int n = 0;
+    const char *p = strstr(obj, "\"public_iq_modes\"");
+    if (!p) return 0;
+    p = strchr(p, '[');
+    if (!p) return 0;
+    p++;
+    while (n < max_modes) {
+        const char *q1 = strchr(p, '"');
+        if (!q1) break;
+        const char *q2 = strchr(q1 + 1, '"');
+        if (!q2) break;
+        size_t mlen = q2 - q1 - 1;
+        if (mlen < sizeof(modes[0]) - 1) {
+            char mode[16];
+            memcpy(mode, q1 + 1, mlen);
+            mode[mlen] = '\0';
+            /* Only keep modes ≤ iq192 */
+            for (int i = 0; allowed[i]; i++) {
+                if (strcmp(mode, allowed[i]) == 0) {
+                    /* mlen < sizeof(modes[0])-1 is guaranteed by the outer if */
+                    memcpy(modes[n], mode, mlen);
+                    modes[n][mlen] = '\0';
+                    n++;
+                    break;
+                }
+            }
+        }
+        p = q2 + 1;
+        /* Stop at end of array */
+        const char *next_q = strchr(p, '"');
+        const char *end_arr = strchr(p, ']');
+        if (end_arr && (!next_q || end_arr < next_q)) break;
+    }
+    return n;
+}
+
+static int cmp_instance(const void *a, const void *b)
+{
+    const struct ubersdr_instance *ia = (const struct ubersdr_instance *)a;
+    const struct ubersdr_instance *ib = (const struct ubersdr_instance *)b;
+    const char *ka = ia->callsign[0] ? ia->callsign : ia->name;
+    const char *kb = ib->callsign[0] ? ib->callsign : ib->name;
+    return strcasecmp(ka, kb);
+}
+
+static bool discover_instances(char *url_out, size_t url_out_size, const char *auto_callsign)
+{
+    /* Fetch the instances list */
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd),
+             "curl -s --max-time 10 -A 'UberSDR_HPSDR/1.0' "
+             "'https://instances.ubersdr.org/api/instances?online_only=true' 2>/dev/null");
+
+    FILE *fp = popen(cmd, "r");
+    if (!fp) {
+        fprintf(stderr, "discover: popen failed\n");
+        return false;
+    }
+
+    /* Read full response */
+    char *resp = NULL;
+    size_t resp_len = 0;
+    char line[1024];
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        size_t ll = strlen(line);
+        char *tmp = realloc(resp, resp_len + ll + 1);
+        if (!tmp) { free(resp); pclose(fp); return false; }
+        resp = tmp;
+        memcpy(resp + resp_len, line, ll);
+        resp_len += ll;
+        resp[resp_len] = '\0';
+    }
+    pclose(fp);
+
+    if (!resp || resp_len == 0) {
+        fprintf(stderr, "discover: no response from instances API\n");
+        free(resp);
+        return false;
+    }
+
+    /* Find the start of the "instances" array */
+    const char *instances_key = strstr(resp, "\"instances\"");
+    if (!instances_key) {
+        fprintf(stderr, "discover: no 'instances' key in response\n");
+        free(resp);
+        return false;
+    }
+    const char *arr_start = strchr(instances_key, '[');
+    if (!arr_start) {
+        fprintf(stderr, "discover: no instances array in response\n");
+        free(resp);
+        return false;
+    }
+
+    /* Parse instances array — use brace-counting to find each object */
+    struct ubersdr_instance instances[MAX_INSTANCES];
+    int n_instances = 0;
+
+    const char *p = arr_start + 1;
+    while (n_instances < MAX_INSTANCES) {
+        /* Skip to next '{' */
+        const char *obj_start = strchr(p, '{');
+        if (!obj_start) break;
+
+        /* Check we haven't passed the end of the array */
+        const char *arr_end = strchr(p, ']');
+        if (arr_end && arr_end < obj_start) break;
+
+        /* Find matching '}' using brace counting */
+        const char *obj_end = find_matching_brace(obj_start);
+        if (!obj_end) break;
+
+        /* Copy object into a NUL-terminated buffer for parsing */
+        size_t obj_len = obj_end - obj_start + 1;
+        char *obj = malloc(obj_len + 1);
+        if (!obj) break;
+        memcpy(obj, obj_start, obj_len);
+        obj[obj_len] = '\0';
+
+        struct ubersdr_instance inst;
+        memset(&inst, 0, sizeof(inst));
+
+        json_str(obj, "name",     inst.name,     sizeof(inst.name));
+        json_str(obj, "callsign", inst.callsign, sizeof(inst.callsign));
+        json_str(obj, "location", inst.location, sizeof(inst.location));
+        json_str(obj, "host",     inst.host,     sizeof(inst.host));
+        /* port is a JSON number, not a string */
+        json_num(obj, "port",     inst.port,     sizeof(inst.port));
+
+        /* tls is a JSON boolean */
+        int tls_val = json_bool(obj, "tls");
+        inst.tls = (tls_val == 1);
+
+        inst.n_modes = parse_iq_modes(obj, inst.iq_modes, MAX_IQ_MODES);
+
+        free(obj);
+
+        /* Only include instances with at least one supported mode */
+        if (inst.n_modes > 0 && inst.host[0] && inst.port[0]) {
+            instances[n_instances++] = inst;
+        }
+
+        p = obj_end + 1;
+    }
+
+    free(resp);
+
+    if (n_instances == 0) {
+        fprintf(stderr, "discover: no suitable public instances found\n");
+        return false;
+    }
+
+    /* Sort by callsign (falling back to name) case-insensitively */
+    qsort(instances, n_instances, sizeof(instances[0]), cmp_instance);
+
+    /* Clamp a string to max_len chars, appending ".." if truncated.
+     * Writes into buf (must be at least max_len+1 bytes). */
+    #define COL_CLAMP(src, buf, max_len) do { \
+        size_t _sl = strlen(src); \
+        if (_sl <= (max_len)) { \
+            memcpy((buf), (src), _sl + 1); \
+        } else { \
+            memcpy((buf), (src), (max_len) - 2); \
+            (buf)[(max_len) - 2] = '.'; \
+            (buf)[(max_len) - 1] = '.'; \
+            (buf)[(max_len)]     = '\0'; \
+        } \
+    } while (0)
+
+    /* Display the list */
+    printf("\nAvailable public UberSDR instances:\n");
+    printf("%-4s %-12s %-35s %-38s %s\n", "No.", "Callsign", "Location", "Host:Port", "Modes");
+    printf("%-4s %-12s %-35s %-38s %s\n", "---", "--------", "--------", "---------", "-----");
+
+    for (int i = 0; i < n_instances; i++) {
+        struct ubersdr_instance *inst = &instances[i];
+
+        /* Build display name: prefer callsign, fall back to name */
+        const char *display = inst->callsign[0] ? inst->callsign : inst->name;
+
+        /* Clamped columns */
+        char col_name[13], col_loc[36], col_hp[39];
+        COL_CLAMP(display,       col_name, 12);
+        COL_CLAMP(inst->location, col_loc, 35);
+
+        char hostport[160];
+        snprintf(hostport, sizeof(hostport), "%s:%s", inst->host, inst->port);
+        COL_CLAMP(hostport, col_hp, 38);
+
+        /* Build modes string */
+        char modes_str[64] = {0};
+        for (int m = 0; m < inst->n_modes; m++) {
+            if (m > 0) strncat(modes_str, " ", sizeof(modes_str) - strlen(modes_str) - 1);
+            strncat(modes_str, inst->iq_modes[m], sizeof(modes_str) - strlen(modes_str) - 1);
+        }
+
+        printf("%-4d %-12s %-35s %-38s %s\n",
+               i + 1, col_name, col_loc, col_hp, modes_str);
+    }
+
+    #undef COL_CLAMP
+
+    /* Auto-select by callsign if --callsign was given */
+    struct ubersdr_instance *chosen = NULL;
+    if (auto_callsign && auto_callsign[0]) {
+        for (int i = 0; i < n_instances; i++) {
+            if (strcasecmp(instances[i].callsign, auto_callsign) == 0) {
+                chosen = &instances[i];
+                break;
+            }
+        }
+        if (!chosen) {
+            fprintf(stderr, "discover: callsign '%s' not found in public instances\n", auto_callsign);
+            return false;
+        }
+    } else {
+        /* Prompt user */
+        printf("\nEnter number (1-%d) or 0 to cancel: ", n_instances);
+        fflush(stdout);
+
+        int choice = 0;
+        if (scanf("%d", &choice) != 1 || choice < 1 || choice > n_instances) {
+            printf("Cancelled.\n");
+            return false;
+        }
+        chosen = &instances[choice - 1];
+    }
+
+    const char *scheme = chosen->tls ? "https" : "http";
+    snprintf(url_out, url_out_size, "%s://%s:%s", scheme, chosen->host, chosen->port);
+
+    printf("Selected: %s (%s)\n", chosen->callsign[0] ? chosen->callsign : chosen->name, url_out);
+    return true;
+}
+
 void sdr_sighandler (int signum)
 {
     t_print ("Signal:%d caught, exiting!\n", signum);
@@ -422,43 +774,21 @@ char *time_stamp ()
  * libwebsockets client for ubersdr
  * ----------------------------------------------------------------------- */
 
-/*
- * Per-session data stored by lws alongside the wsi.
- * We keep a back-pointer to the rcvr_cb so the callback can reach it.
- */
-struct ws_session_data {
-    struct rcvr_cb *rcb;
-};
-
 static int ws_callback(struct lws *wsi,
                        enum lws_callback_reasons reason,
                        void *user, void *in, size_t len)
 {
     /*
-     * We pass rcb via the lws context user pointer (ctx_info.user).
-     * Per-session data (user) is used only to cache the pointer after
-     * LWS_CALLBACK_CLIENT_ESTABLISHED so subsequent callbacks are fast.
+     * rcb is stored as the wsi user-data pointer (ci.userdata in
+     * lws_client_connect_info), accessible via lws_wsi_user().
+     * This works with a shared lws_context because each wsi carries
+     * its own user pointer independently of the context user pointer.
      */
-    struct ws_session_data *sd = (struct ws_session_data *)user;
-    struct rcvr_cb *rcb = NULL;
-
-    if (sd) {
-        if (sd->rcb) {
-            rcb = sd->rcb;
-        } else {
-            /* First callback after session allocation — populate from context */
-            rcb = (struct rcvr_cb *)lws_context_user(lws_get_context(wsi));
-            sd->rcb = rcb;
-        }
-    }
+    struct rcvr_cb *rcb = (struct rcvr_cb *)lws_wsi_user(wsi);
 
     switch (reason) {
 
     case LWS_CALLBACK_CLIENT_ESTABLISHED:
-        if (sd && !sd->rcb) {
-            rcb = (struct rcvr_cb *)lws_context_user(lws_get_context(wsi));
-            sd->rcb = rcb;
-        }
         t_print("ws_callback(%d): connection established\n",
                 rcb ? rcb->rcvr_num : -1);
         break;
@@ -546,13 +876,19 @@ static int ws_callback(struct lws *wsi,
         t_print("ws_callback(%d): connection error: %s\n",
                 rcb ? rcb->rcvr_num : -1,
                 in ? (char *)in : "(null)");
-        if (rcb) rcb->reconnect_needed = 1;
+        if (rcb) {
+            rcb->reconnect_needed = 1;
+            rcb->wsi_closed = 1;
+        }
         break;
 
     case LWS_CALLBACK_CLIENT_CLOSED:
         t_print("ws_callback(%d): connection closed\n",
                 rcb ? rcb->rcvr_num : -1);
-        if (rcb) rcb->reconnect_needed = 1;
+        if (rcb) {
+            rcb->reconnect_needed = 1;
+            rcb->wsi_closed = 1;
+        }
         break;
 
     default:
@@ -565,7 +901,7 @@ static struct lws_protocols ws_protocols[] = {
     {
         .name                  = "ubersdr",
         .callback              = ws_callback,
-        .per_session_data_size = sizeof(struct ws_session_data),
+        .per_session_data_size = 0,
         .rx_buffer_size        = WS_RX_BUF_SIZE,
     },
     LWS_PROTOCOL_LIST_TERM
@@ -577,6 +913,17 @@ static struct lws_protocols ws_protocols[] = {
  * Connects to ubersdr via WebSocket, receives PCM-zstd frames,
  * decodes them, and feeds iqSamples[] for rx_thread to consume.
  * Handles reconnection when reconnect_needed is set (e.g. rate change).
+ *
+ * Each thread has its own lws_context so lws_service() is never called
+ * concurrently on the same context (lws is not thread-safe for that).
+ *
+ * lws_create_context() is serialised with lws_ctx_create_mutex because
+ * lws_context_init_ssl_library() calls OPENSSL_init_ssl() and checks a
+ * one-time .bss flag; concurrent calls race on that flag and corrupt
+ * OpenSSL global state, causing SIGSEGV in CRYPTO_THREAD_read_lock().
+ *
+ * rcb is passed to each wsi via ci.userdata so the callback can retrieve
+ * it with lws_wsi_user() without needing the context user pointer.
  */
 void *ws_thread(void *arg)
 {
@@ -586,6 +933,7 @@ void *ws_thread(void *arg)
     rcb->err_count = 0;
     rcb->last_sample_rate = 0;
     rcb->last_channels    = 0;
+    rcb->wsi_closed       = 0;
 
     /* Allocate a ZSTD decompression context for this receiver */
     rcb->zstd_dctx = ZSTD_createDCtx();
@@ -596,34 +944,11 @@ void *ws_thread(void *arg)
 
     t_print("ws_thread(%d): starting, url=%s\n", rcb->rcvr_num, mcb.ubersdr_url);
 
-    while (!do_exit) {
-        /* Wait until this DDC is enabled */
-        if (!ddcenable[rcb->rcvr_num]) {
-            usleep(50000);
-            continue;
-        }
-
-        rcb->reconnect_needed = 0;
-
-        /*
-         * mcb.ubersdr_url is an HTTP base URL, e.g. "http://host:8080"
-         * or "https://host:8443".  We:
-         *   1. POST to /connection to get permission
-         *   2. Derive ws:// (or wss://) for the WebSocket connection
-         */
-
-        /* --- Step 1: connection permission check --- */
-        if (!check_ubersdr_connection_rcb(mcb.ubersdr_url, rcb)) {
-            t_print("ws_thread(%d): connection not allowed, retrying in 5s\n", rcb->rcvr_num);
-            sleep(5);
-            continue;
-        }
-
-        /* --- Step 2: parse host/port from the HTTP base URL --- */
-        char host[256] = {0};
-        int  port = 80;
-        int  use_ssl = 0;
-
+    /* --- Parse host/port/ssl from the URL once (URL never changes) --- */
+    char host[256] = {0};
+    int  port = 80;
+    int  use_ssl = 0;
+    {
         const char *url = mcb.ubersdr_url;
         if (strncmp(url, "https://", 8) == 0) {
             use_ssl = 1;
@@ -639,7 +964,6 @@ void *ws_thread(void *arg)
             url += 5;
         }
 
-        /* Extract host and optional port from "host[:port][/...]" */
         const char *slash = strchr(url, '/');
         const char *colon = strchr(url, ':');
         if (slash && colon && colon < slash) {
@@ -665,8 +989,52 @@ void *ws_thread(void *arg)
             memcpy(host, url, ulen);
             host[ulen] = '\0';
         }
+    }
 
-        /* --- Step 3: build the WebSocket path with query string --- */
+    /* --- Create the lws context once for the lifetime of this thread.
+     * Serialise with lws_ctx_create_mutex to prevent concurrent
+     * OPENSSL_init_ssl() calls from racing on the one-time init flag. --- */
+    struct lws_context_creation_info ctx_info = {0};
+    ctx_info.port      = CONTEXT_PORT_NO_LISTEN;
+    ctx_info.protocols = ws_protocols;
+    ctx_info.options   = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
+
+    pthread_mutex_lock(&lws_ctx_create_mutex);
+    struct lws_context *ctx = lws_create_context(&ctx_info);
+    pthread_mutex_unlock(&lws_ctx_create_mutex);
+
+    if (!ctx) {
+        t_print("ws_thread(%d): lws_create_context failed\n", rcb->rcvr_num);
+        ZSTD_freeDCtx(rcb->zstd_dctx);
+        rcb->zstd_dctx = NULL;
+        pthread_exit(NULL);
+    }
+
+    while (!do_exit) {
+        /* Wait until this DDC is enabled */
+        if (!ddcenable[rcb->rcvr_num]) {
+            usleep(50000);
+            continue;
+        }
+
+        rcb->reconnect_needed = 0;
+        rcb->wsi_closed       = 0;
+
+        /*
+         * mcb.ubersdr_url is an HTTP base URL, e.g. "http://host:8080"
+         * or "https://host:8443".  We:
+         *   1. POST to /connection to get permission
+         *   2. Connect via WebSocket on the same host
+         */
+
+        /* --- Step 1: connection permission check --- */
+        if (!check_ubersdr_connection_rcb(mcb.ubersdr_url, rcb)) {
+            t_print("ws_thread(%d): connection not allowed, retrying in 5s\n", rcb->rcvr_num);
+            sleep(5);
+            continue;
+        }
+
+        /* --- Step 2: build the WebSocket path with query string --- */
         char full_path[512];
         {
             int rate_khz = rcb->output_rate / 1000;
@@ -683,21 +1051,9 @@ void *ws_thread(void *arg)
             }
         }
 
-        /* Set up lws context */
-        struct lws_context_creation_info ctx_info = {0};
-        ctx_info.port      = CONTEXT_PORT_NO_LISTEN;
-        ctx_info.protocols = ws_protocols;
-        ctx_info.options   = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
-        ctx_info.user      = rcb;   /* accessible via lws_context_user() */
-
-        struct lws_context *ctx = lws_create_context(&ctx_info);
-        if (!ctx) {
-            t_print("ws_thread(%d): lws_create_context failed\n", rcb->rcvr_num);
-            sleep(2);
-            continue;
-        }
-
-        /* Connect — rcb is accessible via lws_context_user() in the callback */
+        /* --- Step 3: connect via WebSocket.
+         * Pass rcb as ci.userdata so the callback can retrieve it via
+         * lws_wsi_user() without needing the context user pointer. --- */
         struct lws_client_connect_info ci = {0};
         ci.context        = ctx;
         ci.address        = host;
@@ -706,27 +1062,40 @@ void *ws_thread(void *arg)
         ci.host           = host;
         ci.origin         = host;
         ci.protocol       = ws_protocols[0].name;
-        ci.ssl_connection = use_ssl ? LCCSCF_USE_SSL : 0;
+        ci.userdata       = rcb;
+        ci.ssl_connection = use_ssl ? (LCCSCF_USE_SSL |
+                                       LCCSCF_ALLOW_SELFSIGNED |
+                                       LCCSCF_SKIP_SERVER_CERT_HOSTNAME_CHECK) : 0;
 
         struct lws *wsi = lws_client_connect_via_info(&ci);
         if (!wsi) {
             t_print("ws_thread(%d): lws_client_connect_via_info failed\n", rcb->rcvr_num);
-            lws_context_destroy(ctx);
             sleep(2);
             continue;
         }
 
-        /* Service loop — exits on shutdown, reconnect request, or DDC disable */
-        while (!do_exit && !rcb->reconnect_needed && ddcenable[rcb->rcvr_num]) {
+        /* Service loop — exits on shutdown, reconnect request, or DDC disable.
+         * Only this thread calls lws_service() on ctx — lws is not thread-safe
+         * for concurrent service on the same context. */
+        while (!do_exit && ddcenable[rcb->rcvr_num]) {
             /* If a new_freq is pending, request writeable callback */
             if (rcb->new_freq != 0)
                 lws_callback_on_writable(wsi);
 
             int rc = lws_service(ctx, 50 /* ms timeout */);
             if (rc < 0) break;
+
+            /* Once the wsi is closed we can safely reconnect */
+            if (rcb->wsi_closed) break;
         }
 
-        lws_context_destroy(ctx);
+        /* If we need to reconnect, drain the context until the wsi is
+         * fully closed before issuing a new connect on the same context. */
+        if (!do_exit && rcb->reconnect_needed && !rcb->wsi_closed) {
+            while (!rcb->wsi_closed && !do_exit) {
+                lws_service(ctx, 50);
+            }
+        }
 
         if (!do_exit && !ddcenable[rcb->rcvr_num] && !rcb->reconnect_needed) {
             t_print("ws_thread(%d): DDC disabled, disconnecting\n", rcb->rcvr_num);
@@ -736,6 +1105,7 @@ void *ws_thread(void *arg)
         }
     }
 
+    lws_context_destroy(ctx);
     ZSTD_freeDCtx(rcb->zstd_dctx);
     rcb->zstd_dctx = NULL;
     t_print("ws_thread(%d): exiting\n", rcb->rcvr_num);
@@ -746,7 +1116,6 @@ int find_net(char *find)
 {
     DIR* dir;
     struct dirent* ent;
-    char* endptr;
 
     if (!(dir = opendir("/sys/class/net"))) {
         perror("can't open /sys/class/net");
@@ -757,12 +1126,11 @@ int find_net(char *find)
         if (!strcmp("print", find) && strcmp(".", ent->d_name) && strcmp("..", ent->d_name)) {
             printf("%s ", ent->d_name);
         } else if (!strcmp(ent->d_name, find)) {
+            closedir(dir);
             return 1;
         }
-        if (*endptr != '\0') {
-            continue;
-        }
     }
+    closedir(dir);
     return 0;
 }
 
@@ -834,6 +1202,10 @@ int main (int argc, char *argv[])
     mcb.device_type = HERMES_LITE;
     strcpy(mcb.ubersdr_url, "http://localhost:8080");
 
+    /* --callsign / --discover state */
+    const char *callsign_arg = NULL;
+    int do_discover = 0;
+
     static struct option long_options[] = {
         {"url",        required_argument, 0, 'u'},
         {"password",   required_argument, 0, 'p'},
@@ -841,18 +1213,22 @@ int main (int argc, char *argv[])
         {"receivers",  required_argument, 0, 'n'},
         {"device",     required_argument, 0, 'd'},
         {"wideband",   no_argument,       0, 'w'},
+        {"discover",   no_argument,       0, 'D'},
+        {"callsign",   required_argument, 0, 'c'},
         {"help",       no_argument,       0, 'h'},
         {0, 0, 0, 0}
     };
 
     int opt_index = 0;
-    while((CmdOption = getopt_long(argc, argv, "u:p:i:n:d:wh", long_options, &opt_index)) != -1) {
+    while((CmdOption = getopt_long(argc, argv, "u:p:i:n:d:wDc:h", long_options, &opt_index)) != -1) {
         switch(CmdOption) {
         case 'h':
             printf("Usage: %s [options]\n\n", basename(argv[0]));
             printf("UberSDR Connection Options:\n");
             printf("  --url URL          UberSDR server URL (default http://localhost:8080)\n");
             printf("  --password PASS    UberSDR server password (optional)\n");
+            printf("  --discover         Fetch public instances and pick one interactively\n");
+            printf("  --callsign CALL    Select a public instance by callsign (implies --discover)\n");
             printf("\n");
             printf("HPSDR Emulation Options:\n");
             printf("  --interface IFACE  Network interface to bind to (auto-detected if omitted)\n");
@@ -864,6 +1240,8 @@ int main (int argc, char *argv[])
             printf("  %s --url http://localhost:8080 --interface eth0\n", basename(argv[0]));
             printf("  %s --url https://sdr.example.com --password mypass --interface eth0\n", basename(argv[0]));
             printf("  %s --url http://localhost:8080 --device 1 --receivers 4 --interface eth0\n", basename(argv[0]));
+            printf("  %s --discover --interface eth0\n", basename(argv[0]));
+            printf("  %s --callsign K3GMQ --interface eth0\n", basename(argv[0]));
             return EXIT_SUCCESS;
             break;
 
@@ -885,6 +1263,20 @@ int main (int argc, char *argv[])
         case 'w':
             mcb.wideband = 1;
             break;
+        case 'D':
+            do_discover = 1;
+            break;
+        case 'c':
+            callsign_arg = optarg;
+            do_discover = 1;
+            break;
+        }
+    }
+
+    /* Run discovery (interactive or auto-select by callsign) */
+    if (do_discover) {
+        if (!discover_instances(mcb.ubersdr_url, sizeof(mcb.ubersdr_url), callsign_arg)) {
+            return EXIT_FAILURE;
         }
     }
     printf("\n");

@@ -51,6 +51,7 @@
 #include <dirent.h>
 #include <ifaddrs.h>
 #include <getopt.h>
+#include <ctype.h>
 
 #include <uuid/uuid.h>
 #include <zstd.h>
@@ -97,7 +98,8 @@ struct main_cb {
         int output_rate;
         u_int rcvr_mask;
         float scale;
-        int reconnect_needed;   /* set by ddc_specific_thread on rate change */
+        int reconnect_needed;   /* set by ws_callback on rate change / error */
+        int wsi_closed;         /* set by ws_callback when wsi is fully closed */
         struct main_cb* mcb;
 
         char session_id[37];    /* UUID v4 string */

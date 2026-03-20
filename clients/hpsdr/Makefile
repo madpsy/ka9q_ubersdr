@@ -4,6 +4,7 @@ CC = gcc
 CFLAGS = -std=gnu11 -Wall -O3 -D_GNU_SOURCE=1
 
 LIBS = -lrt -lm -lpthread -lbsd -lwebsockets -lzstd -luuid
+LDFLAGS =
 
 TARGET = ubersdr-hpsdr-bridge
 
@@ -23,7 +24,7 @@ $(DEPENDDIR)/%.d: %.c $(DEPENDDIR)
 	$(CC) $(CFLAGS) $(DEPENDFLAGS) $< >$@
 
 $(TARGET): $(OBJS)
-	$(CC) $(OBJS) $(LIBS) -o $(TARGET)
+	$(CC) $(OBJS) $(LDFLAGS) $(LIBS) -o $(TARGET)
 
 install: $(TARGET)
 	install -m 755 $(TARGET) $(PREFIX)/bin/

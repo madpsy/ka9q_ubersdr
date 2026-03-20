@@ -8,16 +8,20 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import requests
 import threading
+import uuid as uuid_module
 import webbrowser
 
 
-def create_public_instances_window(parent, on_connect_callback, local_uuids=None):
+def create_public_instances_window(parent, on_connect_callback, local_uuids=None,
+                                   instance_passwords=None, on_password_save=None):
     """Create a window showing public UberSDR instances.
 
     Args:
         parent: Parent tkinter window
-        on_connect_callback: Callback function(host, port, tls, name) to call when connecting
+        on_connect_callback: Callback function(host, port, tls, name, uuid=None) to call when connecting
         local_uuids: Optional set of UUIDs from local instances to highlight
+        instance_passwords: Optional dict of {uuid: password} for saved bypass passwords
+        on_password_save: Optional callback(uuid, password_or_none) called when a password is saved/cleared
 
     Returns:
         The created window
@@ -27,10 +31,16 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
         local_uuids = set()
     elif not isinstance(local_uuids, set):
         local_uuids = set(local_uuids)
+
+    # Mutable copy of instance passwords so we can update it locally
+    if instance_passwords is None:
+        instance_passwords = {}
+    else:
+        instance_passwords = dict(instance_passwords)
     # Create new window
     window = tk.Toplevel(parent)
-    window.title("Public UberSDR Instances")
-    window.geometry("1040x650")
+    window.title("Instance Directory")
+    window.geometry("1140x650")
 
     # Main frame with padding
     main_frame = ttk.Frame(window, padding="10")
@@ -112,10 +122,11 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
     status_label.pack(pady=(0, 10))
 
     # Create Treeview for instances list
-    columns = ('name', 'callsign', 'location', 'users', 'session', 'cw', 'digi', 'noise', 'iq', 'version', 'url', 'map')
+    columns = ('name', 'callsign', 'location', 'users', 'session', 'cw', 'digi', 'noise', 'iq', 'version', 'url', 'map', 'password')
     tree = ttk.Treeview(main_frame, columns=columns, show='headings', height=15)
 
     # Track sort state for each column (column_name: reverse_bool)
+    # 'password' and action columns are not sortable
     sort_state = {col: False for col in columns}
 
     def sort_column(col):
@@ -212,6 +223,7 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
     tree.heading('version', text='Version', command=lambda: sort_column('version'))
     tree.heading('url', text='Public URL')  # No sorting for action column
     tree.heading('map', text='Map')  # No sorting for action column
+    tree.heading('password', text='Password')  # No sorting for action column
 
     # Define column widths
     tree.column('name', width=180)
@@ -226,6 +238,7 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
     tree.column('version', width=80)
     tree.column('url', width=100)
     tree.column('map', width=80)
+    tree.column('password', width=90)
 
     # Add scrollbar
     scrollbar = ttk.Scrollbar(main_frame, orient=tk.VERTICAL, command=tree.yview)
@@ -241,6 +254,148 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
     # Store instance data for later use
     instances_data = {}
     all_instances = []  # Store all fetched instances for filtering
+
+    def get_password_display(uuid):
+        """Return display text for the password column."""
+        if uuid and instance_passwords.get(uuid):
+            return '🔑 ••••'
+        return '🔑 —'
+
+    def edit_password_for_item(item_id):
+        """Open a modal dialog to set/clear the bypass password, testing it first."""
+        instance = instances_data.get(item_id)
+        if not instance:
+            return
+        inst_uuid = instance.get('id', '')
+        if not inst_uuid:
+            messagebox.showinfo("Not Available", "This instance does not have a UUID and cannot have a password saved.")
+            return
+
+        callsign = instance.get('callsign', '') or instance.get('name', 'Unknown')
+        host = instance.get('host', '')
+        port = instance.get('port', 0)
+        tls = instance.get('tls', False)
+        current_pw = instance_passwords.get(inst_uuid, '')
+
+        # Build the /connection URL for this instance
+        protocol = 'https' if tls else 'http'
+        connection_url = f"{protocol}://{host}:{port}/connection"
+
+        # ── Modal dialog ──────────────────────────────────────────────────────
+        dialog = tk.Toplevel(window)
+        dialog.title("Bypass Password")
+        dialog.geometry("380x220")
+        dialog.resizable(False, False)
+        dialog.transient(window)
+
+        # Centre over parent and ensure window is visible before grab_set()
+        dialog.update_idletasks()
+        px = window.winfo_rootx() + (window.winfo_width() - dialog.winfo_width()) // 2
+        py = window.winfo_rooty() + (window.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f"+{px}+{py}")
+        dialog.deiconify()
+        dialog.update_idletasks()
+        dialog.grab_set()
+
+        frame = ttk.Frame(dialog, padding=15)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(frame, text=f"Bypass password for: {callsign}",
+                  font=('TkDefaultFont', 10, 'bold')).pack(anchor=tk.W, pady=(0, 8))
+
+        pw_var = tk.StringVar(value=current_pw)
+        pw_entry = ttk.Entry(frame, textvariable=pw_var, show='*', width=36)
+        pw_entry.pack(fill=tk.X, pady=(0, 6))
+        pw_entry.focus_set()
+        pw_entry.select_range(0, tk.END)
+
+        status_label = ttk.Label(frame, text='', foreground='gray', wraplength=340)
+        status_label.pack(anchor=tk.W, pady=(0, 8))
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill=tk.X)
+
+        def do_test_and_save():
+            """POST to /connection with the entered password; save only if bypassed."""
+            pw = pw_var.get().strip()
+            if not pw:
+                # Empty → clear saved password
+                instance_passwords.pop(inst_uuid, None)
+                if on_password_save:
+                    on_password_save(inst_uuid, None)
+                tree.set(item_id, 'password', get_password_display(inst_uuid))
+                dialog.destroy()
+                return
+
+            apply_btn.config(state='disabled', text='Checking…')
+            status_label.config(text='Testing password against server…', foreground='gray')
+            dialog.update_idletasks()
+
+            def check_in_thread():
+                try:
+                    resp = requests.post(
+                        connection_url,
+                        json={
+                            'user_session_id': str(uuid_module.uuid4()),
+                            'password': pw
+                        },
+                        headers={'Content-Type': 'application/json'},
+                        timeout=8,
+                        verify=False
+                    )
+                    data = resp.json()
+                    accepted = resp.status_code == 200 and data.get('bypassed', False)
+                    wrong_pw = resp.status_code == 403
+                except Exception as e:
+                    accepted = False
+                    wrong_pw = False
+                    data = {}
+
+                def update_ui():
+                    apply_btn.config(state='normal', text='Apply')
+                    if accepted:
+                        instance_passwords[inst_uuid] = pw
+                        if on_password_save:
+                            on_password_save(inst_uuid, pw)
+                        tree.set(item_id, 'password', get_password_display(inst_uuid))
+                        status_label.config(text='✅ Password accepted and saved.', foreground='green')
+                        dialog.after(1200, dialog.destroy)
+                    elif wrong_pw:
+                        status_label.config(text='❌ Invalid password — not saved.', foreground='red')
+                        pw_entry.focus_set()
+                        pw_entry.select_range(0, tk.END)
+                    else:
+                        # Server allowed connection but didn't bypass — password is wrong
+                        # (or server has no bypass_password configured)
+                        status_label.config(
+                            text='❌ Password not accepted (server did not grant bypass).',
+                            foreground='red'
+                        )
+                        pw_entry.focus_set()
+                        pw_entry.select_range(0, tk.END)
+
+                dialog.after(0, update_ui)
+
+            threading.Thread(target=check_in_thread, daemon=True).start()
+
+        def do_clear():
+            instance_passwords.pop(inst_uuid, None)
+            if on_password_save:
+                on_password_save(inst_uuid, None)
+            tree.set(item_id, 'password', get_password_display(inst_uuid))
+            dialog.destroy()
+
+        apply_btn = ttk.Button(btn_frame, text='Apply', command=do_test_and_save)
+        apply_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+        ttk.Button(btn_frame, text='Clear Saved', command=do_clear).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(btn_frame, text='Cancel', command=dialog.destroy).pack(side=tk.LEFT)
+
+        # Allow Enter key to submit
+        pw_entry.bind('<Return>', lambda e: do_test_and_save())
+        pw_entry.bind('<KP_Enter>', lambda e: do_test_and_save())
+
+        dialog.wait_window()
 
     def connect_to_instance():
         """Connect to the selected public instance."""
@@ -261,6 +416,7 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
         port = instance.get('instance', {}).get('port', 0)
         tls = instance.get('instance', {}).get('tls', False)
         name = instance.get('name', 'Unknown')
+        uuid = instance.get('id', '')
 
         if not host or not port:
             messagebox.showerror("Error", "Instance does not provide connection information")
@@ -269,8 +425,8 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
         # Close the window
         window.destroy()
 
-        # Call the callback to connect
-        on_connect_callback(host, port, tls, name)
+        # Call the callback to connect (pass uuid so GUI can look up saved password)
+        on_connect_callback(host, port, tls, name, uuid=uuid)
 
     def open_instance_conditions(uuid):
         """Open instance map page in browser."""
@@ -281,38 +437,32 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
     def on_tree_click(event):
         """Handle single-click on tree items to open links."""
         region = tree.identify_region(event.x, event.y)
-        print(f"DEBUG on_tree_click: region={region}")
         if region == "cell":
             column = tree.identify_column(event.x)
             item = tree.identify_row(event.y)
-            print(f"DEBUG on_tree_click: column={column}, item={item}")
 
             if not item:
-                print(f"DEBUG on_tree_click: no item, returning")
                 return
 
             instance = instances_data.get(item)
             if not instance:
-                print(f"DEBUG on_tree_click: no instance data, returning")
                 return
-
-            print(f"DEBUG on_tree_click: instance keys={list(instance.keys())}")
 
             # Column #11 is Public URL
             if column == '#11':
                 url = instance.get('public_url', '')
-                print(f"DEBUG on_tree_click: Column #11 clicked, url={url}")
                 if url:
                     webbrowser.open(url)
 
             # Column #12 is Map/Conditions
             elif column == '#12':
                 uuid = instance.get('id', '')
-                print(f"DEBUG on_tree_click: Column #12 clicked, uuid={uuid}")
                 if uuid:
                     open_instance_conditions(uuid)
-            else:
-                print(f"DEBUG on_tree_click: Other column clicked: {column}")
+
+            # Column #13 is Password
+            elif column == '#13':
+                edit_password_for_item(item)
 
     def on_tree_double_click(event):
         """Handle double-click on tree items to connect."""
@@ -437,12 +587,15 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
             uuid = instance.get('id', '')
             map_text = '🗺️ Map' if uuid else ''
 
+            # Password column
+            password_text = get_password_display(uuid)
+
             # Determine tags based on whether this is a local instance
             is_local = uuid in local_uuids
             tags = ('local_link',) if is_local else ('link',)
 
             # Insert into tree
-            item_id = tree.insert('', tk.END, values=(name, callsign, location, users_text, session_text, cw_text, digi_text, noise_text, iq_text, version, url_text, map_text), tags=tags)
+            item_id = tree.insert('', tk.END, values=(name, callsign, location, users_text, session_text, cw_text, digi_text, noise_text, iq_text, version, url_text, map_text, password_text), tags=tags)
 
             # Store the first item ID
             if first_item_id is None:

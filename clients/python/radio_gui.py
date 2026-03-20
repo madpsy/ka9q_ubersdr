@@ -302,6 +302,8 @@ class RadioGUI:
 
         # Server configurations storage
         self.servers = []  # List of saved server configurations
+        self.instance_passwords = {}  # Per-instance bypass passwords keyed by UUID
+        self.current_instance_uuid = None  # UUID of the instance we're currently connecting to
         self.config_file = self._get_config_file_path()
         self.load_servers()
 
@@ -516,6 +518,9 @@ class RadioGUI:
                 data = json.load(f)
                 self.servers = data.get('servers', [])
 
+                # Load per-instance bypass passwords (keyed by UUID)
+                self.instance_passwords = data.get('instance_passwords', {})
+
                 # Load audio settings if they exist
                 audio_settings = data.get('audio_settings', {})
                 if audio_settings:
@@ -534,6 +539,7 @@ class RadioGUI:
         except Exception as e:
             print(f"Failed to load server configurations: {e}")
             self.servers = []
+            self.instance_passwords = {}
             self._saved_audio_settings = {}
             self._saved_radio_control_settings = {}
 
@@ -573,6 +579,7 @@ class RadioGUI:
 
             data = {
                 'servers': self.servers,
+                'instance_passwords': getattr(self, 'instance_passwords', {}),
                 'audio_settings': audio_settings,
                 'radio_control_settings': radio_control_settings
             }
@@ -794,7 +801,7 @@ class RadioGUI:
             messagebox.showerror("Error", "Public instances display not available")
             return
 
-        def on_connect(host, port, tls, name, callsign=None):
+        def on_connect(host, port, tls, name, callsign=None, uuid=None):
             """Callback when user selects an instance to connect to."""
             # Disconnect from current server if connected
             if self.connected:
@@ -805,6 +812,16 @@ class RadioGUI:
             self.server_var.set(host)
             self.port_var.set(str(port))
             self.tls_var.set(tls)
+
+            # Remember the UUID so the rejection dialog can offer "Clear Saved Password"
+            self.current_instance_uuid = uuid
+
+            # If a bypass password is saved for this instance UUID, pre-load it
+            if uuid:
+                saved_pw = self.instance_passwords.get(uuid)
+                if saved_pw:
+                    self.config['password'] = saved_pw
+                    self.log_status(f"Using saved bypass password for {name}")
 
             # Close both public and local instances windows
             if self.public_instances_window and self.public_instances_window.winfo_exists():
@@ -819,10 +836,22 @@ class RadioGUI:
             self.log_status(f"Connecting to public instance: {name}")
             self.connect()
 
+        def on_password_save(uuid, password_or_none):
+            """Callback when user saves/clears a bypass password for an instance."""
+            if password_or_none:
+                self.instance_passwords[uuid] = password_or_none
+            else:
+                self.instance_passwords.pop(uuid, None)
+            self.save_servers()
+
         # Collect UUIDs from local instances
         local_uuids = self._get_local_uuids()
 
-        self.public_instances_window = create_public_instances_window(self.root, on_connect, local_uuids)
+        self.public_instances_window = create_public_instances_window(
+            self.root, on_connect, local_uuids,
+            instance_passwords=self.instance_passwords,
+            on_password_save=on_password_save
+        )
 
     def _get_local_uuids(self):
         """Get UUIDs from discovered local instances.
@@ -7480,18 +7509,68 @@ class RadioGUI:
                 self.client.connection_rejected = False  # Reset flag
                 reason = getattr(self.client, 'rejection_reason', 'Connection not allowed')
 
-                # Prompt user for bypass password
-                password = simpledialog.askstring(
-                    "Connection Rejected",
-                    f"{reason}\n\nEnter bypass password (or Cancel to abort):",
-                    show='*'
-                )
+                # Build a modal dialog with optional "Clear Saved Password" button
+                result = {'action': None, 'password': None}
 
-                if password:
+                dialog = tk.Toplevel(self.root)
+                dialog.title("Connection Rejected")
+                dialog.resizable(False, False)
+                dialog.transient(self.root)
+
+                frame = ttk.Frame(dialog, padding=15)
+                frame.pack(fill=tk.BOTH, expand=True)
+
+                ttk.Label(frame, text=reason, wraplength=340,
+                          foreground='red').pack(anchor=tk.W, pady=(0, 10))
+                ttk.Label(frame, text="Enter bypass password to retry, or cancel:").pack(anchor=tk.W, pady=(0, 4))
+
+                pw_var = tk.StringVar()
+                pw_entry = ttk.Entry(frame, textvariable=pw_var, show='*', width=36)
+                pw_entry.pack(fill=tk.X, pady=(0, 10))
+
+                btn_frame = ttk.Frame(frame)
+                btn_frame.pack(fill=tk.X)
+
+                def do_retry():
+                    result['action'] = 'retry'
+                    result['password'] = pw_var.get().strip()
+                    dialog.destroy()
+
+                def do_cancel():
+                    result['action'] = 'cancel'
+                    dialog.destroy()
+
+                def do_clear():
+                    result['action'] = 'clear'
+                    dialog.destroy()
+
+                ttk.Button(btn_frame, text='Retry', command=do_retry).pack(side=tk.LEFT, padx=(0, 5))
+                ttk.Button(btn_frame, text='Cancel', command=do_cancel).pack(side=tk.LEFT, padx=(0, 5))
+
+                # Only show "Clear Saved Password" if there's actually a saved password for this instance
+                inst_uuid = self.current_instance_uuid
+                if inst_uuid and self.instance_passwords.get(inst_uuid):
+                    ttk.Button(btn_frame, text='Clear Saved Password', command=do_clear).pack(side=tk.LEFT)
+
+                pw_entry.bind('<Return>', lambda e: do_retry())
+                pw_entry.bind('<KP_Enter>', lambda e: do_retry())
+
+                # Position and show
+                dialog.update_idletasks()
+                px = self.root.winfo_rootx() + (self.root.winfo_width() - dialog.winfo_width()) // 2
+                py = self.root.winfo_rooty() + (self.root.winfo_height() - dialog.winfo_height()) // 2
+                dialog.geometry(f"+{px}+{py}")
+                dialog.deiconify()
+                dialog.update_idletasks()
+                dialog.grab_set()
+                pw_entry.focus_set()
+                dialog.wait_window()
+
+                if result['action'] == 'retry' and result['password']:
                     # User provided password - retry connection
                     self.log_status("Retrying connection with bypass password...")
-                    self.client.password = password
-                    self.config['password'] = password  # Store for future use
+                    self.client.password = result['password']
+                    self.config['password'] = result['password']
 
                     # Reset client state and retry
                     self.client.running = True
@@ -7500,6 +7579,20 @@ class RadioGUI:
                     # Restart client thread
                     self.client_thread = threading.Thread(target=self.run_client, daemon=True)
                     self.client_thread.start()
+
+                elif result['action'] == 'clear' and inst_uuid:
+                    # Clear the saved password and abort this connection attempt
+                    self.instance_passwords.pop(inst_uuid, None)
+                    if 'password' in self.config:
+                        del self.config['password']
+                    self.save_servers()
+                    self.log_status("Saved bypass password cleared")
+                    self.connected = False
+                    self.connecting = False
+                    self.connect_btn.config(text="Connect", state='normal')
+                    self.cancel_btn.grid_remove()
+                    self.apply_freq_btn.state(['disabled'])
+
                 else:
                     # User cancelled - stop connection attempt
                     self.log_status("Connection cancelled by user")

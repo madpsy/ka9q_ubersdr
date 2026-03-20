@@ -1819,6 +1819,12 @@ class RadioClient:
                 ) as response:
                     data = await response.json()
 
+                    # 403 means the password was explicitly wrong
+                    if response.status == 403:
+                        reason = data.get('reason', 'Invalid bypass password')
+                        self._log(f"Connection rejected (invalid password): {reason}")
+                        return False, reason
+
                     if not data.get('allowed', False):
                         reason = data.get('reason', 'Unknown reason')
                         self._log(f"Connection rejected: {reason}")

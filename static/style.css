@@ -321,7 +321,15 @@
 
 .password-key-button {
     padding: 12px 16px;
-    font-size: 1.2em;
+    font-size: 1em;
+    line-height: normal;
+}
+
+.password-key-button span {
+    font-size: 1em;
+    line-height: 1;
+    display: inline-block;
+    vertical-align: middle;
 }
 
 body {

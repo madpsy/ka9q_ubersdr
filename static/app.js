@@ -1408,8 +1408,8 @@ async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, origin
             }
         } else {
             // Connection allowed
-            // If password was used, store it for WebSocket connections
-            if (password) {
+            // If password was used AND the server confirmed bypass, store it for WebSocket connections
+            if (password && checkData.bypassed) {
                 bypassPassword = password;
                 window.bypassPassword = password;
                 log('Bypass password accepted');
@@ -1433,6 +1433,26 @@ async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, origin
                     setTimeout(() => {
                         window.spectrumDisplay.connect();
                     }, 100);
+                }
+
+                // Reconnect audio WebSocket with password if already connected
+                // Use soft close (just the WS, not the audio pipeline) so audio context is preserved
+                if (wsManager.isConnected()) {
+                    log('Reconnecting audio WebSocket with bypass password');
+                    // Close just the WebSocket without destroying the audio context
+                    if (wsManager.ws) {
+                        wsManager.ws.close();
+                        wsManager.ws = null;
+                        window.ws = null;
+                    }
+                    wsManager.userDisconnected = false;
+                    if (wsManager.reconnectTimer) {
+                        clearTimeout(wsManager.reconnectTimer);
+                        wsManager.reconnectTimer = null;
+                    }
+                    setTimeout(() => {
+                        connect();
+                    }, 200);
                 }
             }
 

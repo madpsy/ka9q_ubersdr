@@ -907,8 +907,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Keep the callsign element in the DOM so it can be populated later
         audioStartButton.innerHTML = '<span id="receiver-callsign" class="receiver-callsign"></span><span>Please wait...</span>';
 
-        // Check if connection will be allowed
-        checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML);
+        // Check if connection will be allowed (pass saved bypass password if any)
+        checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML, bypassPassword || undefined);
 
         const startAudio = async () => {
             // Hide overlay

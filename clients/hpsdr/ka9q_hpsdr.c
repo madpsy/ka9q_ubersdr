@@ -240,7 +240,7 @@ static bool check_ubersdr_connection_rcb(const char *base_url, struct rcvr_cb *r
 
     char cmd[2048];
     snprintf(cmd, sizeof(cmd),
-             "curl -s --max-time 10 -A 'UberSDR_HPSDR/1.0' "
+             "curl -s --max-time 3 -A 'UberSDR_HPSDR/1.0' "
              "-X POST -H 'Content-Type: application/json' "
              "-d '%s' '%s' 2>/dev/null",
              json_body, http_url);
@@ -934,6 +934,7 @@ void *ws_thread(void *arg)
     rcb->last_sample_rate = 0;
     rcb->last_channels    = 0;
     rcb->wsi_closed       = 0;
+    int ever_connected = 0; /* skip /connection check on rate-change reconnects */
 
     /* Allocate a ZSTD decompression context for this receiver */
     rcb->zstd_dctx = ZSTD_createDCtx();
@@ -1017,8 +1018,13 @@ void *ws_thread(void *arg)
             continue;
         }
 
-        rcb->reconnect_needed = 0;
-        rcb->wsi_closed       = 0;
+        /*
+         * Do NOT clear reconnect_needed here — it may have been set by
+         * ddc_specific_thread() while we were sleeping/retrying.  The new
+         * output_rate is already written before reconnect_needed is set, so
+         * we just need to carry it through to the URL build below.
+         */
+        rcb->wsi_closed = 0;
 
         /*
          * mcb.ubersdr_url is an HTTP base URL, e.g. "http://host:8080"
@@ -1027,11 +1033,23 @@ void *ws_thread(void *arg)
          *   2. Connect via WebSocket on the same host
          */
 
-        /* --- Step 1: connection permission check --- */
-        if (!check_ubersdr_connection_rcb(mcb.ubersdr_url, rcb)) {
-            t_print("ws_thread(%d): connection not allowed, retrying in 5s\n", rcb->rcvr_num);
-            sleep(5);
-            continue;
+        t_print("ws_thread(%d): outer loop top: ever_connected=%d reconnect_needed=%d rate=%d\n",
+                rcb->rcvr_num, ever_connected, rcb->reconnect_needed, rcb->output_rate / 1000);
+
+        /* --- Step 1: connection permission check ---
+         * Skip on rate-change reconnects — we were already allowed.
+         * Only check on the very first connect attempt. */
+        if (!ever_connected) {
+            t_print("ws_thread(%d): checking connection permission\n", rcb->rcvr_num);
+            if (!check_ubersdr_connection_rcb(mcb.ubersdr_url, rcb)) {
+                t_print("ws_thread(%d): connection not allowed, retrying in 5s\n", rcb->rcvr_num);
+                /* Sleep in short increments so a rate change wakes us promptly */
+                for (int s = 0; s < 50 && !do_exit && !rcb->reconnect_needed; s++)
+                    usleep(100000); /* 100 ms × 50 = 5 s max */
+                continue;
+            }
+        } else {
+            t_print("ws_thread(%d): skipping connection check (ever_connected)\n", rcb->rcvr_num);
         }
 
         /* --- Step 2: build the WebSocket path with query string --- */
@@ -1067,12 +1085,18 @@ void *ws_thread(void *arg)
                                        LCCSCF_ALLOW_SELFSIGNED |
                                        LCCSCF_SKIP_SERVER_CERT_HOSTNAME_CHECK) : 0;
 
+        t_print("ws_thread(%d): calling lws_client_connect_via_info (rate=%d kHz, path=%s)\n",
+                rcb->rcvr_num, rcb->output_rate / 1000, full_path);
         struct lws *wsi = lws_client_connect_via_info(&ci);
         if (!wsi) {
             t_print("ws_thread(%d): lws_client_connect_via_info failed\n", rcb->rcvr_num);
             sleep(2);
             continue;
         }
+        t_print("ws_thread(%d): lws_client_connect_via_info succeeded\n", rcb->rcvr_num);
+
+        ever_connected = 1;
+        t_print("ws_thread(%d): entering service loop\n", rcb->rcvr_num);
 
         /* Service loop — exits on shutdown, reconnect request, or DDC disable.
          * Only this thread calls lws_service() on ctx — lws is not thread-safe
@@ -1083,25 +1107,60 @@ void *ws_thread(void *arg)
                 lws_callback_on_writable(wsi);
 
             int rc = lws_service(ctx, 50 /* ms timeout */);
-            if (rc < 0) break;
+            if (rc < 0) {
+                t_print("ws_thread(%d): lws_service returned %d, breaking\n", rcb->rcvr_num, rc);
+                break;
+            }
 
             /* Once the wsi is closed we can safely reconnect */
-            if (rcb->wsi_closed) break;
-        }
+            if (rcb->wsi_closed) {
+                t_print("ws_thread(%d): wsi_closed, breaking service loop\n", rcb->rcvr_num);
+                break;
+            }
 
-        /* If we need to reconnect, drain the context until the wsi is
-         * fully closed before issuing a new connect on the same context. */
-        if (!do_exit && rcb->reconnect_needed && !rcb->wsi_closed) {
-            while (!rcb->wsi_closed && !do_exit) {
-                lws_service(ctx, 50);
+            /* Rate change requires reconnect with new mode in URL */
+            if (rcb->reconnect_needed) {
+                t_print("ws_thread(%d): reconnect_needed=%d, breaking service loop (rate=%d kHz)\n",
+                        rcb->rcvr_num, rcb->reconnect_needed, rcb->output_rate / 1000);
+                break;
             }
         }
+
+        t_print("ws_thread(%d): exited service loop: do_exit=%d ddcenable=%d wsi_closed=%d reconnect_needed=%d\n",
+                rcb->rcvr_num, do_exit, ddcenable[rcb->rcvr_num],
+                rcb->wsi_closed, rcb->reconnect_needed);
+
+        /* If we need to reconnect, destroy and recreate the lws context so
+         * we don't have to wait for the old wsi to drain (which can take
+         * many seconds for TLS teardown).  Each thread owns its own context
+         * so this is safe. */
+        if (!do_exit && (rcb->reconnect_needed || !rcb->wsi_closed)) {
+            t_print("ws_thread(%d): destroying lws context for reconnect\n", rcb->rcvr_num);
+            lws_context_destroy(ctx);
+
+            pthread_mutex_lock(&lws_ctx_create_mutex);
+            ctx = lws_create_context(&ctx_info);
+            pthread_mutex_unlock(&lws_ctx_create_mutex);
+
+            if (!ctx) {
+                t_print("ws_thread(%d): lws_create_context failed on reconnect\n", rcb->rcvr_num);
+                break;
+            }
+            rcb->wsi_closed = 1; /* context is fresh, treat as closed */
+            t_print("ws_thread(%d): lws context recreated\n", rcb->rcvr_num);
+        }
+
+        t_print("ws_thread(%d): post-drain: ddcenable=%d reconnect_needed=%d do_exit=%d\n",
+                rcb->rcvr_num, ddcenable[rcb->rcvr_num], rcb->reconnect_needed, do_exit);
 
         if (!do_exit && !ddcenable[rcb->rcvr_num] && !rcb->reconnect_needed) {
             t_print("ws_thread(%d): DDC disabled, disconnecting\n", rcb->rcvr_num);
         } else if (!do_exit && rcb->reconnect_needed) {
-            t_print("ws_thread(%d): reconnecting in 1s\n", rcb->rcvr_num);
+            t_print("ws_thread(%d): reconnecting in 1s (rate=%d kHz)\n",
+                    rcb->rcvr_num, rcb->output_rate / 1000);
+            rcb->reconnect_needed = 0;
             sleep(1);
+            t_print("ws_thread(%d): sleep done, looping back\n", rcb->rcvr_num);
         }
     }
 
@@ -1514,6 +1573,7 @@ void t_print(const char *format, ...)
     //
     vsnprintf(line, 1024, format, args);
     printf("%10.6f %s", now - starttime, line);
+    fflush(stdout);
 }
 
 void t_perror(const char *string)

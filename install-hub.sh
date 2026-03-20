@@ -253,7 +253,7 @@ fi
 echo "Installing dependencies..."
 sudo apt update
 sudo apt -y upgrade
-sudo apt install -y cron ntpsec libfftw3-bin ssh tmux btop htop
+sudo apt install -y cron ntpsec libfftw3-bin libwebsockets19t64 ssh tmux btop htop
 
 # Disable IPv6 to prevent Docker NAT issues with client IP detection
 # When IPv6 clients connect to IPv4-only Docker containers, the kernel performs

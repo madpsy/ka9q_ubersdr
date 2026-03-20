@@ -1530,6 +1530,10 @@ window.submitBypassPassword = async function() {
                 <span>Click to Start</span>`;
 
     // Retry connection check with password
+    // Clear current bypass password before checking so we can detect if it was freshly granted
+    bypassPassword = null;
+    window.bypassPassword = null;
+
     try {
         await checkConnectionOnLoad(audioStartButton, document.getElementById('audio-start-overlay'), originalHTML, password);
 
@@ -1648,6 +1652,13 @@ window.submitPasswordModal = async function() {
                 <span>Click to Start</span>`;
 
     try {
+        // Save previous bypass password so we can restore it if the new one is rejected
+        const previousBypassPassword = bypassPassword;
+
+        // Clear current bypass password before checking so we can detect if it was freshly granted
+        bypassPassword = null;
+        window.bypassPassword = null;
+
         await checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML, password);
 
         if (bypassPassword === password) {
@@ -1662,8 +1673,11 @@ window.submitPasswordModal = async function() {
             const inlineInput = document.getElementById('bypass-password-input');
             if (inlineInput) inlineInput.value = password;
         } else {
-            // Rejected
-            localStorage.removeItem('ubersdr_bypass_password');
+            // Rejected — restore previous bypass password if there was one
+            if (previousBypassPassword) {
+                bypassPassword = previousBypassPassword;
+                window.bypassPassword = previousBypassPassword;
+            }
             if (status) {
                 status.textContent = '❌ Invalid password.';
                 status.style.color = '#dc3545';

@@ -1668,6 +1668,8 @@ void *highprio_thread(void *data)
     struct timeval tv;
     int i, rc, yes = 1;
     long freq;
+    struct timespec last_hp_time = {0};
+    clock_gettime(CLOCK_MONOTONIC, &last_hp_time);
 
     hp_sock = socket(AF_INET, SOCK_DGRAM, 0);
 
@@ -1704,8 +1706,28 @@ void *highprio_thread(void *data)
         }
 
         if (rc < 0) {
+            // EAGAIN timeout — check watchdog
+            if (running) {
+                struct timespec now;
+                clock_gettime(CLOCK_MONOTONIC, &now);
+                double elapsed = (now.tv_sec - last_hp_time.tv_sec) +
+                                 (now.tv_nsec - last_hp_time.tv_nsec) * 1e-9;
+                if (elapsed > 5.0) {
+                    t_print("HP: no high-priority packet for %.1fs, client disconnected\n", elapsed);
+                    running = 0;
+                    for (i = 0; i < mcb.num_rxs; i++) {
+                        ddcenable[i] = 0;
+                        mcb.rcb[i].rcvr_mask = 0;
+                        rxrate[i] = 0;
+                        rxfreq[i] = 0;
+                    }
+                }
+            }
             continue;
         }
+
+        // Successful receive — reset watchdog timer
+        clock_gettime(CLOCK_MONOTONIC, &last_hp_time);
 
         if (rc != 1444) {
             t_print("Received HighPrio packet with incorrect length %d\n", rc);

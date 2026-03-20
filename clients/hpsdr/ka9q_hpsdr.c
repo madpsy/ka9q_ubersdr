@@ -24,10 +24,23 @@
 */
 
 /*
- * This program simulates an HPSDR Hermes board with 8 receiver slices
- * using multicast data from ka9q-radio. Currently it expects ka9q-radio
- * to be setup and using an RX-888 (MkII) SDR but I've tested an RTL Blog V4
- * and it seems to work.
+ * This program simulates an HPSDR Hermes board with up to 10 DDC receiver
+ * slices, bridging HPSDR Protocol-2 clients (Thetis, piHPSDR, SparkSDR etc)
+ * to UberSDR (https://github.com/ka9q/ubersdr).
+ *
+ * This file has been heavily modified from its original form for use with
+ * UberSDR. It connects to the UberSDR WebSocket API using IQ mode
+ * (iq48/iq96/iq192) rather than consuming ka9q-radio multicast streams.
+ *
+ * Key modifications:
+ *   - WebSocket client using libwebsockets (one connection per DDC receiver)
+ *   - Dynamic IQ sample rate selection based on HPSDR client bandwidth request
+ *   - Reconnect logic: rate/mode changes trigger WebSocket disconnect+reconnect
+ *     with the new IQ mode baked into the URL
+ *   - lws context destroy/recreate on reconnect to avoid TLS teardown delays
+ *   - Client disconnect watchdog: if no high-priority packet is received for
+ *     5 seconds, streaming is stopped and DDC state is cleared
+ *   - zstd decompression of PCM frames received from UberSDR
  */
 
 #include "ka9q_hpsdr.h"

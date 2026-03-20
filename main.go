@@ -2106,6 +2106,16 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 	// Get client IP
 	clientIP := getClientIP(r)
 
+	// If a password was provided but doesn't match the configured bypass password, reject immediately
+	if req.Password != "" && sessions.config.Server.BypassPassword != "" && req.Password != sessions.config.Server.BypassPassword {
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(ConnectionCheckResponse{
+			Allowed: false,
+			Reason:  "Invalid bypass password",
+		})
+		return
+	}
+
 	// Check if this IP is bypassed (or valid password provided) - bypassed IPs skip rate limiting
 	isBypassed := sessions.config.Server.IsIPTimeoutBypassed(clientIP, req.Password)
 

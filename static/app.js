@@ -1367,6 +1367,15 @@ async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, origin
 
         const checkData = await checkResponse.json();
 
+        // 403 means the password was explicitly wrong — treat as invalid password
+        if (checkResponse.status === 403 && password) {
+            // Don't show the generic error UI for a bad password attempt from the modal
+            // Just return; the caller (submitPasswordModal / submitBypassPassword) will detect
+            // that bypassPassword was not set and show the appropriate error.
+            log('Bypass password rejected by server (403)', 'error');
+            return;
+        }
+
         if (!checkData.allowed) {
             // Check if this is a terminated session (410 Gone status)
             if (checkResponse.status === 410) {

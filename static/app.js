@@ -58,8 +58,12 @@ window.userSessionID = userSessionID;
 console.log('User session ID:', userSessionID);
 
 // Store bypass password globally (for WebSocket connections)
-let bypassPassword = null;
-window.bypassPassword = null;
+// Load from localStorage if previously saved
+let bypassPassword = localStorage.getItem('ubersdr_bypass_password') || null;
+window.bypassPassword = bypassPassword;
+if (bypassPassword) {
+    console.log('[Password] Loaded saved bypass password from localStorage');
+}
 
 // Initialize WebSocket Manager immediately after userSessionID is generated
 const wsManager = new WebSocketManager({
@@ -1512,6 +1516,7 @@ window.submitBypassPassword = async function() {
         // Check if connection was successful
         if (bypassPassword === password) {
             // Success - password was accepted
+            localStorage.setItem('ubersdr_bypass_password', password);
             log('Connection allowed with bypass password');
         } else {
             // Password was rejected
@@ -1535,7 +1540,7 @@ window.submitBypassPassword = async function() {
     }
 };
 
-// Add Enter key support for password input
+// Add Enter key support for password inputs
 document.addEventListener('DOMContentLoaded', () => {
     const passwordInput = document.getElementById('bypass-password-input');
     if (passwordInput) {
@@ -1546,7 +1551,131 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    const modalInput = document.getElementById('password-modal-input');
+    if (modalInput) {
+        modalInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submitPasswordModal();
+            }
+        });
+    }
 });
+
+// ============================================================================
+// Password Modal (🔑 button — always visible on overlay)
+// ============================================================================
+
+window.openPasswordModal = function() {
+    const modal = document.getElementById('password-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+
+    // Pre-fill with saved password if any
+    const input = document.getElementById('password-modal-input');
+    if (input) {
+        input.value = localStorage.getItem('ubersdr_bypass_password') || '';
+        input.focus();
+        input.select();
+    }
+
+    // Show current status
+    const status = document.getElementById('password-modal-status');
+    if (status) {
+        if (bypassPassword) {
+            status.textContent = '✅ A bypass password is currently active.';
+            status.style.color = '#28a745';
+            status.style.display = 'block';
+        } else {
+            status.style.display = 'none';
+        }
+    }
+};
+
+window.closePasswordModal = function() {
+    const modal = document.getElementById('password-modal');
+    if (modal) modal.style.display = 'none';
+};
+
+window.submitPasswordModal = async function() {
+    const input = document.getElementById('password-modal-input');
+    const status = document.getElementById('password-modal-status');
+    if (!input) return;
+
+    const password = input.value.trim();
+
+    if (!password) {
+        if (status) {
+            status.textContent = 'Please enter a password.';
+            status.style.color = '#dc3545';
+            status.style.display = 'block';
+        }
+        return;
+    }
+
+    if (status) {
+        status.textContent = 'Checking...';
+        status.style.color = '#ecf0f1';
+        status.style.display = 'block';
+    }
+
+    const audioStartButton = document.getElementById('audio-start-button');
+    const audioStartOverlay = document.getElementById('audio-start-overlay');
+    const originalHTML = `<svg width="80" height="80" viewBox="0 0 80 80">
+                    <polygon points="25,15 25,65 65,40" fill="white"/>
+                </svg>
+                <span>Click to Start</span>`;
+
+    try {
+        await checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML, password);
+
+        if (bypassPassword === password) {
+            // Accepted — save to localStorage
+            localStorage.setItem('ubersdr_bypass_password', password);
+            if (status) {
+                status.textContent = '✅ Password accepted! Bypass is now active.';
+                status.style.color = '#28a745';
+                status.style.display = 'block';
+            }
+            // Also sync the inline bypass container input if visible
+            const inlineInput = document.getElementById('bypass-password-input');
+            if (inlineInput) inlineInput.value = password;
+        } else {
+            // Rejected
+            localStorage.removeItem('ubersdr_bypass_password');
+            if (status) {
+                status.textContent = '❌ Invalid password.';
+                status.style.color = '#dc3545';
+                status.style.display = 'block';
+            }
+            input.value = '';
+            input.focus();
+        }
+    } catch (err) {
+        console.error('Password modal check failed:', err);
+        if (status) {
+            status.textContent = '❌ Connection error. Please try again.';
+            status.style.color = '#dc3545';
+            status.style.display = 'block';
+        }
+    }
+};
+
+window.clearSavedPassword = function() {
+    localStorage.removeItem('ubersdr_bypass_password');
+    bypassPassword = null;
+    window.bypassPassword = null;
+    const input = document.getElementById('password-modal-input');
+    if (input) input.value = '';
+    const status = document.getElementById('password-modal-status');
+    if (status) {
+        status.textContent = 'Saved password cleared.';
+        status.style.color = '#ecf0f1';
+        status.style.display = 'block';
+    }
+    log('Bypass password cleared');
+};
 
 // Show full-screen overlay for terminated sessions
 function showTerminatedOverlay(message) {

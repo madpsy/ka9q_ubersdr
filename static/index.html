@@ -172,7 +172,7 @@
                 </svg>
                 <span>Click to Start</span>
             </button>
-            <!-- Password bypass UI (hidden by default) -->
+            <!-- Password bypass UI (hidden by default, shown when connection is rejected) -->
             <div id="password-bypass-container" class="password-bypass-container" style="display: none;">
                 <p style="color: #ecf0f1; margin-bottom: 10px; font-size: 16px;">Do you have a bypass password?</p>
                 <div style="display: flex; gap: 10px; align-items: center; justify-content: center;">
@@ -191,10 +191,13 @@
             </div>
             <div class="overlay-buttons-container" style="margin-top: 10px;">
                 <button id="public-instances-button" class="public-instances-button green-button" onclick="window.open('https://instances.ubersdr.org/', '_blank')">
-                    <span>Public Instance Directory</span>
+                    <span>Instance Directory</span>
                 </button>
                 <button id="uuid-button" class="uuid-button green-button" style="display: none;" onclick="copyUUIDToClipboard()">
                     <span>UUID</span>
+                </button>
+                <button id="password-key-button" class="password-key-button green-button" onclick="openPasswordModal()" title="Enter bypass password">
+                    <span>🔑</span>
                 </button>
             </div>
         </div>
@@ -1488,6 +1491,30 @@
             <div class="rmnoise-section rmnoise-section-log">
                 <div class="rmnoise-section-title">Log</div>
                 <div id="rmnoise-log" class="rmnoise-log"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bypass Password Modal -->
+    <div id="password-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 420px;">
+            <div class="modal-header">
+                <h2>🔑 Bypass Password</h2>
+                <button class="modal-close" onclick="closePasswordModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: #ecf0f1; margin-bottom: 15px; font-size: 14px;">
+                    Enter a bypass password to override connection limits. The password will be saved in your browser for future visits.
+                </p>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="password" id="password-modal-input" placeholder="Enter bypass password" style="flex: 1; padding: 10px; font-size: 14px; border: 2px solid #7f8c8d; background: #34495e; color: #ecf0f1; border-radius: 4px;">
+                    <button onclick="submitPasswordModal()" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; white-space: nowrap;">Apply</button>
+                </div>
+                <p id="password-modal-status" style="margin-top: 12px; font-size: 13px; display: none;"></p>
+                <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: flex-end;">
+                    <button onclick="clearSavedPassword()" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">Clear Saved Password</button>
+                    <button onclick="closePasswordModal()" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">Close</button>
+                </div>
             </div>
         </div>
     </div>

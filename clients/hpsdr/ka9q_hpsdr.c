@@ -74,6 +74,7 @@ static pthread_mutex_t done_send_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t done_send_cond = PTHREAD_COND_INITIALIZER;
 static int running = 0;
 static bool gen_rcvd = false;
+static struct timespec last_client_activity = {0};  // updated by any UDP receive from client
 static bool wbenable = false;
 static int wide_len;
 static int wide_size;
@@ -1515,6 +1516,7 @@ int main (int argc, char *argv[])
             continue;
         }
 
+        clock_gettime(CLOCK_MONOTONIC, &last_client_activity);
         code = *code0;
 
         /*
@@ -1682,7 +1684,9 @@ void *highprio_thread(void *data)
     int i, rc, yes = 1;
     long freq;
     struct timespec last_hp_time = {0};
-    clock_gettime(CLOCK_MONOTONIC, &last_hp_time);
+    int hp_watchdog_armed = 0;   // armed only after client proves it sends HP packets
+    unsigned long hp_pkt_count = 0;
+    struct timespec hp_rate_time = {0};
 
     hp_sock = socket(AF_INET, SOCK_DGRAM, 0);
 
@@ -1719,15 +1723,18 @@ void *highprio_thread(void *data)
         }
 
         if (rc < 0) {
-            // EAGAIN timeout — check watchdog
-            if (running) {
+            // EAGAIN timeout — check activity-based watchdog
+            if (running && last_client_activity.tv_sec != 0) {
                 struct timespec now;
                 clock_gettime(CLOCK_MONOTONIC, &now);
-                double elapsed = (now.tv_sec - last_hp_time.tv_sec) +
-                                 (now.tv_nsec - last_hp_time.tv_nsec) * 1e-9;
-                if (elapsed > 5.0) {
-                    t_print("HP: no high-priority packet for %.1fs, client disconnected\n", elapsed);
+                double since_any = (now.tv_sec - last_client_activity.tv_sec) +
+                                   (now.tv_nsec - last_client_activity.tv_nsec) * 1e-9;
+                if (since_any > 10.0) {
+                    t_print("HP: no client UDP activity for %.1fs, client disconnected\n", since_any);
                     running = 0;
+                    hp_watchdog_armed = 0;
+                    hp_pkt_count = 0;
+                    last_client_activity.tv_sec = 0;
                     for (i = 0; i < mcb.num_rxs; i++) {
                         ddcenable[i] = 0;
                         mcb.rcb[i].rcvr_mask = 0;
@@ -1739,8 +1746,26 @@ void *highprio_thread(void *data)
             continue;
         }
 
-        // Successful receive — reset watchdog timer
+        // Successful receive — reset watchdog timer and count packets
         clock_gettime(CLOCK_MONOTONIC, &last_hp_time);
+        last_client_activity = last_hp_time;
+        hp_pkt_count++;
+        // Arm watchdog once we've seen 100+ packets (client is actively sending HP packets)
+        if (!hp_watchdog_armed && hp_pkt_count >= 100) {
+            hp_watchdog_armed = 1;
+            t_print("HP: watchdog armed after %lu packets\n", hp_pkt_count);
+        }
+        if (hp_rate_time.tv_sec == 0) {
+            hp_rate_time = last_hp_time;
+        } else {
+            double rate_elapsed = (last_hp_time.tv_sec - hp_rate_time.tv_sec) +
+                                  (last_hp_time.tv_nsec - hp_rate_time.tv_nsec) * 1e-9;
+            if (rate_elapsed >= 10.0) {
+                t_print("HP: %.0f packets/sec from client\n", hp_pkt_count / rate_elapsed);
+                hp_pkt_count = 0;
+                hp_rate_time = last_hp_time;
+            }
+        }
 
         if (rc != 1444) {
             t_print("Received HighPrio packet with incorrect length %d\n", rc);
@@ -1790,6 +1815,8 @@ void *highprio_thread(void *data)
             running = rc;
             t_print("HP: Running = %d\n", rc);
             if (!running) {
+                hp_watchdog_armed = 0;
+                hp_pkt_count = 0;
                 for (i = 0; i < mcb.num_rxs; i++) {
                     ddcenable[i] = 0;
                     mcb.rcb[i].rcvr_mask = 0;
@@ -1797,6 +1824,9 @@ void *highprio_thread(void *data)
                     rxfreq[i] = 0;
                 }
             } else {
+                // running just went 1 — reset packet counter, watchdog arms after 100 packets
+                hp_watchdog_armed = 0;
+                hp_pkt_count = 0;
                 for (i = 0; i < mcb.num_rxs; i++) {
                     if (rx_thread_id[i] == 0) {
                         if (pthread_create(&rx_thread_id[i], NULL, rx_thread, (void *) (uintptr_t) i) < 0) {
@@ -1867,6 +1897,8 @@ void *ddc_specific_thread(void *data)
         if (rc < 0) {
             continue;
         }
+
+        clock_gettime(CLOCK_MONOTONIC, &last_client_activity);
 
         if (rc != 1444) {
             t_print("RXspec: Received DDC specific packet with incorrect length");

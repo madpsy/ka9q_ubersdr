@@ -16832,8 +16832,12 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 let configText = editor.value;
 
                 // Extract existing calibration value if present
-                const calibrateRegex = /^(\s*)calibrate\s*=\s*([^\n#]+)/m;
-                const match = configText.match(calibrateRegex);
+                // This regex stops before any '#' so we only parse the numeric value
+                const calibrateValueRegex = /^(\s*)calibrate\s*=\s*([^\n#]+)/m;
+                // This regex consumes the ENTIRE line (including any existing comment) so the
+                // replacement completely overwrites it — prevents comments from compounding
+                const calibrateLineRegex = /^(\s*)calibrate\s*=\s*.*/m;
+                const match = configText.match(calibrateValueRegex);
                 let existingCalibrate = 0;
 
                 if (match && match[2]) {
@@ -16851,9 +16855,11 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 const calibrateValueStr = newCalibrateValue.toExponential(6);
 
                 // Find and replace the calibrate line
+                // Use calibrateLineRegex (not calibrateValueRegex) so the entire line including
+                // any existing comment is replaced — avoids comments compounding on repeated runs
                 if (match) {
-                    // Replace existing calibrate line
-                    configText = configText.replace(calibrateRegex, `$1calibrate = ${calibrateValueStr}  # Auto-calibrated: ${existingCalibrate.toExponential(6)} + ${calculatedCalibrationValue.toExponential(6)}`);
+                    // Replace existing calibrate line (whole line, including old comment)
+                    configText = configText.replace(calibrateLineRegex, `$1calibrate = ${calibrateValueStr}  # Auto-calibrated: ${existingCalibrate.toExponential(6)} + ${calculatedCalibrationValue.toExponential(6)}`);
                 } else {
                     // If calibrate line doesn't exist, add it after the [global] section or at the beginning
                     const globalSectionRegex = /^\[global\]\s*$/m;

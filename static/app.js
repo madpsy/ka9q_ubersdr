@@ -20,19 +20,19 @@ import { screenWakeLock } from './wake-lock.js';
 const initialPageParams = new URLSearchParams(window.location.search);
 
 // Notification system
-function showNotification(message, type = 'error', duration = 5000) {
+function showNotification(message, type = 'error', duration = 5000, position = '') {
     const toast = document.getElementById('notification-toast');
     if (!toast) return;
 
     // Set message and type
     toast.textContent = message;
-    toast.className = 'notification-toast show ' + type;
+    toast.className = 'notification-toast show ' + type + (position ? ' ' + position : '');
 
     // Auto-hide after duration
     setTimeout(() => {
         toast.classList.add('hiding');
         setTimeout(() => {
-            toast.classList.remove('show', 'hiding', type);
+            toast.classList.remove('show', 'hiding', type, position);
         }, 300); // Match animation duration
     }, duration);
 }
@@ -8842,6 +8842,7 @@ async function applyAudioSink() {
         try {
             await audioContext.setSinkId(deviceId);
             console.log(`[AudioSink] AudioContext.setSinkId → "${deviceId}"`);
+            _showAudioSinkToast(deviceId);
         } catch (err) {
             console.warn('[AudioSink] setSinkId failed:', err);
             if (err.name === 'NotFoundError' || err.name === 'NotSupportedError') {
@@ -8901,6 +8902,7 @@ async function applyAudioSink() {
             // Route to the chosen device
             await audioSinkElement.setSinkId(deviceId);
             console.log(`[AudioSink] HTMLMediaElement.setSinkId → "${deviceId}"`);
+            _showAudioSinkToast(deviceId);
 
             // Start playback (may be blocked by autoplay policy; retried per-buffer)
             try {
@@ -8924,6 +8926,30 @@ async function applyAudioSink() {
     }
 
     console.warn('[AudioSink] No supported setSinkId API available in this browser');
+}
+
+/**
+ * Show a top-left toast indicating which audio output device is active.
+ * Tries the dropdown first; falls back to enumerateDevices for the label.
+ */
+async function _showAudioSinkToast(deviceId) {
+    if (!deviceId) return;
+    // Try the dropdown first (already populated if user opened the modal before)
+    const sel = document.getElementById('audio-output-device');
+    const opt = sel ? sel.querySelector(`option[value="${CSS.escape(deviceId)}"]`) : null;
+    let label = opt && opt.textContent ? opt.textContent : null;
+
+    // Fall back to enumerateDevices if the dropdown doesn't have the label yet
+    if (!label && navigator.mediaDevices) {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const match = devices.find(d => d.kind === 'audiooutput' && d.deviceId === deviceId);
+            label = match && match.label ? match.label : null;
+        } catch (e) { /* ignore */ }
+    }
+
+    label = label || `Device …${deviceId.slice(-8)}`;
+    showNotification(`🔊 Audio output: ${label}`, 'info', 3000, 'top-left');
 }
 
 /**

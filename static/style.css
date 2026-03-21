@@ -105,6 +105,11 @@
     display: block;
 }
 
+.notification-toast.top-left {
+    right: auto;
+    left: 20px;
+}
+
 .notification-toast.error {
     background-color: #dc3545;
 }

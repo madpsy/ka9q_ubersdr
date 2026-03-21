@@ -458,6 +458,19 @@ body {
     pointer-events: none;
 }
 
+.audio-buffer-icon {
+    position: absolute;
+    top: 0;
+    left: 2px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    font-size: 8px;
+    line-height: 1;
+    pointer-events: none;
+    z-index: 2;
+}
+
 .audio-buffer-text {
     position: absolute;
     top: 0;
@@ -467,6 +480,8 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
+    padding-left: 12px;
+    box-sizing: border-box;
     color: white;
     font-size: 9px;
     font-weight: bold;

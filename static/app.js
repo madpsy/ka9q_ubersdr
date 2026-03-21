@@ -3417,10 +3417,13 @@ function playAudioBuffer(buffer) {
     }
 
     // Step 12: Final output to destination
-    outputNode.connect(audioContext.destination);
-    // Firefox sink path: also feed the _sinkGain node so MediaStreamDestination receives audio
-    if (audioContext._sinkGain && audioContext._sinkGain.context === audioContext) {
+    // If the Firefox HTMLMediaElement sink path is active (_sinkGain exists and a specific
+    // device is selected), route audio exclusively through _sinkGain → MediaStreamDestination
+    // → <audio>.setSinkId() to avoid double output on both default and chosen device.
+    if (audioContext._sinkGain && audioContext._sinkGain.context === audioContext && selectedAudioSinkId) {
         outputNode.connect(audioContext._sinkGain);
+    } else {
+        outputNode.connect(audioContext.destination);
     }
 
     // Buffer management using configurable threshold
@@ -8848,37 +8851,41 @@ async function applyAudioSink() {
             // Create (or reuse) a hidden <audio> element
             if (!audioSinkElement) {
                 audioSinkElement = document.createElement('audio');
-                audioSinkElement.autoplay = true;
                 audioSinkElement.style.display = 'none';
                 document.body.appendChild(audioSinkElement);
             }
 
-            // Route the Web Audio graph into a MediaStream and feed it to <audio>
-            if (!audioSinkElement._streamDestination ||
-                audioSinkElement._streamDestination.context !== audioContext) {
-                // Create a new MediaStreamDestination for this AudioContext
-                const dest = audioContext.createMediaStreamDestination();
-                audioSinkElement._streamDestination = dest;
-                audioSinkElement.srcObject = dest.stream;
-
-                // Connect the graph's final output node to this destination.
-                // We tap from audioContext.destination's input by connecting the
-                // last node in the chain to both destinations.
-                // The graph already connects outputNode → audioContext.destination;
-                // we additionally connect it to our MediaStreamDestination.
-                // Since we can't easily intercept here, we use a GainNode shim
-                // stored on the context so the playback function can connect to it.
-                if (!audioContext._sinkGain) {
-                    audioContext._sinkGain = audioContext.createGain();
-                    audioContext._sinkGain.gain.value = 1;
-                    audioContext._sinkGain.connect(dest);
-                } else {
-                    audioContext._sinkGain.connect(dest);
-                }
+            // Route the Web Audio graph into a MediaStream and feed it to <audio>.
+            // We create a GainNode (_sinkGain) on the AudioContext that the playback
+            // loop connects to at Step 12. This gain node feeds a MediaStreamDestination
+            // whose stream is assigned to the <audio> element.
+            if (!audioContext._sinkGain) {
+                audioContext._sinkGain = audioContext.createGain();
+                audioContext._sinkGain.gain.value = 1;
             }
 
+            // (Re)create the MediaStreamDestination if needed
+            if (!audioSinkElement._streamDestination ||
+                audioSinkElement._streamDestination.context !== audioContext) {
+                const dest = audioContext.createMediaStreamDestination();
+                audioSinkElement._streamDestination = dest;
+                // Disconnect any old connection and reconnect to new dest
+                try { audioContext._sinkGain.disconnect(); } catch(e) {}
+                audioContext._sinkGain.connect(dest);
+                audioSinkElement.srcObject = dest.stream;
+            }
+
+            // Apply the chosen output device to the <audio> element
             await audioSinkElement.setSinkId(deviceId);
             console.log(`[AudioSink] HTMLMediaElement.setSinkId → "${deviceId}"`);
+
+            // Explicitly play — autoplay policy may block it otherwise
+            try {
+                await audioSinkElement.play();
+                console.log('[AudioSink] <audio> element playing');
+            } catch (playErr) {
+                console.warn('[AudioSink] <audio>.play() failed:', playErr.message);
+            }
         } catch (err) {
             console.warn('[AudioSink] HTMLMediaElement.setSinkId failed:', err);
         }
@@ -8889,7 +8896,7 @@ async function applyAudioSink() {
 }
 
 /**
- * Tear down the hidden <audio> element used for the Firefox sink path.
+ * Tear down the hidden <audio> element and _sinkGain used for the Firefox sink path.
  */
 function _teardownAudioSinkElement() {
     if (audioSinkElement) {
@@ -8897,6 +8904,11 @@ function _teardownAudioSinkElement() {
         audioSinkElement.srcObject = null;
         if (audioSinkElement.parentNode) audioSinkElement.parentNode.removeChild(audioSinkElement);
         audioSinkElement = null;
+    }
+    // Disconnect and remove the gain shim so Step 12 falls back to audioContext.destination
+    if (audioContext && audioContext._sinkGain) {
+        try { audioContext._sinkGain.disconnect(); } catch (e) {}
+        audioContext._sinkGain = null;
     }
 }
 

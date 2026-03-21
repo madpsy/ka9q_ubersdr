@@ -210,6 +210,7 @@ let audioContext = null;
 let currentAudioContextSampleRate = 0; // Track current AudioContext sample rate
 let audioUserDisconnected = false; // Flag to prevent reconnection after user disconnect
 let selectedAudioSinkId = localStorage.getItem('audioSinkId') || ''; // Persist chosen output device
+let audioSinkElement = null; // Hidden <audio> element used for Firefox HTMLMediaElement.setSinkId() fallback
 // Expose audioContext globally for recorder
 window.audioContext = null;
 // Expose ws globally for compatibility (will be set by wsManager)
@@ -2525,6 +2526,8 @@ async function handleBinaryMessage(data) {
             nextPlayTime = audioContext.currentTime;
             window.nextPlayTime = nextPlayTime;
             audioStartTime = audioContext.currentTime;
+            // Clear the old _sinkGain so applyAudioSink() creates a fresh one
+            audioContext._sinkGain = null;
             applyAudioSink();
 
             // Reinitialize all audio nodes
@@ -2883,6 +2886,8 @@ async function handlePCMAudio(msg) {
         nextPlayTime = audioContext.currentTime;
         window.nextPlayTime = nextPlayTime;
         audioStartTime = audioContext.currentTime;
+        // Clear the old _sinkGain so applyAudioSink() creates a fresh one
+        audioContext._sinkGain = null;
         applyAudioSink();
 
         // Reinitialize all audio nodes
@@ -3413,6 +3418,10 @@ function playAudioBuffer(buffer) {
 
     // Step 12: Final output to destination
     outputNode.connect(audioContext.destination);
+    // Firefox sink path: also feed the _sinkGain node so MediaStreamDestination receives audio
+    if (audioContext._sinkGain && audioContext._sinkGain.context === audioContext) {
+        outputNode.connect(audioContext._sinkGain);
+    }
 
     // Buffer management using configurable threshold
     const MAX_BUFFER_SEC = maxBufferMs / 1000;
@@ -8797,16 +8806,97 @@ function openBufferConfigModal() {
 
 /**
  * Apply the persisted (or newly chosen) sink ID to the current AudioContext.
- * Safe to call even when setSinkId is unsupported or the context doesn't exist yet.
+ *
+ * Strategy:
+ *   Chrome/Edge  → AudioContext.setSinkId()  (no extra latency, no graph change)
+ *   Firefox      → MediaStreamDestination → hidden <audio>.setSinkId()
+ *   System Default (empty deviceId) → disconnect any Firefox <audio> path and
+ *                  reconnect directly to audioContext.destination
+ *
+ * Safe to call even when the context doesn't exist yet or the API is unsupported.
  */
 async function applyAudioSink() {
-    if (!audioContext || !selectedAudioSinkId) return;
-    if (typeof audioContext.setSinkId !== 'function') return;
-    try {
-        await audioContext.setSinkId(selectedAudioSinkId);
-        console.log(`[AudioSink] Applied sink: ${selectedAudioSinkId}`);
-    } catch (err) {
-        console.warn('[AudioSink] setSinkId failed:', err);
+    if (!audioContext) return;
+
+    const deviceId = selectedAudioSinkId;
+
+    // ── Chrome / Edge path ────────────────────────────────────────────────────
+    if (typeof audioContext.setSinkId === 'function') {
+        // Tear down any Firefox <audio> path that may have been active
+        _teardownAudioSinkElement();
+        try {
+            await audioContext.setSinkId(deviceId || '');
+            console.log(`[AudioSink] AudioContext.setSinkId → "${deviceId || 'default'}"`);
+        } catch (err) {
+            console.warn('[AudioSink] setSinkId failed:', err);
+        }
+        return;
+    }
+
+    // ── Firefox / HTMLMediaElement path ───────────────────────────────────────
+    if (!deviceId) {
+        // User chose System Default — tear down the <audio> bridge; audio already
+        // flows to audioContext.destination via the normal graph.
+        _teardownAudioSinkElement();
+        console.log('[AudioSink] System Default — using audioContext.destination');
+        return;
+    }
+
+    if (typeof HTMLAudioElement !== 'undefined' &&
+        typeof HTMLAudioElement.prototype.setSinkId === 'function') {
+        try {
+            // Create (or reuse) a hidden <audio> element
+            if (!audioSinkElement) {
+                audioSinkElement = document.createElement('audio');
+                audioSinkElement.autoplay = true;
+                audioSinkElement.style.display = 'none';
+                document.body.appendChild(audioSinkElement);
+            }
+
+            // Route the Web Audio graph into a MediaStream and feed it to <audio>
+            if (!audioSinkElement._streamDestination ||
+                audioSinkElement._streamDestination.context !== audioContext) {
+                // Create a new MediaStreamDestination for this AudioContext
+                const dest = audioContext.createMediaStreamDestination();
+                audioSinkElement._streamDestination = dest;
+                audioSinkElement.srcObject = dest.stream;
+
+                // Connect the graph's final output node to this destination.
+                // We tap from audioContext.destination's input by connecting the
+                // last node in the chain to both destinations.
+                // The graph already connects outputNode → audioContext.destination;
+                // we additionally connect it to our MediaStreamDestination.
+                // Since we can't easily intercept here, we use a GainNode shim
+                // stored on the context so the playback function can connect to it.
+                if (!audioContext._sinkGain) {
+                    audioContext._sinkGain = audioContext.createGain();
+                    audioContext._sinkGain.gain.value = 1;
+                    audioContext._sinkGain.connect(dest);
+                } else {
+                    audioContext._sinkGain.connect(dest);
+                }
+            }
+
+            await audioSinkElement.setSinkId(deviceId);
+            console.log(`[AudioSink] HTMLMediaElement.setSinkId → "${deviceId}"`);
+        } catch (err) {
+            console.warn('[AudioSink] HTMLMediaElement.setSinkId failed:', err);
+        }
+        return;
+    }
+
+    console.warn('[AudioSink] No supported setSinkId API available in this browser');
+}
+
+/**
+ * Tear down the hidden <audio> element used for the Firefox sink path.
+ */
+function _teardownAudioSinkElement() {
+    if (audioSinkElement) {
+        audioSinkElement.pause();
+        audioSinkElement.srcObject = null;
+        if (audioSinkElement.parentNode) audioSinkElement.parentNode.removeChild(audioSinkElement);
+        audioSinkElement = null;
     }
 }
 
@@ -8837,8 +8927,11 @@ async function populateOutputDevices() {
         return;
     }
 
-    if (typeof AudioContext === 'undefined' || typeof AudioContext.prototype.setSinkId !== 'function') {
-        hint.textContent = 'Your browser does not support audio output device selection (AudioContext.setSinkId).';
+    // Require at least one of the two setSinkId APIs
+    const hasContextSink = typeof AudioContext !== 'undefined' && typeof AudioContext.prototype.setSinkId === 'function';
+    const hasElementSink = typeof HTMLAudioElement !== 'undefined' && typeof HTMLAudioElement.prototype.setSinkId === 'function';
+    if (!hasContextSink && !hasElementSink) {
+        hint.textContent = 'Your browser does not support audio output device selection.';
         hint.style.color = '#e67e22';
         select.disabled = true;
         return;
@@ -8919,7 +9012,9 @@ async function setOutputDevice(deviceId) {
     selectedAudioSinkId = deviceId;
     localStorage.setItem('audioSinkId', deviceId);
     await applyAudioSink();
-    const label = document.querySelector(`#audio-output-device option[value="${CSS.escape(deviceId)}"]`);
+    const label = deviceId
+        ? document.querySelector(`#audio-output-device option[value="${CSS.escape(deviceId)}"]`)
+        : null;
     log(`Audio output: ${label ? label.textContent : 'System Default'}`);
 }
 

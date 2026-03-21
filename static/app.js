@@ -8941,15 +8941,15 @@ async function populateOutputDevices() {
         let devices = await navigator.mediaDevices.enumerateDevices();
         let outputs = devices.filter(d => d.kind === 'audiooutput');
 
-        // Chrome hides labels until mic permission is granted — in that state ALL
-        // non-default devices have empty labels. Firefox always provides labels so
-        // we must not trigger getUserMedia there (it would prompt unnecessarily).
-        // We detect Chrome's locked state by checking that every non-default device
-        // has an empty label (Firefox's "default" entry legitimately has no label).
+        // Browsers hide/omit output device info until mic permission is granted:
+        //   Chrome: returns devices but with empty labels
+        //   Firefox: returns zero audiooutput devices entirely
+        // In both cases we request getUserMedia once to unlock the device list.
         const nonDefault = outputs.filter(d => d.deviceId !== 'default' && d.deviceId !== '');
-        const allLabelsHidden = nonDefault.length > 0 && nonDefault.every(d => !d.label);
+        const needsPermission = outputs.length === 0 ||
+            (nonDefault.length > 0 && nonDefault.every(d => !d.label));
 
-        if (allLabelsHidden) {
+        if (needsPermission) {
             hint.textContent = 'Requesting microphone permission to unlock device names…';
             hint.style.color = '#888';
             try {
@@ -8989,14 +8989,13 @@ async function populateOutputDevices() {
 
         select.disabled = false;
 
-        const stillMissingLabels = outputs.filter(d => d.deviceId !== 'default' && d.deviceId !== '').some(d => !d.label);
+        const stillMissingLabels = outputs.length === 0 ||
+            outputs.filter(d => d.deviceId !== 'default' && d.deviceId !== '').some(d => !d.label);
         if (stillMissingLabels) {
             hint.textContent = 'Device names unavailable — microphone permission was denied.';
             hint.style.color = '#e67e22';
         } else {
-            hint.textContent = outputs.length
-                ? `${outputs.length} output device(s) found.`
-                : 'No output devices found.';
+            hint.textContent = `${outputs.length} output device(s) found.`;
             hint.style.color = '#888';
         }
     } catch (err) {

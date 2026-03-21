@@ -943,6 +943,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // This will initialize audio context and connect
             // Preserve bandwidth values loaded from URL
             setMode(currentMode, true);
+
+            // Re-apply saved audio sink after user interaction — on Firefox the
+            // HTMLMediaElement.play() call is blocked by autoplay policy until here.
+            // AudioContext exists at this point (created on WebSocket connect).
+            await applyAudioSink();
         };
 
         audioStartButton.addEventListener('click', startAudio);

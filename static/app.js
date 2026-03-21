@@ -8838,11 +8838,11 @@ async function applyAudioSink() {
     if (typeof audioContext.setSinkId === 'function') {
         // Tear down any Firefox <audio> path that may have been active
         _teardownAudioSinkElement();
-        if (!deviceId) return; // System Default — nothing to do, destination is already default
         try {
-            await audioContext.setSinkId(deviceId);
-            console.log(`[AudioSink] AudioContext.setSinkId → "${deviceId}"`);
-            _showAudioSinkToast(deviceId);
+            // Pass '' to reset to system default, or the specific device ID
+            await audioContext.setSinkId(deviceId || '');
+            console.log(`[AudioSink] AudioContext.setSinkId → "${deviceId || 'default'}"`);
+            if (deviceId) _showAudioSinkToast(deviceId);
         } catch (err) {
             console.warn('[AudioSink] setSinkId failed:', err);
             if (err.name === 'NotFoundError' || err.name === 'NotSupportedError') {

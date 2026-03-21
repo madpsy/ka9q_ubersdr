@@ -8837,8 +8837,8 @@ async function populateOutputDevices() {
         return;
     }
 
-    if (typeof AudioContext !== 'undefined' && typeof (new AudioContext()).setSinkId !== 'function') {
-        hint.textContent = 'Your browser does not support AudioContext.setSinkId (try Chrome or Edge).';
+    if (typeof AudioContext === 'undefined' || typeof AudioContext.prototype.setSinkId !== 'function') {
+        hint.textContent = 'Your browser does not support audio output device selection (AudioContext.setSinkId).';
         hint.style.color = '#e67e22';
         select.disabled = true;
         return;

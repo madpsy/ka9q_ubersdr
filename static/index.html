@@ -1095,14 +1095,14 @@
 
                 <!-- Audio Output Device Selection -->
                 <div id="audio-output-device-section" style="margin-bottom: 15px;">
-                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
-                        <label style="font-weight: bold; color: #ecf0f1; white-space: nowrap;">Output Device:</label>
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px; overflow: hidden;">
+                        <label style="font-weight: bold; color: #ecf0f1; white-space: nowrap; flex-shrink: 0;">Output Device:</label>
                         <select id="audio-output-device" onchange="setOutputDevice(this.value)"
-                            style="flex: 1; padding: 8px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; font-size: 14px; cursor: pointer;">
+                            style="flex: 1; min-width: 0; padding: 8px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; font-size: 14px; cursor: pointer; overflow: hidden; text-overflow: ellipsis;">
                             <option value="">System Default</option>
                         </select>
                         <button onclick="populateOutputDevices()" title="Refresh device list"
-                            style="padding: 7px 12px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 13px; white-space: nowrap;">
+                            style="padding: 7px 12px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 13px; white-space: nowrap; flex-shrink: 0;">
                             ↻ Refresh
                         </button>
                     </div>

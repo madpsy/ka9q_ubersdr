@@ -3426,6 +3426,12 @@ function playAudioBuffer(buffer) {
         outputNode.connect(audioContext.destination);
     }
 
+    // Firefox sink path: ensure the <audio> element is playing (may have been blocked
+    // by autoplay policy on page load; retry once the user has interacted with the page)
+    if (audioSinkElement && audioSinkElement.paused) {
+        audioSinkElement.play().catch(() => {});
+    }
+
     // Buffer management using configurable threshold
     const MAX_BUFFER_SEC = maxBufferMs / 1000;
     const MIN_BUFFER_SEC = MIN_BUFFER_MS / 1000;

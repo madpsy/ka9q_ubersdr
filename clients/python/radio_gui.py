@@ -728,17 +728,41 @@ class RadioGUI:
         if not name:
             return  # User cancelled
 
+        # Ask for an optional bypass password
+        # Pre-fill with: existing saved-server password > currently active password > blank
+        existing_pw = ''
+        for s in self.servers:
+            if s['name'] == name:
+                existing_pw = s.get('bypass_password', '')
+                break
+        if not existing_pw:
+            existing_pw = self.config.get('password', '')
+
+        bypass_password = tk.simpledialog.askstring(
+            "Save Server",
+            "Enter bypass password (optional — leave blank if not needed):",
+            show='*',
+            initialvalue=existing_pw
+        )
+        # None means cancelled the whole dialog — treat as no password
+        if bypass_password is None:
+            bypass_password = existing_pw  # keep existing if user cancelled
+        bypass_password = bypass_password.strip()
+
         # Check if server with this name already exists
         for i, server in enumerate(self.servers):
             if server['name'] == name:
                 if messagebox.askyesno("Overwrite?",
                                       f"A server named '{name}' already exists. Overwrite it?"):
-                    self.servers[i] = {
+                    entry = {
                         'name': name,
                         'hostname': hostname,
                         'port': port,
                         'tls': tls_enabled
                     }
+                    if bypass_password:
+                        entry['bypass_password'] = bypass_password
+                    self.servers[i] = entry
                     self._explicit_server_save = True
                     self.save_servers()
                     self.populate_server_dropdown()
@@ -746,12 +770,15 @@ class RadioGUI:
                 return
 
         # Add new server
-        self.servers.append({
+        entry = {
             'name': name,
             'hostname': hostname,
             'port': port,
             'tls': tls_enabled
-        })
+        }
+        if bypass_password:
+            entry['bypass_password'] = bypass_password
+        self.servers.append(entry)
         self._explicit_server_save = True
         self.save_servers()
         self.populate_server_dropdown()
@@ -770,7 +797,15 @@ class RadioGUI:
                 self.server_var.set(server['hostname'])
                 self.port_var.set(str(server['port']))
                 self.tls_var.set(server['tls'])
-                self.log_status(f"Loaded server: {server['name']}")
+                # Load saved bypass password if present
+                saved_pw = server.get('bypass_password', '')
+                if saved_pw:
+                    self.config['password'] = saved_pw
+                    self.log_status(f"Loaded server: {server['name']} (bypass password loaded)")
+                else:
+                    # Clear any previously loaded password so it doesn't carry over
+                    self.config.pop('password', None)
+                    self.log_status(f"Loaded server: {server['name']}")
                 break
 
     def delete_selected_server(self):

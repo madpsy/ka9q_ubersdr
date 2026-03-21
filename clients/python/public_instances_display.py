@@ -284,7 +284,6 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
         # ── Modal dialog ──────────────────────────────────────────────────────
         dialog = tk.Toplevel(window)
         dialog.title("Bypass Password")
-        dialog.geometry("380x220")
         dialog.resizable(False, False)
         dialog.transient(window)
 

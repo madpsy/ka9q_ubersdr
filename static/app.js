@@ -84,6 +84,7 @@ const wsManager = new WebSocketManager({
             nextPlayTime = audioContext.currentTime;
             window.nextPlayTime = nextPlayTime;
             audioStartTime = audioContext.currentTime;
+            applyAudioSink();
             log(`Audio context initialized (sample rate: ${audioContext.sampleRate} Hz, will match incoming audio)`);
 
             // Create analyser for spectrum/waterfall (pre-filter tap)
@@ -208,6 +209,7 @@ const wsManager = new WebSocketManager({
 let audioContext = null;
 let currentAudioContextSampleRate = 0; // Track current AudioContext sample rate
 let audioUserDisconnected = false; // Flag to prevent reconnection after user disconnect
+let selectedAudioSinkId = localStorage.getItem('audioSinkId') || ''; // Persist chosen output device
 // Expose audioContext globally for recorder
 window.audioContext = null;
 // Expose ws globally for compatibility (will be set by wsManager)
@@ -2523,6 +2525,7 @@ async function handleBinaryMessage(data) {
             nextPlayTime = audioContext.currentTime;
             window.nextPlayTime = nextPlayTime;
             audioStartTime = audioContext.currentTime;
+            applyAudioSink();
 
             // Reinitialize all audio nodes
             analyser = audioContext.createAnalyser();
@@ -2880,6 +2883,7 @@ async function handlePCMAudio(msg) {
         nextPlayTime = audioContext.currentTime;
         window.nextPlayTime = nextPlayTime;
         audioStartTime = audioContext.currentTime;
+        applyAudioSink();
 
         // Reinitialize all audio nodes
         analyser = audioContext.createAnalyser();
@@ -8782,9 +8786,110 @@ function openBufferConfigModal() {
         // Update signal quality display
         updateSignalQualityDisplay();
 
+        // Populate output device list each time the modal opens
+        populateOutputDevices();
+
         modal.style.display = 'flex';
     }
 }
+
+// ── Audio Output Device Selection ────────────────────────────────────────────
+
+/**
+ * Apply the persisted (or newly chosen) sink ID to the current AudioContext.
+ * Safe to call even when setSinkId is unsupported or the context doesn't exist yet.
+ */
+async function applyAudioSink() {
+    if (!audioContext || !selectedAudioSinkId) return;
+    if (typeof audioContext.setSinkId !== 'function') return;
+    try {
+        await audioContext.setSinkId(selectedAudioSinkId);
+        console.log(`[AudioSink] Applied sink: ${selectedAudioSinkId}`);
+    } catch (err) {
+        console.warn('[AudioSink] setSinkId failed:', err);
+    }
+}
+
+/**
+ * Enumerate audio output devices and populate the dropdown.
+ * Shows a "not available" hint when the API is absent or the page is not HTTPS.
+ */
+async function populateOutputDevices() {
+    const select = document.getElementById('audio-output-device');
+    const hint   = document.getElementById('audio-output-device-hint');
+    if (!select || !hint) return;
+
+    const isSecure = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+
+    if (!isSecure) {
+        hint.textContent = 'Output device selection requires HTTPS. This page is served over HTTP.';
+        hint.style.color = '#e67e22';
+        select.disabled = true;
+        return;
+    }
+
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.enumerateDevices !== 'function') {
+        hint.textContent = 'Your browser does not support audio output device selection.';
+        hint.style.color = '#e67e22';
+        select.disabled = true;
+        return;
+    }
+
+    if (typeof AudioContext !== 'undefined' && typeof (new AudioContext()).setSinkId !== 'function') {
+        hint.textContent = 'Your browser does not support AudioContext.setSinkId (try Chrome or Edge).';
+        hint.style.color = '#e67e22';
+        select.disabled = true;
+        return;
+    }
+
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const outputs = devices.filter(d => d.kind === 'audiooutput');
+
+        // Preserve current selection
+        const current = select.value || selectedAudioSinkId;
+
+        // Rebuild options
+        select.innerHTML = '<option value="">System Default</option>';
+        outputs.forEach(dev => {
+            const opt = document.createElement('option');
+            opt.value = dev.deviceId;
+            opt.textContent = dev.label || `Output ${dev.deviceId.slice(0, 8)}…`;
+            select.appendChild(opt);
+        });
+
+        // Restore selection
+        if (current) select.value = current;
+
+        select.disabled = false;
+
+        if (outputs.some(d => !d.label)) {
+            hint.textContent = 'Device names may be hidden until microphone permission is granted.';
+            hint.style.color = '#888';
+        } else {
+            hint.textContent = outputs.length
+                ? `${outputs.length} output device(s) found.`
+                : 'No output devices found.';
+            hint.style.color = '#888';
+        }
+    } catch (err) {
+        hint.textContent = `Could not enumerate devices: ${err.message}`;
+        hint.style.color = '#e67e22';
+    }
+}
+
+/**
+ * Called when the user picks a device from the dropdown.
+ */
+async function setOutputDevice(deviceId) {
+    selectedAudioSinkId = deviceId;
+    localStorage.setItem('audioSinkId', deviceId);
+    await applyAudioSink();
+    const label = document.querySelector(`#audio-output-device option[value="${CSS.escape(deviceId)}"]`);
+    log(`Audio output: ${label ? label.textContent : 'System Default'}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function closeBufferConfigModal() {
     const modal = document.getElementById('buffer-config-modal');

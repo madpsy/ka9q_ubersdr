@@ -1076,7 +1076,7 @@
     <div id="buffer-config-modal" class="modal" style="display: none;">
         <div class="modal-content" style="max-width: 500px;">
             <div class="modal-header">
-                <h2>Audio Buffer Threshold</h2>
+                <h2>Audio Settings</h2>
                 <button class="modal-close" onclick="closeBufferConfigModal()">&times;</button>
             </div>
             <div class="modal-body">
@@ -1092,6 +1092,23 @@
                 <p style="font-size: 0.85em; color: #666; margin-bottom: 15px;">
                     The buffer indicator colors adjust dynamically based on your selection.
                 </p>
+
+                <!-- Audio Output Device Selection -->
+                <div id="audio-output-device-section" style="margin-bottom: 15px;">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                        <label style="font-weight: bold; color: #ecf0f1; white-space: nowrap;">Output Device:</label>
+                        <select id="audio-output-device" onchange="setOutputDevice(this.value)"
+                            style="flex: 1; padding: 8px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; font-size: 14px; cursor: pointer;">
+                            <option value="">System Default</option>
+                        </select>
+                        <button onclick="populateOutputDevices()" title="Refresh device list"
+                            style="padding: 7px 12px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 13px; white-space: nowrap;">
+                            ↻ Refresh
+                        </button>
+                    </div>
+                    <p id="audio-output-device-hint" style="font-size: 0.82em; color: #888; margin: 0;"></p>
+                </div>
+
                 <div style="border-top: 1px solid #444; padding-top: 15px; margin-top: 15px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 10px; background: rgba(0, 0, 0, 0.2); border-radius: 4px;">
                         <div style="flex: 1; text-align: center;">

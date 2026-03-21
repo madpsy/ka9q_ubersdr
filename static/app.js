@@ -8812,6 +8812,8 @@ async function applyAudioSink() {
 
 /**
  * Enumerate audio output devices and populate the dropdown.
+ * If Chrome is hiding labels (mic permission not yet granted), requests getUserMedia
+ * to unlock device names, then immediately stops the stream and re-enumerates.
  * Shows a "not available" hint when the API is absent or the page is not HTTPS.
  */
 async function populateOutputDevices() {
@@ -8843,8 +8845,27 @@ async function populateOutputDevices() {
     }
 
     try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const outputs = devices.filter(d => d.kind === 'audiooutput');
+        let devices = await navigator.mediaDevices.enumerateDevices();
+        let outputs = devices.filter(d => d.kind === 'audiooutput');
+
+        // Chrome hides labels until mic permission is granted.
+        // If any output device has no label, request mic access once to unlock names.
+        const labelsHidden = outputs.some(d => !d.label);
+        if (labelsHidden) {
+            hint.textContent = 'Requesting microphone permission to unlock device names…';
+            hint.style.color = '#888';
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                // Immediately stop all tracks — we only needed the permission grant
+                stream.getTracks().forEach(t => t.stop());
+                // Re-enumerate now that permission is granted
+                devices = await navigator.mediaDevices.enumerateDevices();
+                outputs = devices.filter(d => d.kind === 'audiooutput');
+            } catch (permErr) {
+                // User denied or dismissed — carry on with whatever labels we have
+                console.warn('[AudioSink] Mic permission denied, device names will be generic:', permErr.message);
+            }
+        }
 
         // Preserve current selection
         const current = select.value || selectedAudioSinkId;
@@ -8864,8 +8885,8 @@ async function populateOutputDevices() {
         select.disabled = false;
 
         if (outputs.some(d => !d.label)) {
-            hint.textContent = 'Device names may be hidden until microphone permission is granted.';
-            hint.style.color = '#888';
+            hint.textContent = 'Device names unavailable — microphone permission was denied.';
+            hint.style.color = '#e67e22';
         } else {
             hint.textContent = outputs.length
                 ? `${outputs.length} output device(s) found.`
@@ -9081,6 +9102,8 @@ window.openBufferConfigModal = openBufferConfigModal;
 window.closeBufferConfigModal = closeBufferConfigModal;
 window.setBufferThreshold = setBufferThreshold;
 window.setSignalDataSource = setSignalDataSource;
+window.populateOutputDevices = populateOutputDevices;
+window.setOutputDevice = setOutputDevice;
 window.toggleChatMarkers = toggleChatMarkers;
 
 // Copy UUID to clipboard

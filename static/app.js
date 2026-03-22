@@ -2768,7 +2768,7 @@ async function decodeOpusPacket(opusData, sampleRate, channels) {
     const ready = await initOpusDecoder(sampleRate, channels || 1);
     if (!ready || !opusDecoder) return null;
     try {
-        return await opusDecoder.decode(opusData);
+        return await opusDecoder.decodeFrame(opusData);
     } catch (e) {
         console.error('decodeOpusPacket: decode error:', e);
         return null;

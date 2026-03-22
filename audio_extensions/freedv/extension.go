@@ -3,6 +3,7 @@ package freedv
 import (
 	"fmt"
 	"log"
+	"strings"
 )
 
 /*
@@ -83,12 +84,14 @@ func NewFreeDVExtension(audioParams AudioExtensionParams, extensionParams map[st
 
 	// FreeDV RADE only makes sense on SSB modes (USB or LSB).
 	// Reject any other mode immediately so the user gets a clear error.
-	tunedMode, _ := extensionParams["tuned_mode"].(string)
+	// Normalise to uppercase so "usb"/"lsb" (from the session) and "USB"/"LSB" both match.
+	tunedMode := strings.ToUpper(extensionParams["tuned_mode"].(string))
 	switch tunedMode {
 	case "USB", "LSB":
 		// valid
 	default:
-		return nil, fmt.Errorf("FreeDV requires USB or LSB mode (current mode: %q)", tunedMode)
+		rawMode, _ := extensionParams["tuned_mode"].(string)
+		return nil, fmt.Errorf("FreeDV requires USB or LSB mode (current mode: %q)", rawMode)
 	}
 
 	config := FreeDVConfig{

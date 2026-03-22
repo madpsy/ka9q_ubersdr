@@ -812,6 +812,39 @@ func (ah *AdminHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// HandleConfigParseYAML accepts a YAML config body, parses it with the Go YAML library,
+// and returns the result as JSON. This allows the admin UI to import exported config.yaml
+// files directly, since the export format is YAML but the in-memory editor uses JSON.
+func (ah *AdminHandler) HandleConfigParseYAML(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 10*1024*1024)) // 10 MB limit
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	var configMap map[string]interface{}
+	if err := yaml.Unmarshal(body, &configMap); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid YAML: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Remove admin password from response for security (same as handleGetConfig)
+	if admin, ok := configMap["admin"].(map[string]interface{}); ok {
+		admin["password"] = "********"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(configMap); err != nil {
+		log.Printf("Error encoding parsed YAML config: %v", err)
+	}
+}
+
 // handleGetConfig returns the current configuration
 func (ah *AdminHandler) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	// Read the config file directly to get the raw YAML structure

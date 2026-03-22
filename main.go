@@ -1861,6 +1861,7 @@ func main() {
 
 	// Admin endpoints (session protected)
 	http.HandleFunc("/admin/config", adminHandler.AuthMiddleware(adminHandler.HandleConfig))
+	http.HandleFunc("/admin/config/parse-yaml", adminHandler.AuthMiddleware(adminHandler.HandleConfigParseYAML))
 	http.HandleFunc("/admin/config/schema", adminHandler.AuthMiddleware(adminHandler.HandleConfigSchema))
 	http.HandleFunc("/admin/bands", adminHandler.AuthMiddleware(adminHandler.HandleBands))
 	http.HandleFunc("/admin/bands-import-sdrsharp", adminHandler.AuthMiddleware(adminHandler.HandleSDRSharpImport))

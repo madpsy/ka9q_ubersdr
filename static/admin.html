@@ -2806,16 +2806,27 @@
             try {
                 const text = await file.text();
 
-                // Try to parse as JSON first, then YAML
+                // Try to parse as JSON first, then send YAML to the server for parsing
                 let importedConfig;
                 if (file.name.endsWith('.json')) {
                     importedConfig = JSON.parse(text);
                 } else {
-                    // For YAML, we'll send it to the server to parse
-                    showAlert('YAML import: Please use the visual editor to modify configuration', 'info');
-                    // Reset file input before returning
-                    event.target.value = '';
-                    return;
+                    // Send YAML to the server for parsing (Go's YAML library handles it correctly)
+                    const response = await authenticatedFetch('/admin/config/parse-yaml', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'text/yaml' },
+                        body: text
+                    });
+                    if (!response) {
+                        // Auth failed, already handled by authenticatedFetch
+                        event.target.value = '';
+                        return;
+                    }
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(errorText || 'Failed to parse YAML configuration');
+                    }
+                    importedConfig = await response.json();
                 }
 
                 // Update current config

@@ -11,6 +11,21 @@
         </div>
     </div>
 
+    <!-- Controls -->
+    <div class="freedv-controls">
+        <button id="freedv-start-button" class="freedv-btn freedv-btn-start">
+            ▶ Start
+        </button>
+        <button id="freedv-stop-button" class="freedv-btn freedv-btn-stop" disabled>
+            ■ Stop
+        </button>
+    </div>
+
+    <!-- Decoded audio waterfall -->
+    <div class="freedv-waterfall-wrap">
+        <canvas id="freedv-waterfall" class="freedv-waterfall"></canvas>
+    </div>
+
     <!-- Info bar -->
     <div class="freedv-info-bar">
         <div class="freedv-info-item">
@@ -25,16 +40,6 @@
             <span class="freedv-info-label">Audio</span>
             <span class="freedv-info-value" id="freedv-audio-status">—</span>
         </div>
-    </div>
-
-    <!-- Controls -->
-    <div class="freedv-controls">
-        <button id="freedv-start-button" class="freedv-btn freedv-btn-start">
-            ▶ Start
-        </button>
-        <button id="freedv-stop-button" class="freedv-btn freedv-btn-stop" disabled>
-            ■ Stop
-        </button>
     </div>
 
     <!-- Error display -->

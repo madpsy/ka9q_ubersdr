@@ -17,6 +17,24 @@ class FreeDVExtension extends DecoderExtension {
         this.frameCount = 0;
         this.hasSignal = false;
 
+        // Signal-loss watchdog: if no Opus frames arrive for this many ms, clear the
+        // signal badge. 1000 ms gives one full second of silence before declaring loss.
+        this.signalTimeoutMs = 1000;
+        this.signalTimeoutId = null;
+
+        // Frequency-change debounce: restart the decoder 500 ms after the last
+        // frequency change so the backend gets the updated tuned_frequency_hz.
+        this.freqRestartDebounceMs = 500;
+        this.freqRestartTimeoutId = null;
+
+        // Waterfall
+        this.waterfallCanvas = null;
+        this.waterfallCtx = null;
+        this.waterfallAnalyser = null;
+        this.waterfallGain = null;       // silent sink so analysis audio isn't heard twice
+        this.waterfallRafId = null;      // requestAnimationFrame handle
+        this.waterfallImageData = null;  // reused ImageData for pixel-shift scrolling
+
         // Mute tracking — we mute the main SDR audio while the decoder is active
         this.sdrWasMuted = false;
 
@@ -67,6 +85,152 @@ class FreeDVExtension extends DecoderExtension {
         trySetup();
     }
 
+    // ── Waterfall ─────────────────────────────────────────────────────────────
+
+    initWaterfall() {
+        const canvas = document.getElementById('freedv-waterfall');
+        if (!canvas) return;
+
+        const audioCtx = window.audioContext || (this.radio && this.radio.getAudioContext && this.radio.getAudioContext());
+        if (!audioCtx) return;
+
+        // Size the canvas backing store to match its CSS display size
+        const wrap = canvas.parentElement;
+        const w = wrap ? wrap.clientWidth || 400 : 400;
+        const h = 300;
+        canvas.width  = w;
+        canvas.height = h;
+
+        this.waterfallCanvas = canvas;
+        this.waterfallCtx    = canvas.getContext('2d');
+
+        // AnalyserNode — 2048-point FFT gives good frequency resolution at 12 kHz
+        this.waterfallAnalyser = audioCtx.createAnalyser();
+        this.waterfallAnalyser.fftSize = 2048;
+        this.waterfallAnalyser.smoothingTimeConstant = 0.0; // no smoothing — waterfall does its own
+
+        // Silent sink: connect analyser → gain(0) → destination so the audio
+        // routed through the analyser is analysed but not heard a second time.
+        this.waterfallGain = audioCtx.createGain();
+        this.waterfallGain.gain.value = 0;
+        this.waterfallAnalyser.connect(this.waterfallGain);
+        this.waterfallGain.connect(audioCtx.destination);
+
+        // Pre-allocate the ImageData used for pixel-shift scrolling
+        this.waterfallImageData = this.waterfallCtx.createImageData(w, h);
+
+        // Fill with black initially
+        this.waterfallCtx.fillStyle = '#000';
+        this.waterfallCtx.fillRect(0, 0, w, h);
+
+        // Start the render loop
+        this._waterfallDraw();
+    }
+
+    _waterfallDraw() {
+        if (!this.waterfallCanvas || !this.waterfallCtx || !this.waterfallAnalyser) return;
+
+        const canvas   = this.waterfallCanvas;
+        const ctx      = this.waterfallCtx;
+        const analyser = this.waterfallAnalyser;
+        const w = canvas.width;
+        const h = canvas.height;
+        const binCount = analyser.frequencyBinCount; // fftSize / 2 = 1024
+
+        const freqData = new Uint8Array(binCount);
+
+        const draw = () => {
+            this.waterfallRafId = requestAnimationFrame(draw);
+
+            analyser.getByteFrequencyData(freqData);
+
+            // Shift the existing image down by 1 pixel
+            const imgData = ctx.getImageData(0, 0, w, h);
+            const src = imgData.data;
+            // Copy rows [0 .. h-2] → [1 .. h-1] (move everything down one row)
+            src.copyWithin(w * 4, 0, (h - 1) * w * 4);
+
+            // Paint the new top row from FFT data
+            // Map bin indices to canvas pixels (linear interpolation across width)
+            for (let x = 0; x < w; x++) {
+                const binIdx = Math.floor(x * binCount / w);
+                const magnitude = freqData[binIdx]; // 0–255
+
+                // Colour map: black → dark blue → cyan → yellow → white
+                let r, g, b;
+                if (magnitude < 64) {
+                    // black → dark blue
+                    r = 0;
+                    g = 0;
+                    b = Math.round(magnitude * 2);
+                } else if (magnitude < 128) {
+                    // dark blue → cyan
+                    const t = (magnitude - 64) / 64;
+                    r = 0;
+                    g = Math.round(t * 255);
+                    b = Math.round(128 + t * 127);
+                } else if (magnitude < 192) {
+                    // cyan → yellow
+                    const t = (magnitude - 128) / 64;
+                    r = Math.round(t * 255);
+                    g = 255;
+                    b = Math.round(255 * (1 - t));
+                } else {
+                    // yellow → white
+                    const t = (magnitude - 192) / 63;
+                    r = 255;
+                    g = 255;
+                    b = Math.round(t * 255);
+                }
+
+                const offset = x * 4; // top row starts at byte 0
+                src[offset]     = r;
+                src[offset + 1] = g;
+                src[offset + 2] = b;
+                src[offset + 3] = 255;
+            }
+
+            ctx.putImageData(imgData, 0, 0);
+        };
+
+        draw();
+    }
+
+    stopWaterfall() {
+        if (this.waterfallRafId !== null) {
+            cancelAnimationFrame(this.waterfallRafId);
+            this.waterfallRafId = null;
+        }
+        // Disconnect the analyser from the audio graph
+        if (this.waterfallAnalyser) {
+            try { this.waterfallAnalyser.disconnect(); } catch (e) { /* ignore */ }
+            this.waterfallAnalyser = null;
+        }
+        if (this.waterfallGain) {
+            try { this.waterfallGain.disconnect(); } catch (e) { /* ignore */ }
+            this.waterfallGain = null;
+        }
+        this.waterfallCanvas = null;
+        this.waterfallCtx    = null;
+        this.waterfallImageData = null;
+    }
+
+    // Route a decoded AudioBuffer through the waterfall analyser (in addition to
+    // the normal playback path). Called from decodeAndPlayOpus() after the buffer
+    // is created.
+    _feedWaterfall(audioBuffer, audioCtx) {
+        if (!this.waterfallAnalyser) return;
+        try {
+            const src = audioCtx.createBufferSource();
+            src.buffer = audioBuffer;
+            src.connect(this.waterfallAnalyser);
+            src.start();
+            // No need to stop — it ends naturally when the buffer finishes
+        } catch (e) {
+            // Non-fatal — waterfall just won't update for this frame
+        }
+    }
+
     setupEventHandlers() {
         if (this.handlersSetup) return;
         this.handlersSetup = true;
@@ -85,6 +249,8 @@ class FreeDVExtension extends DecoderExtension {
     onEnable() {
         console.log('FreeDV: Extension enabled');
         this.setupBinaryMessageHandler();
+        // Initialise waterfall now that the DOM template is in the panel
+        this.initWaterfall();
     }
 
     onDisable() {
@@ -93,6 +259,7 @@ class FreeDVExtension extends DecoderExtension {
             this.stopDecoder();
         }
         this.removeBinaryMessageHandler();
+        this.stopWaterfall();
     }
 
     onProcessAudio(dataArray) {
@@ -128,6 +295,8 @@ class FreeDVExtension extends DecoderExtension {
 
         this.isRunning = false;
         this.hasSignal = false;
+        this.clearSignalTimeout();
+        this.clearFreqRestartTimeout();
 
         this.updateButtonStates();
         this.updateStatus('Stopped', '');
@@ -304,12 +473,14 @@ class FreeDVExtension extends DecoderExtension {
             return;
         }
 
-        // Signal detected — backend only sends frames when FreeDV has decoded audio
+        // Signal detected — backend only sends frames when FreeDV has decoded audio.
+        // Arm (or re-arm) the signal-loss watchdog on every frame.
         if (!this.hasSignal) {
             this.hasSignal = true;
             this.updateSignalBadge(true);
             this.updateAudioStatus('Decoding');
         }
+        this.startSignalTimeout();
 
         this.frameCount++;
         this.updateFrameCount(this.frameCount);
@@ -388,6 +559,9 @@ class FreeDVExtension extends DecoderExtension {
                 audioBuffer.copyToChannel(result.channelData[ch], ch);
             }
 
+            // Feed the waterfall analyser (silent duplicate — doesn't affect playback)
+            this._feedWaterfall(audioBuffer, audioCtx);
+
             if (typeof window.playAudioBuffer === 'function') {
                 window.playAudioBuffer(audioBuffer);
             } else {
@@ -450,8 +624,12 @@ class FreeDVExtension extends DecoderExtension {
         console.error('FreeDV: Error —', message);
 
         this.isRunning = false;
+        this.hasSignal = false;
+        this.clearSignalTimeout();
+        this.clearFreqRestartTimeout();
         this.updateButtonStates();
         this.updateStatus('Error', 'error');
+        this.updateSignalBadge(false);
         this.showError(message);
 
         // Restore SDR mute state on error
@@ -474,6 +652,32 @@ class FreeDVExtension extends DecoderExtension {
         const errorEl = document.getElementById('freedv-error');
         if (errorEl) {
             errorEl.style.display = 'none';
+        }
+    }
+
+    // ── Signal-loss watchdog ─────────────────────────────────────────────────
+
+    startSignalTimeout() {
+        // Cancel any existing timer and start a fresh one.
+        // Called on every incoming Opus frame so the timer is always rolling.
+        if (this.signalTimeoutId !== null) {
+            clearTimeout(this.signalTimeoutId);
+        }
+        this.signalTimeoutId = setTimeout(() => {
+            this.signalTimeoutId = null;
+            if (this.hasSignal) {
+                console.log('FreeDV: No frames for 1 s — signal lost');
+                this.hasSignal = false;
+                this.updateSignalBadge(false);
+                this.updateAudioStatus('—');
+            }
+        }, this.signalTimeoutMs);
+    }
+
+    clearSignalTimeout() {
+        if (this.signalTimeoutId !== null) {
+            clearTimeout(this.signalTimeoutId);
+            this.signalTimeoutId = null;
         }
     }
 
@@ -529,12 +733,47 @@ class FreeDVExtension extends DecoderExtension {
         if (el) el.textContent = mode ? mode.toUpperCase() : '—';
     }
 
+    // ── Frequency/mode change debounce helpers ───────────────────────────────
+
+    clearFreqRestartTimeout() {
+        if (this.freqRestartTimeoutId !== null) {
+            clearTimeout(this.freqRestartTimeoutId);
+            this.freqRestartTimeoutId = null;
+        }
+    }
+
+    // Immediately detach from the backend and schedule a re-attach after the
+    // debounce window. Called by both onFrequencyChanged and onModeChanged.
+    _scheduleRestart(reason) {
+        if (!this.isRunning) return;
+
+        console.log(`FreeDV: ${reason} — stopping immediately, restart in ${this.freqRestartDebounceMs} ms`);
+
+        // Cancel any previously scheduled restart
+        this.clearFreqRestartTimeout();
+
+        // Stop the backend immediately so it doesn't keep processing stale audio
+        this.detachAudioExtension();
+        this.updateStatus('Retuning…', 'running');
+
+        // Schedule re-attach after the debounce window
+        this.freqRestartTimeoutId = setTimeout(() => {
+            this.freqRestartTimeoutId = null;
+            if (!this.isRunning) return; // user may have pressed Stop during the window
+            console.log(`FreeDV: Restarting decoder after ${reason}`);
+            this.attachAudioExtension();
+        }, this.freqRestartDebounceMs);
+    }
+
     // ── Radio event overrides ────────────────────────────────────────────────
+
+    onFrequencyChanged(frequency) {
+        this._scheduleRestart(`frequency change to ${frequency} Hz`);
+    }
 
     onModeChanged(mode) {
         this.updateModeDisplay();
-        // If the decoder is running and the mode changes to something invalid,
-        // the backend will send an error — we don't need to stop proactively.
+        this._scheduleRestart(`mode change to ${mode}`);
     }
 }
 

@@ -462,6 +462,11 @@ class FreeDVExtension extends DecoderExtension {
                 tr.classList.add('freedv-activity-tunable');
                 tr.title = `Click to tune to ${this._formatFreq(u.freq_hz)}`;
                 tr.addEventListener('click', () => {
+                    // Validate: FreeDV operates in the HF range 0–30 MHz
+                    if (u.freq_hz <= 0 || u.freq_hz > 30e6) {
+                        console.warn(`FreeDV: Ignoring out-of-range frequency ${u.freq_hz} Hz`);
+                        return;
+                    }
                     if (this.radio && this.radio.setFrequency) {
                         // Disable edge detection briefly so the spectrum doesn't
                         // misfire during the frequency jump (same pattern as SSTV)

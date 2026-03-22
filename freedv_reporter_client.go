@@ -383,7 +383,7 @@ func (c *FreeDVReporterClient) handleNewConnection(data []byte) {
 
 	user := FreeDVReporterUser{
 		SID:         msg.SID,
-		Callsign:    msg.Callsign,
+		Callsign:    strings.ToUpper(msg.Callsign),
 		GridSquare:  msg.GridSquare,
 		Version:     msg.Version,
 		RxOnly:      msg.RxOnly,

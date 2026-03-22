@@ -31,6 +31,7 @@ type Config struct {
 	SSHProxy           SSHProxyConfig           `yaml:"ssh_proxy"`
 	MCP                MCPConfig                `yaml:"mcp"`
 	Whisper            WhisperConfig            `yaml:"whisper"`
+	FreeDVExtension    FreeDVExtensionConfig    `yaml:"freedv_extension"`
 	Bookmarks          []Bookmark               `yaml:"bookmarks"`
 	Bands              []Band                   `yaml:"bands"`
 	Extensions         []string                 `yaml:"extensions"`
@@ -354,6 +355,11 @@ type WhisperConfig struct {
 	MaxUsers          int    `yaml:"max_users"`          // Maximum concurrent users of the extension (0 = unlimited)
 	LibreTranslateURL string `yaml:"libretranslate_url"` // LibreTranslate API URL for translation (default: https://whisper.ubersdr.org/translate)
 	SummaryURL        string `yaml:"summary_url"`        // Summary API URL for text summarization (default: same host as server_url with /summarise endpoint)
+}
+
+// FreeDVExtensionConfig contains settings for the FreeDV audio extension
+type FreeDVExtensionConfig struct {
+	MaxUsers int `yaml:"max_users"` // Maximum concurrent users of the FreeDV extension (0 = unlimited, default: 10)
 }
 
 // LoadConfig loads configuration from a YAML file

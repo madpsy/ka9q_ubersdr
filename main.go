@@ -1357,9 +1357,14 @@ func main() {
 
 	// Register FreeDV extension
 	// Callsign and locator come from the instance config; the frontend only provides freq_hz
+	freedvMaxUsers := config.FreeDVExtension.MaxUsers
+	if freedvMaxUsers == 0 {
+		freedvMaxUsers = 10 // default: 10 concurrent users
+	}
 	freedv.GlobalConfig = &freedv.GlobalConfigProvider{
 		Callsign: config.Admin.Callsign,
 		Locator:  latLonToGridSquare(config.Admin.GPS.Lat, config.Admin.GPS.Lon),
+		MaxUsers: freedvMaxUsers,
 	}
 	freedvInfo := freedv.GetInfo()
 

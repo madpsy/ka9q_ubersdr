@@ -1547,3 +1547,19 @@ whisper:
   # Example: "https://whisper.ubersdr.org/summarise"
   summary_url: "https://whisper.ubersdr.org/summarise"
 
+# ==============================================================================
+# FreeDV Extension Configuration
+# ==============================================================================
+# Controls the FreeDV RADE digital voice decoder extension.
+# Each user who activates the FreeDV extension spawns a dedicated
+# freedv-ka9q subprocess, so limiting concurrent users helps manage
+# CPU and memory usage on the server.
+freedv_extension:
+  # Maximum concurrent users of the FreeDV extension (default: 10)
+  # Limits how many users can run the FreeDV decoder simultaneously.
+  # Each active user spawns a freedv-ka9q subprocess, so this directly
+  # controls the number of subprocesses running at any one time.
+  # Set to 0 for unlimited users (not recommended for public instances).
+  # Recommended: 5-10 depending on server capacity.
+  max_users: 10
+

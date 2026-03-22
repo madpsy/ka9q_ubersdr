@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"sync"
 )
 
@@ -124,7 +125,7 @@ func (s *FreeDVReporterStore) UpdateRx(sid string, receivedCallsign string, snr 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if u, ok := s.users[sid]; ok {
-		u.LastRxCall = receivedCallsign
+		u.LastRxCall = strings.ToUpper(receivedCallsign)
 		u.LastRxSNR = snr
 		u.LastRxMode = mode
 	}

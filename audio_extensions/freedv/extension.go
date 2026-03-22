@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 )
 
 /*
@@ -30,10 +31,15 @@ const reportingMessage = "UberSDR Decoder"
 type GlobalConfigProvider struct {
 	Callsign string // Station callsign (config.Admin.Callsign)
 	Locator  string // Maidenhead grid square (derived from config.Admin.GPS lat/lon)
+	MaxUsers int    // Maximum concurrent users (0 = unlimited, default: 10)
 }
 
 // GlobalConfig is set by main package before the extension is registered
 var GlobalConfig *GlobalConfigProvider
+
+// activeUserCount tracks the number of concurrent FreeDV users
+var activeUserCount int
+var activeUserMutex sync.Mutex
 
 // AudioExtensionParams contains audio stream parameters
 type AudioExtensionParams struct {
@@ -74,6 +80,19 @@ type FreeDVConfig struct {
 
 // NewFreeDVExtension creates a new FreeDV audio extension
 func NewFreeDVExtension(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (*FreeDVExtension, error) {
+	// Check max users limit
+	if GlobalConfig != nil && GlobalConfig.MaxUsers > 0 {
+		activeUserMutex.Lock()
+		if activeUserCount >= GlobalConfig.MaxUsers {
+			activeUserMutex.Unlock()
+			return nil, fmt.Errorf("maximum FreeDV users reached (%d/%d)", activeUserCount, GlobalConfig.MaxUsers)
+		}
+		activeUserCount++
+		currentCount := activeUserCount
+		activeUserMutex.Unlock()
+		log.Printf("[FreeDV Extension] User connected (%d/%d)", currentCount, GlobalConfig.MaxUsers)
+	}
+
 	// Validate audio parameters
 	if audioParams.Channels != 1 {
 		return nil, fmt.Errorf("FreeDV requires mono audio (got %d channels)", audioParams.Channels)
@@ -149,6 +168,17 @@ func (e *FreeDVExtension) Start(audioChan <-chan AudioSample, resultChan chan<- 
 
 // Stop stops the extension and kills the subprocess
 func (e *FreeDVExtension) Stop() error {
+	// Decrement active user count
+	if GlobalConfig != nil && GlobalConfig.MaxUsers > 0 {
+		activeUserMutex.Lock()
+		if activeUserCount > 0 {
+			activeUserCount--
+		}
+		currentCount := activeUserCount
+		activeUserMutex.Unlock()
+		log.Printf("[FreeDV Extension] User disconnected (%d/%d)", currentCount, GlobalConfig.MaxUsers)
+	}
+
 	return e.decoder.Stop()
 }
 

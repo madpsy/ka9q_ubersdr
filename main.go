@@ -1092,6 +1092,7 @@ func main() {
 				dxClusterWsHandler.BroadcastFreeDVActivity("disconnected", nil, "")
 			},
 			OnNewConnection: func(user FreeDVReporterUser) {
+				EnrichFreeDVUser(&user, receiverLocator, globalCTY)
 				store.AddOrUpdate(user)
 				u, _ := store.Get(user.SID)
 				dxClusterWsHandler.BroadcastFreeDVActivity("new_connection", &u, "")

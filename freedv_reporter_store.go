@@ -22,6 +22,34 @@ type FreeDVReporterUser struct {
 	Message      string  `json:"message,omitempty"`
 	ConnectTime  string  `json:"connect_time,omitempty"`
 	LastUpdate   string  `json:"last_update,omitempty"`
+
+	// Enriched fields — computed server-side, not sent by the FreeDV Reporter server.
+	Country    string   `json:"country,omitempty"`
+	Continent  string   `json:"continent,omitempty"`
+	DistanceKm *float64 `json:"distance_km,omitempty"`
+	BearingDeg *float64 `json:"bearing_deg,omitempty"`
+}
+
+// EnrichFreeDVUser populates the derived Country, Continent, DistanceKm and
+// BearingDeg fields on a FreeDVReporterUser using the CTY database and the
+// receiver's Maidenhead locator. Either argument may be nil/empty, in which
+// case the corresponding fields are left unchanged.
+func EnrichFreeDVUser(user *FreeDVReporterUser, receiverLocator string, ctyDB *CTYDatabase) {
+	// Country / continent from callsign via CTY database
+	if ctyDB != nil && user.Callsign != "" {
+		if info := ctyDB.LookupCallsignFull(user.Callsign); info != nil {
+			user.Country = info.Country
+			user.Continent = info.Continent
+		}
+	}
+
+	// Distance / bearing from grid square vs receiver locator
+	if receiverLocator != "" && user.GridSquare != "" {
+		if dist, bearing, err := CalculateDistanceAndBearingFromLocators(receiverLocator, user.GridSquare); err == nil {
+			user.DistanceKm = &dist
+			user.BearingDeg = &bearing
+		}
+	}
 }
 
 // FreeDVReporterStore is a thread-safe in-memory map of active FreeDV Reporter users,

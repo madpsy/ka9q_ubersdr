@@ -399,6 +399,21 @@
     color: #a0c0e0;
 }
 
+/* On-frequency indicator — green dot shown when the dial matches a station's freq */
+.freedv-activity-onfreq {
+    color: #28a745;
+    font-size: 10px;
+    vertical-align: middle;
+    margin-left: 2px;
+}
+
+/* Distance column */
+.freedv-activity-dist {
+    font-size: 11px;
+    color: #8ab0c0;
+    white-space: nowrap;
+}
+
 /* TX badge */
 .freedv-activity-tx-badge {
     font-size: 10px;

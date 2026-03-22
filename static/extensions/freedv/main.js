@@ -504,28 +504,36 @@ class FreeDVExtension extends DecoderExtension {
                 tr = document.createElement('tr');
                 tr.dataset.sid = u.sid;
 
-                // Callsign cell
+                // [0] Callsign cell
                 const tdCall = document.createElement('td');
                 tdCall.className = 'freedv-activity-callsign';
                 tr.appendChild(tdCall);
 
-                // Grid cell
+                // [1] Country cell
                 tr.appendChild(document.createElement('td'));
 
-                // Frequency cell
+                // [2] Distance cell
+                const tdDist = document.createElement('td');
+                tdDist.className = 'freedv-activity-dist';
+                tr.appendChild(tdDist);
+
+                // [3] Grid cell
+                tr.appendChild(document.createElement('td'));
+
+                // [4] Frequency cell
                 const tdFreq = document.createElement('td');
                 tdFreq.className = 'freedv-activity-freq';
                 tr.appendChild(tdFreq);
 
-                // Mode cell
+                // [5] Message cell
                 tr.appendChild(document.createElement('td'));
 
-                // TX cell
+                // [6] TX cell
                 const tdTx = document.createElement('td');
                 tdTx.className = 'freedv-activity-tx-cell';
                 tr.appendChild(tdTx);
 
-                // Last RX cell
+                // [7] Last RX cell
                 const tdRx = document.createElement('td');
                 tdRx.className = 'freedv-activity-rx-cell';
                 tr.appendChild(tdRx);
@@ -565,6 +573,8 @@ class FreeDVExtension extends DecoderExtension {
 
             // ── Update cell contents ──────────────────────────────────────────
             const cells = tr.children;
+            const dialFreqHz = this.radio ? this.radio.getFrequency() : 0;
+            const freqMatchToleranceHz = 100; // ±100 Hz
 
             // [0] Callsign
             const tdCall = cells[0];
@@ -582,19 +592,42 @@ class FreeDVExtension extends DecoderExtension {
                 if (badge) badge.remove();
             }
 
-            // [1] Grid
-            cells[1].textContent = u.grid_square || '—';
+            // [1] Country
+            cells[1].textContent = u.country || '—';
 
-            // [2] Frequency
-            cells[2].textContent = u.freq_hz ? this._formatFreq(u.freq_hz) : '—';
+            // [2] Distance
+            cells[2].textContent = (u.distance_km != null) ? Math.round(u.distance_km) + ' km' : '—';
 
-            // [3] Message (truncated to 28 chars + ellipsis = 29 total; full text in tooltip)
+            // [3] Grid
+            cells[3].textContent = u.grid_square || '—';
+
+            // [4] Frequency — with green dot if dial frequency matches within tolerance
+            const freqCell = cells[4];
+            const freqText = u.freq_hz ? this._formatFreq(u.freq_hz) : '—';
+            const onFreq = u.freq_hz && dialFreqHz &&
+                Math.abs(u.freq_hz - dialFreqHz) <= freqMatchToleranceHz;
+            // Only rebuild the cell content when the text or match state changes
+            const wantDot = !!onFreq;
+            const hasDot = !!freqCell.querySelector('.freedv-activity-onfreq');
+            if (freqCell.dataset.freqText !== freqText || wantDot !== hasDot) {
+                freqCell.dataset.freqText = freqText;
+                freqCell.textContent = freqText;
+                if (wantDot) {
+                    const dot = document.createElement('span');
+                    dot.className = 'freedv-activity-onfreq';
+                    dot.title = 'Currently tuned to this frequency';
+                    dot.textContent = ' ●';
+                    freqCell.appendChild(dot);
+                }
+            }
+
+            // [5] Message (truncated to 28 chars + ellipsis = 29 total; full text in tooltip)
             const msg = u.message || '';
-            cells[3].textContent = msg.length > 28 ? msg.slice(0, 28) + '…' : (msg || '—');
-            cells[3].title = msg.length > 28 ? msg : '';
+            cells[5].textContent = msg.length > 28 ? msg.slice(0, 28) + '…' : (msg || '—');
+            cells[5].title = msg.length > 28 ? msg : '';
 
-            // [4] TX badge — only recreate the badge span if TX state changed
-            const tdTx = cells[4];
+            // [6] TX badge — only recreate the badge span if TX state changed
+            const tdTx = cells[6];
             const hasBadge = !!tdTx.querySelector('.freedv-activity-tx-badge');
             if (u.transmitting && !hasBadge) {
                 tdTx.innerHTML = '<span class="freedv-activity-tx-badge">TX</span>';
@@ -604,8 +637,8 @@ class FreeDVExtension extends DecoderExtension {
                 tdTx.textContent = '—';
             }
 
-            // [5] Last RX
-            const tdRx = cells[5];
+            // [7] Last RX
+            const tdRx = cells[7];
             if (u.last_rx_callsign) {
                 const snr = typeof u.last_rx_snr === 'number' ? ` ${u.last_rx_snr.toFixed(0)} dB` : '';
                 const text = u.last_rx_callsign + snr;

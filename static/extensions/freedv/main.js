@@ -26,6 +26,12 @@ class FreeDVExtension extends DecoderExtension {
         this.opusDecoderSampleRate = null;
         this.opusDecoderChannels = null;
 
+        // Scheduled playback cursor — frames are chained end-to-end so there
+        // are no gaps or overlaps between consecutive 20 ms Opus frames.
+        // Reset to 0 whenever the decoder is stopped so the first frame after
+        // a restart gets a fresh lead-in buffer.
+        this.nextPlayTime = 0;
+
         // Signal-loss watchdog: if no Opus frames arrive for this many ms, clear the
         // signal badge. 1000 ms gives one full second of silence before declaring loss.
         this.signalTimeoutMs = 1000;
@@ -756,6 +762,9 @@ class FreeDVExtension extends DecoderExtension {
 
         // Free the private Opus decoder WASM instance
         this._destroyOpusDecoder();
+
+        // Reset the playback cursor so the next start() gets a fresh lead-in
+        this.nextPlayTime = 0;
     }
 
     // ── Audio extension attach / detach ──────────────────────────────────────
@@ -1057,11 +1066,22 @@ class FreeDVExtension extends DecoderExtension {
             this._feedWaterfall(audioBuffer, audioCtx);
         }
 
-        // Play the decoded audio
+        // Play the decoded audio using a scheduled nextPlayTime cursor so that
+        // consecutive 20 ms frames are chained back-to-back with no gaps or
+        // overlaps, matching the pattern used by the main SDR audio in app.js.
         const source = audioCtx.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioCtx.destination);
-        source.start();
+
+        const now = audioCtx.currentTime;
+        // If we've fallen behind (first frame, tab was backgrounded, or gap
+        // after silence) reset the cursor with a small 50 ms lead-in buffer
+        // so the scheduler has time to queue the next frame before this one ends.
+        if (this.nextPlayTime < now) {
+            this.nextPlayTime = now + 0.05;
+        }
+        source.start(this.nextPlayTime);
+        this.nextPlayTime += audioBuffer.duration;
     }
 
     // ── SDR mute helpers ──────────────────────────────────────────────────────

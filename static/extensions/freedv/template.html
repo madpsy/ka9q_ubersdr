@@ -19,11 +19,42 @@
         <button id="freedv-stop-button" class="freedv-btn freedv-btn-stop" disabled>
             ■ Stop
         </button>
+        <button id="freedv-view-toggle" class="freedv-btn freedv-btn-view" title="Toggle between waterfall and activity list">
+            📋 Activity
+        </button>
     </div>
 
-    <!-- Decoded audio waterfall -->
-    <div class="freedv-waterfall-wrap">
+    <!-- Decoded audio waterfall (shown by default when view=waterfall) -->
+    <div class="freedv-waterfall-wrap" id="freedv-waterfall-panel">
         <canvas id="freedv-waterfall" class="freedv-waterfall"></canvas>
+    </div>
+
+    <!-- FreeDV Reporter activity table (shown when view=activity) -->
+    <div class="freedv-activity-panel" id="freedv-activity-panel" style="display:none;">
+        <div class="freedv-activity-header">
+            <span class="freedv-activity-title">FreeDV Reporter — <span id="freedv-activity-band">current band</span></span>
+            <span class="freedv-activity-count" id="freedv-activity-count">0 stations</span>
+        </div>
+        <div class="freedv-activity-status" id="freedv-activity-status">Connecting…</div>
+        <div class="freedv-activity-table-wrap">
+            <table class="freedv-activity-table">
+                <thead>
+                    <tr>
+                        <th>Callsign</th>
+                        <th>Grid</th>
+                        <th>Freq</th>
+                        <th>Mode</th>
+                        <th>TX</th>
+                        <th>Last RX</th>
+                    </tr>
+                </thead>
+                <tbody id="freedv-activity-tbody">
+                    <tr class="freedv-activity-empty" id="freedv-activity-empty">
+                        <td colspan="6">No FreeDV stations on this band</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 
     <!-- Info bar -->

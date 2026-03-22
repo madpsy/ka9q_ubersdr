@@ -113,7 +113,7 @@ func (d *FreeDVDecoder) Start(audioChan <-chan AudioSample, resultChan chan<- []
 	}
 
 	cmd := exec.Command(binaryPath, args...)
-	cmd.Stderr = os.Stderr // pass binary log output through to our stderr
+	cmd.Stderr = io.Discard // suppress noisy binary stderr output
 
 	// The freedv-ka9q binary depends on shared libraries (e.g. libRADE) that live
 	// in the same directory as the binary. Prepend that directory to LD_LIBRARY_PATH

@@ -1077,6 +1077,62 @@ func main() {
 	}
 	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics, receiverLocator, config.Chat, &config.Admin)
 
+	// Initialize FreeDV Reporter activity monitor (view-only connection to qso.freedv.org)
+	if config.FreeDVReporter.Enabled {
+		store := NewFreeDVReporterStore()
+		dxClusterWsHandler.SetFreeDVReporterStore(store)
+
+		client := NewFreeDVReporterClient(config.FreeDVReporter.URI, FreeDVReporterCallbacks{
+			OnConnect: func() {
+				// Nothing extra needed — snapshot is served on subscribe
+			},
+			OnDisconnect: func() {
+				// Clear stale data so clients don't see a frozen list after reconnect
+				store.Clear()
+				dxClusterWsHandler.BroadcastFreeDVActivity("disconnected", nil, "")
+			},
+			OnNewConnection: func(user FreeDVReporterUser) {
+				store.AddOrUpdate(user)
+				u, _ := store.Get(user.SID)
+				dxClusterWsHandler.BroadcastFreeDVActivity("new_connection", &u, "")
+			},
+			OnRemoveConnection: func(sid string) {
+				store.Remove(sid)
+				dxClusterWsHandler.BroadcastFreeDVActivity("remove_connection", nil, sid)
+			},
+			OnFrequencyChange: func(sid string, freqHz uint64) {
+				store.UpdateFrequency(sid, freqHz)
+				if u, ok := store.Get(sid); ok {
+					dxClusterWsHandler.BroadcastFreeDVActivity("freq_change", &u, "")
+				}
+			},
+			OnTxReport: func(sid string, mode string, transmitting bool, lastTx string) {
+				store.UpdateTx(sid, mode, transmitting, lastTx)
+				if u, ok := store.Get(sid); ok {
+					dxClusterWsHandler.BroadcastFreeDVActivity("tx_report", &u, "")
+				}
+			},
+			OnRxReport: func(sid string, receivedCallsign string, snr float32, mode string) {
+				store.UpdateRx(sid, receivedCallsign, snr, mode)
+				if u, ok := store.Get(sid); ok {
+					dxClusterWsHandler.BroadcastFreeDVActivity("rx_report", &u, "")
+				}
+			},
+			OnMessageUpdate: func(sid string, message string) {
+				store.UpdateMessage(sid, message)
+				if u, ok := store.Get(sid); ok {
+					dxClusterWsHandler.BroadcastFreeDVActivity("message_update", &u, "")
+				}
+			},
+		})
+		client.Start()
+		defer client.Stop()
+		log.Printf("FreeDV Reporter: Activity monitor started (URI: %s, reconnect: %ds)",
+			config.FreeDVReporter.URI, config.FreeDVReporter.ReconnectDelay)
+	} else {
+		log.Printf("FreeDV Reporter: Activity monitor disabled")
+	}
+
 	// Initialize audio extension manager
 	audioExtensionRegistry := NewAudioExtensionRegistry()
 

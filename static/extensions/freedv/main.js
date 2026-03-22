@@ -3,6 +3,9 @@
 // Decodes FreeDV/RADE digital voice signals via the freedv-ka9q backend process.
 // Receives Opus-encoded decoded audio over the DX WebSocket binary channel and
 // plays it through the Web Audio API, muting the main SDR audio while active.
+//
+// Also shows a live FreeDV Reporter activity table (view-only, band-filtered)
+// sourced from the server's FreeDV Reporter monitor via the DX cluster WebSocket.
 
 class FreeDVExtension extends DecoderExtension {
     constructor() {
@@ -45,6 +48,16 @@ class FreeDVExtension extends DecoderExtension {
 
         // DOM handler setup guard
         this.handlersSetup = false;
+
+        // ── Activity view ────────────────────────────────────────────────────
+        // 'activity' (default) or 'waterfall'
+        this.currentView = 'activity';
+
+        // Map of sid → user object (from FreeDV Reporter)
+        this.activityUsers = new Map();
+
+        // Whether we are currently subscribed to the freedv_activity stream
+        this.activitySubscribed = false;
 
         console.log('FreeDV: Extension initialized');
     }
@@ -231,12 +244,308 @@ class FreeDVExtension extends DecoderExtension {
         }
     }
 
+    // ── View toggle ───────────────────────────────────────────────────────────
+
+    /**
+     * Switch between 'activity' and 'waterfall' views.
+     * @param {string} view - 'activity' or 'waterfall'
+     */
+    setView(view) {
+        this.currentView = view;
+
+        const waterfallPanel = document.getElementById('freedv-waterfall-panel');
+        const activityPanel  = document.getElementById('freedv-activity-panel');
+        const toggleBtn      = document.getElementById('freedv-view-toggle');
+
+        if (view === 'waterfall') {
+            if (waterfallPanel) waterfallPanel.style.display = '';
+            if (activityPanel)  activityPanel.style.display  = 'none';
+            if (toggleBtn)      toggleBtn.textContent = '📋 Activity';
+
+            // Subscribe to activity is not needed in waterfall view — unsubscribe
+            // to save bandwidth if we were subscribed.
+            this._unsubscribeActivity();
+
+            // Initialise waterfall if not already running
+            if (!this.waterfallCanvas) {
+                this.initWaterfall();
+            }
+        } else {
+            // activity view
+            if (waterfallPanel) waterfallPanel.style.display = 'none';
+            if (activityPanel)  activityPanel.style.display  = '';
+            if (toggleBtn)      toggleBtn.textContent = '〰 Waterfall';
+
+            // Subscribe to the activity stream
+            this._subscribeActivity();
+
+            // Update the band label and re-render the table
+            this._updateActivityBandLabel();
+            this._renderActivityTable();
+        }
+    }
+
+    // ── FreeDV Reporter activity subscription ─────────────────────────────────
+
+    _subscribeActivity() {
+        if (this.activitySubscribed) return;
+
+        const dxClient = window.dxClusterClient;
+        if (!dxClient || !dxClient.ws || dxClient.ws.readyState !== WebSocket.OPEN) {
+            this._setActivityStatus('Not connected to server');
+            return;
+        }
+
+        dxClient.ws.send(JSON.stringify({ type: 'subscribe_freedv_activity' }));
+        this.activitySubscribed = true;
+        this._setActivityStatus('Connecting…');
+        console.log('FreeDV: Subscribed to FreeDV activity stream');
+    }
+
+    _unsubscribeActivity() {
+        if (!this.activitySubscribed) return;
+
+        const dxClient = window.dxClusterClient;
+        if (dxClient && dxClient.ws && dxClient.ws.readyState === WebSocket.OPEN) {
+            dxClient.ws.send(JSON.stringify({ type: 'unsubscribe_freedv_activity' }));
+        }
+        this.activitySubscribed = false;
+        console.log('FreeDV: Unsubscribed from FreeDV activity stream');
+    }
+
+    // ── Activity message handlers ─────────────────────────────────────────────
+
+    _handleActivitySnapshot(users) {
+        this.activityUsers.clear();
+        for (const u of users) {
+            if (u.sid) this.activityUsers.set(u.sid, u);
+        }
+        this._setActivityStatus('');
+        this._renderActivityTable();
+    }
+
+    _handleActivityUpdate(event, user, sid) {
+        switch (event) {
+            case 'new_connection':
+                if (user && user.sid) this.activityUsers.set(user.sid, user);
+                break;
+            case 'remove_connection':
+                this.activityUsers.delete(sid || (user && user.sid));
+                break;
+            case 'freq_change':
+            case 'tx_report':
+            case 'rx_report':
+            case 'message_update':
+                if (user && user.sid) {
+                    // Merge update into existing record (server sends full user object)
+                    this.activityUsers.set(user.sid, user);
+                }
+                break;
+            case 'disconnected':
+                // Server lost connection to FreeDV Reporter — clear stale data
+                this.activityUsers.clear();
+                this._setActivityStatus('FreeDV Reporter disconnected — reconnecting…');
+                break;
+        }
+        this._renderActivityTable();
+    }
+
+    // ── Band filtering ────────────────────────────────────────────────────────
+
+    /**
+     * Returns the {min, max} Hz range for the band the radio is currently tuned to,
+     * or null if the current frequency doesn't fall in any known band.
+     */
+    _currentBandRange() {
+        const bandRanges = window.bandRanges;
+        if (!bandRanges) return null;
+
+        const freqHz = this.radio ? this.radio.getFrequency() : 0;
+        if (!freqHz) return null;
+
+        for (const [, range] of Object.entries(bandRanges)) {
+            if (freqHz >= range.min && freqHz <= range.max) {
+                return range;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Returns the name of the band the radio is currently tuned to, or null.
+     */
+    _currentBandName() {
+        const bandRanges = window.bandRanges;
+        if (!bandRanges) return null;
+
+        const freqHz = this.radio ? this.radio.getFrequency() : 0;
+        if (!freqHz) return null;
+
+        for (const [name, range] of Object.entries(bandRanges)) {
+            if (freqHz >= range.min && freqHz <= range.max) {
+                return name;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Filter the activity map to users on the current band.
+     * If the current frequency is not in any known band, returns all users.
+     */
+    _filteredUsers() {
+        const range = this._currentBandRange();
+        if (!range) {
+            // Not in a known band — show all
+            return Array.from(this.activityUsers.values());
+        }
+        return Array.from(this.activityUsers.values()).filter(u => {
+            const f = u.freq_hz || 0;
+            return f >= range.min && f <= range.max;
+        });
+    }
+
+    // ── Activity table rendering ──────────────────────────────────────────────
+
+    _updateActivityBandLabel() {
+        const el = document.getElementById('freedv-activity-band');
+        if (!el) return;
+        const band = this._currentBandName();
+        el.textContent = band ? band : 'all bands';
+    }
+
+    _setActivityStatus(msg) {
+        const el = document.getElementById('freedv-activity-status');
+        if (!el) return;
+        el.textContent = msg;
+        el.style.display = msg ? '' : 'none';
+    }
+
+    _renderActivityTable() {
+        if (this.currentView !== 'activity') return;
+
+        const tbody   = document.getElementById('freedv-activity-tbody');
+        const emptyEl = document.getElementById('freedv-activity-empty');
+        const countEl = document.getElementById('freedv-activity-count');
+        if (!tbody) return;
+
+        const users = this._filteredUsers();
+
+        // Sort: transmitting first, then by callsign
+        users.sort((a, b) => {
+            if (a.transmitting && !b.transmitting) return -1;
+            if (!a.transmitting && b.transmitting) return 1;
+            return (a.callsign || '').localeCompare(b.callsign || '');
+        });
+
+        // Update count
+        if (countEl) {
+            countEl.textContent = `${users.length} station${users.length !== 1 ? 's' : ''}`;
+        }
+
+        // Remove all rows except the empty-placeholder
+        Array.from(tbody.querySelectorAll('tr:not(#freedv-activity-empty)')).forEach(r => r.remove());
+
+        if (users.length === 0) {
+            if (emptyEl) emptyEl.style.display = '';
+            return;
+        }
+
+        if (emptyEl) emptyEl.style.display = 'none';
+
+        for (const u of users) {
+            const tr = document.createElement('tr');
+            if (u.transmitting) tr.classList.add('freedv-activity-tx');
+
+            // Click to tune — only if the user has a valid frequency
+            if (u.freq_hz) {
+                tr.classList.add('freedv-activity-tunable');
+                tr.title = `Click to tune to ${this._formatFreq(u.freq_hz)}`;
+                tr.addEventListener('click', () => {
+                    if (this.radio && this.radio.setFrequency) {
+                        // Disable edge detection briefly so the spectrum doesn't
+                        // misfire during the frequency jump (same pattern as SSTV)
+                        if (window.spectrumDisplay) {
+                            window.spectrumDisplay.skipEdgeDetectionTemporary = true;
+                        }
+                        this.radio.setFrequency(u.freq_hz);
+                        setTimeout(() => {
+                            if (window.spectrumDisplay) {
+                                window.spectrumDisplay.skipEdgeDetectionTemporary = false;
+                            }
+                        }, 500);
+                        console.log(`FreeDV: Tuned to ${u.callsign} @ ${this._formatFreq(u.freq_hz)}`);
+                    }
+                });
+            }
+
+            // Callsign
+            const tdCall = document.createElement('td');
+            tdCall.className = 'freedv-activity-callsign';
+            tdCall.textContent = u.callsign || '—';
+            if (u.rx_only) {
+                const badge = document.createElement('span');
+                badge.className = 'freedv-activity-rxonly';
+                badge.textContent = 'RX';
+                tdCall.appendChild(badge);
+            }
+            tr.appendChild(tdCall);
+
+            // Grid square
+            const tdGrid = document.createElement('td');
+            tdGrid.textContent = u.grid_square || '—';
+            tr.appendChild(tdGrid);
+
+            // Frequency
+            const tdFreq = document.createElement('td');
+            tdFreq.className = 'freedv-activity-freq';
+            tdFreq.textContent = u.freq_hz ? this._formatFreq(u.freq_hz) : '—';
+            tr.appendChild(tdFreq);
+
+            // Mode
+            const tdMode = document.createElement('td');
+            tdMode.textContent = u.mode || '—';
+            tr.appendChild(tdMode);
+
+            // TX indicator
+            const tdTx = document.createElement('td');
+            tdTx.className = 'freedv-activity-tx-cell';
+            if (u.transmitting) {
+                tdTx.innerHTML = '<span class="freedv-activity-tx-badge">TX</span>';
+            } else {
+                tdTx.textContent = '—';
+            }
+            tr.appendChild(tdTx);
+
+            // Last RX callsign + SNR
+            const tdRx = document.createElement('td');
+            tdRx.className = 'freedv-activity-rx-cell';
+            if (u.last_rx_callsign) {
+                const snr = typeof u.last_rx_snr === 'number' ? ` ${u.last_rx_snr.toFixed(0)} dB` : '';
+                tdRx.textContent = u.last_rx_callsign + snr;
+            } else {
+                tdRx.textContent = '—';
+            }
+            tr.appendChild(tdRx);
+
+            tbody.appendChild(tr);
+        }
+    }
+
+    /** Format Hz as MHz with 3 decimal places, e.g. 14236000 → "14.236 MHz" */
+    _formatFreq(hz) {
+        return (hz / 1e6).toFixed(3) + ' MHz';
+    }
+
+    // ── Event handlers setup ──────────────────────────────────────────────────
+
     setupEventHandlers() {
         if (this.handlersSetup) return;
         this.handlersSetup = true;
 
-        const startBtn = document.getElementById('freedv-start-button');
-        const stopBtn  = document.getElementById('freedv-stop-button');
+        const startBtn  = document.getElementById('freedv-start-button');
+        const stopBtn   = document.getElementById('freedv-stop-button');
+        const toggleBtn = document.getElementById('freedv-view-toggle');
 
         if (startBtn) {
             startBtn.addEventListener('click', () => this.startDecoder());
@@ -244,13 +553,19 @@ class FreeDVExtension extends DecoderExtension {
         if (stopBtn) {
             stopBtn.addEventListener('click', () => this.stopDecoder());
         }
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', () => {
+                this.setView(this.currentView === 'activity' ? 'waterfall' : 'activity');
+            });
+        }
     }
 
     onEnable() {
         console.log('FreeDV: Extension enabled');
         this.setupBinaryMessageHandler();
-        // Initialise waterfall now that the DOM template is in the panel
-        this.initWaterfall();
+
+        // Default to activity view — subscribe immediately
+        this.setView('activity');
     }
 
     onDisable() {
@@ -260,6 +575,7 @@ class FreeDVExtension extends DecoderExtension {
         }
         this.removeBinaryMessageHandler();
         this.stopWaterfall();
+        this._unsubscribeActivity();
     }
 
     onProcessAudio(dataArray) {
@@ -416,6 +732,28 @@ class FreeDVExtension extends DecoderExtension {
     // ── Message handlers ─────────────────────────────────────────────────────
 
     handleTextMessage(message) {
+        // ── FreeDV Reporter activity messages ────────────────────────────────
+        if (message.type === 'freedv_activity_snapshot') {
+            this._handleActivitySnapshot(message.users || []);
+            return;
+        }
+
+        if (message.type === 'freedv_activity_update') {
+            this._handleActivityUpdate(message.event, message.user || null, message.sid || null);
+            return;
+        }
+
+        if (message.type === 'subscription_status' && message.stream === 'freedv_activity') {
+            if (!message.enabled) {
+                // Server rejected or disabled the subscription
+                this._setActivityStatus(message.error || 'FreeDV Reporter not available on this server');
+            } else {
+                this._setActivityStatus('');
+            }
+            return;
+        }
+
+        // ── Audio extension messages ─────────────────────────────────────────
         if (message.type === 'audio_extension_error') {
             console.error('FreeDV: Server error:', message.error);
             this.handleError(message.error || 'Unknown server error');
@@ -481,136 +819,95 @@ class FreeDVExtension extends DecoderExtension {
         this.frameCount++;
         this.updateFrameCount(this.frameCount);
 
-        // Decode and play the Opus frame asynchronously
+        // Decode and play the Opus frame
         this.decodeAndPlayOpus(opusData, sampleRate, channels);
     }
 
-    // ── Opus decoding ────────────────────────────────────────────────────────
-    // We use the shared window.decodeOpusPacket() helper from app.js rather than
-    // creating our own OpusDecoder instance. The WASM module only supports one
-    // instance at a time, so creating a second one breaks both decoders.
+    // ── Opus decode & playback ────────────────────────────────────────────────
 
-    async decodeAndPlayOpus(opusData, sampleRate, channels) {
-        if (typeof window.decodeOpusPacket !== 'function') {
-            console.error('FreeDV: window.decodeOpusPacket not available');
-            this.updateAudioStatus('Decode error');
-            return;
-        }
-
-        const result = await window.decodeOpusPacket(opusData, sampleRate, channels);
-        if (!result || !result.channelData || result.channelData.length === 0) {
-            return;
-        }
-
-        const audioCtx = window.audioContext;
+    decodeAndPlayOpus(opusData, sampleRate, channels) {
+        const audioCtx = window.audioContext ||
+            (this.radio && this.radio.getAudioContext && this.radio.getAudioContext());
         if (!audioCtx) {
             console.warn('FreeDV: No AudioContext available');
             return;
         }
 
-        const numChannels   = result.channelData.length;
-        const numSamples    = result.channelData[0].length;
-        const outSampleRate = result.sampleRate || sampleRate;
+        // The backend wraps the raw Opus packet in a minimal Ogg container so
+        // the browser's built-in decoder can handle it via decodeAudioData().
+        // We receive the raw Opus packet — wrap it in a minimal Ogg/Opus page.
+        // For simplicity we use the Web Audio API's decodeAudioData with a
+        // hand-crafted single-page Ogg/Opus stream.
+        //
+        // However, most browsers support decodeAudioData for Opus in Ogg.
+        // The backend already sends a complete Ogg/Opus page (see decoder.go
+        // encodeOpusFrame which prepends the Ogg page header).
+        // So we can pass the data directly.
 
-        if (numSamples === 0) return;
+        const blob = new Blob([opusData], { type: 'audio/ogg; codecs=opus' });
+        blob.arrayBuffer().then(buf => {
+            return audioCtx.decodeAudioData(buf);
+        }).then(audioBuffer => {
+            // Feed the waterfall analyser (non-audible copy)
+            if (this.currentView === 'waterfall') {
+                this._feedWaterfall(audioBuffer, audioCtx);
+            }
 
-        // Build an AudioBuffer and hand it to the global playAudioBuffer()
-        // helper so it is scheduled correctly in the existing jitter buffer.
-        const audioBuffer = audioCtx.createBuffer(numChannels, numSamples, outSampleRate);
-        for (let ch = 0; ch < numChannels; ch++) {
-            audioBuffer.copyToChannel(result.channelData[ch], ch);
-        }
-
-        // Feed the waterfall analyser (silent duplicate — doesn't affect playback)
-        this._feedWaterfall(audioBuffer, audioCtx);
-
-        if (typeof window.playAudioBuffer === 'function') {
-            window.playAudioBuffer(audioBuffer);
-        } else {
-            // Fallback: play immediately without jitter buffer
+            // Play the decoded audio
             const source = audioCtx.createBufferSource();
             source.buffer = audioBuffer;
             source.connect(audioCtx.destination);
             source.start();
-        }
+        }).catch(err => {
+            // Decode errors are common during signal acquisition — don't spam the log
+            if (this.hasSignal) {
+                console.debug('FreeDV: Opus decode error:', err.message || err);
+            }
+        });
     }
 
-    // ── SDR mute helpers ─────────────────────────────────────────────────────
+    // ── SDR mute helpers ──────────────────────────────────────────────────────
 
     muteSdr() {
-        // Use RadioAPI.setMuted() which handles the toggle correctly
-        const isMuted = this.radio.getMuted();
-        this.sdrWasMuted = isMuted;
-        console.log(`FreeDV: SDR mute state before start: ${isMuted ? 'muted' : 'unmuted'}`);
-
-        if (!isMuted) {
-            this.radio.setMuted(true);
-            console.log('FreeDV: Muted SDR audio');
+        if (!this.radio) return;
+        try {
+            // Check current mute state so we can restore it on stop
+            this.sdrWasMuted = this.radio.isMuted ? this.radio.isMuted() : false;
+            if (!this.sdrWasMuted) {
+                if (this.radio.setMuted) {
+                    this.radio.setMuted(true);
+                } else if (this.radio.mute) {
+                    this.radio.mute();
+                }
+            }
+        } catch (e) {
+            console.warn('FreeDV: Could not mute SDR audio:', e);
         }
     }
 
     unmuteSdr() {
-        console.log(`FreeDV: Restoring SDR mute state (was muted before: ${this.sdrWasMuted})`);
-        // Only unmute if we were the ones who muted it
-        if (!this.sdrWasMuted) {
-            const isMuted = this.radio.getMuted();
-            if (isMuted) {
-                this.radio.setMuted(false);
-                console.log('FreeDV: Unmuted SDR audio');
+        if (!this.radio) return;
+        try {
+            if (!this.sdrWasMuted) {
+                if (this.radio.setMuted) {
+                    this.radio.setMuted(false);
+                } else if (this.radio.unmute) {
+                    this.radio.unmute();
+                }
             }
+        } catch (e) {
+            console.warn('FreeDV: Could not unmute SDR audio:', e);
         }
     }
 
-    // ── Error handling ───────────────────────────────────────────────────────
-
-    handleError(message) {
-        console.error('FreeDV: Error —', message);
-
-        this.isRunning = false;
-        this.hasSignal = false;
-        this.clearSignalTimeout();
-        this.clearFreqRestartTimeout();
-        this.updateButtonStates();
-        this.updateStatus('Error', 'error');
-        this.updateSignalBadge(false);
-        this.showError(message);
-
-        // Restore SDR mute state on error
-        this.unmuteSdr();
-    }
-
-    showError(message) {
-        const errorEl = document.getElementById('freedv-error');
-        const errorText = document.getElementById('freedv-error-text');
-        if (errorEl && errorText) {
-            errorText.textContent = message;
-            errorEl.style.display = 'block';
-        }
-    }
-
-    hideError() {
-        const errorEl = document.getElementById('freedv-error');
-        if (errorEl) {
-            errorEl.style.display = 'none';
-        }
-    }
-
-    // ── Signal-loss watchdog ─────────────────────────────────────────────────
+    // ── Signal-loss watchdog ──────────────────────────────────────────────────
 
     startSignalTimeout() {
-        // Cancel any existing timer and start a fresh one.
-        // Called on every incoming Opus frame so the timer is always rolling.
-        if (this.signalTimeoutId !== null) {
-            clearTimeout(this.signalTimeoutId);
-        }
+        this.clearSignalTimeout();
         this.signalTimeoutId = setTimeout(() => {
-            this.signalTimeoutId = null;
-            if (this.hasSignal) {
-                console.log('FreeDV: No frames for 1 s — signal lost');
-                this.hasSignal = false;
-                this.updateSignalBadge(false);
-                this.updateAudioStatus('—');
-            }
+            this.hasSignal = false;
+            this.updateSignalBadge(false);
+            this.updateAudioStatus('Waiting…');
         }, this.signalTimeoutMs);
     }
 
@@ -621,59 +918,7 @@ class FreeDVExtension extends DecoderExtension {
         }
     }
 
-    // ── UI update helpers ────────────────────────────────────────────────────
-
-    updateButtonStates() {
-        const startBtn = document.getElementById('freedv-start-button');
-        const stopBtn  = document.getElementById('freedv-stop-button');
-
-        if (startBtn) startBtn.disabled = this.isRunning;
-        if (stopBtn)  stopBtn.disabled  = !this.isRunning;
-    }
-
-    updateStatus(text, cssClass) {
-        const dot  = document.getElementById('freedv-status-dot');
-        const span = document.getElementById('freedv-status-text');
-
-        if (dot) {
-            dot.className = 'freedv-status-dot' + (cssClass ? ' ' + cssClass : '');
-        }
-        if (span) {
-            span.textContent = text;
-            span.className   = 'freedv-status-text' + (cssClass ? ' ' + cssClass : '');
-        }
-    }
-
-    updateSignalBadge(hasSignal) {
-        const badge = document.getElementById('freedv-signal-badge');
-        if (!badge) return;
-
-        if (hasSignal) {
-            badge.textContent = '● Signal';
-            badge.className   = 'freedv-signal-badge signal';
-        } else {
-            badge.textContent = 'No Signal';
-            badge.className   = 'freedv-signal-badge';
-        }
-    }
-
-    updateFrameCount(count) {
-        const el = document.getElementById('freedv-frame-count');
-        if (el) el.textContent = count.toString();
-    }
-
-    updateAudioStatus(text) {
-        const el = document.getElementById('freedv-audio-status');
-        if (el) el.textContent = text;
-    }
-
-    updateModeDisplay() {
-        const mode = this.radio.getMode();
-        const el   = document.getElementById('freedv-mode-display');
-        if (el) el.textContent = mode ? mode.toUpperCase() : '—';
-    }
-
-    // ── Frequency/mode change debounce helpers ───────────────────────────────
+    // ── Frequency-change debounce ─────────────────────────────────────────────
 
     clearFreqRestartTimeout() {
         if (this.freqRestartTimeoutId !== null) {
@@ -682,50 +927,119 @@ class FreeDVExtension extends DecoderExtension {
         }
     }
 
-    // Immediately detach from the backend and schedule a re-attach after the
-    // debounce window. Called by both onFrequencyChanged and onModeChanged.
-    _scheduleRestart(reason) {
-        if (!this.isRunning) return;
+    // ── Error handling ────────────────────────────────────────────────────────
 
-        console.log(`FreeDV: ${reason} — stopping immediately, restart in ${this.freqRestartDebounceMs} ms`);
-
-        // Cancel any previously scheduled restart
+    handleError(message) {
+        this.isRunning = false;
+        this.hasSignal = false;
+        this.clearSignalTimeout();
         this.clearFreqRestartTimeout();
 
-        // Stop the backend immediately so it doesn't keep processing stale audio
-        this.detachAudioExtension();
-        this.updateStatus('Retuning…', 'running');
+        this.unmuteSdr();
+        this.updateButtonStates();
+        this.updateStatus('Error', 'error');
+        this.updateSignalBadge(false);
+        this.showError(message);
+    }
 
-        // Schedule re-attach after the debounce window
+    // ── UI update helpers ─────────────────────────────────────────────────────
+
+    updateButtonStates() {
+        const startBtn = document.getElementById('freedv-start-button');
+        const stopBtn  = document.getElementById('freedv-stop-button');
+        if (startBtn) startBtn.disabled = this.isRunning;
+        if (stopBtn)  stopBtn.disabled  = !this.isRunning;
+    }
+
+    updateStatus(text, cssClass) {
+        const dot  = document.getElementById('freedv-status-dot');
+        const span = document.getElementById('freedv-status-text');
+        if (dot) {
+            dot.className = 'freedv-status-dot' + (cssClass ? ' ' + cssClass : '');
+        }
+        if (span) {
+            span.className = 'freedv-status-text' + (cssClass ? ' ' + cssClass : '');
+            span.textContent = text;
+        }
+    }
+
+    updateSignalBadge(hasSignal) {
+        const badge = document.getElementById('freedv-signal-badge');
+        if (!badge) return;
+        if (hasSignal) {
+            badge.textContent = '● Signal';
+            badge.className = 'freedv-signal-badge signal';
+        } else {
+            badge.textContent = 'No Signal';
+            badge.className = 'freedv-signal-badge';
+        }
+    }
+
+    updateFrameCount(count) {
+        const el = document.getElementById('freedv-frame-count');
+        if (el) el.textContent = count;
+    }
+
+    updateAudioStatus(text) {
+        const el = document.getElementById('freedv-audio-status');
+        if (el) el.textContent = text;
+    }
+
+    updateModeDisplay() {
+        const el = document.getElementById('freedv-mode-display');
+        if (!el) return;
+        const mode = this.radio ? this.radio.getMode() : null;
+        el.textContent = mode || '—';
+    }
+
+    showError(message) {
+        const container = document.getElementById('freedv-error');
+        const text      = document.getElementById('freedv-error-text');
+        if (container) container.style.display = '';
+        if (text)      text.textContent = message;
+    }
+
+    hideError() {
+        const container = document.getElementById('freedv-error');
+        if (container) container.style.display = 'none';
+    }
+
+    // ── Radio event overrides ─────────────────────────────────────────────────
+
+    onFrequencyChanged(freqHz) {
+        // Re-filter and re-render the activity table when the band changes
+        if (this.currentView === 'activity') {
+            this._updateActivityBandLabel();
+            this._renderActivityTable();
+        }
+
+        // Debounce decoder restart so rapid VFO changes don't spam the backend
+        if (!this.isRunning) return;
+        this.clearFreqRestartTimeout();
         this.freqRestartTimeoutId = setTimeout(() => {
-            this.freqRestartTimeoutId = null;
-            if (!this.isRunning) return; // user may have pressed Stop during the window
-            console.log(`FreeDV: Restarting decoder after ${reason}`);
+            console.log('FreeDV: Frequency changed — restarting decoder');
+            this.detachAudioExtension();
             this.attachAudioExtension();
         }, this.freqRestartDebounceMs);
     }
 
-    // ── Radio event overrides ────────────────────────────────────────────────
-
-    onFrequencyChanged(frequency) {
-        this._scheduleRestart(`frequency change to ${frequency} Hz`);
-    }
-
     onModeChanged(mode) {
         this.updateModeDisplay();
-        this._scheduleRestart(`mode change to ${mode}`);
     }
 }
 
-// ── Register the extension ───────────────────────────────────────────────────
+// ── Registration ──────────────────────────────────────────────────────────────
 
 (function () {
-    if (!window.decoderManager) {
-        console.error('FreeDV: decoderManager not available — extension not registered');
-        return;
+    if (window.extensionRegistry) {
+        window.extensionRegistry.register(new FreeDVExtension());
+    } else {
+        // Fallback: wait for the registry to be available
+        const interval = setInterval(() => {
+            if (window.extensionRegistry) {
+                clearInterval(interval);
+                window.extensionRegistry.register(new FreeDVExtension());
+            }
+        }, 100);
     }
-
-    const ext = new FreeDVExtension();
-    window.decoderManager.register(ext);
-    console.log('✅ FreeDV extension registered');
 })();

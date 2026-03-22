@@ -28,10 +28,11 @@ type cwSpotKey struct {
 
 // Subscriptions tracks which data types a client has subscribed to
 type Subscriptions struct {
-	DXSpots      bool
-	DigitalSpots bool
-	CWSpots      bool
-	Chat         bool
+	DXSpots        bool
+	DigitalSpots   bool
+	CWSpots        bool
+	Chat           bool
+	FreeDVActivity bool
 }
 
 // DXClusterWebSocketHandler manages WebSocket connections for DX cluster spots
@@ -64,6 +65,9 @@ type DXClusterWebSocketHandler struct {
 
 	// Receiver location for distance/bearing calculation
 	receiverLocator string
+
+	// FreeDV Reporter activity store (nil if not enabled)
+	freedvReporterStore *FreeDVReporterStore
 
 	// Chat manager for live chat functionality
 	chatManager *ChatManager
@@ -567,6 +571,51 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessi
 							"error": "audio extensions are disabled on this server",
 						})
 					}
+
+				case "subscribe_freedv_activity":
+					// Reject subscription if the FreeDV Reporter monitor is not enabled on this server
+					if h.freedvReporterStore == nil {
+						h.sendMessage(conn, map[string]interface{}{
+							"type":    "subscription_status",
+							"stream":  "freedv_activity",
+							"enabled": false,
+							"error":   "FreeDV Reporter activity monitor is disabled on this server",
+						})
+						continue
+					}
+
+					// Enable FreeDV Reporter activity stream
+					h.connSubscriptionsMu.Lock()
+					if subs, exists := h.connSubscriptions[conn]; exists {
+						subs.FreeDVActivity = true
+					}
+					h.connSubscriptionsMu.Unlock()
+
+					// Send current snapshot to the newly subscribed client
+					h.sendFreeDVActivitySnapshot(conn)
+
+					// Send confirmation
+					h.sendMessage(conn, map[string]interface{}{
+						"type":    "subscription_status",
+						"stream":  "freedv_activity",
+						"enabled": true,
+					})
+					log.Printf("DX Cluster WebSocket: Client %s subscribed to FreeDV activity", userSessionID)
+
+				case "unsubscribe_freedv_activity":
+					// Disable FreeDV Reporter activity stream
+					h.connSubscriptionsMu.Lock()
+					if subs, exists := h.connSubscriptions[conn]; exists {
+						subs.FreeDVActivity = false
+					}
+					h.connSubscriptionsMu.Unlock()
+
+					h.sendMessage(conn, map[string]interface{}{
+						"type":    "subscription_status",
+						"stream":  "freedv_activity",
+						"enabled": false,
+					})
+					log.Printf("DX Cluster WebSocket: Client %s unsubscribed from FreeDV activity", userSessionID)
 
 				}
 			}
@@ -1268,4 +1317,90 @@ func (h *DXClusterWebSocketHandler) HasDXConnection(userSessionID string) bool {
 		}
 	}
 	return false
+}
+
+// SetFreeDVReporterStore attaches the FreeDV Reporter activity store to this handler.
+// Must be called before any clients connect (typically at startup).
+func (h *DXClusterWebSocketHandler) SetFreeDVReporterStore(store *FreeDVReporterStore) {
+	h.freedvReporterStore = store
+}
+
+// sendFreeDVActivitySnapshot sends the full current FreeDV Reporter activity list
+// to a single newly-subscribed client.
+func (h *DXClusterWebSocketHandler) sendFreeDVActivitySnapshot(conn *websocket.Conn) {
+	if h.freedvReporterStore == nil {
+		return
+	}
+	users := h.freedvReporterStore.Snapshot()
+	h.sendMessage(conn, map[string]interface{}{
+		"type":  "freedv_activity_snapshot",
+		"users": users,
+	})
+}
+
+// BroadcastFreeDVActivity broadcasts a single FreeDV Reporter activity update to all
+// clients that have subscribed to the freedv_activity stream.
+// event is one of: "new_connection", "remove_connection", "freq_change", "tx_report",
+// "rx_report", "message_update".
+// user is the current state of the affected user (nil for remove_connection — use sid).
+func (h *DXClusterWebSocketHandler) BroadcastFreeDVActivity(event string, user *FreeDVReporterUser, removedSID string) {
+	msg := map[string]interface{}{
+		"type":  "freedv_activity_update",
+		"event": event,
+	}
+	if user != nil {
+		msg["user"] = user
+	} else {
+		msg["sid"] = removedSID
+	}
+
+	msgJSON, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	h.clientsMu.RLock()
+	clientList := make([]*websocket.Conn, 0, len(h.clients))
+	writeMutexes := make([]*sync.Mutex, 0, len(h.clients))
+	for conn, mu := range h.clients {
+		clientList = append(clientList, conn)
+		writeMutexes = append(writeMutexes, mu)
+	}
+	h.clientsMu.RUnlock()
+
+	h.connSubscriptionsMu.RLock()
+	connSubscriptions := make(map[*websocket.Conn]*Subscriptions)
+	for _, conn := range clientList {
+		if subs, ok := h.connSubscriptions[conn]; ok {
+			connSubscriptions[conn] = subs
+		}
+	}
+	h.connSubscriptionsMu.RUnlock()
+
+	var failedConns []*websocket.Conn
+	for i, conn := range clientList {
+		subs, ok := connSubscriptions[conn]
+		if !ok || !subs.FreeDVActivity {
+			continue
+		}
+
+		writeMu := writeMutexes[i]
+		writeMu.Lock()
+		conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		err := conn.WriteMessage(websocket.TextMessage, msgJSON)
+		writeMu.Unlock()
+
+		if err != nil {
+			failedConns = append(failedConns, conn)
+		}
+	}
+
+	if len(failedConns) > 0 {
+		h.clientsMu.Lock()
+		for _, conn := range failedConns {
+			delete(h.clients, conn)
+			conn.Close()
+		}
+		h.clientsMu.Unlock()
+	}
 }

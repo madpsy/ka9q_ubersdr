@@ -221,3 +221,180 @@
 .freedv-help-text strong {
     color: #9ab0d0;
 }
+
+/* ── View toggle button ───────────────────────────────────────────────────── */
+
+.freedv-btn-view {
+    flex: 0 0 auto;
+    background: #1a3a5c;
+    color: #9ab0d0;
+    border: 1px solid #0f3460;
+    min-width: 110px;
+}
+
+.freedv-btn-view:hover:not(:disabled) {
+    background: #1e4a7a;
+    color: #c8d8f0;
+    border-color: #2a6496;
+}
+
+/* ── Activity panel ───────────────────────────────────────────────────────── */
+
+.freedv-activity-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.freedv-activity-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 10px;
+    background: #16213e;
+    border-radius: 4px;
+    border: 1px solid #0f3460;
+}
+
+.freedv-activity-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #9ab0d0;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.freedv-activity-count {
+    font-size: 11px;
+    color: #6c757d;
+}
+
+.freedv-activity-status {
+    font-size: 11px;
+    color: #6c757d;
+    font-style: italic;
+    padding: 2px 4px;
+    text-align: center;
+}
+
+/* ── Activity table ───────────────────────────────────────────────────────── */
+
+.freedv-activity-table-wrap {
+    overflow-x: auto;
+    border-radius: 4px;
+    border: 1px solid #0f3460;
+}
+
+.freedv-activity-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    background: #0d1b2e;
+}
+
+.freedv-activity-table thead th {
+    padding: 6px 8px;
+    text-align: left;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #6c757d;
+    background: #16213e;
+    border-bottom: 1px solid #0f3460;
+    white-space: nowrap;
+}
+
+.freedv-activity-table tbody tr {
+    border-bottom: 1px solid #0f3460;
+    transition: background 0.15s ease;
+}
+
+.freedv-activity-table tbody tr:last-child {
+    border-bottom: none;
+}
+
+.freedv-activity-table tbody tr:hover {
+    background: #1a2a40;
+}
+
+.freedv-activity-table td {
+    padding: 5px 8px;
+    color: #c0c0c0;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+/* Transmitting row highlight */
+.freedv-activity-table tbody tr.freedv-activity-tx {
+    background: rgba(40, 167, 69, 0.08);
+}
+
+.freedv-activity-table tbody tr.freedv-activity-tx:hover {
+    background: rgba(40, 167, 69, 0.15);
+}
+
+/* Callsign column */
+.freedv-activity-callsign {
+    font-weight: 600;
+    color: #9ab0d0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* RX-only badge */
+.freedv-activity-rxonly {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: #1a3a5c;
+    color: #6c9fc0;
+    border: 1px solid #2a5a8c;
+    letter-spacing: 0.3px;
+    vertical-align: middle;
+}
+
+/* Frequency column */
+.freedv-activity-freq {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px;
+    color: #a0c0e0;
+}
+
+/* TX badge */
+.freedv-activity-tx-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(40, 167, 69, 0.25);
+    color: #28a745;
+    border: 1px solid rgba(40, 167, 69, 0.5);
+    letter-spacing: 0.3px;
+    animation: freedv-pulse 1.5s infinite;
+}
+
+/* Tunable rows — show pointer cursor and highlight on hover */
+.freedv-activity-table tbody tr.freedv-activity-tunable {
+    cursor: pointer;
+}
+
+.freedv-activity-table tbody tr.freedv-activity-tunable:hover {
+    background: #1e3a5c;
+    outline: 1px solid #2a6496;
+}
+
+.freedv-activity-table tbody tr.freedv-activity-tx.freedv-activity-tunable:hover {
+    background: rgba(40, 167, 69, 0.2);
+    outline: 1px solid rgba(40, 167, 69, 0.5);
+}
+
+/* Empty-state row */
+.freedv-activity-empty td {
+    text-align: center;
+    color: #495057;
+    font-style: italic;
+    padding: 16px 8px;
+}

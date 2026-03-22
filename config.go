@@ -21,6 +21,7 @@ type Config struct {
 	MQTT               MQTTConfig               `yaml:"mqtt"`
 	Logging            LoggingConfig            `yaml:"logging"`
 	DXCluster          DXClusterConfig          `yaml:"dxcluster"`
+	FreeDVReporter     FreeDVReporterConfig     `yaml:"freedv_reporter"`
 	Chat               ChatConfig               `yaml:"chat"`
 	SpaceWeather       SpaceWeatherConfig       `yaml:"spaceweather"`
 	InstanceReporting  InstanceReportingConfig  `yaml:"instance_reporting"`
@@ -190,6 +191,15 @@ type DXClusterConfig struct {
 	Callsign       string `yaml:"callsign"`
 	ReconnectDelay int    `yaml:"reconnect_delay"` // Seconds between reconnection attempts
 	KeepAliveDelay int    `yaml:"keepalive_delay"` // Seconds between keep-alive messages
+}
+
+// FreeDVReporterConfig contains settings for the FreeDV Reporter activity monitor.
+// When enabled, UberSDR connects to the FreeDV Reporter server as a view-only client
+// and makes the live activity list available over the DX cluster WebSocket.
+type FreeDVReporterConfig struct {
+	Enabled        bool   `yaml:"enabled"`         // Enable/disable the FreeDV Reporter monitor (default: false)
+	URI            string `yaml:"uri"`             // WebSocket URI of the FreeDV Reporter server
+	ReconnectDelay int    `yaml:"reconnect_delay"` // Seconds between reconnection attempts (default: 30)
 }
 
 // ChatConfig contains live chat settings
@@ -597,6 +607,14 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.DXCluster.KeepAliveDelay == 0 {
 		config.DXCluster.KeepAliveDelay = 300 // 5 minutes default
+	}
+
+	// Set FreeDV Reporter defaults if not specified
+	if config.FreeDVReporter.URI == "" {
+		config.FreeDVReporter.URI = freedvReporterDefaultURI
+	}
+	if config.FreeDVReporter.ReconnectDelay == 0 {
+		config.FreeDVReporter.ReconnectDelay = 30 // 30 seconds default
 	}
 
 	// Set chat defaults if not specified

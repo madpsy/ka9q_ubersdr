@@ -640,6 +640,22 @@ dxcluster:
   # Keep-alive delay in seconds (time between keep-alive messages to prevent timeout)
   keepalive_delay: 300
 
+# FreeDV Reporter activity monitor
+# When enabled, UberSDR connects to the FreeDV Reporter server as a view-only client
+# and makes the live activity list available to browser clients over the DX cluster
+# WebSocket (subscribe with: {"type":"subscribe_freedv_activity"}).
+# No callsign or credentials are required — this is a read-only connection.
+freedv_reporter:
+  # Enable or disable the FreeDV Reporter activity monitor
+  # Default: false
+  enabled: false
+  # WebSocket URI of the FreeDV Reporter server
+  # Default: ws://qso.freedv.org:80/socket.io/?EIO=4&transport=websocket
+  uri: "ws://qso.freedv.org:80/socket.io/?EIO=4&transport=websocket"
+  # Reconnection delay in seconds (time to wait before reconnecting after disconnect)
+  # Default: 30
+  reconnect_delay: 30
+
 # Live Chat settings
 # Provides real-time chat functionality over the DX cluster websocket
 # Users can communicate with each other while monitoring DX spots

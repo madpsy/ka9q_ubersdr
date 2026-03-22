@@ -1,0 +1,198 @@
+/* FreeDV Decoder Extension Styles */
+
+.freedv-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 13px;
+    color: #e0e0e0;
+    background: #1a1a2e;
+    border-radius: 6px;
+    min-width: 280px;
+}
+
+/* ── Status bar ─────────────────────────────────────────────────────────── */
+
+.freedv-status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 10px;
+    background: #16213e;
+    border-radius: 4px;
+    border: 1px solid #0f3460;
+}
+
+.freedv-status-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.freedv-status-right {
+    display: flex;
+    align-items: center;
+}
+
+.freedv-status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #6c757d;
+    flex-shrink: 0;
+    transition: background 0.3s ease;
+}
+
+.freedv-status-dot.running {
+    background: #28a745;
+    box-shadow: 0 0 6px rgba(40, 167, 69, 0.6);
+    animation: freedv-pulse 2s infinite;
+}
+
+.freedv-status-dot.error {
+    background: #dc3545;
+}
+
+@keyframes freedv-pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.5; }
+}
+
+.freedv-status-text {
+    font-weight: 600;
+    font-size: 13px;
+    color: #c0c0c0;
+}
+
+.freedv-status-text.running {
+    color: #28a745;
+}
+
+.freedv-status-text.error {
+    color: #dc3545;
+}
+
+.freedv-signal-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: #343a40;
+    color: #6c757d;
+    border: 1px solid #495057;
+    transition: all 0.3s ease;
+}
+
+.freedv-signal-badge.signal {
+    background: rgba(40, 167, 69, 0.2);
+    color: #28a745;
+    border-color: #28a745;
+}
+
+/* ── Info bar ────────────────────────────────────────────────────────────── */
+
+.freedv-info-bar {
+    display: flex;
+    gap: 8px;
+    justify-content: space-between;
+}
+
+.freedv-info-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    padding: 6px 4px;
+    background: #16213e;
+    border-radius: 4px;
+    border: 1px solid #0f3460;
+}
+
+.freedv-info-label {
+    font-size: 10px;
+    color: #6c757d;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+}
+
+.freedv-info-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: #c0c0c0;
+}
+
+/* ── Controls ────────────────────────────────────────────────────────────── */
+
+.freedv-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.freedv-btn {
+    flex: 1;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    letter-spacing: 0.3px;
+}
+
+.freedv-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.freedv-btn-start {
+    background: #28a745;
+    color: #fff;
+}
+
+.freedv-btn-start:hover:not(:disabled) {
+    background: #218838;
+}
+
+.freedv-btn-stop {
+    background: #dc3545;
+    color: #fff;
+}
+
+.freedv-btn-stop:hover:not(:disabled) {
+    background: #c82333;
+}
+
+/* ── Error display ───────────────────────────────────────────────────────── */
+
+.freedv-error {
+    padding: 8px 10px;
+    background: rgba(220, 53, 69, 0.15);
+    border: 1px solid rgba(220, 53, 69, 0.4);
+    border-radius: 4px;
+    color: #f8a0a8;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+/* ── Help text ───────────────────────────────────────────────────────────── */
+
+.freedv-help {
+    padding: 8px 10px;
+    background: #16213e;
+    border-radius: 4px;
+    border: 1px solid #0f3460;
+}
+
+.freedv-help-text {
+    font-size: 11px;
+    color: #6c757d;
+    line-height: 1.5;
+}
+
+.freedv-help-text strong {
+    color: #9ab0d0;
+}

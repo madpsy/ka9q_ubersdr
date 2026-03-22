@@ -133,6 +133,13 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 		extensionParams["cty_database"] = aem.ctyDatabase
 	}
 
+	// Inject the session's tuned frequency, mode, and filter edges so extensions
+	// can use them without requiring the frontend to send them explicitly.
+	extensionParams["tuned_frequency_hz"] = session.Frequency
+	extensionParams["tuned_mode"] = session.Mode
+	extensionParams["tuned_bandwidth_low_hz"] = session.BandwidthLow
+	extensionParams["tuned_bandwidth_high_hz"] = session.BandwidthHigh
+
 	// Create extension instance
 	extension, err := aem.registry.Create(extensionName, audioParams, extensionParams)
 	if err != nil {
@@ -295,8 +302,17 @@ func (aem *AudioExtensionManager) handleControl(sessionID string, conn *websocke
 	return nil
 }
 
-// forwardResults forwards binary extension results to the client
+// forwardResults forwards binary extension results to the client.
+// If the extension implements CrashReporter, it also monitors the crash channel
+// and sends an audio_extension_error message to the frontend if the subprocess
+// exits unexpectedly while still running.
 func (aem *AudioExtensionManager) forwardResults(activeExtension *ActiveAudioExtension) {
+	// Obtain crash channel via optional CrashReporter interface (nil for non-subprocess extensions)
+	var crashChan <-chan error
+	if cr, ok := activeExtension.Extension.(CrashReporter); ok {
+		crashChan = cr.CrashChan()
+	}
+
 	for {
 		select {
 		case binaryData, ok := <-activeExtension.ResultChan:
@@ -310,6 +326,21 @@ func (aem *AudioExtensionManager) forwardResults(activeExtension *ActiveAudioExt
 				log.Printf("AudioExtension: Failed to send result to session %s: %v", activeExtension.SessionID, err)
 				return
 			}
+
+		case crashErr, ok := <-crashChan:
+			if !ok {
+				// Crash channel closed without an error — treat as nil channel going forward
+				crashChan = nil
+				continue
+			}
+			errMsg := "FreeDV decoder process exited unexpectedly"
+			if crashErr != nil {
+				errMsg = fmt.Sprintf("FreeDV decoder process crashed: %v", crashErr)
+			}
+			log.Printf("AudioExtension: Crash detected for session %s: %s", activeExtension.SessionID, errMsg)
+			// Notify the frontend
+			_ = aem.sendErrorSafe(activeExtension, activeExtension.Conn, errMsg)
+			return
 
 		case <-activeExtension.StopChan:
 			return

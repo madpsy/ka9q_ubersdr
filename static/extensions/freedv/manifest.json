@@ -1,0 +1,18 @@
+{
+  "name": "freedv",
+  "displayName": "FreeDV Decoder",
+  "version": "1.0.0",
+  "description": "FreeDV digital voice decoder — decodes RADE/FreeDV signals on USB/LSB and plays decoded audio",
+  "author": "UberSDR",
+  "type": "decoder",
+  "icon": "📻",
+  "category": "decoder",
+  "requiresAudio": true,
+  "defaultEnabled": false,
+  "files": {
+    "main": "main.js",
+    "styles": ["styles.css"],
+    "template": "template.html"
+  },
+  "settings": {}
+}

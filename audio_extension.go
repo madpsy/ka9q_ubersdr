@@ -34,6 +34,16 @@ type AudioExtension interface {
 	GetName() string
 }
 
+// CrashReporter is an optional interface that extensions can implement to signal
+// unexpected subprocess or goroutine crashes back to the manager.
+// Extensions that cannot crash (pure Go, no subprocess) do not need to implement this.
+type CrashReporter interface {
+	// CrashChan returns a channel that receives an error when the underlying
+	// process exits unexpectedly while the extension is still running.
+	// The channel must be buffered (capacity ≥ 1) and receive at most one value.
+	CrashChan() <-chan error
+}
+
 // AudioExtensionFactory is a function that creates a new extension instance
 type AudioExtensionFactory func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error)
 

@@ -23,6 +23,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/cwsl/ka9q_ubersdr/audio_extensions/freedv"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/fsk"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/ft8"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/morse"
@@ -1296,6 +1297,40 @@ func main() {
 		},
 	)
 	log.Printf("Registered audio extension: whisper v%s", whisperInfo["version"].(string))
+
+	// Register FreeDV extension
+	// Callsign and locator come from the instance config; the frontend only provides freq_hz
+	freedv.GlobalConfig = &freedv.GlobalConfigProvider{
+		Callsign: config.Admin.Callsign,
+		Locator:  latLonToGridSquare(config.Admin.GPS.Lat, config.Admin.GPS.Lon),
+	}
+	freedvInfo := freedv.GetInfo()
+
+	freedvFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
+		freedvParams := freedv.AudioExtensionParams{
+			SampleRate:    audioParams.SampleRate,
+			Channels:      audioParams.Channels,
+			BitsPerSample: audioParams.BitsPerSample,
+		}
+
+		freedvExt, err := freedv.Factory(freedvParams, extensionParams)
+		if err != nil {
+			return nil, err
+		}
+
+		return &freedvExtensionWrapper{ext: freedvExt}, nil
+	}
+
+	audioExtensionRegistry.Register(
+		"freedv",
+		freedvFactoryWrapper,
+		AudioExtensionInfo{
+			Name:        freedvInfo["name"].(string),
+			Description: freedvInfo["description"].(string),
+			Version:     freedvInfo["version"].(string),
+		},
+	)
+	log.Printf("Registered audio extension: freedv v%s", freedvInfo["version"].(string))
 
 	// Create audio extension manager (pass receiver locator and CTY database for enrichment)
 	audioExtensionManager := NewAudioExtensionManager(dxClusterWsHandler, sessions, audioExtensionRegistry, receiverLocator, globalCTY)
@@ -4796,4 +4831,41 @@ func (w *whisperExtensionWrapper) HandleControlMessage(message []byte, resultCha
 	if whisperExt, ok := w.ext.(*whisper.WhisperExtension); ok {
 		whisperExt.HandleControlMessage(message, resultChan)
 	}
+}
+
+// freedvExtensionWrapper wraps a freedv.AudioExtension to implement main.AudioExtension
+type freedvExtensionWrapper struct {
+	ext freedv.AudioExtension
+}
+
+func (w *freedvExtensionWrapper) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
+	// Convert main.AudioSample to freedv.AudioSample
+	freedvChan := make(chan freedv.AudioSample, cap(audioChan))
+	go func() {
+		defer close(freedvChan)
+		for sample := range audioChan {
+			freedvChan <- freedv.AudioSample{
+				PCMData:      sample.PCMData,
+				RTPTimestamp: sample.RTPTimestamp,
+				GPSTimeNs:    sample.GPSTimeNs,
+			}
+		}
+	}()
+	return w.ext.Start(freedvChan, resultChan)
+}
+
+func (w *freedvExtensionWrapper) Stop() error {
+	return w.ext.Stop()
+}
+
+func (w *freedvExtensionWrapper) GetName() string {
+	return w.ext.GetName()
+}
+
+// CrashChan implements CrashReporter — delegates to the inner FreeDVExtension.
+func (w *freedvExtensionWrapper) CrashChan() <-chan error {
+	if cr, ok := w.ext.(interface{ CrashChan() <-chan error }); ok {
+		return cr.CrashChan()
+	}
+	return nil
 }

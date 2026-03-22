@@ -1,0 +1,54 @@
+<div class="freedv-container">
+
+    <!-- Status bar -->
+    <div class="freedv-status-bar">
+        <div class="freedv-status-left">
+            <span class="freedv-status-dot" id="freedv-status-dot"></span>
+            <span class="freedv-status-text" id="freedv-status-text">Stopped</span>
+        </div>
+        <div class="freedv-status-right">
+            <span class="freedv-signal-badge" id="freedv-signal-badge">No Signal</span>
+        </div>
+    </div>
+
+    <!-- Info bar -->
+    <div class="freedv-info-bar">
+        <div class="freedv-info-item">
+            <span class="freedv-info-label">Mode</span>
+            <span class="freedv-info-value" id="freedv-mode-display">—</span>
+        </div>
+        <div class="freedv-info-item">
+            <span class="freedv-info-label">Frames</span>
+            <span class="freedv-info-value" id="freedv-frame-count">0</span>
+        </div>
+        <div class="freedv-info-item">
+            <span class="freedv-info-label">Audio</span>
+            <span class="freedv-info-value" id="freedv-audio-status">—</span>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="freedv-controls">
+        <button id="freedv-start-button" class="freedv-btn freedv-btn-start">
+            ▶ Start
+        </button>
+        <button id="freedv-stop-button" class="freedv-btn freedv-btn-stop" disabled>
+            ■ Stop
+        </button>
+    </div>
+
+    <!-- Error display -->
+    <div class="freedv-error" id="freedv-error" style="display: none;">
+        <span id="freedv-error-text"></span>
+    </div>
+
+    <!-- Help text -->
+    <div class="freedv-help">
+        <div class="freedv-help-text">
+            <strong>FreeDV Decoder</strong> — Decodes RADE/FreeDV digital voice signals.<br>
+            Tune to a FreeDV signal in <strong>USB</strong> or <strong>LSB</strong> mode.<br>
+            Main SDR audio is muted while the decoder is active.
+        </div>
+    </div>
+
+</div>

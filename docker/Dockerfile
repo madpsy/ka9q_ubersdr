@@ -34,6 +34,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     wget \
+    unzip \
     iproute2 \
     libopus0 \
     libopusfile0 \
@@ -56,6 +57,11 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /tmp/wsjtx.deb /tmp/wsjtx-extract \
     && wget https://github.com/madpsy/jt9-decode/releases/download/1.0.0/jt9_decode -O /usr/local/bin/jt9_decode \
     && chmod +x /usr/local/bin/jt9_decode \
+    && mkdir -p /opt/freedv \
+    && wget https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/freedv.zip -O /tmp/freedv.zip \
+    && unzip /tmp/freedv.zip -d /opt/freedv \
+    && chmod +x /opt/freedv/freedv-ka9q \
+    && rm /tmp/freedv.zip \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory

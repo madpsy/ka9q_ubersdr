@@ -1,5 +1,12 @@
 /* FreeDV Decoder Extension Styles */
 
+/* Override the shared extension panel max-height so the waterfall fits without
+   the user having to manually resize. Scoped to when FreeDV content is present. */
+.decoder-extension-content:has(.freedv-container) {
+    max-height: none;
+    overflow-y: visible;
+}
+
 .freedv-container {
     display: flex;
     flex-direction: column;

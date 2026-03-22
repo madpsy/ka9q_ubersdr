@@ -1,4 +1,5 @@
 // FreeDV Decoder Extension for ka9q UberSDR
+// vim: set ts=4 sw=4:
 // Decodes FreeDV/RADE digital voice signals via the freedv-ka9q backend process.
 // Receives Opus-encoded decoded audio over the DX WebSocket binary channel and
 // plays it through the Web Audio API, muting the main SDR audio while active.
@@ -141,6 +142,10 @@ class FreeDVExtension extends DecoderExtension {
 
         const draw = () => {
             this.waterfallRafId = requestAnimationFrame(draw);
+
+            // Only update the waterfall while the decoder is actively running.
+            // When stopped the canvas freezes in place rather than scrolling black.
+            if (!this.isRunning) return;
 
             analyser.getByteFrequencyData(freqData);
 

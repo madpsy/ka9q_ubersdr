@@ -583,8 +583,10 @@ class FreeDVExtension extends DecoderExtension {
             // [2] Frequency
             cells[2].textContent = u.freq_hz ? this._formatFreq(u.freq_hz) : '—';
 
-            // [3] Message
-            cells[3].textContent = u.message || '—';
+            // [3] Message (truncated to 28 chars + ellipsis = 29 total; full text in tooltip)
+            const msg = u.message || '';
+            cells[3].textContent = msg.length > 28 ? msg.slice(0, 28) + '…' : (msg || '—');
+            cells[3].title = msg.length > 28 ? msg : '';
 
             // [4] TX badge — only recreate the badge span if TX state changed
             const tdTx = cells[4];

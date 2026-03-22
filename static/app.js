@@ -10028,6 +10028,14 @@ function openControlPopup(url = 'control.html', width = 400, height = 600) {
  * Verifies origin and source before executing commands
  */
 window.addEventListener('message', (event) => {
+    // Quick pre-filter: our popup control messages are always plain objects with a
+    // string 'command' field. Reject anything that doesn't match this shape early
+    // so browser-extension postMessages (e.g. canvas-fingerprint-defender-alert)
+    // never reach the origin/source checks and don't spam the console.
+    if (!event.data || typeof event.data !== 'object' || typeof event.data.command !== 'string') {
+        return;
+    }
+
     // Security Check 1: Verify origin matches our domain
     const allowedOrigins = [
         window.location.origin,  // Same origin
@@ -10054,11 +10062,6 @@ window.addEventListener('message', (event) => {
     
     // Parse command
     const { command, params } = event.data;
-    
-    if (!command) {
-        console.warn('[Popup Control] Received message without command:', event.data);
-        return;
-    }
     
     console.log('[Popup Control] Processing command:', command, params);
     

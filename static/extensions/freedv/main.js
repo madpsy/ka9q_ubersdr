@@ -443,97 +443,158 @@ class FreeDVExtension extends DecoderExtension {
             countEl.textContent = `${users.length} station${users.length !== 1 ? 's' : ''}`;
         }
 
-        // Remove all rows except the empty-placeholder
-        Array.from(tbody.querySelectorAll('tr:not(#freedv-activity-empty)')).forEach(r => r.remove());
-
         if (users.length === 0) {
+            // Remove all data rows, show empty placeholder
+            Array.from(tbody.querySelectorAll('tr[data-sid]')).forEach(r => r.remove());
             if (emptyEl) emptyEl.style.display = '';
             return;
         }
 
         if (emptyEl) emptyEl.style.display = 'none';
 
-        for (const u of users) {
-            const tr = document.createElement('tr');
-            if (u.transmitting) tr.classList.add('freedv-activity-tx');
+        // ── Diff-based update — update rows in-place to avoid flicker ────────
+        // Rows are keyed by data-sid attribute so we can find and update them
+        // without destroying and recreating DOM nodes (which resets :hover state
+        // and restarts CSS animations like the TX badge pulse).
 
-            // Click to tune — only if the user has a valid frequency
-            if (u.freq_hz) {
-                tr.classList.add('freedv-activity-tunable');
-                tr.title = `Click to tune to ${this._formatFreq(u.freq_hz)}`;
+        const existingSids = new Set(
+            Array.from(tbody.querySelectorAll('tr[data-sid]')).map(r => r.dataset.sid)
+        );
+        const wantedSids = new Set(users.map(u => u.sid));
+
+        // Remove rows that are no longer in the filtered list
+        for (const sid of existingSids) {
+            if (!wantedSids.has(sid)) {
+                const row = tbody.querySelector(`tr[data-sid="${CSS.escape(sid)}"]`);
+                if (row) row.remove();
+            }
+        }
+
+        // Insert or update rows in sorted order
+        // We walk the desired order and use insertBefore to reorder without
+        // removing nodes (preserves hover/animation state for unchanged rows).
+        let refNode = emptyEl ? emptyEl.nextSibling : null;
+
+        for (const u of users) {
+            let tr = tbody.querySelector(`tr[data-sid="${CSS.escape(u.sid)}"]`);
+
+            if (!tr) {
+                // ── Create new row ────────────────────────────────────────────
+                tr = document.createElement('tr');
+                tr.dataset.sid = u.sid;
+
+                // Callsign cell
+                const tdCall = document.createElement('td');
+                tdCall.className = 'freedv-activity-callsign';
+                tr.appendChild(tdCall);
+
+                // Grid cell
+                tr.appendChild(document.createElement('td'));
+
+                // Frequency cell
+                const tdFreq = document.createElement('td');
+                tdFreq.className = 'freedv-activity-freq';
+                tr.appendChild(tdFreq);
+
+                // Mode cell
+                tr.appendChild(document.createElement('td'));
+
+                // TX cell
+                const tdTx = document.createElement('td');
+                tdTx.className = 'freedv-activity-tx-cell';
+                tr.appendChild(tdTx);
+
+                // Last RX cell
+                const tdRx = document.createElement('td');
+                tdRx.className = 'freedv-activity-rx-cell';
+                tr.appendChild(tdRx);
+
+                // Click-to-tune handler (bound once at creation)
                 tr.addEventListener('click', () => {
-                    // Validate: FreeDV operates in the HF range 0–30 MHz
-                    if (u.freq_hz <= 0 || u.freq_hz > 30e6) {
-                        console.warn(`FreeDV: Ignoring out-of-range frequency ${u.freq_hz} Hz`);
+                    const freq = parseFloat(tr.dataset.freq);
+                    if (!freq || freq <= 0 || freq > 30e6) {
+                        console.warn(`FreeDV: Ignoring out-of-range frequency ${freq} Hz`);
                         return;
                     }
                     if (this.radio && this.radio.setFrequency) {
-                        // Disable edge detection briefly so the spectrum doesn't
-                        // misfire during the frequency jump (same pattern as SSTV)
                         if (window.spectrumDisplay) {
                             window.spectrumDisplay.skipEdgeDetectionTemporary = true;
                         }
-                        this.radio.setFrequency(u.freq_hz);
+                        this.radio.setFrequency(freq);
                         setTimeout(() => {
                             if (window.spectrumDisplay) {
                                 window.spectrumDisplay.skipEdgeDetectionTemporary = false;
                             }
                         }, 500);
-                        console.log(`FreeDV: Tuned to ${u.callsign} @ ${this._formatFreq(u.freq_hz)}`);
+                        console.log(`FreeDV: Tuned to ${tr.dataset.callsign} @ ${this._formatFreq(freq)}`);
                     }
                 });
             }
 
-            // Callsign
-            const tdCall = document.createElement('td');
-            tdCall.className = 'freedv-activity-callsign';
+            // ── Update row data attributes (used by click handler) ────────────
+            tr.dataset.freq     = u.freq_hz || 0;
+            tr.dataset.callsign = u.callsign || '';
+
+            // ── Update row classes ────────────────────────────────────────────
+            tr.classList.toggle('freedv-activity-tx',      !!u.transmitting);
+            tr.classList.toggle('freedv-activity-tunable', !!(u.freq_hz && u.freq_hz > 0 && u.freq_hz <= 30e6));
+            tr.title = (u.freq_hz && u.freq_hz > 0 && u.freq_hz <= 30e6)
+                ? `Click to tune to ${this._formatFreq(u.freq_hz)}`
+                : '';
+
+            // ── Update cell contents ──────────────────────────────────────────
+            const cells = tr.children;
+
+            // [0] Callsign
+            const tdCall = cells[0];
             tdCall.textContent = u.callsign || '—';
             if (u.rx_only) {
-                const badge = document.createElement('span');
-                badge.className = 'freedv-activity-rxonly';
-                badge.textContent = 'RX';
-                tdCall.appendChild(badge);
-            }
-            tr.appendChild(tdCall);
-
-            // Grid square
-            const tdGrid = document.createElement('td');
-            tdGrid.textContent = u.grid_square || '—';
-            tr.appendChild(tdGrid);
-
-            // Frequency
-            const tdFreq = document.createElement('td');
-            tdFreq.className = 'freedv-activity-freq';
-            tdFreq.textContent = u.freq_hz ? this._formatFreq(u.freq_hz) : '—';
-            tr.appendChild(tdFreq);
-
-            // Mode
-            const tdMode = document.createElement('td');
-            tdMode.textContent = u.mode || '—';
-            tr.appendChild(tdMode);
-
-            // TX indicator
-            const tdTx = document.createElement('td');
-            tdTx.className = 'freedv-activity-tx-cell';
-            if (u.transmitting) {
-                tdTx.innerHTML = '<span class="freedv-activity-tx-badge">TX</span>';
+                let badge = tdCall.querySelector('.freedv-activity-rxonly');
+                if (!badge) {
+                    badge = document.createElement('span');
+                    badge.className = 'freedv-activity-rxonly';
+                    badge.textContent = 'RX';
+                    tdCall.appendChild(badge);
+                }
             } else {
+                const badge = tdCall.querySelector('.freedv-activity-rxonly');
+                if (badge) badge.remove();
+            }
+
+            // [1] Grid
+            cells[1].textContent = u.grid_square || '—';
+
+            // [2] Frequency
+            cells[2].textContent = u.freq_hz ? this._formatFreq(u.freq_hz) : '—';
+
+            // [3] Mode
+            cells[3].textContent = u.mode || '—';
+
+            // [4] TX badge — only recreate the badge span if TX state changed
+            const tdTx = cells[4];
+            const hasBadge = !!tdTx.querySelector('.freedv-activity-tx-badge');
+            if (u.transmitting && !hasBadge) {
+                tdTx.innerHTML = '<span class="freedv-activity-tx-badge">TX</span>';
+            } else if (!u.transmitting && hasBadge) {
+                tdTx.textContent = '—';
+            } else if (!u.transmitting && !hasBadge && tdTx.textContent !== '—') {
                 tdTx.textContent = '—';
             }
-            tr.appendChild(tdTx);
 
-            // Last RX callsign + SNR
-            const tdRx = document.createElement('td');
-            tdRx.className = 'freedv-activity-rx-cell';
+            // [5] Last RX
+            const tdRx = cells[5];
             if (u.last_rx_callsign) {
                 const snr = typeof u.last_rx_snr === 'number' ? ` ${u.last_rx_snr.toFixed(0)} dB` : '';
-                tdRx.textContent = u.last_rx_callsign + snr;
-            } else {
+                const text = u.last_rx_callsign + snr;
+                if (tdRx.textContent !== text) tdRx.textContent = text;
+            } else if (tdRx.textContent !== '—') {
                 tdRx.textContent = '—';
             }
-            tr.appendChild(tdRx);
 
-            tbody.appendChild(tr);
+            // ── Reorder: insert at correct sorted position ────────────────────
+            // insertBefore with the same nextSibling is a no-op if already in place
+            tbody.insertBefore(tr, refNode);
+            refNode = tr.nextSibling;
         }
     }
 

@@ -2759,6 +2759,22 @@ async function initOpusDecoder(sampleRate, channels) {
     }
 }
 
+// Shared Opus decode helper for extensions.
+// Initialises the global decoder if needed, then decodes a Uint8Array of Opus data.
+// Returns the decoded result ({ channelData, sampleRate }) or null on failure.
+// Extensions should use this instead of creating their own OpusDecoder instance
+// because the WASM module only supports one instance at a time.
+async function decodeOpusPacket(opusData, sampleRate, channels) {
+    const ready = await initOpusDecoder(sampleRate, channels || 1);
+    if (!ready || !opusDecoder) return null;
+    try {
+        return await opusDecoder.decode(opusData);
+    } catch (e) {
+        console.error('decodeOpusPacket: decode error:', e);
+        return null;
+    }
+}
+
 // Find which amateur band contains a frequency
 function findBandForFrequency(frequency) {
     if (!window.amateurBands || window.amateurBands.length === 0) {

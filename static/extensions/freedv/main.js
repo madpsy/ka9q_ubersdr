@@ -39,11 +39,6 @@ class FreeDVExtension extends DecoderExtension {
         // Mute tracking — we mute the main SDR audio while the decoder is active
         this.sdrWasMuted = false;
 
-        // Opus decoder instance (one per session, recreated on start)
-        this.opusDecoder = null;
-        this.opusDecoderReady = false;
-        this.opusDecoderFailed = false;
-
         // Binary WebSocket handler references
         this.originalDXHandler = null;
         this.binaryMessageHandler = null;
@@ -280,7 +275,6 @@ class FreeDVExtension extends DecoderExtension {
         this.isRunning = true;
         this.frameCount = 0;
         this.hasSignal = false;
-        this.opusDecoderFailed = false;
 
         this.updateButtonStates();
         this.updateStatus('Starting…', 'running');
@@ -310,9 +304,6 @@ class FreeDVExtension extends DecoderExtension {
 
         // Restore SDR mute state
         this.unmuteSdr();
-
-        // Tear down Opus decoder
-        this.destroyOpusDecoder();
 
         // Detach from the backend audio extension
         this.detachAudioExtension();
@@ -495,106 +486,53 @@ class FreeDVExtension extends DecoderExtension {
     }
 
     // ── Opus decoding ────────────────────────────────────────────────────────
-
-    async initOpusDecoder(sampleRate, channels) {
-        if (this.opusDecoderFailed) return false;
-        if (this.opusDecoder && this.opusDecoderReady) return true;
-
-        // Locate the OpusDecoder class (same logic as app.js)
-        let OpusDecoderClass = null;
-        if (typeof OpusDecoder !== 'undefined') {
-            OpusDecoderClass = OpusDecoder;
-        } else if (window['opus-decoder'] && window['opus-decoder'].OpusDecoder) {
-            OpusDecoderClass = window['opus-decoder'].OpusDecoder;
-        }
-
-        if (!OpusDecoderClass) {
-            console.error('FreeDV: OpusDecoder library not loaded');
-            return false;
-        }
-
-        try {
-            console.log(`FreeDV: Initialising Opus decoder — ${sampleRate} Hz, ${channels} ch`);
-            this.opusDecoder = new OpusDecoderClass({
-                sampleRate: sampleRate,
-                channels:   channels
-            });
-            await this.opusDecoder.ready;
-            this.opusDecoderReady = true;
-            console.log('FreeDV: Opus decoder ready');
-            return true;
-        } catch (e) {
-            console.error('FreeDV: Opus decoder init failed:', e);
-            this.opusDecoderFailed = true;
-            this.updateAudioStatus('Decode error');
-            return false;
-        }
-    }
+    // We use the shared window.decodeOpusPacket() helper from app.js rather than
+    // creating our own OpusDecoder instance. The WASM module only supports one
+    // instance at a time, so creating a second one breaks both decoders.
 
     async decodeAndPlayOpus(opusData, sampleRate, channels) {
-        // Initialise decoder lazily on first frame
-        const ready = await this.initOpusDecoder(sampleRate, channels);
-        if (!ready) return;
-
-        try {
-            const result = await this.opusDecoder.decode(opusData);
-            // result.channelData is Float32Array[]  (one per channel)
-            // result.sampleRate is the output sample rate
-
-            if (!result || !result.channelData || result.channelData.length === 0) {
-                return;
-            }
-
-            const audioCtx = window.audioContext || this.radio.getAudioContext();
-            if (!audioCtx) {
-                console.warn('FreeDV: No AudioContext available');
-                return;
-            }
-
-            const numChannels = result.channelData.length;
-            const numSamples  = result.channelData[0].length;
-            const outSampleRate = result.sampleRate || sampleRate;
-
-            if (numSamples === 0) return;
-
-            // Build an AudioBuffer and hand it to the global playAudioBuffer()
-            // helper so it is scheduled correctly in the existing jitter buffer.
-            const audioBuffer = audioCtx.createBuffer(numChannels, numSamples, outSampleRate);
-            for (let ch = 0; ch < numChannels; ch++) {
-                audioBuffer.copyToChannel(result.channelData[ch], ch);
-            }
-
-            // Feed the waterfall analyser (silent duplicate — doesn't affect playback)
-            this._feedWaterfall(audioBuffer, audioCtx);
-
-            if (typeof window.playAudioBuffer === 'function') {
-                window.playAudioBuffer(audioBuffer);
-            } else {
-                // Fallback: play immediately without jitter buffer
-                const source = audioCtx.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(audioCtx.destination);
-                source.start();
-            }
-        } catch (e) {
-            console.error('FreeDV: Opus decode error:', e);
+        if (typeof window.decodeOpusPacket !== 'function') {
+            console.error('FreeDV: window.decodeOpusPacket not available');
             this.updateAudioStatus('Decode error');
+            return;
         }
-    }
 
-    destroyOpusDecoder() {
-        if (this.opusDecoder) {
-            try {
-                if (typeof this.opusDecoder.free === 'function') {
-                    this.opusDecoder.free();
-                }
-            } catch (e) {
-                // Ignore cleanup errors
-            }
-            this.opusDecoder = null;
+        const result = await window.decodeOpusPacket(opusData, sampleRate, channels);
+        if (!result || !result.channelData || result.channelData.length === 0) {
+            return;
         }
-        this.opusDecoderReady = false;
-        this.opusDecoderFailed = false;
+
+        const audioCtx = window.audioContext;
+        if (!audioCtx) {
+            console.warn('FreeDV: No AudioContext available');
+            return;
+        }
+
+        const numChannels   = result.channelData.length;
+        const numSamples    = result.channelData[0].length;
+        const outSampleRate = result.sampleRate || sampleRate;
+
+        if (numSamples === 0) return;
+
+        // Build an AudioBuffer and hand it to the global playAudioBuffer()
+        // helper so it is scheduled correctly in the existing jitter buffer.
+        const audioBuffer = audioCtx.createBuffer(numChannels, numSamples, outSampleRate);
+        for (let ch = 0; ch < numChannels; ch++) {
+            audioBuffer.copyToChannel(result.channelData[ch], ch);
+        }
+
+        // Feed the waterfall analyser (silent duplicate — doesn't affect playback)
+        this._feedWaterfall(audioBuffer, audioCtx);
+
+        if (typeof window.playAudioBuffer === 'function') {
+            window.playAudioBuffer(audioBuffer);
+        } else {
+            // Fallback: play immediately without jitter buffer
+            const source = audioCtx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(audioCtx.destination);
+            source.start();
+        }
     }
 
     // ── SDR mute helpers ─────────────────────────────────────────────────────
@@ -639,9 +577,6 @@ class FreeDVExtension extends DecoderExtension {
 
         // Restore SDR mute state on error
         this.unmuteSdr();
-
-        // Tear down Opus decoder
-        this.destroyOpusDecoder();
     }
 
     showError(message) {

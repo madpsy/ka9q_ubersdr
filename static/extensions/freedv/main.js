@@ -925,12 +925,13 @@ class FreeDVExtension extends DecoderExtension {
         // Use the shared WASM-based OpusDecoder from app.js which handles raw
         // Opus packets directly. Do NOT use decodeAudioData() — it requires a
         // complete Ogg/Opus file and will throw "unknown content type" on bare packets.
-        if (typeof decodeOpusPacket !== 'function') {
-            console.warn('FreeDV: decodeOpusPacket not available');
+        // app.js is a module so decodeOpusPacket is exposed via window.decodeOpusPacket.
+        if (typeof window.decodeOpusPacket !== 'function') {
+            console.warn('FreeDV: window.decodeOpusPacket not available (app.js not yet loaded?)');
             return;
         }
 
-        const decoded = await decodeOpusPacket(opusData, sampleRate, channels || 1);
+        const decoded = await window.decodeOpusPacket(opusData, sampleRate, channels || 1);
         if (!decoded || !decoded.channelData || decoded.channelData.length === 0) {
             if (this.hasSignal) {
                 console.debug('FreeDV: Opus decode returned null/empty');

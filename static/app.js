@@ -2774,6 +2774,10 @@ async function decodeOpusPacket(opusData, sampleRate, channels) {
         return null;
     }
 }
+// Expose to classic (non-module) scripts such as extension main.js files.
+// app.js is loaded as type="module" so its top-level declarations are not
+// automatically added to window; extensions need this explicit assignment.
+window.decodeOpusPacket = decodeOpusPacket;
 
 // Find which amateur band contains a frequency
 function findBandForFrequency(frequency) {

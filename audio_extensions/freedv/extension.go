@@ -20,8 +20,10 @@ const binaryPath = "/opt/freedv/freedv-ka9q"
 // maxFreqHz is the upper bound for a valid HF frequency (30 MHz)
 const maxFreqHz = 30_000_000
 
-// outputSampleRate is the fixed output sample rate for decoded audio
-const outputSampleRate = 12000
+// outputSampleRate is the fixed output sample rate for decoded audio.
+// 16 kHz is the standard Opus wideband rate — better voice quality than 12 kHz
+// with minimal bandwidth increase, and natively supported by the Web Audio API.
+const outputSampleRate = 16000
 
 // reportingMessage is the fixed message sent to FreeDV Reporter
 const reportingMessage = "UberSDR Decoder"

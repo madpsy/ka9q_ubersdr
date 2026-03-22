@@ -45,8 +45,8 @@ const (
 	MessageTypeOpusFrame = 0x02
 
 	// opusFrameSamples is the number of int16 samples per Opus frame.
-	// 20 ms at 12 kHz = 240 samples — a standard Opus frame duration.
-	opusFrameSamples = 240
+	// 20 ms at 16 kHz = 320 samples — a standard Opus wideband frame duration.
+	opusFrameSamples = 320
 
 	// readBufSamples is the number of int16 samples to read per iteration from stdout.
 	readBufSamples = 1024

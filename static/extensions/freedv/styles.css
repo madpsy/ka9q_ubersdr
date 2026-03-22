@@ -278,18 +278,34 @@
 }
 
 /* ── Activity table column widths ────────────────────────────────────────── */
-/* table-layout: fixed — widths are driven by the <th> cells in the header.   */
-/* Col 0: Callsign  Col 1: Country  Col 2: Dist  Col 3: Grid                  */
-/* Col 4: Freq      Col 5: Msg      Col 6: TX    Col 7: Last RX               */
+/* The tbody uses display:block for scrolling, so th widths don't propagate   */
+/* to td cells automatically — both th and td need explicit nth-child rules.  */
+/* Col 1: Callsign  Col 2: Country  Col 3: Dist  Col 4: Grid                  */
+/* Col 5: Freq      Col 6: Msg      Col 7: TX    Col 8: Last RX               */
 
-.freedv-activity-table th:nth-child(1) { width: 11%; } /* Callsign  */
-.freedv-activity-table th:nth-child(2) { width: 19%; } /* Country   */
-.freedv-activity-table th:nth-child(3) { width:  8%; } /* Dist      */
-.freedv-activity-table th:nth-child(4) { width:  7%; } /* Grid      */
-.freedv-activity-table th:nth-child(5) { width: 12%; } /* Freq      */
-.freedv-activity-table th:nth-child(6) { width: 19%; } /* Msg       */
-.freedv-activity-table th:nth-child(7) { width:  6%; } /* TX        */
-.freedv-activity-table th:nth-child(8) { width: 18%; } /* Last RX   */
+.freedv-activity-table th:nth-child(1),
+.freedv-activity-table td:nth-child(1) { width: 11%; } /* Callsign  */
+
+.freedv-activity-table th:nth-child(2),
+.freedv-activity-table td:nth-child(2) { width: 19%; } /* Country   */
+
+.freedv-activity-table th:nth-child(3),
+.freedv-activity-table td:nth-child(3) { width:  8%; } /* Dist      */
+
+.freedv-activity-table th:nth-child(4),
+.freedv-activity-table td:nth-child(4) { width:  7%; } /* Grid      */
+
+.freedv-activity-table th:nth-child(5),
+.freedv-activity-table td:nth-child(5) { width: 12%; } /* Freq      */
+
+.freedv-activity-table th:nth-child(6),
+.freedv-activity-table td:nth-child(6) { width: 19%; } /* Msg       */
+
+.freedv-activity-table th:nth-child(7),
+.freedv-activity-table td:nth-child(7) { width:  6%; } /* TX        */
+
+.freedv-activity-table th:nth-child(8),
+.freedv-activity-table td:nth-child(8) { width: 18%; } /* Last RX   */
 
 /* ── Activity table ───────────────────────────────────────────────────────── */
 

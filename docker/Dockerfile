@@ -36,6 +36,7 @@ RUN apt-get update && apt-get install -y \
     wget \
     unzip \
     iproute2 \
+    libsamplerate0 \
     libopus0 \
     libopusfile0 \
     libqt5core5a \

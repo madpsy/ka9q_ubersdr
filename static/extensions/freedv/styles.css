@@ -277,6 +277,20 @@
     text-align: center;
 }
 
+/* ── Activity table column widths ────────────────────────────────────────── */
+/* table-layout: fixed — widths are driven by the <th> cells in the header.   */
+/* Col 0: Callsign  Col 1: Country  Col 2: Dist  Col 3: Grid                  */
+/* Col 4: Freq      Col 5: Msg      Col 6: TX    Col 7: Last RX               */
+
+.freedv-activity-table th:nth-child(1) { width: 11%; } /* Callsign  */
+.freedv-activity-table th:nth-child(2) { width: 19%; } /* Country   */
+.freedv-activity-table th:nth-child(3) { width:  8%; } /* Dist      */
+.freedv-activity-table th:nth-child(4) { width:  7%; } /* Grid      */
+.freedv-activity-table th:nth-child(5) { width: 12%; } /* Freq      */
+.freedv-activity-table th:nth-child(6) { width: 19%; } /* Msg       */
+.freedv-activity-table th:nth-child(7) { width:  6%; } /* TX        */
+.freedv-activity-table th:nth-child(8) { width: 18%; } /* Last RX   */
+
 /* ── Activity table ───────────────────────────────────────────────────────── */
 
 .freedv-activity-table-wrap {

@@ -1035,16 +1035,12 @@ class FreeDVExtension extends DecoderExtension {
 
 // ── Registration ──────────────────────────────────────────────────────────────
 
-(function () {
-    if (window.extensionRegistry) {
-        window.extensionRegistry.register(new FreeDVExtension());
-    } else {
-        // Fallback: wait for the registry to be available
-        const interval = setInterval(() => {
-            if (window.extensionRegistry) {
-                clearInterval(interval);
-                window.extensionRegistry.register(new FreeDVExtension());
-            }
-        }, 100);
-    }
-})();
+let freedvExtensionInstance = null;
+
+if (window.decoderManager) {
+    freedvExtensionInstance = new FreeDVExtension();
+    window.decoderManager.register(freedvExtensionInstance);
+    console.log('FreeDV extension registered:', freedvExtensionInstance);
+} else {
+    console.error('decoderManager not available for FreeDV extension');
+}

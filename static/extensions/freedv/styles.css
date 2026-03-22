@@ -393,11 +393,11 @@
 
 /* Transmitting row highlight */
 .freedv-activity-table tbody tr.freedv-activity-tx {
-    background: rgba(40, 167, 69, 0.08);
+    background: rgba(220, 53, 69, 0.12);
 }
 
 .freedv-activity-table tbody tr.freedv-activity-tx:hover {
-    background: rgba(40, 167, 69, 0.15);
+    background: rgba(220, 53, 69, 0.20);
 }
 
 /* Callsign column */
@@ -450,9 +450,9 @@
     font-weight: 700;
     padding: 2px 6px;
     border-radius: 3px;
-    background: rgba(40, 167, 69, 0.25);
-    color: #28a745;
-    border: 1px solid rgba(40, 167, 69, 0.5);
+    background: rgba(220, 53, 69, 0.25);
+    color: #dc3545;
+    border: 1px solid rgba(220, 53, 69, 0.5);
     letter-spacing: 0.3px;
 }
 
@@ -467,8 +467,8 @@
 }
 
 .freedv-activity-table tbody tr.freedv-activity-tx.freedv-activity-tunable:hover {
-    background: rgba(40, 167, 69, 0.2);
-    outline: 1px solid rgba(40, 167, 69, 0.5);
+    background: rgba(220, 53, 69, 0.20);
+    outline: 1px solid rgba(220, 53, 69, 0.5);
 }
 
 /* Empty-state row */

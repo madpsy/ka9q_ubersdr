@@ -456,6 +456,9 @@ class RadioGUI:
         # SSTV extension window
         self.sstv_window = None
 
+        # FreeDV extension window
+        self.freedv_window = None
+
         # SNR history window
         self.snr_history_window = None
         self.snr_history_display = None
@@ -8485,6 +8488,8 @@ class RadioGUI:
             self.open_ft8_window()
         elif ext_name == 'whisper':
             self.open_whisper_window()
+        elif ext_name == 'freedv':
+            self.open_freedv_window()
         else:
             messagebox.showinfo("Info", f"Extension '{ext_info['displayName']}' is not yet supported in the Python client")
 
@@ -8502,6 +8507,8 @@ class RadioGUI:
             return 'FT8'
         if hasattr(self, 'whisper_window') and self.whisper_window and self.whisper_window.window.winfo_exists():
             return 'Whisper'
+        if hasattr(self, 'freedv_window') and self.freedv_window and self.freedv_window.window.winfo_exists():
+            return 'FreeDV'
         return None
 
     def open_navtex_window(self):
@@ -8766,6 +8773,49 @@ class RadioGUI:
             self
         )
 
+    def open_freedv_window(self):
+        """Open the FreeDV/RADE decoder extension window."""
+        # Don't open multiple windows
+        if hasattr(self, 'freedv_window') and self.freedv_window and self.freedv_window.window.winfo_exists():
+            self.freedv_window.window.lift()
+            return
+
+        # Check if another extension is open
+        open_ext = self.get_open_extension()
+        if open_ext:
+            messagebox.showwarning(
+                "Extension Already Open",
+                f"The {open_ext} extension is currently open.\n\n"
+                f"Please close it before opening another extension."
+            )
+            return
+
+        # Check if connected
+        if not self.connected:
+            messagebox.showwarning("Not Connected", "Please connect to a server first")
+            return
+
+        # Import FreeDV extension
+        try:
+            from freedv_extension import create_freedv_window
+        except ImportError:
+            messagebox.showerror("Error", "FreeDV extension not available")
+            return
+
+        # Ensure shared WebSocket is connected
+        try:
+            ws_manager = self._ensure_dxcluster_ws()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to initialize WebSocket: {e}")
+            return
+
+        # Create FreeDV window
+        self.freedv_window = create_freedv_window(
+            self.root,
+            ws_manager,
+            self
+        )
+
     def on_closing(self):
         """Handle window close event."""
         if self.connected:
@@ -8866,6 +8916,10 @@ class RadioGUI:
         # Close Whisper window if open
         if hasattr(self, 'whisper_window') and self.whisper_window and self.whisper_window.window.winfo_exists():
             self.whisper_window.window.destroy()
+
+        # Close FreeDV window if open
+        if hasattr(self, 'freedv_window') and self.freedv_window and self.freedv_window.window.winfo_exists():
+            self.freedv_window.window.destroy()
 
         # Disconnect MIDI controller if active
         if self.midi_controller:

@@ -409,7 +409,6 @@
     color: #28a745;
     border: 1px solid rgba(40, 167, 69, 0.5);
     letter-spacing: 0.3px;
-    animation: freedv-pulse 1.5s infinite;
 }
 
 /* Tunable rows — show pointer cursor and highlight on hover */

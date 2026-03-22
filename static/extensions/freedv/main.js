@@ -59,6 +59,9 @@ class FreeDVExtension extends DecoderExtension {
         // Whether we are currently subscribed to the freedv_activity stream
         this.activitySubscribed = false;
 
+        // Render throttle: schedule at most one render per animation frame
+        this._renderPending = false;
+
         console.log('FreeDV: Extension initialized');
     }
 
@@ -279,9 +282,9 @@ class FreeDVExtension extends DecoderExtension {
             // Subscribe to the activity stream
             this._subscribeActivity();
 
-            // Update the band label and re-render the table
+            // Update the band label and schedule a render
             this._updateActivityBandLabel();
-            this._renderActivityTable();
+            this._scheduleRender();
         }
     }
 
@@ -321,7 +324,7 @@ class FreeDVExtension extends DecoderExtension {
             if (u.sid) this.activityUsers.set(u.sid, u);
         }
         this._setActivityStatus('');
-        this._renderActivityTable();
+        this._scheduleRender();
     }
 
     _handleActivityUpdate(event, user, sid) {
@@ -347,7 +350,20 @@ class FreeDVExtension extends DecoderExtension {
                 this._setActivityStatus('FreeDV Reporter disconnected — reconnecting…');
                 break;
         }
-        this._renderActivityTable();
+        this._scheduleRender();
+    }
+
+    /**
+     * Schedule a render on the next animation frame.
+     * Multiple calls within the same frame are coalesced into one render.
+     */
+    _scheduleRender() {
+        if (this._renderPending) return;
+        this._renderPending = true;
+        requestAnimationFrame(() => {
+            this._renderPending = false;
+            this._renderActivityTable();
+        });
     }
 
     // ── Band filtering ────────────────────────────────────────────────────────
@@ -567,8 +583,8 @@ class FreeDVExtension extends DecoderExtension {
             // [2] Frequency
             cells[2].textContent = u.freq_hz ? this._formatFreq(u.freq_hz) : '—';
 
-            // [3] Mode
-            cells[3].textContent = u.mode || '—';
+            // [3] Message
+            cells[3].textContent = u.message || '—';
 
             // [4] TX badge — only recreate the badge span if TX state changed
             const tdTx = cells[4];
@@ -592,8 +608,12 @@ class FreeDVExtension extends DecoderExtension {
             }
 
             // ── Reorder: insert at correct sorted position ────────────────────
-            // insertBefore with the same nextSibling is a no-op if already in place
-            tbody.insertBefore(tr, refNode);
+            // Only move the node if it's not already in the right place.
+            // Unnecessary insertBefore calls cause browsers to remove+reinsert
+            // the node, which resets :hover state and CSS animations.
+            if (tr.nextSibling !== refNode) {
+                tbody.insertBefore(tr, refNode);
+            }
             refNode = tr.nextSibling;
         }
     }
@@ -891,7 +911,7 @@ class FreeDVExtension extends DecoderExtension {
 
     // ── Opus decode & playback ────────────────────────────────────────────────
 
-    decodeAndPlayOpus(opusData, sampleRate, channels) {
+    async decodeAndPlayOpus(opusData, sampleRate, channels) {
         const audioCtx = window.audioContext ||
             (this.radio && this.radio.getAudioContext && this.radio.getAudioContext());
         if (!audioCtx) {
@@ -899,37 +919,42 @@ class FreeDVExtension extends DecoderExtension {
             return;
         }
 
-        // The backend wraps the raw Opus packet in a minimal Ogg container so
-        // the browser's built-in decoder can handle it via decodeAudioData().
-        // We receive the raw Opus packet — wrap it in a minimal Ogg/Opus page.
-        // For simplicity we use the Web Audio API's decodeAudioData with a
-        // hand-crafted single-page Ogg/Opus stream.
-        //
-        // However, most browsers support decodeAudioData for Opus in Ogg.
-        // The backend already sends a complete Ogg/Opus page (see decoder.go
-        // encodeOpusFrame which prepends the Ogg page header).
-        // So we can pass the data directly.
+        // The backend sends raw Opus packets (not wrapped in an Ogg container).
+        // Use the shared WASM-based OpusDecoder from app.js which handles raw
+        // Opus packets directly. Do NOT use decodeAudioData() — it requires a
+        // complete Ogg/Opus file and will throw "unknown content type" on bare packets.
+        if (typeof decodeOpusPacket !== 'function') {
+            console.warn('FreeDV: decodeOpusPacket not available');
+            return;
+        }
 
-        const blob = new Blob([opusData], { type: 'audio/ogg; codecs=opus' });
-        blob.arrayBuffer().then(buf => {
-            return audioCtx.decodeAudioData(buf);
-        }).then(audioBuffer => {
-            // Feed the waterfall analyser (non-audible copy)
-            if (this.currentView === 'waterfall') {
-                this._feedWaterfall(audioBuffer, audioCtx);
-            }
-
-            // Play the decoded audio
-            const source = audioCtx.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(audioCtx.destination);
-            source.start();
-        }).catch(err => {
-            // Decode errors are common during signal acquisition — don't spam the log
+        const decoded = await decodeOpusPacket(opusData, sampleRate, channels || 1);
+        if (!decoded || !decoded.channelData || decoded.channelData.length === 0) {
             if (this.hasSignal) {
-                console.debug('FreeDV: Opus decode error:', err.message || err);
+                console.debug('FreeDV: Opus decode returned null/empty');
             }
-        });
+            return;
+        }
+
+        const numChannels = decoded.channelData.length;
+        const numSamples  = decoded.channelData[0].length;
+        const outRate     = decoded.sampleRate || sampleRate;
+
+        const audioBuffer = audioCtx.createBuffer(numChannels, numSamples, outRate);
+        for (let ch = 0; ch < numChannels; ch++) {
+            audioBuffer.copyToChannel(decoded.channelData[ch], ch);
+        }
+
+        // Feed the waterfall analyser (non-audible copy)
+        if (this.currentView === 'waterfall') {
+            this._feedWaterfall(audioBuffer, audioCtx);
+        }
+
+        // Play the decoded audio
+        const source = audioCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioCtx.destination);
+        source.start();
     }
 
     // ── SDR mute helpers ──────────────────────────────────────────────────────
@@ -1055,7 +1080,7 @@ class FreeDVExtension extends DecoderExtension {
         const el = document.getElementById('freedv-mode-display');
         if (!el) return;
         const mode = this.radio ? this.radio.getMode() : null;
-        el.textContent = mode || '—';
+        el.textContent = mode ? mode.toUpperCase() : '—';
     }
 
     showError(message) {
@@ -1076,7 +1101,7 @@ class FreeDVExtension extends DecoderExtension {
         // Re-filter and re-render the activity table when the band changes
         if (this.currentView === 'activity') {
             this._updateActivityBandLabel();
-            this._renderActivityTable();
+            this._scheduleRender();
         }
 
         // Debounce decoder restart so rapid VFO changes don't spam the backend

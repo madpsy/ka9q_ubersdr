@@ -828,6 +828,13 @@ class FreeDVExtension extends DecoderExtension {
             console.log('FreeDV: Stored original DX handler');
         }
 
+        // Force binary WebSocket frames to arrive as ArrayBuffer rather than Blob.
+        // Without this, some browsers deliver binary frames as Blob objects, which
+        // require an async .arrayBuffer() conversion before handleBinaryMessage()
+        // can run. That async delay can push the frame past the nextPlayTime cursor,
+        // triggering the lead-in reset and causing an audible gap.
+        dxClient.ws.binaryType = 'arraybuffer';
+
         this.binaryMessageHandler = (event) => {
             if (event.data instanceof ArrayBuffer) {
                 if (this.isRunning) {
@@ -871,6 +878,9 @@ class FreeDVExtension extends DecoderExtension {
             this.originalDXHandler = null;
             console.log('FreeDV: Original message handler restored');
         }
+
+        // Restore the default binary type so other WebSocket consumers are unaffected.
+        dxClient.ws.binaryType = 'blob';
 
         this.binaryMessageHandler = null;
     }
@@ -1063,9 +1073,12 @@ class FreeDVExtension extends DecoderExtension {
 
         const now = audioCtx.currentTime;
         // If we've fallen behind (first frame, tab was backgrounded, or gap
-        // after silence) reset the cursor with a small 50 ms lead-in buffer.
+        // after genuine silence) reset the cursor with a 20 ms lead-in buffer.
+        // 20 ms = one Opus frame duration — sufficient for the Web Audio API
+        // scheduler without introducing an audible gap at the start of each
+        // speech burst (the previous 50 ms caused a half-word delay).
         if (this.nextPlayTime < now) {
-            this.nextPlayTime = now + 0.05;
+            this.nextPlayTime = now + 0.02;
         }
         source.start(this.nextPlayTime);
         this.nextPlayTime += audioBuffer.duration;

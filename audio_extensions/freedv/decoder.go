@@ -32,9 +32,12 @@ import (
  *   opus_data   - Opus-encoded audio bytes
  *
  * Opus encoding:
- *   - 12 kHz mono, AppVoIP application type
- *   - 20 ms frames (240 samples at 12 kHz)
- *   - PCM from stdout is accumulated until a full frame is available
+ *   - 16 kHz mono, AppVoIP application type
+ *   - 20 ms frames (320 samples at 16 kHz)
+ *   - PCM from stdout is accumulated in a shared ring buffer.
+ *     A time.Ticker emits exactly one Opus frame every 20 ms, re-pacing
+ *     the bursty output of the binary (which drains its internal FIFO in
+ *     a tight loop every 20 ms and may write multiple frames at once).
  */
 
 const (
@@ -50,6 +53,12 @@ const (
 
 	// readBufSamples is the number of int16 samples to read per iteration from stdout.
 	readBufSamples = 1024
+
+	// maxPCMBufSamples caps the shared PCM accumulation buffer at 500 ms of audio
+	// (8000 samples at 16 kHz). If the binary produces audio faster than the ticker
+	// can drain it (e.g. catch-up after a stall), oldest samples are dropped to
+	// prevent unbounded latency growth.
+	maxPCMBufSamples = 8000
 )
 
 // FreeDVDecoder manages the freedv-ka9q subprocess
@@ -248,60 +257,110 @@ func (d *FreeDVDecoder) writeLoop(audioChan <-chan AudioSample) {
 	}
 }
 
-// readLoop reads decoded int16 PCM from the subprocess stdout, accumulates complete
-// 20 ms Opus frames (240 samples at 12 kHz), encodes them with Opus, and sends the
-// result to the frontend. Output is sparse — only present when a RADE signal is decoded.
+// readLoop reads decoded int16 PCM from the subprocess stdout and re-paces it
+// for smooth playback in the browser.
+//
+// The freedv-ka9q binary sleeps 20 ms then drains its internal output FIFO in a
+// tight while-loop, writing all available complete frames to stdout at once.  If
+// the RADE/FARGAN pipeline has decoded 2–3 frames since the last drain, all of
+// them arrive at stdout simultaneously.  Emitting them all immediately causes the
+// browser's nextPlayTime cursor to receive a burst of frames, schedule them
+// correctly, then receive nothing for ~40–60 ms — triggering the lead-in reset
+// and producing audible stuttering.
+//
+// Fix: split into two concurrent parts:
+//   - An inner goroutine reads stdout continuously into a shared pcmBuf.
+//   - The outer goroutine (tracked by wg) runs a 20 ms time.Ticker and emits
+//     exactly one Opus frame per tick, regardless of when the binary wrote it.
+//
+// This mirrors the binary's own internal design (RADE thread fills a FIFO;
+// main loop drains it at a fixed rate) but at the Go→WebSocket boundary.
 func (d *FreeDVDecoder) readLoop(resultChan chan<- []byte) {
 	defer d.wg.Done()
 
-	readBuf := make([]byte, readBufSamples*2)      // raw read buffer (bytes from stdout)
-	pcmBuf := make([]int16, 0, opusFrameSamples*2) // accumulation buffer (int16 samples)
-	opusBuf := make([]byte, 4000)                  // max Opus frame size
+	// pcmBuf is the shared accumulation buffer between the stdout reader and
+	// the ticker emitter.  pcmMu guards it exclusively (d.mu guards subprocess
+	// state and must not be held during blocking I/O or encoding).
+	var pcmMu sync.Mutex
+	pcmBuf := make([]int16, 0, maxPCMBufSamples)
 
-	for {
-		// Blocking read — returns io.EOF when the subprocess exits
-		n, err := d.stdout.Read(readBuf)
-		if n > 0 {
-			// Trim to the last complete int16 sample (n must be even)
-			n = n &^ 1
+	opusBuf := make([]byte, 4000) // max Opus frame size — reused by ticker goroutine only
 
-			// Decode bytes → int16 samples and append to accumulation buffer
-			for i := 0; i < n; i += 2 {
-				pcmBuf = append(pcmBuf, int16(binary.LittleEndian.Uint16(readBuf[i:])))
+	// Inner goroutine: read stdout → accumulate into pcmBuf.
+	// Not tracked by wg — it exits naturally when stdout is closed (EOF) after
+	// Stop() closes stdin and the binary exits.
+	go func() {
+		readBuf := make([]byte, readBufSamples*2)
+		for {
+			n, err := d.stdout.Read(readBuf)
+			if n > 0 {
+				// Trim to the last complete int16 sample (n must be even)
+				n = n &^ 1
+
+				pcmMu.Lock()
+				for i := 0; i < n; i += 2 {
+					pcmBuf = append(pcmBuf, int16(binary.LittleEndian.Uint16(readBuf[i:])))
+				}
+				// Cap the buffer to prevent unbounded latency growth during catch-up.
+				// Drop the oldest samples so the listener always hears the most recent audio.
+				if len(pcmBuf) > maxPCMBufSamples {
+					dropped := len(pcmBuf) - maxPCMBufSamples
+					pcmBuf = pcmBuf[dropped:]
+					log.Printf("[FreeDV] PCM buffer overflow, dropped %d old samples", dropped)
+				}
+				pcmMu.Unlock()
 			}
-
-			// Encode and emit as many complete Opus frames as we have
-			for len(pcmBuf) >= opusFrameSamples {
-				frame := pcmBuf[:opusFrameSamples]
-				pcmBuf = pcmBuf[opusFrameSamples:]
-
-				nEncoded, encErr := d.opusEncoder.Encode(frame, opusBuf)
-				if encErr != nil {
-					log.Printf("[FreeDV] Opus encode error: %v", encErr)
-					continue
+			if err != nil {
+				if err != io.EOF {
+					d.mu.Lock()
+					running := d.running
+					d.mu.Unlock()
+					if running {
+						log.Printf("[FreeDV] stdout read error: %v", err)
+					}
 				}
-
-				timestamp := time.Now().UnixNano()
-				pkt := encodeOpusFrame(opusBuf[:nEncoded], d.config.OutputSampleRate, timestamp)
-
-				select {
-				case resultChan <- pkt:
-				default:
-					log.Printf("[FreeDV] Result channel full, dropping Opus frame")
-				}
+				return
 			}
 		}
+	}()
 
-		if err != nil {
-			if err != io.EOF {
-				d.mu.Lock()
-				running := d.running
-				d.mu.Unlock()
-				if running {
-					log.Printf("[FreeDV] stdout read error: %v", err)
-				}
-			}
+	// Ticker goroutine (this goroutine): emit exactly one Opus frame every 20 ms.
+	// This re-paces the bursty binary output into a steady stream for the browser.
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-d.stopChan:
 			return
+
+		case <-ticker.C:
+			pcmMu.Lock()
+			if len(pcmBuf) < opusFrameSamples {
+				// Not enough samples yet — binary hasn't decoded a frame this tick.
+				pcmMu.Unlock()
+				continue
+			}
+			// Take exactly one frame from the front of the buffer.
+			frame := make([]int16, opusFrameSamples)
+			copy(frame, pcmBuf[:opusFrameSamples])
+			pcmBuf = pcmBuf[opusFrameSamples:]
+			pcmMu.Unlock()
+
+			nEncoded, encErr := d.opusEncoder.Encode(frame, opusBuf)
+			if encErr != nil {
+				log.Printf("[FreeDV] Opus encode error: %v", encErr)
+				continue
+			}
+
+			timestamp := time.Now().UnixNano()
+			pkt := encodeOpusFrame(opusBuf[:nEncoded], d.config.OutputSampleRate, timestamp)
+
+			select {
+			case resultChan <- pkt:
+			default:
+				log.Printf("[FreeDV] Result channel full, dropping Opus frame")
+			}
 		}
 	}
 }

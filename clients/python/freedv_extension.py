@@ -22,6 +22,7 @@ Activity WebSocket messages (text JSON):
 """
 
 import json
+import queue
 import struct
 import threading
 import tkinter as tk
@@ -80,6 +81,13 @@ class FreeDVExtension:
         self.sd_stream: Optional[Any] = None          # persistent sd.OutputStream
         self.sd_stream_rate: Optional[int] = None     # sample rate the stream was opened at
         self.sd_stream_channels: Optional[int] = None # channels the stream was opened with
+
+        # Audio worker queue — frames are enqueued here and consumed by a single
+        # dedicated thread so they are always played in order at a steady rate.
+        # Each item is a tuple (opus_data: bytes, sample_rate: int, channels: int)
+        # or None as a sentinel to stop the worker.
+        self._audio_queue: queue.Queue = queue.Queue(maxsize=50)
+        self._audio_worker_thread: Optional[threading.Thread] = None
 
         # Mute state — saved volume restored when decoder stops
         self._saved_volume: Optional[float] = None
@@ -594,6 +602,16 @@ class FreeDVExtension:
 
             self.setup_binary_handler()
 
+            # Start the single audio worker thread that drains _audio_queue
+            # in order, one frame at a time.
+            self._audio_queue = queue.Queue(maxsize=50)
+            self._audio_worker_thread = threading.Thread(
+                target=self._audio_worker,
+                daemon=True,
+                name='freedv-audio-worker',
+            )
+            self._audio_worker_thread.start()
+
             # Mute the main SDR audio so the raw digital signal isn't audible
             self._mute_sdr()
 
@@ -627,6 +645,9 @@ class FreeDVExtension:
 
         self.restore_binary_handler()
         self._cancel_signal_timeout()
+
+        # Stop the audio worker thread gracefully
+        self._stop_audio_worker()
 
         # Restore main SDR audio
         self._unmute_sdr()
@@ -776,12 +797,46 @@ class FreeDVExtension:
         # Re-arm signal watchdog
         self._arm_signal_timeout()
 
-        # Decode and play in a background thread to avoid blocking the WS thread
-        threading.Thread(
-            target=self._decode_and_play,
-            args=(opus_data, sample_rate, channels),
-            daemon=True,
-        ).start()
+        # Enqueue the frame for the single audio worker thread.
+        # Drop the oldest frame if the queue is full (avoids latency runaway).
+        try:
+            self._audio_queue.put_nowait((opus_data, sample_rate, channels))
+        except queue.Full:
+            try:
+                self._audio_queue.get_nowait()  # discard oldest
+            except queue.Empty:
+                pass
+            try:
+                self._audio_queue.put_nowait((opus_data, sample_rate, channels))
+            except queue.Full:
+                print("[FreeDV] Audio queue full, dropping frame")
+
+    def _audio_worker(self):
+        """Single dedicated thread that decodes and plays Opus frames in order."""
+        while True:
+            item = self._audio_queue.get()
+            if item is None:
+                # Sentinel — time to stop
+                self._audio_queue.task_done()
+                break
+            opus_data, sample_rate, channels = item
+            self._decode_and_play(opus_data, sample_rate, channels)
+            self._audio_queue.task_done()
+
+    def _stop_audio_worker(self):
+        """Send the sentinel and wait for the audio worker thread to exit."""
+        if self._audio_worker_thread is not None and self._audio_worker_thread.is_alive():
+            # Drain any queued frames first so the worker doesn't block on a
+            # full queue before it sees the sentinel.
+            while not self._audio_queue.empty():
+                try:
+                    self._audio_queue.get_nowait()
+                    self._audio_queue.task_done()
+                except queue.Empty:
+                    break
+            self._audio_queue.put(None)  # sentinel
+            self._audio_worker_thread.join(timeout=2.0)
+        self._audio_worker_thread = None
 
     # -------------------------------------------------------------------------
     # SDR audio mute / unmute

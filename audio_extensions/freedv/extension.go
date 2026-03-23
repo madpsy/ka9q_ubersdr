@@ -5,6 +5,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 )
 
 /*
@@ -16,6 +17,15 @@ import (
  */
 
 const binaryPath = "/opt/freedv/freedv-ka9q"
+
+// enableReporting controls whether FreeDV Reporter arguments are passed to the binary.
+// Set to true to enable --reporting-callsign / --reporting-locator / --reporting-freq-hz.
+const enableReporting = false
+
+// restartCooldown is the minimum time that must elapse between a Stop() and the next
+// successful Start(). This prevents rapid restart loops that can destabilise the binary.
+// Set to 0 to disable the cooldown entirely.
+const restartCooldown = 2 * time.Second
 
 // maxFreqHz is the upper bound for a valid HF frequency (30 MHz)
 const maxFreqHz = 30_000_000
@@ -43,6 +53,11 @@ var GlobalConfig *GlobalConfigProvider
 var activeUserCount int
 var activeUserMutex sync.Mutex
 
+// lastStopTimes records when each session's FreeDV extension was last stopped,
+// keyed by session ID. Used to enforce the per-user restartCooldown.
+var lastStopTimes = make(map[string]time.Time)
+var lastStopMutex sync.Mutex
+
 // AudioExtensionParams contains audio stream parameters
 type AudioExtensionParams struct {
 	SampleRate    int
@@ -66,8 +81,9 @@ type AudioExtension interface {
 
 // FreeDVExtension wraps the freedv-ka9q subprocess as an AudioExtension
 type FreeDVExtension struct {
-	decoder *FreeDVDecoder
-	config  FreeDVConfig
+	decoder   *FreeDVDecoder
+	config    FreeDVConfig
+	sessionID string // used to key the per-session restart cooldown
 }
 
 // FreeDVConfig holds configuration for the FreeDV extension
@@ -82,6 +98,22 @@ type FreeDVConfig struct {
 
 // NewFreeDVExtension creates a new FreeDV audio extension
 func NewFreeDVExtension(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (*FreeDVExtension, error) {
+	// Extract session ID (injected by the audio extension manager)
+	sessionID, _ := extensionParams["session_id"].(string)
+
+	// Enforce per-user restart cooldown — reject if not enough time has passed since this
+	// session's last Stop(). Other users are unaffected.
+	if restartCooldown > 0 && sessionID != "" {
+		lastStopMutex.Lock()
+		lastStop := lastStopTimes[sessionID]
+		lastStopMutex.Unlock()
+		if !lastStop.IsZero() {
+			if remaining := restartCooldown - time.Since(lastStop); remaining > 0 {
+				return nil, fmt.Errorf("FreeDV decoder restarted too quickly — please wait %.1f more second(s) before reconnecting", remaining.Seconds())
+			}
+		}
+	}
+
 	// Check max users limit
 	if GlobalConfig != nil && GlobalConfig.MaxUsers > 0 {
 		activeUserMutex.Lock()
@@ -158,8 +190,9 @@ func NewFreeDVExtension(audioParams AudioExtensionParams, extensionParams map[st
 	}
 
 	return &FreeDVExtension{
-		decoder: decoder,
-		config:  config,
+		decoder:   decoder,
+		config:    config,
+		sessionID: sessionID,
 	}, nil
 }
 
@@ -181,7 +214,16 @@ func (e *FreeDVExtension) Stop() error {
 		log.Printf("[FreeDV Extension] User disconnected (%d/%d)", currentCount, GlobalConfig.MaxUsers)
 	}
 
-	return e.decoder.Stop()
+	err := e.decoder.Stop()
+
+	// Record the stop time for this session so the per-user cooldown can be enforced on the next Start()
+	if e.sessionID != "" {
+		lastStopMutex.Lock()
+		lastStopTimes[e.sessionID] = time.Now()
+		lastStopMutex.Unlock()
+	}
+
+	return err
 }
 
 // GetName returns the extension name

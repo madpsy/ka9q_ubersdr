@@ -37,11 +37,6 @@ class FreeDVExtension extends DecoderExtension {
         this.signalTimeoutMs = 1000;
         this.signalTimeoutId = null;
 
-        // Frequency-change debounce: restart the decoder 500 ms after the last
-        // frequency change so the backend gets the updated tuned_frequency_hz.
-        this.freqRestartDebounceMs = 500;
-        this.freqRestartTimeoutId = null;
-
         // Waterfall
         this.waterfallCanvas = null;
         this.waterfallCtx = null;
@@ -747,7 +742,6 @@ class FreeDVExtension extends DecoderExtension {
         this.isRunning = false;
         this.hasSignal = false;
         this.clearSignalTimeout();
-        this.clearFreqRestartTimeout();
 
         this.updateButtonStates();
         this.updateStatus('Stopped', '');
@@ -1129,22 +1123,12 @@ class FreeDVExtension extends DecoderExtension {
         }
     }
 
-    // ── Frequency-change debounce ─────────────────────────────────────────────
-
-    clearFreqRestartTimeout() {
-        if (this.freqRestartTimeoutId !== null) {
-            clearTimeout(this.freqRestartTimeoutId);
-            this.freqRestartTimeoutId = null;
-        }
-    }
-
     // ── Error handling ────────────────────────────────────────────────────────
 
     handleError(message) {
         this.isRunning = false;
         this.hasSignal = false;
         this.clearSignalTimeout();
-        this.clearFreqRestartTimeout();
 
         this.unmuteSdr();
         this.updateButtonStates();
@@ -1223,15 +1207,6 @@ class FreeDVExtension extends DecoderExtension {
             this._updateActivityBandLabel();
             this._scheduleRender();
         }
-
-        // Debounce decoder restart so rapid VFO changes don't spam the backend
-        if (!this.isRunning) return;
-        this.clearFreqRestartTimeout();
-        this.freqRestartTimeoutId = setTimeout(() => {
-            console.log('FreeDV: Frequency changed — restarting decoder');
-            this.detachAudioExtension();
-            this.attachAudioExtension();
-        }, this.freqRestartDebounceMs);
     }
 
     onModeChanged(mode) {

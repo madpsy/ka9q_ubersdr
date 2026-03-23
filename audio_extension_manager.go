@@ -139,6 +139,7 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 	extensionParams["tuned_mode"] = session.Mode
 	extensionParams["tuned_bandwidth_low_hz"] = session.BandwidthLow
 	extensionParams["tuned_bandwidth_high_hz"] = session.BandwidthHigh
+	extensionParams["session_id"] = sessionID
 
 	// Create extension instance
 	extension, err := aem.registry.Create(extensionName, audioParams, extensionParams)

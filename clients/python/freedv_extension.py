@@ -60,13 +60,6 @@ BAND_RANGES = {
 # Signal watchdog: clear indicator if no frames arrive within this many ms
 SIGNAL_TIMEOUT_MS = 1000
 
-# Frequency-change debounce: restart decoder this many ms after frequency settles
-FREQ_RESTART_DELAY_MS = 500
-
-# How often to poll for frequency changes (ms)
-FREQ_POLL_MS = 100
-
-
 class FreeDVExtension:
     """FreeDV/RADE decoder extension window."""
 
@@ -95,12 +88,6 @@ class FreeDVExtension:
         self.has_signal = False
         self.frame_count = 0
         self.signal_timeout_id: Optional[str] = None
-
-        # Frequency-change detection
-        self.last_frequency: Optional[int] = None
-        self.freq_check_timer_id: Optional[str] = None
-        self.freq_restart_timer_id: Optional[str] = None
-        self.was_running_before_freq_change = False
 
         # Activity table state
         self.activity_subscribed = False
@@ -612,15 +599,13 @@ class FreeDVExtension:
             self.status_label.config(text='Running', foreground='green')
             self.hide_error()
 
-            self._start_frequency_monitoring()
-
             print("[FreeDV] Decoder started")
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to start FreeDV decoder: {e}")
             print(f"[FreeDV] Error starting decoder: {e}")
 
-    def stop_decoder(self, skip_frequency_monitoring=False):
+    def stop_decoder(self):
         """Detach from the FreeDV audio extension and stop decoding."""
         if not self.running:
             return
@@ -647,9 +632,6 @@ class FreeDVExtension:
         self.start_btn.config(text='Start')
         self.status_label.config(text='Stopped', foreground='gray')
         self.audio_status_label.config(text='—', foreground='gray')
-
-        if not skip_frequency_monitoring:
-            self._stop_frequency_monitoring()
 
         print("[FreeDV] Decoder stopped")
 
@@ -955,74 +937,6 @@ class FreeDVExtension:
             return
         self.signal_label.config(foreground='green' if has_signal else 'gray')
 
-    # -------------------------------------------------------------------------
-    # Frequency-change detection
-    # -------------------------------------------------------------------------
-
-    def _start_frequency_monitoring(self):
-        """Start polling for frequency changes."""
-        self.last_frequency = self._get_current_frequency()
-        self.was_running_before_freq_change = False
-        self._check_frequency_change()
-
-    def _stop_frequency_monitoring(self):
-        """Stop polling for frequency changes."""
-        if self.freq_check_timer_id is not None:
-            try:
-                self.window.after_cancel(self.freq_check_timer_id)
-            except Exception:
-                pass
-            self.freq_check_timer_id = None
-        if self.freq_restart_timer_id is not None:
-            try:
-                self.window.after_cancel(self.freq_restart_timer_id)
-            except Exception:
-                pass
-            self.freq_restart_timer_id = None
-
-    def _check_frequency_change(self):
-        """Periodic callback: detect frequency changes and debounce-restart decoder."""
-        if not self.running and not self.was_running_before_freq_change:
-            return
-
-        current_freq = self._get_current_frequency()
-
-        if (self.last_frequency is not None
-                and current_freq is not None
-                and current_freq != self.last_frequency):
-            print(f"[FreeDV] Frequency changed: {self.last_frequency} -> {current_freq}")
-
-            if self.running:
-                self.was_running_before_freq_change = True
-                self.stop_decoder(skip_frequency_monitoring=True)
-                self.status_label.config(text='Paused (freq change)', foreground='orange')
-
-            # Cancel any pending restart
-            if self.freq_restart_timer_id is not None:
-                try:
-                    self.window.after_cancel(self.freq_restart_timer_id)
-                except Exception:
-                    pass
-
-            self.freq_restart_timer_id = self.window.after(
-                FREQ_RESTART_DELAY_MS, self._restart_after_freq_stable
-            )
-
-        self.last_frequency = current_freq
-
-        if self.running or self.was_running_before_freq_change:
-            self.freq_check_timer_id = self.window.after(
-                FREQ_POLL_MS, self._check_frequency_change
-            )
-
-    def _restart_after_freq_stable(self):
-        """Restart the decoder after the frequency has been stable."""
-        self.freq_restart_timer_id = None
-        if self.was_running_before_freq_change:
-            self.was_running_before_freq_change = False
-            print("[FreeDV] Frequency stable — restarting decoder")
-            self.start_decoder()
-
     def _start_freq_poll(self):
         """Start the lightweight frequency poll for on-freq dot updates."""
         self._last_poll_freq = self._get_current_frequency()
@@ -1091,7 +1005,6 @@ class FreeDVExtension:
 
         self._unsubscribe_activity()
         self._stop_freq_poll()
-        self._stop_frequency_monitoring()
         self._cancel_signal_timeout()
 
         with self.audio_lock:

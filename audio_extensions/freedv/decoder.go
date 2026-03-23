@@ -100,8 +100,9 @@ func (d *FreeDVDecoder) Start(audioChan <-chan AudioSample, resultChan chan<- []
 		"--output-sample-rate", strconv.Itoa(d.config.OutputSampleRate),
 	}
 
-	// Only add reporting args when all three required fields are present
-	if d.config.Callsign != "" && d.config.Locator != "" && d.config.FreqHz > 0 {
+	// Only add reporting args when reporting is enabled and all three required fields are present.
+	// Set enableReporting = true in extension.go to activate FreeDV Reporter.
+	if enableReporting && d.config.Callsign != "" && d.config.Locator != "" && d.config.FreqHz > 0 {
 		args = append(args,
 			"--reporting-callsign", d.config.Callsign,
 			"--reporting-locator", d.config.Locator,

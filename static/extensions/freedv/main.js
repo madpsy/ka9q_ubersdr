@@ -720,6 +720,15 @@ class FreeDVExtension extends DecoderExtension {
     startDecoder() {
         console.log('FreeDV: Starting decoder');
 
+        // FreeDV only works on SSB — refuse to start on incompatible modes
+        const mode = (this.radio ? this.radio.getMode() : '') || '';
+        const compatible = mode.toLowerCase() === 'usb' || mode.toLowerCase() === 'lsb';
+        if (!compatible) {
+            const label = mode ? mode.toUpperCase() : 'unknown';
+            this.showError(`FreeDV requires USB or LSB — current mode is ${label}`);
+            return;
+        }
+
         this.isRunning = true;
         this.frameCount = 0;
         this.hasSignal = false;
@@ -1222,6 +1231,18 @@ class FreeDVExtension extends DecoderExtension {
     onModeChanged(mode) {
         this.updateFrequencyDisplay();
         this.updateModeDisplay();
+
+        // FreeDV only works on SSB (USB/LSB). Stop the decoder automatically
+        // if the user switches to an incompatible mode.
+        if (this.isRunning) {
+            const m = (mode || '').toLowerCase();
+            const compatible = m === 'usb' || m === 'lsb';
+            if (!compatible) {
+                console.log(`FreeDV: Mode changed to '${mode}' — stopping decoder (incompatible mode)`);
+                this.stopDecoder();
+                this.showError(`FreeDV requires USB or LSB — stopped because mode changed to ${mode.toUpperCase()}`);
+            }
+        }
     }
 }
 

@@ -92,6 +92,7 @@ class FreeDVExtension extends DecoderExtension {
             if (startBtn && stopBtn) {
                 this.setupEventHandlers();
                 this.updateButtonStates();
+                this.updateFrequencyDisplay();
                 this.updateModeDisplay();
                 console.log('FreeDV: DOM ready, handlers set up');
             } else if (attempts < maxAttempts) {
@@ -1187,6 +1188,13 @@ class FreeDVExtension extends DecoderExtension {
         el.textContent = mode ? mode.toUpperCase() : '—';
     }
 
+    updateFrequencyDisplay() {
+        const el = document.getElementById('freedv-freq-display');
+        if (!el) return;
+        const freqHz = this.radio ? this.radio.getFrequency() : null;
+        el.textContent = freqHz ? (freqHz / 1e6).toFixed(3) + ' MHz' : '—';
+    }
+
     showError(message) {
         const container = document.getElementById('freedv-error');
         const text      = document.getElementById('freedv-error-text');
@@ -1202,6 +1210,8 @@ class FreeDVExtension extends DecoderExtension {
     // ── Radio event overrides ─────────────────────────────────────────────────
 
     onFrequencyChanged(freqHz) {
+        this.updateFrequencyDisplay();
+
         // Re-filter and re-render the activity table when the band changes
         if (this.currentView === 'activity') {
             this._updateActivityBandLabel();
@@ -1210,6 +1220,7 @@ class FreeDVExtension extends DecoderExtension {
     }
 
     onModeChanged(mode) {
+        this.updateFrequencyDisplay();
         this.updateModeDisplay();
     }
 }

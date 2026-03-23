@@ -141,17 +141,20 @@ class FreeDVExtension:
         self.status_label = ttk.Label(status_frame, text="Idle", foreground='gray')
         self.status_label.grid(row=0, column=1, sticky='w')
 
-        ttk.Label(status_frame, text="Signal:").grid(row=0, column=2, padx=(16, 4))
+        self.freq_mode_label = ttk.Label(status_frame, text="", foreground='gray')
+        self.freq_mode_label.grid(row=0, column=2, sticky='w', padx=(8, 0))
+
+        ttk.Label(status_frame, text="Signal:").grid(row=0, column=3, padx=(16, 4))
         self.signal_label = ttk.Label(status_frame, text="●", foreground='gray')
-        self.signal_label.grid(row=0, column=3, sticky='w')
+        self.signal_label.grid(row=0, column=4, sticky='w')
 
-        ttk.Label(status_frame, text="Frames:").grid(row=0, column=4, padx=(16, 4))
+        ttk.Label(status_frame, text="Frames:").grid(row=0, column=5, padx=(16, 4))
         self.frame_count_label = ttk.Label(status_frame, text="0")
-        self.frame_count_label.grid(row=0, column=5, sticky='w')
+        self.frame_count_label.grid(row=0, column=6, sticky='w')
 
-        ttk.Label(status_frame, text="Audio:").grid(row=0, column=6, padx=(16, 4))
+        ttk.Label(status_frame, text="Audio:").grid(row=0, column=7, padx=(16, 4))
         self.audio_status_label = ttk.Label(status_frame, text="—", foreground='gray')
-        self.audio_status_label.grid(row=0, column=7, sticky='w')
+        self.audio_status_label.grid(row=0, column=8, sticky='w')
 
         # Row 1: controls
         ctrl_frame = ttk.Frame(main)
@@ -962,7 +965,30 @@ class FreeDVExtension:
         if current != self._last_poll_freq:
             self._last_poll_freq = current
             self._schedule_render()
+        self._update_freq_mode_label()
         self._freq_poll_timer_id = self.window.after(250, self._freq_poll_tick)
+
+    def _update_freq_mode_label(self):
+        """Update the frequency/mode label next to the status indicator."""
+        try:
+            freq_hz = self._get_current_frequency()
+            mode = None
+            if self.radio_control and hasattr(self.radio_control, 'get_mode'):
+                try:
+                    mode = self.radio_control.get_mode()
+                except Exception:
+                    pass
+
+            if freq_hz:
+                freq_str = f"{freq_hz / 1e6:.3f} MHz"
+                mode_str = mode.upper() if mode else ""
+                text = f"({freq_str}  {mode_str})" if mode_str else f"({freq_str})"
+            else:
+                text = ""
+
+            self.freq_mode_label.config(text=text)
+        except Exception:
+            pass
 
     # -------------------------------------------------------------------------
     # Error display

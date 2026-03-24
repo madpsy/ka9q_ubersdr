@@ -1418,8 +1418,9 @@
                             <p style="color: #856404; font-size: 14px;">Your admin password has been changed. You will need this password the next time you log in.</p>
                         </div>
                         <p style="margin-bottom: 10px; color: #555;">Your new admin password is:</p>
-                        <div style="text-align: center; margin-bottom: 20px;">
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 20px;">
                             <code id="modalNewPassword" style="font-size: 22px; color: #333; background: #f8f9fa; padding: 12px 24px; border-radius: 4px; display: inline-block; letter-spacing: 2px; border: 2px solid #dee2e6; word-break: break-all;"></code>
+                            <button onclick="navigator.clipboard.writeText(document.getElementById('modalNewPassword').textContent)" title="Copy to clipboard" style="background: none; border: none; font-size: 22px; cursor: pointer; padding: 4px; line-height: 1; opacity: 0.7; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'">📋</button>
                         </div>
                         <p style="font-size: 13px; color: #666; margin-bottom: 20px;">A server restart is required for the new password to take effect.</p>
                         <div style="display: flex; justify-content: flex-end;">

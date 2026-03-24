@@ -470,21 +470,21 @@ func (s *EiBiSchedule) IsLoaded() bool {
 //
 // We use a month-based approximation:
 //
-//	Months 4–10  → A-season (e.g. "A26")
-//	Month  11–12 → B-season, year = current year (e.g. "B26")
-//	Months 1–3   → B-season, year = previous year  (e.g. "B25")
+//	Months 4–10  → A-season (e.g. "a26")
+//	Month  11–12 → B-season, year = current year (e.g. "b26")
+//	Months 1–3   → B-season, year = previous year  (e.g. "b25")
 func currentEiBiSeason(t time.Time) string {
 	year := t.Year() % 100
 	month := t.Month()
 
 	if month >= 4 && month <= 10 {
-		return fmt.Sprintf("A%02d", year)
+		return fmt.Sprintf("a%02d", year)
 	}
 	if month >= 11 {
-		return fmt.Sprintf("B%02d", year)
+		return fmt.Sprintf("b%02d", year)
 	}
 	// January–March: B-season started in the previous calendar year.
-	return fmt.Sprintf("B%02d", year-1)
+	return fmt.Sprintf("b%02d", year-1)
 }
 
 // previousEiBiSeason returns the season code immediately before the current one.
@@ -495,12 +495,12 @@ func previousEiBiSeason(t time.Time) string {
 
 	// If we're in A-season (Apr–Oct), the previous season is B of the previous year.
 	if month >= 4 && month <= 10 {
-		return fmt.Sprintf("B%02d", year-1)
+		return fmt.Sprintf("b%02d", year-1)
 	}
 	// If we're in B-season (Nov–Dec), the previous season is A of the current year.
 	if month >= 11 {
-		return fmt.Sprintf("A%02d", year)
+		return fmt.Sprintf("a%02d", year)
 	}
 	// Jan–Mar: current is B(year-1), previous is A(year-1).
-	return fmt.Sprintf("A%02d", year-1)
+	return fmt.Sprintf("a%02d", year-1)
 }

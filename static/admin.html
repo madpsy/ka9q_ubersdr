@@ -1863,6 +1863,36 @@
             await _doSaveConfig(_confirmPasswordRestart);
         }
 
+        // Live validation for the admin password field in the visual config editor
+        function validateAdminPasswordField(input, hintEl) {
+            const val = input.value;
+
+            // Empty or still the masked placeholder — neutral hint
+            if (val === '' || val === '********') {
+                hintEl.style.color = '#666';
+                hintEl.textContent = 'Min. 16 characters, letters and numbers only. Leave as-is to keep current password.';
+                return;
+            }
+
+            // Check for invalid characters (non-alphanumeric)
+            if (/[^a-zA-Z0-9]/.test(val)) {
+                hintEl.style.color = '#dc3545';
+                hintEl.textContent = '✗ Only letters (a–z, A–Z) and numbers (0–9) are allowed — no special characters.';
+                return;
+            }
+
+            // Check minimum length
+            if (val.length < 16) {
+                hintEl.style.color = '#dc3545';
+                hintEl.textContent = `✗ Too short — ${val.length}/16 characters minimum.`;
+                return;
+            }
+
+            // All good
+            hintEl.style.color = '#28a745';
+            hintEl.textContent = `✓ Password meets requirements (${val.length} characters).`;
+        }
+
         // Helper function to handle fetch with automatic auth error handling
         async function authenticatedFetch(url, options = {}) {
             try {
@@ -2820,6 +2850,28 @@
                         input = document.createElement('input');
                         input.type = 'text';
                         input.value = value;
+                    }
+
+                    // Special handling for admin.password field
+                    if (fullPath === 'admin.password') {
+                        input.type = 'password';
+                        // Add live validation hint element
+                        const pwdHint = document.createElement('small');
+                        pwdHint.id = 'adminPasswordHint';
+                        pwdHint.style.display = 'block';
+                        pwdHint.style.marginTop = '5px';
+                        pwdHint.style.fontSize = '12px';
+                        pwdHint.style.color = '#666';
+                        pwdHint.textContent = 'Min. 16 characters, letters and numbers only. Leave as-is to keep current password.';
+
+                        input.addEventListener('input', () => validateAdminPasswordField(input, pwdHint));
+
+                        input.dataset.path = fullPath;
+                        input.addEventListener('change', (e) => updateConfigValue(e.target.dataset.path, e.target.value));
+                        field.appendChild(input);
+                        field.appendChild(pwdHint);
+                        container.appendChild(field);
+                        continue;
                     }
 
                     input.dataset.path = fullPath;

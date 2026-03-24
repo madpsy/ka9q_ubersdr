@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	eibiBaseURL     = "https://www.eibispace.de/dx/sked-%s.csv"
+	eibiBaseURL     = "http://www.eibispace.de/dx/sked-%s.csv"
 	eibiMaxBytes    = 1 * 1024 * 1024 // 1 MB hard limit
 	eibiRefreshInt  = 24 * time.Hour  // refresh every 24 hours
 	eibiHTTPTimeout = 30 * time.Second

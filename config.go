@@ -32,6 +32,7 @@ type Config struct {
 	MCP                MCPConfig                `yaml:"mcp"`
 	Whisper            WhisperConfig            `yaml:"whisper"`
 	FreeDVExtension    FreeDVExtensionConfig    `yaml:"freedv_extension"`
+	EiBi               EiBiConfig               `yaml:"eibi"`
 	Bookmarks          []Bookmark               `yaml:"bookmarks"`
 	Bands              []Band                   `yaml:"bands"`
 	Extensions         []string                 `yaml:"extensions"`
@@ -360,6 +361,11 @@ type WhisperConfig struct {
 // FreeDVExtensionConfig contains settings for the FreeDV audio extension
 type FreeDVExtensionConfig struct {
 	MaxUsers int `yaml:"max_users"` // Maximum concurrent users of the FreeDV extension (0 = unlimited, default: 10)
+}
+
+// EiBiConfig contains settings for the EiBi shortwave broadcast schedule
+type EiBiConfig struct {
+	Enabled bool `yaml:"enabled"` // Enable/disable EiBi schedule fetching (default: false)
 }
 
 // LoadConfig loads configuration from a YAML file

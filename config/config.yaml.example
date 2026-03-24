@@ -1548,6 +1548,27 @@ whisper:
   summary_url: "https://whisper.ubersdr.org/summarise"
 
 # ==============================================================================
+# EiBi Shortwave Broadcast Schedule
+# ==============================================================================
+# Downloads and caches the EiBi shortwave broadcast schedule in memory.
+# The schedule is fetched from www.eibispace.de on startup and refreshed
+# every 24 hours. The current season file is tried first; if unavailable
+# (e.g. during the season transition window) the previous season is used
+# as a fallback. The raw CSV is never written to disk — it is held in
+# memory only, with a hard 1 MB download limit.
+#
+# When enabled, other parts of the system can query active broadcasts for
+# any given frequency and UTC time via the EiBiSchedule API.
+#
+# EiBi is maintained by Eike Bierwirth and updated twice yearly:
+#   A-season: late March → late October
+#   B-season: late October → late March
+# Source: http://www.eibispace.de
+eibi:
+  # Enable EiBi schedule fetching (default: false)
+  enabled: false
+
+# ==============================================================================
 # FreeDV Extension Configuration
 # ==============================================================================
 # Controls the FreeDV RADE digital voice decoder extension.

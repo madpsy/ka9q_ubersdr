@@ -1043,6 +1043,13 @@ func main() {
 	}
 	defer spaceWeatherMonitor.Stop()
 
+	// Initialize EiBi shortwave broadcast schedule
+	eibiSchedule := NewEiBiSchedule(&config.EiBi)
+	if err := eibiSchedule.Start(); err != nil {
+		log.Printf("Warning: Failed to start EiBi schedule: %v", err)
+	}
+	defer eibiSchedule.Stop()
+
 	// Initialize MCP server if enabled
 	var mcpServer *MCPServer
 	if config.MCP.Enabled {
@@ -1653,7 +1660,7 @@ func main() {
 		handleTestSpectrum(w, r, sessions)
 	})
 	http.HandleFunc("/api/bookmarks", func(w http.ResponseWriter, r *http.Request) {
-		handleBookmarks(w, r, config)
+		handleBookmarks(w, r, config, eibiSchedule)
 	})
 	http.HandleFunc("/api/bands", func(w http.ResponseWriter, r *http.Request) {
 		handleBands(w, r, config)
@@ -2614,8 +2621,9 @@ func handleTestSpectrum(w http.ResponseWriter, r *http.Request, sessions *Sessio
 	})
 }
 
-// handleBookmarks serves the bookmarks configuration
-func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config) {
+// handleBookmarks serves the bookmarks configuration, augmented with any
+// currently-active EiBi shortwave broadcast entries when EiBi is enabled.
+func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config, eibi *EiBiSchedule) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -2632,6 +2640,32 @@ func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config) {
 		// If bookmark has an extension reference but it's not enabled, clear it
 		if bookmark.Extension != "" && !enabledExtensions[bookmark.Extension] {
 			filteredBookmarks[i].Extension = ""
+		}
+	}
+
+	// Augment with currently-active EiBi broadcasts (0–30 MHz) if available.
+	if eibi != nil && eibi.IsLoaded() {
+		now := time.Now().UTC()
+		activeEntries := eibi.GetActiveEntries(now)
+
+		// Build a set of existing static bookmark frequencies to avoid duplicates.
+		existingFreqs := make(map[uint64]bool, len(filteredBookmarks))
+		for _, b := range filteredBookmarks {
+			existingFreqs[b.Frequency] = true
+		}
+
+		for _, e := range activeEntries {
+			freqHz := uint64(e.FreqKHz * 1000)
+			if existingFreqs[freqHz] {
+				continue // already covered by a static bookmark
+			}
+			filteredBookmarks = append(filteredBookmarks, Bookmark{
+				Name:      e.Station,
+				Frequency: freqHz,
+				Mode:      "am",
+				Group:     "EiBi",
+			})
+			existingFreqs[freqHz] = true // deduplicate within EiBi results too
 		}
 	}
 

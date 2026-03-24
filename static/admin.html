@@ -1395,7 +1395,10 @@
                 <div id="restartPasswordNotice" style="display: none; margin-top: 20px; padding: 20px; background: rgba(255,255,255,0.1); border-radius: 8px; border: 1px solid rgba(255,255,255,0.3); max-width: 480px; margin-left: auto; margin-right: auto;">
                     <p style="color: #ffd700; font-weight: bold; font-size: 16px; margin-bottom: 10px;">🔑 Admin password has been changed</p>
                     <p style="color: #ccc; font-size: 14px; margin-bottom: 10px;">Your new password is:</p>
-                    <code id="restartNewPassword" style="font-size: 22px; color: white; background: rgba(0,0,0,0.5); padding: 10px 20px; border-radius: 4px; display: inline-block; letter-spacing: 2px; word-break: break-all;"></code>
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
+                        <code id="restartNewPassword" style="font-size: 22px; color: white; background: rgba(0,0,0,0.5); padding: 10px 20px; border-radius: 4px; display: inline-block; letter-spacing: 2px; word-break: break-all;"></code>
+                        <button onclick="navigator.clipboard.writeText(document.getElementById('restartNewPassword').textContent).then(() => { this.textContent='✅'; setTimeout(() => { this.textContent='📋'; }, 1500); })" title="Copy to clipboard" style="background: none; border: none; font-size: 22px; cursor: pointer; padding: 4px; line-height: 1; opacity: 0.7; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'">📋</button>
+                    </div>
                     <p style="color: #aaa; font-size: 12px; margin-top: 12px;">⚠️ Note this down now — you will need it to log back in after the restart.</p>
                 </div>
                 <div style="margin-top: 30px;">

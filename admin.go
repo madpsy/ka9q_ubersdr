@@ -866,6 +866,20 @@ func (ah *AdminHandler) handleGetConfig(w http.ResponseWriter, r *http.Request) 
 		admin["password"] = "********"
 	}
 
+	// Ensure server section has known string fields present as empty strings (not nil/absent)
+	// so the admin UI renders them with the correct textarea + hint + button treatment.
+	// yaml.v3 parses bare empty values (custom_head_html: "") as nil, which JSON-encodes
+	// as null, causing typeof value !== 'string' in the frontend and falling back to a
+	// plain <input type="text"> instead of the customised textarea.
+	if server, ok := configMap["server"].(map[string]interface{}); ok {
+		if v, exists := server["custom_head_html"]; !exists || v == nil {
+			server["custom_head_html"] = ""
+		}
+		if v, exists := server["custom_ads_txt"]; !exists || v == nil {
+			server["custom_ads_txt"] = ""
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(configMap); err != nil {
 		log.Printf("Error encoding config: %v", err)

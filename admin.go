@@ -883,9 +883,24 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Preserve admin password if not provided or masked
+	// Validate and handle admin password change
+	passwordChanged := false
 	if admin, ok := newConfig["admin"].(map[string]interface{}); ok {
-		if pwd, ok := admin["password"].(string); !ok || pwd == "" || pwd == "********" {
+		if pwd, ok := admin["password"].(string); ok && pwd != "" && pwd != "********" {
+			// A new password is being set — validate it
+			if len(pwd) < 16 {
+				http.Error(w, "Admin password must be at least 16 characters", http.StatusBadRequest)
+				return
+			}
+			for _, ch := range pwd {
+				if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) {
+					http.Error(w, "Admin password must contain only alphanumeric characters (letters and numbers, no special characters)", http.StatusBadRequest)
+					return
+				}
+			}
+			passwordChanged = true
+		} else {
+			// No new password provided or masked — preserve existing
 			admin["password"] = ah.config.Admin.Password
 		}
 	}
@@ -923,16 +938,18 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		// Trigger restart after response is sent
 		ah.restartServer()
 		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  "success",
-			"message": "Configuration updated. Server is restarting...",
-			"restart": true,
+			"status":           "success",
+			"message":          "Configuration updated. Server is restarting...",
+			"restart":          true,
+			"password_changed": passwordChanged,
 		}); err != nil {
 			log.Printf("Error encoding config update response: %v", err)
 		}
 	} else {
-		if err := json.NewEncoder(w).Encode(map[string]string{
-			"status":  "success",
-			"message": "Configuration updated. Restart server to apply changes.",
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":           "success",
+			"message":          "Configuration updated. Restart server to apply changes.",
+			"password_changed": passwordChanged,
 		}); err != nil {
 			log.Printf("Error encoding config update response: %v", err)
 		}

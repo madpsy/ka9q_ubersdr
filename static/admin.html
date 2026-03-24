@@ -1391,8 +1391,70 @@
                 <div style="font-size: 72px; font-weight: bold; margin-bottom: 20px;" id="countdownNumber">15</div>
                 <h2 style="margin-bottom: 10px;">Server is restarting...</h2>
                 <p style="font-size: 18px; color: #ccc;">You will be redirected to the login page</p>
+                <!-- Password change notice — shown only when admin password was changed -->
+                <div id="restartPasswordNotice" style="display: none; margin-top: 20px; padding: 20px; background: rgba(255,255,255,0.1); border-radius: 8px; border: 1px solid rgba(255,255,255,0.3); max-width: 480px; margin-left: auto; margin-right: auto;">
+                    <p style="color: #ffd700; font-weight: bold; font-size: 16px; margin-bottom: 10px;">🔑 Admin password has been changed</p>
+                    <p style="color: #ccc; font-size: 14px; margin-bottom: 10px;">Your new password is:</p>
+                    <code id="restartNewPassword" style="font-size: 22px; color: white; background: rgba(0,0,0,0.5); padding: 10px 20px; border-radius: 4px; display: inline-block; letter-spacing: 2px; word-break: break-all;"></code>
+                    <p style="color: #aaa; font-size: 12px; margin-top: 12px;">⚠️ Note this down now — you will need it to log back in after the restart.</p>
+                </div>
                 <div style="margin-top: 30px;">
                     <div class="spinner" style="border-color: #f3f3f3; border-top-color: #667eea;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Password Changed Modal (for non-restart saves) -->
+        <div id="passwordChangedModal" class="modal">
+            <div class="modal-content" style="max-width: 500px;">
+                <div class="modal-header">
+                    <h2>🔑 Admin Password Changed</h2>
+                    <button class="modal-close" onclick="closePasswordChangedModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="padding: 20px;">
+                        <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px; padding: 15px; margin-bottom: 20px;">
+                            <p style="color: #856404; font-weight: bold; margin-bottom: 8px;">⚠️ Important — note your new password</p>
+                            <p style="color: #856404; font-size: 14px;">Your admin password has been changed. You will need this password the next time you log in.</p>
+                        </div>
+                        <p style="margin-bottom: 10px; color: #555;">Your new admin password is:</p>
+                        <div style="text-align: center; margin-bottom: 20px;">
+                            <code id="modalNewPassword" style="font-size: 22px; color: #333; background: #f8f9fa; padding: 12px 24px; border-radius: 4px; display: inline-block; letter-spacing: 2px; border: 2px solid #dee2e6; word-break: break-all;"></code>
+                        </div>
+                        <p style="font-size: 13px; color: #666; margin-bottom: 20px;">A server restart is required for the new password to take effect.</p>
+                        <div style="display: flex; justify-content: flex-end;">
+                            <button class="btn" onclick="closePasswordChangedModal()">I've noted my password</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Confirm Password Change Modal -->
+        <div id="confirmPasswordModal" class="modal">
+            <div class="modal-content" style="max-width: 480px;">
+                <div class="modal-header">
+                    <h2>🔑 Confirm New Password</h2>
+                    <button class="modal-close" onclick="closeConfirmPasswordModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="padding: 20px;">
+                        <div style="background: #e3f2fd; border: 1px solid #2196f3; border-radius: 5px; padding: 15px; margin-bottom: 20px;">
+                            <p style="color: #0d47a1; font-size: 14px; margin: 0;">You are about to change the admin password. Please type the new password again to confirm.</p>
+                        </div>
+                        <div class="config-field" style="margin-bottom: 20px;">
+                            <label style="font-weight: bold; margin-bottom: 8px; display: block;">Confirm new password</label>
+                            <input type="password" id="confirmPasswordInput" placeholder="Re-enter new password"
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 15px; box-sizing: border-box;"
+                                oninput="validateConfirmPassword()"
+                                onkeydown="if(event.key==='Enter') submitConfirmPassword()">
+                            <small id="confirmPasswordError" style="color: #dc3545; display: none; margin-top: 5px; display: block;"></small>
+                        </div>
+                        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                            <button class="btn btn-secondary" onclick="closeConfirmPasswordModal()">Cancel</button>
+                            <button class="btn" id="confirmPasswordSubmitBtn" onclick="submitConfirmPassword()" disabled>Confirm &amp; Save</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1695,9 +1757,20 @@
         }
 
         // Show restart countdown overlay
-        function showRestartCountdown() {
+        // newPassword: optional plaintext password to display if admin password was just changed
+        function showRestartCountdown(newPassword = null) {
             const overlay = document.getElementById('restartOverlay');
             const countdownEl = document.getElementById('countdownNumber');
+            const pwdNotice = document.getElementById('restartPasswordNotice');
+            const pwdCode = document.getElementById('restartNewPassword');
+
+            if (newPassword && pwdNotice && pwdCode) {
+                pwdCode.textContent = newPassword;
+                pwdNotice.style.display = 'block';
+            } else if (pwdNotice) {
+                pwdNotice.style.display = 'none';
+            }
+
             overlay.style.display = 'flex';
 
             let countdown = 30;
@@ -1713,6 +1786,80 @@
                     window.location.href = '/admin.html';
                 }
             }, 1000);
+        }
+
+        // Show password changed modal for non-restart saves
+        function showPasswordChangedModal(newPassword) {
+            const modal = document.getElementById('passwordChangedModal');
+            const pwdCode = document.getElementById('modalNewPassword');
+            if (pwdCode) {
+                pwdCode.textContent = newPassword;
+            }
+            if (modal) {
+                modal.style.display = 'flex';
+            }
+        }
+
+        function closePasswordChangedModal() {
+            const modal = document.getElementById('passwordChangedModal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        // Confirm password change modal — shown before save when user has typed a new password
+        // _confirmPasswordRestart stores whether the pending save is a restart save
+        let _confirmPasswordRestart = false;
+
+        function showConfirmPasswordModal(restart) {
+            _confirmPasswordRestart = restart;
+            const modal = document.getElementById('confirmPasswordModal');
+            const input = document.getElementById('confirmPasswordInput');
+            const errEl = document.getElementById('confirmPasswordError');
+            const btn = document.getElementById('confirmPasswordSubmitBtn');
+            if (input) input.value = '';
+            if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+            if (btn) btn.disabled = true;
+            if (modal) {
+                modal.style.display = 'flex';
+                // Focus the input after the modal is visible
+                setTimeout(() => { if (input) input.focus(); }, 50);
+            }
+        }
+
+        function closeConfirmPasswordModal() {
+            const modal = document.getElementById('confirmPasswordModal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        function validateConfirmPassword() {
+            const input = document.getElementById('confirmPasswordInput');
+            const errEl = document.getElementById('confirmPasswordError');
+            const btn = document.getElementById('confirmPasswordSubmitBtn');
+            const intended = currentConfig?.admin?.password || '';
+            const confirmed = input ? input.value : '';
+
+            if (!confirmed) {
+                if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+                if (btn) btn.disabled = true;
+                return;
+            }
+
+            if (confirmed !== intended) {
+                if (errEl) { errEl.textContent = 'Passwords do not match.'; errEl.style.display = 'block'; }
+                if (btn) btn.disabled = true;
+            } else {
+                if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        async function submitConfirmPassword() {
+            const input = document.getElementById('confirmPasswordInput');
+            const intended = currentConfig?.admin?.password || '';
+            if (!input || input.value !== intended) return;
+            closeConfirmPasswordModal();
+            await _doSaveConfig(_confirmPasswordRestart);
         }
 
         // Helper function to handle fetch with automatic auth error handling
@@ -2704,7 +2851,20 @@
             }
         }
 
+        // saveConfig: public entry point — intercepts if user has typed a new password
         async function saveConfig(restart = false) {
+            const intendedPwd = currentConfig?.admin?.password || '';
+            const userIntendedChange = intendedPwd !== '' && intendedPwd !== '********';
+            if (userIntendedChange) {
+                // Show confirmation modal; actual save happens in submitConfirmPassword()
+                showConfirmPasswordModal(restart);
+                return;
+            }
+            await _doSaveConfig(restart);
+        }
+
+        // _doSaveConfig: performs the actual PUT /admin/config request
+        async function _doSaveConfig(restart = false) {
             // Disable save button and show loading state
             const saveButton = event?.target || document.querySelector('.button-group .btn');
             const originalText = saveButton?.textContent;
@@ -2733,13 +2893,27 @@
                 }
 
                 const result = await response.json();
-                showAlert(result.message || 'Configuration saved successfully', 'success');
 
-                // If restarting, show countdown overlay
-                if (restart && result.restart) {
-                    setTimeout(() => {
-                        showRestartCountdown();
-                    }, 500);
+                if (result.password_changed) {
+                    const newPwd = currentConfig?.admin?.password || '';
+                    if (restart && result.restart) {
+                        // Restart path: show password inside the countdown overlay
+                        setTimeout(() => {
+                            showRestartCountdown(newPwd);
+                        }, 500);
+                    } else {
+                        // Non-restart path: show dedicated password changed modal
+                        showAlert(result.message || 'Configuration saved successfully', 'success');
+                        showPasswordChangedModal(newPwd);
+                    }
+                } else {
+                    showAlert(result.message || 'Configuration saved successfully', 'success');
+                    // If restarting, show countdown overlay
+                    if (restart && result.restart) {
+                        setTimeout(() => {
+                            showRestartCountdown();
+                        }, 500);
+                    }
                 }
             } catch (error) {
                 showAlert('Error saving configuration: ' + error.message, 'error');

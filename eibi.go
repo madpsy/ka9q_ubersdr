@@ -395,6 +395,68 @@ func (s *EiBiSchedule) LookupFrequencyAll(freqHz float64) []EiBiEntry {
 	return matches
 }
 
+// eibiFormatTime formats an EiBi HHMM integer as a zero-padded "HHMM" string.
+func eibiFormatTime(t int) string {
+	return fmt.Sprintf("%04d", t)
+}
+
+// eibiDaysLabel converts an EiBi Days field value to a human-readable string.
+// Returns an empty string for daily broadcasts (empty Days field).
+func eibiDaysLabel(days string) string {
+	switch days {
+	case "":
+		return "" // daily — no qualifier needed
+	case "Mo-Fr":
+		return "Mon–Fri"
+	case "SaSu":
+		return "Sat–Sun"
+	case "MoTu":
+		return "Mon–Tue"
+	case "TuWe":
+		return "Tue–Wed"
+	case "WeTh":
+		return "Wed–Thu"
+	case "ThFr":
+		return "Thu–Fri"
+	case "MoWe":
+		return "Mon–Wed"
+	case "MoTh":
+		return "Mon–Thu"
+	case "Tu-Sa":
+		return "Tue–Sat"
+	case "We-Su":
+		return "Wed–Sun"
+	case "Mo":
+		return "Mon"
+	case "Tu":
+		return "Tue"
+	case "We":
+		return "Wed"
+	case "Th":
+		return "Thu"
+	case "Fr":
+		return "Fri"
+	case "Sa":
+		return "Sat"
+	case "Su":
+		return "Sun"
+	default:
+		// Irregular, date-specific (e.g. "irr", "24Dec"), or unknown — wrap in parens.
+		return "(" + days + ")"
+	}
+}
+
+// EiBiBookmarkComment returns a human-readable schedule comment for a bookmark,
+// e.g. "0600–0800 UTC Mon–Fri" or "1400–1600 UTC" or "0300–0500 UTC (irr)".
+func EiBiBookmarkComment(e EiBiEntry) string {
+	timeStr := eibiFormatTime(e.StartUTC) + "–" + eibiFormatTime(e.EndUTC) + " UTC"
+	days := eibiDaysLabel(e.Days)
+	if days == "" {
+		return timeStr
+	}
+	return timeStr + " " + days
+}
+
 // GetActiveEntries returns all EiBi entries that are currently active at time t
 // and whose frequency falls within the shortwave range (0–30 MHz / 0–30,000 kHz).
 // Returns nil when the schedule is not loaded or no entries are active.

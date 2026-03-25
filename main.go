@@ -2664,6 +2664,7 @@ func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config, eib
 				Frequency: freqHz,
 				Mode:      "am",
 				Group:     "EiBi",
+				Comment:   EiBiBookmarkComment(e),
 			})
 			existingFreqs[freqHz] = true // deduplicate within EiBi results too
 		}

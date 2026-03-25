@@ -2830,6 +2830,21 @@ Examples:
         if bandwidth_high is None:
             bandwidth_high = default_high
 
+    # Auto-detect headless environment before attempting GUI launch
+    if not args.no_gui:
+        has_display = (
+            bool(os.environ.get('DISPLAY'))             # X11 Linux
+            or bool(os.environ.get('WAYLAND_DISPLAY'))  # Wayland Linux
+            or sys.platform == 'win32'                  # Windows
+            or sys.platform == 'darwin'                 # macOS
+        )
+        if not has_display:
+            print(
+                "No display detected ($DISPLAY not set) — running in CLI mode.",
+                file=sys.stderr
+            )
+            args.no_gui = True
+
     # Launch GUI by default (unless --no-gui is specified)
     if not args.no_gui:
         try:

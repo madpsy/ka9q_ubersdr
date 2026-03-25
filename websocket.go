@@ -1135,6 +1135,9 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 						silenceDuration := session.SampleRate / 50        // 20ms frame
 						silenceSamples := make([]byte, silenceDuration*2) // 16-bit samples = 2 bytes each (zeros)
 
+						// Silence packets for non-IQ modes always use full header so signal
+						// quality data is included even when squelch is closed.
+						isIQModeSilence := session.Mode == "iq" || session.Mode == "iq48" || session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
 						packet, err := pcmBinaryEncoder.EncodePCMPacketWithSignalQuality(
 							silenceSamples,
 							time.Now().UnixNano(),
@@ -1142,6 +1145,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 							session.Channels,
 							basebandPower,
 							noiseDensity,
+							!isIQModeSilence, // forceFullHeader for non-IQ modes
 						)
 						if err != nil {
 							continue // Skip this update on error
@@ -1341,9 +1345,12 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					}
 				}
 
-				// Encode PCM packet with hybrid header strategy
-				// Version 1: First packet or metadata change: full header (29 bytes), subsequent: minimal (13 bytes)
-				// Version 2: First packet or metadata change: full header (37 bytes), subsequent: minimal (13 bytes)
+				// Encode PCM packet with hybrid header strategy.
+				// Non-IQ modes force a full header on every packet so that signal quality
+				// data (basebandPower / noiseDensity) is delivered continuously, matching
+				// the behaviour of the Opus v2 format.
+				// IQ modes keep the minimal-header optimisation to reduce bandwidth on
+				// high-rate streams where signal quality fields are less useful.
 				// Use audioPacket.SampleRate (stamped at receive time) not session.SampleRate
 				// (which may already reflect a new mode for buffered packets).
 				packet, err := pcmBinaryEncoder.EncodePCMPacketWithSignalQuality(
@@ -1353,6 +1360,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					session.Channels,
 					basebandPower,
 					noiseDensity,
+					!isIQMode, // forceFullHeader for non-IQ modes
 				)
 				if err != nil {
 					log.Printf("PCM binary encoding error: %v", err)

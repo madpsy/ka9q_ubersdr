@@ -159,7 +159,7 @@ func NewPCMBinaryEncoderWithVersion(useCompression bool, version uint8) *PCMBina
 //   - Encoded packet ready for WebSocket transmission
 //   - Error if encoding fails
 func (e *PCMBinaryEncoder) EncodePCMPacket(pcmData []byte, gpsTimeNs int64, sampleRate int, channels int) ([]byte, error) {
-	return e.EncodePCMPacketWithSignalQuality(pcmData, gpsTimeNs, sampleRate, channels, -999.0, -999.0)
+	return e.EncodePCMPacketWithSignalQuality(pcmData, gpsTimeNs, sampleRate, channels, -999.0, -999.0, false)
 }
 
 // EncodePCMPacketWithSignalQuality encodes a PCM audio packet with optional signal quality metrics
@@ -171,11 +171,12 @@ func (e *PCMBinaryEncoder) EncodePCMPacket(pcmData []byte, gpsTimeNs int64, samp
 //   - channels: Number of audio channels (1=mono, 2=stereo)
 //   - basebandPower: Baseband signal power in dBFS (use -999.0 for no data)
 //   - noiseDensity: Noise density (N0) in dBFS (use -999.0 for no data)
+//   - forceFullHeader: Always send a full header (e.g. for non-IQ modes that need per-packet signal data)
 //
 // Returns:
 //   - Encoded packet ready for WebSocket transmission
 //   - Error if encoding fails
-func (e *PCMBinaryEncoder) EncodePCMPacketWithSignalQuality(pcmData []byte, gpsTimeNs int64, sampleRate int, channels int, basebandPower, noiseDensity float32) ([]byte, error) {
+func (e *PCMBinaryEncoder) EncodePCMPacketWithSignalQuality(pcmData []byte, gpsTimeNs int64, sampleRate int, channels int, basebandPower, noiseDensity float32, forceFullHeader bool) ([]byte, error) {
 	e.encoderMu.Lock()
 	defer e.encoderMu.Unlock()
 
@@ -186,7 +187,8 @@ func (e *PCMBinaryEncoder) EncodePCMPacketWithSignalQuality(pcmData []byte, gpsT
 	// 1. First packet (lastSampleRate == -1)
 	// 2. Sample rate changed
 	// 3. Channel count changed
-	needFullHeader := e.lastSampleRate != sampleRate || e.lastChannels != channels
+	// 4. Caller explicitly requests it (e.g. non-IQ modes wanting per-packet signal quality)
+	needFullHeader := forceFullHeader || e.lastSampleRate != sampleRate || e.lastChannels != channels
 
 	var packet []byte
 

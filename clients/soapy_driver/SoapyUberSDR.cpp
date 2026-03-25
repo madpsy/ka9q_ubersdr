@@ -304,13 +304,13 @@ size_t SoapyUberSDR::getNumChannels(const int direction) const
     return (direction == SOAPY_SDR_RX) ? 1 : 0;
 }
 
-bool SoapyUberSDR::getFullDuplex(const int direction, const size_t channel) const
+bool SoapyUberSDR::getFullDuplex(const int /*direction*/, const size_t /*channel*/) const
 {
     return false;
 }
 
 // Stream API
-std::vector<std::string> SoapyUberSDR::getStreamFormats(const int direction, const size_t channel) const
+std::vector<std::string> SoapyUberSDR::getStreamFormats(const int /*direction*/, const size_t /*channel*/) const
 {
     std::vector<std::string> formats;
     formats.push_back(SOAPY_SDR_CF32);
@@ -318,7 +318,7 @@ std::vector<std::string> SoapyUberSDR::getStreamFormats(const int direction, con
     return formats;
 }
 
-std::string SoapyUberSDR::getNativeStreamFormat(const int direction, const size_t channel, double &fullScale) const
+std::string SoapyUberSDR::getNativeStreamFormat(const int /*direction*/, const size_t /*channel*/, double &fullScale) const
 {
     fullScale = 32768;
     return SOAPY_SDR_CF32;
@@ -326,9 +326,9 @@ std::string SoapyUberSDR::getNativeStreamFormat(const int direction, const size_
 
 SoapySDR::Stream *SoapyUberSDR::setupStream(
     const int direction,
-    const std::string &format,
+    const std::string &/*format*/,
     const std::vector<size_t> &channels,
-    const SoapySDR::Kwargs &args)
+    const SoapySDR::Kwargs &/*args*/)
 {
     if (direction != SOAPY_SDR_RX)
         throw std::runtime_error("SoapyUberSDR only supports RX");
@@ -340,21 +340,21 @@ SoapySDR::Stream *SoapyUberSDR::setupStream(
     return (SoapySDR::Stream *) this;
 }
 
-void SoapyUberSDR::closeStream(SoapySDR::Stream *stream)
+void SoapyUberSDR::closeStream(SoapySDR::Stream */*stream*/)
 {
     SoapySDR::log(SOAPY_SDR_INFO, "SoapyUberSDR: Stream closed");
 }
 
-size_t SoapyUberSDR::getStreamMTU(SoapySDR::Stream *stream) const
+size_t SoapyUberSDR::getStreamMTU(SoapySDR::Stream */*stream*/) const
 {
     return 2048;
 }
 
 int SoapyUberSDR::activateStream(
-    SoapySDR::Stream *stream,
-    const int flags,
-    const long long timeNs,
-    const size_t numElems)
+    SoapySDR::Stream */*stream*/,
+    const int /*flags*/,
+    const long long /*timeNs*/,
+    const size_t /*numElems*/)
 {
     if (_streaming)
         return SOAPY_SDR_STREAM_ERROR;
@@ -384,7 +384,7 @@ int SoapyUberSDR::activateStream(
     return 0;
 }
 
-int SoapyUberSDR::deactivateStream(SoapySDR::Stream *stream, const int flags, const long long timeNs)
+int SoapyUberSDR::deactivateStream(SoapySDR::Stream */*stream*/, const int /*flags*/, const long long /*timeNs*/)
 {
     _streaming = false;
     _readyToConsume = false;
@@ -403,7 +403,7 @@ int SoapyUberSDR::deactivateStream(SoapySDR::Stream *stream, const int flags, co
 }
 
 int SoapyUberSDR::readStream(
-    SoapySDR::Stream *stream,
+    SoapySDR::Stream */*stream*/,
     void * const *buffs,
     const size_t numElems,
     int &flags,
@@ -485,47 +485,47 @@ int SoapyUberSDR::readStream(
 }
 
 // Antenna API
-std::vector<std::string> SoapyUberSDR::listAntennas(const int direction, const size_t channel) const
+std::vector<std::string> SoapyUberSDR::listAntennas(const int /*direction*/, const size_t /*channel*/) const
 {
     std::vector<std::string> antennas;
     antennas.push_back("RX");
     return antennas;
 }
 
-void SoapyUberSDR::setAntenna(const int direction, const size_t channel, const std::string &name) {}
-std::string SoapyUberSDR::getAntenna(const int direction, const size_t channel) const { return "RX"; }
+void SoapyUberSDR::setAntenna(const int /*direction*/, const size_t /*channel*/, const std::string &/*name*/) {}
+std::string SoapyUberSDR::getAntenna(const int /*direction*/, const size_t /*channel*/) const { return "RX"; }
 
 // Gain API
-std::vector<std::string> SoapyUberSDR::listGains(const int direction, const size_t channel) const
+std::vector<std::string> SoapyUberSDR::listGains(const int /*direction*/, const size_t /*channel*/) const
 {
     return std::vector<std::string>();
 }
 
-void SoapyUberSDR::setGain(const int direction, const size_t channel, const double value) {}
-double SoapyUberSDR::getGain(const int direction, const size_t channel) const { return 0; }
-SoapySDR::Range SoapyUberSDR::getGainRange(const int direction, const size_t channel) const
+void SoapyUberSDR::setGain(const int /*direction*/, const size_t /*channel*/, const double /*value*/) {}
+double SoapyUberSDR::getGain(const int /*direction*/, const size_t /*channel*/) const { return 0; }
+SoapySDR::Range SoapyUberSDR::getGainRange(const int /*direction*/, const size_t /*channel*/) const
 {
     return SoapySDR::Range(0, 0);
 }
 
-bool SoapyUberSDR::hasGainMode(const int direction, const size_t channel) const
+bool SoapyUberSDR::hasGainMode(const int /*direction*/, const size_t /*channel*/) const
 {
     return true;
 }
 
-bool SoapyUberSDR::getGainMode(const int direction, const size_t channel) const
+bool SoapyUberSDR::getGainMode(const int /*direction*/, const size_t /*channel*/) const
 {
     return false;
 }
 
-void SoapyUberSDR::setGainMode(const int direction, const size_t channel, const bool automatic) {}
+void SoapyUberSDR::setGainMode(const int /*direction*/, const size_t /*channel*/, const bool /*automatic*/) {}
 
 // Frequency API
 void SoapyUberSDR::setFrequency(
-    const int direction,
-    const size_t channel,
+    const int /*direction*/,
+    const size_t /*channel*/,
     const double frequency,
-    const SoapySDR::Kwargs &args)
+    const SoapySDR::Kwargs &/*args*/)
 {
     _currentFrequency = (uint64_t)frequency;
     
@@ -536,19 +536,19 @@ void SoapyUberSDR::setFrequency(
     SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyUberSDR: Frequency set to %llu Hz", _currentFrequency);
 }
 
-double SoapyUberSDR::getFrequency(const int direction, const size_t channel) const
+double SoapyUberSDR::getFrequency(const int /*direction*/, const size_t /*channel*/) const
 {
     return (double)_currentFrequency;
 }
 
-std::vector<std::string> SoapyUberSDR::listFrequencies(const int direction, const size_t channel) const
+std::vector<std::string> SoapyUberSDR::listFrequencies(const int /*direction*/, const size_t /*channel*/) const
 {
     std::vector<std::string> names;
     names.push_back("RF");
     return names;
 }
 
-SoapySDR::RangeList SoapyUberSDR::getFrequencyRange(const int direction, const size_t channel) const
+SoapySDR::RangeList SoapyUberSDR::getFrequencyRange(const int /*direction*/, const size_t /*channel*/) const
 {
     SoapySDR::RangeList ranges;
     ranges.push_back(SoapySDR::Range(100e3, 30e6));
@@ -556,7 +556,7 @@ SoapySDR::RangeList SoapyUberSDR::getFrequencyRange(const int direction, const s
 }
 
 // Sample Rate API
-void SoapyUberSDR::setSampleRate(const int direction, const size_t channel, const double rate)
+void SoapyUberSDR::setSampleRate(const int /*direction*/, const size_t /*channel*/, const double rate)
 {
     std::string newMode = sampleRateToMode(rate);
     
@@ -574,12 +574,12 @@ void SoapyUberSDR::setSampleRate(const int direction, const size_t channel, cons
     }
 }
 
-double SoapyUberSDR::getSampleRate(const int direction, const size_t channel) const
+double SoapyUberSDR::getSampleRate(const int /*direction*/, const size_t /*channel*/) const
 {
     return _sampleRate;
 }
 
-std::vector<double> SoapyUberSDR::listSampleRates(const int direction, const size_t channel) const
+std::vector<double> SoapyUberSDR::listSampleRates(const int /*direction*/, const size_t /*channel*/) const
 {
     std::vector<double> rates;
     rates.push_back(48000);
@@ -589,7 +589,7 @@ std::vector<double> SoapyUberSDR::listSampleRates(const int direction, const siz
     return rates;
 }
 
-SoapySDR::RangeList SoapyUberSDR::getSampleRateRange(const int direction, const size_t channel) const
+SoapySDR::RangeList SoapyUberSDR::getSampleRateRange(const int /*direction*/, const size_t /*channel*/) const
 {
     SoapySDR::RangeList ranges;
     ranges.push_back(SoapySDR::Range(48000, 48000));
@@ -600,7 +600,7 @@ SoapySDR::RangeList SoapyUberSDR::getSampleRateRange(const int direction, const 
 }
 
 // Bandwidth API
-double SoapyUberSDR::getBandwidth(const int direction, const size_t channel) const
+double SoapyUberSDR::getBandwidth(const int /*direction*/, const size_t /*channel*/) const
 {
     return _sampleRate;
 }
@@ -657,7 +657,7 @@ std::string SoapyUberSDR::sampleRateToMode(double rate) const
         " Hz. Valid rates: 48000, 96000, 192000, 384000");
 }
 
-void SoapyUberSDR::handleTLSMessage(websocketpp::connection_hdl hdl, tls_message_ptr msg)
+void SoapyUberSDR::handleTLSMessage(websocketpp::connection_hdl /*hdl*/, tls_message_ptr msg)
 {
     try {
         const std::string& payload = msg->get_payload();
@@ -765,6 +765,7 @@ void SoapyUberSDR::handleTLSMessage(websocketpp::connection_hdl hdl, tls_message
 
 void SoapyUberSDR::handlePlainMessage(websocketpp::connection_hdl hdl, plain_message_ptr msg)
 {
+    (void)hdl;  // suppress unused parameter warning
     try {
         const std::string& payload = msg->get_payload();
         

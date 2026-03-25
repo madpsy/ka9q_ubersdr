@@ -400,50 +400,56 @@ func eibiFormatTime(t int) string {
 	return fmt.Sprintf("%04d", t)
 }
 
+// eibiDayTokens maps EiBi two-letter day codes to full abbreviations.
+var eibiDayTokens = map[string]string{
+	"Mo": "Mon",
+	"Tu": "Tue",
+	"We": "Wed",
+	"Th": "Thu",
+	"Fr": "Fri",
+	"Sa": "Sat",
+	"Su": "Sun",
+}
+
 // eibiDaysLabel converts an EiBi Days field value to a human-readable string.
 // Returns an empty string for daily broadcasts (empty Days field).
+//
+// EiBi uses two-letter day codes (Mo Tu We Th Fr Sa Su) joined either with "-"
+// for ranges (e.g. "Mo-Fr", "Tu-Sa") or concatenated for pairs (e.g. "SaSu",
+// "MoTu"). Single days are just the two-letter code (e.g. "Mo", "Sa").
+// Special values like "irr" or date strings like "24Dec" are wrapped in parens.
 func eibiDaysLabel(days string) string {
-	switch days {
-	case "":
+	if days == "" {
 		return "" // daily — no qualifier needed
-	case "Mo-Fr":
-		return "Mon–Fri"
-	case "SaSu":
-		return "Sat–Sun"
-	case "MoTu":
-		return "Mon–Tue"
-	case "TuWe":
-		return "Tue–Wed"
-	case "WeTh":
-		return "Wed–Thu"
-	case "ThFr":
-		return "Thu–Fri"
-	case "MoWe":
-		return "Mon–Wed"
-	case "MoTh":
-		return "Mon–Thu"
-	case "Tu-Sa":
-		return "Tue–Sat"
-	case "We-Su":
-		return "Wed–Sun"
-	case "Mo":
-		return "Mon"
-	case "Tu":
-		return "Tue"
-	case "We":
-		return "Wed"
-	case "Th":
-		return "Thu"
-	case "Fr":
-		return "Fri"
-	case "Sa":
-		return "Sat"
-	case "Su":
-		return "Sun"
-	default:
-		// Irregular, date-specific (e.g. "irr", "24Dec"), or unknown — wrap in parens.
-		return "(" + days + ")"
 	}
+
+	// Range with explicit hyphen, e.g. "Mo-Fr", "Tu-Sa", "We-Su".
+	if len(days) == 5 && days[2] == '-' {
+		from, okF := eibiDayTokens[days[0:2]]
+		to, okT := eibiDayTokens[days[3:5]]
+		if okF && okT {
+			return from + "–" + to
+		}
+	}
+
+	// Concatenated pair, e.g. "SaSu", "MoTu", "ThFr".
+	if len(days) == 4 {
+		from, okF := eibiDayTokens[days[0:2]]
+		to, okT := eibiDayTokens[days[2:4]]
+		if okF && okT {
+			return from + "–" + to
+		}
+	}
+
+	// Single day, e.g. "Mo", "Sa".
+	if len(days) == 2 {
+		if full, ok := eibiDayTokens[days]; ok {
+			return full
+		}
+	}
+
+	// Irregular, date-specific (e.g. "irr", "24Dec"), or unrecognised — wrap in parens.
+	return "(" + days + ")"
 }
 
 // EiBiBookmarkComment returns a human-readable schedule comment for a bookmark,

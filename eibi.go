@@ -76,20 +76,16 @@ func NewEiBiSchedule(config *EiBiConfig) *EiBiSchedule {
 	}
 }
 
-// Start performs an initial fetch and then schedules a refresh every 24 hours.
-// It is non-blocking; the refresh loop runs in a background goroutine.
+// Start schedules the EiBi refresh loop in a background goroutine and returns
+// immediately. The first fetch is delayed by 2 minutes so that a rapid
+// startup/crash loop does not hammer the remote server.
 func (s *EiBiSchedule) Start() error {
 	if s == nil {
 		log.Printf("EiBi: disabled — schedule lookups will return no results")
 		return nil
 	}
 
-	log.Printf("EiBi: starting (refresh interval: 24h, download limit: 1 MB)")
-
-	// Initial load — log a warning but don't fail startup if the fetch fails.
-	if err := s.refresh(); err != nil {
-		log.Printf("EiBi: initial load failed: %v (will retry in 24h)", err)
-	}
+	log.Printf("EiBi: starting (initial fetch in 2 min, refresh interval: 24h, download limit: 1 MB)")
 
 	s.wg.Add(1)
 	go s.refreshLoop()
@@ -108,9 +104,24 @@ func (s *EiBiSchedule) Stop() {
 	log.Printf("EiBi: stopped")
 }
 
-// refreshLoop runs in the background and triggers a refresh every 24 hours.
+// refreshLoop runs in the background. It waits 2 minutes before the first
+// fetch (to avoid hammering the remote server during a startup/crash loop),
+// then refreshes every 24 hours.
 func (s *EiBiSchedule) refreshLoop() {
 	defer s.wg.Done()
+
+	// 2-minute startup delay — abortable if Stop() is called.
+	log.Printf("EiBi: waiting 2 minutes before initial fetch")
+	select {
+	case <-s.stopChan:
+		return
+	case <-time.After(2 * time.Minute):
+	}
+
+	// Initial fetch.
+	if err := s.refresh(); err != nil {
+		log.Printf("EiBi: initial load failed: %v (will retry in 24h)", err)
+	}
 
 	ticker := time.NewTicker(eibiRefreshInt)
 	defer ticker.Stop()

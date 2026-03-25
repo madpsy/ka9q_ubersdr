@@ -3,7 +3,7 @@
   "displayName": "SSTV Decoder",
   "version": "1.0.0",
   "description": "Slow Scan Television (SSTV) decoder supporting 47 modes including Martin, Scottie, Robot, PD, and MMSSTV",
-  "author": "UberSDR (ported from slowrx by OH2EIQ)",
+  "author": "UberSDR",
   "type": "decoder",
   "icon": "📺",
   "category": "decoder",

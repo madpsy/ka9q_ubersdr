@@ -3,7 +3,7 @@
   "displayName": "DX Cluster",
   "version": "1.0.0",
   "description": "Display DX spots from amateur radio DX clusters in real-time",
-  "author": "ka9q UberSDR",
+  "author": "UberSDR",
   "type": "display",
   "icon": "📡",
   "category": "network",

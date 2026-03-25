@@ -2,7 +2,7 @@
   "name": "ft8",
   "displayName": "FT8/FT4 Decoder",
   "version": "1.0.0",
-  "description": "FT8 and FT4 weak signal digital mode decoder with GPS time synchronization",
+  "description": "FT8 and FT4 weak signal digital mode decoder",
   "author": "UberSDR",
   "type": "decoder",
   "icon": "📡",

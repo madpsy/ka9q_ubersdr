@@ -951,7 +951,15 @@ noisefloor:
   # Lower values = more frequent updates but more CPU/disk usage
   # Recommended: 60 seconds (1 minute) for good time resolution
   poll_interval_sec: 60
-  
+
+  # Exit ubersdr when all spectrum channels stall after a reconnect attempt (default: true)
+  # When enabled, if all band spectrum channels are still stalled 30 seconds after the
+  # first reconnect attempt, ubersdr will exit cleanly (os.Exit(0)). The process manager
+  # (Docker) will restart ubersdr, which in turn triggers a fresh radiod restart via
+  # entrypoint.sh. This is the most reliable recovery from a radiod crash or hang.
+  # When disabled, only individual channel reconnection is attempted indefinitely.
+  restart_on_stall: true
+
   # Directory to store CSV data files (one file per day)
   # If relative path, will be created relative to config directory
   # Default: "noisefloor" (creates <config_dir>/noisefloor/)

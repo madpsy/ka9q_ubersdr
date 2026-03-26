@@ -260,6 +260,7 @@ type InstanceConnectionInfo struct {
 type NoiseFloorConfig struct {
 	Enabled         bool             `yaml:"enabled"`
 	PollIntervalSec int              `yaml:"poll_interval_sec"` // Seconds between measurements
+	RestartOnStall  bool             `yaml:"restart_on_stall"`  // Exit ubersdr when all bands stall post-reconnect
 	DataDir         string           `yaml:"data_dir"`          // Directory to store CSV files
 	Bands           []NoiseFloorBand `yaml:"bands"`             // Amateur radio bands to monitor
 }
@@ -669,6 +670,11 @@ func LoadConfig(filename string) (*Config, error) {
 	// Set noise floor defaults if not specified
 	if config.NoiseFloor.PollIntervalSec == 0 {
 		config.NoiseFloor.PollIntervalSec = 60 // 60 seconds default
+	}
+	// RestartOnStall defaults to true - exit ubersdr when all bands stall post-reconnect
+	// Note: YAML booleans default to false, so we set it to true if not explicitly disabled
+	if !config.NoiseFloor.RestartOnStall {
+		config.NoiseFloor.RestartOnStall = true
 	}
 	// Note: DataDir will be set relative to config directory in main.go
 	// Default is "noisefloor" subdirectory in config directory

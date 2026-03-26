@@ -1778,6 +1778,36 @@ func (nfm *NoiseFloorMonitor) checkAndReconnectStalled() {
 			}
 		}
 	}
+
+	// If all bands are still stalled 30s after their first reconnect attempt,
+	// radiod has likely died and is not recovering. Exit ubersdr so the process
+	// manager restarts it, which in turn triggers a fresh radiod restart via
+	// entrypoint.sh (touch /var/run/restart-trigger/restart).
+	if nfm.config.NoiseFloor.RestartOnStall {
+		stalledPostReconnect := 0
+		eligible := 0
+		for _, bs := range nfm.bandSpectrums {
+			bs.mu.Lock()
+			lastData := bs.LastDataTime
+			lastReconnect := bs.LastReconnect
+			bs.mu.Unlock()
+
+			if lastData.IsZero() {
+				continue // still initialising, don't count
+			}
+			eligible++
+			// Band is stalled AND a reconnect was attempted at least 30s ago with no recovery
+			if now.Sub(lastData) > stallThreshold &&
+				!lastReconnect.IsZero() &&
+				now.Sub(lastReconnect) > 30*time.Second {
+				stalledPostReconnect++
+			}
+		}
+		if eligible > 0 && stalledPostReconnect == eligible {
+			log.Printf("CRITICAL: All %d bands still stalled 30s after reconnect attempt, exiting for clean restart", eligible)
+			os.Exit(0)
+		}
+	}
 }
 
 // reconnectBand attempts to recreate a spectrum channel for a band using the same SSRC

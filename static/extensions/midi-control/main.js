@@ -111,8 +111,10 @@ class MIDIControlExtension extends DecoderExtension {
         this._updateMappingsTable();
         this._updateStepSizeUI();
 
-        // Check Web MIDI API availability
-        if (!navigator.requestMIDIAccess) {
+        // Check Web MIDI API availability.
+        // NOTE: Firefox defines navigator.requestMIDIAccess but always rejects it,
+        // so we cannot use a simple existence check — we must attempt the call.
+        if (typeof navigator.requestMIDIAccess !== 'function') {
             this._showAPIError();
             return;
         }
@@ -136,6 +138,8 @@ class MIDIControlExtension extends DecoderExtension {
                 }
             }
         }).catch(err => {
+            // Firefox rejects with SecurityError/NotSupportedError — show the API error box
+            this._showAPIError();
             this._addMessage(`MIDI access denied: ${err.message}`, 'error');
         });
     }

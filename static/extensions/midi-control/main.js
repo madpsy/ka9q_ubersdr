@@ -802,8 +802,10 @@ class MIDIControlExtension extends DecoderExtension {
                 </tr>`;
         }).join('');
 
-        // Update mapping count badge
-        const countBadge = document.getElementById('midi-mapping-count');
+        // Update both mapping count elements (status grid + learn section badge)
+        const countStatus = document.getElementById('midi-mapping-count');
+        if (countStatus) countStatus.textContent = entries.length;
+        const countBadge = document.getElementById('midi-mapping-count-badge');
         if (countBadge) countBadge.textContent = entries.length;
     }
     

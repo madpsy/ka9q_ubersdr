@@ -1,5 +1,11 @@
 /* MIDI Control Extension Styles */
 
+/* Override the shared panel height for this extension — it needs more vertical space */
+.decoder-extension-content:has(.midi-container) {
+    min-height: 560px;
+    max-height: 560px;
+}
+
 .midi-container {
     padding: 15px;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;

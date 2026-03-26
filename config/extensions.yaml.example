@@ -9,6 +9,11 @@ extensions:
   # Radio Sync - syncs the SDR <-> Radio via serial CAT
   - radio-sync
 
+  # MIDI Control - control the SDR with a USB MIDI controller (DJ controller, knob box, etc.)
+  # Uses the Web MIDI API directly in the browser — no server required
+  # Requires Chrome or Edge (Firefox does not support Web MIDI API)
+  - midi-control
+
 # Default extension to load automatically (optional)
 # Set to the slug of an extension from the list above, or leave empty/commented for none
 # default_extension: ""

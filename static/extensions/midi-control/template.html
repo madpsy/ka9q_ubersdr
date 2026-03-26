@@ -1,0 +1,169 @@
+<div class="midi-container">
+
+    <!-- Web MIDI API not available error -->
+    <div id="midi-api-error" class="midi-error-box" style="display:none;">
+        <strong>⚠️ Web MIDI API Not Available</strong>
+        <p>This extension requires Chrome or Edge. Firefox does not support the Web MIDI API.</p>
+    </div>
+
+    <!-- Top row: device selection + status -->
+    <div class="midi-top-row">
+
+        <!-- Left: device picker -->
+        <div class="midi-device-section">
+            <div class="midi-section-label">MIDI Device</div>
+            <div class="midi-device-row">
+                <select id="midi-device-select" class="midi-select">
+                    <option value="">— Select MIDI Device —</option>
+                </select>
+                <button id="midi-refresh-btn" class="midi-btn midi-btn-icon" title="Refresh device list">↻</button>
+            </div>
+            <div class="midi-device-buttons">
+                <button id="midi-connect-btn"    class="midi-btn midi-btn-primary" disabled>Connect</button>
+                <button id="midi-disconnect-btn" class="midi-btn midi-btn-danger"  style="display:none;">Disconnect</button>
+            </div>
+        </div>
+
+        <!-- Right: status -->
+        <div class="midi-status-section">
+            <div class="midi-section-label">Status</div>
+            <div class="midi-status-grid">
+                <div class="midi-status-row">
+                    <span class="midi-status-key">Connection:</span>
+                    <span id="midi-status-badge" class="midi-status-badge midi-status-disconnected">Disconnected</span>
+                </div>
+                <div class="midi-status-row">
+                    <span class="midi-status-key">Device:</span>
+                    <span id="midi-device-label" class="midi-status-value">—</span>
+                </div>
+                <div class="midi-status-row">
+                    <span class="midi-status-key">Mappings:</span>
+                    <span id="midi-mapping-count" class="midi-status-value">0</span>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Step size selector (for step-up/step-down buttons) -->
+    <div class="midi-section">
+        <div class="midi-section-label">Step Size (for Step Up / Step Down buttons)</div>
+        <select id="midi-step-size" class="midi-select midi-select-narrow">
+            <option value="10">10 Hz</option>
+            <option value="100">100 Hz</option>
+            <option value="500">500 Hz</option>
+            <option value="1000" selected>1 kHz</option>
+            <option value="5000">5 kHz</option>
+            <option value="10000">10 kHz</option>
+            <option value="100000">100 kHz</option>
+        </select>
+    </div>
+
+    <!-- Learn mode section (hidden until connected) -->
+    <div id="midi-learn-section" class="midi-section" style="display:none;">
+        <div class="midi-section-label">MIDI Mappings
+            <span id="midi-mapping-count-badge" class="midi-count-badge">0</span>
+        </div>
+
+        <div class="midi-learn-controls">
+            <button id="midi-learn-btn"        class="midi-btn midi-btn-primary">🎛️ Learn New Mapping</button>
+            <button id="midi-learn-cancel-btn" class="midi-btn midi-btn-secondary" style="display:none;">✕ Cancel</button>
+            <button id="midi-clear-btn"        class="midi-btn midi-btn-danger-outline">🗑 Clear All</button>
+        </div>
+
+        <!-- Learn panel (shown during learn mode) -->
+        <div id="midi-learn-panel" class="midi-learn-panel" style="display:none;">
+
+            <div class="midi-learn-step">
+                <div class="midi-learn-step-label">1. Select the function to map:</div>
+                <select id="midi-learn-function" class="midi-select">
+                    <option value="">— Select Function —</option>
+                    <optgroup label="Frequency">
+                        <option value="freq_enc_10">Encoder (10 Hz steps)</option>
+                        <option value="freq_enc_100">Encoder (100 Hz steps)</option>
+                        <option value="freq_enc_500">Encoder (500 Hz steps)</option>
+                        <option value="freq_enc_1k">Encoder (1 kHz steps)</option>
+                        <option value="freq_enc_10k">Encoder (10 kHz steps)</option>
+                        <option value="freq_step_up">Step Up</option>
+                        <option value="freq_step_down">Step Down</option>
+                    </optgroup>
+                    <optgroup label="Mode">
+                        <option value="mode_usb">USB</option>
+                        <option value="mode_lsb">LSB</option>
+                        <option value="mode_am">AM</option>
+                        <option value="mode_fm">FM</option>
+                        <option value="mode_cw">CW</option>
+                        <option value="mode_next">Next Mode (cycle)</option>
+                        <option value="mode_prev">Previous Mode (cycle)</option>
+                    </optgroup>
+                    <optgroup label="Band">
+                        <option value="band_160m">160m — 1.9 MHz</option>
+                        <option value="band_80m">80m — 3.573 MHz</option>
+                        <option value="band_60m">60m — 5.357 MHz</option>
+                        <option value="band_40m">40m — 7.074 MHz</option>
+                        <option value="band_30m">30m — 10.136 MHz</option>
+                        <option value="band_20m">20m — 14.074 MHz</option>
+                        <option value="band_17m">17m — 18.1 MHz</option>
+                        <option value="band_15m">15m — 21.074 MHz</option>
+                        <option value="band_12m">12m — 24.915 MHz</option>
+                        <option value="band_10m">10m — 28.074 MHz</option>
+                    </optgroup>
+                    <optgroup label="Audio">
+                        <option value="volume_set">Volume (fader/knob 0–100%)</option>
+                        <option value="bw_low">Bandwidth Low Edge (fader)</option>
+                        <option value="bw_high">Bandwidth High Edge (fader)</option>
+                        <option value="mute_toggle">Mute Toggle</option>
+                        <option value="nr2_toggle">NR2 Noise Reduction Toggle</option>
+                        <option value="nb_toggle">Noise Blanker Toggle</option>
+                    </optgroup>
+                </select>
+            </div>
+
+            <div id="midi-learn-map-both-row" class="midi-learn-step midi-learn-map-both-row">
+                <label class="midi-checkbox-label">
+                    <input type="checkbox" id="midi-learn-map-both">
+                    <span>Map both press <em>and</em> release (for momentary buttons)</span>
+                </label>
+            </div>
+
+            <div class="midi-learn-step">
+                <div class="midi-learn-step-label">2. Move or press a control on your MIDI device:</div>
+                <p id="midi-learn-message" class="midi-learn-message">
+                    Select a function above, then move or press a control...
+                </p>
+            </div>
+
+        </div>
+
+        <!-- Mappings table -->
+        <div class="midi-table-wrapper">
+            <table class="midi-table">
+                <thead>
+                    <tr>
+                        <th>MIDI Control</th>
+                        <th>Function</th>
+                        <th>Throttle</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="midi-mappings-tbody">
+                    <tr>
+                        <td colspan="4" class="midi-empty-row">
+                            No mappings yet. Connect a device and use <strong>Learn New Mapping</strong>.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+
+    <!-- Message log (collapsible) -->
+    <div class="midi-section">
+        <details>
+            <summary class="midi-log-summary">📋 Activity Log</summary>
+            <div id="midi-message-log" class="midi-message-log"></div>
+        </details>
+    </div>
+
+</div>

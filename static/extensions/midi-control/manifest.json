@@ -1,0 +1,18 @@
+{
+  "name": "midi-control",
+  "displayName": "MIDI Control",
+  "icon": "🎛️",
+  "version": "1.0.0",
+  "description": "Control the SDR with a USB MIDI controller (DJ controller, knob box, etc.) using the Web MIDI API. Map knobs, faders, buttons and encoders to radio functions via learn mode.",
+  "author": "UberSDR",
+  "files": {
+    "main": "main.js",
+    "styles": ["styles.css"],
+    "template": "template.html"
+  },
+  "config": {
+    "autoTune": false,
+    "requiresMode": null,
+    "preferredBandwidth": null
+  }
+}

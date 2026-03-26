@@ -1,0 +1,470 @@
+/* MIDI Control Extension Styles */
+
+.midi-container {
+    padding: 15px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: #ecf0f1;
+}
+
+/* ── Error box ──────────────────────────────────────────────────────────────── */
+
+.midi-error-box {
+    background: rgba(231, 76, 60, 0.15);
+    border: 2px solid #e74c3c;
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+}
+
+.midi-error-box strong {
+    display: block;
+    color: #e74c3c;
+    margin-bottom: 6px;
+    font-size: 0.95em;
+}
+
+.midi-error-box p {
+    margin: 0;
+    color: #bdc3c7;
+    font-size: 0.88em;
+}
+
+/* ── Top row layout ─────────────────────────────────────────────────────────── */
+
+.midi-top-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+@media (max-width: 500px) {
+    .midi-top-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ── Section labels ─────────────────────────────────────────────────────────── */
+
+.midi-section {
+    margin-bottom: 16px;
+}
+
+.midi-section-label {
+    font-size: 0.78em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #7f8c8d;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* ── Device section ─────────────────────────────────────────────────────────── */
+
+.midi-device-section,
+.midi-status-section {
+    display: flex;
+    flex-direction: column;
+}
+
+.midi-device-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.midi-device-row .midi-select {
+    flex: 1;
+}
+
+.midi-device-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+/* ── Status grid ────────────────────────────────────────────────────────────── */
+
+.midi-status-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.midi-status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.midi-status-key {
+    font-size: 0.85em;
+    color: #7f8c8d;
+    min-width: 80px;
+}
+
+.midi-status-value {
+    font-size: 0.9em;
+    color: #ecf0f1;
+    font-weight: 500;
+}
+
+.midi-status-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.82em;
+    font-weight: 700;
+    border: 1px solid;
+}
+
+.midi-status-connected {
+    background: rgba(39, 174, 96, 0.15);
+    color: #27ae60;
+    border-color: #27ae60;
+    box-shadow: 0 0 8px rgba(39, 174, 96, 0.25);
+}
+
+.midi-status-disconnected {
+    background: rgba(231, 76, 60, 0.12);
+    color: #e74c3c;
+    border-color: #e74c3c;
+}
+
+/* ── Selects ────────────────────────────────────────────────────────────────── */
+
+.midi-select {
+    width: 100%;
+    padding: 8px 10px;
+    background: #2c3e50;
+    color: #ecf0f1;
+    border: 1px solid #3d566e;
+    border-radius: 5px;
+    font-size: 0.9em;
+    cursor: pointer;
+    transition: border-color 0.2s;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237f8c8d'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 28px;
+}
+
+.midi-select:hover {
+    border-color: #3498db;
+}
+
+.midi-select:focus {
+    outline: none;
+    border-color: #3498db;
+    box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.25);
+}
+
+.midi-select option,
+.midi-select optgroup {
+    background: #2c3e50;
+    color: #ecf0f1;
+}
+
+.midi-select-narrow {
+    width: auto;
+    min-width: 140px;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────────────── */
+
+.midi-btn {
+    padding: 7px 14px;
+    border-radius: 5px;
+    font-size: 0.88em;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.midi-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.midi-btn-primary {
+    background: #27ae60;
+    border-color: #2ecc71;
+    color: #fff;
+}
+
+.midi-btn-primary:hover:not(:disabled) {
+    background: #2ecc71;
+    border-color: #58d68d;
+}
+
+.midi-btn-secondary {
+    background: #34495e;
+    border-color: #4a6278;
+    color: #ecf0f1;
+}
+
+.midi-btn-secondary:hover:not(:disabled) {
+    background: #3d566e;
+    border-color: #5d7a96;
+}
+
+.midi-btn-danger {
+    background: #c0392b;
+    border-color: #e74c3c;
+    color: #fff;
+}
+
+.midi-btn-danger:hover:not(:disabled) {
+    background: #e74c3c;
+    border-color: #ec7063;
+}
+
+.midi-btn-danger-outline {
+    background: transparent;
+    border-color: #c0392b;
+    color: #e74c3c;
+}
+
+.midi-btn-danger-outline:hover:not(:disabled) {
+    background: rgba(192, 57, 43, 0.15);
+    border-color: #e74c3c;
+}
+
+.midi-btn-icon {
+    padding: 7px 10px;
+    background: #34495e;
+    border-color: #4a6278;
+    color: #ecf0f1;
+    font-size: 1em;
+}
+
+.midi-btn-icon:hover {
+    background: #3d566e;
+    border-color: #3498db;
+}
+
+/* ── Count badge ────────────────────────────────────────────────────────────── */
+
+.midi-count-badge {
+    display: inline-block;
+    background: #3498db;
+    color: #fff;
+    border-radius: 10px;
+    padding: 1px 7px;
+    font-size: 0.78em;
+    font-weight: 700;
+    min-width: 20px;
+    text-align: center;
+}
+
+/* ── Learn controls row ─────────────────────────────────────────────────────── */
+
+.midi-learn-controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+/* ── Learn panel ────────────────────────────────────────────────────────────── */
+
+.midi-learn-panel {
+    background: rgba(52, 152, 219, 0.07);
+    border: 1px solid rgba(52, 152, 219, 0.3);
+    border-radius: 6px;
+    padding: 14px;
+    margin-bottom: 14px;
+}
+
+.midi-learn-step {
+    margin-bottom: 12px;
+}
+
+.midi-learn-step:last-child {
+    margin-bottom: 0;
+}
+
+.midi-learn-step-label {
+    font-size: 0.82em;
+    font-weight: 600;
+    color: #7f8c8d;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.midi-learn-map-both-row {
+    display: flex;
+    align-items: center;
+}
+
+.midi-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 0.88em;
+    color: #bdc3c7;
+    user-select: none;
+}
+
+.midi-checkbox-label input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+    accent-color: #3498db;
+}
+
+.midi-checkbox-label em {
+    font-style: italic;
+    color: #95a5a6;
+}
+
+.midi-learn-message {
+    margin: 0;
+    font-size: 0.92em;
+    font-weight: 600;
+    color: #3498db;
+    padding: 8px 10px;
+    background: rgba(52, 152, 219, 0.08);
+    border-radius: 4px;
+    border-left: 3px solid #3498db;
+}
+
+/* ── Mappings table ─────────────────────────────────────────────────────────── */
+
+.midi-table-wrapper {
+    overflow-x: auto;
+    border-radius: 6px;
+    border: 1px solid #2c3e50;
+}
+
+.midi-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88em;
+}
+
+.midi-table thead th {
+    background: #1a252f;
+    color: #7f8c8d;
+    font-size: 0.78em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 8px 10px;
+    text-align: left;
+    border-bottom: 1px solid #2c3e50;
+}
+
+.midi-table tbody tr {
+    border-bottom: 1px solid #1e2d3a;
+    transition: background 0.15s;
+}
+
+.midi-table tbody tr:last-child {
+    border-bottom: none;
+}
+
+.midi-table tbody tr:hover {
+    background: rgba(52, 152, 219, 0.06);
+}
+
+.midi-table td {
+    padding: 7px 10px;
+    color: #ecf0f1;
+    vertical-align: middle;
+}
+
+.midi-key-cell {
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
+    color: #3498db;
+    white-space: nowrap;
+}
+
+.midi-throttle-cell {
+    color: #7f8c8d;
+    font-size: 0.85em;
+    white-space: nowrap;
+}
+
+.midi-empty-row {
+    text-align: center;
+    color: #7f8c8d;
+    font-style: italic;
+    padding: 20px 10px !important;
+}
+
+.midi-empty-row strong {
+    color: #95a5a6;
+}
+
+.midi-delete-btn {
+    background: transparent;
+    border: 1px solid #c0392b;
+    color: #e74c3c;
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 0.82em;
+    cursor: pointer;
+    transition: all 0.15s;
+    line-height: 1.4;
+}
+
+.midi-delete-btn:hover {
+    background: rgba(192, 57, 43, 0.2);
+    border-color: #e74c3c;
+}
+
+/* ── Message log ────────────────────────────────────────────────────────────── */
+
+.midi-log-summary {
+    cursor: pointer;
+    font-size: 0.82em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #7f8c8d;
+    user-select: none;
+    padding: 4px 0;
+}
+
+.midi-log-summary:hover {
+    color: #95a5a6;
+}
+
+.midi-message-log {
+    background: #1a252f;
+    border: 1px solid #2c3e50;
+    border-radius: 5px;
+    padding: 8px 10px;
+    margin-top: 8px;
+    min-height: 50px;
+    max-height: 140px;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 0.82em;
+}
+
+.midi-log-entry {
+    padding: 2px 0;
+    line-height: 1.5;
+}
+
+.midi-log-info    { color: #3498db; }
+.midi-log-success { color: #27ae60; }
+.midi-log-warning { color: #f39c12; }
+.midi-log-error   { color: #e74c3c; }
+
+/* Scrollbar */
+.midi-message-log::-webkit-scrollbar { width: 6px; }
+.midi-message-log::-webkit-scrollbar-track { background: #1a1a1a; border-radius: 3px; }
+.midi-message-log::-webkit-scrollbar-thumb { background: #3498db; border-radius: 3px; }
+.midi-message-log::-webkit-scrollbar-thumb:hover { background: #5dade2; }

@@ -272,6 +272,25 @@ class FlexControlExtension extends DecoderExtension {
                 this._addMessage(`Dial step size set to ${this._formatHz(this.stepHz)}`, 'info');
             });
         }
+
+        // Export mappings button
+        const exportBtn = document.getElementById('fc-export-btn');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', () => this.exportMappings());
+        }
+
+        // Import mappings button + hidden file input
+        const importBtn  = document.getElementById('fc-import-btn');
+        const importFile = document.getElementById('fc-import-file');
+        if (importBtn && importFile) {
+            importBtn.addEventListener('click', () => importFile.click());
+            importFile.addEventListener('change', (e) => {
+                if (e.target.files && e.target.files[0]) {
+                    this.importMappings(e.target.files[0]);
+                    e.target.value = ''; // reset so same file can be re-imported
+                }
+            });
+        }
     }
 
     // ── Serial Port Management ─────────────────────────────────────────────────
@@ -707,6 +726,59 @@ class FlexControlExtension extends DecoderExtension {
         this.mappings['dial_down'] = { function: fn, throttleMs: 100, mode: 'rate_limit' };
         this.saveMappings();
         this._updateMappingsTable();
+    }
+
+    // ── Export / Import ────────────────────────────────────────────────────────
+
+    exportMappings() {
+        try {
+            const payload = {
+                version:  1,
+                source:   'flexcontrol',
+                exported: new Date().toISOString(),
+                mappings: this.mappings,
+            };
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            a.href     = url;
+            a.download = `flexcontrol-mappings-${new Date().toISOString().slice(0, 10)}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            this._addMessage(`Exported ${Object.keys(this.mappings).length} mapping(s)`, 'success');
+        } catch (err) {
+            console.error('FlexControl: export failed', err);
+            this._addMessage(`Export failed: ${err.message}`, 'error');
+        }
+    }
+
+    importMappings(file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const data = JSON.parse(e.target.result);
+                if (!data.mappings || typeof data.mappings !== 'object') {
+                    throw new Error('Invalid mappings file — missing "mappings" object');
+                }
+                if (data.source && data.source !== 'flexcontrol') {
+                    if (!confirm(`This file was exported from "${data.source}", not FlexControl. Import anyway?`)) {
+                        return;
+                    }
+                }
+                const count = Object.keys(data.mappings).length;
+                this.mappings = data.mappings;
+                this.saveMappings();
+                this._updateMappingsTable();
+                this._updateStepSizeUI();
+                this._addMessage(`Imported ${count} mapping(s) from ${file.name}`, 'success');
+            } catch (err) {
+                console.error('FlexControl: import failed', err);
+                this._addMessage(`Import failed: ${err.message}`, 'error');
+            }
+        };
+        reader.readAsText(file);
     }
 
     clearMappings() {

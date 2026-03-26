@@ -1,0 +1,162 @@
+<div class="fc-container">
+
+    <!-- Web Serial API not available / access denied error -->
+    <div id="fc-api-error" class="fc-error-box" style="display:none;">
+        <strong>⚠️ Web Serial API Not Supported</strong>
+        <p>Your browser does not support the Web Serial API. Please use <strong>Chrome</strong> or <strong>Edge</strong> — Firefox does not support Web Serial.</p>
+    </div>
+
+    <!-- Device info banner -->
+    <div class="fc-device-banner">
+        <span class="fc-device-icon">🎛️</span>
+        <div class="fc-device-info">
+            <div class="fc-device-name">FlexRadio Systems FlexControl</div>
+            <div class="fc-device-detail">USB Serial · VID 0x2192 · PID 0x0010 · 9600 baud</div>
+        </div>
+        <div class="fc-status-group">
+            <span id="fc-status-badge" class="fc-status-badge fc-status-disconnected">Disconnected</span>
+        </div>
+    </div>
+
+    <!-- Connection controls -->
+    <div class="fc-section">
+        <div class="fc-connect-row">
+            <button id="fc-connect-btn" class="fc-btn fc-btn-primary">🔌 Connect FlexControl</button>
+            <button id="fc-disconnect-btn" class="fc-btn fc-btn-danger" style="display:none;">⏏ Disconnect</button>
+            <span class="fc-connect-hint">Chrome / Edge will show a port picker — the FlexControl will be pre-selected.</span>
+        </div>
+    </div>
+
+    <!-- Step size selector (for step-up/step-down buttons) -->
+    <div class="fc-section">
+        <div class="fc-section-label">Step Size (for Step Up / Step Down buttons)</div>
+        <select id="fc-step-size" class="fc-select fc-select-narrow">
+            <option value="10">10 Hz</option>
+            <option value="100">100 Hz</option>
+            <option value="500">500 Hz</option>
+            <option value="1000" selected>1 kHz</option>
+            <option value="5000">5 kHz</option>
+            <option value="10000">10 kHz</option>
+            <option value="100000">100 kHz</option>
+        </select>
+    </div>
+
+    <!-- Mappings section (hidden until connected) -->
+    <div id="fc-learn-section" class="fc-section" style="display:none;">
+        <div class="fc-section-label">
+            Mappings
+            <span id="fc-mapping-count" class="fc-count-badge">0</span>
+        </div>
+
+        <div class="fc-learn-controls">
+            <button id="fc-learn-btn"        class="fc-btn fc-btn-primary">🎛️ Learn New Mapping</button>
+            <button id="fc-learn-cancel-btn" class="fc-btn fc-btn-secondary" style="display:none;">✕ Cancel</button>
+            <button id="fc-clear-btn"        class="fc-btn fc-btn-danger-outline">🗑 Clear All</button>
+        </div>
+
+        <!-- Learn panel (shown during learn mode) -->
+        <div id="fc-learn-panel" class="fc-learn-panel" style="display:none;">
+
+            <div class="fc-learn-step">
+                <div class="fc-learn-step-label">1. Select the function to map:</div>
+                <select id="fc-learn-function" class="fc-select">
+                    <option value="">— Select Function —</option>
+                    <optgroup label="Frequency">
+                        <option value="freq_enc_10">Encoder (10 Hz steps)</option>
+                        <option value="freq_enc_100">Encoder (100 Hz steps)</option>
+                        <option value="freq_enc_500">Encoder (500 Hz steps)</option>
+                        <option value="freq_enc_1k">Encoder (1 kHz steps)</option>
+                        <option value="freq_enc_10k">Encoder (10 kHz steps)</option>
+                        <option value="freq_step_up">Step Up</option>
+                        <option value="freq_step_down">Step Down</option>
+                    </optgroup>
+                    <optgroup label="Mode">
+                        <option value="mode_usb">USB</option>
+                        <option value="mode_lsb">LSB</option>
+                        <option value="mode_am">AM</option>
+                        <option value="mode_fm">FM</option>
+                        <option value="mode_cw">CW</option>
+                        <option value="mode_next">Next Mode (cycle)</option>
+                        <option value="mode_prev">Previous Mode (cycle)</option>
+                    </optgroup>
+                    <optgroup label="Band">
+                        <option value="band_160m">160m — 1.9 MHz</option>
+                        <option value="band_80m">80m — 3.573 MHz</option>
+                        <option value="band_60m">60m — 5.357 MHz</option>
+                        <option value="band_40m">40m — 7.074 MHz</option>
+                        <option value="band_30m">30m — 10.136 MHz</option>
+                        <option value="band_20m">20m — 14.074 MHz</option>
+                        <option value="band_17m">17m — 18.1 MHz</option>
+                        <option value="band_15m">15m — 21.074 MHz</option>
+                        <option value="band_12m">12m — 24.915 MHz</option>
+                        <option value="band_10m">10m — 28.074 MHz</option>
+                    </optgroup>
+                    <optgroup label="Audio">
+                        <option value="volume_set">Volume (dial increments)</option>
+                        <option value="bw_low">Bandwidth Low Edge</option>
+                        <option value="bw_high">Bandwidth High Edge</option>
+                        <option value="mute_toggle">Mute Toggle</option>
+                        <option value="nr2_toggle">NR2 Noise Reduction Toggle</option>
+                        <option value="nb_toggle">Noise Blanker Toggle</option>
+                    </optgroup>
+                </select>
+            </div>
+
+            <div class="fc-learn-step">
+                <div class="fc-learn-step-label">2. Turn the dial or press a button on the FlexControl:</div>
+                <p id="fc-learn-message" class="fc-learn-message">
+                    Select a function above, then interact with the FlexControl...
+                </p>
+            </div>
+
+            <!-- Quick reference for available inputs -->
+            <div class="fc-input-reference">
+                <div class="fc-ref-label">Available inputs:</div>
+                <div class="fc-ref-grid">
+                    <span class="fc-ref-item">🔄 Dial CW / CCW</span>
+                    <span class="fc-ref-item">1× AUX 1 tap</span>
+                    <span class="fc-ref-item">2× AUX 1 tap</span>
+                    <span class="fc-ref-item">AUX 1 hold</span>
+                    <span class="fc-ref-item">1× AUX 2 tap</span>
+                    <span class="fc-ref-item">2× AUX 2 tap</span>
+                    <span class="fc-ref-item">AUX 2 hold</span>
+                    <span class="fc-ref-item">1× AUX 3 tap</span>
+                    <span class="fc-ref-item">2× AUX 3 tap</span>
+                    <span class="fc-ref-item">AUX 3 hold</span>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Mappings table -->
+        <div class="fc-table-wrapper">
+            <table class="fc-table">
+                <thead>
+                    <tr>
+                        <th>FlexControl Input</th>
+                        <th>Function</th>
+                        <th>Throttle</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="fc-mappings-tbody">
+                    <tr>
+                        <td colspan="4" class="fc-empty-row">
+                            No mappings yet. Connect the FlexControl and use <strong>Learn New Mapping</strong>.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+
+    <!-- Message log (collapsible) -->
+    <div class="fc-section">
+        <details>
+            <summary class="fc-log-summary">📋 Activity Log</summary>
+            <div id="fc-message-log" class="fc-message-log"></div>
+        </details>
+    </div>
+
+</div>

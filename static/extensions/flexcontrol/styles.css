@@ -1,0 +1,469 @@
+/* FlexControl Extension Styles
+ * For the FlexRadio Systems FlexControl USB dial controller
+ */
+
+/* Override the shared panel height — this extension needs more vertical space */
+.decoder-extension-content:has(.fc-container) {
+    min-height: 560px;
+    max-height: 560px;
+}
+
+.fc-container {
+    padding: 15px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: #ecf0f1;
+}
+
+/* ── Error box ──────────────────────────────────────────────────────────────── */
+
+.fc-error-box {
+    background: rgba(231, 76, 60, 0.15);
+    border: 2px solid #e74c3c;
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+}
+
+.fc-error-box strong {
+    display: block;
+    color: #e74c3c;
+    margin-bottom: 6px;
+    font-size: 0.95em;
+}
+
+.fc-error-box p {
+    margin: 0;
+    color: #bdc3c7;
+    font-size: 0.88em;
+}
+
+/* ── Device banner ──────────────────────────────────────────────────────────── */
+
+.fc-device-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(52, 152, 219, 0.07);
+    border: 1px solid rgba(52, 152, 219, 0.2);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+}
+
+.fc-device-icon {
+    font-size: 1.6em;
+    flex-shrink: 0;
+}
+
+.fc-device-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.fc-device-name {
+    font-size: 0.95em;
+    font-weight: 700;
+    color: #ecf0f1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.fc-device-detail {
+    font-size: 0.78em;
+    color: #7f8c8d;
+    margin-top: 2px;
+    font-family: 'Courier New', monospace;
+}
+
+.fc-status-group {
+    flex-shrink: 0;
+}
+
+/* ── Section labels ─────────────────────────────────────────────────────────── */
+
+.fc-section {
+    margin-bottom: 16px;
+}
+
+.fc-section-label {
+    font-size: 0.78em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #7f8c8d;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* ── Connection row ─────────────────────────────────────────────────────────── */
+
+.fc-connect-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.fc-connect-hint {
+    font-size: 0.82em;
+    color: #7f8c8d;
+    font-style: italic;
+}
+
+/* ── Status badge ───────────────────────────────────────────────────────────── */
+
+.fc-status-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.82em;
+    font-weight: 700;
+    border: 1px solid;
+}
+
+.fc-status-connected {
+    background: rgba(39, 174, 96, 0.15);
+    color: #27ae60;
+    border-color: #27ae60;
+    box-shadow: 0 0 8px rgba(39, 174, 96, 0.25);
+}
+
+.fc-status-disconnected {
+    background: rgba(231, 76, 60, 0.12);
+    color: #e74c3c;
+    border-color: #e74c3c;
+}
+
+/* ── Selects ────────────────────────────────────────────────────────────────── */
+
+.fc-select {
+    width: 100%;
+    padding: 8px 10px;
+    background: #2c3e50;
+    color: #ecf0f1;
+    border: 1px solid #3d566e;
+    border-radius: 5px;
+    font-size: 0.9em;
+    cursor: pointer;
+    transition: border-color 0.2s;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237f8c8d'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 28px;
+}
+
+.fc-select:hover {
+    border-color: #3498db;
+}
+
+.fc-select:focus {
+    outline: none;
+    border-color: #3498db;
+    box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.25);
+}
+
+.fc-select option,
+.fc-select optgroup {
+    background: #2c3e50;
+    color: #ecf0f1;
+}
+
+.fc-select-narrow {
+    width: auto;
+    min-width: 140px;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────────────── */
+
+.fc-btn {
+    padding: 7px 14px;
+    border-radius: 5px;
+    font-size: 0.88em;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.fc-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.fc-btn-primary {
+    background: #27ae60;
+    border-color: #2ecc71;
+    color: #fff;
+}
+
+.fc-btn-primary:hover:not(:disabled) {
+    background: #2ecc71;
+    border-color: #58d68d;
+}
+
+.fc-btn-secondary {
+    background: #34495e;
+    border-color: #4a6278;
+    color: #ecf0f1;
+}
+
+.fc-btn-secondary:hover:not(:disabled) {
+    background: #3d566e;
+    border-color: #5d7a96;
+}
+
+.fc-btn-danger {
+    background: #c0392b;
+    border-color: #e74c3c;
+    color: #fff;
+}
+
+.fc-btn-danger:hover:not(:disabled) {
+    background: #e74c3c;
+    border-color: #ec7063;
+}
+
+.fc-btn-danger-outline {
+    background: transparent;
+    border-color: #c0392b;
+    color: #e74c3c;
+}
+
+.fc-btn-danger-outline:hover:not(:disabled) {
+    background: rgba(192, 57, 43, 0.15);
+    border-color: #e74c3c;
+}
+
+/* ── Count badge ────────────────────────────────────────────────────────────── */
+
+.fc-count-badge {
+    display: inline-block;
+    background: #3498db;
+    color: #fff;
+    border-radius: 10px;
+    padding: 1px 7px;
+    font-size: 0.78em;
+    font-weight: 700;
+    min-width: 20px;
+    text-align: center;
+}
+
+/* ── Learn controls row ─────────────────────────────────────────────────────── */
+
+.fc-learn-controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+/* ── Learn panel ────────────────────────────────────────────────────────────── */
+
+.fc-learn-panel {
+    background: rgba(52, 152, 219, 0.07);
+    border: 1px solid rgba(52, 152, 219, 0.3);
+    border-radius: 6px;
+    padding: 14px;
+    margin-bottom: 14px;
+}
+
+.fc-learn-step {
+    margin-bottom: 12px;
+}
+
+.fc-learn-step:last-child {
+    margin-bottom: 0;
+}
+
+.fc-learn-step-label {
+    font-size: 0.82em;
+    font-weight: 600;
+    color: #7f8c8d;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.fc-learn-message {
+    margin: 0;
+    font-size: 0.92em;
+    font-weight: 600;
+    color: #3498db;
+    padding: 8px 10px;
+    background: rgba(52, 152, 219, 0.08);
+    border-radius: 4px;
+    border-left: 3px solid #3498db;
+}
+
+/* ── Input reference grid ───────────────────────────────────────────────────── */
+
+.fc-input-reference {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 5px;
+}
+
+.fc-ref-label {
+    font-size: 0.75em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #7f8c8d;
+    margin-bottom: 6px;
+}
+
+.fc-ref-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.fc-ref-item {
+    font-size: 0.78em;
+    color: #95a5a6;
+    background: rgba(52, 152, 219, 0.08);
+    border: 1px solid rgba(52, 152, 219, 0.15);
+    border-radius: 3px;
+    padding: 2px 7px;
+    white-space: nowrap;
+}
+
+/* ── Mappings table ─────────────────────────────────────────────────────────── */
+
+.fc-table-wrapper {
+    overflow-x: auto;
+    border-radius: 6px;
+    border: 1px solid #2c3e50;
+}
+
+.fc-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88em;
+}
+
+.fc-table thead th {
+    background: #1a252f;
+    color: #7f8c8d;
+    font-size: 0.78em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 8px 10px;
+    text-align: left;
+    border-bottom: 1px solid #2c3e50;
+}
+
+.fc-table tbody tr {
+    border-bottom: 1px solid #1e2d3a;
+    transition: background 0.15s;
+}
+
+.fc-table tbody tr:last-child {
+    border-bottom: none;
+}
+
+.fc-table tbody tr:hover {
+    background: rgba(52, 152, 219, 0.06);
+}
+
+.fc-table td {
+    padding: 7px 10px;
+    color: #ecf0f1;
+    vertical-align: middle;
+}
+
+.fc-key-cell {
+    font-size: 0.9em;
+    color: #3498db;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.fc-throttle-cell {
+    color: #7f8c8d;
+    font-size: 0.85em;
+    white-space: nowrap;
+}
+
+.fc-empty-row {
+    text-align: center;
+    color: #7f8c8d;
+    font-style: italic;
+    padding: 20px 10px !important;
+}
+
+.fc-empty-row strong {
+    color: #95a5a6;
+}
+
+.fc-delete-btn {
+    background: transparent;
+    border: 1px solid #c0392b;
+    color: #e74c3c;
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 0.82em;
+    cursor: pointer;
+    transition: all 0.15s;
+    line-height: 1.4;
+}
+
+.fc-delete-btn:hover {
+    background: rgba(192, 57, 43, 0.2);
+    border-color: #e74c3c;
+}
+
+/* ── Message log ────────────────────────────────────────────────────────────── */
+
+.fc-log-summary {
+    cursor: pointer;
+    font-size: 0.82em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #7f8c8d;
+    user-select: none;
+    padding: 4px 0;
+}
+
+.fc-log-summary:hover {
+    color: #95a5a6;
+}
+
+.fc-message-log {
+    background: #1a252f;
+    border: 1px solid #2c3e50;
+    border-radius: 5px;
+    padding: 8px 10px;
+    margin-top: 8px;
+    min-height: 50px;
+    max-height: 140px;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 0.82em;
+}
+
+.fc-log-entry {
+    padding: 2px 0;
+    line-height: 1.5;
+}
+
+.fc-log-info    { color: #3498db; }
+.fc-log-success { color: #27ae60; }
+.fc-log-warning { color: #f39c12; }
+.fc-log-error   { color: #e74c3c; }
+
+/* Scrollbar */
+.fc-message-log::-webkit-scrollbar       { width: 6px; }
+.fc-message-log::-webkit-scrollbar-track { background: #1a1a1a; border-radius: 3px; }
+.fc-message-log::-webkit-scrollbar-thumb { background: #3498db; border-radius: 3px; }
+.fc-message-log::-webkit-scrollbar-thumb:hover { background: #5dade2; }

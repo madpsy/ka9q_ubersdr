@@ -1,0 +1,18 @@
+{
+  "name": "flexcontrol",
+  "displayName": "FlexControl",
+  "icon": "🎛️",
+  "version": "1.0.0",
+  "description": "Control the SDR with a FlexControl USB controller using the Web Serial API.",
+  "author": "UberSDR",
+  "files": {
+    "main": "main.js",
+    "styles": ["styles.css"],
+    "template": "template.html"
+  },
+  "config": {
+    "autoTune": false,
+    "requiresMode": null,
+    "preferredBandwidth": null
+  }
+}

@@ -113,6 +113,21 @@
     font-style: italic;
 }
 
+/* ── Dial step row ──────────────────────────────────────────────────────────── */
+
+.fc-dial-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.fc-dial-hint {
+    font-size: 0.82em;
+    color: #7f8c8d;
+    font-style: italic;
+}
+
 /* ── Status badge ───────────────────────────────────────────────────────────── */
 
 .fc-status-badge {

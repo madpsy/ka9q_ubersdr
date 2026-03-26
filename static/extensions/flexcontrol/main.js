@@ -267,7 +267,9 @@ class FlexControlExtension extends DecoderExtension {
             stepSelect.addEventListener('change', () => {
                 this.stepHz = parseInt(stepSelect.value, 10);
                 localStorage.setItem(FC_STORAGE_KEY_STEP, this.stepHz.toString());
-                this._addMessage(`Step size set to ${this._formatHz(this.stepHz)}`, 'info');
+                // Update the dial mappings to match the new step size
+                this._applyDialStepSize(this.stepHz);
+                this._addMessage(`Dial step size set to ${this._formatHz(this.stepHz)}`, 'info');
             });
         }
     }
@@ -663,11 +665,48 @@ class FlexControlExtension extends DecoderExtension {
     loadMappings() {
         try {
             const raw = localStorage.getItem(FC_STORAGE_KEY_MAPPINGS);
-            if (raw) this.mappings = JSON.parse(raw);
+            if (raw) {
+                this.mappings = JSON.parse(raw);
+            } else {
+                // First run — seed default dial mappings so the FlexControl
+                // works immediately without any learn-mode setup.
+                // Dial clockwise  → frequency up (1 kHz steps, 100ms rate-limit)
+                // Dial anticlockwise → frequency down (1 kHz steps, 100ms rate-limit)
+                this.mappings = {
+                    dial_up:   { function: 'freq_enc_1k', throttleMs: 100, mode: 'rate_limit' },
+                    dial_down: { function: 'freq_enc_1k', throttleMs: 100, mode: 'rate_limit' },
+                };
+                this.saveMappings();
+            }
         } catch (e) {
             console.error('FlexControl: failed to load mappings', e);
-            this.mappings = {};
+            this.mappings = {
+                dial_up:   { function: 'freq_enc_1k', throttleMs: 100, mode: 'rate_limit' },
+                dial_down: { function: 'freq_enc_1k', throttleMs: 100, mode: 'rate_limit' },
+            };
         }
+    }
+
+    // Map from step size in Hz to the encoder function name
+    _stepHzToEncFn(hz) {
+        const map = {
+            10:    'freq_enc_10',
+            100:   'freq_enc_100',
+            500:   'freq_enc_500',
+            1000:  'freq_enc_1k',
+            10000: 'freq_enc_10k',
+        };
+        return map[hz] || 'freq_enc_1k';
+    }
+
+    // Update both dial mappings to use the encoder matching the given step size,
+    // then persist and refresh the table.
+    _applyDialStepSize(hz) {
+        const fn = this._stepHzToEncFn(hz);
+        this.mappings['dial_up']   = { function: fn, throttleMs: 100, mode: 'rate_limit' };
+        this.mappings['dial_down'] = { function: fn, throttleMs: 100, mode: 'rate_limit' };
+        this.saveMappings();
+        this._updateMappingsTable();
     }
 
     clearMappings() {
@@ -744,7 +783,27 @@ class FlexControlExtension extends DecoderExtension {
 
     _updateStepSizeUI() {
         const stepSelect = document.getElementById('fc-step-size');
-        if (stepSelect) stepSelect.value = this.stepHz.toString();
+        if (!stepSelect) return;
+
+        // If a dial mapping already exists, infer the step size from it
+        // so the dropdown reflects the current state on reload.
+        const dialFn = this.mappings['dial_up']?.function || this.mappings['dial_down']?.function;
+        if (dialFn) {
+            const fnToHz = {
+                freq_enc_10:  10,
+                freq_enc_100: 100,
+                freq_enc_500: 500,
+                freq_enc_1k:  1000,
+                freq_enc_10k: 10000,
+            };
+            const inferredHz = fnToHz[dialFn];
+            if (inferredHz) {
+                this.stepHz = inferredHz;
+                localStorage.setItem(FC_STORAGE_KEY_STEP, this.stepHz.toString());
+            }
+        }
+
+        stepSelect.value = this.stepHz.toString();
     }
 
     // ── Message Log ────────────────────────────────────────────────────────────

@@ -27,18 +27,22 @@
         </div>
     </div>
 
-    <!-- Step size selector (for step-up/step-down buttons) -->
+    <!-- Dial step size — the dial always controls frequency -->
     <div class="fc-section">
-        <div class="fc-section-label">Step Size (for Step Up / Step Down buttons)</div>
-        <select id="fc-step-size" class="fc-select fc-select-narrow">
-            <option value="10">10 Hz</option>
-            <option value="100">100 Hz</option>
-            <option value="500">500 Hz</option>
-            <option value="1000" selected>1 kHz</option>
-            <option value="5000">5 kHz</option>
-            <option value="10000">10 kHz</option>
-            <option value="100000">100 kHz</option>
-        </select>
+        <div class="fc-section-label">Dial Step Size</div>
+        <div class="fc-dial-row">
+            <select id="fc-step-size" class="fc-select fc-select-narrow">
+                <option value="10">10 Hz</option>
+                <option value="100">100 Hz</option>
+                <option value="500">500 Hz</option>
+                <option value="1000" selected>1 kHz</option>
+                <option value="10000">10 kHz</option>
+            </select>
+            <span class="fc-dial-hint">
+                🔄 Clockwise = frequency up &nbsp;·&nbsp; Anticlockwise = frequency down
+                &nbsp;·&nbsp; Faster spin = larger steps (up to 6×)
+            </span>
+        </div>
     </div>
 
     <!-- Mappings section (hidden until connected) -->

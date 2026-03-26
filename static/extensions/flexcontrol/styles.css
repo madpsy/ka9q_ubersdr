@@ -275,7 +275,12 @@
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+    align-items: center;
     margin-bottom: 12px;
+}
+
+.fc-learn-controls-spacer {
+    flex: 1;
 }
 
 /* ── Learn panel ────────────────────────────────────────────────────────────── */

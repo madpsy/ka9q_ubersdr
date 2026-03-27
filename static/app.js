@@ -20,19 +20,28 @@ import { screenWakeLock } from './wake-lock.js';
 const initialPageParams = new URLSearchParams(window.location.search);
 
 // Notification system
+let _notificationTimer = null;
+
 function showNotification(message, type = 'error', duration = 5000, position = '') {
     const toast = document.getElementById('notification-toast');
     if (!toast) return;
 
-    // Set message and type
-    toast.textContent = message;
+    // Cancel any in-flight hide timers from a previous call
+    if (_notificationTimer !== null) {
+        clearTimeout(_notificationTimer);
+        _notificationTimer = null;
+    }
+
+    // Reset to a clean visible state immediately
     toast.className = 'notification-toast show ' + type + (position ? ' ' + position : '');
+    toast.textContent = message;
 
     // Auto-hide after duration
-    setTimeout(() => {
+    _notificationTimer = setTimeout(() => {
         toast.classList.add('hiding');
         setTimeout(() => {
             toast.classList.remove('show', 'hiding', type, position);
+            _notificationTimer = null;
         }, 300); // Match animation duration
     }, duration);
 }

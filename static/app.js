@@ -32,9 +32,13 @@ function showNotification(message, type = 'error', duration = 5000, position = '
         _notificationTimer = null;
     }
 
-    // Reset to a clean visible state immediately
-    toast.className = 'notification-toast show ' + type + (position ? ' ' + position : '');
+    // Reset to a clean visible state, forcing animation restart.
+    // Setting className without 'show' first, then forcing a reflow via offsetWidth,
+    // then re-adding 'show' causes the browser to restart the slideIn animation.
+    toast.className = 'notification-toast ' + type + (position ? ' ' + position : '');
     toast.textContent = message;
+    void toast.offsetWidth; // Force reflow to restart CSS animation
+    toast.classList.add('show');
 
     // Auto-hide after duration
     _notificationTimer = setTimeout(() => {

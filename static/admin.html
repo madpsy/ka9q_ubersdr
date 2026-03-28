@@ -16703,9 +16703,9 @@ const tooltipLine2 = timeStr;
                 const historyData = await historyResponse.json();
                 const history = historyData.history || [];
 
-                // Check if we have enough data (at least 10 data points for 1-minute average)
-                if (history.length < 10) {
-                    showAlert(`Insufficient data for calibration. Need at least 10 data points (1 minute), currently have ${history.length}. Please wait for more data to accumulate.`, 'error');
+                // Check if we have enough data (at least 5 data points for 1-minute average)
+                if (history.length < 5) {
+                    showAlert(`Insufficient data for calibration. Need at least 5 data points, currently have ${history.length}. Please wait for more data to accumulate.`, 'error');
                     return;
                 }
 

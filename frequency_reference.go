@@ -898,10 +898,10 @@ func (frm *FrequencyReferenceMonitor) GetHealthStatus() map[string]interface{} {
 		result["healthy"] = false
 	}
 
-	// Need at least 10 minutes of data for meaningful statistics
-	if len(history) < 10 {
+	// Need at least 5 minutes of data for meaningful statistics
+	if len(history) < 5 {
 		if len(history) > 0 {
-			issues = append(issues, fmt.Sprintf("Insufficient history data (%d minutes, need 10+)", len(history)))
+			issues = append(issues, fmt.Sprintf("Insufficient history data (%d minutes, need 5+)", len(history)))
 		} else {
 			issues = append(issues, "No history data available yet")
 		}

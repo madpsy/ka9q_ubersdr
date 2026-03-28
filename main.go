@@ -15,6 +15,8 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	runtimemetrics "runtime/metrics"
+	"runtime/pprof"
 	"sort"
 	"strconv"
 	"strings"
@@ -745,8 +747,26 @@ func main() {
 			ticker := time.NewTicker(60 * time.Second)
 			defer ticker.Stop()
 			for range ticker.C {
-				var m runtime.MemStats
-				runtime.ReadMemStats(&m)
+				// Use runtime/metrics instead of runtime.ReadMemStats (which is stop-the-world).
+				// Also replace runtime.Stack(all=true) which is also stop-the-world.
+				// Both were causing periodic pauses that stuttered all audio goroutines.
+				rmSamples := []runtimemetrics.Sample{
+					{Name: "/memory/classes/heap/objects:bytes"}, // HeapAlloc equivalent
+					{Name: "/memory/classes/total:bytes"},        // Sys equivalent
+					{Name: "/gc/cycles/total:gc-cycles"},         // NumGC equivalent
+				}
+				runtimemetrics.Read(rmSamples)
+				var allocBytes, sysBytes uint64
+				var numGC uint64
+				if rmSamples[0].Value.Kind() == runtimemetrics.KindUint64 {
+					allocBytes = rmSamples[0].Value.Uint64()
+				}
+				if rmSamples[1].Value.Kind() == runtimemetrics.KindUint64 {
+					sysBytes = rmSamples[1].Value.Uint64()
+				}
+				if rmSamples[2].Value.Kind() == runtimemetrics.KindUint64 {
+					numGC = rmSamples[2].Value.Uint64()
+				}
 
 				// Get load average on Linux
 				loadAvg := "N/A"
@@ -757,10 +777,15 @@ func main() {
 					}
 				}
 
-				// Get goroutine stack traces and count by function
-				buf := make([]byte, 1024*1024) // 1MB buffer for stack traces
-				n := runtime.Stack(buf, true)
-				stackTrace := string(buf[:n])
+				// Count goroutines by sampling pprof non-destructively.
+				// runtime.Stack(all=true) is stop-the-world; pprof.Lookup is not.
+				goroutineProfile := pprof.Lookup("goroutine")
+				var stackTrace string
+				if goroutineProfile != nil {
+					var sb strings.Builder
+					goroutineProfile.WriteTo(&sb, 1)
+					stackTrace = sb.String()
+				}
 
 				// Parse stack traces to count goroutines by function
 				goroutineCounts := make(map[string]int)
@@ -848,9 +873,9 @@ func main() {
 				log.Printf("[HEALTH] goroutines=%d top_gr=[%s] alloc=%dMB sys=%dMB numgc=%d sessions=%d ssrcs=%d uuids=%d ips=%d ip_uuid_map=%d band_map=%d mode_map=%d load=%s",
 					runtime.NumGoroutine(),
 					grSummary,
-					m.Alloc/1024/1024,
-					m.Sys/1024/1024,
-					m.NumGC,
+					allocBytes/1024/1024,
+					sysBytes/1024/1024,
+					numGC,
 					sessionCount,
 					ssrcCount,
 					uuidCount,

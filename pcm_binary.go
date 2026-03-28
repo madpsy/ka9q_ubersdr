@@ -102,6 +102,7 @@ const (
 type PCMBinaryEncoder struct {
 	// Compression
 	useCompression bool
+	fastMode       bool // true = use SpeedFastest pool (for IQ/incompressible data)
 	zstdEncoder    *zstd.Encoder
 	encoderMu      sync.Mutex
 
@@ -114,12 +115,22 @@ type PCMBinaryEncoder struct {
 	version uint8
 }
 
-// zstdEncoderPool provides reusable zstd encoders for efficiency
+// zstdEncoderPool provides reusable zstd encoders at SpeedDefault for audio modes
 var zstdEncoderPool = sync.Pool{
 	New: func() interface{} {
 		// Use compression level 3 (default) for good balance of speed/compression
 		// Level 3 provides ~2.5-3.5x compression with ~1ms latency
 		encoder, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
+		return encoder
+	},
+}
+
+// zstdFastEncoderPool provides reusable zstd encoders at SpeedFastest for IQ/incompressible data.
+// SpeedFastest uses ~3-5x less CPU than SpeedDefault with identical output size on random/IQ data,
+// preventing CPU scheduler starvation when many IQ sessions are active simultaneously.
+var zstdFastEncoderPool = sync.Pool{
+	New: func() interface{} {
+		encoder, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest))
 		return encoder
 	},
 }
@@ -131,16 +142,26 @@ func NewPCMBinaryEncoder(useCompression bool) *PCMBinaryEncoder {
 
 // NewPCMBinaryEncoderWithVersion creates a new PCM binary encoder with specified version
 func NewPCMBinaryEncoderWithVersion(useCompression bool, version uint8) *PCMBinaryEncoder {
+	return NewPCMBinaryEncoderWithVersionAndLevel(false, version)
+}
+
+// NewPCMBinaryEncoderWithVersionAndLevel creates a new PCM binary encoder with specified version
+// and compression level. When fastMode is true, SpeedFastest is used instead of SpeedDefault —
+// this is appropriate for IQ modes where data is essentially incompressible (white noise), so
+// SpeedDefault wastes CPU without any compression benefit.
+func NewPCMBinaryEncoderWithVersionAndLevel(fastMode bool, version uint8) *PCMBinaryEncoder {
 	encoder := &PCMBinaryEncoder{
-		useCompression: useCompression,
+		useCompression: true,
+		fastMode:       fastMode,
 		lastSampleRate: -1, // Force full header on first packet
 		lastChannels:   -1,
 		packetCount:    0,
 		version:        version,
 	}
 
-	if useCompression {
-		// Get encoder from pool
+	if fastMode {
+		encoder.zstdEncoder = zstdFastEncoderPool.Get().(*zstd.Encoder)
+	} else {
 		encoder.zstdEncoder = zstdEncoderPool.Get().(*zstd.Encoder)
 	}
 
@@ -317,8 +338,12 @@ func (e *PCMBinaryEncoder) buildMinimalHeaderPacket(pcmData []byte, gpsTimeNs in
 // Close releases resources used by the encoder
 func (e *PCMBinaryEncoder) Close() {
 	if e.zstdEncoder != nil {
-		// Return encoder to pool for reuse
-		zstdEncoderPool.Put(e.zstdEncoder)
+		// Return encoder to the correct pool based on which level was used
+		if e.fastMode {
+			zstdFastEncoderPool.Put(e.zstdEncoder)
+		} else {
+			zstdEncoderPool.Put(e.zstdEncoder)
+		}
 		e.zstdEncoder = nil
 	}
 }

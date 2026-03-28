@@ -1009,13 +1009,23 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 	}
 
 	if format == "pcm-zstd" {
-		// Create PCM binary encoder with zstd compression and appropriate version
+		// IQ modes carry wideband RF samples (essentially white noise) which are
+		// incompressible — zstd achieves ~0% size reduction on them. Use the fastest
+		// compression level for IQ modes to minimise CPU burn while keeping the
+		// protocol identical (clients still receive valid zstd-compressed packets).
+		// At high session counts (~60 IQ192 sessions = 2,820 compressions/second)
+		// SpeedDefault saturates CPU cores and starves the Go scheduler, causing all
+		// audio goroutines — including unrelated Opus channels — to stutter randomly.
+		// SpeedFastest uses ~3-5x less CPU with identical output size on random data.
+		isIQModeForEncoder := session.Mode == "iq" || session.Mode == "iq48" ||
+			session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
+
 		if version >= 2 {
-			pcmBinaryEncoder = NewPCMBinaryEncoderWithVersion(true, PCMBinaryVersion2)
-			log.Printf("PCM binary encoder initialized with zstd compression (version 2)")
+			pcmBinaryEncoder = NewPCMBinaryEncoderWithVersionAndLevel(isIQModeForEncoder, PCMBinaryVersion2)
+			log.Printf("PCM binary encoder initialized with zstd compression (version 2, iq_fast=%v)", isIQModeForEncoder)
 		} else {
-			pcmBinaryEncoder = NewPCMBinaryEncoder(true)
-			log.Printf("PCM binary encoder initialized with zstd compression (version 1)")
+			pcmBinaryEncoder = NewPCMBinaryEncoderWithVersionAndLevel(isIQModeForEncoder, PCMBinaryVersion1)
+			log.Printf("PCM binary encoder initialized with zstd compression (version 1, iq_fast=%v)", isIQModeForEncoder)
 		}
 		defer pcmBinaryEncoder.Close()
 	}

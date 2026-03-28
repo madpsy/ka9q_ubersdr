@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"runtime"
+	runtimemetrics "runtime/metrics"
 	"sync"
 	"time"
 
@@ -960,24 +961,52 @@ func (pm *PrometheusMetrics) updateResourceMetrics() {
 		return
 	}
 
-	// Get runtime memory statistics
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	// Use runtime/metrics instead of runtime.ReadMemStats.
+	// runtime.ReadMemStats is a stop-the-world operation that pauses ALL goroutines
+	// (including audio streaming goroutines) causing audible stutters every 10 seconds.
+	// runtime/metrics reads the same data without stopping the world.
+	samples := []runtimemetrics.Sample{
+		{Name: "/memory/classes/heap/objects:bytes"},        // HeapAlloc equivalent
+		{Name: "/memory/classes/total:bytes"},               // Sys equivalent (total mapped)
+		{Name: "/memory/classes/heap/stacks:bytes"},         // StackInuse equivalent
+		{Name: "/gc/cycles/total:gc-cycles"},                // NumGC equivalent
+		{Name: "/gc/pauses/other/mark/termination:seconds"}, // GC pause duration histogram
+	}
+	runtimemetrics.Read(samples)
 
-	// Update goroutine count
+	// Update goroutine count (NumGoroutine is always non-STW)
 	pm.goroutineCount.Set(float64(runtime.NumGoroutine()))
 
-	// Update memory metrics
-	pm.memoryAllocBytes.Set(float64(m.Alloc))      // Currently allocated bytes
-	pm.memoryTotalBytes.Set(float64(m.TotalAlloc)) // Total allocated (cumulative)
-	pm.memoryHeapBytes.Set(float64(m.HeapAlloc))   // Heap allocated bytes
-	pm.memoryStackBytes.Set(float64(m.StackInuse)) // Stack in use
+	// Update memory metrics from non-STW samples
+	if samples[0].Value.Kind() == runtimemetrics.KindUint64 {
+		pm.memoryAllocBytes.Set(float64(samples[0].Value.Uint64()))
+		pm.memoryHeapBytes.Set(float64(samples[0].Value.Uint64()))
+	}
+	if samples[1].Value.Kind() == runtimemetrics.KindUint64 {
+		pm.memoryTotalBytes.Set(float64(samples[1].Value.Uint64()))
+	}
+	if samples[2].Value.Kind() == runtimemetrics.KindUint64 {
+		pm.memoryStackBytes.Set(float64(samples[2].Value.Uint64()))
+	}
 
-	// Update GC pause time (convert nanoseconds to seconds)
-	if len(m.PauseNs) > 0 {
-		// Get the most recent GC pause
-		lastPause := m.PauseNs[(m.NumGC+255)%256]
-		pm.gcPauseSeconds.Set(float64(lastPause) / 1e9)
+	// Update GC pause time from histogram (most recent bucket sum / count approximation)
+	if samples[4].Value.Kind() == runtimemetrics.KindFloat64Histogram {
+		hist := samples[4].Value.Float64Histogram()
+		if len(hist.Counts) > 0 {
+			// Use the sum of all pause durations divided by count as average pause
+			var totalPause float64
+			var totalCount uint64
+			for i, count := range hist.Counts {
+				if count > 0 && i < len(hist.Buckets)-1 {
+					midpoint := (hist.Buckets[i] + hist.Buckets[i+1]) / 2
+					totalPause += midpoint * float64(count)
+					totalCount += count
+				}
+			}
+			if totalCount > 0 {
+				pm.gcPauseSeconds.Set(totalPause / float64(totalCount))
+			}
+		}
 	}
 }
 

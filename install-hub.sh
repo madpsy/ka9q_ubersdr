@@ -271,6 +271,24 @@ else
     echo "IPv6 already disabled in sysctl.conf."
 fi
 
+# Increase UDP receive buffer maximum to prevent packet loss at high IQ throughput.
+# The default rmem_max (208 KB) is silently used as a cap even when applications
+# request larger buffers (ubersdr requests 16 MB via SetReadBuffer). At ~130 Mbps
+# of IQ multicast traffic the 208 KB buffer fills in ~12 ms, causing kernel-level
+# UDP drops that stutter ALL audio sessions simultaneously. 64 MB gives ~4 seconds
+# of headroom and eliminates the drops.
+echo "Configuring UDP receive buffer size..."
+if ! grep -q "^net.core.rmem_max" /etc/sysctl.conf; then
+    echo "Setting net.core.rmem_max=67108864 (64 MB) for high-throughput IQ streaming..."
+    echo "net.core.rmem_max = 67108864" | sudo tee -a /etc/sysctl.conf > /dev/null
+    sudo sysctl -w net.core.rmem_max=67108864 > /dev/null 2>&1
+    echo "UDP receive buffer maximum set to 64 MB."
+else
+    echo "net.core.rmem_max already configured in sysctl.conf."
+    # Ensure the live value is also applied (in case it was set lower previously)
+    sudo sysctl -w net.core.rmem_max=67108864 > /dev/null 2>&1
+fi
+
 # Install Docker if not already installed
 if command -v docker &> /dev/null; then
     echo "Docker is already installed, skipping installation..."

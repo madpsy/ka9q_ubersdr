@@ -94,9 +94,39 @@ func setupDataSocket(addr *net.UDPAddr, iface *net.Interface) (*net.UDPConn, err
 	// With many IQ192 channels (~47 pkt/s × 16 KB each), the inbound rate can
 	// exceed 40 MB/s. A GC pause of even 5-20 ms at that rate fills the old
 	// 1 MB buffer and causes kernel-level drops that stutter ALL channels.
-	// 16 MB gives ~400 ms of headroom at peak load.
-	if err := udpConn.SetReadBuffer(16 * 1024 * 1024); err != nil {
-		log.Printf("Warning: failed to set read buffer size: %v", err)
+	// 16 MB gives ~1 second of headroom at 130 Mbps.
+	//
+	// IMPORTANT: The kernel silently caps SetReadBuffer at net.core.rmem_max.
+	// The default rmem_max is only 208 KB — at 130 Mbps that fills in ~12 ms,
+	// causing periodic drops that stutter ALL sessions simultaneously.
+	// Run: sudo sysctl -w net.core.rmem_max=67108864
+	// (install-hub.sh sets this automatically)
+	const wantedBufSize = 16 * 1024 * 1024
+	if err := udpConn.SetReadBuffer(wantedBufSize); err != nil {
+		log.Printf("Warning: failed to set UDP read buffer size: %v", err)
+	}
+	// Verify the actual buffer size granted by the kernel via SO_RCVBUF.
+	// The kernel doubles the value internally, so divide by 2 for the true size.
+	// If it's much smaller than requested, net.core.rmem_max needs to be increased.
+	var actualBufSize int
+	if rawConn, err := udpConn.SyscallConn(); err == nil {
+		rawConn.Control(func(fd uintptr) {
+			if v, err := unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_RCVBUF); err == nil {
+				actualBufSize = v / 2 // kernel doubles the value
+			}
+		})
+	}
+	if actualBufSize > 0 {
+		if actualBufSize < wantedBufSize/2 {
+			log.Printf("WARNING: UDP receive buffer is only %d KB (requested %d KB). "+
+				"Kernel net.core.rmem_max is too low — high-throughput IQ streaming will "+
+				"cause packet drops and audio stuttering. "+
+				"Fix: sudo sysctl -w net.core.rmem_max=67108864",
+				actualBufSize/1024, wantedBufSize/1024)
+		} else {
+			log.Printf("UDP receive buffer set to %d KB (requested %d KB)",
+				actualBufSize/1024, wantedBufSize/1024)
+		}
 	}
 
 	// Join multicast group on specified interface

@@ -90,8 +90,12 @@ func setupDataSocket(addr *net.UDPAddr, iface *net.Interface) (*net.UDPConn, err
 
 	udpConn := conn.(*net.UDPConn)
 
-	// Set buffer size (1 MB like multidecoder)
-	if err := udpConn.SetReadBuffer(1024 * 1024); err != nil {
+	// Set a large receive buffer to absorb bursts during Go GC pauses.
+	// With many IQ192 channels (~47 pkt/s × 16 KB each), the inbound rate can
+	// exceed 40 MB/s. A GC pause of even 5-20 ms at that rate fills the old
+	// 1 MB buffer and causes kernel-level drops that stutter ALL channels.
+	// 16 MB gives ~400 ms of headroom at peak load.
+	if err := udpConn.SetReadBuffer(16 * 1024 * 1024); err != nil {
 		log.Printf("Warning: failed to set read buffer size: %v", err)
 	}
 
@@ -241,9 +245,11 @@ func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp ui
 		// Channel full, skip this packet silently
 	}
 
-	// Also send to audio extension if attached
-	// Convert PCM bytes (big-endian int16) to int16 samples with timestamp data
-	if len(dataCopy) > 0 && len(dataCopy)%2 == 0 {
+	// Also send to audio extension if attached.
+	// Check HasAudioExtension() BEFORE converting to int16 to avoid a
+	// make([]int16, N) allocation on every packet when no extension is running.
+	// With many IQ192 channels this was adding ~30 MB/s of wasted allocations.
+	if len(dataCopy) > 0 && len(dataCopy)%2 == 0 && session.HasAudioExtension() {
 		samples := bytesToInt16Samples(dataCopy)
 		audioSample := AudioSample{
 			PCMData:      samples,

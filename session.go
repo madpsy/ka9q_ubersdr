@@ -2107,6 +2107,15 @@ func (s *Session) DetachAudioExtensionTap() {
 	s.audioExtensionMu.Unlock()
 }
 
+// HasAudioExtension returns true if an audio extension tap is currently attached.
+// Use this to avoid expensive allocations (e.g. int16 conversion) when no extension is running.
+func (s *Session) HasAudioExtension() bool {
+	s.audioExtensionMu.RLock()
+	has := s.audioExtensionChan != nil
+	s.audioExtensionMu.RUnlock()
+	return has
+}
+
 // SendAudioToExtension sends PCM audio with timestamps to the attached extension (if any)
 // This should be called from the audio receiver when sending audio to the user
 func (s *Session) SendAudioToExtension(audioSample AudioSample) {

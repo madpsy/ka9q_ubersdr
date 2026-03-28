@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -380,6 +381,9 @@ func LoadConfig(filename string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
+
+	// Normalise default_mode to lowercase so config values like "USB" work correctly
+	config.Admin.DefaultMode = strings.ToLower(config.Admin.DefaultMode)
 
 	// TEMPORARY: Force enforce_session_ip_match to false regardless of config setting
 	// This overrides any value set in config.yaml

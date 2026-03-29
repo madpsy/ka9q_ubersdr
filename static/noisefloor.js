@@ -49,21 +49,8 @@ class NoiseFloorMonitor {
         // Band configurations for spectrum WebSocket
         this.bandConfigs = null; // Will be loaded from /api/noisefloor/config
 
-        // Tableau 10 color palette - designed for maximum distinction
-        this.bandColors = {
-            '2200m': '#8B4789', // Deep purple
-            '630m': '#D4526E',  // Rose/burgundy 
-            '160m': '#4E79A7',  // Blue
-            '80m': '#F28E2B',   // Orange
-            '60m': '#E15759',   // Red
-            '40m': '#76B7B2',   // Cyan
-            '30m': '#59A14F',   // Green
-            '20m': '#EDC948',   // Yellow
-            '17m': '#B07AA1',   // Purple
-            '15m': '#FF9DA7',   // Pink
-            '12m': '#9C755F',   // Brown
-            '10m': '#BAB0AC'    // Gray
-        };
+        // Band colours - populated dynamically by loadBandConfigs() based on frequency order
+        this.bandColors = {};
 
         this.init();
         this.loadVersion();
@@ -114,22 +101,18 @@ class NoiseFloorMonitor {
     }
 
     sortBands(bands) {
-        // Sort bands by their numeric value (160m, 80m, 60m, 40m, 30m, 20m, 17m, 15m, 12m, 10m)
-        const bandOrder = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
-        return bands.sort((a, b) => {
-            const indexA = bandOrder.indexOf(a);
-            const indexB = bandOrder.indexOf(b);
-            if (indexA === -1) return 1;
-            if (indexB === -1) return -1;
-            return indexA - indexB;
-        });
+        // Sort bands by center_frequency from server config (handles custom bands automatically)
+        return bands.sort((a, b) =>
+            this.bandConfigs[a].center_frequency - this.bandConfigs[b].center_frequency
+        );
     }
 
-    init() {
+    async init() {
         this.setupEventListeners();
         this.loadAvailableDates();
-        this.loadBands();
-        this.loadBandConfigs(); // Load band configurations for spectrum WebSocket
+        // Load band configs first — sortBands() and bandColors both depend on it
+        await this.loadBandConfigs();
+        this.loadBands(); // populate dropdown after configs are loaded
         this.loadFromURL();
 
         // Initialize button text based on default compact view state
@@ -369,16 +352,20 @@ class NoiseFloorMonitor {
     }
 
     loadBands() {
-        const bands = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+        // Populate dropdown from bandConfigs, sorted by frequency
         const select = document.getElementById('bandSelect');
-
         select.innerHTML = '<option value="all">All Bands</option>';
-        bands.forEach(band => {
-            const option = document.createElement('option');
-            option.value = band;
-            option.textContent = band;
-            select.appendChild(option);
-        });
+
+        if (this.bandConfigs) {
+            const sortedBands = Object.keys(this.bandConfigs)
+                .sort((a, b) => this.bandConfigs[a].center_frequency - this.bandConfigs[b].center_frequency);
+            sortedBands.forEach(band => {
+                const option = document.createElement('option');
+                option.value = band;
+                option.textContent = band;
+                select.appendChild(option);
+            });
+        }
     }
 
     async loadBandConfigs() {
@@ -397,7 +384,43 @@ class NoiseFloorMonitor {
                 this.bandConfigs[band.name] = band;
             });
 
+            // Assign colours by frequency order so adjacent bands are always visually distinct.
+            // Palette is manually ordered so consecutive indices alternate hue families
+            // (blue/red/green/orange/purple/cyan/rose/yellow/...) giving 20 slots —
+            // enough for the standard 12 HF bands plus several custom additions.
+            const palette = [
+                '#4E79A7', // blue
+                '#E15759', // red
+                '#59A14F', // green
+                '#F28E2B', // orange
+                '#B07AA1', // purple
+                '#76B7B2', // cyan
+                '#D4526E', // rose
+                '#EDC948', // yellow
+                '#8B4789', // deep purple
+                '#FF9DA7', // pink
+                '#9C755F', // brown
+                '#BAB0AC', // grey
+                '#1f77b4', // steel blue
+                '#d62728', // brick red
+                '#2ca02c', // forest green
+                '#ff7f0e', // amber
+                '#9467bd', // violet
+                '#17becf', // teal
+                '#bcbd22', // olive
+                '#7f7f7f', // mid grey
+            ];
+
+            const sortedBands = Object.keys(this.bandConfigs)
+                .sort((a, b) => this.bandConfigs[a].center_frequency - this.bandConfigs[b].center_frequency);
+
+            this.bandColors = {};
+            sortedBands.forEach((band, i) => {
+                this.bandColors[band] = palette[i % palette.length];
+            });
+
             console.log('Band configurations loaded:', this.bandConfigs);
+            console.log('Band colours assigned:', this.bandColors);
         } catch (error) {
             console.error('Error loading band configurations:', error);
         }
@@ -2910,10 +2933,13 @@ class NoiseFloorMonitor {
                                         }
                                     });
 
-                                    // Convert to array and sort by band order
-                                    const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+                                    // Convert to array and sort by frequency order from bandConfigs
                                     const allPointsAtTime = Array.from(bandMap.entries())
-                                        .sort((a, b) => bandOrder.indexOf(a[0]) - bandOrder.indexOf(b[0]))
+                                        .sort((a, b) => {
+                                            const freqA = this.bandConfigs[a[0]]?.center_frequency ?? Infinity;
+                                            const freqB = this.bandConfigs[b[0]]?.center_frequency ?? Infinity;
+                                            return freqA - freqB;
+                                        })
                                         .map(entry => entry[1].text);
 
                                     return allPointsAtTime;
@@ -3377,9 +3403,10 @@ class NoiseFloorMonitor {
             await this.createWideBandSpectrum('wideband-fft');
         }
 
-        // Get all visible bands
+        // Get all visible bands (sorted by frequency from server config)
         const bands = this.currentBand === 'all'
-            ? ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m']
+            ? Object.keys(this.bandConfigs).sort((a, b) =>
+                this.bandConfigs[a].center_frequency - this.bandConfigs[b].center_frequency)
             : [this.currentBand];
 
         // Update FFT for each visible band, but skip if audio preview is active

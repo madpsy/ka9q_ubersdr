@@ -795,10 +795,12 @@ class SpectrumDisplay:
             points.extend([x, y])
         
         if len(points) >= 4:
-            # Draw filled area
+            # Draw filled area — no stipple (stipple is rendered in software and is
+            # extremely slow, causing UI freezes especially on reconnect when
+            # spectrum_data is already populated and on_resize() triggers a draw).
             fill_points = [self.margin_left, self.margin_top + self.graph_height] + points + \
                          [self.margin_left + self.graph_width, self.margin_top + self.graph_height]
-            self.canvas.create_polygon(fill_points, fill='#1e90ff', outline='', stipple='gray50')
+            self.canvas.create_polygon(fill_points, fill='#1e90ff', outline='')
             
             # Draw line
             self.canvas.create_line(points, fill='#00ff00', width=1)
@@ -1337,9 +1339,12 @@ class SpectrumDisplay:
         self.graph_height = self.height - self.margin_top - self.margin_bottom
         self.graph_width = self.width - self.margin_left - self.margin_right
 
-        # Redraw spectrum with new dimensions if we have data
-        if self.spectrum_data is not None:
-            self._draw_spectrum()
+        # Do NOT call _draw_spectrum() directly here.  The update_display() loop
+        # redraws within 10 ms and respects the 33 ms throttle.  Calling it
+        # synchronously from a <Configure> event fires during Tkinter window
+        # layout — on reconnect, spectrum_data is already populated at the moment
+        # create_waterfall_window() opens, so every layout event would trigger a
+        # full (slow) redraw, freezing the UI before the window is even visible.
     
     def on_motion(self, event):
         """Handle mouse motion for tooltip.

@@ -509,6 +509,7 @@
     <script src="chart.umd.min.js"></script>
     <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
     <script src="suncalc.js"></script>
+    <script src="maidenhead.js"></script>
     <script src="radiod_config_analyzer.js"></script>
     <script src="admin-logs.js"></script>
     <script src="d3.v7.min.js"></script>
@@ -978,15 +979,22 @@
                     <div class="alert alert-info" style="margin-bottom: 20px;">
                         ℹ️ <strong>Note:</strong> CW Skimmer configuration changes require a server restart to take effect.
                     </div>
-                    <div class="alert alert-info" style="margin-bottom: 20px; background: #e3f2fd; border: 1px solid #2196f3; color: #0d47a1;">
-                        <div style="margin-bottom: 10px;">
-                            ℹ️ <strong>Requirements:</strong> CW Skimmer requires the <strong>SkimSrv</strong> application by Afreet (<a href="https://dxatlas.com/SkimServer/" target="_blank" style="color: #0d47a1; font-weight: bold; text-decoration: underline;">dxatlas.com/SkimServer/</a>).
-                            You also need the UberSDR DLL which can be downloaded from <a href="https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/CW_Skimmer.zip" target="_blank" style="color: #0d47a1; font-weight: bold; text-decoration: underline;">GitHub releases</a>.
+                    <div style="margin-bottom: 20px; padding: 15px; background: #e3f2fd; border-radius: 5px; border: 1px solid #2196f3;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px;">
+                            <div style="flex: 1; color: #0d47a1;">
+                                <strong>🖥️ Install CW Skimmer</strong>
+                                <p style="margin: 5px 0 0 0; font-size: 13px;">Automatically installs the CW Skimmer Hub using your callsign, location and grid square from your UberSDR configuration. Opens a terminal window to run the installer.</p>
+                            </div>
+                            <button class="btn" onclick="openInstallCWSkimmerHub()" style="background: #2196f3; color: white; font-weight: bold; white-space: nowrap;">
+                                🖥️ Install CW Skimmer
+                            </button>
                         </div>
-                        <ul style="margin: 10px 0 0 20px; line-height: 1.8;">
-                            <li>Use <a href="https://www.reversebeacon.net/pages/Aggregator+34" target="_blank" style="color: #0d47a1; font-weight: bold; text-decoration: underline;">RBN Aggregator</a> to send spots to RBN</li>
-                            <li>UberSDR will send spots to PSK Reporter directly. Set the <b>host</b> value below to your SkimSrv instance and configure the <b>PSKReporter</b> section below</li>
-                        </ul>
+                        <div style="display: flex; flex-wrap: wrap; gap: 8px; border-top: 1px solid #bbdefb; padding-top: 12px;">
+                            <button class="btn" onclick="openCWSkimmerScript('./start.sh')" style="background: #28a745; color: white; font-weight: bold;">▶ Start</button>
+                            <button class="btn" onclick="openCWSkimmerScript('./stop.sh')" style="background: #dc3545; color: white; font-weight: bold;">⏹ Stop</button>
+                            <button class="btn" onclick="openCWSkimmerScript('./stop.sh &amp;&amp; sleep 2 &amp;&amp; ./start.sh')" style="background: #fd7e14; color: white; font-weight: bold;">🔄 Restart</button>
+                            <button class="btn" onclick="openCWSkimmerScript('./update.sh')" style="background: #6f42c1; color: white; font-weight: bold;">⬆ Update</button>
+                        </div>
                     </div>
                     <div id="cwskimmerAnalyticsLinks" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; border: 1px solid #dee2e6;">
                         <strong style="color: #333; margin-bottom: 10px; display: block;">📊 Analytics & Reports:</strong>
@@ -2410,6 +2418,49 @@
             const left = (screen.width - width) / 2;
             const top = (screen.height - height) / 2;
             window.open(url, 'generate_wisdom_' + Date.now(),
+                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
+        }
+
+        // Open a CW Skimmer management script in a popup terminal window
+        function openCWSkimmerScript(script) {
+            const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
+            const command = `cd ~/ubersdr/cwskimmer && ${script}`;
+            const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
+
+            const width = 1000;
+            const height = 700;
+            const left = (screen.width - width) / 2;
+            const top = (screen.height - height) / 2;
+            window.open(url, 'cwskimmer_mgmt_' + Date.now(),
+                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
+        }
+
+        // Open CW Skimmer Hub installer in popup terminal window
+        function openInstallCWSkimmerHub() {
+            const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
+
+            const callsign = currentConfig?.admin?.callsign || 'N0CALL';
+            const name = callsign; // OPERATOR_NAME == callsign
+            const qth = currentConfig?.admin?.location || '';
+
+            // Derive grid square from GPS lat/lon if available
+            let square = '';
+            if (window.suncalcData?.location?.latitude != null && window.suncalcData?.location?.longitude != null) {
+                try {
+                    square = latLonToMaidenhead(window.suncalcData.location.latitude, window.suncalcData.location.longitude, 3);
+                } catch (e) {
+                    console.warn('Could not calculate Maidenhead locator:', e);
+                }
+            }
+
+            const command = `CALLSIGN=${callsign} OPERATOR_NAME="${name}" OPERATOR_QTH="${qth}" OPERATOR_SQUARE="${square}" UBERSDR_HOST="172.20.0.1" UBERSDR_PORT="8080" ALL_BANDS=true bash <(curl -fsSL https://raw.githubusercontent.com/madpsy/ubersdr-cwskimmer/main/install-hub.sh)`;
+            const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
+
+            const width = 1000;
+            const height = 700;
+            const left = (screen.width - width) / 2;
+            const top = (screen.height - height) / 2;
+            window.open(url, 'cwskimmer_install_' + Date.now(),
                 `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
         }
 

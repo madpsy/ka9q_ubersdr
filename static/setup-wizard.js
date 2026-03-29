@@ -276,6 +276,7 @@
                     setFieldValue('latitude', config.admin.gps?.lat);
                     setFieldValue('longitude', config.admin.gps?.lon);
                     setFieldValue('asl', config.admin.asl);
+                    setFieldValue('antenna', config.admin.antenna);
 
                     // Update map with loaded coordinates
                     if (config.admin.gps?.lat && config.admin.gps?.lon && map && marker) {
@@ -386,6 +387,7 @@
                     email: formData.email,
                     description: formData.description || '',
                     location: formData.location,
+                    antenna: formData.antenna || '',
                     gps: {
                         lat: parseFloat(formData.latitude),
                         lon: parseFloat(formData.longitude)
@@ -410,6 +412,18 @@
                     callsign: formData.dxclusterEnabled ? formData.dxclusterCallsign.toUpperCase() : ''
                 }
             };
+
+            // Update cwskimmer pskreporter_antenna to match
+            const existingCWSkimmerResponse = await fetch('/admin/cwskimmer-config');
+            if (existingCWSkimmerResponse.ok) {
+                const existingCWSkimmerConfig = await existingCWSkimmerResponse.json();
+                existingCWSkimmerConfig.pskreporter_antenna = formData.antenna || '';
+                await fetch('/admin/cwskimmer-config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(existingCWSkimmerConfig)
+                });
+            }
 
             // Save main config (no restart yet)
             const mainResponse = await fetch('/admin/config', {
@@ -466,7 +480,7 @@
                         enabled: true,
                         receiver_callsign: formData.receiverCallsign.toUpperCase(),
                         receiver_locator: formData.receiverLocator.toUpperCase(),
-                        receiver_antenna: formData.receiverAntenna || '',
+                        receiver_antenna: formData.antenna || '',
                         pskreporter_enabled: formData.pskreporterEnabled,
                         wsprnet_enabled: formData.wsprnetEnabled,
                         bands: existingBands

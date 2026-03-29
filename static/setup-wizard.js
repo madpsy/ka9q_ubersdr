@@ -769,7 +769,7 @@
         const countdownEl = document.getElementById('countdownNumber');
         overlay.style.display = 'flex';
 
-        let countdown = 15;
+        let countdown = 20;
         countdownEl.textContent = countdown;
 
         const interval = setInterval(() => {

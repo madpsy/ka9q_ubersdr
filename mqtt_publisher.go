@@ -28,11 +28,17 @@ type MQTTPublisher struct {
 
 	// Health tracking
 	mu              sync.RWMutex
+	connected       bool // authoritative connection state, set by handlers
 	connectedAt     time.Time
 	reconnectCount  int
 	lastDisconnect  time.Time
 	messagesSent    int64
 	lastMessageTime time.Time
+
+	// Error rate-limiting: suppress repeated publish errors
+	lastPublishErrMsg  string
+	lastPublishErrTime time.Time
+	publishErrCount    int64
 }
 
 // MetricPayload represents a metric message for MQTT
@@ -124,18 +130,24 @@ func NewMQTTPublisher(config *MQTTConfig, metrics *PrometheusMetrics, noiseFloor
 	// Set connection handlers
 	opts.SetOnConnectHandler(func(client mqtt.Client) {
 		publisher.mu.Lock()
+		publisher.connected = true
 		publisher.connectedAt = time.Now()
+		// Reset error suppression on reconnect so the first new error is always logged
+		publisher.lastPublishErrMsg = ""
+		publisher.publishErrCount = 0
 		publisher.mu.Unlock()
 		log.Println("MQTT: Connected to broker")
 	})
 	opts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
 		publisher.mu.Lock()
+		publisher.connected = false
 		publisher.lastDisconnect = time.Now()
 		publisher.mu.Unlock()
 		log.Printf("MQTT: Connection lost: %v", err)
 	})
 	opts.SetReconnectingHandler(func(client mqtt.Client, opts *mqtt.ClientOptions) {
 		publisher.mu.Lock()
+		publisher.connected = false
 		publisher.reconnectCount++
 		publisher.mu.Unlock()
 		log.Println("MQTT: Attempting to reconnect...")
@@ -175,6 +187,7 @@ func NewMQTTPublisher(config *MQTTConfig, metrics *PrometheusMetrics, noiseFloor
 		log.Printf("MQTT: Failed to connect after 2 attempts, will retry in background (auto-reconnect enabled)")
 	} else {
 		publisher.mu.Lock()
+		publisher.connected = true
 		publisher.connectedAt = time.Now()
 		publisher.mu.Unlock()
 	}
@@ -452,6 +465,41 @@ func (mp *MQTTPublisher) publishMetricCategory(category string, data map[string]
 	}
 }
 
+// isConnected returns true only when the authoritative handler-tracked state says connected.
+func (mp *MQTTPublisher) isConnected() bool {
+	mp.mu.RLock()
+	defer mp.mu.RUnlock()
+	return mp.connected
+}
+
+// logPublishError logs a publish error, suppressing repeated identical messages.
+// Prints every unique error immediately, then suppresses duplicates for 30 s,
+// and emits a summary ("suppressed N times") when the message changes or the
+// window expires.
+func (mp *MQTTPublisher) logPublishError(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	const suppressWindow = 30 * time.Second
+
+	mp.mu.Lock()
+	defer mp.mu.Unlock()
+
+	now := time.Now()
+	if msg == mp.lastPublishErrMsg && now.Sub(mp.lastPublishErrTime) < suppressWindow {
+		mp.publishErrCount++
+		return
+	}
+
+	// Flush suppressed count before printing new message
+	if mp.publishErrCount > 0 {
+		log.Printf("MQTT ERROR: (previous error suppressed %d more times)", mp.publishErrCount)
+		mp.publishErrCount = 0
+	}
+
+	log.Print(msg)
+	mp.lastPublishErrMsg = msg
+	mp.lastPublishErrTime = now
+}
+
 // publish sends a payload to an MQTT topic
 func (mp *MQTTPublisher) publish(topic string, payload MetricPayload) {
 	// Skip if no metrics to publish
@@ -459,15 +507,21 @@ func (mp *MQTTPublisher) publish(topic string, payload MetricPayload) {
 		return
 	}
 
+	// Guard: skip publish if not connected to avoid flooding logs with
+	// "no message IDs available" errors from the paho library.
+	if !mp.isConnected() {
+		return
+	}
+
 	data, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("MQTT ERROR: Failed to marshal payload for topic %s: %v", topic, err)
+		mp.logPublishError("MQTT ERROR: Failed to marshal payload for topic %s: %v", topic, err)
 		return
 	}
 
 	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
 	if token.Wait() && token.Error() != nil {
-		log.Printf("MQTT ERROR: Failed to publish to topic %s: %v", topic, token.Error())
+		mp.logPublishError("MQTT ERROR: Failed to publish to topic %s: %v", topic, token.Error())
 		return
 	}
 
@@ -505,11 +559,11 @@ func (mp *MQTTPublisher) publishSpectrumData(config *Config) {
 
 		data, err := json.Marshal(widebandPayload)
 		if err != nil {
-			log.Printf("MQTT ERROR: Failed to marshal wideband spectrum payload: %v", err)
-		} else {
+			mp.logPublishError("MQTT ERROR: Failed to marshal wideband spectrum payload: %v", err)
+		} else if mp.isConnected() {
 			token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
 			if token.Wait() && token.Error() != nil {
-				log.Printf("MQTT ERROR: Failed to publish wideband spectrum: %v", token.Error())
+				mp.logPublishError("MQTT ERROR: Failed to publish wideband spectrum: %v", token.Error())
 			} else {
 				// Track successful message
 				mp.mu.Lock()
@@ -557,13 +611,17 @@ func (mp *MQTTPublisher) publishSpectrumData(config *Config) {
 
 		data, err := json.Marshal(spectrumPayload)
 		if err != nil {
-			log.Printf("MQTT ERROR: Failed to marshal spectrum payload for band %s: %v", band.Name, err)
+			mp.logPublishError("MQTT ERROR: Failed to marshal spectrum payload for band %s: %v", band.Name, err)
+			continue
+		}
+
+		if !mp.isConnected() {
 			continue
 		}
 
 		token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
 		if token.Wait() && token.Error() != nil {
-			log.Printf("MQTT ERROR: Failed to publish spectrum for band %s: %v", band.Name, token.Error())
+			mp.logPublishError("MQTT ERROR: Failed to publish spectrum for band %s: %v", band.Name, token.Error())
 			continue
 		}
 
@@ -617,9 +675,13 @@ func (mp *MQTTPublisher) publishSpaceWeather(numericMetrics map[string]interface
 		return
 	}
 
+	if !mp.isConnected() {
+		return
+	}
+
 	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
 	if token.Wait() && token.Error() != nil {
-		log.Printf("MQTT ERROR: Failed to publish spaceweather: %v", token.Error())
+		mp.logPublishError("MQTT ERROR: Failed to publish spaceweather: %v", token.Error())
 		return
 	}
 
@@ -638,7 +700,7 @@ func (mp *MQTTPublisher) publishSpaceWeather(numericMetrics map[string]interface
 // Topic structure: {prefix}/digital_modes/{mode}/{band}
 // Uses the same JSON format as websocket messages for consistency
 func (mp *MQTTPublisher) PublishDigitalDecode(decode DecodeInfo, bandName string) {
-	if mp == nil || !mp.client.IsConnected() {
+	if mp == nil || !mp.isConnected() {
 		return
 	}
 
@@ -682,7 +744,7 @@ func (mp *MQTTPublisher) PublishDigitalDecode(decode DecodeInfo, bandName string
 	// Check for errors in background goroutine
 	go func() {
 		if token.Wait() && token.Error() != nil {
-			log.Printf("MQTT ERROR: Failed to publish digital decode to %s: %v", topic, token.Error())
+			mp.logPublishError("MQTT ERROR: Failed to publish digital decode to %s: %v", topic, token.Error())
 		}
 	}()
 }
@@ -691,7 +753,7 @@ func (mp *MQTTPublisher) PublishDigitalDecode(decode DecodeInfo, bandName string
 // Topic structure: {prefix}/chat
 // Payload contains timestamp, IP address, username, and message
 func (mp *MQTTPublisher) PublishChatMessage(timestamp time.Time, ipAddress, username, message string) {
-	if mp == nil || !mp.client.IsConnected() {
+	if mp == nil || !mp.isConnected() {
 		return
 	}
 
@@ -718,7 +780,7 @@ func (mp *MQTTPublisher) PublishChatMessage(timestamp time.Time, ipAddress, user
 	// Check for errors in background goroutine
 	go func() {
 		if token.Wait() && token.Error() != nil {
-			log.Printf("MQTT ERROR: Failed to publish chat message to %s: %v", topic, token.Error())
+			mp.logPublishError("MQTT ERROR: Failed to publish chat message to %s: %v", topic, token.Error())
 		}
 	}()
 }
@@ -727,7 +789,7 @@ func (mp *MQTTPublisher) PublishChatMessage(timestamp time.Time, ipAddress, user
 // Topic structure: {prefix}/cw_spots/{band}
 // Uses the same JSON format as websocket messages for consistency
 func (mp *MQTTPublisher) PublishCWSpot(spot CWSkimmerSpot) {
-	if mp == nil || !mp.client.IsConnected() {
+	if mp == nil || !mp.isConnected() {
 		return
 	}
 
@@ -775,7 +837,7 @@ func (mp *MQTTPublisher) PublishCWSpot(spot CWSkimmerSpot) {
 	// Check for errors in background goroutine
 	go func() {
 		if token.Wait() && token.Error() != nil {
-			log.Printf("MQTT ERROR: Failed to publish CW spot to %s: %v", topic, token.Error())
+			mp.logPublishError("MQTT ERROR: Failed to publish CW spot to %s: %v", topic, token.Error())
 		}
 	}()
 }
@@ -889,7 +951,7 @@ func (mp *MQTTPublisher) GetHealthStatus() map[string]interface{} {
 
 	status := map[string]interface{}{
 		"enabled":    true,
-		"connected":  mp.client.IsConnected(),
+		"connected":  mp.connected,
 		"broker":     mp.config.Broker,
 		"qos":        mp.config.QoS,
 		"reconnects": mp.reconnectCount,

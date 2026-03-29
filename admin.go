@@ -699,8 +699,29 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		//
 		// X-Admin-Password requests are exempt: they are used by non-browser API clients
 		// that never send Origin/Referer and are not susceptible to CSRF.
+		//
+		// Reverse-proxy / tunnel handling: when the request arrives via a trusted proxy
+		// (Caddy, tunnel server) the internal Host header is the Docker service name
+		// (e.g. "ubersdr:8080") while the browser's Origin/Referer contains the public
+		// hostname (e.g. "m9psy.tunnel.ubersdr.org").  Caddy automatically sets
+		// X-Forwarded-Host to the original public Host, so we use that when present and
+		// the request comes from a trusted source.
 		if r.Header.Get("X-Admin-Password") == "" {
-			serverHost := r.Host // e.g. "ubersdr.local" or "ubersdr.local:8080"
+			// Determine the effective server host for CSRF comparison.
+			// Prefer X-Forwarded-Host from a trusted proxy over r.Host.
+			serverHost := r.Host
+			if xfh := r.Header.Get("X-Forwarded-Host"); xfh != "" {
+				sourceIP := r.RemoteAddr
+				if host, _, err := net.SplitHostPort(sourceIP); err == nil {
+					sourceIP = host
+				}
+				isTunnelServer := globalConfig != nil && globalConfig.InstanceReporting.IsTunnelServer(sourceIP)
+				isTrustedProxy := globalConfig != nil && globalConfig.Server.IsTrustedProxy(sourceIP)
+				if isTunnelServer || isTrustedProxy {
+					serverHost = xfh
+				}
+			}
+
 			if origin := r.Header.Get("Origin"); origin != "" {
 				originURL, err := url.Parse(origin)
 				if err != nil || !strings.EqualFold(originURL.Host, serverHost) {

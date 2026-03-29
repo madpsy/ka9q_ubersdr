@@ -1691,6 +1691,33 @@
             </div>
         </div>
 
+        <!-- CW Skimmer Install Warning Modal -->
+        <div id="cwskimmerInstallWarningModal" class="modal">
+            <div class="modal-content" style="max-width: 540px;">
+                <div class="modal-header">
+                    <h2>🖥️ Install CW Skimmer</h2>
+                    <button class="modal-close" onclick="closeInstallCWSkimmerWarningModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="padding: 20px;">
+                        <div class="alert alert-warning" style="margin-bottom: 20px;">
+                            ⚠️ <strong>CW Skimmer requires significant CPU resources.</strong>
+                        </div>
+                        <p style="margin: 0 0 12px 0; line-height: 1.6;">CW Skimmer performs real-time DSP decoding across the entire HF spectrum simultaneously. This is computationally intensive, especially when combined with WSJT-X digital mode decoding (FT8/FT4/WSPR).</p>
+                        <p style="margin: 0 0 12px 0; line-height: 1.6;"><strong>Recommended minimum:</strong> An 8-core modern CPU (e.g. Intel Core i7/i9, AMD Ryzen 7/9, or equivalent).</p>
+                        <p style="margin: 0 0 20px 0; line-height: 1.6; color: #856404;">If your system does not meet this requirement, running CW Skimmer alongside digital mode decoding may cause audio dropouts, missed spots, or system instability.</p>
+                        <p style="margin: 0; font-weight: bold;">Are you confident your UberSDR instance has enough processing power to continue?</p>
+                    </div>
+                    <div style="padding: 0 20px 20px 20px; display: flex; gap: 10px; justify-content: flex-end;">
+                        <button class="btn btn-secondary" onclick="closeInstallCWSkimmerWarningModal()">Cancel</button>
+                        <button class="btn" onclick="confirmInstallCWSkimmer()" style="font-weight: bold; background: #2196f3; color: white;">
+                            Yes, Install CW Skimmer
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Auto-Calibration Modal -->
         <div id="autoCalibrationModal" class="modal">
             <div class="modal-content" style="max-width: 600px;">
@@ -2451,8 +2478,21 @@
             mgmtButtons.style.display = isEnabled ? 'flex' : 'none';
         }
 
-        // Open CW Skimmer Hub installer in popup terminal window
+        // Show the CPU warning modal before installing CW Skimmer
         function openInstallCWSkimmerHub() {
+            const modal = document.getElementById('cwskimmerInstallWarningModal');
+            if (modal) modal.style.display = 'flex';
+        }
+
+        function closeInstallCWSkimmerWarningModal() {
+            const modal = document.getElementById('cwskimmerInstallWarningModal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        // Called when user confirms they have enough CPU — proceeds with install
+        function confirmInstallCWSkimmer() {
+            closeInstallCWSkimmerWarningModal();
+
             // Pre-populate CW Skimmer config from main config
             const callsign = currentConfig?.admin?.callsign || '';
             const lat = currentConfig?.admin?.gps?.lat;
@@ -15469,6 +15509,7 @@ const tooltipLine2 = timeStr;
             const frontendModal = document.getElementById('frontendStatusModal');
             const channelModal = document.getElementById('channelStatusModal');
             const eventsModal = document.getElementById('sessionEventsModal');
+            const cwInstallModal = document.getElementById('cwskimmerInstallWarningModal');
 
             if (event.target === tunnelModal) {
                 closeTunnelUsersModal();
@@ -15481,6 +15522,9 @@ const tooltipLine2 = timeStr;
             }
             if (event.target === eventsModal) {
                 closeSessionEventsModal();
+            }
+            if (event.target === cwInstallModal) {
+                closeInstallCWSkimmerWarningModal();
             }
         }
 

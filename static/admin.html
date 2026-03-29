@@ -2422,12 +2422,13 @@
         }
 
         // Open a CW Skimmer management script in a popup terminal window
-        // GoTTY is configured as "bash -c <arg>", so we base64-encode complex commands
+        // Wrap in "bash -c '...'" so that exec in tmux-wrapper.sh can handle the pipe
         function openCWSkimmerScript(script) {
             const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
             const inner = `cd ~/ubersdr/cwskimmer && ${script}`;
             const b64 = btoa(unescape(encodeURIComponent(inner)));
-            const command = `echo ${b64} | base64 -d | bash`;
+            // base64 strings only contain [A-Za-z0-9+/=] so single-quote wrapping is safe
+            const command = `bash -c 'echo ${b64} | base64 -d | bash'`;
             const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
 
             const width = 1000;
@@ -2456,7 +2457,8 @@
                 }
             }
 
-            // Build shell script, base64-encode so GoTTY's "bash -c <arg>" handles it cleanly
+            // Build shell script, base64-encode it, then wrap in bash -c so exec in
+            // tmux-wrapper.sh can handle the pipe (exec doesn't support shell operators directly)
             const scriptLines = [
                 `export CALLSIGN=${JSON.stringify(callsign)}`,
                 `export OPERATOR_NAME=${JSON.stringify(name)}`,
@@ -2469,7 +2471,8 @@
             ].join('\n');
 
             const b64 = btoa(unescape(encodeURIComponent(scriptLines)));
-            const command = `echo ${b64} | base64 -d | bash`;
+            // base64 strings only contain [A-Za-z0-9+/=] so single-quote wrapping is safe
+            const command = `bash -c 'echo ${b64} | base64 -d | bash'`;
             const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
 
             const width = 1000;

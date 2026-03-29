@@ -214,8 +214,10 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
                     using_pid=$(fuser "$dev_node" 2>/dev/null || true)
                     if [[ -n "$using_pid" ]]; then
                         using_proc=$(ps -p "$using_pid" -o comm= 2>/dev/null || echo "unknown")
-                        echo "Warning: RX888 device is already in use by process '$using_proc' (PID $using_pid)"
+                        echo "RX888 device is already in use by process '$using_proc' (PID $using_pid)"
                         rx_in_use=1
+                    else
+                        echo "RX888 device is available (not in use)"
                     fi
                 fi
 

@@ -153,16 +153,21 @@ class CWSpotsGraph {
         if (this.spots.length > 5000) {
             this.spots = this.spots.slice(0, 5000);
         }
-        
-        // Update last spot time
-        this.lastSpotTime = spot.timestamp;
 
-        // Update latest spot display
-        this.updateLatestSpot(spot);
+        // Only update latest spot display and auto-tune if spot passes current band filter
+        const passesFilter = !this.bandFilter || this.bandFilter === 'all' || spot.band === this.bandFilter;
 
-        // Auto-tune if enabled
-        if (this.autoTune) {
-            this.tuneToSpot(spot);
+        if (passesFilter) {
+            // Update last spot time
+            this.lastSpotTime = spot.timestamp;
+
+            // Update latest spot display
+            this.updateLatestSpot(spot);
+
+            // Auto-tune if enabled
+            if (this.autoTune) {
+                this.tuneToSpot(spot);
+            }
         }
 
         // Update chart and UI

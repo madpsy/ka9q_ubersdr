@@ -707,9 +707,17 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// X-Forwarded-Host to the original public Host, so we use that when present and
 		// the request comes from a trusted source.
 		if r.Header.Get("X-Admin-Password") == "" {
-			// Determine the effective server host for CSRF comparison.
-			// Prefer X-Forwarded-Host from a trusted proxy over r.Host.
-			serverHost := r.Host
+			// Build the set of valid hosts for CSRF comparison.
+			// A request is legitimate if its Origin/Referer host matches ANY of:
+			//   1. r.Host — the host the request arrived with (direct/local/Caddy access)
+			//   2. X-Forwarded-Host from a trusted proxy — the public hostname set by Caddy
+			//   3. Instance.Host from config — the configured public hostname (tunnel access)
+			// This handles all deployment scenarios: direct IP, mDNS, Caddy, tunnel.
+			validHosts := map[string]bool{
+				strings.ToLower(r.Host): true,
+			}
+
+			// Trust X-Forwarded-Host only from a verified trusted proxy or tunnel server
 			if xfh := r.Header.Get("X-Forwarded-Host"); xfh != "" {
 				sourceIP := r.RemoteAddr
 				if host, _, err := net.SplitHostPort(sourceIP); err == nil {
@@ -718,21 +726,27 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				isTunnelServer := globalConfig != nil && globalConfig.InstanceReporting.IsTunnelServer(sourceIP)
 				isTrustedProxy := globalConfig != nil && globalConfig.Server.IsTrustedProxy(sourceIP)
 				if isTunnelServer || isTrustedProxy {
-					serverHost = xfh
+					validHosts[strings.ToLower(xfh)] = true
 				}
+			}
+
+			// Always include the configured public instance hostname (covers tunnel access
+			// where the tunnel client rewrites Host to the internal Docker service name)
+			if globalConfig != nil && globalConfig.InstanceReporting.Instance.Host != "" {
+				validHosts[strings.ToLower(globalConfig.InstanceReporting.Instance.Host)] = true
 			}
 
 			if origin := r.Header.Get("Origin"); origin != "" {
 				originURL, err := url.Parse(origin)
-				if err != nil || !strings.EqualFold(originURL.Host, serverHost) {
-					log.Printf("CSRF check failed for %s from %s: Origin %q does not match host %q", r.URL.Path, clientIP, origin, serverHost)
+				if err != nil || !validHosts[strings.ToLower(originURL.Host)] {
+					log.Printf("CSRF check failed for %s from %s: Origin %q does not match any valid host %v", r.URL.Path, clientIP, origin, validHosts)
 					http.Error(w, "Forbidden - cross-site request blocked", http.StatusForbidden)
 					return
 				}
 			} else if referer := r.Header.Get("Referer"); referer != "" {
 				refererURL, err := url.Parse(referer)
-				if err != nil || !strings.EqualFold(refererURL.Host, serverHost) {
-					log.Printf("CSRF check failed for %s from %s: Referer %q does not match host %q", r.URL.Path, clientIP, referer, serverHost)
+				if err != nil || !validHosts[strings.ToLower(refererURL.Host)] {
+					log.Printf("CSRF check failed for %s from %s: Referer %q does not match any valid host %v", r.URL.Path, clientIP, referer, validHosts)
 					http.Error(w, "Forbidden - cross-site request blocked", http.StatusForbidden)
 					return
 				}

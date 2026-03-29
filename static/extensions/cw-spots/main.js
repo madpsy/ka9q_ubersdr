@@ -517,7 +517,11 @@ class CWSpotsExtension extends DecoderExtension {
 
         // SNR
         const snrCell = document.createElement('td');
-        snrCell.className = `spot-snr ${spot.snr >= 0 ? 'spot-snr-positive' : 'spot-snr-negative'}`;
+        const snrClass = spot.snr > 26 ? 'spot-snr-excellent'
+            : spot.snr >= 13 ? 'spot-snr-good'
+            : spot.snr >= 6 ? 'spot-snr-fair'
+            : 'spot-snr-weak';
+        snrCell.className = `spot-snr ${snrClass}`;
         snrCell.textContent = spot.snr >= 0 ? `+${spot.snr}` : spot.snr;
         row.appendChild(snrCell);
 

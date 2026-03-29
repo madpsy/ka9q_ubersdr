@@ -335,12 +335,20 @@
     text-align: right;
 }
 
-.cw-spots-table .spot-snr-positive {
-    color: #28a745;
+.cw-spots-table .spot-snr-excellent {
+    color: #28a745; /* Green - >26 dB */
 }
 
-.cw-spots-table .spot-snr-negative {
-    color: #dc3545;
+.cw-spots-table .spot-snr-good {
+    color: #ffc107; /* Yellow - 13-26 dB */
+}
+
+.cw-spots-table .spot-snr-fair {
+    color: #ff8c00; /* Orange - 6-12 dB */
+}
+
+.cw-spots-table .spot-snr-weak {
+    color: #dc3545; /* Red - <6 dB */
 }
 
 .cw-spots-table .spot-wpm {

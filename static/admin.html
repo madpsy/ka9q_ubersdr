@@ -980,14 +980,20 @@
                         ℹ️ <strong>Note:</strong> CW Skimmer configuration changes require a server restart to take effect.
                     </div>
                     <div style="margin-bottom: 20px; padding: 15px; background: #e3f2fd; border-radius: 5px; border: 1px solid #2196f3;">
-                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px;">
                             <div style="flex: 1; color: #0d47a1;">
                                 <strong>🖥️ Install CW Skimmer</strong>
-                                <p style="margin: 5px 0 0 0; font-size: 13px;">Automatically installs the CW Skimmer Hub. Opens a terminal window to run the installer.</p>
+                                <p style="margin: 5px 0 0 0; font-size: 13px;">Automatically installs CW Skimmer. Opens a terminal window to run the installer.</p>
                             </div>
                             <button class="btn" onclick="openInstallCWSkimmerHub()" style="background: #2196f3; color: white; font-weight: bold; white-space: nowrap;">
                                 🖥️ Install CW Skimmer
                             </button>
+                        </div>
+                        <div id="cwskimmerMgmtButtons" style="display: none; flex-wrap: wrap; gap: 8px; border-top: 1px solid #bbdefb; padding-top: 12px;">
+                            <button class="btn" onclick="openCWSkimmerScript('~/ubersdr/cwskimmer/start.sh')" style="background: #28a745; color: white; font-weight: bold;">▶ Start</button>
+                            <button class="btn" onclick="openCWSkimmerScript('~/ubersdr/cwskimmer/stop.sh')" style="background: #dc3545; color: white; font-weight: bold;">⏹ Stop</button>
+                            <button class="btn" onclick="openCWSkimmerScript('~/ubersdr/cwskimmer/restart.sh')" style="background: #fd7e14; color: white; font-weight: bold;">🔄 Restart</button>
+                            <button class="btn" onclick="openCWSkimmerScript('~/ubersdr/cwskimmer/update.sh')" style="background: #6f42c1; color: white; font-weight: bold;">⬆ Update</button>
                         </div>
                     </div>
                     <div id="cwskimmerAnalyticsLinks" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; border: 1px solid #dee2e6;">
@@ -2413,6 +2419,27 @@
             const top = (screen.height - height) / 2;
             window.open(url, 'generate_wisdom_' + Date.now(),
                 `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
+        }
+
+        // Open a CW Skimmer management script in a popup terminal window
+        function openCWSkimmerScript(script) {
+            const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
+            const url = `${terminalPath}/?arg=${encodeURIComponent(script)}`;
+
+            const width = 1000;
+            const height = 700;
+            const left = (screen.width - width) / 2;
+            const top = (screen.height - height) / 2;
+            window.open(url, 'cwskimmer_mgmt_' + Date.now(),
+                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
+        }
+
+        // Show/hide management buttons based on CW Skimmer enabled state
+        function updateCWSkimmerManagementButtons() {
+            const mgmtButtons = document.getElementById('cwskimmerMgmtButtons');
+            if (!mgmtButtons) return;
+            const isEnabled = currentCWSkimmerConfig.enabled === true || currentCWSkimmerConfig.enabled === 'true';
+            mgmtButtons.style.display = isEnabled ? 'flex' : 'none';
         }
 
         // Open CW Skimmer Hub installer in popup terminal window
@@ -6966,6 +6993,7 @@
 
             // Update analytics links visibility based on CW Skimmer enabled status
             updateCWSkimmerAnalyticsLinks();
+            updateCWSkimmerManagementButtons();
 
             // Connection Settings Section
             const connectionSection = document.createElement('div');
@@ -6992,6 +7020,7 @@
             enabledSelect.addEventListener('change', (e) => {
                 currentCWSkimmerConfig.enabled = e.target.value === 'true';
                 updateCWSkimmerAnalyticsLinks();
+                updateCWSkimmerManagementButtons();
             });
             enabledDiv.appendChild(enabledSelect);
             connectionSection.appendChild(enabledDiv);

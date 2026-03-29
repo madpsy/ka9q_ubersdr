@@ -23,6 +23,7 @@ class CWSpotsExtension extends DecoderExtension {
         this.show10mBeacons = false; // Default to hiding 10m beacons (28.2 MHz+)
         this.highlightNew = true;
         this.showBadges = false; // Default to hiding badges
+        this.currentTunedFrequency = null; // Track currently tuned frequency for row indicators
         this.unsubscribe = null;
         this.newSpotId = null;
         this.spotIdCounter = 0;
@@ -423,6 +424,7 @@ class CWSpotsExtension extends DecoderExtension {
 
     createSpotRow(spot) {
         const row = document.createElement('tr');
+        row.setAttribute('data-frequency', spot.frequency);
 
         if (this.newSpotId && spot._highlightId === this.newSpotId && this.highlightNew) {
             row.className = 'spot-new';
@@ -449,6 +451,15 @@ class CWSpotsExtension extends DecoderExtension {
         const freqCell = document.createElement('td');
         freqCell.className = 'spot-frequency';
         freqCell.textContent = this.formatFrequency(spot.frequency);
+
+        // Tuned indicator dot
+        const tunedDot = document.createElement('span');
+        tunedDot.className = 'spot-tuned-indicator';
+        tunedDot.title = 'Currently tuned';
+        tunedDot.style.display = (this.currentTunedFrequency && Math.abs(spot.frequency - this.currentTunedFrequency) <= 10)
+            ? 'inline-block' : 'none';
+        freqCell.appendChild(tunedDot);
+
         freqCell.addEventListener('click', (e) => {
             e.stopPropagation();
             this.tuneToSpot(spot);
@@ -697,8 +708,32 @@ class CWSpotsExtension extends DecoderExtension {
 
         this.radio.log(`Tuned to ${spot.dx_call} on ${this.formatFrequency(spot.frequency)} MHz ${mode.toUpperCase()} (CW ${spot.wpm} WPM)`);
         
+        // Track tuned frequency and update row indicators
+        this.currentTunedFrequency = spot.frequency;
+        this.updateTunedIndicators();
+
         // Update modal tuned info if modal is open
         this.updateModalTunedInfo(spot);
+    }
+
+    updateTunedIndicators() {
+        // Update all visible spot rows to show/hide the tuned indicator dot
+        const tbody = document.getElementById('cw-spots-tbody');
+        if (!tbody) return;
+
+        const tunedFreq = this.currentTunedFrequency;
+
+        tbody.querySelectorAll('tr[data-frequency]').forEach(row => {
+            const rowFreq = parseInt(row.getAttribute('data-frequency'), 10);
+            const indicator = row.querySelector('.spot-tuned-indicator');
+            if (indicator) {
+                if (tunedFreq && Math.abs(rowFreq - tunedFreq) <= 10) {
+                    indicator.style.display = 'inline-block';
+                } else {
+                    indicator.style.display = 'none';
+                }
+            }
+        });
     }
 
     openQRZ(callsign) {
@@ -932,6 +967,9 @@ class CWSpotsExtension extends DecoderExtension {
                 console.log('CW Spots: Frequency changed via polling:', this.lastPolledFrequency, '->', currentFreq);
                 this.lastPolledFrequency = currentFreq;
                 this.updateBandFilterFromFrequency();
+                // Update tuned indicators when radio frequency changes externally
+                this.currentTunedFrequency = currentFreq;
+                this.updateTunedIndicators();
             }
         }, 500);
     }
@@ -2116,13 +2154,16 @@ class CWSpotsExtension extends DecoderExtension {
         // Listen for messages from graph window
         window.addEventListener('message', (event) => {
             if (event.data.type === 'request_initial_spots') {
-                // Send current spots AND filter settings to graph window
+                // Send ALL spots to graph window - it will filter by band itself
                 if (this.graphWindow && !this.graphWindow.closed) {
-                    // Apply main window filters to get filtered spots
-                    const filteredSpots = this.getFilteredSpotsForGraph();
                     this.graphWindow.postMessage({
                         type: 'cw_spots_initial',
-                        data: filteredSpots
+                        data: this.spots
+                    }, '*');
+                    // Also sync the current band filter to the graph window
+                    this.graphWindow.postMessage({
+                        type: 'band_filter_changed',
+                        data: this.bandFilter
                     }, '*');
                 }
             } else if (event.data.type === 'clear_spots_from_graph') {
@@ -2133,6 +2174,18 @@ class CWSpotsExtension extends DecoderExtension {
                 if (event.data.spot) {
                     this.tuneToSpot(event.data.spot);
                 }
+            } else if (event.data.type === 'set_band_filter') {
+                // Graph window changed the band filter - sync extension's dropdown
+                const band = event.data.band;
+                this.bandFilter = band;
+                this.badgeCache = null;
+                this.lastBadgeBand = null;
+                this.lastBadgeUpdate = 0;
+                this.showingAllRows = false;
+                const bandFilter = document.getElementById('cw-spots-band-filter');
+                if (bandFilter) bandFilter.value = band;
+                this.updateBadges();
+                this.filterAndRenderSpots();
             }
         });
     }
@@ -2208,15 +2261,12 @@ class CWSpotsExtension extends DecoderExtension {
     }
 
     forwardSpotToGraph(spot) {
-        // Forward new spot to graph window if it's open AND it passes filters
+        // Forward ALL new spots to graph window - it filters by band itself
         if (this.graphWindow && !this.graphWindow.closed) {
-            // Check if spot passes current filters
-            if (this.spotPassesFilters(spot)) {
-                this.graphWindow.postMessage({
-                    type: 'cw_spot',
-                    data: spot
-                }, '*');
-            }
+            this.graphWindow.postMessage({
+                type: 'cw_spot',
+                data: spot
+            }, '*');
         }
     }
 
@@ -2273,12 +2323,16 @@ class CWSpotsExtension extends DecoderExtension {
     }
 
     refreshGraphWindow() {
-        // Send updated filtered spots to graph window
+        // Send ALL spots to graph window and notify it of the current band filter
         if (this.graphWindow && !this.graphWindow.closed) {
-            const filteredSpots = this.getFilteredSpotsForGraph();
             this.graphWindow.postMessage({
                 type: 'cw_spots_initial',
-                data: filteredSpots
+                data: this.spots
+            }, '*');
+            // Sync band filter to graph window
+            this.graphWindow.postMessage({
+                type: 'band_filter_changed',
+                data: this.bandFilter
             }, '*');
         }
     }

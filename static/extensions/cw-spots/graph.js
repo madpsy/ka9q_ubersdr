@@ -9,6 +9,7 @@ class CWSpotsGraph {
         this.spots = [];
         this.chart = null;
         this.ageFilter = 10; // minutes
+        this.bandFilter = 'all'; // band filter
         this.snrFilter = -999; // no filter
         this.lastSpotTime = null;
         this.showLabels = true; // Show callsign labels by default
@@ -96,6 +97,14 @@ class CWSpotsGraph {
                 this.hideDisconnectedOverlay();
                 this.updateStatus('connected');
                 break;
+            case 'band_filter_changed':
+                // Parent window changed the band filter - sync our dropdown
+                this.bandFilter = data;
+                const bandSelect = document.getElementById('graph-band-filter');
+                if (bandSelect) bandSelect.value = data;
+                this.updateChart();
+                this.updateUI();
+                break;
             default:
                 // Ignore unknown message types
                 break;
@@ -166,6 +175,20 @@ class CWSpotsGraph {
     }
     
     setupEventHandlers() {
+        // Band filter
+        document.getElementById('graph-band-filter').addEventListener('change', (e) => {
+            this.bandFilter = e.target.value;
+            this.updateChart();
+            this.updateUI();
+            // Notify parent window to sync its band filter
+            if (window.opener && !window.opener.closed) {
+                window.opener.postMessage({
+                    type: 'set_band_filter',
+                    band: this.bandFilter
+                }, '*');
+            }
+        });
+
         // Age filter
         document.getElementById('graph-age-filter').addEventListener('change', (e) => {
             this.ageFilter = parseInt(e.target.value);
@@ -398,6 +421,11 @@ class CWSpotsGraph {
         return this.spots.filter(spot => {
             // Age filter
             if (this.ageFilter && (now - spot.timestamp) > maxAge) {
+                return false;
+            }
+
+            // Band filter
+            if (this.bandFilter && this.bandFilter !== 'all' && spot.band !== this.bandFilter) {
                 return false;
             }
 

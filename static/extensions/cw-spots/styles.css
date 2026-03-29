@@ -284,6 +284,18 @@
     text-decoration: underline;
 }
 
+.spot-tuned-indicator {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    background: #28a745;
+    border-radius: 50%;
+    margin-left: 5px;
+    vertical-align: middle;
+    box-shadow: 0 0 4px #28a745;
+    flex-shrink: 0;
+}
+
 .cw-spots-table .spot-callsign {
     font-weight: bold;
     color: #ffc107;

@@ -2331,12 +2331,17 @@ class CWSpotsExtension extends DecoderExtension {
     }
 
     refreshGraphWindow() {
-        // Send ALL spots to graph window along with current band filter in one message
+        // Send ALL spots to graph window along with current band filter
         if (this.graphWindow && !this.graphWindow.closed) {
             this.graphWindow.postMessage({
                 type: 'cw_spots_initial',
                 data: this.spots,
                 bandFilter: this.bandFilter
+            }, '*');
+            // Also send explicit band filter sync as a separate message
+            this.graphWindow.postMessage({
+                type: 'band_filter_sync',
+                data: this.bandFilter
             }, '*');
         }
     }

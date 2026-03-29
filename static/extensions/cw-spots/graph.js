@@ -87,6 +87,14 @@ class CWSpotsGraph {
                 this.loadInitialSpots(data, event.data.bandFilter);
                 this.hideDisconnectedOverlay(); // Hide overlay if extension reconnects
                 break;
+            case 'band_filter_sync':
+                // Explicit band filter sync from parent
+                this.bandFilter = data;
+                const syncBandSelect = document.getElementById('graph-band-filter');
+                if (syncBandSelect) syncBandSelect.value = data;
+                this.updateChart();
+                this.updateUI();
+                break;
             case 'cw_spots_clear':
                 this.clearSpots();
                 break;

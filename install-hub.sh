@@ -142,6 +142,7 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
 
     ports_in_use=0
     rx_found=0
+    rx_in_use=0
     vendor_found=0
     avx2_found=0
 
@@ -206,6 +207,18 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
                     echo "Warning: Device with correct vendor ID ($device_vendor) found, but product ID ($device_product) doesn't match expected values (${VALID_PRODUCTS[*]})"
                     rx_found=1  # Still consider it found since vendor matches
                 fi
+
+                # Check if the device is already in use by another process
+                dev_node=$(printf "/dev/bus/usb/%03d/%03d" "$(cat "$d/busnum")" "$(cat "$d/devnum")")
+                if [[ -e "$dev_node" ]]; then
+                    using_pid=$(fuser "$dev_node" 2>/dev/null || true)
+                    if [[ -n "$using_pid" ]]; then
+                        using_proc=$(ps -p "$using_pid" -o comm= 2>/dev/null || echo "unknown")
+                        echo "Warning: RX888 device is already in use by process '$using_proc' (PID $using_pid)"
+                        rx_in_use=1
+                    fi
+                fi
+
                 break
             fi
         done
@@ -222,8 +235,8 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
     fi
 
     # --- Decide exit code ---
-    # Exit 1 if any ports are in use OR RX888 missing OR AVX2 missing
-    if (( ports_in_use > 0 || rx_found == 0 || avx2_found == 0 )); then
+    # Exit 1 if any ports are in use OR RX888 missing/busy OR AVX2 missing
+    if (( ports_in_use > 0 || rx_found == 0 || rx_in_use == 1 || avx2_found == 0 )); then
         echo
         echo "Pre-flight checks failed. Installation cannot continue."
         if (( ports_in_use > 0 )); then
@@ -232,6 +245,10 @@ if [ ! -f "$INSTALLED_MARKER" ]; then
         fi
         if (( rx_found == 0 )); then
             echo "Error: RX888 MKII not detected."
+            echo "Hint: Use --ignore-rx888 to skip this check."
+        fi
+        if (( rx_in_use == 1 )); then
+            echo "Error: RX888 is already in use by another process. Stop it before installing."
             echo "Hint: Use --ignore-rx888 to skip this check."
         fi
         if (( avx2_found == 0 )); then

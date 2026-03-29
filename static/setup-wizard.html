@@ -445,8 +445,8 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="antenna">Antenna <span class="optional">(optional)</span></label>
-                    <input type="text" id="antenna" name="antenna" placeholder="e.g., Dipole @ 10m">
+                    <label for="antenna">Antenna *</label>
+                    <input type="text" id="antenna" name="antenna" required placeholder="e.g., Dipole @ 10m">
                     <div class="help-text">Brief description of your antenna setup</div>
                 </div>
 
@@ -567,6 +567,15 @@
                         <label for="dxclusterCallsign">DX Cluster Callsign *</label>
                         <input type="text" id="dxclusterCallsign" name="dxclusterCallsign" placeholder="e.g., W1ABC">
                         <div class="help-text">Your callsign for DX cluster login</div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 30px; padding-top: 25px; border-top: 1px solid #e9ecef;">
+                    <h3 style="font-size: 18px; color: #2d3748; margin-bottom: 8px;">EiBi Shortwave Schedule</h3>
+                    <p style="color: #718096; margin-bottom: 15px; line-height: 1.5;">When enabled, the EiBi shortwave broadcast database will be downloaded and used to automatically populate bookmarks with active shortwave broadcasts for any frequency you tune to.</p>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="eibiEnabled" name="eibiEnabled">
+                        <label for="eibiEnabled">Enable EiBi shortwave broadcast schedule</label>
                     </div>
                 </div>
             </div>

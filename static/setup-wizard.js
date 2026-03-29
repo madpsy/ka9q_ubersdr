@@ -322,6 +322,11 @@
                     setFieldValue('dxclusterCallsign', config.dxcluster.callsign);
                     toggleConditionalSection('dxclusterEnabled', 'dxclusterSettings');
                 }
+
+                // Pre-fill EiBi setting
+                if (config.eibi) {
+                    setCheckboxValue('eibiEnabled', config.eibi.enabled);
+                }
             }
 
             // Try to load decoder config
@@ -387,7 +392,7 @@
                     email: formData.email,
                     description: formData.description || '',
                     location: formData.location,
-                    antenna: formData.antenna || '',
+                    antenna: formData.antenna,
                     gps: {
                         lat: parseFloat(formData.latitude),
                         lon: parseFloat(formData.longitude)
@@ -410,6 +415,10 @@
                     ...existingConfig.dxcluster,
                     enabled: formData.dxclusterEnabled,
                     callsign: formData.dxclusterEnabled ? formData.dxclusterCallsign.toUpperCase() : ''
+                },
+                eibi: {
+                    ...existingConfig.eibi,
+                    enabled: formData.eibiEnabled
                 }
             };
 
@@ -417,7 +426,7 @@
             const existingCWSkimmerResponse = await fetch('/admin/cwskimmer-config');
             if (existingCWSkimmerResponse.ok) {
                 const existingCWSkimmerConfig = await existingCWSkimmerResponse.json();
-                existingCWSkimmerConfig.pskreporter_antenna = formData.antenna || '';
+                existingCWSkimmerConfig.pskreporter_antenna = formData.antenna;
                 await fetch('/admin/cwskimmer-config', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
@@ -480,7 +489,7 @@
                         enabled: true,
                         receiver_callsign: formData.receiverCallsign.toUpperCase(),
                         receiver_locator: formData.receiverLocator.toUpperCase(),
-                        receiver_antenna: formData.antenna || '',
+                        receiver_antenna: formData.antenna,
                         pskreporter_enabled: formData.pskreporterEnabled,
                         wsprnet_enabled: formData.wsprnetEnabled,
                         bands: existingBands

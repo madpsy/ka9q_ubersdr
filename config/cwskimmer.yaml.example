@@ -6,8 +6,8 @@
 enabled: false
 
 # CW Skimmer server connection
-host: "localhost"
-port: 7300
+host: "cwskimmer"
+port: 7550
 
 # Your callsign (required for identification)
 callsign: "N0CALL"

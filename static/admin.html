@@ -2422,9 +2422,12 @@
         }
 
         // Open a CW Skimmer management script in a popup terminal window
+        // GoTTY is configured as "bash -c <arg>", so we base64-encode complex commands
         function openCWSkimmerScript(script) {
             const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
-            const command = `cd ~/ubersdr/cwskimmer && ${script}`;
+            const inner = `cd ~/ubersdr/cwskimmer && ${script}`;
+            const b64 = btoa(unescape(encodeURIComponent(inner)));
+            const command = `echo ${b64} | base64 -d | bash`;
             const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
 
             const width = 1000;
@@ -2453,7 +2456,20 @@
                 }
             }
 
-            const command = `CALLSIGN=${callsign} OPERATOR_NAME="${name}" OPERATOR_QTH="${qth}" OPERATOR_SQUARE="${square}" UBERSDR_HOST="172.20.0.1" UBERSDR_PORT="8080" ALL_BANDS=true bash <(curl -fsSL https://raw.githubusercontent.com/madpsy/ubersdr-cwskimmer/main/install-hub.sh)`;
+            // Build shell script, base64-encode so GoTTY's "bash -c <arg>" handles it cleanly
+            const scriptLines = [
+                `export CALLSIGN=${JSON.stringify(callsign)}`,
+                `export OPERATOR_NAME=${JSON.stringify(name)}`,
+                `export OPERATOR_QTH=${JSON.stringify(qth)}`,
+                `export OPERATOR_SQUARE=${JSON.stringify(square)}`,
+                `export UBERSDR_HOST="172.20.0.1"`,
+                `export UBERSDR_PORT="8080"`,
+                `export ALL_BANDS="true"`,
+                `bash <(curl -fsSL https://raw.githubusercontent.com/madpsy/ubersdr-cwskimmer/main/install-hub.sh)`,
+            ].join('\n');
+
+            const b64 = btoa(unescape(encodeURIComponent(scriptLines)));
+            const command = `echo ${b64} | base64 -d | bash`;
             const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
 
             const width = 1000;

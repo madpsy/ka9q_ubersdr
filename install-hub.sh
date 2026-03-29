@@ -497,6 +497,10 @@ echo "Fetching rotctld.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/rotctld.sh -o "$ACTUAL_HOME/ubersdr/rotctld.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/rotctld.sh"
 
+echo "Fetching install_cwskimmer.sh script..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ubersdr-cwskimmer/refs/heads/main/install-hub.sh -o "$ACTUAL_HOME/ubersdr/install_cwskimmer.sh"
+chmod +x "$ACTUAL_HOME/ubersdr/install_cwskimmer.sh"
+
 # Migrate FFTW Wisdom file if it exists in the wrong location (before starting containers)
 #OLD_WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-config/_data/wisdom"
 #WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom"

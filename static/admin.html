@@ -980,20 +980,14 @@
                         ℹ️ <strong>Note:</strong> CW Skimmer configuration changes require a server restart to take effect.
                     </div>
                     <div style="margin-bottom: 20px; padding: 15px; background: #e3f2fd; border-radius: 5px; border: 1px solid #2196f3;">
-                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
                             <div style="flex: 1; color: #0d47a1;">
                                 <strong>🖥️ Install CW Skimmer</strong>
-                                <p style="margin: 5px 0 0 0; font-size: 13px;">Automatically installs the CW Skimmer Hub using your callsign, location and grid square from your UberSDR configuration. Opens a terminal window to run the installer.</p>
+                                <p style="margin: 5px 0 0 0; font-size: 13px;">Automatically installs the CW Skimmer Hub. Opens a terminal window to run the installer.</p>
                             </div>
                             <button class="btn" onclick="openInstallCWSkimmerHub()" style="background: #2196f3; color: white; font-weight: bold; white-space: nowrap;">
                                 🖥️ Install CW Skimmer
                             </button>
-                        </div>
-                        <div style="display: flex; flex-wrap: wrap; gap: 8px; border-top: 1px solid #bbdefb; padding-top: 12px;">
-                            <button class="btn" onclick="openCWSkimmerScript('./start.sh')" style="background: #28a745; color: white; font-weight: bold;">▶ Start</button>
-                            <button class="btn" onclick="openCWSkimmerScript('./stop.sh')" style="background: #dc3545; color: white; font-weight: bold;">⏹ Stop</button>
-                            <button class="btn" onclick="openCWSkimmerScript('./stop.sh &amp;&amp; sleep 2 &amp;&amp; ./start.sh')" style="background: #fd7e14; color: white; font-weight: bold;">🔄 Restart</button>
-                            <button class="btn" onclick="openCWSkimmerScript('./update.sh')" style="background: #6f42c1; color: white; font-weight: bold;">⬆ Update</button>
                         </div>
                     </div>
                     <div id="cwskimmerAnalyticsLinks" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; border: 1px solid #dee2e6;">
@@ -2421,58 +2415,10 @@
                 `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
         }
 
-        // Open a CW Skimmer management script in a popup terminal window
-        // Wrap in "bash -c '...'" so that exec in tmux-wrapper.sh can handle the pipe
-        function openCWSkimmerScript(script) {
-            const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
-            const inner = `cd ~/ubersdr/cwskimmer && ${script}`;
-            const b64 = btoa(unescape(encodeURIComponent(inner)));
-            // base64 strings only contain [A-Za-z0-9+/=] so single-quote wrapping is safe
-            const command = `bash -c 'echo ${b64} | base64 -d | bash'`;
-            const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
-
-            const width = 1000;
-            const height = 700;
-            const left = (screen.width - width) / 2;
-            const top = (screen.height - height) / 2;
-            window.open(url, 'cwskimmer_mgmt_' + Date.now(),
-                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
-        }
-
         // Open CW Skimmer Hub installer in popup terminal window
         function openInstallCWSkimmerHub() {
             const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
-
-            const callsign = currentConfig?.admin?.callsign || 'N0CALL';
-            const name = callsign; // OPERATOR_NAME == callsign
-            const qth = currentConfig?.admin?.location || '';
-
-            // Derive grid square from GPS lat/lon if available
-            let square = '';
-            if (window.suncalcData?.location?.latitude != null && window.suncalcData?.location?.longitude != null) {
-                try {
-                    square = latLonToMaidenhead(window.suncalcData.location.latitude, window.suncalcData.location.longitude, 3);
-                } catch (e) {
-                    console.warn('Could not calculate Maidenhead locator:', e);
-                }
-            }
-
-            // Build shell script, base64-encode it, then wrap in bash -c so exec in
-            // tmux-wrapper.sh can handle the pipe (exec doesn't support shell operators directly)
-            const scriptLines = [
-                `export CALLSIGN=${JSON.stringify(callsign)}`,
-                `export OPERATOR_NAME=${JSON.stringify(name)}`,
-                `export OPERATOR_QTH=${JSON.stringify(qth)}`,
-                `export OPERATOR_SQUARE=${JSON.stringify(square)}`,
-                `export UBERSDR_HOST="172.20.0.1"`,
-                `export UBERSDR_PORT="8080"`,
-                `export ALL_BANDS="true"`,
-                `bash <(curl -fsSL https://raw.githubusercontent.com/madpsy/ubersdr-cwskimmer/main/install-hub.sh)`,
-            ].join('\n');
-
-            const b64 = btoa(unescape(encodeURIComponent(scriptLines)));
-            // base64 strings only contain [A-Za-z0-9+/=] so single-quote wrapping is safe
-            const command = `bash -c 'echo ${b64} | base64 -d | bash'`;
+            const command = '~/ubersdr/install_cwskimmer.sh';
             const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
 
             const width = 1000;

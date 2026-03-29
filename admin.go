@@ -683,6 +683,41 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// Exclude /terminal/sessions which is the management interface that browsers access
 		isSSHProxy := strings.HasPrefix(r.URL.Path, "/terminal") && r.URL.Path != "/terminal/sessions"
 
+		// CSRF protection for all admin and terminal endpoints.
+		//
+		// When a browser makes a cross-site request (e.g. the victim clicks a link in an
+		// email, or a malicious page auto-submits a form) it sends an Origin header whose
+		// host differs from this server.  We reject those requests before the session
+		// cookie is ever evaluated.
+		//
+		// Rules:
+		//   • Origin present and matches this server's Host  → allow
+		//   • Origin present and does NOT match              → block (CSRF)
+		//   • Origin absent, Referer present and matches     → allow
+		//   • Origin absent, Referer present and mismatches  → block (CSRF)
+		//   • Both absent (curl, direct navigation, etc.)    → allow
+		//
+		// X-Admin-Password requests are exempt: they are used by non-browser API clients
+		// that never send Origin/Referer and are not susceptible to CSRF.
+		if r.Header.Get("X-Admin-Password") == "" {
+			serverHost := r.Host // e.g. "ubersdr.local" or "ubersdr.local:8080"
+			if origin := r.Header.Get("Origin"); origin != "" {
+				originURL, err := url.Parse(origin)
+				if err != nil || !strings.EqualFold(originURL.Host, serverHost) {
+					log.Printf("CSRF check failed for %s from %s: Origin %q does not match host %q", r.URL.Path, clientIP, origin, serverHost)
+					http.Error(w, "Forbidden - cross-site request blocked", http.StatusForbidden)
+					return
+				}
+			} else if referer := r.Header.Get("Referer"); referer != "" {
+				refererURL, err := url.Parse(referer)
+				if err != nil || !strings.EqualFold(refererURL.Host, serverHost) {
+					log.Printf("CSRF check failed for %s from %s: Referer %q does not match host %q", r.URL.Path, clientIP, referer, serverHost)
+					http.Error(w, "Forbidden - cross-site request blocked", http.StatusForbidden)
+					return
+				}
+			}
+		}
+
 		// Check for password in X-Admin-Password header first
 		if password := r.Header.Get("X-Admin-Password"); password != "" {
 			// Check if IP is already temporarily banned (before validating password)

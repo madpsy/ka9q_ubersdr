@@ -7,6 +7,7 @@ Displays RF spectrum as a waterfall with frequency along the top.
 import asyncio
 import gzip
 import json
+import time
 import tkinter as tk
 from tkinter import Canvas, Toplevel
 import websockets
@@ -21,10 +22,16 @@ from PIL import Image, ImageTk
 
 class WaterfallDisplay:
     """Waterfall display widget showing RF spectrum as a scrolling waterfall.
-    
+
     This display shares data with the spectrum display instead of creating
     its own WebSocket connection.
     """
+
+    # Class-level generation counter.  Incremented each time a new
+    # WaterfallDisplay is created so that any pending after() callbacks
+    # from a previous instance's update_display() loop see a stale
+    # generation and self-terminate immediately.
+    _class_generation: int = 0
     
     def __init__(self, parent: tk.Widget, spectrum_display, width: int = 800, height: int = 400, spectrum_height: int = 200, click_tune_var=None, bookmarks: list = None):
         """Initialize waterfall display widget.
@@ -146,8 +153,22 @@ class WaterfallDisplay:
         self.bandwidth_high = high
         self.current_mode = mode.lower() if mode else 'usb'
     
-    def update_display(self):
-        """Update waterfall display (called periodically)."""
+    def update_display(self, generation=None):
+        """Update waterfall display (called periodically).
+
+        Uses a class-level generation counter so that when a new
+        WaterfallDisplay instance is created (on reconnect), all loops
+        from previous instances self-terminate immediately, even if their
+        parent widget destruction races with a pending after() callback.
+        """
+        current_gen = WaterfallDisplay._class_generation
+        if generation is None:
+            # First call from __init__ — adopt the current class generation.
+            generation = current_gen
+        elif generation != current_gen:
+            # Stale callback from a previous instance's loop — discard it.
+            return
+
         # Get spectrum data from shared spectrum display
         if self.spectrum_display and self.spectrum_display.spectrum_data is not None:
             # Check if we have new data
@@ -160,10 +181,10 @@ class WaterfallDisplay:
                 self.history.append(self.spectrum_data.copy())
                 self.history_timestamps.append(current_time)
                 self._draw_waterfall()
-        
+
         # Check for new data frequently
         try:
-            self.parent.after(10, self.update_display)
+            self.parent.after(10, self.update_display, generation)
         except (tk.TclError, AttributeError):
             # Parent widget was destroyed, stop the update loop
             pass
@@ -217,26 +238,25 @@ class WaterfallDisplay:
         """Draw waterfall on canvas using PIL Image for efficiency."""
         if len(self.history) == 0 or self.spectrum_display is None:
             return
-        
+
         # Check if canvas still exists before attempting to draw
         try:
             if not self.canvas.winfo_exists():
                 return
         except (tk.TclError, AttributeError):
             return
-        
+
         # Use auto-ranging based on last 2 seconds of data for better contrast
         # Use percentiles to focus on signal range and ignore extreme noise
-        import time
         current_time = time.time()
         cutoff_time = current_time - self.auto_level_window_seconds
-        
+
         # Collect data from last 2 seconds only
         recent_data = []
         for i, timestamp in enumerate(self.history_timestamps):
             if timestamp >= cutoff_time:
                 recent_data.append(self.history[i])
-        
+
         if len(recent_data) > 0:
             all_data = np.concatenate(recent_data)
             valid_data = all_data[np.isfinite(all_data)]
@@ -245,12 +265,12 @@ class WaterfallDisplay:
                 # This captures the actual noise floor, not the signal floor
                 p1 = np.percentile(valid_data, 1)   # True noise floor
                 p99 = np.percentile(valid_data, 99)  # Signal peaks
-                
+
                 # Set min_db to noise floor minus minimal margin (2 dB)
                 # This ensures noise appears in the blue range properly
                 self.min_db = p1 - 2
                 self.max_db = p99 + 5
-                
+
                 # Ensure minimum range for visibility (at least 30 dB total range)
                 if self.max_db - self.min_db < 30:
                     self.max_db = self.min_db + 30
@@ -262,56 +282,98 @@ class WaterfallDisplay:
             # Fallback to spectrum's range if no recent data
             self.min_db = self.spectrum_display.min_db
             self.max_db = self.spectrum_display.max_db
-        
+
         # Scroll waterfall down by one line
         self.waterfall_array[1:] = self.waterfall_array[:-1]
-        
-        # Add newest spectrum line at top
+
+        # Add newest spectrum line at top using fully vectorized NumPy operations.
+        # This replaces the previous pure-Python per-pixel loop (which took ~50 ms
+        # per frame and permanently overloaded the Tkinter main thread on reconnect).
         if len(self.history) > 0:
             spectrum = self.history[-1]  # Most recent
-            
-            # Convert spectrum to RGB colors
-            for x_idx in range(self.waterfall_width):
-                # Map x position to bin index
-                bin_idx = int((x_idx / self.waterfall_width) * len(spectrum))
-                if bin_idx >= len(spectrum):
-                    bin_idx = len(spectrum) - 1
-                
-                db = spectrum[bin_idx]
-                if np.isfinite(db):
-                    r, g, b = self._db_to_rgb(db)
-                    self.waterfall_array[0, x_idx] = [r, g, b]
-        
+
+            # Map waterfall pixel columns to spectrum bin indices (nearest-neighbour)
+            n_bins = len(spectrum)
+            col_indices = (
+                np.arange(self.waterfall_width, dtype=np.float32)
+                * n_bins / self.waterfall_width
+            ).astype(np.int32)
+            col_indices = np.clip(col_indices, 0, n_bins - 1)
+
+            # Sample spectrum at each column position
+            db_row = spectrum[col_indices]  # shape: (waterfall_width,)
+
+            # Replace non-finite values with min_db so they render as background
+            db_row = np.where(np.isfinite(db_row), db_row, self.min_db)
+
+            # Normalise to [0, 1]
+            db_range = self.max_db - self.min_db
+            if db_range == 0:
+                db_range = 1.0
+            norm = np.clip((db_row - self.min_db) / db_range, 0.0, 1.0)
+
+            # Vectorised colour gradient: blue→cyan→green→yellow→red
+            r = np.zeros(self.waterfall_width, dtype=np.uint8)
+            g = np.zeros(self.waterfall_width, dtype=np.uint8)
+            b = np.zeros(self.waterfall_width, dtype=np.uint8)
+
+            m1 = norm < 0.25
+            m2 = (norm >= 0.25) & (norm < 0.5)
+            m3 = (norm >= 0.5) & (norm < 0.75)
+            m4 = norm >= 0.75
+
+            t1 = norm[m1] / 0.25
+            t2 = (norm[m2] - 0.25) / 0.25
+            t3 = (norm[m3] - 0.5) / 0.25
+            t4 = (norm[m4] - 0.75) / 0.25
+
+            # Blue → Cyan
+            g[m1] = (t1 * 255).astype(np.uint8)
+            b[m1] = 255
+            # Cyan → Green
+            g[m2] = 255
+            b[m2] = ((1.0 - t2) * 255).astype(np.uint8)
+            # Green → Yellow
+            r[m3] = (t3 * 255).astype(np.uint8)
+            g[m3] = 255
+            # Yellow → Red
+            r[m4] = 255
+            g[m4] = ((1.0 - t4) * 255).astype(np.uint8)
+
+            self.waterfall_array[0, :, 0] = r
+            self.waterfall_array[0, :, 1] = g
+            self.waterfall_array[0, :, 2] = b
+
         # Convert numpy array to PIL Image
         self.waterfall_image = Image.fromarray(self.waterfall_array, mode='RGB')
         self.waterfall_photo = ImageTk.PhotoImage(self.waterfall_image)
-        
+
         # Clear canvas and redraw
         self.canvas.delete('all')
         self.tooltip_id = None
         self.tooltip_bg_id = None
         self.cursor_line_id = None
-        
+
         # Draw waterfall image
         self.waterfall_canvas_image = self.canvas.create_image(
             self.margin_left, self.margin_top,
             image=self.waterfall_photo, anchor=tk.NW
         )
-        
+
         # Draw frequency scale at top
         self._draw_frequency_scale()
-        
+
         # Draw bandwidth filter visualization
         self._draw_bandwidth_filter()
-        
+
         # Redraw cursor line if visible
         if self.cursor_x >= 0:
             self._draw_cursor_line(self.cursor_x)
-        
+
         # Update tooltip if mouse is over canvas
         if self.last_mouse_x >= 0 and self.last_mouse_y >= 0:
             self._update_tooltip_at_position(self.last_mouse_x, self.last_mouse_y)
-    
+
     def _draw_frequency_scale(self):
         """Draw frequency scale - now handled by spectrum display above."""
         # Frequency scale is now drawn by the spectrum display above
@@ -363,11 +425,11 @@ class WaterfallDisplay:
         low_x = self.margin_left + ((filter_low_freq - start_freq) / total_bandwidth) * self.waterfall_width
         high_x = self.margin_left + ((filter_high_freq - start_freq) / total_bandwidth) * self.waterfall_width
         
-        # Draw semi-transparent yellow overlay
+        # Draw yellow overlay — no stipple (stipple is very slow in Tkinter)
         self.canvas.create_rectangle(
             low_x, self.margin_top,
             high_x, self.margin_top + self.waterfall_height,
-            fill='yellow', stipple='gray25', outline=''
+            fill='#404000', outline=''
         )
         
         # Draw solid yellow lines at filter edges
@@ -969,27 +1031,27 @@ def create_waterfall_window(parent_gui):
     # Use the main GUI's spectrum display directly (shares WebSocket connection and data)
     # No new WebSocket connection is created - waterfall reads from main spectrum
     spectrum = parent_gui.spectrum
-    
+
     # Unbind main spectrum's motion handler - waterfall will handle cursor for both
     # (This is safe because the main spectrum is hidden in the main GUI)
     try:
         spectrum.canvas.unbind('<Motion>')
     except (tk.TclError, AttributeError):
         pass  # Canvas might not exist or already unbound
-    
+
     # Reparent the spectrum canvas to this window's container
     try:
         spectrum.canvas.pack_forget()  # Remove from main GUI
     except (tk.TclError, AttributeError):
         pass  # Canvas might already be removed or destroyed
-    
+
     # Destroy old canvas if it exists
     try:
         if spectrum.canvas and spectrum.canvas.winfo_exists():
             spectrum.canvas.destroy()
     except (tk.TclError, AttributeError):
         pass  # Canvas already destroyed
-    
+
     spectrum.canvas = Canvas(container, width=800, height=200, bg='#000000', highlightthickness=0)
     spectrum.canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=False)
     spectrum.width = 800
@@ -1019,11 +1081,16 @@ def create_waterfall_window(parent_gui):
     if hasattr(parent_gui, 'scroll_mode_var'):
         spectrum.set_scroll_mode(parent_gui.scroll_mode_var.get())
     
-    # CRITICAL: Restart the spectrum update loop
-    # The loop may have stopped when the window was previously closed
-    # We need to restart it for the new window
-    spectrum.update_display()
-    
+    # CRITICAL: Restart the spectrum update loop.
+    # The loop may have stopped when the window was previously closed.
+    # Use restart_update_loop() which clears the _update_loop_running guard
+    # before restarting, preventing duplicate loops from accumulating across
+    # connect/disconnect cycles (which caused UI freezes on second connect).
+    if hasattr(spectrum, 'restart_update_loop'):
+        spectrum.restart_update_loop()
+    else:
+        spectrum.update_display()
+
     # Initialize with current settings
     try:
         freq_hz = parent_gui.get_frequency_hz()
@@ -1036,7 +1103,13 @@ def create_waterfall_window(parent_gui):
         )
     except ValueError:
         pass
-    
+
+    # Increment the class-level generation counter BEFORE creating the new
+    # WaterfallDisplay instance.  Any pending after() callbacks from a
+    # previous instance's update_display() loop will see a stale generation
+    # and self-terminate immediately, preventing duplicate loops.
+    WaterfallDisplay._class_generation += 1
+
     # Create waterfall display below spectrum (shares spectrum's data) with merged bookmarks
     waterfall = WaterfallDisplay(container, spectrum, width=800, height=400, spectrum_height=200, click_tune_var=click_tune_var, bookmarks=parent_gui.all_bookmarks if hasattr(parent_gui, 'all_bookmarks') else parent_gui.bookmarks)
     

@@ -294,7 +294,6 @@ class RadioGUI:
     def __init__(self, root: tk.Tk, initial_config: dict):
         self.root = root
         self.root.title("Radio Client")
-        self.root.geometry("900x1056")  # Increased height for signal data source controls
         self.root.resizable(True, True)
 
         # Configuration
@@ -306,6 +305,9 @@ class RadioGUI:
         self.current_instance_uuid = None  # UUID of the instance we're currently connecting to
         self.config_file = self._get_config_file_path()
         self.load_servers()
+
+        # Restore main window geometry (or use default if not saved)
+        self.restore_window_geometry('main', self.root, "900x1056")
 
         # Client state
         self.client: Optional[RadioClient] = None
@@ -536,6 +538,12 @@ class RadioGUI:
                     # Store for later use (after UI is created)
                     self._saved_radio_control_settings = radio_control_settings
 
+                # Load window geometry settings
+                self._window_geometry = data.get('window_geometry', {})
+
+                # Load previously-open windows set
+                self._open_windows = set(data.get('open_windows', []))
+
                 # Only log if status_text exists (after UI is created)
                 if hasattr(self, 'status_text'):
                     self.log_status(f"Loaded {len(self.servers)} saved server(s)")
@@ -545,6 +553,8 @@ class RadioGUI:
             self.instance_passwords = {}
             self._saved_audio_settings = {}
             self._saved_radio_control_settings = {}
+            self._window_geometry = {}
+            self._open_windows = set()
 
     def save_servers(self):
         """Save server configurations, audio settings, and radio control settings to file."""
@@ -584,7 +594,9 @@ class RadioGUI:
                 'servers': self.servers,
                 'instance_passwords': getattr(self, 'instance_passwords', {}),
                 'audio_settings': audio_settings,
-                'radio_control_settings': radio_control_settings
+                'radio_control_settings': radio_control_settings,
+                'window_geometry': getattr(self, '_window_geometry', {}),
+                'open_windows': sorted(getattr(self, '_open_windows', set()))
             }
 
             with open(self.config_file, 'w') as f:
@@ -701,6 +713,161 @@ class RadioGUI:
         """Save audio settings automatically (called when settings change)."""
         # Use the existing save_servers method which now includes audio settings
         self.save_servers()
+
+    def save_window_geometry(self, key: str, window):
+        """Save a window's current geometry to the persistent config.
+
+        Args:
+            key: Unique key identifying the window (e.g. 'main', 'waterfall')
+            window: The tk.Toplevel (or tk.Tk) whose geometry to save
+        """
+        if not hasattr(self, '_window_geometry'):
+            self._window_geometry = {}
+        try:
+            geom = window.winfo_geometry()
+            # Only save if the geometry looks valid (not '1x1+0+0' which is unmapped)
+            if geom and not geom.startswith('1x1+0+0'):
+                self._window_geometry[key] = geom
+                self._save_geometry_to_file()
+        except Exception:
+            pass
+
+    def _save_geometry_to_file(self):
+        """Write only the window_geometry dict to the config file.
+
+        This is a lightweight alternative to save_servers() that avoids
+        reading UI variables (which may be destroyed during shutdown).
+        """
+        try:
+            import json as _json
+            # Read existing file content first so we don't lose other settings
+            existing = {}
+            if os.path.exists(self.config_file):
+                try:
+                    with open(self.config_file, 'r') as f:
+                        existing = _json.load(f)
+                except Exception:
+                    pass
+            existing['window_geometry'] = getattr(self, '_window_geometry', {})
+            existing['open_windows'] = sorted(getattr(self, '_open_windows', set()))
+            with open(self.config_file, 'w') as f:
+                _json.dump(existing, f, indent=2)
+        except Exception:
+            pass
+
+    def _mark_window_open(self, key: str):
+        """Record that a window is currently open (persisted to config)."""
+        if not hasattr(self, '_open_windows'):
+            self._open_windows = set()
+        self._open_windows.add(key)
+
+    def _mark_window_closed(self, key: str):
+        """Record that a window has been closed (persisted to config)."""
+        if hasattr(self, '_open_windows'):
+            self._open_windows.discard(key)
+
+    def restore_window_geometry(self, key: str, window, default: str = None):
+        """Apply saved geometry to a window, falling back to default.
+
+        Also binds a debounced <Configure> handler so geometry is saved
+        automatically whenever the window is moved or resized.
+        Marks the window as open in the persistent open-windows set.
+
+        Args:
+            key: Unique key identifying the window (e.g. 'main', 'waterfall')
+            window: The tk.Toplevel (or tk.Tk) to apply geometry to
+            default: Fallback geometry string (e.g. '800x600') if no saved value
+        """
+        geom = getattr(self, '_window_geometry', {}).get(key)
+        if geom:
+            try:
+                window.geometry(geom)
+            except Exception:
+                if default:
+                    try:
+                        window.geometry(default)
+                    except Exception:
+                        pass
+        elif default:
+            try:
+                window.geometry(default)
+            except Exception:
+                pass
+
+        # Track this window as open
+        self._mark_window_open(key)
+
+        # Bind debounced save on every move/resize
+        self._bind_geometry_autosave(key, window)
+
+    def _bind_geometry_autosave(self, key: str, window):
+        """Poll window geometry every 2 seconds and save if it has changed.
+
+        Using polling instead of <Configure> event binding avoids flooding the
+        Tkinter event queue on windows that continuously redraw (e.g. waterfall,
+        spectrum canvases), which would cause the UI to freeze.
+
+        The poll starts after a 2-second stabilization delay so the initial
+        geometry restore has time to settle before we record the baseline.
+
+        A <Destroy> binding cancels the pending after() job immediately when the
+        window is destroyed, preventing stale callbacks from accumulating across
+        connect/disconnect cycles (which caused ~0.5 FPS after reconnect).
+
+        Args:
+            key: Geometry dict key for this window
+            window: The tk.Toplevel (or tk.Tk) to watch
+        """
+        _last_geom = [None]   # last geometry string we saved
+        _poll_job = [None]    # pending after() job id
+        _stopped = [False]    # set True when window is destroyed
+
+        def _poll():
+            if _stopped[0]:
+                return
+            # Stop polling if the window has been destroyed
+            try:
+                if not window.winfo_exists():
+                    return
+            except Exception:
+                return
+
+            try:
+                geom = window.winfo_geometry()
+                if geom and not geom.startswith('1x1+0+0') and geom != _last_geom[0]:
+                    _last_geom[0] = geom
+                    self.save_window_geometry(key, window)
+            except Exception:
+                pass
+
+            # Schedule next poll
+            try:
+                _poll_job[0] = window.after(2000, _poll)
+            except Exception:
+                pass
+
+        def _on_destroy(event):
+            # Only respond to the window's own destroy event, not child widgets
+            if event.widget is not window:
+                return
+            _stopped[0] = True
+            if _poll_job[0] is not None:
+                try:
+                    window.after_cancel(_poll_job[0])
+                except Exception:
+                    pass
+
+        # Cancel polling immediately when the window is destroyed
+        try:
+            window.bind('<Destroy>', _on_destroy, add='+')
+        except Exception:
+            pass
+
+        # Start polling after 2 seconds to let the window settle
+        try:
+            window.after(2000, _poll)
+        except Exception:
+            pass
 
     def add_current_server(self):
         """Add current server configuration to saved servers."""
@@ -891,6 +1058,19 @@ class RadioGUI:
             on_password_save=on_password_save
         )
 
+        # Restore saved geometry
+        if self.public_instances_window:
+            self.restore_window_geometry('public_instances', self.public_instances_window)
+
+            # Save geometry on close
+            _pub_win = self.public_instances_window
+            def _pub_close():
+                self.save_window_geometry('public_instances', _pub_win)
+                self._mark_window_closed('public_instances')
+                _pub_win.destroy()
+                self.public_instances_window = None
+            _pub_win.protocol("WM_DELETE_WINDOW", _pub_close)
+
     def _get_local_uuids(self):
         """Get UUIDs from discovered local instances.
 
@@ -1000,6 +1180,20 @@ class RadioGUI:
             self.connect()
 
         self.local_instances_window, self.local_instances_display = create_local_instances_window(self.root, on_connect)
+
+        # Restore saved geometry
+        if self.local_instances_window:
+            self.restore_window_geometry('local_instances', self.local_instances_window)
+
+            # Save geometry on close
+            _loc_win = self.local_instances_window
+            def _loc_close():
+                self.save_window_geometry('local_instances', _loc_win)
+                self._mark_window_closed('local_instances')
+                _loc_win.destroy()
+                self.local_instances_window = None
+                self.local_instances_display = None
+            _loc_win.protocol("WM_DELETE_WINDOW", _loc_close)
 
     def check_and_open_instances_window(self):
         """Check for local instances and open appropriate windows."""
@@ -3357,7 +3551,16 @@ class RadioGUI:
         # Create new window
         self.local_bookmarks_window = tk.Toplevel(self.root)
         self.local_bookmarks_window.title("Local Bookmarks")
-        self.local_bookmarks_window.geometry("600x400")
+        self.restore_window_geometry('local_bookmarks', self.local_bookmarks_window, "600x400")
+
+        # Save geometry on close
+        _bm_win = self.local_bookmarks_window
+        def _bm_close():
+            self.save_window_geometry('local_bookmarks', _bm_win)
+            self._mark_window_closed('local_bookmarks')
+            _bm_win.destroy()
+            self.local_bookmarks_window = None
+        _bm_win.protocol("WM_DELETE_WINDOW", _bm_close)
 
         # Main frame
         main_frame = ttk.Frame(self.local_bookmarks_window, padding="10")
@@ -5350,6 +5553,16 @@ class RadioGUI:
             server_url=_server_url,
         )
 
+        # Restore saved geometry and wire close handler
+        if self.rmnoise_window and hasattr(self.rmnoise_window, 'window') and self.rmnoise_window.window:
+            self.restore_window_geometry('rmnoise', self.rmnoise_window.window)
+            _rm_win = self.rmnoise_window.window
+            def _rm_close():
+                self.save_window_geometry('rmnoise', _rm_win)
+                self._mark_window_closed('rmnoise')
+                _rm_win.destroy()
+            _rm_win.protocol("WM_DELETE_WINDOW", _rm_close)
+
     def _poll_rmnoise_stats(self):
         """Periodically update the main-window RMNoise status label with latency."""
         # Stop if no longer enabled or bridge gone
@@ -6025,6 +6238,15 @@ class RadioGUI:
             # Create waterfall window (shares spectrum's data)
             self.waterfall_window, self.waterfall_display = create_waterfall_window(self)
 
+            # Restore saved geometry and wire close handler
+            self.restore_window_geometry('waterfall', self.waterfall_window)
+            _wf_win = self.waterfall_window
+            def _wf_close():
+                self.save_window_geometry('waterfall', _wf_win)
+                self._mark_window_closed('waterfall')
+                _wf_win.destroy()
+            _wf_win.protocol("WM_DELETE_WINDOW", _wf_close)
+
             self.log_status("Waterfall window opened automatically")
 
         except Exception as e:
@@ -6045,6 +6267,15 @@ class RadioGUI:
 
             # Create audio spectrum window
             self.audio_spectrum_window, self.audio_spectrum_display = create_audio_spectrum_window(self)
+
+            # Restore saved geometry and wire close handler
+            self.restore_window_geometry('audio_spectrum', self.audio_spectrum_window)
+            _as_win = self.audio_spectrum_window
+            def _as_close():
+                self.save_window_geometry('audio_spectrum', _as_win)
+                self._mark_window_closed('audio_spectrum')
+                _as_win.destroy()
+            _as_win.protocol("WM_DELETE_WINDOW", _as_close)
 
             self.log_status("Audio spectrum window opened automatically")
 
@@ -6157,6 +6388,16 @@ class RadioGUI:
             self.s_meter_display = SMeterDisplay(self)
             self.s_meter_display.open_window()
 
+            # Restore saved geometry and wire close handler
+            if self.s_meter_display.window:
+                self.restore_window_geometry('s_meter', self.s_meter_display.window)
+                _sm_win = self.s_meter_display.window
+                def _sm_close():
+                    self.save_window_geometry('s_meter', _sm_win)
+                    self._mark_window_closed('s_meter')
+                    _sm_win.destroy()
+                _sm_win.protocol("WM_DELETE_WINDOW", _sm_close)
+
         except Exception as e:
             # Silent failure for auto-open (user can manually open if needed)
             self.log_status(f"Note: S-Meter auto-open failed - {e}")
@@ -6182,6 +6423,17 @@ class RadioGUI:
             # Create waterfall window (shares spectrum's data)
             self.waterfall_window, self.waterfall_display = create_waterfall_window(self)
 
+            # Restore saved geometry
+            self.restore_window_geometry('waterfall', self.waterfall_window)
+
+            # Save geometry on close
+            _wf_win = self.waterfall_window
+            def _wf_close():
+                self.save_window_geometry('waterfall', _wf_win)
+                self._mark_window_closed('waterfall')
+                _wf_win.destroy()
+            _wf_win.protocol("WM_DELETE_WINDOW", _wf_close)
+
             self.log_status("Waterfall window opened")
 
         except Exception as e:
@@ -6204,6 +6456,17 @@ class RadioGUI:
 
             # Create audio spectrum window
             self.audio_spectrum_window, self.audio_spectrum_display = create_audio_spectrum_window(self)
+
+            # Restore saved geometry
+            self.restore_window_geometry('audio_spectrum', self.audio_spectrum_window)
+
+            # Save geometry on close
+            _as_win = self.audio_spectrum_window
+            def _as_close():
+                self.save_window_geometry('audio_spectrum', _as_win)
+                self._mark_window_closed('audio_spectrum')
+                _as_win.destroy()
+            _as_win.protocol("WM_DELETE_WINDOW", _as_close)
 
             self.log_status("Audio spectrum window opened")
 
@@ -6274,6 +6537,9 @@ class RadioGUI:
             )
             self.digital_spots_window = self.digital_spots_display.window
 
+            # Restore saved geometry
+            self.restore_window_geometry('digital_spots', self.digital_spots_window)
+
             # Set initial band filter to current band if one is active
             try:
                 current_freq = self.get_frequency_hz()
@@ -6295,6 +6561,9 @@ class RadioGUI:
 
     def _on_digital_spots_closed(self):
         """Handle digital spots window close."""
+        if self.digital_spots_window:
+            self.save_window_geometry('digital_spots', self.digital_spots_window)
+        self._mark_window_closed('digital_spots')
         self.digital_spots_window = None
         self.digital_spots_display = None
         self.log_status("Digital spots window closed")
@@ -6328,6 +6597,9 @@ class RadioGUI:
             )
             self.cw_spots_window = self.cw_spots_display.window
 
+            # Restore saved geometry
+            self.restore_window_geometry('cw_spots', self.cw_spots_window)
+
             # Set initial band filter to current band if one is active
             try:
                 current_freq = self.get_frequency_hz()
@@ -6349,6 +6621,9 @@ class RadioGUI:
 
     def _on_cw_spots_closed(self):
         """Handle CW spots window close."""
+        if self.cw_spots_window:
+            self.save_window_geometry('cw_spots', self.cw_spots_window)
+        self._mark_window_closed('cw_spots')
         self.cw_spots_window = None
         self.cw_spots_display = None
         self.log_status("CW spots window closed")
@@ -6376,6 +6651,17 @@ class RadioGUI:
             # Create band conditions window
             self.band_conditions_display = create_band_conditions_window(self.root, server, use_tls)
             self.band_conditions_window = self.band_conditions_display.window
+
+            # Restore saved geometry
+            self.restore_window_geometry('band_conditions', self.band_conditions_window)
+
+            # Save geometry on close
+            _bc_win = self.band_conditions_window
+            def _bc_close():
+                self.save_window_geometry('band_conditions', _bc_win)
+                self._mark_window_closed('band_conditions')
+                _bc_win.destroy()
+            _bc_win.protocol("WM_DELETE_WINDOW", _bc_close)
 
             self.log_status("Band conditions window opened")
 
@@ -6426,6 +6712,17 @@ class RadioGUI:
             )
             self.voice_activity_window = self.voice_activity_display.window
 
+            # Restore saved geometry
+            self.restore_window_geometry('voice_activity', self.voice_activity_window)
+
+            # Save geometry on close
+            _va_win = self.voice_activity_window
+            def _va_close():
+                self.save_window_geometry('voice_activity', _va_win)
+                self._mark_window_closed('voice_activity')
+                _va_win.destroy()
+            _va_win.protocol("WM_DELETE_WINDOW", _va_close)
+
             self.log_status("Voice activity window opened")
 
         except Exception as e:
@@ -6455,6 +6752,17 @@ class RadioGUI:
             # Create noise floor window
             self.noise_floor_display = create_noise_floor_window(self.root, server, use_tls)
             self.noise_floor_window = self.noise_floor_display.window
+
+            # Restore saved geometry
+            self.restore_window_geometry('noise_floor', self.noise_floor_window)
+
+            # Save geometry on close
+            _nf_win = self.noise_floor_window
+            def _nf_close():
+                self.save_window_geometry('noise_floor', _nf_win)
+                self._mark_window_closed('noise_floor')
+                _nf_win.destroy()
+            _nf_win.protocol("WM_DELETE_WINDOW", _nf_close)
 
             self.log_status("Noise floor window opened")
 
@@ -6500,6 +6808,17 @@ class RadioGUI:
             )
             self.space_weather_window = self.space_weather_display.window
 
+            # Restore saved geometry
+            self.restore_window_geometry('space_weather', self.space_weather_window)
+
+            # Save geometry on close
+            _sw_win = self.space_weather_window
+            def _sw_close():
+                self.save_window_geometry('space_weather', _sw_win)
+                self._mark_window_closed('space_weather')
+                _sw_win.destroy()
+            _sw_win.protocol("WM_DELETE_WINDOW", _sw_close)
+
             self.log_status("Space weather window opened")
 
         except Exception as e:
@@ -6537,6 +6856,17 @@ class RadioGUI:
             )
             self.rotator_status_window = self.rotator_status_display.window
 
+            # Restore saved geometry
+            self.restore_window_geometry('rotator_status', self.rotator_status_window)
+
+            # Save geometry on close
+            _rot_win = self.rotator_status_window
+            def _rot_close():
+                self.save_window_geometry('rotator_status', _rot_win)
+                self._mark_window_closed('rotator_status')
+                _rot_win.destroy()
+            _rot_win.protocol("WM_DELETE_WINDOW", _rot_close)
+
             self.log_status("Rotator status window opened")
 
         except Exception as e:
@@ -6557,6 +6887,17 @@ class RadioGUI:
             self.snr_history_window, self.snr_history_display = create_snr_history_window(self)
 
             if self.snr_history_window:
+                # Restore saved geometry
+                self.restore_window_geometry('snr_history', self.snr_history_window)
+
+                # Save geometry on close
+                _snr_win = self.snr_history_window
+                def _snr_close():
+                    self.save_window_geometry('snr_history', _snr_win)
+                    self._mark_window_closed('snr_history')
+                    _snr_win.destroy()
+                _snr_win.protocol("WM_DELETE_WINDOW", _snr_close)
+
                 self.log_status("SNR history window opened")
 
         except ImportError:
@@ -6580,6 +6921,17 @@ class RadioGUI:
             self.s_meter_display.open_window()
 
             if self.s_meter_display.window:
+                # Restore saved geometry
+                self.restore_window_geometry('s_meter', self.s_meter_display.window)
+
+                # Save geometry on close
+                _sm_win = self.s_meter_display.window
+                def _sm_close():
+                    self.save_window_geometry('s_meter', _sm_win)
+                    self._mark_window_closed('s_meter')
+                    _sm_win.destroy()
+                _sm_win.protocol("WM_DELETE_WINDOW", _sm_close)
+
                 self.log_status("S-Meter window opened")
 
         except ImportError as e:
@@ -6601,6 +6953,17 @@ class RadioGUI:
             # Create EQ window with callback
             self.eq_display = create_eq_window(self.root, self.on_eq_changed)
             self.eq_window = self.eq_display.window
+
+            # Restore saved geometry
+            self.restore_window_geometry('eq', self.eq_window)
+
+            # Save geometry on close
+            _eq_win = self.eq_window
+            def _eq_close():
+                self.save_window_geometry('eq', _eq_win)
+                self._mark_window_closed('eq')
+                _eq_win.destroy()
+            _eq_win.protocol("WM_DELETE_WINDOW", _eq_close)
 
             self.log_status("EQ window opened")
 
@@ -6699,6 +7062,17 @@ class RadioGUI:
                 self.root, server, use_tls, get_session_id, tune_to_channel
             )
 
+            # Restore saved geometry
+            self.restore_window_geometry('users', self.users_window)
+
+            # Save geometry on close
+            _users_win = self.users_window
+            def _users_close():
+                self.save_window_geometry('users', _users_win)
+                self._mark_window_closed('users')
+                _users_win.destroy()
+            _users_win.protocol("WM_DELETE_WINDOW", _users_close)
+
             self.log_status("Users window opened")
 
         except Exception as e:
@@ -6735,6 +7109,9 @@ class RadioGUI:
             )
             self.chat_window = self.chat_display.window
 
+            # Restore saved geometry
+            self.restore_window_geometry('chat', self.chat_window)
+
             # Check for saved username and auto-join if found
             if instance_uuid:
                 saved_username = get_saved_username_for_instance(instance_uuid)
@@ -6755,6 +7132,9 @@ class RadioGUI:
 
     def _on_chat_closed(self):
         """Handle chat window close."""
+        if self.chat_window:
+            self.save_window_geometry('chat', self.chat_window)
+        self._mark_window_closed('chat')
         self.chat_window = None
         self.chat_display = None
         self.log_status("Chat window closed")
@@ -6793,13 +7173,25 @@ class RadioGUI:
                 # Controller exists, just create window for it
                 self.midi_controller.create_window(self.root)
                 self.midi_window = self.midi_controller.window
-                self.log_status("MIDI controller window opened")
             else:
                 # No controller yet, create new one with window
                 from midi_controller import create_midi_window
                 self.midi_controller = create_midi_window(self)
                 self.midi_window = self.midi_controller.window
-                self.log_status("MIDI controller window opened")
+
+            if self.midi_window:
+                # Restore saved geometry
+                self.restore_window_geometry('midi', self.midi_window)
+
+                # Save geometry on close
+                _midi_win = self.midi_window
+                def _midi_close():
+                    self.save_window_geometry('midi', _midi_win)
+                    self._mark_window_closed('midi')
+                    _midi_win.destroy()
+                _midi_win.protocol("WM_DELETE_WINDOW", _midi_close)
+
+            self.log_status("MIDI controller window opened")
 
         except ImportError as e:
             messagebox.showerror("Error", "MIDI support not available. Install python-rtmidi:\npip install python-rtmidi")
@@ -7897,6 +8289,9 @@ class RadioGUI:
                             # Add delay to allow other connections to establish first
                             self.root.after(3000, self.start_band_state_polling)
 
+                            # Reopen windows that were open in the previous session
+                            self.root.after(1000, self.auto_reopen_previous_windows)
+
                         # Send initial tune command so the server is tuned to the
                         # frequency/mode shown in the GUI fields.  This is needed both
                         # on first connect and on reconnect (same or different instance).
@@ -8554,6 +8949,16 @@ class RadioGUI:
             self
         )
 
+        # Restore saved geometry and wire close handler
+        if self.navtex_window and hasattr(self.navtex_window, 'window') and self.navtex_window.window:
+            self.restore_window_geometry('navtex', self.navtex_window.window)
+            _navtex_win = self.navtex_window.window
+            def _navtex_close():
+                self.save_window_geometry('navtex', _navtex_win)
+                self._mark_window_closed('navtex')
+                _navtex_win.destroy()
+            _navtex_win.protocol("WM_DELETE_WINDOW", _navtex_close)
+
     def open_fsk_window(self):
         """Open the FSK extension window."""
         # Don't open multiple windows
@@ -8601,6 +9006,16 @@ class RadioGUI:
         if self.client and hasattr(self.client, 'samprate'):
             self.fsk_window.set_sample_rate(self.client.samprate)
 
+        # Restore saved geometry and wire close handler
+        if self.fsk_window and hasattr(self.fsk_window, 'window') and self.fsk_window.window:
+            self.restore_window_geometry('fsk', self.fsk_window.window)
+            _fsk_win = self.fsk_window.window
+            def _fsk_close():
+                self.save_window_geometry('fsk', _fsk_win)
+                self._mark_window_closed('fsk')
+                _fsk_win.destroy()
+            _fsk_win.protocol("WM_DELETE_WINDOW", _fsk_close)
+
     def open_wefax_window(self):
         """Open the WEFAX extension window."""
         # Don't open multiple windows
@@ -8643,6 +9058,16 @@ class RadioGUI:
             ws_manager,
             self
         )
+
+        # Restore saved geometry and wire close handler
+        if self.wefax_window and hasattr(self.wefax_window, 'window') and self.wefax_window.window:
+            self.restore_window_geometry('wefax', self.wefax_window.window)
+            _wefax_win = self.wefax_window.window
+            def _wefax_close():
+                self.save_window_geometry('wefax', _wefax_win)
+                self._mark_window_closed('wefax')
+                _wefax_win.destroy()
+            _wefax_win.protocol("WM_DELETE_WINDOW", _wefax_close)
 
     def open_sstv_window(self):
         """Open the SSTV extension window."""
@@ -8687,6 +9112,16 @@ class RadioGUI:
             self
         )
 
+        # Restore saved geometry and wire close handler
+        if self.sstv_window and hasattr(self.sstv_window, 'window') and self.sstv_window.window:
+            self.restore_window_geometry('sstv', self.sstv_window.window)
+            _sstv_win = self.sstv_window.window
+            def _sstv_close():
+                self.save_window_geometry('sstv', _sstv_win)
+                self._mark_window_closed('sstv')
+                _sstv_win.destroy()
+            _sstv_win.protocol("WM_DELETE_WINDOW", _sstv_close)
+
     def open_ft8_window(self):
         """Open the FT8 extension window."""
         # Don't open multiple windows
@@ -8729,6 +9164,16 @@ class RadioGUI:
             ws_manager,
             self
         )
+
+        # Restore saved geometry and wire close handler
+        if self.ft8_window and hasattr(self.ft8_window, 'window') and self.ft8_window.window:
+            self.restore_window_geometry('ft8', self.ft8_window.window)
+            _ft8_win = self.ft8_window.window
+            def _ft8_close():
+                self.save_window_geometry('ft8', _ft8_win)
+                self._mark_window_closed('ft8')
+                _ft8_win.destroy()
+            _ft8_win.protocol("WM_DELETE_WINDOW", _ft8_close)
 
     def open_whisper_window(self):
         """Open the Whisper speech-to-text extension window."""
@@ -8773,6 +9218,16 @@ class RadioGUI:
             self
         )
 
+        # Restore saved geometry and wire close handler
+        if self.whisper_window and hasattr(self.whisper_window, 'window') and self.whisper_window.window:
+            self.restore_window_geometry('whisper', self.whisper_window.window)
+            _whisper_win = self.whisper_window.window
+            def _whisper_close():
+                self.save_window_geometry('whisper', _whisper_win)
+                self._mark_window_closed('whisper')
+                _whisper_win.destroy()
+            _whisper_win.protocol("WM_DELETE_WINDOW", _whisper_close)
+
     def open_freedv_window(self):
         """Open the FreeDV/RADE decoder extension window."""
         # Don't open multiple windows
@@ -8816,8 +9271,118 @@ class RadioGUI:
             self
         )
 
+        # Restore saved geometry and wire close handler
+        if self.freedv_window and hasattr(self.freedv_window, 'window') and self.freedv_window.window:
+            self.restore_window_geometry('freedv', self.freedv_window.window)
+            _freedv_win = self.freedv_window.window
+            def _freedv_close():
+                self.save_window_geometry('freedv', _freedv_win)
+                self._mark_window_closed('freedv')
+                _freedv_win.destroy()
+            _freedv_win.protocol("WM_DELETE_WINDOW", _freedv_close)
+
+    def auto_reopen_previous_windows(self):
+        """Reopen windows that were open in the previous session.
+
+        Called after a successful connection. Windows that are already being
+        auto-opened unconditionally (waterfall, audio_spectrum, users, s_meter)
+        are skipped here to avoid double-opening.
+
+        Windows that require a connection are opened here. Windows that don't
+        require a connection (local_bookmarks, midi) are opened immediately on
+        startup instead (not here).
+        """
+        prev = getattr(self, '_open_windows', set())
+        if not prev:
+            return
+
+        # Windows already unconditionally auto-opened on connect — skip them
+        always_open = {'waterfall', 'audio_spectrum', 'users', 's_meter'}
+
+        # Connection-dependent windows and their open methods + delays (ms)
+        connection_windows = [
+            ('digital_spots',   self.open_digital_spots_window,  1200),
+            ('cw_spots',        self.open_cw_spots_window,        1400),
+            ('band_conditions', self.open_band_conditions_window, 1600),
+            ('voice_activity',  self.open_voice_activity_window,  1800),
+            ('noise_floor',     self.open_noise_floor_window,     2000),
+            ('space_weather',   self.open_space_weather_window,   2200),
+            ('rotator_status',  self.open_rotator_status_window,  2400),
+            ('snr_history',     self.open_snr_history_window,     2600),
+            ('eq',              self.open_eq_window,              2800),
+            ('chat',            self.open_chat_window,            3000),
+            ('rmnoise',         self.open_rmnoise_window,         3200),
+            ('navtex',          self.open_navtex_window,          3400),
+            ('fsk',             self.open_fsk_window,             3400),
+            ('wefax',           self.open_wefax_window,           3400),
+            ('sstv',            self.open_sstv_window,            3400),
+            ('ft8',             self.open_ft8_window,             3400),
+            ('whisper',         self.open_whisper_window,         3400),
+            ('freedv',          self.open_freedv_window,          3400),
+        ]
+
+        for key, open_fn, delay in connection_windows:
+            if key in prev and key not in always_open:
+                self.root.after(delay, open_fn)
+                self.log_status(f"Scheduling reopen of '{key}' window")
+
     def on_closing(self):
         """Handle window close event."""
+        # Save geometry for all currently open windows before destroying them
+        self.save_window_geometry('main', self.root)
+        if self.waterfall_window and self.waterfall_window.winfo_exists():
+            self.save_window_geometry('waterfall', self.waterfall_window)
+        if self.audio_spectrum_window and self.audio_spectrum_window.winfo_exists():
+            self.save_window_geometry('audio_spectrum', self.audio_spectrum_window)
+        if self.digital_spots_window and self.digital_spots_window.winfo_exists():
+            self.save_window_geometry('digital_spots', self.digital_spots_window)
+        if self.cw_spots_window and self.cw_spots_window.winfo_exists():
+            self.save_window_geometry('cw_spots', self.cw_spots_window)
+        if self.band_conditions_window and self.band_conditions_window.winfo_exists():
+            self.save_window_geometry('band_conditions', self.band_conditions_window)
+        if self.voice_activity_window and self.voice_activity_window.winfo_exists():
+            self.save_window_geometry('voice_activity', self.voice_activity_window)
+        if self.noise_floor_window and self.noise_floor_window.winfo_exists():
+            self.save_window_geometry('noise_floor', self.noise_floor_window)
+        if self.space_weather_window and self.space_weather_window.winfo_exists():
+            self.save_window_geometry('space_weather', self.space_weather_window)
+        if self.rotator_status_window and self.rotator_status_window.winfo_exists():
+            self.save_window_geometry('rotator_status', self.rotator_status_window)
+        if self.public_instances_window and self.public_instances_window.winfo_exists():
+            self.save_window_geometry('public_instances', self.public_instances_window)
+        if self.local_instances_window and self.local_instances_window.winfo_exists():
+            self.save_window_geometry('local_instances', self.local_instances_window)
+        if self.users_window and self.users_window.winfo_exists():
+            self.save_window_geometry('users', self.users_window)
+        if self.chat_window and self.chat_window.winfo_exists():
+            self.save_window_geometry('chat', self.chat_window)
+        if self.eq_window and self.eq_window.winfo_exists():
+            self.save_window_geometry('eq', self.eq_window)
+        if self.snr_history_window and self.snr_history_window.winfo_exists():
+            self.save_window_geometry('snr_history', self.snr_history_window)
+        if self.s_meter_display and self.s_meter_display.window and self.s_meter_display.window.winfo_exists():
+            self.save_window_geometry('s_meter', self.s_meter_display.window)
+        if self.midi_window and self.midi_window.winfo_exists():
+            self.save_window_geometry('midi', self.midi_window)
+        if hasattr(self, 'local_bookmarks_window') and self.local_bookmarks_window and self.local_bookmarks_window.winfo_exists():
+            self.save_window_geometry('local_bookmarks', self.local_bookmarks_window)
+        if self.rmnoise_window and hasattr(self.rmnoise_window, 'window') and self.rmnoise_window.window and self.rmnoise_window.window.winfo_exists():
+            self.save_window_geometry('rmnoise', self.rmnoise_window.window)
+        if hasattr(self, 'navtex_window') and self.navtex_window and self.navtex_window.window.winfo_exists():
+            self.save_window_geometry('navtex', self.navtex_window.window)
+        if hasattr(self, 'fsk_window') and self.fsk_window and self.fsk_window.window.winfo_exists():
+            self.save_window_geometry('fsk', self.fsk_window.window)
+        if hasattr(self, 'wefax_window') and self.wefax_window and self.wefax_window.window.winfo_exists():
+            self.save_window_geometry('wefax', self.wefax_window.window)
+        if hasattr(self, 'sstv_window') and self.sstv_window and self.sstv_window.window.winfo_exists():
+            self.save_window_geometry('sstv', self.sstv_window.window)
+        if hasattr(self, 'ft8_window') and self.ft8_window and self.ft8_window.window.winfo_exists():
+            self.save_window_geometry('ft8', self.ft8_window.window)
+        if hasattr(self, 'whisper_window') and self.whisper_window and self.whisper_window.window.winfo_exists():
+            self.save_window_geometry('whisper', self.whisper_window.window)
+        if hasattr(self, 'freedv_window') and self.freedv_window and self.freedv_window.window.winfo_exists():
+            self.save_window_geometry('freedv', self.freedv_window.window)
+
         if self.connected:
             self.disconnect()
 

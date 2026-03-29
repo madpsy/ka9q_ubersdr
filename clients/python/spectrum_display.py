@@ -104,7 +104,12 @@ class SpectrumDisplay:
         self.ws_url: Optional[str] = None
         self.connected: bool = False
         self.running: bool = False
-        
+
+        # Per-connection ID — incremented on each connect() call so that any
+        # still-running thread from a previous connection can detect it has been
+        # superseded and exit without touching shared state.
+        self._connection_id: int = 0
+
         # Event loop for WebSocket
         self.event_loop: Optional[asyncio.AbstractEventLoop] = None
         self.ws_thread: Optional[threading.Thread] = None
@@ -159,7 +164,7 @@ class SpectrumDisplay:
     
     def connect(self, server_url: str, frequency: float, user_session_id: str = None, use_tls: bool = False, password: str = None):
         """Connect to spectrum WebSocket.
-        
+
         Args:
             server_url: Server URL (e.g., 'localhost:8080' or 'http://server:8080')
             frequency: Initial tuned frequency in Hz (where we're listening)
@@ -167,6 +172,11 @@ class SpectrumDisplay:
             use_tls: Whether to use WSS (WebSocket Secure) instead of WS
             password: Optional password for bypass authentication
         """
+        # Stop any existing connection first.  This increments _connection_id so
+        # the old thread's loop condition becomes False immediately on its next
+        # iteration, even if self.running was just set back to True here.
+        self.disconnect()
+
         # Parse server URL
         if '://' in server_url:
             # Full URL provided
@@ -176,7 +186,7 @@ class SpectrumDisplay:
                 ws_url = server_url.replace('http://', 'ws://')
             else:
                 ws_url = server_url
-            
+
             # Add path if not present
             if '/ws/user-spectrum' not in ws_url:
                 ws_url = ws_url.rstrip('/') + '/ws/user-spectrum'
@@ -184,7 +194,7 @@ class SpectrumDisplay:
             # Host:port format - use TLS setting
             protocol = 'wss' if use_tls else 'ws'
             ws_url = f'{protocol}://{server_url}/ws/user-spectrum'
-        
+
         # Build query parameters
         params = {}
         if user_session_id:
@@ -197,47 +207,95 @@ class SpectrumDisplay:
         # Add query parameters if any
         if params:
             ws_url = f'{ws_url}?{urlencode(params)}'
-        
+
         self.ws_url = ws_url
         # Store the tuned frequency (where we're listening)
         # center_freq will be updated from server's config messages
         self.tuned_freq = frequency
         self.running = True
-        
+
+        # Assign a new connection ID.  The WebSocket thread captures this value
+        # at startup; if it no longer matches self._connection_id the thread
+        # knows it has been superseded and exits immediately.
+        self._connection_id += 1
+
         # Start WebSocket thread
-        self.ws_thread = threading.Thread(target=self._run_websocket, daemon=True)
+        self.ws_thread = threading.Thread(
+            target=self._run_websocket,
+            args=(self._connection_id,),
+            daemon=True
+        )
         self.ws_thread.start()
-    
+
     def disconnect(self):
         """Disconnect from spectrum WebSocket."""
         self.running = False
+        # Drain the data queue so stale frames from this session don't cause a
+        # burst of _draw_spectrum() calls when the waterfall window opens on the
+        # next connect (which would freeze the UI).
+        try:
+            while True:
+                self.data_queue.get_nowait()
+        except Exception:
+            pass
         if self.ws:
             # Close WebSocket in its event loop
             if self.event_loop and self.event_loop.is_running():
                 asyncio.run_coroutine_threadsafe(self.ws.close(), self.event_loop)
-    
-    def _run_websocket(self):
-        """Run WebSocket connection in separate thread."""
+
+        # Clear spectrum data so the waterfall doesn't immediately start drawing
+        # stale data from the previous session on the next connect.
+        self.spectrum_data = None
+
+        # Reset binary protocol state so delta frames from the new connection
+        # are not applied to stale data from the old connection (which would
+        # produce garbage dB values and slow rendering).
+        self.binary_spectrum_data = None
+        self.binary_spectrum_data8 = None
+        self.binary8_logged = False
+        self.using_binary_protocol = False
+        self.initial_bin_bandwidth = 0  # Force re-zoom on next connect
+
+    def _run_websocket(self, connection_id: int):
+        """Run WebSocket connection in separate thread.
+
+        Args:
+            connection_id: ID assigned at connect() time.  If self._connection_id
+                           no longer matches, this thread has been superseded and
+                           should exit without touching shared state.
+        """
         self.event_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.event_loop)
-        
+
         try:
-            self.event_loop.run_until_complete(self._websocket_handler())
+            self.event_loop.run_until_complete(
+                self._websocket_handler(connection_id)
+            )
         except Exception as e:
             print(f"Spectrum WebSocket error: {e}")
         finally:
             self.event_loop.close()
-    
-    async def _websocket_handler(self):
-        """Handle WebSocket connection and messages."""
+
+    async def _websocket_handler(self, connection_id: int):
+        """Handle WebSocket connection and messages.
+
+        Args:
+            connection_id: ID assigned at connect() time.  The receive loop
+                           exits immediately if this no longer matches
+                           self._connection_id (i.e. a newer connect() call
+                           has superseded this one).
+        """
         try:
             async with websockets.connect(self.ws_url) as ws:
+                # Bail out immediately if we've already been superseded.
+                if connection_id != self._connection_id:
+                    return
+
                 self.ws = ws
                 self.connected = True
                 print(f"Spectrum connected to {self.ws_url}")
 
                 # Check if server negotiated WebSocket compression
-                # Check the response headers for Sec-WebSocket-Extensions
                 if hasattr(ws, 'response_headers'):
                     extensions = ws.response_headers.get('Sec-WebSocket-Extensions', '')
                     if 'permessage-deflate' in extensions.lower():
@@ -245,7 +303,6 @@ class SpectrumDisplay:
                     else:
                         print("Server NOT using native WebSocket compression (manual gzip for JSON messages)")
                 else:
-                    # Fallback: check if compression was negotiated
                     compression_enabled = getattr(ws, 'compression', None) is not None
                     if compression_enabled:
                         print("Server using native WebSocket compression")
@@ -254,9 +311,10 @@ class SpectrumDisplay:
 
                 # Don't send zoom command immediately - wait for server's default config first
                 # Then we'll send zoom command after receiving the first config message
-                
-                # Receive messages
-                while self.running:
+
+                # Receive messages — exit if self.running is False OR if this
+                # connection has been superseded by a newer connect() call.
+                while self.running and connection_id == self._connection_id:
                     try:
                         message = await asyncio.wait_for(ws.recv(), timeout=1.0)
                         await self._handle_message(message)
@@ -264,12 +322,14 @@ class SpectrumDisplay:
                         continue
                     except websockets.exceptions.ConnectionClosed:
                         break
-                
+
         except Exception as e:
             print(f"Spectrum connection error: {e}")
         finally:
-            self.connected = False
-            self.ws = None
+            # Only clear shared state if we are still the active connection.
+            if connection_id == self._connection_id:
+                self.connected = False
+                self.ws = None
     
     async def _handle_message(self, message):
         """Handle incoming WebSocket message.
@@ -606,38 +666,84 @@ class SpectrumDisplay:
         if mode:
             self.current_mode = mode.lower()
     
-    def update_display(self):
-        """Update spectrum display (called periodically)."""
-        # Process queued spectrum data - draw immediately when data arrives
+    def update_display(self, generation=None):
+        """Update spectrum display (called periodically).
+
+        Uses a generation counter to detect stale loops: each time
+        restart_update_loop() is called the generation increments, and
+        any previously-scheduled callback sees a mismatched generation
+        and exits immediately.  This prevents duplicate 10 ms after()
+        chains from accumulating across connect/disconnect cycles.
+        """
+        # Each loop iteration captures the generation at the time it was
+        # scheduled.  If the generation has advanced, this is a stale
+        # callback from a previous loop — stop it.
+        current_gen = getattr(self, '_update_generation', 0)
+        if generation is None:
+            # First call (not from after()) — adopt the current generation.
+            generation = current_gen
+        elif generation != current_gen:
+            # Stale callback from a previous loop — discard it.
+            return
+
+        # Drain the entire queue but only draw the latest frame.
+        # Drawing every queued frame would call _draw_spectrum() N times
+        # synchronously in a single event-loop tick, which freezes the UI
+        # if many frames have accumulated (e.g. after a disconnect/reconnect).
+        latest_item = None
+        queue_size = 0
         try:
             while True:
-                queued_item = self.data_queue.get_nowait()
-                
-                # Handle both old format (just data) and new format (timestamp, data)
-                if isinstance(queued_item, tuple) and len(queued_item) == 2:
-                    timestamp, spectrum_data = queued_item
-                    self.last_spectrum_timestamp = timestamp
-                    self.spectrum_data = spectrum_data
-                else:
-                    self.spectrum_data = queued_item
-                
-                self._draw_spectrum()
+                latest_item = self.data_queue.get_nowait()
+                queue_size += 1
         except queue.Empty:
             pass
-        
-        # Check for new data frequently (every 10ms) to be responsive
-        # Protect against destroyed parent widget
+
+        if latest_item is not None:
+            # Handle both old format (just data) and new format (timestamp, data)
+            if isinstance(latest_item, tuple) and len(latest_item) == 2:
+                timestamp, spectrum_data = latest_item
+                self.last_spectrum_timestamp = timestamp
+                self.spectrum_data = spectrum_data
+            else:
+                self.spectrum_data = latest_item
+
+            # Throttle redraws to at most 30 fps (33ms minimum interval).
+            # _draw_spectrum() can take 70-100ms when many band overlays are
+            # visible (Tkinter canvas operations are slow).  Without this
+            # throttle the after() queue fills up faster than it drains,
+            # permanently overloading the main thread.
+            import time as _time
+            now = _time.perf_counter()
+            last_draw = getattr(self, '_last_draw_time', 0.0)
+            if now - last_draw >= 0.033:
+                self._last_draw_time = now
+                self._draw_spectrum()
+
+        # Reschedule — pass the generation so stale callbacks self-terminate.
+        # Protect against destroyed parent widget.
         try:
-            self.parent.after(10, self.update_display)
+            self.parent.after(10, self.update_display, generation)
         except (tk.TclError, AttributeError):
-            # Parent widget was destroyed, stop the update loop
+            # Parent widget was destroyed, stop the update loop.
             pass
+
+    def restart_update_loop(self):
+        """Restart the update loop after the canvas has been reparented.
+
+        Increments the generation counter so any previously-scheduled
+        after() callbacks from the old loop will see a stale generation
+        and exit immediately.  Then starts a fresh loop.
+        """
+        old_gen = getattr(self, '_update_generation', 0)
+        self._update_generation = old_gen + 1
+        self.update_display()
     
     def _draw_spectrum(self):
         """Draw spectrum on canvas."""
         if self.spectrum_data is None or len(self.spectrum_data) == 0:
             return
-        
+
         # Check if canvas still exists before attempting to draw
         try:
             if not self.canvas.winfo_exists():
@@ -716,7 +822,7 @@ class SpectrumDisplay:
         # Update and redraw tooltip with current spectrum data if mouse is over canvas
         if should_update_tooltip:
             self._update_tooltip_at_position(self.last_mouse_x, self.last_mouse_y)
-    
+
     def _draw_frequency_scale(self):
         """Draw frequency scale at bottom."""
         if self.total_bandwidth == 0:
@@ -809,8 +915,9 @@ class SpectrumDisplay:
             self.margin_left, band_y,
             self.margin_left + self.graph_width, band_y + band_height,
             fill='#d3d3d3',  # Light grey
-            outline='',
-            stipple='gray50'  # Semi-transparent
+            outline=''
+            # stipple removed: Tkinter stipple is rendered in software and is
+            # extremely slow (~50ms per frame) when many bands are visible.
         )
 
         # Sort bands by width (widest first) so narrower bands are drawn on top
@@ -827,12 +934,12 @@ class SpectrumDisplay:
                 band_width = band_end_x - band_start_x
 
                 if band_width > 0:
-                    # Draw semi-transparent colored rectangle
+                    # Draw colored rectangle — no stipple (stipple is very slow in Tkinter)
                     color = band.get('color', '#cccccc')
                     self.canvas.create_rectangle(
                         band_start_x, band_y,
                         band_end_x, band_y + band_height,
-                        fill=color, outline='', stipple='gray50'
+                        fill=color, outline=''
                     )
 
                     # Draw band label if there's enough space
@@ -1029,11 +1136,11 @@ class SpectrumDisplay:
         low_x = self.margin_left + ((filter_low_freq - start_freq) / self.total_bandwidth) * self.graph_width
         high_x = self.margin_left + ((filter_high_freq - start_freq) / self.total_bandwidth) * self.graph_width
         
-        # Draw semi-transparent yellow fill for filter bandwidth
+        # Draw yellow fill for filter bandwidth — no stipple (stipple is very slow in Tkinter)
         self.canvas.create_rectangle(
             low_x, self.margin_top,
             high_x, self.margin_top + self.graph_height,
-            fill='yellow', stipple='gray50', outline=''
+            fill='#404000', outline=''
         )
         
         # Draw solid yellow lines at filter edges (only if they're within visible range)

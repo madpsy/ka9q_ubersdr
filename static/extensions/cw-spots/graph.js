@@ -140,6 +140,7 @@ class CWSpotsGraph {
         }
         this.updateChart();
         this.updateUI();
+        this.updateLatestSpotForBand();
     }
     
     addSpot(spot) {
@@ -199,6 +200,7 @@ class CWSpotsGraph {
             this.bandFilter = e.target.value;
             this.updateChart();
             this.updateUI();
+            this.updateLatestSpotForBand();
             // Notify parent window to sync its band filter (no data refresh needed)
             if (window.opener && !window.opener.closed) {
                 window.opener.postMessage({
@@ -508,6 +510,28 @@ class CWSpotsGraph {
         }
     }
     
+    updateLatestSpotForBand() {
+        const latestSpotEl = document.getElementById('latest-spot');
+        if (!latestSpotEl) return;
+
+        // Find the most recent spot that passes the current band filter
+        const filtered = this.getFilteredSpots();
+
+        if (filtered.length === 0) {
+            // No spots match — clear the banner
+            latestSpotEl.textContent = 'No spots yet';
+            latestSpotEl.className = 'latest-spot no-spot';
+            latestSpotEl.style.cursor = 'default';
+            latestSpotEl.onclick = null;
+            delete latestSpotEl.dataset.spot;
+            return;
+        }
+
+        // Spots are stored newest-first; getFilteredSpots preserves that order
+        const mostRecent = filtered[0];
+        this.updateLatestSpot(mostRecent);
+    }
+
     updateLatestSpot(spot) {
         const latestSpotEl = document.getElementById('latest-spot');
         if (!latestSpotEl) return;

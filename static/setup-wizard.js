@@ -370,6 +370,11 @@
         try {
             // Load existing config first to preserve all fields
             const existingConfigResponse = await fetch('/admin/config');
+            if (existingConfigResponse.status === 401) {
+                const returnUrl = encodeURIComponent(window.location.pathname);
+                window.location.href = `/admin.html?return=${returnUrl}`;
+                return;
+            }
             if (!existingConfigResponse.ok) {
                 throw new Error('Failed to load existing configuration');
             }

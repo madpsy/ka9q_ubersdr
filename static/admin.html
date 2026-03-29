@@ -989,11 +989,14 @@
                                 🖥️ Install CW Skimmer
                             </button>
                         </div>
-                        <div id="cwskimmerMgmtButtons" style="display: none; flex-wrap: wrap; gap: 8px; border-top: 1px solid #bbdefb; padding-top: 12px;">
-                            <button class="btn" onclick="openCWSkimmerScript('~/ubersdr/cwskimmer/start.sh')" style="background: #28a745; color: white; font-weight: bold;">▶ Start</button>
-                            <button class="btn" onclick="openCWSkimmerScript('~/ubersdr/cwskimmer/stop.sh')" style="background: #dc3545; color: white; font-weight: bold;">⏹ Stop</button>
-                            <button class="btn" onclick="openCWSkimmerScript('~/ubersdr/cwskimmer/restart.sh')" style="background: #fd7e14; color: white; font-weight: bold;">🔄 Restart</button>
-                            <button class="btn" onclick="openCWSkimmerScript('~/ubersdr/cwskimmer/update.sh')" style="background: #6f42c1; color: white; font-weight: bold;">⬆ Update</button>
+                        <div id="cwskimmerMgmtButtons" style="display: none; flex-wrap: wrap; gap: 8px; border-top: 1px solid #bbdefb; padding-top: 12px; justify-content: space-between; align-items: center;">
+                            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                                <button class="btn" onclick="openCWSkimmerScript('~/ubersdr/cwskimmer/start.sh')" style="background: #28a745; color: white; font-weight: bold;">▶ Start</button>
+                                <button class="btn" onclick="openCWSkimmerScript('~/ubersdr/cwskimmer/stop.sh')" style="background: #dc3545; color: white; font-weight: bold;">⏹ Stop</button>
+                                <button class="btn" onclick="openCWSkimmerScript('~/ubersdr/cwskimmer/restart.sh')" style="background: #fd7e14; color: white; font-weight: bold;">🔄 Restart</button>
+                                <button class="btn" onclick="openCWSkimmerScript('~/ubersdr/cwskimmer/update.sh')" style="background: #6f42c1; color: white; font-weight: bold;">⬆ Update</button>
+                            </div>
+                            <button class="btn" onclick="window.open('http://ubersdr.local:7373/vnc.html?autoconnect=true', '_blank')" style="background: #0d47a1; color: white; font-weight: bold; white-space: nowrap; margin-left: auto;">🖥️ Open VNC</button>
                         </div>
                     </div>
                     <div id="cwskimmerAnalyticsLinks" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; border: 1px solid #dee2e6;">

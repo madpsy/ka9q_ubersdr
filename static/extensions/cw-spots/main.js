@@ -946,6 +946,7 @@ class CWSpotsExtension extends DecoderExtension {
                 this.lastBadgeUpdate = 0; // Reset throttle
                 this.updateBadges(); // Update badges immediately
                 this.filterAndRenderSpots();
+                this.refreshGraphWindow(); // Sync graph window with new band
                 console.log(`CW Spots: Auto-updated band filter to ${band}`);
             } else {
                 console.log('CW Spots: Band filter already set to', band, '- dropdown synced');

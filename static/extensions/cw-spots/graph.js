@@ -84,7 +84,7 @@ class CWSpotsGraph {
                 this.hideDisconnectedOverlay(); // Hide overlay if extension reconnects
                 break;
             case 'cw_spots_initial':
-                this.loadInitialSpots(data);
+                this.loadInitialSpots(data, event.data.bandFilter);
                 this.hideDisconnectedOverlay(); // Hide overlay if extension reconnects
                 break;
             case 'cw_spots_clear':
@@ -118,12 +118,18 @@ class CWSpotsGraph {
         }
     }
     
-    loadInitialSpots(spots) {
+    loadInitialSpots(spots, bandFilter) {
         console.log('CW Spots Graph: Loading', spots.length, 'initial spots');
         this.spots = spots.map(spot => ({
             ...spot,
             timestamp: new Date(spot.time)
         }));
+        // Sync band filter from parent if provided
+        if (bandFilter !== undefined) {
+            this.bandFilter = bandFilter;
+            const bandSelect = document.getElementById('graph-band-filter');
+            if (bandSelect) bandSelect.value = bandFilter;
+        }
         this.updateChart();
         this.updateUI();
     }
@@ -180,10 +186,10 @@ class CWSpotsGraph {
             this.bandFilter = e.target.value;
             this.updateChart();
             this.updateUI();
-            // Notify parent window to sync its band filter
+            // Notify parent window to sync its band filter (no data refresh needed)
             if (window.opener && !window.opener.closed) {
                 window.opener.postMessage({
-                    type: 'set_band_filter',
+                    type: 'set_band_filter_only',
                     band: this.bandFilter
                 }, '*');
             }

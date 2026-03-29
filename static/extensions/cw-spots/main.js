@@ -2154,16 +2154,12 @@ class CWSpotsExtension extends DecoderExtension {
         // Listen for messages from graph window
         window.addEventListener('message', (event) => {
             if (event.data.type === 'request_initial_spots') {
-                // Send ALL spots to graph window - it will filter by band itself
+                // Send ALL spots to graph window along with current band filter
                 if (this.graphWindow && !this.graphWindow.closed) {
                     this.graphWindow.postMessage({
                         type: 'cw_spots_initial',
-                        data: this.spots
-                    }, '*');
-                    // Also sync the current band filter to the graph window
-                    this.graphWindow.postMessage({
-                        type: 'band_filter_changed',
-                        data: this.bandFilter
+                        data: this.spots,
+                        bandFilter: this.bandFilter
                     }, '*');
                 }
             } else if (event.data.type === 'clear_spots_from_graph') {
@@ -2175,7 +2171,19 @@ class CWSpotsExtension extends DecoderExtension {
                     this.tuneToSpot(event.data.spot);
                 }
             } else if (event.data.type === 'set_band_filter') {
-                // Graph window changed the band filter - sync extension's dropdown
+                // Graph window changed the band filter - sync extension's dropdown and re-filter
+                const band = event.data.band;
+                this.bandFilter = band;
+                this.badgeCache = null;
+                this.lastBadgeBand = null;
+                this.lastBadgeUpdate = 0;
+                this.showingAllRows = false;
+                const bandFilter = document.getElementById('cw-spots-band-filter');
+                if (bandFilter) bandFilter.value = band;
+                this.updateBadges();
+                this.filterAndRenderSpots();
+            } else if (event.data.type === 'set_band_filter_only') {
+                // Graph window changed the band filter - sync extension's dropdown only (no graph refresh)
                 const band = event.data.band;
                 this.bandFilter = band;
                 this.badgeCache = null;
@@ -2323,16 +2331,12 @@ class CWSpotsExtension extends DecoderExtension {
     }
 
     refreshGraphWindow() {
-        // Send ALL spots to graph window and notify it of the current band filter
+        // Send ALL spots to graph window along with current band filter in one message
         if (this.graphWindow && !this.graphWindow.closed) {
             this.graphWindow.postMessage({
                 type: 'cw_spots_initial',
-                data: this.spots
-            }, '*');
-            // Sync band filter to graph window
-            this.graphWindow.postMessage({
-                type: 'band_filter_changed',
-                data: this.bandFilter
+                data: this.spots,
+                bandFilter: this.bandFilter
             }, '*');
         }
     }

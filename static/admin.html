@@ -280,6 +280,12 @@
             border: 1px solid #bee5eb;
         }
 
+        .alert-warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffc107;
+        }
+
         .button-group {
             display: flex;
             gap: 10px;
@@ -2447,6 +2453,45 @@
 
         // Open CW Skimmer Hub installer in popup terminal window
         function openInstallCWSkimmerHub() {
+            // Pre-populate CW Skimmer config from main config
+            const callsign = currentConfig?.admin?.callsign || '';
+            const lat = currentConfig?.admin?.gps?.lat;
+            const lon = currentConfig?.admin?.gps?.lon;
+            let locator = currentCWSkimmerConfig.pskreporter_locator || '';
+            if (!locator && typeof lat === 'number' && typeof lon === 'number') {
+                try { locator = latLonToMaidenhead(lat, lon); } catch(e) {}
+            }
+
+            // Apply defaults into the config object
+            currentCWSkimmerConfig.enabled = true;
+            currentCWSkimmerConfig.host = 'cwskimmer';
+            currentCWSkimmerConfig.port = 7550;
+            if (callsign) {
+                currentCWSkimmerConfig.callsign = callsign;
+                currentCWSkimmerConfig.pskreporter_callsign = callsign;
+            }
+            currentCWSkimmerConfig.pskreporter_enabled = true;
+            if (locator) currentCWSkimmerConfig.pskreporter_locator = locator;
+
+            // Re-render the form so the user sees the pre-filled values
+            renderCWSkimmerConfig();
+
+            // Auto-save the config (without restart) so settings are persisted immediately
+            saveCWSkimmerConfig(false);
+
+            // Inject a persistent warning banner at the top of the CW Skimmer tab
+            const tab = document.getElementById('cwskimmerTab');
+            const existingBanner = document.getElementById('cwskimmerInstallBanner');
+            if (tab && !existingBanner) {
+                const banner = document.createElement('div');
+                banner.id = 'cwskimmerInstallBanner';
+                banner.className = 'alert alert-warning';
+                banner.style.cssText = 'margin-bottom: 20px; font-size: 15px;';
+                banner.innerHTML = '⚠️ <strong>Configuration saved.</strong> Once the installer window has finished, click the <strong>"Save &amp; Restart"</strong> button at the bottom of this page to activate CW Skimmer.';
+                tab.insertBefore(banner, tab.firstChild);
+            }
+
+            // Open the installer terminal
             const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
             const command = '~/ubersdr/install_cwskimmer.sh';
             const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;

@@ -1,12 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 )
@@ -347,6 +347,11 @@ func (cm *CWSkimmerMetrics) GetTotalSpots(band string, hours int) int64 {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
+	return cm.getTotalSpotsLocked(band, hours)
+}
+
+// getTotalSpotsLocked returns total spots for a band — must be called with cm.mu held (read or write).
+func (cm *CWSkimmerMetrics) getTotalSpotsLocked(band string, hours int) int64 {
 	if cm.spotsByBand[band] == nil {
 		return 0
 	}
@@ -376,6 +381,11 @@ func (cm *CWSkimmerMetrics) GetUniqueCallsigns(band string, hours int) int {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
+	return cm.getUniqueCallsignsLocked(band, hours)
+}
+
+// getUniqueCallsignsLocked returns unique callsign count — must be called with cm.mu held (read or write).
+func (cm *CWSkimmerMetrics) getUniqueCallsignsLocked(band string, hours int) int {
 	var window string
 	switch hours {
 	case 1:
@@ -447,6 +457,11 @@ func (cm *CWSkimmerMetrics) GetWPMStats(band string, minutes int) (avgWPM float6
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
+	return cm.getWPMStatsLocked(band, minutes)
+}
+
+// getWPMStatsLocked returns WPM stats — must be called with cm.mu held (read or write).
+func (cm *CWSkimmerMetrics) getWPMStatsLocked(band string, minutes int) (avgWPM float64, minWPM, maxWPM int) {
 	if cm.wpmMeasurements[band] == nil {
 		return 0, 0, 0
 	}
@@ -499,7 +514,7 @@ func (cm *CWSkimmerMetrics) WriteMetricsSnapshot() error {
 
 	// Write snapshot for each active band
 	for band := range cm.spotsByBand {
-		snapshot := cm.createSnapshot(band, now)
+		snapshot := cm.createSnapshotLocked(band, now)
 
 		// Create directory structure: metrics_dir/YYYY/MM/DD/
 		dirPath := filepath.Join(
@@ -539,18 +554,20 @@ func (cm *CWSkimmerMetrics) WriteMetricsSnapshot() error {
 	return nil
 }
 
-// createSnapshot creates a metrics snapshot for a band
-func (cm *CWSkimmerMetrics) createSnapshot(band string, timestamp time.Time) CWMetricsSnapshot {
-	// Get spot counts
+// createSnapshotLocked creates a metrics snapshot for a band.
+// Must be called with cm.mu held (read or write) — uses lock-free internal helpers
+// to avoid nested RLock acquisition which would deadlock when a writer is pending.
+func (cm *CWSkimmerMetrics) createSnapshotLocked(band string, timestamp time.Time) CWMetricsSnapshot {
+	// Get spot counts (lock-free — cm.mu already held by caller)
 	spotCounts := CWSpotCountsSnapshot{
-		Last1Hour:  cm.GetTotalSpots(band, 1),
-		Last24Hour: cm.GetTotalSpots(band, 24),
+		Last1Hour:  cm.getTotalSpotsLocked(band, 1),
+		Last24Hour: cm.getTotalSpotsLocked(band, 24),
 	}
 
-	// Get unique callsigns
+	// Get unique callsigns (lock-free — cm.mu already held by caller)
 	uniqueCallsigns := CWUniqueCallsignsSnapshot{
-		Last1Hour:  cm.GetUniqueCallsigns(band, 1),
-		Last24Hour: cm.GetUniqueCallsigns(band, 24),
+		Last1Hour:  cm.getUniqueCallsignsLocked(band, 1),
+		Last24Hour: cm.getUniqueCallsignsLocked(band, 24),
 	}
 
 	// Calculate activity metrics
@@ -567,10 +584,10 @@ func (cm *CWSkimmerMetrics) createSnapshot(band string, timestamp time.Time) CWM
 		ActivityScore:    activityScore,
 	}
 
-	// Get WPM stats
-	avg1m, min1m, max1m := cm.GetWPMStats(band, 1)
-	avg5m, min5m, max5m := cm.GetWPMStats(band, 5)
-	avg10m, min10m, max10m := cm.GetWPMStats(band, 10)
+	// Get WPM stats (lock-free — cm.mu already held by caller)
+	avg1m, min1m, max1m := cm.getWPMStatsLocked(band, 1)
+	avg5m, min5m, max5m := cm.getWPMStatsLocked(band, 5)
+	avg10m, min10m, max10m := cm.getWPMStatsLocked(band, 10)
 
 	wpmStats := CWWPMStatsSnapshot{
 		Last1Min: CWWPMWindowStats{
@@ -705,7 +722,9 @@ func (cm *CWSkimmerMetrics) ReadMetricsFromFiles(startTime, endTime time.Time) (
 	return result, nil
 }
 
-// readSnapshotsFromFile reads CW metrics snapshots from a single file within the time range
+// readSnapshotsFromFile reads CW metrics snapshots from a single file within the time range.
+// Uses bufio.Scanner + json.Unmarshal per line to avoid the json.NewDecoder infinite-loop
+// bug where a malformed token causes Decode() to retry the same position forever.
 func (cm *CWSkimmerMetrics) readSnapshotsFromFile(filePath string, startTime, endTime time.Time) ([]CWMetricsSnapshot, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -714,15 +733,20 @@ func (cm *CWSkimmerMetrics) readSnapshotsFromFile(filePath string, startTime, en
 	defer file.Close()
 
 	var snapshots []CWMetricsSnapshot
-	decoder := json.NewDecoder(file)
 
-	for {
+	// Use a 1 MiB scanner buffer to handle long JSON lines safely.
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
 		var snapshot CWMetricsSnapshot
-		if err := decoder.Decode(&snapshot); err != nil {
-			if err.Error() == "EOF" || strings.Contains(err.Error(), "EOF") {
-				break
-			}
-			// Skip malformed lines
+		if err := json.Unmarshal(line, &snapshot); err != nil {
+			// Skip malformed lines and continue to the next
 			continue
 		}
 
@@ -731,6 +755,10 @@ func (cm *CWSkimmerMetrics) readSnapshotsFromFile(filePath string, startTime, en
 			(snapshot.Timestamp.Equal(endTime) || snapshot.Timestamp.Before(endTime)) {
 			snapshots = append(snapshots, snapshot)
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return snapshots, fmt.Errorf("error reading metrics file: %w", err)
 	}
 
 	return snapshots, nil

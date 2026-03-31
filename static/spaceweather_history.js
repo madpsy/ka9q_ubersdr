@@ -388,7 +388,7 @@ class SpaceWeatherHistory {
 
     renderSingleRecord(record) {
         const qualityColor = record.propagation_quality === 'Excellent' ? '#22c55e' :
-                            record.propagation_quality === 'Good' ? '#fbbf24' :
+                            record.propagation_quality === 'Good' ? '#D3E671' :
                             record.propagation_quality === 'Fair' ? '#ff9800' : '#ef4444';
 
         let html = '<div class="data-grid">';
@@ -728,7 +728,7 @@ class SpaceWeatherHistory {
                         const value = context.raw.v;
                         if (value === 0) return '#ef4444'; // POOR - red
                         if (value === 1) return '#ff9800'; // FAIR - orange
-                        if (value === 2) return '#fbbf24'; // GOOD - bright yellow
+                        if (value === 2) return '#D3E671'; // GOOD - yellow-green
                         if (value === 3) return '#22c55e'; // EXCELLENT - green
                         return '#9ca3af'; // UNKNOWN - gray
                     },

@@ -10788,11 +10788,6 @@ const tooltipLine2 = timeStr;
                 cpuTempTitle.textContent = '🌡️ CPU Temperature';
                 cpuTempSection.appendChild(cpuTempTitle);
 
-                const infoDiv = document.createElement('div');
-                infoDiv.style.background = '#fff';
-                infoDiv.style.padding = '15px';
-                infoDiv.style.borderRadius = '5px';
-
                 const tempC = stats.cpu_temperature.celsius;
                 const driver = stats.cpu_temperature.driver;
 
@@ -10801,13 +10796,19 @@ const tooltipLine2 = timeStr;
                 if (tempC >= 80) colour = '#dc3545';      // red
                 else if (tempC >= 60) colour = '#fd7e14'; // orange
 
-                infoDiv.innerHTML = `
-                    <div style="margin-bottom:8px;">
-                        <strong>Temperature:</strong>
-                        <span style="font-size:1.2em; font-weight:bold; color:${colour}; margin-left:8px;">${tempC.toFixed(1)} °C</span>
-                    </div>
-                    <div style="color:#666; font-size:0.9em;">Driver: ${driver}</div>`;
-                cpuTempSection.appendChild(infoDiv);
+                const pre = document.createElement('pre');
+                pre.style.background = '#fff';
+                pre.style.padding = '15px';
+                pre.style.borderRadius = '5px';
+                pre.style.overflow = 'auto';
+                pre.style.fontFamily = 'monospace';
+                pre.style.fontSize = '13px';
+                pre.style.lineHeight = '1.5';
+                pre.style.whiteSpace = 'pre-wrap';
+                pre.style.wordWrap = 'break-word';
+                pre.style.margin = '0';
+                pre.innerHTML = `<span style="color:${colour}; font-weight:bold;">${Math.round(tempC)} °C</span>  (driver: ${driver})`;
+                cpuTempSection.appendChild(pre);
                 container.appendChild(cpuTempSection);
             }
 
@@ -11557,7 +11558,7 @@ const tooltipLine2 = timeStr;
                                         if (label) { label += ': '; }
                                         if (context.parsed.y !== null) {
                                             if (context.dataset.yAxisID === 'y3') {
-                                                label += context.parsed.y.toFixed(1) + ' °C';
+                                                label += context.parsed.y.toFixed(0) + ' °C';
                                             } else {
                                                 label += context.parsed.y.toFixed(2);
                                             }
@@ -11857,7 +11858,7 @@ const tooltipLine2 = timeStr;
                                         if (label) { label += ': '; }
                                         if (context.parsed.y !== null) {
                                             if (context.dataset.yAxisID === 'y3') {
-                                                label += context.parsed.y.toFixed(1) + ' °C';
+                                                label += context.parsed.y.toFixed(0) + ' °C';
                                             } else {
                                                 label += context.parsed.y.toFixed(2);
                                             }

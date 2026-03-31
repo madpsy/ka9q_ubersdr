@@ -243,7 +243,7 @@ func (lht *LoadHistoryTracker) aggregateLoop() {
 
 				avgTempC := 0.0
 				if tempCount > 0 {
-					avgTempC = math.Round((sumTempC/tempCount)*10) / 10 // 1 decimal place
+					avgTempC = math.Round(sumTempC / tempCount) // 0 decimal places
 				}
 
 				historyEntry := LoadHistory{
@@ -316,7 +316,7 @@ func (lht *LoadHistoryTracker) hourlyAggregateLoop() {
 
 				avgTempC := 0.0
 				if tempCount > 0 {
-					avgTempC = math.Round((sumTempC/tempCount)*10) / 10 // 1 decimal place
+					avgTempC = math.Round(sumTempC / tempCount) // 0 decimal places
 				}
 
 				hourlyEntry := LoadHistory{
@@ -358,7 +358,7 @@ func (lht *LoadHistoryTracker) GetHistory() []LoadHistory {
 			Load1Min:  math.Round(entry.Load1Min*100) / 100,  // 2 decimal places
 			Load5Min:  math.Round(entry.Load5Min*100) / 100,  // 2 decimal places
 			Load15Min: math.Round(entry.Load15Min*100) / 100, // 2 decimal places
-			CPUTempC:  math.Round(entry.CPUTempC*10) / 10,    // 1 decimal place
+			CPUTempC:  math.Round(entry.CPUTempC),            // 0 decimal places
 			Status:    entry.Status,
 			Timestamp: entry.Timestamp,
 		}
@@ -392,7 +392,7 @@ func (lht *LoadHistoryTracker) GetHistory() []LoadHistory {
 
 		avgTempC := 0.0
 		if tempCount > 0 {
-			avgTempC = math.Round((sumTempC/tempCount)*10) / 10
+			avgTempC = math.Round(sumTempC / tempCount) // 0 decimal places
 		}
 
 		partialEntry := LoadHistory{
@@ -468,7 +468,7 @@ func (lht *LoadHistoryTracker) GetHourlyHistory() []LoadHistory {
 
 		avgTempC := 0.0
 		if tempCount > 0 {
-			avgTempC = math.Round((sumTempC/tempCount)*10) / 10 // 1 decimal place
+			avgTempC = math.Round(sumTempC / tempCount) // 0 decimal places
 		}
 
 		partialHourEntry := LoadHistory{

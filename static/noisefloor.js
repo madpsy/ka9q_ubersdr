@@ -817,6 +817,13 @@ class NoiseFloorMonitor {
         return '#22c55e';               // Excellent - green
     }
 
+    getFT8SnrLabel(snr) {
+        if (snr < 6)  return 'Poor';
+        if (snr < 20) return 'Fair';
+        if (snr < 30) return 'Good';
+        return 'Excellent';
+    }
+
     createBandCard(band, measurement, noiseFloorStats = null) {
         // In single band view, create three separate cards
         if (this.currentBand !== 'all') {
@@ -847,7 +854,7 @@ class NoiseFloorMonitor {
         const fftId = `fft-${band}`;
 
         const hasFT8 = measurement.ft8_snr && measurement.ft8_snr > 0;
-        const headerValue = hasFT8 ? `${measurement.ft8_snr.toFixed(0)} dB` : '';
+        const headerValue = hasFT8 ? `${measurement.ft8_snr.toFixed(0)} dB (${this.getFT8SnrLabel(measurement.ft8_snr)})` : '';
         const headerColor = hasFT8 ? this.getFT8SnrColor(measurement.ft8_snr) : '';
 
         const ft8SnrHtml = hasFT8
@@ -917,7 +924,7 @@ class NoiseFloorMonitor {
         const fftId = `fft-${band}`;
 
         const hasFT8 = measurement.ft8_snr && measurement.ft8_snr > 0;
-        const headerValue = hasFT8 ? `${measurement.ft8_snr.toFixed(0)} dB` : '';
+        const headerValue = hasFT8 ? `${measurement.ft8_snr.toFixed(0)} dB (${this.getFT8SnrLabel(measurement.ft8_snr)})` : '';
         const headerColor = hasFT8 ? this.getFT8SnrColor(measurement.ft8_snr) : '';
 
         const ft8SnrHtml = hasFT8
@@ -1029,7 +1036,7 @@ class NoiseFloorMonitor {
         }
 
         const hasFT8 = measurement.ft8_snr && measurement.ft8_snr > 0;
-        const headerValue = hasFT8 ? `${measurement.ft8_snr.toFixed(0)} dB` : '';
+        const headerValue = hasFT8 ? `${measurement.ft8_snr.toFixed(0)} dB (${this.getFT8SnrLabel(measurement.ft8_snr)})` : '';
         const headerColor = hasFT8 ? this.getFT8SnrColor(measurement.ft8_snr) : '';
 
         // Update all cards (in single band view there are 3, in all bands view there's 1)

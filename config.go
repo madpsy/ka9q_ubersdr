@@ -521,6 +521,7 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.Admin.Callsign == "" {
 		config.Admin.Callsign = "N0CALL"
 	}
+	config.Admin.Callsign = strings.ToUpper(config.Admin.Callsign)
 	if config.Admin.PublicURL == "" {
 		config.Admin.PublicURL = "https://example.com"
 	}
@@ -800,6 +801,12 @@ func LoadConfig(filename string) (*Config, error) {
 
 	// Note: Decoder defaults are NOT set here because decoder.yaml is loaded separately
 	// and should be the source of truth for all decoder configuration
+
+	// Uppercase decoder callsigns
+	config.Decoder.ReceiverCallsign = strings.ToUpper(config.Decoder.ReceiverCallsign)
+	if config.Decoder.WSPRNetCallsign != "" {
+		config.Decoder.WSPRNetCallsign = strings.ToUpper(config.Decoder.WSPRNetCallsign)
+	}
 
 	// Parse decoder band modes
 	for i := range config.Decoder.Bands {

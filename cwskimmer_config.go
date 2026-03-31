@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -73,6 +74,9 @@ func LoadCWSkimmerConfig(filename string) (*CWSkimmerConfig, error) {
 	if config.PSKReporterCallsign == "" {
 		config.PSKReporterCallsign = config.Callsign
 	}
+	// Always uppercase callsigns
+	config.Callsign = strings.ToUpper(config.Callsign)
+	config.PSKReporterCallsign = strings.ToUpper(config.PSKReporterCallsign)
 
 	return &config, nil
 }

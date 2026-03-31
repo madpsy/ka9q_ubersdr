@@ -809,6 +809,14 @@ class NoiseFloorMonitor {
         }
     }
 
+    getFT8SnrColor(snr) {
+        // Matches the band conditions chart thresholds
+        if (snr < 6)  return '#ef4444'; // Poor      - red
+        if (snr < 20) return '#ff9800'; // Fair      - orange
+        if (snr < 30) return '#fbbf24'; // Good      - yellow
+        return '#22c55e';               // Excellent - green
+    }
+
     createBandCard(band, measurement, noiseFloorStats = null) {
         // In single band view, create three separate cards
         if (this.currentBand !== 'all') {
@@ -838,11 +846,11 @@ class NoiseFloorMonitor {
         const sparklineId = `sparkline-${band}`;
         const fftId = `fft-${band}`;
 
-        const noiseFloorColor = noiseFloorStats
-            ? this.getNoiseFloorColor(measurement.p5_db, noiseFloorStats)
-            : '#4CAF50';
+        const hasFT8 = measurement.ft8_snr && measurement.ft8_snr > 0;
+        const headerValue = hasFT8 ? `${measurement.ft8_snr.toFixed(0)} dB` : '';
+        const headerColor = hasFT8 ? this.getFT8SnrColor(measurement.ft8_snr) : '';
 
-        const ft8SnrHtml = measurement.ft8_snr && measurement.ft8_snr > 0
+        const ft8SnrHtml = hasFT8
             ? `<div class="metric">
                 <span class="metric-label">FT8 SNR:</span>
                 <span class="metric-value ft8-snr">${measurement.ft8_snr.toFixed(1)} dB</span>
@@ -852,7 +860,7 @@ class NoiseFloorMonitor {
         card.innerHTML = `
             <h3 style="display: flex; justify-content: space-between; align-items: center;">
                 <span>${band}</span>
-                <span style="color: ${noiseFloorColor}; font-size: 0.9em;">${measurement.p5_db.toFixed(0)} dB</span>
+                <span style="color: ${headerColor}; font-size: 0.9em;">${headerValue}</span>
             </h3>
             <div class="metric">
                 <span class="metric-label">Last Update:</span>
@@ -908,11 +916,11 @@ class NoiseFloorMonitor {
         const sparklineId = `sparkline-${band}`;
         const fftId = `fft-${band}`;
 
-        const noiseFloorColor = noiseFloorStats
-            ? this.getNoiseFloorColor(measurement.p5_db, noiseFloorStats)
-            : '#4CAF50';
+        const hasFT8 = measurement.ft8_snr && measurement.ft8_snr > 0;
+        const headerValue = hasFT8 ? `${measurement.ft8_snr.toFixed(0)} dB` : '';
+        const headerColor = hasFT8 ? this.getFT8SnrColor(measurement.ft8_snr) : '';
 
-        const ft8SnrHtml = measurement.ft8_snr && measurement.ft8_snr > 0
+        const ft8SnrHtml = hasFT8
             ? `<div class="metric">
                 <span class="metric-label">FT8 SNR:</span>
                 <span class="metric-value ft8-snr">${measurement.ft8_snr.toFixed(1)} dB</span>
@@ -925,7 +933,7 @@ class NoiseFloorMonitor {
         metricsCard.innerHTML = `
             <h3 style="display: flex; justify-content: space-between; align-items: center;">
                 <span>${band} Metrics</span>
-                <span style="color: ${noiseFloorColor}; font-size: 0.9em;">${measurement.p5_db.toFixed(0)} dB</span>
+                <span style="color: ${headerColor}; font-size: 0.9em;">${headerValue}</span>
             </h3>
             <div class="metric">
                 <span class="metric-label">Last Update:</span>
@@ -1020,13 +1028,17 @@ class NoiseFloorMonitor {
             cards = Array.from(container.querySelectorAll('.card'));
         }
 
+        const hasFT8 = measurement.ft8_snr && measurement.ft8_snr > 0;
+        const headerValue = hasFT8 ? `${measurement.ft8_snr.toFixed(0)} dB` : '';
+        const headerColor = hasFT8 ? this.getFT8SnrColor(measurement.ft8_snr) : '';
+
         // Update all cards (in single band view there are 3, in all bands view there's 1)
         cards.forEach(card => {
-            // Update h3 spans (noise floor value and color)
+            // Update h3 spans (FT8 SNR value and color)
             const h3Spans = card.querySelectorAll('h3 span');
             if (h3Spans.length >= 2) {
-                h3Spans[1].textContent = `${measurement.p5_db.toFixed(0)} dB`;
-                h3Spans[1].style.color = noiseFloorColor;
+                h3Spans[1].textContent = headerValue;
+                h3Spans[1].style.color = headerColor;
             }
 
             // Update metric values

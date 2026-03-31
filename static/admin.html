@@ -1791,6 +1791,25 @@
             }
         }
 
+        // Classify an IP address as LAN (RFC 1918 / loopback) or public
+        function isLANAddress(ip) {
+            if (!ip || ip === 'N/A') return false;
+            // IPv4 loopback
+            if (/^127\./.test(ip)) return true;
+            // 10.0.0.0/8
+            if (/^10\./.test(ip)) return true;
+            // 172.16.0.0/12
+            const m = ip.match(/^172\.(\d+)\./);
+            if (m && parseInt(m[1]) >= 16 && parseInt(m[1]) <= 31) return true;
+            // 192.168.0.0/16
+            if (/^192\.168\./.test(ip)) return true;
+            // IPv6 loopback
+            if (ip === '::1') return true;
+            // IPv6 ULA (fc00::/7)
+            if (/^f[cd]/i.test(ip)) return true;
+            return false;
+        }
+
         // Handle paste events to filter out non-numeric content
         function handleNumberPaste(event, input) {
             event.preventDefault();
@@ -4766,7 +4785,7 @@
             const internalAudio = internalSessions.filter(s => !s.is_spectrum).length;
             const internalSpectrum = internalSessions.filter(s => s.is_spectrum).length;
 
-            // Calculate throughput totals by type
+            // Calculate throughput totals by type and by LAN vs public
             let regularAudioKbps = 0;
             let regularWaterfallKbps = 0;
             let regularDXClusterKbps = 0;
@@ -4776,47 +4795,62 @@
             let passwordBypassedAudioKbps = 0;
             let passwordBypassedWaterfallKbps = 0;
             let passwordBypassedDXClusterKbps = 0;
+            let lanAudioKbps = 0;
+            let lanWaterfallKbps = 0;
+            let lanDXClusterKbps = 0;
+            let publicAudioKbps = 0;
+            let publicWaterfallKbps = 0;
+            let publicDXClusterKbps = 0;
 
             for (const [key, sessions] of Object.entries(sessionsByUser)) {
-                // Get auth method from first available session
+                // Get auth method and client IP from first available session
                 const authMethod = sessions.audio[0]?.auth_method || sessions.spectrum[0]?.auth_method || '';
+                const clientIP   = sessions.audio[0]?.client_ip  || sessions.spectrum[0]?.client_ip  || '';
+                const isLAN      = isLANAddress(clientIP);
 
-                // Sum audio throughput
-                if (sessions.audio.length > 0) {
-                    const audioKbps = sessions.audio[0].audio_kbps || 0;
-                    if (authMethod === 'password') {
-                        passwordBypassedAudioKbps += audioKbps;
-                    } else if (authMethod === 'ip_bypass') {
-                        ipBypassedAudioKbps += audioKbps;
-                    } else {
-                        regularAudioKbps += audioKbps;
-                    }
+                // Collect per-user totals for LAN/public split
+                const audioKbps     = sessions.audio.length > 0    ? (sessions.audio[0].audio_kbps || 0)       : 0;
+                const waterfallKbps = sessions.spectrum.length > 0  ? (sessions.spectrum[0].waterfall_kbps || 0) : 0;
+                const dxSession     = sessions.audio.find(s => s.dxcluster_kbps !== undefined) ||
+                                      sessions.spectrum.find(s => s.dxcluster_kbps !== undefined);
+                const dxKbps        = dxSession ? (dxSession.dxcluster_kbps || 0) : 0;
+
+                // Sum audio throughput by auth method
+                if (authMethod === 'password') {
+                    passwordBypassedAudioKbps += audioKbps;
+                } else if (authMethod === 'ip_bypass') {
+                    ipBypassedAudioKbps += audioKbps;
+                } else {
+                    regularAudioKbps += audioKbps;
                 }
 
-                // Sum waterfall throughput
-                if (sessions.spectrum.length > 0) {
-                    const waterfallKbps = sessions.spectrum[0].waterfall_kbps || 0;
-                    if (authMethod === 'password') {
-                        passwordBypassedWaterfallKbps += waterfallKbps;
-                    } else if (authMethod === 'ip_bypass') {
-                        ipBypassedWaterfallKbps += waterfallKbps;
-                    } else {
-                        regularWaterfallKbps += waterfallKbps;
-                    }
+                // Sum waterfall throughput by auth method
+                if (authMethod === 'password') {
+                    passwordBypassedWaterfallKbps += waterfallKbps;
+                } else if (authMethod === 'ip_bypass') {
+                    ipBypassedWaterfallKbps += waterfallKbps;
+                } else {
+                    regularWaterfallKbps += waterfallKbps;
                 }
 
-                // Sum DX cluster throughput
-                const dxSession = sessions.audio.find(s => s.dxcluster_kbps !== undefined) ||
-                                 sessions.spectrum.find(s => s.dxcluster_kbps !== undefined);
-                if (dxSession) {
-                    const dxKbps = dxSession.dxcluster_kbps || 0;
-                    if (authMethod === 'password') {
-                        passwordBypassedDXClusterKbps += dxKbps;
-                    } else if (authMethod === 'ip_bypass') {
-                        ipBypassedDXClusterKbps += dxKbps;
-                    } else {
-                        regularDXClusterKbps += dxKbps;
-                    }
+                // Sum DX cluster throughput by auth method
+                if (authMethod === 'password') {
+                    passwordBypassedDXClusterKbps += dxKbps;
+                } else if (authMethod === 'ip_bypass') {
+                    ipBypassedDXClusterKbps += dxKbps;
+                } else {
+                    regularDXClusterKbps += dxKbps;
+                }
+
+                // Sum throughput by LAN vs public (orthogonal to auth method)
+                if (isLAN) {
+                    lanAudioKbps     += audioKbps;
+                    lanWaterfallKbps += waterfallKbps;
+                    lanDXClusterKbps += dxKbps;
+                } else {
+                    publicAudioKbps     += audioKbps;
+                    publicWaterfallKbps += waterfallKbps;
+                    publicDXClusterKbps += dxKbps;
                 }
             }
 
@@ -4881,6 +4915,8 @@
             networkHTML += `<span style="margin-left: 20px;">• Regular users: <strong>${formatThroughput(regularAudioKbps)}</strong> audio, <strong>${formatThroughput(regularWaterfallKbps)}</strong> w/f, <strong>${formatThroughput(regularDXClusterKbps)}</strong> DX</span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• Bypassed users: <strong>${formatThroughput(ipBypassedAudioKbps)}</strong> audio, <strong>${formatThroughput(ipBypassedWaterfallKbps)}</strong> w/f, <strong>${formatThroughput(ipBypassedDXClusterKbps)}</strong> DX</span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• Password users: <strong>${formatThroughput(passwordBypassedAudioKbps)}</strong> audio, <strong>${formatThroughput(passwordBypassedWaterfallKbps)}</strong> w/f, <strong>${formatThroughput(passwordBypassedDXClusterKbps)}</strong> DX</span><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• LAN users: <strong>${formatThroughput(lanAudioKbps)}</strong> audio, <strong>${formatThroughput(lanWaterfallKbps)}</strong> w/f, <strong>${formatThroughput(lanDXClusterKbps)}</strong> DX</span><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• Public users: <strong>${formatThroughput(publicAudioKbps)}</strong> audio, <strong>${formatThroughput(publicWaterfallKbps)}</strong> w/f, <strong>${formatThroughput(publicDXClusterKbps)}</strong> DX</span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• <strong>Total audio:</strong> <strong style="color: #667eea;">${formatThroughput(totalAudioKbps)}</strong></span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• <strong>Total waterfall:</strong> <strong style="color: #667eea;">${formatThroughput(totalWaterfallKbps)}</strong></span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• <strong>Total DX cluster:</strong> <strong style="color: #667eea;">${formatThroughput(totalDXClusterKbps)}</strong></span><br>`;

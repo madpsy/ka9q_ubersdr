@@ -39,7 +39,8 @@ type LoadSample struct {
 	Load1Min  float64
 	Load5Min  float64
 	Load15Min float64
-	Status    string // "ok", "warning", "critical"
+	CPUTempC  float64 // 0 if sensor unavailable
+	Status    string  // "ok", "warning", "critical"
 	Timestamp time.Time
 }
 
@@ -48,6 +49,7 @@ type LoadHistory struct {
 	Load1Min  float64   `json:"load_1min"`
 	Load5Min  float64   `json:"load_5min"`
 	Load15Min float64   `json:"load_15min"`
+	CPUTempC  float64   `json:"cpu_temp_c,omitempty"` // 0 / omitted if sensor unavailable
 	Status    string    `json:"status"`
 	Timestamp time.Time `json:"timestamp"`
 }
@@ -170,10 +172,17 @@ func (lht *LoadHistoryTracker) sampleLoop() {
 				}
 			}
 
+			// Read CPU temperature (best-effort; zero if sensor absent)
+			cpuTempC := 0.0
+			if t, _, err := getCPUTemperature(); err == nil {
+				cpuTempC = t
+			}
+
 			sample := LoadSample{
 				Load1Min:  load1,
 				Load5Min:  load5,
 				Load15Min: load15,
+				CPUTempC:  cpuTempC,
 				Status:    status,
 				Timestamp: time.Now(),
 			}
@@ -207,6 +216,8 @@ func (lht *LoadHistoryTracker) aggregateLoop() {
 				var sumLoad1 float64
 				var sumLoad5 float64
 				var sumLoad15 float64
+				var sumTempC float64
+				var tempCount float64
 				statusCounts := make(map[string]int)
 
 				for _, sample := range lht.samples {
@@ -214,6 +225,10 @@ func (lht *LoadHistoryTracker) aggregateLoop() {
 					sumLoad5 += sample.Load5Min
 					sumLoad15 += sample.Load15Min
 					statusCounts[sample.Status]++
+					if sample.CPUTempC > 0 {
+						sumTempC += sample.CPUTempC
+						tempCount++
+					}
 				}
 
 				count := float64(len(lht.samples))
@@ -226,10 +241,16 @@ func (lht *LoadHistoryTracker) aggregateLoop() {
 					status = "warning"
 				}
 
+				avgTempC := 0.0
+				if tempCount > 0 {
+					avgTempC = math.Round((sumTempC/tempCount)*10) / 10 // 1 decimal place
+				}
+
 				historyEntry := LoadHistory{
 					Load1Min:  sumLoad1 / count,
 					Load5Min:  sumLoad5 / count,
 					Load15Min: sumLoad15 / count,
+					CPUTempC:  avgTempC,
 					Status:    status,
 					Timestamp: time.Now(),
 				}
@@ -268,6 +289,8 @@ func (lht *LoadHistoryTracker) hourlyAggregateLoop() {
 				var sumLoad1 float64
 				var sumLoad5 float64
 				var sumLoad15 float64
+				var sumTempC float64
+				var tempCount float64
 				statusCounts := make(map[string]int)
 
 				for _, entry := range lht.history {
@@ -275,6 +298,10 @@ func (lht *LoadHistoryTracker) hourlyAggregateLoop() {
 					sumLoad5 += entry.Load5Min
 					sumLoad15 += entry.Load15Min
 					statusCounts[entry.Status]++
+					if entry.CPUTempC > 0 {
+						sumTempC += entry.CPUTempC
+						tempCount++
+					}
 				}
 
 				count := float64(len(lht.history))
@@ -287,10 +314,16 @@ func (lht *LoadHistoryTracker) hourlyAggregateLoop() {
 					status = "warning"
 				}
 
+				avgTempC := 0.0
+				if tempCount > 0 {
+					avgTempC = math.Round((sumTempC/tempCount)*10) / 10 // 1 decimal place
+				}
+
 				hourlyEntry := LoadHistory{
 					Load1Min:  sumLoad1 / count,
 					Load5Min:  sumLoad5 / count,
 					Load15Min: sumLoad15 / count,
+					CPUTempC:  avgTempC,
 					Status:    status,
 					Timestamp: time.Now(),
 				}
@@ -360,6 +393,8 @@ func (lht *LoadHistoryTracker) GetHourlyHistory() []LoadHistory {
 		var sumLoad1 float64
 		var sumLoad5 float64
 		var sumLoad15 float64
+		var sumTempC float64
+		var tempCount float64
 		statusCounts := make(map[string]int)
 
 		for _, entry := range lht.history {
@@ -367,6 +402,10 @@ func (lht *LoadHistoryTracker) GetHourlyHistory() []LoadHistory {
 			sumLoad5 += entry.Load5Min
 			sumLoad15 += entry.Load15Min
 			statusCounts[entry.Status]++
+			if entry.CPUTempC > 0 {
+				sumTempC += entry.CPUTempC
+				tempCount++
+			}
 		}
 
 		count := float64(len(lht.history))
@@ -379,10 +418,16 @@ func (lht *LoadHistoryTracker) GetHourlyHistory() []LoadHistory {
 			status = "warning"
 		}
 
+		avgTempC := 0.0
+		if tempCount > 0 {
+			avgTempC = math.Round((sumTempC/tempCount)*10) / 10 // 1 decimal place
+		}
+
 		partialHourEntry := LoadHistory{
 			Load1Min:  math.Round((sumLoad1/count)*100) / 100,  // 2 decimal places
 			Load5Min:  math.Round((sumLoad5/count)*100) / 100,  // 2 decimal places
 			Load15Min: math.Round((sumLoad15/count)*100) / 100, // 2 decimal places
+			CPUTempC:  avgTempC,
 			Status:    status,
 			Timestamp: time.Now(),
 		}

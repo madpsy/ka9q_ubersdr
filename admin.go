@@ -3922,6 +3922,38 @@ func (ah *AdminHandler) handleUpdateRadiodConfig(w http.ResponseWriter, r *http.
 	}
 }
 
+// getCPUTemperature reads the CPU temperature from the Linux hwmon subsystem.
+// It scans by driver name (k10temp for AMD, coretemp for Intel) so it is
+// immune to hwmon index changes across reboots.
+// Returns (tempCelsius, driverName, error).
+func getCPUTemperature() (float64, string, error) {
+	entries, err := os.ReadDir("/sys/class/hwmon")
+	if err != nil {
+		return 0, "", fmt.Errorf("cannot read hwmon: %w", err)
+	}
+	for _, e := range entries {
+		base := "/sys/class/hwmon/" + e.Name()
+		nameBytes, err := os.ReadFile(base + "/name")
+		if err != nil {
+			continue
+		}
+		driver := strings.TrimSpace(string(nameBytes))
+		switch driver {
+		case "k10temp", "coretemp":
+			data, err := os.ReadFile(base + "/temp1_input")
+			if err != nil {
+				continue
+			}
+			milliC, err := strconv.Atoi(strings.TrimSpace(string(data)))
+			if err != nil {
+				continue
+			}
+			return float64(milliC) / 1000.0, driver, nil
+		}
+	}
+	return 0, "", fmt.Errorf("no CPU thermal sensor found (k10temp/coretemp)")
+}
+
 // HandleSystemStats returns system statistics by executing system commands
 func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -3970,6 +4002,14 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 		stats["uptime"] = string(uptimeOutput)
 	} else {
 		stats["uptime"] = fmt.Sprintf("Error: %v", err)
+	}
+
+	// Get CPU temperature from hwmon subsystem (AMD k10temp / Intel coretemp)
+	if tempC, driver, err := getCPUTemperature(); err == nil {
+		stats["cpu_temperature"] = map[string]interface{}{
+			"celsius": tempC,
+			"driver":  driver,
+		}
 	}
 
 	// Execute df -h

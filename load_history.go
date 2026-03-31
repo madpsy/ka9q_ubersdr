@@ -358,8 +358,56 @@ func (lht *LoadHistoryTracker) GetHistory() []LoadHistory {
 			Load1Min:  math.Round(entry.Load1Min*100) / 100,  // 2 decimal places
 			Load5Min:  math.Round(entry.Load5Min*100) / 100,  // 2 decimal places
 			Load15Min: math.Round(entry.Load15Min*100) / 100, // 2 decimal places
+			CPUTempC:  math.Round(entry.CPUTempC*10) / 10,    // 1 decimal place
 			Status:    entry.Status,
 			Timestamp: entry.Timestamp,
+		}
+	}
+
+	// Append a partial entry for the current in-progress minute so the
+	// 60-minute chart shows data immediately (mirrors GetHourlyHistory behaviour)
+	if len(lht.samples) > 0 {
+		var sumLoad1, sumLoad5, sumLoad15, sumTempC float64
+		var tempCount float64
+		statusCounts := make(map[string]int)
+
+		for _, s := range lht.samples {
+			sumLoad1 += s.Load1Min
+			sumLoad5 += s.Load5Min
+			sumLoad15 += s.Load15Min
+			statusCounts[s.Status]++
+			if s.CPUTempC > 0 {
+				sumTempC += s.CPUTempC
+				tempCount++
+			}
+		}
+
+		count := float64(len(lht.samples))
+		status := "ok"
+		if statusCounts["critical"] > 0 {
+			status = "critical"
+		} else if statusCounts["warning"] > 0 {
+			status = "warning"
+		}
+
+		avgTempC := 0.0
+		if tempCount > 0 {
+			avgTempC = math.Round((sumTempC/tempCount)*10) / 10
+		}
+
+		partialEntry := LoadHistory{
+			Load1Min:  math.Round((sumLoad1/count)*100) / 100,
+			Load5Min:  math.Round((sumLoad5/count)*100) / 100,
+			Load15Min: math.Round((sumLoad15/count)*100) / 100,
+			CPUTempC:  avgTempC,
+			Status:    status,
+			Timestamp: time.Now(),
+		}
+		historyCopy = append(historyCopy, partialEntry)
+
+		// Keep only last 60 entries
+		if len(historyCopy) > 60 {
+			historyCopy = historyCopy[len(historyCopy)-60:]
 		}
 	}
 

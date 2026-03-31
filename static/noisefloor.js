@@ -853,7 +853,7 @@ class NoiseFloorMonitor {
         const ft8SnrHtml = hasFT8
             ? `<div class="metric">
                 <span class="metric-label">FT8 SNR:</span>
-                <span class="metric-value ft8-snr">${measurement.ft8_snr.toFixed(1)} dB</span>
+                <span class="metric-value ft8-snr" style="color: ${headerColor};">${measurement.ft8_snr.toFixed(1)} dB</span>
             </div>`
             : '';
 
@@ -923,7 +923,7 @@ class NoiseFloorMonitor {
         const ft8SnrHtml = hasFT8
             ? `<div class="metric">
                 <span class="metric-label">FT8 SNR:</span>
-                <span class="metric-value ft8-snr">${measurement.ft8_snr.toFixed(1)} dB</span>
+                <span class="metric-value ft8-snr" style="color: ${headerColor};">${measurement.ft8_snr.toFixed(1)} dB</span>
             </div>`
             : '';
 
@@ -1062,8 +1062,9 @@ class NoiseFloorMonitor {
 
             // Update FT8 SNR if present
             const ft8SnrEl = card.querySelector('.ft8-snr');
-            if (ft8SnrEl && measurement.ft8_snr && measurement.ft8_snr > 0) {
+            if (ft8SnrEl && hasFT8) {
                 ft8SnrEl.textContent = `${measurement.ft8_snr.toFixed(1)} dB`;
+                ft8SnrEl.style.color = headerColor;
             }
         });
     }

@@ -198,9 +198,9 @@ class BandConditionsMonitor {
         if (!summaryDiv || !contentDiv) return;
 
         // Determine overall quality color
-        const qualityColor = data.propagation_quality === 'Excellent' ? '#22c55e' :
-                            data.propagation_quality === 'Good' ? '#fbbf24' :
-                            data.propagation_quality === 'Fair' ? '#ff9800' : '#ef4444';
+        const qualityColor = data.propagation_quality === 'Excellent' ? '#16a34a' :
+                            data.propagation_quality === 'Good' ? '#f59e0b' :
+                            data.propagation_quality === 'Fair' ? '#ea580c' : '#dc2626';
 
         // Build compact display
         let html = '<div style="display: flex; flex-direction: column; gap: 12px;">';
@@ -538,10 +538,10 @@ class BandConditionsMonitor {
                     data: datasets,
                     backgroundColor: (context) => {
                         const value = context.raw.v;
-                        if (value === 0) return '#ef4444'; // POOR - red
-                        if (value === 1) return '#ff9800'; // FAIR - orange
-                        if (value === 2) return '#fbbf24'; // GOOD - bright yellow
-                        if (value === 3) return '#22c55e'; // EXCELLENT - green
+                        if (value === 0) return '#dc2626'; // POOR - red
+                        if (value === 1) return '#ea580c'; // FAIR - burnt orange
+                        if (value === 2) return '#f59e0b'; // GOOD - amber
+                        if (value === 3) return '#16a34a'; // EXCELLENT - green
                         return '#9ca3af'; // UNKNOWN - gray
                     },
                     borderColor: 'rgba(255, 255, 255, 0.3)',

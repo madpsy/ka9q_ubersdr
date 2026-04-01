@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Band State Colour Comparison</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+
+    .container { max-width: 900px; width: 100%; }
+
+    h1 { color: #e2e8f0; font-size: 1.4rem; font-weight: 600; margin-bottom: 0.3rem; }
+    .subtitle { color: #94a3b8; font-size: 0.85rem; margin-bottom: 2rem; }
+
+    .comparison-table {
+      background: rgba(255,255,255,0.07);
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.12);
+    }
+
+    .table-header {
+      display: grid;
+      grid-template-columns: 0.6fr 1fr 1fr 1fr 1fr;
+      background: rgba(0,0,0,0.25);
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .table-header span {
+      color: #94a3b8;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      text-align: center;
+    }
+    .table-header span:first-child { text-align: left; }
+
+    .table-row {
+      display: grid;
+      grid-template-columns: 0.6fr 1fr 1fr 1fr 1fr;
+      padding: 0.8rem 1rem;
+      align-items: center;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .table-row:last-child { border-bottom: none; }
+    .table-row:hover { background: rgba(255,255,255,0.04); }
+
+    .state-label { color: #cbd5e1; font-size: 0.85rem; font-weight: 500; }
+
+    .badge-cell { display: flex; justify-content: center; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.28rem 0.65rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #ffffff;
+      white-space: nowrap;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+    }
+
+    /* Current */
+    .c-poor      { background: #ef4444; }
+    .c-fair      { background: #ff9800; }
+    .c-good      { background: #fbbf24; }
+    .c-excellent { background: #22c55e; }
+
+    /* 600-series, Good = #ca8a04 (amber-600, darkest) */
+    .v1-poor      { background: #dc2626; }
+    .v1-fair      { background: #ea580c; }
+    .v1-good      { background: #ca8a04; }
+    .v1-excellent { background: #16a34a; }
+
+    /* 600-series, Good = #d97706 (amber-600 brighter) */
+    .v2-poor      { background: #dc2626; }
+    .v2-fair      { background: #ea580c; }
+    .v2-good      { background: #d97706; }
+    .v2-excellent { background: #16a34a; }
+
+    /* 600-series, Good = #f59e0b (amber-500, closest to current yellow) */
+    .v3-poor      { background: #dc2626; }
+    .v3-fair      { background: #ea580c; }
+    .v3-good      { background: #f59e0b; }
+    .v3-excellent { background: #16a34a; }
+
+    .note {
+      margin-top: 1.2rem;
+      background: rgba(0,0,0,0.2);
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      color: #94a3b8;
+      font-size: 0.8rem;
+      line-height: 1.6;
+    }
+    .note strong { color: #cbd5e1; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Band State Colour Comparison</h1>
+    <p class="subtitle">Current vs 600-series with three Good colour options</p>
+
+    <div class="comparison-table">
+      <div class="table-header">
+        <span>State</span>
+        <span>Current</span>
+        <span>V1 — #ca8a04</span>
+        <span>V2 — #d97706</span>
+        <span>V3 — #f59e0b</span>
+      </div>
+
+      <div class="table-row">
+        <span class="state-label">Poor</span>
+        <div class="badge-cell"><span class="badge c-poor">−5 dB (Poor)</span></div>
+        <div class="badge-cell"><span class="badge v1-poor">−5 dB (Poor)</span></div>
+        <div class="badge-cell"><span class="badge v2-poor">−5 dB (Poor)</span></div>
+        <div class="badge-cell"><span class="badge v3-poor">−5 dB (Poor)</span></div>
+      </div>
+
+      <div class="table-row">
+        <span class="state-label">Fair</span>
+        <div class="badge-cell"><span class="badge c-fair">12 dB (Fair)</span></div>
+        <div class="badge-cell"><span class="badge v1-fair">12 dB (Fair)</span></div>
+        <div class="badge-cell"><span class="badge v2-fair">12 dB (Fair)</span></div>
+        <div class="badge-cell"><span class="badge v3-fair">12 dB (Fair)</span></div>
+      </div>
+
+      <div class="table-row">
+        <span class="state-label">Good</span>
+        <div class="badge-cell"><span class="badge c-good">24 dB (Good)</span></div>
+        <div class="badge-cell"><span class="badge v1-good">24 dB (Good)</span></div>
+        <div class="badge-cell"><span class="badge v2-good">24 dB (Good)</span></div>
+        <div class="badge-cell"><span class="badge v3-good">24 dB (Good)</span></div>
+      </div>
+
+      <div class="table-row">
+        <span class="state-label">Excellent</span>
+        <div class="badge-cell"><span class="badge c-excellent">35 dB (Excellent)</span></div>
+        <div class="badge-cell"><span class="badge v1-excellent">35 dB (Excellent)</span></div>
+        <div class="badge-cell"><span class="badge v2-excellent">35 dB (Excellent)</span></div>
+        <div class="badge-cell"><span class="badge v3-excellent">35 dB (Excellent)</span></div>
+      </div>
+    </div>
+
+    <div class="note">
+      All three variants use <strong>#dc2626</strong> (Poor), <strong>#ea580c</strong> (Fair), <strong>#16a34a</strong> (Excellent).<br>
+      Only Good differs: <strong>V1 #ca8a04</strong> (dark amber) · <strong>V2 #d97706</strong> (amber-600) · <strong>V3 #f59e0b</strong> (amber-500, closest to current yellow)
+    </div>
+  </div>
+</body>
+</html>

@@ -811,10 +811,10 @@ class NoiseFloorMonitor {
 
     getFT8SnrColor(snr) {
         // Matches the band conditions chart thresholds
-        if (snr < 6)  return '#ef4444'; // Poor      - red
-        if (snr < 20) return '#ff9800'; // Fair      - orange
-        if (snr < 30) return '#fbbf24'; // Good      - yellow
-        return '#22c55e';               // Excellent - green
+        if (snr < 6)  return '#dc2626'; // Poor      - red
+        if (snr < 20) return '#ea580c'; // Fair      - burnt orange
+        if (snr < 30) return '#f59e0b'; // Good      - amber
+        return '#16a34a';               // Excellent - green
     }
 
     getFT8SnrLabel(snr) {
@@ -2882,10 +2882,10 @@ class NoiseFloorMonitor {
                         data: datasets,
                         backgroundColor: (context) => {
                             const value = context.raw.v;
-                            if (value === 0) return '#ef4444'; // POOR - red
-                            if (value === 1) return '#ff9800'; // FAIR - orange
-                            if (value === 2) return '#fbbf24'; // GOOD - yellow
-                            if (value === 3) return '#22c55e'; // EXCELLENT - green
+                            if (value === 0) return '#dc2626'; // POOR - red
+                            if (value === 1) return '#ea580c'; // FAIR - burnt orange
+                            if (value === 2) return '#f59e0b'; // GOOD - amber
+                            if (value === 3) return '#16a34a'; // EXCELLENT - green
                             return '#9ca3af'; // UNKNOWN - gray
                         },
                         borderColor: 'rgba(255, 255, 255, 0.3)',
@@ -3145,10 +3145,10 @@ class NoiseFloorMonitor {
                         data: datasets,
                         backgroundColor: (context) => {
                             const value = context.raw.v;
-                            if (value === 0) return '#ef4444'; // POOR - red
-                            if (value === 1) return '#ff9800'; // FAIR - orange
-                            if (value === 2) return '#fbbf24'; // GOOD - yellow
-                            if (value === 3) return '#22c55e'; // EXCELLENT - green
+                            if (value === 0) return '#dc2626'; // POOR - red
+                            if (value === 1) return '#ea580c'; // FAIR - burnt orange
+                            if (value === 2) return '#f59e0b'; // GOOD - amber
+                            if (value === 3) return '#16a34a'; // EXCELLENT - green
                             return '#9ca3af'; // UNKNOWN - gray
                         },
                         borderColor: 'rgba(255, 255, 255, 0.3)',

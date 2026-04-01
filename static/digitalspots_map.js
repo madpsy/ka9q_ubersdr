@@ -427,9 +427,9 @@ class DigitalSpotsMap {
         if (!contentDiv) return;
 
         // Determine propagation quality color
-        const qualityColor = data.propagation_quality === 'Excellent' ? '#22c55e' :
-                            data.propagation_quality === 'Good' ? '#fbbf24' :
-                            data.propagation_quality === 'Fair' ? '#ff9800' : '#ef4444';
+        const qualityColor = data.propagation_quality === 'Excellent' ? '#16a34a' :
+                            data.propagation_quality === 'Good' ? '#f59e0b' :
+                            data.propagation_quality === 'Fair' ? '#ea580c' : '#dc2626';
 
         let html = '';
 
@@ -504,16 +504,16 @@ class DigitalSpotsMap {
             // Determine state based on SNR
             let bgColor, stateText;
             if (snr < 6) {
-                bgColor = '#ef4444';
+                bgColor = '#dc2626';
                 stateText = 'POOR';
             } else if (snr >= 6 && snr < 20) {
-                bgColor = '#ff9800';
+                bgColor = '#ea580c';
                 stateText = 'FAIR';
             } else if (snr >= 20 && snr < 30) {
-                bgColor = '#fbbf24';
+                bgColor = '#f59e0b';
                 stateText = 'GOOD';
             } else {
-                bgColor = '#22c55e';
+                bgColor = '#16a34a';
                 stateText = 'EXCELLENT';
             }
 

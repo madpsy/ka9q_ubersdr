@@ -37,7 +37,8 @@ const MIDI_FUNCTIONS = [
     { group: 'Audio',      value: 'bw_high',        label: 'Bandwidth High Edge (fader)' },
     { group: 'Audio',      value: 'mute_toggle',    label: 'Mute Toggle' },
     { group: 'Audio',      value: 'nr2_toggle',     label: 'NR2 Noise Reduction Toggle' },
-    { group: 'Audio',      value: 'nb_toggle',      label: 'Noise Blanker Toggle' },
+    { group: 'Audio',      value: 'nb_toggle',       label: 'Noise Blanker Toggle' },
+    { group: 'VFO',        value: 'vfo_ab_toggle',  label: 'Toggle VFO A/B' },
 ];
 
 // Band frequencies (FT8/digital centre frequencies)
@@ -660,6 +661,11 @@ class MIDIControlExtension extends DecoderExtension {
                     break;
                 case 'nb_toggle':
                     if (value > 0 && window.toggleNBQuick) window.toggleNBQuick();
+                    break;
+
+                // ── VFO A/B toggle ─────────────────────────────────────────
+                case 'vfo_ab_toggle':
+                    if (value > 0 && window.toggleVFO) window.toggleVFO();
                     break;
 
                 default:

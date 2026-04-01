@@ -3411,8 +3411,9 @@ func validateDecoderBandName(name string) error {
 	return nil
 }
 
-// checkDecoderBandDuplicates checks for duplicate names and frequencies in decoder bands
-func checkDecoderBandDuplicates(bands []interface{}, newName string, newFreq interface{}, skipIndex int) error {
+// checkDecoderBandDuplicates checks for duplicate names and frequency+mode combinations in decoder bands.
+// Two bands may share the same frequency as long as they use different modes (e.g. FT8 and JS8 on 3578000 Hz).
+func checkDecoderBandDuplicates(bands []interface{}, newName string, newFreq interface{}, newMode string, skipIndex int) error {
 	// Convert newFreq to uint64 for comparison
 	var newFreqUint64 uint64
 	switch v := newFreq.(type) {
@@ -3444,7 +3445,8 @@ func checkDecoderBandDuplicates(bands []interface{}, newName string, newFreq int
 			return fmt.Errorf("a decoder band with the name \"%s\" already exists", newName)
 		}
 
-		// Check for duplicate frequency
+		// Check for duplicate frequency+mode combination.
+		// The same frequency is allowed if the modes differ (e.g. FT8 and JS8 on the same freq).
 		if bandFreq, ok := band["frequency"]; ok {
 			var bandFreqUint64 uint64
 			switch v := bandFreq.(type) {
@@ -3459,11 +3461,14 @@ func checkDecoderBandDuplicates(bands []interface{}, newName string, newFreq int
 			}
 
 			if bandFreqUint64 == newFreqUint64 {
-				existingName := "unknown"
-				if name, ok := band["name"].(string); ok {
-					existingName = name
+				bandMode, _ := band["mode"].(string)
+				if strings.EqualFold(bandMode, newMode) {
+					existingName := "unknown"
+					if name, ok := band["name"].(string); ok {
+						existingName = name
+					}
+					return fmt.Errorf("a decoder band with mode %s on frequency %d Hz already exists (\"%s\")", newMode, newFreqUint64, existingName)
 				}
-				return fmt.Errorf("frequency %d Hz is already used by decoder band \"%s\"", newFreqUint64, existingName)
 			}
 		}
 	}
@@ -3518,7 +3523,8 @@ func (ah *AdminHandler) handleAddDecoderBand(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Check for duplicates (skipIndex = -1 means we're adding, not editing)
-	if err := checkDecoderBandDuplicates(bands, name, newBand["frequency"], -1); err != nil {
+	newMode, _ := newBand["mode"].(string)
+	if err := checkDecoderBandDuplicates(bands, name, newBand["frequency"], newMode, -1); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -3617,7 +3623,8 @@ func (ah *AdminHandler) handleUpdateDecoderBand(w http.ResponseWriter, r *http.R
 	}
 
 	// Check for duplicates (pass the index we're editing to skip it in the check)
-	if err := checkDecoderBandDuplicates(bands, bandName, updatedBand["frequency"], index); err != nil {
+	updatedMode, _ := updatedBand["mode"].(string)
+	if err := checkDecoderBandDuplicates(bands, bandName, updatedBand["frequency"], updatedMode, index); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

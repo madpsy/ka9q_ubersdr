@@ -1,8 +1,7 @@
 // Noise Floor Aggregate Analysis JavaScript
 // Handles data fetching, visualization, and user interactions
 
-// Available bands and fields
-const BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+// Available fields
 const FIELDS = {
     'p5_db': 'Noise Floor',
     'p10_db': 'P10',
@@ -16,33 +15,85 @@ const FIELDS = {
     'ft8_snr': 'FT8 SNR'
 };
 
-// Band colors (matching noisefloor.js)
-const BAND_COLORS = {
-    '160m': '#4E79A7',
-    '80m': '#F28E2B',
-    '60m': '#E15759',
-    '40m': '#76B7B2',
-    '30m': '#59A14F',
-    '20m': '#EDC948',
-    '17m': '#B07AA1',
-    '15m': '#FF9DA7',
-    '12m': '#9C755F',
-    '10m': '#BAB0AC'
-};
+// Band lists and colors — populated dynamically from /api/noisefloor/config
+let BANDS = [];
+let BAND_COLORS = {};
+let BAND_COLORS_COMPARISON = {};
 
-// Lighter versions of band colors for comparison data
-const BAND_COLORS_COMPARISON = {
-    '160m': '#8FAFD4',
-    '80m': '#F7B876',
-    '60m': '#EE9B9C',
-    '40m': '#A8D1CE',
-    '30m': '#92C98A',
-    '20m': '#F5E594',
-    '17m': '#D0A8C5',
-    '15m': '#FFC4CB',
-    '12m': '#C5A393',
-    '10m': '#D5CCC9'
-};
+// Colour palette (same order as noisefloor.js so colours match across pages)
+const BAND_COLOR_PALETTE = [
+    '#4E79A7', // blue
+    '#E15759', // red
+    '#59A14F', // green
+    '#F28E2B', // orange
+    '#B07AA1', // purple
+    '#76B7B2', // cyan
+    '#D4526E', // rose
+    '#EDC948', // yellow
+    '#8B4789', // deep purple
+    '#FF9DA7', // pink
+    '#9C755F', // brown
+    '#BAB0AC', // grey
+    '#1f77b4', // steel blue
+    '#d62728', // brick red
+    '#2ca02c', // forest green
+    '#ff7f0e', // amber
+    '#9467bd', // violet
+    '#17becf', // teal
+    '#bcbd22', // olive
+    '#7f7f7f', // mid grey
+];
+
+// Derive a lighter version of a hex colour by blending 50% toward white
+function lightenColor(hex) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    const lr = Math.round(r + (255 - r) * 0.5);
+    const lg = Math.round(g + (255 - g) * 0.5);
+    const lb = Math.round(b + (255 - b) * 0.5);
+    return `#${lr.toString(16).padStart(2, '0')}${lg.toString(16).padStart(2, '0')}${lb.toString(16).padStart(2, '0')}`;
+}
+
+// Load band configurations from the server and populate BANDS / BAND_COLORS
+async function loadBandConfigs() {
+    try {
+        const response = await fetch('/api/noisefloor/config');
+        if (!response.ok) {
+            console.warn('Failed to load band configurations, falling back to defaults');
+            useFallbackBands();
+            return;
+        }
+        const data = await response.json();
+        const sorted = (data.bands || []).slice().sort((a, b) => a.center_frequency - b.center_frequency);
+
+        BANDS = sorted.map(b => b.name);
+        BAND_COLORS = {};
+        BAND_COLORS_COMPARISON = {};
+        sorted.forEach((b, i) => {
+            const color = BAND_COLOR_PALETTE[i % BAND_COLOR_PALETTE.length];
+            BAND_COLORS[b.name] = color;
+            BAND_COLORS_COMPARISON[b.name] = lightenColor(color);
+        });
+        console.log('Band configurations loaded:', BANDS, BAND_COLORS);
+    } catch (error) {
+        console.error('Error loading band configurations:', error);
+        useFallbackBands();
+    }
+}
+
+// Fallback to a hardcoded list if the API is unavailable
+function useFallbackBands() {
+    const fallback = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+    BANDS = fallback;
+    BAND_COLORS = {};
+    BAND_COLORS_COMPARISON = {};
+    fallback.forEach((band, i) => {
+        const color = BAND_COLOR_PALETTE[i % BAND_COLOR_PALETTE.length];
+        BAND_COLORS[band] = color;
+        BAND_COLORS_COMPARISON[band] = lightenColor(color);
+    });
+}
 
 // Global state
 let currentData = null;
@@ -57,7 +108,9 @@ let selectedDates = {
 };
 
 // Initialize the page
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    // Load band configs from server before building the band checkboxes
+    await loadBandConfigs();
     initializeBandCheckboxes();
     initializeFieldCheckboxes();
     fetchAvailableDates();

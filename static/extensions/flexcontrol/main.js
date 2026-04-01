@@ -74,6 +74,7 @@ const FC_FUNCTIONS = [
     { group: 'Audio',      value: 'mute_toggle',    label: 'Mute Toggle' },
     { group: 'Audio',      value: 'nr2_toggle',     label: 'NR2 Noise Reduction Toggle' },
     { group: 'Audio',      value: 'nb_toggle',      label: 'Noise Blanker Toggle' },
+    { group: 'VFO',        value: 'vfo_ab_toggle',  label: 'Toggle VFO A/B' },
 ];
 
 const FC_BAND_FREQS = {
@@ -651,6 +652,11 @@ class FlexControlExtension extends DecoderExtension {
                     break;
                 case 'nb_toggle':
                     if (window.toggleNBQuick) window.toggleNBQuick();
+                    break;
+
+                // ── VFO A/B toggle ─────────────────────────────────────────
+                case 'vfo_ab_toggle':
+                    if (window.toggleVFO) window.toggleVFO();
                     break;
 
                 default:

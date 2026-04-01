@@ -428,7 +428,7 @@ class DigitalSpotsMap {
 
         // Determine propagation quality color
         const qualityColor = data.propagation_quality === 'Excellent' ? '#16a34a' :
-                            data.propagation_quality === 'Good' ? '#f59e0b' :
+                            data.propagation_quality === 'Good' ? '#fbbf24' :
                             data.propagation_quality === 'Fair' ? '#ea580c' : '#dc2626';
 
         let html = '';
@@ -510,7 +510,7 @@ class DigitalSpotsMap {
                 bgColor = '#ea580c';
                 stateText = 'FAIR';
             } else if (snr >= 20 && snr < 30) {
-                bgColor = '#f59e0b';
+                bgColor = '#fbbf24';
                 stateText = 'GOOD';
             } else {
                 bgColor = '#16a34a';

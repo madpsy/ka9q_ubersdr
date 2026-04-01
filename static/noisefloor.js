@@ -813,7 +813,7 @@ class NoiseFloorMonitor {
         // Matches the band conditions chart thresholds
         if (snr < 6)  return '#dc2626'; // Poor      - red
         if (snr < 20) return '#ea580c'; // Fair      - burnt orange
-        if (snr < 30) return '#f59e0b'; // Good      - amber
+        if (snr < 30) return '#fbbf24'; // Good      - yellow
         return '#16a34a';               // Excellent - green
     }
 
@@ -2884,7 +2884,7 @@ class NoiseFloorMonitor {
                             const value = context.raw.v;
                             if (value === 0) return '#dc2626'; // POOR - red
                             if (value === 1) return '#ea580c'; // FAIR - burnt orange
-                            if (value === 2) return '#f59e0b'; // GOOD - amber
+                            if (value === 2) return '#fbbf24'; // GOOD - yellow
                             if (value === 3) return '#16a34a'; // EXCELLENT - green
                             return '#9ca3af'; // UNKNOWN - gray
                         },
@@ -3147,7 +3147,7 @@ class NoiseFloorMonitor {
                             const value = context.raw.v;
                             if (value === 0) return '#dc2626'; // POOR - red
                             if (value === 1) return '#ea580c'; // FAIR - burnt orange
-                            if (value === 2) return '#f59e0b'; // GOOD - amber
+                            if (value === 2) return '#fbbf24'; // GOOD - yellow
                             if (value === 3) return '#16a34a'; // EXCELLENT - green
                             return '#9ca3af'; // UNKNOWN - gray
                         },

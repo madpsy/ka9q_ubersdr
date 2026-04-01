@@ -199,7 +199,7 @@ class BandConditionsMonitor {
 
         // Determine overall quality color
         const qualityColor = data.propagation_quality === 'Excellent' ? '#16a34a' :
-                            data.propagation_quality === 'Good' ? '#f59e0b' :
+                            data.propagation_quality === 'Good' ? '#fbbf24' :
                             data.propagation_quality === 'Fair' ? '#ea580c' : '#dc2626';
 
         // Build compact display
@@ -540,7 +540,7 @@ class BandConditionsMonitor {
                         const value = context.raw.v;
                         if (value === 0) return '#dc2626'; // POOR - red
                         if (value === 1) return '#ea580c'; // FAIR - burnt orange
-                        if (value === 2) return '#f59e0b'; // GOOD - amber
+                        if (value === 2) return '#fbbf24'; // GOOD - yellow
                         if (value === 3) return '#16a34a'; // EXCELLENT - green
                         return '#9ca3af'; // UNKNOWN - gray
                     },

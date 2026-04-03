@@ -1791,9 +1791,18 @@
             }
         }
 
+        // Classify an IP address as the internal local subnet (172.20.0.0/24)
+        function isLocalAddress(ip) {
+            if (!ip || ip === 'N/A') return false;
+            return /^172\.20\.0\./.test(ip);
+        }
+
         // Classify an IP address as LAN (RFC 1918 / loopback) or public
+        // Note: the local subnet (172.20.0.0/24) is excluded from LAN
         function isLANAddress(ip) {
             if (!ip || ip === 'N/A') return false;
+            // Exclude local subnet — classified separately
+            if (isLocalAddress(ip)) return false;
             // IPv4 loopback
             if (/^127\./.test(ip)) return true;
             // 10.0.0.0/8
@@ -4795,6 +4804,9 @@
             let passwordBypassedAudioKbps = 0;
             let passwordBypassedWaterfallKbps = 0;
             let passwordBypassedDXClusterKbps = 0;
+            let localAudioKbps = 0;
+            let localWaterfallKbps = 0;
+            let localDXClusterKbps = 0;
             let lanAudioKbps = 0;
             let lanWaterfallKbps = 0;
             let lanDXClusterKbps = 0;
@@ -4842,8 +4854,13 @@
                     regularDXClusterKbps += dxKbps;
                 }
 
-                // Sum throughput by LAN vs public (orthogonal to auth method)
-                if (isLAN) {
+                // Sum throughput by Local / LAN / public (orthogonal to auth method)
+                const isLocal = isLocalAddress(clientIP);
+                if (isLocal) {
+                    localAudioKbps     += audioKbps;
+                    localWaterfallKbps += waterfallKbps;
+                    localDXClusterKbps += dxKbps;
+                } else if (isLAN) {
                     lanAudioKbps     += audioKbps;
                     lanWaterfallKbps += waterfallKbps;
                     lanDXClusterKbps += dxKbps;
@@ -4915,6 +4932,7 @@
             networkHTML += `<span style="margin-left: 20px;">• Regular users: <strong>${formatThroughput(regularAudioKbps)}</strong> audio, <strong>${formatThroughput(regularWaterfallKbps)}</strong> w/f, <strong>${formatThroughput(regularDXClusterKbps)}</strong> DX</span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• Bypassed users: <strong>${formatThroughput(ipBypassedAudioKbps)}</strong> audio, <strong>${formatThroughput(ipBypassedWaterfallKbps)}</strong> w/f, <strong>${formatThroughput(ipBypassedDXClusterKbps)}</strong> DX</span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• Password users: <strong>${formatThroughput(passwordBypassedAudioKbps)}</strong> audio, <strong>${formatThroughput(passwordBypassedWaterfallKbps)}</strong> w/f, <strong>${formatThroughput(passwordBypassedDXClusterKbps)}</strong> DX</span><br>`;
+            networkHTML += `<span style="margin-left: 20px;">• Local users: <strong>${formatThroughput(localAudioKbps)}</strong> audio, <strong>${formatThroughput(localWaterfallKbps)}</strong> w/f, <strong>${formatThroughput(localDXClusterKbps)}</strong> DX</span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• LAN users: <strong>${formatThroughput(lanAudioKbps)}</strong> audio, <strong>${formatThroughput(lanWaterfallKbps)}</strong> w/f, <strong>${formatThroughput(lanDXClusterKbps)}</strong> DX</span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• Public users: <strong>${formatThroughput(publicAudioKbps)}</strong> audio, <strong>${formatThroughput(publicWaterfallKbps)}</strong> w/f, <strong>${formatThroughput(publicDXClusterKbps)}</strong> DX</span><br>`;
             networkHTML += `<span style="margin-left: 20px;">• <strong>Total audio:</strong> <strong style="color: #667eea;">${formatThroughput(totalAudioKbps)}</strong></span><br>`;

@@ -1449,7 +1449,8 @@ func (sm *SessionManager) GetUniqueUserCount() int {
 }
 
 // GetNonBypassedUserCount returns the current number of unique non-bypassed users
-// This counts users whose IPs are not in the timeout bypass list
+// This counts users whose IPs are not in the timeout bypass list AND who did not
+// authenticate with a bypass password.
 func (sm *SessionManager) GetNonBypassedUserCount() int {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -1459,8 +1460,8 @@ func (sm *SessionManager) GetNonBypassedUserCount() int {
 
 	for _, session := range sm.sessions {
 		if session.UserSessionID != "" {
-			// Check if this session's IP is bypassed
-			if !sm.config.Server.IsIPTimeoutBypassed(session.ClientIP) {
+			// Check if this session's IP or bypass password grants bypass status
+			if !sm.config.Server.IsIPTimeoutBypassed(session.ClientIP, session.BypassPassword) {
 				nonBypassedUUIDs[session.UserSessionID] = true
 			}
 		}
@@ -1469,8 +1470,10 @@ func (sm *SessionManager) GetNonBypassedUserCount() int {
 	return len(nonBypassedUUIDs)
 }
 
-// CanAcceptNewUUID checks if a new UUID can be accepted without exceeding max_sessions
-// Returns true if the UUID already exists OR if there's room for a new UUID
+// CanAcceptNewUUID checks if a new UUID can be accepted without exceeding max_sessions.
+// Only non-bypassed users count toward the limit — bypassed users (by IP or password)
+// are admitted freely and must not consume slots that block regular users.
+// Returns true if the UUID already exists OR if there's room for a new non-bypassed UUID.
 func (sm *SessionManager) CanAcceptNewUUID(userSessionID string) bool {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -1480,8 +1483,21 @@ func (sm *SessionManager) CanAcceptNewUUID(userSessionID string) bool {
 		return true
 	}
 
-	// Check if we have room for a new UUID
-	return len(sm.userSessionUUIDs) < sm.config.Server.MaxSessions
+	// Count only non-bypassed unique users toward the limit.
+	// Bypassed users (IP list or password) are exempt and must not block regular users.
+	nonBypassedCount := 0
+	seen := make(map[string]bool)
+	for _, session := range sm.sessions {
+		if session.UserSessionID == "" || seen[session.UserSessionID] {
+			continue
+		}
+		if !sm.config.Server.IsIPTimeoutBypassed(session.ClientIP, session.BypassPassword) {
+			nonBypassedCount++
+			seen[session.UserSessionID] = true
+		}
+	}
+
+	return nonBypassedCount < sm.config.Server.MaxSessions
 }
 
 // CanAcceptNewIP checks if a new UUID from an IP can be accepted without exceeding max_sessions_ip

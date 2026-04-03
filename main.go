@@ -2335,7 +2335,7 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 	// Skip this check if the IP is in the bypass list or valid password provided
 	if !sessions.config.Server.IsIPTimeoutBypassed(clientIP, req.Password) {
 		if !sessions.CanAcceptNewUUID(req.UserSessionID) {
-			uniqueCount := sessions.GetUniqueUserCount()
+			uniqueCount := sessions.GetNonBypassedUserCount()
 			maxSessions := sessions.config.Server.MaxSessions
 			response.Allowed = false
 			response.Reason = fmt.Sprintf("Maximum unique users reached (%d of %d)", uniqueCount, maxSessions)

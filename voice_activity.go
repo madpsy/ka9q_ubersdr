@@ -402,6 +402,10 @@ func estimateNoiseFloorMedianFilter(data []float32, minFreq, maxFreq uint64, bin
 		return sorted[i] < sorted[j]
 	})
 
+	if len(sorted) == 0 {
+		return 0
+	}
+
 	// 10th percentile - robust noise floor that ignores signals
 	idx := len(sorted) * 10 / 100
 	if idx >= len(sorted) {
@@ -863,6 +867,9 @@ func detectVoiceActivityMultiFrame(buffer *FFTBuffer, params DetectionParams, wi
 	regionTracker := make(map[string]*CandidateRegion)
 
 	for _, frame := range frames {
+		if len(frame.Data) == 0 {
+			continue
+		}
 		// Per-frame noise floor estimation
 		noiseFloor := estimateNoiseFloorMedianFilter(frame.Data, 1000, 3000, buffer.BinWidth, buffer.StartFreq)
 

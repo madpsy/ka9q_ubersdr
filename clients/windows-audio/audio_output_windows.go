@@ -38,6 +38,12 @@ type AudioOutput struct {
 	mu          sync.Mutex
 }
 
+// DoneC returns a channel that is closed when the WASAPI render loop exits.
+// Callers can select on this to detect unexpected render-loop death.
+func (a *AudioOutput) DoneC() <-chan struct{} {
+	return a.doneCh
+}
+
 // coInit initialises COM as COINIT_MULTITHREADED on the calling goroutine.
 // Returns true if CoUninitialize should be called on exit.
 func coInit() bool {

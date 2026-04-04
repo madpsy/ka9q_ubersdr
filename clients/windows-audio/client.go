@@ -153,6 +153,14 @@ type RadioClient struct {
 	// Protected by mu.
 	opusDec *opusDecoder
 
+	// opusDecodeCh is a buffered channel of raw Opus wire frames.
+	// The WebSocket receive goroutine enqueues frames here non-blocking;
+	// a dedicated worker goroutine calls opus_decode (a DLL syscall that
+	// pins an OS thread) so the receive goroutine is never stalled by it.
+	// This keeps the IOCP completion path as short as possible and prevents
+	// the Go network poller from being starved on Windows.
+	opusDecodeCh chan []byte
+
 	mu sync.RWMutex
 }
 
@@ -428,7 +436,16 @@ func (c *RadioClient) runLoop(ctx context.Context) {
 	headers := http.Header{}
 	headers.Set("User-Agent", "UberSDR-Windows/1.0")
 
-	dialer := websocket.DefaultDialer
+	// Use an explicit dialer with larger read/write buffers.
+	// The default gorilla dialer uses 4 KB buffers; at ~7 kB/s Opus that fills
+	// in under a second, making any Windows scheduling hiccup immediately stall
+	// the TCP window and block ReadMessage.
+	dialer := &websocket.Dialer{
+		Proxy:            http.ProxyFromEnvironment,
+		HandshakeTimeout: 10 * time.Second,
+		ReadBufferSize:   256 * 1024,
+		WriteBufferSize:  32 * 1024,
+	}
 	conn, _, err := dialer.DialContext(ctx, wsURL, headers)
 	if err != nil {
 		c.setState(StateError, fmt.Sprintf("WebSocket dial: %v", err))
@@ -451,6 +468,20 @@ func (c *RadioClient) runLoop(ctx context.Context) {
 	c.mu.Lock()
 	c.pcmDecoder = pcmDec
 	c.mu.Unlock()
+
+	// Create the Opus decode channel and start the worker goroutine.
+	// The worker owns all opus_decode DLL calls so the receive goroutine
+	// (and therefore the IOCP poller) is never blocked by them.
+	opusDecodeCh := make(chan []byte, 256)
+	c.mu.Lock()
+	c.opusDecodeCh = opusDecodeCh
+	c.mu.Unlock()
+
+	go func() {
+		for raw := range opusDecodeCh {
+			c.decodeAndDeliverOpus(raw)
+		}
+	}()
 
 	// Keepalive ticker
 	keepalive := time.NewTicker(30 * time.Second)
@@ -529,8 +560,30 @@ func (c *RadioClient) handlePCMBinary(data []byte) {
 	c.deliverAudio(pcmLE, sampleRate, channels, basebandPower, noiseDensity)
 }
 
-// handleOpusBinary processes an Opus binary frame.
+// handleOpusBinary enqueues a raw Opus wire frame for decoding by the worker
+// goroutine.  This returns immediately so the WebSocket receive goroutine (and
+// the underlying IOCP poller) is never blocked by the opus_decode DLL call.
 func (c *RadioClient) handleOpusBinary(data []byte) {
+	c.mu.RLock()
+	ch := c.opusDecodeCh
+	c.mu.RUnlock()
+	if ch == nil {
+		return
+	}
+	// Copy data — the WebSocket library reuses the underlying buffer.
+	cp := make([]byte, len(data))
+	copy(cp, data)
+	// Non-blocking enqueue: if the worker is momentarily behind, drop rather
+	// than stalling the receive goroutine.
+	select {
+	case ch <- cp:
+	default:
+	}
+}
+
+// decodeAndDeliverOpus is called by the Opus worker goroutine.
+// It performs the actual DLL call and delivers PCM to the audio output.
+func (c *RadioClient) decodeAndDeliverOpus(data []byte) {
 	c.mu.Lock()
 	opusDec := c.opusDec
 	c.mu.Unlock()
@@ -563,6 +616,17 @@ func (c *RadioClient) deliverAudio(pcmLE []byte, sampleRate, channels int, baseb
 	c.mu.Lock()
 	out := c.audioOut
 	needNew := out == nil || c.sampleRate != sampleRate || c.channels != channels
+	// Also recreate if the WASAPI render loop has exited unexpectedly (e.g. a
+	// device reset or AUDCLNT_E_DEVICE_INVALIDATED).  DoneC() is closed by
+	// renderLoop when it returns, so a non-blocking receive succeeds iff the
+	// loop is dead.
+	if !needNew && out != nil {
+		select {
+		case <-out.DoneC():
+			needNew = true // render loop died; recreate the output
+		default:
+		}
+	}
 	var oldOut *AudioOutput
 	var deviceID string
 	var initialVolume float64 = 1.0
@@ -615,10 +679,12 @@ func (c *RadioClient) cleanup() {
 	out := c.audioOut
 	dec := c.pcmDecoder
 	opusDec := c.opusDec
+	decodeCh := c.opusDecodeCh
 	c.conn = nil
 	c.audioOut = nil
 	c.pcmDecoder = nil
 	c.opusDec = nil
+	c.opusDecodeCh = nil
 	// Reset audio params so the output is always recreated on the next connection
 	c.sampleRate = 0
 	c.channels = 0
@@ -626,6 +692,10 @@ func (c *RadioClient) cleanup() {
 
 	if conn != nil {
 		conn.Close()
+	}
+	// Close the Opus decode channel to stop the worker goroutine.
+	if decodeCh != nil {
+		close(decodeCh)
 	}
 	if out != nil {
 		out.Close()

@@ -112,6 +112,12 @@ func formatFreqKHz(hz int) string {
 }
 
 func main() {
+	// Raise process priority so the Go IOCP network poller thread is scheduled
+	// promptly by Windows. Without this, Windows can starve the poller for several
+	// seconds when the process is in the background, causing ReadMessage to block
+	// and audio to go silent even though data is sitting in the kernel TCP buffer.
+	setAboveNormalPriority()
+
 	a := app.NewWithID("io.github.ka9q.ubersdr.windows-audio")
 	a.Settings().SetTheme(theme.DarkTheme())
 	a.SetIcon(fyne.NewStaticResource("ubersdr.ico", appIcon))

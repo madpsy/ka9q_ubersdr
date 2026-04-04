@@ -79,6 +79,12 @@ func (a *AudioOutput) Push(pcmLE []byte) {
 	}
 }
 
+// DoneC returns a channel that never closes on non-Windows (oto has no render
+// loop that can die independently; the output is always considered alive).
+func (a *AudioOutput) DoneC() <-chan struct{} {
+	return make(chan struct{}) // never closed
+}
+
 // SetChannelMode is a no-op on non-Windows (oto doesn't support per-channel routing).
 func (a *AudioOutput) SetChannelMode(_ int) {}
 

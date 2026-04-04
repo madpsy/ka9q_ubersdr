@@ -94,9 +94,13 @@ type noaaSolarFluxResponse struct {
 }
 
 // noaaKIndexResponse represents the official 3-hour K-index data
-// Response is an array of arrays: ["2025-11-06 09:00:00.000", "3.33", "18", "8"]
-// [0] = time_tag, [1] = Kp value, [2] = a_running (A-index), [3] = station_count
-type noaaKIndexResponse []interface{}
+// NOAA returns an array of objects: {"time_tag":"...","Kp":3.67,"a_running":22,"station_count":8}
+type noaaKIndexResponse struct {
+	TimeTag      string  `json:"time_tag"`
+	Kp           float64 `json:"Kp"`
+	ARunning     int     `json:"a_running"`
+	StationCount int     `json:"station_count"`
+}
 
 type noaaSolarWindResponse struct {
 	TimeTag string  `json:"time_tag"`
@@ -324,36 +328,11 @@ func (swm *SpaceWeatherMonitor) fetchKIndex() (int, int, error) {
 		return 0, 0, fmt.Errorf("no K-index data available")
 	}
 
-	// Get the most recent entry (last array in the response)
-	lastEntry := data[len(data)-1]
-	if len(lastEntry) < 3 {
-		return 0, 0, fmt.Errorf("invalid K-index data format")
-	}
-
-	// Parse the Kp value (index 1) as a string, then convert to float and round
-	kpStr, ok := lastEntry[1].(string)
-	if !ok {
-		return 0, 0, fmt.Errorf("K-index value is not a string")
-	}
-
-	var kpFloat float64
-	if _, err := fmt.Sscanf(kpStr, "%f", &kpFloat); err != nil {
-		return 0, 0, fmt.Errorf("failed to parse K-index: %v", err)
-	}
-
-	// Parse the A-index (index 2) as a string, then convert to int
-	aStr, ok := lastEntry[2].(string)
-	if !ok {
-		return 0, 0, fmt.Errorf("A-index value is not a string")
-	}
-
-	var aIndex int
-	if _, err := fmt.Sscanf(aStr, "%d", &aIndex); err != nil {
-		return 0, 0, fmt.Errorf("failed to parse A-index: %v", err)
-	}
+	// Get the most recent entry (last object in the response)
+	last := data[len(data)-1]
 
 	// Round K-index to nearest integer
-	return int(kpFloat + 0.5), aIndex, nil
+	return int(last.Kp + 0.5), last.ARunning, nil
 }
 
 // fetchSolarWind gets the latest solar wind magnetic field from NOAA

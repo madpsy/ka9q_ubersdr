@@ -147,8 +147,8 @@ func main() {
 
 	// ── Widgets ───────────────────────────────────────────────────────────────
 
+	statusDot := NewStatusDot(dotColorGrey)
 	statusLabel := widget.NewLabel("Disconnected")
-	statusLabel.Wrapping = fyne.TextWrapWord
 
 	// Station info — populated from /api/description after URL is set
 	stationLabel := widget.NewLabel("")
@@ -197,7 +197,8 @@ func main() {
 		client.BandwidthLow = lo
 		client.BandwidthHigh = hi
 		if err := client.Tune(currentFreq, currentMode, lo, hi); err != nil {
-			statusLabel.SetText("✖ Tune error: " + err.Error())
+			statusDot.SetColor(dotColorRed)
+			statusLabel.SetText("Tune error: " + err.Error())
 		}
 	}
 
@@ -394,7 +395,8 @@ func main() {
 	doConnect = func() {
 		rawURL := strings.TrimSpace(urlEntry.Text)
 		if rawURL == "" {
-			statusLabel.SetText("✖ Error: URL is required")
+			statusDot.SetColor(dotColorRed)
+			statusLabel.SetText("Error: URL is required")
 			return
 		}
 
@@ -447,7 +449,8 @@ func main() {
 
 		hz, err := parseFreqKHz(freqEntry.Text)
 		if err != nil {
-			statusLabel.SetText("✖ Error: invalid frequency")
+			statusDot.SetColor(dotColorRed)
+			statusLabel.SetText("Error: invalid frequency")
 			return
 		}
 		hz = clampFreq(hz)
@@ -476,7 +479,8 @@ func main() {
 	// openBrowseDialog fetches instances and shows the browse dialog.
 	// It is called both from the button and automatically on startup.
 	openBrowseDialog := func() {
-		statusLabel.SetText("⟳ Fetching instances…")
+		statusDot.SetColor(dotColorOrange)
+		statusLabel.SetText("Fetching instances…")
 
 		go func() {
 			public, _ := FetchPublicInstances()
@@ -490,6 +494,7 @@ func main() {
 			all = append(all, public...)
 
 			if len(all) == 0 {
+				statusDot.SetColor(dotColorRed)
 				statusLabel.SetText("No instances found")
 				dialog.ShowInformation("Browse Instances",
 					"No instances found.\nCheck your internet connection or try again.", w)
@@ -503,6 +508,7 @@ func main() {
 				return all[i].Name < all[j].Name
 			})
 
+			statusDot.SetColor(dotColorRed)
 			statusLabel.SetText("Disconnected")
 
 			// Build full label list (one per instance in `all`).
@@ -700,6 +706,7 @@ func main() {
 		case StateConnected:
 			connectBtn.SetText("Disconnect")
 			connectBtn.Importance = widget.DangerImportance
+			statusDot.SetColor(dotColorGreen)
 			// Override sessionMaxSecs with the per-user value from /connection.
 			// This already has the bypass override applied (0 for bypassed users),
 			// unlike /api/description which always returns the globally configured value.
@@ -709,7 +716,7 @@ func main() {
 				sessionTimerStop = make(chan struct{})
 				stopCh := sessionTimerStop
 				remaining := sessionMaxSecs
-				statusLabel.SetText(fmt.Sprintf("● Connected · %s", formatSessionTime(remaining)))
+				statusLabel.SetText(fmt.Sprintf("Connected · %s", formatSessionTime(remaining)))
 				go func() {
 					ticker := time.NewTicker(time.Second)
 					defer ticker.Stop()
@@ -720,12 +727,14 @@ func main() {
 						case <-ticker.C:
 							remaining--
 							if remaining <= 0 {
-								statusLabel.SetText("⚠ Session time expired")
+								statusDot.SetColor(dotColorOrange)
+								statusLabel.SetText("Session time expired")
 								return
 							}
-							txt := fmt.Sprintf("● Connected · %s", formatSessionTime(remaining))
+							txt := fmt.Sprintf("Connected · %s", formatSessionTime(remaining))
 							if remaining <= 300 { // ≤ 5 minutes
-								txt = fmt.Sprintf("⚠ Connected · %s", formatSessionTime(remaining))
+								statusDot.SetColor(dotColorOrange)
+								txt = fmt.Sprintf("Connected · %s", formatSessionTime(remaining))
 							}
 							statusLabel.SetText(txt)
 						}
@@ -733,16 +742,18 @@ func main() {
 				}()
 			} else {
 				// 0 = unlimited (bypassed user or server has no session limit configured)
-				statusLabel.SetText("● Connected · Unlimited")
+				statusLabel.SetText("Connected · Unlimited")
 			}
 		case StateConnecting:
 			stopSessionTimer()
-			statusLabel.SetText("⟳ Connecting…")
+			statusDot.SetColor(dotColorOrange)
+			statusLabel.SetText("Connecting…")
 			connectBtn.SetText("Cancel")
 			connectBtn.Importance = widget.MediumImportance
 		case StateError:
 			stopSessionTimer()
-			txt := "✖ Error"
+			statusDot.SetColor(dotColorRed)
+			txt := "Error"
 			if msg != "" {
 				txt += ": " + msg
 			}
@@ -758,7 +769,8 @@ func main() {
 			if !userDisconnected {
 				go func() {
 					for i := 5; i > 0; i-- {
-						statusLabel.SetText(fmt.Sprintf("✖ Error — reconnecting in %ds…", i))
+						statusDot.SetColor(dotColorOrange)
+						statusLabel.SetText(fmt.Sprintf("Reconnecting in %ds…", i))
 						time.Sleep(time.Second)
 					}
 					if !userDisconnected {
@@ -768,6 +780,7 @@ func main() {
 			}
 		default:
 			stopSessionTimer()
+			statusDot.SetColor(dotColorRed)
 			statusLabel.SetText("Disconnected")
 			connectBtn.SetText("Connect")
 			connectBtn.Importance = widget.HighImportance
@@ -872,9 +885,10 @@ func main() {
 	// Throughput label — updated every second while connected.
 	throughputLabel := widget.NewLabel("")
 
-	// Status + connect row (pinned to bottom)
-	// Layout: statusLabel expands | throughputLabel fixed | connectBtn fixed
-	statusRow := container.NewBorder(nil, nil, nil,
+	// Status + connect row (pinned to bottom).
+	// The dot is pinned to the left; the label expands; throughput+button pinned right.
+	bottomBar := container.NewBorder(nil, nil,
+		statusDot,
 		container.NewHBox(throughputLabel, connectBtn),
 		statusLabel,
 	)
@@ -889,7 +903,7 @@ func main() {
 	// Full window: scrollable body + fixed status bar at bottom
 	content := container.NewBorder(
 		nil,
-		container.NewVBox(widget.NewSeparator(), statusRow),
+		container.NewVBox(widget.NewSeparator(), bottomBar),
 		nil, nil,
 		container.NewScroll(body),
 	)

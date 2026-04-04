@@ -9,3 +9,4 @@ collector/instances.db
 .vscode
 geoip/*.mmdb
 geoip/licence.txt
+clients/windows-audio/UberSDRAudio.exe

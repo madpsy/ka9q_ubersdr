@@ -1,0 +1,639 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
+)
+
+// AudioFormat selects the wire format requested from the server.
+type AudioFormat int
+
+const (
+	FormatPCMZstd AudioFormat = iota // lossless PCM, zstd-compressed on the wire
+	FormatOpus                       // lossy Opus (requires server Opus support)
+)
+
+// ConnectionState represents the current connection state.
+type ConnectionState int
+
+const (
+	StateDisconnected ConnectionState = iota
+	StateConnecting
+	StateConnected
+	StateError
+)
+
+func (s ConnectionState) String() string {
+	switch s {
+	case StateConnecting:
+		return "Connecting…"
+	case StateConnected:
+		return "Connected"
+	case StateError:
+		return "Error"
+	default:
+		return "Disconnected"
+	}
+}
+
+// TuneRequest is sent over the WebSocket to change frequency/mode/bandwidth
+// without reconnecting.
+type TuneRequest struct {
+	Type          string `json:"type"`
+	Frequency     int    `json:"frequency"`
+	Mode          string `json:"mode,omitempty"`
+	BandwidthLow  *int   `json:"bandwidthLow,omitempty"`
+	BandwidthHigh *int   `json:"bandwidthHigh,omitempty"`
+}
+
+// InstanceDescription holds the fields we care about from GET /api/description.
+type InstanceDescription struct {
+	DefaultFrequency int    `json:"default_frequency"`
+	DefaultMode      string `json:"default_mode"`
+	MaxSessionTime   int    `json:"max_session_time"` // seconds; 0 = unlimited
+	Receiver         struct {
+		Name     string `json:"name"`
+		Callsign string `json:"callsign"`
+		Location string `json:"location"`
+	} `json:"receiver"`
+}
+
+// FetchDescription calls GET /api/description on the current BaseURL and returns
+// the parsed response.  Errors are non-fatal — callers should fall back gracefully.
+func (c *RadioClient) FetchDescription() (*InstanceDescription, error) {
+	httpScheme, host, err := c.parseBaseURL()
+	if err != nil {
+		return nil, err
+	}
+	endpoint := fmt.Sprintf("%s://%s/api/description", httpScheme, host)
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "UberSDR-Windows/1.0")
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var desc InstanceDescription
+	if err := json.NewDecoder(resp.Body).Decode(&desc); err != nil {
+		return nil, err
+	}
+	return &desc, nil
+}
+
+// ConnectionCheckRequest is the body for POST /connection.
+type ConnectionCheckRequest struct {
+	UserSessionID string `json:"user_session_id"`
+	Password      string `json:"password,omitempty"`
+}
+
+// ConnectionCheckResponse is the response from POST /connection.
+type ConnectionCheckResponse struct {
+	Allowed        bool     `json:"allowed"`
+	Reason         string   `json:"reason,omitempty"`
+	ClientIP       string   `json:"client_ip,omitempty"`
+	Bypassed       bool     `json:"bypassed"`
+	AllowedIQModes []string `json:"allowed_iq_modes,omitempty"`
+	MaxSessionTime int      `json:"max_session_time"`
+}
+
+// RadioClient manages a single WebSocket connection to an UberSDR instance.
+//
+// Set BaseURL to the HTTP base URL of the instance, e.g.:
+//
+//	http://ubersdr.local:8080
+//	https://myreceiver.example.com
+//
+// The client derives the WebSocket URL automatically (http→ws, https→wss).
+type RadioClient struct {
+	// Config (set before Connect, read-only during connection)
+	BaseURL       string // e.g. "http://ubersdr.local:8080"
+	Password      string
+	Frequency     int
+	Mode          string
+	BandwidthLow  int
+	BandwidthHigh int
+	Format        AudioFormat
+	DeviceID      string // WASAPI device ID; "" = system default
+
+	// Runtime state
+	userSessionID string
+	conn          *websocket.Conn
+	state         ConnectionState
+	sampleRate    int
+	channels      int
+	volume        float64 // current volume (0.0–1.0); applied to new AudioOutput on creation
+	pcmDecoder    *PCMBinaryDecoder
+	audioOut      *AudioOutput
+	cancelFn      context.CancelFunc
+
+	// Callbacks (called from the receive goroutine; Fyne Set* methods are goroutine-safe)
+	OnStateChange   func(ConnectionState, string)             // state, optional message
+	OnAudioInfo     func(sampleRate, channels int)            // called when audio params are known
+	OnSignalQuality func(basebandPower, noiseDensity float32) // called each full-header packet; -999 = no data
+
+	// bytesReceived accumulates compressed wire bytes since last reset.
+	// Read and reset atomically with BytesReceivedAndReset().
+	bytesReceived atomic.Int64
+
+	// opusDec is the Opus decoder instance (nil until first Opus frame).
+	// Protected by mu.
+	opusDec *opusDecoder
+
+	mu sync.RWMutex
+}
+
+// NewRadioClient creates a new client with sensible defaults.
+func NewRadioClient() *RadioClient {
+	return &RadioClient{
+		BaseURL:       "http://ubersdr.local:8080",
+		userSessionID: uuid.New().String(),
+		state:         StateDisconnected,
+		BandwidthLow:  -2400,
+		BandwidthHigh: 2400,
+		Format:        FormatOpus, // default to Compressed (Opus)
+		volume:        1.0,
+	}
+}
+
+// State returns the current connection state (thread-safe).
+func (c *RadioClient) State() ConnectionState {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.state
+}
+
+func (c *RadioClient) setState(s ConnectionState, msg string) {
+	c.mu.Lock()
+	c.state = s
+	c.mu.Unlock()
+	if c.OnStateChange != nil {
+		c.OnStateChange(s, msg)
+	}
+}
+
+// SampleRate returns the last-known audio sample rate (thread-safe).
+func (c *RadioClient) SampleRate() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.sampleRate
+}
+
+// Channels returns the last-known channel count (thread-safe).
+func (c *RadioClient) Channels() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.channels
+}
+
+// SetVolume adjusts playback volume (0.0–1.0). The value is remembered so
+// that any AudioOutput created later (on the first audio frame) starts at
+// the correct level rather than always defaulting to 1.0.
+func (c *RadioClient) SetVolume(v float64) {
+	if v < 0 {
+		v = 0
+	}
+	if v > 1 {
+		v = 1
+	}
+	c.mu.Lock()
+	c.volume = v
+	out := c.audioOut
+	c.mu.Unlock()
+	if out != nil {
+		out.SetVolume(v)
+	}
+}
+
+// BytesReceivedAndReset returns the number of compressed wire bytes received
+// since the last call (or since Connect), then resets the counter to zero.
+// Safe to call from any goroutine.
+func (c *RadioClient) BytesReceivedAndReset() int64 {
+	return c.bytesReceived.Swap(0)
+}
+
+// SetDevice switches the audio output to a new WASAPI device while connected.
+// The current AudioOutput is closed immediately; the next audio frame will
+// open a new one on the specified device.  deviceID="" = system default.
+func (c *RadioClient) SetDevice(deviceID string) {
+	c.mu.Lock()
+	c.DeviceID = deviceID
+	out := c.audioOut
+	c.audioOut = nil
+	c.sampleRate = 0
+	c.channels = 0
+	c.mu.Unlock()
+	if out != nil {
+		out.Close()
+	}
+}
+
+// SetChannelMode sets which output channels receive audio (ChannelModeBoth/Left/Right).
+// The value is applied immediately to any active AudioOutput.
+func (c *RadioClient) SetChannelMode(mode int) {
+	c.mu.RLock()
+	out := c.audioOut
+	c.mu.RUnlock()
+	if out != nil {
+		out.SetChannelMode(mode)
+	}
+}
+
+// parseBaseURL parses BaseURL and returns scheme, host (host:port).
+// Defaults to http if no scheme is present.
+func (c *RadioClient) parseBaseURL() (scheme, host string, err error) {
+	raw := strings.TrimRight(c.BaseURL, "/")
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid base URL %q: %w", c.BaseURL, err)
+	}
+	scheme = strings.ToLower(u.Scheme)
+	host = u.Host
+	if host == "" {
+		return "", "", fmt.Errorf("invalid base URL %q: missing host", c.BaseURL)
+	}
+	return scheme, host, nil
+}
+
+// buildWSURL constructs the WebSocket URL from BaseURL.
+func (c *RadioClient) buildWSURL() (string, error) {
+	httpScheme, host, err := c.parseBaseURL()
+	if err != nil {
+		return "", err
+	}
+
+	wsScheme := "ws"
+	if httpScheme == "https" {
+		wsScheme = "wss"
+	}
+
+	format := "pcm-zstd"
+	if c.Format == FormatOpus {
+		format = "opus"
+	}
+
+	u := url.URL{
+		Scheme: wsScheme,
+		Host:   host,
+		Path:   "/ws",
+	}
+	q := u.Query()
+	q.Set("frequency", fmt.Sprintf("%d", c.Frequency))
+	q.Set("mode", c.Mode)
+	q.Set("format", format)
+	q.Set("version", "2") // Request v2 headers with signal quality (basebandPower, noiseDensity)
+	q.Set("user_session_id", c.userSessionID)
+	q.Set("bandwidthLow", fmt.Sprintf("%d", c.BandwidthLow))
+	q.Set("bandwidthHigh", fmt.Sprintf("%d", c.BandwidthHigh))
+	if c.Password != "" {
+		q.Set("password", c.Password)
+	}
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+// checkConnectionAllowed calls POST /connection and returns whether the server
+// will accept a WebSocket connection.
+func (c *RadioClient) checkConnectionAllowed() (bool, error) {
+	httpScheme, host, err := c.parseBaseURL()
+	if err != nil {
+		return false, err
+	}
+
+	endpoint := fmt.Sprintf("%s://%s/connection", httpScheme, host)
+
+	body, _ := json.Marshal(ConnectionCheckRequest{
+		UserSessionID: c.userSessionID,
+		Password:      c.Password,
+	})
+
+	req, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "UberSDR-Windows/1.0")
+
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		// Server unreachable — let the WebSocket attempt surface the real error
+		return true, nil
+	}
+	defer resp.Body.Close()
+
+	var cr ConnectionCheckResponse
+	if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil {
+		return true, nil // parse failure: try anyway
+	}
+	if !cr.Allowed {
+		return false, fmt.Errorf("server rejected connection: %s", cr.Reason)
+	}
+	return true, nil
+}
+
+// Connect starts the connection in a background goroutine.
+// It is safe to call Connect again after Disconnect.
+func (c *RadioClient) Connect() {
+	c.mu.Lock()
+	if c.state == StateConnecting || c.state == StateConnected {
+		c.mu.Unlock()
+		return
+	}
+	// Generate a fresh session ID for each new connection
+	c.userSessionID = uuid.New().String()
+	c.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	c.mu.Lock()
+	c.cancelFn = cancel
+	c.mu.Unlock()
+
+	go c.runLoop(ctx)
+}
+
+// Disconnect closes the active connection.
+// It cancels the context AND closes the WebSocket so ReadMessage unblocks immediately.
+func (c *RadioClient) Disconnect() {
+	c.mu.Lock()
+	cancel := c.cancelFn
+	conn := c.conn
+	c.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	// Closing the connection unblocks any pending ReadMessage call.
+	if conn != nil {
+		conn.Close()
+	}
+}
+
+// Tune sends a tune message over the existing WebSocket connection to change
+// frequency, mode, and/or bandwidth without reconnecting.
+func (c *RadioClient) Tune(frequency int, mode string, bwLow, bwHigh int) error {
+	c.mu.RLock()
+	conn := c.conn
+	c.mu.RUnlock()
+	if conn == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	lo, hi := bwLow, bwHigh
+	msg := TuneRequest{
+		Type:          "tune",
+		Frequency:     frequency,
+		Mode:          mode,
+		BandwidthLow:  &lo,
+		BandwidthHigh: &hi,
+	}
+	return conn.WriteJSON(msg)
+}
+
+// runLoop is the main connection goroutine.
+func (c *RadioClient) runLoop(ctx context.Context) {
+	c.setState(StateConnecting, "")
+
+	// Check /connection first
+	allowed, err := c.checkConnectionAllowed()
+	if err != nil {
+		c.setState(StateError, err.Error())
+		return
+	}
+	if !allowed {
+		c.setState(StateError, "connection not allowed by server")
+		return
+	}
+
+	wsURL, err := c.buildWSURL()
+	if err != nil {
+		c.setState(StateError, err.Error())
+		return
+	}
+
+	headers := http.Header{}
+	headers.Set("User-Agent", "UberSDR-Windows/1.0")
+
+	dialer := websocket.DefaultDialer
+	conn, _, err := dialer.DialContext(ctx, wsURL, headers)
+	if err != nil {
+		c.setState(StateError, fmt.Sprintf("WebSocket dial: %v", err))
+		return
+	}
+
+	c.mu.Lock()
+	c.conn = conn
+	c.mu.Unlock()
+
+	c.setState(StateConnected, "")
+
+	// Initialise PCM decoder
+	pcmDec, err := NewPCMBinaryDecoder()
+	if err != nil {
+		c.setState(StateError, fmt.Sprintf("PCM decoder init: %v", err))
+		conn.Close()
+		return
+	}
+	c.mu.Lock()
+	c.pcmDecoder = pcmDec
+	c.mu.Unlock()
+
+	// Keepalive ticker
+	keepalive := time.NewTicker(30 * time.Second)
+	defer keepalive.Stop()
+
+	// Keepalive goroutine
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-keepalive.C:
+				c.mu.RLock()
+				wc := c.conn
+				c.mu.RUnlock()
+				if wc != nil {
+					_ = wc.WriteJSON(map[string]string{"type": "ping"})
+				}
+			}
+		}
+	}()
+
+	// Receive loop — ReadMessage blocks until a frame arrives or the connection
+	// is closed.  We rely on Disconnect() closing the connection to unblock it.
+	for {
+		msgType, data, err := conn.ReadMessage()
+		if err != nil {
+			// Distinguish intentional disconnect from unexpected error.
+			select {
+			case <-ctx.Done():
+				c.cleanup()
+				c.setState(StateDisconnected, "")
+			default:
+				c.cleanup()
+				c.setState(StateError, fmt.Sprintf("read: %v", err))
+			}
+			return
+		}
+
+		if msgType == websocket.BinaryMessage {
+			c.bytesReceived.Add(int64(len(data)))
+			c.handleBinary(data)
+		}
+		// JSON messages (status, error, pong) are ignored for now
+	}
+}
+
+// handleBinary processes a binary WebSocket frame (PCM-zstd or Opus).
+func (c *RadioClient) handleBinary(data []byte) {
+	c.mu.RLock()
+	format := c.Format
+	c.mu.RUnlock()
+
+	if format == FormatOpus {
+		c.handleOpusBinary(data)
+	} else {
+		c.handlePCMBinary(data)
+	}
+}
+
+// handlePCMBinary processes a PCM-zstd binary frame.
+func (c *RadioClient) handlePCMBinary(data []byte) {
+	c.mu.RLock()
+	dec := c.pcmDecoder
+	c.mu.RUnlock()
+
+	if dec == nil {
+		return
+	}
+
+	pcmLE, sampleRate, channels, basebandPower, noiseDensity, err := dec.DecodePCMBinary(data)
+	if err != nil {
+		return
+	}
+
+	c.deliverAudio(pcmLE, sampleRate, channels, basebandPower, noiseDensity)
+}
+
+// handleOpusBinary processes an Opus binary frame.
+func (c *RadioClient) handleOpusBinary(data []byte) {
+	c.mu.Lock()
+	opusDec := c.opusDec
+	c.mu.Unlock()
+
+	pcmLE, sampleRate, channels, basebandPower, noiseDensity, err := decodeOpusFrame(data, &opusDec)
+	if err != nil {
+		return
+	}
+
+	// Store back the (possibly newly created) decoder.
+	c.mu.Lock()
+	c.opusDec = opusDec
+	c.mu.Unlock()
+
+	c.deliverAudio(pcmLE, sampleRate, channels, basebandPower, noiseDensity)
+}
+
+// deliverAudio fires the signal quality callback and pushes PCM to the audio output,
+// creating or recreating the AudioOutput if the stream parameters changed.
+func (c *RadioClient) deliverAudio(pcmLE []byte, sampleRate, channels int, basebandPower, noiseDensity float32) {
+	// Fire signal quality callback whenever we have real data.
+	if (basebandPower > -998 || noiseDensity > -998) && c.OnSignalQuality != nil {
+		c.OnSignalQuality(basebandPower, noiseDensity)
+	}
+
+	// Check under lock whether we need a new AudioOutput.
+	// We do NOT call NewAudioOutput while holding the lock — on non-Windows
+	// platforms NewAudioOutput blocks on <-ready, which would stall the
+	// receive goroutine with the mutex held.
+	c.mu.Lock()
+	out := c.audioOut
+	needNew := out == nil || c.sampleRate != sampleRate || c.channels != channels
+	var oldOut *AudioOutput
+	var deviceID string
+	var initialVolume float64 = 1.0
+	if needNew {
+		oldOut = out
+		deviceID = c.DeviceID
+		initialVolume = c.volume
+		// Clear stale state so a concurrent call doesn't reuse the old output.
+		c.audioOut = nil
+		c.sampleRate = 0
+		c.channels = 0
+	}
+	c.mu.Unlock()
+
+	if needNew {
+		// Close the old output outside the lock so its shutdown doesn't
+		// block other goroutines from acquiring c.mu.
+		if oldOut != nil {
+			oldOut.Close()
+		}
+
+		newOut, err := NewAudioOutput(sampleRate, channels, 200*time.Millisecond, deviceID)
+		if err != nil {
+			return
+		}
+		// Apply the current volume immediately so there's no silent gap.
+		if initialVolume != 1.0 {
+			newOut.SetVolume(initialVolume)
+		}
+
+		c.mu.Lock()
+		c.audioOut = newOut
+		c.sampleRate = sampleRate
+		c.channels = channels
+		out = newOut
+		c.mu.Unlock()
+
+		if c.OnAudioInfo != nil {
+			c.OnAudioInfo(sampleRate, channels)
+		}
+	}
+
+	out.Push(pcmLE)
+}
+
+// cleanup closes the WebSocket and audio output.
+func (c *RadioClient) cleanup() {
+	c.mu.Lock()
+	conn := c.conn
+	out := c.audioOut
+	dec := c.pcmDecoder
+	opusDec := c.opusDec
+	c.conn = nil
+	c.audioOut = nil
+	c.pcmDecoder = nil
+	c.opusDec = nil
+	// Reset audio params so the output is always recreated on the next connection
+	c.sampleRate = 0
+	c.channels = 0
+	c.mu.Unlock()
+
+	if conn != nil {
+		conn.Close()
+	}
+	if out != nil {
+		out.Close()
+	}
+	if dec != nil {
+		dec.Close()
+	}
+	if opusDec != nil {
+		opusDec.Close()
+	}
+}

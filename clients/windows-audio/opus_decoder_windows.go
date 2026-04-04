@@ -25,10 +25,14 @@ var (
 	opusDLLErr  error
 )
 
-// extractOpusDLL writes the embedded opus.dll to a temp file once and returns its path.
+// extractOpusDLL writes the embedded opus.dll to a per-process temp file once
+// and returns its path. Using the PID in the filename prevents write conflicts
+// when multiple instances of the program run simultaneously — Windows holds a
+// file lock on loaded DLLs, so a fixed shared path causes the second instance's
+// os.WriteFile to fail with a sharing violation.
 func extractOpusDLL() (string, error) {
 	opusDLLOnce.Do(func() {
-		tmp := filepath.Join(os.TempDir(), "ubersdr_opus.dll")
+		tmp := filepath.Join(os.TempDir(), fmt.Sprintf("ubersdr_opus_%d.dll", os.Getpid()))
 		if err := os.WriteFile(tmp, opusDLLBytes, 0600); err != nil {
 			opusDLLErr = fmt.Errorf("extracting opus.dll: %w", err)
 			return
@@ -36,6 +40,13 @@ func extractOpusDLL() (string, error) {
 		opusDLLPath = tmp
 	})
 	return opusDLLPath, opusDLLErr
+}
+
+// cleanupOpusDLL removes the per-process DLL temp file. Call this at program exit.
+func cleanupOpusDLL() {
+	if opusDLLPath != "" {
+		os.Remove(opusDLLPath)
+	}
 }
 
 // opusDecoder wraps the libopus C decoder loaded from the embedded DLL.

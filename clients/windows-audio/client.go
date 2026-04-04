@@ -130,15 +130,17 @@ type RadioClient struct {
 	DeviceID      string // WASAPI device ID; "" = system default
 
 	// Runtime state
-	userSessionID string
-	conn          *websocket.Conn
-	state         ConnectionState
-	sampleRate    int
-	channels      int
-	volume        float64 // current volume (0.0–1.0); applied to new AudioOutput on creation
-	pcmDecoder    *PCMBinaryDecoder
-	audioOut      *AudioOutput
-	cancelFn      context.CancelFunc
+	userSessionID      string
+	conn               *websocket.Conn
+	state              ConnectionState
+	sampleRate         int
+	channels           int
+	volume             float64 // current volume (0.0–1.0); applied to new AudioOutput on creation
+	pcmDecoder         *PCMBinaryDecoder
+	audioOut           *AudioOutput
+	cancelFn           context.CancelFunc
+	connMaxSessionTime int  // MaxSessionTime from last /connection response (0 = unlimited)
+	connBypassed       bool // Bypassed flag from last /connection response
 
 	// Callbacks (called from the receive goroutine; Fyne Set* methods are goroutine-safe)
 	OnStateChange   func(ConnectionState, string)             // state, optional message
@@ -205,6 +207,23 @@ func (c *RadioClient) Channels() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.channels
+}
+
+// ConnMaxSessionTime returns the MaxSessionTime from the last /connection
+// response (0 = unlimited). This is the per-user value that already has the
+// bypass override applied, unlike /api/description which always returns the
+// globally configured value.
+func (c *RadioClient) ConnMaxSessionTime() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.connMaxSessionTime
+}
+
+// ConnBypassed returns the Bypassed flag from the last /connection response.
+func (c *RadioClient) ConnBypassed() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.connBypassed
 }
 
 // SetVolume adjusts playback volume (0.0–1.0). The value is remembered so
@@ -316,12 +335,14 @@ func (c *RadioClient) buildWSURL() (string, error) {
 	return u.String(), nil
 }
 
-// checkConnectionAllowed calls POST /connection and returns whether the server
-// will accept a WebSocket connection.
-func (c *RadioClient) checkConnectionAllowed() (bool, error) {
+// checkConnectionAllowed calls POST /connection and returns the full server
+// response so callers can read per-user fields like MaxSessionTime and Bypassed.
+// On network/parse failure a permissive response is returned so the WebSocket
+// attempt can surface the real error.
+func (c *RadioClient) checkConnectionAllowed() (ConnectionCheckResponse, error) {
 	httpScheme, host, err := c.parseBaseURL()
 	if err != nil {
-		return false, err
+		return ConnectionCheckResponse{}, err
 	}
 
 	endpoint := fmt.Sprintf("%s://%s/connection", httpScheme, host)
@@ -333,7 +354,7 @@ func (c *RadioClient) checkConnectionAllowed() (bool, error) {
 
 	req, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
 	if err != nil {
-		return false, err
+		return ConnectionCheckResponse{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "UberSDR-Windows/1.0")
@@ -341,18 +362,18 @@ func (c *RadioClient) checkConnectionAllowed() (bool, error) {
 	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 	if err != nil {
 		// Server unreachable — let the WebSocket attempt surface the real error
-		return true, nil
+		return ConnectionCheckResponse{Allowed: true}, nil
 	}
 	defer resp.Body.Close()
 
 	var cr ConnectionCheckResponse
 	if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil {
-		return true, nil // parse failure: try anyway
+		return ConnectionCheckResponse{Allowed: true}, nil // parse failure: try anyway
 	}
 	if !cr.Allowed {
-		return false, fmt.Errorf("server rejected connection: %s", cr.Reason)
+		return cr, fmt.Errorf("server rejected connection: %s", cr.Reason)
 	}
-	return true, nil
+	return cr, nil
 }
 
 // Connect starts the connection in a background goroutine.
@@ -417,15 +438,20 @@ func (c *RadioClient) runLoop(ctx context.Context) {
 	c.setState(StateConnecting, "")
 
 	// Check /connection first
-	allowed, err := c.checkConnectionAllowed()
+	cr, err := c.checkConnectionAllowed()
 	if err != nil {
 		c.setState(StateError, err.Error())
 		return
 	}
-	if !allowed {
+	if !cr.Allowed {
 		c.setState(StateError, "connection not allowed by server")
 		return
 	}
+	// Store per-user fields from the /connection response so callers can read them.
+	c.mu.Lock()
+	c.connMaxSessionTime = cr.MaxSessionTime
+	c.connBypassed = cr.Bypassed
+	c.mu.Unlock()
 
 	wsURL, err := c.buildWSURL()
 	if err != nil {

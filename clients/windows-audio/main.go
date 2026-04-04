@@ -554,7 +554,8 @@ func main() {
 				}()
 			}
 
-			list := widget.NewList(
+			var list *widget.List
+			list = widget.NewList(
 				func() int { return len(filtered) },
 				func() fyne.CanvasObject {
 					return newDoubleTapLabel("", nil)
@@ -566,7 +567,14 @@ func main() {
 					}
 					allIdx := filtered[id]
 					lbl.SetText(labels[allIdx])
+					capturedID := id
 					capturedAllIdx := allIdx
+					// OnTap drives list.Select so the row gets its highlight.
+					// Without this the label widget consumes the tap and the
+					// list never sees it, so single-click selection doesn't work.
+					lbl.OnTap = func() {
+						list.Select(capturedID)
+					}
 					lbl.OnDoubleTap = func() {
 						connectAndClose(capturedAllIdx)
 					}
@@ -692,8 +700,11 @@ func main() {
 		case StateConnected:
 			connectBtn.SetText("Disconnect")
 			connectBtn.Importance = widget.DangerImportance
-			// Start countdown if server has a session time limit.
+			// Override sessionMaxSecs with the per-user value from /connection.
+			// This already has the bypass override applied (0 for bypassed users),
+			// unlike /api/description which always returns the globally configured value.
 			stopSessionTimer()
+			sessionMaxSecs = client.ConnMaxSessionTime()
 			if sessionMaxSecs > 0 {
 				sessionTimerStop = make(chan struct{})
 				stopCh := sessionTimerStop
@@ -721,7 +732,8 @@ func main() {
 					}
 				}()
 			} else {
-				statusLabel.SetText("● Connected")
+				// 0 = unlimited (bypassed user or server has no session limit configured)
+				statusLabel.SetText("● Connected · Unlimited")
 			}
 		case StateConnecting:
 			stopSessionTimer()
@@ -889,6 +901,7 @@ func main() {
 		if mdns != nil {
 			mdns.Stop()
 		}
+		cleanupOpusDLL()
 	})
 
 	// Throughput ticker — samples bytes received every second while connected.

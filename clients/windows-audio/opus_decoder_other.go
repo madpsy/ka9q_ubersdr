@@ -17,6 +17,9 @@ func (d *opusDecoder) Decode(_ []byte) ([]byte, error) {
 
 func (d *opusDecoder) Close() {}
 
+// cleanupOpusDLL is a no-op on non-Windows platforms.
+func cleanupOpusDLL() {}
+
 // decodeOpusFrame is a no-op stub on non-Windows platforms.
 func decodeOpusFrame(data []byte, dec **opusDecoder) (pcm []byte, sampleRate, channels int, basebandPower, noiseDensity float32, err error) {
 	err = errors.New("Opus not supported on this platform")

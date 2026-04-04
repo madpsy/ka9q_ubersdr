@@ -5,10 +5,15 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// doubleTapLabel is a Label that also implements fyne.DoubleTappable.
-// OnDoubleTap is called when the user double-clicks the widget.
+// doubleTapLabel is a Label that also implements fyne.Tappable and
+// fyne.DoubleTappable so it can be used inside a widget.List without
+// consuming tap events that the list needs to highlight the selected row.
+//
+// OnTap is called on a single tap (use it to call list.Select so the row
+// gets highlighted). OnDoubleTap is called on a double-tap.
 type doubleTapLabel struct {
 	widget.Label
+	OnTap       func()
 	OnDoubleTap func()
 }
 
@@ -17,6 +22,14 @@ func newDoubleTapLabel(text string, onDoubleTap func()) *doubleTapLabel {
 	l.ExtendBaseWidget(l)
 	l.SetText(text)
 	return l
+}
+
+// Tapped implements fyne.Tappable. Forwarding the single-tap to OnTap lets
+// the caller drive list.Select(), which gives the row its highlight.
+func (l *doubleTapLabel) Tapped(_ *fyne.PointEvent) {
+	if l.OnTap != nil {
+		l.OnTap()
+	}
 }
 
 // DoubleTapped implements fyne.DoubleTappable.

@@ -129,9 +129,24 @@ func main() {
 	// Start mDNS discovery in background (best-effort)
 	mdns, _ := NewMDNSDiscovery()
 
+	// ── Preference keys ───────────────────────────────────────────────────────
+	const (
+		prefKeyURL     = "url"
+		prefKeyPass    = "password"
+		prefKeyFreq    = "frequency_hz"
+		prefKeyMode    = "mode"
+		prefKeyBW      = "bandwidth"
+		prefKeyFormat  = "format"
+		prefKeyStep    = "step_index"
+		prefKeyDevice  = "audio_device_id"
+		prefKeyVolume  = "volume"
+		prefKeyChannel = "channel_mode"
+	)
+	prefs := a.Preferences()
+
 	// ── State ────────────────────────────────────────────────────────────────
-	currentMode := "usb"
-	currentFreq := 14_200_000 // Hz
+	currentMode := prefs.StringWithFallback(prefKeyMode, "usb")
+	currentFreq := prefs.IntWithFallback(prefKeyFreq, 14_200_000) // Hz
 
 	// Session timer state — updated when /api/description is fetched.
 	sessionMaxSecs := 0 // 0 = unlimited
@@ -157,17 +172,21 @@ func main() {
 	// Single URL field — users paste the HTTP URL of the instance
 	urlEntry := widget.NewEntry()
 	urlEntry.SetPlaceHolder("http://ubersdr.local:8080")
-	urlEntry.SetText("http://ubersdr.local:8080")
+	urlEntry.SetText(prefs.StringWithFallback(prefKeyURL, "http://ubersdr.local:8080"))
+	urlEntry.OnChanged = func(s string) { prefs.SetString(prefKeyURL, s) }
 
 	passwordEntry := widget.NewPasswordEntry()
 	passwordEntry.SetPlaceHolder("(optional)")
+	passwordEntry.SetText(prefs.String(prefKeyPass))
+	passwordEntry.OnChanged = func(s string) { prefs.SetString(prefKeyPass, s) }
 
 	// Frequency entry — displayed and entered in kHz.
 	freqEntry := widget.NewEntry()
 	freqEntry.SetText(formatFreqKHz(currentFreq))
 
 	stepSelect := widget.NewSelect([]string{"1 Hz", "10 Hz", "100 Hz", "500 Hz", "1 kHz", "10 kHz", "100 kHz", "1 MHz"}, nil)
-	stepSelect.SetSelectedIndex(4) // default: 1 kHz
+	stepSelect.SetSelectedIndex(prefs.IntWithFallback(prefKeyStep, 4))
+	stepSelect.OnChanged = func(_ string) { prefs.SetInt(prefKeyStep, stepSelect.SelectedIndex()) }
 
 	getStep := func() int {
 		idx := stepSelect.SelectedIndex()
@@ -178,9 +197,10 @@ func main() {
 	}
 
 	// Bandwidth slider — range and default depend on mode.
+	savedBW := prefs.FloatWithFallback(prefKeyBW, bwDefaultSlider(currentMode))
 	bwSlider := widget.NewSlider(0, bwSliderMax(currentMode))
 	bwSlider.Step = 50
-	bwSlider.Value = bwDefaultSlider(currentMode)
+	bwSlider.Value = savedBW
 	bwValueLabel := widget.NewLabel(fmt.Sprintf("%.0f Hz", bwSlider.Value))
 
 	connectBtn := widget.NewButton("Connect", nil)
@@ -211,6 +231,7 @@ func main() {
 		}
 		hz = clampFreq(hz)
 		currentFreq = hz
+		prefs.SetInt(prefKeyFreq, hz)
 		freqEntry.SetText(formatFreqKHz(hz))
 		sendTune()
 	}
@@ -223,6 +244,7 @@ func main() {
 		}
 		hz = clampFreq(hz + delta)
 		currentFreq = hz
+		prefs.SetInt(prefKeyFreq, hz)
 		freqEntry.SetText(formatFreqKHz(hz))
 		sendTune()
 	}
@@ -238,25 +260,48 @@ func main() {
 	bwSlider.OnChanged = func(v float64) {
 		bwValueLabel.SetText(fmt.Sprintf("%.0f Hz", v))
 	}
-	bwSlider.OnChangeEnded = func(_ float64) {
+	bwSlider.OnChangeEnded = func(v float64) {
+		prefs.SetFloat(prefKeyBW, v)
 		sendTune()
 	}
 
+	// Find the display label matching the saved mode key.
+	savedModeLabel := "USB"
+	for _, lbl := range modeLabels {
+		if modeKey(lbl) == currentMode {
+			savedModeLabel = lbl
+			break
+		}
+	}
+	// modeInitDone gates the BW reset: on the initial SetSelected call we want
+	// to restore the saved BW, not overwrite it with the mode default.
+	modeInitDone := false
 	modeSelect := widget.NewSelect(modeLabels, func(selected string) {
 		currentMode = modeKey(selected)
+		prefs.SetString(prefKeyMode, currentMode)
 		newMax := bwSliderMax(currentMode)
 		bwSlider.Max = newMax
-		bwSlider.Value = bwDefaultSlider(currentMode)
+		if modeInitDone {
+			// User changed the mode — reset BW to a sensible default for that mode.
+			bwSlider.Value = bwDefaultSlider(currentMode)
+			prefs.SetFloat(prefKeyBW, bwSlider.Value)
+		}
+		// else: initial SetSelected — keep the saved BW value already in bwSlider.Value
 		bwSlider.Refresh()
 		bwValueLabel.SetText(fmt.Sprintf("%.0f Hz", bwSlider.Value))
 		sendTune()
 	})
-	modeSelect.SetSelected("USB")
+	modeSelect.SetSelected(savedModeLabel)
+	modeInitDone = true
 
 	// Declare formatGroup as var so the closure can reference it before assignment.
 	// suppressFormatChange prevents reconnect when reverting the selection programmatically.
 	var formatGroup *widget.RadioGroup
 	suppressFormatChange := false
+	savedFormat := prefs.StringWithFallback(prefKeyFormat, "Compressed")
+	if savedFormat == "Uncompressed" {
+		client.Format = FormatPCMZstd
+	}
 	formatGroup = widget.NewRadioGroup([]string{"Compressed", "Uncompressed"}, func(s string) {
 		if suppressFormatChange {
 			return
@@ -275,6 +320,7 @@ func main() {
 						return
 					}
 					client.Format = FormatPCMZstd
+					prefs.SetString(prefKeyFormat, "Uncompressed")
 					if client.State() == StateConnected {
 						formatSwitching = true
 						client.Disconnect()
@@ -291,6 +337,7 @@ func main() {
 		}
 		// Compressed selected.
 		client.Format = FormatOpus
+		prefs.SetString(prefKeyFormat, "Compressed")
 		// If already connected, reconnect with the new format.
 		// Set formatSwitching so OnStateChange doesn't clear stationLabel.
 		if client.State() == StateConnected {
@@ -303,7 +350,7 @@ func main() {
 			}()
 		}
 	})
-	formatGroup.SetSelected("Compressed")
+	formatGroup.SetSelected(savedFormat)
 	formatGroup.Horizontal = true
 
 	// ── Audio device selector ─────────────────────────────────────────────────
@@ -311,9 +358,7 @@ func main() {
 	deviceSelect := widget.NewSelect([]string{"Default Device"}, nil)
 	deviceSelect.SetSelectedIndex(0)
 	deviceSelect.OnChanged = func(_ string) {
-		if client.State() != StateConnected {
-			return
-		}
+		// Persist the selected device ID so it can be restored on next launch.
 		audioDeviceMu.RLock()
 		idx := deviceSelect.SelectedIndex()
 		var devID string
@@ -321,6 +366,11 @@ func main() {
 			devID = audioDeviceList[idx].ID
 		}
 		audioDeviceMu.RUnlock()
+		prefs.SetString(prefKeyDevice, devID)
+
+		if client.State() != StateConnected {
+			return
+		}
 		client.SetDevice(devID)
 	}
 
@@ -341,10 +391,22 @@ func main() {
 		audioDeviceList = devices
 		audioDeviceMu.Unlock()
 
-		// Update the widget — Options write + Refresh() is the standard
-		// Fyne v2 pattern for updating a Select from a goroutine.
+		// Update the widget options.
 		deviceSelect.Options = names
-		deviceSelect.SetSelectedIndex(0)
+
+		// Restore the previously saved device ID. If it no longer exists in the
+		// current device list, fall back to index 0 (system default).
+		savedID := prefs.String(prefKeyDevice)
+		restoredIdx := 0
+		if savedID != "" {
+			for i, d := range devices {
+				if d.ID == savedID {
+					restoredIdx = i
+					break
+				}
+			}
+		}
+		deviceSelect.SetSelectedIndex(restoredIdx)
 		deviceSelect.Refresh()
 	}
 	refreshDevicesBtn.OnTapped = populateDevices
@@ -352,16 +414,40 @@ func main() {
 	// Populate on startup in background so the window opens immediately
 	go populateDevices()
 
-	volumeLabel := widget.NewLabel("Volume: 100%")
+	savedVolume := prefs.FloatWithFallback(prefKeyVolume, 100)
+	muted := false
+	premuteVolume := savedVolume // volume level to restore when unmuting
+
 	volumeSlider := widget.NewSlider(0, 100)
-	volumeSlider.Value = 100
+	volumeSlider.Value = savedVolume
 	volumeSlider.Step = 1
+
 	volumeSlider.OnChanged = func(v float64) {
-		volumeLabel.SetText(fmt.Sprintf("Volume: %d%%", int(v)))
+		premuteVolume = v
 		client.SetVolume(v / 100.0)
+		prefs.SetFloat(prefKeyVolume, v)
 	}
 
+	// muteBtn toggles mute; icon switches between speaker and muted-speaker.
+	// While muted the slider is disabled so its value is preserved visually.
+	muteBtn := widget.NewButtonWithIcon("", theme.VolumeUpIcon(), nil)
+	muteBtn.OnTapped = func() {
+		muted = !muted
+		if muted {
+			premuteVolume = volumeSlider.Value
+			client.SetVolume(0)
+			muteBtn.SetIcon(theme.VolumeMuteIcon())
+			volumeSlider.Disable()
+		} else {
+			client.SetVolume(premuteVolume / 100.0)
+			muteBtn.SetIcon(theme.VolumeUpIcon())
+			volumeSlider.Enable()
+		}
+	}
+
+	savedChannel := prefs.StringWithFallback(prefKeyChannel, "Left & Right")
 	channelSelect := widget.NewSelect([]string{"Left & Right", "Left", "Right"}, func(selected string) {
+		prefs.SetString(prefKeyChannel, selected)
 		switch selected {
 		case "Left":
 			client.SetChannelMode(ChannelModeLeft)
@@ -371,7 +457,19 @@ func main() {
 			client.SetChannelMode(ChannelModeBoth)
 		}
 	})
-	channelSelect.SetSelected("Left & Right")
+	channelSelect.SetSelected(savedChannel)
+
+	// Apply saved volume and channel mode to the client immediately so they
+	// take effect on the first connection without the user having to touch the controls.
+	client.SetVolume(savedVolume / 100.0)
+	switch savedChannel {
+	case "Left":
+		client.SetChannelMode(ChannelModeLeft)
+	case "Right":
+		client.SetChannelMode(ChannelModeRight)
+	default:
+		client.SetChannelMode(ChannelModeBoth)
+	}
 
 	// Signal quality bars
 	// Signal: -120 dBFS (noise floor) → -50 dBFS (strong signal)
@@ -403,18 +501,22 @@ func main() {
 		// Set BaseURL first so FetchDescription can use it.
 		client.BaseURL = rawURL
 
-		// Fetch /api/description to get default frequency, mode, station info, and session limit.
-		// This is best-effort — failures are silently ignored.
+		// Fetch /api/description to get station info and session limit.
+		// Server-provided default frequency and mode are only applied when the
+		// user is connecting to a different URL than last time — i.e. they just
+		// picked a new instance. If the URL is the same as the saved one, we
+		// keep the user's own saved frequency/mode instead of overwriting them.
 		sessionMaxSecs = 0 // reset before each connection
+		applyServerDefaults := rawURL != prefs.StringWithFallback(prefKeyURL, "")
 		if desc, err := client.FetchDescription(); err == nil {
 			sessionMaxSecs = desc.MaxSessionTime
-			// Apply default frequency if the server provides one.
-			if desc.DefaultFrequency > 0 {
+			// Apply default frequency only when switching to a new instance.
+			if applyServerDefaults && desc.DefaultFrequency > 0 {
 				currentFreq = desc.DefaultFrequency
 				freqEntry.SetText(formatFreqKHz(currentFreq))
 			}
-			// Apply default mode if valid.
-			if desc.DefaultMode != "" {
+			// Apply default mode only when switching to a new instance.
+			if applyServerDefaults && desc.DefaultMode != "" {
 				mk := strings.ToLower(desc.DefaultMode)
 				for _, lbl := range modeLabels {
 					if strings.ToLower(lbl) == mk {
@@ -455,6 +557,7 @@ func main() {
 		}
 		hz = clampFreq(hz)
 		currentFreq = hz
+		prefs.SetInt(prefKeyFreq, hz)
 		freqEntry.SetText(formatFreqKHz(hz))
 		lo, hi := bwToLoHi(currentMode, bwSlider.Value)
 
@@ -479,8 +582,13 @@ func main() {
 	// openBrowseDialog fetches instances and shows the browse dialog.
 	// It is called both from the button and automatically on startup.
 	openBrowseDialog := func() {
-		statusDot.SetColor(dotColorOrange)
-		statusLabel.SetText("Fetching instances…")
+		// Only update the status bar when not already connected — we don't want
+		// to overwrite "Connected · Unlimited" just because the user opened the
+		// browse dialog while listening.
+		if client.State() != StateConnected {
+			statusDot.SetColor(dotColorOrange)
+			statusLabel.SetText("Fetching instances…")
+		}
 
 		go func() {
 			public, _ := FetchPublicInstances()
@@ -494,8 +602,10 @@ func main() {
 			all = append(all, public...)
 
 			if len(all) == 0 {
-				statusDot.SetColor(dotColorRed)
-				statusLabel.SetText("No instances found")
+				if client.State() != StateConnected {
+					statusDot.SetColor(dotColorRed)
+					statusLabel.SetText("No instances found")
+				}
 				dialog.ShowInformation("Browse Instances",
 					"No instances found.\nCheck your internet connection or try again.", w)
 				return
@@ -508,8 +618,11 @@ func main() {
 				return all[i].Name < all[j].Name
 			})
 
-			statusDot.SetColor(dotColorRed)
-			statusLabel.SetText("Disconnected")
+			// Reset status to Disconnected only if we're not currently connected.
+			if client.State() != StateConnected {
+				statusDot.SetColor(dotColorRed)
+				statusLabel.SetText("Disconnected")
+			}
 
 			// Build full label list (one per instance in `all`).
 			labels := make([]string, len(all))
@@ -819,6 +932,11 @@ func main() {
 		}
 	}
 
+	// Pressing Enter in the URL or password field behaves like clicking Connect.
+	connectOrDisconnect := func() { connectBtn.OnTapped() }
+	urlEntry.OnSubmitted = func(_ string) { connectOrDisconnect() }
+	passwordEntry.OnSubmitted = func(_ string) { connectOrDisconnect() }
+
 	// ── Layout ────────────────────────────────────────────────────────────────
 
 	// "Web" button — opens the current URL in the default browser.
@@ -848,12 +966,16 @@ func main() {
 		widget.NewLabel("Instance"), stationLabel,
 	)
 
-	// Frequency: label | entry (fixed width) | ◀ stepSelect ▶  — all on one row.
+	// Frequency: label | entry (fixed width) | ✓ | (gap) | ◀ stepSelect ▶  — all on one row.
+	// The ✓ button lets mouse-only users apply a typed frequency without pressing Enter.
 	// Wrap freqEntry in a GridWrap container to enforce a minimum display width.
+	freqApplyBtn := widget.NewButtonWithIcon("", theme.ConfirmIcon(), func() { applyFreqEntry() })
 	freqEntryFixed := container.New(layout.NewGridWrapLayout(fyne.NewSize(120, 36)), freqEntry)
 	freqRow := container.NewHBox(
 		widget.NewLabel("Frequency (kHz)"),
 		freqEntryFixed,
+		freqApplyBtn,
+		widget.NewLabel("  "), // visual gap between apply and step buttons
 		downBtn,
 		stepSelect,
 		upBtn,
@@ -877,7 +999,7 @@ func main() {
 			widget.NewLabel("Output Device"), deviceRow,
 			widget.NewLabel("Format"), formatGroup,
 		),
-		container.NewBorder(nil, nil, volumeLabel, channelSelect, volumeSlider),
+		container.NewBorder(nil, nil, muteBtn, channelSelect, volumeSlider),
 		signalBar,
 		snrBar,
 	)

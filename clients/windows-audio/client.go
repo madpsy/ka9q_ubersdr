@@ -133,6 +133,7 @@ type RadioClient struct {
 	userSessionID      string
 	conn               *websocket.Conn
 	state              ConnectionState
+	generation         uint64 // incremented on each Connect(); runLoop goroutines ignore stale state transitions
 	sampleRate         int
 	channels           int
 	volume             float64 // current volume (0.0–1.0); applied to new AudioOutput on creation
@@ -186,8 +187,16 @@ func (c *RadioClient) State() ConnectionState {
 	return c.state
 }
 
-func (c *RadioClient) setState(s ConnectionState, msg string) {
+// setState updates the connection state and fires OnStateChange, but only if
+// gen matches the current generation.  This prevents stale runLoop goroutines
+// (from a previous Connect() call that was superseded) from overwriting the
+// UI state of a newer, active connection.
+func (c *RadioClient) setState(gen uint64, s ConnectionState, msg string) {
 	c.mu.Lock()
+	if c.generation != gen {
+		c.mu.Unlock()
+		return // stale goroutine — ignore
+	}
 	c.state = s
 	c.mu.Unlock()
 	if c.OnStateChange != nil {
@@ -379,21 +388,29 @@ func (c *RadioClient) checkConnectionAllowed() (ConnectionCheckResponse, error) 
 // Connect starts the connection in a background goroutine.
 // It is safe to call Connect again after Disconnect.
 func (c *RadioClient) Connect() {
+	ctx, cancel := context.WithCancel(context.Background())
+
 	c.mu.Lock()
 	if c.state == StateConnecting || c.state == StateConnected {
 		c.mu.Unlock()
+		cancel() // discard the unused context
 		return
 	}
-	// Generate a fresh session ID for each new connection
+	// Generate a fresh session ID for each new connection.
 	c.userSessionID = uuid.New().String()
-	c.mu.Unlock()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	c.mu.Lock()
+	// Increment the generation so any stale runLoop goroutine from a previous
+	// connection will have its setState calls silently ignored.
+	c.generation++
+	gen := c.generation
+	// Cancel any previous context and store the new one atomically so
+	// Disconnect() always cancels the correct (most recent) runLoop.
+	if c.cancelFn != nil {
+		c.cancelFn()
+	}
 	c.cancelFn = cancel
 	c.mu.Unlock()
 
-	go c.runLoop(ctx)
+	go c.runLoop(ctx, gen)
 }
 
 // Disconnect closes the active connection.
@@ -434,17 +451,20 @@ func (c *RadioClient) Tune(frequency int, mode string, bwLow, bwHigh int) error 
 }
 
 // runLoop is the main connection goroutine.
-func (c *RadioClient) runLoop(ctx context.Context) {
-	c.setState(StateConnecting, "")
+// gen is the generation counter captured at Connect() time; setState calls with
+// a mismatched generation are silently dropped so stale goroutines cannot
+// overwrite the UI state of a newer active connection.
+func (c *RadioClient) runLoop(ctx context.Context, gen uint64) {
+	c.setState(gen, StateConnecting, "")
 
 	// Check /connection first
 	cr, err := c.checkConnectionAllowed()
 	if err != nil {
-		c.setState(StateError, err.Error())
+		c.setState(gen, StateError, err.Error())
 		return
 	}
 	if !cr.Allowed {
-		c.setState(StateError, "connection not allowed by server")
+		c.setState(gen, StateError, "connection not allowed by server")
 		return
 	}
 	// Store per-user fields from the /connection response so callers can read them.
@@ -455,7 +475,7 @@ func (c *RadioClient) runLoop(ctx context.Context) {
 
 	wsURL, err := c.buildWSURL()
 	if err != nil {
-		c.setState(StateError, err.Error())
+		c.setState(gen, StateError, err.Error())
 		return
 	}
 
@@ -474,7 +494,7 @@ func (c *RadioClient) runLoop(ctx context.Context) {
 	}
 	conn, _, err := dialer.DialContext(ctx, wsURL, headers)
 	if err != nil {
-		c.setState(StateError, fmt.Sprintf("WebSocket dial: %v", err))
+		c.setState(gen, StateError, fmt.Sprintf("WebSocket dial: %v", err))
 		return
 	}
 
@@ -482,12 +502,12 @@ func (c *RadioClient) runLoop(ctx context.Context) {
 	c.conn = conn
 	c.mu.Unlock()
 
-	c.setState(StateConnected, "")
+	c.setState(gen, StateConnected, "")
 
 	// Initialise PCM decoder
 	pcmDec, err := NewPCMBinaryDecoder()
 	if err != nil {
-		c.setState(StateError, fmt.Sprintf("PCM decoder init: %v", err))
+		c.setState(gen, StateError, fmt.Sprintf("PCM decoder init: %v", err))
 		conn.Close()
 		return
 	}
@@ -539,10 +559,10 @@ func (c *RadioClient) runLoop(ctx context.Context) {
 			select {
 			case <-ctx.Done():
 				c.cleanup()
-				c.setState(StateDisconnected, "")
+				c.setState(gen, StateDisconnected, "")
 			default:
 				c.cleanup()
-				c.setState(StateError, fmt.Sprintf("read: %v", err))
+				c.setState(gen, StateError, fmt.Sprintf("read: %v", err))
 			}
 			return
 		}

@@ -474,8 +474,10 @@ func main() {
 	// Signal quality bars
 	// Signal: -120 dBFS (noise floor) → -50 dBFS (strong signal)
 	// SNR:      25 dB (weak)          →  80 dB (excellent)
+	// Audio:   -60 dBFS (quiet)       →   0 dBFS (full scale)
 	signalBar := NewLevelBar("Signal", -120, -50, "dBFS")
 	snrBar := NewLevelBar("SNR", 25, 80, "dB")
+	audioBar := NewLevelBar("Audio", -60, 0, "dBFS")
 
 	// ── applyInstance — fills URL field from a discovered instance ────────────
 	applyInstance := func(inst DiscoveredInstance) {
@@ -875,6 +877,7 @@ func main() {
 			connectBtn.Importance = widget.HighImportance
 			signalBar.SetNoData()
 			snrBar.SetNoData()
+			audioBar.SetNoData()
 			if !formatSwitching {
 				stationLabel.SetText("")
 			}
@@ -899,6 +902,7 @@ func main() {
 			connectBtn.Importance = widget.HighImportance
 			signalBar.SetNoData()
 			snrBar.SetNoData()
+			audioBar.SetNoData()
 			if !formatSwitching {
 				stationLabel.SetText("")
 			}
@@ -919,6 +923,16 @@ func main() {
 		} else {
 			snrBar.SetNoData()
 		}
+	}
+
+	var audioLevelLastUpdate time.Time
+	client.OnAudioLevel = func(dBFS float32) {
+		now := time.Now()
+		if now.Sub(audioLevelLastUpdate) < 100*time.Millisecond {
+			return
+		}
+		audioLevelLastUpdate = now
+		audioBar.SetValue(float64(dBFS))
 	}
 
 	connectBtn.OnTapped = func() {
@@ -1002,6 +1016,7 @@ func main() {
 		container.NewBorder(nil, nil, muteBtn, channelSelect, volumeSlider),
 		signalBar,
 		snrBar,
+		audioBar,
 	)
 
 	// Throughput label — updated every second while connected.

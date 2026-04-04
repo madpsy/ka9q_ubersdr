@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -147,6 +149,7 @@ type RadioClient struct {
 	OnStateChange   func(ConnectionState, string)             // state, optional message
 	OnAudioInfo     func(sampleRate, channels int)            // called when audio params are known
 	OnSignalQuality func(basebandPower, noiseDensity float32) // called each full-header packet; -999 = no data
+	OnAudioLevel    func(dBFS float32)                        // called each audio frame with RMS level in dBFS
 
 	// bytesReceived accumulates compressed wire bytes since last reset.
 	// Read and reset atomically with BytesReceivedAndReset().
@@ -647,12 +650,37 @@ func (c *RadioClient) decodeAndDeliverOpus(data []byte) {
 	c.deliverAudio(pcmLE, sampleRate, channels, basebandPower, noiseDensity)
 }
 
+// rmsDBFS computes the RMS level of little-endian int16 PCM data in dBFS.
+// Returns -144 (silence floor) if the slice is empty or all zeros.
+func rmsDBFS(pcmLE []byte) float32 {
+	n := len(pcmLE) / 2
+	if n == 0 {
+		return -144
+	}
+	var sum float64
+	for i := 0; i < n; i++ {
+		s := int16(binary.LittleEndian.Uint16(pcmLE[i*2:]))
+		v := float64(s) / 32768.0
+		sum += v * v
+	}
+	rms := math.Sqrt(sum / float64(n))
+	if rms < 1e-10 {
+		return -144
+	}
+	return float32(20 * math.Log10(rms))
+}
+
 // deliverAudio fires the signal quality callback and pushes PCM to the audio output,
 // creating or recreating the AudioOutput if the stream parameters changed.
 func (c *RadioClient) deliverAudio(pcmLE []byte, sampleRate, channels int, basebandPower, noiseDensity float32) {
 	// Fire signal quality callback whenever we have real data.
 	if (basebandPower > -998 || noiseDensity > -998) && c.OnSignalQuality != nil {
 		c.OnSignalQuality(basebandPower, noiseDensity)
+	}
+
+	// Fire audio level callback with RMS dBFS of the decoded PCM.
+	if c.OnAudioLevel != nil && len(pcmLE) > 0 {
+		c.OnAudioLevel(rmsDBFS(pcmLE))
 	}
 
 	// Check under lock whether we need a new AudioOutput.

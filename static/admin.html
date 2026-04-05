@@ -1095,7 +1095,7 @@
                                 <button class="btn" onclick="openCWSkimmerScript('~/ubersdr/cwskimmer/restart.sh')" style="background: #fd7e14; color: white; font-weight: bold;">🔄 Restart</button>
                                 <button class="btn" onclick="openCWSkimmerScript('~/ubersdr/cwskimmer/update.sh')" style="background: #6f42c1; color: white; font-weight: bold;">⬆ Update</button>
                             </div>
-                            <button class="btn" onclick="window.open('http://' + window.location.hostname + ':7373/vnc.html?autoconnect=true', '_blank')" style="background: #0d47a1; color: white; font-weight: bold; white-space: nowrap; margin-left: auto;">🖥️ Open VNC</button>
+                            <button class="btn" onclick="window.open(window.location.origin + '/addon/cwskimmer/vnc.html?autoconnect=true&path=addon/cwskimmer/websockify', '_blank')" style="background: #0d47a1; color: white; font-weight: bold; white-space: nowrap; margin-left: auto;">🖥️ Open VNC</button>
                         </div>
                     </div>
                     <div id="cwskimmerAnalyticsLinks" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; border: 1px solid #dee2e6;">
@@ -2621,6 +2621,42 @@
             if (modal) modal.style.display = 'none';
         }
 
+        // Upsert the cwskimmer addon proxy entry (create if absent, update if present)
+        async function upsertCWSkimmerProxy() {
+            const payload = {
+                name: 'cwskimmer',
+                host: 'cwskimmer',
+                port: 7373,
+                enabled: true,
+                require_admin: true,
+                strip_prefix: true,
+                rewrite_origin: false,
+                rate_limit: 100,
+                allowed_ips: [],
+            };
+            try {
+                const listResp = await authenticatedFetch('/admin/addon-proxies');
+                if (!listResp || !listResp.ok) return;
+                const proxies = await listResp.json();
+                const exists = Array.isArray(proxies) && proxies.some(p => p.name === 'cwskimmer');
+                if (exists) {
+                    await authenticatedFetch('/admin/addon-proxies?name=cwskimmer', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+                } else {
+                    await authenticatedFetch('/admin/addon-proxies', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+                }
+            } catch (e) {
+                console.warn('Failed to upsert cwskimmer addon proxy:', e);
+            }
+        }
+
         // Called when user confirms they have enough CPU — proceeds with install
         function confirmInstallCWSkimmer() {
             closeInstallCWSkimmerWarningModal();
@@ -2650,6 +2686,9 @@
 
             // Auto-save the config (without restart) so settings are persisted immediately
             saveCWSkimmerConfig(false);
+
+            // Ensure the cwskimmer addon proxy entry exists with the correct settings
+            upsertCWSkimmerProxy();
 
             // Inject a persistent warning banner at the top of the CW Skimmer tab
             const tab = document.getElementById('cwskimmerTab');

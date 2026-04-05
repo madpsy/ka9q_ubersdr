@@ -81,7 +81,7 @@ func NewAudioOutput(sampleRate, channels int, bufferDuration time.Duration, devi
 		return nil, err
 	}
 
-	reader := newPCMRingReader(64)
+	reader := newPCMRingReader(32)
 	player := ctx.NewPlayer(reader)
 	player.Play()
 

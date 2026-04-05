@@ -595,7 +595,7 @@ func (c *RadioClient) runLoop(ctx context.Context, gen uint64) {
 	// Create the Opus decode channel and start the worker goroutine.
 	// The worker owns all opus_decode DLL calls so the receive goroutine
 	// (and therefore the IOCP poller) is never blocked by them.
-	opusDecodeCh := make(chan []byte, 256)
+	opusDecodeCh := make(chan []byte, 8)
 	c.mu.Lock()
 	c.opusDecodeCh = opusDecodeCh
 	c.mu.Unlock()
@@ -610,7 +610,7 @@ func (c *RadioClient) runLoop(ctx context.Context, gen uint64) {
 	// Mirroring the Opus pattern: the receive goroutine decodes PCM frames and
 	// enqueues them here non-blocking; the worker calls deliverAudio at a
 	// measured pace so Fyne redraws are not coalesced into a single stale value.
-	pcmDeliverCh := make(chan pcmDecodedPacket, 64)
+	pcmDeliverCh := make(chan pcmDecodedPacket, 16)
 	c.mu.Lock()
 	c.pcmDeliverCh = pcmDeliverCh
 	c.mu.Unlock()

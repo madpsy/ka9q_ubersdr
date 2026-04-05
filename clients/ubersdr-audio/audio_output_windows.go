@@ -126,7 +126,7 @@ func EnumerateAudioDevices() ([]AudioDevice, error) {
 // NewAudioOutput creates a WASAPI audio output for the given device.
 // deviceID="" uses the system default device.
 func NewAudioOutput(sampleRate, channels int, bufferDuration time.Duration, deviceID string) (*AudioOutput, error) {
-	reader := newPCMRingReader(128)
+	reader := newPCMRingReader(32)
 
 	out := &AudioOutput{
 		reader:  reader,

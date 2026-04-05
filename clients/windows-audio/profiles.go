@@ -21,6 +21,7 @@ type Profile struct {
 	DeviceID    string  `json:"device_id"`
 	Volume      float64 `json:"volume"`
 	Channel     string  `json:"channel"` // "Left & Right", "Left", "Right"
+	Callsign    string  `json:"callsign,omitempty"` // station callsign from /api/description
 }
 
 const (

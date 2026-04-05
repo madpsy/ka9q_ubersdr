@@ -174,6 +174,11 @@ func main() {
 	// is a single click.
 	activeProfileName := ""
 
+	// activeCallsign holds the station callsign from the last successful
+	// /api/description fetch.  Stored in saved profiles so the list can show
+	// a human-readable subtitle without re-fetching.
+	activeCallsign := ""
+
 	// ── Widgets ───────────────────────────────────────────────────────────────
 
 	statusDot := NewStatusDot(dotColorGrey)
@@ -191,7 +196,20 @@ func main() {
 	urlEntry := widget.NewEntry()
 	urlEntry.SetPlaceHolder("http://ubersdr.local:8080")
 	urlEntry.SetText(prefs.StringWithFallback(prefKeyURL, "http://ubersdr.local:8080"))
-	urlEntry.OnChanged = func(s string) { prefs.SetString(prefKeyURL, s) }
+	// suppressProfileClear is set true while applyProfile is running so that
+	// the urlEntry.OnChanged handler does not clear activeProfileName when
+	// applyProfile programmatically calls urlEntry.SetText.
+	suppressProfileClear := false
+	urlEntry.OnChanged = func(s string) {
+		prefs.SetString(prefKeyURL, s)
+		// Changing the URL means we're no longer on the loaded profile's instance,
+		// so clear the active profile so the Save dialog doesn't pre-fill the old name.
+		// Suppressed during applyProfile so the programmatic SetText doesn't clear it.
+		if !suppressProfileClear {
+			activeProfileName = ""
+			activeCallsign = ""
+		}
+	}
 
 	passwordEntry := widget.NewPasswordEntry()
 	passwordEntry.SetPlaceHolder("(optional)")
@@ -554,21 +572,22 @@ func main() {
 				}
 			}
 			// Build station info line.
-			parts := []string{}
-			if desc.Receiver.Callsign != "" {
-				parts = append(parts, desc.Receiver.Callsign)
-			}
-			if desc.Receiver.Name != "" {
-				parts = append(parts, desc.Receiver.Name)
-			}
-			if desc.Receiver.Location != "" {
-				parts = append(parts, desc.Receiver.Location)
-			}
-			if len(parts) > 0 {
-				stationLabel.SetText(strings.Join(parts, " · "))
-			} else {
-				stationLabel.SetText("")
-			}
+				activeCallsign = desc.Receiver.Callsign
+				parts := []string{}
+				if desc.Receiver.Callsign != "" {
+					parts = append(parts, desc.Receiver.Callsign)
+				}
+				if desc.Receiver.Name != "" {
+					parts = append(parts, desc.Receiver.Name)
+				}
+				if desc.Receiver.Location != "" {
+					parts = append(parts, desc.Receiver.Location)
+				}
+				if len(parts) > 0 {
+					stationLabel.SetText(strings.Join(parts, " · "))
+				} else {
+					stationLabel.SetText("")
+				}
 		}
 
 		hz, err := parseFreqKHz(freqEntry.Text)
@@ -617,6 +636,7 @@ func main() {
 			DeviceID:    devID,
 			Volume:      volumeSlider.Value,
 			Channel:     channel,
+			Callsign:    activeCallsign,
 		}
 	}
 
@@ -624,8 +644,12 @@ func main() {
 	// suppressModeInit prevents the BW slider from being reset to the mode
 	// default when we programmatically call modeSelect.SetSelected.
 	applyProfile := func(p Profile) {
-		// Remember which profile is active so the Save dialog can pre-fill the name.
-		activeProfileName = p.Name
+		// Suppress the urlEntry.OnChanged clear while we programmatically set
+		// widget values, then restore activeProfileName/activeCallsign at the end.
+		suppressProfileClear = true
+		defer func() {
+			suppressProfileClear = false
+		}()
 
 		// URL / password
 		urlEntry.SetText(p.URL)
@@ -692,6 +716,12 @@ func main() {
 		audioDeviceMu.RUnlock()
 		deviceSelect.SetSelectedIndex(devIdx)
 		prefs.SetString(prefKeyDevice, p.DeviceID)
+
+		// Set active profile identity last, after all SetText calls, so that
+		// urlEntry.OnChanged (which clears these when suppressProfileClear is false)
+		// has already fired and these values are the final ones.
+		activeProfileName = p.Name
+		activeCallsign = p.Callsign
 	}
 
 	// ── profileConnectAndClose — applies a profile and reconnects ─────────────
@@ -768,6 +798,7 @@ func main() {
 			if desc, err := client.FetchDescription(); err == nil {
 				sessionMaxSecs = desc.MaxSessionTime
 				connMaxClients = desc.MaxClients
+				activeCallsign = desc.Receiver.Callsign
 				parts := []string{}
 				if desc.Receiver.Callsign != "" {
 					parts = append(parts, desc.Receiver.Callsign)
@@ -811,34 +842,71 @@ func main() {
 			list.Refresh()
 		}
 
+		// profiles holds the full Profile data for each name so the list can
+		// show the subtitle without re-loading on every update call.
+		// Orphaned entries (name in index but no data) are silently deleted.
+		cleanNames := names[:0]
+		var profiles []Profile
+		for _, n := range names {
+			if p, ok := LoadProfile(prefs, n); ok {
+				cleanNames = append(cleanNames, n)
+				profiles = append(profiles, p)
+			} else {
+				DeleteProfile(prefs, n) // remove stale index entry
+			}
+		}
+		names = cleanNames
+
+		if len(names) == 0 {
+			dialog.ShowInformation("Profiles",
+				"No saved profiles yet.\n\nUse the Save (💾) button next to the Web button to save the current settings as a profile.",
+				w)
+			return
+		}
+
 		list = widget.NewList(
 			func() int { return len(names) },
 			func() fyne.CanvasObject {
-				return newDoubleTapLabel("", nil)
+				return newProfileListRow()
 			},
 			func(id widget.ListItemID, obj fyne.CanvasObject) {
-				lbl := obj.(*doubleTapLabel)
+				row := obj.(*profileListRow)
 				if id >= len(names) {
 					return
 				}
-				lbl.SetText("📋 " + names[id])
-				lbl.Importance = widget.MediumImportance
-				lbl.Refresh()
-				capturedID := id
-				lbl.OnTap = func() {
-					list.Select(capturedID)
+				p := profiles[id]
+
+				// Build subtitle: callsign · freq kHz · MODE
+				subParts := []string{}
+				if p.Callsign != "" {
+					subParts = append(subParts, p.Callsign)
 				}
-				lbl.OnDoubleTap = func() {
-						if capturedID >= len(names) {
-							return
-						}
-						p, ok := LoadProfile(prefs, names[capturedID])
-						if !ok {
-							return
-						}
-						applyProfile(p)
-						profileConnectAndClose(dlgRef)
+				if p.FrequencyHz > 0 {
+					subParts = append(subParts, formatFreqKHz(p.FrequencyHz)+" kHz")
+				}
+				if p.Mode != "" {
+					subParts = append(subParts, strings.ToUpper(p.Mode))
+				}
+				subtitle := ""
+				if len(subParts) > 0 {
+					subtitle = "  " + strings.Join(subParts, " · ")
+				}
+				row.SetContent("📋 "+names[id], subtitle)
+
+				capturedID := id
+				doLoad := func() {
+					if capturedID >= len(names) {
+						return
 					}
+					p, ok := LoadProfile(prefs, names[capturedID])
+					if !ok {
+						return
+					}
+					applyProfile(p)
+					profileConnectAndClose(dlgRef)
+				}
+				row.OnTap = func() { list.Select(capturedID) }
+				row.OnDoubleTap = doLoad
 			},
 		)
 		list.OnSelected = func(id widget.ListItemID) {
@@ -858,8 +926,9 @@ func main() {
 						return
 					}
 					DeleteProfile(prefs, nameToDelete)
-					// Remove from local slice and refresh.
+					// Remove from local slices and refresh.
 					names = append(names[:selectedIdx], names[selectedIdx+1:]...)
+					profiles = append(profiles[:selectedIdx], profiles[selectedIdx+1:]...)
 					selectedIdx = -1
 					list.UnselectAll()
 					rebuildList()
@@ -1130,7 +1199,58 @@ func main() {
 			nameEntry.SetText(activeProfileName)
 		}
 
-		dlg := dialog.NewCustomConfirm(
+		var dlg dialog.Dialog
+
+		// doSave contains the save logic shared by the "Save" button and the
+		// Enter key on the name entry.
+		doSave := func() {
+			name := strings.TrimSpace(nameEntry.Text)
+			if !profileNameValid(name) {
+				dialog.ShowError(fmt.Errorf("profile name cannot be empty"), w)
+				return
+			}
+			// If the name matches the currently active profile, go straight to
+			// the overwrite confirm — no need to check existence separately.
+			if name == activeProfileName {
+				dlg.Hide()
+				dialog.ShowConfirm(
+					"Overwrite Profile",
+					fmt.Sprintf("Overwrite profile %q with the current settings?", name),
+					func(confirmed bool) {
+						if confirmed {
+							SaveProfile(prefs, currentProfile(name))
+							activeProfileName = name
+						}
+					},
+					w,
+				)
+				return
+			}
+			// Different name — check whether it already exists.
+			if _, exists := LoadProfile(prefs, name); exists {
+				dlg.Hide()
+				dialog.ShowConfirm(
+					"Overwrite Profile",
+					fmt.Sprintf("A profile named %q already exists. Overwrite it?", name),
+					func(confirmed bool) {
+						if confirmed {
+							SaveProfile(prefs, currentProfile(name))
+							activeProfileName = name
+						}
+					},
+					w,
+				)
+				return
+			}
+			SaveProfile(prefs, currentProfile(name))
+			activeProfileName = name
+			dlg.Hide()
+		}
+
+		// Pressing Enter in the name field is equivalent to clicking Save.
+		nameEntry.OnSubmitted = func(_ string) { doSave() }
+
+		dlg = dialog.NewCustomConfirm(
 			"Save Profile",
 			"Save",
 			"Cancel",
@@ -1139,44 +1259,7 @@ func main() {
 				if !ok {
 					return
 				}
-				name := strings.TrimSpace(nameEntry.Text)
-				if !profileNameValid(name) {
-					dialog.ShowError(fmt.Errorf("profile name cannot be empty"), w)
-					return
-				}
-				// If the name matches the currently active profile, go straight to
-				// the overwrite confirm — no need to check existence separately.
-				if name == activeProfileName {
-					dialog.ShowConfirm(
-						"Overwrite Profile",
-						fmt.Sprintf("Overwrite profile %q with the current settings?", name),
-						func(confirmed bool) {
-							if confirmed {
-								SaveProfile(prefs, currentProfile(name))
-								activeProfileName = name
-							}
-						},
-						w,
-					)
-					return
-				}
-				// Different name — check whether it already exists.
-				if _, exists := LoadProfile(prefs, name); exists {
-					dialog.ShowConfirm(
-						"Overwrite Profile",
-						fmt.Sprintf("A profile named %q already exists. Overwrite it?", name),
-						func(confirmed bool) {
-							if confirmed {
-								SaveProfile(prefs, currentProfile(name))
-								activeProfileName = name
-							}
-						},
-						w,
-					)
-					return
-				}
-				SaveProfile(prefs, currentProfile(name))
-				activeProfileName = name
+				doSave()
 			},
 			w,
 		)
@@ -1454,7 +1537,7 @@ func main() {
 	// Full window: scrollable body + fixed status bar at bottom
 	content := container.NewBorder(
 		nil,
-		container.NewVBox(widget.NewSeparator(), bottomBar),
+		container.NewVBox(newWhiteSeparator(), bottomBar),
 		nil, nil,
 		container.NewScroll(body),
 	)

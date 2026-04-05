@@ -569,6 +569,7 @@
                     <button class="tab" onclick="switchTab('banned')">Banned IPs</button>
                     <button class="tab" onclick="switchTab('logs')">Logs</button>
                     <button class="tab" onclick="switchTab('visual')">Config</button>
+                    <button class="tab" onclick="switchTab('proxy')">Proxy</button>
                     <button class="tab" onclick="switchTab('radiod')">Radiod</button>
                     <button class="tab" onclick="switchTab('radiod-channels')">Radiod Channels</button>
                     <button class="tab" onclick="switchTab('bookmarks')">Bookmarks</button>
@@ -662,6 +663,94 @@
                     <div id="visualEditor" class="loading">
                         <div class="spinner"></div>
                         <p>Loading configuration...</p>
+                    </div>
+                </div>
+
+                <!-- Proxy Tab -->
+                <div id="proxyTab" class="tab-content">
+                    <div style="margin-bottom: 20px; padding: 15px; background: #e8f5e9; border-radius: 5px; border: 1px solid #4caf50;">
+                        <strong>Addon Proxies</strong> — reverse-proxy Docker addon containers through UberSDR.
+                        Each enabled proxy is accessible at <code>/addon/&lt;name&gt;/</code>.
+                        Changes are saved to <code>addons.yaml</code> and take effect after a server restart.
+                    </div>
+
+                    <!-- Warning banner (shown when require_admin is false) -->
+                    <div id="proxyPublicWarning" style="display: none; margin-bottom: 15px; padding: 12px 15px; background: #fff3cd; border: 2px solid #ffc107; border-radius: 5px; color: #856404;">
+                        ⚠️ <strong>Public access warning:</strong> One or more proxies have <em>Require Admin</em> disabled.
+                        If this instance is publicly accessible, those proxies will be open to the world without any authentication.
+                    </div>
+
+                    <!-- Proxy list -->
+                    <div id="proxyList" class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading proxies...</p>
+                    </div>
+
+                    <!-- Add / Edit form -->
+                    <div id="proxyForm" style="display: none; margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px; border: 1px solid #dee2e6;">
+                        <h3 id="proxyFormTitle" style="margin-top: 0; margin-bottom: 15px;">Add Addon Proxy</h3>
+
+                        <div class="config-field">
+                            <label>Name <span style="color:#999; font-weight:normal;">(URL-safe: lowercase letters, digits, hyphens, underscores)</span></label>
+                            <input type="text" id="proxyFormName" placeholder="e.g. cwskimmer" pattern="^[a-z0-9][a-z0-9_-]*$" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
+                        </div>
+
+                        <div class="config-field">
+                            <label>Host <span style="color:#999; font-weight:normal;">(Docker container hostname on the sdr-network)</span></label>
+                            <input type="text" id="proxyFormHost" placeholder="e.g. cwskimmer" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
+                        </div>
+
+                        <div class="config-field">
+                            <label>Port</label>
+                            <input type="number" id="proxyFormPort" placeholder="e.g. 7373" min="1" max="65535" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
+                        </div>
+
+                        <div class="config-field">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" id="proxyFormEnabled">
+                                Enabled
+                            </label>
+                        </div>
+
+                        <div class="config-field">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" id="proxyFormRequireAdmin" onchange="proxyAdminCheckChanged()">
+                                Require Admin authentication to access this proxy
+                            </label>
+                            <div id="proxyRequireAdminWarning" style="display:none; margin-top:8px; padding:10px; background:#fff3cd; border:1px solid #ffc107; border-radius:4px; color:#856404; font-size:13px;">
+                                ⚠️ <strong>Warning:</strong> Disabling admin authentication means this proxy will be accessible to anyone who can reach this server.
+                                If your instance is publicly accessible, this proxy will be open to the world.
+                            </div>
+                        </div>
+
+                        <div class="config-field">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" id="proxyFormStripPrefix">
+                                Strip <code>/addon/&lt;name&gt;</code> prefix before forwarding to backend
+                            </label>
+                        </div>
+
+                        <div class="config-field">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" id="proxyFormRewriteOrigin">
+                                Rewrite WebSocket Origin header to backend URL
+                            </label>
+                        </div>
+
+                        <div class="config-field">
+                            <label>Rate Limit <span style="color:#999; font-weight:normal;">(requests per minute per IP; 0 = unlimited)</span></label>
+                            <input type="number" id="proxyFormRateLimit" placeholder="0" min="0" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
+                        </div>
+
+                        <div class="config-field">
+                            <label>Allowed IPs <span style="color:#999; font-weight:normal;">(one IP or CIDR per line; empty = use admin allowed_ips)</span></label>
+                            <textarea id="proxyFormAllowedIPs" rows="3" placeholder="192.168.1.0/24&#10;10.0.0.1" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px; font-family:monospace;"></textarea>
+                        </div>
+
+                        <div style="display:flex; gap:10px; margin-top:15px;">
+                            <button class="btn" onclick="saveProxy()">Save</button>
+                            <button class="btn btn-secondary" onclick="cancelProxyForm()">Cancel</button>
+                        </div>
                     </div>
                 </div>
 
@@ -1353,6 +1442,10 @@
                     <button class="btn btn-secondary" onclick="loadDecoderConfig()">Reload</button>
                     <button class="btn btn-secondary" onclick="exportDecoderConfig()">Export Config</button>
                     <button class="btn btn-secondary" onclick="importDecoderConfig()">Import Config</button>
+                </div>
+                <div class="button-group" id="proxyButtons" style="display: none;">
+                    <button class="btn" onclick="showAddProxyForm()">Add New Proxy</button>
+                    <button class="btn btn-secondary" onclick="loadAddonProxies()">Reload</button>
                 </div>
                 <div class="button-group" id="monitorButtons" style="display: none;">
                     <button class="btn btn-secondary" onclick="loadMonitorHealth()">Refresh</button>
@@ -2190,6 +2283,7 @@
 
             // Hide all button groups
             document.getElementById('configButtons').style.display = 'none';
+            document.getElementById('proxyButtons').style.display = 'none';
             document.getElementById('radiodButtons').style.display = 'none';
             document.getElementById('radiodChannelsButtons').style.display = 'none';
             document.getElementById('bookmarkButtons').style.display = 'none';
@@ -2253,62 +2347,67 @@
                 document.querySelector('.tab:nth-child(4)').classList.add('active');
                 document.getElementById('visualTab').classList.add('active');
                 document.getElementById('configButtons').style.display = 'flex';
-            } else if (tab === 'radiod') {
+            } else if (tab === 'proxy') {
                 document.querySelector('.tab:nth-child(5)').classList.add('active');
+                document.getElementById('proxyTab').classList.add('active');
+                document.getElementById('proxyButtons').style.display = 'flex';
+                loadAddonProxies();
+            } else if (tab === 'radiod') {
+                document.querySelector('.tab:nth-child(6)').classList.add('active');
                 document.getElementById('radiodTab').classList.add('active');
                 document.getElementById('radiodButtons').style.display = 'flex';
                 loadRadiodConfig();
             } else if (tab === 'radiod-channels') {
-                document.querySelector('.tab:nth-child(6)').classList.add('active');
+                document.querySelector('.tab:nth-child(7)').classList.add('active');
                 document.getElementById('radiodChannelsTab').classList.add('active');
                 document.getElementById('radiodChannelsButtons').style.display = 'flex';
                 loadRadiodChannels();
                 startRadiodChannelsAutoRefresh();
             } else if (tab === 'bookmarks') {
-                document.querySelector('.tab:nth-child(7)').classList.add('active');
+                document.querySelector('.tab:nth-child(8)').classList.add('active');
                 document.getElementById('bookmarksTab').classList.add('active');
                 document.getElementById('bookmarkButtons').style.display = 'flex';
                 loadBookmarks();
             } else if (tab === 'bands') {
-                document.querySelector('.tab:nth-child(8)').classList.add('active');
+                document.querySelector('.tab:nth-child(9)').classList.add('active');
                 document.getElementById('bandsTab').classList.add('active');
                 document.getElementById('bandButtons').style.display = 'flex';
                 loadBands();
             } else if (tab === 'extensions') {
-                document.querySelector('.tab:nth-child(9)').classList.add('active');
+                document.querySelector('.tab:nth-child(10)').classList.add('active');
                 document.getElementById('extensionsTab').classList.add('active');
                 document.getElementById('extensionButtons').style.display = 'flex';
                 loadAvailableExtensions();
             } else if (tab === 'decoder') {
-                document.querySelector('.tab:nth-child(10)').classList.add('active');
+                document.querySelector('.tab:nth-child(11)').classList.add('active');
                 document.getElementById('decoderTab').classList.add('active');
                 document.getElementById('decoderButtons').style.display = 'flex';
                 loadDecoderConfig();
             } else if (tab === 'cwskimmer') {
-                document.querySelector('.tab:nth-child(11)').classList.add('active');
+                document.querySelector('.tab:nth-child(12)').classList.add('active');
                 document.getElementById('cwskimmerTab').classList.add('active');
                 document.getElementById('cwskimmerButtons').style.display = 'flex';
                 loadCWSkimmerConfig();
             } else if (tab === 'rotator') {
-                document.querySelector('.tab:nth-child(12)').classList.add('active');
+                document.querySelector('.tab:nth-child(13)').classList.add('active');
                 document.getElementById('rotatorSchedulerTab').classList.add('active');
                 const rotatorSchedulerButtons = document.getElementById('rotatorSchedulerButtons');
                 if (rotatorSchedulerButtons) rotatorSchedulerButtons.style.display = 'flex';
                 loadRotatorSchedulerConfig();
                 startRotatorLogsAutoRefresh();
             } else if (tab === 'chat') {
-                document.querySelector('.tab:nth-child(13)').classList.add('active');
+                document.querySelector('.tab:nth-child(14)').classList.add('active');
                 document.getElementById('chatTab').classList.add('active');
                 document.getElementById('chatButtons').style.display = 'flex';
                 loadChatLogs();
             } else if (tab === 'monitor') {
-                document.querySelector('.tab:nth-child(14)').classList.add('active');
+                document.querySelector('.tab:nth-child(15)').classList.add('active');
                 document.getElementById('monitorTab').classList.add('active');
                 document.getElementById('monitorButtons').style.display = 'flex';
                 loadMonitorHealth();
                 startMonitorAutoRefresh();
             } else if (tab === 'system') {
-                document.querySelector('.tab:nth-child(15)').classList.add('active');
+                document.querySelector('.tab:nth-child(16)').classList.add('active');
                 document.getElementById('systemTab').classList.add('active');
                 document.getElementById('systemButtons').style.display = 'flex';
                 loadSystemStats();
@@ -18306,6 +18405,197 @@ Referer: ${log.referer}`;
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
+        }
+
+        // ── Addon Proxy Management ────────────────────────────────────────────────
+
+        // State for the proxy form: null = adding new, string = name of entry being edited
+        let proxyEditingName = null;
+
+        async function loadAddonProxies() {
+            const listEl = document.getElementById('proxyList');
+            listEl.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading proxies...</p></div>';
+            try {
+                const resp = await authenticatedFetch('/admin/addon-proxies');
+                if (!resp) return;
+                if (!resp.ok) throw new Error(await resp.text());
+                const proxies = await resp.json();
+                renderProxyList(proxies);
+            } catch (e) {
+                listEl.innerHTML = '<p style="color:red;">Error loading proxies: ' + e.message + '</p>';
+            }
+        }
+
+        function renderProxyList(proxies) {
+            const listEl = document.getElementById('proxyList');
+            const warnEl = document.getElementById('proxyPublicWarning');
+
+            // Show global warning if any proxy has require_admin: false
+            const hasPublic = proxies.some(p => p.enabled && !p.require_admin);
+            warnEl.style.display = hasPublic ? 'block' : 'none';
+
+            if (!proxies || proxies.length === 0) {
+                listEl.innerHTML = '<p style="color:#666;">No addon proxies configured. Click <strong>Add New Proxy</strong> to create one.</p>';
+                return;
+            }
+
+            let html = '<table style="width:100%; border-collapse:collapse; font-size:14px;">';
+            html += '<thead><tr style="background:#f8f9fa; border-bottom:2px solid #dee2e6;">';
+            html += '<th style="padding:10px; text-align:left;">Name</th>';
+            html += '<th style="padding:10px; text-align:left;">Path</th>';
+            html += '<th style="padding:10px; text-align:left;">Backend</th>';
+            html += '<th style="padding:10px; text-align:center;">Enabled</th>';
+            html += '<th style="padding:10px; text-align:center;">Auth</th>';
+            html += '<th style="padding:10px; text-align:right;">Actions</th>';
+            html += '</tr></thead><tbody>';
+
+            proxies.forEach(p => {
+                const enabledBadge = p.enabled
+                    ? '<span style="color:#28a745; font-weight:bold;">✓ Yes</span>'
+                    : '<span style="color:#6c757d;">✗ No</span>';
+                const authBadge = p.require_admin
+                    ? '<span style="color:#007bff;">Admin only</span>'
+                    : '<span style="color:#dc3545; font-weight:bold;">⚠ Public</span>';
+                const nameEsc = p.name.replace(/"/g, '&quot;');
+                html += `<tr style="border-bottom:1px solid #dee2e6;">`;
+                html += `<td style="padding:10px; font-weight:bold;">${p.name}</td>`;
+                html += `<td style="padding:10px; font-family:monospace;"><a href="${p.path}" target="_blank" style="color:#007bff;">${p.path}</a></td>`;
+                html += `<td style="padding:10px; font-family:monospace;">${p.host}:${p.port}</td>`;
+                html += `<td style="padding:10px; text-align:center;">${enabledBadge}</td>`;
+                html += `<td style="padding:10px; text-align:center;">${authBadge}</td>`;
+                html += `<td style="padding:10px; text-align:right; white-space:nowrap;">`;
+                html += `<button class="btn btn-secondary" style="padding:4px 10px; font-size:12px; margin-right:5px;" onclick='showEditProxyForm(${JSON.stringify(p)})'>Edit</button>`;
+                html += `<button class="btn btn-danger" style="padding:4px 10px; font-size:12px;" onclick="deleteProxy('${nameEsc}')">Delete</button>`;
+                html += `</td></tr>`;
+            });
+
+            html += '</tbody></table>';
+            listEl.innerHTML = html;
+        }
+
+        function showAddProxyForm() {
+            proxyEditingName = null;
+            document.getElementById('proxyFormTitle').textContent = 'Add Addon Proxy';
+            document.getElementById('proxyFormName').value = '';
+            document.getElementById('proxyFormName').disabled = false;
+            document.getElementById('proxyFormHost').value = '';
+            document.getElementById('proxyFormPort').value = '';
+            document.getElementById('proxyFormEnabled').checked = false;
+            document.getElementById('proxyFormRequireAdmin').checked = true;
+            document.getElementById('proxyFormStripPrefix').checked = true;
+            document.getElementById('proxyFormRewriteOrigin').checked = false;
+            document.getElementById('proxyFormRateLimit').value = '0';
+            document.getElementById('proxyFormAllowedIPs').value = '';
+            document.getElementById('proxyRequireAdminWarning').style.display = 'none';
+            document.getElementById('proxyForm').style.display = 'block';
+            document.getElementById('proxyForm').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function showEditProxyForm(proxy) {
+            proxyEditingName = proxy.name;
+            document.getElementById('proxyFormTitle').textContent = 'Edit Addon Proxy: ' + proxy.name;
+            document.getElementById('proxyFormName').value = proxy.name;
+            document.getElementById('proxyFormName').disabled = false;
+            document.getElementById('proxyFormHost').value = proxy.host || '';
+            document.getElementById('proxyFormPort').value = proxy.port || '';
+            document.getElementById('proxyFormEnabled').checked = !!proxy.enabled;
+            document.getElementById('proxyFormRequireAdmin').checked = !!proxy.require_admin;
+            document.getElementById('proxyFormStripPrefix').checked = !!proxy.strip_prefix;
+            document.getElementById('proxyFormRewriteOrigin').checked = !!proxy.rewrite_origin;
+            document.getElementById('proxyFormRateLimit').value = proxy.rate_limit || 0;
+            document.getElementById('proxyFormAllowedIPs').value = (proxy.allowed_ips || []).join('\n');
+            document.getElementById('proxyRequireAdminWarning').style.display = proxy.require_admin ? 'none' : 'block';
+            document.getElementById('proxyForm').style.display = 'block';
+            document.getElementById('proxyForm').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function cancelProxyForm() {
+            document.getElementById('proxyForm').style.display = 'none';
+            proxyEditingName = null;
+        }
+
+        function proxyAdminCheckChanged() {
+            const checked = document.getElementById('proxyFormRequireAdmin').checked;
+            document.getElementById('proxyRequireAdminWarning').style.display = checked ? 'none' : 'block';
+        }
+
+        async function saveProxy() {
+            const name = document.getElementById('proxyFormName').value.trim();
+            if (!name) { showAlert('Name is required', 'error'); return; }
+            if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) {
+                showAlert('Name must be lowercase letters, digits, hyphens or underscores, starting with a letter or digit', 'error');
+                return;
+            }
+
+            const port = parseInt(document.getElementById('proxyFormPort').value, 10);
+            const enabled = document.getElementById('proxyFormEnabled').checked;
+            if (enabled) {
+                const host = document.getElementById('proxyFormHost').value.trim();
+                if (!host) { showAlert('Host is required when proxy is enabled', 'error'); return; }
+                if (!port || port < 1 || port > 65535) { showAlert('Port must be between 1 and 65535', 'error'); return; }
+            }
+
+            const allowedIPsRaw = document.getElementById('proxyFormAllowedIPs').value.trim();
+            const allowedIPs = allowedIPsRaw ? allowedIPsRaw.split('\n').map(s => s.trim()).filter(s => s) : [];
+
+            const payload = {
+                name: name,
+                enabled: document.getElementById('proxyFormEnabled').checked,
+                host: document.getElementById('proxyFormHost').value.trim(),
+                port: port || 0,
+                strip_prefix: document.getElementById('proxyFormStripPrefix').checked,
+                require_admin: document.getElementById('proxyFormRequireAdmin').checked,
+                rewrite_origin: document.getElementById('proxyFormRewriteOrigin').checked,
+                rate_limit: parseInt(document.getElementById('proxyFormRateLimit').value, 10) || 0,
+                allowed_ips: allowedIPs,
+            };
+
+            try {
+                let resp;
+                if (proxyEditingName !== null) {
+                    resp = await authenticatedFetch('/admin/addon-proxies?name=' + encodeURIComponent(proxyEditingName), {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+                } else {
+                    resp = await authenticatedFetch('/admin/addon-proxies', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+                }
+                if (!resp) return;
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    showAlert('Error saving proxy: ' + text, 'error');
+                    return;
+                }
+                showAlert('Proxy saved. Restart server to apply changes.', 'success');
+                cancelProxyForm();
+                loadAddonProxies();
+            } catch (e) {
+                showAlert('Error saving proxy: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteProxy(name) {
+            if (!confirm('Delete addon proxy "' + name + '"? This cannot be undone.')) return;
+            try {
+                const resp = await authenticatedFetch('/admin/addon-proxies?name=' + encodeURIComponent(name), {
+                    method: 'DELETE',
+                });
+                if (!resp) return;
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    showAlert('Error deleting proxy: ' + text, 'error');
+                    return;
+                }
+                showAlert('Proxy "' + name + '" deleted. Restart server to apply changes.', 'success');
+                loadAddonProxies();
+            } catch (e) {
+                showAlert('Error deleting proxy: ' + e.message, 'error');
+            }
         }
 
     </script>

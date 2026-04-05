@@ -805,6 +805,65 @@ func (ssrl *SessionStatsRateLimiter) AllowRequest(ip string) bool {
 	return limiter.Allow()
 }
 
+// AddonProxyRateLimiter manages per-IP rate limiters for addon proxy requests.
+// The limit is configurable per proxy instance (rate_limit field in addons.yaml).
+type AddonProxyRateLimiter struct {
+	limiters      map[string]*RateLimiter
+	mu            sync.RWMutex
+	ratePerMinute float64 // tokens per minute
+}
+
+// NewAddonProxyRateLimiter creates a new addon proxy rate limiter with the given
+// requests-per-minute limit. ratePerMinute must be > 0.
+func NewAddonProxyRateLimiter(ratePerMinute int) *AddonProxyRateLimiter {
+	return &AddonProxyRateLimiter{
+		limiters:      make(map[string]*RateLimiter),
+		ratePerMinute: float64(ratePerMinute),
+	}
+}
+
+// AllowRequest checks if a request from the given IP is within the rate limit.
+// Returns true if allowed, false if the limit has been exceeded.
+func (rl *AddonProxyRateLimiter) AllowRequest(ip string) bool {
+	rl.mu.Lock()
+	limiter, exists := rl.limiters[ip]
+	if !exists {
+		rpm := rl.ratePerMinute
+		limiter = &RateLimiter{
+			tokens:     rpm,
+			maxTokens:  rpm,
+			refillRate: rpm / 60.0,
+			lastRefill: time.Now(),
+		}
+		rl.limiters[ip] = limiter
+	}
+	rl.mu.Unlock()
+
+	return limiter.Allow()
+}
+
+// Cleanup removes stale per-IP limiters that have not been used in the last 10 minutes.
+func (rl *AddonProxyRateLimiter) Cleanup() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	for ip, limiter := range rl.limiters {
+		limiter.mu.Lock()
+		if now.Sub(limiter.lastRefill) > 10*time.Minute {
+			delete(rl.limiters, ip)
+		}
+		limiter.mu.Unlock()
+	}
+}
+
+// GetStats returns the number of currently tracked IP addresses.
+func (rl *AddonProxyRateLimiter) GetStats() int {
+	rl.mu.RLock()
+	defer rl.mu.RUnlock()
+	return len(rl.limiters)
+}
+
 // Cleanup removes rate limiters for IPs that haven't been used recently
 func (ssrl *SessionStatsRateLimiter) Cleanup() {
 	ssrl.mu.Lock()

@@ -1,0 +1,117 @@
+# ==============================================================================
+# UberSDR Addon Proxies Configuration
+# ==============================================================================
+# Copy this file to addons.yaml and customise to enable addon proxies.
+#
+# Each entry reverse-proxies /addon/{name}/ to a Docker container on the
+# sdr-network. Both plain HTTP and WebSocket connections (including upgrades)
+# are supported transparently.
+#
+# The file is optional — if addons.yaml does not exist, no addon proxies are
+# registered and the server starts normally.
+#
+# ------------------------------------------------------------------------------
+# Fields
+# ------------------------------------------------------------------------------
+#
+#   name           (required)
+#     URL-safe identifier for this proxy. Must be unique within this file.
+#     Allowed characters: lowercase letters (a-z), digits (0-9), hyphens (-),
+#     underscores (_). Must start with a letter or digit.
+#     The proxy will be accessible at: /addon/{name}/
+#     Example: name: "grafana"  →  https://your-host/addon/grafana/
+#
+#   enabled        (required — must be explicitly set to true)
+#     Enable or disable this proxy entry. Go booleans default to false, so
+#     you must write "enabled: true" to activate an entry.
+#     Disabled entries are skipped at startup; host/port are not validated.
+#     Useful for keeping template entries in the file without activating them.
+#
+#   host           (required when enabled)
+#     Docker container hostname on the sdr-network.
+#     Use the container name as defined in docker-compose.yml.
+#     Example: "ubersdr-grafana", "ubersdr-nodered"
+#
+#   port           (required when enabled)
+#     Container port to proxy to. Must be between 1 and 65535.
+#     Example: 3000 (Grafana), 1880 (Node-RED), 8080 (generic)
+#
+#   strip_prefix   (default: true)
+#     When true, the /addon/{name} prefix is stripped from the request path
+#     before forwarding to the backend. The backend receives the path starting
+#     from the first segment after the name.
+#     Example: /addon/grafana/dashboard → /dashboard (forwarded to Grafana)
+#     Set to false only if the backend expects the full /addon/{name}/... path.
+#
+#   require_admin  (default: true)
+#     When true, the proxy is wrapped in the admin AuthMiddleware. Clients must
+#     have a valid admin session cookie (or X-Admin-Password header) to access
+#     the addon. The admin IP allowlist and CSRF protection also apply.
+#     Set to false for publicly accessible addons that handle their own auth.
+#     Note: even with require_admin: false, the allowed_ips list still applies.
+#
+#   rewrite_origin (default: false)
+#     When true, the WebSocket Origin header is rewritten to match the backend
+#     URL before forwarding. Enable this for containers that validate the Origin
+#     header and reject connections from unknown origins (e.g. GoTTY-style
+#     terminals). Most containers do not need this.
+#
+#   allowed_ips    (default: falls back to admin.allowed_ips)
+#     List of IP addresses or CIDR ranges allowed to access this proxy.
+#     Supports both IPv4 and IPv6 with CIDR notation.
+#     If the list is empty, or contains only 0.0.0.0/0, the proxy falls back
+#     to the admin.allowed_ips list from config.yaml.
+#     Examples:
+#       - "127.0.0.1"         # Single IPv4 address
+#       - "192.168.1.0/24"    # IPv4 CIDR range
+#       - "::1"               # IPv6 localhost
+#       - "0.0.0.0/0"         # Allow all (falls back to admin.allowed_ips)
+#
+#   rate_limit     (default: 100, 0 = unlimited)
+#     Maximum number of requests per minute per IP address.
+#     Set to 0 to disable rate limiting for this proxy.
+#     Recommended: 100 for interactive UIs, 0 for high-frequency data streams.
+#
+# ------------------------------------------------------------------------------
+# Examples
+# ------------------------------------------------------------------------------
+
+proxies:
+
+  # CW Skimmer web interface — admin authentication required
+  # Accessible at: /addon/cwskimmer/
+  - name: "cwskimmer"
+    enabled: false          # set to true to activate
+    host: "cwskimmer"
+    port: 7373
+    strip_prefix: true
+    require_admin: true
+    rewrite_origin: false
+    allowed_ips: []         # empty = falls back to admin.allowed_ips
+    rate_limit: 100
+
+  # HFDL decoder web interface — publicly accessible
+  # Accessible at: /addon/hfdl/
+  - name: "hfdl"
+    enabled: false          # set to true to activate
+    host: "hfdl"
+    port: 6090
+    strip_prefix: true
+    require_admin: false
+    rewrite_origin: false
+    allowed_ips:
+      - "0.0.0.0/0"
+    rate_limit: 100
+
+  # SSTV decoder web interface — publicly accessible
+  # Accessible at: /addon/sstv/
+  - name: "sstv"
+    enabled: false          # set to true to activate
+    host: "sstv"
+    port: 6091
+    strip_prefix: true
+    require_admin: false
+    rewrite_origin: false
+    allowed_ips:
+      - "0.0.0.0/0"
+    rate_limit: 100

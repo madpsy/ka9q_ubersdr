@@ -381,6 +381,9 @@ type AdminHandler struct {
 	loginHistory        *AdminLoginHistory
 	frontendHistory     *FrontendHistoryTracker
 	loadHistory         *LoadHistoryTracker
+	addonsConfig        *AddonProxiesConfig // addon proxy config (from addons.yaml)
+	addonsConfigPath    string              // path to addons.yaml for read/write
+	addonsMu            sync.RWMutex        // protects addonsConfig during live edits
 }
 
 // restartServer triggers a server restart after a short delay
@@ -442,7 +445,7 @@ func (ah *AdminHandler) restartServer() {
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, countryBanManager *CountryBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, geoIPService *GeoIPService, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, countryBanManager *CountryBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, dxClusterWsHandler *DXClusterWebSocketHandler, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter, mqttPublisher *MQTTPublisher, rotctlHandler *RotctlAPIHandler, rotatorScheduler *RotatorScheduler, geoIPService *GeoIPService, frontendHistory *FrontendHistoryTracker, loadHistory *LoadHistoryTracker, addonsConfig *AddonProxiesConfig, addonsConfigPath string) *AdminHandler {
 	history := NewAdminLoginHistory()
 	return &AdminHandler{
 		config:              config,
@@ -470,6 +473,8 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		loginHistory:        history,
 		frontendHistory:     frontendHistory,
 		loadHistory:         loadHistory,
+		addonsConfig:        addonsConfig,
+		addonsConfigPath:    addonsConfigPath,
 	}
 }
 

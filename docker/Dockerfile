@@ -86,6 +86,7 @@ COPY --from=builder /build/config/extensions.yaml.example /etc/ka9q_ubersdr/exte
 COPY --from=builder /build/config/decoder.yaml.example /etc/ka9q_ubersdr/decoder.yaml.example
 COPY --from=builder /build/config/cwskimmer.yaml.example /etc/ka9q_ubersdr/cwskimmer.yaml.example
 COPY --from=builder /build/config/rotator_schedule.yaml.example /etc/ka9q_ubersdr/rotator_schedule.yaml.example
+COPY --from=builder /build/config/addons.yaml.example /etc/ka9q_ubersdr/addons.yaml.example
 
 # Copy CTY directory with cty.dat file
 COPY --from=builder /build/cty /etc/ka9q_ubersdr/cty

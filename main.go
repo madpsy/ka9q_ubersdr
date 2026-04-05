@@ -1562,6 +1562,41 @@ func main() {
 		}
 	}
 
+	// Load addon proxies from addons.yaml (optional — missing file is not an error)
+	addonsPath := "addons.yaml"
+	if *configDir != "." {
+		addonsPath = *configDir + "/addons.yaml"
+	}
+	addonsConfig, err := LoadAddonProxiesConfig(addonsPath)
+	if err != nil {
+		log.Printf("No addons.yaml found or error loading: %v", err)
+		addonsConfig = &AddonProxiesConfig{}
+	} else {
+		enabled := 0
+		for _, p := range addonsConfig.Proxies {
+			if p.Enabled {
+				enabled++
+			}
+		}
+		log.Printf("Loaded addon proxies config from addons.yaml (%d defined, %d enabled)", len(addonsConfig.Proxies), enabled)
+	}
+
+	// Build enabled addon proxies (attach admin config for IP fallback)
+	var addonProxies []*AddonProxy
+	for i := range addonsConfig.Proxies {
+		entry := &addonsConfig.Proxies[i]
+		if !entry.Enabled {
+			continue
+		}
+		entry.adminConfig = &config.Admin
+		ap, err := NewAddonProxy(entry)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize addon proxy %q: %v", entry.Name, err)
+			continue
+		}
+		addonProxies = append(addonProxies, ap)
+	}
+
 	// Start periodic cleanup for rate limiters (every 5 minutes)
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
@@ -1578,6 +1613,12 @@ func main() {
 			// Cleanup SSH proxy rate limiter if enabled
 			if sshProxy != nil && sshProxy.rateLimiter != nil {
 				sshProxy.rateLimiter.Cleanup()
+			}
+			// Cleanup addon proxy rate limiters
+			for _, ap := range addonProxies {
+				if ap.rateLimiter != nil {
+					ap.rateLimiter.Cleanup()
+				}
 			}
 		}
 	}()
@@ -1667,7 +1708,7 @@ func main() {
 	}
 
 	// Initialize admin handler (pass all components for proper shutdown during restart)
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory)
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath)
 
 	// Setup HTTP routes
 	http.HandleFunc("/connection", func(w http.ResponseWriter, r *http.Request) {
@@ -1958,6 +1999,7 @@ func main() {
 	http.HandleFunc("/admin/geoip/lookup", adminHandler.AuthMiddleware(adminHandler.HandleGeoIPLookup))
 	http.HandleFunc("/admin/sessions/countries", adminHandler.AuthMiddleware(adminHandler.HandleSessionsWithCountries))
 	http.HandleFunc("/admin/geoip-health", adminHandler.AuthMiddleware(adminHandler.HandleGeoIPHealth))
+	http.HandleFunc("/admin/addon-proxies", adminHandler.AuthMiddleware(adminHandler.HandleAddonProxies))
 
 	// Register SSH proxy route (admin authentication required)
 	if sshProxy != nil {
@@ -1966,6 +2008,22 @@ func main() {
 		}))
 		log.Printf("SSH terminal proxy enabled at /terminal (proxying to http://%s:%d)",
 			config.SSHProxy.Host, config.SSHProxy.Port)
+	}
+
+	// Register addon proxy routes
+	for _, ap := range addonProxies {
+		// Capture loop variable for the closure
+		proxy := ap
+		pattern := "/addon/" + proxy.entry.Name + "/"
+		if proxy.entry.RequireAdmin {
+			http.HandleFunc(pattern, adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+				proxy.ServeHTTP(w, r)
+			}))
+		} else {
+			http.HandleFunc(pattern, proxy.ServeHTTP)
+		}
+		log.Printf("Addon proxy %q registered at %s (require_admin=%v)",
+			proxy.entry.Name, pattern, proxy.entry.RequireAdmin)
 	}
 
 	// Open log file for HTTP request logging (if enabled)

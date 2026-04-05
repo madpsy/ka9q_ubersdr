@@ -93,6 +93,13 @@ initialize_configs() {
         echo "✓ extensions.yaml exists (user-managed, not auto-merged)"
     fi
 
+    if [ ! -f "/app/config/addons.yaml" ]; then
+        echo "Initializing addons.yaml from example..."
+        cp /etc/ka9q_ubersdr/addons.yaml.example /app/config/addons.yaml
+    else
+        echo "✓ addons.yaml exists (user-managed, not auto-merged)"
+    fi
+
     if [ ! -f "/app/config/decoder.yaml" ]; then
         echo "Initializing decoder.yaml from example..."
         cp /etc/ka9q_ubersdr/decoder.yaml.example /app/config/decoder.yaml

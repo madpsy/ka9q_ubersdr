@@ -122,7 +122,7 @@ func main() {
 	a.Settings().SetTheme(theme.DarkTheme())
 	a.SetIcon(fyne.NewStaticResource("ubersdr.ico", appIcon))
 
-	w := a.NewWindow("UberSDR Audio Client")
+	w := a.NewWindow("UberSDR - Disconnected")
 
 	client := NewRadioClient()
 
@@ -242,6 +242,21 @@ func main() {
 	connectBtn := widget.NewButton("Connect", nil)
 	connectBtn.Importance = widget.HighImportance
 
+	// ── updateWindowTitle — sets the window title based on connection state ───
+	updateWindowTitle := func() {
+		if client.State() != StateConnected {
+			w.SetTitle("UberSDR - Disconnected")
+			return
+		}
+		parts := []string{}
+		if activeCallsign != "" {
+			parts = append(parts, activeCallsign)
+		}
+		parts = append(parts, formatFreqKHz(currentFreq)+" kHz")
+		parts = append(parts, strings.ToUpper(currentMode))
+		w.SetTitle("UberSDR - " + strings.Join(parts, " "))
+	}
+
 	// ── sendTune — sends a tune command if already connected ─────────────────
 	sendTune := func() {
 		if client.State() != StateConnected {
@@ -256,6 +271,7 @@ func main() {
 			statusDot.SetColor(dotColorRed)
 			statusLabel.SetText("Tune error: " + err.Error())
 		}
+		updateWindowTitle()
 	}
 
 	// ── applyFreqEntry — reads the kHz entry, updates currentFreq, tunes ─────
@@ -340,6 +356,19 @@ func main() {
 	}
 	formatGroup = widget.NewRadioGroup([]string{"Compressed", "Uncompressed"}, func(s string) {
 		if suppressFormatChange {
+			return
+		}
+		// Fyne's RadioGroup allows deselection by clicking the active item,
+		// which calls OnChanged("").  Re-assert the current selection so the
+		// group never appears empty.
+		if s == "" {
+			suppressFormatChange = true
+			if client.Format == FormatOpus {
+				formatGroup.SetSelected("Compressed")
+			} else {
+				formatGroup.SetSelected("Uncompressed")
+			}
+			suppressFormatChange = false
 			return
 		}
 		if s == "Uncompressed" {
@@ -572,22 +601,22 @@ func main() {
 				}
 			}
 			// Build station info line.
-				activeCallsign = desc.Receiver.Callsign
-				parts := []string{}
-				if desc.Receiver.Callsign != "" {
-					parts = append(parts, desc.Receiver.Callsign)
-				}
-				if desc.Receiver.Name != "" {
-					parts = append(parts, desc.Receiver.Name)
-				}
-				if desc.Receiver.Location != "" {
-					parts = append(parts, desc.Receiver.Location)
-				}
-				if len(parts) > 0 {
-					stationLabel.SetText(strings.Join(parts, " · "))
-				} else {
-					stationLabel.SetText("")
-				}
+			activeCallsign = desc.Receiver.Callsign
+			parts := []string{}
+			if desc.Receiver.Callsign != "" {
+				parts = append(parts, desc.Receiver.Callsign)
+			}
+			if desc.Receiver.Name != "" {
+				parts = append(parts, desc.Receiver.Name)
+			}
+			if desc.Receiver.Location != "" {
+				parts = append(parts, desc.Receiver.Location)
+			}
+			if len(parts) > 0 {
+				stationLabel.SetText(strings.Join(parts, " · "))
+			} else {
+				stationLabel.SetText("")
+			}
 		}
 
 		hz, err := parseFreqKHz(freqEntry.Text)
@@ -1167,8 +1196,8 @@ func main() {
 
 			dlg := dialog.NewCustomConfirm(
 				"Browse Instances",
-					"Connect",
-					"Cancel",
+				"Connect",
+				"Cancel",
 				dlgContent,
 				func(ok bool) {
 					if !ok || selectedFilteredIdx < 0 || selectedFilteredIdx >= len(filtered) {
@@ -1300,6 +1329,7 @@ func main() {
 	client.OnStateChange = func(state ConnectionState, msg string) {
 		switch state {
 		case StateConnected:
+			updateWindowTitle()
 			connectBtn.SetText("Disconnect")
 			connectBtn.Importance = widget.DangerImportance
 			statusDot.SetColor(dotColorGreen)
@@ -1360,6 +1390,7 @@ func main() {
 			connectBtn.Importance = widget.MediumImportance
 		case StateError:
 			stopSessionTimer()
+			w.SetTitle("UberSDR - Disconnected")
 			statusDot.SetColor(dotColorRed)
 			txt := "Error"
 			if msg != "" {
@@ -1390,6 +1421,7 @@ func main() {
 			}
 		default:
 			stopSessionTimer()
+			w.SetTitle("UberSDR - Disconnected")
 			statusDot.SetColor(dotColorRed)
 			statusLabel.SetText("Disconnected")
 			connectBtn.SetText("Connect")

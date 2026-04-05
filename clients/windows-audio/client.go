@@ -196,7 +196,23 @@ type RadioClient struct {
 	// the Go network poller from being starved on Windows.
 	opusDecodeCh chan []byte
 
+	// pcmDeliverCh is a buffered channel of decoded PCM packets.
+	// The WebSocket receive goroutine decodes and enqueues here non-blocking;
+	// a dedicated worker goroutine calls deliverAudio so that burst processing
+	// (e.g. after a stall) does not cause rapid-fire SetValue calls that Fyne
+	// coalesces into a single stale redraw, making the audio level bar appear stuck.
+	pcmDeliverCh chan pcmDecodedPacket
+
 	mu sync.RWMutex
+}
+
+// pcmDecodedPacket holds a fully decoded PCM frame ready for delivery.
+type pcmDecodedPacket struct {
+	pcmLE         []byte
+	sampleRate    int
+	channels      int
+	basebandPower float32
+	noiseDensity  float32
 }
 
 // NewRadioClient creates a new client with sensible defaults.
@@ -590,6 +606,21 @@ func (c *RadioClient) runLoop(ctx context.Context, gen uint64) {
 		}
 	}()
 
+	// Create the PCM deliver channel and start its worker goroutine.
+	// Mirroring the Opus pattern: the receive goroutine decodes PCM frames and
+	// enqueues them here non-blocking; the worker calls deliverAudio at a
+	// measured pace so Fyne redraws are not coalesced into a single stale value.
+	pcmDeliverCh := make(chan pcmDecodedPacket, 64)
+	c.mu.Lock()
+	c.pcmDeliverCh = pcmDeliverCh
+	c.mu.Unlock()
+
+	go func() {
+		for pkt := range pcmDeliverCh {
+			c.deliverAudio(pkt.pcmLE, pkt.sampleRate, pkt.channels, pkt.basebandPower, pkt.noiseDensity)
+		}
+	}()
+
 	// Keepalive ticker
 	keepalive := time.NewTicker(30 * time.Second)
 	defer keepalive.Stop()
@@ -649,13 +680,16 @@ func (c *RadioClient) handleBinary(data []byte) {
 	}
 }
 
-// handlePCMBinary processes a PCM-zstd binary frame.
+// handlePCMBinary decodes a PCM-zstd binary frame and enqueues it for delivery
+// by the PCM worker goroutine.  This returns immediately so the WebSocket receive
+// goroutine (and the IOCP poller) is never stalled by deliverAudio or NewAudioOutput.
 func (c *RadioClient) handlePCMBinary(data []byte) {
 	c.mu.RLock()
 	dec := c.pcmDecoder
+	ch := c.pcmDeliverCh
 	c.mu.RUnlock()
 
-	if dec == nil {
+	if dec == nil || ch == nil {
 		return
 	}
 
@@ -664,7 +698,12 @@ func (c *RadioClient) handlePCMBinary(data []byte) {
 		return
 	}
 
-	c.deliverAudio(pcmLE, sampleRate, channels, basebandPower, noiseDensity)
+	// Non-blocking enqueue: drop if the worker is momentarily behind rather
+	// than stalling the receive goroutine.
+	select {
+	case ch <- pcmDecodedPacket{pcmLE, sampleRate, channels, basebandPower, noiseDensity}:
+	default:
+	}
 }
 
 // handleOpusBinary enqueues a raw Opus wire frame for decoding by the worker
@@ -812,11 +851,13 @@ func (c *RadioClient) cleanup() {
 	dec := c.pcmDecoder
 	opusDec := c.opusDec
 	decodeCh := c.opusDecodeCh
+	pcmCh := c.pcmDeliverCh
 	c.conn = nil
 	c.audioOut = nil
 	c.pcmDecoder = nil
 	c.opusDec = nil
 	c.opusDecodeCh = nil
+	c.pcmDeliverCh = nil
 	// Reset audio params so the output is always recreated on the next connection
 	c.sampleRate = 0
 	c.channels = 0
@@ -828,6 +869,10 @@ func (c *RadioClient) cleanup() {
 	// Close the Opus decode channel to stop the worker goroutine.
 	if decodeCh != nil {
 		close(decodeCh)
+	}
+	// Close the PCM deliver channel to stop its worker goroutine.
+	if pcmCh != nil {
+		close(pcmCh)
 	}
 	if out != nil {
 		out.Close()

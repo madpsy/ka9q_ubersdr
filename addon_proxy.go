@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -43,6 +42,15 @@ func NewAddonProxy(entry *AddonProxyEntry) (*AddonProxy, error) {
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
 
+		// Strip client-supplied proxy headers before we set our own authoritative
+		// values. Without this a client can inject X-Forwarded-For, X-Real-IP,
+		// X-Forwarded-Host, or X-Forwarded-Proto and have them forwarded verbatim
+		// to the backend, bypassing IP-based controls, audit logs, and HTTPS checks.
+		req.Header.Del("X-Forwarded-For")
+		req.Header.Del("X-Forwarded-Host")
+		req.Header.Del("X-Forwarded-Proto")
+		req.Header.Del("X-Real-IP")
+
 		// Strip the /addon/{name} prefix so the backend sees the correct path
 		if entry.StripPrefix {
 			req.URL.Path = strings.TrimPrefix(req.URL.Path, prefix)
@@ -64,47 +72,28 @@ func NewAddonProxy(entry *AddonProxyEntry) (*AddonProxy, error) {
 		// Set Host header to the backend target
 		req.Host = targetURL.Host
 
-		// Forward real client IP using the same logic as getClientIP() in main.go
-		sourceIP := req.RemoteAddr
-		if host, _, err := net.SplitHostPort(sourceIP); err == nil {
-			sourceIP = host
-		}
+		// Use the same trusted getClientIP() logic used everywhere else in
+		// UberSDR: honours X-Real-IP / X-Forwarded-For only when the request
+		// arrives from a configured tunnel server or trusted proxy, and falls
+		// back to RemoteAddr otherwise.
+		clientIP := getClientIP(req)
 
-		clientIP := sourceIP
-
-		if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
-			// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
-			// Extract the first IP (true client)
-			clientIP = strings.TrimSpace(xff)
-			if commaIdx := strings.Index(clientIP, ","); commaIdx != -1 {
-				clientIP = strings.TrimSpace(clientIP[:commaIdx])
-			}
-			// Strip port if present
-			if host, _, err := net.SplitHostPort(clientIP); err == nil {
-				clientIP = host
-			}
-			req.Header.Set("X-Real-IP", clientIP)
-			// X-Forwarded-For already set — leave as-is
-		} else {
-			// Direct connection — set both headers from source IP
-			req.Header.Set("X-Forwarded-For", sourceIP)
-			req.Header.Set("X-Real-IP", sourceIP)
-		}
+		// Set authoritative forwarding headers for the backend.
+		req.Header.Set("X-Real-IP", clientIP)
+		req.Header.Set("X-Forwarded-For", clientIP)
 
 		// Forward the original Host and protocol so backends can construct
-		// correct absolute URLs (redirects, CORS, cookie domains, etc.)
-		if req.Header.Get("X-Forwarded-Host") == "" {
-			if origHost := req.Header.Get("Host"); origHost != "" {
-				req.Header.Set("X-Forwarded-Host", origHost)
-			}
+		// correct absolute URLs (redirects, CORS, cookie domains, etc.).
+		// These are set unconditionally because the client-supplied values were
+		// deleted above.
+		if origHost := req.Header.Get("Host"); origHost != "" {
+			req.Header.Set("X-Forwarded-Host", origHost)
 		}
-		if req.Header.Get("X-Forwarded-Proto") == "" {
-			proto := "http"
-			if req.TLS != nil {
-				proto = "https"
-			}
-			req.Header.Set("X-Forwarded-Proto", proto)
+		proto := "http"
+		if req.TLS != nil {
+			proto = "https"
 		}
+		req.Header.Set("X-Forwarded-Proto", proto)
 
 		// Optionally rewrite the WebSocket Origin header so backends that
 		// validate Origin (e.g. GoTTY) accept the connection

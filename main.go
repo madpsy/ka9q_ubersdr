@@ -2000,6 +2000,7 @@ func main() {
 	http.HandleFunc("/admin/sessions/countries", adminHandler.AuthMiddleware(adminHandler.HandleSessionsWithCountries))
 	http.HandleFunc("/admin/geoip-health", adminHandler.AuthMiddleware(adminHandler.HandleGeoIPHealth))
 	http.HandleFunc("/admin/addon-proxies", adminHandler.AuthMiddleware(adminHandler.HandleAddonProxies))
+	http.HandleFunc("/admin/addon-proxies/restart", adminHandler.AuthMiddleware(adminHandler.HandleAddonProxiesRestart))
 
 	// Register SSH proxy route (admin authentication required)
 	if sshProxy != nil {

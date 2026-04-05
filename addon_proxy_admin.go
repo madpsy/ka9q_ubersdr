@@ -34,6 +34,23 @@ func (ah *AdminHandler) HandleAddonProxies(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// HandleAddonProxiesRestart triggers a server restart (addon proxy config is already
+// persisted on each add/edit/delete, so no save step is needed here).
+func (ah *AdminHandler) HandleAddonProxiesRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	ah.restartServer()
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": "Server is restarting...",
+		"restart": true,
+	})
+}
+
 // addonProxyJSON is the JSON representation sent to / received from the admin UI.
 // It mirrors AddonProxyEntry but uses json tags and omits internal fields.
 type addonProxyJSON struct {
@@ -52,8 +69,8 @@ type addonProxyJSON struct {
 
 func entryToJSON(e AddonProxyEntry) addonProxyJSON {
 	ips := e.AllowedIPs
-	if ips == nil {
-		ips = []string{}
+	if len(ips) == 0 {
+		ips = []string{"0.0.0.0/0"}
 	}
 	return addonProxyJSON{
 		Name:          e.Name,
@@ -84,15 +101,29 @@ func jsonToEntry(j addonProxyJSON) AddonProxyEntry {
 }
 
 // handleGetAddonProxies returns the full list of addon proxy entries as JSON.
+// It always re-reads from disk so edits made via the admin UI are immediately visible.
 func (ah *AdminHandler) handleGetAddonProxies(w http.ResponseWriter, r *http.Request) {
-	ah.addonsMu.RLock()
-	defer ah.addonsMu.RUnlock()
+	path := ah.addonsConfigPath
+	if path == "" {
+		path = ah.getConfigPath("addons.yaml")
+	}
 
-	result := make([]addonProxyJSON, 0)
-	if ah.addonsConfig != nil {
-		for _, e := range ah.addonsConfig.Proxies {
-			result = append(result, entryToJSON(e))
-		}
+	cfg, err := LoadAddonProxiesConfig(path)
+	if err != nil {
+		// File may not exist yet — return empty list
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode([]addonProxyJSON{})
+		return
+	}
+
+	// Keep in-memory copy in sync
+	ah.addonsMu.Lock()
+	ah.addonsConfig = cfg
+	ah.addonsMu.Unlock()
+
+	result := make([]addonProxyJSON, 0, len(cfg.Proxies))
+	for _, e := range cfg.Proxies {
+		result = append(result, entryToJSON(e))
 	}
 
 	w.WriteHeader(http.StatusOK)

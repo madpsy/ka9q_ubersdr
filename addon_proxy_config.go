@@ -13,6 +13,16 @@ import (
 // lowercase letters, digits, hyphens, underscores; must start with a letter or digit
 var validAddonNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+// validAddonHostRe matches URL-safe hostnames (Docker container names):
+// letters, digits, hyphens, underscores, dots; must start with a letter or digit
+var validAddonHostRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+
+const (
+	addonNameMaxLen   = 15
+	addonHostMaxLen   = 25
+	addonRateLimitMax = 250
+)
+
 // AddonProxyEntry defines a single generic addon reverse proxy
 type AddonProxyEntry struct {
 	Name          string   `yaml:"name"`           // URL-safe name; proxy mounts at /addon/{name}/
@@ -90,6 +100,11 @@ func validateAddonProxies(proxies []AddonProxyEntry) error {
 			return fmt.Errorf("addon proxy at index %d: name cannot be empty", i)
 		}
 
+		// Name length
+		if len(p.Name) > addonNameMaxLen {
+			return fmt.Errorf("addon proxy %q: name must be %d characters or fewer", p.Name, addonNameMaxLen)
+		}
+
 		// Name must be URL-safe
 		if !validAddonNameRe.MatchString(p.Name) {
 			return fmt.Errorf("addon proxy %q: name must contain only lowercase letters, digits, hyphens, and underscores, and must start with a letter or digit", p.Name)
@@ -106,8 +121,28 @@ func validateAddonProxies(proxies []AddonProxyEntry) error {
 			if p.Host == "" {
 				return fmt.Errorf("addon proxy %q: host cannot be empty when enabled", p.Name)
 			}
+			if len(p.Host) > addonHostMaxLen {
+				return fmt.Errorf("addon proxy %q: host must be %d characters or fewer", p.Name, addonHostMaxLen)
+			}
+			if !validAddonHostRe.MatchString(p.Host) {
+				return fmt.Errorf("addon proxy %q: host contains invalid characters (use letters, digits, hyphens, underscores, dots)", p.Name)
+			}
 			if p.Port < 1 || p.Port > 65535 {
 				return fmt.Errorf("addon proxy %q: port must be between 1 and 65535 (got %d)", p.Name, p.Port)
+			}
+		}
+
+		// Rate limit
+		if p.RateLimit < 0 || p.RateLimit > addonRateLimitMax {
+			return fmt.Errorf("addon proxy %q: rate_limit must be between 0 (unlimited) and %d", p.Name, addonRateLimitMax)
+		}
+
+		// Validate allowed IPs if provided
+		for _, ipStr := range p.AllowedIPs {
+			if _, _, err := net.ParseCIDR(ipStr); err != nil {
+				if net.ParseIP(ipStr) == nil {
+					return fmt.Errorf("addon proxy %q: invalid IP/CIDR in allowed_ips: %q", p.Name, ipStr)
+				}
 			}
 		}
 	}

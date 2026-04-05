@@ -671,7 +671,6 @@
                     <div style="margin-bottom: 20px; padding: 15px; background: #e8f5e9; border-radius: 5px; border: 1px solid #4caf50;">
                         <strong>Addon Proxies</strong> — reverse-proxy Docker addon containers through UberSDR.
                         Each enabled proxy is accessible at <code>/addon/&lt;name&gt;/</code>.
-                        Changes are saved to <code>addons.yaml</code> and take effect after a server restart.
                     </div>
 
                     <!-- Warning banner (shown when require_admin is false) -->
@@ -691,30 +690,33 @@
                         <h3 id="proxyFormTitle" style="margin-top: 0; margin-bottom: 15px;">Add Addon Proxy</h3>
 
                         <div class="config-field">
-                            <label>Name <span style="color:#999; font-weight:normal;">(URL-safe: lowercase letters, digits, hyphens, underscores)</span></label>
-                            <input type="text" id="proxyFormName" placeholder="e.g. cwskimmer" pattern="^[a-z0-9][a-z0-9_-]*$" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
+                            <label>Name <span style="color:#999; font-weight:normal;">(lowercase letters, digits, hyphens, underscores; max 15 chars)</span></label>
+                            <input type="text" id="proxyFormName" placeholder="e.g. cwskimmer" maxlength="15" oninput="validateProxyField('name')" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
+                            <div id="proxyNameError" style="display:none; color:#dc3545; font-size:12px; margin-top:4px;"></div>
                         </div>
 
                         <div class="config-field">
-                            <label>Host <span style="color:#999; font-weight:normal;">(Docker container hostname on the sdr-network)</span></label>
-                            <input type="text" id="proxyFormHost" placeholder="e.g. cwskimmer" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
+                            <label>Host <span style="color:#999; font-weight:normal;">(Docker container hostname; max 25 chars)</span></label>
+                            <input type="text" id="proxyFormHost" placeholder="e.g. cwskimmer" maxlength="25" oninput="validateProxyField('host')" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
+                            <div id="proxyHostError" style="display:none; color:#dc3545; font-size:12px; margin-top:4px;"></div>
                         </div>
 
                         <div class="config-field">
-                            <label>Port</label>
-                            <input type="number" id="proxyFormPort" placeholder="e.g. 7373" min="1" max="65535" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
+                            <label>Port <span style="color:#999; font-weight:normal;">(1–65535)</span></label>
+                            <input type="number" id="proxyFormPort" placeholder="e.g. 7373" min="1" max="65535" oninput="validateProxyField('port')" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
+                            <div id="proxyPortError" style="display:none; color:#dc3545; font-size:12px; margin-top:4px;"></div>
                         </div>
 
-                        <div class="config-field">
-                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                                <input type="checkbox" id="proxyFormEnabled">
+                        <div style="margin-bottom: 15px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:500; margin:0;">
+                                <input type="checkbox" id="proxyFormEnabled" style="width:auto; margin:0; cursor:pointer;">
                                 Enabled
                             </label>
                         </div>
 
-                        <div class="config-field">
-                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                                <input type="checkbox" id="proxyFormRequireAdmin" onchange="proxyAdminCheckChanged()">
+                        <div style="margin-bottom: 15px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:500; margin:0;">
+                                <input type="checkbox" id="proxyFormRequireAdmin" onchange="proxyAdminCheckChanged()" style="width:auto; margin:0; cursor:pointer;">
                                 Require Admin authentication to access this proxy
                             </label>
                             <div id="proxyRequireAdminWarning" style="display:none; margin-top:8px; padding:10px; background:#fff3cd; border:1px solid #ffc107; border-radius:4px; color:#856404; font-size:13px;">
@@ -723,28 +725,30 @@
                             </div>
                         </div>
 
-                        <div class="config-field">
-                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                                <input type="checkbox" id="proxyFormStripPrefix">
+                        <div style="margin-bottom: 15px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:500; margin:0;">
+                                <input type="checkbox" id="proxyFormStripPrefix" style="width:auto; margin:0; cursor:pointer;">
                                 Strip <code>/addon/&lt;name&gt;</code> prefix before forwarding to backend
                             </label>
                         </div>
 
-                        <div class="config-field">
-                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                                <input type="checkbox" id="proxyFormRewriteOrigin">
+                        <div style="margin-bottom: 15px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:500; margin:0;">
+                                <input type="checkbox" id="proxyFormRewriteOrigin" style="width:auto; margin:0; cursor:pointer;">
                                 Rewrite WebSocket Origin header to backend URL
                             </label>
                         </div>
 
                         <div class="config-field">
-                            <label>Rate Limit <span style="color:#999; font-weight:normal;">(requests per minute per IP; 0 = unlimited)</span></label>
-                            <input type="number" id="proxyFormRateLimit" placeholder="0" min="0" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
+                            <label>Rate Limit <span style="color:#999; font-weight:normal;">(requests per minute per IP; 0 = unlimited, max 250)</span></label>
+                            <input type="number" id="proxyFormRateLimit" placeholder="0" min="0" max="250" oninput="validateProxyField('rateLimit')" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
+                            <div id="proxyRateLimitError" style="display:none; color:#dc3545; font-size:12px; margin-top:4px;"></div>
                         </div>
 
                         <div class="config-field">
                             <label>Allowed IPs <span style="color:#999; font-weight:normal;">(one IP or CIDR per line; empty = use admin allowed_ips)</span></label>
-                            <textarea id="proxyFormAllowedIPs" rows="3" placeholder="192.168.1.0/24&#10;10.0.0.1" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px; font-family:monospace;"></textarea>
+                            <textarea id="proxyFormAllowedIPs" rows="3" placeholder="192.168.1.0/24&#10;10.0.0.1" oninput="validateProxyField('allowedIPs')" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px; font-family:monospace;"></textarea>
+                            <div id="proxyAllowedIPsError" style="display:none; color:#dc3545; font-size:12px; margin-top:4px;"></div>
                         </div>
 
                         <div style="display:flex; gap:10px; margin-top:15px;">
@@ -1445,6 +1449,7 @@
                 </div>
                 <div class="button-group" id="proxyButtons" style="display: none;">
                     <button class="btn" onclick="showAddProxyForm()">Add New Proxy</button>
+                    <button class="btn btn-danger" onclick="saveProxyAndRestart()">Save &amp; Restart</button>
                     <button class="btn btn-secondary" onclick="loadAddonProxies()">Reload</button>
                 </div>
                 <div class="button-group" id="monitorButtons" style="display: none;">
@@ -18412,6 +18417,125 @@ Referer: ${log.referer}`;
         // State for the proxy form: null = adding new, string = name of entry being edited
         let proxyEditingName = null;
 
+        // ── Proxy form real-time validation ──────────────────────────────────────
+
+        // Returns true if the given IP string is a valid IPv4/IPv6 address or CIDR
+        function isValidIPorCIDR(s) {
+            // CIDR: contains a slash
+            if (s.includes('/')) {
+                // Basic CIDR check: <address>/<prefix>
+                const parts = s.split('/');
+                if (parts.length !== 2) return false;
+                const prefix = parseInt(parts[1], 10);
+                if (isNaN(prefix)) return false;
+                const addr = parts[0];
+                // IPv4 CIDR
+                if (/^(\d{1,3}\.){3}\d{1,3}$/.test(addr)) {
+                    const octets = addr.split('.').map(Number);
+                    if (octets.some(o => o > 255)) return false;
+                    return prefix >= 0 && prefix <= 32;
+                }
+                // IPv6 CIDR (simplified: contains colons)
+                if (addr.includes(':')) return prefix >= 0 && prefix <= 128;
+                return false;
+            }
+            // Plain IPv4
+            if (/^(\d{1,3}\.){3}\d{1,3}$/.test(s)) {
+                return s.split('.').map(Number).every(o => o >= 0 && o <= 255);
+            }
+            // Plain IPv6 (simplified: contains colons and only hex/colons)
+            if (s.includes(':') && /^[0-9a-fA-F:]+$/.test(s)) return true;
+            return false;
+        }
+
+        // Show or clear an error div for a proxy form field
+        function setProxyFieldError(fieldId, msg) {
+            const el = document.getElementById(fieldId);
+            if (!el) return;
+            if (msg) {
+                el.textContent = msg;
+                el.style.display = 'block';
+            } else {
+                el.textContent = '';
+                el.style.display = 'none';
+            }
+        }
+
+        // Real-time validation for individual proxy form fields.
+        // field: 'name' | 'host' | 'port' | 'rateLimit' | 'allowedIPs'
+        // Returns true if the field is valid (or empty/optional), false if invalid.
+        function validateProxyField(field) {
+            const enabled = document.getElementById('proxyFormEnabled').checked;
+            switch (field) {
+                case 'name': {
+                    const v = document.getElementById('proxyFormName').value.trim();
+                    if (!v) { setProxyFieldError('proxyNameError', 'Name is required'); return false; }
+                    if (v.length > 15) { setProxyFieldError('proxyNameError', 'Name must be 15 characters or fewer'); return false; }
+                    if (!/^[a-z0-9][a-z0-9_-]*$/.test(v)) {
+                        setProxyFieldError('proxyNameError', 'Only lowercase letters, digits, hyphens and underscores; must start with a letter or digit');
+                        return false;
+                    }
+                    setProxyFieldError('proxyNameError', '');
+                    return true;
+                }
+                case 'host': {
+                    const v = document.getElementById('proxyFormHost').value.trim();
+                    if (enabled && !v) { setProxyFieldError('proxyHostError', 'Host is required when proxy is enabled'); return false; }
+                    if (v && v.length > 25) { setProxyFieldError('proxyHostError', 'Host must be 25 characters or fewer'); return false; }
+                    if (v && !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(v)) {
+                        setProxyFieldError('proxyHostError', 'Only letters, digits, hyphens, underscores and dots; must start with a letter or digit');
+                        return false;
+                    }
+                    setProxyFieldError('proxyHostError', '');
+                    return true;
+                }
+                case 'port': {
+                    const raw = document.getElementById('proxyFormPort').value.trim();
+                    if (enabled && !raw) { setProxyFieldError('proxyPortError', 'Port is required when proxy is enabled'); return false; }
+                    if (raw) {
+                        const n = parseInt(raw, 10);
+                        if (isNaN(n) || n < 1 || n > 65535) {
+                            setProxyFieldError('proxyPortError', 'Port must be between 1 and 65535');
+                            return false;
+                        }
+                    }
+                    setProxyFieldError('proxyPortError', '');
+                    return true;
+                }
+                case 'rateLimit': {
+                    const raw = document.getElementById('proxyFormRateLimit').value.trim();
+                    if (raw !== '') {
+                        const n = parseInt(raw, 10);
+                        if (isNaN(n) || n < 0 || n > 250) {
+                            setProxyFieldError('proxyRateLimitError', 'Rate limit must be between 0 (unlimited) and 250');
+                            return false;
+                        }
+                    }
+                    setProxyFieldError('proxyRateLimitError', '');
+                    return true;
+                }
+                case 'allowedIPs': {
+                    const raw = document.getElementById('proxyFormAllowedIPs').value.trim();
+                    if (!raw) { setProxyFieldError('proxyAllowedIPsError', ''); return true; }
+                    const lines = raw.split('\n').map(l => l.trim()).filter(l => l);
+                    const bad = lines.filter(l => !isValidIPorCIDR(l));
+                    if (bad.length > 0) {
+                        setProxyFieldError('proxyAllowedIPsError', 'Invalid IP/CIDR: ' + bad.join(', '));
+                        return false;
+                    }
+                    setProxyFieldError('proxyAllowedIPsError', '');
+                    return true;
+                }
+            }
+            return true;
+        }
+
+        // Validate all proxy form fields at once; returns true only if all pass
+        function validateAllProxyFields() {
+            const fields = ['name', 'host', 'port', 'rateLimit', 'allowedIPs'];
+            return fields.map(f => validateProxyField(f)).every(Boolean);
+        }
+
         async function loadAddonProxies() {
             const listEl = document.getElementById('proxyList');
             listEl.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading proxies...</p></div>';
@@ -18473,6 +18597,12 @@ Referer: ${log.referer}`;
             listEl.innerHTML = html;
         }
 
+        function clearProxyFormErrors() {
+            ['proxyNameError', 'proxyHostError', 'proxyPortError', 'proxyRateLimitError', 'proxyAllowedIPsError'].forEach(id => {
+                setProxyFieldError(id, '');
+            });
+        }
+
         function showAddProxyForm() {
             proxyEditingName = null;
             document.getElementById('proxyFormTitle').textContent = 'Add Addon Proxy';
@@ -18485,8 +18615,9 @@ Referer: ${log.referer}`;
             document.getElementById('proxyFormStripPrefix').checked = true;
             document.getElementById('proxyFormRewriteOrigin').checked = false;
             document.getElementById('proxyFormRateLimit').value = '0';
-            document.getElementById('proxyFormAllowedIPs').value = '';
+            document.getElementById('proxyFormAllowedIPs').value = '0.0.0.0/0';
             document.getElementById('proxyRequireAdminWarning').style.display = 'none';
+            clearProxyFormErrors();
             document.getElementById('proxyForm').style.display = 'block';
             document.getElementById('proxyForm').scrollIntoView({ behavior: 'smooth' });
         }
@@ -18505,6 +18636,7 @@ Referer: ${log.referer}`;
             document.getElementById('proxyFormRateLimit').value = proxy.rate_limit || 0;
             document.getElementById('proxyFormAllowedIPs').value = (proxy.allowed_ips || []).join('\n');
             document.getElementById('proxyRequireAdminWarning').style.display = proxy.require_admin ? 'none' : 'block';
+            clearProxyFormErrors();
             document.getElementById('proxyForm').style.display = 'block';
             document.getElementById('proxyForm').scrollIntoView({ behavior: 'smooth' });
         }
@@ -18520,20 +18652,14 @@ Referer: ${log.referer}`;
         }
 
         async function saveProxy() {
-            const name = document.getElementById('proxyFormName').value.trim();
-            if (!name) { showAlert('Name is required', 'error'); return; }
-            if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) {
-                showAlert('Name must be lowercase letters, digits, hyphens or underscores, starting with a letter or digit', 'error');
+            // Run full validation across all fields; errors are shown inline
+            if (!validateAllProxyFields()) {
+                showAlert('Please fix the highlighted errors before saving.', 'error');
                 return;
             }
 
-            const port = parseInt(document.getElementById('proxyFormPort').value, 10);
-            const enabled = document.getElementById('proxyFormEnabled').checked;
-            if (enabled) {
-                const host = document.getElementById('proxyFormHost').value.trim();
-                if (!host) { showAlert('Host is required when proxy is enabled', 'error'); return; }
-                if (!port || port < 1 || port > 65535) { showAlert('Port must be between 1 and 65535', 'error'); return; }
-            }
+            const name = document.getElementById('proxyFormName').value.trim();
+            const port = parseInt(document.getElementById('proxyFormPort').value, 10) || 0;
 
             const allowedIPsRaw = document.getElementById('proxyFormAllowedIPs').value.trim();
             const allowedIPs = allowedIPsRaw ? allowedIPsRaw.split('\n').map(s => s.trim()).filter(s => s) : [];
@@ -18595,6 +18721,31 @@ Referer: ${log.referer}`;
                 loadAddonProxies();
             } catch (e) {
                 showAlert('Error deleting proxy: ' + e.message, 'error');
+            }
+        }
+
+        async function saveProxyAndRestart() {
+            if (!confirm('⚠️ WARNING: This will restart the server immediately!\n\nAll active user sessions will be disconnected.\n\nAre you sure you want to restart the server to apply addon proxy changes?')) {
+                return;
+            }
+            try {
+                const resp = await authenticatedFetch('/admin/addon-proxies/restart', {
+                    method: 'POST',
+                });
+                if (!resp) return;
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    showAlert('Error triggering restart: ' + text, 'error');
+                    return;
+                }
+                const result = await resp.json();
+                if (result.restart) {
+                    setTimeout(() => {
+                        showRestartCountdown();
+                    }, 500);
+                }
+            } catch (e) {
+                showAlert('Error triggering restart: ' + e.message, 'error');
             }
         }
 

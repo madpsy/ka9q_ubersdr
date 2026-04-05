@@ -59,12 +59,13 @@ func getOrCreateOtoContext(sampleRate, channels int, bufferDuration time.Duratio
 
 // AudioOutput manages audio playback via oto (non-Windows fallback).
 type AudioOutput struct {
-	player  *oto.Player
-	reader  *pcmRingReader
-	volume  float64
-	srcRate int // sample rate of the incoming PCM stream
-	srcCh   int // channel count of the incoming PCM stream
-	mu      sync.Mutex
+	player        *oto.Player
+	reader        *pcmRingReader
+	onChunkPlayed func(ChunkMeta)
+	volume        float64
+	srcRate       int // sample rate of the incoming PCM stream
+	srcCh         int // channel count of the incoming PCM stream
+	mu            sync.Mutex
 }
 
 // EnumerateAudioDevices returns a stub list on non-Windows platforms.
@@ -94,13 +95,28 @@ func NewAudioOutput(sampleRate, channels int, bufferDuration time.Duration, devi
 	}, nil
 }
 
-// Push queues PCM audio data (little-endian int16) for playback.
+// SetOnChunkPlayed registers a callback that fires (in a goroutine) at
+// approximately the moment each audio chunk begins playback.
+func (a *AudioOutput) SetOnChunkPlayed(fn func(ChunkMeta)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.onChunkPlayed = fn
+}
+
+// Push queues PCM audio data (little-endian int16) for playback, along with
+// the signal-quality metadata for that chunk.
 // If the stream's sample rate or channel count differs from the oto context's,
 // we resample/remix with nearest-neighbour interpolation before queuing.
-func (a *AudioOutput) Push(pcmLE []byte) {
+func (a *AudioOutput) Push(pcmLE []byte, meta ChunkMeta) {
 	a.mu.Lock()
 	vol := a.volume
+	fn := a.onChunkPlayed
 	a.mu.Unlock()
+
+	// Snapshot queue depth BEFORE pushing so we know how many chunks are
+	// ahead of this one.  Each queued chunk takes chunkDuration to play,
+	// plus the hardware buffer adds hardwareBufferDuration on top.
+	queued := a.reader.Queued()
 
 	// Resample / remix if the stream parameters differ from the oto context.
 	if a.srcRate != otoRate || a.srcCh != otoCh {
@@ -120,6 +136,13 @@ func (a *AudioOutput) Push(pcmLE []byte) {
 		cp := make([]byte, len(pcmLE))
 		copy(cp, pcmLE)
 		a.reader.Push(cp)
+	}
+
+	// Delay the callback by the time it will take for this chunk to reach
+	// the hardware: (chunks ahead × 20 ms) + hardware buffer (40 ms).
+	if fn != nil {
+		delay := time.Duration(queued)*chunkDuration + hardwareBufferDuration
+		FireAfterDelay(delay, func() { fn(meta) })
 	}
 }
 

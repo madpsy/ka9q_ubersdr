@@ -1451,13 +1451,7 @@ func main() {
 		}
 	}
 
-	var audioLevelLastUpdate time.Time
 	client.OnAudioLevel = func(dBFS float32) {
-		now := time.Now()
-		if now.Sub(audioLevelLastUpdate) < 100*time.Millisecond {
-			return
-		}
-		audioLevelLastUpdate = now
 		audioBar.SetValue(float64(dBFS))
 	}
 

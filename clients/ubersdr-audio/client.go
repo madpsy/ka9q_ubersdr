@@ -767,17 +767,19 @@ func rmsDBFS(pcmLE []byte) float32 {
 	return float32(20 * math.Log10(rms))
 }
 
-// deliverAudio fires the signal quality callback and pushes PCM to the audio output,
-// creating or recreating the AudioOutput if the stream parameters changed.
+// deliverAudio pushes PCM to the audio output, creating or recreating the
+// AudioOutput if the stream parameters changed.
+//
+// Signal quality (OnSignalQuality) and audio level (OnAudioLevel) are no
+// longer fired here.  Instead they are fired from the AudioOutput's
+// onChunkStart callback at the moment the audio is actually played, so the
+// bars stay in sync with what the user hears.
 func (c *RadioClient) deliverAudio(pcmLE []byte, sampleRate, channels int, basebandPower, noiseDensity float32) {
-	// Fire signal quality callback whenever we have real data.
-	if (basebandPower > -998 || noiseDensity > -998) && c.OnSignalQuality != nil {
-		c.OnSignalQuality(basebandPower, noiseDensity)
-	}
-
-	// Fire audio level callback with RMS dBFS of the decoded PCM.
-	if c.OnAudioLevel != nil && len(pcmLE) > 0 {
-		c.OnAudioLevel(rmsDBFS(pcmLE))
+	// Build the metadata that travels with this chunk through the ring buffer.
+	meta := ChunkMeta{
+		BasebandPower: basebandPower,
+		NoiseDensity:  noiseDensity,
+		DBFS:          rmsDBFS(pcmLE),
 	}
 
 	// Check under lock whether we need a new AudioOutput.
@@ -819,7 +821,7 @@ func (c *RadioClient) deliverAudio(pcmLE []byte, sampleRate, channels int, baseb
 			oldOut.Close()
 		}
 
-		newOut, err := NewAudioOutput(sampleRate, channels, 200*time.Millisecond, deviceID)
+		newOut, err := NewAudioOutput(sampleRate, channels, 40*time.Millisecond, deviceID)
 		if err != nil {
 			return
 		}
@@ -827,6 +829,35 @@ func (c *RadioClient) deliverAudio(pcmLE []byte, sampleRate, channels int, baseb
 		if initialVolume != 1.0 {
 			newOut.SetVolume(initialVolume)
 		}
+
+		// Register the playback-synchronised callback.  This fires (after a
+		// delay matching the buffer depth) at approximately the moment each
+		// chunk is heard.  The server sends signal data every 100 ms, so we
+		// throttle the UI updates to the same rate to avoid flooding Fyne's
+		// render pipeline.
+		//
+		// We also guard against stale delayed goroutines firing after disconnect:
+		// if the client is no longer connected when the callback fires, we skip
+		// the update so that SetNoData() called by OnStateChange is not overwritten.
+		onSQ := c.OnSignalQuality
+		onAL := c.OnAudioLevel
+		var lastBarUpdate time.Time
+		newOut.SetOnChunkPlayed(func(m ChunkMeta) {
+			if c.State() != StateConnected {
+				return
+			}
+			now := time.Now()
+			if now.Sub(lastBarUpdate) < 100*time.Millisecond {
+				return
+			}
+			lastBarUpdate = now
+			if onSQ != nil && (m.BasebandPower > -998 || m.NoiseDensity > -998) {
+				onSQ(m.BasebandPower, m.NoiseDensity)
+			}
+			if onAL != nil {
+				onAL(m.DBFS)
+			}
+		})
 
 		c.mu.Lock()
 		c.audioOut = newOut
@@ -840,7 +871,7 @@ func (c *RadioClient) deliverAudio(pcmLE []byte, sampleRate, channels int, baseb
 		}
 	}
 
-	out.Push(pcmLE)
+	out.Push(pcmLE, meta)
 }
 
 // cleanup closes the WebSocket and audio output.

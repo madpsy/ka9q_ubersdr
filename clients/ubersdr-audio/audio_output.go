@@ -5,7 +5,17 @@ package main
 
 import (
 	"sync"
+	"time"
 )
+
+// chunkDuration is the nominal duration of one Opus frame (20 ms).
+const chunkDuration = 20 * time.Millisecond
+
+// hardwareBufferDuration is the fixed delay added on top of the ring-buffer
+// depth to account for the audio hardware/driver buffer.  oto's actual
+// internal buffer on Linux (PulseAudio/ALSA) is typically 150–200 ms
+// regardless of the BufferSize hint, so we use 200 ms here.
+const hardwareBufferDuration = 200 * time.Millisecond
 
 // ChannelMode controls which output channels receive audio.
 const (
@@ -20,9 +30,17 @@ type AudioDevice struct {
 	Name string // human-readable name
 }
 
-// pcmRingReader is an io.Reader backed by a channel of int16 sample slices.
+// ChunkMeta carries the signal-quality metadata that was embedded in the
+// audio packet alongside the PCM data.
+type ChunkMeta struct {
+	BasebandPower float32
+	NoiseDensity  float32
+	DBFS          float32 // RMS level of the PCM chunk in dBFS
+}
+
+// pcmRingReader is an io.Reader backed by a channel of byte slices.
 // oto (or the WASAPI render loop) calls Read() from its own goroutine;
-// we feed it from the WebSocket goroutine.
+// we feed it from the WebSocket goroutine via Push().
 type pcmRingReader struct {
 	ch      chan []byte
 	current []byte
@@ -33,6 +51,11 @@ type pcmRingReader struct {
 
 func newPCMRingReader(bufChunks int) *pcmRingReader {
 	return &pcmRingReader{ch: make(chan []byte, bufChunks)}
+}
+
+// Queued returns the number of chunks currently waiting in the ring buffer.
+func (r *pcmRingReader) Queued() int {
+	return len(r.ch)
 }
 
 // Push queues a chunk of little-endian int16 PCM bytes for playback.
@@ -87,4 +110,15 @@ func (r *pcmRingReader) Close() {
 		r.closed = true
 		close(r.ch)
 	}
+}
+
+// FireAfterDelay fires fn in a goroutine after the given delay.
+// Used by both backends to delay bar callbacks to match playback time.
+func FireAfterDelay(delay time.Duration, fn func()) {
+	go func() {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		fn()
+	}()
 }

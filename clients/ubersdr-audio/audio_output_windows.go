@@ -28,14 +28,15 @@ import (
 
 // AudioOutput manages WASAPI audio playback to a specific device.
 type AudioOutput struct {
-	reader      *pcmRingReader
-	volume      float64
-	channelMode int // ChannelModeBoth / Left / Right
-	srcRate     int
-	srcCh       int
-	stopCh      chan struct{}
-	doneCh      chan struct{}
-	mu          sync.Mutex
+	reader        *pcmRingReader
+	onChunkPlayed func(ChunkMeta)
+	volume        float64
+	channelMode   int // ChannelModeBoth / Left / Right
+	srcRate       int
+	srcCh         int
+	stopCh        chan struct{}
+	doneCh        chan struct{}
+	mu            sync.Mutex
 }
 
 // DoneC returns a channel that is closed when the WASAPI render loop exits.
@@ -140,6 +141,14 @@ func NewAudioOutput(sampleRate, channels int, bufferDuration time.Duration, devi
 	go out.renderLoop(deviceID, bufferDuration)
 
 	return out, nil
+}
+
+// SetOnChunkPlayed registers a callback that fires (in a goroutine) at
+// approximately the moment each audio chunk begins playback.
+func (a *AudioOutput) SetOnChunkPlayed(fn func(ChunkMeta)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.onChunkPlayed = fn
 }
 
 // getDevice returns the IMMDevice for the given deviceID (or default if "").
@@ -402,11 +411,26 @@ func (a *AudioOutput) renderLoop(deviceID string, bufferDuration time.Duration) 
 	}
 }
 
-// Push queues PCM audio data (little-endian int16) for playback.
-func (a *AudioOutput) Push(pcmLE []byte) {
+// Push queues PCM audio data (little-endian int16) for playback, along with
+// the signal-quality metadata for that chunk.
+func (a *AudioOutput) Push(pcmLE []byte, meta ChunkMeta) {
+	// Snapshot queue depth BEFORE pushing so we know how many chunks are
+	// ahead of this one.
+	queued := a.reader.Queued()
+
 	cp := make([]byte, len(pcmLE))
 	copy(cp, pcmLE)
 	a.reader.Push(cp)
+
+	// Delay the callback by the time it will take for this chunk to reach
+	// the hardware: (chunks ahead × 20 ms) + hardware buffer (40 ms).
+	a.mu.Lock()
+	fn := a.onChunkPlayed
+	a.mu.Unlock()
+	if fn != nil {
+		delay := time.Duration(queued)*chunkDuration + hardwareBufferDuration
+		FireAfterDelay(delay, func() { fn(meta) })
+	}
 }
 
 // SetVolume sets the playback volume (0.0–1.0).

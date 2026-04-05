@@ -168,6 +168,7 @@ type RadioClient struct {
 	sampleRate         int
 	channels           int
 	volume             float64 // current volume (0.0–1.0); applied to new AudioOutput on creation
+	channelMode        int     // ChannelModeBoth/Left/Right; applied to new AudioOutput on creation
 	pcmDecoder         *PCMBinaryDecoder
 	audioOut           *AudioOutput
 	cancelFn           context.CancelFunc
@@ -326,11 +327,13 @@ func (c *RadioClient) SetDevice(deviceID string) {
 }
 
 // SetChannelMode sets which output channels receive audio (ChannelModeBoth/Left/Right).
-// The value is applied immediately to any active AudioOutput.
+// The value is stored so new AudioOutput instances created on the next audio frame
+// also start with the correct mode, and applied immediately to any active AudioOutput.
 func (c *RadioClient) SetChannelMode(mode int) {
-	c.mu.RLock()
+	c.mu.Lock()
+	c.channelMode = mode
 	out := c.audioOut
-	c.mu.RUnlock()
+	c.mu.Unlock()
 	if out != nil {
 		out.SetChannelMode(mode)
 	}
@@ -825,9 +828,16 @@ func (c *RadioClient) deliverAudio(pcmLE []byte, sampleRate, channels int, baseb
 		if err != nil {
 			return
 		}
-		// Apply the current volume immediately so there's no silent gap.
+		// Apply the current volume and channel mode immediately so there's no
+		// silent gap and the routing is correct from the very first frame.
 		if initialVolume != 1.0 {
 			newOut.SetVolume(initialVolume)
+		}
+		c.mu.RLock()
+		initialChannelMode := c.channelMode
+		c.mu.RUnlock()
+		if initialChannelMode != ChannelModeBoth {
+			newOut.SetChannelMode(initialChannelMode)
 		}
 
 		// Register the playback-synchronised callback.  This fires (after a

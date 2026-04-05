@@ -36,9 +36,17 @@ var (
 // calls return the already-created context regardless of the arguments.
 func getOrCreateOtoContext(sampleRate, channels int, bufferDuration time.Duration) (*oto.Context, error) {
 	otoInitOnce.Do(func() {
+		// Always use 2 output channels so we can independently mute L or R.
+		// Mono source streams are upmixed to stereo in Push() before queuing.
+		// Without this, oto creates a 1-channel context and the OS upmixes to
+		// both speakers, making it impossible to silence one side.
+		outChannels := channels
+		if outChannels < 2 {
+			outChannels = 2
+		}
 		opts := &oto.NewContextOptions{
 			SampleRate:   sampleRate,
-			ChannelCount: channels,
+			ChannelCount: outChannels,
 			Format:       oto.FormatSignedInt16LE,
 			BufferSize:   bufferDuration,
 		}
@@ -50,7 +58,7 @@ func getOrCreateOtoContext(sampleRate, channels int, bufferDuration time.Duratio
 		<-ready
 		otoCtx = ctx
 		otoRate = sampleRate
-		otoCh = channels
+		otoCh = outChannels
 	})
 	return otoCtx, otoInitErr
 }
@@ -63,6 +71,7 @@ type AudioOutput struct {
 	reader        *pcmRingReader
 	onChunkPlayed func(ChunkMeta)
 	volume        float64
+	channelMode   int // ChannelModeBoth / Left / Right
 	srcRate       int // sample rate of the incoming PCM stream
 	srcCh         int // channel count of the incoming PCM stream
 	mu            sync.Mutex
@@ -110,6 +119,7 @@ func (a *AudioOutput) SetOnChunkPlayed(fn func(ChunkMeta)) {
 func (a *AudioOutput) Push(pcmLE []byte, meta ChunkMeta) {
 	a.mu.Lock()
 	vol := a.volume
+	chMode := a.channelMode
 	fn := a.onChunkPlayed
 	a.mu.Unlock()
 
@@ -124,19 +134,26 @@ func (a *AudioOutput) Push(pcmLE []byte, meta ChunkMeta) {
 		vol = 1.0 // volume already applied inside resamplePCM
 	}
 
-	if vol != 1.0 {
-		scaled := make([]byte, len(pcmLE))
-		for i := 0; i < len(pcmLE)/2; i++ {
+	// Apply channel mode and/or volume.
+	// We always make a copy so we never mutate the caller's buffer.
+	out := make([]byte, len(pcmLE))
+	numCh := otoCh // number of channels in the (possibly resampled) data
+	numSamples := len(pcmLE) / 2
+	for i := 0; i < numSamples; i++ {
+		ch := i % numCh
+		mute := (chMode == ChannelModeLeft && ch != 0) ||
+			(chMode == ChannelModeRight && ch != 1)
+		if mute {
+			binary.LittleEndian.PutUint16(out[i*2:], 0)
+		} else {
 			s := int16(binary.LittleEndian.Uint16(pcmLE[i*2:]))
-			s = int16(float64(s) * vol)
-			binary.LittleEndian.PutUint16(scaled[i*2:], uint16(s))
+			if vol != 1.0 {
+				s = int16(float64(s) * vol)
+			}
+			binary.LittleEndian.PutUint16(out[i*2:], uint16(s))
 		}
-		a.reader.Push(scaled)
-	} else {
-		cp := make([]byte, len(pcmLE))
-		copy(cp, pcmLE)
-		a.reader.Push(cp)
 	}
+	a.reader.Push(out)
 
 	// Delay the callback by the time it will take for this chunk to reach
 	// the hardware: (chunks ahead × 20 ms) + hardware buffer (40 ms).
@@ -195,8 +212,13 @@ func (a *AudioOutput) DoneC() <-chan struct{} {
 	return make(chan struct{}) // never closed
 }
 
-// SetChannelMode is a no-op on non-Windows (oto doesn't support per-channel routing).
-func (a *AudioOutput) SetChannelMode(_ int) {}
+// SetChannelMode sets which output channels receive audio (ChannelModeBoth/Left/Right).
+// Channel muting is applied in Push() by zeroing the unwanted channel samples.
+func (a *AudioOutput) SetChannelMode(mode int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.channelMode = mode
+}
 
 // SetVolume sets the playback volume (0.0–1.0).
 func (a *AudioOutput) SetVolume(v float64) {

@@ -69,8 +69,8 @@ type addonProxyJSON struct {
 
 func entryToJSON(e AddonProxyEntry) addonProxyJSON {
 	ips := e.AllowedIPs
-	if len(ips) == 0 {
-		ips = []string{"0.0.0.0/0"}
+	if ips == nil {
+		ips = []string{}
 	}
 	return addonProxyJSON{
 		Name:          e.Name,

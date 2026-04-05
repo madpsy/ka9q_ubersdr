@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -39,6 +38,16 @@ func NewSSHProxy(config *SSHProxyConfig) (*SSHProxy, error) {
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
+
+		// Strip client-supplied proxy headers before we set our own authoritative
+		// values. Without this a client can inject X-Forwarded-For, X-Real-IP,
+		// X-Forwarded-Host, or X-Forwarded-Proto and have them forwarded verbatim
+		// to GoTTY, bypassing IP-based controls, audit logs, and HTTPS checks.
+		req.Header.Del("X-Forwarded-For")
+		req.Header.Del("X-Forwarded-Host")
+		req.Header.Del("X-Forwarded-Proto")
+		req.Header.Del("X-Real-IP")
+
 		// Strip the proxy path prefix so GoTTY receives the correct paths
 		req.URL.Path = strings.TrimPrefix(req.URL.Path, "/terminal")
 		if req.URL.Path == "" {
@@ -46,45 +55,32 @@ func NewSSHProxy(config *SSHProxyConfig) (*SSHProxy, error) {
 		}
 		req.Host = targetURL.Host
 
-		// Extract the real client IP using the same logic as getClientIP() in main.go
-		// This ensures consistency with the rest of the application
-		sourceIP := req.RemoteAddr
-		if host, _, err := net.SplitHostPort(sourceIP); err == nil {
-			sourceIP = host
+		// Use the same trusted getClientIP() logic used everywhere else in
+		// UberSDR: honours X-Real-IP / X-Forwarded-For only when the request
+		// arrives from a configured tunnel server or trusted proxy, and falls
+		// back to RemoteAddr otherwise.
+		clientIP := getClientIP(req)
+
+		// Set authoritative forwarding headers for GoTTY.
+		req.Header.Set("X-Real-IP", clientIP)
+		req.Header.Set("X-Forwarded-For", clientIP)
+
+		// Forward the original Host and protocol so GoTTY can construct correct
+		// absolute URLs. Set unconditionally — client-supplied values were deleted above.
+		if origHost := req.Header.Get("Host"); origHost != "" {
+			req.Header.Set("X-Forwarded-Host", origHost)
 		}
-
-		clientIP := sourceIP
-
-		// Check if X-Forwarded-For already exists (from upstream proxy)
-		// If it does, preserve it and extract the first IP for X-Real-IP
-		if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
-			// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
-			// Extract the first IP (true client)
-			clientIP = strings.TrimSpace(xff)
-			if commaIdx := strings.Index(clientIP, ","); commaIdx != -1 {
-				clientIP = strings.TrimSpace(clientIP[:commaIdx])
-			}
-			// Strip port if present
-			if host, _, err := net.SplitHostPort(clientIP); err == nil {
-				clientIP = host
-			}
-			// Set X-Real-IP to the first IP in the chain (true client)
-			req.Header.Set("X-Real-IP", clientIP)
-			// X-Forwarded-For is already set, leave it as-is
-		} else {
-			// No X-Forwarded-For from upstream, so this is a direct connection
-			// Set both headers with the source IP
-			req.Header.Set("X-Forwarded-For", sourceIP)
-			req.Header.Set("X-Real-IP", sourceIP)
+		proto := "http"
+		if req.TLS != nil {
+			proto = "https"
 		}
+		req.Header.Set("X-Forwarded-Proto", proto)
 
-		// Fix WebSocket origin for GoTTY's CheckOrigin validation
-		// Rewrite the Origin header to match the backend target URL
-		// This allows WebSocket upgrades to pass GoTTY's origin check
+		// Fix WebSocket origin for GoTTY's CheckOrigin validation.
+		// Rewrite the Origin header to match the backend target URL so that
+		// WebSocket upgrades pass GoTTY's origin check.
 		if req.Header.Get("Upgrade") == "websocket" {
-			// Set origin to match the target backend
 			req.Header.Set("Origin", fmt.Sprintf("http://%s:%d", config.Host, config.Port))
-			// WebSocket origin rewritten - no logging needed for normal operation
 		}
 	}
 

@@ -590,6 +590,228 @@ func main() {
 		client.Connect()
 	}
 
+	// ── currentProfile — snapshot of all UI settings as a Profile ────────────
+	currentProfile := func(name string) Profile {
+		format := prefs.StringWithFallback(prefKeyFormat, "Compressed")
+		channel := prefs.StringWithFallback(prefKeyChannel, "Left & Right")
+		devID := prefs.String(prefKeyDevice)
+		return Profile{
+			Name:        name,
+			URL:         strings.TrimSpace(urlEntry.Text),
+			Password:    passwordEntry.Text,
+			FrequencyHz: currentFreq,
+			Mode:        currentMode,
+			Bandwidth:   bwSlider.Value,
+			Format:      format,
+			StepIndex:   stepSelect.SelectedIndex(),
+			DeviceID:    devID,
+			Volume:      volumeSlider.Value,
+			Channel:     channel,
+		}
+	}
+
+	// ── applyProfile — loads a Profile into all UI widgets ───────────────────
+	// suppressModeInit prevents the BW slider from being reset to the mode
+	// default when we programmatically call modeSelect.SetSelected.
+	applyProfile := func(p Profile) {
+		// URL / password
+		urlEntry.SetText(p.URL)
+		passwordEntry.SetText(p.Password)
+
+		// Frequency
+		currentFreq = p.FrequencyHz
+		freqEntry.SetText(formatFreqKHz(currentFreq))
+		prefs.SetInt(prefKeyFreq, currentFreq)
+
+		// Step
+		if p.StepIndex >= 0 && p.StepIndex < len(freqSteps) {
+			stepSelect.SetSelectedIndex(p.StepIndex)
+		}
+
+		// Mode — temporarily disable the BW-reset logic so we can restore the
+		// saved bandwidth value afterwards.
+		modeInitDone = false
+		for _, lbl := range modeLabels {
+			if modeKey(lbl) == p.Mode {
+				modeSelect.SetSelected(lbl)
+				break
+			}
+		}
+		currentMode = p.Mode
+		modeInitDone = true
+
+		// Bandwidth
+		bwSlider.Max = bwSliderMax(currentMode)
+		bwSlider.Value = p.Bandwidth
+		bwSlider.Refresh()
+		bwValueLabel.SetText(fmt.Sprintf("%.0f Hz", p.Bandwidth))
+		prefs.SetFloat(prefKeyBW, p.Bandwidth)
+
+		// Format
+		suppressFormatChange = true
+		formatGroup.SetSelected(p.Format)
+		suppressFormatChange = false
+		if p.Format == "Uncompressed" {
+			client.Format = FormatPCMZstd
+		} else {
+			client.Format = FormatOpus
+		}
+		prefs.SetString(prefKeyFormat, p.Format)
+
+		// Volume
+		volumeSlider.SetValue(p.Volume)
+		client.SetVolume(p.Volume / 100.0)
+		prefs.SetFloat(prefKeyVolume, p.Volume)
+
+		// Channel
+		channelSelect.SetSelected(p.Channel)
+		prefs.SetString(prefKeyChannel, p.Channel)
+
+		// Audio device — find by ID in the current device list.
+		audioDeviceMu.RLock()
+		devIdx := 0
+		for i, d := range audioDeviceList {
+			if d.ID == p.DeviceID {
+				devIdx = i
+				break
+			}
+		}
+		audioDeviceMu.RUnlock()
+		deviceSelect.SetSelectedIndex(devIdx)
+		prefs.SetString(prefKeyDevice, p.DeviceID)
+	}
+
+	// ── openProfilesDialog — browse, load and delete saved profiles ───────────
+	openProfilesDialog := func() {
+		names := ListProfiles(prefs)
+
+		if len(names) == 0 {
+			dialog.ShowInformation("Profiles",
+				"No saved profiles yet.\n\nUse the Save (💾) button next to the Web button to save the current settings as a profile.",
+				w)
+			return
+		}
+
+		// selectedIdx tracks which row is highlighted.
+		selectedIdx := -1
+
+		var dlgRef dialog.Dialog
+		var list *widget.List
+
+		// rebuildList refreshes the list widget after a deletion.
+		rebuildList := func() {
+			list.Refresh()
+		}
+
+		list = widget.NewList(
+			func() int { return len(names) },
+			func() fyne.CanvasObject {
+				return newDoubleTapLabel("", nil)
+			},
+			func(id widget.ListItemID, obj fyne.CanvasObject) {
+				lbl := obj.(*doubleTapLabel)
+				if id >= len(names) {
+					return
+				}
+				lbl.SetText("📋 " + names[id])
+				lbl.Importance = widget.MediumImportance
+				lbl.Refresh()
+				capturedID := id
+				lbl.OnTap = func() {
+					list.Select(capturedID)
+				}
+				lbl.OnDoubleTap = func() {
+						if capturedID >= len(names) {
+							return
+						}
+						p, ok := LoadProfile(prefs, names[capturedID])
+						if !ok {
+							return
+						}
+						if dlgRef != nil {
+							dlgRef.Hide()
+						}
+						applyProfile(p)
+						// Disconnect any existing session then reconnect.
+						// doConnect() must run on the UI goroutine (it calls Fyne Set* methods).
+						// We disconnect here (non-blocking), sleep briefly in a goroutine, then
+						// post doConnect back to the UI goroutine via the connect button tap path.
+						userDisconnected = true
+						client.Disconnect()
+						userDisconnected = false
+						go func() {
+							time.Sleep(300 * time.Millisecond)
+							connectBtn.OnTapped()
+						}()
+					}
+			},
+		)
+		list.OnSelected = func(id widget.ListItemID) {
+			selectedIdx = id
+		}
+
+		deleteBtn := widget.NewButtonWithIcon("Delete", theme.DeleteIcon(), func() {
+			if selectedIdx < 0 || selectedIdx >= len(names) {
+				return
+			}
+			nameToDelete := names[selectedIdx]
+			dialog.ShowConfirm(
+				"Delete Profile",
+				fmt.Sprintf("Delete profile %q?", nameToDelete),
+				func(confirmed bool) {
+					if !confirmed {
+						return
+					}
+					DeleteProfile(prefs, nameToDelete)
+					// Remove from local slice and refresh.
+					names = append(names[:selectedIdx], names[selectedIdx+1:]...)
+					selectedIdx = -1
+					list.UnselectAll()
+					rebuildList()
+				},
+				w,
+			)
+		})
+		deleteBtn.Importance = widget.DangerImportance
+
+		loadBtn := widget.NewButtonWithIcon("Load & Connect", theme.ConfirmIcon(), func() {
+			if selectedIdx < 0 || selectedIdx >= len(names) {
+				return
+			}
+			p, ok := LoadProfile(prefs, names[selectedIdx])
+			if !ok {
+				dialog.ShowError(fmt.Errorf("profile %q not found", names[selectedIdx]), w)
+				return
+			}
+			if dlgRef != nil {
+				dlgRef.Hide()
+			}
+			applyProfile(p)
+			// Disconnect any existing session then reconnect via the connect button
+			// so that doConnect() runs on the UI goroutine (it calls Fyne Set* methods).
+			userDisconnected = true
+			client.Disconnect()
+			userDisconnected = false
+			go func() {
+				time.Sleep(300 * time.Millisecond)
+				connectBtn.OnTapped()
+			}()
+		})
+		loadBtn.Importance = widget.HighImportance
+
+		// Give the list a fixed minimum size so it's scrollable.
+		listScroll := container.NewScroll(list)
+		listScroll.SetMinSize(fyne.NewSize(400, 260))
+
+		btnRow := container.NewHBox(loadBtn, layout.NewSpacer(), deleteBtn)
+		dlgContent := container.NewBorder(nil, btnRow, nil, nil, listScroll)
+
+		dlg := dialog.NewCustom("Profiles", "Close", dlgContent, w)
+		dlgRef = dlg
+		dlg.Resize(fyne.NewSize(440, 380))
+		dlg.Show()
+	}
+
 	// ── Browse Instances ──────────────────────────────────────────────────────
 	// openBrowseDialog fetches instances and shows the browse dialog.
 	// It is called both from the button and automatically on startup.
@@ -787,8 +1009,8 @@ func main() {
 
 			dlg := dialog.NewCustomConfirm(
 				"Browse Instances",
-				"Use Selected",
-				"Cancel",
+					"Connect",
+					"Cancel",
 				dlgContent,
 				func(ok bool) {
 					if !ok || selectedFilteredIdx < 0 || selectedFilteredIdx >= len(filtered) {
@@ -806,7 +1028,53 @@ func main() {
 		}()
 	}
 
-	browseBtn := widget.NewButtonWithIcon("Browse Instances…", theme.SearchIcon(), openBrowseDialog)
+	browseBtn := widget.NewButtonWithIcon("Browse…", theme.SearchIcon(), openBrowseDialog)
+	profilesBtn := widget.NewButtonWithIcon("Profiles…", theme.ListIcon(), openProfilesDialog)
+
+	// ── saveProfileDialog — prompt for a name and save the current settings ──
+	saveProfileDialog := func() {
+		nameEntry := widget.NewEntry()
+		nameEntry.SetPlaceHolder("Profile name…")
+
+		dlg := dialog.NewCustomConfirm(
+			"Save Profile",
+			"Save",
+			"Cancel",
+			nameEntry,
+			func(ok bool) {
+				if !ok {
+					return
+				}
+				name := strings.TrimSpace(nameEntry.Text)
+				if !profileNameValid(name) {
+					dialog.ShowError(fmt.Errorf("profile name cannot be empty"), w)
+					return
+				}
+				// Check for overwrite.
+				if _, exists := LoadProfile(prefs, name); exists {
+					dialog.ShowConfirm(
+						"Overwrite Profile",
+						fmt.Sprintf("A profile named %q already exists. Overwrite it?", name),
+						func(confirmed bool) {
+							if confirmed {
+								SaveProfile(prefs, currentProfile(name))
+							}
+						},
+						w,
+					)
+					return
+				}
+				SaveProfile(prefs, currentProfile(name))
+			},
+			w,
+		)
+		dlg.Resize(fyne.NewSize(340, 160))
+		dlg.Show()
+		w.Canvas().Focus(nameEntry)
+	}
+
+	saveProfileBtn := widget.NewButtonWithIcon("", theme.DocumentSaveIcon(), saveProfileDialog)
+	saveProfileBtn.Importance = widget.MediumImportance
 
 	// ── formatSessionTime — formats remaining seconds as "1h 24m 4s" etc. ────
 	formatSessionTime := func(secs int) string {
@@ -999,14 +1267,17 @@ func main() {
 		_ = a.OpenURL(u)
 	})
 
-	// URL row: entry expands, Web button pinned to the right.
-	urlRow := container.NewBorder(nil, nil, nil, webBtn, urlEntry)
+	// URL row: entry expands; Save Profile (💾) and Web buttons pinned to the right.
+	urlRow := container.NewBorder(nil, nil, nil,
+		container.NewHBox(saveProfileBtn, webBtn),
+		urlEntry,
+	)
 
-	// Server section — URL field + browse button
+	// Server section — URL field + browse/profiles buttons
 	serverGrid := container.New(layout.NewFormLayout(),
 		widget.NewLabel("URL"), urlRow,
 		widget.NewLabel("Password"), passwordEntry,
-		widget.NewLabel(""), browseBtn,
+		widget.NewLabel(""), container.NewHBox(browseBtn, profilesBtn),
 		widget.NewLabel("Instance"), stationLabel,
 	)
 
@@ -1062,7 +1333,7 @@ func main() {
 
 	// Main scrollable body
 	body := container.NewVBox(
-		widget.NewCard("Server", "", serverGrid),
+		widget.NewCard("Instance", "", serverGrid),
 		widget.NewCard("Frequency", "", container.NewVBox(freqRow, bwGrid)),
 		widget.NewCard("Audio", "", audioBox),
 	)

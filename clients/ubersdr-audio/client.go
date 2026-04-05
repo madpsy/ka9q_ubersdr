@@ -84,7 +84,7 @@ func (c *RadioClient) FetchDescription() (*InstanceDescription, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "UberSDR-Windows/1.0")
+	req.Header.Set("User-Agent", "UberSDR-Audio/1.0")
 	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	if err != nil {
 		return nil, err
@@ -110,7 +110,7 @@ func (c *RadioClient) FetchStats() (int, error) {
 	if err != nil {
 		return -1, err
 	}
-	req.Header.Set("User-Agent", "UberSDR-Windows/1.0")
+	req.Header.Set("User-Agent", "UberSDR-Audio/1.0")
 	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	if err != nil {
 		return -1, err
@@ -414,7 +414,7 @@ func (c *RadioClient) checkConnectionAllowed() (ConnectionCheckResponse, error) 
 		return ConnectionCheckResponse{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "UberSDR-Windows/1.0")
+	req.Header.Set("User-Agent", "UberSDR-Audio/1.0")
 
 	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 	if err != nil {
@@ -557,7 +557,7 @@ func (c *RadioClient) runLoop(ctx context.Context, gen uint64) {
 	}
 
 	headers := http.Header{}
-	headers.Set("User-Agent", "UberSDR-Windows/1.0")
+	headers.Set("User-Agent", "UberSDR-Audio/1.0")
 
 	// Use an explicit dialer with larger read/write buffers.
 	// The default gorilla dialer uses 4 KB buffers; at ~7 kB/s Opus that fills

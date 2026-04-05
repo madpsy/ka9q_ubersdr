@@ -10,12 +10,12 @@ import (
 )
 
 // validAddonNameRe matches URL-safe addon names:
-// lowercase letters, digits, hyphens, underscores; must start with a letter or digit
-var validAddonNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+// lowercase letters, digits, hyphens, underscores; must start AND end with a letter or digit
+var validAddonNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$`)
 
 // validAddonHostRe matches URL-safe hostnames (Docker container names):
-// letters, digits, hyphens, underscores, dots; must start with a letter or digit
-var validAddonHostRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+// letters, digits, hyphens, underscores, dots; must start AND end with a letter or digit
+var validAddonHostRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$`)
 
 const (
 	addonNameMaxLen   = 15

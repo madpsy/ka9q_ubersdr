@@ -18471,8 +18471,9 @@ Referer: ${log.referer}`;
                     const v = document.getElementById('proxyFormName').value.trim();
                     if (!v) { setProxyFieldError('proxyNameError', 'Name is required'); return false; }
                     if (v.length > 15) { setProxyFieldError('proxyNameError', 'Name must be 15 characters or fewer'); return false; }
-                    if (!/^[a-z0-9][a-z0-9_-]*$/.test(v)) {
-                        setProxyFieldError('proxyNameError', 'Only lowercase letters, digits, hyphens and underscores; must start with a letter or digit');
+                    // Must start AND end with a letter or digit; single char is fine
+                    if (!/^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$/.test(v)) {
+                        setProxyFieldError('proxyNameError', 'Only lowercase letters, digits, hyphens and underscores; must start and end with a letter or digit');
                         return false;
                     }
                     setProxyFieldError('proxyNameError', '');
@@ -18482,20 +18483,25 @@ Referer: ${log.referer}`;
                     const v = document.getElementById('proxyFormHost').value.trim();
                     if (enabled && !v) { setProxyFieldError('proxyHostError', 'Host is required when proxy is enabled'); return false; }
                     if (v && v.length > 25) { setProxyFieldError('proxyHostError', 'Host must be 25 characters or fewer'); return false; }
-                    if (v && !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(v)) {
-                        setProxyFieldError('proxyHostError', 'Only letters, digits, hyphens, underscores and dots; must start with a letter or digit');
+                    // Must start AND end with a letter or digit; single char is fine
+                    if (v && !/^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$/.test(v)) {
+                        setProxyFieldError('proxyHostError', 'Only letters, digits, hyphens, underscores and dots; must start and end with a letter or digit');
                         return false;
                     }
                     setProxyFieldError('proxyHostError', '');
                     return true;
                 }
                 case 'port': {
-                    const raw = document.getElementById('proxyFormPort').value.trim();
+                    // For type="number" inputs, .value is empty string when the browser
+                    // rejects non-numeric input — use the raw input element value instead
+                    const inputEl = document.getElementById('proxyFormPort');
+                    const raw = inputEl.value.trim();
+                    // Also check the underlying text via valueAsNumber to catch NaN
+                    const n = inputEl.valueAsNumber;
                     if (enabled && !raw) { setProxyFieldError('proxyPortError', 'Port is required when proxy is enabled'); return false; }
                     if (raw) {
-                        const n = parseInt(raw, 10);
-                        if (isNaN(n) || n < 1 || n > 65535) {
-                            setProxyFieldError('proxyPortError', 'Port must be between 1 and 65535');
+                        if (isNaN(n) || !Number.isInteger(n) || n < 1 || n > 65535) {
+                            setProxyFieldError('proxyPortError', 'Port must be a whole number between 1 and 65535');
                             return false;
                         }
                     }

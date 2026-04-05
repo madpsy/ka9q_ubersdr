@@ -112,6 +112,7 @@ type ServerConfig struct {
 	EnforceSessionIPMatch         bool            `yaml:"enforce_session_ip_match"` // Enforce that WebSocket connections must come from same IP as /connection (default: false)
 	TimeoutBypassIPs              []string        `yaml:"timeout_bypass_ips"`       // List of IPs/CIDRs that bypass idle and max session time limits
 	TrustedProxyIPs               []string        `yaml:"trusted_proxy_ips"`        // List of IPs/CIDRs to trust X-Real-IP header from
+	DockerNetwork                 string          `yaml:"docker_network"`           // Docker network CIDR always trusted as proxy (default: "172.20.0.0/24")
 	BypassPassword                string          `yaml:"bypass_password"`          // Password that grants bypass privileges (empty = disabled)
 	PublicIQModes                 map[string]bool `yaml:"public_iq_modes"`          // IQ modes accessible without bypass authentication
 	EnableCORS                    bool            `yaml:"enable_cors"`
@@ -907,11 +908,23 @@ func (sc *ServerConfig) IsIPTimeoutBypassed(ipStr string, password ...string) bo
 	return false
 }
 
-// parseTrustedProxyIPs parses the trusted_proxy_ips list into CIDR networks
+// parseTrustedProxyIPs parses the trusted_proxy_ips list into CIDR networks.
+// The docker_network CIDR (default "172.20.0.0/24") is always prepended so
+// the Docker internal network is trusted even if the user omits it from their
+// config. If the user also lists the same (or an overlapping) CIDR in
+// trusted_proxy_ips it is simply appended; duplicate/overlapping entries are
+// harmless because IsTrustedProxy returns on the first match.
 func (sc *ServerConfig) parseTrustedProxyIPs() error {
-	sc.trustedProxyNets = make([]*net.IPNet, 0, len(sc.TrustedProxyIPs))
+	dockerNet := sc.DockerNetwork
+	if dockerNet == "" {
+		dockerNet = "172.20.0.0/24"
+	}
 
-	for _, ipStr := range sc.TrustedProxyIPs {
+	// Build the full list: docker network first, then user-supplied entries.
+	allEntries := append([]string{dockerNet}, sc.TrustedProxyIPs...)
+	sc.trustedProxyNets = make([]*net.IPNet, 0, len(allEntries))
+
+	for _, ipStr := range allEntries {
 		// Check if it's a CIDR notation
 		if _, ipNet, err := net.ParseCIDR(ipStr); err == nil {
 			sc.trustedProxyNets = append(sc.trustedProxyNets, ipNet)

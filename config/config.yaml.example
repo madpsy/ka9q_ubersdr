@@ -202,26 +202,27 @@ server:
   #   - "192.168.1.0/24"
   #   - "10.0.0.0/8"
 
-  # List of IP addresses or CIDR ranges to trust X-Real-IP header from
-  # When requests come from these IPs, the X-Real-IP header will be trusted
-  # to contain the real client IP address (useful for reverse proxies)
-  # This works in addition to the tunnel server trust mechanism
-  # Trusted IPs/ranges:
-  #   - Can set X-Real-IP header with the real client IP
-  #   - Useful for Caddy, nginx, Cloudflare, or other reverse proxies
-  #   - Prevents clients from spoofing their IP via X-Real-IP header
-  # Supports both IPv4 and IPv6 addresses with CIDR notation
+  # Docker internal network CIDR that is always trusted as a reverse proxy.
+  # Requests arriving from this network are allowed to set X-Real-IP /
+  # X-Forwarded-For headers so the real client IP is visible to UberSDR.
+  # Default: "172.20.0.0/24" (matches the sdr-network subnet in docker-compose.yml)
+  # Change this only if you have customised the Docker network subnet.
+  docker_network: "172.20.0.0/24"
+
+  # Additional IP addresses or CIDR ranges to trust X-Real-IP header from.
+  # The docker_network above is always trusted automatically — you do not need
+  # to repeat it here. Add extra entries for external reverse proxies such as
+  # Caddy, nginx, or Cloudflare running outside the Docker network.
+  # This works in addition to the tunnel server trust mechanism.
+  # Supports both IPv4 and IPv6 addresses with CIDR notation.
   # Examples:
   #   - "127.0.0.1"           # Single IPv4 address (localhost)
   #   - "192.168.1.0/24"      # IPv4 CIDR range (local network)
   #   - "::1"                 # Single IPv6 address (localhost)
   #   - "2001:db8::/32"       # IPv6 CIDR range
   #   - "172.17.0.0/16"       # Docker bridge network
-  # By default, Docker host gateway is trusted (and tunnel server if configured)
-  # Uncomment and add your reverse proxy IPs/ranges as needed
-  trusted_proxy_ips:
-    - "172.20.0.0/24"            # Trust Docker host
-  # Additional examples (uncomment to use):
+  # Uncomment and add your reverse proxy IPs/ranges as needed:
+  # trusted_proxy_ips:
   #   - "127.0.0.1"           # Trust localhost
   #   - "172.17.0.0/16"       # Trust Docker bridge network
   #   - "10.0.0.0/8"          # Trust private network

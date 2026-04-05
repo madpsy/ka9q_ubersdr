@@ -56,6 +56,9 @@ func NewAddonProxy(entry *AddonProxyEntry) (*AddonProxy, error) {
 					req.URL.RawPath = "/"
 				}
 			}
+			// Tell the backend what prefix was stripped so it can construct
+			// correct absolute URLs (e.g. for <base> tags, redirects, etc.)
+			req.Header.Set("X-Forwarded-Prefix", prefix)
 		}
 
 		// Set Host header to the backend target
@@ -86,6 +89,21 @@ func NewAddonProxy(entry *AddonProxyEntry) (*AddonProxy, error) {
 			// Direct connection — set both headers from source IP
 			req.Header.Set("X-Forwarded-For", sourceIP)
 			req.Header.Set("X-Real-IP", sourceIP)
+		}
+
+		// Forward the original Host and protocol so backends can construct
+		// correct absolute URLs (redirects, CORS, cookie domains, etc.)
+		if req.Header.Get("X-Forwarded-Host") == "" {
+			if origHost := req.Header.Get("Host"); origHost != "" {
+				req.Header.Set("X-Forwarded-Host", origHost)
+			}
+		}
+		if req.Header.Get("X-Forwarded-Proto") == "" {
+			proto := "http"
+			if req.TLS != nil {
+				proto = "https"
+			}
+			req.Header.Set("X-Forwarded-Proto", proto)
 		}
 
 		// Optionally rewrite the WebSocket Origin header so backends that

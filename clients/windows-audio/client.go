@@ -419,6 +419,8 @@ func (c *RadioClient) checkConnectionAllowed() (ConnectionCheckResponse, error) 
 
 // Connect starts the connection in a background goroutine.
 // It is safe to call Connect again after Disconnect.
+// If the client is already connecting or connected, this is a no-op; use
+// ConnectForce to override that guard (e.g. after an explicit Disconnect).
 func (c *RadioClient) Connect() {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -440,6 +442,33 @@ func (c *RadioClient) Connect() {
 		c.cancelFn()
 	}
 	c.cancelFn = cancel
+	c.mu.Unlock()
+
+	go c.runLoop(ctx, gen)
+}
+
+// ConnectForce starts a new connection unconditionally, cancelling any
+// in-progress connection first.  Use this when you have already called
+// Disconnect() and polled for the state to settle, but want to guarantee
+// that a stale StateConnecting (e.g. due to a slow runLoop goroutine) does
+// not silently swallow the Connect call.
+func (c *RadioClient) ConnectForce() {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	c.mu.Lock()
+	// Cancel any previous context so the old runLoop goroutine stops.
+	if c.cancelFn != nil {
+		c.cancelFn()
+	}
+	// Generate a fresh session ID for each new connection.
+	c.userSessionID = uuid.New().String()
+	// Increment the generation so any stale runLoop goroutine from a previous
+	// connection will have its setState calls silently ignored.
+	c.generation++
+	gen := c.generation
+	c.cancelFn = cancel
+	// Force state to Disconnected so the UI reflects a clean start.
+	c.state = StateDisconnected
 	c.mu.Unlock()
 
 	go c.runLoop(ctx, gen)

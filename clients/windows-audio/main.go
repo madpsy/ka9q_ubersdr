@@ -164,6 +164,16 @@ func main() {
 	// so that OnStateChange does NOT clear stationLabel during the brief disconnect.
 	formatSwitching := false
 
+	// profileSwitching is set true while loading a profile so that
+	// OnStateChange(StateError) does NOT trigger the auto-reconnect countdown.
+	profileSwitching := false
+
+	// activeProfileName holds the name of the last profile loaded via applyProfile.
+	// Empty string means no profile is active (user started fresh or changed the URL
+	// manually).  Used to pre-fill the Save dialog so saving back to the same profile
+	// is a single click.
+	activeProfileName := ""
+
 	// ── Widgets ───────────────────────────────────────────────────────────────
 
 	statusDot := NewStatusDot(dotColorGrey)
@@ -614,6 +624,9 @@ func main() {
 	// suppressModeInit prevents the BW slider from being reset to the mode
 	// default when we programmatically call modeSelect.SetSelected.
 	applyProfile := func(p Profile) {
+		// Remember which profile is active so the Save dialog can pre-fill the name.
+		activeProfileName = p.Name
+
 		// URL / password
 		urlEntry.SetText(p.URL)
 		passwordEntry.SetText(p.Password)
@@ -681,6 +694,101 @@ func main() {
 		prefs.SetString(prefKeyDevice, p.DeviceID)
 	}
 
+	// ── profileConnectAndClose — applies a profile and reconnects ─────────────
+	// dlgToClose is the profiles dialog to hide before connecting (may be nil).
+	// All widget values are captured here on the UI goroutine so the background
+	// goroutine never needs to read Fyne widget state.
+	// profileSwitching suppresses the auto-reconnect countdown in OnStateChange.
+	profileConnectAndClose := func(dlgToClose dialog.Dialog) {
+		if dlgToClose != nil {
+			dlgToClose.Hide()
+		}
+
+		// Capture all values from widgets NOW, on the UI goroutine.
+		rawURL := strings.TrimSpace(urlEntry.Text)
+		password := passwordEntry.Text
+		hz, err := parseFreqKHz(freqEntry.Text)
+		if err != nil {
+			hz = currentFreq
+		}
+		hz = clampFreq(hz)
+		lo, hi := bwToLoHi(currentMode, bwSlider.Value)
+		vol := volumeSlider.Value / 100.0
+		var devID string
+		audioDeviceMu.RLock()
+		if idx := deviceSelect.SelectedIndex(); idx >= 0 && idx < len(audioDeviceList) {
+			devID = audioDeviceList[idx].ID
+		}
+		audioDeviceMu.RUnlock()
+
+		profileSwitching = true
+		go func() {
+			// Disconnect any existing session and wait for it to fully settle
+			// before calling Connect().  Connect() silently returns if the state
+			// is still StateConnecting or StateConnected, so we must be sure the
+			// previous runLoop has reached StateDisconnected/StateError first.
+			// We wait up to 2 s (200 × 10 ms) to give the runLoop goroutine time
+			// to process the closed connection and call setState.
+			if s := client.State(); s == StateConnected || s == StateConnecting {
+				client.Disconnect()
+				for i := 0; i < 200; i++ {
+					s := client.State()
+					if s == StateDisconnected || s == StateError {
+						break
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
+
+			// profileSwitching must remain true until Connect() has been called
+			// so that any StateError fired by the new runLoop during startup does
+			// not trigger the auto-reconnect countdown.  We clear it only after
+			// Connect() returns (Connect returns immediately; the flag just needs
+			// to be true when OnStateChange(StateError) could fire during the
+			// brief window before the WebSocket is established).
+			defer func() { profileSwitching = false }()
+
+			if rawURL == "" {
+				return
+			}
+
+			// Set client fields directly — no widget reads needed.
+			client.BaseURL = rawURL
+			client.Password = password
+			client.Frequency = hz
+			client.Mode = currentMode
+			client.BandwidthLow = lo
+			client.BandwidthHigh = hi
+			client.DeviceID = devID
+			client.SetVolume(vol)
+
+			// Fetch description for station label / session info (best-effort).
+			sessionMaxSecs = 0
+			connMaxClients = 0
+			if desc, err := client.FetchDescription(); err == nil {
+				sessionMaxSecs = desc.MaxSessionTime
+				connMaxClients = desc.MaxClients
+				parts := []string{}
+				if desc.Receiver.Callsign != "" {
+					parts = append(parts, desc.Receiver.Callsign)
+				}
+				if desc.Receiver.Name != "" {
+					parts = append(parts, desc.Receiver.Name)
+				}
+				if desc.Receiver.Location != "" {
+					parts = append(parts, desc.Receiver.Location)
+				}
+				if len(parts) > 0 {
+					stationLabel.SetText(strings.Join(parts, " · "))
+				} else {
+					stationLabel.SetText("")
+				}
+			}
+
+			client.ConnectForce()
+		}()
+	}
+
 	// ── openProfilesDialog — browse, load and delete saved profiles ───────────
 	openProfilesDialog := func() {
 		names := ListProfiles(prefs)
@@ -728,21 +836,8 @@ func main() {
 						if !ok {
 							return
 						}
-						if dlgRef != nil {
-							dlgRef.Hide()
-						}
 						applyProfile(p)
-						// Disconnect any existing session then reconnect.
-						// doConnect() must run on the UI goroutine (it calls Fyne Set* methods).
-						// We disconnect here (non-blocking), sleep briefly in a goroutine, then
-						// post doConnect back to the UI goroutine via the connect button tap path.
-						userDisconnected = true
-						client.Disconnect()
-						userDisconnected = false
-						go func() {
-							time.Sleep(300 * time.Millisecond)
-							connectBtn.OnTapped()
-						}()
+						profileConnectAndClose(dlgRef)
 					}
 			},
 		)
@@ -787,15 +882,7 @@ func main() {
 				dlgRef.Hide()
 			}
 			applyProfile(p)
-			// Disconnect any existing session then reconnect via the connect button
-			// so that doConnect() runs on the UI goroutine (it calls Fyne Set* methods).
-			userDisconnected = true
-			client.Disconnect()
-			userDisconnected = false
-			go func() {
-				time.Sleep(300 * time.Millisecond)
-				connectBtn.OnTapped()
-			}()
+			profileConnectAndClose(dlgRef)
 		})
 		loadBtn.Importance = widget.HighImportance
 
@@ -891,11 +978,13 @@ func main() {
 					dlgRef.Hide()
 				}
 				// Run in a goroutine: disconnect if needed, then connect.
+				// Use ConnectForce so that a stale StateConnecting from the
+				// previous session never silently swallows the new Connect call.
 				go func() {
 					if s := client.State(); s == StateConnected || s == StateConnecting {
 						client.Disconnect()
-						// Wait up to 500 ms for the disconnect to complete.
-						for i := 0; i < 50; i++ {
+						// Wait up to 2 s for the runLoop to reach a terminal state.
+						for i := 0; i < 200; i++ {
 							s := client.State()
 							if s == StateDisconnected || s == StateError {
 								break
@@ -1035,6 +1124,11 @@ func main() {
 	saveProfileDialog := func() {
 		nameEntry := widget.NewEntry()
 		nameEntry.SetPlaceHolder("Profile name…")
+		// Pre-fill with the active profile name so the user can save back to it
+		// with a single click (they can still edit the name to save as a new one).
+		if activeProfileName != "" {
+			nameEntry.SetText(activeProfileName)
+		}
 
 		dlg := dialog.NewCustomConfirm(
 			"Save Profile",
@@ -1050,7 +1144,23 @@ func main() {
 					dialog.ShowError(fmt.Errorf("profile name cannot be empty"), w)
 					return
 				}
-				// Check for overwrite.
+				// If the name matches the currently active profile, go straight to
+				// the overwrite confirm — no need to check existence separately.
+				if name == activeProfileName {
+					dialog.ShowConfirm(
+						"Overwrite Profile",
+						fmt.Sprintf("Overwrite profile %q with the current settings?", name),
+						func(confirmed bool) {
+							if confirmed {
+								SaveProfile(prefs, currentProfile(name))
+								activeProfileName = name
+							}
+						},
+						w,
+					)
+					return
+				}
+				// Different name — check whether it already exists.
 				if _, exists := LoadProfile(prefs, name); exists {
 					dialog.ShowConfirm(
 						"Overwrite Profile",
@@ -1058,6 +1168,7 @@ func main() {
 						func(confirmed bool) {
 							if confirmed {
 								SaveProfile(prefs, currentProfile(name))
+								activeProfileName = name
 							}
 						},
 						w,
@@ -1065,6 +1176,7 @@ func main() {
 					return
 				}
 				SaveProfile(prefs, currentProfile(name))
+				activeProfileName = name
 			},
 			w,
 		)
@@ -1176,11 +1288,12 @@ func main() {
 			signalBar.SetNoData()
 			snrBar.SetNoData()
 			audioBar.SetNoData()
-			if !formatSwitching {
+			if !formatSwitching && !profileSwitching {
 				stationLabel.SetText("")
 			}
-			// Auto-reconnect after 5 s unless the user explicitly disconnected.
-			if !userDisconnected {
+			// Auto-reconnect after 5 s unless the user explicitly disconnected
+			// or we are in the middle of a profile-load reconnect.
+			if !userDisconnected && !profileSwitching {
 				go func() {
 					for i := 5; i > 0; i-- {
 						statusDot.SetColor(dotColorOrange)

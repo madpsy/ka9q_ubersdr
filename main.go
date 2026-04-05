@@ -3100,12 +3100,15 @@ func getClientIP(r *http.Request) string {
 
 	clientIP := sourceIP
 
-	// Only trust X-Real-IP if request comes from tunnel server or trusted proxy
-	// This prevents clients from spoofing their IP via X-Real-IP header
+	// Only trust X-Real-IP and X-Forwarded-For if the request comes from a
+	// configured tunnel server or trusted proxy. Accepting these headers from
+	// arbitrary clients would allow IP spoofing to bypass allowlists and
+	// rate-limiters (e.g. the addon proxy and terminal proxy allowed_ips checks).
 	isTunnelServer := globalConfig != nil && globalConfig.InstanceReporting.IsTunnelServer(sourceIP)
 	isTrustedProxy := globalConfig != nil && globalConfig.Server.IsTrustedProxy(sourceIP)
 
 	if isTunnelServer || isTrustedProxy {
+		// Prefer X-Real-IP (single authoritative IP set by the proxy)
 		if xri := r.Header.Get("X-Real-IP"); xri != "" {
 			trimmedXRI := strings.TrimSpace(xri)
 
@@ -3142,22 +3145,29 @@ func getClientIP(r *http.Request) string {
 			}
 			return clientIP
 		}
-	}
 
-	// Check X-Forwarded-For header for true source IP (first IP in the list)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// Fall back to X-Forwarded-For (first entry = original client)
 		// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
-		// We want the first one (the true client)
-		clientIP = strings.TrimSpace(xff)
-		if commaIdx := strings.Index(clientIP, ","); commaIdx != -1 {
-			clientIP = strings.TrimSpace(clientIP[:commaIdx])
-		}
-		// Strip port if present in X-Forwarded-For
-		if host, _, err := net.SplitHostPort(clientIP); err == nil {
-			clientIP = host
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			xffIP := strings.TrimSpace(xff)
+			if commaIdx := strings.Index(xffIP, ","); commaIdx != -1 {
+				xffIP = strings.TrimSpace(xffIP[:commaIdx])
+			}
+			// Strip port if present in X-Forwarded-For
+			if host, _, err := net.SplitHostPort(xffIP); err == nil {
+				xffIP = host
+			}
+			if xffIP != "" {
+				if DebugMode {
+					log.Printf("DEBUG: Trusted X-Forwarded-For from %s: clientIP=%s", sourceIP, xffIP)
+				}
+				return xffIP
+			}
 		}
 	}
 
+	// Direct connection (not from a trusted proxy/tunnel): use RemoteAddr as-is.
+	// Forwarding headers from untrusted sources are ignored to prevent IP spoofing.
 	return clientIP
 }
 

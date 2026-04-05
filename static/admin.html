@@ -18532,11 +18532,15 @@ Referer: ${log.referer}`;
                 }
                 case 'port': {
                     // For type="number" inputs, .value is empty string when the browser
-                    // rejects non-numeric input — use the raw input element value instead
+                    // rejects non-numeric input — check validity.badInput to catch that case
                     const inputEl = document.getElementById('proxyFormPort');
                     const raw = inputEl.value.trim();
-                    // Also check the underlying text via valueAsNumber to catch NaN
+                    const badInput = inputEl.validity && inputEl.validity.badInput;
                     const n = inputEl.valueAsNumber;
+                    if (badInput) {
+                        setProxyFieldError('proxyPortError', 'Port must be a whole number between 1 and 65535');
+                        return false;
+                    }
                     if (enabled && !raw) { setProxyFieldError('proxyPortError', 'Port is required when proxy is enabled'); return false; }
                     if (raw) {
                         if (isNaN(n) || !Number.isInteger(n) || n < 1 || n > 65535) {
@@ -18548,7 +18552,13 @@ Referer: ${log.referer}`;
                     return true;
                 }
                 case 'rateLimit': {
-                    const raw = document.getElementById('proxyFormRateLimit').value.trim();
+                    const inputEl = document.getElementById('proxyFormRateLimit');
+                    const raw = inputEl.value.trim();
+                    const badInput = inputEl.validity && inputEl.validity.badInput;
+                    if (badInput) {
+                        setProxyFieldError('proxyRateLimitError', 'Rate limit must be between 0 (unlimited) and 250');
+                        return false;
+                    }
                     if (raw !== '') {
                         const n = parseInt(raw, 10);
                         if (isNaN(n) || n < 0 || n > 250) {

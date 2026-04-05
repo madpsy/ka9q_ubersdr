@@ -11,10 +11,21 @@ package main
 // fixed to the sample rate and channel count of the first stream; if a later
 // stream uses different parameters we resample in Push() before handing data
 // to oto (nearest-neighbour, same strategy as the Windows WASAPI path).
+//
+// We always open the oto context with 2 output channels so that L/R channel
+// muting works correctly even when the source stream is mono.  Mono streams
+// are upmixed to stereo in Push() via the existing resamplePCM path.
+//
+// Device selection on Linux uses PulseAudio/PipeWire's `pactl move-sink-input`
+// to redirect the existing audio stream to a different sink at runtime.
+// This avoids recreating the oto context (which is not supported by oto).
 
 import (
 	"encoding/binary"
 	"fmt"
+	"os"
+	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +38,7 @@ var (
 	otoCtx      *oto.Context
 	otoRate     int // sample rate the context was created with
 	otoCh       int // channel count the context was created with
+	otoMu       sync.Mutex
 	otoInitOnce sync.Once
 	otoInitErr  error
 )
@@ -63,6 +75,98 @@ func getOrCreateOtoContext(sampleRate, channels int, bufferDuration time.Duratio
 	return otoCtx, otoInitErr
 }
 
+// ── Device enumeration ────────────────────────────────────────────────────────
+
+// EnumerateAudioDevices returns the list of available audio output sinks.
+// On Linux it queries PulseAudio/PipeWire via `pactl list short sinks`.
+// Falls back to a single "Default Device" entry if pactl is unavailable.
+func EnumerateAudioDevices() ([]AudioDevice, error) {
+	devices := []AudioDevice{{ID: "", Name: "Default Device"}}
+
+	out, err := exec.Command("pactl", "list", "short", "sinks").Output()
+	if err != nil {
+		// pactl not available or failed — return just the default
+		return devices, nil
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		// pactl list short sinks output format:
+		//   <index>\t<name>\t<module>\t<sample-spec>\t<state>
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		name := fields[1] // sink name, e.g. "alsa_output.pci-0000_00_1f.3.analog-stereo"
+
+		// Build a friendlier display name.
+		display := name
+		for _, prefix := range []string{"alsa_output.", "bluez_sink.", "bluez_output."} {
+			if strings.HasPrefix(display, prefix) {
+				display = strings.TrimPrefix(display, prefix)
+				break
+			}
+		}
+		display = strings.NewReplacer(".", " ", "_", " ").Replace(display)
+		if len(display) > 0 {
+			display = strings.ToUpper(display[:1]) + display[1:]
+		}
+		devices = append(devices, AudioDevice{ID: name, Name: display})
+	}
+
+	return devices, nil
+}
+
+// moveSinkInput uses `pactl move-sink-input` to redirect this process's audio
+// stream(s) to the named sink at runtime, without recreating the oto context.
+// sinkName="" moves to the default sink (@DEFAULT_SINK@).
+func moveSinkInput(sinkName string) {
+	target := sinkName
+	if target == "" {
+		target = "@DEFAULT_SINK@"
+	}
+
+	pid := fmt.Sprintf("%d", os.Getpid())
+
+	// Use verbose `pactl list sink-inputs` to find sink-input indices that
+	// belong to this process, then move each one.
+	verboseOut, err := exec.Command("pactl", "list", "sink-inputs").Output()
+	if err != nil {
+		// Fallback: move all sink-inputs (may affect other apps, but better
+		// than nothing when verbose listing fails).
+		shortOut, err2 := exec.Command("pactl", "list", "short", "sink-inputs").Output()
+		if err2 != nil {
+			return
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(shortOut)), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) >= 1 {
+				exec.Command("pactl", "move-sink-input", fields[0], target).Run() //nolint:errcheck
+			}
+		}
+		return
+	}
+
+	// Parse verbose output blocks:
+	//   Sink Input #42
+	//       ...
+	//       application.process.id = "1234"
+	currentIdx := ""
+	for _, line := range strings.Split(string(verboseOut), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "Sink Input #") {
+			currentIdx = strings.TrimPrefix(trimmed, "Sink Input #")
+		} else if currentIdx != "" &&
+			strings.Contains(trimmed, "application.process.id") &&
+			strings.Contains(trimmed, `"`+pid+`"`) {
+			exec.Command("pactl", "move-sink-input", currentIdx, target).Run() //nolint:errcheck
+			currentIdx = ""                                                    // reset so we don't move it twice
+		}
+	}
+}
+
 // ── AudioOutput ───────────────────────────────────────────────────────────────
 
 // AudioOutput manages audio playback via oto (non-Windows fallback).
@@ -77,14 +181,9 @@ type AudioOutput struct {
 	mu            sync.Mutex
 }
 
-// EnumerateAudioDevices returns a stub list on non-Windows platforms.
-// oto always uses the system default device.
-func EnumerateAudioDevices() ([]AudioDevice, error) {
-	return []AudioDevice{{ID: "", Name: "Default Device"}}, nil
-}
-
 // NewAudioOutput creates (or reuses) an oto context and opens a new player.
-// deviceID is ignored on non-Windows (oto always uses the default device).
+// deviceID is the PulseAudio/PipeWire sink name (empty = system default).
+// The audio stream is moved to deviceID via pactl after the player starts.
 func NewAudioOutput(sampleRate, channels int, bufferDuration time.Duration, deviceID string) (*AudioOutput, error) {
 	ctx, err := getOrCreateOtoContext(sampleRate, channels, bufferDuration)
 	if err != nil {
@@ -94,6 +193,16 @@ func NewAudioOutput(sampleRate, channels int, bufferDuration time.Duration, devi
 	reader := newPCMRingReader(32)
 	player := ctx.NewPlayer(reader)
 	player.Play()
+
+	// Move the stream to the requested sink asynchronously.
+	// We do this in a goroutine because pactl may take a moment to see the
+	// new sink-input after Play() is called.
+	if deviceID != "" {
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			moveSinkInput(deviceID)
+		}()
+	}
 
 	return &AudioOutput{
 		player:  player,
@@ -137,7 +246,10 @@ func (a *AudioOutput) Push(pcmLE []byte, meta ChunkMeta) {
 	// Apply channel mode and/or volume.
 	// We always make a copy so we never mutate the caller's buffer.
 	out := make([]byte, len(pcmLE))
-	numCh := otoCh // number of channels in the (possibly resampled) data
+	numCh := otoCh
+	if numCh < 1 {
+		numCh = 1
+	}
 	numSamples := len(pcmLE) / 2
 	for i := 0; i < numSamples; i++ {
 		ch := i % numCh
@@ -156,7 +268,7 @@ func (a *AudioOutput) Push(pcmLE []byte, meta ChunkMeta) {
 	a.reader.Push(out)
 
 	// Delay the callback by the time it will take for this chunk to reach
-	// the hardware: (chunks ahead × 20 ms) + hardware buffer (40 ms).
+	// the hardware: (chunks ahead × 20 ms) + hardware buffer.
 	if fn != nil {
 		delay := time.Duration(queued)*chunkDuration + hardwareBufferDuration
 		FireAfterDelay(delay, func() { fn(meta) })

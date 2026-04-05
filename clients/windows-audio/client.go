@@ -64,6 +64,7 @@ type InstanceDescription struct {
 	DefaultFrequency int    `json:"default_frequency"`
 	DefaultMode      string `json:"default_mode"`
 	MaxSessionTime   int    `json:"max_session_time"` // seconds; 0 = unlimited
+	MaxClients       int    `json:"max_clients"`      // 0 = not reported
 	Receiver         struct {
 		Name     string `json:"name"`
 		Callsign string `json:"callsign"`
@@ -94,6 +95,34 @@ func (c *RadioClient) FetchDescription() (*InstanceDescription, error) {
 		return nil, err
 	}
 	return &desc, nil
+}
+
+// FetchStats calls GET /stats on the current BaseURL and returns the number of
+// active sessions.  Returns -1 on any error so callers can distinguish "no data"
+// from zero.
+func (c *RadioClient) FetchStats() (int, error) {
+	httpScheme, host, err := c.parseBaseURL()
+	if err != nil {
+		return -1, err
+	}
+	endpoint := fmt.Sprintf("%s://%s/stats", httpScheme, host)
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return -1, err
+	}
+	req.Header.Set("User-Agent", "UberSDR-Windows/1.0")
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		return -1, err
+	}
+	defer resp.Body.Close()
+	var body struct {
+		ActiveSessions int `json:"active_sessions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return -1, err
+	}
+	return body.ActiveSessions, nil
 }
 
 // ConnectionCheckRequest is the body for POST /connection.

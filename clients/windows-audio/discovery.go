@@ -25,15 +25,15 @@ type DiscoveredInstance struct {
 }
 
 // DisplayLabel returns a human-readable label for the instance picker.
-// Format: "CALLSIGN - Name [slots] — Location (host:port) 🔒"
+// Format: "CALLSIGN 10/20 - Name — Location (host:port) 🔒"
 func (d DiscoveredInstance) DisplayLabel() string {
 	tls := ""
 	if d.TLS {
 		tls = " 🔒"
 	}
-	avail := ""
+	slots := ""
 	if d.MaxClients > 0 {
-		avail = fmt.Sprintf(" [%d/%d]", d.AvailableClients, d.MaxClients)
+		slots = fmt.Sprintf(" %d/%d", d.AvailableClients, d.MaxClients)
 	}
 	loc := ""
 	if d.Location != "" {
@@ -41,11 +41,13 @@ func (d DiscoveredInstance) DisplayLabel() string {
 	}
 	title := d.Name
 	if d.Callsign != "" && d.Callsign != d.Name {
-		title = d.Callsign + " - " + d.Name
+		title = d.Callsign + slots + " - " + d.Name
 	} else if d.Callsign != "" {
-		title = d.Callsign
+		title = d.Callsign + slots
+	} else {
+		title = d.Name + slots
 	}
-	return fmt.Sprintf("%s%s%s%s (%s:%d)", title, tls, avail, loc, d.Host, d.Port)
+	return fmt.Sprintf("%s%s%s (%s:%d)", title, tls, loc, d.Host, d.Port)
 }
 
 // publicInstancesURL is the UberSDR public registry endpoint.

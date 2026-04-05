@@ -152,6 +152,10 @@ func main() {
 	sessionMaxSecs := 0 // 0 = unlimited
 	var sessionTimerStop chan struct{}
 
+	// connMaxClients holds the max_clients value from the last /api/description
+	// response so the stats poller can display "active/max".  0 = not reported.
+	connMaxClients := 0
+
 	// userDisconnected is set true when the user explicitly presses Disconnect,
 	// so that OnStateChange(StateError) does NOT auto-reconnect.
 	userDisconnected := false
@@ -164,6 +168,10 @@ func main() {
 
 	statusDot := NewStatusDot(dotColorGrey)
 	statusLabel := widget.NewLabel("Disconnected")
+
+	// Users label — updated every 10 s while connected; shows "👥 active/max".
+	// Declared early so OnStateChange can reference it before the layout is built.
+	usersLabel := widget.NewLabel("")
 
 	// Station info — populated from /api/description after URL is set
 	stationLabel := widget.NewLabel("")
@@ -509,9 +517,11 @@ func main() {
 		// picked a new instance. If the URL is the same as the saved one, we
 		// keep the user's own saved frequency/mode instead of overwriting them.
 		sessionMaxSecs = 0 // reset before each connection
+		connMaxClients = 0 // reset before each connection
 		applyServerDefaults := rawURL != prefs.StringWithFallback(prefKeyURL, "")
 		if desc, err := client.FetchDescription(); err == nil {
 			sessionMaxSecs = desc.MaxSessionTime
+			connMaxClients = desc.MaxClients
 			// Apply default frequency only when switching to a new instance.
 			if applyServerDefaults && desc.DefaultFrequency > 0 {
 				currentFreq = desc.DefaultFrequency
@@ -687,7 +697,15 @@ func main() {
 						return
 					}
 					allIdx := filtered[id]
+					inst := all[allIdx]
 					lbl.SetText(labels[allIdx])
+					// Colour the row red when the instance is full (no available slots).
+					if inst.MaxClients > 0 && inst.AvailableClients == 0 {
+						lbl.Importance = widget.DangerImportance
+					} else {
+						lbl.Importance = widget.MediumImportance
+					}
+					lbl.Refresh()
 					capturedID := id
 					capturedAllIdx := allIdx
 					// OnTap drives list.Select so the row gets its highlight.
@@ -822,6 +840,18 @@ func main() {
 			connectBtn.SetText("Disconnect")
 			connectBtn.Importance = widget.DangerImportance
 			statusDot.SetColor(dotColorGreen)
+			// Fetch /stats immediately on connect so the user count appears right away
+			// rather than waiting up to 10 s for the ticker to fire.
+			go func() {
+				if active, err := client.FetchStats(); err == nil {
+					max := connMaxClients
+					if max > 0 {
+						usersLabel.SetText(fmt.Sprintf("%d/%d users", active, max))
+					} else {
+						usersLabel.SetText(fmt.Sprintf("%d users", active))
+					}
+				}
+			}()
 			// Override sessionMaxSecs with the per-user value from /connection.
 			// This already has the bypass override applied (0 for bypassed users),
 			// unlike /api/description which always returns the globally configured value.
@@ -1023,10 +1053,10 @@ func main() {
 	throughputLabel := widget.NewLabel("")
 
 	// Status + connect row (pinned to bottom).
-	// The dot is pinned to the left; the label expands; throughput+button pinned right.
+	// The dot is pinned to the left; the label expands; users+throughput+button pinned right.
 	bottomBar := container.NewBorder(nil, nil,
 		statusDot,
-		container.NewHBox(throughputLabel, connectBtn),
+		container.NewHBox(usersLabel, throughputLabel, connectBtn),
 		statusLabel,
 	)
 
@@ -1055,10 +1085,11 @@ func main() {
 		cleanupOpusDLL()
 	})
 
-	// Throughput ticker — samples bytes received every second while connected.
+	// Throughput + users ticker — runs every second; polls /stats every 10 s.
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
+		statsTick := 0
 		for range ticker.C {
 			if client.State() == StateConnected {
 				bps := client.BytesReceivedAndReset()
@@ -1072,8 +1103,24 @@ func main() {
 					txt = fmt.Sprintf("%d B/s", bps)
 				}
 				throughputLabel.SetText(txt)
+
+				// Poll /stats every 10 seconds.
+				statsTick++
+				if statsTick >= 10 {
+					statsTick = 0
+					if active, err := client.FetchStats(); err == nil {
+						max := connMaxClients
+						if max > 0 {
+							usersLabel.SetText(fmt.Sprintf("%d/%d users", active, max))
+						} else {
+							usersLabel.SetText(fmt.Sprintf("%d users", active))
+						}
+					}
+				}
 			} else {
 				throughputLabel.SetText("")
+				usersLabel.SetText("")
+				statsTick = 0
 				client.BytesReceivedAndReset() // drain counter
 			}
 		}

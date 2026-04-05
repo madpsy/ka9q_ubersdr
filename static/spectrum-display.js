@@ -431,21 +431,16 @@ class SpectrumDisplay {
                 }
             }
 
-            // Check if click is on a bookmark
-            if (typeof window.bookmarks !== 'undefined' && typeof window.handleBookmarkClick === 'function') {
-                const startFreq = this.centerFreq - this.totalBandwidth / 2;
-                const endFreq = this.centerFreq + this.totalBandwidth / 2;
-
-                // Check each bookmark to see if click is near it
-                for (let bookmark of window.bookmarks) {
-                    if (bookmark.frequency >= startFreq && bookmark.frequency <= endFreq) {
-                        const bookmarkX = ((bookmark.frequency - startFreq) / this.totalBandwidth) * this.width;
-
-                        // Check if click is within 30 pixels of bookmark (wider hit area)
-                        if (Math.abs(x - bookmarkX) <= 30) {
-                            window.handleBookmarkClick(bookmark, e.shiftKey || e.ctrlKey, true);
-                            return;
-                        }
+            // Check if click is on a bookmark label (use exact rendered label bounds)
+            if (window.bookmarkPositions && window.bookmarkPositions.length > 0 &&
+                typeof window.handleBookmarkClick === 'function') {
+                for (let pos of window.bookmarkPositions) {
+                    if (x >= pos.x - pos.width / 2 &&
+                        x <= pos.x + pos.width / 2 &&
+                        y >= pos.y &&
+                        y <= pos.y + pos.height) {
+                        window.handleBookmarkClick(pos.bookmark, e.shiftKey || e.ctrlKey, true);
+                        return;
                     }
                 }
             }
@@ -3492,29 +3487,8 @@ class SpectrumDisplay {
 
             // If we didn't drag (dragDidMove is false), treat it as a click
             if (!this.dragDidMove) {
-                // Check if click is on a bookmark (top 45 pixels where bookmarks are drawn)
-                if (y <= 45 && typeof window.bookmarks !== 'undefined' && typeof window.handleBookmarkClick === 'function') {
-                    const startFreq = this.centerFreq - this.totalBandwidth / 2;
-                    const endFreq = this.centerFreq + this.totalBandwidth / 2;
-
-                    // Check each bookmark to see if click is near it
-                    for (let bookmark of window.bookmarks) {
-                        if (bookmark.frequency >= startFreq && bookmark.frequency <= endFreq) {
-                            const bookmarkX = ((bookmark.frequency - startFreq) / this.totalBandwidth) * this.width;
-
-                            // Check if click is within 20 pixels of bookmark
-                            if (Math.abs(x - bookmarkX) <= 20) {
-                                window.handleBookmarkClick(bookmark, e.shiftKey || e.ctrlKey, true);
-                                this.isDragging = false;
-                                this.dragDidMove = false;
-                                this.updateCursorStyle();
-                                return;
-                            }
-                        }
-                    }
-                }
-
-                // If not a bookmark click, handle as frequency tuning
+                // If not a bookmark click (bookmarks are handled by the overlay canvas click handler),
+                // handle as frequency tuning
                 if (this.config.onFrequencyClick) {
                     // Calculate frequency from server data range
                     const startFreq = this.centerFreq - this.totalBandwidth / 2;

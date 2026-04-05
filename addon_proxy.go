@@ -33,8 +33,15 @@ func NewAddonProxy(entry *AddonProxyEntry) (*AddonProxy, error) {
 	// e.g. name="grafana" → prefix="/addon/grafana"
 	prefix := "/addon/" + entry.Name
 
-	// Create the stdlib reverse proxy
+	// Create the stdlib reverse proxy.
+	// FlushInterval=-1 means "flush immediately after every write" — required for
+	// SSE (text/event-stream) endpoints so that each event frame is forwarded to
+	// the browser as soon as the backend writes it, rather than being buffered.
+	// Without this, ReverseProxy's internal io.Copy buffers the body and the
+	// browser never receives the streamed events, causing the connection to be
+	// interrupted. WebSocket upgrades are unaffected (they use http.Hijacker).
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	proxy.FlushInterval = -1
 
 	// Wrap the default Director to handle path stripping, IP headers, and
 	// optional WebSocket origin rewriting

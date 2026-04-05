@@ -431,6 +431,7 @@ func (lht *LoadHistoryTracker) GetHourlyHistory() []LoadHistory {
 			Load1Min:  math.Round(entry.Load1Min*100) / 100,  // 2 decimal places
 			Load5Min:  math.Round(entry.Load5Min*100) / 100,  // 2 decimal places
 			Load15Min: math.Round(entry.Load15Min*100) / 100, // 2 decimal places
+			CPUTempC:  math.Round(entry.CPUTempC),            // 0 decimal places
 			Status:    entry.Status,
 			Timestamp: entry.Timestamp,
 		}

@@ -68,6 +68,16 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
+// Flush implements http.Flusher so that SSE and streaming responses work
+// correctly when this wrapper is in the middleware chain. Without this,
+// the type assertion w.(http.Flusher) inside httputil.ReverseProxy fails
+// and flushes are silently dropped, breaking Server-Sent Events.
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // httpLogger creates a logging middleware that logs requests in Apache combined log format
 func httpLogger(logFile *os.File, geoIPService *GeoIPService, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

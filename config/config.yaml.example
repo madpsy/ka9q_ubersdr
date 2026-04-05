@@ -220,7 +220,7 @@ server:
   # By default, Docker host gateway is trusted (and tunnel server if configured)
   # Uncomment and add your reverse proxy IPs/ranges as needed
   trusted_proxy_ips:
-    - "172.20.0.1"            # Trust Docker host gateway (HPSDR bridge)
+    - "172.20.0.0/24"            # Trust Docker host
   # Additional examples (uncomment to use):
   #   - "127.0.0.1"           # Trust localhost
   #   - "172.17.0.0/16"       # Trust Docker bridge network

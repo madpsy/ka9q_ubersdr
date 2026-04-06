@@ -402,6 +402,13 @@ func main() {
 	// Set global config for tunnel server IP checking
 	globalConfig = config
 
+	// Create a top-level context for background goroutines (cancelled on process exit)
+	mainCtx, mainCancel := context.WithCancel(context.Background())
+	defer mainCancel()
+
+	// Start periodic DNS resolution of trusted_containers (every 5 seconds, silent on success)
+	config.Server.StartContainerDNSRefresh(mainCtx)
+
 	// Check for empty admin password
 	if config.Admin.Password == "" {
 		log.Fatalf("SECURITY ERROR: Admin password is not set!\n" +

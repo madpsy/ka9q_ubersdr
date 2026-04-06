@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -112,7 +116,7 @@ type ServerConfig struct {
 	EnforceSessionIPMatch         bool            `yaml:"enforce_session_ip_match"` // Enforce that WebSocket connections must come from same IP as /connection (default: false)
 	TimeoutBypassIPs              []string        `yaml:"timeout_bypass_ips"`       // List of IPs/CIDRs that bypass idle and max session time limits
 	TrustedProxyIPs               []string        `yaml:"trusted_proxy_ips"`        // List of IPs/CIDRs to trust X-Real-IP header from
-	DockerNetwork                 string          `yaml:"docker_network"`           // Docker network CIDR always trusted as proxy (default: "172.20.0.0/24")
+	TrustedContainers             []string        `yaml:"trusted_containers"`       // Docker container names to resolve and trust as proxies
 	BypassPassword                string          `yaml:"bypass_password"`          // Password that grants bypass privileges (empty = disabled)
 	PublicIQModes                 map[string]bool `yaml:"public_iq_modes"`          // IQ modes accessible without bypass authentication
 	EnableCORS                    bool            `yaml:"enable_cors"`
@@ -129,6 +133,8 @@ type ServerConfig struct {
 	CustomAdsTxt                  string          `yaml:"custom_ads_txt"`                    // Custom content for /ads.txt endpoint (for Google AdSense verification)
 	timeoutBypassNets             []*net.IPNet    // Parsed CIDR networks (internal use)
 	trustedProxyNets              []*net.IPNet    // Parsed CIDR networks for trusted proxies (internal use)
+	containerProxyIPs             []string        // Dynamically resolved container IPs (internal use)
+	containerProxyMu              sync.RWMutex    // Protects containerProxyIPs
 }
 
 // AudioConfig contains audio processing settings
@@ -404,6 +410,9 @@ func LoadConfig(filename string) (*Config, error) {
 	if err := config.Server.parseTrustedProxyIPs(); err != nil {
 		return nil, fmt.Errorf("failed to parse trusted_proxy_ips: %w", err)
 	}
+
+	// Perform initial DNS resolution of trusted container names (non-fatal)
+	config.Server.resolveContainerIPs()
 
 	// Parse Prometheus allowed hosts IPs/CIDRs
 	if config.Prometheus.Enabled {
@@ -909,22 +918,12 @@ func (sc *ServerConfig) IsIPTimeoutBypassed(ipStr string, password ...string) bo
 }
 
 // parseTrustedProxyIPs parses the trusted_proxy_ips list into CIDR networks.
-// The docker_network CIDR (default "172.20.0.0/24") is always prepended so
-// the Docker internal network is trusted even if the user omits it from their
-// config. If the user also lists the same (or an overlapping) CIDR in
-// trusted_proxy_ips it is simply appended; duplicate/overlapping entries are
-// harmless because IsTrustedProxy returns on the first match.
+// If the user also lists the same (or an overlapping) CIDR, duplicate/overlapping
+// entries are harmless because IsTrustedProxy returns on the first match.
 func (sc *ServerConfig) parseTrustedProxyIPs() error {
-	dockerNet := sc.DockerNetwork
-	if dockerNet == "" {
-		dockerNet = "172.20.0.0/24"
-	}
+	sc.trustedProxyNets = make([]*net.IPNet, 0, len(sc.TrustedProxyIPs))
 
-	// Build the full list: docker network first, then user-supplied entries.
-	allEntries := append([]string{dockerNet}, sc.TrustedProxyIPs...)
-	sc.trustedProxyNets = make([]*net.IPNet, 0, len(allEntries))
-
-	for _, ipStr := range allEntries {
+	for _, ipStr := range sc.TrustedProxyIPs {
 		// Check if it's a CIDR notation
 		if _, ipNet, err := net.ParseCIDR(ipStr); err == nil {
 			sc.trustedProxyNets = append(sc.trustedProxyNets, ipNet)
@@ -948,24 +947,75 @@ func (sc *ServerConfig) parseTrustedProxyIPs() error {
 	return nil
 }
 
-// IsTrustedProxy checks if an IP address is in the trusted proxy list
+// IsTrustedProxy checks if an IP address is in the trusted proxy list.
+// It checks both the statically configured trusted_proxy_ips CIDRs and the
+// dynamically resolved trusted_containers IPs.
 func (sc *ServerConfig) IsTrustedProxy(ipStr string) bool {
-	if len(sc.trustedProxyNets) == 0 {
-		return false
-	}
-
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
 		return false
 	}
 
+	// Check static CIDR list
 	for _, ipNet := range sc.trustedProxyNets {
 		if ipNet.Contains(ip) {
 			return true
 		}
 	}
 
+	// Check dynamically resolved container IPs
+	sc.containerProxyMu.RLock()
+	defer sc.containerProxyMu.RUnlock()
+	normalised := ip.String()
+	for _, cip := range sc.containerProxyIPs {
+		if cip == normalised {
+			return true
+		}
+	}
+
 	return false
+}
+
+// resolveContainerIPs performs a DNS lookup for each name in TrustedContainers
+// and stores the resulting IPs in containerProxyIPs under the write lock.
+// It is silent on success and logs a warning only on resolution failure.
+// Defaults of "tunnel-client" and "caddy" are always included.
+func (sc *ServerConfig) resolveContainerIPs() {
+	names := sc.TrustedContainers
+	if len(names) == 0 {
+		names = []string{"tunnel-client", "caddy"}
+	}
+
+	var resolved []string
+	for _, name := range names {
+		ips, err := net.LookupHost(name)
+		if err != nil {
+			log.Printf("WARNING: trusted_containers: failed to resolve '%s': %v", name, err)
+			continue
+		}
+		resolved = append(resolved, ips...)
+	}
+
+	sc.containerProxyMu.Lock()
+	sc.containerProxyIPs = resolved
+	sc.containerProxyMu.Unlock()
+}
+
+// StartContainerDNSRefresh starts a background goroutine that re-resolves
+// trusted_containers every 5 seconds. It exits when ctx is cancelled.
+func (sc *ServerConfig) StartContainerDNSRefresh(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				sc.resolveContainerIPs()
+			}
+		}
+	}()
 }
 
 // parseAllowedHosts parses the allowed_hosts list into CIDR networks

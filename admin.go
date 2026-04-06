@@ -953,6 +953,14 @@ func (ah *AdminHandler) handleGetConfig(w http.ResponseWriter, r *http.Request) 
 		if v, exists := server["custom_ads_txt"]; !exists || v == nil {
 			server["custom_ads_txt"] = ""
 		}
+		// Ensure list fields are present as empty slices (not nil/absent) so the
+		// admin UI renders them as editable lists rather than missing fields.
+		if v, exists := server["trusted_proxy_ips"]; !exists || v == nil {
+			server["trusted_proxy_ips"] = []interface{}{}
+		}
+		if v, exists := server["trusted_containers"]; !exists || v == nil {
+			server["trusted_containers"] = []interface{}{}
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)

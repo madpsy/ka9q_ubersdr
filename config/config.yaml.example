@@ -202,27 +202,27 @@ server:
   #   - "192.168.1.0/24"
   #   - "10.0.0.0/8"
 
-  # Docker internal network CIDR that is always trusted as a reverse proxy.
-  # Requests arriving from this network are allowed to set X-Real-IP /
-  # X-Forwarded-For headers so the real client IP is visible to UberSDR.
-  # Default: "172.20.0.0/16" (matches the sdr-network subnet in docker-compose.yml)
-  # Change this only if you have customised the Docker network subnet.
-  docker_network: "172.20.0.0/16"
+  # Docker container names to resolve via DNS and trust as reverse proxies.
+  # UberSDR resolves these names at startup and every 5 seconds thereafter,
+  # so containers that restart and get new IPs are picked up automatically.
+  # Resolution uses the OS resolver (/etc/resolv.conf), which inside Docker
+  # points to Docker's embedded DNS (127.0.0.11) — the same mechanism used
+  # by 'ping <container-name>'. Silent on success; warns only on failure.
+  # Defaults (used when this key is absent): tunnel-client, caddy
+  trusted_containers:
+    - "tunnel-client"
+    - "caddy"
 
-  # Additional IP addresses or CIDR ranges to trust X-Real-IP header from.
-  # The docker_network above is always trusted automatically — you do not need
-  # to repeat it here. Add extra entries for external reverse proxies such as
-  # Caddy, nginx, or Cloudflare running outside the Docker network.
-  # This works in addition to the tunnel server trust mechanism.
+  # Additional static IP addresses or CIDR ranges to trust X-Real-IP from.
+  # The trusted_containers above are resolved dynamically and do not need to
+  # be listed here. Add entries for proxies outside the Docker network or
+  # for static IPs that do not have a resolvable hostname.
   # Supports both IPv4 and IPv6 addresses with CIDR notation.
-  # Examples:
-  #   - "127.0.0.1"           # Single IPv4 address (localhost)
-  #   - "192.168.1.0/24"      # IPv4 CIDR range (local network)
-  #   - "::1"                 # Single IPv6 address (localhost)
-  #   - "2001:db8::/32"       # IPv6 CIDR range
-  #   - "172.17.0.0/16"       # Docker bridge network
-  # Uncomment and add your reverse proxy IPs/ranges as needed:
+  # If you add a CIDR that overlaps with an existing entry (e.g. a broader
+  # range that contains another entry) that is fine — overlapping entries
+  # are handled seamlessly.
   # trusted_proxy_ips:
+  #   - "172.20.0.0/24"       # Docker sdr-network subnet (if not using trusted_containers)
   #   - "127.0.0.1"           # Trust localhost
   #   - "172.17.0.0/16"       # Trust Docker bridge network
   #   - "10.0.0.0/8"          # Trust private network

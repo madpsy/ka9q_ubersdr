@@ -18704,11 +18704,11 @@ Referer: ${log.referer}`;
                     btn.textContent = `✅ ${data.status_code}`;
                     btn.style.background = '#28a745';
                 } else {
-                    btn.textContent = '❌';
+                    btn.textContent = '✕ Fail';
                     btn.style.background = '#dc3545';
                 }
             } catch (e) {
-                btn.textContent = '❌';
+                btn.textContent = '✕ Fail';
                 btn.style.background = '#dc3545';
             }
             reset();

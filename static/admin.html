@@ -4557,6 +4557,17 @@
             event.target.value = '';
         }
 
+        // Helper: return the last N labels of a hostname for compact display.
+        // e.g. rdnsShort("abc.def.myisp.com", 3) → "def.myisp.com"
+        // e.g. rdnsShort("mycontainer", 3)        → "mycontainer"  (unchanged)
+        // Full hostname is always shown on hover via the title attribute.
+        function rdnsShort(hostname, n = 3) {
+            if (!hostname) return '';
+            const parts = hostname.split('.');
+            if (parts.length <= n) return hostname;
+            return parts.slice(-n).join('.');
+        }
+
         // Helper function to format duration in a human-readable way
         function formatDuration(ms) {
             const seconds = Math.floor(ms / 1000);
@@ -4830,7 +4841,17 @@
                     }
                 }
                 if (sourceIP !== clientIP && sourceIP !== 'N/A') {
-                    ipDisplay += ` <span style="color: #666; font-size: 11px;">(via ${sourceIP})</span>`;
+                    const sourceName = audioSession?.source_name || spectrumSession?.source_name || '';
+                    const viaLabel = sourceName ? sourceName : sourceIP;
+                    const viaTitle = sourceName ? ` title="${sourceIP}"` : '';
+                    ipDisplay += ` <span style="color: #666; font-size: 11px;"${viaTitle}>(via ${viaLabel})</span>`;
+                }
+
+                // Add reverse DNS hostname if resolved (shown as last-3 labels, full on hover)
+                const reverseDNS = audioSession?.reverse_dns || spectrumSession?.reverse_dns || '';
+                if (reverseDNS) {
+                    const short = rdnsShort(reverseDNS);
+                    ipDisplay += `<br><span style="color: #888; font-size: 10px;" title="${reverseDNS}">🔍 ${short}</span>`;
                 }
 
                 // Add location field underneath if it exists and isn't empty

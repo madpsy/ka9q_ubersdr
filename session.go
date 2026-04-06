@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math"
 	"math/rand"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -89,6 +91,9 @@ type SessionManager struct {
 	uuidSpectrumSessions map[string]string          // Map of user_session_id to spectrum session ID (enforces 1 spectrum per UUID)
 	userSessionBands     map[string]map[string]bool // Map of user_session_id to visited bands (cumulative across all sessions)
 	userSessionModes     map[string]map[string]bool // Map of user_session_id to visited modes (cumulative across all sessions)
+	rdnsCache            map[string]string          // Map of clientIP to resolved PTR hostname ("" = no record)
+	rdnsResolved         map[string]bool            // Map of clientIP to whether lookup has completed
+	rdnsMu               sync.RWMutex               // Separate mutex for rdns maps to avoid hot-path contention
 	mu                   sync.RWMutex
 	config               *Config
 	radiod               *RadiodController
@@ -118,6 +123,8 @@ func NewSessionManager(config *Config, radiod *RadiodController, geoIPService *G
 		uuidSpectrumSessions: make(map[string]string),
 		userSessionBands:     make(map[string]map[string]bool),
 		userSessionModes:     make(map[string]map[string]bool),
+		rdnsCache:            make(map[string]string),
+		rdnsResolved:         make(map[string]bool),
 		config:               config,
 		radiod:               radiod,
 		maxSessions:          config.Server.MaxSessions,
@@ -1306,7 +1313,8 @@ func (sm *SessionManager) cleanupExpiredKickedUUIDs() {
 	}
 }
 
-// cleanupOrphanedUserAgents removes User-Agent entries for UUIDs that haven't had an active session for 5 minutes
+// cleanupOrphanedUserAgents removes User-Agent entries for UUIDs that haven't had an active session for 5 minutes.
+// It also removes rDNS cache entries for IPs that no longer have any active sessions.
 func (sm *SessionManager) cleanupOrphanedUserAgents() {
 	const orphanTimeout = 5 * time.Minute
 	now := time.Now()
@@ -1314,13 +1322,17 @@ func (sm *SessionManager) cleanupOrphanedUserAgents() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	// Build set of UUIDs with active sessions
+	// Build set of UUIDs and active client IPs with active sessions
 	activeUUIDs := make(map[string]bool)
+	activeIPs := make(map[string]bool)
 	for _, session := range sm.sessions {
 		if session.UserSessionID != "" {
 			activeUUIDs[session.UserSessionID] = true
 			// Update last seen time for active sessions
 			sm.userAgentLastSeen[session.UserSessionID] = now
+		}
+		if session.ClientIP != "" {
+			activeIPs[session.ClientIP] = true
 		}
 	}
 
@@ -1336,7 +1348,7 @@ func (sm *SessionManager) cleanupOrphanedUserAgents() {
 		}
 	}
 
-	// Remove orphaned entries
+	// Remove orphaned User-Agent entries
 	if len(toRemove) > 0 {
 		for _, uuid := range toRemove {
 			delete(sm.userAgents, uuid)
@@ -1344,6 +1356,19 @@ func (sm *SessionManager) cleanupOrphanedUserAgents() {
 			delete(sm.uuidToIP, uuid)
 		}
 	}
+
+	// Remove rDNS cache entries for IPs with no active sessions.
+	// Use a separate write lock so we don't hold both sm.mu and rdnsMu simultaneously.
+	sm.mu.Unlock()
+	sm.rdnsMu.Lock()
+	for ip := range sm.rdnsCache {
+		if !activeIPs[ip] {
+			delete(sm.rdnsCache, ip)
+			delete(sm.rdnsResolved, ip)
+		}
+	}
+	sm.rdnsMu.Unlock()
+	sm.mu.Lock() // re-acquire so the deferred Unlock() is balanced
 }
 
 // cleanupInactiveSessions removes sessions that have exceeded the timeout
@@ -1577,6 +1602,78 @@ func (sm *SessionManager) GetUUIDIP(userSessionID string) string {
 	defer sm.mu.RUnlock()
 
 	return sm.uuidToIP[userSessionID]
+}
+
+// PrefetchReverseDNS starts an async reverse DNS lookup for the given clientIP if one
+// has not already been started. It is safe to call multiple times for the same IP —
+// only the first call triggers a goroutine. The lookup is capped at 3 seconds to
+// prevent a build-up of slow goroutines when many clients connect simultaneously.
+func (sm *SessionManager) PrefetchReverseDNS(clientIP string) {
+	if clientIP == "" {
+		return
+	}
+
+	// Check under read lock first (fast path — already resolved or in progress)
+	sm.rdnsMu.RLock()
+	_, alreadyResolved := sm.rdnsResolved[clientIP]
+	sm.rdnsMu.RUnlock()
+
+	if alreadyResolved {
+		return // Lookup already done or in progress for this IP
+	}
+
+	// Mark as in-progress under write lock before spawning goroutine,
+	// so concurrent calls for the same IP don't each spawn their own goroutine.
+	sm.rdnsMu.Lock()
+	if _, alreadyResolved = sm.rdnsResolved[clientIP]; alreadyResolved {
+		sm.rdnsMu.Unlock()
+		return
+	}
+	// Mark resolved=false now to block further goroutines; will be set true when done.
+	sm.rdnsResolved[clientIP] = false
+	sm.rdnsMu.Unlock()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		r := &net.Resolver{}
+		addrs, err := r.LookupAddr(ctx, clientIP)
+
+		hostname := ""
+		if err == nil && len(addrs) > 0 {
+			// PTR records conventionally end with a trailing dot — strip it
+			hostname = strings.TrimSuffix(addrs[0], ".")
+		}
+
+		sm.rdnsMu.Lock()
+		sm.rdnsCache[clientIP] = hostname
+		sm.rdnsResolved[clientIP] = true
+		sm.rdnsMu.Unlock()
+
+		if hostname != "" {
+			log.Printf("rDNS: %s -> %s", clientIP, hostname)
+		}
+	}()
+}
+
+// GetReverseDNS returns the reverse DNS hostname for a clientIP.
+// resolved=false means the lookup is still in progress (or was never started).
+// resolved=true, hostname="" means the lookup completed but no PTR record was found.
+// resolved=true, hostname!="" means a PTR record was found.
+func (sm *SessionManager) GetReverseDNS(clientIP string) (hostname string, resolved bool) {
+	if clientIP == "" {
+		return "", false
+	}
+
+	sm.rdnsMu.RLock()
+	defer sm.rdnsMu.RUnlock()
+
+	resolved, exists := sm.rdnsResolved[clientIP]
+	if !exists {
+		return "", false
+	}
+	return sm.rdnsCache[clientIP], resolved
 }
 
 // AddAudioBytes atomically adds to the audio byte counter and updates sliding window
@@ -1814,6 +1911,14 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 			"country_code":    session.CountryCode,
 		}
 
+		// If the source IP is a known trusted container, include its name so the
+		// admin UI can display "via caddy" instead of "via 172.20.0.10".
+		if session.SourceIP != "" && session.SourceIP != session.ClientIP {
+			if name := sm.config.Server.GetContainerName(session.SourceIP); name != "" {
+				info["source_name"] = name
+			}
+		}
+
 		// Add type-specific info
 		if session.IsSpectrum {
 			info["bin_count"] = session.BinCount
@@ -1832,6 +1937,14 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 			// Add user_agent if available
 			if userAgent, exists := sm.userAgents[session.UserSessionID]; exists {
 				info["user_agent"] = userAgent
+			}
+		}
+
+		// Add reverse DNS only when lookup has completed AND a PTR record was found.
+		// Omit the field entirely while pending or when no PTR record exists.
+		if session.ClientIP != "" {
+			if hostname, resolved := sm.GetReverseDNS(session.ClientIP); resolved && hostname != "" {
+				info["reverse_dns"] = hostname
 			}
 		}
 

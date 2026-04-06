@@ -2454,6 +2454,9 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 	}
 	sessions.SetUUIDIP(req.UserSessionID, clientIP)
 
+	// Start async reverse DNS lookup for this client IP (no-op if already in progress or done)
+	sessions.PrefetchReverseDNS(clientIP)
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 }

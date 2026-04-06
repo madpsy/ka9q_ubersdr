@@ -406,7 +406,10 @@ func main() {
 	mainCtx, mainCancel := context.WithCancel(context.Background())
 	defer mainCancel()
 
-	// Start periodic DNS resolution of trusted_containers (every 5 seconds, silent on success)
+	// Perform initial DNS resolution of trusted container names, then start periodic refresh.
+	// Done here (not in LoadConfig) so it only runs once for the main config, not for every
+	// sub-config file load (bookmarks, bands, extensions, decoder).
+	config.Server.resolveContainerIPs()
 	config.Server.StartContainerDNSRefresh(mainCtx)
 
 	// Check for empty admin password

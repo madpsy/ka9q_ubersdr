@@ -411,9 +411,6 @@ func LoadConfig(filename string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse trusted_proxy_ips: %w", err)
 	}
 
-	// Perform initial DNS resolution of trusted container names (non-fatal)
-	config.Server.resolveContainerIPs()
-
 	// Parse Prometheus allowed hosts IPs/CIDRs
 	if config.Prometheus.Enabled {
 		if err := config.Prometheus.parseAllowedHosts(); err != nil {

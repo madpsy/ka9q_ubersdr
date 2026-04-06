@@ -126,7 +126,15 @@ func generateHTTPCaddyfile() string {
 # To enable HTTPS: set instance_reporting.generate_tls=true, instance.host, instance.tls=true, and admin.email
 
 :80 {
-    reverse_proxy ubersdr:8080
+    reverse_proxy ubersdr:8080 {
+        # Strip client-supplied proxy headers to prevent IP spoofing.
+        # Caddy will set its own authoritative X-Real-IP / X-Forwarded-For
+        # after these are removed.
+        header_up -X-Real-IP
+        header_up -X-Forwarded-For
+        header_up -X-Forwarded-Host
+        header_up -X-Forwarded-Proto
+    }
     encode gzip
     
     # Security headers
@@ -164,7 +172,13 @@ func generateHTTPSCaddyfile(host, email string, redirectToHTTPS bool) string {
 	       path /api/instance /api/description
 	   }
 	   handle @api_exceptions {
-	       reverse_proxy ubersdr:8080
+	       reverse_proxy ubersdr:8080 {
+	           # Strip client-supplied proxy headers to prevent IP spoofing.
+	           header_up -X-Real-IP
+	           header_up -X-Forwarded-For
+	           header_up -X-Forwarded-Host
+	           header_up -X-Forwarded-Proto
+	       }
 	   }
 
 	   # Redirect all other HTTP traffic to HTTPS using the configured domain
@@ -183,7 +197,15 @@ func generateHTTPSCaddyfile(host, email string, redirectToHTTPS bool) string {
 		httpBlock = `# HTTP (port 80) - respond to any host header
 :80 {
     # Reverse proxy to ubersdr container
-    reverse_proxy ubersdr:8080
+    reverse_proxy ubersdr:8080 {
+        # Strip client-supplied proxy headers to prevent IP spoofing.
+        # Caddy will set its own authoritative X-Real-IP / X-Forwarded-For
+        # after these are removed.
+        header_up -X-Real-IP
+        header_up -X-Forwarded-For
+        header_up -X-Forwarded-Host
+        header_up -X-Forwarded-Proto
+    }
     
     # Enable compression
     encode gzip
@@ -227,7 +249,15 @@ func generateHTTPSCaddyfile(host, email string, redirectToHTTPS bool) string {
 # HTTPS (port 443) - with Let's Encrypt
 https://%s {
     # Reverse proxy to ubersdr container
-    reverse_proxy ubersdr:8080
+    reverse_proxy ubersdr:8080 {
+        # Strip client-supplied proxy headers to prevent IP spoofing.
+        # Caddy will set its own authoritative X-Real-IP / X-Forwarded-For
+        # after these are removed.
+        header_up -X-Real-IP
+        header_up -X-Forwarded-For
+        header_up -X-Forwarded-Host
+        header_up -X-Forwarded-Proto
+    }
     
     # Enable compression
     encode gzip

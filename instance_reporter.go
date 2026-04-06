@@ -602,13 +602,27 @@ func (ir *InstanceReporter) sendReport() error {
 		}
 
 		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-			lastErr = fmt.Errorf("server returned status %d for %s (attempt %d/%d)", resp.StatusCode, url, attempt, maxRetries)
+			// Try to extract the error message from the JSON body for display purposes
+			var errBody map[string]interface{}
+			errMessage := ""
+			if decodeErr := json.NewDecoder(resp.Body).Decode(&errBody); decodeErr == nil {
+				if msg, ok := errBody["message"].(string); ok {
+					errMessage = msg
+				}
+			}
+
+			if errMessage != "" {
+				lastErr = fmt.Errorf("server returned status %d: %s (attempt %d/%d)", resp.StatusCode, errMessage, attempt, maxRetries)
+			} else {
+				lastErr = fmt.Errorf("server returned status %d for %s (attempt %d/%d)", resp.StatusCode, url, attempt, maxRetries)
+			}
 			log.Printf("%v", lastErr)
 
-			// Store error response
+			// Store error response, including the message from the body if available
 			ir.mu.Lock()
 			ir.lastResponseCode = resp.StatusCode
 			ir.lastResponseStatus = ""
+			ir.lastResponseMessage = errMessage
 			ir.lastReportError = lastErr.Error()
 			ir.mu.Unlock()
 
@@ -1313,7 +1327,19 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 				}
 
 				if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-					log.Printf("Startup report attempt %d/%d: server returned status %d", attempt, maxRetries, resp.StatusCode)
+					// Try to extract the error message from the JSON body for a more useful log
+					var errBody map[string]interface{}
+					errMessage := ""
+					if decodeErr := json.NewDecoder(resp.Body).Decode(&errBody); decodeErr == nil {
+						if msg, ok := errBody["message"].(string); ok {
+							errMessage = msg
+						}
+					}
+					if errMessage != "" {
+						log.Printf("Startup report attempt %d/%d: server returned status %d: %s", attempt, maxRetries, resp.StatusCode, errMessage)
+					} else {
+						log.Printf("Startup report attempt %d/%d: server returned status %d", attempt, maxRetries, resp.StatusCode)
+					}
 					if attempt < maxRetries {
 						time.Sleep(retryDelay)
 						return

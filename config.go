@@ -976,19 +976,28 @@ func (sc *ServerConfig) IsTrustedProxy(ipStr string) bool {
 	return false
 }
 
-// resolveContainerIPs performs a DNS lookup for each name in TrustedContainers
-// and stores the resulting IPs in containerProxyIPs under the write lock.
-// It is silent on success and logs a warning only on resolution failure.
-// Defaults of "tunnel-client" and "caddy" are always included.
+// resolveContainerIPs performs a DNS lookup for each name in TrustedContainers,
+// updates containerProxyIPs under the write lock, and logs whenever the resolved
+// set changes (including the initial resolution from empty).
+// Defaults of "tunnel-client" and "caddy" are used when TrustedContainers is empty.
+// Logs a warning on resolution failure.
 func (sc *ServerConfig) resolveContainerIPs() {
 	names := sc.TrustedContainers
 	if len(names) == 0 {
 		names = []string{"tunnel-client", "caddy"}
 	}
 
+	// Resolve each name; collect per-name results for logging.
+	type result struct {
+		name string
+		ips  []string
+		err  error
+	}
+	results := make([]result, 0, len(names))
 	var resolved []string
 	for _, name := range names {
 		ips, err := net.LookupHost(name)
+		results = append(results, result{name, ips, err})
 		if err != nil {
 			log.Printf("WARNING: trusted_containers: failed to resolve '%s': %v", name, err)
 			continue
@@ -996,9 +1005,32 @@ func (sc *ServerConfig) resolveContainerIPs() {
 		resolved = append(resolved, ips...)
 	}
 
+	// Detect whether the IP set has changed (initial call goes from nil → resolved, always logs).
 	sc.containerProxyMu.Lock()
+	changed := !stringSlicesEqual(sc.containerProxyIPs, resolved)
 	sc.containerProxyIPs = resolved
 	sc.containerProxyMu.Unlock()
+
+	if changed {
+		for _, r := range results {
+			if r.err == nil {
+				log.Printf("trusted_containers: '%s' resolved to %v", r.name, r.ips)
+			}
+		}
+	}
+}
+
+// stringSlicesEqual returns true if a and b contain the same elements in the same order.
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // StartContainerDNSRefresh starts a background goroutine that re-resolves

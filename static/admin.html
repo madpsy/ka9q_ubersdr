@@ -569,7 +569,7 @@
                     <button class="tab" onclick="switchTab('banned')">Banned IPs</button>
                     <button class="tab" onclick="switchTab('logs')">Logs</button>
                     <button class="tab" onclick="switchTab('visual')">Config</button>
-                    <button class="tab" onclick="switchTab('proxy')">Proxy</button>
+                    <button class="tab" onclick="switchTab('proxy')">Addons</button>
                     <button class="tab" onclick="switchTab('radiod')">Radiod</button>
                     <button class="tab" onclick="switchTab('radiod-channels')">Radiod Channels</button>
                     <button class="tab" onclick="switchTab('bookmarks')">Bookmarks</button>
@@ -670,12 +670,12 @@
                 <div id="proxyTab" class="tab-content">
                     <div style="margin-bottom: 20px; padding: 15px; background: #e8f5e9; border-radius: 5px; border: 1px solid #4caf50;">
                         <strong>Addon Proxies</strong> — reverse-proxy Docker addon containers through UberSDR.
-                        Each enabled proxy is accessible at <code>/addon/&lt;name&gt;/</code>.
+                        Each enabled addon is accessible at <code>/addon/&lt;name&gt;/</code>.
                     </div>
 
                     <!-- Warning banner (shown when require_admin is false) -->
                     <div id="proxyPublicWarning" style="display: none; margin-bottom: 15px; padding: 12px 15px; background: #fff3cd; border: 2px solid #ffc107; border-radius: 5px; color: #856404;">
-                        ⚠️ <strong>Public access warning:</strong> One or more proxies have <em>Require Admin</em> disabled.
+                        ⚠️ <strong>Public access warning:</strong> One or more addon proxies have <em>Require Admin</em> disabled.
                         If this instance is publicly accessible, those proxies will be open to the world without any authentication.
                     </div>
 

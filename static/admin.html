@@ -18660,7 +18660,6 @@ Referer: ${log.referer}`;
                     ? '<span style="color:#007bff;">Admin only</span>'
                     : '<span style="color:#dc3545; font-weight:bold;">⚠ Public</span>';
                 const nameEsc = p.name.replace(/"/g, '&quot;');
-                const testResultId = 'proxy-test-result-' + p.name.replace(/[^a-z0-9]/gi, '_');
                 html += `<tr style="border-bottom:1px solid #dee2e6;">`;
                 html += `<td style="padding:10px; font-weight:bold;">${p.name}</td>`;
                 html += `<td style="padding:10px; font-family:monospace;"><a href="${p.path}" target="_blank" style="color:#007bff;">${p.path}</a></td>`;
@@ -18668,11 +18667,10 @@ Referer: ${log.referer}`;
                 html += `<td style="padding:10px; text-align:center;">${enabledBadge}</td>`;
                 html += `<td style="padding:10px; text-align:center;">${authBadge}</td>`;
                 html += `<td style="padding:10px; text-align:right; white-space:nowrap;">`;
-                html += `<button class="btn" style="padding:4px 10px; font-size:12px; margin-right:5px; background:#17a2b8;" id="proxy-test-btn-${nameEsc}" onclick="testProxy('${nameEsc}')">Test</button>`;
+                html += `<button class="btn" style="padding:4px 10px; font-size:12px; margin-right:5px; background:#17a2b8; min-width:52px;" id="proxy-test-btn-${nameEsc}" onclick="testProxy('${nameEsc}')">Test</button>`;
                 html += `<button class="btn btn-secondary" style="padding:4px 10px; font-size:12px; margin-right:5px;" onclick='showEditProxyForm(${JSON.stringify(p)})'>Edit</button>`;
                 html += `<button class="btn btn-danger" style="padding:4px 10px; font-size:12px;" onclick="deleteProxy('${nameEsc}')">Delete</button>`;
                 html += `</td></tr>`;
-                html += `<tr id="${testResultId}" style="display:none;"><td colspan="6" style="padding:0 10px 10px 10px;"><div id="${testResultId}-inner"></div></td></tr>`;
             });
 
             html += '</tbody></table>';
@@ -18680,36 +18678,40 @@ Referer: ${log.referer}`;
         }
 
         async function testProxy(name) {
-            const resultRowId = 'proxy-test-result-' + name.replace(/[^a-z0-9]/gi, '_');
-            const resultRow = document.getElementById(resultRowId);
-            const resultInner = document.getElementById(resultRowId + '-inner');
             const btn = document.getElementById('proxy-test-btn-' + name);
+            if (!btn || btn.disabled) return;
 
-            if (!resultRow || !resultInner) return;
+            btn.disabled = true;
+            btn.textContent = '⏳';
+            btn.style.background = '#17a2b8';
 
-            // Show row with a spinner while testing
-            resultRow.style.display = '';
-            resultInner.innerHTML = '<span style="color:#666; font-size:13px;">⏳ Testing connection...</span>';
-            if (btn) { btn.disabled = true; btn.textContent = 'Testing…'; }
+            const reset = () => setTimeout(() => {
+                btn.textContent = 'Test';
+                btn.style.background = '#17a2b8';
+                btn.disabled = false;
+            }, 2000);
 
             try {
                 const resp = await authenticatedFetch('/admin/addon-proxies/test?name=' + encodeURIComponent(name));
                 if (!resp) {
-                    resultInner.innerHTML = '<span style="color:#dc3545; font-size:13px;">❌ Request failed (auth error?)</span>';
+                    btn.textContent = '❌';
+                    btn.style.background = '#dc3545';
+                    reset();
                     return;
                 }
                 const data = await resp.json();
                 if (data.success) {
-                    resultInner.innerHTML = `<span style="color:#28a745; font-size:13px; font-weight:bold;">✅ Reachable</span> <span style="color:#555; font-size:13px;">— HTTP ${data.status_code} from <code>${data.url}</code></span>`;
+                    btn.textContent = `✅ ${data.status_code}`;
+                    btn.style.background = '#28a745';
                 } else {
-                    const errMsg = data.error || 'unknown error';
-                    resultInner.innerHTML = `<span style="color:#dc3545; font-size:13px; font-weight:bold;">❌ Unreachable</span> <span style="color:#555; font-size:13px;">— <code>${errMsg}</code></span>`;
+                    btn.textContent = '❌';
+                    btn.style.background = '#dc3545';
                 }
             } catch (e) {
-                resultInner.innerHTML = `<span style="color:#dc3545; font-size:13px;">❌ Error: ${e.message}</span>`;
-            } finally {
-                if (btn) { btn.disabled = false; btn.textContent = 'Test'; }
+                btn.textContent = '❌';
+                btn.style.background = '#dc3545';
             }
+            reset();
         }
 
         function clearProxyFormErrors() {

@@ -3143,13 +3143,6 @@ func getClientIP(r *http.Request) string {
 					sourceIP, xri, trimmedXRI)
 			}
 
-			if DebugMode {
-				if isTunnelServer {
-					log.Printf("DEBUG: Trusted X-Real-IP from tunnel server: sourceIP=%s, X-Real-IP=%s, clientIP=%s", sourceIP, xri, clientIP)
-				} else {
-					log.Printf("DEBUG: Trusted X-Real-IP from trusted proxy: sourceIP=%s, X-Real-IP=%s, clientIP=%s", sourceIP, xri, clientIP)
-				}
-			}
 			return clientIP
 		}
 
@@ -3165,9 +3158,6 @@ func getClientIP(r *http.Request) string {
 				xffIP = host
 			}
 			if xffIP != "" {
-				if DebugMode {
-					log.Printf("DEBUG: Trusted X-Forwarded-For from %s: clientIP=%s", sourceIP, xffIP)
-				}
 				return xffIP
 			}
 		}

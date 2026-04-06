@@ -7578,7 +7578,7 @@ document.addEventListener('DOMContentLoaded', () => {
             maxDb: -20,
             colorScheme: 'jet',
             intensity: 0.30,  // Default +0.30 for brighter display
-            contrast: 70,     // Default 70 for more noise suppression
+            contrast: 35,     // Default 35 - lower threshold shows more signals in auto mode
             showGrid: true,
             showLabels: true,
             onConnect: () => {
@@ -7873,8 +7873,8 @@ function updateSpectrumAutoAdjust() {
     const minDb = -120;
     const maxDb = 0;
     const normalizedNoiseFloor = (avgNoiseFloor - minDb) / (maxDb - minDb);
-    // Increase contrast to better suppress noise floor (add 20-30 instead of 10)
-    const targetContrast = Math.max(0, Math.min(100, normalizedNoiseFloor * 100 + 25));
+    // Moderate contrast offset - suppress noise floor without hiding weak signals
+    const targetContrast = Math.max(0, Math.min(100, normalizedNoiseFloor * 100 + 5));
 
     // Intensity: Reduce brightness to prevent signals from being too hot
     // Negative values darken the display

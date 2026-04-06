@@ -468,7 +468,7 @@ class SpectrumDisplay {
             rangeMargin: config.rangeMargin || 5, // dB margin for auto-range
             colorScheme: config.colorScheme || 'jet', // Default to jet color scheme
             intensity: config.intensity !== undefined ? config.intensity : 0.20, // Intensity adjustment (-1.0 to +1.0)
-            contrast: config.contrast !== undefined ? config.contrast : 70, // Contrast threshold (0-100)
+            contrast: config.contrast !== undefined ? config.contrast : 35, // Contrast threshold (0-100), lower = more signals visible in auto mode
             showGrid: config.showGrid !== false,
             showLabels: config.showLabels !== false,
             updateRate: config.updateRate || 50, // ms

@@ -104,7 +104,7 @@ func httpLogger(logFile *os.File, geoIPService *GeoIPService, next http.Handler)
 			// Perform GeoIP lookup if service is available
 			var country, countryCode, continent, continentCode string
 			if geoIPService != nil && geoIPService.IsEnabled() {
-				if result, err := geoIPService.Lookup(clientIP); err == nil {
+				if result, err := geoIPService.Lookup(clientIP, false); err == nil {
 					country = result.Country
 					countryCode = result.CountryCode
 					continent = result.Continent
@@ -189,7 +189,7 @@ func httpLogger(logFile *os.File, geoIPService *GeoIPService, next http.Handler)
 		// Perform GeoIP lookup if service is available
 		var country, countryCode, continent, continentCode string
 		if geoIPService != nil && geoIPService.IsEnabled() {
-			if result, err := geoIPService.Lookup(clientIP); err == nil {
+			if result, err := geoIPService.Lookup(clientIP, false); err == nil {
 				country = result.Country
 				countryCode = result.CountryCode
 				continent = result.Continent
@@ -2511,7 +2511,7 @@ func handleMyIP(w http.ResponseWriter, r *http.Request, geoIPService *GeoIPServi
 
 	// Add GeoIP information if available
 	if geoIPService != nil && geoIPService.IsEnabled() {
-		if result, err := geoIPService.Lookup(clientIP); err == nil {
+		if result, err := geoIPService.Lookup(clientIP, false); err == nil {
 			// Add all available GeoIP fields
 			response["country"] = result.Country
 			response["country_code"] = result.CountryCode
@@ -2663,7 +2663,7 @@ func handleStats(w http.ResponseWriter, r *http.Request, sessions *SessionManage
 
 						// Perform GeoIP lookup if service is available
 						if sessions.geoIPService != nil && sessions.geoIPService.IsEnabled() {
-							if result, err := sessions.geoIPService.Lookup(clientIP); err == nil {
+							if result, err := sessions.geoIPService.Lookup(clientIP, false); err == nil {
 								// Add latitude and longitude if available
 								if result.Latitude != nil {
 									sessionList[i]["latitude"] = *result.Latitude

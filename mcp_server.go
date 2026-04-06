@@ -591,7 +591,7 @@ func (m *MCPServer) handleGetActiveSessions(ctx context.Context, request mcp.Cal
 
 				// Add GeoIP coordinates if available
 				if m.geoIPService != nil && m.geoIPService.IsEnabled() {
-					if result, err := m.geoIPService.Lookup(session.ClientIP); err == nil {
+					if result, err := m.geoIPService.Lookup(session.ClientIP, false); err == nil {
 						if result.Latitude != nil {
 							sessionInfo["latitude"] = *result.Latitude
 						}

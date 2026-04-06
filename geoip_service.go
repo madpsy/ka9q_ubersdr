@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/oschwald/geoip2-golang"
 )
@@ -20,6 +22,7 @@ type GeoIPService struct {
 // GeoIPResult contains geolocation information for an IP address
 type GeoIPResult struct {
 	IP            string `json:"ip"`
+	Hostname      string `json:"hostname,omitempty"` // Reverse DNS hostname (only populated when requested)
 	Country       string `json:"country"`
 	CountryCode   string `json:"country_code"`
 	Continent     string `json:"continent,omitempty"`
@@ -131,8 +134,9 @@ func (g *GeoIPService) GetCountryCode(ipStr string) (string, error) {
 	return record.Country.IsoCode, nil
 }
 
-// Lookup performs a full geolocation lookup for an IP address
-func (g *GeoIPService) Lookup(ipStr string) (*GeoIPResult, error) {
+// Lookup performs a full geolocation lookup for an IP address.
+// If reverseDNS is true, a reverse DNS lookup is attempted with a 500ms timeout.
+func (g *GeoIPService) Lookup(ipStr string, reverseDNS bool) (*GeoIPResult, error) {
 	if !g.enabled {
 		return nil, fmt.Errorf("GeoIP service not enabled")
 	}
@@ -150,6 +154,21 @@ func (g *GeoIPService) Lookup(ipStr string) (*GeoIPResult, error) {
 
 	result := &GeoIPResult{
 		IP: ipStr,
+	}
+
+	// Perform reverse DNS lookup if requested
+	if reverseDNS {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		resolver := &net.Resolver{}
+		if names, err := resolver.LookupAddr(ctx, ipStr); err == nil && len(names) > 0 {
+			// Strip trailing dot from PTR record if present
+			hostname := names[0]
+			if len(hostname) > 0 && hostname[len(hostname)-1] == '.' {
+				hostname = hostname[:len(hostname)-1]
+			}
+			result.Hostname = hostname
+		}
 	}
 
 	if cityErr == nil {
@@ -294,7 +313,7 @@ func (g *GeoIPService) LookupSafe(ipStr string) (country, countryCode string) {
 		return "", ""
 	}
 
-	result, err := g.Lookup(ipStr)
+	result, err := g.Lookup(ipStr, false)
 	if err != nil {
 		return "", ""
 	}

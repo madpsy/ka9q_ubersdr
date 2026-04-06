@@ -2251,7 +2251,7 @@ func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 		for i := range sessions {
 			if clientIP, ok := sessions[i]["client_ip"].(string); ok && clientIP != "" {
 				// Perform GeoIP lookup
-				if result, err := ah.geoIPService.Lookup(clientIP); err == nil {
+				if result, err := ah.geoIPService.Lookup(clientIP, false); err == nil {
 					// Add latitude and longitude if available
 					if result.Latitude != nil {
 						sessions[i]["latitude"] = *result.Latitude
@@ -6362,7 +6362,8 @@ func (ah *AdminHandler) HandleGeoIPLookup(w http.ResponseWriter, r *http.Request
 	}
 
 	var req struct {
-		IP string `json:"ip"`
+		IP         string `json:"ip"`
+		ReverseDNS bool   `json:"reverse_dns"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -6376,7 +6377,7 @@ func (ah *AdminHandler) HandleGeoIPLookup(w http.ResponseWriter, r *http.Request
 	}
 
 	// Perform lookup
-	result, err := ah.geoIPService.Lookup(req.IP)
+	result, err := ah.geoIPService.Lookup(req.IP, req.ReverseDNS)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Lookup failed: %v", err), http.StatusBadRequest)
 		return
@@ -6429,7 +6430,7 @@ func (ah *AdminHandler) HandleSessionsWithCountries(w http.ResponseWriter, r *ht
 		}
 
 		// Perform full GeoIP lookup to get city and region information
-		geoResult, err := ah.geoIPService.Lookup(clientIP)
+		geoResult, err := ah.geoIPService.Lookup(clientIP, false)
 
 		var country, countryCode, region, city string
 		if err == nil && geoResult != nil {
@@ -6488,7 +6489,7 @@ func (ah *AdminHandler) HandleGeoIPHealth(w http.ResponseWriter, r *http.Request
 
 	if ah.geoIPService != nil && ah.geoIPService.IsEnabled() {
 		// Test with a known IP (Google DNS)
-		_, err := ah.geoIPService.Lookup("8.8.8.8")
+		_, err := ah.geoIPService.Lookup("8.8.8.8", false)
 		if err != nil {
 			health["enabled"] = true
 			health["status"] = "error"

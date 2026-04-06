@@ -274,7 +274,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 	// This will use fresh GeoIP data which may be more accurate than stored event data
 	if geoIPService != nil && geoIPService.IsEnabled() {
 		for ip, info := range ipSessions {
-			geoResult, err := geoIPService.Lookup(ip)
+			geoResult, err := geoIPService.Lookup(ip, false)
 			if err != nil {
 				// GeoIP lookup failed, fall back to event country if available
 				country := info.EventCountry

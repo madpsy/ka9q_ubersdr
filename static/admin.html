@@ -17369,7 +17369,7 @@ const tooltipLine2 = timeStr;
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ ip: ip })
+                body: JSON.stringify({ ip: ip, reverse_dns: true })
             })
             .then(response => {
                 if (!response.ok) {
@@ -17384,6 +17384,9 @@ const tooltipLine2 = timeStr;
                 // IP Address (always present)
                 html += `<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">`;
                 html += `<strong style="color: #667eea;">IP Address:</strong> ${data.ip || 'N/A'}`;
+                if (data.hostname) {
+                    html += `<br><strong style="color: #667eea;">Hostname:</strong> ${data.hostname}`;
+                }
                 html += `</div>`;
                 
                 // Location Information

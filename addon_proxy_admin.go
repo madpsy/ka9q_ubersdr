@@ -34,6 +34,78 @@ func (ah *AdminHandler) HandleAddonProxies(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// HandleAddonProxyTest performs a connectivity test against the backend of a named
+// addon proxy entry. It issues an internal GET to http://<host>:<port>/ with a
+// 3-second timeout and returns whether the connection succeeded together with the
+// HTTP response code (if one was received).
+//
+//	GET /admin/addon-proxies/test?name=X
+func (ah *AdminHandler) HandleAddonProxyTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		http.Error(w, "Missing ?name= query parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Find the entry in the current in-memory config (or re-read from disk).
+	ah.addonsMu.Lock()
+	var entry *AddonProxyEntry
+	if ah.addonsConfig != nil {
+		for i := range ah.addonsConfig.Proxies {
+			if ah.addonsConfig.Proxies[i].Name == name {
+				e := ah.addonsConfig.Proxies[i]
+				entry = &e
+				break
+			}
+		}
+	}
+	ah.addonsMu.Unlock()
+
+	if entry == nil {
+		http.Error(w, fmt.Sprintf("Addon proxy %q not found", name), http.StatusNotFound)
+		return
+	}
+
+	targetURL := fmt.Sprintf("http://%s:%d/", entry.Host, entry.Port)
+
+	client := &http.Client{
+		Timeout: 3 * time.Second,
+		// Do not follow redirects — we just want to know if the backend is reachable.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	resp, err := client.Get(targetURL)
+	if err != nil {
+		log.Printf("Admin: addon proxy test %q → %s: %v", name, targetURL, err)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":     false,
+			"status_code": 0,
+			"error":       err.Error(),
+			"url":         targetURL,
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	log.Printf("Admin: addon proxy test %q → %s: HTTP %d", name, targetURL, resp.StatusCode)
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":     true,
+		"status_code": resp.StatusCode,
+		"error":       "",
+		"url":         targetURL,
+	})
+}
+
 // HandleAddonProxiesRestart triggers a server restart (addon proxy config is already
 // persisted on each add/edit/delete, so no save step is needed here).
 func (ah *AdminHandler) HandleAddonProxiesRestart(w http.ResponseWriter, r *http.Request) {

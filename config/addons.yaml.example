@@ -114,4 +114,4 @@ proxies:
     rewrite_origin: false
     allowed_ips:
       - "0.0.0.0/0"
-    rate_limit: 100
+    rate_limit: 250

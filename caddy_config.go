@@ -127,18 +127,12 @@ func generateHTTPCaddyfile() string {
 
 :80 {
     reverse_proxy ubersdr:8080 {
-        # Strip any client-supplied proxy headers to prevent IP spoofing,
-        # then explicitly set authoritative values from the real connecting client.
-        # {remote_host} is the Caddyfile placeholder for the connecting client's IP
-        # address (host portion only, no port, no DNS lookup).
+        # Strip any client-supplied proxy headers to prevent IP spoofing.
+        # Caddy automatically appends the real client IP to X-Forwarded-For after the strip.
         header_up -X-Real-IP
         header_up -X-Forwarded-For
         header_up -X-Forwarded-Host
         header_up -X-Forwarded-Proto
-        header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
-        header_up X-Forwarded-Proto {scheme}
-        header_up X-Forwarded-Host {host}
     }
     encode gzip
     
@@ -178,18 +172,12 @@ func generateHTTPSCaddyfile(host, email string, redirectToHTTPS bool) string {
 	   }
 	   handle @api_exceptions {
 	       reverse_proxy ubersdr:8080 {
-	           # Strip any client-supplied proxy headers to prevent IP spoofing,
-	           # then explicitly set authoritative values from the real connecting client.
-	           # {remote_host} is the Caddyfile placeholder for the connecting client's IP
-	           # address (host portion only, no port, no DNS lookup).
+	           # Strip any client-supplied proxy headers to prevent IP spoofing.
+	           # Caddy automatically appends the real client IP to X-Forwarded-For after the strip.
 	           header_up -X-Real-IP
 	           header_up -X-Forwarded-For
 	           header_up -X-Forwarded-Host
 	           header_up -X-Forwarded-Proto
-	           header_up X-Real-IP {remote_host}
-	           header_up X-Forwarded-For {remote_host}
-	           header_up X-Forwarded-Proto {scheme}
-	           header_up X-Forwarded-Host {host}
 	       }
 	   }
 
@@ -210,18 +198,12 @@ func generateHTTPSCaddyfile(host, email string, redirectToHTTPS bool) string {
 :80 {
     # Reverse proxy to ubersdr container
     reverse_proxy ubersdr:8080 {
-        # Strip any client-supplied proxy headers to prevent IP spoofing,
-        # then explicitly set authoritative values from the real connecting client.
-        # {remote_host} is the Caddyfile placeholder for the connecting client's IP
-        # address (host portion only, no port, no DNS lookup).
+        # Strip any client-supplied proxy headers to prevent IP spoofing.
+        # Caddy automatically appends the real client IP to X-Forwarded-For after the strip.
         header_up -X-Real-IP
         header_up -X-Forwarded-For
         header_up -X-Forwarded-Host
         header_up -X-Forwarded-Proto
-        header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
-        header_up X-Forwarded-Proto {scheme}
-        header_up X-Forwarded-Host {host}
     }
     
     # Enable compression
@@ -267,18 +249,12 @@ func generateHTTPSCaddyfile(host, email string, redirectToHTTPS bool) string {
 https://%s {
     # Reverse proxy to ubersdr container
     reverse_proxy ubersdr:8080 {
-        # Strip any client-supplied proxy headers to prevent IP spoofing,
-        # then explicitly set authoritative values from the real connecting client.
-        # {remote_host} is the Caddyfile placeholder for the connecting client's IP
-        # address (host portion only, no port, no DNS lookup).
+        # Strip any client-supplied proxy headers to prevent IP spoofing.
+        # Caddy automatically appends the real client IP to X-Forwarded-For after the strip.
         header_up -X-Real-IP
         header_up -X-Forwarded-For
         header_up -X-Forwarded-Host
         header_up -X-Forwarded-Proto
-        header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
-        header_up X-Forwarded-Proto {scheme}
-        header_up X-Forwarded-Host {host}
     }
     
     # Enable compression

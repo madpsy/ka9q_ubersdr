@@ -3726,8 +3726,15 @@ class SpectrumDisplay {
 
         // Setup smoothing checkbox handler
         if (smoothCheckbox) {
+            // Load saved preference from localStorage (default to false/unchecked)
+            const savedSmoothState = localStorage.getItem('spectrumSmoothEnabled');
+            const isSmoothEnabled = savedSmoothState === 'true'; // Only true if explicitly saved as 'true'
+            smoothCheckbox.checked = isSmoothEnabled;
+            this.smoothingEnabled = isSmoothEnabled;
+
             smoothCheckbox.addEventListener('change', (e) => {
                 this.smoothingEnabled = e.target.checked;
+                localStorage.setItem('spectrumSmoothEnabled', e.target.checked.toString());
                 console.log(`Spectrum smoothing ${this.smoothingEnabled ? 'enabled' : 'disabled'}`);
                 // Clear history when toggling to avoid artifacts
                 this.lineGraphDataHistory = [];

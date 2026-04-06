@@ -127,10 +127,9 @@ func generateHTTPCaddyfile() string {
 
 :80 {
     reverse_proxy ubersdr:8080 {
-        # Strip any client-supplied proxy headers to prevent IP spoofing.
-        # Caddy automatically appends the real client IP to X-Forwarded-For after the strip.
+        # Strip client-supplied proxy headers to prevent IP spoofing.
+        # X-Forwarded-For is NOT stripped so Caddy can append the real client IP to it.
         header_up -X-Real-IP
-        header_up -X-Forwarded-For
         header_up -X-Forwarded-Host
         header_up -X-Forwarded-Proto
     }
@@ -172,10 +171,9 @@ func generateHTTPSCaddyfile(host, email string, redirectToHTTPS bool) string {
 	   }
 	   handle @api_exceptions {
 	       reverse_proxy ubersdr:8080 {
-	           # Strip any client-supplied proxy headers to prevent IP spoofing.
-	           # Caddy automatically appends the real client IP to X-Forwarded-For after the strip.
+	           # Strip client-supplied proxy headers to prevent IP spoofing.
+	           # X-Forwarded-For is NOT stripped so Caddy can append the real client IP to it.
 	           header_up -X-Real-IP
-	           header_up -X-Forwarded-For
 	           header_up -X-Forwarded-Host
 	           header_up -X-Forwarded-Proto
 	       }
@@ -198,10 +196,9 @@ func generateHTTPSCaddyfile(host, email string, redirectToHTTPS bool) string {
 :80 {
     # Reverse proxy to ubersdr container
     reverse_proxy ubersdr:8080 {
-        # Strip any client-supplied proxy headers to prevent IP spoofing.
-        # Caddy automatically appends the real client IP to X-Forwarded-For after the strip.
+        # Strip client-supplied proxy headers to prevent IP spoofing.
+        # X-Forwarded-For is NOT stripped so Caddy can append the real client IP to it.
         header_up -X-Real-IP
-        header_up -X-Forwarded-For
         header_up -X-Forwarded-Host
         header_up -X-Forwarded-Proto
     }
@@ -249,10 +246,9 @@ func generateHTTPSCaddyfile(host, email string, redirectToHTTPS bool) string {
 https://%s {
     # Reverse proxy to ubersdr container
     reverse_proxy ubersdr:8080 {
-        # Strip any client-supplied proxy headers to prevent IP spoofing.
-        # Caddy automatically appends the real client IP to X-Forwarded-For after the strip.
+        # Strip client-supplied proxy headers to prevent IP spoofing.
+        # X-Forwarded-For is NOT stripped so Caddy can append the real client IP to it.
         header_up -X-Real-IP
-        header_up -X-Forwarded-For
         header_up -X-Forwarded-Host
         header_up -X-Forwarded-Proto
     }

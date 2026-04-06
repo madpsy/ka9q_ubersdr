@@ -691,13 +691,13 @@
 
                         <div class="config-field">
                             <label>Name <span style="color:#999; font-weight:normal;">(lowercase letters, digits, hyphens, underscores; max 15 chars)</span></label>
-                            <input type="text" id="proxyFormName" placeholder="e.g. cwskimmer" maxlength="15" oninput="validateProxyField('name')" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
+                            <input type="text" id="proxyFormName" placeholder="e.g. cwskimmer" maxlength="15" oninput="validateProxyField('name'); applyProxyAdminLock(this.value, document.getElementById('proxyFormHost').value)" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
                             <div id="proxyNameError" style="display:none; color:#dc3545; font-size:12px; margin-top:4px;"></div>
                         </div>
 
                         <div class="config-field">
                             <label>Host <span style="color:#999; font-weight:normal;">(Docker container hostname; max 25 chars)</span></label>
-                            <input type="text" id="proxyFormHost" placeholder="e.g. cwskimmer" maxlength="25" oninput="validateProxyField('host')" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
+                            <input type="text" id="proxyFormHost" placeholder="e.g. cwskimmer" maxlength="25" oninput="validateProxyField('host'); applyProxyAdminLock(document.getElementById('proxyFormName').value, this.value)" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
                             <div id="proxyHostError" style="display:none; color:#dc3545; font-size:12px; margin-top:4px;"></div>
                         </div>
 
@@ -719,6 +719,9 @@
                                 <input type="checkbox" id="proxyFormRequireAdmin" onchange="proxyAdminCheckChanged()" style="width:auto; margin:0; cursor:pointer;">
                                 Require Admin authentication to access this proxy
                             </label>
+                            <div id="proxyRequireAdminLockNote" style="display:none; margin-top:8px; padding:10px; background:#e3f2fd; border:1px solid #2196f3; border-radius:4px; color:#0d47a1; font-size:13px;">
+                                🔒 <strong>Locked:</strong> Admin authentication cannot be disabled for CW Skimmer proxies.
+                            </div>
                             <div id="proxyRequireAdminWarning" style="display:none; margin-top:8px; padding:10px; background:#fff3cd; border:1px solid #ffc107; border-radius:4px; color:#856404; font-size:13px;">
                                 ⚠️ <strong>Warning:</strong> Disabling admin authentication means this proxy will be accessible to anyone who can reach this server.
                                 If your instance is publicly accessible, this proxy will be open to the world.
@@ -18679,6 +18682,29 @@ Referer: ${log.referer}`;
             });
         }
 
+        function isCWSkimmerProxy(name, host) {
+            const n = (name || '').trim().toLowerCase();
+            const h = (host || '').trim().toLowerCase();
+            return n === 'cwskimmer' || h === 'cwskimmer';
+        }
+
+        function applyProxyAdminLock(name, host) {
+            const locked = isCWSkimmerProxy(name, host);
+            const cb = document.getElementById('proxyFormRequireAdmin');
+            const warning = document.getElementById('proxyRequireAdminWarning');
+            const lockNote = document.getElementById('proxyRequireAdminLockNote');
+            if (locked) {
+                cb.checked = true;
+                cb.disabled = true;
+                if (lockNote) lockNote.style.display = 'block';
+                warning.style.display = 'none';
+            } else {
+                cb.disabled = false;
+                if (lockNote) lockNote.style.display = 'none';
+                warning.style.display = cb.checked ? 'none' : 'block';
+            }
+        }
+
         function showAddProxyForm() {
             proxyEditingName = null;
             document.getElementById('proxyFormTitle').textContent = 'Add Addon Proxy';
@@ -18693,6 +18719,7 @@ Referer: ${log.referer}`;
             document.getElementById('proxyFormRateLimit').value = '0';
             document.getElementById('proxyFormAllowedIPs').value = '0.0.0.0/0';
             document.getElementById('proxyRequireAdminWarning').style.display = 'none';
+            applyProxyAdminLock('', '');
             clearProxyFormErrors();
             document.getElementById('proxyForm').style.display = 'block';
             document.getElementById('proxyForm').scrollIntoView({ behavior: 'smooth' });
@@ -18712,6 +18739,7 @@ Referer: ${log.referer}`;
             document.getElementById('proxyFormRateLimit').value = proxy.rate_limit || 0;
             document.getElementById('proxyFormAllowedIPs').value = (proxy.allowed_ips || []).join('\n');
             document.getElementById('proxyRequireAdminWarning').style.display = proxy.require_admin ? 'none' : 'block';
+            applyProxyAdminLock(proxy.name, proxy.host);
             clearProxyFormErrors();
             document.getElementById('proxyForm').style.display = 'block';
             document.getElementById('proxyForm').scrollIntoView({ behavior: 'smooth' });
@@ -18723,6 +18751,13 @@ Referer: ${log.referer}`;
         }
 
         function proxyAdminCheckChanged() {
+            const name = document.getElementById('proxyFormName').value;
+            const host = document.getElementById('proxyFormHost').value;
+            if (isCWSkimmerProxy(name, host)) {
+                // Force it back on — cannot be disabled for cwskimmer
+                document.getElementById('proxyFormRequireAdmin').checked = true;
+                return;
+            }
             const checked = document.getElementById('proxyFormRequireAdmin').checked;
             document.getElementById('proxyRequireAdminWarning').style.display = checked ? 'none' : 'block';
         }

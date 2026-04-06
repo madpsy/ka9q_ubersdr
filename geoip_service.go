@@ -158,7 +158,7 @@ func (g *GeoIPService) Lookup(ipStr string, reverseDNS bool) (*GeoIPResult, erro
 
 	// Perform reverse DNS lookup if requested
 	if reverseDNS {
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 		resolver := &net.Resolver{}
 		if names, err := resolver.LookupAddr(ctx, ipStr); err == nil && len(names) > 0 {

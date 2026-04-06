@@ -531,8 +531,8 @@ class SpectrumDisplay {
         // Auto-range history for temporal smoothing (matching app.js waterfall behavior)
         this.autoRangeMinHistory = []; // Track minimum values over time for stable noise floor
         this.autoRangeMaxHistory = []; // Track maximum values over time for stable ceiling
-        this.autoRangeMinHistoryMaxAge = 2000; // 2 second window for noise floor (matches app.js)
-        this.autoRangeMaxHistoryMaxAge = 20000; // 20 second window for maximum (handles FT8 cycles, matches app.js)
+        this.autoRangeMinHistoryMaxAge = 2000; // 2 second window for noise floor
+        this.autoRangeMaxHistoryMaxAge = 5000; // 5 second window for maximum (faster recovery after strong signals)
 
         // Waterfall
         this.waterfallImageData = null;
@@ -2978,18 +2978,26 @@ class SpectrumDisplay {
         }
 
         const now = Date.now();
-        let min = Infinity;
-        let max = -Infinity;
 
+        // Collect finite values and sort for percentile calculation
+        const values = [];
         for (let i = 0; i < this.spectrumData.length; i++) {
             const db = this.spectrumData[i];
             if (isFinite(db)) {
-                min = Math.min(min, db);
-                max = Math.max(max, db);
+                values.push(db);
             }
         }
 
-        if (isFinite(min) && isFinite(max)) {
+        if (values.length > 0) {
+            values.sort((a, b) => a - b);
+
+            // Use 5th percentile as noise floor (ignores very low outlier bins)
+            // Use 98th percentile as peak (ignores very high outlier spikes)
+            const floorIndex = Math.floor(values.length * 0.05);
+            const peakIndex  = Math.floor(values.length * 0.98);
+            const min = values[floorIndex];
+            const max = values[peakIndex];
+
             // Add margin
             const targetMin = Math.floor(min - this.config.rangeMargin);
             const targetMax = Math.ceil(max + this.config.rangeMargin);
@@ -2998,7 +3006,7 @@ class SpectrumDisplay {
             this.autoRangeMinHistory.push({ value: targetMin, timestamp: now });
             this.autoRangeMinHistory = this.autoRangeMinHistory.filter(m => now - m.timestamp <= this.autoRangeMinHistoryMaxAge);
 
-            // Track maximum values over time for stable ceiling (20 second window for FT8 cycles)
+            // Track maximum values over time for stable ceiling (5 second window for faster recovery)
             this.autoRangeMaxHistory.push({ value: targetMax, timestamp: now });
             this.autoRangeMaxHistory = this.autoRangeMaxHistory.filter(m => now - m.timestamp <= this.autoRangeMaxHistoryMaxAge);
 

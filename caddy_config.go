@@ -129,14 +129,14 @@ func generateHTTPCaddyfile() string {
     reverse_proxy ubersdr:8080 {
         # Strip any client-supplied proxy headers to prevent IP spoofing,
         # then explicitly set authoritative values from the real connecting client.
-        # Note: {http.request.remote.host} is the raw client IP (no DNS lookup, no port).
-        # Do NOT use {remote_host} - that triggers a reverse DNS lookup.
+        # {remote_host} is the Caddyfile placeholder for the connecting client's IP
+        # address (host portion only, no port, no DNS lookup).
         header_up -X-Real-IP
         header_up -X-Forwarded-For
         header_up -X-Forwarded-Host
         header_up -X-Forwarded-Proto
-        header_up X-Real-IP {http.request.remote.host}
-        header_up X-Forwarded-For {http.request.remote.host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
         header_up X-Forwarded-Host {host}
     }
@@ -180,14 +180,14 @@ func generateHTTPSCaddyfile(host, email string, redirectToHTTPS bool) string {
 	       reverse_proxy ubersdr:8080 {
 	           # Strip any client-supplied proxy headers to prevent IP spoofing,
 	           # then explicitly set authoritative values from the real connecting client.
-	           # Note: {http.request.remote.host} is the raw client IP (no DNS lookup, no port).
-	           # Do NOT use {remote_host} - that triggers a reverse DNS lookup.
+	           # {remote_host} is the Caddyfile placeholder for the connecting client's IP
+	           # address (host portion only, no port, no DNS lookup).
 	           header_up -X-Real-IP
 	           header_up -X-Forwarded-For
 	           header_up -X-Forwarded-Host
 	           header_up -X-Forwarded-Proto
-	           header_up X-Real-IP {http.request.remote.host}
-	           header_up X-Forwarded-For {http.request.remote.host}
+	           header_up X-Real-IP {remote_host}
+	           header_up X-Forwarded-For {remote_host}
 	           header_up X-Forwarded-Proto {scheme}
 	           header_up X-Forwarded-Host {host}
 	       }
@@ -212,14 +212,14 @@ func generateHTTPSCaddyfile(host, email string, redirectToHTTPS bool) string {
     reverse_proxy ubersdr:8080 {
         # Strip any client-supplied proxy headers to prevent IP spoofing,
         # then explicitly set authoritative values from the real connecting client.
-        # Note: {http.request.remote.host} is the raw client IP (no DNS lookup, no port).
-        # Do NOT use {remote_host} - that triggers a reverse DNS lookup.
+        # {remote_host} is the Caddyfile placeholder for the connecting client's IP
+        # address (host portion only, no port, no DNS lookup).
         header_up -X-Real-IP
         header_up -X-Forwarded-For
         header_up -X-Forwarded-Host
         header_up -X-Forwarded-Proto
-        header_up X-Real-IP {http.request.remote.host}
-        header_up X-Forwarded-For {http.request.remote.host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
         header_up X-Forwarded-Host {host}
     }
@@ -269,14 +269,14 @@ https://%s {
     reverse_proxy ubersdr:8080 {
         # Strip any client-supplied proxy headers to prevent IP spoofing,
         # then explicitly set authoritative values from the real connecting client.
-        # Note: {http.request.remote.host} is the raw client IP (no DNS lookup, no port).
-        # Do NOT use {remote_host} - that triggers a reverse DNS lookup.
+        # {remote_host} is the Caddyfile placeholder for the connecting client's IP
+        # address (host portion only, no port, no DNS lookup).
         header_up -X-Real-IP
         header_up -X-Forwarded-For
         header_up -X-Forwarded-Host
         header_up -X-Forwarded-Proto
-        header_up X-Real-IP {http.request.remote.host}
-        header_up X-Forwarded-For {http.request.remote.host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
         header_up X-Forwarded-Host {host}
     }

@@ -23,7 +23,7 @@
 ### In Progress (Coming Soon)
 - NavTex Addon for background NavTex decoding
 
-### Other Annoucements
+### Other Announcements
 - Public instances (with TLS enabled) can be used for ['Smart Listening'](https://instances.ubersdr.org/multi_monitor.html) which can automatically switch instance based on SNR. Example uses: Listening to a net where one instance can't hear all participants. Diversity receive (L+R audio) between two instances.
 
 ## Version 0.1.43

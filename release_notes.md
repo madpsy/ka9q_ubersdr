@@ -3,7 +3,7 @@
 ## Version 0.1.44 - Latest Release
 
 ### New Features
-- Added **EiBi Boomarks** uses the shortwave database from www.eibispace.de to dynamically create bookmarks. Enable in Admin -> Config -> EiBi
+- Added **EiBi Boomarks** uses the shortwave database from [www.eibispace.de](https://www.eibispace.de) to dynamically create bookmarks. Enable in Admin -> Config -> EiBi
 - Added **Addons** which are seperate self contained decoders for specific background tasks. CW Skimmer, HFDL and SSTV currently available (check UberSDR.org website). CW Skimmer can be installed via Admin -> CW Skimmer directly. Note: CW Skimmer requires significant CPU power.
 - Added **MIDI / FlexControl** extensions for the Web UI to control via DJ Controllers or the FlexControl USB controller
 - Added **CPU Temperature** to the Load charts in Admin -> Monitor
@@ -13,7 +13,7 @@
 
 ### Improvements
 - Changed **Waterfall scaling logic** to better align with signals seen in the Spectrum view
-- Fixed **Regualar user session logic** which was causing incorrect max user limit to be reached
+- Fixed **Regular user session logic** which was causing incorrect max user limit to be reached
 - Fixed **Sporadic permission errors** in Admin via Tunnel caused by an HTTP/3 bug in the Tunnel system
 - Fixed **Bookmark Snapping** which cause a bookmark to activate when tuning via on the Waterfall when Spectrum is enabled
 - Fixed **Space Weather A+K Index** caused by NOAA changing their API response format
@@ -23,7 +23,7 @@
 - NavTex Addon for background NavTex decoding
 
 ### Other Annoucements
-- Public instances (with TLS) can be used for 'Smart Listening' via https://instances.ubersdr.org/multi_monitor.html which can automatically switch instance based on SNR. Example uses: Listening to a net where one instance can't hear all participants. Diversity receive (L+R audio) between two instances.
+- Public instances (with TLS) can be used for ['Smart Listening'](https://instances.ubersdr.org/multi_monitor.html) which can automatically switch instance based on SNR. Example uses: Listening to a net where one instance can't hear all participants. Diversity receive (L+R audio) between two instances.
 
 ## Version 0.1.43
 

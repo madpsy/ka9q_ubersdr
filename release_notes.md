@@ -1,6 +1,11 @@
 # 07 April 2026
 
-## Version 0.1.44 - Latest Release
+## Version 0.1.45 - Latest Release
+
+### Improvements
+- Fixed **Regular user session logic** - the bug was only partially fixed in 0.1.44 so this a hot fix release with only this change
+
+## Version 0.1.44
 
 ### New Features
 - Added **EiBi Boomarks** uses the shortwave database from [www.eibispace.de](http://www.eibispace.de) to dynamically create bookmarks. Enable in Admin -> Config -> EiBi

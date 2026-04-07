@@ -4,12 +4,13 @@
 
 ### New Features
 - Added **EiBi Boomarks** uses the shortwave database from [www.eibispace.de](http://www.eibispace.de) to dynamically create bookmarks. Enable in Admin -> Config -> EiBi
-- Added **Addons** which are seperate self contained decoders for specific background tasks. CW Skimmer, HFDL and SSTV currently available (check UberSDR.org website). CW Skimmer can be installed via Admin -> CW Skimmer directly. Note: CW Skimmer requires significant CPU power.
+- Added **Addons** which are seperate self contained decoders for specific background tasks. CW Skimmer, HFDL and SSTV currently available (check UberSDR.org website). CW Skimmer can be installed via Admin -> CW Skimmer directly. Note: CW Skimmer requires significant CPU power
 - Added **MIDI / FlexControl** extensions for the Web UI to control via DJ Controllers or the FlexControl USB controller
 - Added **CPU Temperature** to the Load charts in Admin -> Monitor
 - Added **FreeDV** decoder with integration with their reporter service. Enable in Admin -> Config -> Freedv Reporter and Admin -> Extensions
 - Added **Network Traffic** in Admin -> Active Sessions now splits network throughput between Local (on the host), LAN and Public Internet
-- Added **Lightweight Audio client** for Windows and Linux designed for piping audio to other applications. Allows saving profiles to switch easily between instances / tuning  & audio settings.
+- Added **Audio device selection** in Web UI by clicking on the latency bar in the bottom right. Useful for piping audio to a specific audio device
+- Added **Lightweight Audio client** for Windows and Linux designed for piping audio to other applications. Allows saving profiles to switch easily between instances / tuning  & audio settings
 
 ### Improvements
 - Changed **Waterfall scaling logic** to better align with signals seen in the Spectrum view

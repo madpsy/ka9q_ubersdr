@@ -216,12 +216,11 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 				return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
 			}
 		} else {
-			// UUID provided - check if this is a new unique user
-			if _, exists := sm.userSessionUUIDs[userSessionID]; !exists {
-				// New unique user - check if we've reached the limit
-				if len(sm.userSessionUUIDs) >= sm.maxSessions {
-					return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
-				}
+			// UUID provided - check if this is a new unique user.
+			// Use canAcceptNewUUIDLocked which counts only non-bypassed users,
+			// so internal/bypassed sessions don't consume slots for real users.
+			if !sm.canAcceptNewUUIDLocked(userSessionID) {
+				return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
 			}
 			// Existing user can create additional sessions (audio + spectrum)
 		}
@@ -479,12 +478,11 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 				return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
 			}
 		} else {
-			// UUID provided - check if this is a new unique user
-			if _, exists := sm.userSessionUUIDs[userSessionID]; !exists {
-				// New unique user - check if we've reached the limit
-				if len(sm.userSessionUUIDs) >= sm.maxSessions {
-					return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
-				}
+			// UUID provided - check if this is a new unique user.
+			// Use canAcceptNewUUIDLocked which counts only non-bypassed users,
+			// so internal/bypassed sessions don't consume slots for real users.
+			if !sm.canAcceptNewUUIDLocked(userSessionID) {
+				return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
 			}
 			// Existing user can create additional sessions (audio + spectrum)
 		}
@@ -1495,14 +1493,12 @@ func (sm *SessionManager) GetNonBypassedUserCount() int {
 	return len(nonBypassedUUIDs)
 }
 
-// CanAcceptNewUUID checks if a new UUID can be accepted without exceeding max_sessions.
+// canAcceptNewUUIDLocked checks if a new UUID can be accepted without exceeding max_sessions.
 // Only non-bypassed users count toward the limit — bypassed users (by IP or password)
 // are admitted freely and must not consume slots that block regular users.
 // Returns true if the UUID already exists OR if there's room for a new non-bypassed UUID.
-func (sm *SessionManager) CanAcceptNewUUID(userSessionID string) bool {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-
+// MUST be called with sm.mu held (read or write lock).
+func (sm *SessionManager) canAcceptNewUUIDLocked(userSessionID string) bool {
 	// If this UUID already has sessions, it's always allowed
 	if _, exists := sm.userSessionUUIDs[userSessionID]; exists {
 		return true
@@ -1523,6 +1519,16 @@ func (sm *SessionManager) CanAcceptNewUUID(userSessionID string) bool {
 	}
 
 	return nonBypassedCount < sm.config.Server.MaxSessions
+}
+
+// CanAcceptNewUUID checks if a new UUID can be accepted without exceeding max_sessions.
+// Only non-bypassed users count toward the limit — bypassed users (by IP or password)
+// are admitted freely and must not consume slots that block regular users.
+// Returns true if the UUID already exists OR if there's room for a new non-bypassed UUID.
+func (sm *SessionManager) CanAcceptNewUUID(userSessionID string) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.canAcceptNewUUIDLocked(userSessionID)
 }
 
 // CanAcceptNewIP checks if a new UUID from an IP can be accepted without exceeding max_sessions_ip

@@ -115,3 +115,16 @@ proxies:
     allowed_ips:
       - "0.0.0.0/0"
     rate_limit: 250
+
+  # NAVTEX decoder web interface — publicly accessible
+  # Accessible at: /addon/navtex/
+  - name: "navtex"
+    enabled: false          # set to true to activate
+    host: "navtex"
+    port: 6092
+    strip_prefix: true
+    require_admin: false
+    rewrite_origin: false
+    allowed_ips:
+      - "0.0.0.0/0"
+    rate_limit: 100

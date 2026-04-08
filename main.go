@@ -2967,11 +2967,11 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		effectiveDefaultMode = "usb" // built-in default
 	}
 
-	// Collect names of enabled addon proxies
+	// Collect names of enabled, publicly accessible addon proxies (exclude require_admin ones)
 	enabledAddons := []string{}
 	if addonsConfig != nil {
 		for _, p := range addonsConfig.Proxies {
-			if p.Enabled {
+			if p.Enabled && !p.RequireAdmin {
 				enabledAddons = append(enabledAddons, p.Name)
 			}
 		}

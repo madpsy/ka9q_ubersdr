@@ -151,7 +151,8 @@ func (ir *InstanceReporter) SetAddonsConfig(cfg *AddonProxiesConfig) {
 	ir.addonsConfig = cfg
 }
 
-// getEnabledAddonNames returns the names of all enabled addon proxies (thread-safe)
+// getEnabledAddonNames returns the names of enabled addon proxies that are publicly accessible
+// (enabled and not require_admin). Thread-safe.
 func (ir *InstanceReporter) getEnabledAddonNames() []string {
 	ir.mu.RLock()
 	cfg := ir.addonsConfig
@@ -162,7 +163,7 @@ func (ir *InstanceReporter) getEnabledAddonNames() []string {
 		return names
 	}
 	for _, p := range cfg.Proxies {
-		if p.Enabled {
+		if p.Enabled && !p.RequireAdmin {
 			names = append(names, p.Name)
 		}
 	}
@@ -1230,11 +1231,11 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			}
 		}
 
-		// Collect enabled addon names
+		// Collect names of enabled, publicly accessible addon proxies (exclude require_admin ones)
 		enabledAddons := []string{}
 		if addonsConfig != nil {
 			for _, p := range addonsConfig.Proxies {
-				if p.Enabled {
+				if p.Enabled && !p.RequireAdmin {
 					enabledAddons = append(enabledAddons, p.Name)
 				}
 			}

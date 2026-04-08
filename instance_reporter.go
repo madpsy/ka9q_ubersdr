@@ -27,6 +27,7 @@ type InstanceReporter struct {
 	noiseFloorMonitor   *NoiseFloorMonitor         // For getting SNR measurements
 	rotctlHandler       *RotctlAPIHandler          // For getting rotator information
 	freqRefMonitor      *FrequencyReferenceMonitor // For getting frequency reference information
+	addonsConfig        *AddonProxiesConfig        // For reporting enabled addon proxy names
 	configPath          string
 	httpClient          *http.Client
 	stopChan            chan struct{}
@@ -79,6 +80,7 @@ type InstanceReport struct {
 	Rotator                    map[string]interface{} `json:"rotator"`                      // Rotator information (enabled, connected, azimuth)
 	FrequencyReference         map[string]interface{} `json:"frequency_reference"`          // Frequency reference tracking information
 	SpeechToText               bool                   `json:"speech_to_text"`               // Whether Whisper speech-to-text is enabled
+	Addons                     []string               `json:"addons"`                       // Names of enabled addon proxies
 	Test                       bool                   `json:"test,omitempty"`               // If true, this is a test report - collector will verify /api/description instead of full callback
 	StartupReport              bool                   `json:"startup_report"`               // If true, this is a startup report sent regardless of instance_reporting.enabled
 	NotifyInstanceDisconnected bool                   `json:"notify_instance_disconnected"` // Notify when instance disconnects
@@ -139,6 +141,32 @@ func (ir *InstanceReporter) SetFrequencyReferenceMonitor(monitor *FrequencyRefer
 	ir.mu.Lock()
 	defer ir.mu.Unlock()
 	ir.freqRefMonitor = monitor
+}
+
+// SetAddonsConfig sets the addon proxies config for reporting enabled addon names
+// This must be called after addons are loaded (after NewInstanceReporter)
+func (ir *InstanceReporter) SetAddonsConfig(cfg *AddonProxiesConfig) {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
+	ir.addonsConfig = cfg
+}
+
+// getEnabledAddonNames returns the names of all enabled addon proxies (thread-safe)
+func (ir *InstanceReporter) getEnabledAddonNames() []string {
+	ir.mu.RLock()
+	cfg := ir.addonsConfig
+	ir.mu.RUnlock()
+
+	names := []string{}
+	if cfg == nil {
+		return names
+	}
+	for _, p := range cfg.Proxies {
+		if p.Enabled {
+			names = append(names, p.Name)
+		}
+	}
+	return names
 }
 
 // getChatUserCount returns the current number of active chat users (thread-safe)
@@ -526,6 +554,7 @@ func (ir *InstanceReporter) sendReport() error {
 		Rotator:                    rotatorInfo,
 		FrequencyReference:         freqRefInfo,
 		SpeechToText:               ir.config.Whisper.Enabled,
+		Addons:                     ir.getEnabledAddonNames(),
 		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected,
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,
 	}
@@ -894,6 +923,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		Rotator:                    rotatorInfo,
 		FrequencyReference:         freqRefInfo,
 		SpeechToText:               ir.config.Whisper.Enabled,
+		Addons:                     ir.getEnabledAddonNames(),
 		Test:                       isTest,
 		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected,
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,
@@ -1109,7 +1139,7 @@ func ensureUUIDForStartup(config *Config, configPath string) error {
 
 // SendStartupReport sends a startup report regardless of whether instance reporting is enabled
 // This runs in a non-blocking goroutine with retries and only sends if collector endpoint is configured
-func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, configPath string, noiseFloorMonitor *NoiseFloorMonitor, freqRefMonitor *FrequencyReferenceMonitor) {
+func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, configPath string, noiseFloorMonitor *NoiseFloorMonitor, freqRefMonitor *FrequencyReferenceMonitor, addonsConfig *AddonProxiesConfig) {
 	// Run in a goroutine to not block startup
 	go func() {
 		// Check if we have the minimum required configuration (collector hostname and port)
@@ -1200,6 +1230,16 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			}
 		}
 
+		// Collect enabled addon names
+		enabledAddons := []string{}
+		if addonsConfig != nil {
+			for _, p := range addonsConfig.Proxies {
+				if p.Enabled {
+					enabledAddons = append(enabledAddons, p.Name)
+				}
+			}
+		}
+
 		// Build the report
 		report := InstanceReport{
 			UUID:                       config.InstanceReporting.InstanceUUID,
@@ -1238,6 +1278,7 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			Rotator:                    rotatorInfo,
 			FrequencyReference:         freqRefInfo,
 			StartupReport:              true,
+			Addons:                     enabledAddons,
 			NotifyInstanceDisconnected: config.InstanceReporting.NotifyInstanceDisconnected,
 			NotifyInstanceStartup:      config.InstanceReporting.NotifyInstanceStartup,
 		}

@@ -1651,7 +1651,7 @@ func main() {
 
 	// Send startup report (non-blocking, runs regardless of instance_reporting.enabled)
 	// This must be called after sessions is initialized but before HTTP server starts
-	SendStartupReport(config, cwskimmerConfig, sessions, configPath, noiseFloorMonitor, freqRefMonitor)
+	SendStartupReport(config, cwskimmerConfig, sessions, configPath, noiseFloorMonitor, freqRefMonitor, addonsConfig)
 
 	// Initialize instance reporter (before admin handler so it can be passed in)
 	var instanceReporter *InstanceReporter
@@ -1722,6 +1722,11 @@ func main() {
 		instanceReporter.SetFrequencyReferenceMonitor(freqRefMonitor)
 	}
 
+	// Set the addons config in instance reporter for reporting enabled addon names
+	if instanceReporter != nil {
+		instanceReporter.SetAddonsConfig(addonsConfig)
+	}
+
 	// Update MCP server with rotctlHandler now that it's initialized
 	if mcpServer != nil && rotctlHandler != nil {
 		mcpServer.rotctlHandler = rotctlHandler
@@ -1774,7 +1779,7 @@ func main() {
 		handleMyIP(w, r, geoIPService, config)
 	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
-		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor)
+		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, addonsConfig)
 	})
 	http.HandleFunc("/api/instance", func(w http.ResponseWriter, r *http.Request) {
 		handleInstanceStatus(w, r, config)
@@ -2854,7 +2859,7 @@ func handleExtensions(w http.ResponseWriter, r *http.Request, config *Config) {
 }
 
 // handleDescription serves the description HTML from config plus all status information
-func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor) {
+func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor, addonsConfig *AddonProxiesConfig) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -2962,6 +2967,16 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		effectiveDefaultMode = "usb" // built-in default
 	}
 
+	// Collect names of enabled addon proxies
+	enabledAddons := []string{}
+	if addonsConfig != nil {
+		for _, p := range addonsConfig.Proxies {
+			if p.Enabled {
+				enabledAddons = append(enabledAddons, p.Name)
+			}
+		}
+	}
+
 	// Build the response with description plus status information (without sdrs)
 	response := map[string]interface{}{
 		"description":       config.Admin.Description,
@@ -3001,6 +3016,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"rotator":              rotatorInfo,
 		"frequency_reference":  freqRefInfo,
 		"speech_to_text":       config.Whisper.Enabled,
+		"addons":               enabledAddons,
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

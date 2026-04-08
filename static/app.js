@@ -8338,6 +8338,8 @@ function openAddonFromDropdown(name) {
     const url = `${window.location.origin}/addon/${name}/`;
     window.open(url, '_blank');
 }
+// Expose globally so inline onchange handlers in index.html can call it
+window.openAddonFromDropdown = openAddonFromDropdown;
 
 // Close extension panel
 function closeExtensionPanel() {

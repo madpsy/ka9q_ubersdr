@@ -104,38 +104,39 @@ type RadiodConfig struct {
 
 // ServerConfig contains web server settings
 type ServerConfig struct {
-	Listen                        string            `yaml:"listen"`
-	MaxSessions                   int               `yaml:"max_sessions"`
-	MaxSessionsIP                 int               `yaml:"max_sessions_ip"` // Maximum sessions per IP address (0 = unlimited)
-	SessionTimeout                int               `yaml:"session_timeout"`
-	MaxSessionTime                int               `yaml:"max_session_time"`         // Maximum time a session can exist in seconds (0 = unlimited)
-	MaxIdleTime                   int               `yaml:"max_idle_time"`            // Maximum time a user can be idle in seconds (0 = unlimited)
-	CmdRateLimit                  int               `yaml:"cmd_rate_limit"`           // Commands per second per UUID per channel (0 = unlimited)
-	ConnRateLimit                 int               `yaml:"conn_rate_limit"`          // WebSocket connections per second per IP (0 = unlimited)
-	SessionsPerMinute             int               `yaml:"sessions_per_minute"`      // /connection endpoint requests per minute per IP (0 = unlimited)
-	EnforceSessionIPMatch         bool              `yaml:"enforce_session_ip_match"` // Enforce that WebSocket connections must come from same IP as /connection (default: false)
-	TimeoutBypassIPs              []string          `yaml:"timeout_bypass_ips"`       // List of IPs/CIDRs that bypass idle and max session time limits
-	TrustedProxyIPs               []string          `yaml:"trusted_proxy_ips"`        // List of IPs/CIDRs to trust X-Real-IP header from
-	TrustedContainers             []string          `yaml:"trusted_containers"`       // Docker container names to resolve and trust as proxies
-	BypassPassword                string            `yaml:"bypass_password"`          // Password that grants bypass privileges (empty = disabled)
-	PublicIQModes                 map[string]bool   `yaml:"public_iq_modes"`          // IQ modes accessible without bypass authentication
-	EnableCORS                    bool              `yaml:"enable_cors"`
-	EnableKiwiSDR                 bool              `yaml:"enable_kiwisdr"`                    // Enable KiwiSDR protocol compatibility server (default: false)
-	KiwiSDRListen                 string            `yaml:"kiwisdr_listen"`                    // KiwiSDR server listen address (e.g., ":8073", default: ":8073")
-	KiwiSDRPublicEmail            string            `yaml:"kiwisdr_public_email"`              // Public email for KiwiSDR status endpoint (default: "admin@example.com")
-	KiwiSDRSmeterOffset           float32           `yaml:"kiwisdr_smeter_offset"`             // S-meter calibration offset (dBFS to dBm, default: 30.0)
-	LogFileEnabled                bool              `yaml:"logfile_enabled"`                   // Enable HTTP request logging (default: false)
-	LogFile                       string            `yaml:"logfile"`                           // HTTP request log file path
-	SessionActivityLogEnabled     bool              `yaml:"session_activity_log_enabled"`      // Enable session activity logging to disk
-	SessionActivityLogDir         string            `yaml:"session_activity_log_dir"`          // Directory for session activity logs (default: data/session_activity)
-	SessionActivityLogIntervalSec int               `yaml:"session_activity_log_interval_sec"` // Interval for periodic snapshots in seconds (default: 300)
-	CustomHeadHTML                string            `yaml:"custom_head_html"`                  // Custom HTML to inject into <head> section of index.html (for analytics, ads, meta tags, etc.)
-	CustomAdsTxt                  string            `yaml:"custom_ads_txt"`                    // Custom content for /ads.txt endpoint (for Google AdSense verification)
-	timeoutBypassNets             []*net.IPNet      // Parsed CIDR networks (internal use)
-	trustedProxyNets              []*net.IPNet      // Parsed CIDR networks for trusted proxies (internal use)
-	containerProxyIPs             []string          // Dynamically resolved container IPs (internal use)
-	containerNameByIP             map[string]string // Reverse map: IP -> container name (internal use)
-	containerProxyMu              sync.RWMutex      // Protects containerProxyIPs and containerNameByIP
+	Listen                        string               `yaml:"listen"`
+	MaxSessions                   int                  `yaml:"max_sessions"`
+	MaxSessionsIP                 int                  `yaml:"max_sessions_ip"` // Maximum sessions per IP address (0 = unlimited)
+	SessionTimeout                int                  `yaml:"session_timeout"`
+	MaxSessionTime                int                  `yaml:"max_session_time"`         // Maximum time a session can exist in seconds (0 = unlimited)
+	MaxIdleTime                   int                  `yaml:"max_idle_time"`            // Maximum time a user can be idle in seconds (0 = unlimited)
+	CmdRateLimit                  int                  `yaml:"cmd_rate_limit"`           // Commands per second per UUID per channel (0 = unlimited)
+	ConnRateLimit                 int                  `yaml:"conn_rate_limit"`          // WebSocket connections per second per IP (0 = unlimited)
+	SessionsPerMinute             int                  `yaml:"sessions_per_minute"`      // /connection endpoint requests per minute per IP (0 = unlimited)
+	EnforceSessionIPMatch         bool                 `yaml:"enforce_session_ip_match"` // Enforce that WebSocket connections must come from same IP as /connection (default: false)
+	TimeoutBypassIPs              []string             `yaml:"timeout_bypass_ips"`       // List of IPs/CIDRs that bypass idle and max session time limits
+	TrustedProxyIPs               []string             `yaml:"trusted_proxy_ips"`        // List of IPs/CIDRs to trust X-Real-IP header from
+	TrustedContainers             []string             `yaml:"trusted_containers"`       // Docker container names to resolve and trust as proxies
+	BypassPassword                string               `yaml:"bypass_password"`          // Password that grants bypass privileges (empty = disabled)
+	PublicIQModes                 map[string]bool      `yaml:"public_iq_modes"`          // IQ modes accessible without bypass authentication
+	EnableCORS                    bool                 `yaml:"enable_cors"`
+	EnableKiwiSDR                 bool                 `yaml:"enable_kiwisdr"`                    // Enable KiwiSDR protocol compatibility server (default: false)
+	KiwiSDRListen                 string               `yaml:"kiwisdr_listen"`                    // KiwiSDR server listen address (e.g., ":8073", default: ":8073")
+	KiwiSDRPublicEmail            string               `yaml:"kiwisdr_public_email"`              // Public email for KiwiSDR status endpoint (default: "admin@example.com")
+	KiwiSDRSmeterOffset           float32              `yaml:"kiwisdr_smeter_offset"`             // S-meter calibration offset (dBFS to dBm, default: 30.0)
+	LogFileEnabled                bool                 `yaml:"logfile_enabled"`                   // Enable HTTP request logging (default: false)
+	LogFile                       string               `yaml:"logfile"`                           // HTTP request log file path
+	SessionActivityLogEnabled     bool                 `yaml:"session_activity_log_enabled"`      // Enable session activity logging to disk
+	SessionActivityLogDir         string               `yaml:"session_activity_log_dir"`          // Directory for session activity logs (default: data/session_activity)
+	SessionActivityLogIntervalSec int                  `yaml:"session_activity_log_interval_sec"` // Interval for periodic snapshots in seconds (default: 300)
+	CustomHeadHTML                string               `yaml:"custom_head_html"`                  // Custom HTML to inject into <head> section of index.html (for analytics, ads, meta tags, etc.)
+	CustomAdsTxt                  string               `yaml:"custom_ads_txt"`                    // Custom content for /ads.txt endpoint (for Google AdSense verification)
+	timeoutBypassNets             []*net.IPNet         // Parsed CIDR networks (internal use)
+	trustedProxyNets              []*net.IPNet         // Parsed CIDR networks for trusted proxies (internal use)
+	containerProxyIPs             []string             // Dynamically resolved container IPs (internal use)
+	containerNameByIP             map[string]string    // Reverse map: IP -> container name (internal use)
+	containerProxyMu              sync.RWMutex         // Protects containerProxyIPs and containerNameByIP
+	containerResolveErrLastLog    map[string]time.Time // Rate-limit resolve error logging per container name
 }
 
 // AudioConfig contains audio processing settings
@@ -985,21 +986,52 @@ func (sc *ServerConfig) resolveContainerIPs() {
 		names = []string{"tunnel-client", "caddy"}
 	}
 
+	// Snapshot the current name→IP mapping so we can fall back on failure.
+	sc.containerProxyMu.RLock()
+	prevNameByIP := sc.containerNameByIP
+	sc.containerProxyMu.RUnlock()
+
+	// Build reverse: previous name → []IP for fallback lookups.
+	prevIPsByName := make(map[string][]string, len(prevNameByIP))
+	for ip, n := range prevNameByIP {
+		prevIPsByName[n] = append(prevIPsByName[n], ip)
+	}
+
 	// Resolve each name; collect per-name results for logging.
 	type result struct {
-		name string
-		ips  []string
-		err  error
+		name     string
+		ips      []string
+		err      error
+		fallback bool // true if using cached IPs from a previous successful resolve
 	}
 	results := make([]result, 0, len(names))
 	var resolved []string
 	for _, name := range names {
 		ips, err := net.LookupHost(name)
-		results = append(results, result{name, ips, err})
 		if err != nil {
-			log.Printf("WARNING: trusted_containers: failed to resolve '%s': %v", name, err)
+			// Rate-limit resolve error logging to once per 5 minutes per container name.
+			now := time.Now()
+			if sc.containerResolveErrLastLog == nil {
+				sc.containerResolveErrLastLog = make(map[string]time.Time)
+			}
+			if last, ok := sc.containerResolveErrLastLog[name]; !ok || now.Sub(last) >= 5*time.Minute {
+				log.Printf("WARNING: trusted_containers: failed to resolve '%s': %v", name, err)
+				sc.containerResolveErrLastLog[name] = now
+			}
+			// Fall back to previously resolved IPs for this name, if any.
+			if prev, ok := prevIPsByName[name]; ok && len(prev) > 0 {
+				results = append(results, result{name, prev, nil, true})
+				resolved = append(resolved, prev...)
+			} else {
+				results = append(results, result{name, nil, err, false})
+			}
 			continue
 		}
+		// Clear the rate-limit entry on successful resolution.
+		if sc.containerResolveErrLastLog != nil {
+			delete(sc.containerResolveErrLastLog, name)
+		}
+		results = append(results, result{name, ips, nil, false})
 		resolved = append(resolved, ips...)
 	}
 
@@ -1022,7 +1054,7 @@ func (sc *ServerConfig) resolveContainerIPs() {
 
 	if changed {
 		for _, r := range results {
-			if r.err == nil {
+			if r.err == nil && !r.fallback {
 				log.Printf("trusted_containers: '%s' resolved to %v", r.name, r.ips)
 			}
 		}

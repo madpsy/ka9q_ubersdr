@@ -2115,6 +2115,30 @@ async function fetchSiteDescription() {
 
             // Update page title now that we have the callsign
             updatePageTitle();
+
+            // Populate addons dropdown if any public addons are available
+            if (data.addons && data.addons.length > 0) {
+                const addonsDropdown = document.getElementById('addons-dropdown');
+                const extensionsDropdown = document.getElementById('extensions-dropdown');
+                if (addonsDropdown) {
+                    // Clear existing options except the placeholder
+                    while (addonsDropdown.options.length > 1) {
+                        addonsDropdown.remove(1);
+                    }
+                    // Add one option per addon (name uppercased)
+                    data.addons.forEach(name => {
+                        const opt = document.createElement('option');
+                        opt.value = name;
+                        opt.textContent = name.toUpperCase();
+                        addonsDropdown.appendChild(opt);
+                    });
+                    // Show the addons dropdown and shrink extensions to 50%
+                    addonsDropdown.style.display = '';
+                    if (extensionsDropdown) {
+                        extensionsDropdown.style.width = '50%';
+                    }
+                }
+            }
         } else {
             console.error('Failed to fetch site description:', response.status);
         }
@@ -8302,6 +8326,17 @@ function toggleExtension(extensionName) {
     // Reset dropdown to empty (but don't trigger change event)
     // This allows the user to select the same extension again from the dropdown
     dropdown.value = '';
+}
+
+// Open an addon proxy in a new window when selected from the addons dropdown
+function openAddonFromDropdown(name) {
+    const dropdown = document.getElementById('addons-dropdown');
+    if (!name) return;
+    // Reset dropdown back to placeholder immediately
+    if (dropdown) dropdown.value = '';
+    // Build URL: same origin, path /addon/<name>/
+    const url = `${window.location.origin}/addon/${name}/`;
+    window.open(url, '_blank');
 }
 
 // Close extension panel

@@ -387,10 +387,16 @@
                         <option value="">⭐ My Bookmarks...</option>
                     </select>
                 </div>
-                <select id="extensions-dropdown" onchange="toggleExtension(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px; width: 100%;">
-                    <option value="">Extensions...</option>
-                    <!-- Extensions populated dynamically by extension-loader.js -->
-                </select>
+                <div id="extensions-row" style="display: flex; gap: 5px; margin-top: 5px;">
+                    <select id="extensions-dropdown" onchange="toggleExtension(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; width: 100%;">
+                        <option value="">Extensions...</option>
+                        <!-- Extensions populated dynamically by extension-loader.js -->
+                    </select>
+                    <select id="addons-dropdown" onchange="openAddonFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; width: 50%; display: none;">
+                        <option value="">Addons...</option>
+                        <!-- Addon options populated dynamically from /api/description -->
+                    </select>
+                </div>
             </div>
 
             <div class="control-group">

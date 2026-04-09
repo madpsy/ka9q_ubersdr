@@ -181,9 +181,8 @@
                     <div class="form-group" id="tlsField">
                         <label class="checkbox-label">
                             <input type="checkbox" id="instanceTLS">
-                            <span>Use TLS/HTTPS for public connections</span>
+                            <span>Enable if you want to use TLS for your public facing connection</span>
                         </label>
-                        <small>Enable if your public connection uses HTTPS/WSS (recommended for security)</small>
                     </div>
 
                     <div class="form-group" id="customIngressField" style="display: none;">
@@ -219,22 +218,32 @@
                         </ul>
                     </div>
                     <div id="portForwardingCustomIngress" style="display: none;">
-                        <ul style="margin: 10px 0 0 20px; padding: 0;">
-                            <li>Users will connect via <code>https://your-domain-name</code></li>
-                            <li>Your ingress controller must proxy HTTP traffic to UberSDR on port <strong>8080</strong></li>
-                        </ul>
-                        <div style="margin-top: 12px; display: flex; gap: 12px; flex-wrap: wrap;">
-                            <div style="flex: 1; min-width: 220px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 12px;">
-                                <strong>☁️ Cloudflare Tunnel (on this host)</strong>
-                                <p style="margin: 6px 0 0; font-size: 13px;">Configure your Cloudflare Tunnel running on this UberSDR host to point to:</p>
-                                <code style="display: block; margin-top: 6px; background: #e9ecef; padding: 4px 8px; border-radius: 4px; font-size: 13px;">http://172.20.0.1:8080</code>
-                                <p style="margin: 6px 0 0; font-size: 12px; color: #6c757d;"><code>172.20.0.1</code> is the Docker bridge gateway — reachable from the tunnel daemon running on the host.</p>
-                            </div>
-                            <div style="flex: 1; min-width: 220px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 12px;">
-                                <strong>🔀 Own reverse proxy (separate host)</strong>
-                                <p style="margin: 6px 0 0; font-size: 13px;">Configure your proxy (Nginx, Caddy, etc.) on another host on the same network to point to:</p>
-                                <code style="display: block; margin-top: 6px; background: #e9ecef; padding: 4px 8px; border-radius: 4px; font-size: 13px;">http://ubersdr.local:8080</code>
-                                <p style="margin: 6px 0 0; font-size: 12px; color: #6c757d;">Or use the LAN IP of your UberSDR host instead of <code>ubersdr.local</code> if mDNS is not available.</p>
+                        <p style="margin: 8px 0 10px; font-size: 13px;">Your ingress controller must proxy HTTP traffic to UberSDR on port <strong>8080</strong>. Select your setup:</p>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;">
+                            <label id="customIngressCloudflareCard" onclick="selectCustomIngressType('cloudflare')" style="flex: 1; min-width: 180px; display: flex; align-items: center; gap: 10px; background: #f8f9fa; border: 2px solid #dee2e6; border-radius: 6px; padding: 12px; cursor: pointer; transition: border-color 0.15s, background 0.15s;">
+                                <input type="radio" name="customIngressType" value="cloudflare" style="margin: 0; flex-shrink: 0;">
+                                <span style="font-size: 14px;"><strong>☁️ Cloudflare Tunnel</strong><br><span style="font-size: 12px; color: #6c757d;">Running on this UberSDR host</span></span>
+                            </label>
+                            <label id="customIngressProxyCard" onclick="selectCustomIngressType('proxy')" style="flex: 1; min-width: 180px; display: flex; align-items: center; gap: 10px; background: #f8f9fa; border: 2px solid #dee2e6; border-radius: 6px; padding: 12px; cursor: pointer; transition: border-color 0.15s, background 0.15s;">
+                                <input type="radio" name="customIngressType" value="proxy" style="margin: 0; flex-shrink: 0;">
+                                <span style="font-size: 14px;"><strong>🔀 Own reverse proxy</strong><br><span style="font-size: 12px; color: #6c757d;">Running on a separate host</span></span>
+                            </label>
+                        </div>
+                        <div id="customIngressCloudflareDetail" style="display: none; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 12px;">
+                            <p style="margin: 0 0 6px; font-size: 13px;">Configure your Cloudflare Tunnel running on this UberSDR host to point to:</p>
+                            <code style="display: block; background: #e9ecef; padding: 4px 8px; border-radius: 4px; font-size: 13px;">http://172.20.0.1:8080</code>
+                            <p style="margin: 6px 0 0; font-size: 12px; color: #6c757d;"><code>172.20.0.1</code> is the Docker bridge gateway — reachable from the tunnel daemon running on the host.</p>
+                        </div>
+                        <div id="customIngressProxyDetail" style="display: none; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 12px;">
+                            <p style="margin: 0 0 6px; font-size: 13px;">Configure your proxy (Nginx, Caddy, etc.) on another host on the same network to point to:</p>
+                            <code style="display: block; background: #e9ecef; padding: 4px 8px; border-radius: 4px; font-size: 13px;">http://ubersdr.local:8080</code>
+                            <p style="margin: 6px 0 0; font-size: 12px; color: #6c757d;">Or use the LAN IP of your UberSDR host instead of <code>ubersdr.local</code> if mDNS is not available.</p>
+                            <p style="margin: 8px 0 4px; font-size: 12px; color: #856404; background: #fff3cd; border-left: 3px solid #ffc107; padding: 6px 8px; border-radius: 3px;">⚠️ Your proxy must set the <strong>X-Forwarded-For</strong> (XFF) header so UberSDR can see the real client IP address.</p>
+                            <div style="margin-top: 10px;">
+                                <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px;">LAN IP address of your proxy host <span style="color: #dc3545;">*</span></label>
+                                <input type="text" id="proxyIngressIP" placeholder="e.g. 192.168.4.150" style="width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px; font-family: monospace;">
+                                <div id="proxyIngressIPError" style="display: none; margin-top: 4px; font-size: 12px; color: #dc3545;"></div>
+                                <p style="margin: 4px 0 0; font-size: 11px; color: #6c757d;">Must be a private (RFC 1918) IPv4 address — 10.x.x.x, 172.16–31.x.x, or 192.168.x.x</p>
                             </div>
                         </div>
                     </div>

@@ -414,6 +414,31 @@ function updateCustomIngressVisibility() {
     }
 }
 
+// Handle selection of custom ingress type (cloudflare or proxy)
+function selectCustomIngressType(type) {
+    // Update radio button state
+    const radios = document.querySelectorAll('input[name="customIngressType"]');
+    radios.forEach(r => { r.checked = r.value === type; });
+
+    // Update card highlight styles
+    const cloudflareCard = document.getElementById('customIngressCloudflareCard');
+    const proxyCard = document.getElementById('customIngressProxyCard');
+    if (cloudflareCard) {
+        cloudflareCard.style.borderColor = type === 'cloudflare' ? '#667eea' : '#dee2e6';
+        cloudflareCard.style.background  = type === 'cloudflare' ? '#eef0fd' : '#f8f9fa';
+    }
+    if (proxyCard) {
+        proxyCard.style.borderColor = type === 'proxy' ? '#667eea' : '#dee2e6';
+        proxyCard.style.background  = type === 'proxy' ? '#eef0fd' : '#f8f9fa';
+    }
+
+    // Show the matching detail panel, hide the other
+    const cloudflareDetail = document.getElementById('customIngressCloudflareDetail');
+    const proxyDetail      = document.getElementById('customIngressProxyDetail');
+    if (cloudflareDetail) cloudflareDetail.style.display = type === 'cloudflare' ? 'block' : 'none';
+    if (proxyDetail)      proxyDetail.style.display      = type === 'proxy'       ? 'block' : 'none';
+}
+
 // Update port forwarding instructions based on current state
 function updatePortForwardingInstructions() {
     const useMyIP = document.getElementById('useMyIP').checked;
@@ -918,9 +943,46 @@ async function validateCurrentStep() {
                 return false;
             }
         }
+
+        // Validate proxy LAN IP when custom ingress + proxy type is selected
+        const customIngress = document.getElementById('customIngress').checked;
+        if (customIngress) {
+            const selectedType = document.querySelector('input[name="customIngressType"]:checked')?.value;
+            if (!selectedType) {
+                showAlert('Please select your ingress type (Cloudflare Tunnel or Own reverse proxy).', 'error');
+                return false;
+            }
+            if (selectedType === 'proxy') {
+                const proxyIP = document.getElementById('proxyIngressIP')?.value.trim();
+                const errorEl = document.getElementById('proxyIngressIPError');
+                if (!proxyIP) {
+                    if (errorEl) { errorEl.textContent = 'This field is required.'; errorEl.style.display = 'block'; }
+                    showAlert('Please enter the LAN IP address of your reverse proxy host.', 'error');
+                    return false;
+                }
+                if (!isRFC1918(proxyIP)) {
+                    if (errorEl) { errorEl.textContent = 'Must be a private RFC 1918 address (10.x.x.x, 172.16–31.x.x, or 192.168.x.x).'; errorEl.style.display = 'block'; }
+                    showAlert('The proxy IP must be a private (RFC 1918) IPv4 address.', 'error');
+                    return false;
+                }
+                if (errorEl) errorEl.style.display = 'none';
+            }
+        }
     }
 
     return true;
+}
+
+// Validate that an IP is a private RFC 1918 IPv4 address
+function isRFC1918(ip) {
+    const parts = ip.split('.');
+    if (parts.length !== 4) return false;
+    const [a, b] = parts.map(Number);
+    if (parts.some(p => isNaN(Number(p)) || Number(p) < 0 || Number(p) > 255)) return false;
+    if (a === 10) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    return false;
 }
 
 // Validate that a string is a domain name and not an IP address
@@ -1041,6 +1103,25 @@ async function finishWizard() {
             updatedConfig.instance_reporting.generate_tls = false;
         }
         
+        // If custom ingress is selected, add the proxy IP to trusted_proxy_ips
+        if (customIngress) {
+            const selectedIngressType = document.querySelector('input[name="customIngressType"]:checked')?.value;
+            const existingProxyIPs = Array.isArray(currentConfig.server?.trusted_proxy_ips)
+                ? currentConfig.server.trusted_proxy_ips.map(String)
+                : [];
+            let ipToAdd = null;
+            if (selectedIngressType === 'cloudflare') {
+                ipToAdd = '172.20.0.1';
+            } else if (selectedIngressType === 'proxy') {
+                ipToAdd = document.getElementById('proxyIngressIP')?.value.trim() || null;
+            }
+            if (ipToAdd && !existingProxyIPs.includes(ipToAdd)) {
+                existingProxyIPs.push(ipToAdd);
+            }
+            if (!updatedConfig.server) updatedConfig.server = { ...currentConfig.server };
+            updatedConfig.server.trusted_proxy_ips = existingProxyIPs;
+        }
+
         // Save configuration with restart to apply instance_reporting changes
         const response = await fetch('/admin/config?restart=true', {
             method: 'PUT',

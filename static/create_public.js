@@ -954,22 +954,58 @@ async function validateCurrentStep() {
             }
             if (selectedType === 'proxy') {
                 const proxyIP = document.getElementById('proxyIngressIP')?.value.trim();
-                const errorEl = document.getElementById('proxyIngressIPError');
                 if (!proxyIP) {
-                    if (errorEl) { errorEl.textContent = 'This field is required.'; errorEl.style.display = 'block'; }
+                    // Trigger inline validation to show the error state
+                    validateProxyIngressIP();
                     showAlert('Please enter the LAN IP address of your reverse proxy host.', 'error');
                     return false;
                 }
-                if (!isRFC1918(proxyIP)) {
-                    if (errorEl) { errorEl.textContent = 'Must be a private RFC 1918 address (10.x.x.x, 172.16–31.x.x, or 192.168.x.x).'; errorEl.style.display = 'block'; }
-                    showAlert('The proxy IP must be a private (RFC 1918) IPv4 address.', 'error');
+                if (!validateProxyIngressIP()) {
+                    showAlert('The proxy IP must be a private (RFC 1918) IPv4 address (e.g. 192.168.4.150).', 'error');
                     return false;
                 }
-                if (errorEl) errorEl.style.display = 'none';
             }
         }
     }
 
+    return true;
+}
+
+// Real-time inline validation for the proxy ingress IP input
+function validateProxyIngressIP() {
+    const input = document.getElementById('proxyIngressIP');
+    const errorDiv = document.getElementById('proxyIngressIPError');
+    const errorMsg = document.getElementById('proxyIngressIPErrorMessage');
+    if (!input || !errorDiv || !errorMsg) return false;
+
+    const ip = input.value.trim();
+
+    if (!ip) {
+        // Empty — reset to neutral (no red, no green)
+        input.style.borderColor = '#ced4da';
+        errorDiv.style.display = 'none';
+        return false;
+    }
+
+    // Basic IPv4 format check
+    const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+    if (!ipv4Pattern.test(ip)) {
+        input.style.borderColor = '#dc3545';
+        errorMsg.textContent = 'Please enter a valid IPv4 address (e.g. 192.168.4.150).';
+        errorDiv.style.display = 'block';
+        return false;
+    }
+
+    if (!isRFC1918(ip)) {
+        input.style.borderColor = '#dc3545';
+        errorMsg.textContent = 'This must be a private (RFC 1918) address: 10.x.x.x, 172.16–31.x.x, or 192.168.x.x.';
+        errorDiv.style.display = 'block';
+        return false;
+    }
+
+    // Valid
+    input.style.borderColor = '#28a745';
+    errorDiv.style.display = 'none';
     return true;
 }
 

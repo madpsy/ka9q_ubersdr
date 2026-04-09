@@ -271,7 +271,7 @@ fi
 # Install dependencies
 echo "Installing dependencies..."
 sudo apt update
-sudo apt -y upgrade
+sudo apt upgrade -y
 sudo apt install -y cron ntpsec libfftw3-bin libwebsockets19t64 ssh tmux btop htop
 
 # Disable IPv6 to prevent Docker NAT issues with client IP detection

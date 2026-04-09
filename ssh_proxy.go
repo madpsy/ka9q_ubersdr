@@ -39,6 +39,13 @@ func NewSSHProxy(config *SSHProxyConfig) (*SSHProxy, error) {
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
 
+		// Capture the true client IP BEFORE stripping proxy headers.
+		// getClientIP() reads X-Real-IP / X-Forwarded-For only when the request
+		// arrives from a configured tunnel server or trusted proxy, and falls
+		// back to RemoteAddr otherwise. It must be called while those headers
+		// are still present on the request.
+		clientIP := getClientIP(req)
+
 		// Strip client-supplied proxy headers before we set our own authoritative
 		// values. Without this a client can inject X-Forwarded-For, X-Real-IP,
 		// X-Forwarded-Host, or X-Forwarded-Proto and have them forwarded verbatim
@@ -54,12 +61,6 @@ func NewSSHProxy(config *SSHProxyConfig) (*SSHProxy, error) {
 			req.URL.Path = "/"
 		}
 		req.Host = targetURL.Host
-
-		// Use the same trusted getClientIP() logic used everywhere else in
-		// UberSDR: honours X-Real-IP / X-Forwarded-For only when the request
-		// arrives from a configured tunnel server or trusted proxy, and falls
-		// back to RemoteAddr otherwise.
-		clientIP := getClientIP(req)
 
 		// Set authoritative forwarding headers for GoTTY.
 		req.Header.Set("X-Real-IP", clientIP)

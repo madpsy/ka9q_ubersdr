@@ -1131,8 +1131,19 @@ async function testInstanceReporter() {
         } else if (!useMyIP) {
             const instanceHost = document.getElementById('instanceHost').value.trim();
             const instanceTLS = document.getElementById('instanceTLS').checked;
+            const customIngress = document.getElementById('customIngress').checked;
             testParams.instance_host = instanceHost;
-            testParams.instance_tls = instanceTLS;
+
+            // If Caddy will generate the Let's Encrypt cert (tls=true, customIngress=false),
+            // test via HTTP port 80 — HTTPS isn't available yet until after the first restart.
+            // If customIngress=true the user already has their own cert/proxy handling TLS,
+            // so we test HTTPS directly as it should already be working.
+            if (instanceTLS && !customIngress) {
+                testParams.instance_tls = false;
+                testParams.instance_port = 80;
+            } else {
+                testParams.instance_tls = instanceTLS;
+            }
         } else {
             // When using myip, clear hostname and force TLS to false
             testParams.instance_host = '';

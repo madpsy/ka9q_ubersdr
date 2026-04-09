@@ -221,8 +221,22 @@
                     <div id="portForwardingCustomIngress" style="display: none;">
                         <ul style="margin: 10px 0 0 20px; padding: 0;">
                             <li>Users will connect via <code>https://your-domain-name</code></li>
-                            <li>Ensure your ingress controller (Cloudflare Tunnel, Nginx, etc.) is proxying using HTTP to the UberSDR host on port <strong>8080</strong></li>
+                            <li>Your ingress controller must proxy HTTP traffic to UberSDR on port <strong>8080</strong></li>
                         </ul>
+                        <div style="margin-top: 12px; display: flex; gap: 12px; flex-wrap: wrap;">
+                            <div style="flex: 1; min-width: 220px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 12px;">
+                                <strong>☁️ Cloudflare Tunnel (on this host)</strong>
+                                <p style="margin: 6px 0 0; font-size: 13px;">Configure your Cloudflare Tunnel running on this UberSDR host to point to:</p>
+                                <code style="display: block; margin-top: 6px; background: #e9ecef; padding: 4px 8px; border-radius: 4px; font-size: 13px;">http://172.20.0.1:8080</code>
+                                <p style="margin: 6px 0 0; font-size: 12px; color: #6c757d;"><code>172.20.0.1</code> is the Docker bridge gateway — reachable from the tunnel daemon running on the host.</p>
+                            </div>
+                            <div style="flex: 1; min-width: 220px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 12px;">
+                                <strong>🔀 Own reverse proxy (separate host)</strong>
+                                <p style="margin: 6px 0 0; font-size: 13px;">Configure your proxy (Nginx, Caddy, etc.) on another host on the same network to point to:</p>
+                                <code style="display: block; margin-top: 6px; background: #e9ecef; padding: 4px 8px; border-radius: 4px; font-size: 13px;">http://ubersdr.local:8080</code>
+                                <p style="margin: 6px 0 0; font-size: 12px; color: #6c757d;">Or use the LAN IP of your UberSDR host instead of <code>ubersdr.local</code> if mDNS is not available.</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

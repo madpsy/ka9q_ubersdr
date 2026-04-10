@@ -1400,6 +1400,26 @@
 
                 <!-- System Tab -->
                 <div id="systemTab" class="tab-content">
+
+                    <!-- CPU Governor Card -->
+                    <div style="margin-bottom: 20px; padding: 15px; background: #e8f5e9; border-radius: 5px; border: 1px solid #4caf50;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                            <div style="flex: 1; color: #1b5e20;">
+                                <strong>⚡ CPU Governor</strong>
+                                <p style="margin: 5px 0 0 0; font-size: 13px; color: #2e7d32;">
+                                    The CPU governor controls how the processor scales its clock speed.
+                                    Linux defaults to <strong>powersave</strong> or <strong>ondemand</strong>, which throttle the CPU and ramp up slowly under load —
+                                    causing audio stuttering and missed decoder cycles in UberSDR.
+                                    Setting the governor to <strong>performance</strong> keeps the CPU at full speed at all times,
+                                    which significantly improves real-time streaming stability.
+                                </p>
+                            </div>
+                            <button class="btn" onclick="openCPUGovernor()" style="background: #4caf50; color: white; font-weight: bold; white-space: nowrap;">
+                                ⚡ Manage CPU Governor
+                            </button>
+                        </div>
+                    </div>
+
                     <div id="systemStats" class="loading">
                         <div class="spinner"></div>
                         <p>Loading system statistics...</p>
@@ -2730,6 +2750,20 @@
             const left = (screen.width - width) / 2;
             const top = (screen.height - height) / 2;
             window.open(url, 'rotctld_setup_' + Date.now(),
+                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
+        }
+
+        // Open CPU Governor management script in popup terminal window
+        function openCPUGovernor() {
+            const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
+            const command = 'sudo ~/ubersdr/cpu_governor.sh';
+            const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
+
+            const width = 1000;
+            const height = 700;
+            const left = (screen.width - width) / 2;
+            const top = (screen.height - height) / 2;
+            window.open(url, 'cpu_governor_' + Date.now(),
                 `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
         }
 

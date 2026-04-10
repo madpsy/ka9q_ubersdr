@@ -1,0 +1,43 @@
+{
+  "manifest_version": 2,
+  "name": "UberSDR Bridge",
+  "version": "1.0.0",
+  "description": "Bridges the UberSDR web interface to a local application via HTTP. Read and control frequency, mode, and bandwidth from any external program.",
+  "author": "UberSDR",
+
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": false
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content_script.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_title": "UberSDR Bridge",
+    "default_icon": {
+      "48": "icons/icon48.png",
+      "96": "icons/icon96.png"
+    }
+  },
+
+  "icons": {
+    "48": "icons/icon48.png",
+    "96": "icons/icon96.png"
+  }
+}

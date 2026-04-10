@@ -1,0 +1,423 @@
+/* UberSDR Bridge — Popup Styles */
+
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 13px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    width: 320px;
+    min-height: 200px;
+}
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+
+.header {
+    background: #16213e;
+    border-bottom: 1px solid #0f3460;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.header-icon {
+    font-size: 20px;
+    line-height: 1;
+}
+
+.header-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #e94560;
+    letter-spacing: 0.5px;
+}
+
+.header-subtitle {
+    font-size: 10px;
+    color: #888;
+    margin-top: 1px;
+}
+
+/* ── Sections ────────────────────────────────────────────────────────────── */
+
+.section {
+    padding: 10px 14px;
+    border-bottom: 1px solid #0f3460;
+}
+
+.section:last-child {
+    border-bottom: none;
+}
+
+.section-title {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #888;
+    margin-bottom: 8px;
+}
+
+/* ── No tabs notice ──────────────────────────────────────────────────────── */
+
+.no-tabs {
+    color: #888;
+    font-style: italic;
+    font-size: 12px;
+    padding: 4px 0;
+}
+
+/* ── Tab list ────────────────────────────────────────────────────────────── */
+
+.tab-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.tab-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.tab-item:hover {
+    background: #16213e;
+}
+
+.tab-item.selected {
+    background: #0f3460;
+    border-color: #e94560;
+}
+
+.tab-radio {
+    width: 12px;
+    height: 12px;
+    accent-color: #e94560;
+    flex-shrink: 0;
+}
+
+.tab-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.tab-title {
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #e0e0e0;
+}
+
+.tab-url {
+    font-size: 10px;
+    color: #888;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ── State display ───────────────────────────────────────────────────────── */
+
+.state-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+}
+
+.state-card {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    padding: 6px 8px;
+}
+
+.state-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #888;
+    margin-bottom: 2px;
+}
+
+.state-value {
+    font-size: 15px;
+    font-weight: 600;
+    color: #e94560;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.3px;
+}
+
+.state-value.small {
+    font-size: 12px;
+}
+
+/* ── Controls ────────────────────────────────────────────────────────────── */
+
+.control-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.control-row:last-child {
+    margin-bottom: 0;
+}
+
+.control-label {
+    font-size: 11px;
+    color: #aaa;
+    width: 60px;
+    flex-shrink: 0;
+}
+
+.control-input {
+    flex: 1;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 12px;
+    padding: 4px 6px;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+.control-input:focus {
+    border-color: #e94560;
+}
+
+.control-input.error {
+    border-color: #e94560;
+    background: #2a1a1e;
+}
+
+.control-select {
+    flex: 1;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 12px;
+    padding: 4px 6px;
+    outline: none;
+    cursor: pointer;
+}
+
+.control-select:focus {
+    border-color: #e94560;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+
+.btn {
+    padding: 5px 10px;
+    border-radius: 3px;
+    border: none;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s, background 0.15s;
+    white-space: nowrap;
+}
+
+.btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.btn-primary {
+    background: #e94560;
+    color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: #c73652;
+}
+
+.btn-secondary {
+    background: #0f3460;
+    color: #e0e0e0;
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: #1a4a80;
+}
+
+.btn-sm {
+    padding: 3px 7px;
+    font-size: 10px;
+}
+
+.btn-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+/* ── Step buttons ────────────────────────────────────────────────────────── */
+
+.step-buttons {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.step-btn {
+    padding: 3px 7px;
+    border-radius: 3px;
+    border: 1px solid #0f3460;
+    background: #16213e;
+    color: #aaa;
+    font-size: 10px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.step-btn:hover {
+    background: #0f3460;
+    color: #e0e0e0;
+}
+
+/* ── Bridge settings ─────────────────────────────────────────────────────── */
+
+.bridge-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.bridge-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #555;
+    flex-shrink: 0;
+}
+
+.bridge-dot.connected {
+    background: #27ae60;
+    box-shadow: 0 0 4px #27ae60;
+}
+
+.bridge-dot.error {
+    background: #e94560;
+}
+
+.bridge-status-text {
+    font-size: 11px;
+    color: #888;
+}
+
+/* ── Toggle switch ───────────────────────────────────────────────────────── */
+
+.toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.toggle-label {
+    font-size: 11px;
+    color: #aaa;
+}
+
+.toggle {
+    position: relative;
+    width: 32px;
+    height: 18px;
+}
+
+.toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: #333;
+    border-radius: 18px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    left: 3px;
+    top: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+}
+
+.toggle input:checked + .toggle-slider {
+    background: #e94560;
+}
+
+.toggle input:checked + .toggle-slider::before {
+    transform: translateX(14px);
+}
+
+/* ── Status bar ──────────────────────────────────────────────────────────── */
+
+.status-bar {
+    padding: 5px 14px;
+    background: #0f3460;
+    font-size: 10px;
+    color: #888;
+    min-height: 22px;
+}
+
+.status-bar.ok    { color: #27ae60; }
+.status-bar.error { color: #e94560; }
+.status-bar.info  { color: #3498db; }
+
+/* ── Collapsible sections ────────────────────────────────────────────────── */
+
+.collapsible-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+}
+
+.collapsible-arrow {
+    font-size: 10px;
+    color: #888;
+    transition: transform 0.2s;
+}
+
+.collapsible-arrow.open {
+    transform: rotate(90deg);
+}
+
+.collapsible-body {
+    display: none;
+    margin-top: 8px;
+}
+
+.collapsible-body.open {
+    display: block;
+}

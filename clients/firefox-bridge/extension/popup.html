@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UberSDR Bridge</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+    <!-- ── Header ──────────────────────────────────────────────────────────── -->
+    <div class="header">
+        <div class="header-icon">📡</div>
+        <div>
+            <div class="header-title">UberSDR Bridge</div>
+            <div class="header-subtitle">Radio control &amp; bridge</div>
+        </div>
+    </div>
+
+    <!-- ── UberSDR Tab Selection ────────────────────────────────────────────── -->
+    <div class="section" id="section-tabs">
+        <div class="section-title">UberSDR Instance</div>
+        <div id="tab-list" class="tab-list">
+            <div class="no-tabs">No UberSDR tabs detected.<br>Open an UberSDR page to begin.</div>
+        </div>
+    </div>
+
+    <!-- ── Current State ────────────────────────────────────────────────────── -->
+    <div class="section" id="section-state">
+        <div class="section-title">Current State</div>
+        <div class="state-grid">
+            <div class="state-card">
+                <div class="state-label">Frequency</div>
+                <div class="state-value" id="state-freq">—</div>
+            </div>
+            <div class="state-card">
+                <div class="state-label">Mode</div>
+                <div class="state-value" id="state-mode">—</div>
+            </div>
+            <div class="state-card">
+                <div class="state-label">BW Low</div>
+                <div class="state-value small" id="state-bw-low">—</div>
+            </div>
+            <div class="state-card">
+                <div class="state-label">BW High</div>
+                <div class="state-value small" id="state-bw-high">—</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Frequency Control ─────────────────────────────────────────────────── -->
+    <div class="section">
+        <div class="section-title">Set Frequency</div>
+
+        <div class="control-row">
+            <label class="control-label" for="input-freq">Hz</label>
+            <input  class="control-input" type="number" id="input-freq"
+                    placeholder="e.g. 14074000" min="10000" max="30000000" step="1">
+            <button class="btn btn-primary btn-sm" id="btn-set-freq">Set</button>
+        </div>
+
+        <div class="step-buttons" id="step-buttons">
+            <button class="step-btn" data-delta="-10000">−10k</button>
+            <button class="step-btn" data-delta="-1000">−1k</button>
+            <button class="step-btn" data-delta="-100">−100</button>
+            <button class="step-btn" data-delta="+100">+100</button>
+            <button class="step-btn" data-delta="+1000">+1k</button>
+            <button class="step-btn" data-delta="+10000">+10k</button>
+        </div>
+    </div>
+
+    <!-- ── Mode Control ──────────────────────────────────────────────────────── -->
+    <div class="section">
+        <div class="section-title">Set Mode</div>
+        <div class="control-row">
+            <label class="control-label" for="select-mode">Mode</label>
+            <select class="control-select" id="select-mode">
+                <option value="">— select —</option>
+                <option value="usb">USB</option>
+                <option value="lsb">LSB</option>
+                <option value="cwu">CWU</option>
+                <option value="cwl">CWL</option>
+                <option value="am">AM</option>
+                <option value="sam">SAM</option>
+                <option value="fm">FM</option>
+                <option value="nfm">NFM</option>
+            </select>
+            <button class="btn btn-primary btn-sm" id="btn-set-mode">Set</button>
+        </div>
+    </div>
+
+    <!-- ── Bandwidth Control ─────────────────────────────────────────────────── -->
+    <div class="section">
+        <div class="collapsible-header" id="bw-header">
+            <div class="section-title" style="margin-bottom:0">Set Bandwidth</div>
+            <span class="collapsible-arrow" id="bw-arrow">▶</span>
+        </div>
+        <div class="collapsible-body" id="bw-body">
+            <div class="control-row" style="margin-top:8px">
+                <label class="control-label" for="input-bw-low">Low (Hz)</label>
+                <input class="control-input" type="number" id="input-bw-low"
+                       placeholder="e.g. 50" step="10">
+            </div>
+            <div class="control-row">
+                <label class="control-label" for="input-bw-high">High (Hz)</label>
+                <input class="control-input" type="number" id="input-bw-high"
+                       placeholder="e.g. 2700" step="10">
+            </div>
+            <div class="btn-row">
+                <button class="btn btn-primary btn-sm" id="btn-set-bw">Set Bandwidth</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Bridge Server ─────────────────────────────────────────────────────── -->
+    <div class="section">
+        <div class="collapsible-header" id="bridge-header">
+            <div class="section-title" style="margin-bottom:0">Bridge Server</div>
+            <span class="collapsible-arrow" id="bridge-arrow">▶</span>
+        </div>
+        <div class="collapsible-body" id="bridge-body">
+            <div class="toggle-row" style="margin-top:8px">
+                <span class="toggle-label">Enable bridge relay</span>
+                <label class="toggle">
+                    <input type="checkbox" id="bridge-enabled">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="bridge-status">
+                <div class="bridge-dot" id="bridge-dot"></div>
+                <span class="bridge-status-text" id="bridge-status-text">Disabled</span>
+            </div>
+
+            <div class="control-row">
+                <label class="control-label" for="input-bridge-url">URL</label>
+                <input class="control-input" type="text" id="input-bridge-url"
+                       placeholder="http://localhost:7373">
+            </div>
+            <div class="control-row">
+                <label class="control-label" for="input-bridge-secret">Secret</label>
+                <input class="control-input" type="password" id="input-bridge-secret"
+                       placeholder="optional shared secret">
+            </div>
+            <div class="btn-row">
+                <button class="btn btn-secondary btn-sm" id="btn-save-bridge">Save</button>
+                <button class="btn btn-secondary btn-sm" id="btn-test-bridge">Test</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Status bar ────────────────────────────────────────────────────────── -->
+    <div class="status-bar" id="status-bar">Ready</div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

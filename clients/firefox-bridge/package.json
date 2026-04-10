@@ -1,0 +1,21 @@
+{
+  "name": "ubersdr-bridge",
+  "version": "1.0.0",
+  "description": "Firefox extension bridging the UberSDR web interface to local applications",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "web-ext build --source-dir=extension --artifacts-dir=dist --overwrite-dest",
+    "dev": "web-ext run --source-dir=extension --firefox=firefox",
+    "lint": "web-ext lint --source-dir=extension",
+    "sign": "web-ext sign --source-dir=extension --artifacts-dir=dist --api-key=$WEB_EXT_API_KEY --api-secret=$WEB_EXT_API_SECRET",
+    "clean": "rm -rf dist/"
+  },
+  "devDependencies": {
+    "web-ext": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}

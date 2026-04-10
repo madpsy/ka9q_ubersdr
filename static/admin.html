@@ -7740,10 +7740,11 @@
 
         /**
          * Render RBN skew + statistics data into #rbnDataContent.
-         * @param {object} data  - response from GET /admin/rbn-data[?callsign=…]
-         * @param {string} label - heading label (callsign or "All")
+         * @param {object}  data           - response from GET /admin/rbn-data[?callsign=…]
+         * @param {string}  label          - heading label (callsign or "All")
+         * @param {boolean} isLocalCallsign - true when showing the configured local callsign
          */
-        function renderRBNData(data, label) {
+        function renderRBNData(data, label, isLocalCallsign) {
             const content = document.getElementById('rbnDataContent');
             const lastUpdated = document.getElementById('rbnLastUpdated');
             if (!content) return;
@@ -7758,21 +7759,22 @@
             if (data.callsign) {
                 const skew  = data.skew;
                 const stats = data.statistics;
-                let html = `<div style="font-size:13px; color:#283593; font-weight:bold; margin-bottom:8px;">📡 ${data.callsign}</div>`;
+                let html = `<div style="font-size:13px; color:#283593; font-weight:bold; margin-bottom:8px;">${data.callsign}</div>`;
                 html += '<div style="display:flex; flex-wrap:wrap; gap:12px;">';
                 if (skew) {
                     const skewHigh = Math.abs(skew.skew) > 0.1;
                     const skewCardStyle = skewHigh
-                        ? 'background:#fff8e1; border:1px solid #f9a825; border-radius:4px; padding:10px 14px; min-width:180px;'
-                        : 'background:#fff; border:1px solid #c5cae9; border-radius:4px; padding:10px 14px; min-width:180px;';
+                        ? 'background:#fff8e1; border:1px solid #f9a825; border-radius:4px; padding:10px 14px; min-width:200px;'
+                        : 'background:#fff; border:1px solid #c5cae9; border-radius:4px; padding:10px 14px; min-width:200px;';
                     const skewValueColor = skewHigh ? '#e65100' : '#1a237e';
                     html += `
                         <div style="${skewCardStyle}">
-                            <div style="font-size:11px; color:#666; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">Skew</div>
+                            <div style="font-size:11px; color:#666; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">Frequency deviation (yesterday)</div>
                             <div style="font-size:20px; font-weight:bold; color:${skewValueColor};">${skew.skew} Hz</div>
-                            ${skewHigh ? '<div style="font-size:12px; color:#e65100; font-weight:bold; margin-top:2px;">⚠️ Possible frequency correction needed</div>' : ''}
-                            <div style="font-size:12px; color:#555; margin-top:4px;">Spots: ${skew.spots.toLocaleString()}</div>
-                            <div style="font-size:12px; color:#555;">Correction: ${skew.correction_factor.toFixed(8)}</div>
+                            ${skewHigh ? '<div style="font-size:12px; color:#e65100; font-weight:bold; margin-top:2px;">⚠️ Deviation above 0.1 Hz</div>' : ''}
+                            ${skewHigh && isLocalCallsign ? '<div style="font-size:12px; color:#b71c1c; margin-top:4px;">Consider compensating the SDR frequency reference, or disciplining it with a GPSDO.</div>' : ''}
+                            <div style="font-size:12px; color:#555; margin-top:4px;">Based on ${skew.spots.toLocaleString()} spots</div>
+                            <div style="font-size:12px; color:#555; margin-top:2px;">Correction factor: <code style="font-size:11px;">${skew.correction_factor.toFixed(9)}</code></div>
                         </div>`;
                 } else {
                     html += `<div style="background:#fff; border:1px solid #e0e0e0; border-radius:4px; padding:10px 14px; color:#999; font-size:13px;">No skew data</div>`;
@@ -7833,11 +7835,14 @@
         async function loadRBNDataForConfigCallsign() {
             if (!rbnShouldShow()) return;
             const callsign = (currentConfig?.admin?.callsign || '').trim().toUpperCase();
-            await fetchAndRenderRBNData(callsign);
+            await fetchAndRenderRBNData(callsign, true);
         }
 
-        /** Fetch RBN data for a specific callsign (or summary) and render it. */
-        async function fetchAndRenderRBNData(callsign) {
+        /** Fetch RBN data for a specific callsign (or summary) and render it.
+         * @param {string|null}  callsign       - callsign to look up, or null for summary
+         * @param {boolean}      isLocalCallsign - true when this is the configured local callsign
+         */
+        async function fetchAndRenderRBNData(callsign, isLocalCallsign) {
             const content = document.getElementById('rbnDataContent');
             if (content) content.innerHTML = '<p style="color:#666; font-size:13px; margin:0;">Loading…</p>';
             const url = callsign ? `/admin/rbn-data?callsign=${encodeURIComponent(callsign)}` : '/admin/rbn-data';
@@ -7850,7 +7855,7 @@
                     return;
                 }
                 const data = await resp.json();
-                renderRBNData(data, callsign || 'All');
+                renderRBNData(data, callsign || 'All', isLocalCallsign === true);
             } catch (e) {
                 if (content) content.innerHTML = `<p style="color:#c62828; font-size:13px; margin:0;">Error: ${e.message}</p>`;
             }
@@ -7862,10 +7867,10 @@
             const callsign = (input?.value || '').trim().toUpperCase();
             if (!callsign) {
                 // Empty → show summary
-                await fetchAndRenderRBNData(null);
+                await fetchAndRenderRBNData(null, false);
                 return;
             }
-            await fetchAndRenderRBNData(callsign);
+            await fetchAndRenderRBNData(callsign, false);
         }
 
         /** Trigger a manual refresh of both RBN sources. */

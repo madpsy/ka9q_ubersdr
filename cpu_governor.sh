@@ -49,6 +49,16 @@ get_cpu_freq_mhz() {
     echo $(( freq / 1000 ))
 }
 
+get_all_cpu_freqs_mhz() {
+    local i=0
+    for freq_file in /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq; do
+        local freq
+        freq=$(cat "$freq_file" 2>/dev/null || echo "0")
+        echo "cpu${i}:$(( freq / 1000 ))"
+        (( i++ ))
+    done
+}
+
 get_cpu_max_freq_mhz() {
     local freq
     freq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null || echo "0")
@@ -84,8 +94,42 @@ show_status() {
 
     echo -e "  CPUs detected   : ${BOLD}${cpus}${RESET}"
     echo -e "  Current governor: ${gov_colour}${BOLD}${current}${RESET}"
-    echo -e "  Current freq    : ${BOLD}${cur_mhz} MHz${RESET}"
     echo -e "  Min / Max freq  : ${min_mhz} MHz / ${max_mhz} MHz"
+
+    # Per-core frequencies
+    local all_freqs
+    mapfile -t all_freqs < <(get_all_cpu_freqs_mhz)
+    if [[ ${#all_freqs[@]} -gt 0 ]]; then
+        # Check if all cores are at the same frequency
+        local unique_freqs
+        unique_freqs=$(printf '%s\n' "${all_freqs[@]}" | cut -d: -f2 | sort -u)
+        local unique_count
+        unique_count=$(echo "$unique_freqs" | wc -l)
+        if [[ $unique_count -eq 1 ]]; then
+            echo -e "  Current freq    : ${BOLD}${unique_freqs} MHz${RESET} (all cores)"
+        else
+            echo -e "  Per-core freq   :"
+            local cols=4
+            local col=0
+            local line=""
+            for entry in "${all_freqs[@]}"; do
+                local cpu_id freq_val
+                cpu_id="${entry%%:*}"
+                freq_val="${entry##*:}"
+                line+="    $(printf '%-6s' "${cpu_id}:")"
+                line+="$(printf '%4s MHz' "${freq_val}")  "
+                (( col++ ))
+                if (( col >= cols )); then
+                    echo -e "$line"
+                    line=""
+                    col=0
+                fi
+            done
+            [[ -n "$line" ]] && echo -e "$line"
+        fi
+    else
+        echo -e "  Current freq    : ${BOLD}${cur_mhz} MHz${RESET}"
+    fi
 
     # Show per-CPU governors if they differ
     local governors=()

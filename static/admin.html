@@ -1113,7 +1113,16 @@
                     <!-- RBN Data Panel (hidden until CW Skimmer enabled state is known) -->
                     <div id="rbnDataPanel" style="display: none; margin-bottom: 20px; padding: 15px; background: #f0f4ff; border-radius: 5px; border: 1px solid #7986cb;">
                         <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px;">
-                            <strong style="color: #283593;">📡 RBN Skimmer Data</strong>
+                            <div>
+                                <strong style="color: #283593;">📡 RBN Skimmer Data</strong>
+                                <span style="margin-left: 10px; font-size: 12px; color: #555;">
+                                    Data from
+                                    <a href="https://sm7iun.se/rbn/analytics/" target="_blank" rel="noopener" style="color: #3f51b5;">Analytics</a>
+                                    &amp;
+                                    <a href="https://sm7iun.se/rbn/statistics/" target="_blank" rel="noopener" style="color: #3f51b5;">Statistics</a>
+                                    (sm7iun.se)
+                                </span>
+                            </div>
                             <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                                 <input type="text" id="rbnLookupInput" placeholder="Look up callsign…" style="padding: 5px 10px; border: 1px solid #9fa8da; border-radius: 4px; font-size: 13px; width: 160px;" onkeydown="if(event.key==='Enter') lookupRBNCallsign()">
                                 <button class="btn" onclick="lookupRBNCallsign()" style="background: #3f51b5; color: white; font-size: 13px; padding: 5px 12px;">🔍 Look Up</button>
@@ -7752,10 +7761,16 @@
                 let html = `<div style="font-size:13px; color:#283593; font-weight:bold; margin-bottom:8px;">📡 ${data.callsign}</div>`;
                 html += '<div style="display:flex; flex-wrap:wrap; gap:12px;">';
                 if (skew) {
+                    const skewHigh = Math.abs(skew.skew) > 0.1;
+                    const skewCardStyle = skewHigh
+                        ? 'background:#fff8e1; border:1px solid #f9a825; border-radius:4px; padding:10px 14px; min-width:180px;'
+                        : 'background:#fff; border:1px solid #c5cae9; border-radius:4px; padding:10px 14px; min-width:180px;';
+                    const skewValueColor = skewHigh ? '#e65100' : '#1a237e';
                     html += `
-                        <div style="background:#fff; border:1px solid #c5cae9; border-radius:4px; padding:10px 14px; min-width:180px;">
+                        <div style="${skewCardStyle}">
                             <div style="font-size:11px; color:#666; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">Skew</div>
-                            <div style="font-size:20px; font-weight:bold; color:#1a237e;">${skew.skew} Hz</div>
+                            <div style="font-size:20px; font-weight:bold; color:${skewValueColor};">${skew.skew} Hz</div>
+                            ${skewHigh ? '<div style="font-size:12px; color:#e65100; font-weight:bold; margin-top:2px;">⚠️ Possible frequency correction needed</div>' : ''}
                             <div style="font-size:12px; color:#555; margin-top:4px;">Spots: ${skew.spots.toLocaleString()}</div>
                             <div style="font-size:12px; color:#555;">Correction: ${skew.correction_factor.toFixed(8)}</div>
                         </div>`;

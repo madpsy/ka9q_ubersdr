@@ -7,10 +7,14 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 )
+
+// rbnCallsignRe matches valid callsign query parameters: 1–10 alphanumeric characters.
+var rbnCallsignRe = regexp.MustCompile(`^[A-Z0-9]{1,10}$`)
 
 const (
 	rbnSkewURL       = "https://sm7iun.se/rbnskew.csv"
@@ -446,6 +450,12 @@ func (ah *AdminHandler) HandleRBNData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	callsign := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("callsign")))
+
+	// Validate callsign: alphanumeric only, max 10 characters
+	if callsign != "" && !rbnCallsignRe.MatchString(callsign) {
+		http.Error(w, "invalid callsign: must be 1–10 alphanumeric characters", http.StatusBadRequest)
+		return
+	}
 
 	ah.rbnStore.mu.RLock()
 	defer ah.rbnStore.mu.RUnlock()

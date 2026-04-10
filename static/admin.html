@@ -1124,7 +1124,7 @@
                                 </span>
                             </div>
                             <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                                <input type="text" id="rbnLookupInput" placeholder="Look up callsign…" style="padding: 5px 10px; border: 1px solid #9fa8da; border-radius: 4px; font-size: 13px; width: 160px;" onkeydown="if(event.key==='Enter') lookupRBNCallsign()">
+                                <input type="text" id="rbnLookupInput" placeholder="Look up callsign…" maxlength="10" pattern="[A-Za-z0-9]*" style="padding: 5px 10px; border: 1px solid #9fa8da; border-radius: 4px; font-size: 13px; width: 160px;" oninput="this.value=this.value.replace(/[^A-Za-z0-9]/g,'').toUpperCase()" onkeydown="if(event.key==='Enter') lookupRBNCallsign()">
                                 <button class="btn" onclick="lookupRBNCallsign()" style="background: #3f51b5; color: white; font-size: 13px; padding: 5px 12px;">🔍 Look Up</button>
                                 <button class="btn" id="rbnRefreshBtn" onclick="refreshRBNData()" style="background: #5c6bc0; color: white; font-size: 13px; padding: 5px 12px;">🔄 Refresh</button>
                             </div>
@@ -7861,16 +7861,17 @@
             }
         }
 
-        /** Look up the callsign typed in the lookup input box. */
+        /** Look up the callsign typed in the lookup input box.
+         *  Falls back to the configured local callsign when the input is empty. */
         async function lookupRBNCallsign() {
             const input = document.getElementById('rbnLookupInput');
-            const callsign = (input?.value || '').trim().toUpperCase();
-            if (!callsign) {
-                // Empty → show summary
-                await fetchAndRenderRBNData(null, false);
+            const typed = (input?.value || '').trim().toUpperCase();
+            if (!typed) {
+                // Empty input → use the configured callsign, same as page load
+                await loadRBNDataForConfigCallsign();
                 return;
             }
-            await fetchAndRenderRBNData(callsign, false);
+            await fetchAndRenderRBNData(typed, false);
         }
 
         /** Trigger a manual refresh of both RBN sources. */

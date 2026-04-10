@@ -1406,12 +1406,14 @@
                         <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
                             <div style="flex: 1; color: #1b5e20;">
                                 <strong>⚡ CPU Governor</strong>
+                                <span id="cpuGovernorBadge" style="display: none; margin-left: 10px; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; vertical-align: middle;"></span>
                                 <p style="margin: 5px 0 0 0; font-size: 13px; color: #2e7d32;">
                                     The CPU governor controls how the processor scales its clock speed.
                                     Linux defaults to <strong>powersave</strong> or <strong>ondemand</strong>, which throttle the CPU and ramp up slowly under load —
-                                    causing audio stuttering and missed decoder cycles in UberSDR.
-                                    Setting the governor to <strong>performance</strong> keeps the CPU at full speed at all times,
-                                    which significantly improves real-time streaming stability.
+                                    on some systems this <em>may</em> contribute to audio stuttering or missed decoder cycles.
+                                    The <strong>performance</strong> governor requests maximum clock speed at all times, which
+                                    <em>may</em> improve real-time streaming stability on affected systems, but will typically
+                                    increase power consumption and heat output.
                                 </p>
                             </div>
                             <button class="btn" onclick="openCPUGovernor()" style="background: #4caf50; color: white; font-weight: bold; white-space: nowrap;">
@@ -10935,6 +10937,24 @@ const tooltipLine2 = timeStr;
             const container = document.getElementById('systemStats');
             container.innerHTML = '';
             container.classList.remove('loading');
+
+            // Update CPU governor badge if available
+            const govBadge = document.getElementById('cpuGovernorBadge');
+            if (govBadge && stats.cpu_governor) {
+                const gov = stats.cpu_governor.trim();
+                govBadge.textContent = gov;
+                govBadge.style.display = 'inline-block';
+                if (gov === 'performance') {
+                    govBadge.style.background = '#c8e6c9';
+                    govBadge.style.color = '#1b5e20';
+                } else if (gov === 'powersave' || gov === 'ondemand' || gov === 'conservative') {
+                    govBadge.style.background = '#fff3cd';
+                    govBadge.style.color = '#856404';
+                } else {
+                    govBadge.style.background = '#e3f2fd';
+                    govBadge.style.color = '#0d47a1';
+                }
+            }
 
             // Create sections for each stat
             const sections = [

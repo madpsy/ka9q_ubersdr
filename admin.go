@@ -4171,11 +4171,14 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 		stats["data_directories"] = dataDirs
 	}
 
-	// Get IP address information via GoTTY if SSH proxy is enabled
+	// Get IP address information and CPU governor via GoTTY if SSH proxy is enabled
 	gottyClient := NewGoTTYClient(&ah.config.SSHProxy)
 	if gottyClient != nil {
 		if resp, err := gottyClient.ExecCommand("ip address show", 2); err == nil && resp.ExitCode == 0 {
 			stats["ip_addresses"] = resp.Stdout
+		}
+		if resp, err := gottyClient.ExecCommand("cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", 2); err == nil && resp.ExitCode == 0 {
+			stats["cpu_governor"] = strings.TrimSpace(resp.Stdout)
 		}
 	}
 

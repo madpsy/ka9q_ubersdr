@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # cpu_governor.sh - Interactive CPU governor manager for UberSDR
-# Requires cpufrequtils (installed automatically by install-hub.sh)
+# Requires cpupower (linux-cpupower / cpupower package)
 
 set -euo pipefail
 
@@ -27,7 +27,7 @@ header() {
 # ─── Dependency checks ──────────────────────────────────────────────────────
 check_deps() {
     if ! command -v cpupower &>/dev/null; then
-        die "'cpupower' not found. Install with: sudo apt install cpufrequtils"
+        die "'cpupower' not found. Install with: sudo apt install linux-cpupower"
     fi
     if [[ $EUID -ne 0 ]]; then
         die "This script must be run as root (use: sudo $0)"
@@ -106,12 +106,12 @@ show_status() {
 detect_persistence() {
     local persisted=""
 
-    if [[ -f /etc/default/cpufrequtils ]]; then
-        persisted=$(grep -E '^GOVERNOR=' /etc/default/cpufrequtils 2>/dev/null | cut -d= -f2 | tr -d '"' || true)
+    if [[ -f /etc/default/cpupower ]]; then
+        persisted=$(grep -E '^CPU_DEFAULT_GOVERNOR=' /etc/default/cpupower 2>/dev/null | cut -d= -f2 | tr -d '"' || true)
     fi
 
     if [[ -n "$persisted" ]]; then
-        info "Persistent governor (/etc/default/cpufrequtils): ${BOLD}${persisted}${RESET}"
+        info "Persistent governor (/etc/default/cpupower): ${BOLD}${persisted}${RESET}"
     else
         info "No persistence configured — governor resets to system default on reboot."
     fi
@@ -139,34 +139,36 @@ apply_governor() {
     fi
 }
 
-# ─── Persist governor via cpufrequtils ───────────────────────────────────────
+# ─── Persist governor via cpupower ───────────────────────────────────────────
 persist_governor() {
     local governor="$1"
-    info "Persisting via /etc/default/cpufrequtils ..."
+    info "Persisting via /etc/default/cpupower ..."
 
-    if [[ -f /etc/default/cpufrequtils ]]; then
-        # Update existing GOVERNOR= line, or append if not present
-        if grep -q '^GOVERNOR=' /etc/default/cpufrequtils; then
-            sed -i "s/^GOVERNOR=.*/GOVERNOR=\"${governor}\"/" /etc/default/cpufrequtils
+    if [[ -f /etc/default/cpupower ]]; then
+        # Update existing CPU_DEFAULT_GOVERNOR= line, or append if not present
+        if grep -q '^CPU_DEFAULT_GOVERNOR=' /etc/default/cpupower; then
+            sed -i "s/^CPU_DEFAULT_GOVERNOR=.*/CPU_DEFAULT_GOVERNOR=\"${governor}\"/" /etc/default/cpupower
         else
-            echo "GOVERNOR=\"${governor}\"" >> /etc/default/cpufrequtils
+            echo "CPU_DEFAULT_GOVERNOR=\"${governor}\"" >> /etc/default/cpupower
         fi
     else
-        echo "GOVERNOR=\"${governor}\"" > /etc/default/cpufrequtils
+        echo "CPU_DEFAULT_GOVERNOR=\"${governor}\"" > /etc/default/cpupower
     fi
 
-    ok "Written to /etc/default/cpufrequtils"
+    ok "Written to /etc/default/cpupower"
 
-    if systemctl is-active cpufrequtils &>/dev/null 2>&1; then
-        systemctl restart cpufrequtils && ok "cpufrequtils service restarted"
+    if systemctl is-enabled cpupower &>/dev/null 2>&1; then
+        systemctl restart cpupower && ok "cpupower service restarted"
+    elif systemctl is-enabled cpupower.service &>/dev/null 2>&1; then
+        systemctl restart cpupower.service && ok "cpupower.service restarted"
     fi
 }
 
 # ─── Remove persistence ───────────────────────────────────────────────────────
 remove_persistence() {
-    if [[ -f /etc/default/cpufrequtils ]] && grep -q '^GOVERNOR=' /etc/default/cpufrequtils 2>/dev/null; then
-        sed -i '/^GOVERNOR=/d' /etc/default/cpufrequtils
-        ok "Removed GOVERNOR line from /etc/default/cpufrequtils"
+    if [[ -f /etc/default/cpupower ]] && grep -q '^CPU_DEFAULT_GOVERNOR=' /etc/default/cpupower 2>/dev/null; then
+        sed -i '/^CPU_DEFAULT_GOVERNOR=/d' /etc/default/cpupower
+        ok "Removed CPU_DEFAULT_GOVERNOR line from /etc/default/cpupower"
     else
         info "No persistence configuration found to remove."
     fi
@@ -252,7 +254,7 @@ main() {
     echo ""
     echo -e "${BOLD}Persistence options:${RESET}"
     echo -e "  ${BOLD}1)${RESET} Apply for this session only (resets on reboot)"
-    echo -e "  ${BOLD}2)${RESET} Make persistent across reboots (via /etc/default/cpufrequtils)"
+    echo -e "  ${BOLD}2)${RESET} Make persistent across reboots (via /etc/default/cpupower)"
     echo -e "  ${BOLD}3)${RESET} Remove persistence (revert to system default on reboot)"
     echo ""
     read -rp "$(echo -e "${BOLD}Choose persistence option [1/2/3]:${RESET} ")" persist_choice

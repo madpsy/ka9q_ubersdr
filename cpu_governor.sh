@@ -286,7 +286,7 @@ main() {
         [[ "$gov" == "$current" ]] && marker=" ${GREEN}← current${RESET}"
         local rec=""
         [[ "$gov" == "performance" ]] && rec=" ${YELLOW}(recommended for UberSDR)${RESET}"
-        printf "  ${BOLD}%d)${RESET} %-14s %s%s%s\n" "$i" "$gov" "$(governor_description "$gov")" "$marker" "$rec"
+        echo -e "  ${BOLD}${i})${RESET} $(printf '%-14s' "$gov") $(governor_description "$gov")${marker}${rec}"
         (( i++ ))
     done
 

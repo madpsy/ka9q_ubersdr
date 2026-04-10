@@ -1109,6 +1109,24 @@
                             <a href="cw_metrics.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📊 CW Metrics</a>
                         </div>
                     </div>
+
+                    <!-- RBN Data Panel (hidden until CW Skimmer enabled state is known) -->
+                    <div id="rbnDataPanel" style="display: none; margin-bottom: 20px; padding: 15px; background: #f0f4ff; border-radius: 5px; border: 1px solid #7986cb;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px;">
+                            <strong style="color: #283593;">📡 RBN Skimmer Data</strong>
+                            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                <input type="text" id="rbnLookupInput" placeholder="Look up callsign…" style="padding: 5px 10px; border: 1px solid #9fa8da; border-radius: 4px; font-size: 13px; width: 160px;" onkeydown="if(event.key==='Enter') lookupRBNCallsign()">
+                                <button class="btn" onclick="lookupRBNCallsign()" style="background: #3f51b5; color: white; font-size: 13px; padding: 5px 12px;">🔍 Look Up</button>
+                                <button class="btn" id="rbnRefreshBtn" onclick="refreshRBNData()" style="background: #5c6bc0; color: white; font-size: 13px; padding: 5px 12px;">🔄 Refresh</button>
+                            </div>
+                        </div>
+                        <div id="rbnRateLimitError" style="display: none; margin-bottom: 10px; padding: 8px 12px; background: #fff3e0; border: 1px solid #ffb74d; border-radius: 4px; color: #e65100; font-size: 13px;"></div>
+                        <div id="rbnDataContent">
+                            <p style="color: #666; font-size: 13px; margin: 0;">Loading RBN data…</p>
+                        </div>
+                        <div id="rbnLastUpdated" style="margin-top: 8px; font-size: 11px; color: #888;"></div>
+                    </div>
+
                     <div id="cwskimmerConfig" class="loading">
                         <div class="spinner"></div>
                         <p>Loading CW Skimmer configuration...</p>
@@ -7339,6 +7357,8 @@
             // Update analytics links visibility based on CW Skimmer enabled status
             updateCWSkimmerAnalyticsLinks();
             updateCWSkimmerManagementButtons();
+            updateRBNDataPanelVisibility();
+            loadRBNDataForConfigCallsign();
 
             // Connection Settings Section
             const connectionSection = document.createElement('div');
@@ -7706,6 +7726,172 @@
             // Reset file input
             event.target.value = '';
         }
+
+        // ── RBN Data ──────────────────────────────────────────────────────────
+
+        /**
+         * Render RBN skew + statistics data into #rbnDataContent.
+         * @param {object} data  - response from GET /admin/rbn-data[?callsign=…]
+         * @param {string} label - heading label (callsign or "All")
+         */
+        function renderRBNData(data, label) {
+            const content = document.getElementById('rbnDataContent');
+            const lastUpdated = document.getElementById('rbnLastUpdated');
+            if (!content) return;
+
+            // Build last-updated line
+            const parts = [];
+            if (data.skew_updated_at) parts.push('Skew: ' + new Date(data.skew_updated_at).toLocaleString());
+            if (data.stats_updated_at) parts.push('Stats: ' + new Date(data.stats_updated_at).toLocaleString());
+            if (lastUpdated) lastUpdated.textContent = parts.length ? 'Last updated — ' + parts.join(' · ') : '';
+
+            // Single-callsign view
+            if (data.callsign) {
+                const skew  = data.skew;
+                const stats = data.statistics;
+                let html = `<div style="font-size:13px; color:#283593; font-weight:bold; margin-bottom:8px;">📡 ${data.callsign}</div>`;
+                html += '<div style="display:flex; flex-wrap:wrap; gap:12px;">';
+                if (skew) {
+                    html += `
+                        <div style="background:#fff; border:1px solid #c5cae9; border-radius:4px; padding:10px 14px; min-width:180px;">
+                            <div style="font-size:11px; color:#666; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">Skew</div>
+                            <div style="font-size:20px; font-weight:bold; color:#1a237e;">${skew.skew} Hz</div>
+                            <div style="font-size:12px; color:#555; margin-top:4px;">Spots: ${skew.spots.toLocaleString()}</div>
+                            <div style="font-size:12px; color:#555;">Correction: ${skew.correction_factor.toFixed(8)}</div>
+                        </div>`;
+                } else {
+                    html += `<div style="background:#fff; border:1px solid #e0e0e0; border-radius:4px; padding:10px 14px; color:#999; font-size:13px;">No skew data</div>`;
+                }
+                if (stats) {
+                    html += `
+                        <div style="background:#fff; border:1px solid #c5cae9; border-radius:4px; padding:10px 14px; min-width:180px;">
+                            <div style="font-size:11px; color:#666; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">Statistics</div>
+                            <div style="font-size:20px; font-weight:bold; color:#1a237e;">${stats.spot_count.toLocaleString()}</div>
+                            <div style="font-size:12px; color:#555; margin-top:4px;">Total spots</div>
+                            <div style="font-size:12px; color:#555;">Epoch: ${stats.epoch_date}</div>
+                        </div>`;
+                } else {
+                    html += `<div style="background:#fff; border:1px solid #e0e0e0; border-radius:4px; padding:10px 14px; color:#999; font-size:13px;">No statistics data</div>`;
+                }
+                html += '</div>';
+                content.innerHTML = html;
+                return;
+            }
+
+            // Summary view (no specific callsign)
+            const skewCount  = data.skew_count  || 0;
+            const statsCount = data.stats_count || 0;
+            content.innerHTML = `
+                <div style="display:flex; flex-wrap:wrap; gap:12px; font-size:13px;">
+                    <div style="background:#fff; border:1px solid #c5cae9; border-radius:4px; padding:10px 14px; min-width:160px;">
+                        <div style="font-size:11px; color:#666; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">Skew entries</div>
+                        <div style="font-size:22px; font-weight:bold; color:#1a237e;">${skewCount.toLocaleString()}</div>
+                        ${data.skew_comment ? `<div style="font-size:11px; color:#888; margin-top:4px;">${data.skew_comment}</div>` : ''}
+                    </div>
+                    <div style="background:#fff; border:1px solid #c5cae9; border-radius:4px; padding:10px 14px; min-width:160px;">
+                        <div style="font-size:11px; color:#666; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">Statistics entries</div>
+                        <div style="font-size:22px; font-weight:bold; color:#1a237e;">${statsCount.toLocaleString()}</div>
+                        ${data.stats_comment ? `<div style="font-size:11px; color:#888; margin-top:4px;">${data.stats_comment}</div>` : ''}
+                    </div>
+                </div>`;
+        }
+
+        /** Returns true when the RBN panel should be shown/fetched:
+         *  CW Skimmer must be enabled AND the configured callsign must be
+         *  non-empty and not the placeholder "N0CALL". */
+        function rbnShouldShow() {
+            const isEnabled = currentCWSkimmerConfig.enabled === true || currentCWSkimmerConfig.enabled === 'true';
+            if (!isEnabled) return false;
+            const callsign = (currentConfig?.admin?.callsign || '').trim().toUpperCase();
+            return callsign !== '' && callsign !== 'N0CALL';
+        }
+
+        /** Show or hide the RBN panel based on enabled state + valid callsign. */
+        function updateRBNDataPanelVisibility() {
+            const panel = document.getElementById('rbnDataPanel');
+            if (!panel) return;
+            panel.style.display = rbnShouldShow() ? 'block' : 'none';
+        }
+
+        /** Load RBN data for the configured admin callsign.
+         *  Only fetches when CW Skimmer is enabled and callsign is valid. */
+        async function loadRBNDataForConfigCallsign() {
+            if (!rbnShouldShow()) return;
+            const callsign = (currentConfig?.admin?.callsign || '').trim().toUpperCase();
+            await fetchAndRenderRBNData(callsign);
+        }
+
+        /** Fetch RBN data for a specific callsign (or summary) and render it. */
+        async function fetchAndRenderRBNData(callsign) {
+            const content = document.getElementById('rbnDataContent');
+            if (content) content.innerHTML = '<p style="color:#666; font-size:13px; margin:0;">Loading…</p>';
+            const url = callsign ? `/admin/rbn-data?callsign=${encodeURIComponent(callsign)}` : '/admin/rbn-data';
+            try {
+                const resp = await authenticatedFetch(url);
+                if (!resp) return;
+                if (!resp.ok) {
+                    const txt = await resp.text();
+                    if (content) content.innerHTML = `<p style="color:#c62828; font-size:13px; margin:0;">Error: ${txt || resp.statusText}</p>`;
+                    return;
+                }
+                const data = await resp.json();
+                renderRBNData(data, callsign || 'All');
+            } catch (e) {
+                if (content) content.innerHTML = `<p style="color:#c62828; font-size:13px; margin:0;">Error: ${e.message}</p>`;
+            }
+        }
+
+        /** Look up the callsign typed in the lookup input box. */
+        async function lookupRBNCallsign() {
+            const input = document.getElementById('rbnLookupInput');
+            const callsign = (input?.value || '').trim().toUpperCase();
+            if (!callsign) {
+                // Empty → show summary
+                await fetchAndRenderRBNData(null);
+                return;
+            }
+            await fetchAndRenderRBNData(callsign);
+        }
+
+        /** Trigger a manual refresh of both RBN sources. */
+        async function refreshRBNData() {
+            const btn = document.getElementById('rbnRefreshBtn');
+            const errDiv = document.getElementById('rbnRateLimitError');
+            if (errDiv) errDiv.style.display = 'none';
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ Refreshing…'; }
+            try {
+                const resp = await authenticatedFetch('/admin/rbn-data/refresh', { method: 'POST' });
+                if (!resp) return;
+                if (resp.status === 429) {
+                    const data = await resp.json().catch(() => ({}));
+                    const secs = data.retry_after_secs || 60;
+                    if (errDiv) {
+                        errDiv.textContent = `⏱ Rate limited — please wait ${secs} second${secs !== 1 ? 's' : ''} before refreshing again.`;
+                        errDiv.style.display = 'block';
+                    }
+                    return;
+                }
+                if (!resp.ok) {
+                    const txt = await resp.text();
+                    if (errDiv) {
+                        errDiv.textContent = `Error: ${txt || resp.statusText}`;
+                        errDiv.style.display = 'block';
+                    }
+                    return;
+                }
+                // Refresh succeeded — reload the displayed data
+                await loadRBNDataForConfigCallsign();
+            } catch (e) {
+                if (errDiv) {
+                    errDiv.textContent = `Error: ${e.message}`;
+                    errDiv.style.display = 'block';
+                }
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = '🔄 Refresh'; }
+            }
+        }
+
+        // ── End RBN Data ──────────────────────────────────────────────────────
 
         // Rotator Scheduler configuration management
         let currentRotatorSchedulerConfig = {};

@@ -1733,7 +1733,13 @@ func main() {
 	}
 
 	// Initialize admin handler (pass all components for proper shutdown during restart)
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath)
+	// Initialize RBN data store and fetcher (skew + statistics from sm7iun.se)
+	rbnStore := NewRBNDataStore()
+	rbnFetcher := NewRBNDataFetcher(rbnStore)
+	rbnFetcher.Start()
+	defer rbnFetcher.Stop()
+
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, prometheusMetrics.mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, rbnStore, rbnFetcher)
 
 	// Setup HTTP routes
 	http.HandleFunc("/connection", func(w http.ResponseWriter, r *http.Request) {
@@ -2027,6 +2033,8 @@ func main() {
 	http.HandleFunc("/admin/addon-proxies", adminHandler.AuthMiddleware(adminHandler.HandleAddonProxies))
 	http.HandleFunc("/admin/addon-proxies/test", adminHandler.AuthMiddleware(adminHandler.HandleAddonProxyTest))
 	http.HandleFunc("/admin/addon-proxies/restart", adminHandler.AuthMiddleware(adminHandler.HandleAddonProxiesRestart))
+	http.HandleFunc("/admin/rbn-data", adminHandler.AuthMiddleware(adminHandler.HandleRBNData))
+	http.HandleFunc("/admin/rbn-data/refresh", adminHandler.AuthMiddleware(adminHandler.HandleRBNRefresh))
 
 	// Register SSH proxy route (admin authentication required)
 	if sshProxy != nil {

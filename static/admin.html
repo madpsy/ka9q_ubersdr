@@ -6465,7 +6465,7 @@
             maxWSPRField.querySelector('input').min = '0';
             maxWSPRField.querySelector('input').max = '20';
             const maxWSPRSmall = document.createElement('small');
-            maxWSPRSmall.textContent = '0 = unlimited (all wsprd processes spawn at once — original behaviour). Set to 2–4 to limit concurrent wsprd processes on CPU-constrained systems. All WSPR bands trigger at the same 2-minute boundary; queued decodes are not discarded.';
+            maxWSPRSmall.textContent = '0 = unlimited (all wsprd processes spawn at once). Set to 2–4 to limit concurrent wsprd processes on CPU-constrained systems. All WSPR bands trigger at the same 2-minute boundary; queued decodes are not discarded.';
             maxWSPRField.appendChild(maxWSPRSmall);
             globalSection.appendChild(maxWSPRField);
 

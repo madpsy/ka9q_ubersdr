@@ -7853,7 +7853,7 @@
         function rbnShouldShow() {
             const isEnabled = currentCWSkimmerConfig.enabled === true || currentCWSkimmerConfig.enabled === 'true';
             if (!isEnabled) return false;
-            const callsign = (currentConfig?.admin?.callsign || '').trim().toUpperCase();
+            const callsign = (currentCWSkimmerConfig.callsign || '').trim().toUpperCase();
             return callsign !== '' && callsign !== 'N0CALL';
         }
 
@@ -7868,7 +7868,7 @@
          *  Only fetches when CW Skimmer is enabled and callsign is valid. */
         async function loadRBNDataForConfigCallsign() {
             if (!rbnShouldShow()) return;
-            const callsign = (currentConfig?.admin?.callsign || '').trim().toUpperCase();
+            const callsign = (currentCWSkimmerConfig.callsign || '').trim().toUpperCase();
             await fetchAndRenderRBNData(callsign, true);
         }
 

@@ -15,9 +15,11 @@ class LocalBookmarksUI {
         
         // Wait for DOM to be ready
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this.init());
+            document.addEventListener('DOMContentLoaded', () => {
+                this.init().catch(err => console.error('[LocalBookmarksUI] Initialization failed:', err));
+            });
         } else {
-            this.init();
+            this.init().catch(err => console.error('[LocalBookmarksUI] Initialization failed:', err));
         }
     }
 
@@ -65,6 +67,7 @@ class LocalBookmarksUI {
                     <button class="local-bookmarks-btn" id="local-bookmarks-add-current-btn">+ Add Current</button>
                     <button class="local-bookmarks-btn" id="local-bookmarks-import-btn">📥 Import</button>
                     <button class="local-bookmarks-btn" id="local-bookmarks-export-btn">📤 Export</button>
+                    <button class="local-bookmarks-btn danger" id="local-bookmarks-delete-all-btn">🗑️ Delete All</button>
                 </div>
                 <div class="local-bookmarks-filter-group" id="local-bookmarks-filter-group"></div>
                 <div class="local-bookmarks-list" id="local-bookmarks-list"></div>
@@ -171,6 +174,7 @@ class LocalBookmarksUI {
         document.getElementById('local-bookmarks-add-current-btn')?.addEventListener('click', () => this.addCurrentFrequency());
         document.getElementById('local-bookmarks-import-btn')?.addEventListener('click', () => this.showImportModal());
         document.getElementById('local-bookmarks-export-btn')?.addEventListener('click', () => this.showExportModal());
+        document.getElementById('local-bookmarks-delete-all-btn')?.addEventListener('click', () => this.confirmDeleteAll());
         document.getElementById('local-bookmarks-search')?.addEventListener('input', (e) => this.handleSearch(e.target.value));
 
         // Edit form
@@ -461,8 +465,34 @@ class LocalBookmarksUI {
         );
     }
 
+    // Confirm and delete all bookmarks
+    confirmDeleteAll() {
+        const count = this.manager.getAll().length;
+        if (count === 0) {
+            this.showAlert('management', 'info', 'No bookmarks to delete');
+            return;
+        }
+        this.showConfirmDialog(
+            '🗑️ Delete All Bookmarks',
+            `This will permanently delete all <strong>${count}</strong> bookmark(s). This cannot be undone.`,
+            async () => {
+                try {
+                    await this.manager.deleteAll();
+                    this.showAlert('management', 'success', `Deleted all ${count} bookmark(s)`);
+                    this.renderStats();
+                    this.renderFilterTags();
+                    this.renderBookmarkList();
+                    this.updateMainDropdown();
+                } catch (error) {
+                    this.showAlert('management', 'error', `Delete all failed: ${error.message}`);
+                }
+            },
+            'Delete All'  // custom confirm button label
+        );
+    }
+
     // Show custom confirmation dialog
-    showConfirmDialog(title, message, onConfirm) {
+    showConfirmDialog(title, message, onConfirm, confirmLabel = 'Delete') {
         const existingDialog = document.getElementById('local-bookmarks-confirm-dialog');
         if (existingDialog) {
             existingDialog.remove();
@@ -479,7 +509,7 @@ class LocalBookmarksUI {
                 <p style="margin: 20px 0; color: #ecf0f1;">${message}</p>
                 <div class="local-bookmarks-form-actions">
                     <button class="local-bookmarks-btn secondary" id="local-bookmarks-confirm-cancel">Cancel</button>
-                    <button class="local-bookmarks-btn danger" id="local-bookmarks-confirm-ok">Delete</button>
+                    <button class="local-bookmarks-btn danger" id="local-bookmarks-confirm-ok">${confirmLabel}</button>
                 </div>
             </div>
         `;

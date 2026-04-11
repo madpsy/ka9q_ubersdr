@@ -1480,6 +1480,7 @@
                     <button class="btn btn-secondary" onclick="exportBookmarks()">Export Bookmarks</button>
                     <button class="btn btn-secondary" onclick="importBookmarks()">Import YAML/JSON</button>
                     <button class="btn btn-secondary" onclick="importKiwiSDRBookmarks()">Import KiwiSDR (JSON)</button>
+                    <button class="btn btn-danger" onclick="confirmDeleteAllBookmarks()">🗑️ Delete All Bookmarks</button>
                 </div>
                 <div class="button-group" id="bandButtons" style="display: none;">
                     <button class="btn" onclick="showAddBandForm()">Add New Band</button>
@@ -3886,6 +3887,74 @@
             } catch (error) {
                 showAlert('Error deleting bookmark: ' + error.message, 'error');
             }
+        }
+
+        async function confirmDeleteAllBookmarks() {
+            const count = currentBookmarks.length;
+            if (count === 0) {
+                showAlert('There are no bookmarks to delete.', 'info');
+                return;
+            }
+
+            // Remove any existing modal
+            const existing = document.getElementById('deleteAllBookmarksModal');
+            if (existing) existing.remove();
+
+            const modal = document.createElement('div');
+            modal.id = 'deleteAllBookmarksModal';
+            modal.className = 'modal';
+            modal.style.display = 'flex';
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 460px;">
+                    <div class="modal-header">
+                        <h2>🗑️ Delete All Bookmarks</h2>
+                        <button class="modal-close" id="deleteAllBookmarksClose">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div style="padding: 20px;">
+                            <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px; padding: 15px; margin-bottom: 20px;">
+                                <p style="color: #856404; font-weight: bold; margin-bottom: 6px;">⚠️ This action cannot be undone</p>
+                                <p style="color: #856404; margin: 0;">All <strong>${count}</strong> bookmark(s) will be permanently deleted from the server.</p>
+                            </div>
+                            <p style="color: #555; margin-bottom: 20px;">Are you sure you want to delete all bookmarks?</p>
+                            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                                <button class="btn btn-secondary" id="deleteAllBookmarksCancel">Cancel</button>
+                                <button class="btn btn-danger" id="deleteAllBookmarksConfirm" style="font-weight: bold;">🗑️ Delete All</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+
+            const cleanup = () => modal.remove();
+
+            document.getElementById('deleteAllBookmarksClose').addEventListener('click', cleanup);
+            document.getElementById('deleteAllBookmarksCancel').addEventListener('click', cleanup);
+            modal.addEventListener('click', (e) => { if (e.target === modal) cleanup(); });
+
+            document.getElementById('deleteAllBookmarksConfirm').addEventListener('click', async () => {
+                cleanup();
+                try {
+                    const response = await authenticatedFetch('/admin/bookmarks', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ bookmarks: [] })
+                    });
+
+                    if (!response) return; // Auth failed, already handled
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(errorText || 'Failed to delete all bookmarks');
+                    }
+
+                    currentBookmarks = [];
+                    renderBookmarks();
+                    showAlert(`Successfully deleted all ${count} bookmark(s)`, 'success');
+                } catch (error) {
+                    showAlert('Error deleting all bookmarks: ' + error.message, 'error');
+                }
+            });
         }
 
         // Bookmarks Import/Export functions

@@ -3965,18 +3965,22 @@
                 // Convert frequency from kHz to Hz
                 const frequency = Math.round(freqKHz * 1000);
 
-                // Map KiwiSDR modes to UberSDR modes
+                // Map KiwiSDR modes to UberSDR modes.
+                // Any mode not in this map is unsupported by UberSDR's demodulator
+                // pipeline (e.g. drm, iq, wfm, ecss) — fall back to 'usb' rather
+                // than storing the raw string, which would corrupt audio on click.
                 const modeMap = {
                     'USB': 'usb', 'LSB': 'lsb',
                     'CW': 'cwu', 'CWN': 'cwu',
                     'AM': 'am', 'AMN': 'am',
-                    'FM': 'fm', 'NFM': 'nfm'
+                    'FM': 'fm', 'NFM': 'nfm',
+                    'SAM': 'sam', 'NBFM': 'nfm'
                 };
 
                 const bookmark = {
                     name: name || `${freqKHz} kHz`,
                     frequency: frequency,
-                    mode: modeMap[mode] || mode.toLowerCase()
+                    mode: modeMap[mode] || modeMap[mode?.toUpperCase()] || 'usb'
                 };
 
                 // Extract group from type code (T1-T15)
@@ -4017,6 +4021,120 @@
             return converted;
         }
 
+        /**
+         * Show a modal dialog asking the user how to handle duplicate bookmarks during import.
+         * Returns a Promise that resolves to 'replace', 'merge', or 'skip', or rejects if cancelled.
+         *
+         * @param {number} count - Number of bookmarks found in the import file
+         * @param {string} label - Short label for the import source (e.g. 'KiwiSDR')
+         * @returns {Promise<string>} Resolves with the chosen import mode
+         */
+        function showImportModeDialog(count, label) {
+            return new Promise((resolve, reject) => {
+                // Remove any existing dialog
+                const existing = document.getElementById('bookmarkImportModeModal');
+                if (existing) existing.remove();
+
+                const modal = document.createElement('div');
+                modal.id = 'bookmarkImportModeModal';
+                modal.className = 'modal';
+                modal.style.display = 'flex';
+                modal.innerHTML = `
+                    <div class="modal-content" style="max-width: 480px;">
+                        <div class="modal-header">
+                            <h2>📥 Import ${label} Bookmarks</h2>
+                            <button class="modal-close" id="bookmarkImportModeClose">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div style="padding: 20px;">
+                                <p style="margin-bottom: 16px; color: #555;">
+                                    Found <strong>${count}</strong> bookmark(s). Choose how to handle duplicates
+                                    (matched by name):
+                                </p>
+                                <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px;">
+                                    <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+                                        <input type="radio" name="importMode" value="merge" checked style="margin-top: 3px; flex-shrink: 0;">
+                                        <span>
+                                            <strong>Merge</strong> — update existing bookmarks with the same name,
+                                            add new ones
+                                        </span>
+                                    </label>
+                                    <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+                                        <input type="radio" name="importMode" value="skip" style="margin-top: 3px; flex-shrink: 0;">
+                                        <span>
+                                            <strong>Skip duplicates</strong> — keep existing bookmarks unchanged,
+                                            only add new ones
+                                        </span>
+                                    </label>
+                                    <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+                                        <input type="radio" name="importMode" value="replace" style="margin-top: 3px; flex-shrink: 0;">
+                                        <span>
+                                            <strong>Replace all</strong> — delete all existing bookmarks and
+                                            import only the new ones
+                                        </span>
+                                    </label>
+                                </div>
+                                <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                                    <button class="btn btn-secondary" id="bookmarkImportModeCancel">Cancel</button>
+                                    <button class="btn" id="bookmarkImportModeOK">Import</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+
+                const cleanup = () => modal.remove();
+
+                document.getElementById('bookmarkImportModeOK').addEventListener('click', () => {
+                    const selected = modal.querySelector('input[name="importMode"]:checked');
+                    cleanup();
+                    resolve(selected ? selected.value : 'merge');
+                });
+
+                const cancel = () => { cleanup(); reject(new Error('Import cancelled')); };
+                document.getElementById('bookmarkImportModeCancel').addEventListener('click', cancel);
+                document.getElementById('bookmarkImportModeClose').addEventListener('click', cancel);
+                modal.addEventListener('click', (e) => { if (e.target === modal) cancel(); });
+            });
+        }
+
+        /**
+         * Apply an import mode to the current bookmark list.
+         * - replace: discard all existing, use only imported
+         * - merge:   update existing by name, append new
+         * - skip:    only append bookmarks whose name doesn't already exist
+         *
+         * @param {Array} existing - Current bookmark array
+         * @param {Array} incoming - Imported bookmark array
+         * @param {string} mode - 'replace' | 'merge' | 'skip'
+         * @returns {Array} The resulting merged bookmark array
+         */
+        function applyBookmarkImportMode(existing, incoming, mode) {
+            if (mode === 'replace') {
+                return incoming;
+            }
+
+            // Build a name→index map for fast lookup
+            const nameIndex = new Map();
+            const result = existing.map((b, i) => { nameIndex.set(b.name, i); return { ...b }; });
+
+            for (const bm of incoming) {
+                if (nameIndex.has(bm.name)) {
+                    if (mode === 'merge') {
+                        // Overwrite existing entry
+                        result[nameIndex.get(bm.name)] = bm;
+                    }
+                    // mode === 'skip': do nothing
+                } else {
+                    nameIndex.set(bm.name, result.length);
+                    result.push(bm);
+                }
+            }
+
+            return result;
+        }
+
         async function handleKiwiSDRBookmarksImport(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -4039,34 +4157,27 @@
                     return;
                 }
 
-                // Ask user if they want to replace or merge
-                const action = confirm(
-                    `Found ${importedBookmarks.length} KiwiSDR bookmark(s).\n\n` +
-                    'Click OK to REPLACE all existing bookmarks.\n' +
-                    'Click Cancel to MERGE with existing bookmarks.'
-                );
-
-                if (action) {
-                    // Replace all bookmarks
-                    currentBookmarks = importedBookmarks;
-                } else {
-                    // Merge bookmarks
-                    currentBookmarks = [...currentBookmarks, ...importedBookmarks];
+                // Ask user how to handle duplicates
+                let importMode;
+                try {
+                    importMode = await showImportModeDialog(importedBookmarks.length, 'KiwiSDR');
+                } catch {
+                    return; // User cancelled
                 }
+
+                currentBookmarks = applyBookmarkImportMode(currentBookmarks, importedBookmarks, importMode);
 
                 // Save to server
                 const response = await fetch('/admin/bookmarks', {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ bookmarks: currentBookmarks })
                 });
 
                 if (!response.ok) throw new Error('Failed to save imported bookmarks');
 
                 await loadBookmarks();
-                showAlert(`Successfully imported ${importedBookmarks.length} KiwiSDR bookmark(s)`, 'success');
+                showAlert(`Successfully imported ${importedBookmarks.length} KiwiSDR bookmark(s) (${importMode})`, 'success');
             } catch (error) {
                 showAlert('Error importing KiwiSDR bookmarks: ' + error.message, 'error');
             }
@@ -4128,34 +4239,27 @@
                     return;
                 }
 
-                // Ask user if they want to replace or merge
-                const action = confirm(
-                    `Found ${importedBookmarks.length} bookmark(s).\n\n` +
-                    'Click OK to REPLACE all existing bookmarks.\n' +
-                    'Click Cancel to MERGE with existing bookmarks.'
-                );
-
-                if (action) {
-                    // Replace all bookmarks
-                    currentBookmarks = importedBookmarks;
-                } else {
-                    // Merge bookmarks
-                    currentBookmarks = [...currentBookmarks, ...importedBookmarks];
+                // Ask user how to handle duplicates
+                let importMode;
+                try {
+                    importMode = await showImportModeDialog(importedBookmarks.length, 'YAML/JSON');
+                } catch {
+                    return; // User cancelled
                 }
+
+                currentBookmarks = applyBookmarkImportMode(currentBookmarks, importedBookmarks, importMode);
 
                 // Save to server
                 const response = await fetch('/admin/bookmarks', {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ bookmarks: currentBookmarks })
                 });
 
                 if (!response.ok) throw new Error('Failed to save imported bookmarks');
 
                 await loadBookmarks();
-                showAlert(`Successfully imported ${importedBookmarks.length} bookmark(s)`, 'success');
+                showAlert(`Successfully imported ${importedBookmarks.length} bookmark(s) (${importMode})`, 'success');
             } catch (error) {
                 showAlert('Error importing bookmarks: ' + error.message, 'error');
             }

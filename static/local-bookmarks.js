@@ -1,385 +1,443 @@
 // Local Bookmarks Manager
-// Handles client-side bookmark storage using localStorage
-// Compatible with server bookmark format for easy import/export
+// Handles client-side bookmark storage using IndexedDB.
+// Automatically migrates any existing data from the legacy localStorage keys
+// ('ubersdr_local_bookmarks' and 'ubersdr_local_bookmarks_backup') on first use,
+// then removes those keys so they no longer consume the 5 MB quota.
+
+const DB_NAME    = 'ubersdr_bookmarks';
+const DB_VERSION = 1;
+const STORE_NAME = 'bookmarks';
+
+// Legacy localStorage keys (read-once for migration, then deleted)
+const LS_KEY        = 'ubersdr_local_bookmarks';
+const LS_BACKUP_KEY = 'ubersdr_local_bookmarks_backup';
 
 class LocalBookmarkManager {
     constructor() {
-        this.storageKey = 'ubersdr_local_bookmarks';
-        this.backupKey = 'ubersdr_local_bookmarks_backup';
+        // In-memory cache — kept in sync with IndexedDB after every write
         this.bookmarks = [];
-        this.load();
+
+        // Promise that resolves once the DB is open and migration is complete.
+        // All public methods await this before touching the DB.
+        this.ready = this._open();
     }
 
-    // Load bookmarks from localStorage
-    load() {
+    // -------------------------------------------------------------------------
+    // IndexedDB lifecycle
+    // -------------------------------------------------------------------------
+
+    /** Open (or upgrade) the IndexedDB database, then migrate from localStorage. */
+    _open() {
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open(DB_NAME, DB_VERSION);
+
+            req.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains(STORE_NAME)) {
+                    // 'name' is the primary key — matches the bookmark.name field
+                    db.createObjectStore(STORE_NAME, { keyPath: 'name' });
+                }
+            };
+
+            req.onsuccess = async (event) => {
+                this._db = event.target.result;
+                try {
+                    await this._migrateFromLocalStorage();
+                    await this._loadAll();
+                    console.log(`[LocalBookmarks] Ready — ${this.bookmarks.length} bookmark(s) in IndexedDB`);
+                    resolve();
+                } catch (err) {
+                    console.error('[LocalBookmarks] Init error:', err);
+                    reject(err);
+                }
+            };
+
+            req.onerror = () => {
+                console.error('[LocalBookmarks] Failed to open IndexedDB:', req.error);
+                reject(req.error);
+            };
+        });
+    }
+
+    /**
+     * If localStorage contains legacy bookmark data, import it into IndexedDB
+     * and then remove the localStorage keys so they no longer consume quota.
+     */
+    async _migrateFromLocalStorage() {
+        const raw = localStorage.getItem(LS_KEY);
+        if (!raw) return; // Nothing to migrate
+
+        let migratedCount = 0;
+        let migrationError = null;
+
         try {
-            const data = localStorage.getItem(this.storageKey);
-            if (data) {
-                this.bookmarks = JSON.parse(data);
-                console.log(`[LocalBookmarks] Loaded ${this.bookmarks.length} local bookmarks`);
+            const legacy = JSON.parse(raw);
+            if (Array.isArray(legacy) && legacy.length > 0) {
+                console.log(`[LocalBookmarks] Migration: found ${legacy.length} bookmark(s) in localStorage — copying to IndexedDB…`);
+                await this._putAll(legacy);
+                migratedCount = legacy.length;
+                console.log(`[LocalBookmarks] Migration successful: ${migratedCount} bookmark(s) moved to IndexedDB`);
             } else {
-                this.bookmarks = [];
-                console.log('[LocalBookmarks] No local bookmarks found, starting fresh');
+                console.log('[LocalBookmarks] Migration: localStorage key present but contained no bookmarks — cleaning up');
             }
-            return this.bookmarks;
-        } catch (error) {
-            console.error('[LocalBookmarks] Error loading bookmarks:', error);
-            this.bookmarks = [];
-            return [];
+        } catch (err) {
+            migrationError = err;
+            console.error('[LocalBookmarks] Migration failed — could not parse or write legacy localStorage data:', err);
+            // Do NOT remove the localStorage keys if the write failed,
+            // so the data is not lost and migration can be retried next load.
+            return;
+        }
+
+        // Remove both legacy keys now that data is safely in IndexedDB.
+        let cleanedMain   = false;
+        let cleanedBackup = false;
+        try { localStorage.removeItem(LS_KEY);        cleanedMain   = true; } catch (_) { /* ignore */ }
+        try { localStorage.removeItem(LS_BACKUP_KEY); cleanedBackup = true; } catch (_) { /* ignore */ }
+
+        if (migratedCount > 0) {
+            console.log(
+                `[LocalBookmarks] Migration complete — ${migratedCount} bookmark(s) migrated.` +
+                ` localStorage keys removed: main=${cleanedMain}, backup=${cleanedBackup}`
+            );
         }
     }
 
-    // Save bookmarks to localStorage
-    save() {
-        try {
-            // Create backup before saving
-            const currentData = localStorage.getItem(this.storageKey);
-            if (currentData) {
-                localStorage.setItem(this.backupKey, currentData);
-            }
+    // -------------------------------------------------------------------------
+    // Low-level IndexedDB helpers
+    // -------------------------------------------------------------------------
 
-            // Save new data
-            localStorage.setItem(this.storageKey, JSON.stringify(this.bookmarks));
-            console.log(`[LocalBookmarks] Saved ${this.bookmarks.length} bookmarks`);
-            return true;
-        } catch (error) {
-            console.error('[LocalBookmarks] Error saving bookmarks:', error);
-            return false;
-        }
+    /** Load all records from IndexedDB into this.bookmarks (in-memory cache). */
+    _loadAll() {
+        return new Promise((resolve, reject) => {
+            const tx    = this._db.transaction(STORE_NAME, 'readonly');
+            const store = tx.objectStore(STORE_NAME);
+            const req   = store.getAll();
+            req.onsuccess = () => {
+                this.bookmarks = req.result || [];
+                resolve(this.bookmarks);
+            };
+            req.onerror = () => reject(req.error);
+        });
     }
 
-    // Get all bookmarks
+    /**
+     * Write a single bookmark record (insert or overwrite by name).
+     * Also updates the in-memory cache entry.
+     */
+    _put(bookmark) {
+        return new Promise((resolve, reject) => {
+            const tx    = this._db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            const req   = store.put(bookmark);
+            req.onsuccess = () => resolve();
+            req.onerror   = () => reject(req.error);
+        });
+    }
+
+    /**
+     * Write an array of bookmark records in a single transaction.
+     * Replaces the entire in-memory cache with the provided array.
+     */
+    _putAll(bookmarks) {
+        return new Promise((resolve, reject) => {
+            const tx    = this._db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            for (const bm of bookmarks) {
+                store.put(bm);
+            }
+            tx.oncomplete = () => {
+                // Refresh in-memory cache from the written data
+                this.bookmarks = [...bookmarks];
+                resolve();
+            };
+            tx.onerror = () => reject(tx.error);
+        });
+    }
+
+    /**
+     * Replace the entire object store with the provided array in one transaction.
+     * Used by 'replace' import mode and deleteAll().
+     */
+    _replaceAll(bookmarks) {
+        return new Promise((resolve, reject) => {
+            const tx    = this._db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            store.clear();
+            for (const bm of bookmarks) {
+                store.put(bm);
+            }
+            tx.oncomplete = () => {
+                this.bookmarks = [...bookmarks];
+                resolve();
+            };
+            tx.onerror = () => reject(tx.error);
+        });
+    }
+
+    /** Delete a single record by name. */
+    _delete(name) {
+        return new Promise((resolve, reject) => {
+            const tx    = this._db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            const req   = store.delete(name);
+            req.onsuccess = () => resolve();
+            req.onerror   = () => reject(req.error);
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Public API  (all async — callers should await manager.ready first)
+    // -------------------------------------------------------------------------
+
+    /** Return a shallow copy of all bookmarks from the in-memory cache. */
     getAll() {
-        return [...this.bookmarks]; // Return copy to prevent external modification
+        return [...this.bookmarks];
     }
 
-    // Get bookmark by name
+    /** Return a single bookmark by name, or undefined. */
     get(name) {
         return this.bookmarks.find(b => b.name === name);
     }
 
-    // Check if bookmark exists
+    /** Return true if a bookmark with the given name exists. */
     exists(name) {
         return this.bookmarks.some(b => b.name === name);
     }
 
-    // Add new bookmark
-    add(bookmark) {
-        // Validate required fields
+    /**
+     * Add a new bookmark.
+     * @throws if required fields are missing or name already exists.
+     */
+    async add(bookmark) {
+        await this.ready;
+
         if (!bookmark.name || !bookmark.frequency || !bookmark.mode) {
             throw new Error('Bookmark must have name, frequency, and mode');
         }
-
-        // Check for duplicate name
         if (this.exists(bookmark.name)) {
             throw new Error(`Bookmark with name "${bookmark.name}" already exists`);
         }
 
-        // Create bookmark with metadata
         const newBookmark = {
-            name: bookmark.name,
-            frequency: parseInt(bookmark.frequency),
-            mode: bookmark.mode.toLowerCase(),
-            group: bookmark.group || null,
-            comment: bookmark.comment || null,
-            extension: bookmark.extension || null,
-            bandwidth_low: typeof bookmark.bandwidth_low === 'number' ? bookmark.bandwidth_low : null,
+            name:           bookmark.name,
+            frequency:      parseInt(bookmark.frequency),
+            mode:           bookmark.mode.toLowerCase(),
+            group:          bookmark.group          || null,
+            comment:        bookmark.comment        || null,
+            extension:      bookmark.extension      || null,
+            bandwidth_low:  typeof bookmark.bandwidth_low  === 'number' ? bookmark.bandwidth_low  : null,
             bandwidth_high: typeof bookmark.bandwidth_high === 'number' ? bookmark.bandwidth_high : null,
-            source: 'local',
-            created: Date.now(),
-            modified: Date.now()
+            source:         'local',
+            created:        Date.now(),
+            modified:       Date.now()
         };
 
+        await this._put(newBookmark);
+        // Update in-memory cache
         this.bookmarks.push(newBookmark);
-        console.log(`[LocalBookmarks] Adding bookmark with bandwidth_low=${newBookmark.bandwidth_low}, bandwidth_high=${newBookmark.bandwidth_high}`);
-        this.save();
-        console.log(`[LocalBookmarks] Added bookmark: ${newBookmark.name}`);
+        console.log(`[LocalBookmarks] Added: ${newBookmark.name}`);
         return newBookmark;
     }
 
-    // Update existing bookmark
-    update(oldName, updatedBookmark) {
+    /**
+     * Update an existing bookmark identified by oldName.
+     * @throws if the bookmark is not found, or if the new name conflicts.
+     */
+    async update(oldName, updatedBookmark) {
+        await this.ready;
+
         const index = this.bookmarks.findIndex(b => b.name === oldName);
         if (index === -1) {
             throw new Error(`Bookmark "${oldName}" not found`);
         }
 
-        // If name is changing, check for conflicts
         if (updatedBookmark.name && updatedBookmark.name !== oldName) {
             if (this.exists(updatedBookmark.name)) {
                 throw new Error(`Bookmark with name "${updatedBookmark.name}" already exists`);
             }
+            // Delete the old record (new name = new primary key)
+            await this._delete(oldName);
         }
 
-        // Update bookmark, preserving created timestamp
         const existing = this.bookmarks[index];
-        this.bookmarks[index] = {
-            name: updatedBookmark.name || existing.name,
-            frequency: updatedBookmark.frequency !== undefined ? parseInt(updatedBookmark.frequency) : existing.frequency,
-            mode: updatedBookmark.mode ? updatedBookmark.mode.toLowerCase() : existing.mode,
-            group: updatedBookmark.group !== undefined ? updatedBookmark.group : existing.group,
-            comment: updatedBookmark.comment !== undefined ? updatedBookmark.comment : existing.comment,
-            extension: updatedBookmark.extension !== undefined ? updatedBookmark.extension : existing.extension,
-            bandwidth_low: updatedBookmark.bandwidth_low !== undefined ? updatedBookmark.bandwidth_low : existing.bandwidth_low,
+        const updated = {
+            name:           updatedBookmark.name           || existing.name,
+            frequency:      updatedBookmark.frequency !== undefined ? parseInt(updatedBookmark.frequency) : existing.frequency,
+            mode:           updatedBookmark.mode           ? updatedBookmark.mode.toLowerCase() : existing.mode,
+            group:          updatedBookmark.group          !== undefined ? updatedBookmark.group          : existing.group,
+            comment:        updatedBookmark.comment        !== undefined ? updatedBookmark.comment        : existing.comment,
+            extension:      updatedBookmark.extension      !== undefined ? updatedBookmark.extension      : existing.extension,
+            bandwidth_low:  updatedBookmark.bandwidth_low  !== undefined ? updatedBookmark.bandwidth_low  : existing.bandwidth_low,
             bandwidth_high: updatedBookmark.bandwidth_high !== undefined ? updatedBookmark.bandwidth_high : existing.bandwidth_high,
-            source: 'local',
-            created: existing.created,
-            modified: Date.now()
+            source:         'local',
+            created:        existing.created,
+            modified:       Date.now()
         };
 
-        this.save();
-        console.log(`[LocalBookmarks] Updated bookmark: ${this.bookmarks[index].name}`);
-        return this.bookmarks[index];
+        await this._put(updated);
+        this.bookmarks[index] = updated;
+        console.log(`[LocalBookmarks] Updated: ${updated.name}`);
+        return updated;
     }
 
-    // Delete bookmark
-    delete(name) {
+    /**
+     * Delete a bookmark by name.
+     * @throws if the bookmark is not found.
+     */
+    async delete(name) {
+        await this.ready;
+
         const index = this.bookmarks.findIndex(b => b.name === name);
         if (index === -1) {
             throw new Error(`Bookmark "${name}" not found`);
         }
 
-        const deleted = this.bookmarks.splice(index, 1)[0];
-        this.save();
-        console.log(`[LocalBookmarks] Deleted bookmark: ${deleted.name}`);
+        await this._delete(name);
+        const [deleted] = this.bookmarks.splice(index, 1);
+        console.log(`[LocalBookmarks] Deleted: ${deleted.name}`);
         return deleted;
     }
 
-    // Delete all bookmarks
-    deleteAll() {
+    /** Delete all bookmarks. */
+    async deleteAll() {
+        await this.ready;
         const count = this.bookmarks.length;
-        this.bookmarks = [];
-        this.save();
+        await this._replaceAll([]);
         console.log(`[LocalBookmarks] Deleted all ${count} bookmarks`);
         return count;
     }
 
-    // Search bookmarks
+    // -------------------------------------------------------------------------
+    // Search / filter / sort  (synchronous — operate on in-memory cache)
+    // -------------------------------------------------------------------------
+
     search(query) {
         const lowerQuery = query.toLowerCase();
-        return this.bookmarks.filter(b => 
+        return this.bookmarks.filter(b =>
             b.name.toLowerCase().includes(lowerQuery) ||
-            (b.group && b.group.toLowerCase().includes(lowerQuery)) ||
+            (b.group   && b.group.toLowerCase().includes(lowerQuery))   ||
             (b.comment && b.comment.toLowerCase().includes(lowerQuery)) ||
             b.frequency.toString().includes(query) ||
             b.mode.toLowerCase().includes(lowerQuery)
         );
     }
 
-    // Filter by group
     filterByGroup(group) {
-        if (!group) {
-            return this.bookmarks.filter(b => !b.group);
-        }
+        if (!group) return this.bookmarks.filter(b => !b.group);
         return this.bookmarks.filter(b => b.group === group);
     }
 
-    // Get all unique groups
     getGroups() {
         const groups = new Set();
-        this.bookmarks.forEach(b => {
-            if (b.group) {
-                groups.add(b.group);
-            }
-        });
+        this.bookmarks.forEach(b => { if (b.group) groups.add(b.group); });
         return Array.from(groups).sort();
     }
 
-    // Sort bookmarks
-    sort(by = 'name', ascending = true) {
+    /** Sort the in-memory cache and persist the new order. */
+    async sort(by = 'name', ascending = true) {
+        await this.ready;
+
         const sortFunctions = {
-            name: (a, b) => a.name.localeCompare(b.name),
+            name:      (a, b) => a.name.localeCompare(b.name),
             frequency: (a, b) => a.frequency - b.frequency,
-            mode: (a, b) => a.mode.localeCompare(b.mode),
-            group: (a, b) => (a.group || '').localeCompare(b.group || ''),
-            created: (a, b) => a.created - b.created,
-            modified: (a, b) => a.modified - b.modified
+            mode:      (a, b) => a.mode.localeCompare(b.mode),
+            group:     (a, b) => (a.group || '').localeCompare(b.group || ''),
+            created:   (a, b) => a.created  - b.created,
+            modified:  (a, b) => a.modified - b.modified
         };
 
         const sortFn = sortFunctions[by] || sortFunctions.name;
         this.bookmarks.sort((a, b) => ascending ? sortFn(a, b) : sortFn(b, a));
-        this.save();
+        // Persist the sorted array (IndexedDB doesn't have an inherent order,
+        // but we keep the in-memory array sorted for consistent UI rendering)
+        await this._putAll(this.bookmarks);
         return this.bookmarks;
     }
 
-    // Export bookmarks to JSON
+    // -------------------------------------------------------------------------
+    // Export
+    // -------------------------------------------------------------------------
+
     exportJSON() {
         return JSON.stringify(this.bookmarks, null, 2);
     }
 
-    // Export bookmarks to YAML format (compatible with server bookmarks.yaml)
     exportYAML() {
         let yaml = 'bookmarks:\n';
         this.bookmarks.forEach(bookmark => {
             yaml += `  - name: "${bookmark.name}"\n`;
             yaml += `    frequency: ${bookmark.frequency}\n`;
             yaml += `    mode: ${bookmark.mode}\n`;
-            if (bookmark.group) {
-                yaml += `    group: ${bookmark.group}\n`;
-            }
-            if (bookmark.comment) {
-                yaml += `    comment: "${bookmark.comment}"\n`;
-            }
-            if (bookmark.extension) {
-                yaml += `    extension: ${bookmark.extension}\n`;
-            }
-            if (bookmark.bandwidth_low !== null) {
-                yaml += `    bandwidth_low: ${bookmark.bandwidth_low}\n`;
-            }
-            if (bookmark.bandwidth_high !== null) {
-                yaml += `    bandwidth_high: ${bookmark.bandwidth_high}\n`;
-            }
+            if (bookmark.group)          yaml += `    group: ${bookmark.group}\n`;
+            if (bookmark.comment)        yaml += `    comment: "${bookmark.comment}"\n`;
+            if (bookmark.extension)      yaml += `    extension: ${bookmark.extension}\n`;
+            if (bookmark.bandwidth_low  !== null) yaml += `    bandwidth_low: ${bookmark.bandwidth_low}\n`;
+            if (bookmark.bandwidth_high !== null) yaml += `    bandwidth_high: ${bookmark.bandwidth_high}\n`;
         });
         return yaml;
     }
 
-    // Export bookmarks to CSV
     exportCSV() {
         const headers = ['Name', 'Frequency', 'Mode', 'Group', 'Comment', 'Extension', 'Bandwidth Low', 'Bandwidth High'];
         let csv = headers.join(',') + '\n';
-        
         this.bookmarks.forEach(bookmark => {
             const row = [
                 `"${bookmark.name}"`,
                 bookmark.frequency,
                 bookmark.mode,
-                bookmark.group ? `"${bookmark.group}"` : '',
-                bookmark.comment ? `"${bookmark.comment}"` : '',
+                bookmark.group    ? `"${bookmark.group}"`    : '',
+                bookmark.comment  ? `"${bookmark.comment}"`  : '',
                 bookmark.extension || '',
-                bookmark.bandwidth_low !== null && bookmark.bandwidth_low !== undefined ? bookmark.bandwidth_low : '',
+                bookmark.bandwidth_low  !== null && bookmark.bandwidth_low  !== undefined ? bookmark.bandwidth_low  : '',
                 bookmark.bandwidth_high !== null && bookmark.bandwidth_high !== undefined ? bookmark.bandwidth_high : ''
             ];
             csv += row.join(',') + '\n';
         });
-        
         return csv;
     }
 
-    // Export to KiwiSDR format
     exportKiwiSDR() {
         const dx = this.bookmarks.map(bookmark => {
-            // Map group to KiwiSDR type flags
             const groupToType = {
-                'Active': 'T1',
-                'Watch': 'T2',
-                'Sub': 'T3',
-                'DX': 'T4',
-                'Digital': 'T5',
-                'SSTV-FAX': 'T6',
-                'Aviation': 'T7',
-                'Marine': 'T8',
-                'Mil-Gov': 'T9',
-                'Time': 'T10',
-                'Beacons': 'T11',
-                'Broadcast': 'T12',
-                'Other': 'T13'
+                'Active': 'T1', 'Watch': 'T2', 'Sub': 'T3', 'DX': 'T4',
+                'Digital': 'T5', 'SSTV-FAX': 'T6', 'Aviation': 'T7',
+                'Marine': 'T8', 'Mil-Gov': 'T9', 'Time': 'T10',
+                'Beacons': 'T11', 'Broadcast': 'T12', 'Other': 'T13'
             };
-
             const entry = {
-                f: Math.round(bookmark.frequency / 1000), // Convert Hz to kHz
+                f: Math.round(bookmark.frequency / 1000),
                 m: this.modeToKiwiMode(bookmark.mode),
                 n: bookmark.name
             };
-
-            // Add type flag if group is recognized
             if (bookmark.group && groupToType[bookmark.group]) {
                 entry[groupToType[bookmark.group]] = 1;
             }
-
-            // Add extension as passband if present
-            if (bookmark.extension) {
-                entry.pb = `ext:${bookmark.extension}`;
-            }
-
-            // Add comment if present (URL encoded)
-            if (bookmark.comment) {
-                entry.no = encodeURIComponent(bookmark.comment);
-            }
-
+            if (bookmark.extension) entry.pb = `ext:${bookmark.extension}`;
+            if (bookmark.comment)   entry.no = encodeURIComponent(bookmark.comment);
             return entry;
         });
-
         return JSON.stringify({ dx }, null, 2);
     }
 
-    // Helper: Convert mode to KiwiSDR mode index
-    modeToKiwiMode(mode) {
-        const modeMap = {
-            'am': 0,
-            'amn': 1,
-            'usb': 2,
-            'lsb': 3,
-            'cw': 4,
-            'cwn': 5,
-            'nbfm': 6,
-            'iq': 7,
-            'drm': 8
-        };
-        return modeMap[mode.toLowerCase()] || 0;
-    }
+    // -------------------------------------------------------------------------
+    // Import
+    // -------------------------------------------------------------------------
 
-    // Helper: Convert KiwiSDR mode index to mode string
-    kiwiModeToMode(modeIndex) {
-        const modes = ['am', 'amn', 'usb', 'lsb', 'cw', 'cwn', 'nbfm', 'iq', 'drm'];
-        return modes[modeIndex] || 'am';
-    }
-
-    // Import bookmarks from JSON
-    importJSON(jsonString, mode = 'merge') {
+    async importJSON(jsonString, mode = 'merge') {
+        await this.ready;
         try {
             const data = JSON.parse(jsonString);
             let bookmarks = Array.isArray(data) ? data : (data.bookmarks || []);
-            
-            // Auto-detect and convert alternate formats
             bookmarks = bookmarks.map(b => this.normalizeBookmark(b));
-            
             return this.importBookmarks(bookmarks, mode);
         } catch (error) {
             throw new Error(`Invalid JSON: ${error.message}`);
         }
     }
 
-    // Normalize bookmark from various formats to standard format
-    normalizeBookmark(bookmark) {
-        // If already in standard format, return as-is
-        if (bookmark.frequency && bookmark.name && bookmark.mode) {
-            return bookmark;
-        }
-
-        // Detect and convert alternate formats
-        const normalized = {};
-
-        // Name field (various possibilities)
-        normalized.name = bookmark.name || bookmark.label || bookmark.title || 'Unnamed';
-
-        // Frequency field (various possibilities)
-        normalized.frequency = bookmark.frequency ||
-                              bookmark.frequencyHz ||
-                              bookmark.freq ||
-                              bookmark.f ||
-                              0;
-
-        // Mode field (various possibilities, normalize to lowercase)
-        const mode = bookmark.mode ||
-                    bookmark.modulation ||
-                    bookmark.m ||
-                    'usb';
-        normalized.mode = mode.toString().toLowerCase();
-
-        // Optional fields
-        normalized.group = bookmark.group || bookmark.category || bookmark.type || null;
-        normalized.comment = bookmark.comment || bookmark.notes || bookmark.description || null;
-        normalized.extension = bookmark.extension || bookmark.decoder || null;
-        normalized.bandwidth_low = bookmark.bandwidth_low || bookmark.bandwidthLow || null;
-        normalized.bandwidth_high = bookmark.bandwidth_high || bookmark.bandwidthHigh || null;
-
-        return normalized;
-    }
-
-    // Import bookmarks from YAML
-    importYAML(yamlString, mode = 'merge') {
+    async importYAML(yamlString, mode = 'merge') {
+        await this.ready;
         try {
-            // Simple YAML parser for bookmarks format
             const bookmarks = [];
             const lines = yamlString.split('\n');
             let currentBookmark = null;
@@ -389,9 +447,7 @@ class LocalBookmarkManager {
                 if (!line || line.startsWith('#')) continue;
 
                 if (line.startsWith('- name:')) {
-                    if (currentBookmark) {
-                        bookmarks.push(currentBookmark);
-                    }
+                    if (currentBookmark) bookmarks.push(currentBookmark);
                     currentBookmark = {
                         name: line.match(/name:\s*["']?(.+?)["']?\s*$/)?.[1] || ''
                     };
@@ -399,28 +455,17 @@ class LocalBookmarkManager {
                     const match = line.match(/(\w+):\s*(.+)/);
                     if (match) {
                         const [, key, value] = match;
-                        if (key === 'frequency') {
-                            currentBookmark.frequency = parseInt(value);
-                        } else if (key === 'mode') {
-                            currentBookmark.mode = value;
-                        } else if (key === 'group') {
-                            currentBookmark.group = value;
-                        } else if (key === 'comment') {
-                            currentBookmark.comment = value.replace(/^["']|["']$/g, '');
-                        } else if (key === 'extension') {
-                            currentBookmark.extension = value;
-                        } else if (key === 'bandwidth_low') {
-                            currentBookmark.bandwidth_low = parseInt(value);
-                        } else if (key === 'bandwidth_high') {
-                            currentBookmark.bandwidth_high = parseInt(value);
-                        }
+                        if      (key === 'frequency')      currentBookmark.frequency      = parseInt(value);
+                        else if (key === 'mode')           currentBookmark.mode           = value;
+                        else if (key === 'group')          currentBookmark.group          = value;
+                        else if (key === 'comment')        currentBookmark.comment        = value.replace(/^["']|["']$/g, '');
+                        else if (key === 'extension')      currentBookmark.extension      = value;
+                        else if (key === 'bandwidth_low')  currentBookmark.bandwidth_low  = parseInt(value);
+                        else if (key === 'bandwidth_high') currentBookmark.bandwidth_high = parseInt(value);
                     }
                 }
             }
-
-            if (currentBookmark) {
-                bookmarks.push(currentBookmark);
-            }
+            if (currentBookmark) bookmarks.push(currentBookmark);
 
             return this.importBookmarks(bookmarks, mode);
         } catch (error) {
@@ -428,22 +473,19 @@ class LocalBookmarkManager {
         }
     }
 
-    // Import bookmarks from CSV
-    importCSV(csvString, mode = 'merge') {
+    async importCSV(csvString, mode = 'merge') {
+        await this.ready;
         try {
             const lines = csvString.split('\n');
             const bookmarks = [];
 
-            // Skip header row
             for (let i = 1; i < lines.length; i++) {
                 const line = lines[i].trim();
                 if (!line) continue;
 
-                // Simple CSV parser (handles quoted fields)
                 const fields = [];
                 let current = '';
                 let inQuotes = false;
-
                 for (let char of line) {
                     if (char === '"') {
                         inQuotes = !inQuotes;
@@ -457,17 +499,16 @@ class LocalBookmarkManager {
                 fields.push(current.trim());
 
                 if (fields.length >= 3) {
-                    const bookmark = {
-                        name: fields[0].replace(/^"|"$/g, ''),
-                        frequency: parseInt(fields[1]),
-                        mode: fields[2],
-                        group: fields[3] ? fields[3].replace(/^"|"$/g, '') : null,
-                        comment: fields[4] ? fields[4].replace(/^"|"$/g, '') : null,
-                        extension: fields[5] || null,
-                        bandwidth_low: fields[6] ? parseInt(fields[6]) : null,
+                    bookmarks.push({
+                        name:           fields[0].replace(/^"|"$/g, ''),
+                        frequency:      parseInt(fields[1]),
+                        mode:           fields[2],
+                        group:          fields[3] ? fields[3].replace(/^"|"$/g, '') : null,
+                        comment:        fields[4] ? fields[4].replace(/^"|"$/g, '') : null,
+                        extension:      fields[5] || null,
+                        bandwidth_low:  fields[6] ? parseInt(fields[6]) : null,
                         bandwidth_high: fields[7] ? parseInt(fields[7]) : null
-                    };
-                    bookmarks.push(bookmark);
+                    });
                 }
             }
 
@@ -477,59 +518,37 @@ class LocalBookmarkManager {
         }
     }
 
-    // Import bookmarks from KiwiSDR format
-    importKiwiSDR(jsonString, mode = 'merge') {
+    async importKiwiSDR(jsonString, mode = 'merge') {
+        await this.ready;
         try {
             const data = JSON.parse(jsonString);
             if (!data.dx || !Array.isArray(data.dx)) {
                 throw new Error('Invalid KiwiSDR format: missing dx array');
             }
 
+            const typeToGroup = {
+                'T1': 'Active',  'T2': 'Watch',    'T3': 'Sub',      'T4': 'DX',
+                'T5': 'Digital', 'T6': 'SSTV-FAX', 'T7': 'Aviation', 'T8': 'Marine',
+                'T9': 'Mil-Gov', 'T10': 'Time',    'T11': 'Beacons', 'T12': 'Broadcast',
+                'T13': 'Other'
+            };
+
             const bookmarks = data.dx.map(entry => {
                 const bookmark = {
-                    name: entry.n || `${entry.f} kHz`,
-                    frequency: entry.f * 1000, // Convert kHz to Hz
-                    mode: this.kiwiModeToMode(entry.m || 0)
+                    name:      entry.n || `${entry.f} kHz`,
+                    frequency: entry.f * 1000,
+                    mode:      this.kiwiModeToMode(entry.m || 0)
                 };
-
-                // Extract group from type flags
-                const typeToGroup = {
-                    'T1': 'Active',
-                    'T2': 'Watch',
-                    'T3': 'Sub',
-                    'T4': 'DX',
-                    'T5': 'Digital',
-                    'T6': 'SSTV-FAX',
-                    'T7': 'Aviation',
-                    'T8': 'Marine',
-                    'T9': 'Mil-Gov',
-                    'T10': 'Time',
-                    'T11': 'Beacons',
-                    'T12': 'Broadcast',
-                    'T13': 'Other'
-                };
-
-                for (let [key, group] of Object.entries(typeToGroup)) {
-                    if (entry[key]) {
-                        bookmark.group = group;
-                        break;
-                    }
+                for (const [key, group] of Object.entries(typeToGroup)) {
+                    if (entry[key]) { bookmark.group = group; break; }
                 }
-
-                // Extract extension from passband
                 if (entry.pb && entry.pb.startsWith('ext:')) {
                     bookmark.extension = entry.pb.substring(4);
                 }
-
-                // Extract comment (URL decode)
                 if (entry.no) {
-                    try {
-                        bookmark.comment = decodeURIComponent(entry.no.replace(/\+/g, ' '));
-                    } catch (e) {
-                        bookmark.comment = entry.no;
-                    }
+                    try { bookmark.comment = decodeURIComponent(entry.no.replace(/\+/g, ' ')); }
+                    catch (_) { bookmark.comment = entry.no; }
                 }
-
                 return bookmark;
             });
 
@@ -539,93 +558,143 @@ class LocalBookmarkManager {
         }
     }
 
-    // Generic import function
-    importBookmarks(bookmarks, mode = 'merge') {
+    /**
+     * Generic import — accumulates all changes in memory, then writes to
+     * IndexedDB in a single transaction. This avoids the per-item save
+     * overhead and the quota-doubling backup pattern of the old implementation.
+     */
+    async importBookmarks(bookmarks, mode = 'merge') {
+        await this.ready;
+
         if (!Array.isArray(bookmarks)) {
             throw new Error('Bookmarks must be an array');
         }
 
         const imported = [];
-        const skipped = [];
-        const errors = [];
+        const skipped  = [];
+        const errors   = [];
 
-        if (mode === 'replace') {
-            this.bookmarks = [];
-        }
+        // Work on a mutable copy of the current list
+        let working = mode === 'replace' ? [] : [...this.bookmarks];
 
-        bookmarks.forEach((bookmark, index) => {
+        // Build a name→index map for O(1) duplicate detection
+        const nameIndex = new Map();
+        working.forEach((b, i) => nameIndex.set(b.name, i));
+
+        const now = Date.now();
+
+        for (const [index, bookmark] of bookmarks.entries()) {
             try {
-                // Validate required fields
                 if (!bookmark.name || !bookmark.frequency || !bookmark.mode) {
                     skipped.push({ index, reason: 'Missing required fields', bookmark });
-                    return;
+                    continue;
                 }
 
-                // Check for duplicates
-                if (this.exists(bookmark.name)) {
+                const normalised = {
+                    name:           bookmark.name,
+                    frequency:      parseInt(bookmark.frequency),
+                    mode:           bookmark.mode.toLowerCase(),
+                    group:          bookmark.group          || null,
+                    comment:        bookmark.comment        || null,
+                    extension:      bookmark.extension      || null,
+                    bandwidth_low:  typeof bookmark.bandwidth_low  === 'number' ? bookmark.bandwidth_low  : null,
+                    bandwidth_high: typeof bookmark.bandwidth_high === 'number' ? bookmark.bandwidth_high : null,
+                    source:         'local',
+                    modified:       now
+                };
+
+                if (nameIndex.has(bookmark.name)) {
                     if (mode === 'skip') {
                         skipped.push({ index, reason: 'Duplicate name', bookmark });
-                        return;
+                        continue;
                     } else if (mode === 'merge') {
-                        // Update existing
-                        this.update(bookmark.name, bookmark);
+                        const existingIdx = nameIndex.get(bookmark.name);
+                        normalised.created = working[existingIdx].created || now;
+                        working[existingIdx] = normalised;
                         imported.push(bookmark.name);
-                        return;
+                        continue;
                     }
                 }
 
-                // Add bookmark
-                this.add(bookmark);
+                // New bookmark
+                normalised.created = now;
+                nameIndex.set(bookmark.name, working.length);
+                working.push(normalised);
                 imported.push(bookmark.name);
             } catch (error) {
                 errors.push({ index, error: error.message, bookmark });
             }
-        });
+        }
 
-        this.save();
+        // Single bulk write to IndexedDB
+        if (mode === 'replace') {
+            await this._replaceAll(working);
+        } else {
+            await this._putAll(working);
+        }
+
+        console.log(`[LocalBookmarks] Import complete — ${imported.length} imported, ${skipped.length} skipped, ${errors.length} errors`);
 
         return {
             imported: imported.length,
-            skipped: skipped.length,
-            errors: errors.length,
-            details: { imported, skipped, errors }
+            skipped:  skipped.length,
+            errors:   errors.length,
+            details:  { imported, skipped, errors }
         };
     }
 
-    // Restore from backup
-    restoreBackup() {
-        try {
-            const backup = localStorage.getItem(this.backupKey);
-            if (!backup) {
-                throw new Error('No backup found');
-            }
+    // -------------------------------------------------------------------------
+    // Statistics
+    // -------------------------------------------------------------------------
 
-            localStorage.setItem(this.storageKey, backup);
-            this.load();
-            console.log('[LocalBookmarks] Restored from backup');
-            return true;
-        } catch (error) {
-            console.error('[LocalBookmarks] Error restoring backup:', error);
-            return false;
-        }
-    }
-
-    // Get statistics
     getStats() {
-        const stats = {
-            total: this.bookmarks.length,
-            groups: this.getGroups().length,
-            modes: new Set(this.bookmarks.map(b => b.mode)).size,
-            withComments: this.bookmarks.filter(b => b.comment).length,
+        const freqs = this.bookmarks.map(b => b.frequency);
+        return {
+            total:          this.bookmarks.length,
+            groups:         this.getGroups().length,
+            modes:          new Set(this.bookmarks.map(b => b.mode)).size,
+            withComments:   this.bookmarks.filter(b => b.comment).length,
             withExtensions: this.bookmarks.filter(b => b.extension).length,
-            withBandwidth: this.bookmarks.filter(b => b.bandwidth_low !== null || b.bandwidth_high !== null).length,
+            withBandwidth:  this.bookmarks.filter(b => b.bandwidth_low !== null || b.bandwidth_high !== null).length,
             frequencyRange: {
-                min: Math.min(...this.bookmarks.map(b => b.frequency)),
-                max: Math.max(...this.bookmarks.map(b => b.frequency))
+                min: freqs.length ? Math.min(...freqs) : 0,
+                max: freqs.length ? Math.max(...freqs) : 0
             }
         };
+    }
 
-        return stats;
+    // -------------------------------------------------------------------------
+    // Mode helpers
+    // -------------------------------------------------------------------------
+
+    modeToKiwiMode(mode) {
+        const modeMap = { am: 0, amn: 1, usb: 2, lsb: 3, cw: 4, cwn: 5, nbfm: 6, iq: 7, drm: 8 };
+        return modeMap[mode.toLowerCase()] || 0;
+    }
+
+    kiwiModeToMode(modeIndex) {
+        const modes = ['am', 'amn', 'usb', 'lsb', 'cw', 'cwn', 'nbfm', 'iq', 'drm'];
+        return modes[modeIndex] || 'am';
+    }
+
+    // -------------------------------------------------------------------------
+    // Normalise bookmark from various import formats
+    // -------------------------------------------------------------------------
+
+    normalizeBookmark(bookmark) {
+        if (bookmark.frequency && bookmark.name && bookmark.mode) return bookmark;
+
+        const mode = bookmark.mode || bookmark.modulation || bookmark.m || 'usb';
+        return {
+            name:           bookmark.name      || bookmark.label  || bookmark.title || 'Unnamed',
+            frequency:      bookmark.frequency || bookmark.frequencyHz || bookmark.freq || bookmark.f || 0,
+            mode:           mode.toString().toLowerCase(),
+            group:          bookmark.group     || bookmark.category || bookmark.type || null,
+            comment:        bookmark.comment   || bookmark.notes  || bookmark.description || null,
+            extension:      bookmark.extension || bookmark.decoder || null,
+            bandwidth_low:  bookmark.bandwidth_low  || bookmark.bandwidthLow  || null,
+            bandwidth_high: bookmark.bandwidth_high || bookmark.bandwidthHigh || null
+        };
     }
 }
 

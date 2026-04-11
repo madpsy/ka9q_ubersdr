@@ -22,7 +22,11 @@ class LocalBookmarksUI {
     }
 
     // Initialize UI
-    init() {
+    async init() {
+        // Wait for IndexedDB to open and any localStorage migration to complete
+        // before rendering anything, so the bookmark count is accurate.
+        await this.manager.ready;
+
         this.createModals();
         this.attachEventListeners();
         // Update dropdown immediately
@@ -442,9 +446,9 @@ class LocalBookmarksUI {
         this.showConfirmDialog(
             'Delete Bookmark',
             `Are you sure you want to delete "${name}"?`,
-            () => {
+            async () => {
                 try {
-                    this.manager.delete(name);
+                    await this.manager.delete(name);
                     this.showAlert('management', 'success', `Deleted bookmark "${name}"`);
                     this.renderStats();
                     this.renderFilterTags();
@@ -504,7 +508,7 @@ class LocalBookmarksUI {
     }
 
     // Handle save bookmark
-    handleSaveBookmark(e) {
+    async handleSaveBookmark(e) {
         e.preventDefault();
 
         const frequencyKHz = parseFloat(document.getElementById('local-bookmarks-edit-frequency').value);
@@ -528,10 +532,10 @@ class LocalBookmarksUI {
 
         try {
             if (this.currentEditingBookmark) {
-                this.manager.update(this.currentEditingBookmark, bookmark);
+                await this.manager.update(this.currentEditingBookmark, bookmark);
                 this.showAlert('management', 'success', `Updated bookmark "${bookmark.name}"`);
             } else {
-                this.manager.add(bookmark);
+                await this.manager.add(bookmark);
                 this.showAlert('management', 'success', `Added bookmark "${bookmark.name}"`);
             }
 
@@ -631,11 +635,11 @@ class LocalBookmarksUI {
                 let result;
 
                 if (ext === 'json') {
-                    result = this.manager.importJSON(content, mode);
+                    result = await this.manager.importJSON(content, mode);
                 } else if (ext === 'yaml' || ext === 'yml') {
-                    result = this.manager.importYAML(content, mode);
+                    result = await this.manager.importYAML(content, mode);
                 } else if (ext === 'csv') {
-                    result = this.manager.importCSV(content, mode);
+                    result = await this.manager.importCSV(content, mode);
                 } else {
                     throw new Error('Unsupported file format');
                 }

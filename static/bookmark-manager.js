@@ -422,10 +422,19 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
         updateBandButtons(frequency);
     }
 
+    // Modes supported by UberSDR's demodulator pipeline
+    const SUPPORTED_MODES = new Set(['usb', 'lsb', 'am', 'sam', 'cwu', 'cwl', 'fm', 'nfm']);
+
     // Set mode with proper bandwidth handling for CW modes
     if (setMode && bookmarkMode) {
-        // For CW modes, set narrow bandwidth before changing mode
-        if (bookmarkMode === 'cwu' || bookmarkMode === 'cwl') {
+        if (!SUPPORTED_MODES.has(bookmarkMode)) {
+            // Unsupported mode (e.g. drm, iq, wfm, ecss from KiwiSDR bookmarks) —
+            // skip the mode change to avoid corrupting the audio pipeline.
+            if (log) {
+                log(`Bookmark mode "${bookmarkMode}" is not supported by UberSDR — keeping current mode`);
+            }
+        } else if (bookmarkMode === 'cwu' || bookmarkMode === 'cwl') {
+            // For CW modes, set narrow bandwidth before changing mode
             if (radioAPI) {
                 // Set CW bandwidth first (use bookmark bandwidth if available)
                 if (bandwidthLow !== undefined && bandwidthLow !== null &&

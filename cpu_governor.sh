@@ -147,9 +147,28 @@ show_status() {
 }
 
 # ─── Detect persistence ──────────────────────────────────────────────────────
+ONESHOT_SERVICE_NAME="cpu-governor"
+ONESHOT_SERVICE_PATH="/etc/systemd/system/${ONESHOT_SERVICE_NAME}.service"
+
 detect_persistence() {
     local persisted=""
 
+    # Check our oneshot service first
+    if [[ -f "$ONESHOT_SERVICE_PATH" ]]; then
+        persisted=$(grep -oP '(?<=-g )\S+' "$ONESHOT_SERVICE_PATH" 2>/dev/null || true)
+        if [[ -n "$persisted" ]]; then
+            local enabled_state
+            enabled_state=$(systemctl is-enabled "${ONESHOT_SERVICE_NAME}.service" 2>/dev/null || echo "disabled")
+            if [[ "$enabled_state" == "enabled" ]]; then
+                info "Persistent governor (systemd ${ONESHOT_SERVICE_NAME}.service): ${BOLD}${persisted}${RESET}"
+            else
+                warn "Service ${ONESHOT_SERVICE_NAME}.service exists but is ${BOLD}not enabled${RESET} — governor won't persist on reboot."
+            fi
+            return
+        fi
+    fi
+
+    # Fall back to /etc/default/cpupower
     if [[ -f /etc/default/cpupower ]]; then
         persisted=$(grep -E '^CPU_DEFAULT_GOVERNOR=' /etc/default/cpupower 2>/dev/null | cut -d= -f2 | tr -d '"' || true)
     fi
@@ -183,37 +202,67 @@ apply_governor() {
     fi
 }
 
-# ─── Persist governor via cpupower ───────────────────────────────────────────
+# ─── Persist governor via oneshot systemd service ────────────────────────────
 persist_governor() {
     local governor="$1"
-    info "Persisting via /etc/default/cpupower ..."
+    local cpupower_bin
+    cpupower_bin=$(command -v cpupower)
 
-    if [[ -f /etc/default/cpupower ]]; then
-        # Update existing CPU_DEFAULT_GOVERNOR= line, or append if not present
-        if grep -q '^CPU_DEFAULT_GOVERNOR=' /etc/default/cpupower; then
-            sed -i "s/^CPU_DEFAULT_GOVERNOR=.*/CPU_DEFAULT_GOVERNOR=\"${governor}\"/" /etc/default/cpupower
-        else
-            echo "CPU_DEFAULT_GOVERNOR=\"${governor}\"" >> /etc/default/cpupower
-        fi
+    info "Writing oneshot systemd service to ${ONESHOT_SERVICE_PATH} ..."
+
+    cat > "$ONESHOT_SERVICE_PATH" <<EOF
+[Unit]
+Description=Set CPU governor to ${governor}
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=${cpupower_bin} frequency-set -g ${governor}
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    ok "Service unit written to ${ONESHOT_SERVICE_PATH}"
+
+    systemctl daemon-reload && ok "systemd daemon reloaded"
+
+    if systemctl enable "${ONESHOT_SERVICE_NAME}.service" &>/dev/null; then
+        ok "${ONESHOT_SERVICE_NAME}.service enabled (will run on every boot)"
     else
-        echo "CPU_DEFAULT_GOVERNOR=\"${governor}\"" > /etc/default/cpupower
+        warn "Failed to enable ${ONESHOT_SERVICE_NAME}.service — persistence may not work"
     fi
 
-    ok "Written to /etc/default/cpupower"
-
-    if systemctl is-enabled cpupower &>/dev/null 2>&1; then
-        systemctl restart cpupower && ok "cpupower service restarted"
-    elif systemctl is-enabled cpupower.service &>/dev/null 2>&1; then
-        systemctl restart cpupower.service && ok "cpupower.service restarted"
+    if systemctl restart "${ONESHOT_SERVICE_NAME}.service" &>/dev/null; then
+        ok "${ONESHOT_SERVICE_NAME}.service started"
+    else
+        warn "Failed to start ${ONESHOT_SERVICE_NAME}.service (governor was already applied directly)"
     fi
 }
 
 # ─── Remove persistence ───────────────────────────────────────────────────────
 remove_persistence() {
+    local removed=0
+
+    # Remove our oneshot service
+    if [[ -f "$ONESHOT_SERVICE_PATH" ]]; then
+        systemctl disable "${ONESHOT_SERVICE_NAME}.service" &>/dev/null || true
+        systemctl stop "${ONESHOT_SERVICE_NAME}.service" &>/dev/null || true
+        rm -f "$ONESHOT_SERVICE_PATH"
+        systemctl daemon-reload
+        ok "Removed ${ONESHOT_SERVICE_PATH} and disabled ${ONESHOT_SERVICE_NAME}.service"
+        removed=1
+    fi
+
+    # Also clean up legacy /etc/default/cpupower entry if present
     if [[ -f /etc/default/cpupower ]] && grep -q '^CPU_DEFAULT_GOVERNOR=' /etc/default/cpupower 2>/dev/null; then
         sed -i '/^CPU_DEFAULT_GOVERNOR=/d' /etc/default/cpupower
         ok "Removed CPU_DEFAULT_GOVERNOR line from /etc/default/cpupower"
-    else
+        removed=1
+    fi
+
+    if [[ $removed -eq 0 ]]; then
         info "No persistence configuration found to remove."
     fi
 }

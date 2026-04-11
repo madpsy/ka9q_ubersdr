@@ -6460,6 +6460,15 @@
             const clampExecutionTimeField = createConfigField('Clamp Execution Time', 'checkbox', currentDecoderConfig.clamp_execution_time || false, 'clamp_execution_time', 'Force decoder binaries to stop if they exceed the cycle time (SIGTERM 1s before cycle end, SIGKILL at cycle end). Timeout kills are tracked per band in decoder statistics.');
             globalSection.appendChild(clampExecutionTimeField);
 
+            const maxWSPRField = createConfigField('Max Concurrent WSPR Decoders', 'number', currentDecoderConfig.max_concurrent_wspr_decoders || 2, 'max_concurrent_wspr_decoders');
+            maxWSPRField.querySelector('input').placeholder = '2';
+            maxWSPRField.querySelector('input').min = '1';
+            maxWSPRField.querySelector('input').max = '20';
+            const maxWSPRSmall = document.createElement('small');
+            maxWSPRSmall.textContent = 'Maximum number of wsprd processes to run simultaneously (default: 2). All WSPR bands trigger at the same 2-minute boundary — this limits the CPU burst by queuing excess decoders. Queued decodes are not discarded; they run as slots become free.';
+            maxWSPRField.appendChild(maxWSPRSmall);
+            globalSection.appendChild(maxWSPRField);
+
             container.appendChild(globalSection);
 
             // Station information section

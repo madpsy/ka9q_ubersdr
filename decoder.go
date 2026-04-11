@@ -46,6 +46,9 @@ type MultiDecoder struct {
 	// Prometheus metrics
 	prometheusMetrics *PrometheusMetrics
 
+	// WSPR decoder semaphore (limits concurrent wsprd processes)
+	wsprSemaphore chan struct{} // nil = unlimited
+
 	// Control
 	running  bool
 	stopChan chan struct{}
@@ -83,6 +86,17 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 
 	stats := NewDecoderStats()
 
+	// Initialise WSPR semaphore: default to 2 if not set
+	wsprConcurrency := config.MaxConcurrentWSPRDecoders
+	if wsprConcurrency == 0 {
+		wsprConcurrency = 2
+	}
+	var wsprSem chan struct{}
+	if wsprConcurrency > 0 {
+		wsprSem = make(chan struct{}, wsprConcurrency)
+		log.Printf("WSPR decoder concurrency limit: %d simultaneous wsprd processes", wsprConcurrency)
+	}
+
 	md := &MultiDecoder{
 		config:            config,
 		radiod:            radiod,
@@ -92,6 +106,7 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 		stats:             stats,
 		prometheusMetrics: prometheusMetrics,
 		stopChan:          make(chan struct{}),
+		wsprSemaphore:     wsprSem,
 	}
 
 	// Initialize spot reporters if enabled
@@ -610,6 +625,12 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 
 	// Spawn decoder in goroutine
 	go func() {
+		// Acquire WSPR semaphore slot if this is a WSPR band (limits concurrent wsprd processes)
+		if band.Config.Mode == ModeWSPR && md.wsprSemaphore != nil {
+			md.wsprSemaphore <- struct{}{}
+			defer func() { <-md.wsprSemaphore }()
+		}
+
 		var outputFile, logFile string
 
 		// Ensure cleanup always happens, even if errors occur

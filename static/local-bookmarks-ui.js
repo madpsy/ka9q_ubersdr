@@ -583,7 +583,7 @@ class LocalBookmarksUI {
         content.innerHTML = `
             <div class="local-bookmarks-import-area" id="local-bookmarks-drop-area">
                 <p style="font-size: 1.2em; margin-bottom: 10px;">📁 Drop file here or click to browse</p>
-                <p style="color: #95a5a6; font-size: 0.9em;">Supports: JSON, YAML, CSV, KiwiSDR format</p>
+                <p style="color: #95a5a6; font-size: 0.9em;">Supports: JSON (UberSDR or KiwiSDR dx.json), YAML, CSV</p>
                 <input type="file" id="local-bookmarks-file-input" accept=".json,.yaml,.yml,.csv" style="display: none;">
             </div>
             <div style="margin-top: 20px;">
@@ -635,7 +635,16 @@ class LocalBookmarksUI {
                 let result;
 
                 if (ext === 'json') {
-                    result = await this.manager.importJSON(content, mode);
+                    // Auto-detect KiwiSDR format: both native array-of-arrays and
+                    // object formats share the top-level "dx" key.
+                    let parsed;
+                    try { parsed = JSON.parse(content); } catch (_) { parsed = null; }
+
+                    if (parsed && parsed.dx && Array.isArray(parsed.dx)) {
+                        result = await this.manager.importKiwiSDR(content, mode);
+                    } else {
+                        result = await this.manager.importJSON(content, mode);
+                    }
                 } else if (ext === 'yaml' || ext === 'yml') {
                     result = await this.manager.importYAML(content, mode);
                 } else if (ext === 'csv') {

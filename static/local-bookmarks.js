@@ -533,22 +533,76 @@ class LocalBookmarkManager {
                 'T13': 'Other'
             };
 
+            // KiwiSDR mode string → UberSDR mode string
+            const modeStrMap = {
+                'USB': 'usb', 'LSB': 'lsb',
+                'CW':  'cwu', 'CWN': 'cwu',
+                'AM':  'am',  'AMN': 'am',
+                'FM':  'fm',  'NFM': 'nfm',
+                'SAM': 'sam', 'NBFM': 'nfm'
+            };
+
             const bookmarks = data.dx.map(entry => {
-                const bookmark = {
-                    name:      entry.n || `${entry.f} kHz`,
-                    frequency: entry.f * 1000,
-                    mode:      this.kiwiModeToMode(entry.m || 0)
-                };
-                for (const [key, group] of Object.entries(typeToGroup)) {
-                    if (entry[key]) { bookmark.group = group; break; }
+                let bookmark;
+
+                if (Array.isArray(entry)) {
+                    // ── Array-of-arrays format (native KiwiSDR dx.json export) ──
+                    // Each entry: [freqKHz, modeString, name, comment, optionsObject]
+                    const [freqKHz, modeStr, name, comment, options] = entry;
+
+                    const resolvedMode = modeStrMap[(modeStr || '').toUpperCase()] || 'usb';
+
+                    bookmark = {
+                        name:      name || `${freqKHz} kHz`,
+                        frequency: Math.round(freqKHz * 1000),
+                        mode:      resolvedMode
+                    };
+
+                    // Decode URL-encoded comment (e.g. %5cn → newline)
+                    if (comment && comment.trim()) {
+                        try { bookmark.comment = decodeURIComponent(comment.replace(/\+/g, ' ')); }
+                        catch (_) { bookmark.comment = comment; }
+                    }
+
+                    if (options && typeof options === 'object') {
+                        // Extract group from type flags (T1–T15)
+                        for (const [key, group] of Object.entries(typeToGroup)) {
+                            if (options[key]) { bookmark.group = group; break; }
+                        }
+                        // Passband offsets (Hz) → bandwidth_low / bandwidth_high
+                        if (typeof options.lo === 'number') bookmark.bandwidth_low  = options.lo;
+                        if (typeof options.hi === 'number') bookmark.bandwidth_high = options.hi;
+                        // Extension from 'p' preset field (e.g. "ft8,*")
+                        if (options.p) {
+                            const extMatch = options.p.toString().match(/^([^,]+)/);
+                            if (extMatch) bookmark.extension = extMatch[1];
+                        }
+                    }
+
+                } else {
+                    // ── Object format (UberSDR export / older KiwiSDR API) ──
+                    // Each entry: { n, f, m (numeric index), T4, pb, no, ... }
+                    const rawMode = this.kiwiModeToMode(entry.m || 0);
+                    const resolvedMode = modeStrMap[rawMode.toUpperCase()] || rawMode || 'usb';
+
+                    bookmark = {
+                        name:      entry.n || `${entry.f} kHz`,
+                        frequency: entry.f * 1000,
+                        mode:      resolvedMode
+                    };
+
+                    for (const [key, group] of Object.entries(typeToGroup)) {
+                        if (entry[key]) { bookmark.group = group; break; }
+                    }
+                    if (entry.pb && entry.pb.startsWith('ext:')) {
+                        bookmark.extension = entry.pb.substring(4);
+                    }
+                    if (entry.no) {
+                        try { bookmark.comment = decodeURIComponent(entry.no.replace(/\+/g, ' ')); }
+                        catch (_) { bookmark.comment = entry.no; }
+                    }
                 }
-                if (entry.pb && entry.pb.startsWith('ext:')) {
-                    bookmark.extension = entry.pb.substring(4);
-                }
-                if (entry.no) {
-                    try { bookmark.comment = decodeURIComponent(entry.no.replace(/\+/g, ' ')); }
-                    catch (_) { bookmark.comment = entry.no; }
-                }
+
                 return bookmark;
             });
 

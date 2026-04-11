@@ -29,6 +29,9 @@ type CWSkimmerConfig struct {
 	// Metrics Summary (Pre-aggregated time-series summaries)
 	MetricsSummaryDataDir string `yaml:"metrics_summary_data_dir"` // Directory for summary files (default: cwskimmer_summaries)
 
+	// RBN Spots
+	RBNSpots bool `yaml:"rbn_spots"` // Forward spots to Reverse Beacon Network (default: true)
+
 	// PSKReporter configuration
 	PSKReporterEnabled  bool   `yaml:"pskreporter_enabled"`  // Enable PSKReporter uploads
 	PSKReporterCallsign string `yaml:"pskreporter_callsign"` // Callsign for PSKReporter (defaults to main callsign)
@@ -46,6 +49,18 @@ func LoadCWSkimmerConfig(filename string) (*CWSkimmerConfig, error) {
 	var config CWSkimmerConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse cwskimmer config file: %w", err)
+	}
+
+	// rbn_spots defaults to true — only override when the key is absent from the file
+	// (a bool zero-value of false could mean "not set" or "explicitly false", so we
+	// check the raw map to distinguish the two cases)
+	if !config.RBNSpots {
+		var rawMap map[string]interface{}
+		if err := yaml.Unmarshal(data, &rawMap); err == nil {
+			if _, exists := rawMap["rbn_spots"]; !exists {
+				config.RBNSpots = true
+			}
+		}
 	}
 
 	// Set defaults if not specified

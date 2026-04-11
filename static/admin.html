@@ -7541,6 +7541,40 @@
 
             container.appendChild(metricsSection);
 
+            // RBN Spots Section
+            const rbnSpotsSection = document.createElement('div');
+            rbnSpotsSection.className = 'config-section';
+            rbnSpotsSection.innerHTML = '<h3>RBN Spots</h3>';
+
+            // RBN Spots Enabled select (Yes/No dropdown)
+            const rbnSpotsEnabledDiv = document.createElement('div');
+            rbnSpotsEnabledDiv.className = 'config-field';
+            const rbnSpotsLabel = document.createElement('label');
+            rbnSpotsLabel.textContent = 'Forward Spots to RBN';
+            rbnSpotsEnabledDiv.appendChild(rbnSpotsLabel);
+            const rbnSpotsSelect = document.createElement('select');
+            rbnSpotsSelect.dataset.key = 'rbn_spots';
+            const rbnSpotsYes = document.createElement('option');
+            rbnSpotsYes.value = 'true';
+            rbnSpotsYes.textContent = 'Yes';
+            const rbnSpotsNo = document.createElement('option');
+            rbnSpotsNo.value = 'false';
+            rbnSpotsNo.textContent = 'No';
+            rbnSpotsSelect.appendChild(rbnSpotsYes);
+            rbnSpotsSelect.appendChild(rbnSpotsNo);
+            // Default to true when not explicitly set to false
+            rbnSpotsSelect.value = (currentCWSkimmerConfig.rbn_spots === false) ? 'false' : 'true';
+            rbnSpotsSelect.addEventListener('change', (e) => {
+                currentCWSkimmerConfig.rbn_spots = e.target.value === 'true';
+            });
+            rbnSpotsEnabledDiv.appendChild(rbnSpotsSelect);
+            const rbnSpotsSmall = document.createElement('small');
+            rbnSpotsSmall.textContent = 'Forward CW spots to the Reverse Beacon Network (default: Yes)';
+            rbnSpotsEnabledDiv.appendChild(rbnSpotsSmall);
+            rbnSpotsSection.appendChild(rbnSpotsEnabledDiv);
+
+            container.appendChild(rbnSpotsSection);
+
             // PSKReporter Settings Section
             const pskReporterSection = document.createElement('div');
             pskReporterSection.className = 'config-section';

@@ -45,6 +45,10 @@ metrics_summary_data_dir: "cwskimmer_summaries"  # Directory for summary files (
                                                   # Example: cwskimmer_summaries/daily/2024/11/24/20m-summary.json
                                                   # Updated every minute for fast API responses
 
+# RBN Spots
+# Forward spots to the Reverse Beacon Network (default: true)
+rbn_spots: true
+
 # PSKReporter configuration
 pskreporter_enabled: false
 pskreporter_callsign: "N0CALL"  # Defaults to main callsign if not specified

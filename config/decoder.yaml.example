@@ -29,12 +29,13 @@ decoder:
                                # Timeout kills are tracked per band in decoder statistics
 
   # WSPR decoder concurrency
-  max_concurrent_wspr_decoders: 2  # Maximum number of wsprd processes to run simultaneously (default: 2)
-                                   # All WSPR bands trigger at the same 2-minute cycle boundary, so without
-                                   # a limit they all launch at once and compete for CPU.
-                                   # Goroutines queue and run as slots become free — no decodes are discarded.
-                                   # Set to 0 to use the default (2). Set to a large number to effectively disable limiting.
-                                   # Recommended: 2-4 for most setups; increase if wsprd finishes well within 120s per band.
+  max_concurrent_wspr_decoders: 0  # Maximum number of wsprd processes to run simultaneously.
+                                   # 0 = unlimited (all wsprd processes spawn at once — original behaviour)
+                                   # N > 0 = limit to N concurrent wsprd processes
+                                   # All WSPR bands trigger at the same 2-minute cycle boundary; without a limit
+                                   # they all launch at once and compete for CPU. Queued goroutines run as slots
+                                   # free — no decodes are discarded.
+                                   # Recommended: 0 (unlimited) or 2-4 for CPU-constrained systems.
 
   # Receiver information (required for reporting)
   receiver_callsign: "N0CALL"

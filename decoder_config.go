@@ -177,7 +177,7 @@ type DecoderConfig struct {
 	// Recording options
 	IncludeDeadTime           bool `yaml:"include_dead_time"`            // Record entire cycle including dead time
 	ClampExecutionTime        bool `yaml:"clamp_execution_time"`         // Kill decoder if it exceeds cycle time (default: false)
-	MaxConcurrentWSPRDecoders int  `yaml:"max_concurrent_wspr_decoders"` // Max simultaneous wsprd processes (0 = unlimited, default: 2)
+	MaxConcurrentWSPRDecoders int  `yaml:"max_concurrent_wspr_decoders"` // Max simultaneous wsprd processes (0 = unlimited, default: 0)
 
 	// Receiver information
 	ReceiverCallsign string `yaml:"receiver_callsign"`

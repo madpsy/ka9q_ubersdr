@@ -86,15 +86,15 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 
 	stats := NewDecoderStats()
 
-	// Initialise WSPR semaphore: default to 2 if not set
-	wsprConcurrency := config.MaxConcurrentWSPRDecoders
-	if wsprConcurrency == 0 {
-		wsprConcurrency = 2
-	}
+	// Initialise WSPR semaphore.
+	// 0 = unlimited (no semaphore, all wsprd processes spawn simultaneously — original behaviour)
+	// N > 0 = limit to N concurrent wsprd processes
 	var wsprSem chan struct{}
-	if wsprConcurrency > 0 {
-		wsprSem = make(chan struct{}, wsprConcurrency)
-		log.Printf("WSPR decoder concurrency limit: %d simultaneous wsprd processes", wsprConcurrency)
+	if config.MaxConcurrentWSPRDecoders > 0 {
+		wsprSem = make(chan struct{}, config.MaxConcurrentWSPRDecoders)
+		log.Printf("WSPR decoder concurrency limit: %d simultaneous wsprd processes", config.MaxConcurrentWSPRDecoders)
+	} else {
+		log.Printf("WSPR decoder concurrency: unlimited (all wsprd processes spawn simultaneously)")
 	}
 
 	md := &MultiDecoder{

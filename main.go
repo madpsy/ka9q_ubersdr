@@ -3016,6 +3016,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"digital_decodes":      config.Decoder.Enabled,
 		"cw_skimmer":           cwskimmerConfig.Enabled,
 		"cw_skimmer_rbn_spots": cwskimmerConfig.Enabled && cwskimmerConfig.RBNSpots,
+		"cw_skimmer_callsign":  cwskimmerConfig.Callsign,
 		"chat_enabled":         config.Chat.Enabled,
 		"chat_users":           chatUserCount,
 		"public_iq_modes":      publicIQModes,

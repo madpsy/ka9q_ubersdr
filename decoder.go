@@ -627,8 +627,13 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 	go func() {
 		// Acquire WSPR semaphore slot if this is a WSPR band (limits concurrent wsprd processes)
 		if band.Config.Mode == ModeWSPR && md.wsprSemaphore != nil {
+			log.Printf("WSPR semaphore: %s waiting for slot (queue depth: %d/%d)", band.Config.Name, len(md.wsprSemaphore), cap(md.wsprSemaphore))
 			md.wsprSemaphore <- struct{}{}
-			defer func() { <-md.wsprSemaphore }()
+			log.Printf("WSPR semaphore: %s acquired slot (%d/%d in use)", band.Config.Name, len(md.wsprSemaphore), cap(md.wsprSemaphore))
+			defer func() {
+				<-md.wsprSemaphore
+				log.Printf("WSPR semaphore: %s released slot (%d/%d in use)", band.Config.Name, len(md.wsprSemaphore), cap(md.wsprSemaphore))
+			}()
 		}
 
 		var outputFile, logFile string

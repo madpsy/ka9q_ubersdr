@@ -53,9 +53,9 @@ class SMeterNeedle {
         this.minDb = -127;
         this.maxDb = -33;
 
-        // SNR scale configuration (30–80 dB)
+        // SNR scale configuration (30–60 dB)
         this.snrMin = 30;
-        this.snrMax = 80;
+        this.snrMax = 60;
 
         // Start angle (left) and end angle (right) in radians
         this.startAngle = Math.PI; // 180 degrees (left)
@@ -243,7 +243,7 @@ class SMeterNeedle {
         this.ctx.textBaseline = 'middle';
 
         // Major ticks every 10 dB
-        for (let snr = 30; snr <= 80; snr += 10) {
+        for (let snr = 30; snr <= 60; snr += 10) {
             const angle = this.getScaleLabelAngleForSNR(snr);
             const tickStart = this.radius - 15;
             const tickEnd = this.radius - 5;
@@ -271,7 +271,7 @@ class SMeterNeedle {
         }
 
         // Minor ticks every 5 dB
-        for (let snr = 30; snr <= 80; snr += 5) {
+        for (let snr = 30; snr <= 60; snr += 5) {
             if (snr % 10 === 0) continue;
             const angle = this.getScaleLabelAngleForSNR(snr);
             const tickStart = this.radius - 10;

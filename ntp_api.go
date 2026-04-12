@@ -154,15 +154,8 @@ func handleTimeAPI(w http.ResponseWriter, r *http.Request, cfg *Config) {
 		return
 	}
 
-	// If there's a successful cached result, update ServerTime to now so the
-	// caller always sees the current local clock alongside the last known offset.
-	if result.Error == "" {
-		out := *result
-		out.ServerTime = time.Now().UTC().Format(time.RFC3339Nano)
-		json.NewEncoder(w).Encode(out)
-		return
+	if result.Error != "" {
+		w.WriteHeader(http.StatusServiceUnavailable)
 	}
-
-	w.WriteHeader(http.StatusServiceUnavailable)
 	json.NewEncoder(w).Encode(result)
 }

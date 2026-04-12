@@ -2,11 +2,99 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
 	"time"
 )
+
+// NtpHealthStatus is the response for the /admin/ntp-health endpoint.
+type NtpHealthStatus struct {
+	Healthy     bool     `json:"healthy"`
+	Synced      bool     `json:"synced"`
+	OffsetMs    float64  `json:"offset_ms"`
+	RTTMs       float64  `json:"rtt_ms"`
+	Stratum     uint8    `json:"stratum"`
+	LastPoll    string   `json:"last_poll"`
+	NTPServer   string   `json:"ntp_server"`
+	ToleranceMs int      `json:"tolerance_ms"`
+	Issues      []string `json:"issues"`
+}
+
+// handleNTPHealth serves the NTP time sync health status for the admin monitor.
+func handleNTPHealth(w http.ResponseWriter, r *http.Request, cfg *Config) {
+	w.Header().Set("Content-Type", "application/json")
+
+	toleranceMs := cfg.NTP.SyncToleranceMs
+	if toleranceMs <= 0 {
+		toleranceMs = 500
+	}
+
+	globalNTPState.mu.RLock()
+	result := globalNTPState.result
+	lastPoll := globalNTPState.lastPoll
+	globalNTPState.mu.RUnlock()
+
+	issues := []string{}
+
+	if result == nil {
+		issues = append(issues, "NTP check has not completed yet")
+		json.NewEncoder(w).Encode(NtpHealthStatus{
+			Healthy:     false,
+			NTPServer:   cfg.NTP.ntpServer(),
+			ToleranceMs: toleranceMs,
+			Issues:      issues,
+		})
+		return
+	}
+
+	if result.Error != "" {
+		issues = append(issues, "NTP query failed: "+result.Error)
+		json.NewEncoder(w).Encode(NtpHealthStatus{
+			Healthy:     false,
+			LastPoll:    result.LastPoll,
+			NTPServer:   cfg.NTP.ntpServer(),
+			ToleranceMs: toleranceMs,
+			Issues:      issues,
+		})
+		return
+	}
+
+	// Check for stale data (more than 3× poll interval)
+	staleThreshold := 3 * ntpPollInterval
+	if !lastPoll.IsZero() && time.Since(lastPoll) > staleThreshold {
+		issues = append(issues, "NTP data is stale — last poll was more than 3 minutes ago")
+	}
+
+	if !result.Synced {
+		issues = append(issues, "Clock offset exceeds tolerance: "+
+			formatOffsetMs(result.OffsetMs)+" ms (tolerance: "+
+			formatOffsetMs(float64(toleranceMs))+" ms)")
+	}
+
+	healthy := len(issues) == 0
+
+	json.NewEncoder(w).Encode(NtpHealthStatus{
+		Healthy:     healthy,
+		Synced:      result.Synced,
+		OffsetMs:    result.OffsetMs,
+		RTTMs:       result.RTTMs,
+		Stratum:     result.Stratum,
+		LastPoll:    result.LastPoll,
+		NTPServer:   cfg.NTP.ntpServer(),
+		ToleranceMs: toleranceMs,
+		Issues:      issues,
+	})
+}
+
+// formatOffsetMs formats a float64 millisecond value to 2 decimal places as a string.
+func formatOffsetMs(ms float64) string {
+	if ms < 0 {
+		ms = -ms
+	}
+	return fmt.Sprintf("%.2f", ms)
+}
 
 const ntpPollInterval = 64 * time.Second
 
@@ -31,8 +119,6 @@ type TimeResponse struct {
 	RTTMs float64 `json:"rtt_ms"`
 	// Synced is true when the absolute clock offset is within the configured tolerance.
 	Synced bool `json:"synced"`
-	// NTPServer is the NTP server that was successfully queried.
-	NTPServer string `json:"ntp_server"`
 	// Stratum is the NTP stratum of the responding server (1 = GPS/atomic, 2+ = secondary).
 	Stratum uint8 `json:"stratum"`
 	// LastPoll is when the NTP server was last queried (UTC, RFC3339).
@@ -88,7 +174,6 @@ func pollNTP(cfg *Config) {
 			OffsetMs:   offsetMs,
 			RTTMs:      rttMs,
 			Synced:     synced,
-			NTPServer:  srv,
 			Stratum:    resp.Stratum,
 			LastPoll:   pollTime,
 		}

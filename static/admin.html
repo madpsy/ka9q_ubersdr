@@ -13436,7 +13436,7 @@ const tooltipLine2 = timeStr;
                 // Load frequency reference status
                 await loadFrequencyReference();
 
-                // Fetch system load, tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, and rotctl health
+                // Fetch system load, tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, rotctl and NTP health
                 const fetchPromises = [
                     authenticatedFetch('/admin/system-load'),
                     authenticatedFetch('/admin/instance-reporter-health'),
@@ -13446,7 +13446,8 @@ const tooltipLine2 = timeStr;
                     authenticatedFetch('/admin/decoder-health'),
                     authenticatedFetch('/admin/cwskimmer-health'),
                     authenticatedFetch('/admin/mqtt-health'),
-                    authenticatedFetch('/admin/rotctl-health')
+                    authenticatedFetch('/admin/rotctl-health'),
+                    authenticatedFetch('/admin/ntp-health')
                 ];
 
                 // Add tunnel status fetch if tunnel server is enabled
@@ -13455,9 +13456,9 @@ const tooltipLine2 = timeStr;
                     tunnelStatusPromise = fetchTunnelStatus();
                 }
 
-                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse] = await Promise.all(fetchPromises);
+                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, ntpResponse] = await Promise.all(fetchPromises);
 
-                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse) {
+                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !ntpResponse) {
                     // Auth failed, stop auto-refresh
                     stopMonitorAutoRefresh();
                     return;
@@ -13472,15 +13473,16 @@ const tooltipLine2 = timeStr;
                 const cwSkimmerHealth = (cwSkimmerResponse.ok || cwSkimmerResponse.status === 503) ? await cwSkimmerResponse.json() : null;
                 const mqttHealth = (mqttResponse.ok || mqttResponse.status === 503) ? await mqttResponse.json() : null;
                 const rotctlHealth = (rotctlResponse.ok || rotctlResponse.status === 503) ? await rotctlResponse.json() : null;
+                const ntpHealth = (ntpResponse.ok || ntpResponse.status === 503) ? await ntpResponse.json() : null;
 
                 // Wait for tunnel status if it was fetched
                 const tunnelStatus = tunnelStatusPromise ? await tunnelStatusPromise : null;
 
-                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, frontendStatus: frontendStatusData, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth }, false);
+                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, frontendStatus: frontendStatusData, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth, ntp: ntpHealth }, false);
 
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!monitorRefreshInterval) {
-                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (freqRefHealth?.healthy !== false) && (frontendStatusData?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false);
+                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (freqRefHealth?.healthy !== false) && (frontendStatusData?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false) && (ntpHealth?.healthy !== false);
                     if (allHealthy) {
                         showAlert('Health check completed - all systems healthy', 'success');
                     } else {
@@ -13731,9 +13733,10 @@ const tooltipLine2 = timeStr;
                 const hasCWSkimmerIssues = data.cwSkimmer && data.cwSkimmer.enabled && !data.cwSkimmer.healthy;
                 const hasMQTTIssues = data.mqtt && data.mqtt.enabled && !data.mqtt.healthy;
                 const hasRotctlIssues = data.rotctl && data.rotctl.enabled && !data.rotctl.healthy;
+                const hasNTPIssues = data.ntp && !data.ntp.healthy;
                 const hasSystemLoadIssues = data.system_load && (data.system_load.status === 'warning' || data.system_load.status === 'critical');
 
-                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasFrequencyReferenceIssues || hasFrontendStatusIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues || hasRotctlIssues || hasSystemLoadIssues) {
+                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasFrequencyReferenceIssues || hasFrontendStatusIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues || hasRotctlIssues || hasNTPIssues || hasSystemLoadIssues) {
                     const warningBanner = document.createElement('div');
                     warningBanner.style.padding = '20px';
                     warningBanner.style.background = '#fff3cd';
@@ -13817,6 +13820,12 @@ const tooltipLine2 = timeStr;
                     if (hasRotctlIssues) {
                         const li = document.createElement('li');
                         li.innerHTML = '<strong>Rotator Control:</strong> ' + (data.rotctl.issues && data.rotctl.issues.length > 0 ? data.rotctl.issues.join(', ') : 'System unhealthy');
+                        issuesList.appendChild(li);
+                    }
+
+                    if (hasNTPIssues) {
+                        const li = document.createElement('li');
+                        li.innerHTML = '<strong>Time Sync (NTP):</strong> ' + (data.ntp.issues && data.ntp.issues.length > 0 ? data.ntp.issues.join(', ') : 'System unhealthy');
                         issuesList.appendChild(li);
                     }
 
@@ -13972,7 +13981,76 @@ const tooltipLine2 = timeStr;
                 if (data.rotctl) {
                     renderRotctlHealth(container, data.rotctl);
                 }
+
+                // Render NTP time sync health status
+                if (data.ntp) {
+                    renderNTPHealth(container, data.ntp);
+                }
             }
+        }
+
+        function renderNTPHealth(container, data) {
+            const statusSection = document.createElement('div');
+            statusSection.className = 'config-section';
+            statusSection.innerHTML = '<h3>🕐 Time Sync (NTP)</h3>';
+
+            const statusIcon = data.healthy ? '✅' : '❌';
+            const statusColor = data.healthy ? '#28a745' : '#dc3545';
+
+            const statusDiv = document.createElement('div');
+            statusDiv.style.marginBottom = '15px';
+            statusDiv.style.padding = '15px';
+            statusDiv.style.background = data.healthy ? '#d4edda' : '#f8d7da';
+            statusDiv.style.border = `1px solid ${data.healthy ? '#c3e6cb' : '#f5c6cb'}`;
+            statusDiv.style.borderRadius = '5px';
+
+            let issuesHTML = '';
+            if (data.issues && data.issues.length > 0) {
+                issuesHTML = '<br><strong style="color: #dc3545;">Issues:</strong><ul style="margin: 5px 0 0 0; padding-left: 20px;">' +
+                    data.issues.map(i => `<li style="color: #721c24;">${i}</li>`).join('') + '</ul>';
+            }
+
+            statusDiv.innerHTML = `
+                <strong style="font-size: 16px;">${statusIcon} Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
+                <span style="color: #666; font-size: 14px;">Synced: <strong style="color: ${data.synced ? '#28a745' : '#dc3545'};">${data.synced ? 'Yes' : 'No'}</strong></span>
+                ${issuesHTML}
+            `;
+            statusSection.appendChild(statusDiv);
+
+            if (data.last_poll) {
+                const statsDiv = document.createElement('div');
+                statsDiv.style.display = 'grid';
+                statsDiv.style.gridTemplateColumns = 'repeat(auto-fit, minmax(160px, 1fr))';
+                statsDiv.style.gap = '10px';
+                statsDiv.style.marginBottom = '10px';
+
+                const stats = [
+                    { label: 'Clock Offset', value: (data.offset_ms !== undefined ? data.offset_ms.toFixed(2) + ' ms' : 'N/A'), icon: '⏱️' },
+                    { label: 'Round-Trip Time', value: (data.rtt_ms !== undefined ? data.rtt_ms.toFixed(2) + ' ms' : 'N/A'), icon: '🔄' },
+                    { label: 'Stratum', value: (data.stratum !== undefined ? data.stratum : 'N/A'), icon: '📶' },
+                    { label: 'Tolerance', value: (data.tolerance_ms !== undefined ? data.tolerance_ms + ' ms' : 'N/A'), icon: '🎯' },
+                    { label: 'NTP Server', value: data.ntp_server || 'N/A', icon: '🌐' },
+                    { label: 'Last Poll', value: data.last_poll ? new Date(data.last_poll).toLocaleTimeString() : 'Never', icon: '🕐' },
+                ];
+
+                stats.forEach(stat => {
+                    const statDiv = document.createElement('div');
+                    statDiv.style.background = '#f8f9fa';
+                    statDiv.style.padding = '10px';
+                    statDiv.style.borderRadius = '5px';
+                    statDiv.style.textAlign = 'center';
+                    statDiv.innerHTML = `
+                        <div style="font-size: 20px;">${stat.icon}</div>
+                        <div style="font-size: 12px; color: #666; margin: 3px 0;">${stat.label}</div>
+                        <div style="font-size: 14px; font-weight: bold;">${stat.value}</div>
+                    `;
+                    statsDiv.appendChild(statDiv);
+                });
+
+                statusSection.appendChild(statsDiv);
+            }
+
+            container.appendChild(statusSection);
         }
 
         function renderSystemLoad(container, systemLoad) {

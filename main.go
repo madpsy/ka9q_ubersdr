@@ -2008,6 +2008,9 @@ func main() {
 	http.HandleFunc("/admin/spaceweather-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleSpaceWeatherHealth(w, r, spaceWeatherMonitor)
 	}))
+	http.HandleFunc("/admin/ntp-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleNTPHealth(w, r, config)
+	}))
 	http.HandleFunc("/admin/frequency-reference-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleFrequencyReferenceHealth(w, r, freqRefMonitor)
 	}))

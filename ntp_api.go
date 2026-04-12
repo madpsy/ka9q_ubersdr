@@ -41,28 +41,24 @@ type TimeResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
-// pollNTP queries the configured NTP servers and updates the global cache.
+// pollNTP queries the configured NTP server and updates the global cache.
 func pollNTP(cfg *Config) {
-	servers := cfg.NTP.ntpServers()
+	srv := cfg.NTP.ntpServer()
 	tolerance := cfg.NTP.ntpSyncTolerance()
 
 	var (
 		resp     *NtpResponse
-		usedSrv  string
 		queryErr error
 	)
 
-	for _, srv := range servers {
-		resp, queryErr = NtpQuery(srv)
-		if queryErr == nil {
-			if err := resp.Validate(); err != nil {
-				log.Printf("NTP: server %s returned invalid response: %v", srv, err)
-				queryErr = err
-				continue
-			}
-			usedSrv = srv
-			break
+	resp, queryErr = NtpQuery(srv)
+	if queryErr == nil {
+		if err := resp.Validate(); err != nil {
+			log.Printf("NTP: server %s returned invalid response: %v", srv, err)
+			queryErr = err
+			resp = nil
 		}
+	} else {
 		log.Printf("NTP: query to %s failed: %v", srv, queryErr)
 	}
 
@@ -92,13 +88,13 @@ func pollNTP(cfg *Config) {
 			OffsetMs:   offsetMs,
 			RTTMs:      rttMs,
 			Synced:     synced,
-			NTPServer:  usedSrv,
+			NTPServer:  srv,
 			Stratum:    resp.Stratum,
 			LastPoll:   pollTime,
 		}
 
 		log.Printf("NTP: offset=%.2fms rtt=%.2fms server=%s stratum=%d synced=%v",
-			offsetMs, rttMs, usedSrv, resp.Stratum, synced)
+			offsetMs, rttMs, srv, resp.Stratum, synced)
 	}
 
 	globalNTPState.mu.Lock()
@@ -121,7 +117,7 @@ func GetNTPSynced() bool {
 // StartNTPChecker starts a background goroutine that polls NTP every 64 seconds.
 // An initial poll is performed immediately at startup.
 func StartNTPChecker(cfg *Config) {
-	log.Printf("NTP: starting checker (polling every %v, servers: %v)", ntpPollInterval, cfg.NTP.ntpServers())
+	log.Printf("NTP: starting checker (polling every %v, server: %s)", ntpPollInterval, cfg.NTP.ntpServer())
 
 	// Initial poll at startup.
 	go pollNTP(cfg)

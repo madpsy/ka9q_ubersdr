@@ -47,25 +47,19 @@ type Config struct {
 
 // NTPConfig contains NTP time synchronization check settings
 type NTPConfig struct {
-	// Servers is the list of NTP servers to query (tried in order until one succeeds).
-	// Defaults to the Ubuntu NTP pool servers.
-	Servers []string `yaml:"servers"`
+	// Server is the NTP server to query. Defaults to ntp.ubuntu.com.
+	Server string `yaml:"server"`
 	// SyncToleranceMs is the maximum acceptable clock offset in milliseconds before
 	// the status is reported as out-of-sync. Defaults to 500 ms.
 	SyncToleranceMs int `yaml:"sync_tolerance_ms"`
 }
 
-// ntpServers returns the configured NTP servers, falling back to Ubuntu pool defaults.
-func (c *NTPConfig) ntpServers() []string {
-	if len(c.Servers) > 0 {
-		return c.Servers
+// ntpServer returns the configured NTP server, falling back to ntp.ubuntu.com.
+func (c *NTPConfig) ntpServer() string {
+	if c.Server != "" {
+		return c.Server
 	}
-	return []string{
-		"0.ubuntu.pool.ntp.org",
-		"1.ubuntu.pool.ntp.org",
-		"2.ubuntu.pool.ntp.org",
-		"3.ubuntu.pool.ntp.org",
-	}
+	return "ntp.ubuntu.com"
 }
 
 // ntpSyncTolerance returns the configured tolerance as a time.Duration,

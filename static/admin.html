@@ -1231,6 +1231,9 @@
 
                 <!-- Monitor Tab -->
                 <div id="monitorTab" class="tab-content">
+                    <!-- Monitor Section Navigation -->
+                    <div id="monitorNav" style="display: none; position: sticky; top: 0; z-index: 50; background: white; border-bottom: 2px solid #667eea; padding: 8px 12px 6px; margin: -20px -20px 16px -20px; flex-wrap: wrap; gap: 8px;"></div>
+
                     <!-- System Health Warnings Section (always at top, before frontend status) -->
                     <div id="systemHealthWarnings" style="display: none;"></div>
 
@@ -14357,6 +14360,49 @@ const tooltipLine2 = timeStr;
                     renderNTPHistorySection(data.ntp);
                 }
             }
+
+            // Update the monitor section navigation bar
+            updateMonitorNav();
+        }
+
+        function updateMonitorNav() {
+            const nav = document.getElementById('monitorNav');
+            if (!nav) return;
+
+            const sections = [
+                { id: 'frontendStatusSection',     label: 'SDR Frontend' },
+                { id: 'frequencyReferenceSection', label: 'Freq Reference' },
+                { id: 'systemLoadHistorySection',  label: 'System Load' },
+                { id: 'ntpHistorySection',         label: 'NTP' },
+                { id: 'monitor-tunnel',            label: 'Tunnel' },
+                { id: 'monitor-instance-reporter', label: 'Instance Reporter' },
+                { id: 'monitor-noise-floor',       label: 'Noise Floor' },
+                { id: 'monitor-space-weather',     label: 'Space Weather' },
+                { id: 'monitor-decoder',           label: 'Decoder' },
+                { id: 'monitor-cwskimmer',         label: 'CW Skimmer' },
+                { id: 'monitor-mqtt',              label: 'MQTT' },
+                { id: 'monitor-rotctl',            label: 'Rotator' },
+            ];
+
+            const visible = sections.filter(s => {
+                const el = document.getElementById(s.id);
+                return el && el.style.display !== 'none';
+            });
+
+            if (visible.length < 2) {
+                nav.style.display = 'none';
+                return;
+            }
+
+            nav.style.display = 'flex';
+            nav.innerHTML = visible.map(s =>
+                `<a href="#${s.id}" style="padding: 4px 12px; background: #f0f2ff; color: #667eea;
+                    text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500;
+                    border: 1px solid #c5caf5; white-space: nowrap; transition: background 0.2s, color 0.2s;"
+                   onmouseover="this.style.background='#667eea';this.style.color='white'"
+                   onmouseout="this.style.background='#f0f2ff';this.style.color='#667eea'"
+                >${s.label}</a>`
+            ).join('');
         }
 
         function renderNTPHealth(container, data) {
@@ -14490,6 +14536,7 @@ const tooltipLine2 = timeStr;
             // Render health status
             const statusSection = document.createElement('div');
             statusSection.className = 'config-section';
+            statusSection.id = 'monitor-noise-floor';
 
             const statusIcon = data.healthy ? '✅' : '❌';
             const statusColor = data.healthy ? '#28a745' : '#dc3545';
@@ -14622,6 +14669,7 @@ const tooltipLine2 = timeStr;
             // Render space weather health status
             const statusSection = document.createElement('div');
             statusSection.className = 'config-section';
+            statusSection.id = 'monitor-space-weather';
 
             const statusIcon = data.healthy ? '✅' : '❌';
             const statusColor = data.healthy ? '#28a745' : '#dc3545';
@@ -15023,6 +15071,7 @@ const tooltipLine2 = timeStr;
             // Render decoder health status
             const statusSection = document.createElement('div');
             statusSection.className = 'config-section';
+            statusSection.id = 'monitor-decoder';
 
             const statusIcon = data.healthy ? '✅' : '❌';
             const statusColor = data.healthy ? '#28a745' : '#dc3545';
@@ -15323,6 +15372,7 @@ const tooltipLine2 = timeStr;
             // Render CW Skimmer health status
             const statusSection = document.createElement('div');
             statusSection.className = 'config-section';
+            statusSection.id = 'monitor-cwskimmer';
 
             const statusIcon = data.healthy ? '✅' : '❌';
             const statusColor = data.healthy ? '#28a745' : '#dc3545';
@@ -15467,6 +15517,7 @@ const tooltipLine2 = timeStr;
             // Render MQTT health status
             const statusSection = document.createElement('div');
             statusSection.className = 'config-section';
+            statusSection.id = 'monitor-mqtt';
 
             const statusIcon = data.healthy ? '✅' : '❌';
             const statusColor = data.healthy ? '#28a745' : '#dc3545';
@@ -15610,6 +15661,7 @@ const tooltipLine2 = timeStr;
             // Render rotctl health status
             const statusSection = document.createElement('div');
             statusSection.className = 'config-section';
+            statusSection.id = 'monitor-rotctl';
 
             const statusIcon = data.healthy ? '✅' : '❌';
             const statusColor = data.healthy ? '#28a745' : '#dc3545';
@@ -15756,6 +15808,7 @@ const tooltipLine2 = timeStr;
             // Render tunnel health status
             const statusSection = document.createElement('div');
             statusSection.className = 'config-section';
+            statusSection.id = 'monitor-tunnel';
 
             // Determine status based on data
             let statusIcon = '❌';
@@ -16793,6 +16846,7 @@ const tooltipLine2 = timeStr;
             // Render instance reporter health status
             const statusSection = document.createElement('div');
             statusSection.className = 'config-section';
+            statusSection.id = 'monitor-instance-reporter';
 
             const statusIcon = data.healthy ? '✅' : '❌';
             const statusColor = data.healthy ? '#28a745' : '#dc3545';

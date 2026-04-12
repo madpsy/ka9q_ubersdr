@@ -194,7 +194,10 @@ class SignalMeter {
 
         // Update S-meter needle if it exists
         if (typeof sMeterNeedle !== 'undefined' && sMeterNeedle) {
-            sMeterNeedle.update(basebandPower);
+            const snr = (noiseDensity !== -999 && basebandPower !== -999)
+                ? Math.max(0, basebandPower - noiseDensity)
+                : null;
+            sMeterNeedle.update(basebandPower, snr);
         }
         
         // Calculate SNR if in SNR mode

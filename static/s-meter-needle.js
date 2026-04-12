@@ -27,7 +27,10 @@ class SMeterNeedle {
         this.targetValue = -120;
         this.originalValue = -120; // Store unclamped value for display
         this.needleAngle = this.getAngleForValue(-120);
-        
+
+        // SNR tracking
+        this.currentSNR = null; // null means no data yet
+
         // Peak hold values
         this.peakValue = -120; // dBFS
         this.originalPeakValue = -120; // Store unclamped peak value for display
@@ -226,12 +229,13 @@ class SMeterNeedle {
     updateValueDisplay() {
         const valueDiv = document.getElementById('s-meter-value-display');
         const peakDiv = document.getElementById('s-meter-peak-display');
-        
+        const snrDiv = document.getElementById('s-meter-snr-display');
+
         if (valueDiv) {
             // Use original (unclamped) value for display
             const sUnitText = this.formatSUnits(this.originalValue);
             valueDiv.textContent = sUnitText;
-            
+
             // Check if signal exceeds S9+40 (-33 dBFS)
             const exceedsMax = this.originalValue > -33;
 
@@ -253,7 +257,7 @@ class SMeterNeedle {
                 }
             }
         }
-        
+
         if (peakDiv) {
             // Use original (unclamped) peak value for display
             const peakText = this.formatSUnits(this.originalPeakValue);
@@ -267,6 +271,20 @@ class SMeterNeedle {
                 peakDiv.style.color = '#dc3545'; // Red
             } else {
                 peakDiv.classList.remove('s-meter-overload');
+            }
+        }
+
+        if (snrDiv) {
+            if (this.currentSNR !== null && isFinite(this.currentSNR)) {
+                const snrRounded = Math.round(this.currentSNR);
+                snrDiv.textContent = snrRounded + ' dB SNR';
+                // Graduated colour: red (≤30 dB) → green (≥50 dB)
+                const snrClamped = Math.max(30, Math.min(50, this.currentSNR));
+                const hue = Math.round(((snrClamped - 30) / 20) * 120); // 0° = red, 120° = green
+                snrDiv.style.color = `hsl(${hue}, 90%, 55%)`;
+            } else {
+                snrDiv.textContent = '-- dB SNR';
+                snrDiv.style.color = '#ffc107';
             }
         }
     }
@@ -355,10 +373,15 @@ class SMeterNeedle {
         this.ctx.fill();
     }
     
-    // Update the meter with a new signal value
-    update(dbfsValue) {
+    // Update the meter with a new signal value and optional SNR
+    update(dbfsValue, snrValue) {
         if (!this.canvas) return;
-        
+
+        // Store SNR if provided
+        if (snrValue !== undefined && snrValue !== null) {
+            this.currentSNR = snrValue;
+        }
+
         // Store original (unclamped) value for display
         this.originalValue = dbfsValue;
 
@@ -409,6 +432,7 @@ class SMeterNeedle {
         this.originalPeakValue = -120;
         this.peakAngle = this.getAngleForValue(-120);
         this.peakHoldCounter = 0;
+        this.currentSNR = null;
         this.draw();
     }
 }

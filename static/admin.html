@@ -12681,13 +12681,20 @@ const tooltipLine2 = timeStr;
                 const history = historyData.history || [];
 
                 if (history.length === 0) {
-                    console.log('No NTP history data available yet');
+                    // Show a waiting message in the canvas area
+                    const canvas = document.getElementById('ntpHistoryCanvas');
+                    if (canvas) {
+                        const ctx = canvas.getContext('2d');
+                        canvas.width = canvas.offsetWidth || 400;
+                        canvas.height = 250;
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        ctx.fillStyle = '#999';
+                        ctx.font = '14px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('Waiting for NTP data (first poll in ~64s)...', canvas.width / 2, 130);
+                    }
                     return;
                 }
-
-                // Show the section now that we have data
-                const ntpSection = document.getElementById('ntpHistorySection');
-                if (ntpSection) ntpSection.style.display = 'block';
 
                 // Prepare data for 60-minute chart
                 const labels = history.map(entry => new Date(entry.timestamp));
@@ -14001,7 +14008,6 @@ const tooltipLine2 = timeStr;
 
             // Load the charts (only once, they will update themselves)
             await loadLoadHistory();
-            await loadNTPHistory();
         }
 
         // Fetch tunnel status from local proxy endpoint
@@ -14304,6 +14310,10 @@ const tooltipLine2 = timeStr;
                 // Render NTP time sync health status
                 if (data.ntp) {
                     renderNTPHealth(container, data.ntp);
+                    // Show the static NTP history section and load charts
+                    const ntpSection = document.getElementById('ntpHistorySection');
+                    if (ntpSection) ntpSection.style.display = 'block';
+                    loadNTPHistory();
                 }
             }
         }

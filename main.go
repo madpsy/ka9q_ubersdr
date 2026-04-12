@@ -577,6 +577,8 @@ func main() {
 	StartVersionChecker(config.Admin.VersionCheckEnabled, config.Admin.VersionCheckInterval, sessions)
 
 	// Start NTP background checker (polls every 64 seconds, caches result for /api/time)
+	// Also start the NTP history tracker so offset/RTT trends are recorded.
+	globalNTPHistory.Start()
 	StartNTPChecker(config)
 
 	// Initialize IP ban manager
@@ -1988,6 +1990,12 @@ func main() {
 	http.HandleFunc("/admin/system-load", adminHandler.AuthMiddleware(adminHandler.HandleSystemLoad))
 	http.HandleFunc("/admin/load-history", adminHandler.AuthMiddleware(adminHandler.HandleLoadHistory))
 	http.HandleFunc("/admin/load-hourly-history", adminHandler.AuthMiddleware(adminHandler.HandleLoadHourlyHistory))
+	http.HandleFunc("/admin/ntp-history", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleNTPHistory(w, r)
+	}))
+	http.HandleFunc("/admin/ntp-hourly-history", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleNTPHourlyHistory(w, r)
+	}))
 	http.HandleFunc("/admin/login-history", adminHandler.AuthMiddleware(adminHandler.HandleLoginHistory))
 	http.HandleFunc("/admin/login-session-revoke", adminHandler.AuthMiddleware(adminHandler.HandleRevokeLoginSession))
 	http.HandleFunc("/admin/kick", adminHandler.AuthMiddleware(adminHandler.HandleKickUser))

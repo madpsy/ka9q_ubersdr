@@ -184,6 +184,9 @@ func pollNTP(cfg *Config) {
 
 		log.Printf("NTP: offset=%.2fms rtt=%.2fms server=%s stratum=%d synced=%v",
 			offsetMs, rttMs, srv, resp.Stratum, synced)
+
+		// Record this poll result in the history tracker.
+		globalNTPHistory.AddSample(offsetMs, rttMs, synced, resp.Stratum)
 	}
 
 	globalNTPState.mu.Lock()
@@ -243,4 +246,22 @@ func handleTimeAPI(w http.ResponseWriter, r *http.Request, cfg *Config) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 	json.NewEncoder(w).Encode(result)
+}
+
+// handleNTPHistory serves the 60-minute NTP offset history for the admin monitor.
+func handleNTPHistory(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	history := globalNTPHistory.GetHistory()
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"history": history,
+	})
+}
+
+// handleNTPHourlyHistory serves the 24-hour NTP offset history for the admin monitor.
+func handleNTPHourlyHistory(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	history := globalNTPHistory.GetHourlyHistory()
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"history": history,
+	})
 }

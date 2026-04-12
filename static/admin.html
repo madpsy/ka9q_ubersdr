@@ -1375,6 +1375,31 @@
                         </div>
                     </div>
 
+                    <!-- NTP Offset History Section (static container for charts) -->
+                    <div id="ntpHistorySection" class="config-section" style="display: none;">
+                        <h3 id="ntpHistoryTitle">🕐 NTP Offset History</h3>
+
+                        <!-- Historical tracking chart - 60 minutes -->
+                        <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                                Historical Tracking (Last 60 Minutes)
+                            </div>
+                            <div style="height: 250px; position: relative;">
+                                <canvas id="ntpHistoryCanvas"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Historical tracking chart - 24 hours -->
+                        <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                                Historical Tracking (Last 24 Hours)
+                            </div>
+                            <div style="height: 250px; position: relative;">
+                                <canvas id="ntpHourlyCanvas"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
                     <div id="monitorHealth" class="loading">
                         <div class="spinner"></div>
                         <p>Loading health status...</p>
@@ -11692,6 +11717,8 @@ const tooltipLine2 = timeStr;
         let frontendHourlyChart = null;
         let loadHistoryChart = null;
         let loadHourlyChart = null;
+        let ntpHistoryChart = null;
+        let ntpHourlyChart = null;
 
         async function loadFrontendHistory() {
             try {
@@ -12627,6 +12654,297 @@ const tooltipLine2 = timeStr;
 
             } catch (error) {
                 console.error('Error loading load history:', error);
+            }
+        }
+
+        // NTP Offset History Monitoring
+        async function loadNTPHistory() {
+            try {
+                // Fetch tolerance from ntp-health (same pattern as loadLoadHistory fetching cpu_cores)
+                const healthResponse = await authenticatedFetch('/admin/ntp-health');
+                let toleranceMs = 500; // default
+                if (healthResponse && healthResponse.ok) {
+                    const healthData = await healthResponse.json();
+                    if (healthData.tolerance_ms > 0) {
+                        toleranceMs = healthData.tolerance_ms;
+                    }
+                }
+
+                // Fetch 60-minute history
+                const historyResponse = await authenticatedFetch('/admin/ntp-history');
+                if (!historyResponse || !historyResponse.ok) {
+                    console.log('NTP history not available');
+                    return;
+                }
+
+                const historyData = await historyResponse.json();
+                const history = historyData.history || [];
+
+                if (history.length === 0) {
+                    console.log('No NTP history data available yet');
+                    return;
+                }
+
+                // Show the section now that we have data
+                const ntpSection = document.getElementById('ntpHistorySection');
+                if (ntpSection) ntpSection.style.display = 'block';
+
+                // Prepare data for 60-minute chart
+                const labels = history.map(entry => new Date(entry.timestamp));
+                const offsetData = history.map(entry => entry.offset_ms);
+                const rttData = history.map(entry => entry.rtt_ms);
+
+                // Compute symmetric axis extent: max(|offset|, tolerance * 2.5)
+                const maxAbsOffset = Math.max(...offsetData.map(v => Math.abs(v)), toleranceMs * 2.5);
+
+                // Build green/red zone datasets mirrored on both sides of zero
+                function buildZoneDatasets(lbls, tol, maxAbs) {
+                    return [
+                        // Positive green zone: 0 → +tolerance
+                        {
+                            label: 'OK Zone+',
+                            data: lbls.map(() => tol),
+                            backgroundColor: 'rgba(40, 167, 69, 0.12)',
+                            borderWidth: 0,
+                            fill: 'origin',
+                            pointRadius: 0,
+                            order: 10
+                        },
+                        // Positive red zone: +tolerance → +maxAbs
+                        {
+                            label: 'Critical Zone+',
+                            data: lbls.map(() => maxAbs),
+                            backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                            borderWidth: 0,
+                            fill: '-1',
+                            pointRadius: 0,
+                            order: 9
+                        },
+                        // Negative green zone: -tolerance → 0
+                        {
+                            label: 'OK Zone-',
+                            data: lbls.map(() => -tol),
+                            backgroundColor: 'rgba(40, 167, 69, 0.12)',
+                            borderWidth: 0,
+                            fill: 'origin',
+                            pointRadius: 0,
+                            order: 8
+                        },
+                        // Negative red zone: -maxAbs → -tolerance
+                        {
+                            label: 'Critical Zone-',
+                            data: lbls.map(() => -maxAbs),
+                            backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                            borderWidth: 0,
+                            fill: '-1',
+                            pointRadius: 0,
+                            order: 7
+                        }
+                    ];
+                }
+
+                function buildNTPChartOptions(timeUnit, tooltipFmt) {
+                    return {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: false,
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: {
+                            legend: { display: true, position: 'top' },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        const lbl = context.dataset.label || '';
+                                        // Hide zone datasets from tooltip
+                                        if (lbl.startsWith('OK Zone') || lbl.startsWith('Critical Zone')) return null;
+                                        let out = lbl + ': ';
+                                        if (context.parsed.y !== null) {
+                                            if (context.dataset.yAxisID === 'y2') {
+                                                out += context.parsed.y.toFixed(2) + ' ms (RTT)';
+                                            } else {
+                                                const v = context.parsed.y;
+                                                out += (v >= 0 ? '+' : '') + v.toFixed(2) + ' ms';
+                                            }
+                                        }
+                                        return out;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    unit: timeUnit,
+                                    displayFormats: { minute: 'HH:mm', hour: 'HH:mm' },
+                                    tooltipFormat: tooltipFmt
+                                },
+                                ticks: { source: 'data' },
+                                bounds: 'data',
+                                offset: false,
+                                title: { display: true, text: 'Time' }
+                            },
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                title: { display: true, text: 'Offset (ms)' },
+                                // Symmetric around zero
+                                min: -maxAbsOffset,
+                                max: maxAbsOffset
+                            },
+                            y2: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                title: { display: true, text: 'RTT (ms)', color: '#28a745' },
+                                beginAtZero: true,
+                                ticks: { color: '#28a745' },
+                                grid: { drawOnChartArea: false }
+                            }
+                        }
+                    };
+                }
+
+                const zoneDatasets = buildZoneDatasets(labels, toleranceMs, maxAbsOffset);
+
+                // Check canvas
+                const canvas = document.getElementById('ntpHistoryCanvas');
+                if (!canvas) return;
+
+                if (!ntpHistoryChart) {
+                    const ctx = canvas.getContext('2d');
+                    ntpHistoryChart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [
+                                ...zoneDatasets,
+                                {
+                                    label: 'Offset',
+                                    data: offsetData,
+                                    borderColor: '#667eea',
+                                    backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                                    borderWidth: 2,
+                                    pointRadius: 2,
+                                    tension: 0.3,
+                                    yAxisID: 'y',
+                                    order: 1
+                                },
+                                {
+                                    label: 'RTT',
+                                    data: rttData,
+                                    borderColor: '#28a745',
+                                    backgroundColor: 'rgba(40, 167, 69, 0.15)',
+                                    borderWidth: 2,
+                                    pointRadius: 2,
+                                    tension: 0.3,
+                                    yAxisID: 'y2',
+                                    order: 0
+                                }
+                            ]
+                        },
+                        options: buildNTPChartOptions('minute', 'HH:mm:ss')
+                    });
+                } else {
+                    ntpHistoryChart.data.labels = labels;
+                    ntpHistoryChart.data.datasets.forEach(ds => {
+                        if (ds.label === 'OK Zone+' || ds.label === 'OK Zone-') {
+                            ds.data = labels.map(() => ds.label === 'OK Zone+' ? toleranceMs : -toleranceMs);
+                        } else if (ds.label === 'Critical Zone+') {
+                            ds.data = labels.map(() => maxAbsOffset);
+                        } else if (ds.label === 'Critical Zone-') {
+                            ds.data = labels.map(() => -maxAbsOffset);
+                        } else if (ds.label === 'Offset') {
+                            ds.data = offsetData;
+                        } else if (ds.label === 'RTT') {
+                            ds.data = rttData;
+                        }
+                    });
+                    ntpHistoryChart.options.scales.y.min = -maxAbsOffset;
+                    ntpHistoryChart.options.scales.y.max = maxAbsOffset;
+                    ntpHistoryChart.update('none');
+                }
+
+                // --- 24-hour chart ---
+                const hourlyResponse = await authenticatedFetch('/admin/ntp-hourly-history');
+                if (!hourlyResponse || !hourlyResponse.ok) return;
+
+                const hourlyData = await hourlyResponse.json();
+                const hourlyHistory = hourlyData.history || [];
+                if (hourlyHistory.length === 0) return;
+
+                const hourlyLabels = hourlyHistory.map(entry => new Date(entry.timestamp));
+                const hourlyOffsetData = hourlyHistory.map(entry => entry.offset_ms);
+                const hourlyRttData = hourlyHistory.map(entry => entry.rtt_ms);
+                const hourlyMaxAbs = Math.max(...hourlyOffsetData.map(v => Math.abs(v)), toleranceMs * 2.5);
+
+                const hourlyZoneDatasets = buildZoneDatasets(hourlyLabels, toleranceMs, hourlyMaxAbs);
+
+                const hourlyCanvas = document.getElementById('ntpHourlyCanvas');
+                if (!hourlyCanvas) return;
+
+                if (!ntpHourlyChart) {
+                    const hCtx = hourlyCanvas.getContext('2d');
+                    ntpHourlyChart = new Chart(hCtx, {
+                        type: 'line',
+                        data: {
+                            labels: hourlyLabels,
+                            datasets: [
+                                ...hourlyZoneDatasets,
+                                {
+                                    label: 'Offset',
+                                    data: hourlyOffsetData,
+                                    borderColor: '#667eea',
+                                    backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                                    borderWidth: 2,
+                                    pointRadius: 2,
+                                    tension: 0.3,
+                                    yAxisID: 'y',
+                                    order: 1
+                                },
+                                {
+                                    label: 'RTT',
+                                    data: hourlyRttData,
+                                    borderColor: '#28a745',
+                                    backgroundColor: 'rgba(40, 167, 69, 0.15)',
+                                    borderWidth: 2,
+                                    pointRadius: 2,
+                                    tension: 0.3,
+                                    yAxisID: 'y2',
+                                    order: 0
+                                }
+                            ]
+                        },
+                        options: (function() {
+                            const opts = buildNTPChartOptions('hour', 'MMM d, HH:mm');
+                            opts.scales.y.min = -hourlyMaxAbs;
+                            opts.scales.y.max = hourlyMaxAbs;
+                            return opts;
+                        })()
+                    });
+                } else {
+                    ntpHourlyChart.data.labels = hourlyLabels;
+                    ntpHourlyChart.data.datasets.forEach(ds => {
+                        if (ds.label === 'OK Zone+' || ds.label === 'OK Zone-') {
+                            ds.data = hourlyLabels.map(() => ds.label === 'OK Zone+' ? toleranceMs : -toleranceMs);
+                        } else if (ds.label === 'Critical Zone+') {
+                            ds.data = hourlyLabels.map(() => hourlyMaxAbs);
+                        } else if (ds.label === 'Critical Zone-') {
+                            ds.data = hourlyLabels.map(() => -hourlyMaxAbs);
+                        } else if (ds.label === 'Offset') {
+                            ds.data = hourlyOffsetData;
+                        } else if (ds.label === 'RTT') {
+                            ds.data = hourlyRttData;
+                        }
+                    });
+                    ntpHourlyChart.options.scales.y.min = -hourlyMaxAbs;
+                    ntpHourlyChart.options.scales.y.max = hourlyMaxAbs;
+                    ntpHourlyChart.update('none');
+                }
+
+            } catch (error) {
+                console.error('Error loading NTP history:', error);
             }
         }
 
@@ -13683,6 +14001,7 @@ const tooltipLine2 = timeStr;
 
             // Load the charts (only once, they will update themselves)
             await loadLoadHistory();
+            await loadNTPHistory();
         }
 
         // Fetch tunnel status from local proxy endpoint

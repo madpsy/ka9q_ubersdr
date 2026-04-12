@@ -511,6 +511,22 @@
             border-radius: 0 0 5px 5px;
         }
 
+        /* Offset anchor targets so the sticky monitor nav doesn't obscure section headers */
+        #frontendStatusSection,
+        #frequencyReferenceSection,
+        #systemLoadHistorySection,
+        #ntpHistorySection,
+        #monitor-tunnel,
+        #monitor-instance-reporter,
+        #monitor-noise-floor,
+        #monitor-space-weather,
+        #monitor-decoder,
+        #monitor-cwskimmer,
+        #monitor-mqtt,
+        #monitor-rotctl {
+            scroll-margin-top: 52px;
+        }
+
     </style>
     <script src="chart.umd.min.js"></script>
     <script src="chartjs-adapter-date-fns.bundle.min.js"></script>

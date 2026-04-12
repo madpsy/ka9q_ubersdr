@@ -1378,6 +1378,9 @@
                     <!-- NTP Offset History Section (static container for charts) -->
                     <div id="ntpHistorySection" class="config-section" style="display: none;">
                         <h3 id="ntpHistoryTitle">🕐 NTP Offset History</h3>
+                        <div id="ntpHistoryDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                            <!-- NTP current stats will be populated by JavaScript -->
+                        </div>
 
                         <!-- Historical tracking chart - 60 minutes -->
                         <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
@@ -12658,15 +12661,18 @@ const tooltipLine2 = timeStr;
         }
 
         // NTP Offset History Monitoring
-        async function loadNTPHistory() {
+        // toleranceMsOverride: if provided (from renderNTPHistorySection), skip the extra /admin/ntp-health fetch
+        async function loadNTPHistory(toleranceMsOverride) {
             try {
-                // Fetch tolerance from ntp-health (same pattern as loadLoadHistory fetching cpu_cores)
-                const healthResponse = await authenticatedFetch('/admin/ntp-health');
-                let toleranceMs = 500; // default
-                if (healthResponse && healthResponse.ok) {
-                    const healthData = await healthResponse.json();
-                    if (healthData.tolerance_ms > 0) {
-                        toleranceMs = healthData.tolerance_ms;
+                let toleranceMs = toleranceMsOverride || 500;
+                if (!toleranceMsOverride) {
+                    // Fetch tolerance from ntp-health (same pattern as loadLoadHistory fetching cpu_cores)
+                    const healthResponse = await authenticatedFetch('/admin/ntp-health');
+                    if (healthResponse && healthResponse.ok) {
+                        const healthData = await healthResponse.json();
+                        if (healthData.tolerance_ms > 0) {
+                            toleranceMs = healthData.tolerance_ms;
+                        }
                     }
                 }
 
@@ -14024,6 +14030,72 @@ const tooltipLine2 = timeStr;
             await loadLoadHistory();
         }
 
+        // Render the NTP history section — mirrors renderSystemLoadHealth pattern exactly.
+        async function renderNTPHistorySection(ntpData) {
+            // Show the static section
+            const ntpSection = document.getElementById('ntpHistorySection');
+            if (ntpSection) ntpSection.style.display = 'block';
+
+            // Populate the display div with current NTP stats
+            const displayDiv = document.getElementById('ntpHistoryDisplay');
+            if (!displayDiv) return;
+
+            const healthy = ntpData.healthy;
+            const synced = ntpData.synced;
+            const offsetMs = ntpData.offset_ms !== undefined ? ntpData.offset_ms : null;
+            const rttMs = ntpData.rtt_ms !== undefined ? ntpData.rtt_ms : null;
+            const stratum = ntpData.stratum !== undefined ? ntpData.stratum : null;
+            const toleranceMs = ntpData.tolerance_ms || 500;
+            const ntpServer = ntpData.ntp_server || '—';
+            const lastPoll = ntpData.last_poll ? new Date(ntpData.last_poll).toLocaleTimeString() : 'Never';
+
+            const statusColor = healthy ? '#28a745' : '#dc3545';
+            const statusIcon = healthy ? '✓' : '✗';
+            const statusText = healthy ? 'OK' : 'UNHEALTHY';
+
+            const offsetColor = (offsetMs !== null && Math.abs(offsetMs) <= toleranceMs) ? '#28a745' : '#dc3545';
+            const offsetStr = offsetMs !== null ? ((offsetMs >= 0 ? '+' : '') + offsetMs.toFixed(2) + ' ms') : '—';
+
+            // Update title colour
+            const titleEl = document.getElementById('ntpHistoryTitle');
+            if (titleEl) titleEl.style.color = statusColor;
+
+            displayDiv.innerHTML = `
+                <div style="margin-bottom: 15px;">
+                    <strong style="font-size: 16px; color: ${statusColor};">Status: ${statusIcon} ${statusText}</strong>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 15px;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 28px; font-weight: bold; color: ${offsetColor};">${offsetStr}</div>
+                        <div style="font-size: 12px; color: #666;">Clock Offset</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 28px; font-weight: bold; color: #667eea;">${rttMs !== null ? rttMs.toFixed(2) + ' ms' : '—'}</div>
+                        <div style="font-size: 12px; color: #666;">Round-Trip Time</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 28px; font-weight: bold; color: #667eea;">${stratum !== null ? stratum : '—'}</div>
+                        <div style="font-size: 12px; color: #666;">Stratum</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 28px; font-weight: bold; color: #667eea;">±${toleranceMs} ms</div>
+                        <div style="font-size: 12px; color: #666;">Tolerance</div>
+                    </div>
+                </div>
+                <div style="text-align: center; color: #999; font-size: 12px;">
+                    Server: <strong>${ntpServer}</strong> &nbsp;|&nbsp; Last poll: <strong>${lastPoll}</strong>
+                </div>
+                <div style="text-align: center; color: #999; font-size: 12px; margin-top: 4px;">
+                    <span style="color: #28a745;">●</span> Within tolerance (±${toleranceMs} ms)&nbsp;
+                    <span style="color: #dc3545;">●</span> Outside tolerance
+                </div>
+            `;
+
+            // Load the charts (only once, they will update themselves)
+            // Pass toleranceMs so loadNTPHistory skips the redundant /admin/ntp-health fetch
+            await loadNTPHistory(toleranceMs);
+        }
+
         // Fetch tunnel status from local proxy endpoint
         async function fetchTunnelStatus() {
             try {
@@ -14324,10 +14396,7 @@ const tooltipLine2 = timeStr;
                 // Render NTP time sync health status
                 if (data.ntp) {
                     renderNTPHealth(container, data.ntp);
-                    // Show the static NTP history section and load charts
-                    const ntpSection = document.getElementById('ntpHistorySection');
-                    if (ntpSection) ntpSection.style.display = 'block';
-                    loadNTPHistory();
+                    renderNTPHistorySection(data.ntp);
                 }
             }
         }

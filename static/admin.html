@@ -1377,7 +1377,7 @@
 
                     <!-- NTP Offset History Section (static container for charts) -->
                     <div id="ntpHistorySection" class="config-section" style="display: none;">
-                        <h3 id="ntpHistoryTitle">🕐 NTP Offset History</h3>
+                        <h3 id="ntpHistoryTitle">🕐 NTP</h3>
                         <div id="ntpHistoryDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
                             <!-- NTP current stats will be populated by JavaScript -->
                         </div>
@@ -12705,7 +12705,6 @@ const tooltipLine2 = timeStr;
                 // Prepare data for 60-minute chart
                 const labels = history.map(entry => new Date(entry.timestamp));
                 const offsetData = history.map(entry => entry.offset_ms);
-                const rttData = history.map(entry => entry.rtt_ms);
 
                 // Compute symmetric axis extent: max(|offset|, tolerance * 2.5)
                 const maxAbsOffset = Math.max(...offsetData.map(v => Math.abs(v)), toleranceMs * 2.5);
@@ -12770,16 +12769,11 @@ const tooltipLine2 = timeStr;
                                         const lbl = context.dataset.label || '';
                                         // Hide zone datasets from tooltip
                                         if (lbl.startsWith('OK Zone') || lbl.startsWith('Critical Zone')) return null;
-                                        let out = lbl + ': ';
                                         if (context.parsed.y !== null) {
-                                            if (context.dataset.yAxisID === 'y2') {
-                                                out += context.parsed.y.toFixed(2) + ' ms (RTT)';
-                                            } else {
-                                                const v = context.parsed.y;
-                                                out += (v >= 0 ? '+' : '') + v.toFixed(2) + ' ms';
-                                            }
+                                            const v = context.parsed.y;
+                                            return lbl + ': ' + (v >= 0 ? '+' : '') + v.toFixed(2) + ' ms';
                                         }
-                                        return out;
+                                        return null;
                                     }
                                 }
                             }
@@ -12805,15 +12799,6 @@ const tooltipLine2 = timeStr;
                                 // Symmetric around zero
                                 min: -maxAbsOffset,
                                 max: maxAbsOffset
-                            },
-                            y2: {
-                                type: 'linear',
-                                display: true,
-                                position: 'right',
-                                title: { display: true, text: 'RTT (ms)', color: '#28a745' },
-                                beginAtZero: true,
-                                ticks: { color: '#28a745' },
-                                grid: { drawOnChartArea: false }
                             }
                         }
                     };
@@ -12843,17 +12828,6 @@ const tooltipLine2 = timeStr;
                                     tension: 0.3,
                                     yAxisID: 'y',
                                     order: 1
-                                },
-                                {
-                                    label: 'RTT',
-                                    data: rttData,
-                                    borderColor: '#28a745',
-                                    backgroundColor: 'rgba(40, 167, 69, 0.15)',
-                                    borderWidth: 2,
-                                    pointRadius: 2,
-                                    tension: 0.3,
-                                    yAxisID: 'y2',
-                                    order: 0
                                 }
                             ]
                         },
@@ -12870,8 +12844,6 @@ const tooltipLine2 = timeStr;
                             ds.data = labels.map(() => -maxAbsOffset);
                         } else if (ds.label === 'Offset') {
                             ds.data = offsetData;
-                        } else if (ds.label === 'RTT') {
-                            ds.data = rttData;
                         }
                     });
                     ntpHistoryChart.options.scales.y.min = -maxAbsOffset;
@@ -12903,7 +12875,6 @@ const tooltipLine2 = timeStr;
 
                 const hourlyLabels = hourlyHistory.map(entry => new Date(entry.timestamp));
                 const hourlyOffsetData = hourlyHistory.map(entry => entry.offset_ms);
-                const hourlyRttData = hourlyHistory.map(entry => entry.rtt_ms);
                 const hourlyMaxAbs = Math.max(...hourlyOffsetData.map(v => Math.abs(v)), toleranceMs * 2.5);
 
                 const hourlyZoneDatasets = buildZoneDatasets(hourlyLabels, toleranceMs, hourlyMaxAbs);
@@ -12929,17 +12900,6 @@ const tooltipLine2 = timeStr;
                                     tension: 0.3,
                                     yAxisID: 'y',
                                     order: 1
-                                },
-                                {
-                                    label: 'RTT',
-                                    data: hourlyRttData,
-                                    borderColor: '#28a745',
-                                    backgroundColor: 'rgba(40, 167, 69, 0.15)',
-                                    borderWidth: 2,
-                                    pointRadius: 2,
-                                    tension: 0.3,
-                                    yAxisID: 'y2',
-                                    order: 0
                                 }
                             ]
                         },
@@ -12961,8 +12921,6 @@ const tooltipLine2 = timeStr;
                             ds.data = hourlyLabels.map(() => -hourlyMaxAbs);
                         } else if (ds.label === 'Offset') {
                             ds.data = hourlyOffsetData;
-                        } else if (ds.label === 'RTT') {
-                            ds.data = hourlyRttData;
                         }
                     });
                     ntpHourlyChart.options.scales.y.min = -hourlyMaxAbs;
@@ -14041,55 +13999,56 @@ const tooltipLine2 = timeStr;
             if (!displayDiv) return;
 
             const healthy = ntpData.healthy;
-            const synced = ntpData.synced;
-            const offsetMs = ntpData.offset_ms !== undefined ? ntpData.offset_ms : null;
-            const rttMs = ntpData.rtt_ms !== undefined ? ntpData.rtt_ms : null;
-            const stratum = ntpData.stratum !== undefined ? ntpData.stratum : null;
             const toleranceMs = ntpData.tolerance_ms || 500;
-            const ntpServer = ntpData.ntp_server || '—';
-            const lastPoll = ntpData.last_poll ? new Date(ntpData.last_poll).toLocaleTimeString() : 'Never';
 
             const statusColor = healthy ? '#28a745' : '#dc3545';
-            const statusIcon = healthy ? '✓' : '✗';
-            const statusText = healthy ? 'OK' : 'UNHEALTHY';
-
-            const offsetColor = (offsetMs !== null && Math.abs(offsetMs) <= toleranceMs) ? '#28a745' : '#dc3545';
-            const offsetStr = offsetMs !== null ? ((offsetMs >= 0 ? '+' : '') + offsetMs.toFixed(2) + ' ms') : '—';
+            const statusIcon = healthy ? '✅' : '❌';
 
             // Update title colour
             const titleEl = document.getElementById('ntpHistoryTitle');
             if (titleEl) titleEl.style.color = statusColor;
 
-            displayDiv.innerHTML = `
-                <div style="margin-bottom: 15px;">
-                    <strong style="font-size: 16px; color: ${statusColor};">Status: ${statusIcon} ${statusText}</strong>
-                </div>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 15px;">
-                    <div style="text-align: center;">
-                        <div style="font-size: 28px; font-weight: bold; color: ${offsetColor};">${offsetStr}</div>
-                        <div style="font-size: 12px; color: #666;">Clock Offset</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="font-size: 28px; font-weight: bold; color: #667eea;">${rttMs !== null ? rttMs.toFixed(2) + ' ms' : '—'}</div>
-                        <div style="font-size: 12px; color: #666;">Round-Trip Time</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="font-size: 28px; font-weight: bold; color: #667eea;">${stratum !== null ? stratum : '—'}</div>
-                        <div style="font-size: 12px; color: #666;">Stratum</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="font-size: 28px; font-weight: bold; color: #667eea;">±${toleranceMs} ms</div>
-                        <div style="font-size: 12px; color: #666;">Tolerance</div>
-                    </div>
-                </div>
-                <div style="text-align: center; color: #999; font-size: 12px;">
-                    Server: <strong>${ntpServer}</strong> &nbsp;|&nbsp; Last poll: <strong>${lastPoll}</strong>
+            // Status banner (mirrors renderNTPHealth)
+            let issuesHTML = '';
+            if (ntpData.issues && ntpData.issues.length > 0) {
+                issuesHTML = '<br><strong style="color: #dc3545;">Issues:</strong><ul style="margin: 5px 0 0 0; padding-left: 20px;">' +
+                    ntpData.issues.map(i => `<li style="color: #721c24;">${i}</li>`).join('') + '</ul>';
+            }
+            const serverTimeStr = ntpData.server_time ? new Date(ntpData.server_time).toLocaleString(undefined, {timeZoneName: 'short'}) : 'N/A';
+            const ntpTimeStr = ntpData.ntp_time ? new Date(ntpData.ntp_time).toLocaleString(undefined, {timeZoneName: 'short'}) : 'N/A';
+
+            const statusBannerHTML = `
+                <div style="margin-bottom: 15px; padding: 15px; background: ${healthy ? '#d4edda' : '#f8d7da'}; border: 1px solid ${healthy ? '#c3e6cb' : '#f5c6cb'}; border-radius: 5px;">
+                    <strong style="font-size: 16px;">${statusIcon} Status: ${healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
+                    <span style="color: #666; font-size: 14px;">Synced: <strong style="color: ${ntpData.synced ? '#28a745' : '#dc3545'};">${ntpData.synced ? 'Yes' : 'No'}</strong></span><br>
+                    <span style="color: #666; font-size: 13px; margin-top: 6px; display: inline-block;">🖥️ System Time: <strong>${serverTimeStr}</strong></span><br>
+                    <span style="color: #666; font-size: 13px;">🌐 NTP Time: <strong>${ntpTimeStr}</strong></span>
+                    ${issuesHTML}
+                </div>`;
+
+            // Stats grid
+            const statsGridHTML = ntpData.last_poll ? `
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 10px;">
+                    ${[
+                        { label: 'Clock Offset', value: ntpData.offset_ms !== undefined ? (ntpData.offset_ms >= 0 ? '+' : '') + ntpData.offset_ms.toFixed(2) + ' ms' : 'N/A', icon: '⏱️' },
+                        { label: 'Round-Trip Time', value: ntpData.rtt_ms !== undefined ? ntpData.rtt_ms.toFixed(2) + ' ms' : 'N/A', icon: '🔄' },
+                        { label: 'Stratum', value: ntpData.stratum !== undefined ? ntpData.stratum : 'N/A', icon: '📶' },
+                        { label: 'Tolerance', value: toleranceMs + ' ms', icon: '🎯' },
+                        { label: 'NTP Server', value: ntpData.ntp_server || 'N/A', icon: '🌐' },
+                        { label: 'Last Poll', value: new Date(ntpData.last_poll).toLocaleTimeString(), icon: '🕐' },
+                    ].map(s => `
+                        <div style="background: #f8f9fa; padding: 10px; border-radius: 5px; text-align: center;">
+                            <div style="font-size: 20px;">${s.icon}</div>
+                            <div style="font-size: 12px; color: #666; margin: 3px 0;">${s.label}</div>
+                            <div style="font-size: 14px; font-weight: bold;">${s.value}</div>
+                        </div>`).join('')}
                 </div>
                 <div style="text-align: center; color: #999; font-size: 12px; margin-top: 4px;">
                     <span style="color: #28a745;">●</span> Within tolerance (±${toleranceMs} ms)&nbsp;
                     <span style="color: #dc3545;">●</span> Outside tolerance
-                </div>
-            `;
+                </div>` : '';
+
+            displayDiv.innerHTML = statusBannerHTML + statsGridHTML;
 
             // Load the charts (only once, they will update themselves)
             // Pass toleranceMs so loadNTPHistory skips the redundant /admin/ntp-health fetch
@@ -14393,9 +14352,8 @@ const tooltipLine2 = timeStr;
                     renderRotctlHealth(container, data.rotctl);
                 }
 
-                // Render NTP time sync health status
+                // Render NTP time sync health status (unified static section with charts)
                 if (data.ntp) {
-                    renderNTPHealth(container, data.ntp);
                     renderNTPHistorySection(data.ntp);
                 }
             }

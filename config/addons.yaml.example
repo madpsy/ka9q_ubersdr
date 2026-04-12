@@ -128,3 +128,16 @@ proxies:
     allowed_ips:
       - "0.0.0.0/0"
     rate_limit: 100
+
+  # WEFAX decoder web interface — publicly accessible
+  # Accessible at: /addon/wefax/
+  - name: "wefax"
+    enabled: false          # set to true to activate
+    host: "wefax"
+    port: 6094
+    strip_prefix: true
+    require_admin: false
+    rewrite_origin: false
+    allowed_ips:
+      - "0.0.0.0/0"
+    rate_limit: 250

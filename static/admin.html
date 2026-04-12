@@ -12879,7 +12879,21 @@ const tooltipLine2 = timeStr;
 
                 const hourlyData = await hourlyResponse.json();
                 const hourlyHistory = hourlyData.history || [];
-                if (hourlyHistory.length === 0) return;
+                if (hourlyHistory.length === 0) {
+                    // Show a waiting message — hourly data appears after the first 1-minute aggregation
+                    const hourlyCanvas = document.getElementById('ntpHourlyCanvas');
+                    if (hourlyCanvas) {
+                        const hCtx = hourlyCanvas.getContext('2d');
+                        hourlyCanvas.width = hourlyCanvas.offsetWidth || 400;
+                        hourlyCanvas.height = 250;
+                        hCtx.clearRect(0, 0, hourlyCanvas.width, hourlyCanvas.height);
+                        hCtx.fillStyle = '#999';
+                        hCtx.font = '14px sans-serif';
+                        hCtx.textAlign = 'center';
+                        hCtx.fillText('Waiting for hourly NTP data (available after ~1 min)...', hourlyCanvas.width / 2, 130);
+                    }
+                    return;
+                }
 
                 const hourlyLabels = hourlyHistory.map(entry => new Date(entry.timestamp));
                 const hourlyOffsetData = hourlyHistory.map(entry => entry.offset_ms);

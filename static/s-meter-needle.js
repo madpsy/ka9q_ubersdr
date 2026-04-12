@@ -246,13 +246,13 @@ class SMeterNeedle {
         this.ctx.fillText('dB', this.width - 10, this.height - 10);
     }
 
-    // Draw SNR scale (30–80 dB, major ticks every 10 dB, minor every 5 dB)
+    // Draw SNR scale (30–60 dB, major ticks with labels at every 5 dB)
     drawScaleSNR() {
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
 
-        // Major ticks every 10 dB
-        for (let snr = 30; snr <= 60; snr += 10) {
+        // Major ticks with labels at every 5 dB (30, 35, 40, 45, 50, 55, 60)
+        for (let snr = 30; snr <= 60; snr += 5) {
             const angle = this.getScaleLabelAngleForSNR(snr);
             const tickStart = this.radius - 15;
             const tickEnd = this.radius - 5;
@@ -277,26 +277,6 @@ class SMeterNeedle {
             this.ctx.fillStyle = col;
             this.ctx.font = 'bold 11px Arial';
             this.ctx.fillText(snr.toString(), labelX, labelY);
-        }
-
-        // Minor ticks every 5 dB
-        for (let snr = 30; snr <= 60; snr += 5) {
-            if (snr % 10 === 0) continue;
-            const angle = this.getScaleLabelAngleForSNR(snr);
-            const tickStart = this.radius - 10;
-            const tickEnd = this.radius - 5;
-
-            const x1 = this.centerX + Math.cos(angle) * tickStart;
-            const y1 = this.centerY - Math.sin(angle) * tickStart;
-            const x2 = this.centerX + Math.cos(angle) * tickEnd;
-            const y2 = this.centerY - Math.sin(angle) * tickEnd;
-
-            this.ctx.beginPath();
-            this.ctx.moveTo(x1, y1);
-            this.ctx.lineTo(x2, y2);
-            this.ctx.strokeStyle = 'rgba(236, 240, 241, 0.5)';
-            this.ctx.lineWidth = 1;
-            this.ctx.stroke();
         }
 
         // "SNR" label at bottom left

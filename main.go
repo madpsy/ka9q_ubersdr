@@ -576,6 +576,9 @@ func main() {
 	// Must be called after sessions is initialized so it can check for active users
 	StartVersionChecker(config.Admin.VersionCheckEnabled, config.Admin.VersionCheckInterval, sessions)
 
+	// Start NTP background checker (polls every 64 seconds, caches result for /api/time)
+	StartNTPChecker(config)
+
 	// Initialize IP ban manager
 	bannedIPsPath := "banned_ips.yaml"
 	if *configDir != "." {
@@ -1781,6 +1784,9 @@ func main() {
 		log.Printf("Rotctl API endpoints registered (disabled in configuration)")
 	}
 
+	http.HandleFunc("/api/time", func(w http.ResponseWriter, r *http.Request) {
+		handleTimeAPI(w, r, config)
+	})
 	http.HandleFunc("/api/myip", func(w http.ResponseWriter, r *http.Request) {
 		handleMyIP(w, r, geoIPService, config)
 	})
@@ -3027,6 +3033,8 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"frequency_reference":  freqRefInfo,
 		"speech_to_text":       config.Whisper.Enabled,
 		"addons":               enabledAddons,
+		"server_time":          time.Now().UTC().Format(time.RFC3339),
+		"server_time_sync":     GetNTPSynced(),
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

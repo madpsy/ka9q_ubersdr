@@ -1593,3 +1593,20 @@ freedv_extension:
   # Recommended: 5-10 depending on server capacity.
   max_users: 10
 
+# ==============================================================================
+# NTP Time Synchronization Check
+# ==============================================================================
+# The /api/time endpoint queries an NTP server and compares it to the local
+# system clock, returning the offset and a sync status flag.
+ntp:
+  # NTP servers to query (tried in order until one succeeds).
+  # Defaults to the Ubuntu NTP pool if not specified.
+  servers:
+    - 0.ubuntu.pool.ntp.org
+    - 1.ubuntu.pool.ntp.org
+    - 2.ubuntu.pool.ntp.org
+    - 3.ubuntu.pool.ntp.org
+  # Maximum acceptable clock offset in milliseconds before reporting out-of-sync.
+  # Default: 500 ms
+  sync_tolerance_ms: 500
+

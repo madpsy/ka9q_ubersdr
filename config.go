@@ -38,10 +38,43 @@ type Config struct {
 	Whisper            WhisperConfig            `yaml:"whisper"`
 	FreeDVExtension    FreeDVExtensionConfig    `yaml:"freedv_extension"`
 	EiBi               EiBiConfig               `yaml:"eibi"`
+	NTP                NTPConfig                `yaml:"ntp"`
 	Bookmarks          []Bookmark               `yaml:"bookmarks"`
 	Bands              []Band                   `yaml:"bands"`
 	Extensions         []string                 `yaml:"extensions"`
 	DefaultExtension   string                   `yaml:"default_extension,omitempty"`
+}
+
+// NTPConfig contains NTP time synchronization check settings
+type NTPConfig struct {
+	// Servers is the list of NTP servers to query (tried in order until one succeeds).
+	// Defaults to the Ubuntu NTP pool servers.
+	Servers []string `yaml:"servers"`
+	// SyncToleranceMs is the maximum acceptable clock offset in milliseconds before
+	// the status is reported as out-of-sync. Defaults to 500 ms.
+	SyncToleranceMs int `yaml:"sync_tolerance_ms"`
+}
+
+// ntpServers returns the configured NTP servers, falling back to Ubuntu pool defaults.
+func (c *NTPConfig) ntpServers() []string {
+	if len(c.Servers) > 0 {
+		return c.Servers
+	}
+	return []string{
+		"0.ubuntu.pool.ntp.org",
+		"1.ubuntu.pool.ntp.org",
+		"2.ubuntu.pool.ntp.org",
+		"3.ubuntu.pool.ntp.org",
+	}
+}
+
+// ntpSyncTolerance returns the configured tolerance as a time.Duration,
+// defaulting to 500 ms.
+func (c *NTPConfig) ntpSyncTolerance() time.Duration {
+	if c.SyncToleranceMs <= 0 {
+		return 500 * time.Millisecond
+	}
+	return time.Duration(c.SyncToleranceMs) * time.Millisecond
 }
 
 // AdminConfig contains admin authentication settings

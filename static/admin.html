@@ -2851,7 +2851,7 @@
                     header.className = 'config-section-header';
 
                     const title = document.createElement('h3');
-                    title.textContent = section.charAt(0).toUpperCase() + section.slice(1);
+                    title.textContent = section.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 
                     const toggle = document.createElement('span');
                     toggle.className = 'config-section-toggle collapsed';
@@ -2926,7 +2926,7 @@
                     subSection.style.marginTop = '10px';
 
                     const subTitle = document.createElement('h4');
-                    subTitle.textContent = key;
+                    subTitle.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                     subTitle.style.color = '#555';
                     subTitle.style.marginBottom = '10px';
                     subSection.appendChild(subTitle);

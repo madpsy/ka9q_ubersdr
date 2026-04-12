@@ -352,11 +352,14 @@ class SMeterNeedle {
         this.ctx.lineTo(2, -10);
         this.ctx.closePath();
 
-        this.ctx.fillStyle = 'rgba(0, 255, 255, 0.6)';
+        this.ctx.globalAlpha = 0.65;
+        this.ctx.fillStyle = this.sMeterColour(this.peakValue);
         this.ctx.fill();
-        this.ctx.strokeStyle = 'rgba(0, 200, 200, 0.8)';
+        this.ctx.globalAlpha = 0.85;
+        this.ctx.strokeStyle = this.sMeterColour(this.peakValue);
         this.ctx.lineWidth = 1;
         this.ctx.stroke();
+        this.ctx.globalAlpha = 1.0;
 
         this.ctx.restore();
     }

@@ -135,6 +135,13 @@ class SMeterNeedle {
         return `hsl(${hue}, 90%, 55%)`;
     }
 
+    // Graduated S-meter colour (red at S1/−115 dBFS → yellow at S5/−91 dBFS → green at S9/−73 dBFS)
+    sMeterColour(dbfs) {
+        const clamped = Math.max(-115, Math.min(-73, dbfs));
+        const hue = Math.round(((clamped + 115) / 42) * 120);
+        return `hsl(${hue}, 90%, 55%)`;
+    }
+
     // Draw the complete meter
     draw() {
         this.ctx.clearRect(0, 0, this.width, this.height);
@@ -174,6 +181,7 @@ class SMeterNeedle {
         for (let s = 1; s <= 9; s++) {
             const dbfs = -115 + (s - 1) * 6;
             const angle = this.getScaleLabelAngle(dbfs);
+            const col = this.sMeterColour(dbfs);
 
             const tickStart = this.radius - 15;
             const tickEnd = this.radius - 5;
@@ -187,18 +195,19 @@ class SMeterNeedle {
             this.ctx.beginPath();
             this.ctx.moveTo(x1, y1);
             this.ctx.lineTo(x2, y2);
-            this.ctx.strokeStyle = '#ecf0f1';
+            this.ctx.strokeStyle = col;
             this.ctx.lineWidth = 2;
             this.ctx.stroke();
 
             const labelX = this.centerX + Math.cos(angle) * labelRadius;
             const labelY = this.centerY - Math.sin(angle) * labelRadius;
-            this.ctx.fillStyle = '#ecf0f1';
+            this.ctx.fillStyle = col;
             this.ctx.fillText(s.toString(), labelX, labelY);
         }
 
-        // Over S9 markers (+10, +20, +30, +40)
+        // Over S9 markers (+10, +20, +30, +40) — all above S9 so full green
         const overS9 = [10, 20, 30, 40];
+        const greenCol = this.sMeterColour(-73);
         for (const db of overS9) {
             const dbfs = -73 + db;
             const angle = this.getScaleLabelAngle(dbfs);
@@ -215,13 +224,13 @@ class SMeterNeedle {
             this.ctx.beginPath();
             this.ctx.moveTo(x1, y1);
             this.ctx.lineTo(x2, y2);
-            this.ctx.strokeStyle = '#ecf0f1';
+            this.ctx.strokeStyle = greenCol;
             this.ctx.lineWidth = 1.5;
             this.ctx.stroke();
 
             const labelX = this.centerX + Math.cos(angle) * labelRadius;
             const labelY = this.centerY - Math.sin(angle) * labelRadius;
-            this.ctx.fillStyle = '#ecf0f1';
+            this.ctx.fillStyle = greenCol;
             this.ctx.font = 'bold 10px Arial';
             this.ctx.fillText(`+${db}`, labelX, labelY);
         }
@@ -317,13 +326,7 @@ class SMeterNeedle {
                 valueDiv.classList.add('s-meter-overload');
             } else {
                 valueDiv.classList.remove('s-meter-overload');
-                if (this.currentValue >= -70) {
-                    valueDiv.style.color = '#28a745';
-                } else if (this.currentValue >= -85) {
-                    valueDiv.style.color = '#ffc107';
-                } else {
-                    valueDiv.style.color = '#dc3545';
-                }
+                valueDiv.style.color = this.sMeterColour(this.currentValue);
             }
         }
 
@@ -337,6 +340,7 @@ class SMeterNeedle {
                 peakDiv.style.color = '#dc3545';
             } else {
                 peakDiv.classList.remove('s-meter-overload');
+                peakDiv.style.color = this.sMeterColour(this.peakValue);
             }
         }
 
@@ -406,13 +410,7 @@ class SMeterNeedle {
         if (this.displayMode === 'snr') {
             this.ctx.fillStyle = this.snrColour(this.snrNeedleValue);
         } else {
-            if (this.currentValue >= -70) {
-                this.ctx.fillStyle = '#28a745';
-            } else if (this.currentValue >= -85) {
-                this.ctx.fillStyle = '#ffc107';
-            } else {
-                this.ctx.fillStyle = '#dc3545';
-            }
+            this.ctx.fillStyle = this.sMeterColour(this.currentValue);
         }
         this.ctx.fill();
 

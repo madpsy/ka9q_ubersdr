@@ -637,6 +637,12 @@ class LocalBookmarkManager {
 
         const now = Date.now();
 
+        // Modes recognised by UberSDR — anything else falls back to 'usb'
+        const VALID_MODES = new Set([
+            'am', 'sam', 'usb', 'lsb', 'cw', 'cwu', 'cwl', 'fm', 'nfm', 'nbfm',
+            'iq', 'iq48', 'iq96', 'iq192', 'iq384', 'drm'
+        ]);
+
         for (const [index, bookmark] of bookmarks.entries()) {
             try {
                 if (!bookmark.name || !bookmark.frequency || !bookmark.mode) {
@@ -644,10 +650,16 @@ class LocalBookmarkManager {
                     continue;
                 }
 
+                const rawMode = bookmark.mode.toString().toLowerCase();
+                const resolvedMode = VALID_MODES.has(rawMode) ? rawMode : 'usb';
+                if (resolvedMode !== rawMode) {
+                    console.warn(`[LocalBookmarks] Unknown mode "${rawMode}" for "${bookmark.name}" — falling back to usb`);
+                }
+
                 const normalised = {
                     name:           bookmark.name,
                     frequency:      parseInt(bookmark.frequency),
-                    mode:           bookmark.mode.toLowerCase(),
+                    mode:           resolvedMode,
                     group:          bookmark.group          || null,
                     comment:        bookmark.comment        || null,
                     extension:      bookmark.extension      || null,

@@ -17,6 +17,8 @@ type NtpHealthStatus struct {
 	RTTMs       float64  `json:"rtt_ms"`
 	Stratum     uint8    `json:"stratum"`
 	LastPoll    string   `json:"last_poll"`
+	ServerTime  string   `json:"server_time,omitempty"`
+	NTPTime     string   `json:"ntp_time,omitempty"`
 	NTPServer   string   `json:"ntp_server"`
 	ToleranceMs int      `json:"tolerance_ms"`
 	Issues      []string `json:"issues"`
@@ -82,6 +84,8 @@ func handleNTPHealth(w http.ResponseWriter, r *http.Request, cfg *Config) {
 		RTTMs:       result.RTTMs,
 		Stratum:     result.Stratum,
 		LastPoll:    result.LastPoll,
+		ServerTime:  result.ServerTime,
+		NTPTime:     result.NTPTime,
 		NTPServer:   cfg.NTP.ntpServer(),
 		ToleranceMs: toleranceMs,
 		Issues:      issues,

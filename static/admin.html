@@ -14010,9 +14010,14 @@ const tooltipLine2 = timeStr;
                     data.issues.map(i => `<li style="color: #721c24;">${i}</li>`).join('') + '</ul>';
             }
 
+            const serverTimeStr = data.server_time ? new Date(data.server_time).toLocaleString(undefined, {timeZoneName: 'short'}) : 'N/A';
+            const ntpTimeStr = data.ntp_time ? new Date(data.ntp_time).toLocaleString(undefined, {timeZoneName: 'short'}) : 'N/A';
+
             statusDiv.innerHTML = `
                 <strong style="font-size: 16px;">${statusIcon} Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
-                <span style="color: #666; font-size: 14px;">Synced: <strong style="color: ${data.synced ? '#28a745' : '#dc3545'};">${data.synced ? 'Yes' : 'No'}</strong></span>
+                <span style="color: #666; font-size: 14px;">Synced: <strong style="color: ${data.synced ? '#28a745' : '#dc3545'};">${data.synced ? 'Yes' : 'No'}</strong></span><br>
+                <span style="color: #666; font-size: 13px; margin-top: 6px; display: inline-block;">🖥️ System Time: <strong>${serverTimeStr}</strong></span><br>
+                <span style="color: #666; font-size: 13px;">🌐 NTP Time: <strong>${ntpTimeStr}</strong></span>
                 ${issuesHTML}
             `;
             statusSection.appendChild(statusDiv);

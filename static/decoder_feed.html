@@ -109,8 +109,7 @@
         }
 
         #statusText { color: #9099b8; }
-        #countBadge {
-            margin-left: auto;
+        #countBadge, #lastSpotBadge {
             background: #252836;
             border: 1px solid #3a3f5c;
             border-radius: 10px;
@@ -118,6 +117,7 @@
             font-size: 11px;
             color: #9099b8;
         }
+        #countBadge { margin-left: auto; }
 
         /* ── Table area ── */
         #tableWrap {
@@ -265,6 +265,7 @@
     <span class="dot" id="dot"></span>
     <span id="statusText">Connecting…</span>
     <span id="countBadge">0 decodes</span>
+    <span id="lastSpotBadge" style="display:none">Last decode: —</span>
 </div>
 
 <!-- Table -->
@@ -297,6 +298,8 @@
     let totalCount = 0;
     let userDisconnected = false;
     let reconnectTimer = null;
+    let lastSpotTime = null;   // Date object, updated by heartbeat
+    let relTimeTimer = null;   // setInterval handle for refreshing the badge
 
     // ── Auth check ──────────────────────────────────────────────────────────
     async function checkAuth() {
@@ -390,6 +393,16 @@
                 if (d.type === 'decode') addRow(d);
             } catch { /* ignore malformed */ }
         };
+
+        evtSource.addEventListener('heartbeat', (e) => {
+            try {
+                const d = JSON.parse(e.data);
+                if (d.last_spot) {
+                    lastSpotTime = new Date(d.last_spot);
+                    updateLastSpotBadge();
+                }
+            } catch { /* ignore */ }
+        });
 
         evtSource.onerror = () => {
             if (userDisconnected) return;
@@ -516,6 +529,27 @@
             .replace(/"/g, '&quot;');
     }
     function escAttr(s) { return escHtml(s); }
+
+    // ── Relative-time badge ──────────────────────────────────────────────────
+    function fmtRelTime(date) {
+        const secs = Math.floor((Date.now() - date.getTime()) / 1000);
+        if (secs < 5)  return 'just now';
+        if (secs < 60) return secs + 's ago';
+        const mins = Math.floor(secs / 60);
+        if (mins < 60) return mins + 'm ago';
+        const hrs = Math.floor(mins / 60);
+        return hrs + 'h ago';
+    }
+
+    function updateLastSpotBadge() {
+        const badge = document.getElementById('lastSpotBadge');
+        if (!lastSpotTime) { badge.style.display = 'none'; return; }
+        badge.style.display = '';
+        badge.textContent = 'Last decode: ' + fmtRelTime(lastSpotTime);
+    }
+
+    // Refresh the relative-time badge every second
+    relTimeTimer = setInterval(updateLastSpotBadge, 1000);
 
     // ── Filter change → reconnect ────────────────────────────────────────────
     document.getElementById('modeFilter').addEventListener('change', () => {

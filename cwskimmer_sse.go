@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -21,6 +22,10 @@ import (
 //     "callsign": "SM4SEF", "spotter": "MM3NDH", "snr": 12, "wpm": 19,
 //     "comment": "CQ", "country": "...", "continent": "EU",
 //     "distance_km": 1234.5, "bearing_deg": 45.0, "timestamp": "..." }
+//
+// A heartbeat event is sent every second:
+//   event: heartbeat
+//   data: {"last_spot": "2026-04-13T07:00:00Z"}   (or null if no spot yet)
 
 // CWSkimmerSSEEvent is the JSON payload sent to SSE clients
 type CWSkimmerSSEEvent struct {
@@ -48,8 +53,9 @@ type cwSkimmerSSEClient struct {
 
 // CWSkimmerSSEHub manages all connected SSE clients for the CW skimmer feed
 type CWSkimmerSSEHub struct {
-	mu      sync.RWMutex
-	clients map[*cwSkimmerSSEClient]struct{}
+	mu           sync.RWMutex
+	clients      map[*cwSkimmerSSEClient]struct{}
+	lastSpotTime atomic.Int64 // Unix nanoseconds; 0 = no spot yet
 }
 
 // NewCWSkimmerSSEHub creates a new hub
@@ -76,6 +82,9 @@ func (h *CWSkimmerSSEHub) unregister(c *cwSkimmerSSEClient) {
 
 // Broadcast sends a CW spot to all matching clients
 func (h *CWSkimmerSSEHub) Broadcast(spot CWSkimmerSpot) {
+	// Record the time of this spot
+	h.lastSpotTime.Store(time.Now().UnixNano())
+
 	evt := CWSkimmerSSEEvent{
 		Type:       "cw_spot",
 		Band:       spot.Band,
@@ -116,6 +125,16 @@ func (h *CWSkimmerSSEHub) Broadcast(spot CWSkimmerSpot) {
 	}
 }
 
+// heartbeatJSON builds the heartbeat SSE data line
+func (h *CWSkimmerSSEHub) heartbeatJSON() string {
+	ns := h.lastSpotTime.Load()
+	if ns == 0 {
+		return "event: heartbeat\ndata: {\"last_spot\":null}\n\n"
+	}
+	t := time.Unix(0, ns).UTC().Format(time.RFC3339)
+	return fmt.Sprintf("event: heartbeat\ndata: {\"last_spot\":%q}\n\n", t)
+}
+
 // HandleCWSkimmerStream is the HTTP handler for /admin/cwskimmer/stream
 func HandleCWSkimmerStream(hub *CWSkimmerSSEHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -149,8 +168,8 @@ func HandleCWSkimmerStream(hub *CWSkimmerSSEHub) http.HandlerFunc {
 		fmt.Fprintf(w, ": connected to CW skimmer stream\nretry: 3000\n\n")
 		flusher.Flush()
 
-		// Keep-alive ticker (every 15s — shorter than typical proxy timeouts)
-		ticker := time.NewTicker(15 * time.Second)
+		// 1-second heartbeat ticker — keeps NAT alive and provides last-spot timestamp
+		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
 
 		for {
@@ -165,8 +184,7 @@ func HandleCWSkimmerStream(hub *CWSkimmerSSEHub) http.HandlerFunc {
 				fmt.Fprint(w, msg)
 				flusher.Flush()
 			case <-ticker.C:
-				// SSE keep-alive comment
-				fmt.Fprintf(w, ": keepalive\n\n")
+				fmt.Fprint(w, hub.heartbeatJSON())
 				flusher.Flush()
 			}
 		}

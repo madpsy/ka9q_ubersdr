@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -21,6 +22,10 @@ import (
 //   { "type": "decode", "mode": "FT8", "band": "20m_FT8",
 //     "callsign": "...", "locator": "...", "snr": -10,
 //     "frequency": 14074000, "message": "...", "timestamp": "..." }
+//
+// A heartbeat event is sent every second:
+//   event: heartbeat
+//   data: {"last_spot": "2026-04-13T07:00:00Z"}   (or null if no spot yet)
 
 // DecoderSSEEvent is the JSON payload sent to SSE clients
 type DecoderSSEEvent struct {
@@ -48,8 +53,9 @@ type decoderSSEClient struct {
 
 // DecoderSSEHub manages all connected SSE clients for the digital decoder feed
 type DecoderSSEHub struct {
-	mu      sync.RWMutex
-	clients map[*decoderSSEClient]struct{}
+	mu           sync.RWMutex
+	clients      map[*decoderSSEClient]struct{}
+	lastSpotTime atomic.Int64 // Unix nanoseconds; 0 = no spot yet
 }
 
 // NewDecoderSSEHub creates a new hub
@@ -76,6 +82,9 @@ func (h *DecoderSSEHub) unregister(c *decoderSSEClient) {
 
 // Broadcast sends a decode to all matching clients
 func (h *DecoderSSEHub) Broadcast(decode DecodeInfo) {
+	// Record the time of this spot
+	h.lastSpotTime.Store(time.Now().UnixNano())
+
 	evt := DecoderSSEEvent{
 		Type:       "decode",
 		Mode:       decode.Mode,
@@ -118,6 +127,16 @@ func (h *DecoderSSEHub) Broadcast(decode DecodeInfo) {
 	}
 }
 
+// heartbeatJSON builds the heartbeat SSE data line
+func (h *DecoderSSEHub) heartbeatJSON() string {
+	ns := h.lastSpotTime.Load()
+	if ns == 0 {
+		return "event: heartbeat\ndata: {\"last_spot\":null}\n\n"
+	}
+	t := time.Unix(0, ns).UTC().Format(time.RFC3339)
+	return fmt.Sprintf("event: heartbeat\ndata: {\"last_spot\":%q}\n\n", t)
+}
+
 // HandleDecoderStream is the HTTP handler for /admin/decoder/stream
 func HandleDecoderStream(hub *DecoderSSEHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -153,8 +172,8 @@ func HandleDecoderStream(hub *DecoderSSEHub) http.HandlerFunc {
 		fmt.Fprintf(w, ": connected to decoder stream\nretry: 3000\n\n")
 		flusher.Flush()
 
-		// Keep-alive ticker (every 15s — shorter than typical proxy timeouts)
-		ticker := time.NewTicker(15 * time.Second)
+		// 1-second heartbeat ticker — keeps NAT alive and provides last-spot timestamp
+		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
 
 		for {
@@ -169,8 +188,7 @@ func HandleDecoderStream(hub *DecoderSSEHub) http.HandlerFunc {
 				fmt.Fprint(w, msg)
 				flusher.Flush()
 			case <-ticker.C:
-				// SSE keep-alive comment
-				fmt.Fprintf(w, ": keepalive\n\n")
+				fmt.Fprint(w, hub.heartbeatJSON())
 				flusher.Flush()
 			}
 		}

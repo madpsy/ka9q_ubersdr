@@ -257,6 +257,7 @@ class RadioAPI {
             setTimeout(() => {
                 this._justSetMute = false;
             }, 100);
+            this.notifyMuteChange(muted);
             return true;
         }
 
@@ -274,9 +275,14 @@ class RadioAPI {
             setTimeout(() => {
                 this._justSetMute = false;
             }, 100);
+            this.notifyMuteChange(this._muteState);
             return true;
         }
         return false;
+    }
+
+    notifyMuteChange(muted) {
+        this.emit('mute_changed', { muted: muted });
     }
 
     // === AUDIO PROCESSING ===

@@ -4538,6 +4538,11 @@ function toggleMute() {
     } else {
         log('Unmuted');
     }
+
+    // Notify extensions (and the bridge popup) of mute state change
+    if (window.radioAPI) {
+        window.radioAPI.notifyMuteChange(isMuted);
+    }
 }
 
 // Update channel selection (L/R checkboxes)

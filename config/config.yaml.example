@@ -1604,6 +1604,6 @@ ntp:
   # Default: ntp.ubuntu.com
   server: ntp.ubuntu.com
   # Maximum acceptable clock offset in milliseconds before reporting out-of-sync.
-  # Default: 100 ms
-  sync_tolerance_ms: 500
+  # Default: 200 ms
+  sync_tolerance_ms: 200
 

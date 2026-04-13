@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CW Skimmer – Real-time Feed</title>
+    <title>📻 CW Skimmer</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -44,7 +44,7 @@
             flex: 1;
         }
 
-        select {
+        select, input[type="text"] {
             background: #252836;
             border: 1px solid #3a3f5c;
             color: #e0e0e0;
@@ -54,7 +54,7 @@
             height: 28px;
         }
 
-        select:focus { outline: none; border-color: #4fc3f7; }
+        select:focus, input[type="text"]:focus { outline: none; border-color: #4fc3f7; }
 
         label {
             font-size: 12px;
@@ -216,7 +216,7 @@
 
 <!-- Header -->
 <header>
-    <h1>📻 CW Skimmer — Real-time Feed</h1>
+    <h1>📻 CW Skimmer</h1>
     <div class="controls">
         <label>Band:</label>
         <select id="bandFilter">
@@ -236,6 +236,9 @@
         <button class="btn btn-primary"   id="connectBtn" onclick="reconnect()">Connect</button>
         <button class="btn btn-danger"    id="stopBtn"    onclick="disconnect()" style="display:none">Disconnect</button>
         <button class="btn btn-secondary" onclick="clearTable()">Clear</button>
+
+        <input type="text" id="textFilter" placeholder="Filter callsign, country, comment…"
+               style="width:220px;" oninput="applyTextFilter()">
 
         <label style="margin-left:8px;">Max rows:</label>
         <select id="maxRows">
@@ -282,6 +285,7 @@
 <script>
     let evtSource = null;
     let totalCount = 0;
+    let userDisconnected = false;
 
     // ── Auth check ──────────────────────────────────────────────────────────
     async function checkAuth() {
@@ -314,6 +318,7 @@
     }
 
     function connect() {
+        userDisconnected = false;
         if (evtSource) { evtSource.close(); evtSource = null; }
 
         setStatus('connecting', 'Connecting…');
@@ -334,7 +339,8 @@
         };
 
         evtSource.onerror = () => {
-            setStatus('disconnected', 'Connection lost — retrying…');
+            if (userDisconnected) return;
+            setStatus('connecting', 'Reconnecting…');
         };
     }
 
@@ -343,6 +349,7 @@
     }
 
     function disconnect() {
+        userDisconnected = true;
         if (evtSource) { evtSource.close(); evtSource = null; }
         setStatus('disconnected', 'Disconnected');
         document.getElementById('connectBtn').style.display = '';
@@ -384,6 +391,8 @@
 
         const tr = document.createElement('tr');
         tr.className = 'new-row';
+        // Store searchable text for client-side filtering
+        tr.dataset.search = [d.callsign || '', d.country || '', d.comment || ''].join('\x00').toLowerCase();
 
         const snrStr = (d.snr >= 0 ? '+' : '') + d.snr;
 
@@ -399,6 +408,12 @@
             <td class="col-country">${escHtml(d.country || '')}</td>
             <td class="col-dist">${fmtDist(d.distance_km)}</td>
         `;
+
+        // Apply current text filter before inserting
+        const needle = document.getElementById('textFilter').value.trim().toLowerCase();
+        if (needle && !tr.dataset.search.includes(needle)) {
+            tr.style.display = 'none';
+        }
 
         // Prepend (newest first)
         body.insertBefore(tr, body.firstChild);
@@ -420,6 +435,15 @@
         document.getElementById('emptyState').style.display = '';
         totalCount = 0;
         document.getElementById('countBadge').textContent = '0 spots';
+    }
+
+    // ── Client-side text filter ──────────────────────────────────────────────
+    function applyTextFilter() {
+        const needle = document.getElementById('textFilter').value.trim().toLowerCase();
+        const rows = document.getElementById('feedBody').rows;
+        for (const tr of rows) {
+            tr.style.display = (!needle || tr.dataset.search.includes(needle)) ? '' : 'none';
+        }
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CW Skimmer – Real-time Feed</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #0f1117;
+            color: #e0e0e0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* ── Header ── */
+        header {
+            background: #1a1d27;
+            border-bottom: 1px solid #2d3148;
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            flex-shrink: 0;
+        }
+
+        header h1 {
+            font-size: 15px;
+            font-weight: 600;
+            color: #4fc3f7;
+            white-space: nowrap;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            flex: 1;
+        }
+
+        select {
+            background: #252836;
+            border: 1px solid #3a3f5c;
+            color: #e0e0e0;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 13px;
+            height: 28px;
+        }
+
+        select:focus { outline: none; border-color: #4fc3f7; }
+
+        label {
+            font-size: 12px;
+            color: #9099b8;
+            white-space: nowrap;
+        }
+
+        .btn {
+            padding: 4px 12px;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            height: 28px;
+            font-weight: 500;
+            transition: opacity 0.15s;
+        }
+        .btn:hover { opacity: 0.85; }
+        .btn-primary   { background: #4fc3f7; color: #0f1117; }
+        .btn-danger    { background: #e05252; color: #fff; }
+        .btn-secondary { background: #3a3f5c; color: #e0e0e0; }
+
+        /* ── Status bar ── */
+        #statusBar {
+            font-size: 12px;
+            padding: 4px 16px;
+            background: #13151f;
+            border-bottom: 1px solid #2d3148;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+
+        .dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            background: #555;
+            flex-shrink: 0;
+        }
+        .dot.connected    { background: #4caf50; }
+        .dot.connecting   { background: #ff9800; animation: pulse 1s infinite; }
+        .dot.disconnected { background: #e05252; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.3; }
+        }
+
+        #statusText { color: #9099b8; }
+        #countBadge {
+            margin-left: auto;
+            background: #252836;
+            border: 1px solid #3a3f5c;
+            border-radius: 10px;
+            padding: 1px 8px;
+            font-size: 11px;
+            color: #9099b8;
+        }
+
+        /* ── Table area ── */
+        #tableWrap {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        thead th {
+            position: sticky;
+            top: 0;
+            background: #1a1d27;
+            border-bottom: 1px solid #2d3148;
+            padding: 6px 10px;
+            text-align: left;
+            font-weight: 600;
+            color: #4fc3f7;
+            white-space: nowrap;
+            z-index: 1;
+        }
+
+        tbody tr {
+            border-bottom: 1px solid #1e2133;
+            transition: background 0.1s;
+        }
+        tbody tr:hover { background: #1e2133; }
+        tbody tr.new-row { animation: flashIn 0.6s ease-out; }
+
+        @keyframes flashIn {
+            from { background: #1a3a4a; }
+            to   { background: transparent; }
+        }
+
+        td {
+            padding: 5px 10px;
+            white-space: nowrap;
+            vertical-align: middle;
+        }
+
+        .col-time     { color: #9099b8; font-family: monospace; }
+        .col-band     { color: #9099b8; }
+        .col-callsign { font-weight: 700; color: #4fc3f7; }
+        .col-spotter  { color: #9099b8; font-family: monospace; }
+        .col-freq     { font-family: monospace; color: #9099b8; }
+        .col-snr      { font-family: monospace; }
+        .col-wpm      { font-family: monospace; color: #ff9800; }
+        .col-comment  { color: #a5d6a7; }
+        .col-country  { color: #c0c8e8; }
+        .col-dist     { color: #ff9800; font-family: monospace; }
+
+        .snr-pos { color: #4caf50; }
+        .snr-neg { color: #e05252; }
+
+        /* ── Auth error overlay ── */
+        #authError {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.85);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 12px;
+            text-align: center;
+        }
+        #authError.show { display: flex; }
+        #authError h2 { color: #e05252; font-size: 18px; }
+        #authError p  { color: #9099b8; font-size: 13px; }
+
+        /* ── Empty state ── */
+        #emptyState {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #555;
+            font-size: 14px;
+            flex-direction: column;
+            gap: 8px;
+        }
+        #emptyState .icon { font-size: 32px; }
+    </style>
+</head>
+<body>
+
+<!-- Auth error overlay -->
+<div id="authError">
+    <h2>🔒 Not Authenticated</h2>
+    <p>You must be logged in to the admin panel to view this feed.</p>
+    <button class="btn btn-primary" onclick="window.close()">Close</button>
+</div>
+
+<!-- Header -->
+<header>
+    <h1>📻 CW Skimmer — Real-time Feed</h1>
+    <div class="controls">
+        <label>Band:</label>
+        <select id="bandFilter">
+            <option value="">All bands</option>
+            <option value="160m">160m</option>
+            <option value="80m">80m</option>
+            <option value="60m">60m</option>
+            <option value="40m">40m</option>
+            <option value="30m">30m</option>
+            <option value="20m">20m</option>
+            <option value="17m">17m</option>
+            <option value="15m">15m</option>
+            <option value="12m">12m</option>
+            <option value="10m">10m</option>
+        </select>
+
+        <button class="btn btn-primary"   id="connectBtn" onclick="reconnect()">Connect</button>
+        <button class="btn btn-danger"    id="stopBtn"    onclick="disconnect()" style="display:none">Disconnect</button>
+        <button class="btn btn-secondary" onclick="clearTable()">Clear</button>
+
+        <label style="margin-left:8px;">Max rows:</label>
+        <select id="maxRows">
+            <option value="100">100</option>
+            <option value="250" selected>250</option>
+            <option value="500">500</option>
+            <option value="1000">1000</option>
+        </select>
+    </div>
+</header>
+
+<!-- Status bar -->
+<div id="statusBar">
+    <span class="dot" id="dot"></span>
+    <span id="statusText">Connecting…</span>
+    <span id="countBadge">0 spots</span>
+</div>
+
+<!-- Table -->
+<div id="tableWrap">
+    <div id="emptyState">
+        <span class="icon">📡</span>
+        <span>Waiting for CW spots…</span>
+    </div>
+    <table id="feedTable" style="display:none">
+        <thead>
+            <tr>
+                <th class="col-time">Time (UTC)</th>
+                <th class="col-band">Band</th>
+                <th class="col-freq">Freq (kHz)</th>
+                <th class="col-callsign">Callsign</th>
+                <th class="col-spotter">Spotter</th>
+                <th class="col-snr">SNR</th>
+                <th class="col-wpm">WPM</th>
+                <th class="col-comment">Comment</th>
+                <th class="col-country">Country</th>
+                <th class="col-dist">Dist (km)</th>
+            </tr>
+        </thead>
+        <tbody id="feedBody"></tbody>
+    </table>
+</div>
+
+<script>
+    let evtSource = null;
+    let totalCount = 0;
+
+    // ── Auth check ──────────────────────────────────────────────────────────
+    async function checkAuth() {
+        try {
+            const r = await fetch('/admin/config', { credentials: 'same-origin' });
+            if (r.status === 401 || r.status === 403) {
+                document.getElementById('authError').classList.add('show');
+                return false;
+            }
+            return true;
+        } catch {
+            document.getElementById('authError').classList.add('show');
+            return false;
+        }
+    }
+
+    // ── SSE connection ───────────────────────────────────────────────────────
+    function buildURL() {
+        const band = document.getElementById('bandFilter').value;
+        const params = new URLSearchParams();
+        if (band) params.set('band', band);
+        const qs = params.toString();
+        return '/admin/cwskimmer/stream' + (qs ? '?' + qs : '');
+    }
+
+    function setStatus(state, text) {
+        const dot = document.getElementById('dot');
+        dot.className = 'dot ' + state;
+        document.getElementById('statusText').textContent = text;
+    }
+
+    function connect() {
+        if (evtSource) { evtSource.close(); evtSource = null; }
+
+        setStatus('connecting', 'Connecting…');
+        document.getElementById('connectBtn').style.display = 'none';
+        document.getElementById('stopBtn').style.display = '';
+
+        evtSource = new EventSource(buildURL(), { withCredentials: true });
+
+        evtSource.onopen = () => {
+            setStatus('connected', 'Connected — receiving CW spots');
+        };
+
+        evtSource.onmessage = (e) => {
+            try {
+                const d = JSON.parse(e.data);
+                if (d.type === 'cw_spot') addRow(d);
+            } catch { /* ignore malformed */ }
+        };
+
+        evtSource.onerror = () => {
+            setStatus('disconnected', 'Connection lost — retrying…');
+        };
+    }
+
+    function reconnect() {
+        connect();
+    }
+
+    function disconnect() {
+        if (evtSource) { evtSource.close(); evtSource = null; }
+        setStatus('disconnected', 'Disconnected');
+        document.getElementById('connectBtn').style.display = '';
+        document.getElementById('stopBtn').style.display = 'none';
+    }
+
+    // ── Table rendering ──────────────────────────────────────────────────────
+    function snrClass(snr) {
+        return snr >= 0 ? 'snr-pos' : 'snr-neg';
+    }
+
+    function fmtFreqKHz(hz) {
+        // frequency is in Hz from the server
+        return (hz / 1000).toFixed(1);
+    }
+
+    function fmtTime(iso) {
+        try {
+            const d = new Date(iso);
+            return d.toISOString().substring(11, 19);
+        } catch { return iso; }
+    }
+
+    function fmtDist(km) {
+        if (km == null) return '';
+        return Math.round(km).toLocaleString();
+    }
+
+    function addRow(d) {
+        const table = document.getElementById('feedTable');
+        const body  = document.getElementById('feedBody');
+        const empty = document.getElementById('emptyState');
+
+        // Show table, hide empty state
+        if (table.style.display === 'none') {
+            table.style.display = '';
+            empty.style.display = 'none';
+        }
+
+        const tr = document.createElement('tr');
+        tr.className = 'new-row';
+
+        const snrStr = (d.snr >= 0 ? '+' : '') + d.snr;
+
+        tr.innerHTML = `
+            <td class="col-time">${fmtTime(d.timestamp)}</td>
+            <td class="col-band">${escHtml(d.band || '—')}</td>
+            <td class="col-freq">${fmtFreqKHz(d.frequency)}</td>
+            <td class="col-callsign">${escHtml(d.callsign || '—')}</td>
+            <td class="col-spotter">${escHtml(d.spotter || '')}</td>
+            <td class="col-snr ${snrClass(d.snr)}">${snrStr} dB</td>
+            <td class="col-wpm">${d.wpm} WPM</td>
+            <td class="col-comment">${escHtml(d.comment || '')}</td>
+            <td class="col-country">${escHtml(d.country || '')}</td>
+            <td class="col-dist">${fmtDist(d.distance_km)}</td>
+        `;
+
+        // Prepend (newest first)
+        body.insertBefore(tr, body.firstChild);
+
+        // Trim to max rows
+        const max = parseInt(document.getElementById('maxRows').value, 10);
+        while (body.rows.length > max) {
+            body.removeChild(body.lastChild);
+        }
+
+        totalCount++;
+        document.getElementById('countBadge').textContent =
+            totalCount.toLocaleString() + ' spot' + (totalCount !== 1 ? 's' : '');
+    }
+
+    function clearTable() {
+        document.getElementById('feedBody').innerHTML = '';
+        document.getElementById('feedTable').style.display = 'none';
+        document.getElementById('emptyState').style.display = '';
+        totalCount = 0;
+        document.getElementById('countBadge').textContent = '0 spots';
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    function escHtml(s) {
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    // ── Filter change → reconnect ────────────────────────────────────────────
+    document.getElementById('bandFilter').addEventListener('change', () => {
+        if (evtSource) connect();
+    });
+
+    // ── Init ─────────────────────────────────────────────────────────────────
+    (async () => {
+        const ok = await checkAuth();
+        if (!ok) return;
+        connect();
+    })();
+</script>
+</body>
+</html>

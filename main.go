@@ -1464,7 +1464,11 @@ func main() {
 		mcpServer.dxClusterWsHandler = dxClusterWsHandler
 	}
 
-	// Register CW Skimmer spot handler to broadcast via websocket and MQTT
+	// Create SSE hubs for real-time admin feeds
+	decoderSSEHub := NewDecoderSSEHub()
+	cwSkimmerSSEHub := NewCWSkimmerSSEHub()
+
+	// Register CW Skimmer spot handler to broadcast via websocket, MQTT, and SSE
 	if cwSkimmer != nil {
 		cwSkimmer.OnSpot(func(spot CWSkimmerSpot) {
 			// Broadcast to websocket clients
@@ -1474,6 +1478,9 @@ func main() {
 			if prometheusMetrics != nil && prometheusMetrics.mqttPublisher != nil {
 				prometheusMetrics.mqttPublisher.PublishCWSpot(spot)
 			}
+
+			// Broadcast to SSE clients
+			cwSkimmerSSEHub.Broadcast(spot)
 		})
 	}
 
@@ -1509,7 +1516,7 @@ func main() {
 			log.Printf("Multi-decoder will be disabled. Server will continue without decoder functionality.")
 			multiDecoder = nil
 		} else {
-			// Register callback to broadcast digital spots via websocket and MQTT
+			// Register callback to broadcast digital spots via websocket, MQTT, and SSE
 			multiDecoder.OnDecode(func(decode DecodeInfo) {
 				// Broadcast to websocket clients
 				dxClusterWsHandler.BroadcastDigitalSpot(decode)
@@ -1533,6 +1540,9 @@ func main() {
 						log.Printf("Failed to send WSJT-X UDP message: %v", err)
 					}
 				}
+
+				// Broadcast to SSE clients
+				decoderSSEHub.Broadcast(decode)
 			})
 			defer multiDecoder.Stop()
 		}
@@ -2052,6 +2062,10 @@ func main() {
 	http.HandleFunc("/admin/addon-proxies/restart", adminHandler.AuthMiddleware(adminHandler.HandleAddonProxiesRestart))
 	http.HandleFunc("/admin/rbn-data", adminHandler.AuthMiddleware(adminHandler.HandleRBNData))
 	http.HandleFunc("/admin/rbn-data/refresh", adminHandler.AuthMiddleware(adminHandler.HandleRBNRefresh))
+
+	// Real-time SSE feeds (admin only)
+	http.HandleFunc("/admin/decoder/stream", adminHandler.AuthMiddleware(HandleDecoderStream(decoderSSEHub)))
+	http.HandleFunc("/admin/cwskimmer/stream", adminHandler.AuthMiddleware(HandleCWSkimmerStream(cwSkimmerSSEHub)))
 
 	// Register SSH proxy route (admin authentication required)
 	if sshProxy != nil {

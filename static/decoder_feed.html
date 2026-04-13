@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Decoder – Real-time Feed</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #0f1117;
+            color: #e0e0e0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* ── Header ── */
+        header {
+            background: #1a1d27;
+            border-bottom: 1px solid #2d3148;
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            flex-shrink: 0;
+        }
+
+        header h1 {
+            font-size: 15px;
+            font-weight: 600;
+            color: #7c8cf8;
+            white-space: nowrap;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            flex: 1;
+        }
+
+        select, input[type="text"] {
+            background: #252836;
+            border: 1px solid #3a3f5c;
+            color: #e0e0e0;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 13px;
+            height: 28px;
+        }
+
+        select:focus, input[type="text"]:focus {
+            outline: none;
+            border-color: #7c8cf8;
+        }
+
+        label {
+            font-size: 12px;
+            color: #9099b8;
+            white-space: nowrap;
+        }
+
+        .btn {
+            padding: 4px 12px;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            height: 28px;
+            font-weight: 500;
+            transition: opacity 0.15s;
+        }
+        .btn:hover { opacity: 0.85; }
+        .btn-primary { background: #7c8cf8; color: #fff; }
+        .btn-danger  { background: #e05252; color: #fff; }
+        .btn-secondary { background: #3a3f5c; color: #e0e0e0; }
+
+        /* ── Status bar ── */
+        #statusBar {
+            font-size: 12px;
+            padding: 4px 16px;
+            background: #13151f;
+            border-bottom: 1px solid #2d3148;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+
+        .dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            background: #555;
+            flex-shrink: 0;
+        }
+        .dot.connected    { background: #4caf50; }
+        .dot.connecting   { background: #ff9800; animation: pulse 1s infinite; }
+        .dot.disconnected { background: #e05252; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.3; }
+        }
+
+        #statusText { color: #9099b8; }
+        #countBadge {
+            margin-left: auto;
+            background: #252836;
+            border: 1px solid #3a3f5c;
+            border-radius: 10px;
+            padding: 1px 8px;
+            font-size: 11px;
+            color: #9099b8;
+        }
+
+        /* ── Table area ── */
+        #tableWrap {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        thead th {
+            position: sticky;
+            top: 0;
+            background: #1a1d27;
+            border-bottom: 1px solid #2d3148;
+            padding: 6px 10px;
+            text-align: left;
+            font-weight: 600;
+            color: #7c8cf8;
+            white-space: nowrap;
+            z-index: 1;
+        }
+
+        tbody tr {
+            border-bottom: 1px solid #1e2133;
+            transition: background 0.1s;
+        }
+        tbody tr:hover { background: #1e2133; }
+        tbody tr.new-row { animation: flashIn 0.6s ease-out; }
+
+        @keyframes flashIn {
+            from { background: #2d3a5c; }
+            to   { background: transparent; }
+        }
+
+        td {
+            padding: 5px 10px;
+            white-space: nowrap;
+            vertical-align: middle;
+        }
+
+        .col-time      { color: #9099b8; font-family: monospace; }
+        .col-mode      { font-weight: 600; }
+        .col-band      { color: #9099b8; }
+        .col-callsign  { font-weight: 700; color: #7c8cf8; }
+        .col-locator   { color: #4caf50; font-family: monospace; }
+        .col-snr       { font-family: monospace; }
+        .col-freq      { font-family: monospace; color: #9099b8; }
+        .col-country   { color: #c0c8e8; }
+        .col-dist      { color: #ff9800; font-family: monospace; }
+        .col-message   { color: #c0c8e8; max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+
+        .snr-pos { color: #4caf50; }
+        .snr-neg { color: #e05252; }
+
+        /* mode colour chips */
+        .mode-ft8  { color: #7c8cf8; }
+        .mode-ft4  { color: #4fc3f7; }
+        .mode-wspr { color: #ff9800; }
+        .mode-js8  { color: #a5d6a7; }
+        .mode-ft2  { color: #ce93d8; }
+
+        /* ── Auth error overlay ── */
+        #authError {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.85);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 12px;
+            text-align: center;
+        }
+        #authError.show { display: flex; }
+        #authError h2 { color: #e05252; font-size: 18px; }
+        #authError p  { color: #9099b8; font-size: 13px; }
+
+        /* ── Empty state ── */
+        #emptyState {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #555;
+            font-size: 14px;
+            flex-direction: column;
+            gap: 8px;
+        }
+        #emptyState .icon { font-size: 32px; }
+    </style>
+</head>
+<body>
+
+<!-- Auth error overlay -->
+<div id="authError">
+    <h2>🔒 Not Authenticated</h2>
+    <p>You must be logged in to the admin panel to view this feed.</p>
+    <button class="btn btn-primary" onclick="window.close()">Close</button>
+</div>
+
+<!-- Header -->
+<header>
+    <h1>📡 Digital Decoder — Real-time Feed</h1>
+    <div class="controls">
+        <label>Mode:</label>
+        <select id="modeFilter">
+            <option value="">All modes</option>
+            <option value="FT8">FT8</option>
+            <option value="FT4">FT4</option>
+            <option value="FT2">FT2</option>
+            <option value="WSPR">WSPR</option>
+            <option value="JS8">JS8</option>
+        </select>
+
+        <label>Band:</label>
+        <select id="bandFilter">
+            <option value="">All bands</option>
+        </select>
+
+        <button class="btn btn-primary" id="connectBtn" onclick="reconnect()">Connect</button>
+        <button class="btn btn-danger"  id="stopBtn"    onclick="disconnect()" style="display:none">Disconnect</button>
+        <button class="btn btn-secondary" onclick="clearTable()">Clear</button>
+
+        <label style="margin-left:8px;">Max rows:</label>
+        <select id="maxRows">
+            <option value="100">100</option>
+            <option value="250" selected>250</option>
+            <option value="500">500</option>
+            <option value="1000">1000</option>
+        </select>
+    </div>
+</header>
+
+<!-- Status bar -->
+<div id="statusBar">
+    <span class="dot" id="dot"></span>
+    <span id="statusText">Connecting…</span>
+    <span id="countBadge">0 decodes</span>
+</div>
+
+<!-- Table -->
+<div id="tableWrap">
+    <div id="emptyState">
+        <span class="icon">📻</span>
+        <span>Waiting for decodes…</span>
+    </div>
+    <table id="feedTable" style="display:none">
+        <thead>
+            <tr>
+                <th class="col-time">Time (UTC)</th>
+                <th class="col-mode">Mode</th>
+                <th class="col-band">Band</th>
+                <th class="col-callsign">Callsign</th>
+                <th class="col-locator">Locator</th>
+                <th class="col-snr">SNR</th>
+                <th class="col-freq">Freq (MHz)</th>
+                <th class="col-country">Country</th>
+                <th class="col-dist">Dist (km)</th>
+                <th class="col-message">Message</th>
+            </tr>
+        </thead>
+        <tbody id="feedBody"></tbody>
+    </table>
+</div>
+
+<script>
+    let evtSource = null;
+    let totalCount = 0;
+
+    // ── Auth check ──────────────────────────────────────────────────────────
+    async function checkAuth() {
+        try {
+            const r = await fetch('/admin/config', { credentials: 'same-origin' });
+            if (r.status === 401 || r.status === 403) {
+                document.getElementById('authError').classList.add('show');
+                return false;
+            }
+            return true;
+        } catch {
+            document.getElementById('authError').classList.add('show');
+            return false;
+        }
+    }
+
+    // ── Band list ────────────────────────────────────────────────────────────
+    async function loadBands() {
+        try {
+            const r = await fetch('/api/decoder/band-names');
+            if (!r.ok) return;
+            const data = await r.json();
+            const sel = document.getElementById('bandFilter');
+            (data.band_names || []).forEach(name => {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                sel.appendChild(opt);
+            });
+        } catch { /* ignore */ }
+    }
+
+    // ── SSE connection ───────────────────────────────────────────────────────
+    function buildURL() {
+        const mode = document.getElementById('modeFilter').value;
+        const band = document.getElementById('bandFilter').value;
+        const params = new URLSearchParams();
+        if (mode) params.set('mode', mode);
+        if (band) params.set('band', band);
+        const qs = params.toString();
+        return '/admin/decoder/stream' + (qs ? '?' + qs : '');
+    }
+
+    function setStatus(state, text) {
+        const dot = document.getElementById('dot');
+        dot.className = 'dot ' + state;
+        document.getElementById('statusText').textContent = text;
+    }
+
+    function connect() {
+        if (evtSource) { evtSource.close(); evtSource = null; }
+
+        setStatus('connecting', 'Connecting…');
+        document.getElementById('connectBtn').style.display = 'none';
+        document.getElementById('stopBtn').style.display = '';
+
+        evtSource = new EventSource(buildURL(), { withCredentials: true });
+
+        evtSource.onopen = () => {
+            setStatus('connected', 'Connected — receiving decodes');
+        };
+
+        evtSource.onmessage = (e) => {
+            try {
+                const d = JSON.parse(e.data);
+                if (d.type === 'decode') addRow(d);
+            } catch { /* ignore malformed */ }
+        };
+
+        evtSource.onerror = () => {
+            setStatus('disconnected', 'Connection lost — retrying…');
+        };
+    }
+
+    function reconnect() {
+        connect();
+    }
+
+    function disconnect() {
+        if (evtSource) { evtSource.close(); evtSource = null; }
+        setStatus('disconnected', 'Disconnected');
+        document.getElementById('connectBtn').style.display = '';
+        document.getElementById('stopBtn').style.display = 'none';
+    }
+
+    // ── Table rendering ──────────────────────────────────────────────────────
+    function modeClass(mode) {
+        return 'mode-' + (mode || '').toLowerCase();
+    }
+
+    function snrClass(snr) {
+        return snr >= 0 ? 'snr-pos' : 'snr-neg';
+    }
+
+    function fmtFreq(hz) {
+        return (hz / 1e6).toFixed(6);
+    }
+
+    function fmtTime(iso) {
+        try {
+            const d = new Date(iso);
+            return d.toISOString().substring(11, 19);
+        } catch { return iso; }
+    }
+
+    function fmtDist(km) {
+        if (km == null) return '';
+        return Math.round(km).toLocaleString();
+    }
+
+    function addRow(d) {
+        const table = document.getElementById('feedTable');
+        const body  = document.getElementById('feedBody');
+        const empty = document.getElementById('emptyState');
+
+        // Show table, hide empty state
+        if (table.style.display === 'none') {
+            table.style.display = '';
+            empty.style.display = 'none';
+        }
+
+        const tr = document.createElement('tr');
+        tr.className = 'new-row';
+
+        const snrStr = (d.snr >= 0 ? '+' : '') + d.snr;
+
+        tr.innerHTML = `
+            <td class="col-time">${fmtTime(d.timestamp)}</td>
+            <td class="col-mode ${modeClass(d.mode)}">${escHtml(d.mode)}</td>
+            <td class="col-band">${escHtml(d.band)}</td>
+            <td class="col-callsign">${escHtml(d.callsign || '—')}</td>
+            <td class="col-locator">${escHtml(d.locator || '')}</td>
+            <td class="col-snr ${snrClass(d.snr)}">${snrStr}</td>
+            <td class="col-freq">${fmtFreq(d.frequency)}</td>
+            <td class="col-country">${escHtml(d.country || '')}</td>
+            <td class="col-dist">${fmtDist(d.distance_km)}</td>
+            <td class="col-message" title="${escAttr(d.message || '')}">${escHtml(d.message || '')}</td>
+        `;
+
+        // Prepend (newest first)
+        body.insertBefore(tr, body.firstChild);
+
+        // Trim to max rows
+        const max = parseInt(document.getElementById('maxRows').value, 10);
+        while (body.rows.length > max) {
+            body.removeChild(body.lastChild);
+        }
+
+        totalCount++;
+        document.getElementById('countBadge').textContent =
+            totalCount.toLocaleString() + ' decode' + (totalCount !== 1 ? 's' : '');
+    }
+
+    function clearTable() {
+        document.getElementById('feedBody').innerHTML = '';
+        document.getElementById('feedTable').style.display = 'none';
+        document.getElementById('emptyState').style.display = '';
+        totalCount = 0;
+        document.getElementById('countBadge').textContent = '0 decodes';
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    function escHtml(s) {
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+    function escAttr(s) { return escHtml(s); }
+
+    // ── Filter change → reconnect ────────────────────────────────────────────
+    document.getElementById('modeFilter').addEventListener('change', () => {
+        if (evtSource) connect();
+    });
+    document.getElementById('bandFilter').addEventListener('change', () => {
+        if (evtSource) connect();
+    });
+
+    // ── Init ─────────────────────────────────────────────────────────────────
+    (async () => {
+        const ok = await checkAuth();
+        if (!ok) return;
+        await loadBands();
+        connect();
+    })();
+</script>
+</body>
+</html>

@@ -1,6 +1,11 @@
 // S-Meter with Needle - Classic analog-style signal strength meter
 // Displays signal strength using a rotating needle on an arc scale
-// Click the canvas to toggle between S-meter and SNR mode
+// Click the canvas to cycle through 4 display modes:
+//   1) smeter-classic  - S-meter, white arc, red needle, teal peak
+//   2) snr-classic     - SNR meter, white arc, red needle, no peak
+//   3) smeter-dynamic  - S-meter, graduated arc/needle/peak
+//   4) snr-dynamic     - SNR meter, graduated arc/needle, no peak
+// Text values below the meter are always graduated in all modes.
 
 class SMeterNeedle {
     constructor(canvasId) {
@@ -22,7 +27,11 @@ class SMeterNeedle {
         this.radius = Math.min(this.width / 2.2, this.height - 30);
         this.needleLength = this.radius - 18;
 
-        // Display mode: 'smeter' or 'snr'
+        // Colour mode cycles 1→2→3→4→1 on each click
+        // 'smeter-classic' | 'snr-classic' | 'smeter-dynamic' | 'snr-dynamic'
+        this.colourMode = 'smeter-classic';
+
+        // Derived display mode (smeter or snr) — set by _applyColourMode()
         this.displayMode = 'smeter';
 
         // Signal values
@@ -62,19 +71,47 @@ class SMeterNeedle {
         this.endAngle = 0;         // 0 degrees (right)
         this.angleRange = this.startAngle - this.endAngle;
 
-        // Click handler to toggle display mode
+        // Mode names for tooltip
+        this._modeNames = {
+            'smeter-classic':  'S-Meter (classic)',
+            'snr-classic':     'SNR Meter (classic)',
+            'smeter-dynamic':  'S-Meter (dynamic colour)',
+            'snr-dynamic':     'SNR Meter (dynamic colour)'
+        };
+        this._modeOrder = ['smeter-classic', 'snr-classic', 'smeter-dynamic', 'snr-dynamic'];
+
+        // Restore saved colour mode from localStorage
+        try {
+            const saved = localStorage.getItem('ubersdr_smeter_colour_mode');
+            if (saved && this._modeOrder.includes(saved)) {
+                this.colourMode = saved;
+                this.displayMode = saved.startsWith('snr') ? 'snr' : 'smeter';
+            }
+        } catch (e) { /* ignore */ }
+
+        // Click handler to cycle display mode
         this.canvas.style.cursor = 'pointer';
-        this.canvas.title = 'Click to toggle S-Meter / SNR mode';
-        this.canvas.addEventListener('click', () => this.toggleDisplayMode());
+        this._updateTitle();
+        this.canvas.addEventListener('click', () => this.cycleMode());
 
         // Initial draw
         this.draw();
     }
 
-    // Toggle between S-meter and SNR display modes
-    toggleDisplayMode() {
-        this.displayMode = this.displayMode === 'smeter' ? 'snr' : 'smeter';
+    // Cycle to the next of the 4 modes
+    cycleMode() {
+        const idx = this._modeOrder.indexOf(this.colourMode);
+        this.colourMode = this._modeOrder[(idx + 1) % this._modeOrder.length];
+        this.displayMode = this.colourMode.startsWith('snr') ? 'snr' : 'smeter';
+        this._updateTitle();
+        try {
+            localStorage.setItem('ubersdr_smeter_colour_mode', this.colourMode);
+        } catch (e) { /* ignore */ }
         this.draw();
+    }
+
+    _updateTitle() {
+        this.canvas.title = `Click to cycle mode — current: ${this._modeNames[this.colourMode]}`;
     }
 
     // Convert dBFS to S-units for display
@@ -114,7 +151,7 @@ class SMeterNeedle {
         return this.startAngle - (normalized * this.angleRange);
     }
 
-    // Convert SNR value (30–80 dB) to needle angle
+    // Convert SNR value (30–60 dB) to needle angle
     getAngleForSNR(snr) {
         const clamped = Math.max(this.snrMin, Math.min(this.snrMax, snr));
         const normalized = (clamped - this.snrMin) / (this.snrMax - this.snrMin);
@@ -162,7 +199,7 @@ class SMeterNeedle {
         this.ctx.stroke();
     }
 
-    // Draw scale markings and labels (branches on displayMode)
+    // Draw scale markings and labels (branches on colourMode)
     drawScale() {
         if (this.displayMode === 'snr') {
             this.drawScaleSNR();
@@ -173,6 +210,7 @@ class SMeterNeedle {
 
     // Draw S-meter scale (S1–S9, +10/+20/+30/+40)
     drawScaleSMeter() {
+        const dynamic = this.colourMode === 'smeter-dynamic';
         this.ctx.font = 'bold 13px Arial';
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
@@ -181,7 +219,7 @@ class SMeterNeedle {
         for (let s = 1; s <= 9; s++) {
             const dbfs = -115 + (s - 1) * 6;
             const angle = this.getScaleLabelAngle(dbfs);
-            const col = this.sMeterColour(dbfs);
+            const col = dynamic ? this.sMeterColour(dbfs) : '#ecf0f1';
 
             const tickStart = this.radius - 15;
             const tickEnd = this.radius - 5;
@@ -205,9 +243,9 @@ class SMeterNeedle {
             this.ctx.fillText(s.toString(), labelX, labelY);
         }
 
-        // Over S9 markers (+10, +20, +30, +40) — all above S9 so full green
+        // Over S9 markers (+10, +20, +30, +40) — all above S9 so full green when dynamic
         const overS9 = [10, 20, 30, 40];
-        const greenCol = this.sMeterColour(-73);
+        const overCol = dynamic ? this.sMeterColour(-73) : '#ecf0f1';
         for (const db of overS9) {
             const dbfs = -73 + db;
             const angle = this.getScaleLabelAngle(dbfs);
@@ -224,13 +262,13 @@ class SMeterNeedle {
             this.ctx.beginPath();
             this.ctx.moveTo(x1, y1);
             this.ctx.lineTo(x2, y2);
-            this.ctx.strokeStyle = greenCol;
+            this.ctx.strokeStyle = overCol;
             this.ctx.lineWidth = 1.5;
             this.ctx.stroke();
 
             const labelX = this.centerX + Math.cos(angle) * labelRadius;
             const labelY = this.centerY - Math.sin(angle) * labelRadius;
-            this.ctx.fillStyle = greenCol;
+            this.ctx.fillStyle = overCol;
             this.ctx.font = 'bold 10px Arial';
             this.ctx.fillText(`+${db}`, labelX, labelY);
         }
@@ -248,6 +286,7 @@ class SMeterNeedle {
 
     // Draw SNR scale (30–60 dB, major ticks with labels at every 5 dB)
     drawScaleSNR() {
+        const dynamic = this.colourMode === 'snr-dynamic';
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
 
@@ -263,7 +302,7 @@ class SMeterNeedle {
             const x2 = this.centerX + Math.cos(angle) * tickEnd;
             const y2 = this.centerY - Math.sin(angle) * tickEnd;
 
-            const col = this.snrColour(snr);
+            const col = dynamic ? this.snrColour(snr) : '#ecf0f1';
 
             this.ctx.beginPath();
             this.ctx.moveTo(x1, y1);
@@ -290,7 +329,7 @@ class SMeterNeedle {
         this.ctx.fillText('dB', this.width - 10, this.height - 10);
     }
 
-    // Update the value display divs
+    // Update the value display divs — text values are always graduated in all modes
     updateValueDisplay() {
         const valueDiv = document.getElementById('s-meter-value-display');
         const peakDiv = document.getElementById('s-meter-peak-display');
@@ -336,9 +375,9 @@ class SMeterNeedle {
         }
     }
 
-    // Draw the peak hold needle
+    // Draw the peak hold needle (only in smeter modes)
     drawPeakNeedle() {
-        // In SNR mode, no peak needle (SNR doesn't have a meaningful peak hold)
+        // Peak needle only shown in S-meter modes
         if (this.displayMode === 'snr') return;
 
         this.ctx.save();
@@ -352,14 +391,24 @@ class SMeterNeedle {
         this.ctx.lineTo(2, -10);
         this.ctx.closePath();
 
-        this.ctx.globalAlpha = 0.65;
-        this.ctx.fillStyle = this.sMeterColour(this.peakValue);
-        this.ctx.fill();
-        this.ctx.globalAlpha = 0.85;
-        this.ctx.strokeStyle = this.sMeterColour(this.peakValue);
-        this.ctx.lineWidth = 1;
-        this.ctx.stroke();
-        this.ctx.globalAlpha = 1.0;
+        if (this.colourMode === 'smeter-dynamic') {
+            // Graduated colour at reduced opacity
+            this.ctx.globalAlpha = 0.65;
+            this.ctx.fillStyle = this.sMeterColour(this.peakValue);
+            this.ctx.fill();
+            this.ctx.globalAlpha = 0.85;
+            this.ctx.strokeStyle = this.sMeterColour(this.peakValue);
+            this.ctx.lineWidth = 1;
+            this.ctx.stroke();
+            this.ctx.globalAlpha = 1.0;
+        } else {
+            // Classic: teal
+            this.ctx.fillStyle = 'rgba(0, 255, 255, 0.6)';
+            this.ctx.fill();
+            this.ctx.strokeStyle = 'rgba(0, 200, 200, 0.8)';
+            this.ctx.lineWidth = 1;
+            this.ctx.stroke();
+        }
 
         this.ctx.restore();
     }
@@ -389,11 +438,19 @@ class SMeterNeedle {
         this.ctx.lineTo(4, -10);
         this.ctx.closePath();
 
-        // Needle colour
-        if (this.displayMode === 'snr') {
-            this.ctx.fillStyle = this.snrColour(this.snrNeedleValue);
-        } else {
-            this.ctx.fillStyle = this.sMeterColour(this.currentValue);
+        // Needle colour based on mode
+        switch (this.colourMode) {
+            case 'smeter-dynamic':
+                this.ctx.fillStyle = this.sMeterColour(this.currentValue);
+                break;
+            case 'snr-dynamic':
+                this.ctx.fillStyle = this.snrColour(this.snrNeedleValue);
+                break;
+            case 'smeter-classic':
+            case 'snr-classic':
+            default:
+                this.ctx.fillStyle = '#dc3545'; // red
+                break;
         }
         this.ctx.fill();
 

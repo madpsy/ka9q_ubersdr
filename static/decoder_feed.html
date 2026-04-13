@@ -296,6 +296,7 @@
     let evtSource = null;
     let totalCount = 0;
     let userDisconnected = false;
+    let reconnectTimer = null;
 
     // ── Auth check ──────────────────────────────────────────────────────────
     async function checkAuth() {
@@ -370,6 +371,7 @@
 
     function connect() {
         userDisconnected = false;
+        clearTimeout(reconnectTimer);
         if (evtSource) { evtSource.close(); evtSource = null; }
 
         setStatus('connecting', 'Connecting…');
@@ -391,7 +393,11 @@
 
         evtSource.onerror = () => {
             if (userDisconnected) return;
+            // EventSource won't auto-reconnect after a hard close; do it manually.
+            evtSource.close();
+            evtSource = null;
             setStatus('connecting', 'Reconnecting…');
+            reconnectTimer = setTimeout(connect, 3000);
         };
     }
 
@@ -401,6 +407,7 @@
 
     function disconnect() {
         userDisconnected = true;
+        clearTimeout(reconnectTimer);
         if (evtSource) { evtSource.close(); evtSource = null; }
         setStatus('disconnected', 'Disconnected');
         document.getElementById('connectBtn').style.display = '';

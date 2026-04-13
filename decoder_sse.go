@@ -149,12 +149,12 @@ func HandleDecoderStream(hub *DecoderSSEHub) http.HandlerFunc {
 
 		log.Printf("DecoderSSE: client connected (mode=%q band=%q remote=%s)", modeFilter, bandFilter, r.RemoteAddr)
 
-		// Send an initial comment to confirm connection
-		fmt.Fprintf(w, ": connected to decoder stream\n\n")
+		// Send an initial comment + retry hint to confirm connection
+		fmt.Fprintf(w, ": connected to decoder stream\nretry: 3000\n\n")
 		flusher.Flush()
 
-		// Keep-alive ticker (every 30s)
-		ticker := time.NewTicker(30 * time.Second)
+		// Keep-alive ticker (every 15s — shorter than typical proxy timeouts)
+		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 
 		for {

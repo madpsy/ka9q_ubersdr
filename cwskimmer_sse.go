@@ -145,12 +145,12 @@ func HandleCWSkimmerStream(hub *CWSkimmerSSEHub) http.HandlerFunc {
 
 		log.Printf("CWSkimmerSSE: client connected (band=%q remote=%s)", bandFilter, r.RemoteAddr)
 
-		// Send an initial comment to confirm connection
-		fmt.Fprintf(w, ": connected to CW skimmer stream\n\n")
+		// Send an initial comment + retry hint to confirm connection
+		fmt.Fprintf(w, ": connected to CW skimmer stream\nretry: 3000\n\n")
 		flusher.Flush()
 
-		// Keep-alive ticker (every 30s)
-		ticker := time.NewTicker(30 * time.Second)
+		// Keep-alive ticker (every 15s — shorter than typical proxy timeouts)
+		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 
 		for {

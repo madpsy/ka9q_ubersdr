@@ -236,7 +236,9 @@
 
     // ── Listen for messages from the page world ────────────────────────────────
 
-    let initialised = false;
+    let initialised            = false;
+    let _sessionId             = null;   // stored so cmd:reregister can re-send it
+    let _audioStarted          = false;  // last known audio-started state
 
     window.addEventListener('message', function (e) {
         if (!e.data || !e.data.__ubersdr) return;
@@ -246,7 +248,9 @@
 
             case 'detected': {
                 if (initialised) break;
-                initialised = true;
+                initialised   = true;
+                _sessionId    = msg.sessionId;
+                _audioStarted = !!msg.audioStarted;
                 init(msg.sessionId, msg.audioStarted);
                 break;
             }
@@ -268,6 +272,7 @@
             }
 
             case 'audio_started': {
+                _audioStarted = true;
                 browser.runtime.sendMessage({
                     type: 'ubersdr:audio_started',
                 }).catch(() => {});
@@ -324,6 +329,24 @@
 
     function handleCommand(msg) {
         if (!msg || !msg.type) return;
+
+        // Re-register request: background asks us to re-send ubersdr:register
+        // so it can rediscover already-open tabs after the plugin is re-enabled.
+        // Only act if this content script has already confirmed it's on an
+        // UberSDR page (initialised === true).
+        if (msg.type === 'cmd:reregister') {
+            if (initialised) {
+                browser.runtime.sendMessage({
+                    type:         'ubersdr:register',
+                    sessionId:    _sessionId,
+                    url:          window.location.href,
+                    title:        document.title,
+                    audioStarted: _audioStarted,
+                }).catch(() => {});
+            }
+            return;
+        }
+
         // Relay the command into the page world (add sentinel so the injected
         // listener can distinguish it from other postMessage traffic).
         window.postMessage(Object.assign({}, msg, { __ubersdr_cmd: true }), '*');

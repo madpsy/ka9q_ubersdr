@@ -469,6 +469,16 @@ browser.runtime.onMessage.addListener((msg, sender) => {
             } else {
                 // Re-enable: restart flrig polling if configured.
                 if (flrigEnabled) startFlrigPoll();
+
+                // Ask every open tab to re-register so already-open UberSDR
+                // instances are rediscovered without needing a page reload.
+                // Non-UberSDR tabs will receive the message and ignore it
+                // (their content scripts guard on initialised === true).
+                browser.tabs.query({}).then((tabs) => {
+                    for (const tab of tabs) {
+                        browser.tabs.sendMessage(tab.id, { type: 'cmd:reregister' }).catch(() => {});
+                    }
+                });
             }
 
             // Broadcast empty registry so popup reflects the cleared state.

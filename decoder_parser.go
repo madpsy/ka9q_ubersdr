@@ -269,7 +269,7 @@ func extractCallsignLocator(message string) (string, string) {
 	}
 
 	if len(fields) > callIndex && isValidCallsign(fields[callIndex]) {
-		transmitterCall = fields[callIndex]
+		transmitterCall = strings.Trim(fields[callIndex], "<>")
 	}
 	if len(fields) > gridIndex && isValidGridLocatorForMode(fields[gridIndex], ModeFT8) {
 		locator = fields[gridIndex]

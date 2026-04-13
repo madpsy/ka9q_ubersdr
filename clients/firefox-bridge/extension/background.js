@@ -34,7 +34,7 @@ let lastKnownState = null;
 let pluginEnabled  = true;
 
 // ── flrig settings ─────────────────────────────────────────────────────────────
-let flrigEnabled   = true;
+let flrigEnabled   = false;
 let flrigHost      = '127.0.0.1';
 let flrigPort      = 12345;
 let flrigDirection = 'both';   // 'sdr-to-rig' | 'rig-to-sdr' | 'both'

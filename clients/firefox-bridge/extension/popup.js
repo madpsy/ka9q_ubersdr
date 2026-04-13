@@ -67,7 +67,7 @@ const modalCancel     = document.getElementById('modal-cancel');
 let currentState = null;   // Last known radio state { freq, mode, bwLow, bwHigh }
 let selectedTabId = null;
 let isMuted = false;
-let isSyncEnabled = true;   // mirrors background flrigEnabled
+let isSyncEnabled = false;  // mirrors background flrigEnabled (default: disabled)
 let isPluginEnabled = true; // mirrors background pluginEnabled
 let publicInstances = []; // Cached list from instances.ubersdr.org
 
@@ -741,6 +741,7 @@ flrigHeader.addEventListener('click', () => toggleCollapsible(flrigBody, flrigAr
 
 flrigEnabledCb.addEventListener('change', () => {
     const enabled = flrigEnabledCb.checked;
+    setSyncButtonState(enabled);
     updateFlrigUI(enabled, false);
     saveFlrigSettings(enabled);
 });

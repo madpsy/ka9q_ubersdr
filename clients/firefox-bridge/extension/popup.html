@@ -10,11 +10,14 @@
 
     <!-- ── Header ──────────────────────────────────────────────────────────── -->
     <div class="header">
-        <div class="header-icon">📡</div>
+        <img class="header-icon" src="icons/icon48.png" alt="UberSDR" width="32" height="32">
         <div>
             <div class="header-title">UberSDR Bridge</div>
             <div class="header-subtitle">Radio control &amp; bridge</div>
         </div>
+        <button class="header-btn" id="btn-mute"  title="Mute / Unmute">🔊</button>
+        <button class="header-btn" id="btn-sync"  title="flrig sync on/off">⇄</button>
+        <button class="header-btn" id="btn-power" title="Enable / disable extension">⏻</button>
     </div>
 
     <!-- ── UberSDR Tab Selection ────────────────────────────────────────────── -->
@@ -22,6 +25,28 @@
         <div class="section-title">UberSDR Instance</div>
         <div id="tab-list" class="tab-list">
             <div class="no-tabs">No UberSDR tabs detected.<br>Open an UberSDR page to begin.</div>
+        </div>
+        <select class="control-select" id="select-instance" style="margin-top:6px;width:100%">
+            <option value="">— select an instance —</option>
+        </select>
+        <div id="instance-info" class="instance-info"></div>
+    </div>
+
+    <!-- ── Profiles ──────────────────────────────────────────────────────────── -->
+    <div class="section">
+        <div class="collapsible-header" id="profiles-header">
+            <div class="section-title" style="margin-bottom:0">Profiles</div>
+            <span class="collapsible-arrow" id="profiles-arrow">▶</span>
+        </div>
+        <div class="collapsible-body" id="profiles-body">
+            <!-- Save current state as a new profile -->
+            <div class="control-row" style="margin-top:8px">
+                <input class="control-input" type="text" id="input-profile-name"
+                       placeholder="Profile name…" maxlength="64">
+                <button class="btn btn-success btn-sm" id="btn-save-profile">Save</button>
+            </div>
+            <!-- Saved profile list -->
+            <div id="profile-list" class="profile-list"></div>
         </div>
     </div>
 
@@ -45,6 +70,20 @@
                 <div class="state-label">BW High</div>
                 <div class="state-value small" id="state-bw-high">—</div>
             </div>
+            <div class="state-card">
+                <div class="state-label">Signal (dBFS)</div>
+                <div class="state-value small" id="state-dbfs">—</div>
+            </div>
+            <div class="state-card">
+                <div class="state-label">SNR</div>
+                <div class="state-value small" id="state-snr">—</div>
+            </div>
+        </div>
+        <!-- Signal bar spanning full width -->
+        <div class="signal-bar-wrap" id="signal-bar-wrap">
+            <div class="signal-bar-track">
+                <div class="signal-bar-fill" id="signal-bar-fill"></div>
+            </div>
         </div>
     </div>
 
@@ -53,9 +92,9 @@
         <div class="section-title">Set Frequency</div>
 
         <div class="control-row">
-            <label class="control-label" for="input-freq">Hz</label>
+            <label class="control-label" for="input-freq">kHz</label>
             <input  class="control-input" type="number" id="input-freq"
-                    placeholder="e.g. 14074000" min="10000" max="30000000" step="1">
+                    placeholder="e.g. 14074" min="10" max="30000" step="0.001">
             <button class="btn btn-primary btn-sm" id="btn-set-freq">Set</button>
         </div>
 
@@ -85,7 +124,6 @@
                 <option value="fm">FM</option>
                 <option value="nfm">NFM</option>
             </select>
-            <button class="btn btn-primary btn-sm" id="btn-set-mode">Set</button>
         </div>
     </div>
 
@@ -112,45 +150,71 @@
         </div>
     </div>
 
-    <!-- ── Bridge Server ─────────────────────────────────────────────────────── -->
+    <!-- ── flrig Sync ────────────────────────────────────────────────────────── -->
     <div class="section">
-        <div class="collapsible-header" id="bridge-header">
-            <div class="section-title" style="margin-bottom:0">Bridge Server</div>
-            <span class="collapsible-arrow" id="bridge-arrow">▶</span>
+        <div class="collapsible-header" id="flrig-header">
+            <div class="section-title" style="margin-bottom:0">flrig Sync</div>
+            <span class="collapsible-arrow open" id="flrig-arrow">▶</span>
         </div>
-        <div class="collapsible-body" id="bridge-body">
+        <div class="collapsible-body open" id="flrig-body">
             <div class="toggle-row" style="margin-top:8px">
-                <span class="toggle-label">Enable bridge relay</span>
+                <span class="toggle-label">Enable flrig sync</span>
                 <label class="toggle">
-                    <input type="checkbox" id="bridge-enabled">
+                    <input type="checkbox" id="flrig-enabled" checked>
                     <span class="toggle-slider"></span>
                 </label>
             </div>
 
-            <div class="bridge-status">
-                <div class="bridge-dot" id="bridge-dot"></div>
-                <span class="bridge-status-text" id="bridge-status-text">Disabled</span>
+            <div class="flrig-status">
+                <div class="flrig-dot" id="flrig-dot"></div>
+                <span class="flrig-status-text" id="flrig-status-text">Disabled</span>
+            </div>
+            <div class="flrig-readout" id="flrig-readout">
+                <span id="flrig-readout-freq">—</span>
+                <span class="flrig-readout-sep">·</span>
+                <span id="flrig-readout-mode">—</span>
             </div>
 
             <div class="control-row">
-                <label class="control-label" for="input-bridge-url">URL</label>
-                <input class="control-input" type="text" id="input-bridge-url"
-                       placeholder="http://localhost:7373">
+                <label class="control-label" for="input-flrig-host">Host</label>
+                <input class="control-input" type="text" id="input-flrig-host"
+                       placeholder="127.0.0.1">
             </div>
             <div class="control-row">
-                <label class="control-label" for="input-bridge-secret">Secret</label>
-                <input class="control-input" type="password" id="input-bridge-secret"
-                       placeholder="optional shared secret">
+                <label class="control-label" for="input-flrig-port">Port</label>
+                <input class="control-input" type="number" id="input-flrig-port"
+                       placeholder="12345" min="1" max="65535">
+            </div>
+            <div class="control-row">
+                <label class="control-label" for="select-flrig-dir">Direction</label>
+                <select class="control-select" id="select-flrig-dir">
+                    <option value="both">Both ways</option>
+                    <option value="sdr-to-rig">SDR → rig</option>
+                    <option value="rig-to-sdr">Rig → SDR</option>
+                </select>
             </div>
             <div class="btn-row">
-                <button class="btn btn-secondary btn-sm" id="btn-save-bridge">Save</button>
-                <button class="btn btn-secondary btn-sm" id="btn-test-bridge">Test</button>
+                <button class="btn btn-secondary btn-sm" id="btn-save-flrig">Save</button>
+                <button class="btn btn-secondary btn-sm" id="btn-test-flrig">Test</button>
             </div>
         </div>
     </div>
 
     <!-- ── Status bar ────────────────────────────────────────────────────────── -->
     <div class="status-bar" id="status-bar">Ready</div>
+
+    <!-- ── Confirm modal ─────────────────────────────────────────────────────── -->
+    <div class="modal-backdrop" id="modal-backdrop">
+        <div class="modal-box">
+            <div class="modal-title" id="modal-title">Open instance?</div>
+            <div class="modal-body" id="modal-body"></div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary btn-sm" id="modal-cancel">Cancel</button>
+                <button class="btn btn-success btn-sm" id="modal-add">Add</button>
+                <button class="btn btn-primary btn-sm" id="modal-confirm">Replace</button>
+            </div>
+        </div>
+    </div>
 
     <script src="popup.js"></script>
 </body>

@@ -6,13 +6,19 @@
     padding: 0;
 }
 
+html {
+    height: 100%;
+}
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     font-size: 13px;
     background: #1a1a2e;
     color: #e0e0e0;
     width: 320px;
-    min-height: 200px;
+    height: 600px;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
@@ -26,9 +32,60 @@ body {
     gap: 8px;
 }
 
-.header-icon {
-    font-size: 20px;
+.header > div {
+    flex: 1;
+}
+
+.header-btn {
+    background: none;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    color: #e0e0e0;
+    font-size: 16px;
     line-height: 1;
+    padding: 3px 6px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.header-btn:hover {
+    background: #0f3460;
+    border-color: #e94560;
+}
+
+/* Mute button — red when muted */
+.header-btn.muted {
+    color: #e94560;
+    border-color: #e94560;
+}
+
+/* Sync button — green when active, dimmed when off */
+.header-btn.sync-on {
+    color: #27ae60;
+    border-color: #27ae60;
+}
+.header-btn.sync-off {
+    color: #555;
+    border-color: #333;
+}
+
+/* Power button — green when plugin is on, red when off */
+.header-btn.power-on {
+    color: #27ae60;
+    border-color: #27ae60;
+}
+.header-btn.power-off {
+    color: #e94560;
+    border-color: #e94560;
+    background: rgba(233, 69, 96, 0.1);
+}
+
+.header-icon {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    border-radius: 4px;
 }
 
 .header-title {
@@ -101,15 +158,34 @@ body {
     border-color: #e94560;
 }
 
-.tab-radio {
-    width: 12px;
-    height: 12px;
-    accent-color: #e94560;
+.tab-close-btn {
     flex-shrink: 0;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    color: #555;
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 5px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.tab-close-btn:hover {
+    color: #e94560;
+    border-color: #e94560;
+    background: rgba(233, 69, 96, 0.1);
 }
 
 .tab-info {
     flex: 1;
+    min-width: 0;
+}
+
+.tab-title-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
     min-width: 0;
 }
 
@@ -120,6 +196,21 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     color: #e0e0e0;
+    min-width: 0;
+}
+
+/* "⏸ waiting" badge — shown when audio hasn't started yet */
+.tab-waiting-badge {
+    flex-shrink: 0;
+    font-size: 9px;
+    font-weight: 600;
+    color: #f39c12;
+    background: rgba(243, 156, 18, 0.15);
+    border: 1px solid rgba(243, 156, 18, 0.4);
+    border-radius: 3px;
+    padding: 1px 4px;
+    white-space: nowrap;
+    letter-spacing: 0.3px;
 }
 
 .tab-url {
@@ -129,6 +220,55 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+/* ── VFO selector (shown in tab list when 2+ tabs) ──────────────────────── */
+
+.vfo-select {
+    flex-shrink: 0;
+    background: #0f3460;
+    color: #e94560;
+    border: 1px solid #e94560;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 1px 3px;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    width: 36px;
+    text-align: center;
+}
+
+.vfo-select:hover {
+    background: #1a2a5e;
+}
+
+/* ── Signal bar ──────────────────────────────────────────────────────────── */
+
+.signal-bar-wrap {
+    margin-top: 8px;
+}
+
+.signal-bar-track {
+    height: 6px;
+    background: #0f3460;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.signal-bar-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 3px;
+    background: #dc3545;
+    transition: width 0.4s ease, background 0.4s ease;
+}
+
+/* Matches signal-meter.js colour thresholds exactly */
+.signal-bar-fill.sig-weak   { background: #dc3545; } /* < -85 dBFS  — red    */
+.signal-bar-fill.sig-medium { background: #ffc107; } /* >= -85 dBFS — yellow */
+.signal-bar-fill.sig-strong { background: #28a745; } /* >= -70 dBFS — green  */
 
 /* ── State display ───────────────────────────────────────────────────────── */
 
@@ -258,6 +398,15 @@ body {
     background: #1a4a80;
 }
 
+.btn-success {
+    background: #27ae60;
+    color: #fff;
+}
+
+.btn-success:hover:not(:disabled) {
+    background: #1e8449;
+}
+
 .btn-sm {
     padding: 3px 7px;
     font-size: 10px;
@@ -293,16 +442,33 @@ body {
     color: #e0e0e0;
 }
 
-/* ── Bridge settings ─────────────────────────────────────────────────────── */
+/* ── flrig readout ───────────────────────────────────────────────────────── */
 
-.bridge-status {
+.flrig-readout {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e94560;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 8px;
+    letter-spacing: 0.3px;
+}
+
+.flrig-readout-sep {
+    color: #555;
+    margin: 0 5px;
+    font-weight: 400;
+}
+
+/* ── flrig settings ──────────────────────────────────────────────────────── */
+
+.flrig-status {
     display: flex;
     align-items: center;
     gap: 6px;
     margin-bottom: 8px;
 }
 
-.bridge-dot {
+.flrig-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
@@ -310,16 +476,16 @@ body {
     flex-shrink: 0;
 }
 
-.bridge-dot.connected {
+.flrig-dot.connected {
     background: #27ae60;
     box-shadow: 0 0 4px #27ae60;
 }
 
-.bridge-dot.error {
+.flrig-dot.error {
     background: #e94560;
 }
 
-.bridge-status-text {
+.flrig-status-text {
     font-size: 11px;
     color: #888;
 }
@@ -379,6 +545,21 @@ body {
     transform: translateX(14px);
 }
 
+/* ── Instance info strip ─────────────────────────────────────────────────── */
+
+.instance-info {
+    font-size: 10px;
+    color: #888;
+    line-height: 1.4;
+}
+
+.instance-info:not(:empty) {
+    margin-top: 4px;
+}
+
+.instance-info.available { color: #27ae60; }
+.instance-info.full      { color: #e94560; }
+
 /* ── Status bar ──────────────────────────────────────────────────────────── */
 
 .status-bar {
@@ -418,6 +599,101 @@ body {
     margin-top: 8px;
 }
 
+/* ── Confirm modal ──────────────────────────────────────────────────────────── */
+
+.modal-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-backdrop.open {
+    display: flex;
+}
+
+.modal-box {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 8px;
+    padding: 16px;
+    width: 260px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.modal-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e0e0e0;
+    margin-bottom: 8px;
+}
+
+.modal-body {
+    font-size: 12px;
+    color: #aaa;
+    margin-bottom: 14px;
+    line-height: 1.5;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
 .collapsible-body.open {
     display: block;
+}
+
+/* ── Profiles ────────────────────────────────────────────────────────────── */
+
+.profile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+.profile-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+}
+
+.profile-name {
+    flex: 1;
+    font-size: 12px;
+    font-weight: 500;
+    color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
+.profile-meta {
+    font-size: 9px;
+    color: #555;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.profile-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.profile-no-saved {
+    font-size: 11px;
+    color: #555;
+    font-style: italic;
+    padding: 4px 0;
 }

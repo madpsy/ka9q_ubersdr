@@ -19,9 +19,10 @@
 
 EXTENSION_DIR := extension
 DIST_DIR      := dist
-ICON_SRC      := $(EXTENSION_DIR)/icons/icon.svg
+ICON_SRC      := $(EXTENSION_DIR)/icons/icon_source.png
 ICON_48       := $(EXTENSION_DIR)/icons/icon48.png
 ICON_96       := $(EXTENSION_DIR)/icons/icon96.png
+ICON_128      := $(EXTENSION_DIR)/icons/icon128.png
 
 # Read version from manifest.json (requires python3 or jq)
 VERSION := $(shell python3 -c "import json,sys; print(json.load(open('$(EXTENSION_DIR)/manifest.json'))['version'])" 2>/dev/null || echo "unknown")
@@ -36,7 +37,7 @@ install:
 build: install icons
 	npm run build
 	@echo ""
-	@echo "✅ Built: $(DIST_DIR)/ubersdr_bridge-$(VERSION).xpi"
+	@echo "✅ Built: $(DIST_DIR)/ubersdr_bridge-$(VERSION).xpi (rename from .zip if needed)"
 	@echo "   Load in Firefox: about:debugging → This Firefox → Load Temporary Add-on"
 
 ## dev: Run the extension in a temporary Firefox profile with live reload
@@ -47,15 +48,19 @@ dev: install
 lint: install
 	npm run lint
 
-## icons: Regenerate PNG icons from icon.svg (requires ImageMagick)
-icons: $(ICON_48) $(ICON_96)
+## icons: Regenerate PNG icons from icon_source.png (requires ImageMagick)
+icons: $(ICON_48) $(ICON_96) $(ICON_128)
 
 $(ICON_48): $(ICON_SRC)
-	convert -background none -size 48x48 $< $@
+	convert $< -resize 48x48 $@
 	@echo "  Generated $@"
 
 $(ICON_96): $(ICON_SRC)
-	convert -background none -size 96x96 $< $@
+	convert $< -resize 96x96 $@
+	@echo "  Generated $@"
+
+$(ICON_128): $(ICON_SRC)
+	convert $< -resize 128x128 $@
 	@echo "  Generated $@"
 
 ## zip: Build a plain .zip (same content as .xpi, different extension)

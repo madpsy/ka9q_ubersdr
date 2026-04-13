@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "web-ext build --source-dir=extension --artifacts-dir=dist --overwrite-dest",
+    "build": "web-ext build --source-dir=extension --artifacts-dir=dist --overwrite-dest --filename=ubersdr_bridge-{version}.xpi",
     "dev": "web-ext run --source-dir=extension --firefox=firefox",
     "lint": "web-ext lint --source-dir=extension",
     "sign": "web-ext sign --source-dir=extension --artifacts-dir=dist --api-key=$WEB_EXT_API_KEY --api-secret=$WEB_EXT_API_SECRET",

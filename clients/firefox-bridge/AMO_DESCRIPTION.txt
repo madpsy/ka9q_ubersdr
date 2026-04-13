@@ -1,0 +1,58 @@
+========================================
+ UberSDR Bridge — AMO Submission Text
+========================================
+
+---- SUMMARY (≤ 250 characters) ----
+
+Control any UberSDR software-defined radio directly from your browser toolbar. Set frequency, mode and bandwidth, sync with flrig, manage multiple instances, save profiles, and discover local SDRs automatically.
+
+
+---- DESCRIPTION (full) ----
+
+UberSDR Bridge connects Firefox to any open UberSDR software-defined radio page and gives you full radio control without leaving your browser.
+
+Open the toolbar popup to see the current frequency, mode, bandwidth and signal level in real time. Type a new frequency, click a step button, or pick a mode from the dropdown — the SDR tunes instantly. You can also set the filter bandwidth manually.
+
+KEY FEATURES
+
+• Auto-detection — the extension silently watches for UberSDR pages. As soon as you open one, it registers automatically. No configuration required for basic use.
+
+• Multi-instance support — running two SDRs side by side? The extension tracks all open UberSDR tabs. Click any entry in the popup to switch control to that instance, or close it with the ✕ button.
+
+• VFO assignment — when two instances are open, assign each one to VFO A or VFO B on your transceiver. The extension switches the active VFO automatically as you move between tabs.
+
+• flrig sync — optional bidirectional frequency and mode synchronisation with flrig (the popular rig-control application). Direction is configurable: SDR → rig, rig → SDR, or both ways. The extension connects to flrig's built-in XML-RPC server on localhost.
+
+• Local instance discovery — if an UberSDR server is running on your local network and advertising itself as ubersdr.local, the extension probes it automatically and shows it at the top of the instance list, above public instances.
+
+• Public instance browser — browse the live list of public UberSDR instances from instances.ubersdr.org directly in the popup. Select one to open it in a new tab or replace the current one.
+
+• Profiles — save a named snapshot of your current setup (which instances are open, their VFO assignments, frequency, mode and bandwidth). Recall any profile later with one click; missing tabs are opened and tuned automatically.
+
+• Signal meter — a colour-coded bar shows received signal strength (dBFS) and SNR in real time.
+
+• Mute control — mute or unmute the selected SDR tab's audio from the toolbar without switching to that tab.
+
+• Power switch — disable the extension entirely without uninstalling it. Re-enable it with one click.
+
+PRIVACY
+
+This extension does not collect, transmit or store any personal data. All settings are saved locally in your browser using the standard storage API. The only outbound network requests are:
+  • To instances.ubersdr.org to fetch the public instance list (only when you open the instance dropdown).
+  • To ubersdr.local:8080 to probe for a local SDR (only when you open the instance dropdown, 2-second timeout).
+  • To your configured flrig host (localhost by default) for rig synchronisation.
+  • To whichever UberSDR pages you choose to open.
+
+PERMISSIONS EXPLAINED
+
+• tabs — needed to detect which tabs are UberSDR pages, switch between them, and close them.
+• storage — saves your settings (flrig host/port, profiles, selected tab) locally in the browser.
+• activeTab — used to interact with the currently active UberSDR tab.
+• http://localhost/*, http://127.0.0.1/* — required to communicate with flrig running on your local machine.
+• http://ubersdr.local/* — required to probe for a locally networked UberSDR instance.
+• https://instances.ubersdr.org/* — required to fetch the public instance list.
+
+SOURCE CODE
+
+UberSDR Bridge is open source. The extension source is part of the UberSDR project:
+https://github.com/madpsy/ka9q_ubersdr

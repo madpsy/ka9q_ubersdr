@@ -10,7 +10,9 @@
     "tabs",
     "storage",
     "http://localhost/*",
-    "http://127.0.0.1/*"
+    "http://127.0.0.1/*",
+    "http://ubersdr.local/*",
+    "https://instances.ubersdr.org/*"
   ],
 
   "background": {
@@ -32,12 +34,25 @@
     "default_title": "UberSDR Bridge",
     "default_icon": {
       "48": "icons/icon48.png",
-      "96": "icons/icon96.png"
+      "96": "icons/icon96.png",
+      "128": "icons/icon128.png"
     }
   },
 
   "icons": {
     "48": "icons/icon48.png",
-    "96": "icons/icon96.png"
+    "96": "icons/icon96.png",
+    "128": "icons/icon128.png"
+  },
+
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "ubersdr-bridge@ubersdr.org",
+      "strict_min_version": "109.0",
+      "data_collection_permissions": {
+        "required": ["none"],
+        "optional": []
+      }
+    }
   }
 }

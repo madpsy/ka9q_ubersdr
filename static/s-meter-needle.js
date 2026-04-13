@@ -391,24 +391,15 @@ class SMeterNeedle {
         this.ctx.lineTo(2, -10);
         this.ctx.closePath();
 
-        if (this.colourMode === 'smeter-dynamic') {
-            // Graduated colour at reduced opacity
-            this.ctx.globalAlpha = 0.65;
-            this.ctx.fillStyle = this.sMeterColour(this.peakValue);
-            this.ctx.fill();
-            this.ctx.globalAlpha = 0.85;
-            this.ctx.strokeStyle = this.sMeterColour(this.peakValue);
-            this.ctx.lineWidth = 1;
-            this.ctx.stroke();
-            this.ctx.globalAlpha = 1.0;
-        } else {
-            // Classic: teal
-            this.ctx.fillStyle = 'rgba(0, 255, 255, 0.6)';
-            this.ctx.fill();
-            this.ctx.strokeStyle = 'rgba(0, 200, 200, 0.8)';
-            this.ctx.lineWidth = 1;
-            this.ctx.stroke();
-        }
+        // Graduated colour at reduced opacity in all smeter modes
+        this.ctx.globalAlpha = 0.65;
+        this.ctx.fillStyle = this.sMeterColour(this.peakValue);
+        this.ctx.fill();
+        this.ctx.globalAlpha = 0.85;
+        this.ctx.strokeStyle = this.sMeterColour(this.peakValue);
+        this.ctx.lineWidth = 1;
+        this.ctx.stroke();
+        this.ctx.globalAlpha = 1.0;
 
         this.ctx.restore();
     }
@@ -438,18 +429,18 @@ class SMeterNeedle {
         this.ctx.lineTo(4, -10);
         this.ctx.closePath();
 
-        // Needle colour based on mode
+        // Needle colour based on mode — classic modes use graduated colour, dynamic modes too
         switch (this.colourMode) {
+            case 'smeter-classic':
             case 'smeter-dynamic':
                 this.ctx.fillStyle = this.sMeterColour(this.currentValue);
                 break;
+            case 'snr-classic':
             case 'snr-dynamic':
                 this.ctx.fillStyle = this.snrColour(this.snrNeedleValue);
                 break;
-            case 'smeter-classic':
-            case 'snr-classic':
             default:
-                this.ctx.fillStyle = '#dc3545'; // red
+                this.ctx.fillStyle = this.sMeterColour(this.currentValue);
                 break;
         }
         this.ctx.fill();

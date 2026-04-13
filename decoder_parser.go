@@ -249,30 +249,30 @@ func extractCallsignLocator(message string) (string, string) {
 
 	var transmitterCall string
 	var locator string
+	callIndex := 1
+	gridIndex := 2
 
 	// Position-based parsing:
-	// - If starts with "CQ" or "<...>": TX = field[1], Grid = field[2] (if valid)
-	// - Otherwise: TX = field[1], Grid = field[2] (if valid)
+	// - If starts with "CQ"/"CQ_"/"<...>": TX = field[1], Grid = field[2] (if valid)
+	// - If field[1] is not a valid callsign, it's a region/zone designator
+	//   e.g. "CQ FWA EA5KE IM99", "CQ RU EU2ABM KO43", "CQ DX W1AW FN31"
+	//   → shift: TX = field[2], Grid = field[3]
+	// - Otherwise (directed messages): TX = field[1], Grid = field[2] (if valid)
 	// This avoids ambiguity where strings like "HJ54FF" could be both callsign and grid
 
 	if fields[0] == "CQ" || fields[0] == "CQ_" || fields[0] == "<...>" {
-		// CQ or truncated message: transmitter is field[1]
-		if len(fields) >= 2 && isValidCallsign(fields[1]) {
-			transmitterCall = fields[1]
+		// If fields[1] is not a valid callsign, it's a region/zone designator
+		if len(fields) >= 3 && !isValidCallsign(fields[1]) {
+			callIndex = 2
+			gridIndex = 3
 		}
-		// Grid is field[2] if present and valid
-		if len(fields) >= 3 && isValidGridLocatorForMode(fields[2], ModeFT8) {
-			locator = fields[2]
-		}
-	} else {
-		// Directed message: transmitter is field[1] (second field)
-		if len(fields) >= 2 && isValidCallsign(fields[1]) {
-			transmitterCall = fields[1]
-		}
-		// Grid is field[2] if present and valid
-		if len(fields) >= 3 && isValidGridLocatorForMode(fields[2], ModeFT8) {
-			locator = fields[2]
-		}
+	}
+
+	if len(fields) > callIndex && isValidCallsign(fields[callIndex]) {
+		transmitterCall = fields[callIndex]
+	}
+	if len(fields) > gridIndex && isValidGridLocatorForMode(fields[gridIndex], ModeFT8) {
+		locator = fields[gridIndex]
 	}
 
 	return transmitterCall, locator

@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,12 @@ import (
 
 // rbnCallsignRe matches valid callsign query parameters: 1–10 alphanumeric characters.
 var rbnCallsignRe = regexp.MustCompile(`^[A-Z0-9]{1,10}$`)
+
+// rbnCommentDateRe extracts a YYYY-MM-DD date from a CSV comment line such as:
+//
+//	# Created 2026-04-10 00:20:03 UTC
+//	# Calculated 2026-04-14 00:15:46
+var rbnCommentDateRe = regexp.MustCompile(`(\d{4})-(\d{2})-(\d{2})`)
 
 const (
 	rbnSkewURL       = "https://sm7iun.se/rbnskew.csv"
@@ -88,11 +95,11 @@ func NewRBNDataFetcher(store *RBNDataStore) *RBNDataFetcher {
 // Start launches the background fetch loop and returns immediately.
 // The first fetch is delayed by 5 minutes so that a rapid startup/crash loop
 // does not hammer the remote server. After the initial fetch the loop sleeps
-// until 02:00 UTC each day. If the statistics data is stale after the daily
-// fetch (epoch_date is older than yesterday), a stats-only retry is scheduled
-// every 3 hours until the data advances.
+// until 01:00 UTC each day. If either file's comment date is still yesterday
+// (i.e. the remote has not yet published today's data), individual retries are
+// scheduled every 3 hours until both files are current.
 func (f *RBNDataFetcher) Start() {
-	log.Println("[RBN] Starting (initial fetch in 5 min, then daily at 02:00 UTC)")
+	log.Println("[RBN] Starting (initial fetch in 5 min, then daily at 01:00 UTC)")
 	go f.fetchLoop()
 }
 
@@ -110,17 +117,17 @@ func (f *RBNDataFetcher) fetchLoop() {
 	// Initial fetch.
 	log.Println("[RBN] Performing initial data fetch")
 	f.fetchAll()
-	f.retryStatsIfStale()
+	f.retryIfStale()
 
 	// Schedule daily refresh at 02:00 UTC — abortable via stopCh.
 	for {
-		next := nextDailyAt(2, 0, 0)
+		next := nextDailyAt(1, 0, 0)
 		log.Printf("[RBN] Next scheduled fetch at %s", next.UTC().Format(time.RFC3339))
 		select {
 		case <-time.After(time.Until(next)):
-			log.Println("[RBN] Running scheduled daily fetch")
+			log.Println("[RBN] Running scheduled daily fetch (01:00 UTC)")
 			f.fetchAll()
-			f.retryStatsIfStale()
+			f.retryIfStale()
 		case <-f.stopCh:
 			log.Println("[RBN] Fetcher stopped")
 			return
@@ -128,57 +135,88 @@ func (f *RBNDataFetcher) fetchLoop() {
 	}
 }
 
-// retryStatsIfStale checks whether the statistics data is stale (epoch_date is
-// older than yesterday) and, if so, retries fetchStatistics every 3 hours until
-// the data advances or Stop() is called.
+// retryIfStale checks whether either CSV file's comment date is older than
+// today's UTC date and, if so, retries the stale file(s) every 3 hours until
+// both are current or Stop() is called.
 //
-// The statistics.csv epoch_date field is a day-number (days since Unix epoch)
-// representing the previous day's data. "Fresh" means epoch_date equals
-// (today's day number - 1). "Stale" means it is older than that.
-func (f *RBNDataFetcher) retryStatsIfStale() {
+// Both rbnskew.csv and statistics.csv embed a date in their first comment line:
+//
+//	# Calculated 2026-04-14 00:15:46
+//	# Created 2026-04-10 00:20:03 UTC
+//
+// "Fresh" means the YYYY-MM-DD in that comment equals today's UTC date.
+func (f *RBNDataFetcher) retryIfStale() {
 	const retryInterval = 3 * time.Hour
 
 	for {
-		if !f.statsAreStale() {
+		skewStale := f.commentIsStale(f.skewComment())
+		statsStale := f.commentIsStale(f.statsComment())
+
+		if !skewStale && !statsStale {
 			return
 		}
 
-		log.Printf("[RBN] Statistics data is stale; will retry in %s", retryInterval)
+		if skewStale {
+			log.Printf("[RBN] Skew data comment date is stale; will retry in %s", retryInterval)
+		}
+		if statsStale {
+			log.Printf("[RBN] Statistics data comment date is stale; will retry in %s", retryInterval)
+		}
+
 		select {
 		case <-f.stopCh:
-			log.Println("[RBN] Fetcher stopped during stats retry wait")
+			log.Println("[RBN] Fetcher stopped during stale-data retry wait")
 			return
 		case <-time.After(retryInterval):
 		}
 
-		log.Println("[RBN] Retrying statistics fetch (stale epoch_date)")
-		f.fetchStatistics()
+		if skewStale {
+			log.Println("[RBN] Retrying skew fetch (stale comment date)")
+			f.fetchSkew()
+		}
+		if statsStale {
+			log.Println("[RBN] Retrying statistics fetch (stale comment date)")
+			f.fetchStatistics()
+		}
 	}
 }
 
-// statsAreStale returns true when the in-memory statistics data has an
-// epoch_date older than yesterday (i.e. the remote file has not yet been
-// updated for the current day's cycle).
-func (f *RBNDataFetcher) statsAreStale() bool {
+// skewComment returns the current skew CSV comment string under a read lock.
+func (f *RBNDataFetcher) skewComment() string {
 	f.store.mu.RLock()
 	defer f.store.mu.RUnlock()
+	return f.store.skewComment
+}
 
-	if len(f.store.statsData) == 0 {
-		// No data at all — treat as stale so we keep retrying.
+// statsComment returns the current statistics CSV comment string under a read lock.
+func (f *RBNDataFetcher) statsComment() string {
+	f.store.mu.RLock()
+	defer f.store.mu.RUnlock()
+	return f.store.statsComment
+}
+
+// commentIsStale parses the YYYY-MM-DD date embedded in a CSV comment line and
+// returns true when that date is before today's UTC date (or when no date can
+// be parsed, which is treated conservatively as stale).
+//
+// Example comment lines:
+//
+//	# Calculated 2026-04-14 00:15:46
+//	# Created 2026-04-10 00:20:03 UTC
+func (f *RBNDataFetcher) commentIsStale(comment string) bool {
+	m := rbnCommentDateRe.FindStringSubmatch(comment)
+	if m == nil {
+		// Cannot determine freshness — treat as stale.
 		return true
 	}
+	year, _ := strconv.Atoi(m[1])
+	month, _ := strconv.Atoi(m[2])
+	day, _ := strconv.Atoi(m[3])
 
-	// epoch_date is days since Unix epoch; yesterday = today - 1.
-	yesterdayEpoch := int(time.Now().UTC().Unix()/86400) - 1
+	commentDate := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+	todayUTC := time.Now().UTC().Truncate(24 * time.Hour)
 
-	for _, entry := range f.store.statsData {
-		if entry.EpochDate >= yesterdayEpoch {
-			// At least one entry is current — data is fresh.
-			return false
-		}
-	}
-	// Every entry is older than yesterday.
-	return true
+	return commentDate.Before(todayUTC)
 }
 
 // Stop signals the background goroutine to exit

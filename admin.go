@@ -4186,6 +4186,9 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 		if resp, err := gottyClient.ExecCommand("cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", 2); err == nil && resp.ExitCode == 0 {
 			stats["cpu_governor"] = strings.TrimSpace(resp.Stdout)
 		}
+		if resp, err := gottyClient.ExecCommand("~/ubersdr/check_time.sh", 10); err == nil && resp.ExitCode == 0 {
+			stats["system_time"] = resp.Stdout
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)

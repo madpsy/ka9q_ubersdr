@@ -520,6 +520,10 @@ echo "Fetching cpu_governor.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/cpu_governor.sh -o "$ACTUAL_HOME/ubersdr/cpu_governor.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/cpu_governor.sh"
 
+echo "Fetching check_time.sh script..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/check_time.sh -o "$ACTUAL_HOME/ubersdr/check_time.sh"
+chmod +x "$ACTUAL_HOME/ubersdr/check_time.sh"
+
 echo "Fetching install_cwskimmer.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ubersdr-cwskimmer/refs/heads/main/install-hub.sh -o "$ACTUAL_HOME/ubersdr/install_cwskimmer.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/install_cwskimmer.sh"

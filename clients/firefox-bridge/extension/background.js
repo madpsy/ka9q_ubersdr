@@ -41,7 +41,8 @@ let flrigDirection  = 'both';   // 'sdr-to-rig' | 'rig-to-sdr' | 'both'
 let flrigConnected  = false;
 
 // PTT mute: when true, the selected SDR tab is muted while the rig is transmitting.
-let pttMuteEnabled = false;
+// Default ON — most users want the SDR muted during TX.
+let pttMuteEnabled = true;
 let _lastPtt       = false;   // last known PTT state (false = RX, true = TX)
 
 // Active VFO in flrig ('A' or 'B'). Kept in sync with flrig via rig.get_AB polls.

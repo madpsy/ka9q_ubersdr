@@ -4,7 +4,7 @@ echo "== Time =="
 date
 
 echo "== Timedatectl =="
-timedatectl | grep -E 'Time zone|System clock synchronized'
+timedatectl | grep -E 'Time zone|System clock synchronized' | sed 's/^[[:space:]]*//'
 
 echo "== NTP Health =="
 

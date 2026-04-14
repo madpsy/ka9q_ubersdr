@@ -682,7 +682,9 @@ btnMute.addEventListener('click', () => {
     btnMute.textContent = isMuted ? '🔇' : '🔊';
     btnMute.classList.toggle('muted', isMuted);
     btnMute.title = isMuted ? 'Unmute' : 'Mute';
-    sendCommand({ type: 'cmd:set_mute', muted: isMuted });
+    // Use tab-level mute (browser mixer) — same mechanism as PTT-mute and
+    // multi-tab muting — for instant, consistent behaviour.
+    browser.runtime.sendMessage({ type: 'popup:set_tab_mute', muted: isMuted }).catch(() => {});
     setStatus(isMuted ? 'Muted' : 'Unmuted', 'info');
 });
 

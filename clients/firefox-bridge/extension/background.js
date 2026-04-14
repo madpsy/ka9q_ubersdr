@@ -480,6 +480,14 @@ browser.runtime.onMessage.addListener((msg, sender) => {
             break;
         }
 
+        // ── Popup: mute / unmute the selected tab (tab-level, browser mixer) ──
+        case 'popup:set_tab_mute': {
+            if (selectedTabId && registry.has(selectedTabId)) {
+                browser.tabs.update(selectedTabId, { muted: !!msg.muted }).catch(() => {});
+            }
+            break;
+        }
+
         // ── Popup: enable / disable the entire plugin ─────────────────────────
         case 'popup:set_plugin_enabled': {
             pluginEnabled = !!msg.enabled;

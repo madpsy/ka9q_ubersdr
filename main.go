@@ -1750,7 +1750,7 @@ func main() {
 	// Initialize admin handler (pass all components for proper shutdown during restart)
 	// Initialize RBN data store and fetcher (skew + statistics from sm7iun.se)
 	rbnStore := NewRBNDataStore()
-	rbnFetcher := NewRBNDataFetcher(rbnStore)
+	rbnFetcher := NewRBNDataFetcher(rbnStore, cwskimmerConfig)
 	rbnFetcher.Start()
 	defer rbnFetcher.Stop()
 

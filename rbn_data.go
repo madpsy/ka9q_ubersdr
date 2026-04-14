@@ -75,16 +75,20 @@ func NewRBNDataStore() *RBNDataStore {
 // RBNDataFetcher manages periodic fetching of RBN data
 type RBNDataFetcher struct {
 	store           *RBNDataStore
+	cwSkimmerConfig *CWSkimmerConfig // nil or disabled → fetching is skipped
 	client          *http.Client
 	stopCh          chan struct{}
 	mu              sync.Mutex
 	lastManualFetch time.Time // guards the once-per-minute manual refresh rate limit
 }
 
-// NewRBNDataFetcher creates a new fetcher backed by the given store
-func NewRBNDataFetcher(store *RBNDataStore) *RBNDataFetcher {
+// NewRBNDataFetcher creates a new fetcher backed by the given store.
+// cwSkimmerConfig may be nil; if it is nil or its Enabled field is false,
+// all fetches are skipped.
+func NewRBNDataFetcher(store *RBNDataStore, cwSkimmerConfig *CWSkimmerConfig) *RBNDataFetcher {
 	return &RBNDataFetcher{
-		store: store,
+		store:           store,
+		cwSkimmerConfig: cwSkimmerConfig,
 		client: &http.Client{
 			Timeout: rbnFetchTimeout,
 		},
@@ -224,8 +228,18 @@ func (f *RBNDataFetcher) Stop() {
 	close(f.stopCh)
 }
 
-// fetchAll fetches both CSV files, retrying up to rbnMaxRetries times each
+// cwSkimmerEnabled returns true when the CW Skimmer config is present and enabled.
+func (f *RBNDataFetcher) cwSkimmerEnabled() bool {
+	return f.cwSkimmerConfig != nil && f.cwSkimmerConfig.Enabled
+}
+
+// fetchAll fetches both CSV files, retrying up to rbnMaxRetries times each.
+// It is a no-op when CW Skimmer is not enabled.
 func (f *RBNDataFetcher) fetchAll() {
+	if !f.cwSkimmerEnabled() {
+		log.Println("[RBN] Skipping fetch — CW Skimmer is not enabled")
+		return
+	}
 	f.fetchSkew()
 	f.fetchStatistics()
 }

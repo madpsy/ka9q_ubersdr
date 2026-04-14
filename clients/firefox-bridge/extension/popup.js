@@ -568,9 +568,10 @@ function renderState(state) {
 
     if (state.freq !== undefined) {
         stateFreq.textContent = formatHz(state.freq);
-        // Pre-fill the frequency input in kHz.
+        // Pre-fill the frequency input in kHz, always showing 3 decimal places
+        // so the user can see and edit down to 1 Hz resolution.
         if (document.activeElement !== inputFreq) {
-            inputFreq.value = (state.freq / 1000).toFixed(3).replace(/\.?0+$/, '');
+            inputFreq.value = (state.freq / 1000).toFixed(3);
         }
     }
     if (state.mode !== undefined) {
@@ -875,9 +876,12 @@ function formatHz(hz) {
     const n = Number(hz);
     if (!isFinite(n) || isNaN(n)) return '—';
     if (n >= 1000000) {
-        return (n / 1000000).toFixed(3) + ' MHz';
+        // 3 decimal places = 1 kHz resolution at MHz scale
+        // Strip trailing zeros after decimal for cleaner display
+        return (n / 1000000).toFixed(6).replace(/\.?0+$/, '') + ' MHz';
     } else if (n >= 1000) {
-        return (n / 1000).toFixed(1) + ' kHz';
+        // 3 decimal places = 1 Hz resolution at kHz scale
+        return (n / 1000).toFixed(3).replace(/\.?0+$/, '') + ' kHz';
     }
     return n + ' Hz';
 }

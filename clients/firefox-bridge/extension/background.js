@@ -473,7 +473,8 @@ browser.runtime.onMessage.addListener((msg, sender) => {
             // If disabling PTT-mute while the rig is transmitting, unmute the SDR.
             if (!pttMuteEnabled && _lastPtt) {
                 if (selectedTabId && registry.has(selectedTabId)) {
-                    browser.tabs.sendMessage(selectedTabId, { type: 'cmd:set_mute', muted: false }).catch(() => {});
+                    browser.tabs.update(selectedTabId, { muted: false }).catch(() => {});
+                    // browser.tabs.sendMessage(selectedTabId, { type: 'cmd:set_mute', muted: false }).catch(() => {});
                 }
             }
             break;
@@ -641,11 +642,15 @@ function forwardCommandToTab(command) {
 
 // Mute every registered tab except activeTabId (which gets unmuted).
 // Only acts when there are 2+ tabs — single-tab setups are left alone.
+// Uses browser tab-level mute (instant, OS mixer) for fastest response.
+// radioAPI mute (Web Audio gain ramp) left here for reference but disabled —
+// it introduces unmute lag due to the gain ramp.
 function muteAllExcept(activeTabId) {
     if (registry.size < 2) return;
     for (const [tabId] of registry) {
         const shouldMute = tabId !== activeTabId;
-        browser.tabs.sendMessage(tabId, { type: 'cmd:set_mute', muted: shouldMute }).catch(() => {});
+        browser.tabs.update(tabId, { muted: shouldMute }).catch(() => {});
+        // browser.tabs.sendMessage(tabId, { type: 'cmd:set_mute', muted: shouldMute }).catch(() => {});
     }
 }
 
@@ -954,8 +959,12 @@ async function pollFlrigToSdr() {
             broadcastToPopup({ type: 'ptt:status', active: pttNow });
 
             if (pttMuteEnabled && selectedTabId && registry.has(selectedTabId)) {
-                // TX → mute; RX → unmute (but only if we were the ones who muted it).
-                browser.tabs.sendMessage(selectedTabId, { type: 'cmd:set_mute', muted: pttNow }).catch(() => {});
+                // TX → mute; RX → unmute.
+                // Tab-level mute (browser mixer) for instant response.
+                // radioAPI mute (Web Audio gain ramp) left for reference but disabled —
+                // it introduces unmute lag due to the gain ramp.
+                browser.tabs.update(selectedTabId, { muted: pttNow }).catch(() => {});
+                // browser.tabs.sendMessage(selectedTabId, { type: 'cmd:set_mute', muted: pttNow }).catch(() => {});
             }
         }
 
@@ -1008,7 +1017,7 @@ async function pollFlrigToSdr() {
 // ── flrig reconnect / poll loop ────────────────────────────────────────────────
 
 const FLRIG_RECONNECT_INTERVAL_MS = 10000;
-const FLRIG_POLL_INTERVAL_MS      = 500;
+const FLRIG_POLL_INTERVAL_MS      = 100;
 
 let flrigPollTimer     = null;
 let flrigReconnectTimer = null;

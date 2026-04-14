@@ -88,7 +88,9 @@ func NewRBNDataFetcher(store *RBNDataStore) *RBNDataFetcher {
 // Start launches the background fetch loop and returns immediately.
 // The first fetch is delayed by 5 minutes so that a rapid startup/crash loop
 // does not hammer the remote server. After the initial fetch the loop sleeps
-// until 02:00 UTC each day.
+// until 02:00 UTC each day. If the statistics data is stale after the daily
+// fetch (epoch_date is older than yesterday), a stats-only retry is scheduled
+// every 3 hours until the data advances.
 func (f *RBNDataFetcher) Start() {
 	log.Println("[RBN] Starting (initial fetch in 5 min, then daily at 02:00 UTC)")
 	go f.fetchLoop()
@@ -108,6 +110,7 @@ func (f *RBNDataFetcher) fetchLoop() {
 	// Initial fetch.
 	log.Println("[RBN] Performing initial data fetch")
 	f.fetchAll()
+	f.retryStatsIfStale()
 
 	// Schedule daily refresh at 02:00 UTC — abortable via stopCh.
 	for {
@@ -117,11 +120,65 @@ func (f *RBNDataFetcher) fetchLoop() {
 		case <-time.After(time.Until(next)):
 			log.Println("[RBN] Running scheduled daily fetch")
 			f.fetchAll()
+			f.retryStatsIfStale()
 		case <-f.stopCh:
 			log.Println("[RBN] Fetcher stopped")
 			return
 		}
 	}
+}
+
+// retryStatsIfStale checks whether the statistics data is stale (epoch_date is
+// older than yesterday) and, if so, retries fetchStatistics every 3 hours until
+// the data advances or Stop() is called.
+//
+// The statistics.csv epoch_date field is a day-number (days since Unix epoch)
+// representing the previous day's data. "Fresh" means epoch_date equals
+// (today's day number - 1). "Stale" means it is older than that.
+func (f *RBNDataFetcher) retryStatsIfStale() {
+	const retryInterval = 3 * time.Hour
+
+	for {
+		if !f.statsAreStale() {
+			return
+		}
+
+		log.Printf("[RBN] Statistics data is stale; will retry in %s", retryInterval)
+		select {
+		case <-f.stopCh:
+			log.Println("[RBN] Fetcher stopped during stats retry wait")
+			return
+		case <-time.After(retryInterval):
+		}
+
+		log.Println("[RBN] Retrying statistics fetch (stale epoch_date)")
+		f.fetchStatistics()
+	}
+}
+
+// statsAreStale returns true when the in-memory statistics data has an
+// epoch_date older than yesterday (i.e. the remote file has not yet been
+// updated for the current day's cycle).
+func (f *RBNDataFetcher) statsAreStale() bool {
+	f.store.mu.RLock()
+	defer f.store.mu.RUnlock()
+
+	if len(f.store.statsData) == 0 {
+		// No data at all — treat as stale so we keep retrying.
+		return true
+	}
+
+	// epoch_date is days since Unix epoch; yesterday = today - 1.
+	yesterdayEpoch := int(time.Now().UTC().Unix()/86400) - 1
+
+	for _, entry := range f.store.statsData {
+		if entry.EpochDate >= yesterdayEpoch {
+			// At least one entry is current — data is fresh.
+			return false
+		}
+	}
+	// Every entry is older than yesterday.
+	return true
 }
 
 // Stop signals the background goroutine to exit
@@ -203,8 +260,15 @@ func (f *RBNDataFetcher) fetchStatistics() {
 
 // fetchURL performs a GET request and returns the body bytes.
 // The response body is capped at rbnMaxBodyBytes to guard against runaway responses.
+// A descriptive User-Agent is sent so that sm7iun.se can identify the client.
 func (f *RBNDataFetcher) fetchURL(url string) ([]byte, error) {
-	resp, err := f.client.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("building request for %s: %w", url, err)
+	}
+	req.Header.Set("User-Agent", "UberSDR/"+Version+" (https://github.com/ka9q/ka9q-radio)")
+
+	resp, err := f.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("GET %s: %w", url, err)
 	}

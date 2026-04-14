@@ -11509,11 +11509,6 @@ const tooltipLine2 = timeStr;
                 const tempC = stats.cpu_temperature.celsius;
                 const driver = stats.cpu_temperature.driver;
 
-                // Colour-code by temperature range
-                let colour = '#28a745'; // green  < 60
-                if (tempC >= 80) colour = '#dc3545';      // red
-                else if (tempC >= 60) colour = '#fd7e14'; // orange
-
                 const pre = document.createElement('pre');
                 pre.style.background = '#fff';
                 pre.style.padding = '15px';
@@ -11525,7 +11520,7 @@ const tooltipLine2 = timeStr;
                 pre.style.whiteSpace = 'pre-wrap';
                 pre.style.wordWrap = 'break-word';
                 pre.style.margin = '0';
-                pre.innerHTML = `<span style="color:${colour}; font-weight:bold;">${Math.round(tempC)} °C</span>  (driver: ${driver})`;
+                pre.textContent = `${Math.round(tempC)} °C  (driver: ${driver})`;
                 cpuTempSection.appendChild(pre);
                 container.appendChild(cpuTempSection);
             }

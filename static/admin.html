@@ -8051,12 +8051,13 @@
                     html += `<div style="background:#fff; border:1px solid #e0e0e0; border-radius:4px; padding:10px 14px; color:#999; font-size:13px;">No skew data</div>`;
                 }
                 if (stats) {
+                    const statsDate = new Date(stats.epoch_date * 86400 * 1000).toISOString().slice(0, 10);
                     html += `
                         <div style="background:#fff; border:1px solid #c5cae9; border-radius:4px; padding:10px 14px; min-width:180px;">
                             <div style="font-size:11px; color:#666; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">Statistics</div>
                             <div style="font-size:20px; font-weight:bold; color:#1a237e;">${stats.spot_count.toLocaleString()}</div>
                             <div style="font-size:12px; color:#555; margin-top:4px;">Total spots</div>
-                            <div style="font-size:12px; color:#555;">Epoch: ${stats.epoch_date}</div>
+                            <div style="font-size:12px; color:#555;">Date: ${statsDate}</div>
                         </div>`;
                 } else {
                     html += `<div style="background:#fff; border:1px solid #e0e0e0; border-radius:4px; padding:10px 14px; color:#999; font-size:13px;">No statistics data</div>`;

@@ -34,11 +34,15 @@ let lastKnownState = null;
 let pluginEnabled  = true;
 
 // ── flrig settings ─────────────────────────────────────────────────────────────
-let flrigEnabled   = false;
-let flrigHost      = '127.0.0.1';
-let flrigPort      = 12345;
-let flrigDirection = 'both';   // 'sdr-to-rig' | 'rig-to-sdr' | 'both'
-let flrigConnected = false;
+let flrigEnabled    = false;
+let flrigHost       = '127.0.0.1';
+let flrigPort       = 12345;
+let flrigDirection  = 'both';   // 'sdr-to-rig' | 'rig-to-sdr' | 'both'
+let flrigConnected  = false;
+
+// PTT mute: when true, the selected SDR tab is muted while the rig is transmitting.
+let pttMuteEnabled = false;
+let _lastPtt       = false;   // last known PTT state (false = RX, true = TX)
 
 // Active VFO in flrig ('A' or 'B'). Kept in sync with flrig via rig.get_AB polls.
 let flrigActiveVfo = 'A';
@@ -67,14 +71,15 @@ let _pendingSdrMode = null;
 
 browser.storage.local.get([
     'selectedTabId', 'flrigEnabled', 'flrigHost', 'flrigPort', 'flrigDirection',
-    'pluginEnabled',
+    'pluginEnabled', 'pttMuteEnabled',
 ]).then((stored) => {
-    if (stored.selectedTabId  !== undefined) selectedTabId  = stored.selectedTabId;
-    if (stored.flrigEnabled   !== undefined) flrigEnabled   = stored.flrigEnabled;
-    if (stored.flrigHost      !== undefined) flrigHost      = stored.flrigHost;
-    if (stored.flrigPort      !== undefined) flrigPort      = stored.flrigPort;
-    if (stored.flrigDirection !== undefined) flrigDirection = stored.flrigDirection;
-    if (stored.pluginEnabled  !== undefined) pluginEnabled  = stored.pluginEnabled;
+    if (stored.selectedTabId   !== undefined) selectedTabId   = stored.selectedTabId;
+    if (stored.flrigEnabled    !== undefined) flrigEnabled    = stored.flrigEnabled;
+    if (stored.flrigHost       !== undefined) flrigHost       = stored.flrigHost;
+    if (stored.flrigPort       !== undefined) flrigPort       = stored.flrigPort;
+    if (stored.flrigDirection  !== undefined) flrigDirection  = stored.flrigDirection;
+    if (stored.pluginEnabled   !== undefined) pluginEnabled   = stored.pluginEnabled;
+    if (stored.pttMuteEnabled  !== undefined) pttMuteEnabled = stored.pttMuteEnabled;
 });
 
 // ── Profiles ───────────────────────────────────────────────────────────────────
@@ -153,6 +158,7 @@ browser.tabs.onRemoved.addListener((tabId) => {
             selectedTabId = null;
             browser.storage.local.set({ selectedTabId: null });
         }
+        if (registry.size === 0) lastKnownState = null;
         broadcastRegistry();
     }
 });
@@ -166,6 +172,7 @@ browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
             selectedTabId = null;
             browser.storage.local.set({ selectedTabId: null });
         }
+        if (registry.size === 0) lastKnownState = null;
         broadcastRegistry();
     }
 });
@@ -260,6 +267,11 @@ browser.runtime.onMessage.addListener((msg, sender) => {
                 selectedTabId = null;
                 browser.storage.local.set({ selectedTabId: null });
             }
+            // Clear stale state when the registry is now empty so the popup
+            // doesn't show old values the next time it is opened.
+            if (registry.size === 0) {
+                lastKnownState = null;
+            }
             broadcastRegistry();
             break;
         }
@@ -337,15 +349,17 @@ browser.runtime.onMessage.addListener((msg, sender) => {
         // ── Popup: request current registry + state ───────────────────────────
         case 'popup:get_registry': {
             return Promise.resolve({
-                tabs:          registrySnapshot(),
-                selectedTabId: selectedTabId,
-                lastState:     lastKnownState,
-                flrigEnabled:  flrigEnabled,
-                flrigHost:     flrigHost,
-                flrigPort:     flrigPort,
-                flrigDirection: flrigDirection,
-                flrigConnected: flrigConnected,
-                pluginEnabled:  pluginEnabled,
+                tabs:            registrySnapshot(),
+                selectedTabId:   selectedTabId,
+                lastState:       lastKnownState,
+                flrigEnabled:    flrigEnabled,
+                flrigHost:       flrigHost,
+                flrigPort:       flrigPort,
+                flrigDirection:  flrigDirection,
+                flrigConnected:  flrigConnected,
+                pluginEnabled:   pluginEnabled,
+                pttMuteEnabled:  pttMuteEnabled,
+                pttActive:       _lastPtt,
             });
         }
 
@@ -450,6 +464,20 @@ browser.runtime.onMessage.addListener((msg, sender) => {
             break;
         }
 
+        // ── Popup: enable / disable PTT-mute feature ──────────────────────────
+        case 'popup:set_ptt_mute_enabled': {
+            pttMuteEnabled = !!msg.enabled;
+            browser.storage.local.set({ pttMuteEnabled });
+
+            // If disabling PTT-mute while the rig is transmitting, unmute the SDR.
+            if (!pttMuteEnabled && _lastPtt) {
+                if (selectedTabId && registry.has(selectedTabId)) {
+                    browser.tabs.sendMessage(selectedTabId, { type: 'cmd:set_mute', muted: false }).catch(() => {});
+                }
+            }
+            break;
+        }
+
         // ── Popup: enable / disable the entire plugin ─────────────────────────
         case 'popup:set_plugin_enabled': {
             pluginEnabled = !!msg.enabled;
@@ -465,7 +493,9 @@ browser.runtime.onMessage.addListener((msg, sender) => {
                 // Stop flrig polling.
                 stopFlrigPoll();
                 flrigConnected = false;
+                _lastPtt = false;
                 broadcastToPopup({ type: 'flrig:status', connected: false, message: 'Plugin disabled' });
+                broadcastToPopup({ type: 'ptt:status', active: false });
             } else {
                 // Re-enable: restart flrig polling if configured.
                 if (flrigEnabled) startFlrigPoll();
@@ -733,6 +763,11 @@ async function flrigSetMode(flrigMode) {
     await xmlrpcCall('rig.set_mode', [flrigMode]);
 }
 
+async function flrigGetPtt() {
+    const val = await xmlrpcCall('rig.get_ptt', []);
+    return !!val;
+}
+
 async function flrigGetAB() {
     // Returns 'A' or 'B' — the currently active VFO in flrig.
     const val = await xmlrpcCall('rig.get_AB', []);
@@ -900,11 +935,31 @@ async function pollFlrigToSdr() {
             flrigGetMode(),
         ]);
 
-        const freq = Math.round(freqRaw);
+        const freq    = Math.round(freqRaw);
         const sdrMode = FLRIG_TO_SDR[modeRaw] || null;
 
+        // PTT is fetched separately so that rigs which don't support rig.get_ptt
+        // don't break the poll loop — a failure here is silently ignored.
+        let pttNow = _lastPtt;
+        try {
+            pttNow = !!(await flrigGetPtt());
+        } catch (_) {
+            // rig doesn't support get_ptt — leave pttNow as last known value
+        }
+
+        // Handle PTT state transitions — mute/unmute the selected SDR tab.
+        if (pttNow !== _lastPtt) {
+            _lastPtt = pttNow;
+            broadcastToPopup({ type: 'ptt:status', active: pttNow });
+
+            if (pttMuteEnabled && selectedTabId && registry.has(selectedTabId)) {
+                // TX → mute; RX → unmute (but only if we were the ones who muted it).
+                browser.tabs.sendMessage(selectedTabId, { type: 'cmd:set_mute', muted: pttNow }).catch(() => {});
+            }
+        }
+
         // Always broadcast raw flrig values to the popup for display.
-        broadcastToPopup({ type: 'flrig:state', freq, mode: modeRaw, vfo: flrigActiveVfo });
+        broadcastToPopup({ type: 'flrig:state', freq, mode: modeRaw, vfo: flrigActiveVfo, ptt: pttNow });
 
         // Only push to SDR if direction allows it.
         if (flrigDirection === 'rig-to-sdr' || flrigDirection === 'both') {

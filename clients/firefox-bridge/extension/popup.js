@@ -14,6 +14,7 @@ const signalBarFill   = document.getElementById('signal-bar-fill');
 
 const btnMute         = document.getElementById('btn-mute');
 const btnSync         = document.getElementById('btn-sync');
+const btnPttMute      = document.getElementById('btn-ptt-mute');
 const btnPower        = document.getElementById('btn-power');
 
 const inputFreq       = document.getElementById('input-freq');
@@ -35,6 +36,7 @@ const flrigBody        = document.getElementById('flrig-body');
 const flrigEnabledCb   = document.getElementById('flrig-enabled');
 const flrigDot         = document.getElementById('flrig-dot');
 const flrigStatusTxt   = document.getElementById('flrig-status-text');
+const flrigPttBadge    = document.getElementById('flrig-ptt-badge');
 const flrigReadoutFreq = document.getElementById('flrig-readout-freq');
 const flrigReadoutMode = document.getElementById('flrig-readout-mode');
 const inputFlrigHost   = document.getElementById('input-flrig-host');
@@ -67,9 +69,11 @@ const modalCancel     = document.getElementById('modal-cancel');
 let currentState = null;   // Last known radio state { freq, mode, bwLow, bwHigh }
 let selectedTabId = null;
 let isMuted = false;
-let isSyncEnabled = false;  // mirrors background flrigEnabled (default: disabled)
-let isPluginEnabled = true; // mirrors background pluginEnabled
-let publicInstances = []; // Cached list from instances.ubersdr.org
+let isSyncEnabled    = false;  // mirrors background flrigEnabled (default: disabled)
+let isPluginEnabled  = true;   // mirrors background pluginEnabled
+let isPttMuteEnabled = false;  // mirrors background pttMuteEnabled
+let isPttActive      = false;  // current PTT state from flrig
+let publicInstances  = [];     // Cached list from instances.ubersdr.org
 
 // ── Confirm modal ──────────────────────────────────────────────────────────────
 
@@ -322,7 +326,10 @@ async function init() {
         if (resp) {
             renderTabList(resp.tabs, resp.selectedTabId);
             selectedTabId = resp.selectedTabId;
-            if (resp.lastState) {
+            // Only restore last state if there are actually tabs registered —
+            // otherwise renderTabList already cleared the display via renderState(null)
+            // and we must not re-populate it with stale values.
+            if (resp.lastState && resp.tabs && resp.tabs.length > 0) {
                 currentState = resp.lastState;
                 renderState(resp.lastState);
             }
@@ -335,8 +342,10 @@ async function init() {
                 updateFlrigUI(resp.flrigEnabled, resp.flrigConnected);
             }
             // Restore header button states
-            if (resp.flrigEnabled  !== undefined) setSyncButtonState(resp.flrigEnabled);
-            if (resp.pluginEnabled !== undefined) setPluginButtonState(resp.pluginEnabled);
+            if (resp.flrigEnabled    !== undefined) setSyncButtonState(resp.flrigEnabled);
+            if (resp.pluginEnabled   !== undefined) setPluginButtonState(resp.pluginEnabled);
+            if (resp.pttMuteEnabled  !== undefined) setPttMuteButtonState(resp.pttMuteEnabled);
+            if (resp.pttActive       !== undefined) updatePttDisplay(resp.pttActive);
         }
     } catch (err) {
         setStatus('Background not ready — try reopening the popup.', 'error');
@@ -695,6 +704,36 @@ btnSync.addEventListener('click', () => {
     setStatus(newEnabled ? 'flrig sync enabled' : 'flrig sync disabled', 'info');
 });
 
+// ── PTT-mute toggle ────────────────────────────────────────────────────────────
+
+function setPttMuteButtonState(enabled) {
+    isPttMuteEnabled = enabled;
+    btnPttMute.classList.toggle('ptt-mute-on',  enabled);
+    btnPttMute.classList.toggle('ptt-mute-off', !enabled);
+    btnPttMute.title = enabled
+        ? 'PTT-mute ON — SDR mutes while transmitting (click to disable)'
+        : 'PTT-mute OFF — SDR stays live during TX (click to enable)';
+}
+
+function updatePttDisplay(active) {
+    isPttActive = active;
+    // Badge in flrig section — always visible, switches between RX (green) and TX (red+pulse)
+    if (flrigPttBadge) {
+        flrigPttBadge.textContent = active ? 'TX' : 'RX';
+        flrigPttBadge.classList.toggle('tx', active);
+        flrigPttBadge.classList.toggle('rx', !active);
+    }
+    // Header button gets extra pulse class when actively transmitting
+    btnPttMute.classList.toggle('ptt-active', active && isPttMuteEnabled);
+}
+
+btnPttMute.addEventListener('click', () => {
+    const newEnabled = !isPttMuteEnabled;
+    setPttMuteButtonState(newEnabled);
+    browser.runtime.sendMessage({ type: 'popup:set_ptt_mute_enabled', enabled: newEnabled }).catch(() => {});
+    setStatus(newEnabled ? 'PTT-mute enabled' : 'PTT-mute disabled', newEnabled ? 'ok' : 'info');
+});
+
 // ── Power toggle (enable / disable the entire plugin) ─────────────────────────
 
 function setPluginButtonState(enabled) {
@@ -792,14 +831,20 @@ function saveFlrigSettings(enabled) {
 
 function updateFlrigUI(enabled, connected) {
     if (!enabled) {
-        flrigDot.className       = 'flrig-dot';
+        flrigDot.className         = 'flrig-dot';
         flrigStatusTxt.textContent = 'Disabled';
+        // Hide PTT badge when flrig is disabled
+        if (flrigPttBadge) flrigPttBadge.style.display = 'none';
     } else if (connected) {
-        flrigDot.className       = 'flrig-dot connected';
+        flrigDot.className         = 'flrig-dot connected';
         flrigStatusTxt.textContent = 'Connected';
+        // Show PTT badge when connected
+        if (flrigPttBadge) flrigPttBadge.style.display = '';
     } else {
-        flrigDot.className       = 'flrig-dot';
+        flrigDot.className         = 'flrig-dot';
         flrigStatusTxt.textContent = 'Connecting…';
+        // Show PTT badge (as RX) even while connecting — it will update on first poll
+        if (flrigPttBadge) flrigPttBadge.style.display = '';
     }
 }
 
@@ -874,6 +919,13 @@ browser.runtime.onMessage.addListener((msg) => {
                 const vfoLabel = msg.vfo ? ` [${msg.vfo}]` : '';
                 flrigReadoutMode.textContent = msg.mode + vfoLabel;
             }
+            if (msg.ptt !== undefined) {
+                updatePttDisplay(msg.ptt);
+            }
+            break;
+
+        case 'ptt:status':
+            updatePttDisplay(!!msg.active);
             break;
 
         case 'vfo:switched':
@@ -1011,6 +1063,7 @@ async function deleteProfile(name) {
 // Apply default visual states immediately (before async init response arrives).
 setSyncButtonState(isSyncEnabled);
 setPluginButtonState(isPluginEnabled);
+setPttMuteButtonState(isPttMuteEnabled);
 
 init();
 fetchAndRenderProfiles();

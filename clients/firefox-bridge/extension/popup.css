@@ -81,6 +81,27 @@ body {
     background: rgba(233, 69, 96, 0.1);
 }
 
+/* PTT-mute button — amber when enabled (will mute on TX), dimmed when off */
+.header-btn.ptt-mute-on {
+    color: #f39c12;
+    border-color: #f39c12;
+}
+.header-btn.ptt-mute-off {
+    color: #555;
+    border-color: #333;
+}
+/* PTT-mute button — red pulse when actively transmitting */
+.header-btn.ptt-mute-on.ptt-active {
+    color: #e94560;
+    border-color: #e94560;
+    background: rgba(233, 69, 96, 0.15);
+    animation: ptt-pulse 0.8s ease-in-out infinite alternate;
+}
+@keyframes ptt-pulse {
+    from { box-shadow: 0 0 0px #e94560; }
+    to   { box-shadow: 0 0 6px #e94560; }
+}
+
 .header-icon {
     width: 32px;
     height: 32px;
@@ -488,6 +509,28 @@ body {
 .flrig-status-text {
     font-size: 11px;
     color: #888;
+    flex: 1;
+}
+
+/* PTT badge — always visible in the flrig status row */
+.flrig-ptt-badge {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: #fff;
+    border-radius: 3px;
+    padding: 1px 5px;
+}
+
+/* RX state — green, no animation */
+.flrig-ptt-badge.rx {
+    background: #27ae60;
+}
+
+/* TX state — red with pulse */
+.flrig-ptt-badge.tx {
+    background: #e94560;
+    animation: ptt-pulse 0.8s ease-in-out infinite alternate;
 }
 
 /* ── Toggle switch ───────────────────────────────────────────────────────── */

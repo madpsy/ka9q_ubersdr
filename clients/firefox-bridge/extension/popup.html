@@ -12,12 +12,12 @@
     <div class="header">
         <img class="header-icon" src="icons/icon48.png" alt="UberSDR" width="32" height="32">
         <div>
-            <div class="header-title">UberSDR Bridge</div>
-            <div class="header-subtitle">Radio control &amp; bridge</div>
+            <div class="header-title">UberSDR</div>
         </div>
-        <button class="header-btn" id="btn-mute"  title="Mute / Unmute">🔊</button>
-        <button class="header-btn" id="btn-sync"  title="flrig sync on/off">⇄</button>
-        <button class="header-btn" id="btn-power" title="Enable / disable extension">⏻</button>
+        <button class="header-btn" id="btn-mute"     title="Mute / Unmute">🔊</button>
+        <button class="header-btn" id="btn-sync"     title="flrig sync on/off">⇄</button>
+        <button class="header-btn" id="btn-ptt-mute" title="Mute SDR on PTT — click to toggle">📡</button>
+        <button class="header-btn" id="btn-power"    title="Enable / disable extension">⏻</button>
     </div>
 
     <!-- ── UberSDR Tab Selection ────────────────────────────────────────────── -->
@@ -168,6 +168,7 @@
             <div class="flrig-status">
                 <div class="flrig-dot" id="flrig-dot"></div>
                 <span class="flrig-status-text" id="flrig-status-text">Disabled</span>
+                <div class="flrig-ptt-badge rx" id="flrig-ptt-badge" style="display:none">RX</div>
             </div>
             <div class="flrig-readout" id="flrig-readout">
                 <span id="flrig-readout-freq">—</span>

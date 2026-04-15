@@ -33,16 +33,22 @@ import (
 //     "poor"     predicted SSB SNR <   0 dB
 
 const (
-	// wsprNoiseBWHz is the effective noise bandwidth of a WSPR signal (~6 Hz)
-	wsprNoiseBWHz = 6.0
+	// wsprSNRRefBWHz is the reference noise bandwidth used by wsprd when reporting SNR.
+	// Per the WSPR specification (and wsprd source), SNR is reported relative to a
+	// 2500 Hz noise bandwidth — NOT the ~6 Hz occupied bandwidth of the signal itself.
+	// This is an important distinction: the 2500 Hz reference is already baked into
+	// every SNR value we read from the CSV, so the bandwidth penalty is the difference
+	// between 2500 Hz (WSPR SNR reference) and 2700 Hz (SSB phone bandwidth).
+	wsprSNRRefBWHz = 2500.0
 	// ssbNoiseBWHz is the effective noise bandwidth of an SSB phone signal (~2700 Hz)
 	ssbNoiseBWHz = 2700.0
 )
 
-// bwPenaltyDB is the noise bandwidth penalty when switching from WSPR to SSB.
-// = 10 * log10(2700 / 6) ≈ 26.5 dB
-// Computed at package init time (math.Log10 is not a constant expression in Go).
-var bwPenaltyDB = 10.0 * math.Log10(ssbNoiseBWHz/wsprNoiseBWHz)
+// bwPenaltyDB is the noise bandwidth penalty when switching from the WSPR SNR reference
+// bandwidth (2500 Hz) to SSB phone bandwidth (2700 Hz).
+// = 10 * log10(2700 / 2500) ≈ 0.34 dB
+// This is nearly negligible because wsprd already normalises SNR to a 2500 Hz reference.
+var bwPenaltyDB = 10.0 * math.Log10(ssbNoiseBWHz/wsprSNRRefBWHz)
 
 // validWSPRBands is the whitelist of standard amateur bands on which WSPR operates
 var validWSPRBands = map[string]bool{

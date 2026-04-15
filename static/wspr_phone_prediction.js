@@ -275,9 +275,7 @@ const app = (() => {
 
         let distStr = '—';
         if (entry.distance_km != null) {
-            distStr = entry.distance_km >= 1000
-                ? `${(entry.distance_km / 1000).toFixed(1)} Mm`
-                : `${Math.round(entry.distance_km)} km`;
+            distStr = `${Math.round(entry.distance_km)} km`;
         }
 
         let bearingStr = '—';
@@ -366,9 +364,7 @@ const app = (() => {
 
             let distStr = '—';
             if (e.distance_km != null) {
-                distStr = e.distance_km >= 1000
-                    ? `${(e.distance_km / 1000).toFixed(1)} Mm`
-                    : `${Math.round(e.distance_km)} km`;
+                distStr = `${Math.round(e.distance_km)} km`;
             }
 
             let bearingStr = '—';

@@ -402,14 +402,14 @@
 
 <div class="methodology">
     <strong>How this works:</strong>
-    WSPR uses a ~6 Hz noise bandwidth; SSB phone uses ~2700 Hz.
-    The noise bandwidth penalty is <code>10 × log₁₀(2700 ÷ 6) ≈ 26.5 dB</code>.
+    WSPR SNR values (as reported by wsprd) are already normalised to a <strong>2500 Hz reference bandwidth</strong> — very close to the 2700 Hz SSB phone bandwidth.
+    The noise bandwidth correction is therefore only <code>10 × log₁₀(2700 ÷ 2500) ≈ 0.34 dB</code> (negligible).
     Each WSPR spot is normalised to a <strong>path metric</strong> = <code>SNR − TX_dBm</code>, which removes the transmitter's power from the equation.
     The <strong>mean path metric</strong> across all spots for a country/band is used — this is robust against transmitters mis-reporting their power and smooths out propagation fluctuations.
-    <strong>Predicted SSB SNR</strong> = mean path metric + your TX power (dBm) − 26.5 dB.
+    <strong>Predicted SSB SNR</strong> = mean path metric + your TX power (dBm) − 0.34 dB.
     Signal quality thresholds follow <strong>ITU-R RS.1808 / CCIR Report 322</strong> aligned with the amateur RS report system:
     Excellent ≥ +15 dB (RS 5), Good ≥ +10 dB (RS 4), Workable ≥ +6 dB (RS 3), Marginal ≥ +3 dB (RS 2), Very Poor ≥ 0 dB (RS 1), Not Viable &lt; 0 dB.
-    Assumes reciprocal propagation. Does not account for antenna gain or SSB coding inefficiency (~3–6 dB worse than pure bandwidth math).
+    Assumes reciprocal propagation. Does not account for antenna gain differences between WSPR and SSB antennas.
 </div>
 
 <div class="table-section">

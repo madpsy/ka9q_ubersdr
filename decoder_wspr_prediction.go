@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 )
@@ -19,11 +20,16 @@ import (
 //   phone_power_w  int   whitelist {10,50,100,500,1000}  Assumed SSB TX power in watts (default: 100)
 //   band           str   WSPR band whitelist or empty for all (default: "")
 //   min_ssb_snr    int   -60–30   Minimum predicted SSB SNR to include in results (default: -60)
-//   summary        bool  If "true", return a lightweight list of country/band combinations only.
+//   summary        bool  If "true", return a lightweight grouped summary — no meta block.
 //                        When summary=true the default min_ssb_snr is raised to +10 dB (Good+)
-//                        so the list only contains bands that are realistically usable.
-//                        Response shape changes to { "predictions": [ { country, continent, band,
-//                        prediction, predicted_ssb_snr }, … ] } — no meta block.
+//                        so only realistically usable bands appear.
+//   by             str   "country" (default) or "band" — controls grouping in summary mode.
+//                        by=country: one entry per country, best band highlighted, all qualifying
+//                          bands listed.  Shape: { country, continent, best_prediction,
+//                          best_predicted_ssb_snr, bands:[{band,prediction,predicted_ssb_snr}] }
+//                        by=band: one entry per band, all qualifying countries listed sorted by
+//                          SNR descending.  Shape: { band, country_count, best_prediction,
+//                          countries:[{country,continent,prediction,predicted_ssb_snr}] }
 //
 // Physics:
 //   wsprd reports SNR normalised to a 2500 Hz reference bandwidth.  This is the
@@ -145,20 +151,48 @@ type WSPRPredictionResponse struct {
 	Predictions []WSPRPredictionEntry `json:"predictions"`
 }
 
-// WSPRPredictionSummaryEntry is the lightweight per-country/band entry returned
-// when the caller passes summary=true.  It omits all signal-level detail and
-// meta information so the response is small enough to embed in other pages.
-type WSPRPredictionSummaryEntry struct {
-	Country         string  `json:"country"`
-	Continent       string  `json:"continent"`
+// ── Summary-mode types ────────────────────────────────────────────────────────
+
+// WSPRSummaryBandEntry is one band within a by=country summary row.
+type WSPRSummaryBandEntry struct {
 	Band            string  `json:"band"`
 	Prediction      string  `json:"prediction"`
 	PredictedSSBSNR float64 `json:"predicted_ssb_snr"`
 }
 
-// WSPRPredictionSummaryResponse is the slim API response used when summary=true
-type WSPRPredictionSummaryResponse struct {
-	Predictions []WSPRPredictionSummaryEntry `json:"predictions"`
+// WSPRSummaryByCountryEntry is one row in a by=country summary response.
+type WSPRSummaryByCountryEntry struct {
+	Country             string                 `json:"country"`
+	Continent           string                 `json:"continent"`
+	BestPrediction      string                 `json:"best_prediction"`
+	BestPredictedSSBSNR float64                `json:"best_predicted_ssb_snr"`
+	Bands               []WSPRSummaryBandEntry `json:"bands"` // all qualifying bands, best-first
+}
+
+// WSPRSummaryByCountryResponse wraps the by=country summary list.
+type WSPRSummaryByCountryResponse struct {
+	Predictions []WSPRSummaryByCountryEntry `json:"predictions"`
+}
+
+// WSPRSummaryCountryEntry is one country within a by=band summary row.
+type WSPRSummaryCountryEntry struct {
+	Country         string  `json:"country"`
+	Continent       string  `json:"continent"`
+	Prediction      string  `json:"prediction"`
+	PredictedSSBSNR float64 `json:"predicted_ssb_snr"`
+}
+
+// WSPRSummaryByBandEntry is one row in a by=band summary response.
+type WSPRSummaryByBandEntry struct {
+	Band           string                    `json:"band"`
+	CountryCount   int                       `json:"country_count"`
+	BestPrediction string                    `json:"best_prediction"`
+	Countries      []WSPRSummaryCountryEntry `json:"countries"` // sorted by predicted_ssb_snr desc
+}
+
+// WSPRSummaryByBandResponse wraps the by=band summary list.
+type WSPRSummaryByBandResponse struct {
+	Predictions []WSPRSummaryByBandEntry `json:"predictions"`
 }
 
 // wattsTodBm converts power in watts to dBm
@@ -255,10 +289,24 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 		return
 	}
 
-	// summary: if "true", return a lightweight country/band list only.
+	// summary: if "true", return a lightweight grouped summary — no meta block.
 	// When summary mode is active the default min_ssb_snr is raised to +10 dB
 	// (Good+) so the list only contains bands that are realistically usable.
 	summaryMode := r.URL.Query().Get("summary") == "true"
+
+	// by: grouping dimension for summary mode — "country" (default) or "band".
+	// Ignored when summary=false.
+	summaryBy := r.URL.Query().Get("by")
+	if summaryBy == "" {
+		summaryBy = "country"
+	}
+	if summaryMode && summaryBy != "country" && summaryBy != "band" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "by must be 'country' or 'band'",
+		})
+		return
+	}
 
 	// min_ssb_snr: -60–30.
 	// Default is -60 (show everything) in full mode; +10 (Good+) in summary mode.
@@ -514,21 +562,127 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 		}
 	}
 
-	// ── Summary mode: return slim country/band list ───────────────────────────
+	// ── Summary mode ─────────────────────────────────────────────────────────
 	if summaryMode {
-		summary := make([]WSPRPredictionSummaryEntry, 0, len(predictions))
+		predRank := map[string]int{
+			"excellent": 0, "good": 1, "workable": 2,
+			"marginal": 3, "poor": 4, "not_viable": 5,
+		}
+
+		if summaryBy == "country" {
+			// Group by country — one entry per country, all qualifying bands listed.
+			type countryAcc struct {
+				continent           string
+				bestPrediction      string
+				bestPredictedSSBSNR float64
+				bands               []WSPRSummaryBandEntry
+			}
+			byCountry := make(map[string]*countryAcc)
+			for _, p := range predictions {
+				acc, ok := byCountry[p.Country]
+				if !ok {
+					acc = &countryAcc{
+						continent:           p.Continent,
+						bestPrediction:      p.Prediction,
+						bestPredictedSSBSNR: p.PredictedSSBSNR,
+					}
+					byCountry[p.Country] = acc
+				}
+				acc.bands = append(acc.bands, WSPRSummaryBandEntry{
+					Band:            p.Band,
+					Prediction:      p.Prediction,
+					PredictedSSBSNR: p.PredictedSSBSNR,
+				})
+				if predRank[p.Prediction] < predRank[acc.bestPrediction] ||
+					(predRank[p.Prediction] == predRank[acc.bestPrediction] && p.PredictedSSBSNR > acc.bestPredictedSSBSNR) {
+					acc.bestPrediction = p.Prediction
+					acc.bestPredictedSSBSNR = p.PredictedSSBSNR
+				}
+			}
+
+			// Build result slice, sort bands within each country best-first
+			result := make([]WSPRSummaryByCountryEntry, 0, len(byCountry))
+			for country, acc := range byCountry {
+				sort.Slice(acc.bands, func(i, j int) bool {
+					ri, rj := predRank[acc.bands[i].Prediction], predRank[acc.bands[j].Prediction]
+					if ri != rj {
+						return ri < rj
+					}
+					return acc.bands[i].PredictedSSBSNR > acc.bands[j].PredictedSSBSNR
+				})
+				result = append(result, WSPRSummaryByCountryEntry{
+					Country:             country,
+					Continent:           acc.continent,
+					BestPrediction:      acc.bestPrediction,
+					BestPredictedSSBSNR: acc.bestPredictedSSBSNR,
+					Bands:               acc.bands,
+				})
+			}
+			// Sort countries: best prediction first, then by best SNR descending
+			sort.Slice(result, func(i, j int) bool {
+				ri, rj := predRank[result[i].BestPrediction], predRank[result[j].BestPrediction]
+				if ri != rj {
+					return ri < rj
+				}
+				return result[i].BestPredictedSSBSNR > result[j].BestPredictedSSBSNR
+			})
+
+			w.WriteHeader(http.StatusOK)
+			if err := json.NewEncoder(w).Encode(WSPRSummaryByCountryResponse{Predictions: result}); err != nil {
+				log.Printf("WSPR prediction summary by=country: error encoding response: %v", err)
+			}
+			return
+		}
+
+		// by=band: one entry per band, all qualifying countries listed sorted by SNR desc.
+		// Use the canonical band order so bands appear in frequency order.
+		bandOrder := []string{"2200m", "630m", "160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m"}
+		type bandAcc struct {
+			bestPrediction string
+			countries      []WSPRSummaryCountryEntry
+		}
+		byBand := make(map[string]*bandAcc)
 		for _, p := range predictions {
-			summary = append(summary, WSPRPredictionSummaryEntry{
+			acc, ok := byBand[p.Band]
+			if !ok {
+				acc = &bandAcc{bestPrediction: p.Prediction}
+				byBand[p.Band] = acc
+			}
+			acc.countries = append(acc.countries, WSPRSummaryCountryEntry{
 				Country:         p.Country,
 				Continent:       p.Continent,
-				Band:            p.Band,
 				Prediction:      p.Prediction,
 				PredictedSSBSNR: p.PredictedSSBSNR,
 			})
+			if predRank[p.Prediction] < predRank[acc.bestPrediction] {
+				acc.bestPrediction = p.Prediction
+			}
 		}
+
+		result := make([]WSPRSummaryByBandEntry, 0, len(byBand))
+		for _, b := range bandOrder {
+			acc, ok := byBand[b]
+			if !ok {
+				continue
+			}
+			sort.Slice(acc.countries, func(i, j int) bool {
+				ri, rj := predRank[acc.countries[i].Prediction], predRank[acc.countries[j].Prediction]
+				if ri != rj {
+					return ri < rj
+				}
+				return acc.countries[i].PredictedSSBSNR > acc.countries[j].PredictedSSBSNR
+			})
+			result = append(result, WSPRSummaryByBandEntry{
+				Band:           b,
+				CountryCount:   len(acc.countries),
+				BestPrediction: acc.bestPrediction,
+				Countries:      acc.countries,
+			})
+		}
+
 		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(WSPRPredictionSummaryResponse{Predictions: summary}); err != nil {
-			log.Printf("WSPR prediction summary: error encoding response: %v", err)
+		if err := json.NewEncoder(w).Encode(WSPRSummaryByBandResponse{Predictions: result}); err != nil {
+			log.Printf("WSPR prediction summary by=band: error encoding response: %v", err)
 		}
 		return
 	}

@@ -1895,20 +1895,28 @@ class SpectrumDisplay {
         const waterfallStartY = lineGraphVisible ? 0 : 75;
         const waterfallHeight = this.height - waterfallStartY;
 
-        // Clear the waterfall area on the visible canvas
-        this.ctx.fillStyle = '#000';
-        this.ctx.fillRect(0, waterfallStartY, this.width, waterfallHeight);
-
         // Draw offscreen canvas onto visible canvas shifted down by the fractional offset.
-        // Source: full waterfall area of offscreen canvas
-        // Destination: same area but shifted down by gpuScrollOffset (fractional pixels)
+        // Source: full waterfall area of offscreen canvas, minus the bottom strip that would
+        //         scroll off the bottom edge.
+        // Destination: shifted down by gpuScrollOffset (fractional pixels, 0..1).
+        //
+        // We do NOT clear the whole waterfall area first — that caused a 0..1px black gap
+        // at the top to flicker every frame. Instead we draw the shifted content first, then
+        // fill only the tiny exposed strip at the top (at most 1px, usually sub-pixel).
+        const srcHeight = waterfallHeight - this.gpuScrollOffset; // clip bottom to avoid overflow
         this.ctx.drawImage(
             this.gpuOffscreenCanvas,
             0, waterfallStartY,                          // source x, y
-            this.width, waterfallHeight,                 // source width, height
+            this.width, srcHeight,                       // source width, height (clipped)
             0, waterfallStartY + this.gpuScrollOffset,   // dest x, y (fractional)
-            this.width, waterfallHeight                  // dest width, height
+            this.width, srcHeight                        // dest width, height
         );
+
+        // Fill the sub-pixel gap at the top with black (at most 1px tall — invisible to the eye)
+        if (this.gpuScrollOffset > 0) {
+            this.ctx.fillStyle = '#000';
+            this.ctx.fillRect(0, waterfallStartY, this.width, this.gpuScrollOffset);
+        }
     }
 
     // Reset GPU scroll state (called when switching modes or resizing)

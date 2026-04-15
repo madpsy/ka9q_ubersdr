@@ -201,84 +201,69 @@ class SignalMeter {
             sMeterNeedle.update(basebandPower, snr);
         }
         
+        // ── Scale constants matching s-meter-needle.js ──────────────────────
+        // dBFS: minDb = -127, maxDb = -33  (same as SMeterNeedle.minDb/maxDb)
+        // SNR:  snrMin = 30,  snrMax = 60  (same as SMeterNeedle.snrMin/snrMax)
+        const DBFS_MIN = -127;
+        const DBFS_MAX = -33;
+        const SNR_MIN  = 30;
+        const SNR_MAX  = 60;
+
+        // ── Colour helpers matching s-meter-needle.js ────────────────────────
+        // sMeterColour: red at -115 → yellow at -91 → green at -73 (HSL 0→120)
+        const sMeterColour = (dbfs) => {
+            const clamped = Math.max(-115, Math.min(-73, dbfs));
+            const hue = Math.round(((clamped + 115) / 42) * 120);
+            return `hsl(${hue}, 90%, 55%)`;
+        };
+        // snrColour: red at 30 → green at 50 (HSL 0→120)
+        const snrColour = (snr) => {
+            const snrClamped = Math.max(30, Math.min(50, snr));
+            const hue = Math.round(((snrClamped - 30) / 20) * 120);
+            return `hsl(${hue}, 90%, 55%)`;
+        };
+
         // Calculate SNR if in SNR mode
         let displayValue = basebandPower;
         let displayText = '';
-        
+
         if (this.displayMode === 'snr') {
             const snr = basebandPower - noiseDensity;
             displayValue = snr;
-            // Pad single-digit values with a non-breaking space to prevent layout shift
             const snrText = snr.toFixed(1);
-            // Check if the value is single digit (before decimal point)
             const paddedSnrText = (Math.abs(snr) < 10) ? '\u00A0' + snrText : snrText;
             displayText = `${paddedSnrText} dB (SNR)`;
         } else {
             displayText = `${basebandPower.toFixed(1)} dBFS`;
         }
-        
-        // S-meter style logarithmic scale
+
+        // Linear percentage mapping — same range as S-meter needle
         let percentage;
         if (this.displayMode === 'snr') {
-            // SNR mode: 0-60 dB range
-            // 0-20 dB: 0-40% (weak)
-            // 20-40 dB: 40-80% (medium)
-            // 40-60 dB: 80-100% (strong)
-            if (displayValue < 20) {
-                percentage = (displayValue / 20) * 40;
-            } else if (displayValue < 40) {
-                percentage = 40 + ((displayValue - 20) / 20) * 40;
-            } else {
-                percentage = 80 + ((displayValue - 40) / 20) * 20;
-            }
+            percentage = ((displayValue - SNR_MIN) / (SNR_MAX - SNR_MIN)) * 100;
         } else {
-            // dBFS mode: -120 to -20 dB range
-            // Weak signals (-120 to -80 dB) use 0-40% of meter
-            // Medium signals (-80 to -60 dB) use 40-80% of meter
-            // Strong signals (-60 to -20 dB) use 80-100% of meter (highly compressed)
-            if (basebandPower < -80) {
-                percentage = ((basebandPower + 120) / 40) * 40;
-            } else if (basebandPower < -60) {
-                percentage = 40 + ((basebandPower + 80) / 20) * 40;
-            } else {
-                percentage = 80 + ((basebandPower + 60) / 40) * 20;
-            }
+            percentage = ((basebandPower - DBFS_MIN) / (DBFS_MAX - DBFS_MIN)) * 100;
         }
-        
         percentage = Math.max(0, Math.min(100, percentage));
-        
+
         this.meterBar.style.width = percentage + '%';
         this.meterValue.textContent = displayText;
-        
-        // Color code both bar and text based on signal strength
+
+        // Colour coding — mirrors s-meter-needle.js gradient logic
         let color;
         if (this.displayMode === 'snr') {
-            // SNR color coding
-            if (displayValue >= 30) {
-                color = '#28a745'; // Green - strong signal
-            } else if (displayValue >= 15) {
-                color = '#ffc107'; // Yellow - moderate signal
-            } else {
-                color = '#dc3545'; // Red - weak signal
-            }
+            color = snrColour(displayValue);
         } else {
-            // dBFS color coding
-            if (basebandPower >= -70) {
-                color = '#28a745'; // Green - strong signal
-            } else if (basebandPower >= -85) {
-                color = '#ffc107'; // Yellow - moderate signal
-            } else {
-                color = '#dc3545'; // Red - weak signal
-            }
+            color = sMeterColour(basebandPower);
         }
 
-        // Add flashing animation for extremely strong signals (only in dBFS mode)
-        if (this.displayMode === 'dbfs' && basebandPower > -30) {
+        // Add flashing animation for extremely strong signals (only in dBFS mode, above S9+40 = -33 dBFS)
+        if (this.displayMode === 'dbfs' && basebandPower > DBFS_MAX) {
             this.meterValue.classList.add('flashing');
         } else {
             this.meterValue.classList.remove('flashing');
         }
-        
+
         this.meterBar.style.background = color;
         this.meterValue.style.color = color;
     }

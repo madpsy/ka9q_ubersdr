@@ -2723,12 +2723,18 @@ input[type="range"]::-moz-range-thumb {
     display: flex;
     justify-content: center;
     align-items: center;
-    padding: 5px;
+    padding: 0;
+    line-height: 0;
+    font-size: 0;
+}
+
+.s-meter-container canvas {
+    display: block;
 }
 
 #s-meter-canvas {
     background: #2c3e50;
-    border-radius: 6px;
+    border-radius: 6px 6px 0 0;
     box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
     display: block;
 }

@@ -42,6 +42,15 @@ class SpectrumDisplay {
         this.animationLoopRunning = false;
         this.droppedFrameCount = 0; // Track dropped frames for debugging
 
+        // Smooth waterfall scrolling - decouple visual scroll rate from data arrival rate
+        // The accumulator advances at targetScrollRate px/sec every rAF tick (60fps),
+        // scrolling 1 pixel each time it crosses a whole number. This gives smooth 60fps
+        // scrolling regardless of how infrequently spectrum data arrives (e.g. 100ms intervals).
+        this.scrollAccumulator = 0;
+        this.lastRafTime = null; // set on first rAF tick
+        this.targetScrollRate = 10; // rows/sec — lazily set from spectrum_poll_period on first frame
+        this.lastSpectrumRow = null; // most recent spectrum data, reused between data packets
+
         // Spectrum sync setting (controlled by user preference)
         this.spectrumSyncEnabled = window.spectrumSyncEnabled === true; // Default to disabled
 
@@ -956,123 +965,126 @@ class SpectrumDisplay {
         this.animationLoopRunning = true;
         console.log('Started spectrum frame processing loop');
 
-        const processFrame = () => {
+        const processFrame = (timestamp) => {
             if (!this.animationLoopRunning) return;
 
-            // Check if spectrum sync is enabled
+            // --- Initialise timing on first tick ---
+            if (this.lastRafTime === null) {
+                this.lastRafTime = timestamp;
+            }
+            // Cap elapsed to 200ms so a hidden/backgrounded tab doesn't cause a huge jump
+            const elapsed = Math.min(timestamp - this.lastRafTime, 200);
+            this.lastRafTime = timestamp;
+
+            // --- Lazily read spectrum_poll_period from the API description ---
+            // window.instanceDescription is populated by fetchSiteDescription() in app.js.
+            // We read it lazily here so it is always available by the time the first frame arrives.
+            if (!this.targetScrollRateInitialised) {
+                const pollMs = window.instanceDescription?.spectrum_poll_period;
+                if (pollMs && pollMs > 0) {
+                    this.targetScrollRate = 1000 / pollMs;
+                    this.targetScrollRateInitialised = true;
+                    console.log(`Waterfall smooth scroll: ${this.targetScrollRate.toFixed(2)} rows/sec (poll period: ${pollMs}ms)`);
+                }
+                // If not yet available, keep the default 10 rows/sec until next tick
+            }
+
+            // --- Consume incoming data frames ---
+            // When spectrum sync is enabled, honour audio timing; otherwise take the latest frame.
             if (this.spectrumSyncEnabled && window.audioContext && window.nextPlayTime) {
                 const currentTime = window.audioContext.currentTime;
                 const bufferAhead = window.nextPlayTime - currentTime;
-
-                // Use cached filter latency in seconds (convert from ms)
-                // This value is updated dynamically when filters are toggled or parameters change
                 const filterLatency = this.cachedFilterLatency / 1000;
-
-                // Process frames that should be displayed now
                 const now = Date.now();
 
-                // ADAPTIVE FRAME DROPPING: Prevent unbounded queue growth during high CPU
-                // Drop old frames if queue is too large (prevents 5+ second lag)
+                // ADAPTIVE FRAME DROPPING: prevent unbounded queue growth
                 if (this.frameQueue.length > this.maxHealthyQueueSize) {
                     const dropped = this.frameQueue.length - this.maxHealthyQueueSize;
                     this.frameQueue.splice(0, dropped);
                     this.droppedFrameCount += dropped;
                     if (this.droppedFrameCount % 50 === 0) {
-                        console.log(`Waterfall: Dropped ${this.droppedFrameCount} frames total to prevent lag (queue was ${this.frameQueue.length + dropped})`);
+                        console.log(`Waterfall: Dropped ${this.droppedFrameCount} frames total to prevent lag`);
                     }
                 }
 
-                // Drop stale frames (older than maxFrameAge)
+                // Drop stale frames
                 while (this.frameQueue.length > 0) {
                     const frame = this.frameQueue[0];
-                    const age = now - frame.receiveTime;
-
-                    if (age > this.maxFrameAge) {
+                    if (now - frame.receiveTime > this.maxFrameAge) {
                         this.frameQueue.shift();
                         this.droppedFrameCount++;
-                        if (this.droppedFrameCount % 50 === 0) {
-                            console.log(`Waterfall: Dropped stale frame (${age}ms old, total dropped: ${this.droppedFrameCount})`);
-                        }
                     } else {
-                        break; // Rest of queue is fresh
+                        break;
                     }
                 }
 
+                // Consume frames whose display time has arrived
                 while (this.frameQueue.length > 0) {
                     const frame = this.frameQueue[0];
-
-                    // Calculate when this frame should be displayed
-                    // The audio path has these delays:
-                    // 1. bufferAhead: Audio buffered ahead of playback (subtract to sync with current playback)
-                    // 2. filterLatency: Processing delay from filters (ADD to delay waterfall to match delayed audio)
-                    // 3. bufferMargin: Safety margin for timing jitter (subtract for conservative display)
-                    //
-                    // Audio captured at time T goes through filters (adding filterLatency) and plays at T + filterLatency
-                    // Spectrum captured at time T should display when audio plays, so add filterLatency to delay it
                     const displayTime = frame.receiveTime - (bufferAhead * 1000) + (filterLatency * 1000) - (this.bufferMargin * 1000);
-
                     if (now >= displayTime) {
-                        // Time to display this frame
                         this.frameQueue.shift();
-                        this.displayFrame(frame.data);
+                        this._consumeNewFrame(frame.data);
                     } else {
-                        // This frame and all subsequent frames are not ready yet
                         break;
                     }
                 }
             } else {
-                // Spectrum sync disabled OR no audio timing available - display frames immediately
-                // But still drop very old frames to prevent processing huge backlog when returning from another tab
+                // No audio sync — drop very old frames then take the latest available
                 const now = Date.now();
                 while (this.frameQueue.length > 0) {
                     const frame = this.frameQueue[0];
-                    const age = now - frame.receiveTime;
-
-                    // Drop frames older than 5 seconds (much more lenient than sync mode's 500ms)
-                    if (age > 5000) {
+                    if (now - frame.receiveTime > 5000) {
                         this.frameQueue.shift();
                         this.droppedFrameCount++;
-                        if (this.droppedFrameCount % 50 === 0) {
-                            console.log(`Waterfall (no sync): Dropped very old frame (${age}ms old, total dropped: ${this.droppedFrameCount})`);
-                        }
                     } else {
-                        break; // Rest of queue is fresh enough
+                        break;
                     }
                 }
-
-                // Display the next frame if available
                 if (this.frameQueue.length > 0) {
                     const frame = this.frameQueue.shift();
-                    this.displayFrame(frame.data);
+                    this._consumeNewFrame(frame.data);
                 }
             }
 
-            // Continue processing
+            // --- Smooth scroll accumulator ---
+            // Advance by the elapsed time at the target rate, then scroll one pixel per whole unit.
+            // This produces smooth 60fps scrolling regardless of how infrequently data arrives.
+            if (this.lastSpectrumRow) {
+                this.scrollAccumulator += (elapsed / 1000) * this.targetScrollRate;
+
+                while (this.scrollAccumulator >= 1.0) {
+                    this.scrollWaterfallOneRow();
+                    this.scrollAccumulator -= 1.0;
+                }
+            }
+
+            // --- Always redraw the line graph and overlay at full frame rate ---
+            if (this.spectrumData) {
+                this.drawLineGraph();
+            }
+            this.drawTunedFrequencyCursor();
+
             requestAnimationFrame(processFrame);
         };
 
-        processFrame();
+        requestAnimationFrame(processFrame);
     }
 
-    // Stop frame processing loop
-    stopFrameProcessing() {
-        this.animationLoopRunning = false;
-        this.frameQueue = [];
-        console.log('Stopped spectrum frame processing loop');
-    }
-
-    // Display a spectrum frame
-    displayFrame(data) {
+    // Consume a newly-arrived spectrum data frame:
+    // update spectrumData, run side-effects (signal meter, decoder extensions, tooltip),
+    // but do NOT draw the waterfall row — that is handled by the smooth scroll accumulator.
+    _consumeNewFrame(data) {
         this.spectrumData = data;
+        this.lastSpectrumRow = data;
         this.lastUpdate = Date.now();
-        this.draw();
 
         // Update tooltip with new data even if mouse hasn't moved
         if (this.mouseX >= 0 && this.mouseY >= 0 && !this.isDragging) {
             this.updateTooltip();
         }
 
-        // Update signal meter with new data
+        // Update signal meter
         this.updateSignalMeter();
 
         // Process spectrum data for decoder extensions
@@ -1086,6 +1098,20 @@ class SpectrumDisplay {
             };
             window.decoderManager.processSpectrum(spectrumDataForExtensions);
         }
+    }
+
+    // Stop frame processing loop
+    stopFrameProcessing() {
+        this.animationLoopRunning = false;
+        this.frameQueue = [];
+        console.log('Stopped spectrum frame processing loop');
+    }
+
+    // Display a spectrum frame (legacy entry point — delegates to _consumeNewFrame).
+    // The waterfall scroll is now driven by the smooth-scroll accumulator in
+    // startFrameProcessing(), so this no longer calls drawWaterfall() directly.
+    displayFrame(data) {
+        this._consumeNewFrame(data);
     }
 
     // Connect to spectrum WebSocket
@@ -1592,7 +1618,10 @@ class SpectrumDisplay {
         }
     }
 
-    // Draw the spectrum display (split mode only: line graph on top, waterfall on bottom)
+    // Draw the spectrum display (split mode only: line graph on top, waterfall on bottom).
+    // NOTE: With smooth scrolling, the waterfall is no longer driven from here — it is
+    // advanced by the scroll accumulator in startFrameProcessing() via scrollWaterfallOneRow().
+    // draw() is kept for any legacy callers; it redraws the line graph and overlay only.
     draw() {
         if (!this.spectrumData || this.spectrumData.length === 0) {
             this.drawPlaceholder();
@@ -1611,42 +1640,35 @@ class SpectrumDisplay {
             }
         }
 
-        // Draw waterfall in bottom half
-        this.drawWaterfall();
-
         // Draw tuned frequency cursor on overlay canvas
         this.drawTunedFrequencyCursor();
     }
 
-    // Draw waterfall display
-    drawWaterfall() {
-        // Auto-range if enabled
+    // Scroll the waterfall canvas down by one pixel and paint the current spectrum data
+    // as a new row at the top. Called by the smooth-scroll accumulator in startFrameProcessing()
+    // at a steady rate derived from spectrum_poll_period, so the waterfall always scrolls
+    // smoothly at ~60fps regardless of how infrequently new data arrives.
+    scrollWaterfallOneRow() {
+        if (!this.spectrumData || this.spectrumData.length === 0) return;
+
+        // Update auto-range on every painted row so colours stay calibrated
         if (this.config.autoRange) {
             this.updateAutoRange();
         }
 
-        // Don't apply predicted shift - it causes continuous movement when button is held
-        // The shift was intended for smooth dragging but causes issues with stationary mouse
-        // Commenting out for now - dragging will work but without client-side prediction
-        // if (this.isDragging && this.predictedFreqOffset !== 0 && this.dragDidMove) {
-        //     this.applyPredictedShift();
-        // }
-
-        // Waterfall starts at y=75 (below bookmarks + freq scale) when line graph is hidden, y=0 when visible (split mode - canvas is already positioned below line graph)
+        // Waterfall starts at y=75 when line graph is hidden, y=0 in split mode
         const lineGraphVisible = this.lineGraphCanvas && this.lineGraphCanvas.style.display !== 'none';
         const waterfallStartY = lineGraphVisible ? 0 : 75;
         const waterfallHeight = this.height - waterfallStartY - 1;
 
-        // Initialize waterfall image data if needed
+        // Initialise image data buffer and canvas background on first call
         if (!this.waterfallImageData) {
-            console.log(`[drawWaterfall] Initializing waterfall in ${this.displayMode} mode, canvas height: ${this.height}`);
+            console.log(`[scrollWaterfallOneRow] Initialising waterfall in ${this.displayMode} mode, canvas height: ${this.height}`);
             this.waterfallImageData = this.ctx.createImageData(this.width, 1);
-            // Initialize with black background - only clear the waterfall drawing area
             this.ctx.fillStyle = '#000';
             this.ctx.fillRect(0, waterfallStartY, this.width, this.height - waterfallStartY);
         }
 
-        // Initialize start time if needed
         if (!this.waterfallStartTime) {
             this.waterfallStartTime = Date.now();
             this.waterfallLineCount = 0;
@@ -1654,91 +1676,69 @@ class SpectrumDisplay {
 
         // Log only first time in split mode
         if (this.displayMode === 'split' && !this.splitModeLogged) {
-            console.log(`[drawWaterfall] Split mode - waterfallStartY: ${waterfallStartY}, waterfallHeight: ${waterfallHeight}, canvas height: ${this.height}`);
+            console.log(`[scrollWaterfallOneRow] Split mode - waterfallStartY: ${waterfallStartY}, waterfallHeight: ${waterfallHeight}, canvas height: ${this.height}`);
             this.splitModeLogged = true;
         }
 
-        // Scroll existing waterfall down by 1 pixel
-        // CRITICAL: Copy pixel-for-pixel without scaling to avoid stretching
-        // Source and destination dimensions must match exactly
+        // Scroll existing waterfall down by 1 pixel (pixel-perfect, no scaling)
         this.ctx.drawImage(this.canvas, 0, waterfallStartY, this.width, waterfallHeight - 1, 0, waterfallStartY + 1, this.width, waterfallHeight - 1);
 
-        // Create new line at top with current spectrum data (at y=30, below frequency scale)
+        // Build the new top row from the most recent spectrum data
         const pixelData = this.waterfallImageData.data;
         const dbRange = this.actualMaxDb - this.actualMinDb;
 
-        // Server-side zoom: map bins to pixels with interpolation for smooth rendering
-        // When bin_count is reduced for deep zoom, interpolate between bins to avoid pixelation
         for (let x = 0; x < this.width; x++) {
-            // Map pixel x to exact bin position (floating point)
             const binPos = (x / this.width) * this.spectrumData.length;
             const binIndex = Math.floor(binPos);
             const binFrac = binPos - binIndex;
 
-            // Get dB value with linear interpolation between adjacent bins
             let db;
             if (binIndex >= 0 && binIndex < this.spectrumData.length - 1) {
-                // Interpolate between current and next bin
                 const db1 = this.spectrumData[binIndex];
                 const db2 = this.spectrumData[binIndex + 1];
                 db = db1 + (db2 - db1) * binFrac;
             } else if (binIndex === this.spectrumData.length - 1) {
-                // Last bin, no interpolation
                 db = this.spectrumData[binIndex];
             } else {
-                // Out of range
                 db = this.actualMinDb;
             }
 
-            // Normalize to 0-1 range
             let normalized = Math.max(0, Math.min(1, (db - this.actualMinDb) / dbRange));
-
-            // Apply contrast threshold (noise floor suppression)
-            // Convert normalized (0-1) to magnitude (0-255) for contrast calculation
             let magnitude = normalized * 255;
 
             if (magnitude < this.config.contrast) {
                 magnitude = 0;
             } else {
-                // Rescale remaining values to use full range
                 magnitude = ((magnitude - this.config.contrast) / (255 - this.config.contrast)) * 255;
             }
 
-            // Apply intensity adjustment
             if (this.config.intensity < 0) {
-                // Reduce intensity: multiply by (1 + intensity), where intensity is negative
                 magnitude = magnitude * (1 + this.config.intensity);
             } else if (this.config.intensity > 0) {
-                // Increase intensity: multiply by (1 + intensity * 2)
                 magnitude = Math.min(255, magnitude * (1 + this.config.intensity * 2));
             }
 
-            // Convert back to normalized (0-1) for color mapping
             normalized = magnitude / 255;
-
-            // Convert to color
             const color = this.getColorRGB(normalized);
 
             const offset = x * 4;
-            pixelData[offset] = color.r;
+            pixelData[offset]     = color.r;
             pixelData[offset + 1] = color.g;
             pixelData[offset + 2] = color.b;
-            pixelData[offset + 3] = 255; // Alpha
+            pixelData[offset + 3] = 255;
         }
 
-        // Draw the new line at waterfallStartY (below frequency scale)
         this.ctx.putImageData(this.waterfallImageData, 0, waterfallStartY);
-
         this.waterfallLineCount++;
 
-        // Log only first few lines in split mode
         if (this.displayMode === 'split' && this.waterfallLineCount <= 3) {
-            console.log(`[drawWaterfall] Drew waterfall line #${this.waterfallLineCount} at y=${waterfallStartY}`);
+            console.log(`[scrollWaterfallOneRow] Drew waterfall line #${this.waterfallLineCount} at y=${waterfallStartY}`);
         }
+    }
 
-        // Timestamps removed per user request
-
-        // Waterfall frequency scale removed - line graph has its own frequency scale
+    // drawWaterfall() is kept for any legacy callers but now simply delegates to scrollWaterfallOneRow().
+    drawWaterfall() {
+        this.scrollWaterfallOneRow();
     }
 
 

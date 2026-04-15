@@ -118,14 +118,25 @@ const app = (() => {
 
         // Draw countries — store group reference so receiver marker can be appended later
         mapGroup = svg.append('g').attr('class', 'map-group');
-        // Country paths are a neutral base map only — no mouse events on them.
-        // Spot circles drawn by updateMap() handle all interaction.
+        // Country paths show a name tooltip on hover for countries with no spot data.
+        // Spot circles drawn by updateMap() sit on top in SVG z-order and handle
+        // the detailed tooltip for countries that do have spots.
         countryPaths = mapGroup.selectAll('path')
             .data(worldFeatures)
             .enter()
             .append('path')
             .attr('class', 'country-path no-data')
-            .attr('d', pathGen);
+            .attr('d', pathGen)
+            .on('mousemove', (event, d) => {
+                const name = (d.properties && d.properties.name) || 'Unknown';
+                tooltip.innerHTML = `
+                    <div class="tooltip-title">${escHtml(name)}</div>
+                    <div style="color:#666;font-size:11px;">No WSPR spots in this window</div>
+                `;
+                tooltip.style.display = 'block';
+                positionTooltip(event);
+            })
+            .on('mouseout', () => { tooltip.style.display = 'none'; });
 
         // Sphere outline
         svg.append('path')

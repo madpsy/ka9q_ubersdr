@@ -427,7 +427,7 @@
     <div>Spots used: <span id="spot-count">—</span></div>
     <div>Countries: <span id="country-count">—</span></div>
     <div>Generated: <span id="generated-at">—</span></div>
-    <div>BW penalty: <span id="bw-penalty">26.5 dB</span></div>
+    <div>BW correction: <span id="bw-penalty">0.35 dB</span></div>
 </div>
 
 <div id="map-container">
@@ -457,10 +457,10 @@
 
 <div class="methodology">
     <strong>How this works:</strong>
-    WSPR SNR is measured in a ~6 Hz noise bandwidth. SSB phone uses ~2700 Hz.
-    The bandwidth penalty is <code>10 × log₁₀(2700 ÷ 6) ≈ 26.5 dB</code> — the wider SSB bandwidth admits 26.5 dB more noise, so the SNR is <em>lower</em> by that amount.
+    <code>wsprd</code> reports SNR already normalised to a <strong>2500 Hz</strong> reference bandwidth (it internally subtracts ~26.3 dB from the raw in-band SNR).
+    SSB phone uses ~2700 Hz, so the bandwidth correction is only <code>10 × log₁₀(2700 ÷ 2500) ≈ +0.35 dB</code> — negligible.
     The mean WSPR SNR and mean TX power are calculated across all spots for a country/band, making the prediction robust against outliers and transmitters mis-reporting their power.
-    <strong>Predicted SSB SNR</strong> = mean WSPR SNR − 26.5 dB + (your TX power − mean WSPR TX power).
+    <strong>Predicted SSB SNR</strong> = mean WSPR SNR + 0.35 dB + (your TX power − mean WSPR TX power).
     Signal quality thresholds follow <strong>ITU-R RS.1808 / CCIR Report 322</strong> aligned with the amateur RS report system:
     Excellent ≥ +15 dB (RS 5), Good ≥ +10 dB (RS 4), Workable ≥ +6 dB (RS 3), Marginal ≥ +3 dB (RS 2), Very Poor ≥ 0 dB (RS 1), Not Viable &lt; 0 dB.
     Assumes reciprocal propagation. Does not account for antenna gain differences between WSPR and SSB antennas.

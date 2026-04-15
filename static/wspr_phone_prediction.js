@@ -362,7 +362,7 @@ const app = (() => {
             <div>Band: <strong>${escHtml(entry.band)}</strong> &nbsp; Continent: <strong>${escHtml(entry.continent || '—')}</strong></div>
             <div class="${tooltipPredClass(cls)}">Signal quality: <strong>${predLabel}</strong> (${snrStr} dB)</div>
             <div>Mean WSPR SNR: ${wsprSnrStr} dB &nbsp; Mean TX: ${entry.mean_tx_dbm.toFixed(1)} dBm &nbsp; (${entry.spot_count} spot${entry.spot_count !== 1 ? 's' : ''})</div>
-            <div>BW penalty: −${entry.bw_correction_db.toFixed(1)} dB &nbsp; Power gain: ${pgStr} dB</div>
+            <div>BW correction: +${entry.bw_correction_db.toFixed(2)} dB &nbsp; Power gain: ${pgStr} dB</div>
             <div>Distance: ${distStr} &nbsp; Bearing: ${bearingStr}</div>
             <div>Last seen: ${lastSeen}</div>
         `;

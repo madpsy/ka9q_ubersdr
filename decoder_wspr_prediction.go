@@ -21,11 +21,12 @@ import (
 //   min_ssb_snr    int   -60–30   Minimum predicted SSB SNR to include in results (default: -60)
 //
 // Physics:
-//   WSPR occupies ~6 Hz noise bandwidth.
+//   wsprd reports SNR normalised to a 2500 Hz reference bandwidth (it internally
+//   subtracts 26.3 dB from the raw in-band SNR before writing the spot file).
 //   SSB phone occupies ~2700 Hz noise bandwidth.
-//   BW penalty = 10 * log10(2700/6) ≈ 26.5 dB
+//   BW correction = 10 * log10(2700/2500) ≈ +0.35 dB  (negligible but included)
 //
-//   Predicted SSB SNR = WSPR_SNR − BW_penalty + (phone_power_dbm − wspr_tx_dbm)
+//   Predicted SSB SNR = WSPR_SNR + BW_correction + (phone_power_dbm − wspr_tx_dbm)
 //
 //   Prediction categories:
 //     "good"     predicted SSB SNR ≥ +10 dB
@@ -33,22 +34,20 @@ import (
 //     "poor"     predicted SSB SNR <   0 dB
 
 const (
-	// wsprNoiseBWHz is the effective noise bandwidth of a WSPR signal (~6 Hz).
-	// wsprd reports SNR measured in this narrow bandwidth — NOT normalised to 2500 Hz.
-	// Because the bandwidth is so small, WSPR SNR values are very negative compared
-	// to conventional communications systems.
-	wsprNoiseBWHz = 6.0
+	// wsprRefBWHz is the reference noise bandwidth that wsprd normalises its SNR to.
+	// wsprd internally subtracts 10*log10(wsprSignalBW/wsprRefBWHz) ≈ 26.3 dB from
+	// the raw in-band SNR, so the reported value is already a 2500 Hz SNR.
+	wsprRefBWHz = 2500.0
 	// ssbNoiseBWHz is the effective noise bandwidth of an SSB phone signal (~2700 Hz)
 	ssbNoiseBWHz = 2700.0
 )
 
-// bwCorrectionDB is the bandwidth penalty to convert WSPR SNR (measured in ~6 Hz)
-// to the equivalent SNR in a 2700 Hz SSB phone bandwidth.
-// = 10 * log10(2700 / 6) ≈ +26.5 dB
-// This is SUBTRACTED from the WSPR SNR: the wider SSB bandwidth admits 26.5 dB more
-// noise, so the SNR is lower by that amount.
-// A WSPR decode at -30 dB (in 6 Hz) is roughly -30 - 26.5 = -56.5 dB in 2700 Hz.
-var bwCorrectionDB = 10.0 * math.Log10(ssbNoiseBWHz/wsprNoiseBWHz)
+// bwCorrectionDB is the small bandwidth correction to convert the wsprd 2500 Hz
+// reference SNR to the equivalent SNR in a 2700 Hz SSB phone bandwidth.
+// = 10 * log10(2700 / 2500) ≈ +0.35 dB
+// This is ADDED to the WSPR SNR (wider SSB BW = slightly more noise = slightly lower SNR,
+// but the ratio 2700/2500 is so close to 1 that the correction is nearly negligible).
+var bwCorrectionDB = 10.0 * math.Log10(ssbNoiseBWHz/wsprRefBWHz)
 
 // validWSPRBands is the whitelist of standard amateur bands on which WSPR operates
 var validWSPRBands = map[string]bool{
@@ -97,12 +96,12 @@ type WSPRPredictionEntry struct {
 	Country         string   `json:"country"`
 	Continent       string   `json:"continent"`
 	Band            string   `json:"band"`
-	MeanWSPRSNR     float64  `json:"mean_wspr_snr"`    // mean WSPR SNR across all spots (in ~6 Hz BW)
+	MeanWSPRSNR     float64  `json:"mean_wspr_snr"`    // mean WSPR SNR across all spots (normalised to 2500 Hz by wsprd)
 	MeanTxDbm       float64  `json:"mean_tx_dbm"`      // mean reported TX power across all spots
-	BWCorrectionDB  float64  `json:"bw_correction_db"` // +26.5 dB penalty: SUBTRACTED from WSPR SNR (wider SSB BW = more noise)
+	BWCorrectionDB  float64  `json:"bw_correction_db"` // ≈+0.35 dB: converts wsprd 2500 Hz SNR to 2700 Hz SSB equivalent
 	PhonePowerDbm   float64  `json:"phone_power_dbm"`
 	PowerGainDB     float64  `json:"power_gain_db"`     // phone_power_dbm − mean_tx_dbm
-	PredictedSSBSNR float64  `json:"predicted_ssb_snr"` // mean_wspr_snr + bw_correction + power_gain
+	PredictedSSBSNR float64  `json:"predicted_ssb_snr"` // mean_wspr_snr + bw_correction(≈0.35dB) + power_gain
 	Prediction      string   `json:"prediction"`
 	SpotCount       int      `json:"spot_count"`
 	LastSeen        string   `json:"last_seen"`
@@ -369,16 +368,16 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 		}
 
 		// Correct formula:
-		//   predicted_ssb_snr = mean_wspr_snr − bw_correction + (phone_power_dbm − mean_tx_dbm)
+		//   predicted_ssb_snr = mean_wspr_snr + bw_correction + (phone_power_dbm − mean_tx_dbm)
 		//
 		// Where:
-		//   mean_wspr_snr   = mean WSPR SNR in ~6 Hz bandwidth
-		//   bw_correction   = +26.5 dB (SUBTRACTED: wider SSB BW means 26.5 dB more noise)
+		//   mean_wspr_snr   = mean WSPR SNR normalised to 2500 Hz (wsprd does this internally)
+		//   bw_correction   = +0.35 dB (2500→2700 Hz; negligible but included for correctness)
 		//   power_gain      = phone_power_dbm − mean_tx_dbm (your power vs their power)
 		meanWSPRSNR := g.SNRSum / float64(g.SpotCount)
 		meanTxDbm := g.TxDbmSum / float64(g.SpotCount)
 		powerGainDB := phonePowerDbm - meanTxDbm
-		predictedSSBSNR := meanWSPRSNR - bwCorrectionDB + powerGainDB
+		predictedSSBSNR := meanWSPRSNR + bwCorrectionDB + powerGainDB
 
 		// Apply min_ssb_snr filter
 		if predictedSSBSNR < minSSBSNR {

@@ -152,53 +152,50 @@ const app = (() => {
                         const base = +d3.select(this).attr('data-base-sw');
                         return isNaN(base) ? null : (base / k) + 'px';
                     });
-                // Counter-scale the receiver pin group so it stays constant screen size.
-                // The group uses local coords (tip at origin), so just translate + scale.
-                mapGroup.selectAll('.receiver-marker')
-                    .attr('transform', function() {
-                        const cx = +d3.select(this).attr('data-pin-cx');
-                        const cy = +d3.select(this).attr('data-pin-cy');
-                        if (isNaN(cx) || isNaN(cy)) return null;
-                        return `translate(${cx},${cy}) scale(${1/k})`;
+                // Counter-scale the receiver marker circles the same way as spot circles.
+                mapGroup.selectAll('.receiver-marker circle')
+                    .attr('r', function() {
+                        const base = +d3.select(this).attr('data-base-r');
+                        return isNaN(base) ? null : base / k;
+                    })
+                    .style('stroke-width', function() {
+                        const base = +d3.select(this).attr('data-base-sw');
+                        return isNaN(base) ? null : (base / k) + 'px';
                     });
             });
         svg.call(zoom);
     }
 
     // ── Receiver marker ──────────────────────────────────────────────────────
-    // Drawn as a classic teardrop map-pin using a local-coordinate path
-    // (tip at origin, head above) translated to the projected position.
-    // Local path: tip at (0,0), circular head centred at (0,-12), radius 8.
-    // Tangent lines from (0,0) touch the circle at (±6.93, -4).
-    //   M 0 0  L 6.93 -4  A 8 8 0 1 0 -6.93 -4  Z
-    const PIN_PATH = 'M 0 0 L 6.93 -4 A 8 8 0 1 0 -6.93 -4 Z';
-    const PIN_HEAD_CY = -12; // circle centre y in local coords
-
+    // White dot with dark-blue border — contrasts against all signal-quality
+    // colours (teal / green / yellow / orange / red / dark-red).
     function drawReceiverMarker(m) {
-        // Remove any existing marker
-        if (receiverMarkerGroup) {
-            receiverMarkerGroup.remove();
-            receiverMarkerGroup = null;
-        }
-
+        if (receiverMarkerGroup) { receiverMarkerGroup.remove(); receiverMarkerGroup = null; }
         if (!m || m.receiver_lat == null || m.receiver_lon == null || !mapGroup) return;
 
         const [cx, cy] = projection([m.receiver_lon, m.receiver_lat]);
         if (isNaN(cx) || isNaN(cy)) return;
 
-        // Group translated so local (0,0) = tip = projected receiver position
         receiverMarkerGroup = mapGroup.append('g')
-            .attr('class', 'receiver-marker')
-            .attr('data-pin-cx', cx)
-            .attr('data-pin-cy', cy)
-            .attr('transform', `translate(${cx},${cy})`);
+            .attr('class', 'receiver-marker');
 
-        // Pin body
-        receiverMarkerGroup.append('path')
-            .attr('d', PIN_PATH)
-            .style('fill', '#e74c3c')
-            .style('stroke', '#fff')
-            .style('stroke-width', '1.5px')
+        // Outer halo ring (subtle, non-interactive)
+        receiverMarkerGroup.append('circle')
+            .attr('cx', cx).attr('cy', cy)
+            .attr('r', 12).attr('data-base-r', 12).attr('data-base-sw', 0)
+            .style('fill', 'none')
+            .style('stroke', '#ffffff')
+            .style('stroke-width', '0px')
+            .style('opacity', '0.45')
+            .style('pointer-events', 'none');
+
+        // Main dot — white fill, dark-blue border
+        receiverMarkerGroup.append('circle')
+            .attr('cx', cx).attr('cy', cy)
+            .attr('r', 8).attr('data-base-r', 8).attr('data-base-sw', 2)
+            .style('fill', '#ffffff')
+            .style('stroke', '#0f3460')
+            .style('stroke-width', '2px')
             .style('cursor', 'pointer')
             .on('mousemove', (event) => {
                 const callsign = m.receiver_callsign ? ` (${m.receiver_callsign})` : '';
@@ -213,12 +210,11 @@ const app = (() => {
             })
             .on('mouseout', () => { tooltip.style.display = 'none'; });
 
-        // White dot in the pin head (local coords)
+        // Centre pip — dark-blue
         receiverMarkerGroup.append('circle')
-            .attr('cx', 0)
-            .attr('cy', PIN_HEAD_CY)
-            .attr('r', 3)
-            .style('fill', '#fff')
+            .attr('cx', cx).attr('cy', cy)
+            .attr('r', 2.5).attr('data-base-r', 2.5).attr('data-base-sw', 0)
+            .style('fill', '#0f3460')
             .style('pointer-events', 'none');
     }
 

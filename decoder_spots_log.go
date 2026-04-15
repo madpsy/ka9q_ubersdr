@@ -498,6 +498,9 @@ func (sl *SpotsLogger) readNameFile(dirPath, configName, mode string) ([]SpotRec
 	defer file.Close()
 
 	reader := csv.NewReader(file)
+	// Allow variable column counts so files written before and after schema
+	// changes (e.g. adding the dbm column) can both be read without error.
+	reader.FieldsPerRecord = -1
 	records, err := reader.ReadAll()
 	if err != nil {
 		return nil, err

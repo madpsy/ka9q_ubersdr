@@ -43,6 +43,7 @@ type SpotRecord struct {
 	Continent  string   `json:"continent"`
 	DistanceKm *float64 `json:"distance_km,omitempty"` // Distance from receiver in km
 	BearingDeg *float64 `json:"bearing_deg,omitempty"` // Bearing from receiver in degrees
+	DBm        *int     `json:"dbm,omitempty"`         // Transmitter power in dBm (WSPR only)
 	Mode       string   `json:"mode"`
 	Name       string   `json:"name"` // Decoder config band name
 }
@@ -142,6 +143,10 @@ func (sl *SpotsLogger) LogSpot(decode *DecodeInfo) error {
 	band := frequencyToBand(float64(decode.Frequency))
 
 	// Write CSV record
+	dbmStr := ""
+	if decode.IsWSPR {
+		dbmStr = fmt.Sprintf("%d", decode.DBm)
+	}
 	record := []string{
 		decode.Timestamp.Format(time.RFC3339),
 		decode.Callsign,
@@ -156,6 +161,7 @@ func (sl *SpotsLogger) LogSpot(decode *DecodeInfo) error {
 		decode.Continent,
 		formatOptionalFloat(decode.DistanceKm),
 		formatOptionalFloat(decode.BearingDeg),
+		dbmStr,
 	}
 
 	if err := writer.Write(record); err != nil {
@@ -220,7 +226,7 @@ func (sl *SpotsLogger) getOrCreateWriter(decode *DecodeInfo) (*csv.Writer, error
 		header := []string{
 			"timestamp", "callsign", "locator", "snr", "frequency", "band",
 			"message", "country", "cq_zone", "itu_zone", "continent",
-			"distance_km", "bearing_deg",
+			"distance_km", "bearing_deg", "dbm",
 		}
 		if err := writer.Write(header); err != nil {
 			return nil, fmt.Errorf("failed to write CSV header: %w", err)
@@ -540,6 +546,14 @@ func (sl *SpotsLogger) readNameFile(dirPath, configName, mode string) ([]SpotRec
 				if _, err := fmt.Sscanf(record[12], "%f", &bearing); err == nil {
 					spot.BearingDeg = &bearing
 				}
+			}
+		}
+
+		// Parse dBm if present (new format with 14 columns, WSPR only)
+		if len(record) >= 14 && record[13] != "" {
+			var dbm int
+			if _, err := fmt.Sscanf(record[13], "%d", &dbm); err == nil {
+				spot.DBm = &dbm
 			}
 		}
 

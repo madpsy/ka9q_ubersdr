@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WSPR → SSB Phone Propagation Prediction</title>
+    <script src="d3-geo.v3.min.js"></script>
+    <script src="topojson.v3.min.js"></script>
+    <script src="maidenhead.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-size: 14px;
+        }
+
+        .page-header {
+            background: #16213e;
+            border-bottom: 1px solid #0f3460;
+            padding: 14px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .page-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #4a9eff;
+        }
+
+        .page-subtitle {
+            font-size: 0.85em;
+            color: #888;
+            margin-top: 2px;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .control-group label {
+            font-size: 12px;
+            color: #aaa;
+            white-space: nowrap;
+        }
+
+        select, button {
+            background: #0f3460;
+            color: #e0e0e0;
+            border: 1px solid #1a5276;
+            border-radius: 4px;
+            padding: 5px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            outline: none;
+        }
+
+        select:hover, button:hover {
+            border-color: #4a9eff;
+        }
+
+        button.refresh-btn {
+            background: #1a5276;
+            color: #fff;
+            font-weight: bold;
+            padding: 5px 14px;
+        }
+
+        button.refresh-btn:hover {
+            background: #2471a3;
+        }
+
+        button.refresh-btn.loading {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* ── Map ── */
+        #map-container {
+            position: relative;
+            width: 100%;
+            background: #0d1117;
+            border-bottom: 1px solid #0f3460;
+        }
+
+        #world-map {
+            width: 100%;
+            display: block;
+        }
+
+        .country-path {
+            stroke: #2a3a4a;
+            stroke-width: 0.4px;
+            cursor: pointer;
+            transition: opacity 0.15s;
+        }
+
+        .country-path:hover {
+            opacity: 0.75;
+            stroke: #4a9eff;
+            stroke-width: 1px;
+        }
+
+        /* 6-tier signal quality colour scale */
+        .country-path.no-data    { fill: #1e2a38; }
+        .country-path.excellent  { fill: #1abc9c; } /* bright teal-green  ≥ +15 dB */
+        .country-path.good       { fill: #27ae60; } /* green              ≥ +10 dB */
+        .country-path.workable   { fill: #f1c40f; } /* yellow             ≥  +6 dB */
+        .country-path.marginal   { fill: #e67e22; } /* orange             ≥  +3 dB */
+        .country-path.poor       { fill: #c0392b; } /* red                ≥   0 dB */
+        .country-path.not-viable { fill: #4a2020; } /* dark red-grey      <   0 dB */
+
+        /* ── Tooltip ── */
+        .map-tooltip {
+            position: fixed;
+            background: rgba(15, 25, 50, 0.95);
+            border: 1px solid #4a9eff;
+            border-radius: 6px;
+            padding: 10px 14px;
+            pointer-events: none;
+            font-size: 12px;
+            line-height: 1.6;
+            z-index: 1000;
+            max-width: 260px;
+            display: none;
+        }
+
+        .tooltip-title {
+            font-weight: bold;
+            color: #4a9eff;
+            font-size: 13px;
+            margin-bottom: 4px;
+        }
+
+        .tooltip-excellent  { color: #1abc9c; }
+        .tooltip-good       { color: #2ecc71; }
+        .tooltip-workable   { color: #f1c40f; }
+        .tooltip-marginal   { color: #e67e22; }
+        .tooltip-poor       { color: #e74c3c; }
+        .tooltip-not-viable { color: #888; }
+        .tooltip-nodata     { color: #666; }
+
+        /* ── Legend ── */
+        .map-legend {
+            position: absolute;
+            bottom: 14px;
+            left: 14px;
+            background: rgba(15, 25, 50, 0.9);
+            border: 1px solid #0f3460;
+            border-radius: 6px;
+            padding: 10px 14px;
+            font-size: 11px;
+        }
+
+        .map-legend-title {
+            font-weight: bold;
+            color: #aaa;
+            margin-bottom: 6px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            margin-bottom: 4px;
+        }
+
+        .legend-swatch {
+            width: 14px;
+            height: 14px;
+            border-radius: 2px;
+            flex-shrink: 0;
+        }
+
+        /* ── Status bar ── */
+        #status-bar {
+            padding: 6px 20px;
+            background: #16213e;
+            border-bottom: 1px solid #0f3460;
+            font-size: 11px;
+            color: #888;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        #status-bar span { color: #ccc; }
+
+        /* ── Methodology box ── */
+        .methodology {
+            margin: 14px 20px 0;
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 6px;
+            padding: 12px 16px;
+            font-size: 12px;
+            color: #aaa;
+            line-height: 1.7;
+        }
+
+        .methodology strong { color: #4a9eff; }
+        .methodology code {
+            background: #0d1117;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-family: monospace;
+            color: #e0e0e0;
+        }
+
+        /* ── Table ── */
+        .table-section {
+            margin: 14px 20px 20px;
+        }
+
+        .table-section h2 {
+            font-size: 1em;
+            color: #4a9eff;
+            margin-bottom: 8px;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+            border-radius: 6px;
+            border: 1px solid #0f3460;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        thead th {
+            background: #0f3460;
+            color: #aaa;
+            padding: 8px 10px;
+            text-align: left;
+            white-space: nowrap;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        thead th:hover { color: #4a9eff; }
+
+        thead th.sort-asc::after  { content: ' ▲'; color: #4a9eff; }
+        thead th.sort-desc::after { content: ' ▼'; color: #4a9eff; }
+
+        tbody tr {
+            border-bottom: 1px solid #1a2a3a;
+            transition: background 0.1s;
+        }
+
+        tbody tr:hover { background: #1a2a3a; }
+
+        tbody td {
+            padding: 7px 10px;
+            white-space: nowrap;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+
+        .badge-excellent  { background: rgba(26,188,156,0.25); color: #1abc9c; border: 1px solid #1abc9c; }
+        .badge-good       { background: rgba(39,174,96,0.25);  color: #2ecc71; border: 1px solid #27ae60; }
+        .badge-workable   { background: rgba(241,196,15,0.25); color: #f1c40f; border: 1px solid #f1c40f; }
+        .badge-marginal   { background: rgba(230,126,34,0.25); color: #e67e22; border: 1px solid #e67e22; }
+        .badge-poor       { background: rgba(192,57,43,0.25);  color: #e74c3c; border: 1px solid #c0392b; }
+        .badge-not-viable { background: rgba(74,32,32,0.4);    color: #888;    border: 1px solid #4a2020; }
+
+        .snr-excellent  { color: #1abc9c; }
+        .snr-good       { color: #2ecc71; }
+        .snr-workable   { color: #f1c40f; }
+        .snr-marginal   { color: #e67e22; }
+        .snr-poor       { color: #e74c3c; }
+        .snr-not-viable { color: #888; }
+
+        #no-data-msg {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            display: none;
+        }
+
+        #loading-msg {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-header">
+    <div>
+        <div class="page-title">📡 WSPR → SSB Phone Propagation Prediction</div>
+        <div class="page-subtitle">Uses live WSPR decode data to predict whether SSB phone contacts should be possible</div>
+    </div>
+    <div class="controls">
+        <div class="control-group">
+            <label for="band-select">Band:</label>
+            <select id="band-select">
+                <option value="">All Bands</option>
+                <option value="2200m">2200m</option>
+                <option value="630m">630m</option>
+                <option value="160m">160m</option>
+                <option value="80m">80m</option>
+                <option value="60m">60m</option>
+                <option value="40m">40m</option>
+                <option value="30m">30m</option>
+                <option value="20m" selected>20m</option>
+                <option value="17m">17m</option>
+                <option value="15m">15m</option>
+                <option value="12m">12m</option>
+                <option value="10m">10m</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label for="minutes-select">Window:</label>
+            <select id="minutes-select">
+                <option value="30">30 min</option>
+                <option value="60" selected>1 hour</option>
+                <option value="120">2 hours</option>
+                <option value="360">6 hours</option>
+                <option value="1440">24 hours</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label for="power-select">Your TX Power:</label>
+            <select id="power-select">
+                <option value="10">10 W</option>
+                <option value="50">50 W</option>
+                <option value="100" selected>100 W</option>
+                <option value="500">500 W</option>
+                <option value="1000">1 kW</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label for="min-snr-select">Min SSB SNR:</label>
+            <select id="min-snr-select">
+                <option value="-60" selected>Show All</option>
+                <option value="0">≥ 0 dB (hide not viable)</option>
+                <option value="3">≥ +3 dB (Marginal+)</option>
+                <option value="6">≥ +6 dB (Workable+)</option>
+                <option value="10">≥ +10 dB (Good+)</option>
+                <option value="15">≥ +15 dB (Excellent only)</option>
+            </select>
+        </div>
+        <button class="refresh-btn" id="refresh-btn" onclick="app.fetch()">🔄 Refresh</button>
+    </div>
+</div>
+
+<div id="status-bar">
+    <div>Status: <span id="status-text">Loading…</span></div>
+    <div>Spots used: <span id="spot-count">—</span></div>
+    <div>Countries: <span id="country-count">—</span></div>
+    <div>Generated: <span id="generated-at">—</span></div>
+    <div>BW penalty: <span id="bw-penalty">26.5 dB</span></div>
+</div>
+
+<div id="map-container">
+    <svg id="world-map"></svg>
+    <div class="map-legend">
+        <div class="map-legend-title">SSB Signal Quality</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:#1abc9c"></div> Excellent ≥ +15 dB (RS 5)</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:#27ae60"></div> Good ≥ +10 dB (RS 4)</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:#f1c40f"></div> Workable ≥ +6 dB (RS 3)</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:#e67e22"></div> Marginal ≥ +3 dB (RS 2)</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:#c0392b"></div> Very Poor ≥ 0 dB (RS 1)</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:#4a2020"></div> Not Viable &lt; 0 dB</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:#1e2a38"></div> No WSPR data</div>
+        <div class="legend-item">
+            <svg width="14" height="14" style="flex-shrink:0;overflow:visible">
+                <circle cx="7" cy="7" r="6" fill="none" stroke="#4CAF50" stroke-width="1.5" opacity="0.4"/>
+                <circle cx="7" cy="7" r="5" fill="#4CAF50" stroke="#fff" stroke-width="1.5"/>
+                <circle cx="7" cy="7" r="2" fill="#fff"/>
+            </svg>
+            Receiver
+        </div>
+    </div>
+</div>
+
+<div class="methodology">
+    <strong>How this works:</strong>
+    WSPR uses a ~6 Hz noise bandwidth; SSB phone uses ~2700 Hz.
+    The noise bandwidth penalty is <code>10 × log₁₀(2700 ÷ 6) ≈ 26.5 dB</code>.
+    Each WSPR spot is normalised to a <strong>path metric</strong> = <code>SNR − TX_dBm</code>, which removes the transmitter's power from the equation.
+    The <strong>mean path metric</strong> across all spots for a country/band is used — this is robust against transmitters mis-reporting their power and smooths out propagation fluctuations.
+    <strong>Predicted SSB SNR</strong> = mean path metric + your TX power (dBm) − 26.5 dB.
+    Signal quality thresholds follow <strong>ITU-R RS.1808 / CCIR Report 322</strong> aligned with the amateur RS report system:
+    Excellent ≥ +15 dB (RS 5), Good ≥ +10 dB (RS 4), Workable ≥ +6 dB (RS 3), Marginal ≥ +3 dB (RS 2), Very Poor ≥ 0 dB (RS 1), Not Viable &lt; 0 dB.
+    Assumes reciprocal propagation. Does not account for antenna gain or SSB coding inefficiency (~3–6 dB worse than pure bandwidth math).
+</div>
+
+<div class="table-section">
+    <h2>Prediction Results</h2>
+    <div class="table-wrapper">
+        <div id="loading-msg">Loading WSPR data…</div>
+        <div id="no-data-msg">No WSPR spots found for the selected parameters. Ensure WSPR decoding is enabled and spots have been logged.</div>
+        <table id="results-table" style="display:none">
+            <thead>
+                <tr>
+                    <th data-col="prediction">Prediction</th>
+                    <th data-col="country">Country</th>
+                    <th data-col="continent">Cont.</th>
+                    <th data-col="band">Band</th>
+                    <th data-col="predicted_ssb_snr">Pred. SSB SNR</th>
+                    <th data-col="mean_normalised_snr" title="Mean(SNR − TX dBm) across all spots — power-independent path metric">Path Metric ℹ</th>
+                    <th data-col="distance_km">Distance</th>
+                    <th data-col="bearing_deg">Bearing</th>
+                    <th data-col="spot_count">Spots</th>
+                    <th data-col="last_seen">Last Seen</th>
+                </tr>
+            </thead>
+            <tbody id="results-tbody"></tbody>
+        </table>
+    </div>
+</div>
+
+<div class="map-tooltip" id="map-tooltip"></div>
+
+<script src="wspr_phone_prediction.js"></script>
+</body>
+</html>

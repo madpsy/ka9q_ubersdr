@@ -43,13 +43,21 @@ class SpectrumDisplay {
         this.droppedFrameCount = 0; // Track dropped frames for debugging
 
         // Smooth waterfall scrolling - decouple visual scroll rate from data arrival rate
-        // The accumulator advances at targetScrollRate px/sec every rAF tick (60fps),
-        // scrolling 1 pixel each time it crosses a whole number. This gives smooth 60fps
-        // scrolling regardless of how infrequently spectrum data arrives (e.g. 100ms intervals).
+        // The accumulator advances at targetScrollRate px/sec every rAF tick,
+        // scrolling 1 pixel each time it crosses a whole number.
         this.scrollAccumulator = 0;
         this.lastRafTime = null; // set on first rAF tick
         this.targetScrollRate = 10; // rows/sec — lazily set from spectrum_poll_period on first frame
         this.lastSpectrumRow = null; // most recent spectrum data, reused between data packets
+
+        // GPU sub-pixel scroll mode — uses CSS translateY for smooth composited scrolling.
+        // When enabled the rAF loop runs at 60fps and advances a float pixel offset each tick;
+        // the canvas is shifted by that offset via CSS transform (GPU-composited, sub-pixel).
+        // A new canvas row is only painted when the offset crosses a whole pixel boundary.
+        // Disabled by default; user can enable via the "GPU" checkbox.
+        this.gpuScrollEnabled = false; // set from localStorage in setupScrollHandler
+        this.gpuScrollOffset = 0;     // fractional pixel offset (0 .. waterfallHeight)
+        this.gpuNextWriteRow = 0;     // ring-buffer write pointer (canvas row index)
 
         // Spectrum sync setting (controlled by user preference)
         this.spectrumSyncEnabled = window.spectrumSyncEnabled === true; // Default to disabled
@@ -973,9 +981,9 @@ class SpectrumDisplay {
         const processFrame = (timestamp) => {
             if (!this.animationLoopRunning) return;
 
-            // --- 30fps throttle ---
-            // Always re-schedule so we don't miss the next window, but skip work
-            // if not enough time has elapsed since the last rendered frame.
+            // --- Frame rate throttle ---
+            // GPU mode runs at full 60fps (sub-pixel CSS transform needs every tick).
+            // CPU mode is throttled to 30fps to keep CPU usage comparable to pre-change levels.
             requestAnimationFrame(processFrame);
 
             // --- Initialise timing on first tick ---
@@ -984,8 +992,8 @@ class SpectrumDisplay {
             }
 
             const sinceLastFrame = timestamp - this.lastRafTime;
-            if (sinceLastFrame < FRAME_INTERVAL_MS) {
-                return; // Too soon — skip this tick
+            if (!this.gpuScrollEnabled && sinceLastFrame < FRAME_INTERVAL_MS) {
+                return; // CPU mode: too soon — skip this tick
             }
 
             // Cap elapsed to 200ms so a hidden/backgrounded tab doesn't cause a huge jump
@@ -1069,14 +1077,33 @@ class SpectrumDisplay {
             }
 
             // --- Smooth scroll accumulator ---
-            // Advance by the elapsed time at the target rate, then scroll one pixel per whole unit.
-            // Between data packets the waterfall keeps scrolling with the last spectrum snapshot.
             if (this.lastSpectrumRow) {
-                this.scrollAccumulator += (elapsed / 1000) * this.targetScrollRate;
+                if (this.gpuScrollEnabled) {
+                    // GPU mode: advance a float offset every tick and apply as CSS translateY.
+                    // The canvas is shifted by the fractional amount each frame (GPU-composited,
+                    // sub-pixel smooth). A new row is only painted when offset crosses 1px.
+                    this.gpuScrollOffset += (elapsed / 1000) * this.targetScrollRate;
 
-                while (this.scrollAccumulator >= 1.0) {
-                    this.scrollWaterfallOneRow();
-                    this.scrollAccumulator -= 1.0;
+                    // Paint new rows for each whole pixel crossed
+                    while (this.gpuScrollOffset >= 1.0) {
+                        this.scrollWaterfallGPU();
+                        this.gpuScrollOffset -= 1.0;
+                    }
+
+                    // Combine ring-buffer base offset (integer) with fractional sub-pixel offset.
+                    // gpuScrollBaseOffset shifts the canvas so the ring-buffer "current top" row
+                    // appears at the visual top; gpuScrollOffset adds the smooth fractional motion.
+                    const totalOffset = (this.gpuScrollBaseOffset || 0) + this.gpuScrollOffset;
+                    this.canvas.style.transform = `translateY(${totalOffset}px)`;
+                    this.canvas.style.willChange = 'transform';
+                } else {
+                    // CPU mode: integer-pixel drawImage scroll at 30fps
+                    this.scrollAccumulator += (elapsed / 1000) * this.targetScrollRate;
+
+                    while (this.scrollAccumulator >= 1.0) {
+                        this.scrollWaterfallOneRow();
+                        this.scrollAccumulator -= 1.0;
+                    }
                 }
             }
 
@@ -1762,6 +1789,123 @@ class SpectrumDisplay {
         this.scrollWaterfallOneRow();
     }
 
+    // GPU sub-pixel waterfall scroll.
+    // Instead of using drawImage to copy the entire canvas each frame, this method uses a
+    // ring-buffer approach: new rows are written at a fixed position in the canvas and the
+    // whole canvas is shifted via CSS translateY (GPU-composited). This means:
+    //   - No per-frame canvas copy (CPU-free between data packets)
+    //   - Sub-pixel positioning handled by the GPU compositor
+    //   - True smooth motion at 60fps regardless of data rate
+    //
+    // The canvas is treated as a circular buffer of height rows. gpuNextWriteRow tracks
+    // where the next new row should be written. The CSS transform shifts the canvas so
+    // that the "current top" row is always at the visual top of the container.
+    scrollWaterfallGPU() {
+        if (!this.spectrumData || this.spectrumData.length === 0) return;
+
+        // Update auto-range on every painted row
+        if (this.config.autoRange) {
+            this.updateAutoRange();
+        }
+
+        const lineGraphVisible = this.lineGraphCanvas && this.lineGraphCanvas.style.display !== 'none';
+        const waterfallStartY = lineGraphVisible ? 0 : 75;
+        const waterfallHeight = this.height - waterfallStartY;
+
+        // Initialise on first call
+        if (!this.waterfallImageData) {
+            this.waterfallImageData = this.ctx.createImageData(this.width, 1);
+            this.ctx.fillStyle = '#000';
+            this.ctx.fillRect(0, waterfallStartY, this.width, waterfallHeight);
+            this.gpuNextWriteRow = waterfallStartY; // start writing at top
+        }
+        if (!this.waterfallStartTime) {
+            this.waterfallStartTime = Date.now();
+            this.waterfallLineCount = 0;
+        }
+
+        // Build the new row pixel data from current spectrum
+        const pixelData = this.waterfallImageData.data;
+        const dbRange = this.actualMaxDb - this.actualMinDb;
+
+        for (let x = 0; x < this.width; x++) {
+            const binPos = (x / this.width) * this.spectrumData.length;
+            const binIndex = Math.floor(binPos);
+            const binFrac = binPos - binIndex;
+
+            let db;
+            if (binIndex >= 0 && binIndex < this.spectrumData.length - 1) {
+                db = this.spectrumData[binIndex] + (this.spectrumData[binIndex + 1] - this.spectrumData[binIndex]) * binFrac;
+            } else if (binIndex === this.spectrumData.length - 1) {
+                db = this.spectrumData[binIndex];
+            } else {
+                db = this.actualMinDb;
+            }
+
+            let normalized = Math.max(0, Math.min(1, (db - this.actualMinDb) / dbRange));
+            let magnitude = normalized * 255;
+
+            if (magnitude < this.config.contrast) {
+                magnitude = 0;
+            } else {
+                magnitude = ((magnitude - this.config.contrast) / (255 - this.config.contrast)) * 255;
+            }
+
+            if (this.config.intensity < 0) {
+                magnitude = magnitude * (1 + this.config.intensity);
+            } else if (this.config.intensity > 0) {
+                magnitude = Math.min(255, magnitude * (1 + this.config.intensity * 2));
+            }
+
+            normalized = magnitude / 255;
+            const color = this.getColorRGB(normalized);
+            const offset = x * 4;
+            pixelData[offset]     = color.r;
+            pixelData[offset + 1] = color.g;
+            pixelData[offset + 2] = color.b;
+            pixelData[offset + 3] = 255;
+        }
+
+        // Write the new row at gpuNextWriteRow (ring buffer — wraps around)
+        this.ctx.putImageData(this.waterfallImageData, 0, this.gpuNextWriteRow);
+
+        // Advance write pointer, wrapping within the waterfall area
+        this.gpuNextWriteRow++;
+        if (this.gpuNextWriteRow >= waterfallStartY + waterfallHeight) {
+            this.gpuNextWriteRow = waterfallStartY;
+        }
+
+        // The CSS translateY is applied by the caller (startFrameProcessing) using gpuScrollOffset,
+        // which provides the sub-pixel fractional shift. We also need to account for the ring-buffer
+        // wrap: the visual "top" of the waterfall is at gpuNextWriteRow in canvas coordinates.
+        // We achieve this by setting the canvas transform to shift it so gpuNextWriteRow appears at
+        // waterfallStartY visually. The fractional gpuScrollOffset is added on top by the caller.
+        //
+        // Full transform = -(gpuNextWriteRow - waterfallStartY) + gpuScrollOffset (applied by caller)
+        // We store the integer part here so the caller can combine it with the fractional offset.
+        this.gpuScrollBaseOffset = -(this.gpuNextWriteRow - waterfallStartY);
+
+        this.waterfallLineCount++;
+    }
+
+    // Reset GPU scroll state (called when switching modes or resizing)
+    resetGPUScroll() {
+        this.gpuScrollOffset = 0;
+        this.gpuScrollBaseOffset = 0;
+        this.canvas.style.transform = '';
+        this.canvas.style.willChange = '';
+        // Clear the waterfall canvas
+        if (this.ctx) {
+            const lineGraphVisible = this.lineGraphCanvas && this.lineGraphCanvas.style.display !== 'none';
+            const waterfallStartY = lineGraphVisible ? 0 : 75;
+            this.gpuNextWriteRow = waterfallStartY; // initialise to correct start row
+            this.ctx.fillStyle = '#000';
+            this.ctx.fillRect(0, waterfallStartY, this.width, this.height - waterfallStartY);
+        } else {
+            this.gpuNextWriteRow = 0;
+        }
+        this.waterfallImageData = null; // force re-init on next scrollWaterfallGPU() call
+    }
 
     // Draw line graph in top half (split mode only)
     drawLineGraph() {
@@ -3776,6 +3920,28 @@ class SpectrumDisplay {
                 console.log(`Spectrum smoothing ${this.smoothingEnabled ? 'enabled' : 'disabled'}`);
                 // Clear history when toggling to avoid artifacts
                 this.lineGraphDataHistory = [];
+            });
+        }
+
+        // Setup GPU scroll checkbox handler
+        const gpuScrollCheckbox = document.getElementById('spectrum-gpu-scroll-enable');
+        if (gpuScrollCheckbox) {
+            // Load saved preference from localStorage (default to false/unchecked)
+            const savedGpuState = localStorage.getItem('spectrumGpuScrollEnabled');
+            const isGpuEnabled = savedGpuState === 'true'; // Only true if explicitly saved as 'true'
+            gpuScrollCheckbox.checked = isGpuEnabled;
+            this.gpuScrollEnabled = isGpuEnabled;
+
+            gpuScrollCheckbox.addEventListener('change', (e) => {
+                this.gpuScrollEnabled = e.target.checked;
+                localStorage.setItem('spectrumGpuScrollEnabled', e.target.checked.toString());
+                console.log(`Spectrum GPU scroll ${this.gpuScrollEnabled ? 'enabled' : 'disabled'}`);
+
+                // Reset GPU scroll state when toggling to avoid visual glitches
+                this.resetGPUScroll();
+                // Also reset CPU scroll accumulator
+                this.scrollAccumulator = 0;
+                this.lastRafTime = null; // reset timing so elapsed doesn't spike on next tick
             });
         }
 

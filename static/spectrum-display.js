@@ -1079,9 +1079,10 @@ class SpectrumDisplay {
             // --- Smooth scroll accumulator ---
             if (this.lastSpectrumRow) {
                 if (this.gpuScrollEnabled) {
-                    // GPU mode: advance a float offset every tick and apply as CSS translateY.
-                    // The canvas is shifted by the fractional amount each frame (GPU-composited,
-                    // sub-pixel smooth). A new row is only painted when offset crosses 1px.
+                    // GPU mode: advance a float offset every tick.
+                    // The offscreen canvas is stamped onto the visible canvas with a fractional
+                    // Y offset using drawImage — this gives sub-pixel smooth scrolling entirely
+                    // within canvas-space, with no CSS transform side effects on overlays.
                     this.gpuScrollOffset += (elapsed / 1000) * this.targetScrollRate;
 
                     // Paint new rows for each whole pixel crossed
@@ -1090,12 +1091,9 @@ class SpectrumDisplay {
                         this.gpuScrollOffset -= 1.0;
                     }
 
-                    // Combine ring-buffer base offset (integer) with fractional sub-pixel offset.
-                    // gpuScrollBaseOffset shifts the canvas so the ring-buffer "current top" row
-                    // appears at the visual top; gpuScrollOffset adds the smooth fractional motion.
-                    const totalOffset = (this.gpuScrollBaseOffset || 0) + this.gpuScrollOffset;
-                    this.canvas.style.transform = `translateY(${totalOffset}px)`;
-                    this.canvas.style.willChange = 'transform';
+                    // Stamp offscreen canvas onto visible canvas with fractional sub-pixel Y shift.
+                    // drawImage supports float coordinates — the browser interpolates sub-pixel rows.
+                    this.scrollWaterfallGPUComposite();
                 } else {
                     // CPU mode: integer-pixel drawImage scroll at 30fps
                     this.scrollAccumulator += (elapsed / 1000) * this.targetScrollRate;
@@ -1790,41 +1788,51 @@ class SpectrumDisplay {
     }
 
     // GPU sub-pixel waterfall scroll.
-    // Instead of using drawImage to copy the entire canvas each frame, this method uses a
-    // ring-buffer approach: new rows are written at a fixed position in the canvas and the
-    // whole canvas is shifted via CSS translateY (GPU-composited). This means:
-    //   - No per-frame canvas copy (CPU-free between data packets)
-    //   - Sub-pixel positioning handled by the GPU compositor
-    //   - True smooth motion at 60fps regardless of data rate
     //
-    // The canvas is treated as a circular buffer of height rows. gpuNextWriteRow tracks
-    // where the next new row should be written. The CSS transform shifts the canvas so
-    // that the "current top" row is always at the visual top of the container.
+    // Strategy: use an offscreen canvas as the true waterfall buffer. It scrolls exactly
+    // like the CPU path (drawImage + putImageData). The visible on-screen canvas is then
+    // stamped from the offscreen canvas every whole-pixel step. Between whole-pixel steps
+    // the CSS translateY on the on-screen canvas provides the fractional sub-pixel shift,
+    // which the browser compositor handles in hardware — giving true smooth 60fps motion.
+    //
+    // This avoids the ring-buffer complexity entirely and is guaranteed correct.
     scrollWaterfallGPU() {
         if (!this.spectrumData || this.spectrumData.length === 0) return;
 
-        // Update auto-range on every painted row
         if (this.config.autoRange) {
             this.updateAutoRange();
         }
 
         const lineGraphVisible = this.lineGraphCanvas && this.lineGraphCanvas.style.display !== 'none';
         const waterfallStartY = lineGraphVisible ? 0 : 75;
-        const waterfallHeight = this.height - waterfallStartY;
+        const waterfallHeight = this.height - waterfallStartY - 1;
 
-        // Initialise on first call
+        // Lazily create the offscreen canvas (same dimensions as the visible canvas)
+        if (!this.gpuOffscreenCanvas || this.gpuOffscreenCanvas.width !== this.width || this.gpuOffscreenCanvas.height !== this.height) {
+            this.gpuOffscreenCanvas = document.createElement('canvas');
+            this.gpuOffscreenCanvas.width = this.width;
+            this.gpuOffscreenCanvas.height = this.height;
+            this.gpuOffscreenCtx = this.gpuOffscreenCanvas.getContext('2d', { alpha: false });
+            this.gpuOffscreenCtx.fillStyle = '#000';
+            this.gpuOffscreenCtx.fillRect(0, 0, this.width, this.height);
+        }
+
         if (!this.waterfallImageData) {
-            this.waterfallImageData = this.ctx.createImageData(this.width, 1);
-            this.ctx.fillStyle = '#000';
-            this.ctx.fillRect(0, waterfallStartY, this.width, waterfallHeight);
-            this.gpuNextWriteRow = waterfallStartY; // start writing at top
+            this.waterfallImageData = this.gpuOffscreenCtx.createImageData(this.width, 1);
         }
         if (!this.waterfallStartTime) {
             this.waterfallStartTime = Date.now();
             this.waterfallLineCount = 0;
         }
 
-        // Build the new row pixel data from current spectrum
+        // 1. Scroll the offscreen canvas down by 1 pixel (same as CPU path)
+        this.gpuOffscreenCtx.drawImage(
+            this.gpuOffscreenCanvas,
+            0, waterfallStartY, this.width, waterfallHeight - 1,
+            0, waterfallStartY + 1, this.width, waterfallHeight - 1
+        );
+
+        // 2. Build the new top row from current spectrum data
         const pixelData = this.waterfallImageData.data;
         const dbRange = this.actualMaxDb - this.actualMinDb;
 
@@ -1866,45 +1874,58 @@ class SpectrumDisplay {
             pixelData[offset + 3] = 255;
         }
 
-        // Write the new row at gpuNextWriteRow (ring buffer — wraps around)
-        this.ctx.putImageData(this.waterfallImageData, 0, this.gpuNextWriteRow);
+        // 3. Write the new row at the top of the offscreen canvas
+        this.gpuOffscreenCtx.putImageData(this.waterfallImageData, 0, waterfallStartY);
 
-        // Advance write pointer, wrapping within the waterfall area
-        this.gpuNextWriteRow++;
-        if (this.gpuNextWriteRow >= waterfallStartY + waterfallHeight) {
-            this.gpuNextWriteRow = waterfallStartY;
-        }
-
-        // The CSS translateY is applied by the caller (startFrameProcessing) using gpuScrollOffset,
-        // which provides the sub-pixel fractional shift. We also need to account for the ring-buffer
-        // wrap: the visual "top" of the waterfall is at gpuNextWriteRow in canvas coordinates.
-        // We achieve this by setting the canvas transform to shift it so gpuNextWriteRow appears at
-        // waterfallStartY visually. The fractional gpuScrollOffset is added on top by the caller.
-        //
-        // Full transform = -(gpuNextWriteRow - waterfallStartY) + gpuScrollOffset (applied by caller)
-        // We store the integer part here so the caller can combine it with the fractional offset.
-        this.gpuScrollBaseOffset = -(this.gpuNextWriteRow - waterfallStartY);
+        // 4. Stamp the offscreen canvas onto the visible canvas (no transform — just pixel copy)
+        //    The CSS translateY fractional shift is applied by the caller every rAF tick.
+        this.ctx.drawImage(this.gpuOffscreenCanvas, 0, 0);
 
         this.waterfallLineCount++;
+    }
+
+    // Composite the offscreen waterfall canvas onto the visible canvas with a fractional
+    // sub-pixel Y offset. drawImage supports float destination coordinates — the browser
+    // interpolates between rows, giving smooth sub-pixel motion entirely within canvas-space.
+    // No CSS transform is used, so overlays (frequency bar, bookmarks) are unaffected.
+    scrollWaterfallGPUComposite() {
+        if (!this.gpuOffscreenCanvas) return;
+
+        const lineGraphVisible = this.lineGraphCanvas && this.lineGraphCanvas.style.display !== 'none';
+        const waterfallStartY = lineGraphVisible ? 0 : 75;
+        const waterfallHeight = this.height - waterfallStartY;
+
+        // Clear the waterfall area on the visible canvas
+        this.ctx.fillStyle = '#000';
+        this.ctx.fillRect(0, waterfallStartY, this.width, waterfallHeight);
+
+        // Draw offscreen canvas onto visible canvas shifted down by the fractional offset.
+        // Source: full waterfall area of offscreen canvas
+        // Destination: same area but shifted down by gpuScrollOffset (fractional pixels)
+        this.ctx.drawImage(
+            this.gpuOffscreenCanvas,
+            0, waterfallStartY,                          // source x, y
+            this.width, waterfallHeight,                 // source width, height
+            0, waterfallStartY + this.gpuScrollOffset,   // dest x, y (fractional)
+            this.width, waterfallHeight                  // dest width, height
+        );
     }
 
     // Reset GPU scroll state (called when switching modes or resizing)
     resetGPUScroll() {
         this.gpuScrollOffset = 0;
         this.gpuScrollBaseOffset = 0;
-        this.canvas.style.transform = '';
-        this.canvas.style.willChange = '';
-        // Clear the waterfall canvas
+        // Discard offscreen canvas so it is recreated on next scrollWaterfallGPU() call
+        this.gpuOffscreenCanvas = null;
+        this.gpuOffscreenCtx = null;
+        this.waterfallImageData = null;
+        // Clear the visible canvas
         if (this.ctx) {
             const lineGraphVisible = this.lineGraphCanvas && this.lineGraphCanvas.style.display !== 'none';
             const waterfallStartY = lineGraphVisible ? 0 : 75;
-            this.gpuNextWriteRow = waterfallStartY; // initialise to correct start row
             this.ctx.fillStyle = '#000';
             this.ctx.fillRect(0, waterfallStartY, this.width, this.height - waterfallStartY);
-        } else {
-            this.gpuNextWriteRow = 0;
         }
-        this.waterfallImageData = null; // force re-init on next scrollWaterfallGPU() call
     }
 
     // Draw line graph in top half (split mode only)

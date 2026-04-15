@@ -2508,7 +2508,6 @@ input[type="range"]::-moz-range-thumb {
     position: relative; /* For absolute positioning of controls overlay and line graph */
     z-index: 1; /* Base stacking context */
     height: 600px; /* Fixed height - controls always at same position */
-    overflow: hidden; /* Required for GPU sub-pixel scroll (CSS transform clips canvas) */
 }
 
 /* Spectrum frequency overlay - below audio start overlay */

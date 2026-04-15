@@ -26,7 +26,11 @@ import (
 //   SSB phone occupies ~2700 Hz noise bandwidth.
 //   BW correction = 10 * log10(2700/2500) ≈ +0.35 dB  (negligible but included)
 //
-//   Predicted SSB SNR = WSPR_SNR + BW_correction + (phone_power_dbm − wspr_tx_dbm)
+//   WSPR uses coherent FSK + FEC and can decode down to ≈ −31 dB SNR (2500 Hz ref).
+//   A human ear needs ≈ +10 dB SNR (2500 Hz ref) to copy SSB phone.
+//   This gives a WSPR coding advantage of ≈ 41 dB that must be subtracted.
+//
+//   Predicted SSB SNR = WSPR_SNR + BW_correction − coding_advantage + (phone_power_dbm − wspr_tx_dbm)
 //
 //   Prediction categories:
 //     "good"     predicted SSB SNR ≥ +10 dB
@@ -40,13 +44,22 @@ const (
 	wsprRefBWHz = 2500.0
 	// ssbNoiseBWHz is the effective noise bandwidth of an SSB phone signal (~2700 Hz)
 	ssbNoiseBWHz = 2700.0
+
+	// wsprMinDecodeSNR is the minimum SNR (in 2500 Hz BW) at which wsprd can decode.
+	// wsprd uses coherent FSK + FEC; empirically decodes down to ≈ −31 dB SNR.
+	wsprMinDecodeSNR = -31.0
+	// ssbMinCopySNR is the minimum SNR (in 2500 Hz BW) at which a human can copy SSB phone.
+	// Typically ≈ +10 dB for comfortable copy; some operators manage at +6 dB.
+	ssbMinCopySNR = 10.0
+	// wsprCodingAdvantageDB is the SNR advantage WSPR has over SSB phone.
+	// = ssbMinCopySNR − wsprMinDecodeSNR = 10 − (−31) = 41 dB
+	// This must be SUBTRACTED from the WSPR SNR when predicting SSB viability.
+	wsprCodingAdvantageDB = ssbMinCopySNR - wsprMinDecodeSNR // = 41 dB
 )
 
 // bwCorrectionDB is the small bandwidth correction to convert the wsprd 2500 Hz
 // reference SNR to the equivalent SNR in a 2700 Hz SSB phone bandwidth.
-// = 10 * log10(2700 / 2500) ≈ +0.35 dB
-// This is ADDED to the WSPR SNR (wider SSB BW = slightly more noise = slightly lower SNR,
-// but the ratio 2700/2500 is so close to 1 that the correction is nearly negligible).
+// = 10 * log10(2700 / 2500) ≈ +0.35 dB  (negligible but included for correctness)
 var bwCorrectionDB = 10.0 * math.Log10(ssbNoiseBWHz/wsprRefBWHz)
 
 // validWSPRBands is the whitelist of standard amateur bands on which WSPR operates
@@ -77,37 +90,39 @@ var validPhonePowers = map[int]bool{
 
 // WSPRPredictionMeta holds metadata about the prediction request
 type WSPRPredictionMeta struct {
-	PhonePowerW      int       `json:"phone_power_w"`
-	PhonePowerDbm    float64   `json:"phone_power_dbm"`
-	BWPenaltyDB      float64   `json:"bw_penalty_db"`
-	Minutes          int       `json:"minutes"`
-	BandFilter       string    `json:"band_filter"`
-	BandsAvailable   []string  `json:"bands_available"`
-	SpotCount        int       `json:"spot_count"`
-	GeneratedAt      time.Time `json:"generated_at"`
-	ReceiverLocator  string    `json:"receiver_locator,omitempty"`
-	ReceiverLat      *float64  `json:"receiver_lat,omitempty"`
-	ReceiverLon      *float64  `json:"receiver_lon,omitempty"`
-	ReceiverCallsign string    `json:"receiver_callsign,omitempty"`
+	PhonePowerW       int       `json:"phone_power_w"`
+	PhonePowerDbm     float64   `json:"phone_power_dbm"`
+	BWCorrectionDB    float64   `json:"bw_correction_db"`    // ≈+0.35 dB (2500→2700 Hz)
+	CodingAdvantageDB float64   `json:"coding_advantage_db"` // 41 dB (WSPR vs SSB phone)
+	Minutes           int       `json:"minutes"`
+	BandFilter        string    `json:"band_filter"`
+	BandsAvailable    []string  `json:"bands_available"`
+	SpotCount         int       `json:"spot_count"`
+	GeneratedAt       time.Time `json:"generated_at"`
+	ReceiverLocator   string    `json:"receiver_locator,omitempty"`
+	ReceiverLat       *float64  `json:"receiver_lat,omitempty"`
+	ReceiverLon       *float64  `json:"receiver_lon,omitempty"`
+	ReceiverCallsign  string    `json:"receiver_callsign,omitempty"`
 }
 
 // WSPRPredictionEntry holds the prediction result for a single country+band combination
 type WSPRPredictionEntry struct {
-	Country         string   `json:"country"`
-	Continent       string   `json:"continent"`
-	Band            string   `json:"band"`
-	MeanWSPRSNR     float64  `json:"mean_wspr_snr"`    // mean WSPR SNR across all spots (normalised to 2500 Hz by wsprd)
-	MeanTxDbm       float64  `json:"mean_tx_dbm"`      // mean reported TX power across all spots
-	BWCorrectionDB  float64  `json:"bw_correction_db"` // ≈+0.35 dB: converts wsprd 2500 Hz SNR to 2700 Hz SSB equivalent
-	PhonePowerDbm   float64  `json:"phone_power_dbm"`
-	PowerGainDB     float64  `json:"power_gain_db"`     // phone_power_dbm − mean_tx_dbm
-	PredictedSSBSNR float64  `json:"predicted_ssb_snr"` // mean_wspr_snr + bw_correction(≈0.35dB) + power_gain
-	Prediction      string   `json:"prediction"`
-	SpotCount       int      `json:"spot_count"`
-	LastSeen        string   `json:"last_seen"`
-	Locator         string   `json:"locator,omitempty"`
-	DistanceKm      *float64 `json:"distance_km,omitempty"`
-	BearingDeg      *float64 `json:"bearing_deg,omitempty"`
+	Country           string   `json:"country"`
+	Continent         string   `json:"continent"`
+	Band              string   `json:"band"`
+	MeanWSPRSNR       float64  `json:"mean_wspr_snr"`       // mean WSPR SNR across all spots (normalised to 2500 Hz by wsprd)
+	MeanTxDbm         float64  `json:"mean_tx_dbm"`         // mean reported TX power across all spots
+	BWCorrectionDB    float64  `json:"bw_correction_db"`    // ≈+0.35 dB: converts wsprd 2500 Hz SNR to 2700 Hz SSB equivalent
+	CodingAdvantageDB float64  `json:"coding_advantage_db"` // 41 dB: WSPR decodes at −31 dB; SSB needs +10 dB
+	PhonePowerDbm     float64  `json:"phone_power_dbm"`
+	PowerGainDB       float64  `json:"power_gain_db"`     // phone_power_dbm − mean_tx_dbm
+	PredictedSSBSNR   float64  `json:"predicted_ssb_snr"` // mean_wspr_snr + bw_correction − coding_advantage + power_gain
+	Prediction        string   `json:"prediction"`
+	SpotCount         int      `json:"spot_count"`
+	LastSeen          string   `json:"last_seen"`
+	Locator           string   `json:"locator,omitempty"`
+	DistanceKm        *float64 `json:"distance_km,omitempty"`
+	BearingDeg        *float64 `json:"bearing_deg,omitempty"`
 }
 
 // WSPRPredictionResponse is the full API response
@@ -368,16 +383,17 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 		}
 
 		// Correct formula:
-		//   predicted_ssb_snr = mean_wspr_snr + bw_correction + (phone_power_dbm − mean_tx_dbm)
+		//   predicted_ssb_snr = mean_wspr_snr + bw_correction − coding_advantage + power_gain
 		//
 		// Where:
-		//   mean_wspr_snr   = mean WSPR SNR normalised to 2500 Hz (wsprd does this internally)
-		//   bw_correction   = +0.35 dB (2500→2700 Hz; negligible but included for correctness)
-		//   power_gain      = phone_power_dbm − mean_tx_dbm (your power vs their power)
+		//   mean_wspr_snr      = mean WSPR SNR normalised to 2500 Hz (wsprd does this internally)
+		//   bw_correction      = +0.35 dB (2500→2700 Hz; negligible but included for correctness)
+		//   coding_advantage   = 41 dB (WSPR decodes at −31 dB; SSB phone needs +10 dB)
+		//   power_gain         = phone_power_dbm − mean_tx_dbm (your power vs their power)
 		meanWSPRSNR := g.SNRSum / float64(g.SpotCount)
 		meanTxDbm := g.TxDbmSum / float64(g.SpotCount)
 		powerGainDB := phonePowerDbm - meanTxDbm
-		predictedSSBSNR := meanWSPRSNR + bwCorrectionDB + powerGainDB
+		predictedSSBSNR := meanWSPRSNR + bwCorrectionDB - wsprCodingAdvantageDB + powerGainDB
 
 		// Apply min_ssb_snr filter
 		if predictedSSBSNR < minSSBSNR {
@@ -385,21 +401,22 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 		}
 
 		entry := WSPRPredictionEntry{
-			Country:         k.Country,
-			Continent:       g.Continent,
-			Band:            k.Band,
-			MeanWSPRSNR:     math.Round(meanWSPRSNR*10) / 10,
-			MeanTxDbm:       math.Round(meanTxDbm*10) / 10,
-			BWCorrectionDB:  math.Round(bwCorrectionDB*10) / 10,
-			PhonePowerDbm:   math.Round(phonePowerDbm*10) / 10,
-			PowerGainDB:     math.Round(powerGainDB*10) / 10,
-			PredictedSSBSNR: math.Round(predictedSSBSNR*10) / 10,
-			Prediction:      classifyPrediction(predictedSSBSNR),
-			SpotCount:       g.SpotCount,
-			LastSeen:        g.LastSeen,
-			Locator:         g.Locator,
-			DistanceKm:      g.DistanceKm,
-			BearingDeg:      g.BearingDeg,
+			Country:           k.Country,
+			Continent:         g.Continent,
+			Band:              k.Band,
+			MeanWSPRSNR:       math.Round(meanWSPRSNR*10) / 10,
+			MeanTxDbm:         math.Round(meanTxDbm*10) / 10,
+			BWCorrectionDB:    math.Round(bwCorrectionDB*100) / 100,
+			CodingAdvantageDB: wsprCodingAdvantageDB,
+			PhonePowerDbm:     math.Round(phonePowerDbm*10) / 10,
+			PowerGainDB:       math.Round(powerGainDB*10) / 10,
+			PredictedSSBSNR:   math.Round(predictedSSBSNR*10) / 10,
+			Prediction:        classifyPrediction(predictedSSBSNR),
+			SpotCount:         g.SpotCount,
+			LastSeen:          g.LastSeen,
+			Locator:           g.Locator,
+			DistanceKm:        g.DistanceKm,
+			BearingDeg:        g.BearingDeg,
 		}
 		predictions = append(predictions, entry)
 	}
@@ -409,14 +426,15 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 
 	// ── Build response ────────────────────────────────────────────────────────
 	meta := WSPRPredictionMeta{
-		PhonePowerW:    phonePowerW,
-		PhonePowerDbm:  math.Round(phonePowerDbm*10) / 10,
-		BWPenaltyDB:    math.Round(bwCorrectionDB*10) / 10,
-		Minutes:        minutes,
-		BandFilter:     band,
-		BandsAvailable: bandsAvailable,
-		SpotCount:      totalFiltered,
-		GeneratedAt:    now,
+		PhonePowerW:       phonePowerW,
+		PhonePowerDbm:     math.Round(phonePowerDbm*10) / 10,
+		BWCorrectionDB:    math.Round(bwCorrectionDB*100) / 100,
+		CodingAdvantageDB: wsprCodingAdvantageDB,
+		Minutes:           minutes,
+		BandFilter:        band,
+		BandsAvailable:    bandsAvailable,
+		SpotCount:         totalFiltered,
+		GeneratedAt:       now,
 	}
 
 	// Add receiver location if configured (convert Maidenhead locator to lat/lon)

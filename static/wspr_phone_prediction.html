@@ -459,8 +459,9 @@
     <strong>How this works:</strong>
     <code>wsprd</code> reports SNR already normalised to a <strong>2500 Hz</strong> reference bandwidth (it internally subtracts ~26.3 dB from the raw in-band SNR).
     SSB phone uses ~2700 Hz, so the bandwidth correction is only <code>10 × log₁₀(2700 ÷ 2500) ≈ +0.35 dB</code> — negligible.
+    The critical factor is the <strong>WSPR coding advantage</strong>: WSPR uses coherent FSK + FEC and can decode signals down to ≈ −31 dB SNR, whereas a human ear needs ≈ +10 dB SNR to copy SSB phone — a <strong>41 dB gap</strong> that is subtracted from the prediction.
     The mean WSPR SNR and mean TX power are calculated across all spots for a country/band, making the prediction robust against outliers and transmitters mis-reporting their power.
-    <strong>Predicted SSB SNR</strong> = mean WSPR SNR + 0.35 dB + (your TX power − mean WSPR TX power).
+    <strong>Predicted SSB SNR</strong> = mean WSPR SNR + 0.35 dB − 41 dB (coding advantage) + (your TX power − mean WSPR TX power).
     Signal quality thresholds follow <strong>ITU-R RS.1808 / CCIR Report 322</strong> aligned with the amateur RS report system:
     Excellent ≥ +15 dB (RS 5), Good ≥ +10 dB (RS 4), Workable ≥ +6 dB (RS 3), Marginal ≥ +3 dB (RS 2), Very Poor ≥ 0 dB (RS 1), Not Viable &lt; 0 dB.
     Assumes reciprocal propagation. Does not account for antenna gain differences between WSPR and SSB antennas.

@@ -447,16 +447,19 @@
                 <div class="s-meter-container">
                     <canvas id="s-meter-canvas" width="280" height="160"></canvas>
                 </div>
-                <div style="display: flex; justify-content: center; align-items: center; padding: 5px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #2c3e50; border-radius: 4px; margin-top: 5px; width: 280px; box-sizing: border-box;">
-                        <div id="s-meter-value-display" style="font-size: 18px; font-weight: bold; color: #ecf0f1; flex: 1; text-align: left;">
-                            S0
+                <div style="display: flex; justify-content: center; align-items: center; padding: 0;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #2c3e50; border-radius: 0 0 4px 4px; width: 280px; box-sizing: border-box;">
+                        <div style="flex: 1; text-align: left; display: flex; flex-direction: column; align-items: flex-start; gap: 1px;">
+                            <div id="s-meter-value-display" style="font-size: 18px; font-weight: bold; color: #ecf0f1;">S0</div>
+                            <div style="font-size: 10px; color: #ffffff; opacity: 0.7;">Instant</div>
                         </div>
-                        <div id="s-meter-peak-display" style="font-size: 18px; font-weight: bold; color: rgba(0, 255, 255, 0.9); flex: 1; text-align: center;">
-                            S0
+                        <div style="flex: 1; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 1px;">
+                            <div id="s-meter-peak-display" style="font-size: 18px; font-weight: bold; color: rgba(0, 255, 255, 0.9);">S0</div>
+                            <div style="font-size: 10px; color: #ffffff; opacity: 0.7;">Hold</div>
                         </div>
-                        <div id="s-meter-snr-display" style="font-size: 14px; font-weight: bold; color: #ffc107; flex: 1; text-align: right;">
-                            -- dB SNR
+                        <div style="flex: 1; text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 1px;">
+                            <div id="s-meter-snr-display" style="font-size: 18px; font-weight: bold; color: #ffc107;">--</div>
+                            <div style="font-size: 10px; color: #ffffff; opacity: 0.7;">SNR</div>
                         </div>
                     </div>
                 </div>

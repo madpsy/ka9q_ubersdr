@@ -366,10 +366,10 @@ class SMeterNeedle {
         if (snrDiv) {
             if (this.currentSNR !== null && isFinite(this.currentSNR)) {
                 const snrRounded = Math.round(this.currentSNR);
-                snrDiv.textContent = snrRounded + ' dB SNR';
+                snrDiv.textContent = snrRounded + ' dB';
                 snrDiv.style.color = this.snrColour(this.currentSNR);
             } else {
-                snrDiv.textContent = '-- dB SNR';
+                snrDiv.textContent = '--';
                 snrDiv.style.color = '#ffc107';
             }
         }

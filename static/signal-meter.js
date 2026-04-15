@@ -4,7 +4,7 @@
 class SignalMeter {
     constructor() {
         // Display mode: 'dbfs' or 'snr'
-        this.displayMode = 'dbfs';
+        this.displayMode = localStorage.getItem('signalMeterDisplayMode') || 'dbfs';
 
         // Peak history for smoothing
         this.peakHistory = [];
@@ -45,6 +45,7 @@ class SignalMeter {
     // Toggle between dBFS and SNR display modes
     toggleDisplayMode() {
         this.displayMode = this.displayMode === 'dbfs' ? 'snr' : 'dbfs';
+        localStorage.setItem('signalMeterDisplayMode', this.displayMode);
         console.log(`Signal meter mode: ${this.displayMode.toUpperCase()}`);
         
         // Update tooltip

@@ -153,21 +153,27 @@ const app = (() => {
                         return isNaN(base) ? null : (base / k) + 'px';
                     });
                 // Counter-scale the receiver pin group so it stays constant screen size.
-                // The pin was drawn with its tip at (cx, cy); we scale around that point.
+                // The group uses local coords (tip at origin), so just translate + scale.
                 mapGroup.selectAll('.receiver-marker')
                     .attr('transform', function() {
                         const cx = +d3.select(this).attr('data-pin-cx');
                         const cy = +d3.select(this).attr('data-pin-cy');
                         if (isNaN(cx) || isNaN(cy)) return null;
-                        return `translate(${cx},${cy}) scale(${1/k}) translate(${-cx},${-cy})`;
+                        return `translate(${cx},${cy}) scale(${1/k})`;
                     });
             });
         svg.call(zoom);
     }
 
     // ── Receiver marker ──────────────────────────────────────────────────────
-    // Drawn as a classic teardrop map-pin: a circle on top of a downward point.
-    // The pin tip sits exactly at the receiver's projected coordinates.
+    // Drawn as a classic teardrop map-pin using a local-coordinate path
+    // (tip at origin, head above) translated to the projected position.
+    // Local path: tip at (0,0), circular head centred at (0,-12), radius 8.
+    // Tangent lines from (0,0) touch the circle at (±6.93, -4).
+    //   M 0 0  L 6.93 -4  A 8 8 0 1 0 -6.93 -4  Z
+    const PIN_PATH = 'M 0 0 L 6.93 -4 A 8 8 0 1 0 -6.93 -4 Z';
+    const PIN_HEAD_CY = -12; // circle centre y in local coords
+
     function drawReceiverMarker(m) {
         // Remove any existing marker
         if (receiverMarkerGroup) {
@@ -180,48 +186,16 @@ const app = (() => {
         const [cx, cy] = projection([m.receiver_lon, m.receiver_lat]);
         if (isNaN(cx) || isNaN(cy)) return;
 
+        // Group translated so local (0,0) = tip = projected receiver position
         receiverMarkerGroup = mapGroup.append('g')
             .attr('class', 'receiver-marker')
             .attr('data-pin-cx', cx)
-            .attr('data-pin-cy', cy);
-
-        // Pin dimensions (in map-space pixels at zoom=1)
-        const pinR   = 8;   // radius of the circular head
-        const pinH   = 20;  // total height from tip to top of circle
-        // The circle centre sits pinH - pinR above the tip
-        const headCY = cy - (pinH - pinR);
-
-        // Teardrop path: circle head + two tangent lines meeting at the tip point
-        // We use a path that combines an arc for the head and straight lines to the tip.
-        // angle where the tangent from the tip touches the circle:
-        //   sin(α) = r / d,  d = pinH - pinR  (distance from tip to circle centre)
-        const d = pinH - pinR;
-        const sinA = pinR / d;
-        const alpha = Math.asin(sinA);  // half-angle of the "notch"
-        const cosA  = Math.cos(alpha);
-
-        // Tangent touch points on the circle (relative to circle centre)
-        const tx = pinR * cosA;
-        const ty = pinR * sinA;
-
-        // SVG path: start at tip, line to right tangent, arc over the top, line back to tip
-        const pinPath = [
-            `M ${cx} ${cy}`,                                          // tip
-            `L ${cx + tx} ${headCY + ty}`,                           // right tangent point
-            `A ${pinR} ${pinR} 0 1 1 ${cx - tx} ${headCY + ty}`,    // arc (large arc = top half)
-            'Z'
-        ].join(' ');
-
-        // Drop shadow / glow
-        receiverMarkerGroup.append('path')
-            .attr('d', pinPath)
-            .attr('transform', `translate(1.5, 1.5)`)
-            .style('fill', 'rgba(0,0,0,0.35)')
-            .style('pointer-events', 'none');
+            .attr('data-pin-cy', cy)
+            .attr('transform', `translate(${cx},${cy})`);
 
         // Pin body
         receiverMarkerGroup.append('path')
-            .attr('d', pinPath)
+            .attr('d', PIN_PATH)
             .style('fill', '#e74c3c')
             .style('stroke', '#fff')
             .style('stroke-width', '1.5px')
@@ -239,11 +213,11 @@ const app = (() => {
             })
             .on('mouseout', () => { tooltip.style.display = 'none'; });
 
-        // White dot in the pin head
+        // White dot in the pin head (local coords)
         receiverMarkerGroup.append('circle')
-            .attr('cx', cx)
-            .attr('cy', headCY)
-            .attr('r', pinR * 0.35)
+            .attr('cx', 0)
+            .attr('cy', PIN_HEAD_CY)
+            .attr('r', 3)
             .style('fill', '#fff')
             .style('pointer-events', 'none');
     }

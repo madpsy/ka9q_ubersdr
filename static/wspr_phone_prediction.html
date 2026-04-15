@@ -441,10 +441,11 @@
         <div class="legend-item"><svg width="14" height="14" style="flex-shrink:0"><circle cx="7" cy="7" r="6" fill="#c0392b" stroke="#fff" stroke-width="1.2"/></svg> Very Poor ≥ 0 dB (RS 1)</div>
         <div class="legend-item"><svg width="14" height="14" style="flex-shrink:0"><circle cx="7" cy="7" r="6" fill="#4a2020" stroke="#fff" stroke-width="1.2"/></svg> Not Viable &lt; 0 dB</div>
         <div class="legend-item">
-            <!-- Teardrop pin icon matching the JS marker -->
-            <svg width="14" height="20" viewBox="0 0 14 20" style="flex-shrink:0;overflow:visible">
-                <path d="M 7 20 L 12.2 13.1 A 6 6 0 1 0 1.8 13.1 Z" fill="#e74c3c" stroke="#fff" stroke-width="1.2"/>
-                <circle cx="7" cy="7" r="2.2" fill="#fff"/>
+            <!-- Teardrop pin: local coords tip at (0,0), head centre at (0,-12), r=8 -->
+            <!-- viewBox centres the pin horizontally; 22px tall to show full pin -->
+            <svg width="16" height="22" viewBox="-8 -20 16 22" style="flex-shrink:0;overflow:visible">
+                <path d="M 0 0 L 6.93 -4 A 8 8 0 1 0 -6.93 -4 Z" fill="#e74c3c" stroke="#fff" stroke-width="1.2"/>
+                <circle cx="0" cy="-12" r="3" fill="#fff"/>
             </svg>
             Receiver
         </div>

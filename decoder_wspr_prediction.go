@@ -263,6 +263,18 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 		spots = nil
 	}
 
+	log.Printf("WSPR prediction DEBUG: GetHistoricalSpots returned %d spots, fromDate=%s toDate=%s windowStart=%s",
+		len(spots), fromDate, toDate, windowStart.Format(time.RFC3339))
+	if len(spots) > 0 {
+		s := spots[0]
+		dbmStr := "nil"
+		if s.DBm != nil {
+			dbmStr = fmt.Sprintf("%d", *s.DBm)
+		}
+		log.Printf("WSPR prediction DEBUG: first spot: ts=%s band=%s country=%s snr=%d dbm=%s",
+			s.Timestamp, s.Band, s.Country, s.SNR, dbmStr)
+	}
+
 	// ── Filter spots to the exact time window ─────────────────────────────────
 	// GetHistoricalSpots works on whole days; we need to trim to the minute window.
 	phonePowerDbm := wattsTodBm(phonePowerW)
@@ -307,6 +319,7 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 
 		// Must have a dBm value (WSPR-specific field)
 		if spot.DBm == nil {
+			log.Printf("WSPR prediction DEBUG: skipping spot ts=%s callsign=%s band=%s — DBm is nil", spot.Timestamp, spot.Callsign, spot.Band)
 			continue
 		}
 

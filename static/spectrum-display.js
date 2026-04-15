@@ -1816,16 +1816,19 @@ class SpectrumDisplay {
             minDb = this.config.manualMinDb;
             maxDb = this.config.manualMaxDb;
         } else {
-            // Find min and max values in smoothed data
-            let currentMinDb = Infinity;
-            let currentMaxDb = -Infinity;
+            // Use 20th percentile as noise floor (lands at actual noise floor in typical HF spectrum
+            // where ~80% of bins are noise — gives full colour gradient to the signal region above noise)
+            const values = [];
             for (let i = 0; i < smoothedData.length; i++) {
                 const db = smoothedData[i];
-                if (isFinite(db)) {
-                    currentMinDb = Math.min(currentMinDb, db);
-                    currentMaxDb = Math.max(currentMaxDb, db);
-                }
+                if (isFinite(db)) values.push(db);
             }
+            values.sort((a, b) => a - b);
+
+            const floorIndex = Math.floor(values.length * 0.20);
+            const peakIndex  = Math.floor(values.length * 0.98);
+            const currentMinDb = values.length > 0 ? values[floorIndex] : -120;
+            const currentMaxDb = values.length > 0 ? values[peakIndex]  : -40;
 
             // Track minimum values over time for stable noise floor
             this.lineGraphMinHistory.push({ value: currentMinDb, timestamp: now });
@@ -2991,9 +2994,10 @@ class SpectrumDisplay {
         if (values.length > 0) {
             values.sort((a, b) => a - b);
 
-            // Use 5th percentile as noise floor (ignores very low outlier bins)
+            // Use 20th percentile as noise floor (lands at actual noise floor in typical HF spectrum
+            // where ~80% of bins are noise — gives full colour gradient to the signal region above noise)
             // Use 98th percentile as peak (ignores very high outlier spikes)
-            const floorIndex = Math.floor(values.length * 0.05);
+            const floorIndex = Math.floor(values.length * 0.20);
             const peakIndex  = Math.floor(values.length * 0.98);
             const min = values[floorIndex];
             const max = values[peakIndex];

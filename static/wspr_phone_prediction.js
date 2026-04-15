@@ -118,14 +118,14 @@ const app = (() => {
 
         // Draw countries — store group reference so receiver marker can be appended later
         mapGroup = svg.append('g').attr('class', 'map-group');
+        // Country paths are a neutral base map only — no mouse events on them.
+        // Spot circles drawn by updateMap() handle all interaction.
         countryPaths = mapGroup.selectAll('path')
             .data(worldFeatures)
             .enter()
             .append('path')
             .attr('class', 'country-path no-data')
-            .attr('d', pathGen)
-            .on('mousemove', onCountryMouseMove)
-            .on('mouseout', onCountryMouseOut);
+            .attr('d', pathGen);
 
         // Sphere outline
         svg.append('path')
@@ -197,12 +197,43 @@ const app = (() => {
             .style('pointer-events', 'none');
     }
 
-    // ── Country → prediction lookup ──────────────────────────────────────────
-    // Build a map from TopoJSON numeric ID → prediction entry.
-    // We match using d3.geoContains() with the locator's lat/lon.
-    function buildCountryMap(preds) {
-        // Map: topoJSON feature numeric id → prediction entry (best SNR if multiple)
-        const featureMap = new Map(); // feature index → entry
+    // ── Spot circle markers ───────────────────────────────────────────────────
+    // Instead of colouring country polygons (which include overseas territories),
+    // we draw a circle at each prediction's Maidenhead locator position.
+    // This accurately represents where the signal was heard, not a whole country.
+    let spotMarkersGroup = null;
+
+    const PREDICTION_FILL = {
+        excellent:  '#1abc9c',
+        good:       '#27ae60',
+        workable:   '#f1c40f',
+        marginal:   '#e67e22',
+        poor:       '#c0392b',
+        not_viable: '#4a2020',
+    };
+
+    function updateMap(preds) {
+        if (!mapGroup) return;
+
+        // Remove old spot markers
+        if (spotMarkersGroup) {
+            spotMarkersGroup.remove();
+            spotMarkersGroup = null;
+        }
+
+        // All country paths stay neutral (no-data class) — colouring is done via spot circles
+        if (countryPaths) {
+            countryPaths.classed('no-data', true)
+                        .classed('excellent', false)
+                        .classed('good', false)
+                        .classed('workable', false)
+                        .classed('marginal', false)
+                        .classed('poor', false)
+                        .classed('not-viable', false);
+        }
+
+        // Draw spot circles at locator positions
+        spotMarkersGroup = mapGroup.append('g').attr('class', 'spot-markers');
 
         for (const entry of preds) {
             if (!entry.locator || entry.locator.length < 4) continue;
@@ -214,96 +245,73 @@ const app = (() => {
                 continue;
             }
 
-            // Find which TopoJSON feature contains this point
-            for (let i = 0; i < worldFeatures.length; i++) {
-                const feat = worldFeatures[i];
-                try {
-                    if (d3.geoContains(feat, [coords.lon, coords.lat])) {
-                        const existing = featureMap.get(i);
-                        if (!existing || entry.predicted_ssb_snr > existing.predicted_ssb_snr) {
-                            featureMap.set(i, entry);
-                        }
-                        break;
-                    }
-                } catch (_) { /* skip malformed features */ }
-            }
+            const projected = projection([coords.lon, coords.lat]);
+            if (!projected || isNaN(projected[0]) || isNaN(projected[1])) continue;
+
+            const [cx, cy] = projected;
+            const fill = PREDICTION_FILL[entry.prediction] || '#888';
+            // Radius scales slightly with spot count (min 5, max 10)
+            const r = Math.min(10, Math.max(5, 4 + Math.log2(entry.spot_count + 1)));
+
+            const g = spotMarkersGroup.append('g').attr('class', 'spot-marker');
+
+            // Outer ring
+            g.append('circle')
+                .attr('cx', cx).attr('cy', cy)
+                .attr('r', r + 3)
+                .style('fill', 'none')
+                .style('stroke', fill)
+                .style('stroke-width', '1')
+                .style('opacity', '0.35')
+                .style('pointer-events', 'none');
+
+            // Main circle
+            g.append('circle')
+                .attr('cx', cx).attr('cy', cy)
+                .attr('r', r)
+                .style('fill', fill)
+                .style('stroke', '#fff')
+                .style('stroke-width', '1.2')
+                .style('cursor', 'pointer')
+                .on('mousemove', (event) => onSpotMouseMove(event, entry))
+                .on('mouseout', () => { tooltip.style.display = 'none'; });
         }
 
-        return featureMap;
-    }
-
-    // ── Update map colours ───────────────────────────────────────────────────
-    function updateMap(preds) {
-        if (!countryPaths) return;
-
-        const featureMap = buildCountryMap(preds);
-
-        countryPaths.each(function(d, i) {
-            const el = d3.select(this);
-            const entry = featureMap.get(i);
-            const p = entry ? entry.prediction : null;
-            // Remove all prediction classes then apply the correct one
-            el.classed('no-data',    !entry)
-              .classed('excellent',  p === 'excellent')
-              .classed('good',       p === 'good')
-              .classed('workable',   p === 'workable')
-              .classed('marginal',   p === 'marginal')
-              .classed('poor',       p === 'poor')
-              .classed('not-viable', p === 'not_viable');
-            // Store entry reference for tooltip
-            el.datum().predEntry = entry || null;
-        });
-
-        // Draw receiver marker on top of countries (uses current meta)
+        // Draw receiver marker on top
         drawReceiverMarker(meta);
     }
 
     // ── Tooltip ──────────────────────────────────────────────────────────────
     const tooltip = document.getElementById('map-tooltip');
 
-    function onCountryMouseMove(event, d) {
-        const entry = d.predEntry;
-        if (!entry) {
-            tooltip.style.display = 'none';
-            return;
-        }
-
+    // Tooltip for spot circle markers
+    function onSpotMouseMove(event, entry) {
         const cls = entry.prediction;
-        const snrStr = entry.predicted_ssb_snr >= 0
-            ? `+${entry.predicted_ssb_snr.toFixed(1)}`
-            : entry.predicted_ssb_snr.toFixed(1);
+        const snrStr = (entry.predicted_ssb_snr >= 0 ? '+' : '') + entry.predicted_ssb_snr.toFixed(1);
+        const normSnrStr = (entry.mean_normalised_snr >= 0 ? '+' : '') + entry.mean_normalised_snr.toFixed(1);
 
         let distStr = '—';
-        if (entry.distance_km != null) {
-            distStr = `${Math.round(entry.distance_km)} km`;
-        }
+        if (entry.distance_km != null) distStr = `${Math.round(entry.distance_km)} km`;
 
         let bearingStr = '—';
-        if (entry.bearing_deg != null) {
-            bearingStr = `${Math.round(entry.bearing_deg)}°`;
-        }
+        if (entry.bearing_deg != null) bearingStr = `${Math.round(entry.bearing_deg)}°`;
 
         const lastSeen = entry.last_seen
             ? new Date(entry.last_seen).toUTCString().replace(' GMT', ' UTC')
             : '—';
 
         const predLabel = PREDICTION_LABELS[cls] || cls;
-        const normSnrStr = (entry.mean_normalised_snr >= 0 ? '+' : '') + entry.mean_normalised_snr.toFixed(1);
         tooltip.innerHTML = `
-            <div class="tooltip-title">${entry.country}</div>
-            <div>Band: <strong>${entry.band}</strong> &nbsp; Continent: <strong>${entry.continent || '—'}</strong></div>
+            <div class="tooltip-title">${escHtml(entry.country)} — ${escHtml(entry.locator || '?')}</div>
+            <div>Band: <strong>${escHtml(entry.band)}</strong> &nbsp; Continent: <strong>${escHtml(entry.continent || '—')}</strong></div>
             <div class="${tooltipPredClass(cls)}">Signal quality: <strong>${predLabel}</strong> (${snrStr} dB)</div>
-            <div>Mean path metric: ${normSnrStr} dB &nbsp; (avg SNR−TX power, ${entry.spot_count} spot${entry.spot_count !== 1 ? 's' : ''})</div>
+            <div>Mean path metric: ${normSnrStr} dB &nbsp; (${entry.spot_count} spot${entry.spot_count !== 1 ? 's' : ''})</div>
             <div>BW penalty: −${entry.bw_penalty_db.toFixed(1)} dB &nbsp; Your TX: ${entry.phone_power_dbm.toFixed(1)} dBm</div>
             <div>Distance: ${distStr} &nbsp; Bearing: ${bearingStr}</div>
             <div>Last seen: ${lastSeen}</div>
         `;
         tooltip.style.display = 'block';
         positionTooltip(event);
-    }
-
-    function onCountryMouseOut() {
-        tooltip.style.display = 'none';
     }
 
     function positionTooltip(event) {

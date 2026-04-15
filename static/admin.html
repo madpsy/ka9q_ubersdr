@@ -1084,6 +1084,7 @@
                             <a href="decode_metrics.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📊 Decode Metrics</a>
                             <a href="decoder_spots_analytics.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">🔍 Spot Analysis</a>
                             <a href="pskreporter_analytics.html" target="_blank" style="padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📡 PSK Reporter Stats</a>
+                            <a id="wspr-phone-prediction-btn" href="wspr_phone_prediction.html" target="_blank" style="display: none; padding: 6px 12px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#5568d3'" onmouseout="this.style.background='#667eea'">📻 Phone Predictions</a>
                             <a href="decoder_feed.html" target="_blank" onclick="return openFeedPopout('decoder_feed.html')" style="padding: 6px 12px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='#218838'" onmouseout="this.style.background='#28a745'">⚡ Real-time Feed</a>
                         </div>
                     </div>
@@ -2254,6 +2255,8 @@
                     const descData = await descResponse.json();
                     currentVersion = descData.version || 'Unknown';
                     document.getElementById('currentVersion').textContent = currentVersion;
+                    siteDescription = descData;
+                    updateDecoderAnalyticsLinks();
                 }
 
                 // Fetch latest version from GitHub
@@ -6417,6 +6420,7 @@
 
         // Decoder configuration management
         let currentDecoderConfig = {};
+        let siteDescription = null;
 
         // Update decoder analytics links visibility based on enabled status
         function updateDecoderAnalyticsLinks() {
@@ -6425,6 +6429,15 @@
                 // Show links if decoder is enabled
                 const isEnabled = currentDecoderConfig.enabled === true;
                 linksSection.style.display = isEnabled ? 'block' : 'none';
+            }
+            // Show/hide Phone Predictions button based on description
+            const phonePredBtn = document.getElementById('wspr-phone-prediction-btn');
+            if (phonePredBtn) {
+                const wsprEnabled = siteDescription &&
+                    siteDescription.digital_decodes === true &&
+                    Array.isArray(siteDescription.digital_modes) &&
+                    siteDescription.digital_modes.includes('WSPR');
+                phonePredBtn.style.display = wsprEnabled ? '' : 'none';
             }
         }
 

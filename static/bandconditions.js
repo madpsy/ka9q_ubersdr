@@ -11,6 +11,7 @@ class BandConditionsMonitor {
         this.gpsCoordinates = null; // Store GPS coordinates for sunrise/sunset calculation
         this.location = null; // Store location name if available
         this.utcClockInterval = null; // Interval for UTC clock updates
+        this.wsprEnabled = false; // Whether WSPR phone predictions are available
 
         // Tableau 10 color palette
         this.bandColors = {
@@ -37,6 +38,13 @@ class BandConditionsMonitor {
             const response = await fetch('/api/description');
             if (response.ok) {
                 const data = await response.json();
+
+                // Store WSPR enabled flag
+                if (data.digital_decodes === true &&
+                    Array.isArray(data.digital_modes) &&
+                    data.digital_modes.includes('WSPR')) {
+                    this.wsprEnabled = true;
+                }
 
                 // Store GPS coordinates if available
                 if (data.receiver && data.receiver.gps &&
@@ -171,6 +179,61 @@ class BandConditionsMonitor {
         const countdown = document.getElementById('countdown');
         if (countdown) {
             countdown.textContent = '';
+        }
+    }
+
+    async loadWsprPredictions() {
+        const section = document.getElementById('wspr-predictions-section');
+        const content = document.getElementById('wspr-predictions-content');
+        if (!section || !content) return;
+
+        try {
+            const response = await fetch('/api/wspr/phone-prediction?summary=true&by=band&phone_power_w=250');
+            if (!response.ok) {
+                console.error('Failed to load WSPR phone predictions');
+                section.style.display = 'none';
+                return;
+            }
+
+            const data = await response.json();
+            if (!data.predictions || data.predictions.length === 0) {
+                section.style.display = 'none';
+                return;
+            }
+
+            const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+            const sorted = data.predictions.slice().sort((a, b) => {
+                const ia = bandOrder.indexOf(a.band);
+                const ib = bandOrder.indexOf(b.band);
+                return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+            });
+
+            let html = '';
+            for (const bandEntry of sorted) {
+                if (!bandEntry.countries || bandEntry.countries.length === 0) continue;
+
+                const badges = bandEntry.countries.map(c => {
+                    const cls = (c.prediction || 'poor').toLowerCase();
+                    const snr = typeof c.predicted_ssb_snr === 'number' ? c.predicted_ssb_snr.toFixed(1) : '?';
+                    return `<span class="wspr-badge ${cls}" title="${c.prediction} (${snr} dB SSB SNR)">${c.country}</span>`;
+                }).join('');
+
+                html += `<div class="wspr-band-block">
+                    <div class="wspr-band-title">${bandEntry.band} <span style="font-size:0.8em;opacity:0.7;">(${bandEntry.country_count} countr${bandEntry.country_count === 1 ? 'y' : 'ies'}, best: ${bandEntry.best_prediction})</span></div>
+                    <div class="wspr-badges">${badges}</div>
+                </div>`;
+            }
+
+            if (html === '') {
+                section.style.display = 'none';
+                return;
+            }
+
+            content.innerHTML = html;
+            section.style.display = 'block';
+        } catch (error) {
+            console.error('Error loading WSPR phone predictions:', error);
+            section.style.display = 'none';
         }
     }
 
@@ -344,6 +407,11 @@ class BandConditionsMonitor {
 
             // Load space weather data
             await this.loadSpaceWeather();
+
+            // Load phone/SSB predictions if WSPR is available
+            if (this.wsprEnabled) {
+                await this.loadWsprPredictions();
+            }
 
             // Get latest data
             const response = await fetch('/api/noisefloor/latest');

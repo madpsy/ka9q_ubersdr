@@ -142,56 +142,9 @@ class SignalMeter {
     updateDisplay(avgPeakDb) {
         if (!this.meterBar || !this.meterValue) return;
 
-        // Check data source selection (default to 'audio' if not set)
-        const dataSource = window.signalDataSource || 'audio';
-
-        let basebandPower, noiseDensity;
-
-        if (dataSource === 'audio') {
-            // Use audio stream data from radiod
-            basebandPower = window.currentBasebandPower || -999;
-            noiseDensity = window.currentNoiseDensity || -999;
-        } else {
-            // Use spectrum FFT data (original behavior)
-            basebandPower = avgPeakDb;
-            noiseDensity = this.getNoiseFloor();
-
-            // Update global window variables so modal and other components can use spectrum data
-            window.currentBasebandPower = basebandPower;
-            window.currentNoiseDensity = noiseDensity;
-
-            // Update SNR history for the graph with smoothing (same logic as audio packets)
-            const snr = Math.max(0, basebandPower - noiseDensity);
-            const timestamp = Date.now();
-
-            // Add to smoothing history
-            this.snrSmoothingHistory.push({ value: snr, timestamp: timestamp });
-
-            // Remove old entries from smoothing history (older than 2 seconds)
-            this.snrSmoothingHistory = this.snrSmoothingHistory.filter(entry => timestamp - entry.timestamp <= this.snrSmoothingMaxAge);
-
-            // Only update SNR history every 100ms (throttled like audio packets)
-            if (timestamp - this.lastSnrHistoryUpdate >= this.snrHistoryUpdateInterval) {
-                // Calculate smoothed SNR (average over 2 second window)
-                const smoothedSnr = this.snrSmoothingHistory.reduce((sum, entry) => sum + entry.value, 0) / this.snrSmoothingHistory.length;
-
-                // Access global snrHistory array from app.js
-                if (typeof window.snrHistory !== 'undefined') {
-                    window.snrHistory.push({ value: smoothedSnr, timestamp: timestamp });
-
-                    // Remove old entries (older than 10 seconds)
-                    const SNR_HISTORY_MAX_AGE = 10000; // 10 seconds
-                    window.snrHistory = window.snrHistory.filter(entry => timestamp - entry.timestamp <= SNR_HISTORY_MAX_AGE);
-                }
-
-                // Update modal display if it's open (every 100ms)
-                if (typeof updateSignalQualityDisplay === 'function') {
-                    updateSignalQualityDisplay();
-                }
-
-                this.lastSnrHistoryUpdate = timestamp;
-            }
-        }
+        // Use audio stream data from radiod
+        const basebandPower = window.currentBasebandPower || -999;
+        const noiseDensity = window.currentNoiseDensity || -999;
 
         // Update S-meter needle if it exists
         if (typeof sMeterNeedle !== 'undefined' && sMeterNeedle) {

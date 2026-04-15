@@ -2520,9 +2520,8 @@ async function handleBinaryMessage(data) {
                 window.currentNoiseDensity = noiseDensity;
                 lastSignalQualityUpdate = now;
 
-                // Calculate SNR and add to history (only if audio is the selected data source)
-                const dataSource = window.signalDataSource || 'audio';
-                if (dataSource === 'audio' && basebandPower > -900 && noiseDensity > -900) {
+                // Calculate SNR and add to history
+                if (basebandPower > -900 && noiseDensity > -900) {
                     const snr = Math.max(0, basebandPower - noiseDensity);
                     const timestamp = Date.now();
                     snrHistory.push({ value: snr, timestamp: timestamp });
@@ -7570,9 +7569,6 @@ const ZOOM_THROTTLE_MS = 25;
 
 // Initialize spectrum display on page load
 document.addEventListener('DOMContentLoaded', () => {
-    // Load signal data source setting FIRST
-    loadSignalDataSource();
-
     // Load chat markers setting
     loadChatMarkersSetting();
 
@@ -8873,14 +8869,6 @@ function openBufferConfigModal() {
             }
         });
 
-        // Update signal data source radio buttons
-        const audioRadio = document.querySelector('input[name="signal-source"][value="audio"]');
-        const spectrumRadio = document.querySelector('input[name="signal-source"][value="spectrum"]');
-        if (audioRadio && spectrumRadio) {
-            audioRadio.checked = (window.signalDataSource === 'audio');
-            spectrumRadio.checked = (window.signalDataSource === 'spectrum');
-        }
-
         // Update signal quality display
         updateSignalQualityDisplay();
 
@@ -9241,43 +9229,6 @@ function loadBufferThreshold() {
         }
     } catch (e) {
         console.error('Failed to load buffer threshold from localStorage:', e);
-    }
-}
-
-// Signal data source selection
-function setSignalDataSource(source) {
-    window.signalDataSource = source;
-
-    // Save to localStorage
-    try {
-        localStorage.setItem('signalDataSource', source);
-    } catch (e) {
-        console.error('Failed to save signal data source to localStorage:', e);
-    }
-
-    log(`Signal data source set to: ${source}`);
-
-    // Update displays that depend on this setting
-    updateSignalQualityDisplay();
-}
-
-// Load signal data source from localStorage
-function loadSignalDataSource() {
-    try {
-        const saved = localStorage.getItem('signalDataSource');
-        window.signalDataSource = saved || 'audio'; // Default to audio
-        log(`Loaded signal data source: ${window.signalDataSource}`);
-
-        // Update radio button state if modal exists
-        const audioRadio = document.querySelector('input[name="signal-source"][value="audio"]');
-        const spectrumRadio = document.querySelector('input[name="signal-source"][value="spectrum"]');
-        if (audioRadio && spectrumRadio) {
-            audioRadio.checked = (window.signalDataSource === 'audio');
-            spectrumRadio.checked = (window.signalDataSource === 'spectrum');
-        }
-    } catch (e) {
-        console.error('Failed to load signal data source from localStorage:', e);
-        window.signalDataSource = 'audio'; // Default to audio on error
     }
 }
 
@@ -9989,21 +9940,10 @@ function updateSignalQualityDisplay() {
 
     let basebandPower, noiseDensity, snr;
 
-    // Determine data source (default to 'audio' if not set)
-    const dataSource = window.signalDataSource || 'audio';
-
-    // Use explicit check - only use spectrum if explicitly selected
-    if (dataSource === 'spectrum') {
-        // Use spectrum FFT data - get from window variables set by signal meter
-        basebandPower = window.currentBasebandPower || -999;
-        noiseDensity = window.currentNoiseDensity || -999;
-        snr = (basebandPower > -900 && noiseDensity > -900) ? basebandPower - noiseDensity : null;
-    } else {
-        // Use audio stream data (default for 'audio' or any other value)
-        basebandPower = currentBasebandPower;
-        noiseDensity = currentNoiseDensity;
-        snr = (basebandPower > -900 && noiseDensity > -900) ? basebandPower - noiseDensity : null;
-    }
+    // Use audio stream data
+    basebandPower = currentBasebandPower;
+    noiseDensity = currentNoiseDensity;
+    snr = (basebandPower > -900 && noiseDensity > -900) ? basebandPower - noiseDensity : null;
 
     // Update display elements
     if (basebandElement) {

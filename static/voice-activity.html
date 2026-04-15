@@ -440,17 +440,18 @@
         let scanActivities = [];
         let wsprPredictionInterval = null;
 
-        async function fetchWsprPredictions() {
+        function fetchWsprPredictions() {
+            // Re-use the predictions already fetched by bands_state.js in the opener
+            // window rather than making a redundant API call.
             try {
-                const response = await fetch(`/api/wspr/phone-prediction?summary=true&by=band`);
-                if (!response.ok) return;
-                const data = await response.json();
-
-                // Find predictions for this band
-                const bandEntry = data.predictions && data.predictions.find(p => p.band === band);
-                renderWsprPredictions(bandEntry ? bandEntry.countries : null);
+                const source = (window.opener && window.opener.wsprPredictions)
+                    ? window.opener.wsprPredictions
+                    : window.wsprPredictions;
+                const countries = source && source[band] ? source[band] : null;
+                renderWsprPredictions(countries);
             } catch (err) {
-                console.error('Error fetching WSPR predictions:', err);
+                // Cross-origin or closed opener — silently ignore
+                console.warn('Could not read WSPR predictions from opener:', err);
             }
         }
 

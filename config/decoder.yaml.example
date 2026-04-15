@@ -238,6 +238,11 @@ decoder:
       frequency: 10138700  # 10.1387 MHz
       enabled: false
 
+    - name: "22m-wspr"
+      mode: "WSPR"
+      frequency: 13553900
+      enabled: false
+
     - name: "20m-wspr"
       mode: "WSPR"
       frequency: 14095600  # 14.0956 MHz

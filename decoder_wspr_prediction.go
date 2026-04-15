@@ -216,6 +216,8 @@ type WSPRPredictionEntry struct {
 	BearingDeg      *float64 `json:"bearing_deg,omitempty"`
 	BestCallsign    string   `json:"best_callsign,omitempty"`     // callsign of the spot with the highest SNR in this group
 	BestCallsignDBm int      `json:"best_callsign_dbm,omitempty"` // TX power (dBm) reported by that callsign
+	Lat             *float64 `json:"lat,omitempty"`               // CTY entity latitude (from best-SNR callsign lookup)
+	Lon             *float64 `json:"lon,omitempty"`               // CTY entity longitude (from best-SNR callsign lookup)
 }
 
 // WSPRPredictionResponse is the full API response
@@ -239,7 +241,9 @@ type WSPRSummaryByCountryEntry struct {
 	Continent           string                 `json:"continent"`
 	BestPrediction      string                 `json:"best_prediction"`
 	BestPredictedSSBSNR float64                `json:"best_predicted_ssb_snr"`
-	Bands               []WSPRSummaryBandEntry `json:"bands"` // all qualifying bands, best-first
+	Bands               []WSPRSummaryBandEntry `json:"bands"`         // all qualifying bands, best-first
+	Lat                 *float64               `json:"lat,omitempty"` // CTY entity latitude (from best-SNR callsign lookup)
+	Lon                 *float64               `json:"lon,omitempty"` // CTY entity longitude (from best-SNR callsign lookup)
 }
 
 // WSPRSummaryByCountryResponse wraps the by=country summary list.
@@ -249,10 +253,12 @@ type WSPRSummaryByCountryResponse struct {
 
 // WSPRSummaryCountryEntry is one country within a by=band summary row.
 type WSPRSummaryCountryEntry struct {
-	Country         string  `json:"country"`
-	Continent       string  `json:"continent"`
-	Prediction      string  `json:"prediction"`
-	PredictedSSBSNR float64 `json:"predicted_ssb_snr"`
+	Country         string   `json:"country"`
+	Continent       string   `json:"continent"`
+	Prediction      string   `json:"prediction"`
+	PredictedSSBSNR float64  `json:"predicted_ssb_snr"`
+	Lat             *float64 `json:"lat,omitempty"` // CTY entity latitude (from best-SNR callsign lookup)
+	Lon             *float64 `json:"lon,omitempty"` // CTY entity longitude (from best-SNR callsign lookup)
 }
 
 // WSPRSummaryByBandEntry is one row in a by=band summary response.
@@ -295,10 +301,13 @@ func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) []WSPRS
 		Band    string
 	}
 	type groupData struct {
-		SNRSum    float64
-		TxDbmSum  float64
-		SpotCount int
-		Continent string
+		SNRSum       float64
+		TxDbmSum     float64
+		SpotCount    int
+		Continent    string
+		BestCallsign string
+		BestSNR      int
+		BestSNRSet   bool
 	}
 
 	groups := make(map[groupKey]*groupData)
@@ -320,6 +329,11 @@ func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) []WSPRS
 		g.SNRSum += float64(spot.SNR)
 		g.TxDbmSum += float64(*spot.DBm)
 		g.SpotCount++
+		if !g.BestSNRSet || spot.SNR > g.BestSNR {
+			g.BestSNR = spot.SNR
+			g.BestCallsign = spot.Callsign
+			g.BestSNRSet = true
+		}
 	}
 
 	if len(groups) == 0 {
@@ -333,6 +347,7 @@ func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) []WSPRS
 		Band            string
 		PredictedSSBSNR float64
 		Prediction      string
+		BestCallsign    string
 	}
 	var flat []flatEntry
 	for k, g := range groups {
@@ -351,6 +366,7 @@ func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) []WSPRS
 			Band:            k.Band,
 			PredictedSSBSNR: math.Round(predictedSSBSNR*10) / 10,
 			Prediction:      classifyPrediction(predictedSSBSNR),
+			BestCallsign:    g.BestCallsign,
 		})
 	}
 
@@ -376,12 +392,21 @@ func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) []WSPRS
 			acc = &bandAcc{bestPrediction: e.Prediction}
 			byBand[e.Band] = acc
 		}
-		acc.countries = append(acc.countries, WSPRSummaryCountryEntry{
+		entry := WSPRSummaryCountryEntry{
 			Country:         e.Country,
 			Continent:       e.Continent,
 			Prediction:      e.Prediction,
 			PredictedSSBSNR: e.PredictedSSBSNR,
-		})
+		}
+		if e.BestCallsign != "" {
+			if ctyInfo := GetCallsignInfo(e.BestCallsign); ctyInfo != nil {
+				lat := ctyInfo.Latitude
+				lon := ctyInfo.Longitude
+				entry.Lat = &lat
+				entry.Lon = &lon
+			}
+		}
+		acc.countries = append(acc.countries, entry)
 		if predRank[e.Prediction] < predRank[acc.bestPrediction] {
 			acc.bestPrediction = e.Prediction
 		}
@@ -732,6 +757,14 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 			BestCallsign:    g.BestCallsign,
 			BestCallsignDBm: g.BestCallsignDBm,
 		}
+		if g.BestCallsign != "" {
+			if ctyInfo := GetCallsignInfo(g.BestCallsign); ctyInfo != nil {
+				lat := ctyInfo.Latitude
+				lon := ctyInfo.Longitude
+				entry.Lat = &lat
+				entry.Lon = &lon
+			}
+		}
 		predictions = append(predictions, entry)
 	}
 
@@ -803,6 +836,26 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 			}
 
 			// Build result slice, sort bands within each country best-first
+			// Track best callsign per country for CTY lat/lon lookup
+			type countryBestCallsign struct {
+				callsign string
+				snr      float64
+				set      bool
+			}
+			bestCallsignByCountry := make(map[string]*countryBestCallsign)
+			for _, p := range predictions {
+				bc, ok := bestCallsignByCountry[p.Country]
+				if !ok {
+					bc = &countryBestCallsign{}
+					bestCallsignByCountry[p.Country] = bc
+				}
+				if p.BestCallsign != "" && (!bc.set || p.MeanWSPRSNR > bc.snr) {
+					bc.callsign = p.BestCallsign
+					bc.snr = p.MeanWSPRSNR
+					bc.set = true
+				}
+			}
+
 			result := make([]WSPRSummaryByCountryEntry, 0, len(byCountry))
 			for country, acc := range byCountry {
 				sort.Slice(acc.bands, func(i, j int) bool {
@@ -812,13 +865,22 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 					}
 					return acc.bands[i].PredictedSSBSNR > acc.bands[j].PredictedSSBSNR
 				})
-				result = append(result, WSPRSummaryByCountryEntry{
+				countryEntry := WSPRSummaryByCountryEntry{
 					Country:             country,
 					Continent:           acc.continent,
 					BestPrediction:      acc.bestPrediction,
 					BestPredictedSSBSNR: acc.bestPredictedSSBSNR,
 					Bands:               acc.bands,
-				})
+				}
+				if bc, ok := bestCallsignByCountry[country]; ok && bc.set && bc.callsign != "" {
+					if ctyInfo := GetCallsignInfo(bc.callsign); ctyInfo != nil {
+						lat := ctyInfo.Latitude
+						lon := ctyInfo.Longitude
+						countryEntry.Lat = &lat
+						countryEntry.Lon = &lon
+					}
+				}
+				result = append(result, countryEntry)
 			}
 			// Sort countries: best prediction first, then by best SNR descending
 			sort.Slice(result, func(i, j int) bool {
@@ -850,12 +912,21 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 				acc = &bandAcc{bestPrediction: p.Prediction}
 				byBand[p.Band] = acc
 			}
-			acc.countries = append(acc.countries, WSPRSummaryCountryEntry{
+			countryEntry := WSPRSummaryCountryEntry{
 				Country:         p.Country,
 				Continent:       p.Continent,
 				Prediction:      p.Prediction,
 				PredictedSSBSNR: p.PredictedSSBSNR,
-			})
+			}
+			if p.BestCallsign != "" {
+				if ctyInfo := GetCallsignInfo(p.BestCallsign); ctyInfo != nil {
+					lat := ctyInfo.Latitude
+					lon := ctyInfo.Longitude
+					countryEntry.Lat = &lat
+					countryEntry.Lon = &lon
+				}
+			}
+			acc.countries = append(acc.countries, countryEntry)
 			if predRank[p.Prediction] < predRank[acc.bestPrediction] {
 				acc.bestPrediction = p.Prediction
 			}

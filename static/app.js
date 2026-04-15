@@ -1799,6 +1799,13 @@ async function fetchSiteDescription() {
             // Store instance description globally for use by other modules (e.g., recorder)
             window.instanceDescription = data;
 
+            // Start WSPR prediction polling if WSPR is an available digital mode
+            if (Array.isArray(data.digital_modes) && data.digital_modes.includes('WSPR')) {
+                if (typeof startWsprPredictionPolling === 'function') {
+                    startWsprPredictionPolling();
+                }
+            }
+
             // Apply server-configured defaults for frequency and mode.
             // Use initialPageParams (captured at module load time) rather than re-reading
             // window.location.search, because updateURL() may have already rewritten the

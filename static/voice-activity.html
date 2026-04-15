@@ -335,6 +335,42 @@
         .confidence-filter select:hover {
             border-color: #3498db;
         }
+
+        .wspr-predictions {
+            background: #2c3e50;
+            border-radius: 6px;
+            padding: 10px 15px;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        .wspr-predictions-label {
+            font-size: 11px;
+            color: #95a5a6;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            letter-spacing: 0.5px;
+        }
+
+        .wspr-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .wspr-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            color: white;
+        }
+
+        .wspr-badge.excellent { background: #16a34a; }
+        .wspr-badge.good      { background: #fbbf24; color: #1a1a1a; }
+        .wspr-badge.fair      { background: #ea580c; }
+        .wspr-badge.poor      { background: #dc2626; }
     </style>
 </head>
 <body>
@@ -373,6 +409,11 @@
             <button class="random-btn" id="random-btn" onclick="tuneToRandom()">Random</button>
         </div>
 
+        <div class="wspr-predictions" id="wspr-predictions">
+            <div class="wspr-predictions-label">📡 Predicted SSB countries on <span id="wspr-band-label"></span></div>
+            <div class="wspr-badges" id="wspr-badges"></div>
+        </div>
+
         <div class="activity-list">
             <div class="activity-header">
                 <span>Recent Voice Activity</span>
@@ -391,11 +432,49 @@
         // Update title
         document.getElementById('band-title').textContent = `Voice Activity - ${band}`;
         document.title = `Voice Activity - ${band}`;
+        document.getElementById('wspr-band-label').textContent = band;
 
         let autoRefreshInterval = null;
         let scanInterval = null;
         let currentScanIndex = 0;
         let scanActivities = [];
+        let wsprPredictionInterval = null;
+
+        async function fetchWsprPredictions() {
+            try {
+                const response = await fetch(`/api/wspr/phone-prediction?summary=true&by=band`);
+                if (!response.ok) return;
+                const data = await response.json();
+
+                // Find predictions for this band
+                const bandEntry = data.predictions && data.predictions.find(p => p.band === band);
+                renderWsprPredictions(bandEntry ? bandEntry.countries : null);
+            } catch (err) {
+                console.error('Error fetching WSPR predictions:', err);
+            }
+        }
+
+        function renderWsprPredictions(countries) {
+            const container = document.getElementById('wspr-predictions');
+            const badgesEl = document.getElementById('wspr-badges');
+
+            if (!countries || countries.length === 0) {
+                container.style.display = 'none';
+                return;
+            }
+
+            badgesEl.innerHTML = countries.map(c => {
+                const cls = c.prediction || 'poor';
+                return `<span class="wspr-badge ${cls}" title="${c.prediction} (${c.predicted_ssb_snr.toFixed(1)} dB SSB SNR)">${c.country}</span>`;
+            }).join('');
+
+            container.style.display = 'block';
+        }
+
+        function startWsprPolling() {
+            fetchWsprPredictions();
+            wsprPredictionInterval = setInterval(fetchWsprPredictions, 2 * 60 * 1000);
+        }
 
         async function fetchData() {
             const errorEl = document.getElementById('error-container');
@@ -735,6 +814,7 @@
         // Initial load
         fetchData();
         startAutoRefresh();
+        startWsprPolling();
 
         // Cleanup on close
         window.addEventListener('beforeunload', () => {
@@ -743,6 +823,9 @@
             }
             if (scanInterval) {
                 clearInterval(scanInterval);
+            }
+            if (wsprPredictionInterval) {
+                clearInterval(wsprPredictionInterval);
             }
         });
     </script>

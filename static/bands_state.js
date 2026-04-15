@@ -373,6 +373,84 @@ function setupBandKeyboardShortcuts() {
 }
 
 /**
+ * Build the tooltip string for a band badge, incorporating SNR state and WSPR predictions.
+ * @param {string} band - Band name (e.g. '20m')
+ * @param {Object|null} state - Band state from BandStateMonitor, or null
+ * @returns {string} Tooltip text
+ */
+function buildBandTooltip(band, state) {
+    const shortcut = BAND_SHORTCUTS[band] || '';
+    const shortcutText = shortcut ? `\nShortcut: ${shortcut} key` : '';
+
+    let snrLine;
+    if (state && state.snr !== null && state.snr !== undefined) {
+        snrLine = `${band}: ${state.status}\nFT8 SNR: ${state.snr.toFixed(2)} dB`;
+    } else {
+        snrLine = `${band}: No data available`;
+    }
+
+    // Append WSPR SSB predictions if available for this band
+    const predictions = window.wsprPredictions && window.wsprPredictions[band];
+    let predLine = '';
+    if (predictions && predictions.length > 0) {
+        const parts = predictions.map(c => {
+            const icon = c.prediction === 'excellent' ? '★' : '○';
+            return `${icon} ${c.country} (${c.continent})`;
+        });
+        predLine = `\nSSB: ${parts.join(', ')}`;
+    }
+
+    return snrLine + predLine + shortcutText;
+}
+
+/**
+ * Re-apply tooltips to all band badges using current SNR state + latest WSPR predictions.
+ * Called after WSPR predictions are refreshed.
+ */
+function refreshBandBadgeTooltips() {
+    const states = bandStateMonitor ? bandStateMonitor.getBandStates() : {};
+    for (const band of Object.keys(BAND_SHORTCUTS)) {
+        const bandBadge = document.querySelector(`.band-status-badge[data-band="${band}"]`);
+        if (!bandBadge) continue;
+        bandBadge.title = buildBandTooltip(band, states[band] || null);
+    }
+}
+
+/**
+ * Fetch WSPR phone predictions and store in window.wsprPredictions, then refresh tooltips.
+ */
+async function fetchWsprPredictions() {
+    try {
+        const response = await fetch('/api/wspr/phone-prediction?summary=true&by=band');
+        if (!response.ok) return;
+        const data = await response.json();
+
+        // Build lookup: band -> array of country objects
+        window.wsprPredictions = {};
+        if (data.predictions) {
+            for (const entry of data.predictions) {
+                window.wsprPredictions[entry.band] = entry.countries;
+            }
+        }
+
+        refreshBandBadgeTooltips();
+        console.log('WSPR predictions updated', window.wsprPredictions);
+    } catch (err) {
+        console.error('Error fetching WSPR predictions:', err);
+    }
+}
+
+/**
+ * Start polling WSPR phone predictions every 2 minutes.
+ * Should only be called when WSPR is listed in digital_modes.
+ */
+function startWsprPredictionPolling() {
+    fetchWsprPredictions(); // immediate first fetch
+    setInterval(fetchWsprPredictions, 2 * 60 * 1000);
+    console.log('WSPR prediction polling started (every 2 minutes)');
+}
+
+/**
  * Update the band status display in the UI
  * @param {Object} states - Band states from the monitor
  */
@@ -387,20 +465,12 @@ function updateBandStatusDisplay(states) {
 
         // Treat UNKNOWN as EXCELLENT (green) - assume band is open if no data
         const displayStatus = state.status === 'UNKNOWN' ? 'EXCELLENT' : state.status;
-        
+
         // Update data attribute for CSS styling
         bandBadge.setAttribute('data-status', displayStatus);
 
-        // Get keyboard shortcut for this band
-        const shortcut = BAND_SHORTCUTS[band] || '';
-        const shortcutText = shortcut ? `\nShortcut: ${shortcut} key` : '';
-
-        // Add tooltip with FT8 SNR value if available
-        if (state.snr !== null && state.snr !== undefined) {
-            bandBadge.title = `${band}: ${state.status}\nFT8 SNR: ${state.snr.toFixed(2)} dB${shortcutText}`;
-        } else {
-            bandBadge.title = `${band}: No data available${shortcutText}`;
-        }
+        // Build tooltip incorporating SNR + WSPR predictions
+        bandBadge.title = buildBandTooltip(band, state);
     }
 
     // Update active state based on current frequency

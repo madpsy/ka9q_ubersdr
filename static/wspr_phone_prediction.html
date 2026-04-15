@@ -168,6 +168,58 @@
             font-size: 11px;
         }
 
+        /* ── Top-10 panel ── */
+        .top10-panel {
+            position: absolute;
+            top: 14px;
+            right: 14px;
+            background: rgba(15, 25, 50, 0.92);
+            border: 1px solid #0f3460;
+            border-radius: 6px;
+            padding: 10px 14px;
+            font-size: 11px;
+            min-width: 180px;
+            max-width: 220px;
+        }
+
+        .top10-title {
+            font-weight: bold;
+            color: #aaa;
+            margin-bottom: 7px;
+            font-size: 11px;
+        }
+
+        .top10-row {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            margin-bottom: 4px;
+            line-height: 1.3;
+        }
+
+        .top10-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            border: 1px solid rgba(255,255,255,0.4);
+            flex-shrink: 0;
+        }
+
+        .top10-country {
+            flex: 1;
+            color: #ddd;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .top10-snr {
+            color: #aaa;
+            font-family: monospace;
+            font-size: 10px;
+            white-space: nowrap;
+        }
+
         .map-legend-title {
             font-weight: bold;
             color: #aaa;
@@ -358,10 +410,10 @@
         <div class="control-group">
             <label for="min-snr-select">Min SSB SNR:</label>
             <select id="min-snr-select">
-                <option value="-60" selected>Show All</option>
+                <option value="-60">Show All</option>
                 <option value="0">≥ 0 dB (hide not viable)</option>
                 <option value="3">≥ +3 dB (Marginal+)</option>
-                <option value="6">≥ +6 dB (Workable+)</option>
+                <option value="6" selected>≥ +6 dB (Workable+)</option>
                 <option value="10">≥ +10 dB (Good+)</option>
                 <option value="15">≥ +15 dB (Excellent only)</option>
             </select>
@@ -396,6 +448,10 @@
             </svg>
             Receiver
         </div>
+    </div>
+    <div class="top10-panel">
+        <div class="top10-title">🏆 Top 10 Strongest</div>
+        <div id="top10-list"><div style="color:#666;font-size:10px;">Loading…</div></div>
     </div>
 </div>
 

@@ -423,6 +423,43 @@ const app = (() => {
         if (defaultTh) defaultTh.classList.add('sort-desc');
     }
 
+    // ── Top-10 panel ─────────────────────────────────────────────────────────
+    function renderTop10(preds) {
+        const el = document.getElementById('top10-list');
+        if (!el) return;
+
+        if (!preds || preds.length === 0) {
+            el.innerHTML = '<div style="color:#666;font-size:10px;">No data</div>';
+            return;
+        }
+
+        // Deduplicate by country — keep best predicted_ssb_snr per country
+        const byCountry = new Map();
+        for (const p of preds) {
+            const key = p.country || '—';
+            const existing = byCountry.get(key);
+            if (!existing || p.predicted_ssb_snr > existing.predicted_ssb_snr) {
+                byCountry.set(key, p);
+            }
+        }
+
+        // Sort by predicted SSB SNR descending, take top 10
+        const top10 = [...byCountry.values()]
+            .sort((a, b) => b.predicted_ssb_snr - a.predicted_ssb_snr)
+            .slice(0, 10);
+
+        el.innerHTML = top10.map(p => {
+            const fill = PREDICTION_FILL[p.prediction] || '#888';
+            const snrStr = (p.predicted_ssb_snr >= 0 ? '+' : '') + p.predicted_ssb_snr.toFixed(1);
+            const country = escHtml(p.country || '—');
+            return `<div class="top10-row">
+                <div class="top10-dot" style="background:${fill}"></div>
+                <div class="top10-country" title="${country}">${country}</div>
+                <div class="top10-snr">${snrStr} dB</div>
+            </div>`;
+        }).join('');
+    }
+
     // ── Status bar update ────────────────────────────────────────────────────
     function updateStatusBar(m, predCount) {
         if (!m) return;
@@ -472,6 +509,7 @@ const app = (() => {
             updateStatusBar(meta, predictions.length);
             updateMap(predictions);
             renderTable(predictions);
+            renderTop10(predictions);
 
         } catch (e) {
             console.error('WSPR prediction fetch error:', e);
@@ -513,20 +551,67 @@ const app = (() => {
         }
     }
 
+    // ── Auto-refresh ─────────────────────────────────────────────────────────
+    // Refresh every 2 minutes (aligned to WSPR cycle).
+    // Pauses when the tab is hidden to avoid stacking up fetches.
+    // Uses a single interval ID stored in closure — no leaks.
+    const REFRESH_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes
+    let refreshTimer = null;
+    let isFetching = false; // guard against overlapping fetches
+
+    function startAutoRefresh() {
+        stopAutoRefresh();
+        refreshTimer = setInterval(async () => {
+            // Skip if tab is hidden or a fetch is already in progress
+            if (document.hidden || isFetching) return;
+            isFetching = true;
+            try {
+                await fetchData();
+            } finally {
+                isFetching = false;
+            }
+        }, REFRESH_INTERVAL_MS);
+    }
+
+    function stopAutoRefresh() {
+        if (refreshTimer !== null) {
+            clearInterval(refreshTimer);
+            refreshTimer = null;
+        }
+    }
+
     // ── Init ─────────────────────────────────────────────────────────────────
     async function init() {
         await initMap();
         initTableSort();
 
-        // Wire up controls to auto-fetch on change
+        // Wire up controls to re-fetch immediately on change and reset the timer
         ['band-select', 'minutes-select', 'power-select', 'min-snr-select'].forEach(id => {
-            document.getElementById(id).addEventListener('change', fetchData);
+            document.getElementById(id).addEventListener('change', () => {
+                fetchData();
+                startAutoRefresh(); // reset 2-min timer after manual change
+            });
         });
 
         window.addEventListener('resize', onResize);
 
-        // Initial fetch
+        // Stop timer when tab is hidden, restart when visible
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                stopAutoRefresh();
+            } else {
+                // Fetch immediately on return, then restart timer
+                fetchData();
+                startAutoRefresh();
+            }
+        });
+
+        // Stop timer on page unload to prevent any lingering callbacks
+        window.addEventListener('beforeunload', stopAutoRefresh);
+
+        // Initial fetch then start timer
         await fetchData();
+        startAutoRefresh();
     }
 
     // Public interface

@@ -421,7 +421,7 @@ function refreshBandBadgeTooltips() {
  */
 async function fetchWsprPredictions() {
     try {
-        const response = await fetch('/api/wspr/phone-prediction?summary=true&by=band');
+        const response = await fetch('/api/wspr/phone-prediction?summary=true&by=band&phone_power_w=250');
         if (!response.ok) return;
         const data = await response.json();
 

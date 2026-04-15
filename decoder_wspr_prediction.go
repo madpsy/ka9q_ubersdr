@@ -105,6 +105,7 @@ var validPhonePowers = map[int]bool{
 	10:   true,
 	50:   true,
 	100:  true,
+	250:  true,
 	500:  true,
 	1000: true,
 }
@@ -344,7 +345,7 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 		if err != nil || !validPhonePowers[v] {
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{
-				"error": "phone_power_w must be one of: 10, 50, 100, 500, 1000",
+				"error": "phone_power_w must be one of: 10, 50, 100, 250, 500, 1000",
 			})
 			return
 		}

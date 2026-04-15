@@ -1825,7 +1825,7 @@ class SpectrumDisplay {
             }
             values.sort((a, b) => a - b);
 
-            const floorIndex = Math.floor(values.length * 0.20);
+            const floorIndex = Math.floor(values.length * 0.10);
             const peakIndex  = Math.floor(values.length * 0.98);
             const currentMinDb = values.length > 0 ? values[floorIndex] : -120;
             const currentMaxDb = values.length > 0 ? values[peakIndex]  : -40;
@@ -2994,10 +2994,10 @@ class SpectrumDisplay {
         if (values.length > 0) {
             values.sort((a, b) => a - b);
 
-            // Use 20th percentile as noise floor (lands at actual noise floor in typical HF spectrum
-            // where ~80% of bins are noise — gives full colour gradient to the signal region above noise)
+            // Use 10th percentile as noise floor (good balance: ignores quiet outlier bins while
+            // still sitting close to the actual noise floor in typical HF spectrum)
             // Use 98th percentile as peak (ignores very high outlier spikes)
-            const floorIndex = Math.floor(values.length * 0.20);
+            const floorIndex = Math.floor(values.length * 0.10);
             const peakIndex  = Math.floor(values.length * 0.98);
             const min = values[floorIndex];
             const max = values[peakIndex];

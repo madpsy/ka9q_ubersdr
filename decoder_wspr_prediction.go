@@ -389,6 +389,13 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 			continue
 		}
 
+		// Skip entries with no resolved country — these are spots from transmitters
+		// whose locator could not be matched to a DXCC entity.  They would appear
+		// as blank/dash rows in the table and are not useful for propagation planning.
+		if k.Country == "" {
+			continue
+		}
+
 		// Correct formula:
 		//   predicted_ssb_snr = mean_wspr_snr + power_gain − bw_correction_db
 		//

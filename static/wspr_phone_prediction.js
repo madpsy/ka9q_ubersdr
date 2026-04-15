@@ -176,13 +176,17 @@ const app = (() => {
         const [cx, cy] = projection([m.receiver_lon, m.receiver_lat]);
         if (isNaN(cx) || isNaN(cy)) return;
 
+        // Read current zoom scale so the marker is immediately counter-scaled
+        // to match the existing zoom level (avoids full-size dot on data refresh).
+        const k = d3.zoomTransform(svg.node()).k;
+
         receiverMarkerGroup = mapGroup.append('g')
             .attr('class', 'receiver-marker');
 
         // Outer halo ring (subtle, non-interactive)
         receiverMarkerGroup.append('circle')
             .attr('cx', cx).attr('cy', cy)
-            .attr('r', 12).attr('data-base-r', 12).attr('data-base-sw', 0)
+            .attr('r', 12 / k).attr('data-base-r', 12).attr('data-base-sw', 0)
             .style('fill', 'none')
             .style('stroke', '#ffffff')
             .style('stroke-width', '0px')
@@ -192,10 +196,10 @@ const app = (() => {
         // Main dot — white fill, dark-blue border
         receiverMarkerGroup.append('circle')
             .attr('cx', cx).attr('cy', cy)
-            .attr('r', 8).attr('data-base-r', 8).attr('data-base-sw', 2)
+            .attr('r', 8 / k).attr('data-base-r', 8).attr('data-base-sw', 2)
             .style('fill', '#ffffff')
             .style('stroke', '#0f3460')
-            .style('stroke-width', '2px')
+            .style('stroke-width', (2 / k) + 'px')
             .style('cursor', 'pointer')
             .on('mousemove', (event) => {
                 const callsign = m.receiver_callsign ? ` (${m.receiver_callsign})` : '';
@@ -213,7 +217,7 @@ const app = (() => {
         // Centre pip — dark-blue
         receiverMarkerGroup.append('circle')
             .attr('cx', cx).attr('cy', cy)
-            .attr('r', 2.5).attr('data-base-r', 2.5).attr('data-base-sw', 0)
+            .attr('r', 2.5 / k).attr('data-base-r', 2.5).attr('data-base-sw', 0)
             .style('fill', '#0f3460')
             .style('pointer-events', 'none');
     }
@@ -256,6 +260,12 @@ const app = (() => {
         // Draw spot circles at locator positions
         spotMarkersGroup = mapGroup.append('g').attr('class', 'spot-markers');
 
+        // Read the current zoom scale so newly-drawn circles are immediately
+        // counter-scaled to match the existing zoom level (avoids full-size dots
+        // appearing when the user changes a dropdown while zoomed in).
+        const currentTransform = d3.zoomTransform(svg.node());
+        const k = currentTransform.k;
+
         for (const entry of preds) {
             if (!entry.locator || entry.locator.length < 4) continue;
 
@@ -272,19 +282,20 @@ const app = (() => {
             const [cx, cy] = projected;
             const fill = PREDICTION_FILL[entry.prediction] || '#888';
             // Radius scales slightly with spot count (min 5, max 10)
-            const r = Math.min(10, Math.max(5, 4 + Math.log2(entry.spot_count + 1)));
+            const baseR = Math.min(10, Math.max(5, 4 + Math.log2(entry.spot_count + 1)));
+            const r = baseR / k; // counter-scale for current zoom level
 
             const g = spotMarkersGroup.append('g').attr('class', 'spot-marker');
 
             // Outer ring — store base-r and base-sw for zoom counter-scaling
             g.append('circle')
                 .attr('cx', cx).attr('cy', cy)
-                .attr('r', r + 3)
-                .attr('data-base-r', r + 3)
+                .attr('r', r + 3 / k)
+                .attr('data-base-r', baseR + 3)
                 .attr('data-base-sw', 1)
                 .style('fill', 'none')
                 .style('stroke', fill)
-                .style('stroke-width', '1')
+                .style('stroke-width', (1 / k) + 'px')
                 .style('opacity', '0.35')
                 .style('pointer-events', 'none');
 
@@ -292,11 +303,11 @@ const app = (() => {
             g.append('circle')
                 .attr('cx', cx).attr('cy', cy)
                 .attr('r', r)
-                .attr('data-base-r', r)
+                .attr('data-base-r', baseR)
                 .attr('data-base-sw', 1.2)
                 .style('fill', fill)
                 .style('stroke', '#fff')
-                .style('stroke-width', '1.2')
+                .style('stroke-width', (1.2 / k) + 'px')
                 .style('cursor', 'pointer')
                 .on('mousemove', (event) => onSpotMouseMove(event, entry))
                 .on('mouseout', () => { tooltip.style.display = 'none'; });
@@ -332,7 +343,7 @@ const app = (() => {
             <div>Band: <strong>${escHtml(entry.band)}</strong> &nbsp; Continent: <strong>${escHtml(entry.continent || '—')}</strong></div>
             <div class="${tooltipPredClass(cls)}">Signal quality: <strong>${predLabel}</strong> (${snrStr} dB)</div>
             <div>Mean WSPR SNR: ${wsprSnrStr} dB &nbsp; Mean TX: ${entry.mean_tx_dbm.toFixed(1)} dBm &nbsp; (${entry.spot_count} spot${entry.spot_count !== 1 ? 's' : ''})</div>
-            <div>BW correction: +${entry.bw_correction_db.toFixed(2)} dB &nbsp; Coding advantage: −${entry.coding_advantage_db.toFixed(0)} dB &nbsp; Power gain: ${pgStr} dB</div>
+            <div>Power gain: ${pgStr} dB &nbsp; BW correction: −${entry.bw_correction_db.toFixed(2)} dB</div>
             <div>Distance: ${distStr} &nbsp; Bearing: ${bearingStr}</div>
             <div>Last seen: ${lastSeen}</div>
         `;
@@ -459,10 +470,12 @@ const app = (() => {
             return;
         }
 
-        // Deduplicate by country + band — keep best predicted_ssb_snr per country/band pair
+        // Deduplicate by country + band — keep best predicted_ssb_snr per country/band pair.
+        // Skip entries with no country name (unknown/unresolved locators show as '—').
         const byCountryBand = new Map();
         for (const p of preds) {
-            const key = (p.country || '—') + '\x00' + (p.band || '—');
+            if (!p.country) continue; // exclude entries with no country
+            const key = p.country + '\x00' + (p.band || '');
             const existing = byCountryBand.get(key);
             if (!existing || p.predicted_ssb_snr > existing.predicted_ssb_snr) {
                 byCountryBand.set(key, p);

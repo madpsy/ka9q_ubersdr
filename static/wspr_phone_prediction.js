@@ -141,7 +141,8 @@ const app = (() => {
             .on('zoom', (event) => {
                 mapGroup.attr('transform', event.transform);
                 const k = event.transform.k; // current zoom scale
-                // Counter-scale all spot circles and their glow rings
+                // Counter-scale all spot circles and their glow rings so they stay
+                // a constant screen size regardless of zoom level
                 mapGroup.selectAll('.spot-marker circle')
                     .attr('r', function() {
                         const base = +d3.select(this).attr('data-base-r');
@@ -151,21 +152,22 @@ const app = (() => {
                         const base = +d3.select(this).attr('data-base-sw');
                         return isNaN(base) ? null : (base / k) + 'px';
                     });
-                // Counter-scale receiver marker circles
-                mapGroup.selectAll('.receiver-marker circle')
-                    .attr('r', function() {
-                        const base = +d3.select(this).attr('data-base-r');
-                        return isNaN(base) ? null : base / k;
-                    })
-                    .style('stroke-width', function() {
-                        const base = +d3.select(this).attr('data-base-sw');
-                        return isNaN(base) ? null : (base / k) + 'px';
+                // Counter-scale the receiver pin group so it stays constant screen size.
+                // The pin was drawn with its tip at (cx, cy); we scale around that point.
+                mapGroup.selectAll('.receiver-marker')
+                    .attr('transform', function() {
+                        const cx = +d3.select(this).attr('data-pin-cx');
+                        const cy = +d3.select(this).attr('data-pin-cy');
+                        if (isNaN(cx) || isNaN(cy)) return null;
+                        return `translate(${cx},${cy}) scale(${1/k}) translate(${-cx},${-cy})`;
                     });
             });
         svg.call(zoom);
     }
 
     // ── Receiver marker ──────────────────────────────────────────────────────
+    // Drawn as a classic teardrop map-pin: a circle on top of a downward point.
+    // The pin tip sits exactly at the receiver's projected coordinates.
     function drawReceiverMarker(m) {
         // Remove any existing marker
         if (receiverMarkerGroup) {
@@ -178,28 +180,51 @@ const app = (() => {
         const [cx, cy] = projection([m.receiver_lon, m.receiver_lat]);
         if (isNaN(cx) || isNaN(cy)) return;
 
-        receiverMarkerGroup = mapGroup.append('g').attr('class', 'receiver-marker');
+        receiverMarkerGroup = mapGroup.append('g')
+            .attr('class', 'receiver-marker')
+            .attr('data-pin-cx', cx)
+            .attr('data-pin-cy', cy);
 
-        // Outer glow ring
-        receiverMarkerGroup.append('circle')
-            .attr('cx', cx).attr('cy', cy)
-            .attr('r', 11)
-            .attr('data-base-r', 11)
-            .attr('data-base-sw', 1.5)
-            .style('fill', 'none')
-            .style('stroke', '#4CAF50')
-            .style('stroke-width', '1.5')
-            .style('opacity', '0.4');
+        // Pin dimensions (in map-space pixels at zoom=1)
+        const pinR   = 8;   // radius of the circular head
+        const pinH   = 20;  // total height from tip to top of circle
+        // The circle centre sits pinH - pinR above the tip
+        const headCY = cy - (pinH - pinR);
 
-        // Main marker — green circle with white border (same as session_stats.js)
-        receiverMarkerGroup.append('circle')
-            .attr('cx', cx).attr('cy', cy)
-            .attr('r', 7)
-            .attr('data-base-r', 7)
-            .attr('data-base-sw', 2)
-            .style('fill', '#4CAF50')
+        // Teardrop path: circle head + two tangent lines meeting at the tip point
+        // We use a path that combines an arc for the head and straight lines to the tip.
+        // angle where the tangent from the tip touches the circle:
+        //   sin(α) = r / d,  d = pinH - pinR  (distance from tip to circle centre)
+        const d = pinH - pinR;
+        const sinA = pinR / d;
+        const alpha = Math.asin(sinA);  // half-angle of the "notch"
+        const cosA  = Math.cos(alpha);
+
+        // Tangent touch points on the circle (relative to circle centre)
+        const tx = pinR * cosA;
+        const ty = pinR * sinA;
+
+        // SVG path: start at tip, line to right tangent, arc over the top, line back to tip
+        const pinPath = [
+            `M ${cx} ${cy}`,                                          // tip
+            `L ${cx + tx} ${headCY + ty}`,                           // right tangent point
+            `A ${pinR} ${pinR} 0 1 1 ${cx - tx} ${headCY + ty}`,    // arc (large arc = top half)
+            'Z'
+        ].join(' ');
+
+        // Drop shadow / glow
+        receiverMarkerGroup.append('path')
+            .attr('d', pinPath)
+            .attr('transform', `translate(1.5, 1.5)`)
+            .style('fill', 'rgba(0,0,0,0.35)')
+            .style('pointer-events', 'none');
+
+        // Pin body
+        receiverMarkerGroup.append('path')
+            .attr('d', pinPath)
+            .style('fill', '#e74c3c')
             .style('stroke', '#fff')
-            .style('stroke-width', '2')
+            .style('stroke-width', '1.5px')
             .style('cursor', 'pointer')
             .on('mousemove', (event) => {
                 const callsign = m.receiver_callsign ? ` (${m.receiver_callsign})` : '';
@@ -214,12 +239,11 @@ const app = (() => {
             })
             .on('mouseout', () => { tooltip.style.display = 'none'; });
 
-        // Centre dot
+        // White dot in the pin head
         receiverMarkerGroup.append('circle')
-            .attr('cx', cx).attr('cy', cy)
-            .attr('r', 2.5)
-            .attr('data-base-r', 2.5)
-            .attr('data-base-sw', 0)
+            .attr('cx', cx)
+            .attr('cy', headCY)
+            .attr('r', pinR * 0.35)
             .style('fill', '#fff')
             .style('pointer-events', 'none');
     }
@@ -338,7 +362,7 @@ const app = (() => {
             <div>Band: <strong>${escHtml(entry.band)}</strong> &nbsp; Continent: <strong>${escHtml(entry.continent || '—')}</strong></div>
             <div class="${tooltipPredClass(cls)}">Signal quality: <strong>${predLabel}</strong> (${snrStr} dB)</div>
             <div>Mean WSPR SNR: ${wsprSnrStr} dB &nbsp; Mean TX: ${entry.mean_tx_dbm.toFixed(1)} dBm &nbsp; (${entry.spot_count} spot${entry.spot_count !== 1 ? 's' : ''})</div>
-            <div>BW correction: +${entry.bw_correction_db.toFixed(1)} dB &nbsp; Power gain: ${pgStr} dB</div>
+            <div>BW penalty: −${entry.bw_correction_db.toFixed(1)} dB &nbsp; Power gain: ${pgStr} dB</div>
             <div>Distance: ${distStr} &nbsp; Bearing: ${bearingStr}</div>
             <div>Last seen: ${lastSeen}</div>
         `;

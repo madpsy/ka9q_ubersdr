@@ -441,10 +441,10 @@
         <div class="legend-item"><svg width="14" height="14" style="flex-shrink:0"><circle cx="7" cy="7" r="6" fill="#c0392b" stroke="#fff" stroke-width="1.2"/></svg> Very Poor ≥ 0 dB (RS 1)</div>
         <div class="legend-item"><svg width="14" height="14" style="flex-shrink:0"><circle cx="7" cy="7" r="6" fill="#4a2020" stroke="#fff" stroke-width="1.2"/></svg> Not Viable &lt; 0 dB</div>
         <div class="legend-item">
-            <svg width="14" height="14" style="flex-shrink:0;overflow:visible">
-                <circle cx="7" cy="7" r="6" fill="none" stroke="#4CAF50" stroke-width="1.5" opacity="0.4"/>
-                <circle cx="7" cy="7" r="5" fill="#4CAF50" stroke="#fff" stroke-width="1.5"/>
-                <circle cx="7" cy="7" r="2" fill="#fff"/>
+            <!-- Teardrop pin icon matching the JS marker -->
+            <svg width="14" height="20" viewBox="0 0 14 20" style="flex-shrink:0;overflow:visible">
+                <path d="M 7 20 L 12.2 13.1 A 6 6 0 1 0 1.8 13.1 Z" fill="#e74c3c" stroke="#fff" stroke-width="1.2"/>
+                <circle cx="7" cy="7" r="2.2" fill="#fff"/>
             </svg>
             Receiver
         </div>
@@ -458,9 +458,9 @@
 <div class="methodology">
     <strong>How this works:</strong>
     WSPR SNR is measured in a ~6 Hz noise bandwidth. SSB phone uses ~2700 Hz.
-    The bandwidth correction is <code>+10 × log₁₀(2700 ÷ 6) ≈ +26.5 dB</code> — this converts the WSPR SNR to an equivalent SNR in SSB bandwidth.
+    The bandwidth penalty is <code>10 × log₁₀(2700 ÷ 6) ≈ 26.5 dB</code> — the wider SSB bandwidth admits 26.5 dB more noise, so the SNR is <em>lower</em> by that amount.
     The mean WSPR SNR and mean TX power are calculated across all spots for a country/band, making the prediction robust against outliers and transmitters mis-reporting their power.
-    <strong>Predicted SSB SNR</strong> = mean WSPR SNR + 26.5 dB + (your TX power − mean WSPR TX power).
+    <strong>Predicted SSB SNR</strong> = mean WSPR SNR − 26.5 dB + (your TX power − mean WSPR TX power).
     Signal quality thresholds follow <strong>ITU-R RS.1808 / CCIR Report 322</strong> aligned with the amateur RS report system:
     Excellent ≥ +15 dB (RS 5), Good ≥ +10 dB (RS 4), Workable ≥ +6 dB (RS 3), Marginal ≥ +3 dB (RS 2), Very Poor ≥ 0 dB (RS 1), Not Viable &lt; 0 dB.
     Assumes reciprocal propagation. Does not account for antenna gain differences between WSPR and SSB antennas.

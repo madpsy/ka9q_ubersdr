@@ -25,7 +25,7 @@ import (
 //   SSB phone occupies ~2700 Hz noise bandwidth.
 //   BW penalty = 10 * log10(2700/6) ≈ 26.5 dB
 //
-//   Predicted SSB SNR = WSPR_SNR + (phone_power_dbm − wspr_tx_dbm) − BW_penalty
+//   Predicted SSB SNR = WSPR_SNR − BW_penalty + (phone_power_dbm − wspr_tx_dbm)
 //
 //   Prediction categories:
 //     "good"     predicted SSB SNR ≥ +10 dB
@@ -42,11 +42,12 @@ const (
 	ssbNoiseBWHz = 2700.0
 )
 
-// bwCorrectionDB is the bandwidth correction to convert WSPR SNR (measured in ~6 Hz)
+// bwCorrectionDB is the bandwidth penalty to convert WSPR SNR (measured in ~6 Hz)
 // to the equivalent SNR in a 2700 Hz SSB phone bandwidth.
 // = 10 * log10(2700 / 6) ≈ +26.5 dB
-// This is ADDED to the WSPR SNR to get the equivalent SSB SNR at the same signal level.
-// A WSPR decode at -30 dB (in 6 Hz) is roughly -30 + 26.5 = -3.5 dB in 2700 Hz.
+// This is SUBTRACTED from the WSPR SNR: the wider SSB bandwidth admits 26.5 dB more
+// noise, so the SNR is lower by that amount.
+// A WSPR decode at -30 dB (in 6 Hz) is roughly -30 - 26.5 = -56.5 dB in 2700 Hz.
 var bwCorrectionDB = 10.0 * math.Log10(ssbNoiseBWHz/wsprNoiseBWHz)
 
 // validWSPRBands is the whitelist of standard amateur bands on which WSPR operates
@@ -98,7 +99,7 @@ type WSPRPredictionEntry struct {
 	Band            string   `json:"band"`
 	MeanWSPRSNR     float64  `json:"mean_wspr_snr"`    // mean WSPR SNR across all spots (in ~6 Hz BW)
 	MeanTxDbm       float64  `json:"mean_tx_dbm"`      // mean reported TX power across all spots
-	BWCorrectionDB  float64  `json:"bw_correction_db"` // +26.5 dB: converts 6 Hz SNR to 2700 Hz equivalent
+	BWCorrectionDB  float64  `json:"bw_correction_db"` // +26.5 dB penalty: SUBTRACTED from WSPR SNR (wider SSB BW = more noise)
 	PhonePowerDbm   float64  `json:"phone_power_dbm"`
 	PowerGainDB     float64  `json:"power_gain_db"`     // phone_power_dbm − mean_tx_dbm
 	PredictedSSBSNR float64  `json:"predicted_ssb_snr"` // mean_wspr_snr + bw_correction + power_gain
@@ -368,16 +369,16 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 		}
 
 		// Correct formula:
-		//   predicted_ssb_snr = mean_wspr_snr + bw_correction + (phone_power_dbm − mean_tx_dbm)
+		//   predicted_ssb_snr = mean_wspr_snr − bw_correction + (phone_power_dbm − mean_tx_dbm)
 		//
 		// Where:
 		//   mean_wspr_snr   = mean WSPR SNR in ~6 Hz bandwidth
-		//   bw_correction   = +26.5 dB (converts 6 Hz SNR to 2700 Hz equivalent)
+		//   bw_correction   = +26.5 dB (SUBTRACTED: wider SSB BW means 26.5 dB more noise)
 		//   power_gain      = phone_power_dbm − mean_tx_dbm (your power vs their power)
 		meanWSPRSNR := g.SNRSum / float64(g.SpotCount)
 		meanTxDbm := g.TxDbmSum / float64(g.SpotCount)
 		powerGainDB := phonePowerDbm - meanTxDbm
-		predictedSSBSNR := meanWSPRSNR + bwCorrectionDB + powerGainDB
+		predictedSSBSNR := meanWSPRSNR - bwCorrectionDB + powerGainDB
 
 		// Apply min_ssb_snr filter
 		if predictedSSBSNR < minSSBSNR {

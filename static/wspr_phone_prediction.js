@@ -288,7 +288,8 @@ const app = (() => {
     function onSpotMouseMove(event, entry) {
         const cls = entry.prediction;
         const snrStr = (entry.predicted_ssb_snr >= 0 ? '+' : '') + entry.predicted_ssb_snr.toFixed(1);
-        const normSnrStr = (entry.mean_normalised_snr >= 0 ? '+' : '') + entry.mean_normalised_snr.toFixed(1);
+        const wsprSnrStr = (entry.mean_wspr_snr >= 0 ? '+' : '') + entry.mean_wspr_snr.toFixed(1);
+        const pgStr = (entry.power_gain_db >= 0 ? '+' : '') + entry.power_gain_db.toFixed(1);
 
         let distStr = '—';
         if (entry.distance_km != null) distStr = `${Math.round(entry.distance_km)} km`;
@@ -305,8 +306,8 @@ const app = (() => {
             <div class="tooltip-title">${escHtml(entry.country)} — ${escHtml(entry.locator || '?')}</div>
             <div>Band: <strong>${escHtml(entry.band)}</strong> &nbsp; Continent: <strong>${escHtml(entry.continent || '—')}</strong></div>
             <div class="${tooltipPredClass(cls)}">Signal quality: <strong>${predLabel}</strong> (${snrStr} dB)</div>
-            <div>Mean path metric: ${normSnrStr} dB &nbsp; (${entry.spot_count} spot${entry.spot_count !== 1 ? 's' : ''})</div>
-            <div>BW penalty: −${entry.bw_penalty_db.toFixed(1)} dB &nbsp; Your TX: ${entry.phone_power_dbm.toFixed(1)} dBm</div>
+            <div>Mean WSPR SNR: ${wsprSnrStr} dB &nbsp; Mean TX: ${entry.mean_tx_dbm.toFixed(1)} dBm &nbsp; (${entry.spot_count} spot${entry.spot_count !== 1 ? 's' : ''})</div>
+            <div>BW correction: +${entry.bw_correction_db.toFixed(1)} dB &nbsp; Power gain: ${pgStr} dB</div>
             <div>Distance: ${distStr} &nbsp; Bearing: ${bearingStr}</div>
             <div>Last seen: ${lastSeen}</div>
         `;
@@ -368,7 +369,7 @@ const app = (() => {
         tbody.innerHTML = sorted.map(e => {
             const ssnr = e.predicted_ssb_snr;
             const ssnrStr = (ssnr >= 0 ? '+' : '') + ssnr.toFixed(1);
-            const normStr = (e.mean_normalised_snr >= 0 ? '+' : '') + e.mean_normalised_snr.toFixed(1);
+            const wsnrStr = (e.mean_wspr_snr >= 0 ? '+' : '') + e.mean_wspr_snr.toFixed(1);
 
             let distStr = '—';
             if (e.distance_km != null) {
@@ -388,7 +389,7 @@ const app = (() => {
                 <td>${escHtml(e.continent || '—')}</td>
                 <td>${escHtml(e.band)}</td>
                 <td class="${snrClass(ssnr)}">${ssnrStr} dB</td>
-                <td class="${snrClass(e.mean_normalised_snr)}">${normStr} dB</td>
+                <td class="${snrClass(e.mean_wspr_snr)}">${wsnrStr} dB</td>
                 <td>${distStr}</td>
                 <td>${bearingStr}</td>
                 <td>${e.spot_count}</td>

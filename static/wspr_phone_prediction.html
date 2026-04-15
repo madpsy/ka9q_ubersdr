@@ -457,11 +457,10 @@
 
 <div class="methodology">
     <strong>How this works:</strong>
-    WSPR SNR values (as reported by wsprd) are already normalised to a <strong>2500 Hz reference bandwidth</strong> — very close to the 2700 Hz SSB phone bandwidth.
-    The noise bandwidth correction is therefore only <code>10 × log₁₀(2700 ÷ 2500) ≈ 0.34 dB</code> (negligible).
-    Each WSPR spot is normalised to a <strong>path metric</strong> = <code>SNR − TX_dBm</code>, which removes the transmitter's power from the equation.
-    The <strong>mean path metric</strong> across all spots for a country/band is used — this is robust against transmitters mis-reporting their power and smooths out propagation fluctuations.
-    <strong>Predicted SSB SNR</strong> = mean path metric + your TX power (dBm) − 0.34 dB.
+    WSPR SNR is measured in a ~6 Hz noise bandwidth. SSB phone uses ~2700 Hz.
+    The bandwidth correction is <code>+10 × log₁₀(2700 ÷ 6) ≈ +26.5 dB</code> — this converts the WSPR SNR to an equivalent SNR in SSB bandwidth.
+    The mean WSPR SNR and mean TX power are calculated across all spots for a country/band, making the prediction robust against outliers and transmitters mis-reporting their power.
+    <strong>Predicted SSB SNR</strong> = mean WSPR SNR + 26.5 dB + (your TX power − mean WSPR TX power).
     Signal quality thresholds follow <strong>ITU-R RS.1808 / CCIR Report 322</strong> aligned with the amateur RS report system:
     Excellent ≥ +15 dB (RS 5), Good ≥ +10 dB (RS 4), Workable ≥ +6 dB (RS 3), Marginal ≥ +3 dB (RS 2), Very Poor ≥ 0 dB (RS 1), Not Viable &lt; 0 dB.
     Assumes reciprocal propagation. Does not account for antenna gain differences between WSPR and SSB antennas.
@@ -480,7 +479,7 @@
                     <th data-col="continent">Cont.</th>
                     <th data-col="band">Band</th>
                     <th data-col="predicted_ssb_snr">Pred. SSB SNR</th>
-                    <th data-col="mean_normalised_snr" title="Mean(SNR − TX dBm) across all spots — power-independent path metric">Path Metric ℹ</th>
+                    <th data-col="mean_wspr_snr" title="Mean WSPR SNR in ~6 Hz bandwidth across all spots">WSPR SNR (6 Hz)</th>
                     <th data-col="distance_km">Distance</th>
                     <th data-col="bearing_deg">Bearing</th>
                     <th data-col="spot_count">Spots</th>

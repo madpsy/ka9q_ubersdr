@@ -33,22 +33,21 @@ import (
 //     "poor"     predicted SSB SNR <   0 dB
 
 const (
-	// wsprSNRRefBWHz is the reference noise bandwidth used by wsprd when reporting SNR.
-	// Per the WSPR specification (and wsprd source), SNR is reported relative to a
-	// 2500 Hz noise bandwidth — NOT the ~6 Hz occupied bandwidth of the signal itself.
-	// This is an important distinction: the 2500 Hz reference is already baked into
-	// every SNR value we read from the CSV, so the bandwidth penalty is the difference
-	// between 2500 Hz (WSPR SNR reference) and 2700 Hz (SSB phone bandwidth).
-	wsprSNRRefBWHz = 2500.0
+	// wsprNoiseBWHz is the effective noise bandwidth of a WSPR signal (~6 Hz).
+	// wsprd reports SNR measured in this narrow bandwidth — NOT normalised to 2500 Hz.
+	// Because the bandwidth is so small, WSPR SNR values are very negative compared
+	// to conventional communications systems.
+	wsprNoiseBWHz = 6.0
 	// ssbNoiseBWHz is the effective noise bandwidth of an SSB phone signal (~2700 Hz)
 	ssbNoiseBWHz = 2700.0
 )
 
-// bwPenaltyDB is the noise bandwidth penalty when switching from the WSPR SNR reference
-// bandwidth (2500 Hz) to SSB phone bandwidth (2700 Hz).
-// = 10 * log10(2700 / 2500) ≈ 0.34 dB
-// This is nearly negligible because wsprd already normalises SNR to a 2500 Hz reference.
-var bwPenaltyDB = 10.0 * math.Log10(ssbNoiseBWHz/wsprSNRRefBWHz)
+// bwCorrectionDB is the bandwidth correction to convert WSPR SNR (measured in ~6 Hz)
+// to the equivalent SNR in a 2700 Hz SSB phone bandwidth.
+// = 10 * log10(2700 / 6) ≈ +26.5 dB
+// This is ADDED to the WSPR SNR to get the equivalent SSB SNR at the same signal level.
+// A WSPR decode at -30 dB (in 6 Hz) is roughly -30 + 26.5 = -3.5 dB in 2700 Hz.
+var bwCorrectionDB = 10.0 * math.Log10(ssbNoiseBWHz/wsprNoiseBWHz)
 
 // validWSPRBands is the whitelist of standard amateur bands on which WSPR operates
 var validWSPRBands = map[string]bool{
@@ -94,19 +93,21 @@ type WSPRPredictionMeta struct {
 
 // WSPRPredictionEntry holds the prediction result for a single country+band combination
 type WSPRPredictionEntry struct {
-	Country           string   `json:"country"`
-	Continent         string   `json:"continent"`
-	Band              string   `json:"band"`
-	MeanNormalisedSNR float64  `json:"mean_normalised_snr"` // mean(SNR − TX_dBm) across all spots — power-independent path metric
-	PhonePowerDbm     float64  `json:"phone_power_dbm"`
-	BWPenaltyDB       float64  `json:"bw_penalty_db"`
-	PredictedSSBSNR   float64  `json:"predicted_ssb_snr"`
-	Prediction        string   `json:"prediction"`
-	SpotCount         int      `json:"spot_count"`
-	LastSeen          string   `json:"last_seen"`
-	Locator           string   `json:"locator,omitempty"`
-	DistanceKm        *float64 `json:"distance_km,omitempty"`
-	BearingDeg        *float64 `json:"bearing_deg,omitempty"`
+	Country         string   `json:"country"`
+	Continent       string   `json:"continent"`
+	Band            string   `json:"band"`
+	MeanWSPRSNR     float64  `json:"mean_wspr_snr"`    // mean WSPR SNR across all spots (in ~6 Hz BW)
+	MeanTxDbm       float64  `json:"mean_tx_dbm"`      // mean reported TX power across all spots
+	BWCorrectionDB  float64  `json:"bw_correction_db"` // +26.5 dB: converts 6 Hz SNR to 2700 Hz equivalent
+	PhonePowerDbm   float64  `json:"phone_power_dbm"`
+	PowerGainDB     float64  `json:"power_gain_db"`     // phone_power_dbm − mean_tx_dbm
+	PredictedSSBSNR float64  `json:"predicted_ssb_snr"` // mean_wspr_snr + bw_correction + power_gain
+	Prediction      string   `json:"prediction"`
+	SpotCount       int      `json:"spot_count"`
+	LastSeen        string   `json:"last_seen"`
+	Locator         string   `json:"locator,omitempty"`
+	DistanceKm      *float64 `json:"distance_km,omitempty"`
+	BearingDeg      *float64 `json:"bearing_deg,omitempty"`
 }
 
 // WSPRPredictionResponse is the full API response
@@ -278,12 +279,13 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 		Country string
 		Band    string
 	}
-	// groupData accumulates normalised SNR values across all spots for a country+band.
-	// Normalised SNR = spot.SNR − spot.DBm  (removes per-transmitter power, giving a
-	// power-independent path loss metric). Using the mean across all spots makes the
-	// prediction robust against transmitters mis-reporting their TX power.
+	// groupData accumulates SNR and TX power separately so we can apply the
+	// bandwidth correction and power adjustment correctly at prediction time.
+	// Using means across all spots makes the prediction robust against outliers
+	// and transmitters mis-reporting their TX power.
 	type groupData struct {
-		NormSNRSum float64 // sum of (SNR − dBm) for all spots
+		SNRSum     float64 // sum of WSPR SNR values (in ~6 Hz BW)
+		TxDbmSum   float64 // sum of reported TX power in dBm
 		SpotCount  int
 		LastSeen   string
 		Locator    string // locator of the most recent spot (for map placement)
@@ -332,9 +334,9 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 			groups[k] = existing
 		}
 
-		// Accumulate normalised SNR: SNR − dBm removes the transmitter power variable.
-		// This is a path loss metric independent of what power the transmitter claimed.
-		existing.NormSNRSum += float64(spot.SNR - *spot.DBm)
+		// Accumulate SNR and TX power separately
+		existing.SNRSum += float64(spot.SNR)
+		existing.TxDbmSum += float64(*spot.DBm)
 		existing.SpotCount++
 
 		// Track latest timestamp and its associated locator/distance/bearing
@@ -365,11 +367,17 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 			continue
 		}
 
-		// Mean normalised SNR = mean(SNR − dBm) across all spots.
-		// Adding phone_power_dbm gives the predicted received SNR at the far end
-		// if we transmit at phone_power_dbm, then subtract the BW penalty.
-		meanNormSNR := g.NormSNRSum / float64(g.SpotCount)
-		predictedSSBSNR := meanNormSNR + phonePowerDbm - bwPenaltyDB
+		// Correct formula:
+		//   predicted_ssb_snr = mean_wspr_snr + bw_correction + (phone_power_dbm − mean_tx_dbm)
+		//
+		// Where:
+		//   mean_wspr_snr   = mean WSPR SNR in ~6 Hz bandwidth
+		//   bw_correction   = +26.5 dB (converts 6 Hz SNR to 2700 Hz equivalent)
+		//   power_gain      = phone_power_dbm − mean_tx_dbm (your power vs their power)
+		meanWSPRSNR := g.SNRSum / float64(g.SpotCount)
+		meanTxDbm := g.TxDbmSum / float64(g.SpotCount)
+		powerGainDB := phonePowerDbm - meanTxDbm
+		predictedSSBSNR := meanWSPRSNR + bwCorrectionDB + powerGainDB
 
 		// Apply min_ssb_snr filter
 		if predictedSSBSNR < minSSBSNR {
@@ -377,19 +385,21 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 		}
 
 		entry := WSPRPredictionEntry{
-			Country:           k.Country,
-			Continent:         g.Continent,
-			Band:              k.Band,
-			MeanNormalisedSNR: math.Round(meanNormSNR*10) / 10,
-			PhonePowerDbm:     math.Round(phonePowerDbm*10) / 10,
-			BWPenaltyDB:       math.Round(bwPenaltyDB*10) / 10,
-			PredictedSSBSNR:   math.Round(predictedSSBSNR*10) / 10,
-			Prediction:        classifyPrediction(predictedSSBSNR),
-			SpotCount:         g.SpotCount,
-			LastSeen:          g.LastSeen,
-			Locator:           g.Locator,
-			DistanceKm:        g.DistanceKm,
-			BearingDeg:        g.BearingDeg,
+			Country:         k.Country,
+			Continent:       g.Continent,
+			Band:            k.Band,
+			MeanWSPRSNR:     math.Round(meanWSPRSNR*10) / 10,
+			MeanTxDbm:       math.Round(meanTxDbm*10) / 10,
+			BWCorrectionDB:  math.Round(bwCorrectionDB*10) / 10,
+			PhonePowerDbm:   math.Round(phonePowerDbm*10) / 10,
+			PowerGainDB:     math.Round(powerGainDB*10) / 10,
+			PredictedSSBSNR: math.Round(predictedSSBSNR*10) / 10,
+			Prediction:      classifyPrediction(predictedSSBSNR),
+			SpotCount:       g.SpotCount,
+			LastSeen:        g.LastSeen,
+			Locator:         g.Locator,
+			DistanceKm:      g.DistanceKm,
+			BearingDeg:      g.BearingDeg,
 		}
 		predictions = append(predictions, entry)
 	}
@@ -401,7 +411,7 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 	meta := WSPRPredictionMeta{
 		PhonePowerW:    phonePowerW,
 		PhonePowerDbm:  math.Round(phonePowerDbm*10) / 10,
-		BWPenaltyDB:    math.Round(bwPenaltyDB*10) / 10,
+		BWPenaltyDB:    math.Round(bwCorrectionDB*10) / 10,
 		Minutes:        minutes,
 		BandFilter:     band,
 		BandsAvailable: bandsAvailable,

@@ -277,11 +277,11 @@ class SMeterNeedle {
         this.ctx.font = 'bold 12px Arial';
         this.ctx.fillStyle = '#ecf0f1';
         this.ctx.textAlign = 'left';
-        this.ctx.fillText('S', 10, this.height - 10);
+        this.ctx.fillText('S', 10, this.height - 4);
 
         // "dB" label at bottom right
         this.ctx.textAlign = 'right';
-        this.ctx.fillText('dB', this.width - 10, this.height - 10);
+        this.ctx.fillText('dB', this.width - 10, this.height - 4);
     }
 
     // Draw SNR scale (30–60 dB, major ticks with labels at every 5 dB)
@@ -322,11 +322,11 @@ class SMeterNeedle {
         this.ctx.font = 'bold 11px Arial';
         this.ctx.fillStyle = '#ecf0f1';
         this.ctx.textAlign = 'left';
-        this.ctx.fillText('SNR', 5, this.height - 10);
+        this.ctx.fillText('SNR', 5, this.height - 4);
 
         // "dB" label at bottom right
         this.ctx.textAlign = 'right';
-        this.ctx.fillText('dB', this.width - 10, this.height - 10);
+        this.ctx.fillText('dB', this.width - 10, this.height - 4);
     }
 
     // Update the value display divs — text values are always graduated in all modes

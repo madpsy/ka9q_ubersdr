@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -106,6 +107,77 @@ var validPhonePowers = map[int]bool{
 	100:  true,
 	500:  true,
 	1000: true,
+}
+
+// wsprSpotsCacheTTL is how long the raw spot slice is reused before the CSV
+// files are re-read.  Two minutes matches the WSPR transmission cycle so the
+// cache is always fresh enough for any lookback window a caller might request.
+const wsprSpotsCacheTTL = 2 * time.Minute
+
+// wsprSpotsCache holds the most-recently-fetched raw WSPR spot slice and the
+// time it was populated.  It always covers yesterday + today (the widest
+// possible window — up to 1440 minutes) so that requests with different
+// 'minutes' values all share the same single cached slice.  Per-request
+// filtering (band, timestamp window, min SNR) is applied in the handler after
+// the cache lookup.  All fields are protected by mu.
+var wsprSpotsCache struct {
+	mu        sync.RWMutex
+	spots     []SpotRecord
+	fetchedAt time.Time
+}
+
+// getWSPRSpotsCached returns all WSPR spots for yesterday + today, reading
+// from disk only when the cache is stale (older than wsprSpotsCacheTTL).
+// Concurrent callers share a single disk read via double-checked locking.
+func getWSPRSpotsCached(sl *SpotsLogger) ([]SpotRecord, error) {
+	now := time.Now().UTC()
+	// Always fetch yesterday + today so every possible 'minutes' window is covered.
+	fromDate := now.AddDate(0, 0, -1).Format("2006-01-02")
+	toDate := now.Format("2006-01-02")
+
+	// Fast path — read lock only.
+	wsprSpotsCache.mu.RLock()
+	if time.Since(wsprSpotsCache.fetchedAt) < wsprSpotsCacheTTL {
+		spots := wsprSpotsCache.spots
+		wsprSpotsCache.mu.RUnlock()
+		return spots, nil
+	}
+	wsprSpotsCache.mu.RUnlock()
+
+	// Slow path — write lock with double-check.
+	wsprSpotsCache.mu.Lock()
+	defer wsprSpotsCache.mu.Unlock()
+
+	// Another goroutine may have refreshed the cache while we waited for the lock.
+	if time.Since(wsprSpotsCache.fetchedAt) < wsprSpotsCacheTTL {
+		return wsprSpotsCache.spots, nil
+	}
+
+	spots, err := sl.GetHistoricalSpots(
+		"WSPR", // mode
+		"",     // band — fetch all, filter in handler
+		"",     // name
+		"",     // callsign
+		"",     // locator
+		"",     // continent
+		"",     // direction
+		fromDate,
+		toDate,
+		"",    // startTime
+		"",    // endTime
+		false, // deduplicate
+		false, // locatorsOnly
+		0,     // minDistanceKm
+		-999,  // minSNR
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	wsprSpotsCache.spots = spots
+	wsprSpotsCache.fetchedAt = time.Now()
+	log.Printf("WSPR spots cache refreshed: %d spots for %s–%s", len(spots), fromDate, toDate)
+	return spots, nil
 }
 
 // WSPRPredictionMeta holds metadata about the prediction request
@@ -339,34 +411,17 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 		return
 	}
 
-	// ── Determine date range for the lookback window ──────────────────────────
+	// ── Determine the exact timestamp window for in-memory filtering ──────────
+	// The cache always holds yesterday + today (the widest possible range).
+	// windowStart is used below to trim spots to the caller's requested window.
 	now := time.Now().UTC()
 	windowStart := now.Add(-time.Duration(minutes) * time.Minute)
 
-	fromDate := windowStart.Format("2006-01-02")
-	toDate := now.Format("2006-01-02")
-
-	// ── Fetch WSPR spots ──────────────────────────────────────────────────────
-	// We fetch all WSPR spots for the date range (no band filter at DB level —
-	// we filter by timestamp and band in Go after fetching).
-	// deduplicate=false so we see all spots and can pick the best SNR per country+band.
-	spots, err := md.spotsLogger.GetHistoricalSpots(
-		"WSPR", // mode
-		"",     // band — fetch all, filter below
-		"",     // name
-		"",     // callsign
-		"",     // locator
-		"",     // continent
-		"",     // direction
-		fromDate,
-		toDate,
-		"",    // startTime
-		"",    // endTime
-		false, // deduplicate — we need all spots to pick best SNR
-		false, // locatorsOnly — WSPR spots without locators still have dBm
-		0,     // minDistanceKm
-		-999,  // minSNR
-	)
+	// ── Fetch WSPR spots (cached) ─────────────────────────────────────────────
+	// Raw spots for yesterday + today are cached for wsprSpotsCacheTTL (2 min).
+	// All requests — regardless of their 'minutes' window — share this one slice.
+	// Per-request filtering (band, timestamp window, min SNR) is applied below.
+	spots, err := getWSPRSpotsCached(md.spotsLogger)
 	if err != nil {
 		// No data is not an error — return empty predictions
 		log.Printf("WSPR prediction: failed to fetch spots: %v", err)

@@ -3019,6 +3019,19 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		}
 	}
 
+	// Collect unique enabled digital mode types (e.g. ["FT8","WSPR"]) when decoder is enabled.
+	// Iterates enabled bands and deduplicates by DecoderMode integer value — no string parsing.
+	digitalModes := []string{}
+	if config.Decoder.Enabled {
+		seenModes := map[DecoderMode]bool{}
+		for _, band := range config.Decoder.GetEnabledBands() {
+			if !seenModes[band.Mode] {
+				seenModes[band.Mode] = true
+				digitalModes = append(digitalModes, band.Mode.String())
+			}
+		}
+	}
+
 	// Build the response with description plus status information (without sdrs)
 	response := map[string]interface{}{
 		"description":       config.Admin.Description,
@@ -3048,6 +3061,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"space_weather":        config.SpaceWeather.Enabled,
 		"noise_floor":          config.NoiseFloor.Enabled,
 		"digital_decodes":      config.Decoder.Enabled,
+		"digital_modes":        digitalModes,
 		"cw_skimmer":           cwskimmerConfig.Enabled,
 		"cw_skimmer_rbn_spots": cwskimmerConfig.Enabled && cwskimmerConfig.RBNSpots,
 		"cw_skimmer_callsign":  cwskimmerConfig.Callsign,

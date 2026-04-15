@@ -965,15 +965,31 @@ class SpectrumDisplay {
         this.animationLoopRunning = true;
         console.log('Started spectrum frame processing loop');
 
+        // Target 30fps for the render loop — enough for smooth waterfall scrolling and
+        // cursor updates while keeping CPU usage comparable to the original implementation.
+        const TARGET_FPS = 30;
+        const FRAME_INTERVAL_MS = 1000 / TARGET_FPS; // ~33.3ms
+
         const processFrame = (timestamp) => {
             if (!this.animationLoopRunning) return;
+
+            // --- 30fps throttle ---
+            // Always re-schedule so we don't miss the next window, but skip work
+            // if not enough time has elapsed since the last rendered frame.
+            requestAnimationFrame(processFrame);
 
             // --- Initialise timing on first tick ---
             if (this.lastRafTime === null) {
                 this.lastRafTime = timestamp;
             }
+
+            const sinceLastFrame = timestamp - this.lastRafTime;
+            if (sinceLastFrame < FRAME_INTERVAL_MS) {
+                return; // Too soon — skip this tick
+            }
+
             // Cap elapsed to 200ms so a hidden/backgrounded tab doesn't cause a huge jump
-            const elapsed = Math.min(timestamp - this.lastRafTime, 200);
+            const elapsed = Math.min(sinceLastFrame, 200);
             this.lastRafTime = timestamp;
 
             // --- Lazily read spectrum_poll_period from the API description ---
@@ -990,6 +1006,9 @@ class SpectrumDisplay {
             }
 
             // --- Consume incoming data frames ---
+            // Track whether new data arrived this tick so we know whether to redraw the line graph.
+            let newDataArrived = false;
+
             // When spectrum sync is enabled, honour audio timing; otherwise take the latest frame.
             if (this.spectrumSyncEnabled && window.audioContext && window.nextPlayTime) {
                 const currentTime = window.audioContext.currentTime;
@@ -1025,6 +1044,7 @@ class SpectrumDisplay {
                     if (now >= displayTime) {
                         this.frameQueue.shift();
                         this._consumeNewFrame(frame.data);
+                        newDataArrived = true;
                     } else {
                         break;
                     }
@@ -1044,12 +1064,13 @@ class SpectrumDisplay {
                 if (this.frameQueue.length > 0) {
                     const frame = this.frameQueue.shift();
                     this._consumeNewFrame(frame.data);
+                    newDataArrived = true;
                 }
             }
 
             // --- Smooth scroll accumulator ---
             // Advance by the elapsed time at the target rate, then scroll one pixel per whole unit.
-            // This produces smooth 60fps scrolling regardless of how infrequently data arrives.
+            // Between data packets the waterfall keeps scrolling with the last spectrum snapshot.
             if (this.lastSpectrumRow) {
                 this.scrollAccumulator += (elapsed / 1000) * this.targetScrollRate;
 
@@ -1059,13 +1080,13 @@ class SpectrumDisplay {
                 }
             }
 
-            // --- Always redraw the line graph and overlay at full frame rate ---
-            if (this.spectrumData) {
+            // --- Redraw line graph only when new data arrived (avoids 60fps CPU spike) ---
+            if (newDataArrived && this.spectrumData) {
                 this.drawLineGraph();
             }
-            this.drawTunedFrequencyCursor();
 
-            requestAnimationFrame(processFrame);
+            // --- Redraw overlay (cursor, bookmarks) every rendered frame ---
+            this.drawTunedFrequencyCursor();
         };
 
         requestAnimationFrame(processFrame);

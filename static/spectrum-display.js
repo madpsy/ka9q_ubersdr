@@ -1876,10 +1876,8 @@ class SpectrumDisplay {
 
         // 3. Write the new row at the top of the offscreen canvas
         this.gpuOffscreenCtx.putImageData(this.waterfallImageData, 0, waterfallStartY);
-
-        // 4. Stamp the offscreen canvas onto the visible canvas (no transform — just pixel copy)
-        //    The CSS translateY fractional shift is applied by the caller every rAF tick.
-        this.ctx.drawImage(this.gpuOffscreenCanvas, 0, 0);
+        // Note: do NOT stamp to visible canvas here — scrollWaterfallGPUComposite() handles
+        // that every rAF tick with the correct fractional sub-pixel offset.
 
         this.waterfallLineCount++;
     }
@@ -1912,8 +1910,11 @@ class SpectrumDisplay {
             this.width, srcHeight                        // dest width, height
         );
 
-        // Fill the sub-pixel gap at the top with black (at most 1px tall — invisible to the eye)
-        if (this.gpuScrollOffset > 0) {
+        // Fill the sub-pixel gap at the top with black (at most 1px tall).
+        // Only needed when waterfallStartY > 0 (full-screen mode with frequency scale above).
+        // In split view (waterfallStartY = 0) the grey separator line on the line graph canvas
+        // covers this seam, so filling it would cause visible flicker at the join.
+        if (this.gpuScrollOffset > 0 && waterfallStartY > 0) {
             this.ctx.fillStyle = '#000';
             this.ctx.fillRect(0, waterfallStartY, this.width, this.gpuScrollOffset);
         }

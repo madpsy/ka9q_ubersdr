@@ -135,11 +135,32 @@ const app = (() => {
             .attr('stroke', '#2a3a4a')
             .attr('stroke-width', 0.8);
 
-        // Zoom behaviour — also repositions receiver marker
+        // Zoom behaviour — counter-scale circles so they stay constant screen size
         const zoom = d3.zoom()
             .scaleExtent([1, 8])
             .on('zoom', (event) => {
                 mapGroup.attr('transform', event.transform);
+                const k = event.transform.k; // current zoom scale
+                // Counter-scale all spot circles and their glow rings
+                mapGroup.selectAll('.spot-marker circle')
+                    .attr('r', function() {
+                        const base = +d3.select(this).attr('data-base-r');
+                        return isNaN(base) ? null : base / k;
+                    })
+                    .style('stroke-width', function() {
+                        const base = +d3.select(this).attr('data-base-sw');
+                        return isNaN(base) ? null : (base / k) + 'px';
+                    });
+                // Counter-scale receiver marker circles
+                mapGroup.selectAll('.receiver-marker circle')
+                    .attr('r', function() {
+                        const base = +d3.select(this).attr('data-base-r');
+                        return isNaN(base) ? null : base / k;
+                    })
+                    .style('stroke-width', function() {
+                        const base = +d3.select(this).attr('data-base-sw');
+                        return isNaN(base) ? null : (base / k) + 'px';
+                    });
             });
         svg.call(zoom);
     }
@@ -163,6 +184,8 @@ const app = (() => {
         receiverMarkerGroup.append('circle')
             .attr('cx', cx).attr('cy', cy)
             .attr('r', 11)
+            .attr('data-base-r', 11)
+            .attr('data-base-sw', 1.5)
             .style('fill', 'none')
             .style('stroke', '#4CAF50')
             .style('stroke-width', '1.5')
@@ -172,6 +195,8 @@ const app = (() => {
         receiverMarkerGroup.append('circle')
             .attr('cx', cx).attr('cy', cy)
             .attr('r', 7)
+            .attr('data-base-r', 7)
+            .attr('data-base-sw', 2)
             .style('fill', '#4CAF50')
             .style('stroke', '#fff')
             .style('stroke-width', '2')
@@ -193,6 +218,8 @@ const app = (() => {
         receiverMarkerGroup.append('circle')
             .attr('cx', cx).attr('cy', cy)
             .attr('r', 2.5)
+            .attr('data-base-r', 2.5)
+            .attr('data-base-sw', 0)
             .style('fill', '#fff')
             .style('pointer-events', 'none');
     }
@@ -255,20 +282,24 @@ const app = (() => {
 
             const g = spotMarkersGroup.append('g').attr('class', 'spot-marker');
 
-            // Outer ring
+            // Outer ring — store base-r and base-sw for zoom counter-scaling
             g.append('circle')
                 .attr('cx', cx).attr('cy', cy)
                 .attr('r', r + 3)
+                .attr('data-base-r', r + 3)
+                .attr('data-base-sw', 1)
                 .style('fill', 'none')
                 .style('stroke', fill)
                 .style('stroke-width', '1')
                 .style('opacity', '0.35')
                 .style('pointer-events', 'none');
 
-            // Main circle
+            // Main circle — store base-r and base-sw for zoom counter-scaling
             g.append('circle')
                 .attr('cx', cx).attr('cy', cy)
                 .attr('r', r)
+                .attr('data-base-r', r)
+                .attr('data-base-sw', 1.2)
                 .style('fill', fill)
                 .style('stroke', '#fff')
                 .style('stroke-width', '1.2')

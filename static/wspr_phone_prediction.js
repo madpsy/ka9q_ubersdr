@@ -465,18 +465,18 @@ const app = (() => {
             return;
         }
 
-        // Deduplicate by country — keep best predicted_ssb_snr per country
-        const byCountry = new Map();
+        // Deduplicate by country + band — keep best predicted_ssb_snr per country/band pair
+        const byCountryBand = new Map();
         for (const p of preds) {
-            const key = p.country || '—';
-            const existing = byCountry.get(key);
+            const key = (p.country || '—') + '\x00' + (p.band || '—');
+            const existing = byCountryBand.get(key);
             if (!existing || p.predicted_ssb_snr > existing.predicted_ssb_snr) {
-                byCountry.set(key, p);
+                byCountryBand.set(key, p);
             }
         }
 
         // Sort by predicted SSB SNR descending, take top 10
-        const top10 = [...byCountry.values()]
+        const top10 = [...byCountryBand.values()]
             .sort((a, b) => b.predicted_ssb_snr - a.predicted_ssb_snr)
             .slice(0, 10);
 
@@ -484,10 +484,11 @@ const app = (() => {
             const fill = PREDICTION_FILL[p.prediction] || '#888';
             const snrStr = (p.predicted_ssb_snr >= 0 ? '+' : '') + p.predicted_ssb_snr.toFixed(1);
             const country = escHtml(p.country || '—');
+            const band = escHtml(p.band || '—');
             return `<div class="top10-row">
                 <div class="top10-dot" style="background:${fill}"></div>
-                <div class="top10-country" title="${country}">${country}</div>
-                <div class="top10-snr">${snrStr} dB</div>
+                <div class="top10-country" title="${country} (${band})">${country}</div>
+                <div class="top10-snr">${band}&nbsp;${snrStr} dB</div>
             </div>`;
         }).join('');
     }

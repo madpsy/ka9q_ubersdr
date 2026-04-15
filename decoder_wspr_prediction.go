@@ -19,6 +19,11 @@ import (
 //   phone_power_w  int   whitelist {10,50,100,500,1000}  Assumed SSB TX power in watts (default: 100)
 //   band           str   WSPR band whitelist or empty for all (default: "")
 //   min_ssb_snr    int   -60–30   Minimum predicted SSB SNR to include in results (default: -60)
+//   summary        bool  If "true", return a lightweight list of country/band combinations only.
+//                        When summary=true the default min_ssb_snr is raised to +10 dB (Good+)
+//                        so the list only contains bands that are realistically usable.
+//                        Response shape changes to { "predictions": [ { country, continent, band,
+//                        prediction, predicted_ssb_snr }, … ] } — no meta block.
 //
 // Physics:
 //   wsprd reports SNR normalised to a 2500 Hz reference bandwidth.  This is the
@@ -130,12 +135,30 @@ type WSPRPredictionEntry struct {
 	Locator         string   `json:"locator,omitempty"`
 	DistanceKm      *float64 `json:"distance_km,omitempty"`
 	BearingDeg      *float64 `json:"bearing_deg,omitempty"`
+	BestCallsign    string   `json:"best_callsign,omitempty"`     // callsign of the spot with the highest SNR in this group
+	BestCallsignDBm int      `json:"best_callsign_dbm,omitempty"` // TX power (dBm) reported by that callsign
 }
 
 // WSPRPredictionResponse is the full API response
 type WSPRPredictionResponse struct {
 	Meta        WSPRPredictionMeta    `json:"meta"`
 	Predictions []WSPRPredictionEntry `json:"predictions"`
+}
+
+// WSPRPredictionSummaryEntry is the lightweight per-country/band entry returned
+// when the caller passes summary=true.  It omits all signal-level detail and
+// meta information so the response is small enough to embed in other pages.
+type WSPRPredictionSummaryEntry struct {
+	Country         string  `json:"country"`
+	Continent       string  `json:"continent"`
+	Band            string  `json:"band"`
+	Prediction      string  `json:"prediction"`
+	PredictedSSBSNR float64 `json:"predicted_ssb_snr"`
+}
+
+// WSPRPredictionSummaryResponse is the slim API response used when summary=true
+type WSPRPredictionSummaryResponse struct {
+	Predictions []WSPRPredictionSummaryEntry `json:"predictions"`
 }
 
 // wattsTodBm converts power in watts to dBm
@@ -232,8 +255,18 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 		return
 	}
 
-	// min_ssb_snr: -60–30, default -60 (show everything)
-	minSSBSNR := -60.0
+	// summary: if "true", return a lightweight country/band list only.
+	// When summary mode is active the default min_ssb_snr is raised to +10 dB
+	// (Good+) so the list only contains bands that are realistically usable.
+	summaryMode := r.URL.Query().Get("summary") == "true"
+
+	// min_ssb_snr: -60–30.
+	// Default is -60 (show everything) in full mode; +10 (Good+) in summary mode.
+	defaultMinSSBSNR := -60.0
+	if summaryMode {
+		defaultMinSSBSNR = 10.0
+	}
+	minSSBSNR := defaultMinSSBSNR
 	if s := r.URL.Query().Get("min_ssb_snr"); s != "" {
 		v, err := strconv.Atoi(s)
 		if err != nil || v < -60 || v > 30 {
@@ -306,14 +339,18 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 	// Using means across all spots makes the prediction robust against outliers
 	// and transmitters mis-reporting their TX power.
 	type groupData struct {
-		SNRSum     float64 // sum of WSPR SNR values (in ~6 Hz BW)
-		TxDbmSum   float64 // sum of reported TX power in dBm
-		SpotCount  int
-		LastSeen   string
-		Locator    string // locator of the most recent spot (for map placement)
-		DistanceKm *float64
-		BearingDeg *float64
-		Continent  string
+		SNRSum          float64 // sum of WSPR SNR values (in ~6 Hz BW)
+		TxDbmSum        float64 // sum of reported TX power in dBm
+		SpotCount       int
+		LastSeen        string
+		Locator         string // locator of the most recent spot (for map placement)
+		DistanceKm      *float64
+		BearingDeg      *float64
+		Continent       string
+		BestSNR         int    // highest SNR seen in this group
+		BestCallsign    string // callsign of the spot with the highest SNR
+		BestCallsignDBm int    // TX power (dBm) of that best-SNR spot
+		BestSNRSet      bool   // whether BestSNR has been initialised
 	}
 
 	groups := make(map[groupKey]*groupData)
@@ -360,6 +397,14 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 		existing.SNRSum += float64(spot.SNR)
 		existing.TxDbmSum += float64(*spot.DBm)
 		existing.SpotCount++
+
+		// Track the callsign with the highest SNR (best propagation sample for this group)
+		if !existing.BestSNRSet || spot.SNR > existing.BestSNR {
+			existing.BestSNR = spot.SNR
+			existing.BestSNRSet = true
+			existing.BestCallsign = spot.Callsign
+			existing.BestCallsignDBm = *spot.DBm
+		}
 
 		// Track latest timestamp and its associated locator/distance/bearing
 		if spot.Timestamp > existing.LastSeen {
@@ -434,6 +479,8 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 			Locator:         g.Locator,
 			DistanceKm:      g.DistanceKm,
 			BearingDeg:      g.BearingDeg,
+			BestCallsign:    g.BestCallsign,
+			BestCallsignDBm: g.BestCallsignDBm,
 		}
 		predictions = append(predictions, entry)
 	}
@@ -465,6 +512,25 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 		if md.config.ReceiverCallsign != "" {
 			meta.ReceiverCallsign = md.config.ReceiverCallsign
 		}
+	}
+
+	// ── Summary mode: return slim country/band list ───────────────────────────
+	if summaryMode {
+		summary := make([]WSPRPredictionSummaryEntry, 0, len(predictions))
+		for _, p := range predictions {
+			summary = append(summary, WSPRPredictionSummaryEntry{
+				Country:         p.Country,
+				Continent:       p.Continent,
+				Band:            p.Band,
+				Prediction:      p.Prediction,
+				PredictedSSBSNR: p.PredictedSSBSNR,
+			})
+		}
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(WSPRPredictionSummaryResponse{Predictions: summary}); err != nil {
+			log.Printf("WSPR prediction summary: error encoding response: %v", err)
+		}
+		return
 	}
 
 	resp := WSPRPredictionResponse{

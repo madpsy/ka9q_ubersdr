@@ -338,6 +338,15 @@ const app = (() => {
             : '—';
 
         const predLabel = PREDICTION_LABELS[cls] || cls;
+
+        // Best-SNR callsign line (explains why a locator may be geographically
+        // distant from the country name — e.g. a Swedish SM callsign in JN60)
+        let callsignLine = '';
+        if (entry.best_callsign) {
+            const dbmStr = entry.best_callsign_dbm != null ? ` @ ${entry.best_callsign_dbm} dBm` : '';
+            callsignLine = `<div style="color:#aaa;font-size:11px;margin-top:3px;">Best spot: <strong style="color:#e0e0e0">${escHtml(entry.best_callsign)}</strong>${escHtml(dbmStr)} &nbsp; Grid: <strong style="color:#e0e0e0">${escHtml(entry.locator || '?')}</strong></div>`;
+        }
+
         tooltip.innerHTML = `
             <div class="tooltip-title">${escHtml(entry.country)} — ${escHtml(entry.locator || '?')}</div>
             <div>Band: <strong>${escHtml(entry.band)}</strong> &nbsp; Continent: <strong>${escHtml(entry.continent || '—')}</strong></div>
@@ -346,6 +355,7 @@ const app = (() => {
             <div>Power gain: ${pgStr} dB &nbsp; BW correction: −${entry.bw_correction_db.toFixed(2)} dB</div>
             <div>Distance: ${distStr} &nbsp; Bearing: ${bearingStr}</div>
             <div>Last seen: ${lastSeen}</div>
+            ${callsignLine}
         `;
         tooltip.style.display = 'block';
         positionTooltip(event);

@@ -1742,6 +1742,11 @@ func main() {
 		instanceReporter.SetAddonsConfig(addonsConfig)
 	}
 
+	// Set the multi-decoder in instance reporter for WSPR SSB phone predictions
+	if instanceReporter != nil && multiDecoder != nil {
+		instanceReporter.SetMultiDecoder(multiDecoder)
+	}
+
 	// Update MCP server with rotctlHandler now that it's initialized
 	if mcpServer != nil && rotctlHandler != nil {
 		mcpServer.rotctlHandler = rotctlHandler

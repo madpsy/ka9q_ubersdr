@@ -28,6 +28,7 @@ type InstanceReporter struct {
 	rotctlHandler       *RotctlAPIHandler          // For getting rotator information
 	freqRefMonitor      *FrequencyReferenceMonitor // For getting frequency reference information
 	addonsConfig        *AddonProxiesConfig        // For reporting enabled addon proxy names
+	multiDecoder        *MultiDecoder              // For getting WSPR SSB phone predictions
 	configPath          string
 	httpClient          *http.Client
 	stopChan            chan struct{}
@@ -44,47 +45,48 @@ type InstanceReporter struct {
 
 // InstanceReport represents the data sent to the central server
 type InstanceReport struct {
-	UUID                       string                 `json:"uuid"`
-	Callsign                   string                 `json:"callsign"`
-	Name                       string                 `json:"name"`
-	Email                      string                 `json:"email"` // Admin email address (private, for Let's Encrypt)
-	Location                   string                 `json:"location"`
-	Latitude                   float64                `json:"latitude"`
-	Longitude                  float64                `json:"longitude"`
-	GPSEnabled                 bool                   `json:"gps_enabled"`  // Whether GPS time synchronization is enabled
-	TDOAEnabled                bool                   `json:"tdoa_enabled"` // Whether TDOA calculations are enabled
-	Altitude                   int                    `json:"altitude"`
-	PublicURL                  string                 `json:"public_url"`
-	Version                    string                 `json:"version"`
-	Timestamp                  int64                  `json:"timestamp"`
-	Uptime                     int64                  `json:"uptime"`                       // Uptime in seconds since application start
-	Host                       string                 `json:"host,omitempty"`               // Optional: tells clients how to connect to this instance
-	Port                       int                    `json:"port,omitempty"`               // Optional: port for client connections
-	TLS                        bool                   `json:"tls,omitempty"`                // Optional: whether TLS is required for connections
-	UseMyIP                    bool                   `json:"use_myip"`                     // Automatically use public IP for public access
-	CreateDomain               bool                   `json:"create_domain"`                // Request automatic DNS subdomain creation
-	CWSkimmer                  bool                   `json:"cw_skimmer"`                   // Whether CW Skimmer is enabled
-	DigitalDecodes             bool                   `json:"digital_decodes"`              // Whether digital decoding is enabled
-	NoiseFloor                 bool                   `json:"noise_floor"`                  // Whether noise floor monitoring is enabled
-	MaxClients                 int                    `json:"max_clients"`                  // Maximum number of clients allowed
-	AvailableClients           int                    `json:"available_clients"`            // Current number of available client slots
-	MaxSessionTime             int                    `json:"max_session_time"`             // Maximum session time in seconds (0 = unlimited)
-	PublicIQModes              []string               `json:"public_iq_modes"`              // List of IQ modes accessible without authentication
-	CPUModel                   string                 `json:"cpu_model"`                    // CPU model name
-	Load                       map[string]interface{} `json:"load,omitempty"`               // System load averages, CPU cores, and status
-	CORSEnabled                bool                   `json:"cors_enabled"`                 // Whether CORS is enabled
-	ChatEnabled                bool                   `json:"chat_enabled"`                 // Whether chat is enabled
-	ChatUsers                  int                    `json:"chat_users"`                   // Number of active chat users
-	SNR_0_30MHz                int                    `json:"snr_0_30_mhz"`                 // SNR for 0-30 MHz (dynamic range in dB, -1 if unavailable)
-	SNR_1_8_30MHz              int                    `json:"snr_1_8_30_mhz"`               // SNR for 1.8-30 MHz HF bands (dynamic range in dB, -1 if unavailable)
-	Rotator                    map[string]interface{} `json:"rotator"`                      // Rotator information (enabled, connected, azimuth)
-	FrequencyReference         map[string]interface{} `json:"frequency_reference"`          // Frequency reference tracking information
-	SpeechToText               bool                   `json:"speech_to_text"`               // Whether Whisper speech-to-text is enabled
-	Addons                     []string               `json:"addons"`                       // Names of enabled addon proxies
-	Test                       bool                   `json:"test,omitempty"`               // If true, this is a test report - collector will verify /api/description instead of full callback
-	StartupReport              bool                   `json:"startup_report"`               // If true, this is a startup report sent regardless of instance_reporting.enabled
-	NotifyInstanceDisconnected bool                   `json:"notify_instance_disconnected"` // Notify when instance disconnects
-	NotifyInstanceStartup      bool                   `json:"notify_instance_startup"`      // Notify on instance startup
+	UUID                       string                   `json:"uuid"`
+	Callsign                   string                   `json:"callsign"`
+	Name                       string                   `json:"name"`
+	Email                      string                   `json:"email"` // Admin email address (private, for Let's Encrypt)
+	Location                   string                   `json:"location"`
+	Latitude                   float64                  `json:"latitude"`
+	Longitude                  float64                  `json:"longitude"`
+	GPSEnabled                 bool                     `json:"gps_enabled"`  // Whether GPS time synchronization is enabled
+	TDOAEnabled                bool                     `json:"tdoa_enabled"` // Whether TDOA calculations are enabled
+	Altitude                   int                      `json:"altitude"`
+	PublicURL                  string                   `json:"public_url"`
+	Version                    string                   `json:"version"`
+	Timestamp                  int64                    `json:"timestamp"`
+	Uptime                     int64                    `json:"uptime"`                       // Uptime in seconds since application start
+	Host                       string                   `json:"host,omitempty"`               // Optional: tells clients how to connect to this instance
+	Port                       int                      `json:"port,omitempty"`               // Optional: port for client connections
+	TLS                        bool                     `json:"tls,omitempty"`                // Optional: whether TLS is required for connections
+	UseMyIP                    bool                     `json:"use_myip"`                     // Automatically use public IP for public access
+	CreateDomain               bool                     `json:"create_domain"`                // Request automatic DNS subdomain creation
+	CWSkimmer                  bool                     `json:"cw_skimmer"`                   // Whether CW Skimmer is enabled
+	DigitalDecodes             bool                     `json:"digital_decodes"`              // Whether digital decoding is enabled
+	NoiseFloor                 bool                     `json:"noise_floor"`                  // Whether noise floor monitoring is enabled
+	MaxClients                 int                      `json:"max_clients"`                  // Maximum number of clients allowed
+	AvailableClients           int                      `json:"available_clients"`            // Current number of available client slots
+	MaxSessionTime             int                      `json:"max_session_time"`             // Maximum session time in seconds (0 = unlimited)
+	PublicIQModes              []string                 `json:"public_iq_modes"`              // List of IQ modes accessible without authentication
+	CPUModel                   string                   `json:"cpu_model"`                    // CPU model name
+	Load                       map[string]interface{}   `json:"load,omitempty"`               // System load averages, CPU cores, and status
+	CORSEnabled                bool                     `json:"cors_enabled"`                 // Whether CORS is enabled
+	ChatEnabled                bool                     `json:"chat_enabled"`                 // Whether chat is enabled
+	ChatUsers                  int                      `json:"chat_users"`                   // Number of active chat users
+	SNR_0_30MHz                int                      `json:"snr_0_30_mhz"`                 // SNR for 0-30 MHz (dynamic range in dB, -1 if unavailable)
+	SNR_1_8_30MHz              int                      `json:"snr_1_8_30_mhz"`               // SNR for 1.8-30 MHz HF bands (dynamic range in dB, -1 if unavailable)
+	Rotator                    map[string]interface{}   `json:"rotator"`                      // Rotator information (enabled, connected, azimuth)
+	FrequencyReference         map[string]interface{}   `json:"frequency_reference"`          // Frequency reference tracking information
+	SpeechToText               bool                     `json:"speech_to_text"`               // Whether Whisper speech-to-text is enabled
+	Addons                     []string                 `json:"addons"`                       // Names of enabled addon proxies
+	SSBPredictions             []WSPRSummaryByBandEntry `json:"ssb_predictions,omitempty"`    // WSPR-derived SSB phone predictions by band (omitted when unavailable)
+	Test                       bool                     `json:"test,omitempty"`               // If true, this is a test report - collector will verify /api/description instead of full callback
+	StartupReport              bool                     `json:"startup_report"`               // If true, this is a startup report sent regardless of instance_reporting.enabled
+	NotifyInstanceDisconnected bool                     `json:"notify_instance_disconnected"` // Notify when instance disconnects
+	NotifyInstanceStartup      bool                     `json:"notify_instance_startup"`      // Notify on instance startup
 }
 
 // NewInstanceReporter creates a new instance reporter
@@ -149,6 +151,49 @@ func (ir *InstanceReporter) SetAddonsConfig(cfg *AddonProxiesConfig) {
 	ir.mu.Lock()
 	defer ir.mu.Unlock()
 	ir.addonsConfig = cfg
+}
+
+// SetMultiDecoder sets the multi-decoder for WSPR SSB phone predictions
+// This must be called after the decoder is initialized (after NewInstanceReporter)
+func (ir *InstanceReporter) SetMultiDecoder(md *MultiDecoder) {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
+	ir.multiDecoder = md
+}
+
+// getSSBPredictions returns WSPR-derived SSB phone predictions by band, or nil
+// when decoding is disabled, WSPR is not configured, or no spots are available.
+// Uses a 60-minute lookback window and 250 W assumed TX power (same as the
+// public API default used by the front-end).  Thread-safe.
+func (ir *InstanceReporter) getSSBPredictions() []WSPRSummaryByBandEntry {
+	// Guard 1: decoder must be enabled in config.
+	if !ir.config.Decoder.Enabled {
+		return nil
+	}
+
+	// Guard 2: at least one WSPR band must be configured.
+	hasWSPR := false
+	for _, band := range ir.config.Decoder.GetEnabledBands() {
+		if band.Mode == ModeWSPR {
+			hasWSPR = true
+			break
+		}
+	}
+	if !hasWSPR {
+		return nil
+	}
+
+	// Guard 3: MultiDecoder and its SpotsLogger must be available.
+	ir.mu.RLock()
+	md := ir.multiDecoder
+	ir.mu.RUnlock()
+
+	if md == nil || md.spotsLogger == nil {
+		return nil
+	}
+
+	// Compute predictions — returns nil when there are no qualifying spots.
+	return computeWSPRSummaryByBand(md.spotsLogger, 250, 60)
 }
 
 // getEnabledAddonNames returns the names of enabled addon proxies that are publicly accessible
@@ -556,6 +601,7 @@ func (ir *InstanceReporter) sendReport() error {
 		FrequencyReference:         freqRefInfo,
 		SpeechToText:               ir.config.Whisper.Enabled,
 		Addons:                     ir.getEnabledAddonNames(),
+		SSBPredictions:             ir.getSSBPredictions(),
 		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected,
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,
 	}
@@ -925,6 +971,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		FrequencyReference:         freqRefInfo,
 		SpeechToText:               ir.config.Whisper.Enabled,
 		Addons:                     ir.getEnabledAddonNames(),
+		SSBPredictions:             ir.getSSBPredictions(),
 		Test:                       isTest,
 		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected,
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,

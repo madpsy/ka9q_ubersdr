@@ -268,6 +268,152 @@ type WSPRSummaryByBandResponse struct {
 	Predictions []WSPRSummaryByBandEntry `json:"predictions"`
 }
 
+// computeWSPRSummaryByBand computes the by=band SSB phone prediction summary
+// using the shared spot cache.  It is safe to call from any goroutine.
+//
+// Parameters:
+//
+//	sl           – SpotsLogger used to read WSPR spot CSV files (must not be nil)
+//	phonePowerW  – assumed SSB TX power in watts (must be in validPhonePowers)
+//	minutes      – lookback window in minutes (1–1440)
+//
+// Returns nil (not an empty slice) when there are no qualifying spots, so
+// callers can use nil as a sentinel for "no data" and omit the field from JSON.
+func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) []WSPRSummaryByBandEntry {
+	now := time.Now().UTC()
+	windowStart := now.Add(-time.Duration(minutes) * time.Minute)
+	phonePowerDbm := wattsTodBm(phonePowerW)
+	minSSBSNR := 10.0 // same default as summary mode in the HTTP handler
+
+	spots, err := getWSPRSpotsCached(sl)
+	if err != nil || len(spots) == 0 {
+		return nil
+	}
+
+	type groupKey struct {
+		Country string
+		Band    string
+	}
+	type groupData struct {
+		SNRSum    float64
+		TxDbmSum  float64
+		SpotCount int
+		Continent string
+	}
+
+	groups := make(map[groupKey]*groupData)
+
+	for _, spot := range spots {
+		ts, err := time.Parse(time.RFC3339, spot.Timestamp)
+		if err != nil || ts.Before(windowStart) {
+			continue
+		}
+		if spot.DBm == nil || spot.Country == "" {
+			continue
+		}
+		k := groupKey{Country: spot.Country, Band: spot.Band}
+		g, ok := groups[k]
+		if !ok {
+			g = &groupData{Continent: spot.Continent}
+			groups[k] = g
+		}
+		g.SNRSum += float64(spot.SNR)
+		g.TxDbmSum += float64(*spot.DBm)
+		g.SpotCount++
+	}
+
+	if len(groups) == 0 {
+		return nil
+	}
+
+	// Build flat prediction list, applying the same SNR filter as summary mode.
+	type flatEntry struct {
+		Country         string
+		Continent       string
+		Band            string
+		PredictedSSBSNR float64
+		Prediction      string
+	}
+	var flat []flatEntry
+	for k, g := range groups {
+		if g.SpotCount == 0 {
+			continue
+		}
+		meanWSPRSNR := g.SNRSum / float64(g.SpotCount)
+		meanTxDbm := g.TxDbmSum / float64(g.SpotCount)
+		predictedSSBSNR := meanWSPRSNR + (phonePowerDbm - meanTxDbm) - bwCorrectionDB
+		if predictedSSBSNR < minSSBSNR {
+			continue
+		}
+		flat = append(flat, flatEntry{
+			Country:         k.Country,
+			Continent:       g.Continent,
+			Band:            k.Band,
+			PredictedSSBSNR: math.Round(predictedSSBSNR*10) / 10,
+			Prediction:      classifyPrediction(predictedSSBSNR),
+		})
+	}
+
+	if len(flat) == 0 {
+		return nil
+	}
+
+	predRank := map[string]int{
+		"excellent": 0, "good": 1, "workable": 2,
+		"marginal": 3, "poor": 4, "not_viable": 5,
+	}
+
+	// Group by band.
+	bandOrder := []string{"2200m", "630m", "160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m"}
+	type bandAcc struct {
+		bestPrediction string
+		countries      []WSPRSummaryCountryEntry
+	}
+	byBand := make(map[string]*bandAcc)
+	for _, e := range flat {
+		acc, ok := byBand[e.Band]
+		if !ok {
+			acc = &bandAcc{bestPrediction: e.Prediction}
+			byBand[e.Band] = acc
+		}
+		acc.countries = append(acc.countries, WSPRSummaryCountryEntry{
+			Country:         e.Country,
+			Continent:       e.Continent,
+			Prediction:      e.Prediction,
+			PredictedSSBSNR: e.PredictedSSBSNR,
+		})
+		if predRank[e.Prediction] < predRank[acc.bestPrediction] {
+			acc.bestPrediction = e.Prediction
+		}
+	}
+
+	result := make([]WSPRSummaryByBandEntry, 0, len(byBand))
+	for _, b := range bandOrder {
+		acc, ok := byBand[b]
+		if !ok {
+			continue
+		}
+		sort.Slice(acc.countries, func(i, j int) bool {
+			ri, rj := predRank[acc.countries[i].Prediction], predRank[acc.countries[j].Prediction]
+			if ri != rj {
+				return ri < rj
+			}
+			return acc.countries[i].PredictedSSBSNR > acc.countries[j].PredictedSSBSNR
+		})
+		result = append(result, WSPRSummaryByBandEntry{
+			Band:           b,
+			CountryCount:   len(acc.countries),
+			BestPrediction: acc.bestPrediction,
+			Countries:      acc.countries,
+		})
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
 // wattsTodBm converts power in watts to dBm
 func wattsTodBm(watts int) float64 {
 	return 10.0*math.Log10(float64(watts)) + 30.0

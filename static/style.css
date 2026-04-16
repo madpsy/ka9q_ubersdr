@@ -1180,8 +1180,8 @@ button:not(.primary-btn):not(:disabled):not(.download-client-button):not(.digita
 .vu-meter-leds-compact {
     width: 100%;
     height: 40px;
-    display: flex;
-    align-items: center;
+    display: grid;
+    grid-template-columns: repeat(40, 1fr);
     gap: 2px;
     background: #111;
     border-radius: 6px;
@@ -1192,13 +1192,11 @@ button:not(.primary-btn):not(:disabled):not(.download-client-button):not(.digita
 }
 
 .vu-meter-led-compact {
-    flex: 1;
     height: 100%;
     border-radius: 2px;
     background: #1e1e1e;
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
     transition: none;
-    min-width: 0;
 }
 
 .vu-meter-led-compact.lit-green {

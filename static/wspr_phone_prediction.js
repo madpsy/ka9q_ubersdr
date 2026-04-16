@@ -797,7 +797,10 @@ const app = (() => {
             updateMap(predictions, gridSquares);
             renderTable(predictions);
             renderTop10(predictions, gridSquares);
-            fetchNearestGridsBanner();
+            // Only fetch nearest-grids banner if we already have a user location.
+            // When location is not yet known, the geolocation callback will trigger
+            // the banner fetch once the position is obtained.
+            if (userLocation) fetchNearestGridsBanner();
 
         } catch (e) {
             console.error('WSPR prediction fetch error:', e);

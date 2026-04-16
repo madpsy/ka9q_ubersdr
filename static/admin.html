@@ -8054,8 +8054,8 @@
                     html += `
                         <div style="${skewCardStyle}">
                             <div style="font-size:11px; color:#666; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">Frequency deviation (yesterday)</div>
-                            <div style="font-size:20px; font-weight:bold; color:${skewValueColor};">${skew.skew} Hz</div>
-                            ${skewHigh ? '<div style="font-size:12px; color:#e65100; font-weight:bold; margin-top:2px;">⚠️ Deviation above 0.1 Hz</div>' : ''}
+                            <div style="font-size:20px; font-weight:bold; color:${skewValueColor};">${skew.skew} ppm</div>
+                            ${skewHigh ? '<div style="font-size:12px; color:#e65100; font-weight:bold; margin-top:2px;">⚠️ Deviation above 0.1 ppm</div>' : ''}
                             ${skewHigh && isLocalCallsign ? '<div style="font-size:12px; color:#b71c1c; margin-top:4px;">Consider compensating the SDR frequency reference, or disciplining it with a GPSDO.</div>' : ''}
                             <div style="font-size:12px; color:#555; margin-top:4px;">Based on ${skew.spots.toLocaleString()} spots</div>
                             <div style="font-size:12px; color:#555; margin-top:2px;">Correction factor: <code style="font-size:11px;">${skew.correction_factor.toFixed(9)}</code></div>

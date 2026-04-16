@@ -13,6 +13,7 @@ const app = (() => {
 
     // ── State ────────────────────────────────────────────────────────────────
     let predictions = [];       // Current API response predictions array
+    let gridSquares = [];       // Current API response grid_squares array
     let meta = null;            // Current API response meta object
     let worldFeatures = null;   // TopoJSON country features
     let svg = null;
@@ -233,11 +234,47 @@ const app = (() => {
             .style('pointer-events', 'none');
     }
 
+    // ── Grid-square helpers ───────────────────────────────────────────────────
+
+    /**
+     * Convert a 4-char Maidenhead grid square to its geographic bounding box.
+     * A 4-char square covers exactly 2° longitude × 1° latitude.
+     * Returns [lonMin, latMin, lonMax, latMax].
+     */
+    function gridSquareBounds(grid4) {
+        const g = grid4.toUpperCase();
+        const lonMin = (g.charCodeAt(0) - 65) * 20 - 180 + parseInt(g[2], 10) * 2;
+        const latMin = (g.charCodeAt(1) - 65) * 10 - 90  + parseInt(g[3], 10) * 1;
+        return [lonMin, latMin, lonMin + 2, latMin + 1];
+    }
+
+    // Tooltip handler for grid-square hover
+    function onGridSquareMouseMove(event, gs) {
+        const bestSnrStr = (gs.best_ssb_snr >= 0 ? '+' : '') + gs.best_ssb_snr.toFixed(1);
+        const predLabel = PREDICTION_LABELS[gs.best_prediction] || gs.best_prediction;
+
+        const bandLines = (gs.bands || []).map(b => {
+            const bsnr = (b.predicted_ssb_snr >= 0 ? '+' : '') + b.predicted_ssb_snr.toFixed(1);
+            const cls  = tooltipPredClass(b.prediction);
+            const blabel = PREDICTION_LABELS[b.prediction] || b.prediction;
+            return `<div class="${cls}" style="margin-top:2px;">${escHtml(b.band)}: <strong>${blabel}</strong> (${bsnr} dB)</div>`;
+        }).join('');
+
+        tooltip.innerHTML = `
+            <div class="tooltip-title">⊞ ${escHtml(gs.grid)} — ${escHtml(gs.country)}</div>
+            <div class="${tooltipPredClass(gs.best_prediction)}">Best: <strong>${predLabel}</strong> (${bestSnrStr} dB)</div>
+            ${bandLines}
+        `;
+        tooltip.style.display = 'block';
+        positionTooltip(event);
+    }
+
     // ── Spot circle markers ───────────────────────────────────────────────────
     // Instead of colouring country polygons (which include overseas territories),
     // we draw a circle at each prediction's Maidenhead locator position.
     // This accurately represents where the signal was heard, not a whole country.
     let spotMarkersGroup = null;
+    let gridSquaresGroup = null; // D3 group for the grid-square heat-map layer
 
     const PREDICTION_FILL = {
         excellent:  '#1abc9c',
@@ -248,14 +285,12 @@ const app = (() => {
         not_viable: '#4a2020',
     };
 
-    function updateMap(preds) {
+    function updateMap(preds, gsData) {
         if (!mapGroup) return;
 
-        // Remove old spot markers
-        if (spotMarkersGroup) {
-            spotMarkersGroup.remove();
-            spotMarkersGroup = null;
-        }
+        // Remove old layers
+        if (gridSquaresGroup) { gridSquaresGroup.remove(); gridSquaresGroup = null; }
+        if (spotMarkersGroup) { spotMarkersGroup.remove(); spotMarkersGroup = null; }
 
         // All country paths stay neutral (no-data class) — colouring is done via spot circles
         if (countryPaths) {
@@ -266,6 +301,38 @@ const app = (() => {
                         .classed('marginal', false)
                         .classed('poor', false)
                         .classed('not-viable', false);
+        }
+
+        // ── Grid-square heat-map layer (drawn first, below spot circles) ──────
+        gridSquaresGroup = mapGroup.append('g').attr('class', 'grid-squares');
+
+        for (const gs of (gsData || [])) {
+            if (!gs.grid || gs.grid.length < 4) continue;
+            let bounds;
+            try { bounds = gridSquareBounds(gs.grid); } catch (e) { continue; }
+            const [lonMin, latMin, lonMax, latMax] = bounds;
+
+            const fill = PREDICTION_FILL[gs.best_prediction] || '#888';
+
+            gridSquaresGroup.append('path')
+                .datum({
+                    type: 'Feature',
+                    geometry: {
+                        type: 'Polygon',
+                        coordinates: [[[lonMin, latMin], [lonMax, latMin],
+                                       [lonMax, latMax], [lonMin, latMax],
+                                       [lonMin, latMin]]]
+                    }
+                })
+                .attr('d', pathGen)
+                .style('fill', fill)
+                .style('fill-opacity', '0.28')
+                .style('stroke', fill)
+                .style('stroke-width', '0.6px')
+                .style('stroke-opacity', '0.5')
+                .style('cursor', 'pointer')
+                .on('mousemove', (event) => onGridSquareMouseMove(event, gs))
+                .on('mouseout', () => { tooltip.style.display = 'none'; });
         }
 
         // Draw spot circles at locator positions
@@ -482,13 +549,21 @@ const app = (() => {
     }
 
     // ── Top-10 panel ─────────────────────────────────────────────────────────
-    function renderTop10(preds) {
+    function renderTop10(preds, gsData) {
         const el = document.getElementById('top10-list');
         if (!el) return;
 
         if (!preds || preds.length === 0) {
             el.innerHTML = '<div style="color:#666;font-size:10px;">No data</div>';
             return;
+        }
+
+        // Build grid-square count per country from gsData
+        const gridCountByCountry = {};
+        for (const gs of (gsData || [])) {
+            if (gs.country) {
+                gridCountByCountry[gs.country] = (gridCountByCountry[gs.country] || 0) + 1;
+            }
         }
 
         // Deduplicate by country + band — keep best predicted_ssb_snr per country/band pair.
@@ -513,10 +588,15 @@ const app = (() => {
             const snrStr = (p.predicted_ssb_snr >= 0 ? '+' : '') + p.predicted_ssb_snr.toFixed(1);
             const country = escHtml(p.country || '—');
             const band = escHtml(p.band || '—');
+            const gridCount = gridCountByCountry[p.country] || 0;
+            const gridBadge = gridCount > 0
+                ? `<div class="top10-grids" title="${gridCount} grid square${gridCount !== 1 ? 's' : ''} heard">${gridCount}⊞</div>`
+                : '';
             return `<div class="top10-row">
                 <div class="top10-dot" style="background:${fill}"></div>
                 <div class="top10-country" title="${country} (${band})">${country}</div>
                 <div class="top10-snr">${band}&nbsp;${snrStr} dB</div>
+                ${gridBadge}
             </div>`;
         }).join('');
     }
@@ -565,12 +645,13 @@ const app = (() => {
 
             const data = await resp.json();
             predictions = data.predictions || [];
+            gridSquares = data.grid_squares || [];
             meta = data.meta || null;
 
             updateStatusBar(meta, predictions.length);
-            updateMap(predictions);
+            updateMap(predictions, gridSquares);
             renderTable(predictions);
-            renderTop10(predictions);
+            renderTop10(predictions, gridSquares);
 
         } catch (e) {
             console.error('WSPR prediction fetch error:', e);

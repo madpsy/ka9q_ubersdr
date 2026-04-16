@@ -83,6 +83,7 @@ type InstanceReport struct {
 	SpeechToText               bool                     `json:"speech_to_text"`               // Whether Whisper speech-to-text is enabled
 	Addons                     []string                 `json:"addons"`                       // Names of enabled addon proxies
 	SSBPredictions             []WSPRSummaryByBandEntry `json:"ssb_predictions,omitempty"`    // WSPR-derived SSB phone predictions by band (omitted when unavailable)
+	SSBGridSquares             []WSPRGridSquareEntry    `json:"ssb_grid_squares,omitempty"`   // WSPR-derived grid-square map overlay data (omitted when unavailable)
 	Test                       bool                     `json:"test,omitempty"`               // If true, this is a test report - collector will verify /api/description instead of full callback
 	StartupReport              bool                     `json:"startup_report"`               // If true, this is a startup report sent regardless of instance_reporting.enabled
 	NotifyInstanceDisconnected bool                     `json:"notify_instance_disconnected"` // Notify when instance disconnects
@@ -161,11 +162,11 @@ func (ir *InstanceReporter) SetMultiDecoder(md *MultiDecoder) {
 	ir.multiDecoder = md
 }
 
-// getSSBPredictions returns WSPR-derived SSB phone predictions by band, or nil
-// when decoding is disabled, WSPR is not configured, or no spots are available.
-// Uses a 60-minute lookback window and 250 W assumed TX power (same as the
-// public API default used by the front-end).  Thread-safe.
-func (ir *InstanceReporter) getSSBPredictions() []WSPRSummaryByBandEntry {
+// getSSBPredictions returns WSPR-derived SSB phone predictions and grid-square
+// overlay data, or nil when decoding is disabled, WSPR is not configured, or
+// no spots are available.  Uses a 60-minute lookback window and 250 W assumed
+// TX power (same as the public API default used by the front-end).  Thread-safe.
+func (ir *InstanceReporter) getSSBPredictions() *WSPRSummaryResult {
 	// Guard 1: decoder must be enabled in config.
 	if !ir.config.Decoder.Enabled {
 		return nil
@@ -601,9 +602,12 @@ func (ir *InstanceReporter) sendReport() error {
 		FrequencyReference:         freqRefInfo,
 		SpeechToText:               ir.config.Whisper.Enabled,
 		Addons:                     ir.getEnabledAddonNames(),
-		SSBPredictions:             ir.getSSBPredictions(),
 		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected,
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,
+	}
+	if ssbResult := ir.getSSBPredictions(); ssbResult != nil {
+		report.SSBPredictions = ssbResult.Predictions
+		report.SSBGridSquares = ssbResult.GridSquares
 	}
 
 	jsonData, err := json.Marshal(report)
@@ -971,10 +975,13 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		FrequencyReference:         freqRefInfo,
 		SpeechToText:               ir.config.Whisper.Enabled,
 		Addons:                     ir.getEnabledAddonNames(),
-		SSBPredictions:             ir.getSSBPredictions(),
 		Test:                       isTest,
 		NotifyInstanceDisconnected: ir.config.InstanceReporting.NotifyInstanceDisconnected,
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,
+	}
+	if ssbResult := ir.getSSBPredictions(); ssbResult != nil {
+		report.SSBPredictions = ssbResult.Predictions
+		report.SSBGridSquares = ssbResult.GridSquares
 	}
 
 	jsonData, err := json.Marshal(report)

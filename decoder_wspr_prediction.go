@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -224,6 +225,28 @@ type WSPRPredictionEntry struct {
 type WSPRPredictionResponse struct {
 	Meta        WSPRPredictionMeta    `json:"meta"`
 	Predictions []WSPRPredictionEntry `json:"predictions"`
+	GridSquares []WSPRGridSquareEntry `json:"grid_squares,omitempty"`
+}
+
+// ── Grid-square types ─────────────────────────────────────────────────────────
+
+// WSPRGridSquareBandEntry is one band's quality for a specific 4-char grid square.
+type WSPRGridSquareBandEntry struct {
+	Band            string  `json:"band"`
+	Prediction      string  `json:"prediction"`
+	PredictedSSBSNR float64 `json:"predicted_ssb_snr"`
+}
+
+// WSPRGridSquareEntry aggregates all bands seen from a single 4-char Maidenhead
+// grid square.  The map colour is driven by BestPrediction; the Bands list
+// provides per-band detail for the hover tooltip.
+type WSPRGridSquareEntry struct {
+	Grid           string                    `json:"grid"` // 4-char Maidenhead (e.g. "IO91")
+	Country        string                    `json:"country"`
+	Continent      string                    `json:"continent"`
+	BestPrediction string                    `json:"best_prediction"` // best quality across all bands
+	BestSSBSNR     float64                   `json:"best_ssb_snr"`    // highest predicted SSB SNR across all bands
+	Bands          []WSPRGridSquareBandEntry `json:"bands"`           // all bands heard, best-first
 }
 
 // ── Summary-mode types ────────────────────────────────────────────────────────
@@ -249,6 +272,7 @@ type WSPRSummaryByCountryEntry struct {
 // WSPRSummaryByCountryResponse wraps the by=country summary list.
 type WSPRSummaryByCountryResponse struct {
 	Predictions []WSPRSummaryByCountryEntry `json:"predictions"`
+	GridSquares []WSPRGridSquareEntry       `json:"grid_squares,omitempty"`
 }
 
 // WSPRSummaryCountryEntry is one country within a by=band summary row.
@@ -272,6 +296,14 @@ type WSPRSummaryByBandEntry struct {
 // WSPRSummaryByBandResponse wraps the by=band summary list.
 type WSPRSummaryByBandResponse struct {
 	Predictions []WSPRSummaryByBandEntry `json:"predictions"`
+	GridSquares []WSPRGridSquareEntry    `json:"grid_squares,omitempty"`
+}
+
+// WSPRSummaryResult holds both the by-band predictions and the grid-square
+// overlay data returned by computeWSPRSummaryByBand.
+type WSPRSummaryResult struct {
+	Predictions []WSPRSummaryByBandEntry
+	GridSquares []WSPRGridSquareEntry
 }
 
 // computeWSPRSummaryByBand computes the by=band SSB phone prediction summary
@@ -283,9 +315,9 @@ type WSPRSummaryByBandResponse struct {
 //	phonePowerW  – assumed SSB TX power in watts (must be in validPhonePowers)
 //	minutes      – lookback window in minutes (1–1440)
 //
-// Returns nil (not an empty slice) when there are no qualifying spots, so
-// callers can use nil as a sentinel for "no data" and omit the field from JSON.
-func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) []WSPRSummaryByBandEntry {
+// Returns nil when there are no qualifying spots so callers can use nil as a
+// sentinel for "no data" and omit the field from JSON.
+func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) *WSPRSummaryResult {
 	now := time.Now().UTC()
 	windowStart := now.Add(-time.Duration(minutes) * time.Minute)
 	phonePowerDbm := wattsTodBm(phonePowerW)
@@ -311,6 +343,7 @@ func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) []WSPRS
 	}
 
 	groups := make(map[groupKey]*groupData)
+	gridGroups := make(map[gridBandKey]*gridBandData) // parallel grid-square accumulator
 
 	for _, spot := range spots {
 		ts, err := time.Parse(time.RFC3339, spot.Timestamp)
@@ -333,6 +366,23 @@ func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) []WSPRS
 			g.BestSNR = spot.SNR
 			g.BestCallsign = spot.Callsign
 			g.BestSNRSet = true
+		}
+
+		// Parallel grid-square accumulation
+		if len(spot.Locator) >= 4 {
+			gk := gridBandKey{
+				Grid:    strings.ToUpper(spot.Locator[:4]),
+				Band:    spot.Band,
+				Country: spot.Country,
+			}
+			gg, ok := gridGroups[gk]
+			if !ok {
+				gg = &gridBandData{Continent: spot.Continent}
+				gridGroups[gk] = gg
+			}
+			gg.SNRSum += float64(spot.SNR)
+			gg.TxDbmSum += float64(*spot.DBm)
+			gg.SpotCount++
 		}
 	}
 
@@ -436,7 +486,10 @@ func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) []WSPRS
 	if len(result) == 0 {
 		return nil
 	}
-	return result
+	return &WSPRSummaryResult{
+		Predictions: result,
+		GridSquares: buildWSPRGridSquaresTyped(gridGroups, phonePowerDbm),
+	}
 }
 
 // wattsTodBm converts power in watts to dBm
@@ -628,7 +681,13 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 		BestSNRSet      bool   // whether BestSNR has been initialised
 	}
 
+	// Parallel grouping by grid4+band+country for the map grid-square layer.
+	// Each entry accumulates SNR/TxDbm independently so we can compute a
+	// per-grid-square predicted SSB SNR that is then aggregated across bands.
+	// gridBandKey and gridBandData are defined at package level.
+
 	groups := make(map[groupKey]*groupData)
+	gridBandGroups := make(map[gridBandKey]*gridBandData)
 	bandsSeenSet := make(map[string]bool)
 	totalFiltered := 0
 
@@ -689,6 +748,25 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 				existing.DistanceKm = spot.DistanceKm
 				existing.BearingDeg = spot.BearingDeg
 			}
+		}
+
+		// ── Parallel grid-square grouping ─────────────────────────────────────
+		// Only accumulate spots that have a valid 4-char locator prefix and a
+		// resolved country (same guard as the main prediction path).
+		if len(spot.Locator) >= 4 && spot.Country != "" {
+			gk := gridBandKey{
+				Grid:    strings.ToUpper(spot.Locator[:4]),
+				Band:    spot.Band,
+				Country: spot.Country,
+			}
+			gg, ok := gridBandGroups[gk]
+			if !ok {
+				gg = &gridBandData{Continent: spot.Continent}
+				gridBandGroups[gk] = gg
+			}
+			gg.SNRSum += float64(spot.SNR)
+			gg.TxDbmSum += float64(*spot.DBm)
+			gg.SpotCount++
 		}
 	}
 
@@ -892,7 +970,10 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 			})
 
 			w.WriteHeader(http.StatusOK)
-			if err := json.NewEncoder(w).Encode(WSPRSummaryByCountryResponse{Predictions: result}); err != nil {
+			if err := json.NewEncoder(w).Encode(WSPRSummaryByCountryResponse{
+				Predictions: result,
+				GridSquares: buildWSPRGridSquaresTyped(gridBandGroups, phonePowerDbm),
+			}); err != nil {
 				log.Printf("WSPR prediction summary by=country: error encoding response: %v", err)
 			}
 			return
@@ -954,7 +1035,10 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 		}
 
 		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(WSPRSummaryByBandResponse{Predictions: result}); err != nil {
+		if err := json.NewEncoder(w).Encode(WSPRSummaryByBandResponse{
+			Predictions: result,
+			GridSquares: buildWSPRGridSquaresTyped(gridBandGroups, phonePowerDbm),
+		}); err != nil {
 			log.Printf("WSPR prediction summary by=band: error encoding response: %v", err)
 		}
 		return
@@ -963,12 +1047,132 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 	resp := WSPRPredictionResponse{
 		Meta:        meta,
 		Predictions: predictions,
+		GridSquares: buildWSPRGridSquaresTyped(gridBandGroups, phonePowerDbm),
 	}
 
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		log.Printf("WSPR prediction: error encoding response: %v", err)
 	}
+}
+
+// gridBandKey is the map key for the parallel grid-square accumulator.
+// Defined at package level so buildWSPRGridSquaresTyped can reference it.
+type gridBandKey struct {
+	Grid    string
+	Band    string
+	Country string
+}
+
+// gridBandData accumulates SNR/TxDbm per grid+band+country group.
+type gridBandData struct {
+	SNRSum    float64
+	TxDbmSum  float64
+	SpotCount int
+	Continent string
+}
+
+// buildWSPRGridSquaresTyped converts the parallel grid+band+country accumulator
+// into a sorted []WSPRGridSquareEntry for the map overlay.
+//
+// Each WSPRGridSquareEntry represents one 4-char Maidenhead grid square.
+// BestPrediction / BestSSBSNR reflect the best quality across all bands heard
+// from that square; Bands lists every band with its individual quality.
+func buildWSPRGridSquaresTyped(groups map[gridBandKey]*gridBandData, phonePowerDbm float64) []WSPRGridSquareEntry {
+	if len(groups) == 0 {
+		return nil
+	}
+
+	predRank := map[string]int{
+		"excellent": 0, "good": 1, "workable": 2,
+		"marginal": 3, "poor": 4, "not_viable": 5,
+	}
+
+	// Aggregate by grid square across bands.
+	type gridAcc struct {
+		country        string
+		continent      string
+		bestPrediction string
+		bestSSBSNR     float64
+		bands          map[string]WSPRGridSquareBandEntry // band → best entry for that band
+	}
+	byGrid := make(map[string]*gridAcc)
+
+	bandOrder := []string{"2200m", "630m", "160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m"}
+
+	for gk, gg := range groups {
+		if gg.SpotCount == 0 {
+			continue
+		}
+		meanWSPR := gg.SNRSum / float64(gg.SpotCount)
+		meanTx := gg.TxDbmSum / float64(gg.SpotCount)
+		snr := math.Round((meanWSPR+(phonePowerDbm-meanTx)-bwCorrectionDB)*10) / 10
+		pred := classifyPrediction(snr)
+
+		acc, ok := byGrid[gk.Grid]
+		if !ok {
+			acc = &gridAcc{
+				country:        gk.Country,
+				continent:      gg.Continent,
+				bestPrediction: pred,
+				bestSSBSNR:     snr,
+				bands:          make(map[string]WSPRGridSquareBandEntry),
+			}
+			byGrid[gk.Grid] = acc
+		}
+
+		// Keep best SNR per band for this grid square (a grid may be heard by
+		// multiple transmitters on the same band — keep the strongest).
+		existing, hasBand := acc.bands[gk.Band]
+		if !hasBand || snr > existing.PredictedSSBSNR {
+			acc.bands[gk.Band] = WSPRGridSquareBandEntry{
+				Band:            gk.Band,
+				Prediction:      pred,
+				PredictedSSBSNR: snr,
+			}
+		}
+
+		// Update best across all bands
+		if predRank[pred] < predRank[acc.bestPrediction] ||
+			(predRank[pred] == predRank[acc.bestPrediction] && snr > acc.bestSSBSNR) {
+			acc.bestPrediction = pred
+			acc.bestSSBSNR = snr
+		}
+	}
+
+	if len(byGrid) == 0 {
+		return nil
+	}
+
+	result := make([]WSPRGridSquareEntry, 0, len(byGrid))
+	for grid, acc := range byGrid {
+		// Build sorted bands slice (canonical band order)
+		bands := make([]WSPRGridSquareBandEntry, 0, len(acc.bands))
+		for _, b := range bandOrder {
+			if entry, ok := acc.bands[b]; ok {
+				bands = append(bands, entry)
+			}
+		}
+		result = append(result, WSPRGridSquareEntry{
+			Grid:           grid,
+			Country:        acc.country,
+			Continent:      acc.continent,
+			BestPrediction: acc.bestPrediction,
+			BestSSBSNR:     acc.bestSSBSNR,
+			Bands:          bands,
+		})
+	}
+
+	// Sort by best prediction tier, then by best SNR descending
+	sort.Slice(result, func(i, j int) bool {
+		ri, rj := predRank[result[i].BestPrediction], predRank[result[j].BestPrediction]
+		if ri != rj {
+			return ri < rj
+		}
+		return result[i].BestSSBSNR > result[j].BestSSBSNR
+	})
+
+	return result
 }
 
 // sortWSPRPredictions sorts predictions by quality tier (best first), then by predicted SSB SNR descending within each tier

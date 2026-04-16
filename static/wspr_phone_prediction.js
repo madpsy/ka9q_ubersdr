@@ -700,6 +700,7 @@ const app = (() => {
 
         if (!preds || preds.length === 0) {
             el.innerHTML = '<div style="color:#666;font-size:10px;">No data</div>';
+            el._top10Data = null;
             return;
         }
 
@@ -716,7 +717,11 @@ const app = (() => {
         for (const p of preds) {
             if (!p.country) continue;
             if (!byCountry.has(p.country)) {
-                byCountry.set(p.country, { bands: new Map(), bestSNR: -Infinity, bestBand: '', bestPred: '' });
+                byCountry.set(p.country, {
+                    continent: p.continent || '',
+                    bands: new Map(),
+                    bestSNR: -Infinity, bestBand: '', bestPred: ''
+                });
             }
             const acc = byCountry.get(p.country);
             const existing = acc.bands.get(p.band);
@@ -735,12 +740,20 @@ const app = (() => {
             .sort((a, b) => b[1].bestSNR - a[1].bestSNR)
             .slice(0, 10);
 
+        // Store tooltip data indexed by row position for event delegation
+        const tooltipData = top10.map(([country, acc]) => ({
+            country,
+            continent: acc.continent,
+            bands: [...acc.bands.values()],
+        }));
+        el._top10Data = tooltipData;
+
         const DOT_R = 7; // px — mini marker radius
         const CX = DOT_R + 1;
         const CY = DOT_R + 1;
         const SIZE = (DOT_R + 1) * 2;
 
-        el.innerHTML = top10.map(([country, acc]) => {
+        el.innerHTML = top10.map(([country, acc], idx) => {
             const bands = [...acc.bands.values()];
             const ringColor = PREDICTION_FILL[acc.bestPred] || '#888';
             const snrStr = (acc.bestSNR >= 0 ? '+' : '') + acc.bestSNR.toFixed(1);
@@ -781,13 +794,27 @@ const app = (() => {
                 </svg>`;
             }
 
-            return `<div class="top10-row">
+            return `<div class="top10-row" data-idx="${idx}" style="cursor:pointer">
                 ${dotSVG}
                 <div class="top10-country" title="${countryEsc}">${countryEsc}</div>
                 <div class="top10-snr">${bandEsc}&nbsp;${snrStr} dB</div>
                 ${gridBadge}
             </div>`;
         }).join('');
+
+        // Event delegation — one listener on the container
+        el.onmousemove = (event) => {
+            const row = event.target.closest('.top10-row');
+            if (!row || !el._top10Data) return;
+            const idx = parseInt(row.dataset.idx, 10);
+            const cdata = el._top10Data[idx];
+            if (cdata) onSpotMouseMove(event, cdata);
+        };
+        el.onmouseout = (event) => {
+            if (!event.relatedTarget || !el.contains(event.relatedTarget)) {
+                tooltip.style.display = 'none';
+            }
+        };
     }
 
     // ── Status bar update ────────────────────────────────────────────────────

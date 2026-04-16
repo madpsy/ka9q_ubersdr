@@ -50,6 +50,11 @@ class Oscilloscope {
         // the displayed time dynamically from the current zoom at draw time.
         this._cachedBufferLength = 0;
         this._cachedSampleRate = 0;
+        // Frozen frame data — the last raw audio frame captured by update().
+        // Stored so we can re-render the waveform at a different zoom while paused.
+        this._frozenDataArray = null;
+        this._frozenDcOffset = 128;
+        this._frozenAvgFreq = 0;
         // Snapshot of the canvas pixels taken just before markers are drawn,
         // so we can restore it when redrawing markers while paused.
         this._frozenSnapshot = null;
@@ -144,6 +149,12 @@ class Oscilloscope {
         const sampleRate = audioContext.sampleRate;
         this._cachedBufferLength = bufferLength;
         this._cachedSampleRate = sampleRate;
+
+        // Always keep a copy of the latest raw frame so redrawFrozen() can
+        // re-render the waveform at a different zoom level while paused.
+        this._frozenDataArray = new Uint8Array(dataArray);
+        this._frozenDcOffset = dcOffset;
+        this._frozenAvgFreq = avgFreq;
         
         // Find trigger point if enabled
         let startSample;
@@ -423,6 +434,79 @@ class Oscilloscope {
         // Capture the current canvas as the frozen background
         this._frozenSnapshot = this.ctx.getImageData(0, 0, w, h);
         this.drawMarkers(w, h);
+    }
+
+    // Re-render the waveform from the last captured raw frame at the current zoom.
+    // Called when the timebase slider is changed while the visualization is paused,
+    // so the user can explore the frozen waveform at different zoom levels.
+    redrawFrozen() {
+        if (!this._frozenDataArray || !this.canvas || !this.ctx) return;
+        if (!this._cachedBufferLength || !this._cachedSampleRate) return;
+
+        const dataArray = this._frozenDataArray;
+        const dcOffset = this._frozenDcOffset;
+        const avgFreq = this._frozenAvgFreq;
+        const bufferLength = this._cachedBufferLength;
+        const sampleRate = this._cachedSampleRate;
+        const width = this.canvas.width;
+        const height = this.canvas.height;
+
+        // Recompute samplesToDisplay at the current zoom
+        const minFraction = 0.005;
+        const maxFraction = 1.0;
+        const logMin = Math.log10(minFraction);
+        const logMax = Math.log10(maxFraction);
+        const logRange = logMax - logMin;
+        const normalizedSlider = (this.zoom - 1) / 199;
+        const logValue = logMin + (normalizedSlider * logRange);
+        const fraction = Math.pow(10, logValue);
+        const samplesToDisplay = Math.floor(bufferLength * fraction);
+
+        // Find start sample (no trigger while frozen — use centre)
+        const startSample = Math.floor((bufferLength - samplesToDisplay) / 2);
+
+        // Clear and redraw background
+        this.ctx.fillStyle = '#2c3e50';
+        this.ctx.fillRect(0, 0, width, height);
+
+        // Draw grid using a minimal stub that satisfies drawGrid()'s analyser/audioContext
+        // parameters — we pass null and let drawGrid() use the cached values via this.zoom.
+        // drawGrid() only needs analyser.fftSize and audioContext.sampleRate, so we fake them.
+        const fakeAnalyser = { fftSize: bufferLength };
+        const fakeAudioContext = { sampleRate };
+        this.drawGrid(width, height, fakeAnalyser, fakeAudioContext);
+
+        // Draw waveform
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeStyle = '#00ff00';
+        this.ctx.beginPath();
+        const sliceWidth = width / samplesToDisplay;
+        let x = 0;
+        for (let i = 0; i < samplesToDisplay; i++) {
+            const sampleIndex = startSample + i;
+            const centered = dataArray[sampleIndex] - dcOffset + 128;
+            const v = centered / 128.0;
+            const scaledV = ((v - 1.0) * this.yScale) + 1.0;
+            const y = (scaledV * height) / 2;
+            if (i === 0) {
+                this.ctx.moveTo(x, y);
+            } else {
+                this.ctx.lineTo(x, y);
+            }
+            x += sliceWidth;
+        }
+        this.ctx.stroke();
+
+        // Update frozen snapshot and redraw markers if enabled
+        if (this.markersEnabled) {
+            this._frozenSnapshot = this.ctx.getImageData(0, 0, width, height);
+            this.drawMarkers(width, height);
+        } else {
+            this._frozenSnapshot = null;
+        }
+
+        // Draw frequency display
+        this.drawFrequencyDisplay(width, avgFreq);
     }
     
     // Draw grid lines and labels

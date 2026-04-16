@@ -7142,6 +7142,11 @@ function updateOscilloscopeZoom() {
     const sliderValue = parseInt(document.getElementById('oscilloscope-zoom').value);
     if (oscilloscope) {
         oscilloscope.setZoom(sliderValue);
+        // If the visualization is paused, re-render the frozen frame at the new zoom
+        // so the user can explore the waveform without unpausing.
+        if (audioVisualizationPaused) {
+            oscilloscope.redrawFrozen();
+        }
     }
 
     // Calculate actual time window being displayed using logarithmic scale

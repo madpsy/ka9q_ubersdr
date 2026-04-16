@@ -5098,7 +5098,7 @@ function toggleVUMeterStyle() {
 function applyVUMeterStyle() {
     const barWrapper = document.getElementById('vu-meter-bar-wrapper');
     if (barWrapper) barWrapper.style.display = vuMeterStyle === 'led' ? 'none' : '';
-    if (vuMeterLedsCompact) vuMeterLedsCompact.style.display = vuMeterStyle === 'led' ? 'flex' : 'none';
+    if (vuMeterLedsCompact) vuMeterLedsCompact.style.display = vuMeterStyle === 'led' ? 'grid' : 'none';
 }
 
 // Update the title tooltip on the compact VU meter container

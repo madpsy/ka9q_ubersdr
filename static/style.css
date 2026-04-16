@@ -2760,6 +2760,25 @@ input[type="range"]::-moz-range-thumb {
     animation: signal-flash 0.5s ease-in-out infinite;
 }
 
+/* Signal Meter LED mode */
+.signal-meter-leds {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.signal-meter-led {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #1a252f;
+    border: 1px solid #34495e;
+    transition: background 0.1s ease-out, box-shadow 0.1s ease-out;
+    flex-shrink: 0;
+}
+
 @keyframes signal-flash {
     0%, 100% {
         opacity: 1;

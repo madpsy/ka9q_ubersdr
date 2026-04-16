@@ -3,7 +3,7 @@
 
 class SignalMeter {
     constructor() {
-        // Display mode: 'dbfs' or 'snr'
+        // Display mode: 'dbfs', 'snr', 'dbfs-led', or 'snr-led'
         this.displayMode = localStorage.getItem('signalMeterDisplayMode') || 'dbfs';
 
         // Peak history for smoothing
@@ -26,36 +26,77 @@ class SignalMeter {
         this.meterBar = document.getElementById('signal-meter-bar');
         this.meterValue = document.getElementById('signal-meter-value');
         this.meterContainer = document.querySelector('.signal-meter');
+        this.meterLeds = document.getElementById('signal-meter-leds');
         
         // Add click handler to toggle between modes
         if (this.meterValue) {
             this.meterValue.style.cursor = 'pointer';
-            this.meterValue.title = 'Click to toggle between dBFS and SNR';
+            this.meterValue.title = 'Click to cycle meter display mode';
             this.meterValue.addEventListener('click', () => this.toggleDisplayMode());
         }
         
         // Add click handler to meter bar as well
         if (this.meterContainer) {
             this.meterContainer.style.cursor = 'pointer';
-            this.meterContainer.title = 'Click to toggle between dBFS and SNR';
+            this.meterContainer.title = 'Click to cycle meter display mode';
             this.meterContainer.addEventListener('click', () => this.toggleDisplayMode());
+        }
+
+        // Add click handler to LED container
+        if (this.meterLeds) {
+            this.meterLeds.style.cursor = 'pointer';
+            this.meterLeds.title = 'Click to cycle meter display mode';
+            this.meterLeds.addEventListener('click', () => this.toggleDisplayMode());
+        }
+
+        // Build the 10 LED elements once
+        this._buildLeds();
+
+        // Apply correct initial visibility
+        this._applyModeVisibility();
+    }
+
+    // Build 10 LED <span> elements inside the LED container
+    _buildLeds() {
+        if (!this.meterLeds) return;
+        this.meterLeds.innerHTML = '';
+        this._ledElements = [];
+        for (let i = 0; i < 10; i++) {
+            const led = document.createElement('span');
+            led.className = 'signal-meter-led';
+            this.meterLeds.appendChild(led);
+            this._ledElements.push(led);
+        }
+    }
+
+    // Show/hide bar vs LED container based on current mode
+    _applyModeVisibility() {
+        const isLed = this.displayMode === 'dbfs-led' || this.displayMode === 'snr-led';
+        if (this.meterContainer) {
+            this.meterContainer.style.display = isLed ? 'none' : '';
+        }
+        if (this.meterLeds) {
+            this.meterLeds.style.display = isLed ? 'flex' : 'none';
         }
     }
     
-    // Toggle between dBFS and SNR display modes
+    // Cycle through all four display modes
     toggleDisplayMode() {
-        this.displayMode = this.displayMode === 'dbfs' ? 'snr' : 'dbfs';
+        const modes = ['dbfs', 'snr', 'dbfs-led', 'snr-led'];
+        const idx = modes.indexOf(this.displayMode);
+        this.displayMode = modes[(idx + 1) % modes.length];
         localStorage.setItem('signalMeterDisplayMode', this.displayMode);
-        console.log(`Signal meter mode: ${this.displayMode.toUpperCase()}`);
-        
-        // Update tooltip
-        const modeText = this.displayMode === 'dbfs' ? 'dBFS' : 'SNR (dB)';
-        if (this.meterValue) {
-            this.meterValue.title = `Click to toggle between dBFS and SNR (currently: ${modeText})`;
-        }
-        if (this.meterContainer) {
-            this.meterContainer.title = `Click to toggle between dBFS and SNR (currently: ${modeText})`;
-        }
+        console.log(`Signal meter mode: ${this.displayMode}`);
+
+        this._applyModeVisibility();
+
+        // Update tooltips
+        const modeLabels = { 'dbfs': 'dBFS bar', 'snr': 'SNR bar', 'dbfs-led': 'dBFS LED', 'snr-led': 'SNR LED' };
+        const modeText = modeLabels[this.displayMode] || this.displayMode;
+        const tip = `Click to cycle meter mode (currently: ${modeText})`;
+        if (this.meterValue)    this.meterValue.title    = tip;
+        if (this.meterContainer) this.meterContainer.title = tip;
+        if (this.meterLeds)     this.meterLeds.title     = tip;
     }
     
     // Update noise floor from spectrum data (called by spectrum display)
@@ -223,11 +264,14 @@ class SignalMeter {
             return `hsl(${hue}, 90%, 55%)`;
         };
 
-        // Calculate SNR if in SNR mode
+        // Calculate SNR if in SNR-based mode
+        const isSnrMode = this.displayMode === 'snr' || this.displayMode === 'snr-led';
+        const isLedMode = this.displayMode === 'dbfs-led' || this.displayMode === 'snr-led';
+
         let displayValue = basebandPower;
         let displayText = '';
 
-        if (this.displayMode === 'snr') {
+        if (isSnrMode) {
             const snr = basebandPower - noiseDensity;
             displayValue = snr;
             const snrText = snr.toFixed(1);
@@ -239,41 +283,84 @@ class SignalMeter {
 
         // Linear percentage mapping — same range as S-meter needle
         let percentage;
-        if (this.displayMode === 'snr') {
+        if (isSnrMode) {
             percentage = ((displayValue - SNR_MIN) / (SNR_MAX - SNR_MIN)) * 100;
         } else {
             percentage = ((basebandPower - DBFS_MIN) / (DBFS_MAX - DBFS_MIN)) * 100;
         }
         percentage = Math.max(0, Math.min(100, percentage));
 
-        this.meterBar.style.width = percentage + '%';
-        this.meterValue.textContent = displayText;
-
-        // Colour coding — mirrors s-meter-needle.js gradient logic
+        // Colour for the text label (based on current value)
         let color;
-        if (this.displayMode === 'snr') {
+        if (isSnrMode) {
             color = snrColour(displayValue);
         } else {
             color = sMeterColour(basebandPower);
         }
 
-        // Add flashing animation for extremely strong signals (only in dBFS mode, above S9+40 = -33 dBFS)
+        this.meterValue.textContent = displayText;
+        this.meterValue.style.color = color;
+
+        // Add flashing animation for extremely strong signals (only in dBFS bar mode)
         if (this.displayMode === 'dbfs' && basebandPower > DBFS_MAX) {
             this.meterValue.classList.add('flashing');
         } else {
             this.meterValue.classList.remove('flashing');
         }
 
-        this.meterBar.style.background = color;
-        this.meterValue.style.color = color;
+        if (isLedMode) {
+            // ── LED mode ─────────────────────────────────────────────────────
+            if (this._ledElements && this._ledElements.length === 10) {
+                const litCount = Math.round(percentage / 10); // 0–10 LEDs lit
+                for (let i = 0; i < 10; i++) {
+                    const led = this._ledElements[i];
+                    if (i < litCount) {
+                        // Compute this LED's intrinsic colour from its position on the scale
+                        let ledColor;
+                        if (isSnrMode) {
+                            const ledSnr = SNR_MIN + (i / 9) * (SNR_MAX - SNR_MIN);
+                            ledColor = snrColour(ledSnr);
+                        } else {
+                            const ledDbfs = DBFS_MIN + (i / 9) * (DBFS_MAX - DBFS_MIN);
+                            ledColor = sMeterColour(ledDbfs);
+                        }
+                        led.style.background = ledColor;
+                        led.style.boxShadow = `0 0 5px ${ledColor}`;
+                        led.classList.add('lit');
+                    } else {
+                        led.style.background = '';
+                        led.style.boxShadow = '';
+                        led.classList.remove('lit');
+                    }
+                }
+            }
+        } else {
+            // ── Bar mode ──────────────────────────────────────────────────────
+            this.meterBar.style.width = percentage + '%';
+            this.meterBar.style.background = color;
+        }
     }
-    
+
     // Reset meter display
     reset() {
-        if (this.meterBar) this.meterBar.style.width = '0%';
+        const isSnrMode = this.displayMode === 'snr' || this.displayMode === 'snr-led';
+        const isLedMode = this.displayMode === 'dbfs-led' || this.displayMode === 'snr-led';
+
         if (this.meterValue) {
-            const suffix = this.displayMode === 'snr' ? ' dB (SNR)' : ' dBFS';
+            const suffix = isSnrMode ? ' dB (SNR)' : ' dBFS';
             this.meterValue.textContent = '--' + suffix;
+        }
+
+        if (isLedMode) {
+            if (this._ledElements) {
+                this._ledElements.forEach(led => {
+                    led.style.background = '';
+                    led.style.boxShadow = '';
+                    led.classList.remove('lit');
+                });
+            }
+        } else {
+            if (this.meterBar) this.meterBar.style.width = '0%';
         }
     }
 }

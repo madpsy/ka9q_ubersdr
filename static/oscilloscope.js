@@ -140,14 +140,13 @@ class Oscilloscope {
         const samplesToDisplay = Math.floor(bufferLength * fraction);
 
         // Cache timebase for marker readout.
-        // Use samplesToDisplay / sampleRate — this is the actual time span shown on
-        // screen (log-scale zoom), NOT the linear invertedZoom approximation used
-        // for the grid labels.
+        // Use the SAME formula as drawGrid() so the marker ΔT is consistent with
+        // the time labels shown on the grid lines.
         const sampleRate = audioContext.sampleRate;
         this._lastSamplesToDisplay = samplesToDisplay;
         this._lastSampleRate = sampleRate;
-        // Derived: total time visible on canvas in ms
-        this._lastDisplayedTimeMs = (samplesToDisplay / sampleRate) * 1000;
+        // This matches drawGrid(): totalTimeMs / (201 - zoom)
+        this._lastDisplayedTimeMs = ((bufferLength / sampleRate) * 1000) / (201 - this.zoom);
         
         // Find trigger point if enabled
         let startSample;

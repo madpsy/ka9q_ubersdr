@@ -1195,18 +1195,17 @@ type WSPRNearestGridsResponse struct {
 
 // handleWSPRNearestGrids handles GET /api/wspr/nearest-grids.
 //
-// Required query parameters:
-//
-//	lat  float64  -90 to +90    Caller's latitude
-//	lon  float64  -180 to +180  Caller's longitude
-//
 // Optional query parameters:
 //
-//	count         int  1–50                              Number of nearest grids to return (default: 3)
-//	phone_power_w int  {10,50,100,250,500,1000}          Assumed SSB TX power in watts (default: 100)
-//	minutes       int  1–1440                            Lookback window in minutes (default: 60)
-//	min_ssb_snr   int  -60–30                            Minimum predicted SSB SNR to include (default: -60)
-func handleWSPRNearestGrids(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+//	lat           float64  -90 to +90    Caller's latitude  (if omitted, GeoIP is used as fallback)
+//	lon           float64  -180 to +180  Caller's longitude (if omitted, GeoIP is used as fallback)
+//	count         int      1–50          Number of nearest grids to return (default: 3)
+//	phone_power_w int      {10,50,100,250,500,1000}  Assumed SSB TX power in watts (default: 100)
+//	minutes       int      1–1440        Lookback window in minutes (default: 60)
+//	min_ssb_snr   int      -60–30        Minimum predicted SSB SNR to include (default: -60)
+//
+// If neither lat/lon nor a usable GeoIP location is available, returns 400.
+func handleWSPRNearestGrids(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter, geoIPService *GeoIPService) {
 	if checkIPBan(w, r, ipBanManager) {
 		return
 	}
@@ -1223,32 +1222,47 @@ func handleWSPRNearestGrids(w http.ResponseWriter, r *http.Request, md *MultiDec
 
 	q := r.URL.Query()
 
-	// ── lat (required) ────────────────────────────────────────────────────────
+	// ── lat / lon (optional — fall back to GeoIP if not provided) ────────────
+	var callerLat, callerLon float64
 	latStr := q.Get("lat")
-	if latStr == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "lat is required"})
-		return
-	}
-	callerLat, err := strconv.ParseFloat(latStr, 64)
-	if err != nil || callerLat < -90 || callerLat > 90 {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "lat must be a number between -90 and 90"})
-		return
-	}
-
-	// ── lon (required) ────────────────────────────────────────────────────────
 	lonStr := q.Get("lon")
-	if lonStr == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "lon is required"})
-		return
-	}
-	callerLon, err := strconv.ParseFloat(lonStr, 64)
-	if err != nil || callerLon < -180 || callerLon > 180 {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "lon must be a number between -180 and 180"})
-		return
+
+	if latStr != "" || lonStr != "" {
+		// Explicit lat/lon provided — validate both
+		if latStr == "" || lonStr == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "lat and lon must both be provided together"})
+			return
+		}
+		var err error
+		callerLat, err = strconv.ParseFloat(latStr, 64)
+		if err != nil || callerLat < -90 || callerLat > 90 {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "lat must be a number between -90 and 90"})
+			return
+		}
+		callerLon, err = strconv.ParseFloat(lonStr, 64)
+		if err != nil || callerLon < -180 || callerLon > 180 {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "lon must be a number between -180 and 180"})
+			return
+		}
+	} else {
+		// No lat/lon — try GeoIP fallback using the caller's IP
+		if geoIPService == nil || !geoIPService.IsEnabled() {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "lat and lon are required (GeoIP not available)"})
+			return
+		}
+		clientIP := getClientIP(r)
+		geoResult, err := geoIPService.Lookup(clientIP, false)
+		if err != nil || geoResult.Latitude == nil || geoResult.Longitude == nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "location not available — please provide lat and lon"})
+			return
+		}
+		callerLat = *geoResult.Latitude
+		callerLon = *geoResult.Longitude
 	}
 
 	// ── count (optional, default 3) ───────────────────────────────────────────

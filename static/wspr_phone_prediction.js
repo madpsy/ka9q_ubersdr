@@ -903,23 +903,22 @@ const app = (() => {
         const banner = document.getElementById('nearest-grids-banner');
         if (!banner) return;
 
-        if (!userLocation) {
-            banner.classList.remove('visible');
-            return;
-        }
-
         const minutes   = document.getElementById('minutes-select').value;
         const power     = document.getElementById('power-select').value;
         const minSSBSNR = document.getElementById('min-snr-select').value;
 
         const params = new URLSearchParams({
-            lat:           userLocation.lat.toFixed(6),
-            lon:           userLocation.lon.toFixed(6),
             count:         3,
             minutes,
             phone_power_w: power,
             min_ssb_snr:   minSSBSNR,
         });
+        // Include precise location if available; otherwise the server will
+        // fall back to GeoIP based on the caller's IP address.
+        if (userLocation && userLocation.lat != null && userLocation.lon != null) {
+            params.set('lat', userLocation.lat.toFixed(6));
+            params.set('lon', userLocation.lon.toFixed(6));
+        }
 
         try {
             const resp = await fetch(`/api/wspr/nearest-grids?${params}`);

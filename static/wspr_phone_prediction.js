@@ -136,10 +136,7 @@ const app = (() => {
             .attr('d', pathGen)
             .on('mousemove', (event, d) => {
                 const name = (d.properties && d.properties.name) || 'Unknown';
-                tooltip.innerHTML = `
-                    <div class="tooltip-title">${escHtml(name)}</div>
-                    <div style="color:#666;font-size:11px;">No WSPR spots in this window</div>
-                `;
+                tooltip.innerHTML = `<div class="tooltip-title">${escHtml(name)}</div>`;
                 tooltip.style.display = 'block';
                 positionTooltip(event);
             })

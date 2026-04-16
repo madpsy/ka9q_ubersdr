@@ -396,6 +396,20 @@ class Oscilloscope {
         }
         return this.markersEnabled;
     }
+
+    // Draw markers on top of the current canvas content without waiting for update().
+    // Called when markers are enabled while the visualization is paused — takes a
+    // snapshot of whatever is currently on the canvas, stores it as _frozenSnapshot,
+    // then draws the marker overlay on top.
+    drawMarkersOnFrozenCanvas() {
+        if (!this.canvas || !this.ctx || !this.markersEnabled) return;
+        const w = this.canvas.width;
+        const h = this.canvas.height;
+        if (w <= 0 || h <= 0) return;
+        // Capture the current canvas as the frozen background
+        this._frozenSnapshot = this.ctx.getImageData(0, 0, w, h);
+        this.drawMarkers(w, h);
+    }
     
     // Draw grid lines and labels
     drawGrid(width, height, analyser, audioContext) {

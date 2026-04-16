@@ -7245,6 +7245,13 @@ function toggleOscilloscopeMarkers() {
             ? 'Drag cyan (A) and yellow (B) lines to measure time between two points. Click again to hide.'
             : 'Toggle time markers A/B — drag to measure time between two points';
     }
+
+    // If markers were just enabled while the visualization is paused, draw them
+    // immediately on the frozen canvas so they appear without needing to unpause.
+    if (enabled && audioVisualizationPaused) {
+        oscilloscope.drawMarkersOnFrozenCanvas();
+    }
+
     log(enabled ? 'Oscilloscope time markers enabled — drag A/B to measure' : 'Oscilloscope time markers disabled');
 }
 

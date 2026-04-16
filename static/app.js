@@ -566,8 +566,8 @@ let vuRmsValue = null;
 let vuPeakValue = null;
 let vuMeterBarCompact = null;
 let vuMeterPeakCompact = null;
-let vuMeterLedsCompact = null;       // LED container element
-let vuMeterLedElements = [];         // Array of 20 LED <span> elements
+let vuMeterLedsCompact = null;       // LED canvas element
+let vuMeterLedsCtx = null;           // LED canvas 2D context
 let vuMeterStyle = localStorage.getItem('vuMeterStyle') || 'bar'; // 'bar' or 'led'
 let vuPeakHold = 0; // Peak hold value (0-100%)
 let vuPeakDecayRate = 0.1; // Percentage points per frame (slower decay for visibility)
@@ -1021,16 +1021,13 @@ document.addEventListener('DOMContentLoaded', () => {
     vuMeterPeakCompact = document.getElementById('vu-meter-peak-compact');
     vuMeterLedsCompact = document.getElementById('vu-meter-leds-compact');
 
-    // Build 40 LED <span> elements inside the LED container
+    // Set up LED canvas — size it to match its CSS display size
     if (vuMeterLedsCompact) {
-        vuMeterLedsCompact.innerHTML = '';
-        vuMeterLedElements = [];
-        for (let i = 0; i < 40; i++) {
-            const led = document.createElement('span');
-            led.className = 'vu-meter-led-compact';
-            vuMeterLedsCompact.appendChild(led);
-            vuMeterLedElements.push(led);
-        }
+        vuMeterLedsCtx = vuMeterLedsCompact.getContext('2d');
+        // Size canvas to its CSS pixel dimensions (will be set properly on first draw)
+        const rect = vuMeterLedsCompact.getBoundingClientRect();
+        vuMeterLedsCompact.width = rect.width > 0 ? Math.floor(rect.width) : 450;
+        vuMeterLedsCompact.height = 40;
     }
 
     // Apply initial VU meter style visibility
@@ -5094,11 +5091,11 @@ function toggleVUMeterStyle() {
     if (container) updateVUMeterTooltip(container);
 }
 
-// Show/hide bar wrapper vs LED container based on current vuMeterStyle
+// Show/hide bar wrapper vs LED canvas based on current vuMeterStyle
 function applyVUMeterStyle() {
     const barWrapper = document.getElementById('vu-meter-bar-wrapper');
     if (barWrapper) barWrapper.style.display = vuMeterStyle === 'led' ? 'none' : '';
-    if (vuMeterLedsCompact) vuMeterLedsCompact.style.display = vuMeterStyle === 'led' ? 'grid' : 'none';
+    if (vuMeterLedsCompact) vuMeterLedsCompact.style.display = vuMeterStyle === 'led' ? 'block' : 'none';
 }
 
 // Update the title tooltip on the compact VU meter container
@@ -5174,36 +5171,73 @@ function updateVUMeter() {
 
     // Update compact VU meter (in audio controls) - bar and peak only, no text values
     if (vuMeterStyle === 'led') {
-        // ── LED mode ─────────────────────────────────────────────────────────
-        // 40 segments matching the gradient zones:
-        //   0–26  (0–66.67%)   → green
-        //   27–33 (66.67–83.33%) → yellow
-        //   34–36 (83.33–91.67%) → orange
-        //   37–39 (91.67–100%)   → red
-        const NUM_LEDS = 40;
-        if (vuMeterLedElements.length === NUM_LEDS) {
-            const litCount = Math.round(rmsPercentage / 100 * NUM_LEDS); // 0–40
-            const peakSegment = Math.min(NUM_LEDS - 1, Math.round(vuPeakHold / 100 * NUM_LEDS) - 1);
+        // ── LED canvas mode ───────────────────────────────────────────────────
+        if (vuMeterLedsCtx && vuMeterLedsCompact) {
+            const canvas = vuMeterLedsCompact;
 
-            // Helper: get zone class for a segment index
-            const zoneClass = (i) => {
-                if (i <= 26) return 'lit-green';
-                if (i <= 33) return 'lit-yellow';
-                if (i <= 36) return 'lit-orange';
-                return 'lit-red';
+            // Ensure canvas pixel size matches its CSS layout size
+            const cssWidth = canvas.offsetWidth;
+            if (cssWidth > 0 && canvas.width !== cssWidth) {
+                canvas.width = cssWidth;
+            }
+
+            const W = canvas.width;
+            const H = canvas.height;
+            const NUM_LEDS = 40;
+            const GAP = 2;                          // px between segments
+            const totalGap = GAP * (NUM_LEDS - 1);
+            const segW = Math.floor((W - totalGap) / NUM_LEDS); // integer segment width
+            const ctx = vuMeterLedsCtx;
+
+            // Zone colours matching the gradient bar breakpoints
+            // 0–26 green, 27–33 yellow, 34–36 orange, 37–39 red
+            const zoneColour = (i) => {
+                if (i <= 26) return '#28a745';
+                if (i <= 33) return '#ffc107';
+                if (i <= 36) return '#ff9800';
+                return '#dc3545';
+            };
+            const zonePeakColour = (i) => {
+                if (i <= 26) return '#5dfc82';
+                if (i <= 33) return '#ffe066';
+                if (i <= 36) return '#ffb74d';
+                return '#ff6b7a';
             };
 
-            for (let i = 0; i < NUM_LEDS; i++) {
-                const led = vuMeterLedElements[i];
-                led.classList.remove('lit-green', 'lit-yellow', 'lit-orange', 'lit-red', 'peak-hold');
+            // Dim (unlit) versions of each zone colour — clearly visible but not bright
+            const zoneDimColour = (i) => {
+                if (i <= 26) return '#0d3d1a';   // dim green
+                if (i <= 33) return '#3d2e00';   // dim yellow
+                if (i <= 36) return '#3d2000';   // dim orange
+                return '#3d0a0f';                // dim red
+            };
 
-                if (i === peakSegment && vuPeakHold > 0) {
-                    // Peak hold: use the zone colour but with peak-hold brightness modifier
-                    led.classList.add(zoneClass(i), 'peak-hold');
-                } else if (i < litCount) {
-                    led.classList.add(zoneClass(i));
+            const litCount = Math.round(rmsPercentage / 100 * NUM_LEDS); // 0–40
+            const peakSegment = vuPeakHold > 0
+                ? Math.min(NUM_LEDS - 1, Math.round(vuPeakHold / 100 * NUM_LEDS) - 1)
+                : -1;
+
+            // Clear background
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0, 0, W, H);
+
+            for (let i = 0; i < NUM_LEDS; i++) {
+                const x = i * (segW + GAP);
+                const isPeak = (i === peakSegment);
+                const isLit = (i < litCount);
+
+                if (isPeak) {
+                    ctx.fillStyle = zonePeakColour(i);
+                } else if (isLit) {
+                    ctx.fillStyle = zoneColour(i);
+                } else {
+                    ctx.fillStyle = zoneDimColour(i);
                 }
-                // else: unlit — no class, shows dark background
+
+                // Rounded rect segment
+                ctx.beginPath();
+                ctx.roundRect(x, 2, segW, H - 4, 2);
+                ctx.fill();
             }
         }
     } else {

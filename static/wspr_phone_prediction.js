@@ -946,9 +946,24 @@ const app = (() => {
         }
 
         items.innerHTML = grids.map(g => {
-            const distStr = g.distance_km < 50
-                ? 'nearby'
-                : `${Math.round(g.distance_km).toLocaleString()} km`;
+            const km = g.distance_km;
+            let distStr, distColor;
+            if (km < 50) {
+                distStr  = 'nearby';
+                distColor = '#1abc9c'; // green
+            } else if (km < 100) {
+                distStr  = `${Math.round(km).toLocaleString()} km`;
+                distColor = '#1abc9c'; // green
+            } else if (km < 250) {
+                distStr  = `${Math.round(km).toLocaleString()} km`;
+                distColor = '#f1c40f'; // yellow
+            } else if (km < 500) {
+                distStr  = `${Math.round(km).toLocaleString()} km`;
+                distColor = '#e67e22'; // orange
+            } else {
+                distStr  = `${Math.round(km).toLocaleString()} km`;
+                distColor = '#e74c3c'; // red
+            }
 
             const bandBadges = (g.bands || []).map(b => {
                 const color = bandColor(b.band);
@@ -958,7 +973,7 @@ const app = (() => {
 
             return `<div class="ngb-grid-item">
                 <span class="ngb-grid-name">${escHtml(g.grid)}</span>
-                <span class="ngb-dist">${distStr}</span>
+                <span class="ngb-dist" style="color:${distColor}">${distStr}</span>
                 <span class="ngb-bands">${bandBadges}</span>
             </div>`;
         }).join('');

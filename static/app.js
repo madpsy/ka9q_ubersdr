@@ -7237,27 +7237,37 @@ function autoScaleOscilloscope() {
     }
 }
 
-// Toggle time markers A/B on the oscilloscope
+// Toggle time markers on the oscilloscope — cycles off → manual → auto → off.
+// manual: A/B markers shown, user drags them, ΔT readout shown.
+// auto:   PRF detection runs each frame, A/B snap to first two pulse peaks.
 function toggleOscilloscopeMarkers() {
     if (!oscilloscope) return;
 
-    const enabled = oscilloscope.toggleMarkers();
+    const mode = oscilloscope.toggleMarkers(); // returns 'off' | 'manual' | 'auto'
     const button = document.getElementById('osc-markers-btn');
     if (button) {
-        button.style.backgroundColor = enabled ? '#fd7e14' : '#6c757d';
-        button.textContent = enabled ? 'Markers: ON' : 'Markers';
-        button.title = enabled
-            ? 'Drag cyan (A) and yellow (B) lines to measure time between two points. Click again to hide.'
-            : 'Toggle time markers A/B — drag to measure time between two points';
+        if (mode === 'off') {
+            button.style.backgroundColor = '#6c757d';
+            button.textContent = 'Markers';
+            button.title = 'Toggle time markers A/B — click for manual placement, click again for auto PRF detection';
+        } else if (mode === 'manual') {
+            button.style.backgroundColor = '#fd7e14';
+            button.textContent = 'Markers: Manual';
+            button.title = 'Drag cyan (A) and yellow (B) lines to measure time. Click again for auto PRF mode.';
+        } else {
+            button.style.backgroundColor = '#28a745';
+            button.textContent = 'Markers: Auto';
+            button.title = 'Auto PRF mode — markers snap to detected pulse peaks. Click to disable.';
+        }
     }
 
-    // If markers were just enabled while the visualization is paused, draw them
-    // immediately on the frozen canvas so they appear without needing to unpause.
-    if (enabled && audioVisualizationPaused) {
+    // If markers just became active while paused, draw them immediately.
+    if (mode !== 'off' && audioVisualizationPaused) {
         oscilloscope.drawMarkersOnFrozenCanvas();
     }
 
-    log(enabled ? 'Oscilloscope time markers enabled — drag A/B to measure' : 'Oscilloscope time markers disabled');
+    const logMsg = { off: 'Oscilloscope markers disabled', manual: 'Oscilloscope markers: manual mode — drag A/B to measure', auto: 'Oscilloscope markers: auto PRF mode — snapping to pulse peaks' };
+    log(logMsg[mode] || '');
 }
 
 

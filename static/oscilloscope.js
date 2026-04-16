@@ -38,9 +38,14 @@ class Oscilloscope {
         this.lastUpdate = 0;
         this.updateInterval = 33; // 30 fps
 
-        // --- Time markers ---
-        // markersEnabled: whether the marker overlay is shown
-        this.markersEnabled = false;
+        // --- Time markers + PRF ---
+        // markersMode: 'off' | 'manual' | 'auto'
+        //   off    — no markers shown
+        //   manual — A/B markers shown, user drags them, ΔT readout shown
+        //   auto   — PRF detection runs each frame, A/B snap to first two pulse peaks
+        this.markersMode = 'off';
+        this._prfHistory = []; // rolling history of detected PRF values for averaging
+        this._prfHistoryMaxSize = 30; // average over ~1 second at 30fps
         // Marker positions as fractions of canvas width (0.0 – 1.0)
         this.markerA = 0.25;
         this.markerB = 0.75;
@@ -212,13 +217,16 @@ class Oscilloscope {
         this.ctx.stroke();
 
         // Draw time markers (on top of waveform).
-        // Take a snapshot of the canvas just before drawing markers so we can
-        // restore it when the user drags a marker while the visualization is paused.
-        if (this.markersEnabled) {
+        // In auto mode, snap markers to detected pulse peaks before drawing.
+        if (this.markersMode !== 'off') {
+            if (this.markersMode === 'auto') {
+                this._detectAndDrawPRF(dataArray, sampleRate, width, height);
+            }
             this._frozenSnapshot = this.ctx.getImageData(0, 0, width, height);
             this.drawMarkers(width, height);
         } else {
             this._frozenSnapshot = null;
+            this._prfHistory = [];
         }
         
         // Draw frequency display
@@ -371,7 +379,7 @@ class Oscilloscope {
     }
 
     _markerMouseDown(e) {
-        if (!this.markersEnabled) return;
+        if (this.markersMode === 'off' || this.markersMode === 'auto') return;
         const frac = this._canvasFracX(e);
         const hit = this._markerHitTest(frac);
         if (hit) {
@@ -411,15 +419,21 @@ class Oscilloscope {
         }
     }
 
-    // Toggle markers on/off; returns new state
+    // Cycle markers through off → manual → auto → off.
+    // Returns the new mode string: 'off' | 'manual' | 'auto'
     toggleMarkers() {
-        this.markersEnabled = !this.markersEnabled;
-        // Reset to sensible default positions when enabling
-        if (this.markersEnabled) {
+        if (this.markersMode === 'off') {
+            this.markersMode = 'manual';
             this.markerA = 0.25;
             this.markerB = 0.75;
+        } else if (this.markersMode === 'manual') {
+            this.markersMode = 'auto';
+            this._prfHistory = [];
+        } else {
+            this.markersMode = 'off';
+            this._prfHistory = [];
         }
-        return this.markersEnabled;
+        return this.markersMode;
     }
 
     // Draw markers on top of the current canvas content without waiting for update().
@@ -427,13 +441,173 @@ class Oscilloscope {
     // snapshot of whatever is currently on the canvas, stores it as _frozenSnapshot,
     // then draws the marker overlay on top.
     drawMarkersOnFrozenCanvas() {
-        if (!this.canvas || !this.ctx || !this.markersEnabled) return;
+        if (!this.canvas || !this.ctx || this.markersMode === 'off') return;
         const w = this.canvas.width;
         const h = this.canvas.height;
         if (w <= 0 || h <= 0) return;
         // Capture the current canvas as the frozen background
         this._frozenSnapshot = this.ctx.getImageData(0, 0, w, h);
         this.drawMarkers(w, h);
+    }
+
+    // -----------------------------------------------------------------------
+    // PRF (Pulse Repetition Frequency) detector
+    // -----------------------------------------------------------------------
+
+    // Detect pulse repetition frequency from a raw time-domain buffer.
+    // Uses envelope peak detection: compute sliding-window RMS, find peaks
+    // above a threshold, measure inter-peak intervals.
+    // Returns { prf, peaks } where prf is in Hz (0 if not detectable)
+    // and peaks is an array of sample indices of detected pulse peaks.
+    detectPRF(dataArray, sampleRate) {
+        const n = dataArray.length;
+        if (n < 2 || sampleRate <= 0) return 0;
+
+        // --- Step 1: compute rectified envelope using a sliding RMS window ---
+        // Window size ~5 ms (enough to smooth carrier but preserve pulse shape)
+        const windowSamples = Math.max(4, Math.round(sampleRate * 0.005));
+        const envelope = new Float32Array(n);
+        let sumSq = 0;
+
+        // Seed the window
+        for (let i = 0; i < Math.min(windowSamples, n); i++) {
+            const v = (dataArray[i] - 128) / 128;
+            sumSq += v * v;
+        }
+
+        for (let i = 0; i < n; i++) {
+            // Add new sample
+            if (i + windowSamples < n) {
+                const vNew = (dataArray[i + windowSamples] - 128) / 128;
+                sumSq += vNew * vNew;
+            }
+            // Remove old sample
+            if (i > 0) {
+                const vOld = (dataArray[i - 1] - 128) / 128;
+                sumSq -= vOld * vOld;
+            }
+            envelope[i] = Math.sqrt(Math.max(0, sumSq) / windowSamples);
+        }
+
+        // --- Step 2: find the peak envelope value and set threshold ---
+        let envMax = 0;
+        for (let i = 0; i < n; i++) {
+            if (envelope[i] > envMax) envMax = envelope[i];
+        }
+        if (envMax < 0.02) return { prf: 0, peaks: [] }; // signal too weak
+
+        const threshold = envMax * 0.4; // 40% of peak
+
+        // --- Step 3: find peaks (local maxima above threshold) ---
+        // Minimum separation between peaks: 10 ms (max PRF ~100 Hz)
+        const minPeakSep = Math.round(sampleRate * 0.01);
+        const peaks = [];
+        let lastPeakIdx = -minPeakSep;
+
+        for (let i = 1; i < n - 1; i++) {
+            if (envelope[i] > threshold &&
+                envelope[i] >= envelope[i - 1] &&
+                envelope[i] >= envelope[i + 1] &&
+                i - lastPeakIdx >= minPeakSep) {
+                peaks.push(i);
+                lastPeakIdx = i;
+            }
+        }
+
+        if (peaks.length < 2) return { prf: 0, peaks };
+
+        // --- Step 4: compute average inter-peak interval ---
+        let totalInterval = 0;
+        for (let i = 1; i < peaks.length; i++) {
+            totalInterval += peaks[i] - peaks[i - 1];
+        }
+        const avgIntervalSamples = totalInterval / (peaks.length - 1);
+        const prf = sampleRate / avgIntervalSamples;
+
+        // Sanity check: PRF must be between 0.5 Hz and 100 Hz
+        if (prf < 0.5 || prf > 100) return { prf: 0, peaks };
+
+        return { prf, peaks };
+    }
+
+    // Run PRF detection, optionally auto-snap markers to first two peaks (auto mode),
+    // and draw the PRF readout box on the canvas.
+    _detectAndDrawPRF(dataArray, sampleRate, width, height) {
+        const { prf, peaks } = this.detectPRF(dataArray, sampleRate);
+
+        if (prf > 0) {
+            this._prfHistory.push(prf);
+            if (this._prfHistory.length > this._prfHistoryMaxSize) {
+                this._prfHistory.shift();
+            }
+
+            // In auto mode, snap markerA and markerB to the first two detected peaks.
+            // Peaks are absolute sample indices; convert to canvas fractions using the
+            // same log-scale formula as the waveform drawing.
+            if (this.markersMode === 'auto' && peaks.length >= 2 &&
+                this._cachedBufferLength && this._cachedSampleRate) {
+                const bufLen = this._cachedBufferLength;
+                const minFraction = 0.005;
+                const maxFraction = 1.0;
+                const logMin = Math.log10(minFraction);
+                const logMax = Math.log10(maxFraction);
+                const logRange = logMax - logMin;
+                const normalizedSlider = (this.zoom - 1) / 199;
+                const logValue = logMin + (normalizedSlider * logRange);
+                const fraction = Math.pow(10, logValue);
+                const samplesToDisplay = Math.floor(bufLen * fraction);
+                const startSample = Math.floor((bufLen - samplesToDisplay) / 2);
+
+                const toFrac = (sampleIdx) =>
+                    Math.max(0, Math.min(1, (sampleIdx - startSample) / samplesToDisplay));
+
+                this.markerA = toFrac(peaks[0]);
+                this.markerB = toFrac(peaks[1]);
+            }
+        }
+
+        // Need at least a few samples before displaying
+        if (this._prfHistory.length < 3) return;
+
+        const avgPRF = this._prfHistory.reduce((s, v) => s + v, 0) / this._prfHistory.length;
+        const periodMs = 1000 / avgPRF;
+
+        let prfLabel;
+        if (avgPRF >= 10) {
+            prfLabel = avgPRF.toFixed(1) + ' Hz';
+        } else {
+            prfLabel = avgPRF.toFixed(2) + ' Hz';
+        }
+
+        let periodLabel;
+        if (periodMs >= 1) {
+            periodLabel = periodMs.toFixed(1) + ' ms';
+        } else {
+            periodLabel = (periodMs * 1000).toFixed(0) + ' µs';
+        }
+
+        const line1 = `PRF: ${prfLabel}  (${periodLabel})`;
+
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.font = 'bold 12px monospace';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'top';
+
+        const padding = 5;
+        const boxW = ctx.measureText(line1).width + padding * 2;
+        const boxH = 18;
+
+        // Position: bottom-right corner, above time labels
+        const bx = width - boxW - 4;
+        const by = height - boxH - 18;
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+        ctx.fillRect(bx, by, boxW, boxH);
+
+        ctx.fillStyle = '#ffa500'; // orange to distinguish from ΔT readout
+        ctx.fillText(line1, width - 4 - padding, by + 3);
+        ctx.restore();
     }
 
     // Re-render the waveform from the last captured raw frame at the current zoom.
@@ -507,6 +681,11 @@ class Oscilloscope {
 
         // Draw frequency display
         this.drawFrequencyDisplay(width, avgFreq);
+
+        // Draw PRF readout if enabled (uses frozen data — no new detection, just redraw)
+        if (this.prfEnabled && this._prfHistory.length >= 3) {
+            this._detectAndDrawPRF(dataArray, sampleRate, width, height);
+        }
     }
     
     // Draw grid lines and labels

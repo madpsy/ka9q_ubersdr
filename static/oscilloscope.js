@@ -46,10 +46,10 @@ class Oscilloscope {
         this.markerB = 0.75;
         // Which marker is being dragged: null | 'A' | 'B'
         this._draggingMarker = null;
-        // Cache the last computed timebase so drawMarkers can use it
-        this._lastDisplayedTimeMs = 0;
-        this._lastSamplesToDisplay = 0;
-        this._lastSampleRate = 0;
+        // Cache bufferLength and sampleRate so _drawMarkerReadout() can recompute
+        // the displayed time dynamically from the current zoom at draw time.
+        this._cachedBufferLength = 0;
+        this._cachedSampleRate = 0;
         // Snapshot of the canvas pixels taken just before markers are drawn,
         // so we can restore it when redrawing markers while paused.
         this._frozenSnapshot = null;
@@ -139,14 +139,11 @@ class Oscilloscope {
         const fraction = Math.pow(10, logValue);
         const samplesToDisplay = Math.floor(bufferLength * fraction);
 
-        // Cache timebase for marker readout.
-        // Use the SAME formula as drawGrid() so the marker ΔT is consistent with
-        // the time labels shown on the grid lines.
+        // Cache bufferLength and sampleRate so _drawMarkerReadout() can compute
+        // the actual displayed time from the current zoom at draw time.
         const sampleRate = audioContext.sampleRate;
-        this._lastSamplesToDisplay = samplesToDisplay;
-        this._lastSampleRate = sampleRate;
-        // This matches drawGrid(): totalTimeMs / (201 - zoom)
-        this._lastDisplayedTimeMs = ((bufferLength / sampleRate) * 1000) / (201 - this.zoom);
+        this._cachedBufferLength = bufferLength;
+        this._cachedSampleRate = sampleRate;
         
         // Find trigger point if enabled
         let startSample;
@@ -272,12 +269,29 @@ class Oscilloscope {
         this._drawMarkerReadout(width, height);
     }
 
+    // Compute the actual displayed time span in ms from the current zoom level,
+    // using the same log-scale formula as the waveform drawing code.
+    _computeDisplayedTimeMs() {
+        if (!this._cachedBufferLength || !this._cachedSampleRate) return 0;
+        const minFraction = 0.005;
+        const maxFraction = 1.0;
+        const logMin = Math.log10(minFraction);
+        const logMax = Math.log10(maxFraction);
+        const logRange = logMax - logMin;
+        const normalizedSlider = (this.zoom - 1) / 199;
+        const logValue = logMin + (normalizedSlider * logRange);
+        const fraction = Math.pow(10, logValue);
+        const samplesToDisplay = Math.floor(this._cachedBufferLength * fraction);
+        return (samplesToDisplay / this._cachedSampleRate) * 1000;
+    }
+
     _drawMarkerReadout(width, height) {
-        if (this._lastDisplayedTimeMs <= 0) return;
+        const displayedTimeMs = this._computeDisplayedTimeMs();
+        if (displayedTimeMs <= 0) return;
 
         const ctx = this.ctx;
         const deltaFrac = Math.abs(this.markerB - this.markerA);
-        const deltaMs = deltaFrac * this._lastDisplayedTimeMs;
+        const deltaMs = deltaFrac * displayedTimeMs;
 
         let deltaLabel;
         if (deltaMs >= 1) {
@@ -445,11 +459,20 @@ class Oscilloscope {
         this.ctx.textBaseline = 'top';
         
         if (analyser && audioContext) {
+            // Use the same log-scale formula as the waveform drawing so grid
+            // time labels match what is actually displayed on screen.
             const bufferLength = analyser.fftSize;
             const sampleRate = audioContext.sampleRate;
-            const totalTimeMs = (bufferLength / sampleRate) * 1000;
-            const invertedZoom = 201 - this.zoom;
-            const displayedTimeMs = totalTimeMs / invertedZoom;
+            const minFraction = 0.005;
+            const maxFraction = 1.0;
+            const logMin = Math.log10(minFraction);
+            const logMax = Math.log10(maxFraction);
+            const logRange = logMax - logMin;
+            const normalizedSlider = (this.zoom - 1) / 199;
+            const logValue = logMin + (normalizedSlider * logRange);
+            const fraction = Math.pow(10, logValue);
+            const samplesToDisplay = Math.floor(bufferLength * fraction);
+            const displayedTimeMs = (samplesToDisplay / sampleRate) * 1000;
             const timePerDivision = displayedTimeMs / 8;
             
             for (let i = 0; i <= 8; i++) {

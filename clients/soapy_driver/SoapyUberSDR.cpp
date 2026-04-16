@@ -1406,42 +1406,72 @@ static std::vector<std::map<std::string, std::string>> fetchPublicInstances()
         return instances;
     }
     
+    // Helper: find the matching closing brace for a top-level '{' at objStart,
+    // correctly skipping nested braces and quoted strings.
+    auto findMatchingBrace = [&response](size_t objStart) -> size_t {
+        int depth = 0;
+        bool inString = false;
+        for (size_t i = objStart; i < response.size(); i++) {
+            char c = response[i];
+            if (inString) {
+                if (c == '\\') { i++; continue; }  // skip escaped char
+                if (c == '"') inString = false;
+            } else {
+                if (c == '"') { inString = true; continue; }
+                if (c == '{') depth++;
+                else if (c == '}') {
+                    depth--;
+                    if (depth == 0) return i;
+                }
+            }
+        }
+        return std::string::npos;
+    };
+
     // Parse each instance object
     size_t pos = instancesPos;
     while (true) {
         size_t objStart = response.find("{", pos);
         if (objStart == std::string::npos) break;
-        
-        size_t objEnd = response.find("}", objStart);
+
+        // Check we haven't passed the end of the instances array
+        size_t arrayClose = response.find("]", pos);
+        if (arrayClose != std::string::npos && arrayClose < objStart) break;
+
+        size_t objEnd = findMatchingBrace(objStart);
         if (objEnd == std::string::npos) break;
-        
+
         std::string instanceObj = response.substr(objStart, objEnd - objStart + 1);
-        
+
         // Extract fields
         std::map<std::string, std::string> instance;
-        
-        // Helper lambda to extract JSON string value
+
+        // Helper lambda to extract JSON string/bool/number value by key
         auto extractValue = [&instanceObj](const std::string &key) -> std::string {
             size_t keyPos = instanceObj.find("\"" + key + "\"");
             if (keyPos == std::string::npos) return "";
-            
+
             size_t colonPos = instanceObj.find(":", keyPos);
             if (colonPos == std::string::npos) return "";
-            
+
             size_t valueStart = instanceObj.find_first_not_of(" \t\n\r", colonPos + 1);
             if (valueStart == std::string::npos) return "";
-            
+
             if (instanceObj[valueStart] == '"') {
-                // String value
-                valueStart++;
-                size_t valueEnd = instanceObj.find("\"", valueStart);
-                if (valueEnd == std::string::npos) return "";
-                return instanceObj.substr(valueStart, valueEnd - valueStart);
+                // String value — scan forward respecting escape sequences
+                size_t vs = valueStart + 1;
+                std::string result;
+                while (vs < instanceObj.size()) {
+                    char c = instanceObj[vs];
+                    if (c == '\\') { vs += 2; continue; }
+                    if (c == '"') break;
+                    result += c;
+                    vs++;
+                }
+                return result;
             } else if (instanceObj[valueStart] == 't') {
-                // true
                 return "true";
             } else if (instanceObj[valueStart] == 'f') {
-                // false
                 return "false";
             } else {
                 // Number
@@ -1450,7 +1480,7 @@ static std::vector<std::map<std::string, std::string>> fetchPublicInstances()
                 return instanceObj.substr(valueStart, valueEnd - valueStart);
             }
         };
-        
+
         instance["name"] = extractValue("name");
         instance["host"] = extractValue("host");
         instance["port"] = extractValue("port");
@@ -1458,49 +1488,41 @@ static std::vector<std::map<std::string, std::string>> fetchPublicInstances()
         instance["callsign"] = extractValue("callsign");
         instance["location"] = extractValue("location");
         instance["max_session_time"] = extractValue("max_session_time");
-        
+
         // Extract public_iq_modes array
         size_t modesPos = instanceObj.find("\"public_iq_modes\"");
         if (modesPos != std::string::npos) {
             size_t arrayStart = instanceObj.find("[", modesPos);
             size_t arrayEnd = instanceObj.find("]", arrayStart);
-            
+
             if (arrayStart != std::string::npos && arrayEnd != std::string::npos) {
                 std::string modesArray = instanceObj.substr(arrayStart + 1, arrayEnd - arrayStart - 1);
-                
-                // Parse each mode in the array and concatenate with commas
+
                 std::string publicModes;
                 size_t modePos = 0;
                 while (modePos < modesArray.length()) {
                     size_t quoteStart = modesArray.find("\"", modePos);
                     if (quoteStart == std::string::npos) break;
-                    
+
                     size_t quoteEnd = modesArray.find("\"", quoteStart + 1);
                     if (quoteEnd == std::string::npos) break;
-                    
+
                     std::string mode = modesArray.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
                     if (!publicModes.empty()) publicModes += ",";
                     publicModes += mode;
                     modePos = quoteEnd + 1;
                 }
-                
+
                 instance["public_iq_modes"] = publicModes;
             }
         }
-        
+
         // Only add if we have host, port, and at least one public IQ mode
         if (!instance["host"].empty() && !instance["port"].empty() && !instance["public_iq_modes"].empty()) {
             instances.push_back(instance);
         }
-        
+
         pos = objEnd + 1;
-        
-        // Check if we've reached the end of the array
-        size_t nextObj = response.find("{", pos);
-        size_t arrayEnd = response.find("]", pos);
-        if (arrayEnd != std::string::npos && (nextObj == std::string::npos || arrayEnd < nextObj)) {
-            break;
-        }
     }
     
     return instances;

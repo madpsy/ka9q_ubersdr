@@ -339,17 +339,52 @@
         .wspr-predictions {
             background: #2c3e50;
             border-radius: 6px;
-            padding: 10px 15px;
             margin-bottom: 15px;
             display: none;
+        }
+
+        .wspr-predictions-toggle {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px 8px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .wspr-predictions-toggle:hover {
+            background: #34495e;
+            border-radius: 6px;
+        }
+
+        .wspr-predictions-toggle.collapsed {
+            border-radius: 6px;
         }
 
         .wspr-predictions-label {
             font-size: 11px;
             color: #95a5a6;
             text-transform: uppercase;
-            margin-bottom: 8px;
             letter-spacing: 0.5px;
+            margin-bottom: 0;
+        }
+
+        .wspr-predictions-chevron {
+            font-size: 11px;
+            color: #95a5a6;
+            transition: transform 0.2s;
+        }
+
+        .wspr-predictions-chevron.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .wspr-predictions-body {
+            padding: 0 15px 10px 15px;
+        }
+
+        .wspr-predictions-body.collapsed {
+            display: none;
         }
 
         .wspr-badges {
@@ -410,11 +445,16 @@
         </div>
 
         <div class="wspr-predictions" id="wspr-predictions">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <div class="wspr-predictions-label" style="margin-bottom: 0;">Predicted SSB countries on <span id="wspr-band-label"></span></div>
-                <a href="/wspr_phone_prediction.html" target="_blank" onclick="if(window.opener){window.opener.open('/wspr_phone_prediction.html','_blank');return false;}" style="display: inline-block; padding: 3px 10px; background: #3498db; color: white; text-decoration: none; border-radius: 4px; font-size: 11px; font-weight: 600; white-space: nowrap;">🗺️ View Map</a>
+            <div class="wspr-predictions-toggle" id="wspr-predictions-toggle" onclick="toggleWsprPredictions()">
+                <div class="wspr-predictions-label">Predicted SSB countries on <span id="wspr-band-label"></span></div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <a href="/wspr_phone_prediction.html" target="_blank" onclick="event.stopPropagation(); if(window.opener){window.opener.open('/wspr_phone_prediction.html','_blank');return false;}" style="display: inline-block; padding: 3px 10px; background: #3498db; color: white; text-decoration: none; border-radius: 4px; font-size: 11px; font-weight: 600; white-space: nowrap;">🗺️ View Map</a>
+                    <span class="wspr-predictions-chevron" id="wspr-predictions-chevron">▼</span>
+                </div>
             </div>
-            <div class="wspr-badges" id="wspr-badges"></div>
+            <div class="wspr-predictions-body" id="wspr-predictions-body">
+                <div class="wspr-badges" id="wspr-badges"></div>
+            </div>
         </div>
 
         <div class="activity-list">
@@ -442,6 +482,22 @@
         let currentScanIndex = 0;
         let scanActivities = [];
         let wsprPredictionInterval = null;
+
+        function toggleWsprPredictions() {
+            const body = document.getElementById('wspr-predictions-body');
+            const chevron = document.getElementById('wspr-predictions-chevron');
+            const toggle = document.getElementById('wspr-predictions-toggle');
+            const isCollapsed = body.classList.contains('collapsed');
+            if (isCollapsed) {
+                body.classList.remove('collapsed');
+                chevron.classList.remove('collapsed');
+                toggle.classList.remove('collapsed');
+            } else {
+                body.classList.add('collapsed');
+                chevron.classList.add('collapsed');
+                toggle.classList.add('collapsed');
+            }
+        }
 
         function fetchWsprPredictions() {
             // Re-use the predictions already fetched by bands_state.js in the opener
